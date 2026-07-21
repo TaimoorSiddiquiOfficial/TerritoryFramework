@@ -62,6 +62,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory")
 	bool ContainsPoint(const FVector& WorldPoint) const;
 
+	UFUNCTION(BlueprintPure, Category = "Territory")
+	FGameplayTag GetParentTerritoryTag() const;
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory")
 	void SetOwningFaction(const FGameplayTag& NewFaction);
 

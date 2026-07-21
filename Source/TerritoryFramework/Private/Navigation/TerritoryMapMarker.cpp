@@ -5,7 +5,38 @@
 
 void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
 {
+	// Unbind from previous territory
+	ClearTerritoryBinding();
+
 	TerritoryVolume = InTerritory;
+
+	// Subscribe to ownership and state changes for auto-refresh
+	if (InTerritory)
+	{
+		InTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
+		InTerritory->OnTerritoryStateChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
+	}
+
+	RefreshMarker();
+}
+
+void UTerritoryMapMarker::ClearTerritoryBinding()
+{
+	if (TerritoryVolume.IsValid())
+	{
+		TerritoryVolume->OnTerritoryControlChanged.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
+		TerritoryVolume->OnTerritoryStateChanged.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
+	}
+	TerritoryVolume = nullptr;
+}
+
+void UTerritoryMapMarker::OnTerritoryChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	RefreshMarker();
+}
+
+void UTerritoryMapMarker::OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState)
+{
 	RefreshMarker();
 }
 

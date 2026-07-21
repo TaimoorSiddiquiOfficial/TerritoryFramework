@@ -18,6 +18,9 @@ public:
 	void SetTerritoryVolume(ATerritoryVolume* InTerritory);
 
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
+	void ClearTerritoryBinding();
+
+	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	ATerritoryVolume* GetTerritoryVolume() const;
 
 protected:
@@ -46,4 +49,10 @@ protected:
 private:
 	UPROPERTY()
 	TWeakObjectPtr<ATerritoryVolume> TerritoryVolume;
+
+	UFUNCTION()
+	void OnTerritoryChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);
+
+	UFUNCTION()
+	void OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
 };

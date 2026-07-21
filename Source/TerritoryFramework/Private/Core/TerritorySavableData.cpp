@@ -81,9 +81,13 @@ void ATerritorySavableData::LoadFromSelf()
 	{
 		for (const auto& Pair : SavedTreasuries)
 		{
-			Economy->AddToTreasury(Pair.Key, Pair.Value.Gold);
+			// Restore accumulated gold (always positive)
+			if (Pair.Value.Gold > 0)
+			{
+				Economy->AddToTreasury(Pair.Key, Pair.Value.Gold);
+			}
 		}
-		// Recalculate income for each faction
+		// Recalculate income from current territory ownership
 		for (const auto& Pair : SavedTreasuries)
 		{
 			Economy->RecalculateIncome(Pair.Key);

@@ -13,6 +13,7 @@ void UTerritoryRegistrySubsystem::Deinitialize()
 {
 	RegisteredTerritories.Empty();
 	TagToTerritoryMap.Empty();
+	GUIDToTerritoryMap.Empty();
 	Super::Deinitialize();
 }
 
@@ -20,17 +21,50 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 {
 	if (!Territory) return;
 
+	FGameplayTag Tag = Territory->GetTerritoryTag();
+	FGuid GUID = Territory->GetActorGUID_Implementation();
+
+	// ─── Duplicate Tag Validation ───
+	if (Tag.IsValid())
+	{
+		if (TWeakObjectPtr<ATerritoryVolume>* Existing = TagToTerritoryMap.Find(Tag))
+		{
+			if (Existing->IsValid() && Existing->Get() != Territory)
+			{
+				UE_LOG(LogTerritory, Error,
+					TEXT("DUPLICATE TAG: %s already registered by %s, rejecting %s"),
+					*Tag.ToString(), *Existing->Get()->GetName(), *Territory->GetName());
+				return;
+			}
+		}
+	}
+
+	// ─── Duplicate GUID Validation ───
+	if (GUID.IsValid())
+	{
+		if (TWeakObjectPtr<ATerritoryVolume>* Existing = GUIDToTerritoryMap.Find(GUID))
+		{
+			if (Existing->IsValid() && Existing->Get() != Territory)
+			{
+				UE_LOG(LogTerritory, Error,
+					TEXT("DUPLICATE GUID: %s already registered by %s, rejecting %s"),
+					*GUID.ToString(), *Existing->Get()->GetName(), *Territory->GetName());
+				return;
+			}
+		}
+		GUIDToTerritoryMap.Add(GUID, Territory);
+	}
+
 	RegisteredTerritories.AddUnique(Territory);
 
-	FGameplayTag Tag = Territory->GetTerritoryTag();
 	if (Tag.IsValid())
 	{
 		TagToTerritoryMap.Add(Tag, Territory);
 	}
 
 	OnTerritoryRegistered.Broadcast(Territory, false);
-	UE_LOG(LogTerritory, Log, TEXT("Registered territory: %s (%s)"),
-		*Territory->GetName(), *Tag.ToString());
+	UE_LOG(LogTerritory, Log, TEXT("Registered territory: %s (tag: %s, GUID: %s)"),
+		*Territory->GetName(), *Tag.ToString(), *GUID.ToString());
 }
 
 void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territory)
@@ -45,12 +79,24 @@ void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territor
 		TagToTerritoryMap.Remove(Tag);
 	}
 
+	FGuid GUID = Territory->GetActorGUID_Implementation();
+	if (GUID.IsValid())
+	{
+		GUIDToTerritoryMap.Remove(GUID);
+	}
+
 	OnTerritoryUnregistered.Broadcast(Territory, true);
 }
 
 ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryByTag(const FGameplayTag& TerritoryTag) const
 {
 	const TWeakObjectPtr<ATerritoryVolume>* Found = TagToTerritoryMap.Find(TerritoryTag);
+	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
+}
+
+ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryByGUID(const FGuid& GUID) const
+{
+	const TWeakObjectPtr<ATerritoryVolume>* Found = GUIDToTerritoryMap.Find(GUID);
 	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
 }
 
@@ -113,6 +159,18 @@ int32 UTerritoryRegistrySubsystem::GetTerritoryCountForFaction(const FGameplayTa
 TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetChildTerritories(const FGameplayTag& ParentTag) const
 {
 	TArray<ATerritoryVolume*> Result;
-	// TODO: Implement parent-child hierarchy lookup when ParentTerritoryTag is used on volumes
+	if (!ParentTag.IsValid()) return Result;
+
+	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
+	{
+		if (!Territory) continue;
+
+		// A child territory has ParentTerritoryTag matching the query tag
+		FGameplayTag ParentRef = Territory->GetParentTerritoryTag();
+		if (ParentRef == ParentTag)
+		{
+			Result.Add(Territory);
+		}
+	}
 	return Result;
 }

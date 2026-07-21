@@ -227,6 +227,11 @@ bool ATerritoryVolume::ContainsPoint(const FVector& WorldPoint) const
 	return false;
 }
 
+FGameplayTag ATerritoryVolume::GetParentTerritoryTag() const
+{
+	return ParentTerritoryTag;
+}
+
 void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 {
 	if (!HasAuthority()) return;
@@ -361,8 +366,16 @@ void ATerritoryVolume::SpawnGuards()
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 
-	// Read faction from NPC Definition's DefaultFactions
-	FGameplayTagContainer DefFactions = GuardNPCDefinition->DefaultFactions;
+	// Guards take their faction from the TERRITORY OWNER, not the NPC Definition.
+	// The NPC Definition defines character template (mesh, abilities, stats).
+	// The territory's OwningFaction defines who the guards fight for.
+	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+	if (!OwnerFaction.IsValid())
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("SpawnGuards: territory %s has no OwningFaction, skipping"),
+			*GetTerritoryTag().ToString());
+		return;
+	}
 
 	for (int32 i = 0; i < GuardSpawnCount; ++i)
 	{
@@ -396,21 +409,19 @@ void ATerritoryVolume::SpawnGuards()
 		// → OnActorSpawned → SaveSubsystem looks up GUID → GetActorGUID returns valid GUID
 		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
-		// Add factions from NPC Definition's DefaultFactions
+		// Set guard faction to match the territory owner
 		if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
 		{
-			for (const FGameplayTag& FactionTag : DefFactions)
-			{
-				TeamAgent->AddFaction(FactionTag);
-			}
+			TeamAgent->AddFaction(OwnerFaction);
 		}
 
 		SpawnedGuards.Add(Guard);
 		RegisterDefender(Guard);
 
-		UE_LOG(LogTerritory, Log, TEXT("Spawned guard %d/%d for %s (GUID: %s)"),
+		UE_LOG(LogTerritory, Log, TEXT("Spawned guard %d/%d for %s (faction: %s, GUID: %s)"),
 			i + 1, GuardSpawnCount,
 			*GetTerritoryTag().ToString(),
+			*OwnerFaction.ToString(),
 			*GuardSaveGUID.ToString());
 	}
 }

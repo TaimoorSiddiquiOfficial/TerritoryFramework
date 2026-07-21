@@ -3,6 +3,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "UnrealFramework/NarrativeGameState.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -89,6 +90,32 @@ ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Terr
 	if (Territory->IsOwnedByFaction(AttackingFaction))
 	{
 		return ECaptureResult::AlreadyOwned;
+	}
+
+	// ─── P1.2: Check Narrative faction attitudes before allowing capture ───
+	FGameplayTag DefendingFaction = Territory->GetOwningFaction();
+	if (DefendingFaction.IsValid())
+	{
+		ANarrativeGameState* NarrativeGS = Cast<ANarrativeGameState>(GetWorld()->GetGameState());
+		if (NarrativeGS)
+		{
+			ETeamAttitude::Type Attitude = NarrativeGS->GetFactionAttitudeTowardsFaction(AttackingFaction, DefendingFaction);
+			if (Attitude == ETeamAttitude::Friendly)
+			{
+				UE_LOG(LogTerritory, Warning,
+					TEXT("Capture denied: %s is Friendly with %s (territory %s)"),
+					*AttackingFaction.ToString(), *DefendingFaction.ToString(),
+					*Territory->GetTerritoryTag().ToString());
+
+				FCaptureAttempt Attempt;
+				Attempt.Territory = Territory;
+				Attempt.AttackingFaction = AttackingFaction;
+				Attempt.DefendingFaction = DefendingFaction;
+				Attempt.Result = ECaptureResult::Locked; // Reuse Locked as "diplomatically blocked"
+				OnCaptureAttempted.Broadcast(Attempt);
+				return ECaptureResult::Locked;
+			}
+		}
 	}
 
 	if (Territory->GetDefenderCount() > 0 && Territory->IsOwnedByFaction(Territory->GetOwningFaction()))

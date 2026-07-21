@@ -27,6 +27,9 @@ public:
 	ATerritoryVolume* GetTerritoryByTag(const FGameplayTag& TerritoryTag) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Territory")
+	ATerritoryVolume* GetTerritoryByGUID(const FGuid& GUID) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Territory")
 	ATerritoryVolume* GetTerritoryAtLocation(const FVector& WorldLocation) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Territory")
@@ -55,4 +58,5 @@ private:
 	TArray<TObjectPtr<ATerritoryVolume>> RegisteredTerritories;
 
 	TMap<FGameplayTag, TWeakObjectPtr<ATerritoryVolume>> TagToTerritoryMap;
+	TMap<FGuid, TWeakObjectPtr<ATerritoryVolume>> GUIDToTerritoryMap;
 };

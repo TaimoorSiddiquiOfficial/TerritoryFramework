@@ -433,6 +433,10 @@ bool FTFContract_EconomySubsystem::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("TryDebitTreasury")));
 	TestTrue(TEXT("RecalculateIncome is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("RecalculateIncome")));
+	TestTrue(TEXT("GetFactionEconomy is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetFactionEconomy")));
+	TestTrue(TEXT("GetAllFactionsWithTreasury is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetAllFactionsWithTreasury")));
 
 	// ─── Delegates ───
 	TestTrue(TEXT("Has OnEconomyTickFired delegate"),
