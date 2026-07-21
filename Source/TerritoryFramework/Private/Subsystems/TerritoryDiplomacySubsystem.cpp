@@ -3,6 +3,7 @@
 #include "UnrealFramework/NarrativeGameState.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
+#include "TimerManager.h"
 
 void UTerritoryDiplomacySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -14,11 +15,27 @@ void UTerritoryDiplomacySubsystem::Initialize(FSubsystemCollectionBase& Collecti
 		LoadFromGameState();
 	}
 
+	// Start treaty expiration check timer (every 10 seconds)
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			TreatyExpirationTimerHandle,
+			this,
+			&UTerritoryDiplomacySubsystem::OnTreatyExpirationTick,
+			10.f,
+			true);
+	}
+
 	UE_LOG(LogTerritory, Log, TEXT("TerritoryDiplomacySubsystem initialized"));
 }
 
 void UTerritoryDiplomacySubsystem::Deinitialize()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(TreatyExpirationTimerHandle);
+	}
+
 	if (ANarrativeGameState* GS = GetNarrativeGameState())
 	{
 		GS->OnFactionAttitudeChanged.RemoveDynamic(this, &UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged);
@@ -362,4 +379,9 @@ void UTerritoryDiplomacySubsystem::CheckTreatyExpirations()
 		RecordEvent(EDiplomacyEventType::ExpiredTreaty, Treaty.FactionA, Treaty.FactionB);
 		SetDiplomacyState(Treaty.FactionA, Treaty.FactionB, EDiplomacyState::None);
 	}
+}
+
+void UTerritoryDiplomacySubsystem::OnTreatyExpirationTick()
+{
+	CheckTreatyExpirations();
 }

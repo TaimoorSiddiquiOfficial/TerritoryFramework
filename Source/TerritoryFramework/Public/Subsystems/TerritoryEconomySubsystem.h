@@ -97,4 +97,7 @@ private:
 
 	UFUNCTION()
 	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	UFUNCTION()
+	void OnTerritoryUnregistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 };

@@ -32,4 +32,8 @@ public:
 	// Blueprint-accessible helper to set the owning territory GUID
 	UFUNCTION(BlueprintCallable, Category = "Territory|Guard")
 	void SetOwningTerritoryGUID(const FGuid& TerritoryGUID);
+
+private:
+	/** Cached fallback GUID — generated once if SpawnAssignedSaveGUID is invalid */
+	FGuid CachedFallbackGUID;
 };

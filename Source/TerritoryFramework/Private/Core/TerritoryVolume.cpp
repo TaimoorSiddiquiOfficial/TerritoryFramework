@@ -8,6 +8,8 @@
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "AI/NPCDefinition.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
@@ -133,15 +135,19 @@ void ATerritoryVolume::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 void ATerritoryVolume::OnRep_OwnershipData()
 {
-	// Broadcast delegates so client-side UI, markers, and AI can react
-	OnTerritoryControlChanged.Broadcast(this, FGameplayTag(), OwnershipData.OwningFaction);
+	// Broadcast with cached previous owner so clients know the transition
+	OnTerritoryControlChanged.Broadcast(this, PreviousOwningFaction, OwnershipData.OwningFaction);
 	OnTerritoryStateChanged.Broadcast(this, OwnershipData.State);
 
-	UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s ownership rep'd: %s, state=%d, progress=%.2f"),
+	UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s ownership rep'd: %s → %s, state=%d, progress=%.2f"),
 		*GetTerritoryTag().ToString(),
+		*PreviousOwningFaction.ToString(),
 		*OwnershipData.OwningFaction.ToString(),
 		static_cast<int32>(OwnershipData.State),
 		OwnershipData.ControlProgress);
+
+	// Update cache for next rep
+	PreviousOwningFaction = OwnershipData.OwningFaction;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -238,6 +244,9 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 
 	FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	if (OldOwner == NewFaction) return;
+
+	// Cache previous owner for RepNotify
+	PreviousOwningFaction = OldOwner;
 
 	OwnershipData.OwningFaction = NewFaction;
 	OwnershipData.State = NewFaction.IsValid() ? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
@@ -358,17 +367,17 @@ void ATerritoryVolume::SpawnGuards()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// Determine NPC class from definition, default to ATerritoryGuardCharacter
-	// which properly implements GetActorGUID to prevent save system assertion crash
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebug = Settings && Settings->ShouldDebugGuards();
+
+	// Determine NPC class from definition
 	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.Get();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 
-	// Guards take their faction from the TERRITORY OWNER, not the NPC Definition.
-	// The NPC Definition defines character template (mesh, abilities, stats).
-	// The territory's OwningFaction defines who the guards fight for.
+	// Guards take their faction from the TERRITORY OWNER
 	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
 	if (!OwnerFaction.IsValid())
 	{
@@ -377,13 +386,50 @@ void ATerritoryVolume::SpawnGuards()
 		return;
 	}
 
+	// Resolve GuardSpawnPoints
+	TArray<ATerritoryGuardSpawnPoint*> SpawnPointActors = GetGuardSpawnPoints();
+	int32 NextSPIdx = 0;
+
+	if (bDebug)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("SpawnGuards: %s spawning %d guards, faction=%s, spawn points=%d"),
+			*GetTerritoryTag().ToString(), GuardSpawnCount, *OwnerFaction.ToString(),
+			SpawnPointActors.Num());
+	}
+
 	for (int32 i = 0; i < GuardSpawnCount; ++i)
 	{
-		FVector SpawnLoc = GetRandomSpawnPoint();
-		FTransform SpawnTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), SpawnLoc);
+		FTransform SpawnTransform;
+		ATerritoryGuardSpawnPoint* UsedSP = nullptr;
 
-		// Deferred spawning: BeginDeferred creates actor WITHOUT calling PostSpawnInitialize
-		// so OnActorSpawned does NOT fire yet — giving us a window to set the GUID
+		// Use GuardSpawnPoints if available, otherwise random within bounds
+		if (SpawnPointActors.Num() > 0)
+		{
+			// Find next available spawn point
+			for (int32 j = 0; j < SpawnPointActors.Num(); ++j)
+			{
+				ATerritoryGuardSpawnPoint* SP = SpawnPointActors[(NextSPIdx + j) % SpawnPointActors.Num()];
+				if (SP->HasAvailableSlot() || SP->HasReserveAvailable())
+				{
+					UsedSP = SP;
+					SpawnTransform = SP->GetSpawnTransform();
+					NextSPIdx += j + 1;
+					break;
+				}
+			}
+			// Fallback: all points full, use random
+			if (!UsedSP)
+			{
+				if (bDebug) UE_LOG(LogTerritory, Warning, TEXT("  All spawn points full, using random"));
+				SpawnTransform = FTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), GetRandomSpawnPoint());
+			}
+		}
+		else
+		{
+			SpawnTransform = FTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), GetRandomSpawnPoint());
+		}
+
+		// Deferred spawning for save system GUID safety
 		ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
 			UGameplayStatics::BeginDeferredActorSpawnFromClass(
 				this, NPCClass, SpawnTransform,
@@ -392,24 +438,18 @@ void ATerritoryVolume::SpawnGuards()
 
 		if (!Guard)
 		{
-			UE_LOG(LogTerritory, Warning, TEXT("Failed to begin deferred spawn for guard %d/%d of %s"),
+			UE_LOG(LogTerritory, Warning, TEXT("Failed deferred spawn guard %d/%d of %s"),
 				i + 1, GuardSpawnCount, *GetTerritoryTag().ToString());
 			continue;
 		}
 
-		// Set save GUID BEFORE FinishSpawning triggers OnActorSpawned
 		FGuid GuardSaveGUID = FGuid::NewGuid();
 		Guard->SetTerritorySaveGUID(GuardSaveGUID);
 		Guard->SetOwningTerritoryGUID(TerritoryGUID);
-
-		// Set NPC definition
 		Guard->SetNPCDefinition(GuardNPCDefinition);
 
-		// FinishSpawning triggers PostSpawnInitialize → OnActorFinishedSpawning
-		// → OnActorSpawned → SaveSubsystem looks up GUID → GetActorGUID returns valid GUID
 		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
-		// Set guard faction to match the territory owner
 		if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
 		{
 			TeamAgent->AddFaction(OwnerFaction);
@@ -418,11 +458,20 @@ void ATerritoryVolume::SpawnGuards()
 		SpawnedGuards.Add(Guard);
 		RegisterDefender(Guard);
 
-		UE_LOG(LogTerritory, Log, TEXT("Spawned guard %d/%d for %s (faction: %s, GUID: %s)"),
-			i + 1, GuardSpawnCount,
-			*GetTerritoryTag().ToString(),
-			*OwnerFaction.ToString(),
-			*GuardSaveGUID.ToString());
+		if (UsedSP)
+		{
+			UsedSP->RegisterSpawnedGuard(Guard);
+		}
+
+		if (bDebug)
+		{
+			UE_LOG(LogTerritory, Log, TEXT("  Guard %d/%d spawned for %s (faction=%s, GUID=%s, SP=%s)"),
+				i + 1, GuardSpawnCount,
+				*GetTerritoryTag().ToString(),
+				*OwnerFaction.ToString(),
+				*GuardSaveGUID.ToString(),
+				UsedSP ? *UsedSP->GetActorLabel() : TEXT("random"));
+		}
 	}
 }
 
@@ -477,4 +526,17 @@ FVector ATerritoryVolume::GetRandomSpawnPoint() const
 		FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
 		FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
 		0.f);
+}
+
+TArray<ATerritoryGuardSpawnPoint*> ATerritoryVolume::GetGuardSpawnPoints() const
+{
+	TArray<ATerritoryGuardSpawnPoint*> Result;
+	for (const TObjectPtr<AActor>& Ptr : GuardSpawnPoints)
+	{
+		if (ATerritoryGuardSpawnPoint* SP = Cast<ATerritoryGuardSpawnPoint>(Ptr))
+		{
+			Result.Add(SP);
+		}
+	}
+	return Result;
 }

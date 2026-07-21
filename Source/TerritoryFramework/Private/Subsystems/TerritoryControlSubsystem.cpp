@@ -111,9 +111,9 @@ ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Terr
 				Attempt.Territory = Territory;
 				Attempt.AttackingFaction = AttackingFaction;
 				Attempt.DefendingFaction = DefendingFaction;
-				Attempt.Result = ECaptureResult::Locked; // Reuse Locked as "diplomatically blocked"
+				Attempt.Result = ECaptureResult::DiplomaticallyBlocked;
 				OnCaptureAttempted.Broadcast(Attempt);
-				return ECaptureResult::Locked;
+				return ECaptureResult::DiplomaticallyBlocked;
 			}
 		}
 	}

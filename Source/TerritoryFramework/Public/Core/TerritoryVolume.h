@@ -132,6 +132,9 @@ protected:
 	UPROPERTY(SaveGame, ReplicatedUsing = OnRep_OwnershipData)
 	FTerritoryOwnershipData OwnershipData;
 
+	/** Cached previous owner — set before rep overwrites OwnershipData, used in OnRep */
+	FGameplayTag PreviousOwningFaction;
+
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
 		meta = (DisplayName = "Territory GUID (auto-generated)"))
 	FGuid TerritoryGUID;
@@ -154,6 +157,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards")
 	float GuardSpawnRadius = 500.f;
 
+	/** Guard spawn points within this territory. If empty, uses random positions within BoundsShape */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
+		meta = (AllowedClasses = "/Script/TerritoryFramework.TerritoryGuardSpawnPoint"))
+	TArray<TObjectPtr<AActor>> GuardSpawnPoints;
+
+public:
 	UFUNCTION(BlueprintCallable, Category = "Territory|Guards")
 	void SpawnGuards();
 
@@ -165,6 +174,9 @@ protected:
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
 	bool HasGuardsAlive() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Territory|Guards")
+	TArray<class ATerritoryGuardSpawnPoint*> GetGuardSpawnPoints() const;
 
 	UFUNCTION(BlueprintNativeEvent, Category = "Territory")
 	void OnOwnershipChanged(FGameplayTag OldOwner, FGameplayTag NewOwner);

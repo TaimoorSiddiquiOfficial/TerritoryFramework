@@ -103,4 +103,9 @@ private:
 	void OnFactionAttitudeChanged(FGameplayTag Faction, FGameplayTag OtherFaction, ETeamAttitude::Type NewAttitude);
 
 	void CheckTreatyExpirations();
+
+	FTimerHandle TreatyExpirationTimerHandle;
+
+	UFUNCTION()
+	void OnTreatyExpirationTick();
 };

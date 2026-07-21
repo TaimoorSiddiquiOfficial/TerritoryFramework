@@ -1,6 +1,7 @@
 #include "Combat/BTTask_RequestTerritoryPermission.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Core/TerritoryVolume.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "AI/NarrativeNPCController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AIController.h"
@@ -30,16 +31,23 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::ExecuteTask(UBehaviorTre
 
 	if (!Territory)
 	{
-		// Fallback: find territory at NPC's location
+		// Fallback: find territory at NPC's current location using spatial index
 		APawn* Pawn = AIController->GetPawn();
 		if (Pawn)
 		{
-			// TODO: Use TerritoryRegistrySubsystem::GetTerritoryAtLocation
-			// For now, if no territory specified, succeed (no restriction in wilderness)
+			UTerritoryRegistrySubsystem* Registry = AIController->GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+			if (Registry)
+			{
+				Territory = Registry->GetTerritoryAtLocation(Pawn->GetActorLocation());
+			}
+		}
+
+		// No territory at location — wilderness, no restriction
+		if (!Territory)
+		{
 			OwnerComp.GetBlackboardComponent()->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, true);
 			return EBTNodeResult::Succeeded;
 		}
-		return EBTNodeResult::Failed;
 	}
 
 	bool bGranted = Director->RequestAttackPermission(Territory, NPCController);

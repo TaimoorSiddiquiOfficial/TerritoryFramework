@@ -8,19 +8,18 @@ ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& Obj
 
 FGuid ATerritoryGuardCharacter::GetActorGUID_Implementation() const
 {
-	// Return the save GUID assigned by the territory spawner.
-	// If not yet assigned (invalid), generate one on the fly to prevent
-	// the NarrativeStableActor assertion crash.
 	if (SpawnInfo.SpawnAssignedSaveGUID.IsValid())
 	{
 		return SpawnInfo.SpawnAssignedSaveGUID;
 	}
 
-	// Fallback: return a deterministic GUID based on the actor's name
-	// This prevents the checkf(false) crash while still providing identity
-	UE_LOG(LogTerritory, Warning, TEXT("TerritoryGuardCharacter %s has no SpawnAssignedSaveGUID, generating fallback"),
-		*GetName());
-	return FGuid::NewGuid();
+	// Fallback: generate once and cache to ensure deterministic identity
+	// This should not normally happen — SpawnGuards() always sets the GUID
+	if (!CachedFallbackGUID.IsValid())
+	{
+		const_cast<ATerritoryGuardCharacter*>(this)->CachedFallbackGUID = FGuid::NewGuid();
+	}
+	return CachedFallbackGUID;
 }
 
 void ATerritoryGuardCharacter::SetActorGUID_Implementation(const FGuid& NewGUID)

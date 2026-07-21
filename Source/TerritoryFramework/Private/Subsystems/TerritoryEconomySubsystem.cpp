@@ -20,6 +20,7 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{
 		Registry->OnTerritoryRegistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
+		Registry->OnTerritoryUnregistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
 	}
 
 	// Start economy tick timer (server-only in UE5)
@@ -46,6 +47,7 @@ void UTerritoryEconomySubsystem::Deinitialize()
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{
 		Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
+		Registry->OnTerritoryUnregistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
 	}
 
 	FactionTreasuries.Empty();
@@ -230,6 +232,21 @@ void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territo
 	Territory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
 
 	// Recalculate income for the owning faction
+	FGameplayTag Owner = Territory->GetOwningFaction();
+	if (Owner.IsValid())
+	{
+		RecalculateIncome(Owner);
+	}
+}
+
+void UTerritoryEconomySubsystem::OnTerritoryUnregistered(ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	if (!Territory || !bWasUnregistered) return;
+
+	// Unbind the control-changed delegate to prevent dangling references
+	Territory->OnTerritoryControlChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+
+	// Recalculate income for the owning faction (territory removed from their count)
 	FGameplayTag Owner = Territory->GetOwningFaction();
 	if (Owner.IsValid())
 	{
