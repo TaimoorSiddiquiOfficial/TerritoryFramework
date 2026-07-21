@@ -3,6 +3,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "UnrealFramework/NarrativeGameState.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -151,6 +152,13 @@ void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int3
 	Tx.Amount = PositiveAmount;
 	Tx.BalanceAfter = Treasury.Gold;
 	Tx.Reason = Reason;
+
+	// Set game time from NarrativeGameState
+	if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+	{
+		Tx.GameTime = GS->GetAccumulatedTime();
+	}
+
 	TransactionLedger.Add(Tx);
 
 	// Trim ledger if over limit
@@ -188,6 +196,13 @@ bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, i
 	Tx.Amount = -PositiveAmount;
 	Tx.BalanceAfter = Treasury->Gold;
 	Tx.Reason = Reason;
+
+	// Set game time from NarrativeGameState
+	if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+	{
+		Tx.GameTime = GS->GetAccumulatedTime();
+	}
+
 	TransactionLedger.Add(Tx);
 
 	while (TransactionLedger.Num() > MaxTransactionHistory)
@@ -235,6 +250,8 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 	for (const ATerritoryVolume* Territory : Territories)
 	{
 		Treasury.IncomePerTick += Territory->GetPeriodicIncome();
+		// Deduct guard costs for each owned territory
+		Treasury.CostsPerTick += Territory->GetGuardCost();
 	}
 }
 

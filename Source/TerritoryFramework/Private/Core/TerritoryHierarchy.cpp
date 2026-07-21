@@ -1,5 +1,6 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Engine/World.h"
@@ -12,31 +13,31 @@ ATerritoryCity::ATerritoryCity()
 {
 }
 
+void ATerritoryCity::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Bind to all child districts' ownership changes
+	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (Registry)
+	{
+		FGameplayTag CityTag = GetTerritoryTag();
+		TArray<ATerritoryVolume*> Districts = Registry->GetChildTerritories(CityTag);
+		for (ATerritoryVolume* District : Districts)
+		{
+			District->OnTerritoryControlChanged.AddDynamic(this, &ATerritoryCity::OnDistrictControlChanged);
+		}
+	}
+}
+
 TArray<ATerritoryVolume*> ATerritoryCity::GetDistricts() const
 {
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return TArray<ATerritoryVolume*>();
 
+	// Use registry's indexed child lookup instead of O(N) full scan
 	FGameplayTag CityTag = GetTerritoryTag();
-	TArray<ATerritoryVolume*> All = Registry->GetAllTerritories();
-	TArray<ATerritoryVolume*> Districts;
-
-	for (ATerritoryVolume* Volume : All)
-	{
-		if (Volume == this) continue;
-		// Match territories whose tag is a child of this city's tag
-		FGameplayTag VolTag = Volume->GetTerritoryTag();
-		if (VolTag.IsValid() && CityTag.IsValid() && VolTag.MatchesTag(CityTag))
-		{
-			// Ensure it's a direct child (one level deeper), not self
-			if (VolTag != CityTag)
-			{
-				Districts.Add(Volume);
-			}
-		}
-	}
-
-	return Districts;
+	return Registry->GetChildTerritories(CityTag);
 }
 
 int32 ATerritoryCity::GetDistrictCount() const
@@ -114,7 +115,15 @@ ATerritoryCity* ATerritoryDistrict::GetOwningCity() const
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return nullptr;
 
-	// Walk up via tag matching
+	// Use ParentTerritoryTag for direct lookup instead of O(N) scan
+	FGameplayTag ParentTag = GetParentTerritoryTag();
+	if (ParentTag.IsValid())
+	{
+		ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
+		return Cast<ATerritoryCity>(Parent);
+	}
+
+	// Fallback: walk up via tag matching
 	FGameplayTag MyTag = GetTerritoryTag();
 	if (!MyTag.IsValid()) return nullptr;
 
@@ -135,21 +144,9 @@ TArray<ATerritoryVolume*> ATerritoryDistrict::GetProperties() const
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return TArray<ATerritoryVolume*>();
 
+	// Use registry's indexed child lookup instead of O(N) full scan
 	FGameplayTag DistrictTag = GetTerritoryTag();
-	TArray<ATerritoryVolume*> All = Registry->GetAllTerritories();
-	TArray<ATerritoryVolume*> Properties;
-
-	for (ATerritoryVolume* Volume : All)
-	{
-		if (Volume == this) continue;
-		FGameplayTag VolTag = Volume->GetTerritoryTag();
-		if (VolTag.IsValid() && DistrictTag.IsValid() && VolTag.MatchesTag(DistrictTag) && VolTag != DistrictTag)
-		{
-			Properties.Add(Volume);
-		}
-	}
-
-	return Properties;
+	return Registry->GetChildTerritories(DistrictTag);
 }
 
 bool ATerritoryDistrict::IsCapitalDistrict() const
@@ -170,6 +167,15 @@ ATerritoryDistrict* ATerritoryProperty::GetOwningDistrict() const
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return nullptr;
 
+	// Use ParentTerritoryTag for direct lookup instead of O(N) scan
+	FGameplayTag ParentTag = GetParentTerritoryTag();
+	if (ParentTag.IsValid())
+	{
+		ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
+		return Cast<ATerritoryDistrict>(Parent);
+	}
+
+	// Fallback: walk up via tag matching
 	FGameplayTag MyTag = GetTerritoryTag();
 	if (!MyTag.IsValid()) return nullptr;
 

@@ -57,6 +57,9 @@ public:
 	int32 GetPeriodicIncome() const;
 
 	UFUNCTION(BlueprintPure, Category = "Territory")
+	int32 GetGuardCost() const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory")
 	FBox GetTerritoryBounds() const;
 
 	UFUNCTION(BlueprintPure, Category = "Territory")

@@ -205,6 +205,7 @@ FText ATerritoryVolume::GetTerritoryDisplayName() const { return TerritoryDispla
 int32 ATerritoryVolume::GetMaxConcurrentAttackers() const { return OwnershipData.MaxConcurrentAttackers; }
 int32 ATerritoryVolume::GetDefenderCount() const { return RegisteredDefenders.Num(); }
 int32 ATerritoryVolume::GetPeriodicIncome() const { return OwnershipData.PeriodicIncome; }
+int32 ATerritoryVolume::GetGuardCost() const { return OwnershipData.GuardCost; }
 
 bool ATerritoryVolume::IsOwnedByFaction(const FGameplayTag& Faction) const
 {

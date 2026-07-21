@@ -46,6 +46,15 @@ public:
 	int32 DefaultMaxConcurrentAttackers = 3;
 
 	// ═══════════════════════════════════════════════════════════════════════════
+	// Spatial Index
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	/** Grid cell size (in Unreal units) for the spatial index. Smaller = more precise but more cells. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Spatial",
+		meta = (ClampMin = "500.0", UIMin = "500.0", UIMax = "10000.0"))
+	float SpatialCellSize = 2000.f;
+
+	// ═══════════════════════════════════════════════════════════════════════════
 	// Tags
 	// ═══════════════════════════════════════════════════════════════════════════
 

@@ -8,8 +8,12 @@
 void UTerritoryRegistrySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	SpatialIndex.Initialize(2000.f);
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryRegistrySubsystem initialized (spatial cell: 2000u)"));
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	float CellSize = Settings ? Settings->SpatialCellSize : 2000.f;
+	SpatialIndex.Initialize(CellSize);
+
+	UE_LOG(LogTerritory, Log, TEXT("TerritoryRegistrySubsystem initialized (spatial cell: %.0fu)"), CellSize);
 }
 
 void UTerritoryRegistrySubsystem::Deinitialize()

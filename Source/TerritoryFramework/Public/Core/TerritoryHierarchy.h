@@ -12,6 +12,8 @@ class TERRITORYFRAMEWORK_API ATerritoryCity : public ATerritoryVolume
 public:
 	ATerritoryCity();
 
+	virtual void BeginPlay() override;
+
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	TArray<ATerritoryVolume*> GetDistricts() const;
 
