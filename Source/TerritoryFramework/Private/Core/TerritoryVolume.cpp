@@ -27,10 +27,14 @@ ATerritoryVolume::ATerritoryVolume()
 		Box->SetBoxExtent(FVector(500.f, 500.f, 200.f));
 		// Invisible during gameplay — editor-only visualization
 		Box->SetHiddenInGame(true, true);
-		// Overlap-only on ALL channels — must not block weapon traces,
-		// projectiles, fist attacks, or pawn movement
-		Box->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-		Box->SetCollisionResponseToAllChannels(ECR_Overlap);
+		// No collision at all — weapon traces, projectiles, fist attacks,
+		// and pawn movement must pass through freely. The box is purely
+		// an editor visualization and a bounds reference for spawn logic.
+		Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Box->SetGenerateOverlapEvents(false);
+		Box->SetCanEverAffectNavigation(false);
+		Box->bHiddenInGame = true;
+		Box->bVisibleInReflectionCaptures = false;
 	}
 
 	// NOTE: OwnershipData defaults are synced from Initial* properties in BeginPlay,
