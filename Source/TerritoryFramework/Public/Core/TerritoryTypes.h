@@ -8,6 +8,10 @@ DECLARE_LOG_CATEGORY_EXTERN(LogTerritory, Log, All);
 
 class ATerritoryVolume;
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Enums
+// ═══════════════════════════════════════════════════════════════════════════════
+
 UENUM(BlueprintType)
 enum class ETerritoryState : uint8
 {
@@ -24,8 +28,26 @@ enum class ECaptureResult : uint8
 	AlreadyOwned,
 	Locked,
 	DefendersRemain,
+	DiplomaticallyBlocked,
 	InvalidTerritory
 };
+
+UENUM(BlueprintType)
+enum class ETerritoryTransactionType : uint8
+{
+	Income,
+	GuardUpkeep,
+	UpgradeCost,
+	Purchase,
+	Reward,
+	Scripted,
+	ManualCredit,
+	ManualDebit
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Structs
+// ═══════════════════════════════════════════════════════════════════════════════
 
 USTRUCT(BlueprintType)
 struct FTerritoryOwnershipData
@@ -75,6 +97,44 @@ struct FTerritoryEconomySnapshot
 	int32 TerritoryCount = 0;
 };
 
+/**
+ * Transaction ledger entry — immutable audit trail for every economy mutation.
+ * Records who, what, when, why, and how much.
+ */
+USTRUCT(BlueprintType)
+struct FTerritoryTransaction
+{
+	GENERATED_BODY()
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
+	FGuid TransactionID;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
+	FGameplayTag Faction;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
+	ETerritoryTransactionType Type = ETerritoryTransactionType::ManualCredit;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
+	int32 Amount = 0;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
+	int32 BalanceAfter = 0;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
+	double GameTime = 0.0;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
+	FString Reason;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction",
+		meta = (Categories = "Territory"))
+	FGameplayTag SourceTerritory;
+
+	bool IsCredit() const { return Amount > 0; }
+	bool IsDebit() const { return Amount < 0; }
+};
+
 USTRUCT(BlueprintType)
 struct FCaptureAttempt
 {
@@ -98,6 +158,10 @@ struct FCaptureAttempt
 	UPROPERTY(BlueprintReadOnly, Category = "Territory")
 	int32 DefendersPresent = 0;
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Delegates
+// ═══════════════════════════════════════════════════════════════════════════════
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	FOnTerritoryControlChanged,
@@ -123,3 +187,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnCaptureAttempted,
 	const FCaptureAttempt&, Attempt);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnTransactionRecorded,
+	const FTerritoryTransaction&, Transaction);

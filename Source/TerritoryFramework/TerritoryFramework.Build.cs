@@ -16,7 +16,8 @@ public class TerritoryFramework : ModuleRules
 			"GameplayAbilities",
 			"GameplayTags",
 			"AIModule",
-			"DeveloperSettings"
+			"DeveloperSettings",
+			"UMG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -24,5 +25,16 @@ public class TerritoryFramework : ModuleRules
 			"Slate",
 			"SlateCore"
 		});
+
+		// Optional: Gameplay Debugger support
+		if (Target.bBuildDeveloperTools)
+		{
+			PrivateDependencyModuleNames.Add("GameplayDebugger");
+			PublicDefinitions.Add("WITH_GAMEPLAY_DEBUGGER=1");
+		}
+		else
+		{
+			PublicDefinitions.Add("WITH_GAMEPLAY_DEBUGGER=0");
+		}
 	}
 }

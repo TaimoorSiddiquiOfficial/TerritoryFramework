@@ -18,6 +18,11 @@
 				"Android",
 				"Linux"
 			]
+		},
+		{
+			"Name": "TerritoryFrameworkEditor",
+			"Type": "Editor",
+			"LoadingPhase": "PostEngineInit"
 		}
 	],
 	"Plugins": [

@@ -48,10 +48,10 @@ public:
 	bool CanAfford(const FGameplayTag& Faction, int32 Cost) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
-	void AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount);
+	void AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason = TEXT(""), ETerritoryTransactionType Type = ETerritoryTransactionType::ManualCredit);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
-	bool TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount);
+	bool TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason = TEXT(""), ETerritoryTransactionType Type = ETerritoryTransactionType::ManualDebit);
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	FTerritoryTreasury GetFactionEconomy(const FGameplayTag& Faction) const;
@@ -59,14 +59,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	TArray<FGameplayTag> GetAllFactionsWithTreasury() const;
 
+	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
+	TArray<FTerritoryTransaction> GetTransactionHistory(const FGameplayTag& Faction, int32 MaxEntries = 50) const;
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	void RecalculateIncome(const FGameplayTag& Faction);
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
 	FOnEconomyTick OnEconomyTickFired;
 
+	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
+	FOnTransactionRecorded OnTransactionRecorded;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Territory|Economy")
 	float TickIntervalSeconds = 300.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Territory|Economy")
+	int32 MaxTransactionHistory = 500;
 
 protected:
 	void PerformEconomyTick();
@@ -74,6 +83,9 @@ protected:
 private:
 	UPROPERTY(SaveGame)
 	TMap<FGameplayTag, FTerritoryTreasury> FactionTreasuries;
+
+	UPROPERTY(SaveGame)
+	TArray<FTerritoryTransaction> TransactionLedger;
 
 	FTimerHandle EconomyTickTimerHandle;
 

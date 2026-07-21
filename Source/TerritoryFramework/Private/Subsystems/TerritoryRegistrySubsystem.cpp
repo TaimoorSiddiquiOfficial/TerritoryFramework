@@ -1,12 +1,14 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritorySpatialIndex.h"
 #include "Engine/World.h"
 
 void UTerritoryRegistrySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryRegistrySubsystem initialized"));
+	SpatialIndex.Initialize(2000.f);
+	UE_LOG(LogTerritory, Log, TEXT("TerritoryRegistrySubsystem initialized (spatial cell: 2000u)"));
 }
 
 void UTerritoryRegistrySubsystem::Deinitialize()
@@ -14,6 +16,7 @@ void UTerritoryRegistrySubsystem::Deinitialize()
 	RegisteredTerritories.Empty();
 	TagToTerritoryMap.Empty();
 	GUIDToTerritoryMap.Empty();
+	SpatialIndex.Clear();
 	Super::Deinitialize();
 }
 
@@ -62,9 +65,13 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 		TagToTerritoryMap.Add(Tag, Territory);
 	}
 
+	// Add to spatial index
+	SpatialIndex.Insert(Territory);
+
 	OnTerritoryRegistered.Broadcast(Territory, false);
-	UE_LOG(LogTerritory, Log, TEXT("Registered territory: %s (tag: %s, GUID: %s)"),
-		*Territory->GetName(), *Tag.ToString(), *GUID.ToString());
+	UE_LOG(LogTerritory, Log, TEXT("Registered territory: %s (tag: %s, GUID: %s, cells: %d)"),
+		*Territory->GetName(), *Tag.ToString(), *GUID.ToString(),
+		SpatialIndex.GetCellCount());
 }
 
 void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territory)
@@ -85,6 +92,9 @@ void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territor
 		GUIDToTerritoryMap.Remove(GUID);
 	}
 
+	// Remove from spatial index
+	SpatialIndex.Remove(Territory);
+
 	OnTerritoryUnregistered.Broadcast(Territory, true);
 }
 
@@ -102,14 +112,19 @@ ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryByGUID(const FGuid& G
 
 ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryAtLocation(const FVector& WorldLocation) const
 {
-	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
-	{
-		if (Territory && Territory->ContainsPoint(WorldLocation))
-		{
-			return Territory;
-		}
-	}
-	return nullptr;
+	// Spatial index: O(1) hash lookup + O(k) candidates instead of O(N) full scan
+	TArray<ATerritoryVolume*> Candidates = SpatialIndex.QueryPoint(WorldLocation);
+	return Candidates.Num() > 0 ? Candidates[0] : nullptr;
+}
+
+TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetTerritoriesAtLocation(const FVector& WorldLocation) const
+{
+	return SpatialIndex.QueryPoint(WorldLocation);
+}
+
+TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetTerritoriesInBox(const FBox& QueryBox) const
+{
+	return SpatialIndex.QueryBox(QueryBox);
 }
 
 TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetTerritoriesOwnedByFaction(const FGameplayTag& Faction) const
@@ -165,7 +180,6 @@ TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetChildTerritories(const
 	{
 		if (!Territory) continue;
 
-		// A child territory has ParentTerritoryTag matching the query tag
 		FGameplayTag ParentRef = Territory->GetParentTerritoryTag();
 		if (ParentRef == ParentTag)
 		{

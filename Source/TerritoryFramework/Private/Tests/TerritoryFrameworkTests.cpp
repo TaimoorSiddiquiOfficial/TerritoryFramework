@@ -213,8 +213,10 @@ bool FTFContract_Enums::RunTest(const FString& Parameters)
 		static_cast<uint8>(ECaptureResult::Locked), static_cast<uint8>(2));
 	TestEqual(TEXT("ECaptureResult::DefendersRemain == 3"),
 		static_cast<uint8>(ECaptureResult::DefendersRemain), static_cast<uint8>(3));
-	TestEqual(TEXT("ECaptureResult::InvalidTerritory == 4"),
-		static_cast<uint8>(ECaptureResult::InvalidTerritory), static_cast<uint8>(4));
+	TestEqual(TEXT("ECaptureResult::DiplomaticallyBlocked == 4"),
+		static_cast<uint8>(ECaptureResult::DiplomaticallyBlocked), static_cast<uint8>(4));
+	TestEqual(TEXT("ECaptureResult::InvalidTerritory == 5"),
+		static_cast<uint8>(ECaptureResult::InvalidTerritory), static_cast<uint8>(5));
 
 	// Verify all values are distinct
 	TestNotEqual(TEXT("Success != AlreadyOwned"),
@@ -358,6 +360,12 @@ bool FTFContract_RegistrySubsystem::RunTest(const FString& Parameters)
 	TestTrue(TEXT("GetTerritoryCountForFaction is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryCountForFaction")));
 
+	// ─── Spatial Index API ───
+	TestTrue(TEXT("GetTerritoriesAtLocation is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("GetTerritoriesAtLocation")));
+	TestTrue(TEXT("GetTerritoriesInBox is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("GetTerritoriesInBox")));
+
 	// ─── Delegates ───
 	TestTrue(TEXT("Has OnTerritoryRegistered delegate"),
 		TFTestUtils::HasProperty(Class, TEXT("OnTerritoryRegistered")));
@@ -437,6 +445,14 @@ bool FTFContract_EconomySubsystem::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetFactionEconomy")));
 	TestTrue(TEXT("GetAllFactionsWithTreasury is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetAllFactionsWithTreasury")));
+
+	// ─── Transaction Ledger API ───
+	TestTrue(TEXT("GetTransactionHistory is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("GetTransactionHistory")));
+	TestTrue(TEXT("OnTransactionRecorded delegate exists"),
+		TFTestUtils::HasProperty(Class, TEXT("OnTransactionRecorded")));
+	TestTrue(TEXT("MaxTransactionHistory property exists"),
+		TFTestUtils::HasProperty(Class, TEXT("MaxTransactionHistory")));
 
 	// ─── Delegates ───
 	TestTrue(TEXT("Has OnEconomyTickFired delegate"),

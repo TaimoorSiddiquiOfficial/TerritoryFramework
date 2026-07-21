@@ -4,6 +4,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritorySpatialIndex.h"
 #include "TerritoryRegistrySubsystem.generated.h"
 
 class ATerritoryVolume;
@@ -33,6 +34,12 @@ public:
 	ATerritoryVolume* GetTerritoryAtLocation(const FVector& WorldLocation) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Territory")
+	TArray<ATerritoryVolume*> GetTerritoriesAtLocation(const FVector& WorldLocation) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Territory")
+	TArray<ATerritoryVolume*> GetTerritoriesInBox(const FBox& QueryBox) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Territory")
 	TArray<ATerritoryVolume*> GetTerritoriesOwnedByFaction(const FGameplayTag& Faction) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Territory")
@@ -59,4 +66,5 @@ private:
 
 	TMap<FGameplayTag, TWeakObjectPtr<ATerritoryVolume>> TagToTerritoryMap;
 	TMap<FGuid, TWeakObjectPtr<ATerritoryVolume>> GUIDToTerritoryMap;
+	FTerritorySpatialIndex SpatialIndex;
 };

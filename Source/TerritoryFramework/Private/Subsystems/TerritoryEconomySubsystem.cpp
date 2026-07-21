@@ -120,14 +120,32 @@ TArray<FGameplayTag> UTerritoryEconomySubsystem::GetAllFactionsWithTreasury() co
 // Mutation API (Authority-Only)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount)
+void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
 	if (!Faction.IsValid() || PositiveAmount <= 0) return;
 	FTerritoryTreasury& Treasury = FactionTreasuries.FindOrAdd(Faction);
 	Treasury.Gold += PositiveAmount;
+
+	// Record transaction
+	FTerritoryTransaction Tx;
+	Tx.TransactionID = FGuid::NewGuid();
+	Tx.Faction = Faction;
+	Tx.Type = Type;
+	Tx.Amount = PositiveAmount;
+	Tx.BalanceAfter = Treasury.Gold;
+	Tx.Reason = Reason;
+	TransactionLedger.Add(Tx);
+
+	// Trim ledger if over limit
+	while (TransactionLedger.Num() > MaxTransactionHistory)
+	{
+		TransactionLedger.RemoveAt(0);
+	}
+
+	OnTransactionRecorded.Broadcast(Tx);
 }
 
-bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount)
+bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
 	if (!Faction.IsValid() || PositiveAmount <= 0) return false;
 
@@ -135,7 +153,37 @@ bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, i
 	if (!Treasury || Treasury->Gold < PositiveAmount) return false;
 
 	Treasury->Gold -= PositiveAmount;
+
+	// Record transaction (negative amount for debits)
+	FTerritoryTransaction Tx;
+	Tx.TransactionID = FGuid::NewGuid();
+	Tx.Faction = Faction;
+	Tx.Type = Type;
+	Tx.Amount = -PositiveAmount;
+	Tx.BalanceAfter = Treasury->Gold;
+	Tx.Reason = Reason;
+	TransactionLedger.Add(Tx);
+
+	while (TransactionLedger.Num() > MaxTransactionHistory)
+	{
+		TransactionLedger.RemoveAt(0);
+	}
+
+	OnTransactionRecorded.Broadcast(Tx);
 	return true;
+}
+
+TArray<FTerritoryTransaction> UTerritoryEconomySubsystem::GetTransactionHistory(const FGameplayTag& Faction, int32 MaxEntries) const
+{
+	TArray<FTerritoryTransaction> Result;
+	for (int32 i = TransactionLedger.Num() - 1; i >= 0 && Result.Num() < MaxEntries; --i)
+	{
+		if (TransactionLedger[i].Faction == Faction)
+		{
+			Result.Add(TransactionLedger[i]);
+		}
+	}
+	return Result;
 }
 
 void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
