@@ -43,6 +43,7 @@ void UTerritoryControlSubsystem::Deinitialize()
 void UTerritoryControlSubsystem::OnCaptureTick()
 {
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebug = Settings && Settings->ShouldDebugCapture();
 	const float DeltaTime = 0.1f;
 
 	TArray<TWeakObjectPtr<ATerritoryVolume>> ToRemove;
@@ -55,6 +56,15 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 			ToRemove.Add(Pair.Key);
 			continue;
 		}
+
+		if (bDebug)
+		{
+			float Progress = GetCaptureProgress(Territory);
+			FGameplayTag Contesting = GetContestingFaction(Territory);
+			UE_LOG(LogTerritory, Verbose, TEXT("[CaptureTick] %s: progress=%.2f, contesting=%s"),
+				*Territory->GetTerritoryTag().ToString(), Progress, *Contesting.ToString());
+		}
+
 		EvaluateCaptureState(Territory, DeltaTime);
 	}
 
@@ -73,6 +83,18 @@ ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Terr
 	if (!Territory || !AttackingFaction.IsValid())
 	{
 		return ECaptureResult::InvalidTerritory;
+	}
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebugAttempts = Settings && Settings->ShouldDebugCaptureAttempts();
+
+	if (bDebugAttempts)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[CaptureAttempt] %s by %s (current owner: %s, state: %d)"),
+			*Territory->GetTerritoryTag().ToString(),
+			*AttackingFaction.ToString(),
+			*Territory->GetOwningFaction().ToString(),
+			static_cast<int32>(Territory->GetTerritoryState()));
 	}
 
 	ETerritoryState CurrentState = Territory->GetTerritoryState();
@@ -363,6 +385,14 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		*Territory->GetTerritoryTag().ToString(),
 		*NewOwner.ToString(),
 		*OldOwner.ToString());
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->ShouldDebugOwnership())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[CaptureComplete] %s: %s → %s"),
+			*Territory->GetTerritoryTag().ToString(),
+			*OldOwner.ToString(), *NewOwner.ToString());
+	}
 
 	OnTerritoryControlChanged.Broadcast(Territory, OldOwner, NewOwner);
 }

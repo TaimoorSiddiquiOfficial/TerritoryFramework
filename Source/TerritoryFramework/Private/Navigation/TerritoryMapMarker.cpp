@@ -1,6 +1,7 @@
 #include "Navigation/TerritoryMapMarker.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Navigation/NarrativeNavigationComponent.h"
 
 void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
@@ -32,11 +33,23 @@ void UTerritoryMapMarker::ClearTerritoryBinding()
 
 void UTerritoryMapMarker::OnTerritoryChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->ShouldDebugMarkers())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Marker] Refresh: %s owner changed %s → %s"),
+			*Territory->GetTerritoryTag().ToString(), *OldOwner.ToString(), *NewOwner.ToString());
+	}
 	RefreshMarker();
 }
 
 void UTerritoryMapMarker::OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState)
 {
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->ShouldDebugMarkers())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Marker] Refresh: %s state → %d"),
+			*Territory->GetTerritoryTag().ToString(), static_cast<int32>(NewState));
+	}
 	RefreshMarker();
 }
 

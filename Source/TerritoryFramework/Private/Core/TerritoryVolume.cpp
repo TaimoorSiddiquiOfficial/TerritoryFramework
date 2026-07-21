@@ -245,6 +245,13 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	if (OldOwner == NewFaction) return;
 
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->ShouldDebugOwnership())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Ownership] %s: %s → %s"),
+			*GetTerritoryTag().ToString(), *OldOwner.ToString(), *NewFaction.ToString());
+	}
+
 	// Cache previous owner for RepNotify
 	PreviousOwningFaction = OldOwner;
 
@@ -268,6 +275,15 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 	if (!HasAuthority()) return;
 	ETerritoryState OldState = OwnershipData.State;
 	if (OldState == NewState) return;
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->ShouldDebugStateTransitions())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s: %d → %d"),
+			*GetTerritoryTag().ToString(),
+			static_cast<int32>(OldState), static_cast<int32>(NewState));
+	}
+
 	OwnershipData.State = NewState;
 	OnStateChanged(OldState, NewState);
 	OnTerritoryStateChanged.Broadcast(this, NewState);

@@ -1,5 +1,6 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
@@ -102,10 +103,20 @@ void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGam
 {
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
 
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebug = Settings && Settings->ShouldDebugDiplomacy();
+
 	FTreatyRecord* Existing = FindTreaty(FactionA, FactionB);
 	EDiplomacyState OldState = Existing ? Existing->State : EDiplomacyState::None;
 
 	if (OldState == NewState) return;
+
+	if (bDebug)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Diplomacy] %s ↔ %s: %d → %d"),
+			*FactionA.ToString(), *FactionB.ToString(),
+			static_cast<int32>(OldState), static_cast<int32>(NewState));
+	}
 
 	if (NewState == EDiplomacyState::None)
 	{

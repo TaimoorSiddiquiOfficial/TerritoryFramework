@@ -1,6 +1,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritorySpatialIndex.h"
 #include "Engine/World.h"
 
@@ -24,8 +25,17 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 {
 	if (!Territory) return;
 
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebug = Settings && Settings->ShouldDebugRegistry();
+
 	FGameplayTag Tag = Territory->GetTerritoryTag();
 	FGuid GUID = Territory->GetActorGUID_Implementation();
+
+	if (bDebug)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Registry] Registering %s (tag=%s, GUID=%s)"),
+			*Territory->GetActorLabel(), *Tag.ToString(), *GUID.ToString());
+	}
 
 	// ─── Duplicate Tag Validation ───
 	if (Tag.IsValid())

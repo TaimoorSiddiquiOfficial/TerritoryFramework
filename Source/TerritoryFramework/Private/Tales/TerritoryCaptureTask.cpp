@@ -1,6 +1,7 @@
 #include "Tales/TerritoryCaptureTask.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Tales/TalesComponent.h"
@@ -58,6 +59,13 @@ void UTerritoryCaptureTask::EndTask()
 void UTerritoryCaptureTask::OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
 	if (Territory != CachedTerritory.Get()) return;
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->ShouldDebugTales())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureTask] %s ownership changed: %s → %s"),
+			*TargetTerritoryTag.ToString(), *OldOwner.ToString(), *NewOwner.ToString());
+	}
 
 	if (bCompleteOnLoss)
 	{

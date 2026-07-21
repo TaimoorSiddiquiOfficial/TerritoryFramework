@@ -1,6 +1,7 @@
 #include "Combat/BTTask_RequestTerritoryPermission.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "AI/NarrativeNPCController.h"
 #include "BehaviorTree/BlackboardComponent.h"
@@ -52,6 +53,15 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::ExecuteTask(UBehaviorTre
 
 	bool bGranted = Director->RequestAttackPermission(Territory, NPCController);
 	OwnerComp.GetBlackboardComponent()->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, bGranted);
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->IsDebugEnabled())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[BT] RequestPermission: %s → %s (%s)"),
+			*Territory->GetTerritoryTag().ToString(),
+			bGranted ? TEXT("GRANTED") : TEXT("DENIED"),
+			*AIController->GetName());
+	}
 
 	return bGranted ? EBTNodeResult::Succeeded : EBTNodeResult::Failed;
 }

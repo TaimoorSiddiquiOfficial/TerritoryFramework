@@ -1,6 +1,7 @@
 #include "Tales/TerritoryCaptureEvent.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Tales/TalesComponent.h"
@@ -45,6 +46,16 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 		Territory->SetOwningFaction(CapturingFaction);
 	}
 
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebug = Settings && Settings->ShouldDebugTales();
+
 	UE_LOG(LogTerritory, Log, TEXT("TerritoryCaptureEvent: %s captured by %s via event"),
 		*TargetTerritoryTag.ToString(), *CapturingFaction.ToString());
+
+	if (bDebug)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureEvent] ForceCapture %s → %s (force=%s)"),
+			*TargetTerritoryTag.ToString(), *CapturingFaction.ToString(),
+			bForceCapture ? TEXT("true") : TEXT("false"));
+	}
 }

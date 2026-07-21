@@ -60,6 +60,10 @@ void UTerritoryEconomySubsystem::Deinitialize()
 
 void UTerritoryEconomySubsystem::OnEconomyTick()
 {
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebugTicks = Settings && Settings->ShouldDebugEconomy();
+	const bool bDebugTx = Settings && Settings->ShouldDebugTransactions();
+
 	for (auto& Pair : FactionTreasuries)
 	{
 		FTerritoryTreasury& Treasury = Pair.Value;
@@ -67,6 +71,13 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		Treasury.Gold += NetIncome;
 
 		if (Treasury.Gold < 0) Treasury.Gold = 0;
+
+		if (bDebugTicks)
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[EconomyTick] %s: gold=%d, income=%d, costs=%d, net=%d, territories=%d"),
+				*Pair.Key.ToString(), Treasury.Gold, Treasury.IncomePerTick,
+				Treasury.CostsPerTick, NetIncome, Treasury.TerritoryCount);
+		}
 
 		FTerritoryEconomySnapshot Snapshot;
 		Snapshot.Treasury = Treasury.Gold;
@@ -125,6 +136,10 @@ TArray<FGameplayTag> UTerritoryEconomySubsystem::GetAllFactionsWithTreasury() co
 void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
 	if (!Faction.IsValid() || PositiveAmount <= 0) return;
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebugTx = Settings && Settings->ShouldDebugTransactions();
+
 	FTerritoryTreasury& Treasury = FactionTreasuries.FindOrAdd(Faction);
 	Treasury.Gold += PositiveAmount;
 
@@ -145,11 +160,20 @@ void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int3
 	}
 
 	OnTransactionRecorded.Broadcast(Tx);
+
+	if (bDebugTx)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Transaction] CREDIT %s: +%d (%s) balance=%d"),
+			*Faction.ToString(), PositiveAmount, *Reason, Tx.BalanceAfter);
+	}
 }
 
 bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
 	if (!Faction.IsValid() || PositiveAmount <= 0) return false;
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebugTx = Settings && Settings->ShouldDebugTransactions();
 
 	FTerritoryTreasury* Treasury = FactionTreasuries.Find(Faction);
 	if (!Treasury || Treasury->Gold < PositiveAmount) return false;
@@ -172,6 +196,12 @@ bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, i
 	}
 
 	OnTransactionRecorded.Broadcast(Tx);
+
+	if (bDebugTx)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Transaction] DEBIT %s: -%d (%s) balance=%d"),
+			*Faction.ToString(), PositiveAmount, *Reason, Tx.BalanceAfter);
+	}
 	return true;
 }
 
