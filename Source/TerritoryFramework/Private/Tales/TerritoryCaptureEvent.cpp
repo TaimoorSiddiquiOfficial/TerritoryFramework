@@ -1,0 +1,39 @@
+#include "Tales/TerritoryCaptureEvent.h"
+#include "Core/TerritoryVolume.h"
+#include "Core/TerritoryTypes.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Tales/TalesComponent.h"
+#include "Engine/World.h"
+
+void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!TargetTerritoryTag.IsValid()) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry) return;
+
+	ATerritoryVolume* Territory = Registry->GetTerritoryByTag(TargetTerritoryTag);
+	if (!Territory) return;
+
+	if (Territory->GetTerritoryState() == ETerritoryState::Locked && !bForceCapture)
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("TerritoryCaptureEvent: %s is locked, skipping (bForceCapture=false)"),
+			*TargetTerritoryTag.ToString());
+		return;
+	}
+
+	if (!CapturingFaction.IsValid())
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("TerritoryCaptureEvent: CapturingFaction not set for %s"),
+			*TargetTerritoryTag.ToString());
+		return;
+	}
+
+	Territory->SetOwningFaction(CapturingFaction);
+
+	UE_LOG(LogTerritory, Log, TEXT("TerritoryCaptureEvent: %s captured by %s via event"),
+		*TargetTerritoryTag.ToString(), *CapturingFaction.ToString());
+}

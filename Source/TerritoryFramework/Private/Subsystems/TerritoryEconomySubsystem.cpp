@@ -1,0 +1,157 @@
+#include "Subsystems/TerritoryEconomySubsystem.h"
+#include "Core/TerritoryVolume.h"
+#include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Engine/World.h"
+
+void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings)
+	{
+		TickIntervalSeconds = Settings->EconomyTickIntervalSeconds;
+	}
+
+	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+	{
+		Registry->OnTerritoryRegistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
+	}
+
+	UE_LOG(LogTerritory, Log, TEXT("TerritoryEconomySubsystem initialized (tick: %.0fs)"), TickIntervalSeconds);
+}
+
+void UTerritoryEconomySubsystem::Deinitialize()
+{
+	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+	{
+		Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
+	}
+
+	FactionTreasuries.Empty();
+	Super::Deinitialize();
+}
+
+int32 UTerritoryEconomySubsystem::GetTreasury(const FGameplayTag& Faction) const
+{
+	const FTerritoryTreasury* Treasury = FactionTreasuries.Find(Faction);
+	return Treasury ? Treasury->Gold : 0;
+}
+
+int32 UTerritoryEconomySubsystem::GetIncome(const FGameplayTag& Faction) const
+{
+	const FTerritoryTreasury* Treasury = FactionTreasuries.Find(Faction);
+	return Treasury ? Treasury->IncomePerTick : 0;
+}
+
+int32 UTerritoryEconomySubsystem::GetCosts(const FGameplayTag& Faction) const
+{
+	const FTerritoryTreasury* Treasury = FactionTreasuries.Find(Faction);
+	return Treasury ? Treasury->CostsPerTick : 0;
+}
+
+bool UTerritoryEconomySubsystem::CanAfford(const FGameplayTag& Faction, int32 Cost) const
+{
+	return GetTreasury(Faction) >= Cost;
+}
+
+void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int32 Amount)
+{
+	if (!Faction.IsValid() || Amount == 0) return;
+	FTerritoryTreasury& Treasury = FactionTreasuries.FindOrAdd(Faction);
+	Treasury.Gold += Amount;
+}
+
+bool UTerritoryEconomySubsystem::DeductFromTreasury(const FGameplayTag& Faction, int32 Amount)
+{
+	if (!Faction.IsValid() || Amount <= 0) return false;
+
+	FTerritoryTreasury* Treasury = FactionTreasuries.Find(Faction);
+	if (!Treasury || Treasury->Gold < Amount) return false;
+
+	Treasury->Gold -= Amount;
+	return true;
+}
+
+FTerritoryTreasury UTerritoryEconomySubsystem::GetFactionEconomy(const FGameplayTag& Faction) const
+{
+	const FTerritoryTreasury* Treasury = FactionTreasuries.Find(Faction);
+	return Treasury ? *Treasury : FTerritoryTreasury();
+}
+
+TArray<FGameplayTag> UTerritoryEconomySubsystem::GetAllFactionsWithTreasury() const
+{
+	TArray<FGameplayTag> Result;
+	FactionTreasuries.GetKeys(Result);
+	return Result;
+}
+
+void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
+{
+	if (!Faction.IsValid()) return;
+
+	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry) return;
+
+	TArray<ATerritoryVolume*> Territories = Registry->GetTerritoriesOwnedByFaction(Faction);
+
+	FTerritoryTreasury& Treasury = FactionTreasuries.FindOrAdd(Faction);
+	Treasury.IncomePerTick = 0;
+	Treasury.CostsPerTick = 0;
+	Treasury.TerritoryCount = Territories.Num();
+
+	for (const ATerritoryVolume* Territory : Territories)
+	{
+		Treasury.IncomePerTick += Territory->GetPeriodicIncome();
+		// TODO: Add guard costs when guard system is implemented
+	}
+}
+
+void UTerritoryEconomySubsystem::PerformEconomyTick()
+{
+	for (auto& Pair : FactionTreasuries)
+	{
+		FTerritoryTreasury& Treasury = Pair.Value;
+		int32 NetIncome = Treasury.IncomePerTick - Treasury.CostsPerTick;
+		Treasury.Gold += NetIncome;
+
+		if (Treasury.Gold < 0) Treasury.Gold = 0;
+
+		FTerritoryEconomySnapshot Snapshot;
+		Snapshot.Treasury = Treasury.Gold;
+		Snapshot.TotalIncome = Treasury.IncomePerTick;
+		Snapshot.TotalCosts = Treasury.CostsPerTick;
+		Snapshot.TerritoryCount = Treasury.TerritoryCount;
+
+		OnEconomyTickFired.Broadcast(Pair.Key, Snapshot);
+	}
+}
+
+void UTerritoryEconomySubsystem::OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	if (OldOwner.IsValid())
+	{
+		RecalculateIncome(OldOwner);
+	}
+	if (NewOwner.IsValid())
+	{
+		RecalculateIncome(NewOwner);
+	}
+}
+
+void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	if (!Territory || bWasUnregistered) return;
+
+	// When a territory registers, bind its control-changed delegate
+	Territory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+
+	// Recalculate income for the owning faction
+	FGameplayTag Owner = Territory->GetOwningFaction();
+	if (Owner.IsValid())
+	{
+		RecalculateIncome(Owner);
+	}
+}
