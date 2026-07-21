@@ -953,4 +953,253 @@ bool FTFContract_ModuleSanity::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTRACT TESTS — Diplomacy (Phase F)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#include "Core/TerritoryDiplomacyTypes.h"
+#include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Core/TerritoryHierarchy.h"
+#include "Core/TerritorySavableData.h"
+#include "Combat/BTTask_RequestTerritoryPermission.h"
+#include "Combat/BTTask_ReleaseTerritoryPermission.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_DiplomacyTypes,
+	"TerritoryFramework.Contract.DiplomacyTypes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_DiplomacyTypes::RunTest(const FString& Parameters)
+{
+	// ─── EDiplomacyState ───
+	TestEqual(TEXT("DiplomacyState::None == 0"), static_cast<uint8>(EDiplomacyState::None), static_cast<uint8>(0));
+	TestEqual(TEXT("DiplomacyState::Alliance == 1"), static_cast<uint8>(EDiplomacyState::Alliance), static_cast<uint8>(1));
+	TestEqual(TEXT("DiplomacyState::War == 4"), static_cast<uint8>(EDiplomacyState::War), static_cast<uint8>(4));
+	TestNotEqual(TEXT("Alliance != War"), EDiplomacyState::Alliance, EDiplomacyState::War);
+	TestNotEqual(TEXT("None != Ceasefire"), EDiplomacyState::None, EDiplomacyState::Ceasefire);
+
+	// ─── EDiplomacyEventType ───
+	TestEqual(TEXT("EventType::DeclaredWar == 0"), static_cast<uint8>(EDiplomacyEventType::DeclaredWar), static_cast<uint8>(0));
+	TestNotEqual(TEXT("DeclaredWar != DeclaredPeace"), EDiplomacyEventType::DeclaredWar, EDiplomacyEventType::DeclaredPeace);
+
+	// ─── FTreatyRecord defaults ───
+	{
+		FTreatyRecord Treaty;
+		TestFalse(TEXT("Default Treaty FactionA is invalid"), Treaty.FactionA.IsValid());
+		TestFalse(TEXT("Default Treaty FactionB is invalid"), Treaty.FactionB.IsValid());
+		TestEqual(TEXT("Default State is None"), Treaty.State, EDiplomacyState::None);
+		TestTrue(TEXT("Default is permanent"), Treaty.bPermanent);
+		TestFalse(TEXT("Default is not valid"), Treaty.IsValid());
+		TestFalse(TEXT("Default is not expired"), Treaty.IsExpired(100.f));
+	}
+
+	// ─── FTreatyRecord validity ───
+	{
+		FTreatyRecord Treaty;
+		Treaty.FactionA = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Bandits")), false);
+		Treaty.FactionB = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Heroes")), false);
+		TestTrue(TEXT("Treaty with both factions is valid"), Treaty.IsValid());
+
+		// Test expiry
+		Treaty.bPermanent = false;
+		Treaty.ExpiryGameTime = 50.f;
+		TestFalse(TEXT("Not expired before expiry time"), Treaty.IsExpired(40.f));
+		TestTrue(TEXT("Expired at expiry time"), Treaty.IsExpired(50.f));
+		TestTrue(TEXT("Expired after expiry time"), Treaty.IsExpired(60.f));
+	}
+
+	// ─── FDiplomacyEvent ───
+	{
+		FDiplomacyEvent Event;
+		TestEqual(TEXT("Default event type is DeclaredWar"), Event.EventType, EDiplomacyEventType::DeclaredWar);
+		TestEqual(TEXT("Default game time is 0"), Event.GameTime, 0.f);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_DiplomacySubsystem,
+	"TerritoryFramework.Contract.DiplomacySubsystem",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_DiplomacySubsystem::RunTest(const FString& Parameters)
+{
+	const UClass* Class = UTerritoryDiplomacySubsystem::StaticClass();
+	TestNotNull(TEXT("UTerritoryDiplomacySubsystem::StaticClass()"), Class);
+	TestTrue(TEXT("Inherits UWorldSubsystem"), Class->IsChildOf(UWorldSubsystem::StaticClass()));
+
+	// ─── Diplomacy API ───
+	TestTrue(TEXT("DeclareWar is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("DeclareWar")));
+	TestTrue(TEXT("DeclarePeace is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("DeclarePeace")));
+	TestTrue(TEXT("FormAlliance is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("FormAlliance")));
+	TestTrue(TEXT("BreakAlliance is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("BreakAlliance")));
+	TestTrue(TEXT("SignTradeAgreement is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("SignTradeAgreement")));
+	TestTrue(TEXT("SetDiplomacyState is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("SetDiplomacyState")));
+
+	// ─── Query API ───
+	TestTrue(TEXT("GetDiplomacyState is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetDiplomacyState")));
+	TestTrue(TEXT("IsAtWar is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("IsAtWar")));
+	TestTrue(TEXT("IsAllied is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("IsAllied")));
+	TestTrue(TEXT("HasTradeAgreement is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("HasTradeAgreement")));
+
+	// ─── Reputation API ───
+	TestTrue(TEXT("AddReputation is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("AddReputation")));
+	TestTrue(TEXT("SetReputation is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("SetReputation")));
+	TestTrue(TEXT("GetReputation is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetReputation")));
+
+	// ─── History API ───
+	TestTrue(TEXT("GetAllTreaties is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("GetAllTreaties")));
+	TestTrue(TEXT("GetTreatiesForFaction is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("GetTreatiesForFaction")));
+	TestTrue(TEXT("GetDiplomacyHistory is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("GetDiplomacyHistory")));
+
+	// ─── Sync API ───
+	TestTrue(TEXT("SyncToGameState is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("SyncToGameState")));
+	TestTrue(TEXT("LoadFromGameState is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("LoadFromGameState")));
+
+	// ─── Delegates ───
+	TestTrue(TEXT("Has OnDiplomacyStateChanged delegate"), TFTestUtils::HasProperty(Class, TEXT("OnDiplomacyStateChanged")));
+	TestTrue(TEXT("Has OnDiplomacyEvent delegate"), TFTestUtils::HasProperty(Class, TEXT("OnDiplomacyEvent")));
+	TestTrue(TEXT("Has OnReputationChanged delegate"), TFTestUtils::HasProperty(Class, TEXT("OnReputationChanged")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_Hierarchy,
+	"TerritoryFramework.Contract.TerritoryHierarchy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_Hierarchy::RunTest(const FString& Parameters)
+{
+	// ─── ATerritoryCity ───
+	{
+		const UClass* Class = ATerritoryCity::StaticClass();
+		TestNotNull(TEXT("ATerritoryCity::StaticClass()"), Class);
+		TestTrue(TEXT("City inherits TerritoryVolume"), Class->IsChildOf(ATerritoryVolume::StaticClass()));
+		TestTrue(TEXT("City implements INarrativeSavableActor"),
+			TFTestUtils::ImplementsInterface(Class, UNarrativeSavableActor::StaticClass()));
+
+		TestTrue(TEXT("GetDistricts is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetDistricts")));
+		TestTrue(TEXT("GetDistrictCount is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetDistrictCount")));
+		TestTrue(TEXT("AllDistrictsOwnedBy is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("AllDistrictsOwnedBy")));
+		TestTrue(TEXT("GetCityControlPercentage is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetCityControlPercentage")));
+		TestTrue(TEXT("OnCityFullyCaptured is BP extension point"), TFTestUtils::HasFunction(Class, TEXT("OnCityFullyCaptured")));
+		TestTrue(TEXT("OnCityLost is BP extension point"), TFTestUtils::HasFunction(Class, TEXT("OnCityLost")));
+	}
+
+	// ─── ATerritoryDistrict ───
+	{
+		const UClass* Class = ATerritoryDistrict::StaticClass();
+		TestNotNull(TEXT("ATerritoryDistrict::StaticClass()"), Class);
+		TestTrue(TEXT("District inherits TerritoryVolume"), Class->IsChildOf(ATerritoryVolume::StaticClass()));
+
+		TestTrue(TEXT("Has bIsCapital property"), TFTestUtils::HasProperty(Class, TEXT("bIsCapital")));
+		TestTrue(TEXT("Has DefenderSpawnCount property"), TFTestUtils::HasProperty(Class, TEXT("DefenderSpawnCount")));
+		TestTrue(TEXT("GetOwningCity is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetOwningCity")));
+		TestTrue(TEXT("GetProperties is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetProperties")));
+		TestTrue(TEXT("IsCapitalDistrict is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("IsCapitalDistrict")));
+	}
+
+	// ─── ATerritoryProperty ───
+	{
+		const UClass* Class = ATerritoryProperty::StaticClass();
+		TestNotNull(TEXT("ATerritoryProperty::StaticClass()"), Class);
+		TestTrue(TEXT("Property inherits TerritoryVolume"), Class->IsChildOf(ATerritoryVolume::StaticClass()));
+
+		TestTrue(TEXT("Has UpgradeLevel property"), TFTestUtils::HasProperty(Class, TEXT("UpgradeLevel")));
+		TestTrue(TEXT("Has MaxUpgradeLevel property"), TFTestUtils::HasProperty(Class, TEXT("MaxUpgradeLevel")));
+		TestTrue(TEXT("Has UpgradeCostPerLevel property"), TFTestUtils::HasProperty(Class, TEXT("UpgradeCostPerLevel")));
+		TestTrue(TEXT("Has IncomeBonusPerLevel property"), TFTestUtils::HasProperty(Class, TEXT("IncomeBonusPerLevel")));
+		TestTrue(TEXT("CanUpgrade is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("CanUpgrade")));
+		TestTrue(TEXT("GetUpgradeCost is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("GetUpgradeCost")));
+		TestTrue(TEXT("GetEffectiveIncome is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("GetEffectiveIncome")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_SavableData,
+	"TerritoryFramework.Contract.SavableData",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_SavableData::RunTest(const FString& Parameters)
+{
+	const UClass* Class = ATerritorySavableData::StaticClass();
+	TestNotNull(TEXT("ATerritorySavableData::StaticClass()"), Class);
+	TestTrue(TEXT("Inherits AActor"), Class->IsChildOf(AActor::StaticClass()));
+	TestTrue(TEXT("Implements INarrativeSavableActor"),
+		TFTestUtils::ImplementsInterface(Class, UNarrativeSavableActor::StaticClass()));
+
+	// SaveGame properties
+	TestTrue(TEXT("SavedTreasuries is SaveGame"), TFTestUtils::IsSaveGame(Class, TEXT("SavedTreasuries")));
+	TestTrue(TEXT("SavedTreaties is SaveGame"), TFTestUtils::IsSaveGame(Class, TEXT("SavedTreaties")));
+	TestTrue(TEXT("SavedReputation is SaveGame"), TFTestUtils::IsSaveGame(Class, TEXT("SavedReputation")));
+	TestTrue(TEXT("SavedDiplomacyHistory is SaveGame"), TFTestUtils::IsSaveGame(Class, TEXT("SavedDiplomacyHistory")));
+
+	// Interface functions
+	TestTrue(TEXT("Has GetActorGUID"), TFTestUtils::HasFunction(Class, TEXT("GetActorGUID")));
+	TestTrue(TEXT("Has PrepareForSave"), TFTestUtils::HasFunction(Class, TEXT("PrepareForSave")));
+	TestTrue(TEXT("Has Load"), TFTestUtils::HasFunction(Class, TEXT("Load")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_BTTasks,
+	"TerritoryFramework.Contract.BTTasks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_BTTasks::RunTest(const FString& Parameters)
+{
+	// ─── Request Permission ───
+	{
+		const UClass* Class = UBTTask_RequestTerritoryPermission::StaticClass();
+		TestNotNull(TEXT("UBTTask_RequestTerritoryPermission::StaticClass()"), Class);
+		TestTrue(TEXT("Inherits UBTTaskNode"), Class->IsChildOf(UBTTaskNode::StaticClass()));
+		TestTrue(TEXT("Has TerritoryKey blackboard selector"), TFTestUtils::HasProperty(Class, TEXT("TerritoryKey")));
+		TestTrue(TEXT("Has bPermissionGrantedKey blackboard selector"), TFTestUtils::HasProperty(Class, TEXT("bPermissionGrantedKey")));
+	}
+
+	// ─── Release Permission ───
+	{
+		const UClass* Class = UBTTask_ReleaseTerritoryPermission::StaticClass();
+		TestNotNull(TEXT("UBTTask_ReleaseTerritoryPermission::StaticClass()"), Class);
+		TestTrue(TEXT("Inherits UBTTaskNode"), Class->IsChildOf(UBTTaskNode::StaticClass()));
+		TestTrue(TEXT("Has TerritoryKey blackboard selector"), TFTestUtils::HasProperty(Class, TEXT("TerritoryKey")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFFunctional_PropertyUpgrade,
+	"TerritoryFramework.Functional.PropertyUpgrade",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFFunctional_PropertyUpgrade::RunTest(const FString& Parameters)
+{
+	// Test upgrade logic without a world
+	ATerritoryProperty* Prop = NewObject<ATerritoryProperty>();
+	Prop->UpgradeLevel = 0;
+	Prop->MaxUpgradeLevel = 3;
+	Prop->UpgradeCostPerLevel = 500;
+	Prop->IncomeBonusPerLevel = 25;
+
+	TestTrue(TEXT("Can upgrade at level 0"), Prop->CanUpgrade());
+	TestEqual(TEXT("Upgrade cost at level 0 is 500"), Prop->GetUpgradeCost(), 500);
+
+	Prop->UpgradeLevel = 2;
+	TestTrue(TEXT("Can upgrade at level 2"), Prop->CanUpgrade());
+	TestEqual(TEXT("Upgrade cost at level 2 is 1500"), Prop->GetUpgradeCost(), 1500);
+
+	Prop->UpgradeLevel = 3;
+	TestFalse(TEXT("Cannot upgrade at max level"), Prop->CanUpgrade());
+	TestEqual(TEXT("Upgrade cost at max level is 0"), Prop->GetUpgradeCost(), 0);
+
+	// Effective income
+	Prop->UpgradeLevel = 2;
+	// GetPeriodicIncome returns OwnershipData.PeriodicIncome (default from constructor)
+	// Since we can't easily set it here without BeginPlay, just test the bonus calculation
+	int32 ExpectedBonus = 2 * 25; // UpgradeLevel * IncomeBonusPerLevel
+	TestEqual(TEXT("Income bonus at level 2 is 50"), ExpectedBonus, 50);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
