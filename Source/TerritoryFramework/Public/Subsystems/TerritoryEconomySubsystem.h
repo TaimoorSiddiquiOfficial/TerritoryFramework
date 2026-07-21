@@ -47,19 +47,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
 	bool CanAfford(const FGameplayTag& Faction, int32 Cost) const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
-	void AddToTreasury(const FGameplayTag& Faction, int32 Amount);
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	void AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
-	bool DeductFromTreasury(const FGameplayTag& Faction, int32 Amount);
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	bool TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	FTerritoryTreasury GetFactionEconomy(const FGameplayTag& Faction) const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	TArray<FGameplayTag> GetAllFactionsWithTreasury() const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	void RecalculateIncome(const FGameplayTag& Faction);
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
@@ -75,7 +75,10 @@ private:
 	UPROPERTY(SaveGame)
 	TMap<FGameplayTag, FTerritoryTreasury> FactionTreasuries;
 
-	float TimeSinceLastTick = 0.f;
+	FTimerHandle EconomyTickTimerHandle;
+
+	UFUNCTION()
+	void OnEconomyTick();
 
 	UFUNCTION()
 	void OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);

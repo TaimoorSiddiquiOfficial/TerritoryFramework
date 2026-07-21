@@ -127,6 +127,52 @@ void ATerritoryVolume::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(ATerritoryVolume, OwnershipData);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// RepNotify — Clients receive replicated ownership changes here
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void ATerritoryVolume::OnRep_OwnershipData()
+{
+	// Broadcast delegates so client-side UI, markers, and AI can react
+	OnTerritoryControlChanged.Broadcast(this, FGameplayTag(), OwnershipData.OwningFaction);
+	OnTerritoryStateChanged.Broadcast(this, OwnershipData.State);
+
+	UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s ownership rep'd: %s, state=%d, progress=%.2f"),
+		*GetTerritoryTag().ToString(),
+		*OwnershipData.OwningFaction.ToString(),
+		static_cast<int32>(OwnershipData.State),
+		OwnershipData.ControlProgress);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Editor Hooks — Generate stable GUIDs at edit time
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#if WITH_EDITOR
+void ATerritoryVolume::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	// Auto-generate GUID if not yet assigned (first time placed or edited)
+	if (!TerritoryGUID.IsValid())
+	{
+		TerritoryGUID = FGuid::NewGuid();
+		UE_LOG(LogTerritory, Log, TEXT("Generated editor-stable GUID for %s: %s"),
+			*GetActorLabel(), *TerritoryGUID.ToString());
+	}
+}
+
+void ATerritoryVolume::PostDuplicate(EDuplicateMode::Type DuplicateMode)
+{
+	Super::PostDuplicate(DuplicateMode);
+
+	// Duplicated actors must get a NEW GUID to prevent save/load conflicts
+	TerritoryGUID = FGuid::NewGuid();
+	UE_LOG(LogTerritory, Log, TEXT("Assigned new GUID to duplicated territory %s: %s"),
+		*GetActorLabel(), *TerritoryGUID.ToString());
+}
+#endif
+
 FGuid ATerritoryVolume::GetActorGUID_Implementation() const { return TerritoryGUID; }
 void ATerritoryVolume::SetActorGUID_Implementation(const FGuid& NewGUID) { TerritoryGUID = NewGUID; }
 void ATerritoryVolume::PrepareForSave_Implementation() { /* OwnershipData auto-saved via SaveGame */ }

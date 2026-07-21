@@ -4,18 +4,68 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryControlSubsystem initialized"));
+
+	// Start a repeating timer for capture progression (10 ticks/sec)
+	// Timer callbacks always run on the server (timers are server-only in UE5)
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			CaptureTickTimerHandle,
+			this,
+			&UTerritoryControlSubsystem::OnCaptureTick,
+			0.1f,
+			true);
+	}
+
+	UE_LOG(LogTerritory, Log, TEXT("TerritoryControlSubsystem initialized (capture tick: 0.1s)"));
 }
 
 void UTerritoryControlSubsystem::Deinitialize()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(CaptureTickTimerHandle);
+	}
 	TerritoryCaptureState.Empty();
 	Super::Deinitialize();
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Capture Timer Callback
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void UTerritoryControlSubsystem::OnCaptureTick()
+{
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const float DeltaTime = 0.1f;
+
+	TArray<TWeakObjectPtr<ATerritoryVolume>> ToRemove;
+
+	for (auto& Pair : TerritoryCaptureState)
+	{
+		ATerritoryVolume* Territory = Pair.Key.Get();
+		if (!Territory)
+		{
+			ToRemove.Add(Pair.Key);
+			continue;
+		}
+		EvaluateCaptureState(Territory, DeltaTime);
+	}
+
+	for (const TWeakObjectPtr<ATerritoryVolume>& WeakTerritory : ToRemove)
+	{
+		TerritoryCaptureState.Remove(WeakTerritory);
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Capture API (Authority-Only Mutations)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction)
 {
@@ -60,7 +110,11 @@ ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Terr
 	}
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
-	State.CaptureProgressByFaction.FindOrAdd(AttackingFaction) = 0.f;
+	// Only reset to 0 if not already in progress (prevents repeated reset on re-call)
+	if (!State.CaptureProgressByFaction.Contains(AttackingFaction))
+	{
+		State.CaptureProgressByFaction.Add(AttackingFaction, 0.f);
+	}
 
 	FCaptureAttempt Attempt;
 	Attempt.Territory = Territory;
@@ -71,6 +125,84 @@ ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Terr
 
 	return ECaptureResult::Success;
 }
+
+void UTerritoryControlSubsystem::ResetCapture(ATerritoryVolume* Territory)
+{
+	if (!Territory) return;
+	TerritoryCaptureState.Remove(Territory);
+	if (Territory->GetTerritoryState() == ETerritoryState::Contested)
+	{
+		if (Territory->GetOwningFaction().IsValid())
+		{
+			Territory->SetTerritoryState(ETerritoryState::Claimed);
+		}
+		else
+		{
+			Territory->SetTerritoryState(ETerritoryState::Unclaimed);
+		}
+	}
+	Territory->SetControlProgress(0.f);
+}
+
+void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction, float ProgressDelta)
+{
+	if (!Territory || !AttackingFaction.IsValid()) return;
+
+	// Ensure capture is initiated
+	if (Territory->GetTerritoryState() != ETerritoryState::Contested)
+	{
+		Territory->SetTerritoryState(ETerritoryState::Contested);
+	}
+
+	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
+	float& Progress = State.CaptureProgressByFaction.FindOrAdd(AttackingFaction);
+	Progress = FMath::Clamp(Progress + ProgressDelta, 0.f, 1.f);
+
+	Territory->SetControlProgress(Progress);
+
+	if (Progress >= 1.f)
+	{
+		CompleteCapture(Territory, AttackingFaction);
+	}
+}
+
+void UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner)
+{
+	if (!Territory || !NewOwner.IsValid()) return;
+
+	// Clear any in-progress capture state
+	TerritoryCaptureState.Remove(Territory);
+
+	// Direct ownership transfer through the actor's authoritative setter
+	Territory->SetOwningFaction(NewOwner);
+
+	UE_LOG(LogTerritory, Log, TEXT("ForceCapture: %s → %s"),
+		*Territory->GetTerritoryTag().ToString(), *NewOwner.ToString());
+}
+
+void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
+{
+	if (!Territory || !Attacker || !Faction.IsValid()) return;
+	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
+	State.AttackersByFaction.FindOrAdd(Faction)++;
+}
+
+void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
+{
+	if (!Territory || !Attacker || !Faction.IsValid()) return;
+	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
+	if (!State) return;
+
+	int32* Count = State->AttackersByFaction.Find(Faction);
+	if (Count && *Count > 0)
+	{
+		(*Count)--;
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Query API (Read-Only)
+// ═══════════════════════════════════════════════════════════════════════════════
 
 bool UTerritoryControlSubsystem::IsCaptureInProgress(const ATerritoryVolume* Territory) const
 {
@@ -112,40 +244,6 @@ FGameplayTag UTerritoryControlSubsystem::GetContestingFaction(const ATerritoryVo
 	return LeadingFaction;
 }
 
-void UTerritoryControlSubsystem::ResetCapture(ATerritoryVolume* Territory)
-{
-	if (!Territory) return;
-	TerritoryCaptureState.Remove(Territory);
-	if (Territory->GetTerritoryState() == ETerritoryState::Contested)
-	{
-		if (Territory->GetOwningFaction().IsValid())
-		{
-			Territory->SetTerritoryState(ETerritoryState::Claimed);
-		}
-		else
-		{
-			Territory->SetTerritoryState(ETerritoryState::Unclaimed);
-		}
-	}
-	Territory->SetControlProgress(0.f);
-}
-
-void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction, float ProgressDelta)
-{
-	if (!Territory || !AttackingFaction.IsValid()) return;
-
-	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
-	float& Progress = State.CaptureProgressByFaction.FindOrAdd(AttackingFaction);
-	Progress = FMath::Clamp(Progress + ProgressDelta, 0.f, 1.f);
-
-	Territory->SetControlProgress(Progress);
-
-	if (Progress >= 1.f)
-	{
-		CompleteCapture(Territory, AttackingFaction);
-	}
-}
-
 bool UTerritoryControlSubsystem::HasAttackBudget(const ATerritoryVolume* Territory, const FGameplayTag& Faction) const
 {
 	if (!Territory) return false;
@@ -163,61 +261,18 @@ int32 UTerritoryControlSubsystem::GetActiveAttackers(const ATerritoryVolume* Ter
 	return Count ? *Count : 0;
 }
 
-void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
-{
-	if (!Territory || !Attacker) return;
-	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
-	State.AttackersByFaction.FindOrAdd(Faction)++;
-}
-
-void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker)
-{
-	if (!Territory || !Attacker) return;
-	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
-	if (!State) return;
-
-	// TODO: Track which faction this attacker belongs to for proper decrement
-	// For now, decrement the first faction with > 0 count
-	for (auto& Pair : State->AttackersByFaction)
-	{
-		if (Pair.Value > 0)
-		{
-			Pair.Value--;
-			break;
-		}
-	}
-}
-
-void UTerritoryControlSubsystem::Tick(float DeltaTime)
-{
-	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	float ProgressRate = Settings ? Settings->CaptureProgressPerSecond : 0.1f;
-	float DecayRate = Settings ? Settings->CaptureProgressDecayPerSecond : 0.05f;
-
-	TArray<TWeakObjectPtr<ATerritoryVolume>> ToRemove;
-
-	for (auto& Pair : TerritoryCaptureState)
-	{
-		ATerritoryVolume* Territory = Pair.Key.Get();
-		if (!Territory)
-		{
-			ToRemove.Add(Pair.Key);
-			continue;
-		}
-
-		EvaluateCaptureState(Territory, DeltaTime);
-	}
-
-	for (const TWeakObjectPtr<ATerritoryVolume>& WeakTerritory : ToRemove)
-	{
-		TerritoryCaptureState.Remove(WeakTerritory);
-	}
-}
+// ═══════════════════════════════════════════════════════════════════════════════
+// Internal
+// ═══════════════════════════════════════════════════════════════════════════════
 
 void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territory, float DeltaTime)
 {
 	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
 	if (!State) return;
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const float ProgressRate = Settings ? Settings->CaptureProgressPerSecond : 0.1f;
+	const float DecayRate = Settings ? Settings->CaptureProgressDecayPerSecond : 0.05f;
 
 	FGameplayTag BestFaction;
 	float BestProgress = 0.f;
@@ -227,11 +282,11 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 		int32 Attackers = State->AttackersByFaction.FindRef(Pair.Key);
 		if (Attackers > 0)
 		{
-			Pair.Value = FMath::Clamp(Pair.Value + DeltaTime * 0.1f, 0.f, 1.f);
+			Pair.Value = FMath::Clamp(Pair.Value + DeltaTime * ProgressRate, 0.f, 1.f);
 		}
 		else
 		{
-			Pair.Value = FMath::Max(0.f, Pair.Value - DeltaTime * 0.05f);
+			Pair.Value = FMath::Max(0.f, Pair.Value - DeltaTime * DecayRate);
 		}
 
 		if (Pair.Value > BestProgress)

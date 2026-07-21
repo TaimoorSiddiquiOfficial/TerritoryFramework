@@ -2,6 +2,7 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Subsystems/TerritoryControlSubsystem.h"
 #include "Tales/TalesComponent.h"
 #include "Engine/World.h"
 
@@ -32,7 +33,17 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 		return;
 	}
 
-	Territory->SetOwningFaction(CapturingFaction);
+	// Route through the control subsystem — centralized capture authority
+	UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
+	if (Control)
+	{
+		Control->ForceCapture(Territory, CapturingFaction);
+	}
+	else
+	{
+		// Fallback if control subsystem unavailable (shouldn't happen in normal play)
+		Territory->SetOwningFaction(CapturingFaction);
+	}
 
 	UE_LOG(LogTerritory, Log, TEXT("TerritoryCaptureEvent: %s captured by %s via event"),
 		*TargetTerritoryTag.ToString(), *CapturingFaction.ToString());

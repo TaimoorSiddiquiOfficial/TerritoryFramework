@@ -395,6 +395,8 @@ bool FTFContract_ControlSubsystem::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("RegisterAttacker")));
 	TestTrue(TEXT("UnregisterAttacker is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("UnregisterAttacker")));
+	TestTrue(TEXT("ForceCapture is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("ForceCapture")));
 
 	// ─── Delegates ───
 	TestTrue(TEXT("Has OnTerritoryControlChanged delegate"),
@@ -427,8 +429,8 @@ bool FTFContract_EconomySubsystem::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("CanAfford")));
 	TestTrue(TEXT("AddToTreasury is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("AddToTreasury")));
-	TestTrue(TEXT("DeductFromTreasury is BlueprintCallable"),
-		TFTestUtils::IsBlueprintCallable(Class, TEXT("DeductFromTreasury")));
+	TestTrue(TEXT("TryDebitTreasury is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("TryDebitTreasury")));
 	TestTrue(TEXT("RecalculateIncome is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("RecalculateIncome")));
 

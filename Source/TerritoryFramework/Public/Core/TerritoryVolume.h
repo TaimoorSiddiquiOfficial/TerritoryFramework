@@ -62,19 +62,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory")
 	bool ContainsPoint(const FVector& WorldPoint) const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory")
 	void SetOwningFaction(const FGameplayTag& NewFaction);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory")
 	void SetControlProgress(float Progress);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory")
 	void SetTerritoryState(ETerritoryState NewState);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory")
 	void RegisterDefender(AActor* Defender);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory")
 	void UnregisterDefender(AActor* Defender);
 
 	UFUNCTION(BlueprintCallable, Category = "Territory")
@@ -90,6 +90,14 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
+#endif
+
+	UFUNCTION()
+	void OnRep_OwnershipData();
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory",
 		meta = (Categories = "Territory"))
@@ -118,10 +126,11 @@ protected:
 		meta = (Categories = "Territory"))
 	FGameplayTag ParentTerritoryTag;
 
-	UPROPERTY(SaveGame, Replicated)
+	UPROPERTY(SaveGame, ReplicatedUsing = OnRep_OwnershipData)
 	FTerritoryOwnershipData OwnershipData;
 
-	UPROPERTY(SaveGame)
+	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
+		meta = (DisplayName = "Territory GUID (auto-generated)"))
 	FGuid TerritoryGUID;
 
 	UPROPERTY()
