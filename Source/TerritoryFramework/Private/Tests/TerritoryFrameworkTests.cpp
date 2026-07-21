@@ -1202,4 +1202,679 @@ bool FTFFunctional_PropertyUpgrade::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// NARRATIVE INTEGRATION TESTS
+// Verify actual integration contracts between TerritoryFramework and Narrative Pro
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#include "UnrealFramework/NarrativeGameState.h"
+#include "UnrealFramework/NarrativeTeamAgentInterface.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
+#include "Tales/TalesComponent.h"
+#include "AI/NarrativeNPCController.h"
+#include "SaveSystemStatics.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_FactionTagNamespace,
+	"TerritoryFramework.Integration.FactionTagNamespace",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_FactionTagNamespace::RunTest(const FString& Parameters)
+{
+	// Verify that Narrative Pro's canonical faction tags resolve correctly
+	// and that TerritoryFramework uses the same namespace
+
+	// ─── Narrative canonical factions ───
+	FGameplayTag HeroesTag = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Heroes")), false);
+	FGameplayTag BanditsTag = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Bandits")), false);
+	FGameplayTag CiviliansTag = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Civilians")), false);
+	FGameplayTag SoldiersTag = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Soldiers")), false);
+
+	// Heroes and Bandits are guaranteed to exist in Narrative Pro
+	TestTrue(TEXT("Narrative.Factions.Heroes is valid"), HeroesTag.IsValid());
+	TestTrue(TEXT("Narrative.Factions.Bandits is valid"), BanditsTag.IsValid());
+
+	// Civilians and Soldiers may or may not be defined in the project tag table
+	// Test their validity without asserting — they are informational
+	bool bHasCivilians = CiviliansTag.IsValid();
+	bool bHasSoldiers = SoldiersTag.IsValid();
+
+	// Heroes and Bandits must be distinct
+	TestNotEqual(TEXT("Heroes != Bandits"), HeroesTag, BanditsTag);
+
+	// If optional factions exist, verify they are distinct from canonical ones
+	if (bHasCivilians)
+	{
+		TestNotEqual(TEXT("Heroes != Civilians"), HeroesTag, CiviliansTag);
+		TestNotEqual(TEXT("Bandits != Civilians"), BanditsTag, CiviliansTag);
+	}
+	if (bHasSoldiers)
+	{
+		TestNotEqual(TEXT("Heroes != Soldiers"), HeroesTag, SoldiersTag);
+		TestNotEqual(TEXT("Bandits != Soldiers"), BanditsTag, SoldiersTag);
+	}
+	if (bHasCivilians && bHasSoldiers)
+	{
+		TestNotEqual(TEXT("Civilians != Soldiers"), CiviliansTag, SoldiersTag);
+	}
+
+	// ─── Verify tag matching works for territory ownership ───
+	// The territory system stores ownership as FGameplayTag and compares with ==
+	FGameplayTag OwnerTag = BanditsTag;
+	FGameplayTag QueryTag = BanditsTag;
+	TestTrue(TEXT("Same tag instance matches"), OwnerTag == QueryTag);
+	TestTrue(TEXT("IsSameFaction works for Narrative factions"),
+		UTerritoryBlueprintLibrary::IsSameFaction(OwnerTag, QueryTag));
+
+	// ─── Verify non-existent faction tag is invalid ───
+	FGameplayTag FakeFaction = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.DoesNotExist")), false);
+	TestFalse(TEXT("Non-existent faction tag is invalid"), FakeFaction.IsValid());
+
+	// ─── Verify tag hierarchy matching ───
+	FGameplayTagContainer FactionContainer;
+	FactionContainer.AddTag(HeroesTag);
+	FactionContainer.AddTag(BanditsTag);
+	TestTrue(TEXT("Container has Heroes"), FactionContainer.HasTag(HeroesTag));
+	TestTrue(TEXT("Container has Bandits"), FactionContainer.HasTag(BanditsTag));
+	TestFalse(TEXT("Container does not have Civilians"), FactionContainer.HasTag(CiviliansTag));
+
+	// ─── Verify MatchesTag for hierarchy queries ───
+	// Territory tags use MatchesTag for parent-child relationships
+	FGameplayTag CityTag = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions")), false);
+	if (CityTag.IsValid())
+	{
+		TestTrue(TEXT("Heroes matches parent Narrative.Factions"),
+			HeroesTag.MatchesTag(CityTag));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_SaveSystemContract,
+	"TerritoryFramework.Integration.SaveSystemContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_SaveSystemContract::RunTest(const FString& Parameters)
+{
+	// Verify TerritoryFramework classes conform to Narrative's save system contracts
+
+	// ─── ATerritoryVolume save contract ───
+	{
+		const UClass* VolumeClass = ATerritoryVolume::StaticClass();
+
+		// Must implement INarrativeSavableActor (which extends INarrativeStableActor)
+		TestTrue(TEXT("Volume implements INarrativeSavableActor"),
+			VolumeClass->ImplementsInterface(UNarrativeSavableActor::StaticClass()));
+
+		// Must implement INarrativeStableActor (GUID-based identity)
+		TestTrue(TEXT("Volume implements INarrativeStableActor"),
+			VolumeClass->ImplementsInterface(UNarrativeStableActor::StaticClass()));
+
+		// Verify all 5 required interface functions exist and are callable
+		TestTrue(TEXT("Volume has GetActorGUID"), TFTestUtils::HasFunction(VolumeClass, TEXT("GetActorGUID")));
+		TestTrue(TEXT("Volume has SetActorGUID"), TFTestUtils::HasFunction(VolumeClass, TEXT("SetActorGUID")));
+		TestTrue(TEXT("Volume has PrepareForSave"), TFTestUtils::HasFunction(VolumeClass, TEXT("PrepareForSave")));
+		TestTrue(TEXT("Volume has Load"), TFTestUtils::HasFunction(VolumeClass, TEXT("Load")));
+		TestTrue(TEXT("Volume has ShouldRespawn"), TFTestUtils::HasFunction(VolumeClass, TEXT("ShouldRespawn")));
+
+		// OwnershipData must be SaveGame for automatic serialization
+		TestTrue(TEXT("OwnershipData has SaveGame flag"),
+			TFTestUtils::IsSaveGame(VolumeClass, TEXT("OwnershipData")));
+
+		// TerritoryGUID must be SaveGame
+		TestTrue(TEXT("TerritoryGUID has SaveGame flag"),
+			TFTestUtils::IsSaveGame(VolumeClass, TEXT("TerritoryGUID")));
+
+		// TerritoryGUID must NOT shadow AActor's ActorGUID
+		FProperty* GuidProp = VolumeClass->FindPropertyByName(FName(TEXT("TerritoryGUID")));
+		TestNotNull(TEXT("TerritoryGUID property exists"), GuidProp);
+		if (GuidProp)
+		{
+			FProperty* ActorGuidProp = AActor::StaticClass()->FindPropertyByName(FName(TEXT("ActorGUID")));
+			if (ActorGuidProp)
+			{
+				TestTrue(TEXT("TerritoryGUID is a different property than AActor::ActorGUID"),
+					GuidProp != ActorGuidProp);
+			}
+		}
+	}
+
+	// ─── ATerritorySavableData save contract ───
+	{
+		const UClass* SavableClass = ATerritorySavableData::StaticClass();
+
+		TestTrue(TEXT("SavableData implements INarrativeSavableActor"),
+			SavableClass->ImplementsInterface(UNarrativeSavableActor::StaticClass()));
+
+		// All economy/diplomacy data must be SaveGame
+		TestTrue(TEXT("SavedTreasuries has SaveGame flag"),
+			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedTreasuries")));
+		TestTrue(TEXT("SavedTreaties has SaveGame flag"),
+			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedTreaties")));
+		TestTrue(TEXT("SavedReputation has SaveGame flag"),
+			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedReputation")));
+		TestTrue(TEXT("SavedDiplomacyHistory has SaveGame flag"),
+			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedDiplomacyHistory")));
+	}
+
+	// ─── Hierarchy classes inherit save contract ───
+	{
+		TestTrue(TEXT("City implements INarrativeSavableActor"),
+			ATerritoryCity::StaticClass()->ImplementsInterface(UNarrativeSavableActor::StaticClass()));
+		TestTrue(TEXT("District implements INarrativeSavableActor"),
+			ATerritoryDistrict::StaticClass()->ImplementsInterface(UNarrativeSavableActor::StaticClass()));
+		TestTrue(TEXT("Property implements INarrativeSavableActor"),
+			ATerritoryProperty::StaticClass()->ImplementsInterface(UNarrativeSavableActor::StaticClass()));
+	}
+
+	// ─── SaveSystemStatics API is accessible ───
+	{
+		const UClass* StaticsClass = USaveSystemStatics::StaticClass();
+		TestNotNull(TEXT("USaveSystemStatics is accessible"), StaticsClass);
+		TestTrue(TEXT("LoadSingleActor function exists"),
+			TFTestUtils::HasFunction(StaticsClass, TEXT("LoadSingleActor")));
+		TestTrue(TEXT("SaveSingleActor function exists"),
+			TFTestUtils::HasFunction(StaticsClass, TEXT("SaveSingleActor")));
+	}
+
+	// ─── NarrativeSaveSubsystem is accessible ───
+	{
+		const UClass* SaveSubClass = UNarrativeSaveSubsystem::StaticClass();
+		TestNotNull(TEXT("UNarrativeSaveSubsystem is accessible"), SaveSubClass);
+		TestTrue(TEXT("SaveSubsystem inherits UWorldSubsystem"),
+			SaveSubClass->IsChildOf(UWorldSubsystem::StaticClass()));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_GameStateDiplomacySync,
+	"TerritoryFramework.Integration.GameStateDiplomacySync",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_GameStateDiplomacySync::RunTest(const FString& Parameters)
+{
+	// Verify the diplomacy subsystem can integrate with NarrativeGameState's faction system
+
+	// ─── NarrativeGameState faction API ───
+	{
+		const UClass* GSClass = ANarrativeGameState::StaticClass();
+		TestNotNull(TEXT("ANarrativeGameState is accessible"), GSClass);
+
+		// FactionAllianceMap must exist and be SaveGame
+		TestTrue(TEXT("FactionAllianceMap property exists"),
+			TFTestUtils::HasProperty(GSClass, TEXT("FactionAllianceMap")));
+		TestTrue(TEXT("FactionAllianceMap has SaveGame flag"),
+			TFTestUtils::IsSaveGame(GSClass, TEXT("FactionAllianceMap")));
+
+		// Faction attitude functions must be callable
+		TestTrue(TEXT("SetFactionAttitude is BlueprintCallable"),
+			TFTestUtils::IsBlueprintCallable(GSClass, TEXT("SetFactionAttitude")));
+		TestTrue(TEXT("GetFactionAttitudeTowardsFaction is BlueprintCallable"),
+			TFTestUtils::IsBlueprintCallable(GSClass, TEXT("GetFactionAttitudeTowardsFaction")));
+		TestTrue(TEXT("GetFactionsAttitudeTowardsFactions is BlueprintCallable"),
+			TFTestUtils::IsBlueprintCallable(GSClass, TEXT("GetFactionsAttitudeTowardsFactions")));
+
+		// OnFactionAttitudeChanged delegate must exist
+		TestTrue(TEXT("OnFactionAttitudeChanged delegate exists"),
+			TFTestUtils::HasProperty(GSClass, TEXT("OnFactionAttitudeChanged")));
+	}
+
+	// ─── FFactionAttitudeData struct ───
+	{
+		FFactionAttitudeData AttitudeData;
+		// Verify we can set and read attitudes
+		FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Heroes")), false);
+		FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Bandits")), false);
+
+		if (Heroes.IsValid() && Bandits.IsValid())
+		{
+			AttitudeData.AttitudeMap.Add(Heroes, ETeamAttitude::Hostile);
+			AttitudeData.AttitudeMap.Add(Bandits, ETeamAttitude::Friendly);
+
+			TestEqual(TEXT("Heroes attitude is Hostile"),
+				AttitudeData.AttitudeMap[Heroes], ETeamAttitude::Hostile);
+			TestEqual(TEXT("Bandits attitude is Friendly"),
+				AttitudeData.AttitudeMap[Bandits], ETeamAttitude::Friendly);
+		}
+	}
+
+	// ─── Diplomacy subsystem state mapping ───
+	{
+		const UClass* DiploClass = UTerritoryDiplomacySubsystem::StaticClass();
+
+		// Verify DiplomacyStateToAttitude mapping would be correct:
+		// Alliance → Friendly, War → Hostile, None → Neutral
+		// We can't call the private method, but we verify the enum values
+		// that drive the mapping are correct
+		TestEqual(TEXT("ETeamAttitude::Friendly == 0"),
+			static_cast<uint8>(ETeamAttitude::Friendly), static_cast<uint8>(0));
+		TestEqual(TEXT("ETeamAttitude::Neutral == 1"),
+			static_cast<uint8>(ETeamAttitude::Neutral), static_cast<uint8>(1));
+		TestEqual(TEXT("ETeamAttitude::Hostile == 2"),
+			static_cast<uint8>(ETeamAttitude::Hostile), static_cast<uint8>(2));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_TalesInheritance,
+	"TerritoryFramework.Integration.TalesInheritance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_TalesInheritance::RunTest(const FString& Parameters)
+{
+	// Verify territory tale classes properly inherit from Narrative's tale system
+
+	// ─── UNarrativeTask base class contract ───
+	{
+		const UClass* TaskBase = UNarrativeTask::StaticClass();
+		TestNotNull(TEXT("UNarrativeTask is accessible"), TaskBase);
+
+		// Required base properties that CaptureTask must inherit
+		TestTrue(TEXT("NarrativeTask has RequiredQuantity"),
+			TFTestUtils::HasProperty(TaskBase, TEXT("RequiredQuantity")));
+		TestTrue(TEXT("NarrativeTask has MarkerSettings"),
+			TFTestUtils::HasProperty(TaskBase, TEXT("MarkerSettings")));
+
+		// Required base functions that CaptureTask must inherit
+		TestTrue(TEXT("NarrativeTask has CompleteTask"),
+			TFTestUtils::HasFunction(TaskBase, TEXT("CompleteTask")));
+		TestTrue(TEXT("NarrativeTask has SetProgress"),
+			TFTestUtils::HasFunction(TaskBase, TEXT("SetProgress")));
+		TestTrue(TEXT("NarrativeTask has GetTaskDescription"),
+			TFTestUtils::HasFunction(TaskBase, TEXT("GetTaskDescription")));
+	}
+
+	// ─── UTerritoryCaptureTask inherits all base contract ───
+	{
+		const UClass* CaptureTask = UTerritoryCaptureTask::StaticClass();
+		const UClass* TaskBase = UNarrativeTask::StaticClass();
+
+		// Must inherit from UNarrativeTask
+		TestTrue(TEXT("CaptureTask is-a NarrativeTask"),
+			CaptureTask->IsChildOf(TaskBase));
+
+		// Must inherit base properties
+		TestTrue(TEXT("CaptureTask inherits RequiredQuantity"),
+			TFTestUtils::HasProperty(CaptureTask, TEXT("RequiredQuantity")));
+		TestTrue(TEXT("CaptureTask inherits MarkerSettings"),
+			TFTestUtils::HasProperty(CaptureTask, TEXT("MarkerSettings")));
+
+		// Must inherit base functions
+		TestTrue(TEXT("CaptureTask inherits CompleteTask"),
+			TFTestUtils::HasFunction(CaptureTask, TEXT("CompleteTask")));
+		TestTrue(TEXT("CaptureTask inherits SetProgress"),
+			TFTestUtils::HasFunction(CaptureTask, TEXT("SetProgress")));
+
+		// Must have own territory-specific properties
+		TestTrue(TEXT("CaptureTask has TargetTerritoryTag"),
+			TFTestUtils::HasProperty(CaptureTask, TEXT("TargetTerritoryTag")));
+		TestTrue(TEXT("CaptureTask has RequiredCapturingFaction"),
+			TFTestUtils::HasProperty(CaptureTask, TEXT("RequiredCapturingFaction")));
+	}
+
+	// ─── UNarrativeEvent base class contract ───
+	{
+		const UClass* EventBase = UNarrativeEvent::StaticClass();
+		TestNotNull(TEXT("UNarrativeEvent is accessible"), EventBase);
+
+		// CaptureEvent must inherit from it
+		const UClass* CaptureEvent = UTerritoryCaptureEvent::StaticClass();
+		TestTrue(TEXT("CaptureEvent is-a NarrativeEvent"),
+			CaptureEvent->IsChildOf(EventBase));
+
+		// Must have ExecuteEvent function
+		TestTrue(TEXT("CaptureEvent has ExecuteEvent"),
+			TFTestUtils::HasFunction(CaptureEvent, TEXT("ExecuteEvent")));
+	}
+
+	// ─── UNarrativeCondition base class contract ───
+	{
+		const UClass* CondBase = UNarrativeCondition::StaticClass();
+		TestNotNull(TEXT("UNarrativeCondition is accessible"), CondBase);
+
+		// OwnershipCondition must inherit from it
+		const UClass* OwnCond = UTerritoryOwnershipCondition::StaticClass();
+		TestTrue(TEXT("OwnershipCondition is-a NarrativeCondition"),
+			OwnCond->IsChildOf(CondBase));
+
+		// Must have CheckCondition function
+		TestTrue(TEXT("OwnershipCondition has CheckCondition"),
+			TFTestUtils::HasFunction(OwnCond, TEXT("CheckCondition")));
+
+		// Must have GetGraphDisplayText function
+		TestTrue(TEXT("OwnershipCondition has GetGraphDisplayText"),
+			TFTestUtils::HasFunction(OwnCond, TEXT("GetGraphDisplayText")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_MapMarkerInheritance,
+	"TerritoryFramework.Integration.MapMarkerInheritance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_MapMarkerInheritance::RunTest(const FString& Parameters)
+{
+	// Verify territory map marker properly integrates with Narrative's navigation system
+
+	// ─── UMapMarker base class contract ───
+	{
+		const UClass* MarkerBase = UMapMarker::StaticClass();
+		TestNotNull(TEXT("UMapMarker is accessible"), MarkerBase);
+
+		// Verify the base class exists and inherits UObject
+		TestTrue(TEXT("MapMarker inherits UObject"),
+			MarkerBase->IsChildOf(UObject::StaticClass()));
+
+		// Required base functions (BlueprintNativeEvent overrides)
+		TestTrue(TEXT("MapMarker has GetMarkerColor"),
+			TFTestUtils::HasFunction(MarkerBase, TEXT("GetMarkerColor")));
+		TestTrue(TEXT("MapMarker has GetMarkerDisplayText"),
+			TFTestUtils::HasFunction(MarkerBase, TEXT("GetMarkerDisplayText")));
+		TestTrue(TEXT("MapMarker has MarkerOnPaint"),
+			TFTestUtils::HasFunction(MarkerBase, TEXT("MarkerOnPaint")));
+		TestTrue(TEXT("MapMarker has RefreshMarker"),
+			TFTestUtils::HasFunction(MarkerBase, TEXT("RefreshMarker")));
+
+		// bWantsOnPaint determines if MarkerOnPaint gets called
+		TestTrue(TEXT("MapMarker has bWantsOnPaint"),
+			TFTestUtils::HasProperty(MarkerBase, TEXT("bWantsOnPaint")));
+	}
+
+	// ─── UTerritoryMapMarker inherits full marker contract ───
+	{
+		const UClass* TerrMarker = UTerritoryMapMarker::StaticClass();
+		const UClass* MarkerBase = UMapMarker::StaticClass();
+
+		TestTrue(TEXT("TerritoryMapMarker is-a MapMarker"),
+			TerrMarker->IsChildOf(MarkerBase));
+
+		// Must inherit base properties
+		TestTrue(TEXT("TerritoryMapMarker inherits bWantsOnPaint"),
+			TFTestUtils::HasProperty(TerrMarker, TEXT("bWantsOnPaint")));
+
+		// Must inherit base functions
+		TestTrue(TEXT("TerritoryMapMarker inherits RefreshMarker"),
+			TFTestUtils::HasFunction(TerrMarker, TEXT("RefreshMarker")));
+
+		// Must override the correct functions with correct signatures
+		TestTrue(TEXT("TerritoryMapMarker overrides GetMarkerColor"),
+			TFTestUtils::HasFunction(TerrMarker, TEXT("GetMarkerColor")));
+		TestTrue(TEXT("TerritoryMapMarker overrides GetMarkerDisplayText"),
+			TFTestUtils::HasFunction(TerrMarker, TEXT("GetMarkerDisplayText")));
+		TestTrue(TEXT("TerritoryMapMarker overrides MarkerOnPaint"),
+			TFTestUtils::HasFunction(TerrMarker, TEXT("MarkerOnPaint")));
+
+		// Must have territory-specific properties
+		TestTrue(TEXT("TerritoryMapMarker has FactionColorMap"),
+			TFTestUtils::HasProperty(TerrMarker, TEXT("FactionColorMap")));
+		TestTrue(TEXT("TerritoryMapMarker has DefaultColor"),
+			TFTestUtils::HasProperty(TerrMarker, TEXT("DefaultColor")));
+		TestTrue(TEXT("TerritoryMapMarker has ContestedColor"),
+			TFTestUtils::HasProperty(TerrMarker, TEXT("ContestedColor")));
+		TestTrue(TEXT("TerritoryMapMarker has LockedColor"),
+			TFTestUtils::HasProperty(TerrMarker, TEXT("LockedColor")));
+	}
+
+	// ─── UNavigationMarkerComponent base contract ───
+	{
+		const UClass* NavCompBase = UNavigationMarkerComponent::StaticClass();
+		TestNotNull(TEXT("UNavigationMarkerComponent is accessible"), NavCompBase);
+
+		// TerritoryNavigationMarkerComponent must inherit
+		const UClass* TerrNavComp = UTerritoryNavigationMarkerComponent::StaticClass();
+		TestTrue(TEXT("TerritoryNavMarkerComponent is-a NavigationMarkerComponent"),
+			TerrNavComp->IsChildOf(NavCompBase));
+
+		// Must inherit MarkerObject property
+		TestTrue(TEXT("TerritoryNavMarkerComponent inherits MarkerObject"),
+			TFTestUtils::HasProperty(TerrNavComp, TEXT("MarkerObject")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_GASContract,
+	"TerritoryFramework.Integration.GASContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_GASContract::RunTest(const FString& Parameters)
+{
+	// Verify TerritoryFramework's GAS integration points are compatible
+
+	// ─── UNarrativeAbilitySystemComponent death delegate ───
+	{
+		const UClass* ASCClass = UNarrativeAbilitySystemComponent::StaticClass();
+		TestNotNull(TEXT("UNarrativeAbilitySystemComponent is accessible"), ASCClass);
+
+		// OnDied delegate must exist (used by ATerritoryVolume::BindDefenderDeath)
+		TestTrue(TEXT("ASC has OnDied delegate"),
+			TFTestUtils::HasProperty(ASCClass, TEXT("OnDied")));
+
+		// Attack token system must exist (properties and C++ methods)
+		TestTrue(TEXT("ASC has NumAttackTokens property"),
+			TFTestUtils::HasProperty(ASCClass, TEXT("NumAttackTokens")));
+		TestTrue(TEXT("ASC has GrantedAttackTokens property"),
+			TFTestUtils::HasProperty(ASCClass, TEXT("GrantedAttackTokens")));
+		// TryClaimToken/ReturnToken are C++ methods (not UFUNCTION), so verify
+		// the class compiles and links by checking the class itself is valid
+		TestNotNull(TEXT("UNarrativeAbilitySystemComponent CDO is valid"),
+			UNarrativeAbilitySystemComponent::StaticClass()->GetDefaultObject());
+		TestTrue(TEXT("ASC has OnDied delegate (used by territory defenders)"),
+			TFTestUtils::HasProperty(ASCClass, TEXT("OnDied")));
+	}
+
+	// ─── ANarrativeNPCController compatibility ───
+	{
+		const UClass* NPCControllerClass = ANarrativeNPCController::StaticClass();
+		TestNotNull(TEXT("ANarrativeNPCController is accessible"), NPCControllerClass);
+		TestTrue(TEXT("NPCController inherits AAIController"),
+			NPCControllerClass->IsChildOf(AAIController::StaticClass()));
+
+		// BT tasks use this class
+		const UClass* RequestTask = UBTTask_RequestTerritoryPermission::StaticClass();
+		TestNotNull(TEXT("RequestTerritoryPermission task exists"), RequestTask);
+
+		// The task must have blackboard key selectors
+		TestTrue(TEXT("Request task has TerritoryKey"),
+			TFTestUtils::HasProperty(RequestTask, TEXT("TerritoryKey")));
+		TestTrue(TEXT("Request task has bPermissionGrantedKey"),
+			TFTestUtils::HasProperty(RequestTask, TEXT("bPermissionGrantedKey")));
+	}
+
+	// ─── Combat director uses Narrative ASC tokens ───
+	{
+		const UClass* DirectorClass = UTerritoryCombatDirector::StaticClass();
+
+		// RequestAttackPermission wraps Narrative's TryClaimToken
+		TestTrue(TEXT("Director has RequestAttackPermission"),
+			TFTestUtils::HasFunction(DirectorClass, TEXT("RequestAttackPermission")));
+		TestTrue(TEXT("Director has ReleaseAttackPermission"),
+			TFTestUtils::HasFunction(DirectorClass, TEXT("ReleaseAttackPermission")));
+		TestTrue(TEXT("Director has GetAvailableSlots"),
+			TFTestUtils::IsBlueprintPure(DirectorClass, TEXT("GetAvailableSlots")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_TeamAgentInterface,
+	"TerritoryFramework.Integration.TeamAgentInterface",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_TeamAgentInterface::RunTest(const FString& Parameters)
+{
+	// Verify INarrativeTeamAgentInterface is accessible and has the expected contract
+
+	const UClass* InterfaceClass = UNarrativeTeamAgentInterface::StaticClass();
+	TestNotNull(TEXT("UNarrativeTeamAgentInterface is accessible"), InterfaceClass);
+
+	// INarrativeTeamAgentInterface methods are C++ virtuals (not UFUNCTION),
+	// so they won't appear in reflection. Verify the interface class is valid
+	// and inherits from UGenericTeamAgentInterface.
+	TestTrue(TEXT("TeamAgent inherits UGenericTeamAgentInterface"),
+		InterfaceClass->IsChildOf(UGenericTeamAgentInterface::StaticClass()));
+
+	// Verify the interface CDO is constructable
+	TestNotNull(TEXT("TeamAgent interface CDO is valid"),
+		InterfaceClass->GetDefaultObject());
+
+	// INarrativeTeamAgentInterface is implemented by characters (not GameState).
+	// The territory diplomacy system reads faction attitudes from
+	// ANarrativeGameState::FactionAllianceMap (separate mechanism).
+	// Here we just verify the GameState has the faction alliance API.
+	const UClass* GSClass = ANarrativeGameState::StaticClass();
+	TestTrue(TEXT("GameState has FactionAllianceMap for diplomacy"),
+		TFTestUtils::HasProperty(GSClass, TEXT("FactionAllianceMap")));
+	TestTrue(TEXT("GameState has SetFactionAttitude"),
+		TFTestUtils::IsBlueprintCallable(GSClass, TEXT("SetFactionAttitude")));
+
+	// Verify the territory volume does NOT implement INarrativeTeamAgentInterface
+	// (it uses direct FGameplayTag ownership, not the team agent interface)
+	const UClass* VolumeClass = ATerritoryVolume::StaticClass();
+	TestFalse(TEXT("TerritoryVolume does NOT implement INarrativeTeamAgentInterface"),
+		VolumeClass->ImplementsInterface(UNarrativeTeamAgentInterface::StaticClass()));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_TalesComponentBinding,
+	"TerritoryFramework.Integration.TalesComponentBinding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_TalesComponentBinding::RunTest(const FString& Parameters)
+{
+	// Verify UTalesComponent has the delegates that territory tale extensions bind to
+
+	const UClass* TalesClass = UTalesComponent::StaticClass();
+	TestNotNull(TEXT("UTalesComponent is accessible"), TalesClass);
+
+	// ─── Quest lifecycle delegates (bound by UTerritoryCaptureTask) ───
+	TestTrue(TEXT("TalesComponent has OnQuestTaskCompleted"),
+		TFTestUtils::HasProperty(TalesClass, TEXT("OnQuestTaskCompleted")));
+	TestTrue(TEXT("TalesComponent has OnQuestTaskProgressChanged"),
+		TFTestUtils::HasProperty(TalesClass, TEXT("OnQuestTaskProgressChanged")));
+	TestTrue(TEXT("TalesComponent has OnQuestSucceeded"),
+		TFTestUtils::HasProperty(TalesClass, TEXT("OnQuestSucceeded")));
+	TestTrue(TEXT("TalesComponent has OnQuestFailed"),
+		TFTestUtils::HasProperty(TalesClass, TEXT("OnQuestFailed")));
+	TestTrue(TEXT("TalesComponent has OnQuestStarted"),
+		TFTestUtils::HasProperty(TalesClass, TEXT("OnQuestStarted")));
+
+	// ─── Quest management API (used by capture event) ───
+	TestTrue(TEXT("TalesComponent has BeginQuest"),
+		TFTestUtils::HasFunction(TalesClass, TEXT("BeginQuest")));
+	TestTrue(TEXT("TalesComponent has IsQuestInProgress"),
+		TFTestUtils::HasFunction(TalesClass, TEXT("IsQuestInProgress")));
+	TestTrue(TEXT("TalesComponent has IsQuestSucceeded"),
+		TFTestUtils::HasFunction(TalesClass, TEXT("IsQuestSucceeded")));
+	TestTrue(TEXT("TalesComponent has IsQuestFailed"),
+		TFTestUtils::HasFunction(TalesClass, TEXT("IsQuestFailed")));
+
+	// ─── Dialogue API (used by ownership condition) ───
+	TestTrue(TEXT("TalesComponent has BeginDialogue"),
+		TFTestUtils::HasFunction(TalesClass, TEXT("BeginDialogue")));
+	TestTrue(TEXT("TalesComponent has IsInDialogue"),
+		TFTestUtils::HasFunction(TalesClass, TEXT("IsInDialogue")));
+
+	// ─── TalesComponent implements INarrativeSavableComponent ───
+	TestTrue(TEXT("TalesComponent implements INarrativeSavableComponent"),
+		TalesClass->ImplementsInterface(UNarrativeSavableComponent::StaticClass()));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_TimeOfDayBridge,
+	"TerritoryFramework.Integration.TimeOfDayBridge",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_TimeOfDayBridge::RunTest(const FString& Parameters)
+{
+	// Verify territory economy subsystem can integrate with Narrative's time system
+	// Economy ticks are triggered by game time, not real time
+
+	const UClass* GSClass = ANarrativeGameState::StaticClass();
+
+	// Time of day API that economy system would hook into
+	TestTrue(TEXT("GameState has GetTimeOfDay"),
+		TFTestUtils::IsBlueprintPure(GSClass, TEXT("GetTimeOfDay")));
+	TestTrue(TEXT("GameState has GetAccumulatedTime"),
+		TFTestUtils::IsBlueprintPure(GSClass, TEXT("GetAccumulatedTime")));
+	TestTrue(TEXT("GameState has IsDayTime"),
+		TFTestUtils::IsBlueprintPure(GSClass, TEXT("IsDayTime")));
+	TestTrue(TEXT("GameState has AdvanceTimeOfDay"),
+		TFTestUtils::IsBlueprintCallable(GSClass, TEXT("AdvanceTimeOfDay")));
+	TestTrue(TEXT("GameState has AdvanceToTimeOfDay"),
+		TFTestUtils::IsBlueprintCallable(GSClass, TEXT("AdvanceToTimeOfDay")));
+
+	// Time events (economy could bind to hourly events)
+	TestTrue(TEXT("GameState has TimeOfDayEvents"),
+		TFTestUtils::HasProperty(GSClass, TEXT("TimeOfDayEvents")));
+
+	// Economy subsystem's tick interval config
+	const UClass* EconClass = UTerritoryEconomySubsystem::StaticClass();
+	TestTrue(TEXT("EconomySubsystem has TickIntervalSeconds"),
+		TFTestUtils::HasProperty(EconClass, TEXT("TickIntervalSeconds")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIntegration_ModuleDependency,
+	"TerritoryFramework.Integration.ModuleDependency",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFIntegration_ModuleDependency::RunTest(const FString& Parameters)
+{
+	// Verify that TerritoryFramework can resolve all Narrative Pro types it depends on
+	// This catches missing module dependencies at test time
+
+	// ─── NarrativeSaveSystem types ───
+	TestNotNull(TEXT("UNarrativeSavableActor interface resolves"),
+		UNarrativeSavableActor::StaticClass());
+	TestNotNull(TEXT("UNarrativeStableActor interface resolves"),
+		UNarrativeStableActor::StaticClass());
+	TestNotNull(TEXT("UNarrativeSavableComponent interface resolves"),
+		UNarrativeSavableComponent::StaticClass());
+	TestNotNull(TEXT("USaveSystemStatics resolves"),
+		USaveSystemStatics::StaticClass());
+	TestNotNull(TEXT("UNarrativeSaveSubsystem resolves"),
+		UNarrativeSaveSubsystem::StaticClass());
+
+	// ─── NarrativeArsenal types ───
+	TestNotNull(TEXT("ANarrativeGameState resolves"),
+		ANarrativeGameState::StaticClass());
+	TestNotNull(TEXT("UNarrativeAbilitySystemComponent resolves"),
+		UNarrativeAbilitySystemComponent::StaticClass());
+	TestNotNull(TEXT("ANarrativeNPCController resolves"),
+		ANarrativeNPCController::StaticClass());
+	TestNotNull(TEXT("UTalesComponent resolves"),
+		UTalesComponent::StaticClass());
+	TestNotNull(TEXT("UNarrativeTask resolves"),
+		UNarrativeTask::StaticClass());
+	TestNotNull(TEXT("UNarrativeEvent resolves"),
+		UNarrativeEvent::StaticClass());
+	TestNotNull(TEXT("UNarrativeCondition resolves"),
+		UNarrativeCondition::StaticClass());
+	TestNotNull(TEXT("UMapMarker resolves"),
+		UMapMarker::StaticClass());
+	TestNotNull(TEXT("UNavigationMarkerComponent resolves"),
+		UNavigationMarkerComponent::StaticClass());
+	TestNotNull(TEXT("UNarrativeTeamAgentInterface resolves"),
+		UNarrativeTeamAgentInterface::StaticClass());
+
+	// ─── Engine types used by TerritoryFramework ───
+	TestNotNull(TEXT("UWorldSubsystem resolves"),
+		UWorldSubsystem::StaticClass());
+	TestNotNull(TEXT("UBehaviorTreeComponent resolves"),
+		UBehaviorTreeComponent::StaticClass());
+	TestNotNull(TEXT("UBTTaskNode resolves"),
+		UBTTaskNode::StaticClass());
+	TestNotNull(TEXT("UDeveloperSettings resolves"),
+		UDeveloperSettings::StaticClass());
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
