@@ -7,6 +7,10 @@
 #include "Components/BoxComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
+#include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "AI/NPCDefinition.h"
+#include "AI/NarrativeCharacterSubsystem.h"
+#include "UnrealFramework/NarrativeTeamAgentInterface.h"
 
 ATerritoryVolume::ATerritoryVolume()
 {
@@ -19,7 +23,12 @@ ATerritoryVolume::ATerritoryVolume()
 	if (UBoxComponent* Box = Cast<UBoxComponent>(BoundsShape))
 	{
 		Box->SetBoxExtent(FVector(500.f, 500.f, 200.f));
-		Box->SetCollisionProfileName(FName("OverlapAllDynamic"));
+		// Invisible during gameplay — editor-only visualization
+		Box->SetHiddenInGame(true, true);
+		// Overlap-only on ALL channels — must not block weapon traces,
+		// projectiles, fist attacks, or pawn movement
+		Box->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Box->SetCollisionResponseToAllChannels(ECR_Overlap);
 	}
 
 	// NOTE: OwnershipData defaults are synced from Initial* properties in BeginPlay,
@@ -59,6 +68,16 @@ void ATerritoryVolume::BeginPlay()
 
 		// Load saved data — overrides the Initial* defaults above if a save exists
 		USaveSystemStatics::LoadSingleActor(this);
+
+		// Spawn initial guards if territory is claimed and has a guard definition
+		if (OwnershipData.State == ETerritoryState::Claimed
+			&& OwnershipData.OwningFaction.IsValid()
+			&& GuardNPCDefinition
+			&& GuardSpawnCount > 0
+			&& SpawnedGuards.Num() == 0)
+		{
+			SpawnGuards();
+		}
 	}
 
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
@@ -73,6 +92,16 @@ void ATerritoryVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		Registry->UnregisterTerritory(this);
 	}
+
+	// Clean up spawned guards
+	for (TWeakObjectPtr<ANarrativeNPCCharacter>& GuardPtr : SpawnedGuards)
+	{
+		if (GuardPtr.IsValid())
+		{
+			GuardPtr->Destroy();
+		}
+	}
+	SpawnedGuards.Empty();
 
 	for (const TWeakObjectPtr<AActor>& DefenderPtr : RegisteredDefenders)
 	{
@@ -212,6 +241,13 @@ TArray<AActor*> ATerritoryVolume::GetRegisteredDefenders() const
 
 void ATerritoryVolume::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	// Despawn old guards, spawn new ones for the new owner
+	DespawnGuards();
+
+	if (NewOwner.IsValid() && GuardNPCDefinition && GuardSpawnCount > 0)
+	{
+		SpawnGuards();
+	}
 }
 
 void ATerritoryVolume::OnStateChanged_Implementation(ETerritoryState OldState, ETerritoryState NewState)
@@ -252,4 +288,116 @@ void ATerritoryVolume::UnbindDefenderDeath(AActor* Defender)
 void ATerritoryVolume::CleanupInvalidDefenders()
 {
 	RegisteredDefenders.RemoveAll([](const TWeakObjectPtr<AActor>& Ptr) { return !Ptr.IsValid(); });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Guard Spawning
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void ATerritoryVolume::SpawnGuards()
+{
+	if (!HasAuthority() || !GuardNPCDefinition) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UNarrativeCharacterSubsystem* CharSubsystem = World->GetSubsystem<UNarrativeCharacterSubsystem>();
+	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+
+	for (int32 i = 0; i < GuardSpawnCount; ++i)
+	{
+		FVector SpawnLoc = GetRandomSpawnPoint();
+		FTransform SpawnTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), SpawnLoc);
+
+		ANarrativeNPCCharacter* Guard = nullptr;
+
+		if (CharSubsystem)
+		{
+			Guard = CharSubsystem->SpawnNPC(GuardNPCDefinition, SpawnTransform);
+		}
+
+		if (!Guard)
+		{
+			// Fallback: direct spawn if subsystem unavailable
+			FActorSpawnParameters SpawnParams;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+			Guard = World->SpawnActor<ANarrativeNPCCharacter>(
+				ANarrativeNPCCharacter::StaticClass(), SpawnLoc,
+				SpawnTransform.Rotator(), SpawnParams);
+			if (Guard)
+			{
+				Guard->SetNPCDefinition(GuardNPCDefinition);
+			}
+		}
+
+		if (Guard)
+		{
+			// Set the guard's faction to match the territory owner
+			if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
+			{
+				TeamAgent->AddFaction(OwnerFaction);
+			}
+
+			SpawnedGuards.Add(Guard);
+			RegisterDefender(Guard);
+
+			UE_LOG(LogTerritory, Log, TEXT("Spawned guard %d/%d for %s (faction: %s)"),
+				i + 1, GuardSpawnCount,
+				*GetTerritoryTag().ToString(),
+				*OwnerFaction.ToString());
+		}
+	}
+}
+
+void ATerritoryVolume::DespawnGuards()
+{
+	for (TWeakObjectPtr<ANarrativeNPCCharacter>& GuardPtr : SpawnedGuards)
+	{
+		if (GuardPtr.IsValid())
+		{
+			UnbindDefenderDeath(GuardPtr.Get());
+			RegisteredDefenders.Remove(GuardPtr);
+			GuardPtr->Destroy();
+		}
+	}
+	SpawnedGuards.Empty();
+	CleanupInvalidDefenders();
+	OwnershipData.DefenderCount = RegisteredDefenders.Num();
+
+	UE_LOG(LogTerritory, Log, TEXT("Despawned all guards for %s"),
+		*GetTerritoryTag().ToString());
+}
+
+int32 ATerritoryVolume::GetSpawnedGuardCount() const
+{
+	int32 Count = 0;
+	for (const TWeakObjectPtr<ANarrativeNPCCharacter>& Ptr : SpawnedGuards)
+	{
+		if (Ptr.IsValid()) ++Count;
+	}
+	return Count;
+}
+
+bool ATerritoryVolume::HasGuardsAlive() const
+{
+	return GetSpawnedGuardCount() > 0;
+}
+
+FVector ATerritoryVolume::GetRandomSpawnPoint() const
+{
+	FVector Center = GetActorLocation();
+
+	if (UBoxComponent* Box = Cast<UBoxComponent>(BoundsShape))
+	{
+		FVector Extent = Box->GetScaledBoxExtent();
+		return Center + FVector(
+			FMath::FRandRange(-Extent.X, Extent.X),
+			FMath::FRandRange(-Extent.Y, Extent.Y),
+			0.f);
+	}
+
+	return Center + FVector(
+		FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
+		FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
+		0.f);
 }

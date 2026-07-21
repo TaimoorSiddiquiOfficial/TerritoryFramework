@@ -9,6 +9,8 @@
 
 class UNarrativeAbilitySystemComponent;
 class UShapeComponent;
+class UNPCDefinition;
+class ANarrativeNPCCharacter;
 
 UCLASS(BlueprintType, Blueprintable)
 class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrativeSavableActor
@@ -128,6 +130,30 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Visual")
 	TObjectPtr<UShapeComponent> BoundsShape;
 
+	// ─── Guard Spawning ───
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
+		meta = (AllowedClasses = "/Script/NarrativeArsenal.NPCDefinition"))
+	TObjectPtr<UNPCDefinition> GuardNPCDefinition;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards")
+	int32 GuardSpawnCount = 3;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards")
+	float GuardSpawnRadius = 500.f;
+
+	UFUNCTION(BlueprintCallable, Category = "Territory|Guards")
+	void SpawnGuards();
+
+	UFUNCTION(BlueprintCallable, Category = "Territory|Guards")
+	void DespawnGuards();
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
+	int32 GetSpawnedGuardCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
+	bool HasGuardsAlive() const;
+
 	UFUNCTION(BlueprintNativeEvent, Category = "Territory")
 	void OnOwnershipChanged(FGameplayTag OldOwner, FGameplayTag NewOwner);
 	virtual void OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner);
@@ -143,4 +169,9 @@ private:
 	void BindDefenderDeath(AActor* Defender);
 	void UnbindDefenderDeath(AActor* Defender);
 	void CleanupInvalidDefenders();
+
+	UPROPERTY()
+	TArray<TWeakObjectPtr<ANarrativeNPCCharacter>> SpawnedGuards;
+
+	FVector GetRandomSpawnPoint() const;
 };
