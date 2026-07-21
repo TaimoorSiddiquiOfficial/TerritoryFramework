@@ -121,6 +121,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
 	const TArray<FTerritoryPatrolNode>& GetPatrolRoute() const;
 
+	/** Whether the patrol route loops back to start after the last node */
+	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
+	bool GetLoopPatrol() const { return bLoopPatrol; }
+
 	/** Get the owning territory volume (resolved at BeginPlay) */
 	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
 	ATerritoryVolume* GetOwningTerritory() const;
