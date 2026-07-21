@@ -10,7 +10,7 @@
 class UNarrativeAbilitySystemComponent;
 class UShapeComponent;
 class UNPCDefinition;
-class ANarrativeNPCCharacter;
+class ATerritoryGuardCharacter;
 
 UCLASS(BlueprintType, Blueprintable)
 class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrativeSavableActor
@@ -171,7 +171,7 @@ private:
 	void CleanupInvalidDefenders();
 
 	UPROPERTY()
-	TArray<TWeakObjectPtr<ANarrativeNPCCharacter>> SpawnedGuards;
+	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> SpawnedGuards;
 
 	FVector GetRandomSpawnPoint() const;
 };

@@ -7,10 +7,12 @@
 #include "Components/BoxComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
-#include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "Core/TerritoryGuardCharacter.h"
 #include "AI/NPCDefinition.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
+#include "Character/CharacterDefinition.h"
+#include "Kismet/GameplayStatics.h"
 
 ATerritoryVolume::ATerritoryVolume()
 {
@@ -94,7 +96,7 @@ void ATerritoryVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	// Clean up spawned guards
-	for (TWeakObjectPtr<ANarrativeNPCCharacter>& GuardPtr : SpawnedGuards)
+	for (TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
 	{
 		if (GuardPtr.IsValid())
 		{
@@ -301,57 +303,71 @@ void ATerritoryVolume::SpawnGuards()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	UNarrativeCharacterSubsystem* CharSubsystem = World->GetSubsystem<UNarrativeCharacterSubsystem>();
-	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+	// Determine NPC class from definition, default to ATerritoryGuardCharacter
+	// which properly implements GetActorGUID to prevent save system assertion crash
+	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.Get();
+	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
+	{
+		NPCClass = ATerritoryGuardCharacter::StaticClass();
+	}
+
+	// Read faction from NPC Definition's DefaultFactions
+	FGameplayTagContainer DefFactions = GuardNPCDefinition->DefaultFactions;
 
 	for (int32 i = 0; i < GuardSpawnCount; ++i)
 	{
 		FVector SpawnLoc = GetRandomSpawnPoint();
 		FTransform SpawnTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), SpawnLoc);
 
-		ANarrativeNPCCharacter* Guard = nullptr;
-
-		if (CharSubsystem)
-		{
-			Guard = CharSubsystem->SpawnNPC(GuardNPCDefinition, SpawnTransform);
-		}
+		// Deferred spawning: BeginDeferred creates actor WITHOUT calling PostSpawnInitialize
+		// so OnActorSpawned does NOT fire yet — giving us a window to set the GUID
+		ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
+			UGameplayStatics::BeginDeferredActorSpawnFromClass(
+				this, NPCClass, SpawnTransform,
+				ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn,
+				this));
 
 		if (!Guard)
 		{
-			// Fallback: direct spawn if subsystem unavailable
-			FActorSpawnParameters SpawnParams;
-			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-			Guard = World->SpawnActor<ANarrativeNPCCharacter>(
-				ANarrativeNPCCharacter::StaticClass(), SpawnLoc,
-				SpawnTransform.Rotator(), SpawnParams);
-			if (Guard)
-			{
-				Guard->SetNPCDefinition(GuardNPCDefinition);
-			}
+			UE_LOG(LogTerritory, Warning, TEXT("Failed to begin deferred spawn for guard %d/%d of %s"),
+				i + 1, GuardSpawnCount, *GetTerritoryTag().ToString());
+			continue;
 		}
 
-		if (Guard)
+		// Set save GUID BEFORE FinishSpawning triggers OnActorSpawned
+		FGuid GuardSaveGUID = FGuid::NewGuid();
+		Guard->SetTerritorySaveGUID(GuardSaveGUID);
+		Guard->SetOwningTerritoryGUID(TerritoryGUID);
+
+		// Set NPC definition
+		Guard->SetNPCDefinition(GuardNPCDefinition);
+
+		// FinishSpawning triggers PostSpawnInitialize → OnActorFinishedSpawning
+		// → OnActorSpawned → SaveSubsystem looks up GUID → GetActorGUID returns valid GUID
+		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
+
+		// Add factions from NPC Definition's DefaultFactions
+		if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
 		{
-			// Set the guard's faction to match the territory owner
-			if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
+			for (const FGameplayTag& FactionTag : DefFactions)
 			{
-				TeamAgent->AddFaction(OwnerFaction);
+				TeamAgent->AddFaction(FactionTag);
 			}
-
-			SpawnedGuards.Add(Guard);
-			RegisterDefender(Guard);
-
-			UE_LOG(LogTerritory, Log, TEXT("Spawned guard %d/%d for %s (faction: %s)"),
-				i + 1, GuardSpawnCount,
-				*GetTerritoryTag().ToString(),
-				*OwnerFaction.ToString());
 		}
+
+		SpawnedGuards.Add(Guard);
+		RegisterDefender(Guard);
+
+		UE_LOG(LogTerritory, Log, TEXT("Spawned guard %d/%d for %s (GUID: %s)"),
+			i + 1, GuardSpawnCount,
+			*GetTerritoryTag().ToString(),
+			*GuardSaveGUID.ToString());
 	}
 }
 
 void ATerritoryVolume::DespawnGuards()
 {
-	for (TWeakObjectPtr<ANarrativeNPCCharacter>& GuardPtr : SpawnedGuards)
+	for (TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
 	{
 		if (GuardPtr.IsValid())
 		{
@@ -371,7 +387,7 @@ void ATerritoryVolume::DespawnGuards()
 int32 ATerritoryVolume::GetSpawnedGuardCount() const
 {
 	int32 Count = 0;
-	for (const TWeakObjectPtr<ANarrativeNPCCharacter>& Ptr : SpawnedGuards)
+	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr : SpawnedGuards)
 	{
 		if (Ptr.IsValid()) ++Count;
 	}
