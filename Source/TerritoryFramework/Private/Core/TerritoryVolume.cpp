@@ -22,9 +22,9 @@ ATerritoryVolume::ATerritoryVolume()
 		Box->SetCollisionProfileName(FName("OverlapAllDynamic"));
 	}
 
-	OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
-	OwnershipData.PeriodicIncome = InitialPeriodicIncome;
-	OwnershipData.GuardCost = InitialGuardCost;
+	// NOTE: OwnershipData defaults are synced from Initial* properties in BeginPlay,
+	// not here in the constructor. The constructor runs with CDO default values before
+	// Blueprint instance overrides are applied, causing Initial* edits to be ignored.
 }
 
 void ATerritoryVolume::BeginPlay()
@@ -38,6 +38,14 @@ void ATerritoryVolume::BeginPlay()
 			TerritoryGUID = FGuid::NewGuid();
 		}
 
+		// Sync Initial* → OwnershipData.* using instance values (not CDO defaults).
+		// This must happen in BeginPlay, not the constructor, because Blueprint CDO
+		// overrides for InitialPeriodicIncome/InitialMaxConcurrentAttackers/InitialGuardCost
+		// are not yet applied when the constructor runs.
+		OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
+		OwnershipData.PeriodicIncome = InitialPeriodicIncome;
+		OwnershipData.GuardCost = InitialGuardCost;
+
 		if (OwnershipData.State == ETerritoryState::Unclaimed && InitialOwningFaction.IsValid())
 		{
 			OwnershipData.OwningFaction = InitialOwningFaction;
@@ -49,6 +57,7 @@ void ATerritoryVolume::BeginPlay()
 			OwnershipData.State = ETerritoryState::Locked;
 		}
 
+		// Load saved data — overrides the Initial* defaults above if a save exists
 		USaveSystemStatics::LoadSingleActor(this);
 	}
 
