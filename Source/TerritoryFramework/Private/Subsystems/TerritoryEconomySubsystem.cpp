@@ -235,6 +235,12 @@ TArray<FTerritoryTransaction> UTerritoryEconomySubsystem::GetTransactionHistory(
 	return Result;
 }
 
+void UTerritoryEconomySubsystem::SetFactionTreasury(const FGameplayTag& Faction, const FTerritoryTreasury& Treasury)
+{
+	if (!Faction.IsValid()) return;
+	FactionTreasuries.Add(Faction, Treasury);
+}
+
 void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 {
 	if (!Faction.IsValid()) return;
