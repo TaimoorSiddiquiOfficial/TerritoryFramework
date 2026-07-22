@@ -15,13 +15,17 @@
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Character/CharacterDefinition.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/Engine.h"
+#include "DrawDebugHelpers.h"
 #include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AIController.h"
+#include "Navigation/TerritoryNavigationMarkerComponent.h"
 
 ATerritoryVolume::ATerritoryVolume()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 	bReplicates = true;
 
 	BoundsShape = CreateDefaultSubobject<UBoxComponent>(TEXT("BoundsShape"));
@@ -118,6 +122,40 @@ void ATerritoryVolume::BeginPlay()
 	{
 		Registry->RegisterTerritory(this);
 	}
+
+	// Auto-create map marker component if enabled and not already present
+	if (bAutoCreateMapMarker && !AutoMapMarkerComponent)
+	{
+		// Check if one already exists (designer may have added it in BP)
+		UActorComponent* ExistingComp = GetComponentByClass(UTerritoryNavigationMarkerComponent::StaticClass());
+		if (!ExistingComp)
+		{
+			AutoMapMarkerComponent = NewObject<UTerritoryNavigationMarkerComponent>(this, UTerritoryNavigationMarkerComponent::StaticClass());
+			if (AutoMapMarkerComponent)
+			{
+				AutoMapMarkerComponent->RegisterComponent();
+			}
+		}
+		else
+		{
+			AutoMapMarkerComponent = Cast<UTerritoryNavigationMarkerComponent>(ExistingComp);
+		}
+	}
+
+	// Fire BP-exposed initialization event
+	OnTerritoryInitialized();
+
+	// Enable ticking only when debug visual draw is enabled (PIE only)
+#if ENABLE_DRAW_DEBUG
+	const UTerritoryDeveloperSettings* DebugSettings = GetDefault<UTerritoryDeveloperSettings>();
+	if (DebugSettings && DebugSettings->IsDebugEnabled()
+		&& (DebugSettings->bDrawTerritoryBounds || DebugSettings->bDrawOwnershipOverlay
+			|| DebugSettings->bDrawCaptureProgress || DebugSettings->bDrawGuardSpawnPoints
+			|| DebugSettings->bDrawSpatialGrid))
+	{
+		SetActorTickEnabled(true);
+	}
+#endif
 }
 
 void ATerritoryVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -147,6 +185,81 @@ void ATerritoryVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	RegisteredDefenders.Empty();
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void ATerritoryVolume::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+#if ENABLE_DRAW_DEBUG
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (!Settings || !Settings->IsDebugEnabled()) return;
+
+	UWorld* World = GetWorld();
+	if (!World || !World->IsGameWorld()) return;
+
+	const FVector Center = GetActorLocation();
+	const FBox Bounds = GetTerritoryBounds();
+
+	// Draw territory bounds
+	if (Settings->bDrawTerritoryBounds)
+	{
+		DrawDebugBox(World, Bounds.GetCenter(), Bounds.GetExtent(), FQuat::Identity,
+			FColor::White, false, 0.f, 0, 1.f);
+	}
+
+	// Draw ownership color overlay
+	if (Settings->bDrawOwnershipOverlay && OwnershipData.OwningFaction.IsValid())
+	{
+		DrawDebugBox(World, Bounds.GetCenter(), Bounds.GetExtent(), FQuat::Identity,
+			FColor::Green, false, 0.f, 1, 2.f);
+	}
+
+	// Draw capture progress bar above contested territories
+	if (Settings->bDrawCaptureProgress && OwnershipData.State == ETerritoryState::Contested)
+	{
+		const FVector TopCenter(Center.X, Center.Y, Bounds.Max.Z + 100.f);
+		const float BarWidth = 200.f;
+		const float Progress = OwnershipData.ControlProgress;
+		DrawDebugLine(World, TopCenter - FVector(BarWidth * 0.5f, 0, 0),
+			TopCenter + FVector(BarWidth * Progress - BarWidth * 0.5f, 0, 0),
+			FColor::Red, false, 0.f, 0, 3.f);
+		DrawDebugLine(World, TopCenter - FVector(BarWidth * 0.5f, 0, 0),
+			TopCenter + FVector(BarWidth * 0.5f, 0, 0),
+			FColor::White, false, 0.f, 1, 1.f);
+		DrawDebugString(World, TopCenter + FVector(0, 0, 20.f),
+			FString::Printf(TEXT("%.0f%%"), Progress * 100.f),
+			nullptr, FColor::White, 0.f, true);
+	}
+
+	// Draw guard spawn points and patrol routes
+	if (Settings->bDrawGuardSpawnPoints)
+	{
+		for (const TObjectPtr<AActor>& SPActor : GuardSpawnPoints)
+		{
+			if (ATerritoryGuardSpawnPoint* SP = Cast<ATerritoryGuardSpawnPoint>(SPActor))
+			{
+				DrawDebugSphere(World, SP->GetActorLocation(), 30.f, 8, FColor::Yellow, false, 0.f, 0, 1.f);
+
+				// Draw patrol route
+				const TArray<FTerritoryPatrolNode>& Route = SP->PatrolRoute;
+				for (int32 i = 0; i < Route.Num(); ++i)
+				{
+					const FVector& Node = Route[i].Location;
+					DrawDebugSphere(World, Node, 15.f, 6, FColor::Cyan, false, 0.f, 0, 0.5f);
+					if (i + 1 < Route.Num())
+					{
+						DrawDebugLine(World, Node, Route[i + 1].Location, FColor::Cyan, false, 0.f, 0, 1.f);
+					}
+					else if (SP->bLoopPatrol && Route.Num() > 1)
+					{
+						DrawDebugLine(World, Node, Route[0].Location, FColor::Turquoise, false, 0.f, 0, 0.5f);
+					}
+				}
+			}
+		}
+	}
+#endif
 }
 
 void ATerritoryVolume::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -222,6 +335,38 @@ void ATerritoryVolume::Load_Implementation()
 
 bool ATerritoryVolume::ShouldRespawn_Implementation() const { return false; }
 
+// ─── ITerritoryOwnershipInterface ───
+
+FGameplayTag ATerritoryVolume::GetTerritoryOwner_Implementation() const { return OwnershipData.OwningFaction; }
+float ATerritoryVolume::GetTerritoryControlProgress_Implementation() const { return OwnershipData.ControlProgress; }
+bool ATerritoryVolume::IsTerritoryContested_Implementation() const { return OwnershipData.State == ETerritoryState::Contested; }
+FGameplayTag ATerritoryVolume::GetContestingFaction_Implementation() const { return OwnershipData.ContestingFaction; }
+
+// ─── ITerritoryEventReceiverInterface ───
+
+void ATerritoryVolume::OnTerritoryControlChanged_Implementation(FGameplayTag InTerritoryTag, FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	// Self ownership change handled by OnOwnershipChanged; this is for external territory events
+}
+
+void ATerritoryVolume::OnTerritoryContested_Implementation(FGameplayTag InTerritoryTag, FGameplayTag ContestingFaction)
+{
+	if (InTerritoryTag == TerritoryTag && OwnershipData.ContestingFaction != ContestingFaction)
+	{
+		OwnershipData.ContestingFaction = ContestingFaction;
+	}
+}
+
+void ATerritoryVolume::OnTerritoryUncontested_Implementation(FGameplayTag InTerritoryTag)
+{
+	OwnershipData.ContestingFaction = FGameplayTag();
+}
+
+void ATerritoryVolume::OnTerritoryStateChanged_Implementation(FGameplayTag InTerritoryTag, ETerritoryState NewState)
+{
+	// External state change notification — local state is managed by SetTerritoryState
+}
+
 FGameplayTag ATerritoryVolume::GetOwningFaction() const { return OwnershipData.OwningFaction; }
 ETerritoryState ATerritoryVolume::GetTerritoryState() const { return OwnershipData.State; }
 float ATerritoryVolume::GetControlProgress() const { return OwnershipData.ControlProgress; }
@@ -287,6 +432,14 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[Ownership] %s: %s → %s"),
 			*GetTerritoryTag().ToString(), *OldOwner.ToString(), *NewFaction.ToString());
+
+		if (Settings->IsDebugEnabled())
+		{
+			const FString Msg = FString::Printf(TEXT("[Territory] %s: %s → %s"),
+				*GetTerritoryDisplayName().ToString(),
+				*OldOwner.ToString(), *NewFaction.ToString());
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, Msg);
+		}
 	}
 
 	// Cache previous owner for RepNotify
@@ -371,6 +524,48 @@ void ATerritoryVolume::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, 
 
 void ATerritoryVolume::OnStateChanged_Implementation(ETerritoryState OldState, ETerritoryState NewState)
 {
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+
+	// Entering Contested — despawn guards (they'll be respawned if recaptured)
+	if (NewState == ETerritoryState::Contested && OldState == ETerritoryState::Claimed)
+	{
+		if (Settings && Settings->ShouldDebugStateTransitions())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s entering Contested — despawning guards"),
+				*GetTerritoryTag().ToString());
+		}
+		DespawnGuards();
+	}
+
+	// Entering Claimed from Contested — recapture by owner, respawn guards
+	if (NewState == ETerritoryState::Claimed && OldState == ETerritoryState::Contested)
+	{
+		if (Settings && Settings->ShouldDebugStateTransitions())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s recaptured — respawning guards"),
+				*GetTerritoryTag().ToString());
+		}
+		if (HasAuthority() && GuardNPCDefinition && GuardSpawnCount > 0 && SpawnedGuards.Num() == 0)
+		{
+			SpawnGuards();
+		}
+	}
+
+	// Entering Locked — despawn guards, no capture possible
+	if (NewState == ETerritoryState::Locked)
+	{
+		DespawnGuards();
+	}
+}
+
+void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
+{
+	UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All guards defeated in %s — territory is undefended"),
+		*GetTerritoryTag().ToString());
+}
+
+void ATerritoryVolume::OnTerritoryInitialized_Implementation()
+{
 }
 
 void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC)
@@ -389,7 +584,7 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 	}
 
 	// Broadcast OnGuardDied delegate for Blueprint
-	OnGuardDied.Broadcast(this, GetOwningFaction(), FGameplayTag());
+	OnGuardDied.Broadcast(this, GetOwningFaction(), OwnershipData.ContestingFaction);
 
 	// Notify spawn points that a guard died (triggers reserve replacement)
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
@@ -408,6 +603,15 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 	{
 		return !Ptr.IsValid() || Ptr.Get() == KilledActor;
 	});
+
+	// If all guards are dead, fire OnAllGuardsDefeated
+	if (SpawnedGuards.Num() == 0 && HasGuardsAlive() == false)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All guards defeated in %s"),
+			*GetTerritoryTag().ToString());
+		OnAllGuardsDefeated();
+		OnAllGuardsDefeatedDelegate.Broadcast(this);
+	}
 }
 
 void ATerritoryVolume::BindDefenderDeath(AActor* Defender)
@@ -473,6 +677,11 @@ void ATerritoryVolume::SpawnGuards()
 
 	// Resolve GuardSpawnPoints
 	TArray<ATerritoryGuardSpawnPoint*> SpawnPointActors = GetGuardSpawnPoints();
+	// Sort by priority (higher = fills first)
+	SpawnPointActors.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
+	{
+		return A.Priority > B.Priority;
+	});
 	int32 NextSPIdx = 0;
 
 	if (bDebug)
@@ -665,4 +874,21 @@ TArray<ATerritoryGuardSpawnPoint*> ATerritoryVolume::GetGuardSpawnPoints() const
 		}
 	}
 	return Result;
+}
+
+UTerritoryNavigationMarkerComponent* ATerritoryVolume::GetMapMarkerComponent() const
+{
+	return AutoMapMarkerComponent;
+}
+
+FString ATerritoryVolume::GetDebugString() const
+{
+	return FString::Printf(TEXT("%s | Owner=%s | State=%d | Progress=%.2f | Guards=%d/%d | Defenders=%d"),
+		*TerritoryTag.ToString(),
+		*OwnershipData.OwningFaction.ToString(),
+		static_cast<int32>(OwnershipData.State),
+		OwnershipData.ControlProgress,
+		GetSpawnedGuardCount(),
+		GuardSpawnCount,
+		GetDefenderCount());
 }

@@ -58,6 +58,12 @@ protected:
 private:
 	FGameplayTag DisplayFaction;
 
+	/** Client-side polling fallback timer — refreshes data periodically in case delegate broadcasts are missed. */
+	FTimerHandle ClientPollTimerHandle;
+
+	/** Seconds between client polling refreshes. */
+	static constexpr float ClientPollInterval = 5.f;
+
 	UFUNCTION()
 	void HandleEconomyTick(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot);
 
@@ -66,6 +72,9 @@ private:
 
 	void BindDelegates();
 	void UnbindDelegates();
+
+	/** Client polling fallback — queries current data and fires OnEconomyUpdated. */
+	void ClientPollRefresh();
 
 	UTerritoryEconomySubsystem* GetEconomySubsystem() const;
 };

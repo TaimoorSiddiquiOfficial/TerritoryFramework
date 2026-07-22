@@ -39,28 +39,28 @@ void UTerritoryCaptureTask::BeginTask()
 			*TargetTerritoryTag.ToString());
 		return;
 	}
-		CachedTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 
-		// Store the initial owner for loss detection
-		InitialOwner = CachedTerritory->GetOwningFaction();
+	CachedTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 
-		// Check if already in the desired state
-		if (bCompleteOnLoss)
+	// Store the initial owner for loss detection
+	InitialOwner = CachedTerritory->GetOwningFaction();
+
+	// Check if already in the desired state
+	if (bCompleteOnLoss)
+	{
+		// Complete if already unclaimed
+		if (!CachedTerritory->GetOwningFaction().IsValid())
 		{
-			// Complete if already unclaimed
-			if (!CachedTerritory->GetOwningFaction().IsValid())
-			{
-				CompleteTask();
-				return;
-			}
+			CompleteTask();
+			return;
 		}
-		else if (RequiredCapturingFaction.IsValid())
+	}
+	else if (RequiredCapturingFaction.IsValid())
+	{
+		if (CachedTerritory->IsOwnedByFaction(RequiredCapturingFaction))
 		{
-			if (CachedTerritory->IsOwnedByFaction(RequiredCapturingFaction))
-			{
-				CompleteTask();
-				return;
-			}
+			CompleteTask();
+			return;
 		}
 	}
 }

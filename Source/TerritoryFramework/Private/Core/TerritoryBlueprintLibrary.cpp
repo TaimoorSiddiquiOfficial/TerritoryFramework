@@ -5,7 +5,10 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryHierarchy.h"
+#include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 
 UTerritoryRegistrySubsystem* UTerritoryBlueprintLibrary::GetTerritoryRegistry(const UObject* WorldContextObject)
 {
@@ -145,4 +148,165 @@ bool UTerritoryBlueprintLibrary::IsAtWar(const UObject* WorldContextObject, cons
 bool UTerritoryBlueprintLibrary::IsSameFaction(const FGameplayTag& FactionA, const FGameplayTag& FactionB)
 {
 	return FactionA == FactionB && FactionA.IsValid();
+}
+
+// ─── Narrative Pro Faction Bridge ───
+
+FGameplayTagContainer UTerritoryBlueprintLibrary::GetActorFactions(const UObject* WorldContextObject, AActor* Actor)
+{
+	if (!Actor) return FGameplayTagContainer();
+	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Actor))
+	{
+		return TeamAgent->GetFactions();
+	}
+	return FGameplayTagContainer();
+}
+
+bool UTerritoryBlueprintLibrary::IsActorInFaction(const UObject* WorldContextObject, AActor* Actor, const FGameplayTag& FactionTag)
+{
+	if (!Actor || !FactionTag.IsValid()) return false;
+	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Actor))
+	{
+		return TeamAgent->GetFactions().HasTag(FactionTag);
+	}
+	return false;
+}
+
+FGameplayTag UTerritoryBlueprintLibrary::GetActorPrimaryFaction(const UObject* WorldContextObject, AActor* Actor)
+{
+	if (!Actor) return FGameplayTag();
+	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Actor))
+	{
+		FGameplayTagContainer Factions = TeamAgent->GetFactions();
+		if (Factions.Num() > 0)
+		{
+			return Factions.GetByIndex(0);
+		}
+	}
+	return FGameplayTag();
+}
+
+bool UTerritoryBlueprintLibrary::AreActorsAllied(AActor* A, AActor* B)
+{
+	if (!A || !B) return false;
+	INarrativeTeamAgentInterface* TeamA = Cast<INarrativeTeamAgentInterface>(A);
+	INarrativeTeamAgentInterface* TeamB = Cast<INarrativeTeamAgentInterface>(B);
+	if (!TeamA || !TeamB) return false;
+	return TeamA->GetFactions().HasAny(TeamB->GetFactions());
+}
+
+// ─── City / District Queries ───
+
+TArray<ATerritoryCity*> UTerritoryBlueprintLibrary::GetAllCities(const UObject* WorldContextObject)
+{
+	TArray<ATerritoryCity*> Result;
+	UTerritoryRegistrySubsystem* Registry = GetTerritoryRegistry(WorldContextObject);
+	if (!Registry) return Result;
+
+	TArray<ATerritoryVolume*> All = Registry->GetAllTerritories();
+	for (ATerritoryVolume* Vol : All)
+	{
+		if (ATerritoryCity* City = Cast<ATerritoryCity>(Vol))
+		{
+			Result.Add(City);
+		}
+	}
+	return Result;
+}
+
+TArray<ATerritoryDistrict*> UTerritoryBlueprintLibrary::GetAllDistricts(const UObject* WorldContextObject)
+{
+	TArray<ATerritoryDistrict*> Result;
+	UTerritoryRegistrySubsystem* Registry = GetTerritoryRegistry(WorldContextObject);
+	if (!Registry) return Result;
+
+	TArray<ATerritoryVolume*> All = Registry->GetAllTerritories();
+	for (ATerritoryVolume* Vol : All)
+	{
+		if (ATerritoryDistrict* D = Cast<ATerritoryDistrict>(Vol))
+		{
+			Result.Add(D);
+		}
+	}
+	return Result;
+}
+
+ATerritoryCity* UTerritoryBlueprintLibrary::GetCityForDistrict(const UObject* WorldContextObject, ATerritoryDistrict* District)
+{
+	if (!District) return nullptr;
+	return District->GetOwningCity();
+}
+
+bool UTerritoryBlueprintLibrary::DoesFactionControlCity(const UObject* WorldContextObject, ATerritoryCity* City, const FGameplayTag& FactionTag)
+{
+	if (!City || !FactionTag.IsValid()) return false;
+	return City->AllDistrictsOwnedBy(FactionTag);
+}
+
+int32 UTerritoryBlueprintLibrary::GetFactionCityCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag)
+{
+	if (!FactionTag.IsValid()) return 0;
+	int32 Count = 0;
+	for (ATerritoryCity* City : GetAllCities(WorldContextObject))
+	{
+		if (City && City->AllDistrictsOwnedBy(FactionTag))
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
+int32 UTerritoryBlueprintLibrary::GetFactionDistrictCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag)
+{
+	if (!FactionTag.IsValid()) return 0;
+	int32 Count = 0;
+	for (ATerritoryDistrict* D : GetAllDistricts(WorldContextObject))
+	{
+		if (D && D->IsOwnedByFaction(FactionTag))
+		{
+			++Count;
+		}
+	}
+	return Count;
+}
+
+TArray<ATerritoryDistrict*> UTerritoryBlueprintLibrary::GetCapitalDistricts(const UObject* WorldContextObject)
+{
+	TArray<ATerritoryDistrict*> Result;
+	for (ATerritoryDistrict* D : GetAllDistricts(WorldContextObject))
+	{
+		if (D && D->IsCapitalDistrict())
+		{
+			Result.Add(D);
+		}
+	}
+	return Result;
+}
+
+// ─── Debug Helpers ───
+
+void UTerritoryBlueprintLibrary::PrintTerritoryDebug(const UObject* WorldContextObject, ATerritoryVolume* Territory, float Duration)
+{
+	if (!Territory) return;
+
+	const FString DebugStr = Territory->GetDebugString();
+	UE_LOG(LogTerritory, Log, TEXT("%s"), *DebugStr);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, Duration, FColor::Orange, DebugStr);
+	}
+}
+
+void UTerritoryBlueprintLibrary::PrintAllTerritoryDebug(const UObject* WorldContextObject, float Duration)
+{
+	TArray<ATerritoryVolume*> All = GetAllTerritories(WorldContextObject);
+	for (ATerritoryVolume* Vol : All)
+	{
+		if (Vol)
+		{
+			PrintTerritoryDebug(WorldContextObject, Vol, Duration);
+		}
+	}
 }

@@ -6,6 +6,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "TimerManager.h"
 
 void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -119,6 +120,13 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 			UE_LOG(LogTerritory, Log, TEXT("[EconomyTick] %s: gold=%d, income=%d, costs=%d, net=%d, territories=%d"),
 				*Pair.Key.ToString(), Treasury.Gold, Treasury.IncomePerTick,
 				Treasury.CostsPerTick, NetIncome, Treasury.TerritoryCount);
+
+			if (Settings->IsDebugEnabled())
+			{
+				const FString Msg = FString::Printf(TEXT("[Economy] %s: gold=%d (+%d/-%d)"),
+					*Pair.Key.ToString(), Treasury.Gold, Treasury.IncomePerTick, Treasury.CostsPerTick);
+				GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan, Msg);
+			}
 		}
 
 		FTerritoryEconomySnapshot Snapshot;

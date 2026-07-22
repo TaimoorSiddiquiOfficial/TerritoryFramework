@@ -191,3 +191,30 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnTransactionRecorded,
 	const FTerritoryTransaction&, Transaction);
+
+// ─── Hierarchy Delegates ───
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnCityCaptured,
+	class ATerritoryCity*, City,
+	FGameplayTag, CapturingFaction);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnCityLost,
+	class ATerritoryCity*, City,
+	FGameplayTag, PreviousFaction);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FOnDistrictCaptured,
+	class ATerritoryDistrict*, District,
+	FGameplayTag, OldOwner,
+	FGameplayTag, NewOwner);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnPropertyCaptured,
+	class ATerritoryProperty*, Property,
+	FGameplayTag, NewOwner);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnAllGuardsDefeated,
+	class ATerritoryVolume*, Territory);

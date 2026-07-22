@@ -5,6 +5,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "TimerManager.h"
 
 void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -406,6 +407,13 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		UE_LOG(LogTerritory, Log, TEXT("[CaptureComplete] %s: %s → %s"),
 			*Territory->GetTerritoryTag().ToString(),
 			*OldOwner.ToString(), *NewOwner.ToString());
+
+		if (Settings->IsDebugEnabled())
+		{
+			const FString Msg = FString::Printf(TEXT("[Capture] %s captured by %s"),
+				*Territory->GetTerritoryDisplayName().ToString(), *NewOwner.ToString());
+			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, Msg);
+		}
 	}
 
 	OnTerritoryControlChanged.Broadcast(Territory, OldOwner, NewOwner);

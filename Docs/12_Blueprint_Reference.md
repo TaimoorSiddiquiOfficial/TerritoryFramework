@@ -25,6 +25,7 @@
 | HasGuardsAlive() | bool | Territory\|Guards |
 | GetGuardSpawnPoints() | Array<GuardSpawnPoint*> | Territory\|Guards |
 | GetRegisteredDefenders() | Array<Actor*> | Territory |
+| GetMapMarkerComponent() | TerritoryNavigationMarkerComponent* | Territory\|Visual |
 
 ### BlueprintCallable (AuthorityOnly) Functions
 
@@ -38,18 +39,14 @@
 | SpawnGuards() | Territory\|Guards |
 | DespawnGuards() | Territory\|Guards |
 
-### BlueprintCallable Functions
-
-| Function | Category |
-|---|---|
-| GetRegisteredDefenders() | Territory |
-
 ### BlueprintNativeEvent
 
 | Event | Parameters |
 |---|---|
 | OnOwnershipChanged | OldOwner (GameplayTag), NewOwner (GameplayTag) |
 | OnStateChanged | OldState (ETerritoryState), NewState (ETerritoryState) |
+| OnAllGuardsDefeated | (none) |
+| OnTerritoryInitialized | (none) |
 
 ### BlueprintAssignable Delegates
 
@@ -57,7 +54,8 @@
 |---|---|
 | OnTerritoryControlChanged | (Volume*, OldOwner, NewOwner) |
 | OnTerritoryStateChanged | (Volume*, NewState) |
-| OnGuardDied | (Volume*, Faction, EmptyTag) |
+| OnGuardDied | (Volume*, Faction, ContestingFaction) |
+| OnAllGuardsDefeatedDelegate | (Volume*) |
 
 ### BlueprintReadWrite Properties
 
@@ -71,6 +69,7 @@
 | InitialGuardCost | int32 |
 | bStartsLocked | bool |
 | ParentTerritoryTag | GameplayTag |
+| bAutoCreateMapMarker | bool |
 | TerritoryGUID | FGuid |
 | BoundsShape | ShapeComponent* |
 | GuardNPCDefinition | NPCDefinition* |
@@ -79,6 +78,68 @@
 | GuardSpawnCount | int32 |
 | GuardSpawnRadius | float |
 | GuardSpawnPoints | Array<Actor*> |
+
+## ATerritoryCity (extends ATerritoryVolume)
+
+### BlueprintPure
+
+| Function | Returns |
+|---|---|
+| GetDistricts() | Array<Volume*> |
+| GetDistrictCount() | int32 |
+| AllDistrictsOwnedBy(Faction) | bool |
+| GetCityControlPercentage(Faction) | float |
+| GetMajorityOwner() | GameplayTag |
+| IsFullyCaptured() | bool |
+| GetCapturingFaction() | GameplayTag |
+| GetCapitalDistrictCount() | int32 |
+| HasCapitalDistrict() | bool |
+
+### BlueprintNativeEvent
+
+| Event | Parameters |
+|---|---|
+| OnCityFullyCaptured | CapturingFaction (GameplayTag) |
+| OnCityLost | PreviousFaction (GameplayTag) |
+| OnDistrictCapturedInCity | District (Volume*), OldOwner, NewOwner |
+
+### BlueprintAssignable Delegates
+
+| Delegate | Signature |
+|---|---|
+| OnCityCapturedDelegate | (City*, CapturingFaction) |
+| OnCityLostDelegate | (City*, PreviousFaction) |
+
+## ATerritoryDistrict (extends ATerritoryVolume)
+
+### BlueprintPure
+
+| Function | Returns |
+|---|---|
+| GetOwningCity() | City* |
+| GetProperties() | Array<Volume*> |
+| IsCapitalDistrict() | bool |
+| GetPropertyCountForFaction(Faction) | int32 |
+| AllPropertiesOwnedBy(Faction) | bool |
+
+### BlueprintNativeEvent
+
+| Event | Parameters |
+|---|---|
+| OnDistrictFullyCaptured | CapturingFaction (GameplayTag) |
+
+### BlueprintAssignable Delegates
+
+| Delegate | Signature |
+|---|---|
+| OnDistrictCapturedDelegate | (District*, OldOwner, NewOwner) |
+
+### BlueprintReadWrite Properties
+
+| Property | Type |
+|---|---|
+| bIsCapital | bool |
+| CapitalIncomeMultiplier | float |
 
 ## ATerritoryProperty (extends ATerritoryVolume)
 
@@ -89,7 +150,7 @@
 | CanUpgrade() | bool |
 | GetUpgradeCost() | int32 |
 | GetEffectiveIncome() | int32 |
-| GetOwningDistrict() | TerritoryDistrict* |
+| GetOwningDistrict() | District* |
 
 ### BlueprintCallable (AuthorityOnly)
 
@@ -98,11 +159,23 @@
 | TryUpgrade() → bool |
 | SetUpgradeLevel(NewLevel) |
 
+### BlueprintNativeEvent
+
+| Event | Parameters |
+|---|---|
+| OnPropertyCaptured | NewOwner (GameplayTag) |
+
 ### BlueprintImplementableEvent
 
 | Event |
 |---|
 | OnUpgradeLevelChanged(NewLevel) |
+
+### BlueprintAssignable Delegates
+
+| Delegate | Signature |
+|---|---|
+| OnPropertyCapturedDelegate | (Property*, NewOwner) |
 
 ### BlueprintReadWrite
 
@@ -115,14 +188,78 @@
 
 ## UTerritoryBlueprintLibrary (Static)
 
+### Subsystem Access
+
 | Function | Returns |
 |---|---|
 | GetTerritoryRegistry(WorldContext) | RegistrySubsystem* |
 | GetTerritoryControl(WorldContext) | ControlSubsystem* |
 | GetTerritoryEconomy(WorldContext) | EconomySubsystem* |
 | GetTerritoryCombatDirector(WorldContext) | CombatDirector* |
+| GetTerritoryDiplomacy(WorldContext) | DiplomacySubsystem* |
+
+### Territory Queries
+
+| Function | Returns |
+|---|---|
 | GetTerritoryAtLocation(WorldContext, Location) | TerritoryVolume* |
 | GetTerritoryByTag(WorldContext, Tag) | TerritoryVolume* |
+| GetAllTerritories(WorldContext) | Array<Volume*> |
+| GetTerritoriesByFaction(WorldContext, Faction) | Array<Volume*> |
+| GetChildTerritories(WorldContext, ParentTag) | Array<Volume*> |
+| GetTerritoryCount(WorldContext) | int32 |
+| GetFactionTerritoryCount(WorldContext, Faction) | int32 |
+| IsTerritoryAtLocation(WorldContext, Location) | bool |
+
+### Economy Shortcuts
+
+| Function | Returns |
+|---|---|
+| GetFactionGold(WorldContext, Faction) | int32 |
+| GetFactionIncome(WorldContext, Faction) | int32 |
+| GetAllFactions(WorldContext) | Array<GameplayTag> |
+
+### Capture Shortcuts
+
+| Function | Returns |
+|---|---|
+| GetTerritoryState(WorldContext, Tag) | ETerritoryState |
+| GetCaptureProgress(WorldContext, Tag) | float |
+| ForceCaptureTerritory(WorldContext, Tag, Faction) | void |
+
+### Diplomacy Shortcuts
+
+| Function | Returns |
+|---|---|
+| GetTreatyState(WorldContext, A, B) | EDiplomacyState |
+| IsAllied(WorldContext, A, B) | bool |
+| IsAtWar(WorldContext, A, B) | bool |
+
+### Narrative Pro Faction Bridge
+
+| Function | Returns |
+|---|---|
+| GetActorFactions(WorldContext, Actor) | GameplayTagContainer |
+| IsActorInFaction(WorldContext, Actor, Faction) | bool |
+| GetActorPrimaryFaction(WorldContext, Actor) | GameplayTag |
+| AreActorsAllied(A, B) | bool |
+
+### City / District Queries
+
+| Function | Returns |
+|---|---|
+| GetAllCities(WorldContext) | Array<City*> |
+| GetAllDistricts(WorldContext) | Array<District*> |
+| GetCityForDistrict(WorldContext, District) | City* |
+| DoesFactionControlCity(WorldContext, City, Faction) | bool |
+| GetFactionCityCount(WorldContext, Faction) | int32 |
+| GetFactionDistrictCount(WorldContext, Faction) | int32 |
+| GetCapitalDistricts(WorldContext) | Array<District*> |
+
+### Utility
+
+| Function | Returns |
+|---|---|
 | IsSameFaction(A, B) | bool |
 
 ## Subsystem API Summary
@@ -179,29 +316,6 @@
 | GetAllTreaties() | → Array<TreatyRecord> |
 | GetTreatiesForFaction(Faction) | → Array<TreatyRecord> |
 
-## UTerritoryBlueprintLibrary (Extended)
-
-### New Helper Functions (Strengthening Pass)
-
-| Function | Type | Returns |
-|---|---|---|
-| GetTerritoryDiplomacy(WorldContext) | Callable | DiplomacySubsystem* |
-| GetAllTerritories(WorldContext) | Pure | Array<TerritoryVolume*> |
-| GetTerritoriesByFaction(WorldContext, Faction) | Pure | Array<TerritoryVolume*> |
-| GetChildTerritories(WorldContext, ParentTag) | Pure | Array<TerritoryVolume*> |
-| GetTerritoryCount(WorldContext) | Pure | int32 |
-| GetFactionTerritoryCount(WorldContext, Faction) | Pure | int32 |
-| IsTerritoryAtLocation(WorldContext, Location) | Pure | bool |
-| GetFactionGold(WorldContext, Faction) | Pure | int32 |
-| GetFactionIncome(WorldContext, Faction) | Pure | int32 |
-| GetAllFactions(WorldContext) | Pure | Array<GameplayTag> |
-| GetTerritoryState(WorldContext, Tag) | Pure | ETerritoryState |
-| GetCaptureProgress(WorldContext, Tag) | Pure | float |
-| ForceCaptureTerritory(WorldContext, Tag, Faction) | Callable | void |
-| GetTreatyState(WorldContext, A, B) | Pure | EDiplomacyState |
-| IsAllied(WorldContext, A, B) | Pure | bool |
-| IsAtWar(WorldContext, A, B) | Pure | bool |
-
 ## ITerritoryOwnershipInterface (Extended)
 
 | Function | Type | Notes |
@@ -209,7 +323,7 @@
 | GetTerritoryOwner | BlueprintNativeEvent | Returns owning faction |
 | GetTerritoryControlProgress | BlueprintNativeEvent | 0.0–1.0 |
 | IsTerritoryContested | BlueprintNativeEvent | bool |
-| GetContestingFaction | BlueprintNativeEvent | New — who is attacking |
+| GetContestingFaction | BlueprintNativeEvent | Who is attacking |
 
 ## ITerritoryEventReceiverInterface (Extended)
 
@@ -217,12 +331,12 @@
 |---|---|---|
 | OnTerritoryControlChanged | (Tag, OldOwner, NewOwner) | Ownership change |
 | OnTerritoryContested | (Tag, ContestingFaction) | Capture started |
-| OnTerritoryUncontested | (Tag) | New — capture ended |
-| OnTerritoryStateChanged | (Tag, NewState) | New — any state transition |
+| OnTerritoryUncontested | (Tag) | Capture ended |
+| OnTerritoryStateChanged | (Tag, NewState) | Any state transition |
 
 ## UTerritoryMapMarker (Extended)
 
 | Function | Type | Notes |
 |---|---|---|
-| SetFactionColor(Faction, Color) | Callable | New — runtime color override |
-| ClearFactionColors() | Callable | New — reset all colors |
+| SetFactionColor(Faction, Color) | Callable | Runtime color override |
+| ClearFactionColors() | Callable | Reset all colors |

@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "NarrativeSavableActor.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryInterfaces.h"
 #include "TerritoryVolume.generated.h"
 
 class UNarrativeAbilitySystemComponent;
@@ -12,11 +13,13 @@ class UShapeComponent;
 class UNPCDefinition;
 class ATerritoryGuardCharacter;
 class ATerritoryGuardSpawnPoint;
+class UTerritoryNavigationMarkerComponent;
 
 UCLASS(BlueprintType, Blueprintable)
-class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrativeSavableActor
+class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrativeSavableActor, public ITerritoryOwnershipInterface, public ITerritoryEventReceiverInterface
 {
 	GENERATED_BODY()
+	friend class UTerritoryDataValidator;
 
 public:
 	ATerritoryVolume();
@@ -27,6 +30,18 @@ public:
 	virtual void PrepareForSave_Implementation() override;
 	virtual void Load_Implementation() override;
 	virtual bool ShouldRespawn_Implementation() const override;
+
+	// ─── ITerritoryOwnershipInterface ───
+	virtual FGameplayTag GetTerritoryOwner_Implementation() const override;
+	virtual float GetTerritoryControlProgress_Implementation() const override;
+	virtual bool IsTerritoryContested_Implementation() const override;
+	virtual FGameplayTag GetContestingFaction_Implementation() const override;
+
+	// ─── ITerritoryEventReceiverInterface ───
+	virtual void OnTerritoryControlChanged_Implementation(FGameplayTag TerritoryTag, FGameplayTag OldOwner, FGameplayTag NewOwner) override;
+	virtual void OnTerritoryContested_Implementation(FGameplayTag TerritoryTag, FGameplayTag ContestingFaction) override;
+	virtual void OnTerritoryUncontested_Implementation(FGameplayTag TerritoryTag) override;
+	virtual void OnTerritoryStateChanged_Implementation(FGameplayTag TerritoryTag, ETerritoryState NewState) override;
 
 	// ─── Query API (BlueprintPure) ───
 
@@ -105,6 +120,14 @@ public:
 	void OnStateChanged(ETerritoryState OldState, ETerritoryState NewState);
 	virtual void OnStateChanged_Implementation(ETerritoryState OldState, ETerritoryState NewState);
 
+	UFUNCTION(BlueprintNativeEvent, Category = "Territory|Guards")
+	void OnAllGuardsDefeated();
+	virtual void OnAllGuardsDefeated_Implementation();
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Territory")
+	void OnTerritoryInitialized();
+	virtual void OnTerritoryInitialized_Implementation();
+
 	// ─── Blueprint Delegates ───
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory")
@@ -112,6 +135,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory")
 	FOnTerritoryStateChanged OnTerritoryStateChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Territory|Guards")
+	FOnAllGuardsDefeated OnAllGuardsDefeatedDelegate;
 
 	// ─── Guard Spawning API ───
 
@@ -130,9 +156,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
 	TArray<ATerritoryGuardSpawnPoint*> GetGuardSpawnPoints() const;
 
+	/** Returns the auto-created navigation marker component, if any. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Visual")
+	UTerritoryNavigationMarkerComponent* GetMapMarkerComponent() const;
+
+	/** Returns a human-readable debug string for this territory (owner, state, progress, guards). */
+	UFUNCTION(BlueprintPure, Category = "Territory|Debug")
+	FString GetDebugString() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 #if WITH_EDITOR
@@ -182,6 +217,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Visual")
 	TObjectPtr<UShapeComponent> BoundsShape;
 
+	/** If true, automatically creates a TerritoryNavigationMarkerComponent on BeginPlay. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Visual")
+	bool bAutoCreateMapMarker = true;
+
 	// ─── Guard Configuration ───
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
@@ -217,6 +256,9 @@ private:
 
 	UPROPERTY()
 	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> SpawnedGuards;
+
+	UPROPERTY()
+	TObjectPtr<UTerritoryNavigationMarkerComponent> AutoMapMarkerComponent;
 
 	FGameplayTag PreviousOwningFaction;
 

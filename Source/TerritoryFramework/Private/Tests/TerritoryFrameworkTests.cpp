@@ -22,6 +22,7 @@
 #include "Tales/NarrativeCondition.h"
 #include "Navigation/MapMarker.h"
 #include "Navigation/NavigationMarkerComponent.h"
+#include "AI/BTTask_MoveToPatrolNode.h"
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -1936,9 +1937,9 @@ bool FTFFunctional_EconomyEdgeCases::RunTest(const FString& Parameters)
 
 	// ─── EconomySnapshot ───
 	FTerritoryEconomySnapshot Snap;
-	TestEqual(TEXT("Default Gold is 0"), Snap.Gold, 0);
-	TestEqual(TEXT("Default Income is 0"), Snap.Income, 0);
-	TestEqual(TEXT("Default Costs is 0"), Snap.Costs, 0);
+	TestEqual(TEXT("Default Treasury is 0"), Snap.Treasury, 0);
+	TestEqual(TEXT("Default TotalIncome is 0"), Snap.TotalIncome, 0);
+	TestEqual(TEXT("Default TotalCosts is 0"), Snap.TotalCosts, 0);
 	TestEqual(TEXT("Default TerritoryCount is 0"), Snap.TerritoryCount, 0);
 
 	return true;

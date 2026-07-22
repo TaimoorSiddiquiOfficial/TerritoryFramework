@@ -71,6 +71,18 @@ void UTerritoryEconomyWidget::BindDelegates()
 		Economy->OnEconomyTickFired.AddDynamic(this, &UTerritoryEconomyWidget::HandleEconomyTick);
 		Economy->OnTransactionRecorded.AddDynamic(this, &UTerritoryEconomyWidget::HandleTransactionRecorded);
 	}
+
+	// Client polling fallback — if delegates are missed (late join, network desync),
+	// periodically refresh from the subsystem's current state.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			ClientPollTimerHandle,
+			this,
+			&UTerritoryEconomyWidget::ClientPollRefresh,
+			ClientPollInterval,
+			true);
+	}
 }
 
 void UTerritoryEconomyWidget::UnbindDelegates()
@@ -81,6 +93,25 @@ void UTerritoryEconomyWidget::UnbindDelegates()
 		Economy->OnEconomyTickFired.RemoveDynamic(this, &UTerritoryEconomyWidget::HandleEconomyTick);
 		Economy->OnTransactionRecorded.RemoveDynamic(this, &UTerritoryEconomyWidget::HandleTransactionRecorded);
 	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(ClientPollTimerHandle);
+	}
+}
+
+void UTerritoryEconomyWidget::ClientPollRefresh()
+{
+	if (!DisplayFaction.IsValid()) return;
+	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
+	if (!Economy) return;
+
+	FTerritoryEconomySnapshot Snapshot;
+	Snapshot.Treasury = Economy->GetTreasury(DisplayFaction);
+	Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
+	Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
+	Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
+	OnEconomyUpdated(DisplayFaction, Snapshot);
 }
 
 void UTerritoryEconomyWidget::HandleEconomyTick(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot)
