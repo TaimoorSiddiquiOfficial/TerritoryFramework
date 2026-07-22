@@ -33,11 +33,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory|Guard")
 	void SetOwningTerritoryGUID(const FGuid& TerritoryGUID);
 
-	// Prevent floating on hit impact — forces character back to ground after damage
-	UFUNCTION()
-	void OnGuardTakeAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
-		AController* EventInstigator, AActor* DamageCauser);
-
 protected:
 	virtual void BeginPlay() override;
 

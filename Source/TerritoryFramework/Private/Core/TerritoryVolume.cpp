@@ -911,6 +911,7 @@ bool ATerritoryVolume::HasGuardsAlive() const
 FVector ATerritoryVolume::GetRandomSpawnPoint() const
 {
 	FVector Center = GetActorLocation();
+	FQuat Rotation = GetActorQuat();
 
 	FVector LocalOffset(0.f);
 	if (UBoxComponent* Box = Cast<UBoxComponent>(BoundsShape))
@@ -929,7 +930,8 @@ FVector ATerritoryVolume::GetRandomSpawnPoint() const
 			0.f);
 	}
 
-	FVector SpawnLoc = Center + LocalOffset;
+	// Transform local offset by actor rotation so rotated volumes spawn correctly
+	FVector SpawnLoc = Center + Rotation.RotateVector(LocalOffset);
 
 	// Project to NavMesh so guards spawn on walkable ground, not floating at volume Z
 	if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))

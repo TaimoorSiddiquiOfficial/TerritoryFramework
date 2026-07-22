@@ -210,11 +210,11 @@ void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory,
 {
 	if (!Territory || !AttackingFaction.IsValid()) return;
 
-	if (Territory->GetTerritoryState() == ETerritoryState::Locked) return;
-
-	if (Territory->GetTerritoryState() != ETerritoryState::Contested)
+	// Validate through AttemptCapture rules (lock, diplomacy, defenders) before adding progress
+	if (!IsCaptureInProgress(Territory))
 	{
-		Territory->SetTerritoryState(ETerritoryState::Contested);
+		ECaptureResult Result = AttemptCapture(Territory, AttackingFaction);
+		if (Result != ECaptureResult::Success) return;
 	}
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);

@@ -8,9 +8,9 @@
 #include "TerritorySavableData.generated.h"
 
 /**
- * Persistent actor that saves economy + diplomacy state.
- * Place one instance in the level. Implements INarrativeSavableActor
- * so Narrative's save system picks it up automatically.
+ * DEPRECATED — Use ATerritoryWorldState instead. This actor provides a competing
+ * persistence implementation that can conflict with TerritoryWorldState.
+ * Kept for backwards compatibility — will be removed in v0.3.0.
  */
 UCLASS(BlueprintType)
 class TERRITORYFRAMEWORK_API ATerritorySavableData : public AActor, public INarrativeSavableActor
