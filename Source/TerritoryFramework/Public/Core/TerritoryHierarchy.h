@@ -4,6 +4,8 @@
 #include "Core/TerritoryVolume.h"
 #include "TerritoryHierarchy.generated.h"
 
+class UTerritoryEconomySubsystem;
+
 UCLASS(BlueprintType, Blueprintable)
 class TERRITORYFRAMEWORK_API ATerritoryCity : public ATerritoryVolume
 {
@@ -38,6 +40,12 @@ protected:
 private:
 	UFUNCTION()
 	void OnDistrictControlChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
+
+	/** Bind to registry events for late-registered districts */
+	UFUNCTION()
+	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	void BindToDistrict(ATerritoryVolume* District);
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -59,9 +67,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|District")
 	bool bIsCapital = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|District")
-	int32 DefenderSpawnCount = 3;
 };
 
 UCLASS(BlueprintType, Blueprintable)
@@ -75,7 +80,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	ATerritoryDistrict* GetOwningDistrict() const;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Property")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Replicated, Category = "Territory|Property")
 	int32 UpgradeLevel = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Property")
@@ -95,4 +100,11 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Territory|Property")
 	int32 GetEffectiveIncome() const;
+
+	/** Attempt to upgrade this property. Debits treasury and records transaction. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property")
+	bool TryUpgrade();
+
+protected:
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 };

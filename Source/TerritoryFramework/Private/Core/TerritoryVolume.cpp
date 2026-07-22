@@ -359,6 +359,24 @@ void ATerritoryVolume::OnStateChanged_Implementation(ETerritoryState OldState, E
 void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC)
 {
 	UnregisterDefender(KilledActor);
+
+	// Notify spawn points that a guard died (triggers reserve replacement)
+	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
+	{
+		for (const TObjectPtr<AActor>& SPActor : GuardSpawnPoints)
+		{
+			if (ATerritoryGuardSpawnPoint* SP = Cast<ATerritoryGuardSpawnPoint>(SPActor))
+			{
+				SP->UnregisterGuard(Guard);
+			}
+		}
+	}
+
+	// Remove from spawned guards list
+	SpawnedGuards.RemoveAll([KilledActor](const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr)
+	{
+		return !Ptr.IsValid() || Ptr.Get() == KilledActor;
+	});
 }
 
 void ATerritoryVolume::BindDefenderDeath(AActor* Defender)

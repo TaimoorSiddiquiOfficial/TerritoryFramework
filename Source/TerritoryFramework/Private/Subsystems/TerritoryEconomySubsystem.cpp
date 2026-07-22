@@ -1,5 +1,6 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -74,6 +75,42 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		Treasury.Gold += NetIncome;
 
 		if (Treasury.Gold < 0) Treasury.Gold = 0;
+
+		// Record ledger entries for this tick
+		if (Treasury.IncomePerTick > 0)
+		{
+			FTerritoryTransaction IncomeTx;
+			IncomeTx.TransactionID = FGuid::NewGuid();
+			IncomeTx.Faction = Pair.Key;
+			IncomeTx.Type = ETerritoryTransactionType::Income;
+			IncomeTx.Amount = Treasury.IncomePerTick;
+			IncomeTx.BalanceAfter = Treasury.Gold;
+			IncomeTx.Reason = TEXT("Periodic income");
+			if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+			{
+				IncomeTx.GameTime = GS->GetAccumulatedTime();
+			}
+			TransactionLedger.Add(IncomeTx);
+		}
+		if (Treasury.CostsPerTick > 0)
+		{
+			FTerritoryTransaction UpkeepTx;
+			UpkeepTx.TransactionID = FGuid::NewGuid();
+			UpkeepTx.Faction = Pair.Key;
+			UpkeepTx.Type = ETerritoryTransactionType::GuardUpkeep;
+			UpkeepTx.Amount = -Treasury.CostsPerTick;
+			UpkeepTx.BalanceAfter = Treasury.Gold;
+			UpkeepTx.Reason = TEXT("Guard upkeep");
+			if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+			{
+				UpkeepTx.GameTime = GS->GetAccumulatedTime();
+			}
+			TransactionLedger.Add(UpkeepTx);
+		}
+		while (TransactionLedger.Num() > MaxTransactionHistory)
+		{
+			TransactionLedger.RemoveAt(0);
+		}
 
 		if (bDebugTicks)
 		{
@@ -257,8 +294,17 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 
 	for (const ATerritoryVolume* Territory : Territories)
 	{
-		Treasury.IncomePerTick += Territory->GetPeriodicIncome();
-		// Deduct guard costs for each owned territory
+		// Use GetEffectiveIncome for properties (includes upgrade bonus)
+		// Fall back to GetPeriodicIncome for non-property territories
+		const ATerritoryProperty* Property = Cast<const ATerritoryProperty>(Territory);
+		if (Property)
+		{
+			Treasury.IncomePerTick += Property->GetEffectiveIncome();
+		}
+		else
+		{
+			Treasury.IncomePerTick += Territory->GetPeriodicIncome();
+		}
 		Treasury.CostsPerTick += Territory->GetGuardCost();
 	}
 }

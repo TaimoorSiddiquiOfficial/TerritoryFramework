@@ -3,6 +3,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
+#include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -17,16 +18,39 @@ void ATerritoryCity::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Bind to all child districts' ownership changes
+	// Bind to existing child districts
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (Registry)
 	{
-		FGameplayTag CityTag = GetTerritoryTag();
-		TArray<ATerritoryVolume*> Districts = Registry->GetChildTerritories(CityTag);
+		// Bind to registry for late-registered districts (World Partition, streaming)
+		Registry->OnTerritoryRegistered.AddDynamic(this, &ATerritoryCity::OnTerritoryRegistered);
+
+		// Bind to currently registered districts
+		TArray<ATerritoryVolume*> Districts = Registry->GetChildTerritories(GetTerritoryTag());
 		for (ATerritoryVolume* District : Districts)
 		{
-			District->OnTerritoryControlChanged.AddDynamic(this, &ATerritoryCity::OnDistrictControlChanged);
+			BindToDistrict(District);
 		}
+	}
+}
+
+void ATerritoryCity::BindToDistrict(ATerritoryVolume* District)
+{
+	if (!District) return;
+
+	// Check if already bound to avoid double-binding
+	District->OnTerritoryControlChanged.AddUniqueDynamic(this, &ATerritoryCity::OnDistrictControlChanged);
+}
+
+void ATerritoryCity::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	if (bWasUnregistered) return;
+
+	// Check if this territory is a child of this city
+	FGameplayTag ChildParent = Territory->GetParentTerritoryTag();
+	if (ChildParent == GetTerritoryTag())
+	{
+		BindToDistrict(Territory);
 	}
 }
 
@@ -35,9 +59,7 @@ TArray<ATerritoryVolume*> ATerritoryCity::GetDistricts() const
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return TArray<ATerritoryVolume*>();
 
-	// Use registry's indexed child lookup instead of O(N) full scan
-	FGameplayTag CityTag = GetTerritoryTag();
-	return Registry->GetChildTerritories(CityTag);
+	return Registry->GetChildTerritories(GetTerritoryTag());
 }
 
 int32 ATerritoryCity::GetDistrictCount() const
@@ -90,15 +112,29 @@ void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 
 void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
-	// Check if all districts are now owned by the same faction
-	FGameplayTag CurrentOwner = GetOwningFaction();
-	if (CurrentOwner.IsValid() && AllDistrictsOwnedBy(CurrentOwner))
+	// Update city ownership to match majority district owner
+	if (NewOwner.IsValid())
 	{
-		OnCityFullyCaptured(CurrentOwner);
+		// If all districts now owned by the same faction, the city is fully captured
+		if (AllDistrictsOwnedBy(NewOwner))
+		{
+			FGameplayTag CityOldOwner = GetOwningFaction();
+			if (CityOldOwner != NewOwner)
+			{
+				SetOwningFaction(NewOwner);
+				OnCityFullyCaptured(NewOwner);
+			}
+		}
 	}
-	else if (OldOwner.IsValid() && OldOwner == CurrentOwner)
+
+	// Check if city was lost
+	if (OldOwner.IsValid())
 	{
-		OnCityLost(OldOwner);
+		FGameplayTag CityOwner = GetOwningFaction();
+		if (CityOwner == OldOwner && !AllDistrictsOwnedBy(OldOwner))
+		{
+			OnCityLost(OldOwner);
+		}
 	}
 }
 
@@ -115,7 +151,6 @@ ATerritoryCity* ATerritoryDistrict::GetOwningCity() const
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return nullptr;
 
-	// Use ParentTerritoryTag for direct lookup instead of O(N) scan
 	FGameplayTag ParentTag = GetParentTerritoryTag();
 	if (ParentTag.IsValid())
 	{
@@ -123,7 +158,6 @@ ATerritoryCity* ATerritoryDistrict::GetOwningCity() const
 		return Cast<ATerritoryCity>(Parent);
 	}
 
-	// Fallback: walk up via tag matching
 	FGameplayTag MyTag = GetTerritoryTag();
 	if (!MyTag.IsValid()) return nullptr;
 
@@ -144,9 +178,7 @@ TArray<ATerritoryVolume*> ATerritoryDistrict::GetProperties() const
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return TArray<ATerritoryVolume*>();
 
-	// Use registry's indexed child lookup instead of O(N) full scan
-	FGameplayTag DistrictTag = GetTerritoryTag();
-	return Registry->GetChildTerritories(DistrictTag);
+	return Registry->GetChildTerritories(GetTerritoryTag());
 }
 
 bool ATerritoryDistrict::IsCapitalDistrict() const
@@ -162,12 +194,17 @@ ATerritoryProperty::ATerritoryProperty()
 {
 }
 
+void ATerritoryProperty::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ATerritoryProperty, UpgradeLevel);
+}
+
 ATerritoryDistrict* ATerritoryProperty::GetOwningDistrict() const
 {
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return nullptr;
 
-	// Use ParentTerritoryTag for direct lookup instead of O(N) scan
 	FGameplayTag ParentTag = GetParentTerritoryTag();
 	if (ParentTag.IsValid())
 	{
@@ -175,7 +212,6 @@ ATerritoryDistrict* ATerritoryProperty::GetOwningDistrict() const
 		return Cast<ATerritoryDistrict>(Parent);
 	}
 
-	// Fallback: walk up via tag matching
 	FGameplayTag MyTag = GetTerritoryTag();
 	if (!MyTag.IsValid()) return nullptr;
 
@@ -205,4 +241,39 @@ int32 ATerritoryProperty::GetUpgradeCost() const
 int32 ATerritoryProperty::GetEffectiveIncome() const
 {
 	return GetPeriodicIncome() + (UpgradeLevel * IncomeBonusPerLevel);
+}
+
+bool ATerritoryProperty::TryUpgrade()
+{
+	if (!HasAuthority() || !CanUpgrade()) return false;
+
+	FGameplayTag OwnerFaction = GetOwningFaction();
+	if (!OwnerFaction.IsValid()) return false;
+
+	int32 Cost = GetUpgradeCost();
+
+	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
+	if (!Economy) return false;
+
+	// Check if faction can afford the upgrade
+	if (!Economy->CanAfford(OwnerFaction, Cost)) return false;
+
+	// Debit treasury
+	FString Reason = FString::Printf(TEXT("Property upgrade %s level %d→%d"),
+		*GetTerritoryTag().ToString(), UpgradeLevel, UpgradeLevel + 1);
+	if (!Economy->TryDebitTreasury(OwnerFaction, Cost, Reason, ETerritoryTransactionType::UpgradeCost))
+	{
+		return false;
+	}
+
+	// Increment upgrade level (replicated)
+	UpgradeLevel++;
+
+	// Recalculate income for the owning faction
+	Economy->RecalculateIncome(OwnerFaction);
+
+	UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s upgraded to level %d (cost: %d, faction: %s)"),
+		*GetTerritoryTag().ToString(), UpgradeLevel, Cost, *OwnerFaction.ToString());
+
+	return true;
 }
