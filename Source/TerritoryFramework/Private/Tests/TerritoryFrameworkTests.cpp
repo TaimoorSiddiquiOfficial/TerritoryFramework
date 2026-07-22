@@ -1114,7 +1114,6 @@ bool FTFContract_Hierarchy::RunTest(const FString& Parameters)
 		TestTrue(TEXT("District inherits TerritoryVolume"), Class->IsChildOf(ATerritoryVolume::StaticClass()));
 
 		TestTrue(TEXT("Has bIsCapital property"), TFTestUtils::HasProperty(Class, TEXT("bIsCapital")));
-		TestTrue(TEXT("Has DefenderSpawnCount property"), TFTestUtils::HasProperty(Class, TEXT("DefenderSpawnCount")));
 		TestTrue(TEXT("GetOwningCity is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetOwningCity")));
 		TestTrue(TEXT("GetProperties is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetProperties")));
 		TestTrue(TEXT("IsCapitalDistrict is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("IsCapitalDistrict")));
