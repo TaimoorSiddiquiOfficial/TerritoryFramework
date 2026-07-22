@@ -17,7 +17,8 @@ public class TerritoryFramework : ModuleRules
 			"GameplayTags",
 			"AIModule",
 			"DeveloperSettings",
-			"UMG"
+			"UMG",
+			"NavigationSystem"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

@@ -21,6 +21,7 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "AIController.h"
 #include "Navigation/TerritoryNavigationMarkerComponent.h"
+#include "NavigationSystem.h"
 
 ATerritoryVolume::ATerritoryVolume()
 {
@@ -848,19 +849,36 @@ FVector ATerritoryVolume::GetRandomSpawnPoint() const
 {
 	FVector Center = GetActorLocation();
 
+	FVector LocalOffset(0.f);
 	if (UBoxComponent* Box = Cast<UBoxComponent>(BoundsShape))
 	{
 		FVector Extent = Box->GetScaledBoxExtent();
-		return Center + FVector(
+		LocalOffset = FVector(
 			FMath::FRandRange(-Extent.X, Extent.X),
 			FMath::FRandRange(-Extent.Y, Extent.Y),
 			0.f);
 	}
+	else
+	{
+		LocalOffset = FVector(
+			FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
+			FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
+			0.f);
+	}
 
-	return Center + FVector(
-		FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
-		FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
-		0.f);
+	FVector SpawnLoc = Center + LocalOffset;
+
+	// Project to NavMesh so guards spawn on walkable ground, not floating at volume Z
+	if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+	{
+		FNavLocation ProjectedLoc;
+		if (NavSys->ProjectPointToNavigation(SpawnLoc, ProjectedLoc, FVector(500.f, 500.f, 500.f)))
+		{
+			SpawnLoc = ProjectedLoc.Location;
+		}
+	}
+
+	return SpawnLoc;
 }
 
 TArray<ATerritoryGuardSpawnPoint*> ATerritoryVolume::GetGuardSpawnPoints() const

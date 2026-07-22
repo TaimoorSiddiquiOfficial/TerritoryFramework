@@ -5,6 +5,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Engine/World.h"
 #include "Components/BillboardComponent.h"
+#include "NavigationSystem.h"
 
 #if WITH_EDITOR
 #include "Components/ArrowComponent.h"
@@ -81,7 +82,20 @@ void ATerritoryGuardSpawnPoint::InitializeReserves()
 
 FTransform ATerritoryGuardSpawnPoint::GetSpawnTransform() const
 {
-	return GetActorTransform();
+	FTransform Transform = GetActorTransform();
+
+	// Project spawn location to NavMesh so guards start on walkable ground
+	FVector SpawnLoc = Transform.GetLocation();
+	if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+	{
+		FNavLocation ProjectedLoc;
+		if (NavSys->ProjectPointToNavigation(SpawnLoc, ProjectedLoc, FVector(500.f, 500.f, 500.f)))
+		{
+			Transform.SetLocation(ProjectedLoc.Location);
+		}
+	}
+
+	return Transform;
 }
 
 bool ATerritoryGuardSpawnPoint::HasAvailableSlot() const

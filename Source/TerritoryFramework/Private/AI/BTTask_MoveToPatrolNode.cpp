@@ -5,6 +5,7 @@
 #include "AIController.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "NavigationSystem.h"
 
 UBTTask_MoveToPatrolNode::UBTTask_MoveToPatrolNode()
 {
@@ -76,6 +77,17 @@ EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent
 		TargetLocation = SpawnPoint->GetActorLocation();
 	}
 
+	// Project target to NavMesh — patrol nodes may be placed at positions
+	// that are not exactly on the NavMesh (e.g., slightly above ground)
+	if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(AIController->GetWorld()))
+	{
+		FNavLocation ProjectedTarget;
+		if (NavSys->ProjectPointToNavigation(TargetLocation, ProjectedTarget, FVector(200.f, 200.f, 200.f)))
+		{
+			TargetLocation = ProjectedTarget.Location;
+		}
+	}
+
 	// Write all three values to blackboard for downstream nodes
 	BB->SetValueAsVector(TargetLocationKey.SelectedKeyName, TargetLocation);
 	BB->SetValueAsRotator(TargetRotationKey.SelectedKeyName, TargetRotation);
@@ -88,6 +100,21 @@ EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent
 	}
 
 	// Issue move command
+	// First, project the guard's current location to NavMesh.
+	// Guards spawned inside territory volumes may be slightly off-mesh
+	// (floating at volume Z, or in a gap), which causes MoveToLocation
+	// to fail immediately with UsePathfinding=true.
+	FVector GuardLoc = AIController->GetPawn()->GetActorLocation();
+	if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(AIController->GetWorld()))
+	{
+		FNavLocation ProjectedLoc;
+		if (NavSys->ProjectPointToNavigation(GuardLoc, ProjectedLoc, FVector(500.f, 500.f, 500.f)))
+		{
+			// Snap the guard to the NavMesh so pathfinding can start
+			AIController->GetPawn()->SetActorLocation(ProjectedLoc.Location, false);
+		}
+	}
+
 	EPathFollowingRequestResult::Type MoveResult = AIController->MoveToLocation(
 		TargetLocation,
 		AcceptanceRadius,
