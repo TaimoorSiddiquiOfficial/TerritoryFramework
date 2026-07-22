@@ -1,17 +1,17 @@
 #include "TerritoryFrameworkEditor.h"
-#include "DataValidation/TerritoryDataValidator.h"
 
 #define LOCTEXT_NAMESPACE "FTerritoryFrameworkEditorModule"
 
 void FTerritoryFrameworkEditorModule::StartupModule()
 {
-	// Register data validators
-	UTerritoryDataValidator::Register();
+	// UEditorValidator subclasses are auto-registered by the DataValidation system
+	// when the module loads — no manual registration needed
+	UE_LOG(LogTemp, Log, TEXT("TerritoryFrameworkEditor module loaded (auto-validators registered)"));
 }
 
 void FTerritoryFrameworkEditorModule::ShutdownModule()
 {
-	UTerritoryDataValidator::Unregister();
+	UE_LOG(LogTemp, Log, TEXT("TerritoryFrameworkEditor module unloaded"));
 }
 
 #undef LOCTEXT_NAMESPACE

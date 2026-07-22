@@ -68,6 +68,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory")
 	FGameplayTag GetParentTerritoryTag() const;
 
+	UFUNCTION(BlueprintPure, Category = "Territory")
+	FGameplayTag GetInitialOwningFaction() const;
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory")
 	void SetOwningFaction(const FGameplayTag& NewFaction);
 

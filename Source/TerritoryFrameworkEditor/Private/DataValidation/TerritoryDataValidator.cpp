@@ -1,31 +1,80 @@
 #include "DataValidation/TerritoryDataValidator.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryHierarchy.h"
+#include "Core/TerritorySavableData.h"
+#include "Core/TerritoryWorldState.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
 #include "Engine/Level.h"
 #include "EngineUtils.h"
 #include "GameplayTagContainer.h"
 
-void UTerritoryDataValidator::Register()
+UTerritoryDataValidator::UTerritoryDataValidator()
 {
-	// TODO: Register with EditorValidatorSubsystem when available
-	// For now, validators are called manually or via editor utility
-	UE_LOG(LogTemp, Log, TEXT("TerritoryDataValidator registered"));
+	// Auto-register with the validation system
+	bIsEnabled = true;
 }
 
-void UTerritoryDataValidator::Unregister()
+bool UTerritoryDataValidator::CanValidateAsset_Implementation(UObject* InAsset) const
 {
-	UE_LOG(LogTemp, Log, TEXT("TerritoryDataValidator unregistered"));
+	if (!InAsset) return false;
+
+	// Validate any level/world that contains territory actors
+	if (ULevel* Level = Cast<ULevel>(InAsset))
+	{
+		for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
+		{
+			return true;
+		}
+	}
+
+	// Also validate individual territory-related assets
+	if (InAsset->IsA(ATerritoryVolume::StaticClass()) ||
+		InAsset->IsA(ATerritoryWorldState::StaticClass()) ||
+		InAsset->IsA(ATerritorySavableData::StaticClass()))
+	{
+		return true;
+	}
+
+	return false;
 }
+
+EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementation(
+	UObject* InAsset, TArray<FText>& ValidationErrors)
+{
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+
+	if (ATerritoryVolume* Territory = Cast<ATerritoryVolume>(InAsset))
+	{
+		ValidateTerritory(Territory, Errors, Warnings);
+	}
+	else if (ULevel* Level = Cast<ULevel>(InAsset))
+	{
+		ValidateLevel(Level, Errors, Warnings);
+	}
+
+	// Convert to FText
+	for (const FString& Error : Errors)
+	{
+		ValidationErrors.Add(FText::FromString(Error));
+	}
+
+	return Errors.Num() == 0 ? EDataValidationResult::Valid : EDataValidationResult::Invalid;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Manual Validation API
+// ═══════════════════════════════════════════════════════════════════════════════
 
 bool UTerritoryDataValidator::ValidateLevel(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings)
 {
 	if (!Level) return false;
 
-	// Run all checks
 	CheckDuplicateTags(Level, OutErrors);
 	CheckDuplicateGUIDs(Level, OutErrors);
 	CheckHierarchyIntegrity(Level, OutErrors, OutWarnings);
+	CheckSingletonActors(Level, OutErrors, OutWarnings);
 
-	// Validate individual territories
 	for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
 	{
 		ATerritoryVolume* Territory = *It;
@@ -41,7 +90,6 @@ bool UTerritoryDataValidator::ValidateLevel(ULevel* Level, TArray<FString>& OutE
 bool UTerritoryDataValidator::ValidateTerritory(ATerritoryVolume* Territory, TArray<FString>& OutErrors, TArray<FString>& OutWarnings)
 {
 	if (!Territory) return false;
-	bool bValid = true;
 
 	FString Label = Territory->GetActorLabel();
 
@@ -59,26 +107,27 @@ bool UTerritoryDataValidator::ValidateTerritory(ATerritoryVolume* Territory, TAr
 		OutWarnings.Add(FString::Printf(TEXT("%s: TerritoryDisplayName is empty"), *Label));
 	}
 
-	// Check for invalid initial faction (warning only — some territories may start unclaimed)
-	FGameplayTag InitialFaction = Territory->GetOwningFaction();
-	if (InitialFaction.IsValid())
+	// FIX: Use InitialOwningFaction (editor property) not GetOwningFaction (runtime state)
+	FGameplayTag FactionTag;
+	if (ATerritoryVolume* Vol = Territory)
 	{
-		// Verify it starts with Narrative.Factions
-		if (!InitialFaction.ToString().StartsWith(TEXT("Narrative.Factions")))
+		// Read the InitialOwningFaction property — the editor-authored value
+		FactionTag = Vol->GetInitialOwningFaction();
+	}
+
+	if (FactionTag.IsValid())
+	{
+		if (!FactionTag.ToString().StartsWith(TEXT("Narrative.Factions")))
 		{
 			OutWarnings.Add(FString::Printf(TEXT("%s: InitialOwningFaction '%s' doesn't start with Narrative.Factions"),
-				*Label, *InitialFaction.ToString()));
+				*Label, *FactionTag.ToString()));
 		}
 	}
 
-	// Check guard spawn config (warning only)
-	if (Territory->GetDefenderCount() == 0 && Territory->GetOwningFaction().IsValid())
-	{
-		OutWarnings.Add(FString::Printf(TEXT("%s: Owned territory has no registered defenders"),
-			*Territory->GetActorLabel()));
-	}
+	// Check economy configuration
+	CheckEconomyConfig(Territory, OutWarnings);
 
-	return bValid;
+	return OutErrors.Num() == 0;
 }
 
 void UTerritoryDataValidator::CheckDuplicateTags(ULevel* Level, TArray<FString>& OutErrors)
@@ -136,8 +185,9 @@ void UTerritoryDataValidator::CheckDuplicateGUIDs(ULevel* Level, TArray<FString>
 
 void UTerritoryDataValidator::CheckHierarchyIntegrity(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings)
 {
-	// Collect all tags
 	TSet<FGameplayTag> AllTags;
+	TMap<FGameplayTag, UClass*> TagToClass;
+
 	for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
 	{
 		ATerritoryVolume* Territory = *It;
@@ -147,28 +197,115 @@ void UTerritoryDataValidator::CheckHierarchyIntegrity(ULevel* Level, TArray<FStr
 		if (Tag.IsValid())
 		{
 			AllTags.Add(Tag);
+			TagToClass.Add(Tag, Territory->GetClass());
 		}
 	}
 
-	// Check parent references
 	for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
 	{
 		ATerritoryVolume* Territory = *It;
 		if (!Territory || Territory->GetLevel() != Level) continue;
 
 		FGameplayTag ParentTag = Territory->GetParentTerritoryTag();
+		FGameplayTag SelfTag = Territory->GetTerritoryTag();
+		FString Label = Territory->GetActorLabel();
+
+		// Missing parent reference
 		if (ParentTag.IsValid() && !AllTags.Contains(ParentTag))
 		{
 			OutErrors.Add(FString::Printf(TEXT("%s: ParentTerritoryTag '%s' references a non-existent territory"),
-				*Territory->GetActorLabel(), *ParentTag.ToString()));
+				*Label, *ParentTag.ToString()));
 		}
 
-		// Check self-reference
-		FGameplayTag SelfTag = Territory->GetTerritoryTag();
+		// Self-reference (cycle)
 		if (ParentTag.IsValid() && ParentTag == SelfTag)
 		{
 			OutErrors.Add(FString::Printf(TEXT("%s: ParentTerritoryTag references itself (cycle)"),
-				*Territory->GetActorLabel()));
+				*Label));
 		}
+
+		// Parent class type mismatch
+		if (ParentTag.IsValid())
+		{
+			UClass** ParentClassPtr = TagToClass.Find(ParentTag);
+			if (ParentClassPtr && *ParentClassPtr)
+			{
+				UClass* ParentClass = *ParentClassPtr;
+				bool bTypeOK = true;
+
+				if (Territory->IsA(ATerritoryDistrict::StaticClass()) && !ParentClass->IsChildOf(ATerritoryCity::StaticClass()))
+				{
+					OutErrors.Add(FString::Printf(TEXT("%s: District's parent '%s' is not a TerritoryCity"),
+						*Label, *ParentTag.ToString()));
+					bTypeOK = false;
+				}
+				if (Territory->IsA(ATerritoryProperty::StaticClass()) && !ParentClass->IsChildOf(ATerritoryDistrict::StaticClass()))
+				{
+					OutErrors.Add(FString::Printf(TEXT("%s: Property's parent '%s' is not a TerritoryDistrict"),
+						*Label, *ParentTag.ToString()));
+					bTypeOK = false;
+				}
+			}
+		}
+	}
+}
+
+void UTerritoryDataValidator::CheckSingletonActors(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings)
+{
+	int32 WorldStateCount = 0;
+	int32 SavableDataCount = 0;
+
+	for (TActorIterator<AActor> It(Level->GetWorld()); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (!Actor || Actor->GetLevel() != Level) continue;
+
+		if (Actor->IsA(ATerritoryWorldState::StaticClass()))
+		{
+			WorldStateCount++;
+		}
+		if (Actor->IsA(ATerritorySavableData::StaticClass()))
+		{
+			SavableDataCount++;
+		}
+	}
+
+	if (WorldStateCount > 1)
+	{
+		OutErrors.Add(FString::Printf(TEXT("Multiple ATerritoryWorldState actors (%d found) — only one is allowed"),
+			WorldStateCount));
+	}
+	if (SavableDataCount > 1)
+	{
+		OutErrors.Add(FString::Printf(TEXT("Multiple ATerritorySavableData actors (%d found) — only one is allowed"),
+			SavableDataCount));
+	}
+
+	if (WorldStateCount == 0 && SavableDataCount == 0)
+	{
+		OutWarnings.Add(TEXT("No TerritoryWorldState or TerritorySavableData actor found — economy/diplomacy state will not persist"));
+	}
+}
+
+void UTerritoryDataValidator::CheckEconomyConfig(ATerritoryVolume* Territory, TArray<FString>& OutWarnings)
+{
+	if (!Territory) return;
+
+	FString Label = Territory->GetActorLabel();
+
+	int32 Income = Territory->GetPeriodicIncome();
+	int32 GuardCost = Territory->GetGuardCost();
+
+	if (Income < 0)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: PeriodicIncome is negative (%d)"), *Label, Income));
+	}
+	if (GuardCost < 0)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: GuardCost is negative (%d)"), *Label, GuardCost));
+	}
+	if (Territory->GetMaxConcurrentAttackers() < 1)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: MaxConcurrentAttackers < 1 — no NPCs can attack"), *Label));
 	}
 }

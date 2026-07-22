@@ -258,6 +258,11 @@ FGameplayTag ATerritoryVolume::GetParentTerritoryTag() const
 	return ParentTerritoryTag;
 }
 
+FGameplayTag ATerritoryVolume::GetInitialOwningFaction() const
+{
+	return InitialOwningFaction;
+}
+
 void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 {
 	if (!HasAuthority()) return;
