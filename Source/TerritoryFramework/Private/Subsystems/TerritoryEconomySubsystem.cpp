@@ -72,19 +72,20 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 	for (auto& Pair : FactionTreasuries)
 	{
 		FTerritoryTreasury& Treasury = Pair.Value;
-		int32 NetIncome = Treasury.IncomePerTick - Treasury.CostsPerTick;
-		Treasury.Gold += NetIncome;
 
-		if (Treasury.Gold < 0) Treasury.Gold = 0;
+		// Apply income first, then upkeep — record each with its own running balance
+		int32 ActualIncome = Treasury.IncomePerTick;
+		int32 ActualUpkeep = Treasury.CostsPerTick;
 
-		// Record ledger entries for this tick
-		if (Treasury.IncomePerTick > 0)
+		Treasury.Gold += ActualIncome;
+
+		if (ActualIncome > 0)
 		{
 			FTerritoryTransaction IncomeTx;
 			IncomeTx.TransactionID = FGuid::NewGuid();
 			IncomeTx.Faction = Pair.Key;
 			IncomeTx.Type = ETerritoryTransactionType::Income;
-			IncomeTx.Amount = Treasury.IncomePerTick;
+			IncomeTx.Amount = ActualIncome;
 			IncomeTx.BalanceAfter = Treasury.Gold;
 			IncomeTx.Reason = TEXT("Periodic income");
 			if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
@@ -94,15 +95,24 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 			TransactionLedger.Add(IncomeTx);
 			OnTransactionRecorded.Broadcast(IncomeTx);
 		}
+
+		if (ActualUpkeep > Treasury.Gold)
+		{
+			ActualUpkeep = Treasury.Gold;
+		}
+		Treasury.Gold -= ActualUpkeep;
+
 		if (Treasury.CostsPerTick > 0)
 		{
 			FTerritoryTransaction UpkeepTx;
 			UpkeepTx.TransactionID = FGuid::NewGuid();
 			UpkeepTx.Faction = Pair.Key;
 			UpkeepTx.Type = ETerritoryTransactionType::GuardUpkeep;
-			UpkeepTx.Amount = -Treasury.CostsPerTick;
+			UpkeepTx.Amount = -ActualUpkeep;
 			UpkeepTx.BalanceAfter = Treasury.Gold;
-			UpkeepTx.Reason = TEXT("Guard upkeep");
+			UpkeepTx.Reason = ActualUpkeep < Treasury.CostsPerTick
+				? TEXT("Guard upkeep (partial — insufficient gold)")
+				: TEXT("Guard upkeep");
 			if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
 			{
 				UpkeepTx.GameTime = GS->GetAccumulatedTime();
@@ -118,8 +128,8 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		if (bDebugTicks)
 		{
 			UE_LOG(LogTerritory, Log, TEXT("[EconomyTick] %s: gold=%d, income=%d, costs=%d, net=%d, territories=%d"),
-				*Pair.Key.ToString(), Treasury.Gold, Treasury.IncomePerTick,
-				Treasury.CostsPerTick, NetIncome, Treasury.TerritoryCount);
+				*Pair.Key.ToString(), Treasury.Gold, ActualIncome,
+				ActualUpkeep, ActualIncome - ActualUpkeep, Treasury.TerritoryCount);
 
 			if (Settings->IsDebugEnabled())
 			{
@@ -306,16 +316,13 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 
 	for (const ATerritoryVolume* Territory : Territories)
 	{
-		// Use GetEffectiveIncome for properties (includes upgrade bonus)
-		// Fall back to GetPeriodicIncome for non-property territories
-		const ATerritoryProperty* Property = Cast<const ATerritoryProperty>(Territory);
-		if (Property)
+		// Only count leaf-level (Property) income to avoid hierarchy double-counting.
+		// Cities and Districts are containers — their PeriodicIncome is metadata
+		// for UI display, not a separate income source.
+		if (Territory->IsA<ATerritoryProperty>())
 		{
+			const ATerritoryProperty* Property = Cast<const ATerritoryProperty>(Territory);
 			Treasury.IncomePerTick += Property->GetEffectiveIncome();
-		}
-		else
-		{
-			Treasury.IncomePerTick += Territory->GetPeriodicIncome();
 		}
 		Treasury.CostsPerTick += Territory->GetGuardCost();
 	}

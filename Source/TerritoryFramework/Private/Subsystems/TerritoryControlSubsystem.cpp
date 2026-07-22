@@ -363,6 +363,7 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 
 	FGameplayTag BestFaction;
 	float BestProgress = 0.f;
+	int32 BestAttackerCount = 0;
 
 	for (auto& Pair : State->CaptureProgressByFaction)
 	{
@@ -378,10 +379,30 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 			Pair.Value = FMath::Max(0.f, Pair.Value - DeltaTime * DecayRate);
 		}
 
+		// Deterministic winner selection: highest progress → most attackers → tag name tie-break
+		bool bWins = false;
 		if (Pair.Value > BestProgress)
+		{
+			bWins = true;
+		}
+		else if (Pair.Value == BestProgress && Pair.Value > 0.f)
+		{
+			// Tie-break: more attackers wins, then lexicographic tag for determinism
+			if (AttackerCount > BestAttackerCount)
+			{
+				bWins = true;
+			}
+			else if (AttackerCount == BestAttackerCount && BestFaction.IsValid())
+			{
+				bWins = Pair.Key.ToString() < BestFaction.ToString();
+			}
+		}
+
+		if (bWins)
 		{
 			BestProgress = Pair.Value;
 			BestFaction = Pair.Key;
+			BestAttackerCount = AttackerCount;
 		}
 	}
 
