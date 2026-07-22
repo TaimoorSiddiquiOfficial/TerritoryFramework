@@ -160,6 +160,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards")
 	float GuardSpawnRadius = 500.f;
 
+	/** Behavior tree to run on spawned guards. If null, guards will idle. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
+		meta = (AllowedClasses = "/Script/AIModule.BehaviorTree"))
+	TObjectPtr<class UBehaviorTree> GuardBehaviorTree;
+
+	/** Blackboard asset for the guard behavior tree. If null, uses BT's default blackboard. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
+		meta = (AllowedClasses = "/Script/AIModule.BlackboardData", EditCondition = "GuardBehaviorTree"))
+	TObjectPtr<class UBlackboardData> GuardBlackboardAsset;
+
 	/** Guard spawn points within this territory. If empty, uses random positions within BoundsShape */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
 		meta = (AllowedClasses = "/Script/TerritoryFramework.TerritoryGuardSpawnPoint"))

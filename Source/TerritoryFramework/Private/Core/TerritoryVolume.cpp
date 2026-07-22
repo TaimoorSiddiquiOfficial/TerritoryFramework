@@ -15,6 +15,9 @@
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Character/CharacterDefinition.h"
 #include "Kismet/GameplayStatics.h"
+#include "BehaviorTree/BehaviorTree.h"
+#include "BehaviorTree/BlackboardComponent.h"
+#include "AIController.h"
 
 ATerritoryVolume::ATerritoryVolume()
 {
@@ -47,6 +50,17 @@ ATerritoryVolume::ATerritoryVolume()
 void ATerritoryVolume::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Force-disable collision on the BoundShape at runtime.
+	// Blueprint CDO may override the constructor's NoCollision setting,
+	// causing guards/enemies to collide with the volume and float on hit.
+	if (BoundsShape)
+	{
+		BoundsShape->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		BoundsShape->SetGenerateOverlapEvents(false);
+		BoundsShape->SetCanEverAffectNavigation(false);
+		BoundsShape->SetVisibility(false, true); // Hide in game
+	}
 
 	if (HasAuthority())
 	{
@@ -467,9 +481,50 @@ void ATerritoryVolume::SpawnGuards()
 
 		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
+		// Set faction
 		if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
 		{
 			TeamAgent->AddFaction(OwnerFaction);
+		}
+
+		// Assign behavior tree to the guard's AI controller
+		if (GuardBehaviorTree)
+		{
+			AAIController* AIC = Cast<AAIController>(Guard->GetController());
+			if (AIC)
+			{
+				UBlackboardComponent* BB = AIC->GetBlackboardComponent();
+				if (GuardBlackboardAsset && BB)
+				{
+					BB->InitializeBlackboard(*GuardBlackboardAsset);
+				}
+				AIC->RunBehaviorTree(GuardBehaviorTree);
+
+				// Set patrol spawn point on blackboard for BT tasks
+				if (BB)
+				{
+					if (UsedSP)
+					{
+						BB->SetValueAsObject(TEXT("PatrolSpawnPoint"), UsedSP);
+					}
+					else
+					{
+						BB->SetValueAsObject(TEXT("PatrolSpawnPoint"), this);
+					}
+					BB->SetValueAsInt(TEXT("PatrolNodeIndex"), 0);
+				}
+
+				if (bDebug)
+				{
+					UE_LOG(LogTerritory, Log, TEXT("  Guard %d assigned BT: %s"),
+						i + 1, *GuardBehaviorTree->GetName());
+				}
+			}
+			else if (bDebug)
+			{
+				UE_LOG(LogTerritory, Warning, TEXT("  Guard %d has no AI controller — BT not assigned"),
+					i + 1);
+			}
 		}
 
 		SpawnedGuards.Add(Guard);
