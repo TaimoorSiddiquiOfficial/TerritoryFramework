@@ -13,6 +13,8 @@ UBTTask_MoveToPatrolNode::UBTTask_MoveToPatrolNode()
 	PatrolSpawnPointKey.AddObjectFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_MoveToPatrolNode, PatrolSpawnPointKey), ATerritoryGuardSpawnPoint::StaticClass());
 	PatrolNodeIndexKey.AddIntFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_MoveToPatrolNode, PatrolNodeIndexKey));
 	TargetLocationKey.AddVectorFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_MoveToPatrolNode, TargetLocationKey));
+	TargetRotationKey.AddRotatorFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_MoveToPatrolNode, TargetRotationKey));
+	DelayKey.AddFloatFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_MoveToPatrolNode, DelayKey));
 }
 
 EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
@@ -22,6 +24,9 @@ EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent
 
 	UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
 	if (!BB) return EBTNodeResult::Failed;
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebug = Settings && Settings->IsDebugEnabled();
 
 	// Get the patrol spawn point from blackboard
 	ATerritoryGuardSpawnPoint* SpawnPoint = Cast<ATerritoryGuardSpawnPoint>(
@@ -36,8 +41,16 @@ EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent
 	const TArray<FTerritoryPatrolNode>& Route = SpawnPoint->GetPatrolRoute();
 	if (Route.Num() == 0)
 	{
-		// No patrol route — stay at spawn point
-		BB->SetValueAsVector(TargetLocationKey.SelectedKeyName, SpawnPoint->GetActorLocation());
+		// No patrol route — stay at spawn point, write fallback values to BB
+		FVector SpawnLoc = SpawnPoint->GetActorLocation();
+		BB->SetValueAsVector(TargetLocationKey.SelectedKeyName, SpawnLoc);
+		BB->SetValueAsRotator(TargetRotationKey.SelectedKeyName, SpawnPoint->GetActorRotation());
+		BB->SetValueAsFloat(DelayKey.SelectedKeyName, 2.f);
+
+		if (bDebug)
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[PatrolAI] No patrol route, staying at spawn: %s"), *SpawnLoc.ToString());
+		}
 		return EBTNodeResult::Succeeded;
 	}
 
@@ -47,6 +60,8 @@ EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent
 
 	const FTerritoryPatrolNode& CurrentNode = Route[NodeIndex];
 	FVector TargetLocation = CurrentNode.Location;
+	FRotator TargetRotation = CurrentNode.Rotation;
+	float WaitDelay = FMath::Max(CurrentNode.WaitTime, 0.5f);
 
 	// If location is zero, use spawn point location as fallback
 	if (TargetLocation.IsNearlyZero())
@@ -54,19 +69,27 @@ EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent
 		TargetLocation = SpawnPoint->GetActorLocation();
 	}
 
-	// Set the target location on blackboard
+	// Write all three values to blackboard for downstream nodes
 	BB->SetValueAsVector(TargetLocationKey.SelectedKeyName, TargetLocation);
+	BB->SetValueAsRotator(TargetRotationKey.SelectedKeyName, TargetRotation);
+	BB->SetValueAsFloat(DelayKey.SelectedKeyName, WaitDelay);
+
+	if (bDebug)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[PatrolAI] Node %d/%d: loc=%s, rot=%s, delay=%.1f"),
+			NodeIndex, Route.Num(), *TargetLocation.ToString(), *TargetRotation.ToString(), WaitDelay);
+	}
 
 	// Issue move command
 	EPathFollowingRequestResult::Type MoveResult = AIController->MoveToLocation(
 		TargetLocation,
 		AcceptanceRadius,
-		true,  // StopOnOverlap
-		true,  // UsePathfinding
-		true,  // ProjectDestinationToNavigation
-		false, // CanStrafe
+		true,   // StopOnOverlap
+		true,   // UsePathfinding
+		true,   // ProjectDestinationToNavigation
+		false,  // CanStrafe
 		nullptr, // FilterClass
-		true   // AllowPartialPath
+		true    // AllowPartialPath
 	);
 
 	if (MoveResult == EPathFollowingRequestResult::AlreadyAtGoal)
@@ -76,11 +99,9 @@ EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent
 
 	if (MoveResult == EPathFollowingRequestResult::RequestSuccessful)
 	{
-		// Wait for movement to finish
 		return EBTNodeResult::InProgress;
 	}
 
-	// Failed to start path
 	UE_LOG(LogTerritory, Warning, TEXT("[PatrolAI] MoveTo failed for node %d at %s"),
 		NodeIndex, *TargetLocation.ToString());
 	return EBTNodeResult::Failed;
