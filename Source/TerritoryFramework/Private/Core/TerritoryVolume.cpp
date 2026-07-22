@@ -33,11 +33,7 @@ ATerritoryVolume::ATerritoryVolume()
 	if (UBoxComponent* Box = Cast<UBoxComponent>(BoundsShape))
 	{
 		Box->SetBoxExtent(FVector(500.f, 500.f, 200.f));
-		// Invisible during gameplay — editor-only visualization
 		Box->SetHiddenInGame(true, true);
-		// No collision at all — weapon traces, projectiles, fist attacks,
-		// and pawn movement must pass through freely. The box is purely
-		// an editor visualization and a bounds reference for spawn logic.
 		Box->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Box->SetGenerateOverlapEvents(false);
 		Box->SetCanEverAffectNavigation(false);
@@ -45,9 +41,8 @@ ATerritoryVolume::ATerritoryVolume()
 		Box->bVisibleInReflectionCaptures = false;
 	}
 
-	// NOTE: OwnershipData defaults are synced from Initial* properties in BeginPlay,
-	// not here in the constructor. The constructor runs with CDO default values before
-	// Blueprint instance overrides are applied, causing Initial* edits to be ignored.
+	// Proper subcomponent — visible in BP editor Components panel
+	MapMarkerComponent = CreateDefaultSubobject<UTerritoryNavigationMarkerComponent>(TEXT("MapMarkerComponent"));
 }
 
 void ATerritoryVolume::BeginPlay()
@@ -121,25 +116,6 @@ void ATerritoryVolume::BeginPlay()
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{
 		Registry->RegisterTerritory(this);
-	}
-
-	// Auto-create map marker component if enabled and not already present
-	if (bAutoCreateMapMarker && !AutoMapMarkerComponent)
-	{
-		// Check if one already exists (designer may have added it in BP)
-		UActorComponent* ExistingComp = GetComponentByClass(UTerritoryNavigationMarkerComponent::StaticClass());
-		if (!ExistingComp)
-		{
-			AutoMapMarkerComponent = NewObject<UTerritoryNavigationMarkerComponent>(this, UTerritoryNavigationMarkerComponent::StaticClass());
-			if (AutoMapMarkerComponent)
-			{
-				AutoMapMarkerComponent->RegisterComponent();
-			}
-		}
-		else
-		{
-			AutoMapMarkerComponent = Cast<UTerritoryNavigationMarkerComponent>(ExistingComp);
-		}
 	}
 
 	// Fire BP-exposed initialization event
@@ -624,7 +600,6 @@ void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
 	{
 		// Territory becomes unclaimed — owner lost all defenders.
 		// Marker turns red. Player (or any faction) can now claim it.
-		FGameplayTag OldOwner = OwnershipData.OwningFaction;
 		SetOwningFaction(FGameplayTag());
 		SetControlProgress(0.f);
 
@@ -979,7 +954,7 @@ TArray<ATerritoryGuardSpawnPoint*> ATerritoryVolume::GetGuardSpawnPoints() const
 
 UTerritoryNavigationMarkerComponent* ATerritoryVolume::GetMapMarkerComponent() const
 {
-	return AutoMapMarkerComponent;
+	return MapMarkerComponent;
 }
 
 FString ATerritoryVolume::GetDebugString() const

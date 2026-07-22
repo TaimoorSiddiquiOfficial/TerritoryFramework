@@ -254,12 +254,10 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 		}
 		else
 		{
-			// Not all districts owned by one faction — city can't be claimed
-			// Lock city to prevent premature capture if it was being contested
-			if (!IsLocked() && OwnershipData.State != ETerritoryState::Contested)
+			// Not all districts owned by one faction — city stays contested
+			if (OwnershipData.State == ETerritoryState::Claimed)
 			{
-				// Keep city in contested state, not locked — player can still try
-				// to capture remaining districts
+				SetTerritoryState(ETerritoryState::Contested);
 			}
 		}
 	}

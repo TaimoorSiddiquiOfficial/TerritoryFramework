@@ -251,9 +251,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Visual")
 	TObjectPtr<UShapeComponent> BoundsShape;
 
-	/** If true, automatically creates a TerritoryNavigationMarkerComponent on BeginPlay. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Visual")
-	bool bAutoCreateMapMarker = true;
+	/** Navigation marker component — manages map marker, auto-refreshes on state changes. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Territory|Visual")
+	TObjectPtr<UTerritoryNavigationMarkerComponent> MapMarkerComponent;
 
 	// ─── Guard Configuration ───
 
@@ -282,9 +282,6 @@ private:
 
 	UPROPERTY()
 	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> SpawnedGuards;
-
-	UPROPERTY()
-	TObjectPtr<UTerritoryNavigationMarkerComponent> AutoMapMarkerComponent;
 
 	FGameplayTag PreviousOwningFaction;
 
