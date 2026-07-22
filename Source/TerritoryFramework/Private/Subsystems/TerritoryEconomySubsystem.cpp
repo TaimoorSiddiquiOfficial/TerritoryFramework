@@ -91,6 +91,7 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 				IncomeTx.GameTime = GS->GetAccumulatedTime();
 			}
 			TransactionLedger.Add(IncomeTx);
+			OnTransactionRecorded.Broadcast(IncomeTx);
 		}
 		if (Treasury.CostsPerTick > 0)
 		{
@@ -106,6 +107,7 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 				UpkeepTx.GameTime = GS->GetAccumulatedTime();
 			}
 			TransactionLedger.Add(UpkeepTx);
+			OnTransactionRecorded.Broadcast(UpkeepTx);
 		}
 		while (TransactionLedger.Num() > MaxTransactionHistory)
 		{

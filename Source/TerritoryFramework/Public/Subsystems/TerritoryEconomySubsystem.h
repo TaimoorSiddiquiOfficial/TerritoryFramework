@@ -81,9 +81,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Territory|Economy")
 	int32 MaxTransactionHistory = 500;
 
-protected:
-	void PerformEconomyTick();
-
 private:
 	UPROPERTY(SaveGame)
 	TMap<FGameplayTag, FTerritoryTreasury> FactionTreasuries;

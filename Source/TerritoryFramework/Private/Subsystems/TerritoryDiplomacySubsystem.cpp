@@ -20,12 +20,15 @@ void UTerritoryDiplomacySubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	UWorld* World = GetWorld();
 	if (World && World->GetNetMode() != NM_Client)
 	{
-		World->GetTimerManager().SetTimer(
-			TreatyExpirationTimerHandle,
-			this,
-			&UTerritoryDiplomacySubsystem::OnTreatyExpirationTick,
-			10.f,
-			true);
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const float TreatyInterval = Settings ? Settings->TreatyExpirationCheckInterval : 10.f;
+
+	World->GetTimerManager().SetTimer(
+		TreatyExpirationTimerHandle,
+		this,
+		&UTerritoryDiplomacySubsystem::OnTreatyExpirationTick,
+		TreatyInterval,
+		true);
 	}
 
 	UE_LOG(LogTerritory, Log, TEXT("TerritoryDiplomacySubsystem initialized"));

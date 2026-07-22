@@ -17,13 +17,13 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Combat")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
 	bool RequestAttackPermission(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Combat")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
 	void ReleaseAttackPermission(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Combat")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
 	void ReleaseAllPermissions(ANarrativeNPCController* Controller);
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Combat")

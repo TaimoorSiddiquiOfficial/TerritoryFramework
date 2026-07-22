@@ -119,17 +119,40 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)
 {
 	if (!Guard) return;
 
+	// CRITICAL FIX: Only process if this spawn point actually tracked this guard.
+	// Without this check, a guard dying at SP_1 would also drain reserves at SP_2, SP_3, etc.
+	bool bWasTracked = false;
+	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr : ActiveGuards)
+	{
+		if (Ptr.Get() == Guard)
+		{
+			bWasTracked = true;
+			break;
+		}
+	}
+
+	if (!bWasTracked) return; // Not our guard — no-op
+
 	ActiveGuards.RemoveAll([Guard](const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr)
 	{
 		return !Ptr.IsValid() || Ptr.Get() == Guard;
 	});
 
-	// If we have reserves, signal that a replacement should spawn
+	// If we have reserves, consume one to signal a replacement should spawn
 	if (CurrentReserveCount > 0)
 	{
 		CurrentReserveCount--;
 		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: guard died, using reserve (%d remaining)"),
 			*GetActorLabel(), CurrentReserveCount);
+
+		// M1 FIX: Actually spawn a replacement guard
+		if (ATerritoryVolume* Territory = GetOwningTerritory())
+		{
+			// Spawn one replacement guard at this spawn point
+			// Territory's SpawnGuards will use this point if it has an available slot
+			// (the dead guard freed one active slot, and we consumed a reserve)
+			Territory->SpawnGuards();
+		}
 	}
 	else
 	{

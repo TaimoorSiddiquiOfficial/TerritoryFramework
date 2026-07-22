@@ -13,13 +13,16 @@ void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection
 
 	// Only start capture tick timer on the server — capture state is server-authoritative
 	UWorld* World = GetWorld();
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const float CaptureTickInterval = Settings ? Settings->CaptureTickInterval : 0.1f;
+
 	if (World && World->GetNetMode() != NM_Client)
 	{
 		World->GetTimerManager().SetTimer(
 			CaptureTickTimerHandle,
 			this,
 			&UTerritoryControlSubsystem::OnCaptureTick,
-			0.1f,
+			CaptureTickInterval,
 			true);
 	}
 
@@ -45,7 +48,7 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 {
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugCapture();
-	const float DeltaTime = 0.1f;
+	const float DeltaTime = Settings ? Settings->CaptureTickInterval : 0.1f;
 
 	TArray<TWeakObjectPtr<ATerritoryVolume>> ToRemove;
 

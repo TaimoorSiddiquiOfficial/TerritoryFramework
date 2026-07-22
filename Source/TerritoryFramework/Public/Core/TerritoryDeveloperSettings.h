@@ -45,6 +45,16 @@ public:
 		meta = (ClampMin = "1", UIMin = "1", UIMax = "20"))
 	int32 DefaultMaxConcurrentAttackers = 3;
 
+	/** Capture tick interval in seconds. Controls how often capture progression is evaluated. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Capture",
+		meta = (ClampMin = "0.05", UIMin = "0.05", UIMax = "1.0"))
+	float CaptureTickInterval = 0.1f;
+
+	/** Treaty expiration check interval in seconds. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Capture",
+		meta = (ClampMin = "1.0", UIMin = "1.0", UIMax = "60.0"))
+	float TreatyExpirationCheckInterval = 10.f;
+
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Spatial Index
 	// ═══════════════════════════════════════════════════════════════════════════

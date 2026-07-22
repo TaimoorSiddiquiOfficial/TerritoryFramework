@@ -18,22 +18,22 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void DeclareWar(FGameplayTag FactionA, FGameplayTag FactionB);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void DeclarePeace(FGameplayTag FactionA, FGameplayTag FactionB);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void BreakAlliance(FGameplayTag FactionA, FGameplayTag FactionB);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SignTradeAgreement(FGameplayTag FactionA, FGameplayTag FactionB, float DurationGameTime = -1.f);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SetDiplomacyState(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState);
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
@@ -48,10 +48,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	bool HasTradeAgreement(FGameplayTag FactionA, FGameplayTag FactionB) const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void AddReputation(FGameplayTag Faction, int32 Amount);
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SetReputation(FGameplayTag Faction, int32 Value);
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
