@@ -39,7 +39,7 @@ void ATerritoryCity::BindToDistrict(ATerritoryVolume* District)
 	if (!District) return;
 
 	// Check if already bound to avoid double-binding
-	District->OnTerritoryControlChanged.AddUniqueDynamic(this, &ATerritoryCity::OnDistrictControlChanged);
+	District->OnTerritoryOwnershipChanged.AddUniqueDynamic(this, &ATerritoryCity::OnDistrictControlChanged);
 }
 
 void ATerritoryCity::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
@@ -339,7 +339,7 @@ void ATerritoryDistrict::BeginPlay()
 void ATerritoryDistrict::BindToProperty(ATerritoryVolume* Property)
 {
 	if (!Property) return;
-	Property->OnTerritoryControlChanged.AddUniqueDynamic(this, &ATerritoryDistrict::OnPropertyControlChanged);
+	Property->OnTerritoryOwnershipChanged.AddUniqueDynamic(this, &ATerritoryDistrict::OnPropertyControlChanged);
 }
 
 void ATerritoryDistrict::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)

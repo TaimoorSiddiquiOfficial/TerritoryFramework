@@ -83,8 +83,8 @@ void UTerritoryInfoWidget::BindDelegates()
 {
 	if (BoundTerritory.IsValid())
 	{
-		BoundTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryInfoWidget::HandleControlChanged);
-		BoundTerritory->OnTerritoryStateChanged.AddDynamic(this, &UTerritoryInfoWidget::HandleStateChanged);
+		BoundTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryInfoWidget::HandleControlChanged);
+		BoundTerritory->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryInfoWidget::HandleStateChanged);
 	}
 }
 
@@ -92,8 +92,8 @@ void UTerritoryInfoWidget::UnbindDelegates()
 {
 	if (BoundTerritory.IsValid())
 	{
-		BoundTerritory->OnTerritoryControlChanged.RemoveDynamic(this, &UTerritoryInfoWidget::HandleControlChanged);
-		BoundTerritory->OnTerritoryStateChanged.RemoveDynamic(this, &UTerritoryInfoWidget::HandleStateChanged);
+		BoundTerritory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryInfoWidget::HandleControlChanged);
+		BoundTerritory->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryInfoWidget::HandleStateChanged);
 	}
 }
 

@@ -131,10 +131,10 @@ public:
 	// ─── Blueprint Delegates ───
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory")
-	FOnTerritoryControlChanged OnTerritoryControlChanged;
+	FOnTerritoryControlChanged OnTerritoryOwnershipChanged;
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory")
-	FOnTerritoryStateChanged OnTerritoryStateChanged;
+	FOnTerritoryStateChanged OnTerritoryStateChangedDelegate;
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Guards")
 	FOnAllGuardsDefeated OnAllGuardsDefeatedDelegate;

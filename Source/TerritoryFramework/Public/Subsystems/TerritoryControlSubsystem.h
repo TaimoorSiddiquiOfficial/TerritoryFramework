@@ -85,18 +85,9 @@ private:
 
 	FTimerHandle CaptureTickTimerHandle;
 
-	/** Player presence poll timer */
-	FTimerHandle PresencePollTimerHandle;
-
 	UFUNCTION()
 	void OnCaptureTick();
 
-	/** Poll player pawn positions and auto-register attackers in unclaimed/contested territories */
-	void PollPlayerPresence();
-
 	void EvaluateCaptureState(ATerritoryVolume* Territory, float DeltaTime);
 	void CompleteCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
-
-	/** Resolve player faction from pawn via INarrativeTeamAgentInterface */
-	FGameplayTag GetActorFaction(AActor* Actor) const;
 };

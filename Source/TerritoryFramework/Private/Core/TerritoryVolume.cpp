@@ -275,8 +275,8 @@ void ATerritoryVolume::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 void ATerritoryVolume::OnRep_OwnershipData()
 {
 	// Broadcast with cached previous owner so clients know the transition
-	OnTerritoryControlChanged.Broadcast(this, PreviousOwningFaction, OwnershipData.OwningFaction);
-	OnTerritoryStateChanged.Broadcast(this, OwnershipData.State);
+	OnTerritoryOwnershipChanged.Broadcast(this, PreviousOwningFaction, OwnershipData.OwningFaction);
+	OnTerritoryStateChangedDelegate.Broadcast(this, OwnershipData.State);
 
 	UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s ownership rep'd: %s → %s, state=%d, progress=%.2f"),
 		*GetTerritoryTag().ToString(),
@@ -451,7 +451,7 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	OwnershipData.ControlProgress = NewFaction.IsValid() ? 1.f : 0.f;
 
 	OnOwnershipChanged(OldOwner, NewFaction);
-	OnTerritoryControlChanged.Broadcast(this, OldOwner, NewFaction);
+	OnTerritoryOwnershipChanged.Broadcast(this, OldOwner, NewFaction);
 }
 
 void ATerritoryVolume::SetControlProgress(float Progress)
@@ -476,7 +476,7 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 
 	OwnershipData.State = NewState;
 	OnStateChanged(OldState, NewState);
-	OnTerritoryStateChanged.Broadcast(this, NewState);
+	OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
 }
 
 // ─── Lock System ───

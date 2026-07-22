@@ -342,7 +342,7 @@ void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territo
 	if (!Territory || bWasUnregistered) return;
 
 	// When a territory registers, bind its control-changed delegate
-	Territory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+	Territory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
 
 	// Recalculate income for the owning faction
 	FGameplayTag Owner = Territory->GetOwningFaction();
@@ -357,7 +357,7 @@ void UTerritoryEconomySubsystem::OnTerritoryUnregistered(ATerritoryVolume* Terri
 	if (!Territory || !bWasUnregistered) return;
 
 	// Unbind the control-changed delegate to prevent dangling references
-	Territory->OnTerritoryControlChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+	Territory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
 
 	// Recalculate income for the owning faction (territory removed from their count)
 	FGameplayTag Owner = Territory->GetOwningFaction();

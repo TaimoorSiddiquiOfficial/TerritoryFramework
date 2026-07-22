@@ -17,8 +17,8 @@ void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
 	TerritoryVolume = InTerritory;
 
 	// Subscribe to ownership and state changes for auto-refresh
-	InTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
-	InTerritory->OnTerritoryStateChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
+	InTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
+	InTerritory->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
 
 	RefreshMarker();
 }
@@ -27,8 +27,8 @@ void UTerritoryMapMarker::ClearTerritoryBinding()
 {
 	if (TerritoryVolume.IsValid())
 	{
-		TerritoryVolume->OnTerritoryControlChanged.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
-		TerritoryVolume->OnTerritoryStateChanged.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
+		TerritoryVolume->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
+		TerritoryVolume->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
 	}
 	TerritoryVolume = nullptr;
 }

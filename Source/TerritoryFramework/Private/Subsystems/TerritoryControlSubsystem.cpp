@@ -4,10 +4,8 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
-#include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 
 void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -26,14 +24,6 @@ void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection
 			&UTerritoryControlSubsystem::OnCaptureTick,
 			CaptureTickInterval,
 			true);
-
-		// Player presence poll — check every 0.5s if players are standing in capturable territories
-		World->GetTimerManager().SetTimer(
-			PresencePollTimerHandle,
-			this,
-			&UTerritoryControlSubsystem::PollPlayerPresence,
-			0.5f,
-			true);
 	}
 
 	UE_LOG(LogTerritory, Log, TEXT("TerritoryControlSubsystem initialized (tick: %.2fs)"),
@@ -45,106 +35,9 @@ void UTerritoryControlSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(CaptureTickTimerHandle);
-		World->GetTimerManager().ClearTimer(PresencePollTimerHandle);
 	}
 	TerritoryCaptureState.Empty();
 	Super::Deinitialize();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Player Presence — auto-register attackers
-// ═══════════════════════════════════════════════════════════════════════════════
-
-FGameplayTag UTerritoryControlSubsystem::GetActorFaction(AActor* Actor) const
-{
-	if (!Actor) return FGameplayTag();
-	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Actor))
-	{
-		FGameplayTagContainer Factions = TeamAgent->GetFactions();
-		if (Factions.Num() > 0) return Factions.GetByIndex(0);
-	}
-	return FGameplayTag();
-}
-
-void UTerritoryControlSubsystem::PollPlayerPresence()
-{
-	UWorld* World = GetWorld();
-	if (!World || !World->GetAuthGameMode()) return;
-
-	// Get all player pawns
-	TArray<AActor*> PlayerPawns;
-	UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass(), PlayerPawns);
-
-	for (AActor* Pawn : PlayerPawns)
-	{
-		if (!Pawn) continue;
-
-		// Only player-controlled pawns
-		APawn* P = Cast<APawn>(Pawn);
-		if (!P || !P->IsPlayerControlled()) continue;
-
-		FGameplayTag Faction = GetActorFaction(P);
-		if (!Faction.IsValid()) continue;
-
-		FVector PawnLoc = P->GetActorLocation();
-
-		// Find which territory the player is standing in
-		UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
-		if (!Registry) continue;
-
-		ATerritoryVolume* Territory = Registry->GetTerritoryAtLocation(PawnLoc);
-		if (!Territory) continue;
-
-		ETerritoryState State = Territory->GetTerritoryState();
-		if (State == ETerritoryState::Locked) continue;
-		if (Territory->IsOwnedByFaction(Faction)) continue;
-
-		// Player is in an unclaimed or contested (not owned by player) territory
-		// Auto-register as attacker — identity-based, so polling doesn't inflate counts
-		RegisterAttacker(Territory, P, Faction);
-	}
-
-	// Also unregister players who left their territory
-	// Clean stale weak pointers from all attacker sets
-	for (auto& Pair : TerritoryCaptureState)
-	{
-		ATerritoryVolume* Territory = Pair.Key.Get();
-		if (!Territory) continue;
-
-		ETerritoryState State = Territory->GetTerritoryState();
-		if (State == ETerritoryState::Locked || State == ETerritoryState::Claimed)
-		{
-			// Territory changed state — clear all attackers
-			for (auto& FactionPair : Pair.Value.AttackersByFaction)
-			{
-				for (const TWeakObjectPtr<AActor>& WeakAttacker : FactionPair.Value)
-				{
-					AActor* Attacker = WeakAttacker.Get();
-					if (!Attacker) continue;
-
-					// Check if attacker is still in this territory
-					if (!Territory->ContainsPoint(Attacker->GetActorLocation()))
-					{
-						UnregisterAttacker(Territory, Attacker, FactionPair.Key);
-					}
-				}
-			}
-		}
-
-		// Remove dead weak pointers from sets
-		for (auto& FactionPair : Pair.Value.AttackersByFaction)
-		{
-			TArray<TWeakObjectPtr<AActor>> DeadKeys;
-			for (const TWeakObjectPtr<AActor>& Ptr : FactionPair.Value)
-			{
-				if (!Ptr.IsValid()) DeadKeys.Add(Ptr);
-			}
-			for (const TWeakObjectPtr<AActor>& Dead : DeadKeys)
-			{
-				FactionPair.Value.Remove(Dead);
-			}
-		}
-	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

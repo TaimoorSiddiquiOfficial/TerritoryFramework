@@ -40,7 +40,7 @@ void UTerritoryCaptureTask::BeginTask()
 		return;
 	}
 
-	CachedTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
+	CachedTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 
 	// Store the initial owner for loss detection
 	InitialOwner = CachedTerritory->GetOwningFaction();
@@ -69,7 +69,7 @@ void UTerritoryCaptureTask::EndTask()
 {
 	if (CachedTerritory.IsValid())
 	{
-		CachedTerritory->OnTerritoryControlChanged.RemoveDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
+		CachedTerritory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 	}
 
 	Super::EndTask();

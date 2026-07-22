@@ -21,9 +21,9 @@ void UTerritoryNavigationMarkerComponent::BeginPlay()
 		return;
 	}
 	{
-		CachedTerritory->OnTerritoryControlChanged.AddDynamic(this,
+		CachedTerritory->OnTerritoryOwnershipChanged.AddDynamic(this,
 			&UTerritoryNavigationMarkerComponent::OnTerritoryControlChanged);
-		CachedTerritory->OnTerritoryStateChanged.AddDynamic(this,
+		CachedTerritory->OnTerritoryStateChangedDelegate.AddDynamic(this,
 			&UTerritoryNavigationMarkerComponent::OnTerritoryStateChanged);
 
 		// Create the territory map marker
@@ -52,9 +52,9 @@ void UTerritoryNavigationMarkerComponent::EndPlay(const EEndPlayReason::Type End
 
 	if (CachedTerritory.IsValid())
 	{
-		CachedTerritory->OnTerritoryControlChanged.RemoveDynamic(this,
+		CachedTerritory->OnTerritoryOwnershipChanged.RemoveDynamic(this,
 			&UTerritoryNavigationMarkerComponent::OnTerritoryControlChanged);
-		CachedTerritory->OnTerritoryStateChanged.RemoveDynamic(this,
+		CachedTerritory->OnTerritoryStateChangedDelegate.RemoveDynamic(this,
 			&UTerritoryNavigationMarkerComponent::OnTerritoryStateChanged);
 	}
 
