@@ -65,6 +65,40 @@ public:
 	float SpatialCellSize = 2000.f;
 
 	// ═══════════════════════════════════════════════════════════════════════════
+	// Guard / Patrol
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	/** Default arrival threshold for patrol route advancement (uu) */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Guards",
+		meta = (ClampMin = "50.0", UIMin = "50.0", UIMax = "500.0"))
+	float DefaultPatrolArrivalThreshold = 100.f;
+
+	/** Default acceptance radius for patrol move task (uu) */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Guards",
+		meta = (ClampMin = "10.0", UIMin = "10.0", UIMax = "200.0"))
+	float DefaultPatrolAcceptanceRadius = 50.f;
+
+	/** Default wait time at patrol nodes (seconds) */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Guards",
+		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "30.0"))
+	float DefaultPatrolWaitTime = 2.f;
+
+	/** Max patrol route nodes per spawn point (sanity cap) */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Guards",
+		meta = (ClampMin = "0", UIMin = "0", UIMax = "100"))
+	int32 MaxPatrolRouteNodes = 32;
+
+	/** Starting gold for new factions (first time a faction appears in economy) */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy",
+		meta = (ClampMin = "0"))
+	int32 EconomyStartingGold = 0;
+
+	/** Max capture history entries stored per territory */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Capture",
+		meta = (ClampMin = "10", UIMin = "10", UIMax = "500"))
+	int32 MaxCaptureHistory = 50;
+
+	// ═══════════════════════════════════════════════════════════════════════════
 	// Tags
 	// ═══════════════════════════════════════════════════════════════════════════
 
@@ -156,6 +190,16 @@ public:
 		meta = (EditCondition = "bEnableDebug"))
 	bool bDebugTales = false;
 
+	/** Log behavior tree patrol AI (move tasks, route advancement) */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|AI",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugBT = false;
+
+	/** Log combat director events (attack permissions, budget) */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Combat",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugCombat = false;
+
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Debug — Visual
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -211,4 +255,6 @@ public:
 	bool ShouldDebugSpatial() const { return bEnableDebug && bDebugSpatialIndex; }
 	bool ShouldDebugMarkers() const { return bEnableDebug && bDebugMapMarkers; }
 	bool ShouldDebugTales() const { return bEnableDebug && bDebugTales; }
+	bool ShouldDebugBT() const { return bEnableDebug && bDebugBT; }
+	bool ShouldDebugCombat() const { return bEnableDebug && bDebugCombat; }
 };

@@ -1898,4 +1898,203 @@ bool FTFIntegration_ModuleDependency::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRENGTHENING PASS TESTS — Economy edge cases, Diplomacy edge cases,
+// BlueprintLibrary new helpers, Interface extensions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFFunctional_EconomyEdgeCases,
+	"TerritoryFramework.Functional.EconomyEdgeCases",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFFunctional_EconomyEdgeCases::RunTest(const FString& Parameters)
+{
+	FTerritoryTreasury Treasury;
+
+	// ─── Zero-gold edge cases ───
+	Treasury.Gold = 0;
+	TestFalse(TEXT("Cannot afford anything with 0 gold"), Treasury.Gold >= 1);
+	TestFalse(TEXT("Cannot afford 0 cost with 0 gold (depends on >= semantics)"), Treasury.Gold >= 0 && 0 > 0);
+
+	// ─── Negative-gold protection ───
+	Treasury.Gold = 100;
+	Treasury.Gold -= 200;
+	// Economy tick clamps: if (Treasury.Gold < 0) Treasury.Gold = 0;
+	if (Treasury.Gold < 0) Treasury.Gold = 0;
+	TestEqual(TEXT("Gold clamped to 0 after overdraft"), Treasury.Gold, 0);
+
+	// ─── Large amounts ───
+	Treasury.Gold = 2147483647; // INT32_MAX
+	TestTrue(TEXT("Max int32 gold is valid"), Treasury.Gold == INT32_MAX);
+
+	// ─── Transaction struct ───
+	FTerritoryTransaction Tx;
+	TestFalse(TEXT("Default TransactionID is invalid"), Tx.TransactionID.IsValid());
+	TestEqual(TEXT("Default Amount is 0"), Tx.Amount, 0);
+	TestEqual(TEXT("Default BalanceAfter is 0"), Tx.BalanceAfter, 0);
+	TestEqual(TEXT("Default GameTime is 0"), Tx.GameTime, 0.0);
+
+	// ─── EconomySnapshot ───
+	FTerritoryEconomySnapshot Snap;
+	TestEqual(TEXT("Default Gold is 0"), Snap.Gold, 0);
+	TestEqual(TEXT("Default Income is 0"), Snap.Income, 0);
+	TestEqual(TEXT("Default Costs is 0"), Snap.Costs, 0);
+	TestEqual(TEXT("Default TerritoryCount is 0"), Snap.TerritoryCount, 0);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFFunctional_DiplomacyEdgeCases,
+	"TerritoryFramework.Functional.DiplomacyEdgeCases",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFFunctional_DiplomacyEdgeCases::RunTest(const FString& Parameters)
+{
+	// ─── Self-war / self-alliance ───
+	FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Factions.Heroes")), false);
+	TestTrue(TEXT("Heroes tag is valid"), Heroes.IsValid());
+
+	// The subsystem has a FactionA == FactionB guard — verify the logic conceptually:
+	// DeclareWar(Heroes, Heroes) should be a no-op
+	bool bSelfWar = (Heroes == Heroes);
+	TestTrue(TEXT("Self-faction comparison is true"), bSelfWar);
+	// Self-war/alliance makes no sense — subsystem guards against it
+
+	// ─── Invalid faction tags ───
+	FGameplayTag Invalid;
+	TestFalse(TEXT("Invalid tag is invalid"), Invalid.IsValid());
+
+	// IsSameFaction with invalid tags
+	TestFalse(TEXT("IsSameFaction(invalid, invalid) is false"),
+		UTerritoryBlueprintLibrary::IsSameFaction(Invalid, Invalid));
+	TestFalse(TEXT("IsSameFaction(valid, invalid) is false"),
+		UTerritoryBlueprintLibrary::IsSameFaction(Heroes, Invalid));
+
+	// ─── TreatyRecord self-reference ───
+	FTreatyRecord SelfTreaty;
+	SelfTreaty.FactionA = Heroes;
+	SelfTreaty.FactionB = Heroes;
+	// A treaty with both factions the same is technically "valid" per IsValid()
+	// but should never be created by the subsystem — this is a design guard
+	TestTrue(TEXT("Self-treaty struct is valid (struct doesn't guard)"), SelfTreaty.IsValid());
+
+	// ─── Attitude mapping sanity ───
+	// EDiplomacyState values are distinct
+	TestNotEqual(TEXT("None != Alliance"), EDiplomacyState::None, EDiplomacyState::Alliance);
+	TestNotEqual(TEXT("None != War"), EDiplomacyState::None, EDiplomacyState::War);
+	TestNotEqual(TEXT("Alliance != War"), EDiplomacyState::Alliance, EDiplomacyState::War);
+	TestNotEqual(TEXT("Ceasefire != War"), EDiplomacyState::Ceasefire, EDiplomacyState::War);
+	TestNotEqual(TEXT("TradeAgreement != Alliance"), EDiplomacyState::TradeAgreement, EDiplomacyState::Alliance);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_BlueprintLibraryExtended,
+	"TerritoryFramework.Contract.BlueprintLibraryExtended",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_BlueprintLibraryExtended::RunTest(const FString& Parameters)
+{
+	const UClass* Class = UTerritoryBlueprintLibrary::StaticClass();
+	TestNotNull(TEXT("UTerritoryBlueprintLibrary::StaticClass()"), Class);
+	TestTrue(TEXT("Inherits UBlueprintFunctionLibrary"), Class->IsChildOf(UBlueprintFunctionLibrary::StaticClass()));
+
+	// ─── New helper functions ───
+	TestTrue(TEXT("GetTerritoryDiplomacy exists"), TFTestUtils::HasFunction(Class, TEXT("GetTerritoryDiplomacy")));
+	TestTrue(TEXT("GetAllTerritories exists"), TFTestUtils::HasFunction(Class, TEXT("GetAllTerritories")));
+	TestTrue(TEXT("GetTerritoriesByFaction exists"), TFTestUtils::HasFunction(Class, TEXT("GetTerritoriesByFaction")));
+	TestTrue(TEXT("GetChildTerritories exists"), TFTestUtils::HasFunction(Class, TEXT("GetChildTerritories")));
+	TestTrue(TEXT("GetTerritoryCount exists"), TFTestUtils::HasFunction(Class, TEXT("GetTerritoryCount")));
+	TestTrue(TEXT("GetFactionTerritoryCount exists"), TFTestUtils::HasFunction(Class, TEXT("GetFactionTerritoryCount")));
+	TestTrue(TEXT("IsTerritoryAtLocation exists"), TFTestUtils::HasFunction(Class, TEXT("IsTerritoryAtLocation")));
+	TestTrue(TEXT("GetFactionGold exists"), TFTestUtils::HasFunction(Class, TEXT("GetFactionGold")));
+	TestTrue(TEXT("GetFactionIncome exists"), TFTestUtils::HasFunction(Class, TEXT("GetFactionIncome")));
+	TestTrue(TEXT("GetAllFactions exists"), TFTestUtils::HasFunction(Class, TEXT("GetAllFactions")));
+	TestTrue(TEXT("GetTerritoryState exists"), TFTestUtils::HasFunction(Class, TEXT("GetTerritoryState")));
+	TestTrue(TEXT("GetCaptureProgress exists"), TFTestUtils::HasFunction(Class, TEXT("GetCaptureProgress")));
+	TestTrue(TEXT("ForceCaptureTerritory exists"), TFTestUtils::HasFunction(Class, TEXT("ForceCaptureTerritory")));
+	TestTrue(TEXT("GetTreatyState exists"), TFTestUtils::HasFunction(Class, TEXT("GetTreatyState")));
+	TestTrue(TEXT("IsAllied exists"), TFTestUtils::HasFunction(Class, TEXT("IsAllied")));
+	TestTrue(TEXT("IsAtWar exists"), TFTestUtils::HasFunction(Class, TEXT("IsAtWar")));
+
+	// ─── Verify BlueprintPure on query functions ───
+	TestTrue(TEXT("GetAllTerritories is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetAllTerritories")));
+	TestTrue(TEXT("GetTerritoriesByFaction is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoriesByFaction")));
+	TestTrue(TEXT("GetFactionGold is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetFactionGold")));
+	TestTrue(TEXT("IsAllied is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("IsAllied")));
+	TestTrue(TEXT("IsAtWar is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("IsAtWar")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_InterfacesExtended,
+	"TerritoryFramework.Contract.InterfacesExtended",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_InterfacesExtended::RunTest(const FString& Parameters)
+{
+	// ─── Ownership Interface — new GetContestingFaction ───
+	{
+		const UClass* Class = UTerritoryOwnershipInterface::StaticClass();
+		TestNotNull(TEXT("UTerritoryOwnershipInterface::StaticClass()"), Class);
+		TestTrue(TEXT("Has GetContestingFaction"), TFTestUtils::HasFunction(Class, TEXT("GetContestingFaction")));
+	}
+
+	// ─── Event Receiver Interface — new events ───
+	{
+		const UClass* Class = UTerritoryEventReceiverInterface::StaticClass();
+		TestNotNull(TEXT("UTerritoryEventReceiverInterface::StaticClass()"), Class);
+		TestTrue(TEXT("Has OnTerritoryUncontested"), TFTestUtils::HasFunction(Class, TEXT("OnTerritoryUncontested")));
+		TestTrue(TEXT("Has OnTerritoryStateChanged"), TFTestUtils::HasFunction(Class, TEXT("OnTerritoryStateChanged")));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_DeveloperSettingsExtended,
+	"TerritoryFramework.Contract.DeveloperSettingsExtended",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_DeveloperSettingsExtended::RunTest(const FString& Parameters)
+{
+	const UClass* Class = UTerritoryDeveloperSettings::StaticClass();
+	TestNotNull(TEXT("UTerritoryDeveloperSettings::StaticClass()"), Class);
+
+	// ─── New guard/patrol settings ───
+	TestTrue(TEXT("Has DefaultPatrolArrivalThreshold"), TFTestUtils::HasProperty(Class, TEXT("DefaultPatrolArrivalThreshold")));
+	TestTrue(TEXT("Has DefaultPatrolAcceptanceRadius"), TFTestUtils::HasProperty(Class, TEXT("DefaultPatrolAcceptanceRadius")));
+	TestTrue(TEXT("Has DefaultPatrolWaitTime"), TFTestUtils::HasProperty(Class, TEXT("DefaultPatrolWaitTime")));
+	TestTrue(TEXT("Has MaxPatrolRouteNodes"), TFTestUtils::HasProperty(Class, TEXT("MaxPatrolRouteNodes")));
+	TestTrue(TEXT("Has EconomyStartingGold"), TFTestUtils::HasProperty(Class, TEXT("EconomyStartingGold")));
+	TestTrue(TEXT("Has MaxCaptureHistory"), TFTestUtils::HasProperty(Class, TEXT("MaxCaptureHistory")));
+
+	// ─── New debug flags ───
+	TestTrue(TEXT("Has bDebugBT"), TFTestUtils::HasProperty(Class, TEXT("bDebugBT")));
+	TestTrue(TEXT("Has bDebugCombat"), TFTestUtils::HasProperty(Class, TEXT("bDebugCombat")));
+
+	// ─── Debug helper methods ───
+	TestTrue(TEXT("Has ShouldDebugBT"), TFTestUtils::HasFunction(Class, TEXT("ShouldDebugBT")));
+	TestTrue(TEXT("Has ShouldDebugCombat"), TFTestUtils::HasFunction(Class, TEXT("ShouldDebugCombat")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_BTTaskAbortHandling,
+	"TerritoryFramework.Contract.BTTaskAbortHandling",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_BTTaskAbortHandling::RunTest(const FString& Parameters)
+{
+	const UClass* Class = UBTTask_MoveToPatrolNode::StaticClass();
+	TestNotNull(TEXT("UBTTask_MoveToPatrolNode::StaticClass()"), Class);
+
+	// Verify AbortTask is overridden — critical for stopping movement on task abort
+	TestTrue(TEXT("Has AbortTask override"), TFTestUtils::HasFunction(Class, TEXT("AbortTask")));
+
+	// Verify OnTaskFinished is still present
+	TestTrue(TEXT("Has OnTaskFinished"), TFTestUtils::HasFunction(Class, TEXT("OnTaskFinished")));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

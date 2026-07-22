@@ -22,6 +22,12 @@ class ULevel;
  * - Invalid faction prefixes
  * - Multiple TerritoryWorldState/SavableData actors
  * - Negative economy configuration
+ * - Missing bounds shape
+ * - Guard config mismatch (BT without NPC definition, etc.)
+ * - Duplicate territory display names
+ * - Missing parent tag on districts/properties
+ * - Orphaned guard spawn points (no parent territory)
+ * - City with parent tag set (cities are top-level)
  */
 UCLASS()
 class TERRITORYFRAMEWORKEDITOR_API UTerritoryDataValidator : public UEditorValidatorBase
@@ -46,4 +52,9 @@ private:
 	static void CheckHierarchyIntegrity(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static void CheckSingletonActors(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static void CheckEconomyConfig(ATerritoryVolume* Territory, TArray<FString>& OutWarnings);
+	static void CheckDuplicateDisplayNames(ULevel* Level, TArray<FString>& OutWarnings);
+	static void CheckGuardConfig(ATerritoryVolume* Territory, TArray<FString>& OutWarnings);
+	static void CheckBoundsShape(ATerritoryVolume* Territory, TArray<FString>& OutWarnings);
+	static void CheckOrphanedSpawnPoints(ULevel* Level, TArray<FString>& OutWarnings);
+	static void CheckMissingParentTags(ULevel* Level, TArray<FString>& OutWarnings);
 };

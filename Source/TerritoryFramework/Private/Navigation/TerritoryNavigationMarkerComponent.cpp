@@ -14,7 +14,12 @@ void UTerritoryNavigationMarkerComponent::BeginPlay()
 	Super::BeginPlay();
 
 	CachedTerritory = Cast<ATerritoryVolume>(GetOwner());
-	if (CachedTerritory.IsValid())
+	if (!CachedTerritory.IsValid())
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("[NavMarker] Owner is not an ATerritoryVolume — marker component inactive on %s"),
+			*GetOwner()->GetName());
+		return;
+	}
 	{
 		CachedTerritory->OnTerritoryControlChanged.AddDynamic(this,
 			&UTerritoryNavigationMarkerComponent::OnTerritoryControlChanged);

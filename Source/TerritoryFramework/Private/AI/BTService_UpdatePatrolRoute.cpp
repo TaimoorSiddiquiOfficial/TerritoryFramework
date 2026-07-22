@@ -11,6 +11,13 @@ UBTService_UpdatePatrolRoute::UBTService_UpdatePatrolRoute()
 	Interval = 0.5f; // Check every 0.5 seconds
 	RandomDeviation = 0.1f;
 
+	// Read default from DeveloperSettings
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings)
+	{
+		ArrivalThreshold = Settings->DefaultPatrolArrivalThreshold;
+	}
+
 	PatrolSpawnPointKey.AddObjectFilter(this, GET_MEMBER_NAME_CHECKED(UBTService_UpdatePatrolRoute, PatrolSpawnPointKey), ATerritoryGuardSpawnPoint::StaticClass());
 	PatrolNodeIndexKey.AddIntFilter(this, GET_MEMBER_NAME_CHECKED(UBTService_UpdatePatrolRoute, PatrolNodeIndexKey));
 }
@@ -20,17 +27,25 @@ void UBTService_UpdatePatrolRoute::TickNode(UBehaviorTreeComponent& OwnerComp, u
 	Super::TickNode(OwnerComp, NodeMemory, DeltaSeconds);
 
 	AAIController* AIController = OwnerComp.GetAIOwner();
-	if (!AIController || !AIController->GetPawn()) return;
+	if (!IsValid(AIController) || !IsValid(AIController->GetPawn())) return;
 
 	UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
 	if (!BB) return;
 
 	ATerritoryGuardSpawnPoint* SpawnPoint = Cast<ATerritoryGuardSpawnPoint>(
 		BB->GetValueAsObject(PatrolSpawnPointKey.SelectedKeyName));
-	if (!SpawnPoint) return;
+	if (!SpawnPoint)
+	{
+		UE_LOG(LogTerritory, Verbose, TEXT("[PatrolAI] No PatrolSpawnPoint on blackboard"));
+		return;
+	}
 
 	const TArray<FTerritoryPatrolNode>& Route = SpawnPoint->GetPatrolRoute();
-	if (Route.Num() == 0) return;
+	if (Route.Num() == 0)
+	{
+		UE_LOG(LogTerritory, Verbose, TEXT("[PatrolAI] SpawnPoint '%s' has empty patrol route"), *SpawnPoint->GetActorLabel());
+		return;
+	}
 
 	int32 CurrentIndex = BB->GetValueAsInt(PatrolNodeIndexKey.SelectedKeyName);
 	CurrentIndex = FMath::Clamp(CurrentIndex, 0, Route.Num() - 1);
@@ -66,7 +81,7 @@ void UBTService_UpdatePatrolRoute::TickNode(UBehaviorTreeComponent& OwnerComp, u
 		BB->SetValueAsInt(PatrolNodeIndexKey.SelectedKeyName, NextIndex);
 
 		const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-		if (Settings && Settings->IsDebugEnabled())
+		if (Settings && Settings->ShouldDebugBT())
 		{
 			UE_LOG(LogTerritory, Log, TEXT("[PatrolAI] Advanced to node %d/%d (distance: %.0f)"),
 				NextIndex, Route.Num(), Distance);

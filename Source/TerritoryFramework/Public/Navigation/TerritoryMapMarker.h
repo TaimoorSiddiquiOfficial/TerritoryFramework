@@ -23,6 +23,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	ATerritoryVolume* GetTerritoryVolume() const;
 
+	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
+	void SetFactionColor(FGameplayTag Faction, FLinearColor Color);
+
+	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
+	void ClearFactionColors();
+
 protected:
 	virtual FLinearColor GetMarkerColor_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType) const override;
 	virtual FText GetMarkerDisplayText_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType, FText& OutSubtitleText) const override;

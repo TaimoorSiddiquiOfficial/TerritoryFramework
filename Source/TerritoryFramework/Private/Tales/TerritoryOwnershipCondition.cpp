@@ -7,7 +7,11 @@
 
 bool UTerritoryOwnershipCondition::CheckCondition_Implementation(APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	if (!TerritoryToCheck.IsValid()) return false;
+	if (!TerritoryToCheck.IsValid())
+	{
+		UE_LOG(LogTerritory, Verbose, TEXT("[TalesOwnershipCondition] No TerritoryToCheck tag set"));
+		return false;
+	}
 
 	UWorld* World = GetWorld();
 	if (!World) return false;
@@ -16,30 +20,29 @@ bool UTerritoryOwnershipCondition::CheckCondition_Implementation(APawn* Target, 
 	if (!Registry) return false;
 
 	ATerritoryVolume* Territory = Registry->GetTerritoryByTag(TerritoryToCheck);
-	if (!Territory) return false;
+	if (!Territory)
+	{
+		UE_LOG(LogTerritory, Verbose, TEXT("[TalesOwnershipCondition] Territory '%s' not found in registry"),
+			*TerritoryToCheck.ToString());
+		return false;
+	}
 
 	ETerritoryState State = Territory->GetTerritoryState();
 
-	if (bPassWhenLocked && State == ETerritoryState::Locked)
-	{
-		return true;
-	}
+	// State-based flags are checked first — if any matches, condition passes
+	// (these are OR conditions for special states, independent of RequiredOwner)
+	if (bPassWhenLocked && State == ETerritoryState::Locked) return true;
+	if (bPassWhenContested && State == ETerritoryState::Contested) return true;
+	if (bPassWhenUnclaimed && State == ETerritoryState::Unclaimed) return true;
 
-	if (bPassWhenContested && State == ETerritoryState::Contested)
-	{
-		return true;
-	}
-
-	if (bPassWhenUnclaimed && State == ETerritoryState::Unclaimed)
-	{
-		return true;
-	}
-
+	// If RequiredOwner is set, check that the territory is owned by that faction.
+	// This is an AND with the default "Claimed" state — the owner must match.
 	if (RequiredOwner.IsValid())
 	{
 		return Territory->IsOwnedByFaction(RequiredOwner);
 	}
 
+	// Default: pass if the territory is in the Claimed state
 	return State == ETerritoryState::Claimed;
 }
 

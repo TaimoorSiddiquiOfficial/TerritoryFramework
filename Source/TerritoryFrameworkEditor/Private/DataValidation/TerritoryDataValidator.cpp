@@ -4,6 +4,7 @@
 #include "Core/TerritorySavableData.h"
 #include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Components/ShapeComponent.h"
 #include "Engine/Level.h"
 #include "EngineUtils.h"
 #include "GameplayTagContainer.h"
@@ -74,6 +75,9 @@ bool UTerritoryDataValidator::ValidateLevel(ULevel* Level, TArray<FString>& OutE
 	CheckDuplicateGUIDs(Level, OutErrors);
 	CheckHierarchyIntegrity(Level, OutErrors, OutWarnings);
 	CheckSingletonActors(Level, OutErrors, OutWarnings);
+	CheckDuplicateDisplayNames(Level, OutWarnings);
+	CheckOrphanedSpawnPoints(Level, OutWarnings);
+	CheckMissingParentTags(Level, OutWarnings);
 
 	for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
 	{
@@ -126,6 +130,12 @@ bool UTerritoryDataValidator::ValidateTerritory(ATerritoryVolume* Territory, TAr
 
 	// Check economy configuration
 	CheckEconomyConfig(Territory, OutWarnings);
+
+	// Check bounds shape
+	CheckBoundsShape(Territory, OutWarnings);
+
+	// Check guard config
+	CheckGuardConfig(Territory, OutWarnings);
 
 	return OutErrors.Num() == 0;
 }
@@ -307,5 +317,173 @@ void UTerritoryDataValidator::CheckEconomyConfig(ATerritoryVolume* Territory, TA
 	if (Territory->GetMaxConcurrentAttackers() < 1)
 	{
 		OutWarnings.Add(FString::Printf(TEXT("%s: MaxConcurrentAttackers < 1 — no NPCs can attack"), *Label));
+	}
+}
+
+void UTerritoryDataValidator::CheckDuplicateDisplayNames(ULevel* Level, TArray<FString>& OutWarnings)
+{
+	TMap<FString, FString> NameOwners;
+
+	for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
+	{
+		ATerritoryVolume* Territory = *It;
+		if (!Territory || Territory->GetLevel() != Level) continue;
+
+		FText DisplayName = Territory->GetTerritoryDisplayName();
+		if (DisplayName.IsEmpty()) continue;
+
+		FString NameStr = DisplayName.ToString();
+		if (NameOwners.Contains(NameStr))
+		{
+			OutWarnings.Add(FString::Printf(TEXT("Duplicate TerritoryDisplayName '%s': used by '%s' and '%s'"),
+				*NameStr, *NameOwners[NameStr], *Territory->GetActorLabel()));
+		}
+		else
+		{
+			NameOwners.Add(NameStr, Territory->GetActorLabel());
+		}
+	}
+}
+
+void UTerritoryDataValidator::CheckGuardConfig(ATerritoryVolume* Territory, TArray<FString>& OutWarnings)
+{
+	if (!Territory) return;
+
+	FString Label = Territory->GetActorLabel();
+
+	bool bHasNPCDef = Territory->GuardNPCDefinition != nullptr;
+	bool bHasBT = Territory->GuardBehaviorTree != nullptr;
+	bool bHasBB = Territory->GuardBlackboardAsset != nullptr;
+	bool bHasSpawnCount = Territory->GuardSpawnCount > 0;
+	bool bHasSpawnPoints = Territory->GuardSpawnPoints.Num() > 0;
+
+	// BT set but no NPC definition — BT will never be used
+	if (bHasBT && !bHasNPCDef)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: GuardBehaviorTree set but GuardNPCDefinition is null — guards won't spawn"), *Label));
+	}
+
+	// NPC definition set but no BT — guards spawn with default AI
+	if (bHasNPCDef && !bHasBT)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: GuardNPCDefinition set but no GuardBehaviorTree — guards use default AI"), *Label));
+	}
+
+	// BT set but no Blackboard — BT will fail to initialize
+	if (bHasBT && !bHasBB)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: GuardBehaviorTree set but GuardBlackboardAsset is null — BT will fail to init"), *Label));
+	}
+
+	// Spawn count > 0 but no NPC definition
+	if (bHasSpawnCount && !bHasNPCDef)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: GuardSpawnCount=%d but no GuardNPCDefinition — SpawnGuards will no-op"), *Label, Territory->GuardSpawnCount));
+	}
+
+	// Spawn points reference non-spawn-point actors
+	for (int32 i = 0; i < Territory->GuardSpawnPoints.Num(); ++i)
+	{
+		if (Territory->GuardSpawnPoints[i] && !Territory->GuardSpawnPoints[i]->IsA(ATerritoryGuardSpawnPoint::StaticClass()))
+		{
+			OutWarnings.Add(FString::Printf(TEXT("%s: GuardSpawnPoints[%d] '%s' is not an ATerritoryGuardSpawnPoint"),
+				*Label, i, *Territory->GuardSpawnPoints[i]->GetName()));
+		}
+	}
+}
+
+void UTerritoryDataValidator::CheckBoundsShape(ATerritoryVolume* Territory, TArray<FString>& OutWarnings)
+{
+	if (!Territory) return;
+
+	if (!Territory->BoundsShape)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: BoundsShape is null — ContainsPoint and spatial index will not work"),
+			*Territory->GetActorLabel()));
+	}
+}
+
+void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FString>& OutWarnings)
+{
+	if (!Level) return;
+
+	// Collect all territory tags present in the level
+	TSet<FGameplayTag> AllTerritoryTags;
+	for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
+	{
+		ATerritoryVolume* Territory = *It;
+		if (Territory && Territory->GetLevel() == Level)
+		{
+			FGameplayTag Tag = Territory->GetTerritoryTag();
+			if (Tag.IsValid()) AllTerritoryTags.Add(Tag);
+		}
+	}
+
+	// Check each spawn point — does any territory reference it?
+	TSet<AActor*> ReferencedSpawnPoints;
+	for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
+	{
+		ATerritoryVolume* Territory = *It;
+		if (!Territory || Territory->GetLevel() != Level) continue;
+		for (AActor* SP : Territory->GuardSpawnPoints)
+		{
+			if (SP) ReferencedSpawnPoints.Add(SP);
+		}
+	}
+
+	// Find orphaned spawn points
+	for (TActorIterator<ATerritoryGuardSpawnPoint> It(Level->GetWorld()); It; ++It)
+	{
+		ATerritoryGuardSpawnPoint* SP = *It;
+		if (!SP || SP->GetLevel() != Level) continue;
+
+		if (!ReferencedSpawnPoints.Contains(SP))
+		{
+			OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — not referenced by any territory"),
+				*SP->GetActorLabel()));
+		}
+	}
+}
+
+void UTerritoryDataValidator::CheckMissingParentTags(ULevel* Level, TArray<FString>& OutWarnings)
+{
+	if (!Level) return;
+
+	for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
+	{
+		ATerritoryVolume* Territory = *It;
+		if (!Territory || Territory->GetLevel() != Level) continue;
+
+		FString Label = Territory->GetActorLabel();
+
+		// Districts should have a parent city tag
+		if (Territory->IsA(ATerritoryDistrict::StaticClass()))
+		{
+			FGameplayTag ParentTag = Territory->GetParentTerritoryTag();
+			if (!ParentTag.IsValid())
+			{
+				OutWarnings.Add(FString::Printf(TEXT("%s: District has no ParentTerritoryTag set"), *Label));
+			}
+		}
+
+		// Properties should have a parent district tag
+		if (Territory->IsA(ATerritoryProperty::StaticClass()))
+		{
+			FGameplayTag ParentTag = Territory->GetParentTerritoryTag();
+			if (!ParentTag.IsValid())
+			{
+				OutWarnings.Add(FString::Printf(TEXT("%s: Property has no ParentTerritoryTag set"), *Label));
+			}
+		}
+
+		// Cities should NOT have a parent tag (they are top-level)
+		if (Territory->IsA(ATerritoryCity::StaticClass()))
+		{
+			FGameplayTag ParentTag = Territory->GetParentTerritoryTag();
+			if (ParentTag.IsValid())
+			{
+				OutWarnings.Add(FString::Printf(TEXT("%s: City has ParentTerritoryTag set — cities should be top-level"), *Label));
+			}
+		}
 	}
 }

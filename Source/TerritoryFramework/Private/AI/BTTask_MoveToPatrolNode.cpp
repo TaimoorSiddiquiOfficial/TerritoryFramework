@@ -10,6 +10,13 @@ UBTTask_MoveToPatrolNode::UBTTask_MoveToPatrolNode()
 {
 	NodeName = "Move To Patrol Node";
 
+	// Read default from DeveloperSettings
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings)
+	{
+		AcceptanceRadius = Settings->DefaultPatrolAcceptanceRadius;
+	}
+
 	PatrolSpawnPointKey.AddObjectFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_MoveToPatrolNode, PatrolSpawnPointKey), ATerritoryGuardSpawnPoint::StaticClass());
 	PatrolNodeIndexKey.AddIntFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_MoveToPatrolNode, PatrolNodeIndexKey));
 	TargetLocationKey.AddVectorFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_MoveToPatrolNode, TargetLocationKey));
@@ -20,13 +27,13 @@ UBTTask_MoveToPatrolNode::UBTTask_MoveToPatrolNode()
 EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
 	AAIController* AIController = OwnerComp.GetAIOwner();
-	if (!AIController) return EBTNodeResult::Failed;
+	if (!IsValid(AIController) || !IsValid(AIController->GetPawn())) return EBTNodeResult::Failed;
 
 	UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
 	if (!BB) return EBTNodeResult::Failed;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	const bool bDebug = Settings && Settings->IsDebugEnabled();
+	const bool bDebug = Settings && Settings->ShouldDebugBT();
 
 	// Get the patrol spawn point from blackboard
 	ATerritoryGuardSpawnPoint* SpawnPoint = Cast<ATerritoryGuardSpawnPoint>(
@@ -110,6 +117,17 @@ EBTNodeResult::Type UBTTask_MoveToPatrolNode::ExecuteTask(UBehaviorTreeComponent
 void UBTTask_MoveToPatrolNode::OnTaskFinished(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, EBTNodeResult::Type TaskResult)
 {
 	Super::OnTaskFinished(OwnerComp, NodeMemory, TaskResult);
+}
+
+EBTNodeResult::Type UBTTask_MoveToPatrolNode::AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
+{
+	AAIController* AIController = OwnerComp.GetAIOwner();
+	if (IsValid(AIController))
+	{
+		AIController->StopMovement();
+	}
+
+	return EBTNodeResult::Aborted;
 }
 
 FString UBTTask_MoveToPatrolNode::GetStaticDescription() const

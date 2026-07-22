@@ -63,6 +63,8 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	else
 	{
 		// Fallback if control subsystem unavailable (shouldn't happen in normal play)
+		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureEvent] Control subsystem unavailable — direct SetOwningFaction fallback for %s"),
+			*TargetTerritoryTag.ToString());
 		Territory->SetOwningFaction(CapturingFaction);
 	}
 

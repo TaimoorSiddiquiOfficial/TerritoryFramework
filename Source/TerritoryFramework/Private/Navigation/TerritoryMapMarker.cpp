@@ -12,14 +12,13 @@ void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
 	// Unbind from previous territory
 	ClearTerritoryBinding();
 
+	if (!IsValid(InTerritory)) return;
+
 	TerritoryVolume = InTerritory;
 
 	// Subscribe to ownership and state changes for auto-refresh
-	if (InTerritory)
-	{
-		InTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
-		InTerritory->OnTerritoryStateChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
-	}
+	InTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
+	InTerritory->OnTerritoryStateChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
 
 	RefreshMarker();
 }
@@ -59,6 +58,18 @@ void UTerritoryMapMarker::OnTerritoryStateChanged(ATerritoryVolume* Territory, E
 ATerritoryVolume* UTerritoryMapMarker::GetTerritoryVolume() const
 {
 	return TerritoryVolume.IsValid() ? TerritoryVolume.Get() : nullptr;
+}
+
+void UTerritoryMapMarker::SetFactionColor(FGameplayTag Faction, FLinearColor Color)
+{
+	FactionColorMap.Add(Faction, Color);
+	RefreshMarker();
+}
+
+void UTerritoryMapMarker::ClearFactionColors()
+{
+	FactionColorMap.Empty();
+	RefreshMarker();
 }
 
 FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType) const

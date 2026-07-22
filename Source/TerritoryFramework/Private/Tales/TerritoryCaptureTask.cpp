@@ -11,19 +11,34 @@ void UTerritoryCaptureTask::BeginTask()
 {
 	Super::BeginTask();
 
-	if (!OwningComp) return;
-
-	UWorld* World = OwningComp->GetWorld();
-	if (!World) return;
-
-	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
-	if (Registry)
+	if (!OwningComp)
 	{
-		CachedTerritory = Registry->GetTerritoryByTag(TargetTerritoryTag);
+		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureTask] BeginTask called with no OwningComp"));
+		return;
 	}
 
-	if (CachedTerritory.IsValid())
+	UWorld* World = OwningComp->GetWorld();
+	if (!World)
 	{
+		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureTask] BeginTask: no World"));
+		return;
+	}
+
+	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry)
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureTask] BeginTask: no Registry subsystem"));
+		return;
+	}
+
+	CachedTerritory = Registry->GetTerritoryByTag(TargetTerritoryTag);
+
+	if (!CachedTerritory.IsValid())
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureTask] Territory '%s' not found in registry"),
+			*TargetTerritoryTag.ToString());
+		return;
+	}
 		CachedTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 
 		// Store the initial owner for loss detection
@@ -73,8 +88,9 @@ void UTerritoryCaptureTask::OnTerritoryControlChanged(ATerritoryVolume* Territor
 
 	if (bCompleteOnLoss)
 	{
-		// Complete when territory is lost by its initial owner (unclaimed OR captured by another faction)
-		if (!NewOwner.IsValid() || (InitialOwner.IsValid() && NewOwner != InitialOwner))
+		// Complete when territory is lost by its initial owner.
+		// Only fires if there WAS an initial owner — capturing an unclaimed territory is not a "loss".
+		if (InitialOwner.IsValid() && (!NewOwner.IsValid() || NewOwner != InitialOwner))
 		{
 			CompleteTask();
 		}

@@ -25,6 +25,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory")
 	bool IsTerritoryContested() const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory")
+	FGameplayTag GetContestingFaction() const;
 };
 
 UINTERFACE(BlueprintType)
@@ -64,4 +67,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory")
 	void OnTerritoryContested(FGameplayTag TerritoryTag, FGameplayTag ContestingFaction);
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory")
+	void OnTerritoryUncontested(FGameplayTag TerritoryTag);
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory")
+	void OnTerritoryStateChanged(FGameplayTag TerritoryTag, ETerritoryState NewState);
 };

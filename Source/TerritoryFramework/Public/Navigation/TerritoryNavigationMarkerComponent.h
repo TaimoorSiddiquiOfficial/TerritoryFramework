@@ -43,9 +43,6 @@ protected:
 	TWeakObjectPtr<ATerritoryVolume> CachedTerritory;
 
 private:
-	void ResolveTerritory();
-	void CreateMapMarker();
-
 	UFUNCTION()
 	void OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);
 

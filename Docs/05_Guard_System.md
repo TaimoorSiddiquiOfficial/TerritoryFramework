@@ -103,6 +103,23 @@ When a guard dies:
    - Broadcasts `OnGuardDied` delegate
    - Logs `[GuardDeath]` if debug enabled
 
+## BT Task Abort Handling
+
+`BTTask_MoveToPatrolNode` now implements `AbortTask` — when the BT aborts the task (parent node fails, decorator cancels, etc.), the AI controller's movement is stopped via `StopMovement()`. This prevents guards from walking toward a stale target after the BT has moved on.
+
+## DeveloperSettings-Driven Thresholds
+
+BT patrol thresholds are no longer hardcoded — they read defaults from `UTerritoryDeveloperSettings`:
+
+| Setting | Used By | Default |
+|---|---|---|
+| DefaultPatrolArrivalThreshold | BTService_UpdatePatrolRoute | 100.0 |
+| DefaultPatrolAcceptanceRadius | BTTask_MoveToPatrolNode | 50.0 |
+| DefaultPatrolWaitTime | (patrol node default) | 2.0 |
+| MaxPatrolRouteNodes | (validation cap) | 32 |
+
+Designers can override per-instance in the BT node properties.
+
 ## Setup Checklist
 
 For guards to work, ALL of these must be set:

@@ -1,9 +1,10 @@
 # Territory Framework — Complete Integration Guide
 
-> **Plugin:** TerritoryFramework (v0.1.0)  
-> **Depends on:** Narrative Pro 2.3.3  
-> **Engine:** UE 5.7  
+> **Plugin:** TerritoryFramework (v0.1.1)
+> **Depends on:** Narrative Pro 2.3.3
+> **Engine:** UE 5.7
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
+> **Tests:** 42 automation tests (36 original + 6 strengthening pass)
 
 ## Table of Contents
 

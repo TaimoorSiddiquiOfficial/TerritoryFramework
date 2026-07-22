@@ -2,7 +2,7 @@
 
 ## Overview
 
-TerritoryFramework has 16 individual debug toggles organized into categories, plus 5 visual debug toggles. All are in **Project Settings → Territory Framework → Debug**.
+TerritoryFramework has 18 individual debug toggles organized into categories, plus 5 visual debug toggles. All are in **Project Settings → Territory Framework → Debug**.
 
 ## Master Toggle
 
@@ -27,6 +27,8 @@ TerritoryFramework has 16 individual debug toggles organized into categories, pl
 | Debug Spatial | `[Spatial]` | QueryPoint results |
 | Debug Map Markers | `[Marker]` | Refresh events |
 | Debug Tales | `[TalesCaptureTask/Event]` | Task/event integration |
+| **Debug BT** | `[PatrolAI]` | **New** — BT move tasks, route advancement |
+| **Debug Combat** | `[Combat]` | **New** — Attack permissions, budget |
 
 ## Visual Debug Toggles
 
@@ -37,6 +39,17 @@ TerritoryFramework has 16 individual debug toggles organized into categories, pl
 | Draw Capture Progress | (Not implemented yet — placeholder) |
 | Draw Guard Spawn Points | (Not implemented yet — placeholder) |
 | Draw Spatial Grid | (Not implemented yet — placeholder) |
+
+## Developer Settings — Guard / Patrol
+
+| Setting | Default | Range | Description |
+|---|---|---|---|
+| DefaultPatrolArrivalThreshold | 100.0 | 50–500 | Distance to consider "arrived" at patrol node |
+| DefaultPatrolAcceptanceRadius | 50.0 | 10–200 | Move completion distance for BT task |
+| DefaultPatrolWaitTime | 2.0 | 0–30 | Wait time at patrol nodes |
+| MaxPatrolRouteNodes | 32 | 0–100 | Sanity cap for patrol route length |
+| EconomyStartingGold | 0 | 0+ | Starting gold for new factions |
+| MaxCaptureHistory | 50 | 10–500 | Max capture history per territory |
 
 ## UTerritoryDebugWidget
 

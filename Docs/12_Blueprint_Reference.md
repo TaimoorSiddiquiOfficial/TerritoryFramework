@@ -178,3 +178,51 @@
 | GetReputation(Faction) | Pure → int32 |
 | GetAllTreaties() | → Array<TreatyRecord> |
 | GetTreatiesForFaction(Faction) | → Array<TreatyRecord> |
+
+## UTerritoryBlueprintLibrary (Extended)
+
+### New Helper Functions (Strengthening Pass)
+
+| Function | Type | Returns |
+|---|---|---|
+| GetTerritoryDiplomacy(WorldContext) | Callable | DiplomacySubsystem* |
+| GetAllTerritories(WorldContext) | Pure | Array<TerritoryVolume*> |
+| GetTerritoriesByFaction(WorldContext, Faction) | Pure | Array<TerritoryVolume*> |
+| GetChildTerritories(WorldContext, ParentTag) | Pure | Array<TerritoryVolume*> |
+| GetTerritoryCount(WorldContext) | Pure | int32 |
+| GetFactionTerritoryCount(WorldContext, Faction) | Pure | int32 |
+| IsTerritoryAtLocation(WorldContext, Location) | Pure | bool |
+| GetFactionGold(WorldContext, Faction) | Pure | int32 |
+| GetFactionIncome(WorldContext, Faction) | Pure | int32 |
+| GetAllFactions(WorldContext) | Pure | Array<GameplayTag> |
+| GetTerritoryState(WorldContext, Tag) | Pure | ETerritoryState |
+| GetCaptureProgress(WorldContext, Tag) | Pure | float |
+| ForceCaptureTerritory(WorldContext, Tag, Faction) | Callable | void |
+| GetTreatyState(WorldContext, A, B) | Pure | EDiplomacyState |
+| IsAllied(WorldContext, A, B) | Pure | bool |
+| IsAtWar(WorldContext, A, B) | Pure | bool |
+
+## ITerritoryOwnershipInterface (Extended)
+
+| Function | Type | Notes |
+|---|---|---|
+| GetTerritoryOwner | BlueprintNativeEvent | Returns owning faction |
+| GetTerritoryControlProgress | BlueprintNativeEvent | 0.0–1.0 |
+| IsTerritoryContested | BlueprintNativeEvent | bool |
+| GetContestingFaction | BlueprintNativeEvent | New — who is attacking |
+
+## ITerritoryEventReceiverInterface (Extended)
+
+| Event | Parameters | Notes |
+|---|---|---|
+| OnTerritoryControlChanged | (Tag, OldOwner, NewOwner) | Ownership change |
+| OnTerritoryContested | (Tag, ContestingFaction) | Capture started |
+| OnTerritoryUncontested | (Tag) | New — capture ended |
+| OnTerritoryStateChanged | (Tag, NewState) | New — any state transition |
+
+## UTerritoryMapMarker (Extended)
+
+| Function | Type | Notes |
+|---|---|---|
+| SetFactionColor(Faction, Color) | Callable | New — runtime color override |
+| ClearFactionColors() | Callable | New — reset all colors |
