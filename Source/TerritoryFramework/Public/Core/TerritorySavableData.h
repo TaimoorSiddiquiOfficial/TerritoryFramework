@@ -29,7 +29,13 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	UPROPERTY(SaveGame)
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
+#endif
+
+	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
+		meta = (DisplayName = "Savable Data GUID (auto-generated)"))
 	FGuid SavableDataGUID;
 
 	UPROPERTY(SaveGame)

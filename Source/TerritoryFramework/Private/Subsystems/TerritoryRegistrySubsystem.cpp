@@ -44,7 +44,7 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 	// ─── Duplicate Tag Validation ───
 	if (Tag.IsValid())
 	{
-		if (TWeakObjectPtr<ATerritoryVolume>* Existing = TagToTerritoryMap.Find(Tag))
+		if (const TWeakObjectPtr<ATerritoryVolume>* Existing = TagToTerritoryMap.Find(Tag))
 		{
 			if (Existing->IsValid() && Existing->Get() != Territory)
 			{
@@ -59,7 +59,7 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 	// ─── Duplicate GUID Validation ───
 	if (GUID.IsValid())
 	{
-		if (TWeakObjectPtr<ATerritoryVolume>* Existing = GUIDToTerritoryMap.Find(GUID))
+		if (const TWeakObjectPtr<ATerritoryVolume>* Existing = GUIDToTerritoryMap.Find(GUID))
 		{
 			if (Existing->IsValid() && Existing->Get() != Territory)
 			{
@@ -94,16 +94,30 @@ void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territor
 
 	RegisteredTerritories.Remove(Territory);
 
+	// CRITICAL FIX: Only remove tag/GUID mappings if they still point to THIS actor.
+	// A rejected duplicate actor could otherwise remove the valid actor's mappings.
 	FGameplayTag Tag = Territory->GetTerritoryTag();
 	if (Tag.IsValid())
 	{
-		TagToTerritoryMap.Remove(Tag);
+		if (const TWeakObjectPtr<ATerritoryVolume>* Existing = TagToTerritoryMap.Find(Tag))
+		{
+			if (Existing->Get() == Territory)
+			{
+				TagToTerritoryMap.Remove(Tag);
+			}
+		}
 	}
 
 	FGuid GUID = Territory->GetActorGUID_Implementation();
 	if (GUID.IsValid())
 	{
-		GUIDToTerritoryMap.Remove(GUID);
+		if (const TWeakObjectPtr<ATerritoryVolume>* Existing = GUIDToTerritoryMap.Find(GUID))
+		{
+			if (Existing->Get() == Territory)
+			{
+				GUIDToTerritoryMap.Remove(GUID);
+			}
+		}
 	}
 
 	// Remove from spatial index

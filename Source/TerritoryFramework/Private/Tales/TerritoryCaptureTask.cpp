@@ -26,9 +26,13 @@ void UTerritoryCaptureTask::BeginTask()
 	{
 		CachedTerritory->OnTerritoryControlChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 
-		// Check if already captured
+		// Store the initial owner for loss detection
+		InitialOwner = CachedTerritory->GetOwningFaction();
+
+		// Check if already in the desired state
 		if (bCompleteOnLoss)
 		{
+			// Complete if already unclaimed
 			if (!CachedTerritory->GetOwningFaction().IsValid())
 			{
 				CompleteTask();
@@ -69,7 +73,8 @@ void UTerritoryCaptureTask::OnTerritoryControlChanged(ATerritoryVolume* Territor
 
 	if (bCompleteOnLoss)
 	{
-		if (!NewOwner.IsValid())
+		// Complete when territory is lost by its initial owner (unclaimed OR captured by another faction)
+		if (!NewOwner.IsValid() || (InitialOwner.IsValid() && NewOwner != InitialOwner))
 		{
 			CompleteTask();
 		}

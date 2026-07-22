@@ -11,9 +11,9 @@ void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection
 {
 	Super::Initialize(Collection);
 
-	// Start a repeating timer for capture progression (10 ticks/sec)
-	// Timer callbacks always run on the server (timers are server-only in UE5)
-	if (UWorld* World = GetWorld())
+	// Only start capture tick timer on the server — capture state is server-authoritative
+	UWorld* World = GetWorld();
+	if (World && World->GetNetMode() != NM_Client)
 	{
 		World->GetTimerManager().SetTimer(
 			CaptureTickTimerHandle,
@@ -23,7 +23,8 @@ void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection
 			true);
 	}
 
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryControlSubsystem initialized (capture tick: 0.1s)"));
+	UE_LOG(LogTerritory, Log, TEXT("TerritoryControlSubsystem initialized (capture tick: 0.1s, server-only: %s)"),
+		World && World->GetNetMode() != NM_Client ? TEXT("true") : TEXT("false"));
 }
 
 void UTerritoryControlSubsystem::Deinitialize()

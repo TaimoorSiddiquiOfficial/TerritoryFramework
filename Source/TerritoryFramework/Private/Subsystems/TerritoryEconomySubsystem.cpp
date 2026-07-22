@@ -24,8 +24,9 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 		Registry->OnTerritoryUnregistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
 	}
 
-	// Start economy tick timer (server-only in UE5)
-	if (UWorld* World = GetWorld())
+	// Start economy tick timer (server-only — economy state is server-authoritative)
+	UWorld* World = GetWorld();
+	if (World && World->GetNetMode() != NM_Client)
 	{
 		World->GetTimerManager().SetTimer(
 			EconomyTickTimerHandle,
@@ -35,7 +36,8 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 			true);
 	}
 
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryEconomySubsystem initialized (tick: %.0fs)"), TickIntervalSeconds);
+	UE_LOG(LogTerritory, Log, TEXT("TerritoryEconomySubsystem initialized (tick: %.0fs, server-only: %s)"),
+		TickIntervalSeconds, World && World->GetNetMode() != NM_Client ? TEXT("true") : TEXT("false"));
 }
 
 void UTerritoryEconomySubsystem::Deinitialize()

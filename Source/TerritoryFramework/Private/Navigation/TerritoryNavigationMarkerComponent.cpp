@@ -38,6 +38,13 @@ void UTerritoryNavigationMarkerComponent::BeginPlay()
 
 void UTerritoryNavigationMarkerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// CRITICAL FIX: Cleanup order matters.
+	// 1. Unbind territory delegates first
+	// 2. Clear territory binding on the marker
+	// 3. Remove marker from navigation subsystem
+	// 4. Call Super::EndPlay (parent uses MarkerObject to remove marker)
+	// 5. Null references LAST (parent needs MarkerObject during its EndPlay)
+
 	if (CachedTerritory.IsValid())
 	{
 		CachedTerritory->OnTerritoryControlChanged.RemoveDynamic(this,
@@ -46,10 +53,20 @@ void UTerritoryNavigationMarkerComponent::EndPlay(const EEndPlayReason::Type End
 			&UTerritoryNavigationMarkerComponent::OnTerritoryStateChanged);
 	}
 
+	if (TerritoryMapMarker)
+	{
+		TerritoryMapMarker->ClearTerritoryBinding();
+	}
+
+	// RemoveMarker while MarkerObject is still valid
+	RemoveMarker();
+
+	// Call Super BEFORE nulling MarkerObject — parent EndPlay uses MarkerObject
+	Super::EndPlay(EndPlayReason);
+
+	// Null references AFTER Super::EndPlay
 	TerritoryMapMarker = nullptr;
 	CachedTerritory = nullptr;
-
-	Super::EndPlay(EndPlayReason);
 }
 
 UTerritoryMapMarker* UTerritoryNavigationMarkerComponent::GetTerritoryMapMarker() const

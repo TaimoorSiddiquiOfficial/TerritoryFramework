@@ -26,6 +26,26 @@ void ATerritorySavableData::BeginPlay()
 	}
 }
 
+#if WITH_EDITOR
+void ATerritorySavableData::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	if (!SavableDataGUID.IsValid())
+	{
+		SavableDataGUID = FGuid::NewGuid();
+	}
+}
+
+void ATerritorySavableData::PostDuplicate(EDuplicateMode::Type DuplicateMode)
+{
+	Super::PostDuplicate(DuplicateMode);
+
+	// Duplicated actors must get a NEW GUID to prevent save/load conflicts
+	SavableDataGUID = FGuid::NewGuid();
+}
+#endif
+
 FGuid ATerritorySavableData::GetActorGUID_Implementation() const { return SavableDataGUID; }
 void ATerritorySavableData::SetActorGUID_Implementation(const FGuid& NewGUID) { SavableDataGUID = NewGUID; }
 bool ATerritorySavableData::ShouldRespawn_Implementation() const { return false; }

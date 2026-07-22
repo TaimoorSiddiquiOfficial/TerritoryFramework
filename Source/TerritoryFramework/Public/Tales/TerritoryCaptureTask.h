@@ -38,4 +38,7 @@ private:
 
 	UPROPERTY()
 	TWeakObjectPtr<ATerritoryVolume> CachedTerritory;
+
+	/** Faction that owned the territory when the task started (for loss detection) */
+	FGameplayTag InitialOwner;
 };

@@ -38,7 +38,27 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
 	if (Control)
 	{
-		Control->ForceCapture(Territory, CapturingFaction);
+		if (bForceCapture)
+		{
+			// Forced: bypass all rules (quest/dialogue override)
+			Control->ForceCapture(Territory, CapturingFaction);
+		}
+		else
+		{
+			// Normal: respect all capture rules (defenders, diplomacy, budget)
+			const ECaptureResult Result = Control->AttemptCapture(Territory, CapturingFaction);
+			if (Result != ECaptureResult::Success)
+			{
+				const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+				const bool bDebug = Settings && Settings->ShouldDebugTales();
+				if (bDebug)
+				{
+					UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureEvent] AttemptCapture failed: %s, result=%d"),
+						*TargetTerritoryTag.ToString(), static_cast<int32>(Result));
+				}
+				return; // Capture failed — do not proceed
+			}
+		}
 	}
 	else
 	{

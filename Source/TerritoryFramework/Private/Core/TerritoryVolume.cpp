@@ -235,10 +235,15 @@ bool ATerritoryVolume::ContainsPoint(const FVector& WorldPoint) const
 {
 	if (UBoxComponent* Box = Cast<UBoxComponent>(BoundsShape))
 	{
-		FVector ClosestPoint;
-		float DistanceSq;
-		Box->GetSquaredDistanceToCollision(WorldPoint, DistanceSq, ClosestPoint);
-		return DistanceSq == 0.f;
+		// Transform-space containment — does NOT depend on collision geometry.
+		// Transforms the world point into the box's local space and compares
+		// against the unscaled box extent. Handles rotated boxes correctly.
+		const FTransform& BoxTransform = Box->GetComponentTransform();
+		const FVector LocalPoint = BoxTransform.InverseTransformPosition(WorldPoint);
+		const FVector Extent = Box->GetUnscaledBoxExtent();
+		return FMath::Abs(LocalPoint.X) <= Extent.X
+			&& FMath::Abs(LocalPoint.Y) <= Extent.Y
+			&& FMath::Abs(LocalPoint.Z) <= Extent.Z;
 	}
 	if (BoundsShape)
 	{
