@@ -145,14 +145,34 @@ ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryAtLocation(const FVec
 
 	TArray<ATerritoryVolume*> Candidates = SpatialIndex.QueryPoint(WorldLocation);
 
-	if (bDebugSpatial && Candidates.Num() > 0)
+	if (Candidates.Num() == 0) return nullptr;
+
+	// Return the most specific (smallest volume) territory.
+	// Property < District < City — smallest bounds = most specific.
+	ATerritoryVolume* Best = Candidates[0];
+	float BestVolume = TNumericLimits<float>::Max();
+
+	for (ATerritoryVolume* Candidate : Candidates)
 	{
-		UE_LOG(LogTerritory, Log, TEXT("[Spatial] QueryPoint(%s) → %d candidates, first=%s"),
-			*WorldLocation.ToString(), Candidates.Num(),
-			Candidates[0] ? *Candidates[0]->GetTerritoryTag().ToString() : TEXT("null"));
+		if (!Candidate) continue;
+		FBox Bounds = Candidate->GetTerritoryBounds();
+		FVector Size = Bounds.GetSize();
+		float Volume = Size.X * Size.Y * Size.Z;
+		if (Volume < BestVolume)
+		{
+			BestVolume = Volume;
+			Best = Candidate;
+		}
 	}
 
-	return Candidates.Num() > 0 ? Candidates[0] : nullptr;
+	if (bDebugSpatial)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Spatial] QueryPoint(%s) → %d candidates, best=%s (volume=%.0f)"),
+			*WorldLocation.ToString(), Candidates.Num(),
+			Best ? *Best->GetTerritoryTag().ToString() : TEXT("null"), BestVolume);
+	}
+
+	return Best;
 }
 
 TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetTerritoriesAtLocation(const FVector& WorldLocation) const

@@ -431,6 +431,14 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	OwnershipData.ContestingFaction = FGameplayTag();
 	OwnershipData.ControlProgress = NewFaction.IsValid() ? 1.f : 0.f;
 
+	// Guard lifecycle invariants — run BEFORE BP virtual so BP can react to final state.
+	// Not overridable: despawn old owner guards, spawn new owner guards.
+	DespawnGuards();
+	if (NewFaction.IsValid() && GuardNPCDefinition && GuardSpawnCount > 0)
+	{
+		SpawnGuards();
+	}
+
 	OnOwnershipChanged(OldOwner, NewFaction);
 	OnTerritoryOwnershipChanged.Broadcast(this, OldOwner, NewFaction);
 }
@@ -456,6 +464,25 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 	}
 
 	OwnershipData.State = NewState;
+
+	// Guard lifecycle invariants — run BEFORE BP virtual.
+	// Not overridable: despawn on Contested/Locked, respawn on Claimed-from-Contested.
+	if (NewState == ETerritoryState::Locked)
+	{
+		DespawnGuards();
+	}
+	else if (NewState == ETerritoryState::Contested && OldState == ETerritoryState::Claimed)
+	{
+		DespawnGuards();
+	}
+	else if (NewState == ETerritoryState::Claimed && OldState == ETerritoryState::Contested)
+	{
+		if (HasAuthority() && GuardNPCDefinition && GuardSpawnCount > 0 && SpawnedGuards.Num() == 0)
+		{
+			SpawnGuards();
+		}
+	}
+
 	OnStateChanged(OldState, NewState);
 	OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
 }
@@ -485,7 +512,7 @@ void ATerritoryVolume::LockTerritory(const FText& Reason)
 {
 	if (!HasAuthority()) return;
 
-	LockReason = Reason;
+	OwnershipData.LockReason = Reason;
 	if (OwnershipData.State != ETerritoryState::Locked)
 	{
 		SetTerritoryState(ETerritoryState::Locked);
@@ -498,7 +525,7 @@ void ATerritoryVolume::LockTerritory(const FText& Reason)
 bool ATerritoryVolume::TryUnlock(bool bForce)
 {
 	if (!HasAuthority()) return false;
-	if (!IsLocked()) return true; // already unlocked
+	if (!IsLocked()) return true;
 
 	if (!bForce && !CanUnlock())
 	{
@@ -507,7 +534,7 @@ bool ATerritoryVolume::TryUnlock(bool bForce)
 		return false;
 	}
 
-	LockReason = FText();
+	OwnershipData.LockReason = FText();
 	SetTerritoryState(OwnershipData.OwningFaction.IsValid()
 		? ETerritoryState::Claimed
 		: ETerritoryState::Unclaimed);
@@ -551,49 +578,14 @@ TArray<AActor*> ATerritoryVolume::GetRegisteredDefenders() const
 
 void ATerritoryVolume::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
-	// Despawn old guards, spawn new ones for the new owner
-	DespawnGuards();
-
-	if (NewOwner.IsValid() && GuardNPCDefinition && GuardSpawnCount > 0)
-	{
-		SpawnGuards();
-	}
+	// Guard lifecycle invariants are handled in SetOwningFaction (non-virtual).
+	// This virtual exists for BP subclasses to add behavior — calling Super is optional.
 }
 
 void ATerritoryVolume::OnStateChanged_Implementation(ETerritoryState OldState, ETerritoryState NewState)
 {
-	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-
-	// Entering Contested — despawn guards (they'll be respawned if recaptured)
-	if (NewState == ETerritoryState::Contested && OldState == ETerritoryState::Claimed)
-	{
-		if (Settings && Settings->ShouldDebugStateTransitions())
-		{
-			UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s entering Contested — despawning guards"),
-				*GetTerritoryTag().ToString());
-		}
-		DespawnGuards();
-	}
-
-	// Entering Claimed from Contested — recapture by owner, respawn guards
-	if (NewState == ETerritoryState::Claimed && OldState == ETerritoryState::Contested)
-	{
-		if (Settings && Settings->ShouldDebugStateTransitions())
-		{
-			UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s recaptured — respawning guards"),
-				*GetTerritoryTag().ToString());
-		}
-		if (HasAuthority() && GuardNPCDefinition && GuardSpawnCount > 0 && SpawnedGuards.Num() == 0)
-		{
-			SpawnGuards();
-		}
-	}
-
-	// Entering Locked — despawn guards, no capture possible
-	if (NewState == ETerritoryState::Locked)
-	{
-		DespawnGuards();
-	}
+	// Guard lifecycle invariants are handled in SetTerritoryState (non-virtual).
+	// This virtual exists for BP subclasses to add behavior — calling Super is optional.
 }
 
 void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
@@ -714,8 +706,8 @@ void ATerritoryVolume::SpawnGuards()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugGuards();
 
-	// Determine NPC class from definition
-	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.Get();
+	// Determine NPC class from definition — sync load if not already loaded
+	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
@@ -832,7 +824,7 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.Get();
+	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
 		NPCClass = ATerritoryGuardCharacter::StaticClass();

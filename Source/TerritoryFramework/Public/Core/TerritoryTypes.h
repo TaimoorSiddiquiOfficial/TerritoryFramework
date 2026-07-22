@@ -77,6 +77,10 @@ struct FTerritoryOwnershipData
 
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	int32 GuardCost = 0;
+
+	/** Why the territory is locked. Empty when not locked. Replicated + saved. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
+	FText LockReason;
 };
 
 USTRUCT(BlueprintType)

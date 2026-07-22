@@ -157,6 +157,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Lock")
 	bool CanUnlock() const;
 
+	/** Get the lock reason text. Returns empty if not locked. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Lock")
+	FText GetLockReason() const { return OwnershipData.LockReason; }
+
 	// ─── Guard Spawning API ───
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Guards")
@@ -232,10 +236,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category = "Territory|Lock",
 		meta = (EditCondition = "bStartsLocked"))
 	TArray<TObjectPtr<class UNarrativeCondition>> LockConditions;
-
-	/** Lock reason shown to UI/debug. Set when locked, cleared when unlocked. */
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Lock")
-	FText LockReason;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Hierarchy",
 		meta = (Categories = "Territory"))
