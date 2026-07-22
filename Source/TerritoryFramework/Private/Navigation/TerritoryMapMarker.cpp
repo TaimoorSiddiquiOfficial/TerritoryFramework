@@ -141,23 +141,24 @@ void UTerritoryMapMarker::MarkerOnPaint_Implementation(FPaintContext& Context, F
 	Corners[2] = FVector2D(BoxCenter.X + BoxExtent.X, BoxCenter.Y + BoxExtent.Y); // NE
 	Corners[3] = FVector2D(BoxCenter.X - BoxExtent.X, BoxCenter.Y + BoxExtent.Y); // NW
 
-	// Convert world-space corners to map-space using MapOrigin and map geometry
-	// MapOrigin is the world-space center of the map
-	// We need to project world XY onto the map widget's local space
+	// Calculate scale using MapOrigin and MapPan from Narrative's FMarkerOnPaintData
 	FVector2D MapSize = OnPaintData.MapGeometry.GetLocalSize();
 	FVector2D Origin = OnPaintData.MapOrigin;
+	FVector2D Pan = OnPaintData.MapPan;
 
-	// Calculate scale: how many map pixels per world unit
-	// This depends on the map's zoom level and the world extent the map covers
+	// MapScale: pixels per world unit
+	// Narrative's Navigator uses MapSize to represent the world extent
+	// The scale is derived from the ratio of map widget size to world coverage
+	// If MapOrigin is valid (map is active), compute from available data
 	float MapScale = 1.f;
 	if (Origin.X != TNumericLimits<double>::Max())
 	{
-		// Estimate scale from map geometry
-		// Assume the map covers a reasonable world area
-		MapScale = MapSize.X / 20000.f; // Default: 20000 UU world = full map width
+		// Default assumption: map widget covers 20000x20000 world units at 1:1 zoom
+		// Adjust this based on actual Narrative Navigator zoom level in Blueprint
+		MapScale = MapSize.X / 20000.f;
 	}
 
-	// Convert corners to local map space
+	// Convert corners to local map space, accounting for MapPan offset
 	TArray<FVector2f> LinePoints;
 	for (int32 i = 0; i < 4; ++i)
 	{
@@ -165,6 +166,13 @@ void UTerritoryMapMarker::MarkerOnPaint_Implementation(FPaintContext& Context, F
 		FVector2D MapCorner;
 		MapCorner.X = (WorldCorner.X - Origin.X) * MapScale + MapSize.X * 0.5f;
 		MapCorner.Y = (WorldCorner.Y - Origin.Y) * MapScale + MapSize.Y * 0.5f;
+
+		// Apply pan offset if valid
+		if (Pan.X != TNumericLimits<double>::Max())
+		{
+			MapCorner += Pan;
+		}
+
 		LinePoints.Add(FVector2f(MapCorner.X, MapCorner.Y));
 	}
 	// Close the loop

@@ -72,6 +72,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	void LoadFromGameState();
 
+	/** Direct Narrative attitude setter — Narrative is sole authority for AI attitudes */
+	void SetNarrativeAttitude(FGameplayTag FactionA, FGameplayTag FactionB, ETeamAttitude::Type Attitude);
+
+	/** Convert Narrative attitude back to treaty state */
+	EDiplomacyState AttitudeToDiplomacyState(ETeamAttitude::Type Attitude) const;
+
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnDiplomacyStateChanged OnDiplomacyStateChanged;
 
