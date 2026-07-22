@@ -177,6 +177,7 @@ TArray<FGameplayTag> UTerritoryEconomySubsystem::GetAllFactionsWithTreasury() co
 
 void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	if (!Faction.IsValid() || PositiveAmount <= 0) return;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -219,6 +220,7 @@ void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int3
 
 bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
+	if (!GetWorld()->GetAuthGameMode()) return false;
 	if (!Faction.IsValid() || PositiveAmount <= 0) return false;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();

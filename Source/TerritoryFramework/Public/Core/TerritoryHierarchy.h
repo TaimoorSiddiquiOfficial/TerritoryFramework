@@ -41,7 +41,6 @@ private:
 	UFUNCTION()
 	void OnDistrictControlChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
-	/** Bind to registry events for late-registered districts */
 	UFUNCTION()
 	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 
@@ -65,7 +64,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	bool IsCapitalDistrict() const;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|District")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|District")
 	bool bIsCapital = false;
 };
 
@@ -80,31 +79,39 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	ATerritoryDistrict* GetOwningDistrict() const;
 
-	UPROPERTY(SaveGame, BlueprintReadOnly, Replicated, Category = "Territory|Property")
+	UPROPERTY(SaveGame, BlueprintReadWrite, ReplicatedUsing = OnRep_UpgradeLevel, Category = "Territory|Property")
 	int32 UpgradeLevel = 0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Property")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Property")
 	int32 MaxUpgradeLevel = 3;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Property")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Property")
 	int32 UpgradeCostPerLevel = 500;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Property")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Property")
 	int32 IncomeBonusPerLevel = 25;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Property")
+	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	bool CanUpgrade() const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Property")
+	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	int32 GetUpgradeCost() const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Property")
+	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	int32 GetEffectiveIncome() const;
 
-	/** Attempt to upgrade this property. Debits treasury and records transaction. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property")
 	bool TryUpgrade();
 
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property")
+	void SetUpgradeLevel(int32 NewLevel);
+
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	UFUNCTION()
+	void OnRep_UpgradeLevel();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|Property")
+	void OnUpgradeLevelChanged(int32 NewLevel);
 };

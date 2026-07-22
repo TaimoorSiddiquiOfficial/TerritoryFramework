@@ -200,6 +200,11 @@ void ATerritoryProperty::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(ATerritoryProperty, UpgradeLevel);
 }
 
+void ATerritoryProperty::OnRep_UpgradeLevel()
+{
+	OnUpgradeLevelChanged(UpgradeLevel);
+}
+
 ATerritoryDistrict* ATerritoryProperty::GetOwningDistrict() const
 {
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
@@ -276,4 +281,24 @@ bool ATerritoryProperty::TryUpgrade()
 		*GetTerritoryTag().ToString(), UpgradeLevel, Cost, *OwnerFaction.ToString());
 
 	return true;
+}
+
+void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
+{
+	if (!HasAuthority()) return;
+	int32 OldLevel = UpgradeLevel;
+	UpgradeLevel = FMath::Clamp(NewLevel, 0, MaxUpgradeLevel);
+
+	if (OldLevel != UpgradeLevel)
+	{
+		FGameplayTag OwnerFaction = GetOwningFaction();
+		if (OwnerFaction.IsValid())
+		{
+			UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
+			if (Economy) Economy->RecalculateIncome(OwnerFaction);
+		}
+
+		UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s set to level %d (was %d)"),
+			*GetTerritoryTag().ToString(), UpgradeLevel, OldLevel);
+	}
 }

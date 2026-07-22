@@ -84,6 +84,7 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 
 ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction)
 {
+	if (!GetWorld()->GetAuthGameMode()) return ECaptureResult::InvalidTerritory;
 	if (!Territory || !AttackingFaction.IsValid())
 	{
 		return ECaptureResult::InvalidTerritory;

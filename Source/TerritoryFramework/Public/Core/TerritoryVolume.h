@@ -11,6 +11,7 @@ class UNarrativeAbilitySystemComponent;
 class UShapeComponent;
 class UNPCDefinition;
 class ATerritoryGuardCharacter;
+class ATerritoryGuardSpawnPoint;
 
 UCLASS(BlueprintType, Blueprintable)
 class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrativeSavableActor
@@ -20,11 +21,14 @@ class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrative
 public:
 	ATerritoryVolume();
 
+	// ─── INarrativeSavableActor ───
 	virtual FGuid GetActorGUID_Implementation() const override;
 	virtual void SetActorGUID_Implementation(const FGuid& NewGUID) override;
 	virtual void PrepareForSave_Implementation() override;
 	virtual void Load_Implementation() override;
 	virtual bool ShouldRespawn_Implementation() const override;
+
+	// ─── Query API (BlueprintPure) ───
 
 	UFUNCTION(BlueprintPure, Category = "Territory")
 	FGameplayTag GetOwningFaction() const;
@@ -71,6 +75,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory")
 	FGameplayTag GetInitialOwningFaction() const;
 
+	// ─── Mutation API (BlueprintAuthorityOnly) ───
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory")
 	void SetOwningFaction(const FGameplayTag& NewFaction);
 
@@ -89,11 +95,40 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory")
 	TArray<AActor*> GetRegisteredDefenders() const;
 
+	// ─── Blueprint Events (BlueprintNativeEvent) ───
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Territory")
+	void OnOwnershipChanged(FGameplayTag OldOwner, FGameplayTag NewOwner);
+	virtual void OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner);
+
+	UFUNCTION(BlueprintNativeEvent, Category = "Territory")
+	void OnStateChanged(ETerritoryState OldState, ETerritoryState NewState);
+	virtual void OnStateChanged_Implementation(ETerritoryState OldState, ETerritoryState NewState);
+
+	// ─── Blueprint Delegates ───
+
 	UPROPERTY(BlueprintAssignable, Category = "Territory")
 	FOnTerritoryControlChanged OnTerritoryControlChanged;
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory")
 	FOnTerritoryStateChanged OnTerritoryStateChanged;
+
+	// ─── Guard Spawning API ───
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Guards")
+	void SpawnGuards();
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Guards")
+	void DespawnGuards();
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
+	int32 GetSpawnedGuardCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
+	bool HasGuardsAlive() const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
+	TArray<ATerritoryGuardSpawnPoint*> GetGuardSpawnPoints() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -108,110 +143,89 @@ protected:
 	UFUNCTION()
 	void OnRep_OwnershipData();
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory",
+	// ─── Editable Properties (BlueprintReadWrite for BP access) ───
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory",
 		meta = (Categories = "Territory"))
 	FGameplayTag TerritoryTag;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
 	FText TerritoryDisplayName;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory",
 		meta = (Categories = "Narrative.Factions"))
 	FGameplayTag InitialOwningFaction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
 	int32 InitialMaxConcurrentAttackers = 3;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
 	int32 InitialPeriodicIncome = 100;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
 	int32 InitialGuardCost = 50;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
 	bool bStartsLocked = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Hierarchy",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Hierarchy",
 		meta = (Categories = "Territory"))
 	FGameplayTag ParentTerritoryTag;
 
-	UPROPERTY(SaveGame, ReplicatedUsing = OnRep_OwnershipData)
+	UPROPERTY(SaveGame, ReplicatedUsing = OnRep_OwnershipData, BlueprintReadWrite)
 	FTerritoryOwnershipData OwnershipData;
 
-	/** Cached previous owner — set before rep overwrites OwnershipData, used in OnRep */
-	FGameplayTag PreviousOwningFaction;
-
-	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
+	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadWrite, Category = "Territory|Identity",
 		meta = (DisplayName = "Territory GUID (auto-generated)"))
 	FGuid TerritoryGUID;
 
-	UPROPERTY()
-	TArray<TWeakObjectPtr<AActor>> RegisteredDefenders;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Visual")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Visual")
 	TObjectPtr<UShapeComponent> BoundsShape;
 
-	// ─── Guard Spawning ───
+	// ─── Guard Configuration ───
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
 		meta = (AllowedClasses = "/Script/NarrativeArsenal.NPCDefinition"))
 	TObjectPtr<UNPCDefinition> GuardNPCDefinition;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards")
 	int32 GuardSpawnCount = 3;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards")
 	float GuardSpawnRadius = 500.f;
 
-	/** Behavior tree to run on spawned guards. If null, guards will idle. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
 		meta = (AllowedClasses = "/Script/AIModule.BehaviorTree"))
 	TObjectPtr<class UBehaviorTree> GuardBehaviorTree;
 
-	/** Blackboard asset for the guard behavior tree. If null, uses BT's default blackboard. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
 		meta = (AllowedClasses = "/Script/AIModule.BlackboardData", EditCondition = "GuardBehaviorTree"))
 	TObjectPtr<class UBlackboardData> GuardBlackboardAsset;
 
-	/** Guard spawn points within this territory. If empty, uses random positions within BoundsShape */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Guards",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
 		meta = (AllowedClasses = "/Script/TerritoryFramework.TerritoryGuardSpawnPoint"))
 	TArray<TObjectPtr<AActor>> GuardSpawnPoints;
 
-public:
-	UFUNCTION(BlueprintCallable, Category = "Territory|Guards")
-	void SpawnGuards();
+	// ─── Guard Spawn Point Delegate (Blueprint) ───
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Guards")
-	void DespawnGuards();
-
-	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
-	int32 GetSpawnedGuardCount() const;
-
-	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
-	bool HasGuardsAlive() const;
-
-	UFUNCTION(BlueprintCallable, Category = "Territory|Guards")
-	TArray<class ATerritoryGuardSpawnPoint*> GetGuardSpawnPoints() const;
-
-	UFUNCTION(BlueprintNativeEvent, Category = "Territory")
-	void OnOwnershipChanged(FGameplayTag OldOwner, FGameplayTag NewOwner);
-	virtual void OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner);
-
-	UFUNCTION(BlueprintNativeEvent, Category = "Territory")
-	void OnStateChanged(ETerritoryState OldState, ETerritoryState NewState);
-	virtual void OnStateChanged_Implementation(ETerritoryState OldState, ETerritoryState NewState);
+	UPROPERTY(BlueprintAssignable, Category = "Territory|Guards")
+	FOnTerritoryControlChanged OnGuardDied;
 
 private:
+	UPROPERTY()
+	TArray<TWeakObjectPtr<AActor>> RegisteredDefenders;
+
+	UPROPERTY()
+	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> SpawnedGuards;
+
+	FGameplayTag PreviousOwningFaction;
+
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
 
 	void BindDefenderDeath(AActor* Defender);
 	void UnbindDefenderDeath(AActor* Defender);
 	void CleanupInvalidDefenders();
-
-	UPROPERTY()
-	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> SpawnedGuards;
 
 	FVector GetRandomSpawnPoint() const;
 };

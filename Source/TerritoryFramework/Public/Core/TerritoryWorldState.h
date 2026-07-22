@@ -217,12 +217,10 @@ public:
 	void ImportPersistentState();
 
 	// ─── Delegates ───
-
-	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
-	FOnEconomyTick OnEconomyChanged;
-
-	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
-	FOnDiplomacyStateChanged OnDiplomacyChanged;
+	// NOTE: Economy and diplomacy change events are broadcast by the subsystems
+	// (UTerritoryEconomySubsystem::OnEconomyTickFired, UTerritoryDiplomacySubsystem::OnDiplomacyStateChanged).
+	// The WorldState actor is for save/load persistence and client-visible replicated state.
+	// Subscribe to subsystem delegates for reactive gameplay, not to WorldState.
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Transaction")
 	FOnTransactionRecorded OnTransactionRecorded;

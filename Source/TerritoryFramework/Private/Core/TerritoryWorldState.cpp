@@ -136,7 +136,11 @@ void ATerritoryWorldState::RecordTransaction(const FReplicatedTransaction& Trans
 	if (!HasAuthority()) return;
 	ReplicatedTransactions.Add(Transaction);
 
-	while (ReplicatedTransactions.Num() > 500)
+	// Use MaxTransactionHistory from EconomySubsystem (default 500)
+	const UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
+	int32 MaxHistory = Economy ? Economy->MaxTransactionHistory : 500;
+
+	while (ReplicatedTransactions.Num() > MaxHistory)
 	{
 		ReplicatedTransactions.RemoveAt(0);
 	}

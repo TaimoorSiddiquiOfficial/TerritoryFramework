@@ -116,6 +116,7 @@ void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGa
 
 void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
