@@ -24,7 +24,7 @@ EBTNodeResult::Type UBTTask_ReleaseTerritoryPermission::ExecuteTask(UBehaviorTre
 	if (!Director) return EBTNodeResult::Succeeded;
 
 	// Release all permissions for this controller
-	Director->ReleaseAllPermissions(NPCController);
+	Director->ReleaseAllSlots(NPCController);
 
 	return EBTNodeResult::Succeeded;
 }

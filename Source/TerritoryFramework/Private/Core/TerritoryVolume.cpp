@@ -250,19 +250,24 @@ void ATerritoryVolume::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 void ATerritoryVolume::OnRep_OwnershipData()
 {
-	// Broadcast with cached previous owner so clients know the transition
-	OnTerritoryOwnershipChanged.Broadcast(this, PreviousOwningFaction, OwnershipData.OwningFaction);
-	OnTerritoryStateChangedDelegate.Broadcast(this, OwnershipData.State);
+	// Diff against cached values — only fire events for fields that actually changed
+	if (PreviousOwningFaction != OwnershipData.OwningFaction)
+	{
+		OnTerritoryOwnershipChanged.Broadcast(this, PreviousOwningFaction, OwnershipData.OwningFaction);
+		UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s ownership: %s → %s"),
+			*GetTerritoryTag().ToString(),
+			*PreviousOwningFaction.ToString(),
+			*OwnershipData.OwningFaction.ToString());
+		PreviousOwningFaction = OwnershipData.OwningFaction;
+	}
 
-	UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s ownership rep'd: %s → %s, state=%d, progress=%.2f"),
-		*GetTerritoryTag().ToString(),
-		*PreviousOwningFaction.ToString(),
-		*OwnershipData.OwningFaction.ToString(),
-		static_cast<int32>(OwnershipData.State),
-		OwnershipData.ControlProgress);
-
-	// Update cache for next rep
-	PreviousOwningFaction = OwnershipData.OwningFaction;
+	if (PreviousState != OwnershipData.State)
+	{
+		OnTerritoryStateChangedDelegate.Broadcast(this, OwnershipData.State);
+		UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s state → %d"),
+			*GetTerritoryTag().ToString(), static_cast<int32>(OwnershipData.State));
+		PreviousState = OwnershipData.State;
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -350,7 +355,7 @@ bool ATerritoryVolume::IsContested() const { return OwnershipData.State == ETerr
 FGameplayTag ATerritoryVolume::GetTerritoryTag() const { return TerritoryTag; }
 FText ATerritoryVolume::GetTerritoryDisplayName() const { return TerritoryDisplayName; }
 int32 ATerritoryVolume::GetMaxConcurrentAttackers() const { return OwnershipData.MaxConcurrentAttackers; }
-int32 ATerritoryVolume::GetDefenderCount() const { return RegisteredDefenders.Num(); }
+int32 ATerritoryVolume::GetDefenderCount() const { return OwnershipData.DefenderCount; }
 int32 ATerritoryVolume::GetPeriodicIncome() const { return OwnershipData.PeriodicIncome; }
 int32 ATerritoryVolume::GetGuardCost() const { return OwnershipData.GuardCost; }
 
@@ -792,14 +797,13 @@ void ATerritoryVolume::SpawnGuards()
 		Guard->SetOwningTerritoryGUID(TerritoryGUID);
 		Guard->SetNPCDefinition(GuardNPCDefinition);
 
-		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
-
-		// Set faction from territory owner — Narrative's NPCDefinition handles
-		// all AI behavior (ActivityConfiguration, ActivitySchedules, TriggerSets)
+		// Set faction BEFORE FinishSpawningActor so Narrative's BeginPlay reads correct faction
 		if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
 		{
 			TeamAgent->AddFaction(OwnerFaction);
 		}
+
+		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
 		SpawnedGuards.Add(Guard);
 		RegisterDefender(Guard);
@@ -852,12 +856,13 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 	Guard->SetOwningTerritoryGUID(TerritoryGUID);
 	Guard->SetNPCDefinition(GuardNPCDefinition);
 
-	UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
-
+	// Set faction BEFORE FinishSpawningActor so Narrative's BeginPlay reads correct faction
 	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
 	{
 		TeamAgent->AddFaction(OwnerFaction);
 	}
+
+	UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
 	SpawnedGuards.Add(Guard);
 	RegisterDefender(Guard);

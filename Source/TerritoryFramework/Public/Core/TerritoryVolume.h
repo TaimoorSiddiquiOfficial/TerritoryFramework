@@ -284,6 +284,7 @@ private:
 	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> SpawnedGuards;
 
 	FGameplayTag PreviousOwningFaction;
+	ETerritoryState PreviousState = ETerritoryState::Unclaimed;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);

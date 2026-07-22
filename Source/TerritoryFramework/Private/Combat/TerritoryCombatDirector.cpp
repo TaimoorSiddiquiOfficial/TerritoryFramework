@@ -2,72 +2,71 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "AI/NarrativeNPCController.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "Engine/World.h"
 
 void UTerritoryCombatDirector::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryCombatDirector initialized"));
+	UE_LOG(LogTerritory, Log, TEXT("TerritoryCombatDirector initialized (assault budget manager)"));
 }
 
 void UTerritoryCombatDirector::Deinitialize()
 {
-	PermissionMap.Empty();
+	SlotMap.Empty();
 	Super::Deinitialize();
 }
 
-bool UTerritoryCombatDirector::RequestAttackPermission(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
+bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
 {
 	if (!Territory || !Controller) return false;
 
 	if (Territory->GetTerritoryState() == ETerritoryState::Locked) return false;
 
-	FPerTerritoryPermissions& Permissions = PermissionMap.FindOrAdd(Territory);
-	CleanupInvalidControllers(Permissions);
+	FPerTerritorySlots& Slots = SlotMap.FindOrAdd(Territory);
+	CleanupInvalidControllers(Slots);
 
 	int32 MaxSlots = Territory->GetMaxConcurrentAttackers();
-	if (Permissions.GrantedControllers.Num() >= MaxSlots)
+	if (Slots.GrantedControllers.Num() >= MaxSlots)
 	{
 		return false;
 	}
 
-	// Check if this controller already has permission
-	for (const TWeakObjectPtr<ANarrativeNPCController>& Existing : Permissions.GrantedControllers)
+	// Check if this controller already has a slot
+	for (const TWeakObjectPtr<ANarrativeNPCController>& Existing : Slots.GrantedControllers)
 	{
 		if (Existing.Get() == Controller) return true;
 	}
 
-	Permissions.GrantedControllers.Add(Controller);
+	Slots.GrantedControllers.Add(Controller);
 
-	// NOTE: Controller cleanup handled via TWeakObjectPtr in CleanupInvalidControllers()
-	// called on each RequestAttackPermission. No need for OnDestroyed binding.
-
-	UE_LOG(LogTerritory, Verbose, TEXT("Attack permission granted in %s (%d/%d)"),
+	UE_LOG(LogTerritory, Verbose, TEXT("Assault slot granted in %s (%d/%d)"),
 		*Territory->GetTerritoryTag().ToString(),
-		Permissions.GrantedControllers.Num(), MaxSlots);
+		Slots.GrantedControllers.Num(), MaxSlots);
 
 	return true;
 }
 
-void UTerritoryCombatDirector::ReleaseAttackPermission(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
+void UTerritoryCombatDirector::ReleaseAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
 {
 	if (!Territory || !Controller) return;
 
-	FPerTerritoryPermissions* Permissions = PermissionMap.Find(Territory);
-	if (!Permissions) return;
+	FPerTerritorySlots* Slots = SlotMap.Find(Territory);
+	if (!Slots) return;
 
-	Permissions->GrantedControllers.RemoveAll(
+	Slots->GrantedControllers.RemoveAll(
 		[Controller](const TWeakObjectPtr<ANarrativeNPCController>& Ptr)
 		{
 			return Ptr.Get() == Controller;
 		});
 }
 
-void UTerritoryCombatDirector::ReleaseAllPermissions(ANarrativeNPCController* Controller)
+void UTerritoryCombatDirector::ReleaseAllSlots(ANarrativeNPCController* Controller)
 {
 	if (!Controller) return;
 
-	for (auto& Pair : PermissionMap)
+	for (auto& Pair : SlotMap)
 	{
 		Pair.Value.GrantedControllers.RemoveAll(
 			[Controller](const TWeakObjectPtr<ANarrativeNPCController>& Ptr)
@@ -77,36 +76,36 @@ void UTerritoryCombatDirector::ReleaseAllPermissions(ANarrativeNPCController* Co
 	}
 }
 
-bool UTerritoryCombatDirector::HasAttackPermission(const ATerritoryVolume* Territory, const ANarrativeNPCController* Controller) const
+bool UTerritoryCombatDirector::HasAssaultSlot(const ATerritoryVolume* Territory, const ANarrativeNPCController* Controller) const
 {
 	if (!Territory || !Controller) return false;
 
-	const FPerTerritoryPermissions* Permissions = PermissionMap.Find(Territory);
-	if (!Permissions) return false;
+	const FPerTerritorySlots* Slots = SlotMap.Find(Territory);
+	if (!Slots) return false;
 
-	for (const TWeakObjectPtr<ANarrativeNPCController>& Existing : Permissions->GrantedControllers)
+	for (const TWeakObjectPtr<ANarrativeNPCController>& Existing : Slots->GrantedControllers)
 	{
 		if (Existing.Get() == Controller) return true;
 	}
 	return false;
 }
 
-int32 UTerritoryCombatDirector::GetGrantedPermissions(const ATerritoryVolume* Territory) const
+int32 UTerritoryCombatDirector::GetGrantedSlots(const ATerritoryVolume* Territory) const
 {
 	if (!Territory) return 0;
-	const FPerTerritoryPermissions* Permissions = PermissionMap.Find(Territory);
-	return Permissions ? Permissions->GrantedControllers.Num() : 0;
+	const FPerTerritorySlots* Slots = SlotMap.Find(Territory);
+	return Slots ? Slots->GrantedControllers.Num() : 0;
 }
 
 int32 UTerritoryCombatDirector::GetAvailableSlots(const ATerritoryVolume* Territory) const
 {
 	if (!Territory) return 0;
 	int32 MaxSlots = Territory->GetMaxConcurrentAttackers();
-	int32 Granted = GetGrantedPermissions(Territory);
+	int32 Granted = GetGrantedSlots(Territory);
 	return FMath::Max(0, MaxSlots - Granted);
 }
 
-void UTerritoryCombatDirector::CleanupInvalidControllers(FPerTerritoryPermissions& Permissions)
+void UTerritoryCombatDirector::CleanupInvalidControllers(FPerTerritorySlots& Slots)
 {
-	Permissions.GrantedControllers.RemoveAll([](const TWeakObjectPtr<ANarrativeNPCController>& Ptr) { return !Ptr.IsValid(); });
+	Slots.GrantedControllers.RemoveAll([](const TWeakObjectPtr<ANarrativeNPCController>& Ptr) { return !Ptr.IsValid(); });
 }

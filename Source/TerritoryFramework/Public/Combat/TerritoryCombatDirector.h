@@ -7,7 +7,18 @@
 
 class ATerritoryVolume;
 class ANarrativeNPCController;
+class UNarrativeAbilitySystemComponent;
 
+/**
+ * Strategic assault budget manager — limits how many AI can simultaneously
+ * attack within a territory. This is SEPARATE from Narrative Pro's per-target
+ * attack tokens (UNarrativeAbilitySystemComponent::TryClaimToken):
+ *
+ * - Narrative tokens = tactical: limits how many AI gang up on ONE defender
+ * - Assault slots = strategic: limits how many AI participate in a territory assault
+ *
+ * AI should use both: RequestAssaultSlot (strategic gate) → RequestAttackToken (tactical).
+ */
 UCLASS()
 class TERRITORYFRAMEWORK_API UTerritoryCombatDirector : public UWorldSubsystem
 {
@@ -17,31 +28,41 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
+	/**
+	 * Request a strategic assault slot in this territory.
+	 * Does NOT claim a Narrative attack token — call RequestAttackToken separately.
+	 * Returns true if a slot was granted (or controller already has one).
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
-	bool RequestAttackPermission(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
+	bool RequestAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
 
+	/** Release an assault slot. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
-	void ReleaseAttackPermission(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
+	void ReleaseAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
 
+	/** Release all assault slots held by this controller across all territories. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
-	void ReleaseAllPermissions(ANarrativeNPCController* Controller);
+	void ReleaseAllSlots(ANarrativeNPCController* Controller);
 
+	/** Check if controller currently holds an assault slot in this territory. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Combat")
-	bool HasAttackPermission(const ATerritoryVolume* Territory, const ANarrativeNPCController* Controller) const;
+	bool HasAssaultSlot(const ATerritoryVolume* Territory, const ANarrativeNPCController* Controller) const;
 
+	/** Number of assault slots currently granted in this territory. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Combat")
-	int32 GetGrantedPermissions(const ATerritoryVolume* Territory) const;
+	int32 GetGrantedSlots(const ATerritoryVolume* Territory) const;
 
+	/** Available assault slots remaining in this territory. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Combat")
 	int32 GetAvailableSlots(const ATerritoryVolume* Territory) const;
 
 private:
-	struct FPerTerritoryPermissions
+	struct FPerTerritorySlots
 	{
 		TArray<TWeakObjectPtr<ANarrativeNPCController>> GrantedControllers;
 	};
 
-	TMap<TWeakObjectPtr<ATerritoryVolume>, FPerTerritoryPermissions> PermissionMap;
+	TMap<TWeakObjectPtr<ATerritoryVolume>, FPerTerritorySlots> SlotMap;
 
-	void CleanupInvalidControllers(FPerTerritoryPermissions& Permissions);
+	void CleanupInvalidControllers(FPerTerritorySlots& Slots);
 };

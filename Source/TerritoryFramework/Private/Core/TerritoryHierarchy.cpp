@@ -522,16 +522,15 @@ void ATerritoryProperty::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Properties auto-sync their ownership to their parent district on initialization
-	// This ensures properties start aligned with their district's owner
-	if (HasAuthority())
+	// Only sync to district owner if property has NO owner (first-time init).
+	// Do NOT overwrite saved ownership — SaveSystem already restored it in Super::BeginPlay.
+	if (HasAuthority() && !GetOwningFaction().IsValid())
 	{
 		ATerritoryDistrict* District = GetOwningDistrict();
 		if (District)
 		{
 			FGameplayTag DistrictOwner = District->GetOwningFaction();
-			FGameplayTag MyOwner = GetOwningFaction();
-			if (DistrictOwner.IsValid() && MyOwner != DistrictOwner)
+			if (DistrictOwner.IsValid())
 			{
 				SetOwningFaction(DistrictOwner);
 			}

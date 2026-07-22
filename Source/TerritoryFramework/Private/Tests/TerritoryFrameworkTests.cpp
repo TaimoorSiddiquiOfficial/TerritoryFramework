@@ -476,16 +476,16 @@ bool FTFContract_CombatDirector::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Inherits UWorldSubsystem"),
 		Class->IsChildOf(UWorldSubsystem::StaticClass()));
 
-	TestTrue(TEXT("RequestAttackPermission is BlueprintCallable"),
-		TFTestUtils::IsBlueprintCallable(Class, TEXT("RequestAttackPermission")));
-	TestTrue(TEXT("ReleaseAttackPermission is BlueprintCallable"),
-		TFTestUtils::IsBlueprintCallable(Class, TEXT("ReleaseAttackPermission")));
-	TestTrue(TEXT("ReleaseAllPermissions is BlueprintCallable"),
-		TFTestUtils::IsBlueprintCallable(Class, TEXT("ReleaseAllPermissions")));
-	TestTrue(TEXT("HasAttackPermission is BlueprintPure"),
-		TFTestUtils::IsBlueprintPure(Class, TEXT("HasAttackPermission")));
-	TestTrue(TEXT("GetGrantedPermissions is BlueprintPure"),
-		TFTestUtils::IsBlueprintPure(Class, TEXT("GetGrantedPermissions")));
+	TestTrue(TEXT("RequestAssaultSlot is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("RequestAssaultSlot")));
+	TestTrue(TEXT("ReleaseAssaultSlot is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("ReleaseAssaultSlot")));
+	TestTrue(TEXT("ReleaseAllSlots is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("ReleaseAllSlots")));
+	TestTrue(TEXT("HasAssaultSlot is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasAssaultSlot")));
+	TestTrue(TEXT("GetGrantedSlots is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetGrantedSlots")));
 	TestTrue(TEXT("GetAvailableSlots is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetAvailableSlots")));
 
@@ -1705,15 +1705,15 @@ bool FTFIntegration_GASContract::RunTest(const FString& Parameters)
 			TFTestUtils::HasProperty(RequestTask, TEXT("bPermissionGrantedKey")));
 	}
 
-	// ─── Combat director uses Narrative ASC tokens ───
+	// ─── Combat director assault budget ───
 	{
 		const UClass* DirectorClass = UTerritoryCombatDirector::StaticClass();
 
-		// RequestAttackPermission wraps Narrative's TryClaimToken
-		TestTrue(TEXT("Director has RequestAttackPermission"),
-			TFTestUtils::HasFunction(DirectorClass, TEXT("RequestAttackPermission")));
-		TestTrue(TEXT("Director has ReleaseAttackPermission"),
-			TFTestUtils::HasFunction(DirectorClass, TEXT("ReleaseAttackPermission")));
+		// Assault budget — strategic territory-level slot, separate from Narrative per-target tokens
+		TestTrue(TEXT("Director has RequestAssaultSlot"),
+			TFTestUtils::HasFunction(DirectorClass, TEXT("RequestAssaultSlot")));
+		TestTrue(TEXT("Director has ReleaseAssaultSlot"),
+			TFTestUtils::HasFunction(DirectorClass, TEXT("ReleaseAssaultSlot")));
 		TestTrue(TEXT("Director has GetAvailableSlots"),
 			TFTestUtils::IsBlueprintPure(DirectorClass, TEXT("GetAvailableSlots")));
 	}

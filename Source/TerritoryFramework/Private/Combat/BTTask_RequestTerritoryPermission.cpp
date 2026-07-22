@@ -51,7 +51,7 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::ExecuteTask(UBehaviorTre
 		}
 	}
 
-	bool bGranted = Director->RequestAttackPermission(Territory, NPCController);
+	bool bGranted = Director->RequestAssaultSlot(Territory, NPCController);
 	OwnerComp.GetBlackboardComponent()->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, bGranted);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
