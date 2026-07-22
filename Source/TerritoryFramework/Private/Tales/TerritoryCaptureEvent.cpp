@@ -45,26 +45,23 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 		}
 		else
 		{
-			// Normal: respect all capture rules (defenders, diplomacy, budget)
+			// Normal: respect all capture rules, then complete capture
 			const ECaptureResult Result = Control->AttemptCapture(Territory, CapturingFaction);
-			if (Result != ECaptureResult::Success)
+			if (Result == ECaptureResult::Success)
 			{
-				const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-				const bool bDebug = Settings && Settings->ShouldDebugTales();
-				if (bDebug)
-				{
-					UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureEvent] AttemptCapture failed: %s, result=%d"),
-						*TargetTerritoryTag.ToString(), static_cast<int32>(Result));
-				}
-				return; // Capture failed — do not proceed
+				// AttemptCapture initiated contested state — complete it directly
+				Control->AddCaptureProgress(Territory, CapturingFaction, 1.f);
+			}
+			else
+			{
+				UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureEvent] AttemptCapture failed: %s, result=%d"),
+					*TargetTerritoryTag.ToString(), static_cast<int32>(Result));
+				return;
 			}
 		}
 	}
 	else
 	{
-		// Fallback if control subsystem unavailable (shouldn't happen in normal play)
-		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureEvent] Control subsystem unavailable — direct SetOwningFaction fallback for %s"),
-			*TargetTerritoryTag.ToString());
 		Territory->SetOwningFaction(CapturingFaction);
 	}
 

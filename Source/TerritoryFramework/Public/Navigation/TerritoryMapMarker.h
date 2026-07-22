@@ -48,13 +48,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Colors")
 	FLinearColor ContestedColor = FLinearColor(1.f, 1.f, 0.f, 1.f);
 
-	/** Color when territory is captured by a faction (fallback when no faction-specific color). Default: Green. */
+	/** Color when territory is owned by an enemy faction (no FactionColorMap entry).
+	 *  Default: Red. Set player faction to green via FactionColorMap or SetFactionColor. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Colors")
-	FLinearColor CapturedColor = FLinearColor(0.f, 1.f, 0.f, 1.f);
+	FLinearColor EnemyOwnedColor = FLinearColor(1.f, 0.f, 0.f, 1.f);
 
-	/** Color when territory is locked. Default: Dark gray. */
+	/** Color when territory is locked. Default: Purple. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Colors")
-	FLinearColor LockedColor = FLinearColor(0.3f, 0.3f, 0.3f, 1.f);
+	FLinearColor LockedColor = FLinearColor(0.5f, 0.f, 0.5f, 1.f);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
 	bool bDrawTerritoryOutline = true;

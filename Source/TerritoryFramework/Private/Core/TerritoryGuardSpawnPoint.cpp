@@ -159,13 +159,10 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)
 		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: guard died, using reserve (%d remaining)"),
 			*GetActorLabel(), CurrentReserveCount);
 
-		// M1 FIX: Actually spawn a replacement guard
+		// Spawn ONE replacement guard — not a full batch
 		if (ATerritoryVolume* Territory = GetOwningTerritory())
 		{
-			// Spawn one replacement guard at this spawn point
-			// Territory's SpawnGuards will use this point if it has an available slot
-			// (the dead guard freed one active slot, and we consumed a reserve)
-			Territory->SpawnGuards();
+			Territory->SpawnSingleGuard(this);
 		}
 	}
 	else

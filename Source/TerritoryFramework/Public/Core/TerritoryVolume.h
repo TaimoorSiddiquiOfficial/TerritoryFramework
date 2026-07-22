@@ -162,6 +162,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Guards")
 	void SpawnGuards();
 
+	/** Spawn exactly one guard at the given spawn point (reserve replacement). */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Guards")
+	void SpawnSingleGuard(class ATerritoryGuardSpawnPoint* SpawnPoint);
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Guards")
 	void DespawnGuards();
 

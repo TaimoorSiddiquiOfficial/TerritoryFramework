@@ -387,7 +387,8 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 		FGameplayTag MajorityOwner = GetMajorityPropertyOwner();
 		if (MajorityOwner.IsValid() && MajorityOwner != DistrictOwner)
 		{
-			// A faction now holds majority of properties — trigger district capture
+			// A faction now holds majority of properties — capture the district
+			SetOwningFaction(MajorityOwner);
 			OnDistrictFullyCaptured(MajorityOwner);
 			OnDistrictCapturedDelegate.Broadcast(this, DistrictOwner, MajorityOwner);
 		}

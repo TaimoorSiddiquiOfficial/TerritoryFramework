@@ -81,9 +81,10 @@ FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNaviga
 
 	ETerritoryState State = TerritoryVolume->GetTerritoryState();
 
+	// Locked = invisible. No marker shown at all.
 	if (State == ETerritoryState::Locked)
 	{
-		return LockedColor;
+		return FLinearColor(0.f, 0.f, 0.f, 0.f);
 	}
 
 	if (State == ETerritoryState::Contested)
@@ -94,15 +95,15 @@ FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNaviga
 	FGameplayTag Owner = TerritoryVolume->GetOwningFaction();
 	if (Owner.IsValid())
 	{
-		// Check faction-specific color override first
+		// Check faction-specific color override (player faction = green via FactionColorMap)
 		const FLinearColor* FactionColor = FactionColorMap.Find(Owner);
 		if (FactionColor) return *FactionColor;
 
-		// No faction-specific color → use captured (green)
-		return CapturedColor;
+		// No faction-specific color → enemy owned → red
+		return EnemyOwnedColor;
 	}
 
-	// No owner → unclaimed (red)
+	// No owner → unclaimed → red
 	return UnclaimedColor;
 }
 
@@ -110,7 +111,13 @@ FText UTerritoryMapMarker::GetMarkerDisplayText_Implementation(UNarrativeNavigat
 {
 	if (!TerritoryVolume.IsValid())
 	{
-		return FText::FromString(TEXT("Unknown Territory"));
+		return FText::GetEmpty();
+	}
+
+	// Locked = no text shown
+	if (TerritoryVolume->GetTerritoryState() == ETerritoryState::Locked)
+	{
+		return FText::GetEmpty();
 	}
 
 	FText Name = TerritoryVolume->GetTerritoryDisplayName();

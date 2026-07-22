@@ -31,9 +31,11 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
 
+	/** Register an actor as an attacker for a faction. Identity-based — duplicates ignored. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
 
+	/** Unregister an actor. Removes identity, decrements count only if actor was registered. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
 
@@ -61,19 +63,40 @@ public:
 	FOnCaptureAttempted OnCaptureAttempted;
 
 private:
+	/** Per-faction capture state — attacker tracking is actor-based, not count-based */
 	struct FPerTerritoryState
 	{
-		TMap<FGameplayTag, int32> AttackersByFaction;
+		/** Actor sets per faction — prevents count inflation from duplicate registrations */
+		TMap<FGameplayTag, TSet<TWeakObjectPtr<AActor>>> AttackersByFaction;
 		TMap<FGameplayTag, float> CaptureProgressByFaction;
 	};
 
 	TMap<TWeakObjectPtr<ATerritoryVolume>, FPerTerritoryState> TerritoryCaptureState;
 
+	/** Deferred commands to apply AFTER iteration to avoid map mutation during range-for */
+	struct FDeferredCommand
+	{
+		enum EType { Complete, Reset, RemoveInvalid };
+		EType Type;
+		TWeakObjectPtr<ATerritoryVolume> Territory;
+		FGameplayTag Faction;
+	};
+	TArray<FDeferredCommand> DeferredCommands;
+
 	FTimerHandle CaptureTickTimerHandle;
+
+	/** Player presence poll timer */
+	FTimerHandle PresencePollTimerHandle;
 
 	UFUNCTION()
 	void OnCaptureTick();
 
+	/** Poll player pawn positions and auto-register attackers in unclaimed/contested territories */
+	void PollPlayerPresence();
+
 	void EvaluateCaptureState(ATerritoryVolume* Territory, float DeltaTime);
 	void CompleteCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
+
+	/** Resolve player faction from pawn via INarrativeTeamAgentInterface */
+	FGameplayTag GetActorFaction(AActor* Actor) const;
 };

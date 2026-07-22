@@ -80,13 +80,14 @@ void ATerritoryVolume::BeginPlay()
 		OwnershipData.PeriodicIncome = InitialPeriodicIncome;
 		OwnershipData.GuardCost = InitialGuardCost;
 
-		if (OwnershipData.State == ETerritoryState::Unclaimed && InitialOwningFaction.IsValid())
+		if (InitialOwningFaction.IsValid())
 		{
 			OwnershipData.OwningFaction = InitialOwningFaction;
 			OwnershipData.State = ETerritoryState::Claimed;
 		}
 
-		if (bStartsLocked && OwnershipData.State == ETerritoryState::Unclaimed)
+		// bStartsLocked takes priority — territory starts Locked regardless of initial owner
+		if (bStartsLocked)
 		{
 			OwnershipData.State = ETerritoryState::Locked;
 		}
@@ -616,8 +617,26 @@ void ATerritoryVolume::OnStateChanged_Implementation(ETerritoryState OldState, E
 
 void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
 {
-	UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All guards defeated in %s — territory is undefended"),
+	UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All guards defeated in %s — territory is now undefended"),
 		*GetTerritoryTag().ToString());
+
+	if (HasAuthority())
+	{
+		// Territory becomes unclaimed — owner lost all defenders.
+		// Marker turns red. Player (or any faction) can now claim it.
+		FGameplayTag OldOwner = OwnershipData.OwningFaction;
+		SetOwningFaction(FGameplayTag());
+		SetControlProgress(0.f);
+
+		// Transition to Unclaimed so capture flow can begin
+		if (OwnershipData.State != ETerritoryState::Locked)
+		{
+			SetTerritoryState(ETerritoryState::Unclaimed);
+		}
+
+		// Do NOT respawn guards here — the territory is undefended.
+		// Guards only respawn when a new faction claims the territory.
+	}
 }
 
 void ATerritoryVolume::OnTerritoryInitialized_Implementation()
@@ -825,6 +844,54 @@ void ATerritoryVolume::SpawnGuards()
 				UsedSP ? *UsedSP->GetActorLabel() : TEXT("random"));
 		}
 	}
+}
+
+void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
+{
+	if (!HasAuthority() || !GuardNPCDefinition || !SpawnPoint) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.Get();
+	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
+	{
+		NPCClass = ATerritoryGuardCharacter::StaticClass();
+	}
+
+	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+	if (!OwnerFaction.IsValid()) return;
+
+	FTransform SpawnTransform = SpawnPoint->GetSpawnTransform();
+
+	ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
+		UGameplayStatics::BeginDeferredActorSpawnFromClass(
+			this, NPCClass, SpawnTransform,
+			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn,
+			this));
+
+	if (!Guard) return;
+
+	FGuid GuardSaveGUID = FGuid::NewGuid();
+	Guard->SetTerritorySaveGUID(GuardSaveGUID);
+	Guard->SetOwningTerritoryGUID(TerritoryGUID);
+	Guard->SetNPCDefinition(GuardNPCDefinition);
+
+	UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
+
+	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
+	{
+		TeamAgent->AddFaction(OwnerFaction);
+	}
+
+	SpawnedGuards.Add(Guard);
+	RegisterDefender(Guard);
+	SpawnPoint->RegisterSpawnedGuard(Guard);
+
+	UE_LOG(LogTerritory, Log, TEXT("[GuardReserve] 1 replacement spawned at %s for %s (faction=%s)"),
+		*SpawnPoint->GetActorLabel(),
+		*GetTerritoryTag().ToString(),
+		*OwnerFaction.ToString());
 }
 
 void ATerritoryVolume::DespawnGuards()
