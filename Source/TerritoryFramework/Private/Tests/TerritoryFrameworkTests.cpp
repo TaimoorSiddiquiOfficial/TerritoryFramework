@@ -22,7 +22,6 @@
 #include "Tales/NarrativeCondition.h"
 #include "Navigation/MapMarker.h"
 #include "Navigation/NavigationMarkerComponent.h"
-#include "AI/BTTask_MoveToPatrolNode.h"
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -2076,24 +2075,6 @@ bool FTFContract_DeveloperSettingsExtended::RunTest(const FString& Parameters)
 	// ─── Debug helper methods ───
 	TestTrue(TEXT("Has ShouldDebugBT"), TFTestUtils::HasFunction(Class, TEXT("ShouldDebugBT")));
 	TestTrue(TEXT("Has ShouldDebugCombat"), TFTestUtils::HasFunction(Class, TEXT("ShouldDebugCombat")));
-
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_BTTaskAbortHandling,
-	"TerritoryFramework.Contract.BTTaskAbortHandling",
-	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-
-bool FTFContract_BTTaskAbortHandling::RunTest(const FString& Parameters)
-{
-	const UClass* Class = UBTTask_MoveToPatrolNode::StaticClass();
-	TestNotNull(TEXT("UBTTask_MoveToPatrolNode::StaticClass()"), Class);
-
-	// Verify AbortTask is overridden — critical for stopping movement on task abort
-	TestTrue(TEXT("Has AbortTask override"), TFTestUtils::HasFunction(Class, TEXT("AbortTask")));
-
-	// Verify OnTaskFinished is still present
-	TestTrue(TEXT("Has OnTaskFinished"), TFTestUtils::HasFunction(Class, TEXT("OnTaskFinished")));
 
 	return true;
 }

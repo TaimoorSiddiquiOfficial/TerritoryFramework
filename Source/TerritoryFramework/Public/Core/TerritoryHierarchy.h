@@ -115,6 +115,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	bool AllPropertiesOwnedBy(FGameplayTag Faction) const;
 
+	/** Returns the faction that owns the majority of properties, or empty if no majority. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
+	FGameplayTag GetMajorityPropertyOwner() const;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|District")
 	bool bIsCapital = false;
 

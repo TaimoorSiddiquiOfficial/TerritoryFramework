@@ -230,17 +230,36 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 	// Cascade ownership change to child properties of the district
 	CascadeCaptureToProperties(District, NewOwner);
 
+	// ─── Hierarchy Lock Propagation ───
+	// If any district still has enemy-held properties, the district stays contested
+	// and the city can't be fully captured. Lock propagates bottom-up.
+
 	if (NewOwner.IsValid())
 	{
-		// If all districts now owned by the same faction, the city is fully captured
+		// Check if all districts now owned by the same faction
 		if (AllDistrictsOwnedBy(NewOwner))
 		{
 			FGameplayTag CityOldOwner = GetOwningFaction();
 			if (CityOldOwner != NewOwner)
 			{
+				// City fully captured — unlock if it was locked
+				if (IsLocked())
+				{
+					TryUnlock(true);
+				}
 				SetOwningFaction(NewOwner);
 				OnCityFullyCaptured(NewOwner);
 				OnCityCapturedDelegate.Broadcast(this, NewOwner);
+			}
+		}
+		else
+		{
+			// Not all districts owned by one faction — city can't be claimed
+			// Lock city to prevent premature capture if it was being contested
+			if (!IsLocked() && OwnershipData.State != ETerritoryState::Contested)
+			{
+				// Keep city in contested state, not locked — player can still try
+				// to capture remaining districts
 			}
 		}
 	}
@@ -343,6 +362,36 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 		if (OldOwner.IsValid()) Economy->RecalculateIncome(OldOwner);
 		if (NewOwner.IsValid()) Economy->RecalculateIncome(NewOwner);
 	}
+
+	// ─── Hierarchy Lock Propagation ───
+	// If any property in this district is still owned by a different faction,
+	// the district can't be fully captured by any single faction.
+	if (NewOwner.IsValid() && HasAuthority())
+	{
+		FGameplayTag DistrictOwner = GetOwningFaction();
+		if (!DistrictOwner.IsValid() || DistrictOwner != NewOwner)
+		{
+			// Check if all properties now owned by the same faction
+			if (AllPropertiesOwnedBy(NewOwner))
+			{
+				// All properties aligned — district can be captured
+				if (IsLocked())
+				{
+					TryUnlock(true);
+				}
+			}
+		}
+
+		// If a property was just captured by a new faction but others remain
+		// under different ownership, the district stays contested
+		FGameplayTag MajorityOwner = GetMajorityPropertyOwner();
+		if (MajorityOwner.IsValid() && MajorityOwner != DistrictOwner)
+		{
+			// A faction now holds majority of properties — trigger district capture
+			OnDistrictFullyCaptured(MajorityOwner);
+			OnDistrictCapturedDelegate.Broadcast(this, DistrictOwner, MajorityOwner);
+		}
+	}
 }
 
 void ATerritoryDistrict::OnDistrictFullyCaptured_Implementation(FGameplayTag CapturingFaction)
@@ -429,6 +478,37 @@ bool ATerritoryDistrict::AllPropertiesOwnedBy(FGameplayTag Faction) const
 		}
 	}
 	return true;
+}
+
+FGameplayTag ATerritoryDistrict::GetMajorityPropertyOwner() const
+{
+	TArray<ATerritoryVolume*> Properties = GetProperties();
+	if (Properties.Num() == 0) return FGameplayTag();
+
+	TMap<FGameplayTag, int32> Counts;
+	for (const ATerritoryVolume* Prop : Properties)
+	{
+		FGameplayTag PropOwner = Prop->GetOwningFaction();
+		if (PropOwner.IsValid())
+		{
+			int32& C = Counts.FindOrAdd(PropOwner);
+			++C;
+		}
+	}
+
+	FGameplayTag Best;
+	int32 BestCount = 0;
+	for (const auto& Pair : Counts)
+	{
+		if (Pair.Value > BestCount)
+		{
+			BestCount = Pair.Value;
+			Best = Pair.Key;
+		}
+	}
+	// Only return majority if > 50%
+	if (BestCount * 2 > Properties.Num()) return Best;
+	return FGameplayTag();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

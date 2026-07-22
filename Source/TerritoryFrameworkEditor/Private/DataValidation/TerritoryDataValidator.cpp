@@ -352,28 +352,8 @@ void UTerritoryDataValidator::CheckGuardConfig(ATerritoryVolume* Territory, TArr
 	FString Label = Territory->GetActorLabel();
 
 	bool bHasNPCDef = Territory->GuardNPCDefinition != nullptr;
-	bool bHasBT = Territory->GuardBehaviorTree != nullptr;
-	bool bHasBB = Territory->GuardBlackboardAsset != nullptr;
 	bool bHasSpawnCount = Territory->GuardSpawnCount > 0;
 	bool bHasSpawnPoints = Territory->GuardSpawnPoints.Num() > 0;
-
-	// BT set but no NPC definition — BT will never be used
-	if (bHasBT && !bHasNPCDef)
-	{
-		OutWarnings.Add(FString::Printf(TEXT("%s: GuardBehaviorTree set but GuardNPCDefinition is null — guards won't spawn"), *Label));
-	}
-
-	// NPC definition set but no BT — guards spawn with default AI
-	if (bHasNPCDef && !bHasBT)
-	{
-		OutWarnings.Add(FString::Printf(TEXT("%s: GuardNPCDefinition set but no GuardBehaviorTree — guards use default AI"), *Label));
-	}
-
-	// BT set but no Blackboard — BT will fail to initialize
-	if (bHasBT && !bHasBB)
-	{
-		OutWarnings.Add(FString::Printf(TEXT("%s: GuardBehaviorTree set but GuardBlackboardAsset is null — BT will fail to init"), *Label));
-	}
 
 	// Spawn count > 0 but no NPC definition
 	if (bHasSpawnCount && !bHasNPCDef)

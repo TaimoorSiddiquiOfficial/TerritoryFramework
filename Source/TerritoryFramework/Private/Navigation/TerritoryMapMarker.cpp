@@ -94,11 +94,16 @@ FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNaviga
 	FGameplayTag Owner = TerritoryVolume->GetOwningFaction();
 	if (Owner.IsValid())
 	{
+		// Check faction-specific color override first
 		const FLinearColor* FactionColor = FactionColorMap.Find(Owner);
-		return FactionColor ? *FactionColor : DefaultColor;
+		if (FactionColor) return *FactionColor;
+
+		// No faction-specific color → use captured (green)
+		return CapturedColor;
 	}
 
-	return DefaultColor;
+	// No owner → unclaimed (red)
+	return UnclaimedColor;
 }
 
 FText UTerritoryMapMarker::GetMarkerDisplayText_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType, FText& OutSubtitleText) const

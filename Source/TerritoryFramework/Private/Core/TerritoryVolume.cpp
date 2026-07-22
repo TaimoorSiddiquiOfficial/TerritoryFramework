@@ -17,11 +17,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
 #include "DrawDebugHelpers.h"
-#include "BehaviorTree/BehaviorTree.h"
-#include "BehaviorTree/BlackboardComponent.h"
-#include "AIController.h"
-#include "Navigation/TerritoryNavigationMarkerComponent.h"
 #include "NavigationSystem.h"
+#include "Navigation/TerritoryNavigationMarkerComponent.h"
+#include "Tales/NarrativeCondition.h"
 
 ATerritoryVolume::ATerritoryVolume()
 {
@@ -480,6 +478,63 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 	OnTerritoryStateChanged.Broadcast(this, NewState);
 }
 
+// ─── Lock System ───
+
+bool ATerritoryVolume::IsLocked() const
+{
+	return OwnershipData.State == ETerritoryState::Locked;
+}
+
+bool ATerritoryVolume::CanUnlock() const
+{
+	// No lock conditions → always unlockable
+	if (LockConditions.Num() == 0) return true;
+
+	// All conditions must pass (no target pawn/controller needed for territory conditions)
+	for (const TObjectPtr<UNarrativeCondition>& Cond : LockConditions)
+	{
+		if (!Cond) continue;
+		if (!Cond->CheckCondition(nullptr, nullptr, nullptr)) return false;
+	}
+	return true;
+}
+
+void ATerritoryVolume::LockTerritory(const FText& Reason)
+{
+	if (!HasAuthority()) return;
+
+	LockReason = Reason;
+	if (OwnershipData.State != ETerritoryState::Locked)
+	{
+		SetTerritoryState(ETerritoryState::Locked);
+	}
+
+	UE_LOG(LogTerritory, Log, TEXT("[Lock] %s locked: %s"),
+		*GetTerritoryTag().ToString(), *Reason.ToString());
+}
+
+bool ATerritoryVolume::TryUnlock(bool bForce)
+{
+	if (!HasAuthority()) return false;
+	if (!IsLocked()) return true; // already unlocked
+
+	if (!bForce && !CanUnlock())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlock blocked — conditions not met"),
+			*GetTerritoryTag().ToString());
+		return false;
+	}
+
+	LockReason = FText();
+	SetTerritoryState(OwnershipData.OwningFaction.IsValid()
+		? ETerritoryState::Claimed
+		: ETerritoryState::Unclaimed);
+
+	UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlocked"),
+		*GetTerritoryTag().ToString());
+	return true;
+}
+
 void ATerritoryVolume::RegisterDefender(AActor* Defender)
 {
 	if (!Defender || !HasAuthority()) return;
@@ -745,50 +800,11 @@ void ATerritoryVolume::SpawnGuards()
 
 		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
-		// Set faction
+		// Set faction from territory owner — Narrative's NPCDefinition handles
+		// all AI behavior (ActivityConfiguration, ActivitySchedules, TriggerSets)
 		if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
 		{
 			TeamAgent->AddFaction(OwnerFaction);
-		}
-
-		// Assign behavior tree to the guard's AI controller
-		if (GuardBehaviorTree)
-		{
-			AAIController* AIC = Cast<AAIController>(Guard->GetController());
-			if (AIC)
-			{
-				UBlackboardComponent* BB = AIC->GetBlackboardComponent();
-				if (GuardBlackboardAsset && BB)
-				{
-					BB->InitializeBlackboard(*GuardBlackboardAsset);
-				}
-				AIC->RunBehaviorTree(GuardBehaviorTree);
-
-				// Set patrol spawn point on blackboard for BT tasks
-				if (BB)
-				{
-					if (UsedSP)
-					{
-						BB->SetValueAsObject(TEXT("PatrolSpawnPoint"), UsedSP);
-					}
-					else
-					{
-						BB->SetValueAsObject(TEXT("PatrolSpawnPoint"), this);
-					}
-					BB->SetValueAsInt(TEXT("PatrolNodeIndex"), 0);
-				}
-
-				if (bDebug)
-				{
-					UE_LOG(LogTerritory, Log, TEXT("  Guard %d assigned BT: %s"),
-						i + 1, *GuardBehaviorTree->GetName());
-				}
-			}
-			else if (bDebug)
-			{
-				UE_LOG(LogTerritory, Warning, TEXT("  Guard %d has no AI controller — BT not assigned"),
-					i + 1);
-			}
 		}
 
 		SpawnedGuards.Add(Guard);

@@ -40,10 +40,20 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
 	FLinearColor DefaultColor = FLinearColor(0.5f, 0.5f, 0.5f, 1.f);
 
-	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
-	FLinearColor ContestedColor = FLinearColor(1.f, 0.5f, 0.f, 1.f);
+	/** Color when territory is unclaimed (no owner). Default: Red. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Colors")
+	FLinearColor UnclaimedColor = FLinearColor(1.f, 0.f, 0.f, 1.f);
 
-	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
+	/** Color when territory is being contested. Default: Yellow. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Colors")
+	FLinearColor ContestedColor = FLinearColor(1.f, 1.f, 0.f, 1.f);
+
+	/** Color when territory is captured by a faction (fallback when no faction-specific color). Default: Green. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Colors")
+	FLinearColor CapturedColor = FLinearColor(0.f, 1.f, 0.f, 1.f);
+
+	/** Color when territory is locked. Default: Dark gray. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Colors")
 	FLinearColor LockedColor = FLinearColor(0.3f, 0.3f, 0.3f, 1.f);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")

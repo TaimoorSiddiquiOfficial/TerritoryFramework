@@ -139,6 +139,24 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Guards")
 	FOnAllGuardsDefeated OnAllGuardsDefeatedDelegate;
 
+	// ─── Lock System API ───
+
+	/** Returns true if the territory is currently locked (can't be captured). */
+	UFUNCTION(BlueprintPure, Category = "Territory|Lock")
+	bool IsLocked() const;
+
+	/** Lock the territory. Server-only. Optional reason shown in UI. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Lock")
+	void LockTerritory(const FText& Reason = FText());
+
+	/** Unlock the territory if all LockConditions pass (or bForce=true). Server-only. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Lock")
+	bool TryUnlock(bool bForce = false);
+
+	/** Check if all LockConditions currently pass without actually unlocking. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Lock")
+	bool CanUnlock() const;
+
 	// ─── Guard Spawning API ───
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Guards")
@@ -203,6 +221,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory")
 	bool bStartsLocked = false;
 
+	// ─── Lock System ───
+
+	/** Narrative conditions that must ALL pass for this territory to be unlockable.
+	 *  Checked by TryUnlock(). If empty, territory can always be unlocked. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category = "Territory|Lock",
+		meta = (EditCondition = "bStartsLocked"))
+	TArray<TObjectPtr<class UNarrativeCondition>> LockConditions;
+
+	/** Lock reason shown to UI/debug. Set when locked, cleared when unlocked. */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|Lock")
+	FText LockReason;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Hierarchy",
 		meta = (Categories = "Territory"))
 	FGameplayTag ParentTerritoryTag;
@@ -232,14 +262,6 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards")
 	float GuardSpawnRadius = 500.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
-		meta = (AllowedClasses = "/Script/AIModule.BehaviorTree"))
-	TObjectPtr<class UBehaviorTree> GuardBehaviorTree;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
-		meta = (AllowedClasses = "/Script/AIModule.BlackboardData", EditCondition = "GuardBehaviorTree"))
-	TObjectPtr<class UBlackboardData> GuardBlackboardAsset;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
 		meta = (AllowedClasses = "/Script/TerritoryFramework.TerritoryGuardSpawnPoint"))
