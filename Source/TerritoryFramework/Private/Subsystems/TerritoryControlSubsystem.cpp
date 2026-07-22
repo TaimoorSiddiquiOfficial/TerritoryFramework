@@ -127,6 +127,15 @@ ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Terr
 		if (NarrativeGS)
 		{
 			ETeamAttitude::Type Attitude = NarrativeGS->GetFactionAttitudeTowardsFaction(AttackingFaction, DefendingFaction);
+
+			const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
+			if (DevSettings && DevSettings->ShouldDebugAttitudes())
+			{
+				UE_LOG(LogTerritory, Log, TEXT("[Attitude] %s → %s: %d"),
+					*AttackingFaction.ToString(), *DefendingFaction.ToString(),
+					static_cast<int32>(Attitude));
+			}
+
 			if (Attitude == ETeamAttitude::Friendly)
 			{
 				UE_LOG(LogTerritory, Warning,

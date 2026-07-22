@@ -91,6 +91,18 @@ void ATerritoryVolume::BeginPlay()
 		// Load saved data — overrides the Initial* defaults above if a save exists
 		USaveSystemStatics::LoadSingleActor(this);
 
+		{
+			const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
+			if (DevSettings && DevSettings->ShouldDebugSaveLoad())
+			{
+				UE_LOG(LogTerritory, Log, TEXT("[SaveLoad] %s loaded: owner=%s, state=%d, progress=%.2f"),
+					*GetTerritoryTag().ToString(),
+					*OwnershipData.OwningFaction.ToString(),
+					static_cast<int32>(OwnershipData.State),
+					OwnershipData.ControlProgress);
+			}
+		}
+
 		// Spawn initial guards if territory is claimed and has a guard definition
 		if (OwnershipData.State == ETerritoryState::Claimed
 			&& OwnershipData.OwningFaction.IsValid()
@@ -364,6 +376,20 @@ void ATerritoryVolume::OnStateChanged_Implementation(ETerritoryState OldState, E
 void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC)
 {
 	UnregisterDefender(KilledActor);
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebugDeaths = Settings && Settings->ShouldDebugGuardDeaths();
+
+	if (bDebugDeaths)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] %s died in %s (remaining: %d)"),
+			KilledActor ? *KilledActor->GetName() : TEXT("null"),
+			*GetTerritoryTag().ToString(),
+			GetDefenderCount());
+	}
+
+	// Broadcast OnGuardDied delegate for Blueprint
+	OnGuardDied.Broadcast(this, GetOwningFaction(), FGameplayTag());
 
 	// Notify spawn points that a guard died (triggers reserve replacement)
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))

@@ -140,8 +140,18 @@ ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryByGUID(const FGuid& G
 
 ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryAtLocation(const FVector& WorldLocation) const
 {
-	// Spatial index: O(1) hash lookup + O(k) candidates instead of O(N) full scan
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebugSpatial = Settings && Settings->ShouldDebugSpatial();
+
 	TArray<ATerritoryVolume*> Candidates = SpatialIndex.QueryPoint(WorldLocation);
+
+	if (bDebugSpatial && Candidates.Num() > 0)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Spatial] QueryPoint(%s) → %d candidates, first=%s"),
+			*WorldLocation.ToString(), Candidates.Num(),
+			Candidates[0] ? *Candidates[0]->GetTerritoryTag().ToString() : TEXT("null"));
+	}
+
 	return Candidates.Num() > 0 ? Candidates[0] : nullptr;
 }
 
