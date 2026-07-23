@@ -254,6 +254,11 @@ void ATerritoryVolume::OnRep_OwnershipData()
 	// Diff against cached values — only fire events for fields that actually changed
 	if (PreviousOwningFaction != OwnershipData.OwningFaction)
 	{
+		// Fire cosmetic BP event on clients — invariants already ran on authority
+		if (!HasAuthority())
+		{
+			OnOwnershipChanged(PreviousOwningFaction, OwnershipData.OwningFaction);
+		}
 		OnTerritoryOwnershipChanged.Broadcast(this, PreviousOwningFaction, OwnershipData.OwningFaction);
 		UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s ownership: %s → %s"),
 			*GetTerritoryTag().ToString(),
@@ -264,6 +269,11 @@ void ATerritoryVolume::OnRep_OwnershipData()
 
 	if (PreviousState != OwnershipData.State)
 	{
+		// Fire cosmetic BP event on clients — invariants already ran on authority
+		if (!HasAuthority())
+		{
+			OnStateChanged(PreviousState, OwnershipData.State);
+		}
 		OnTerritoryStateChangedDelegate.Broadcast(this, OwnershipData.State);
 		UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s state → %d"),
 			*GetTerritoryTag().ToString(), static_cast<int32>(OwnershipData.State));

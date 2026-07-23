@@ -58,24 +58,28 @@ void UTerritoryDiplomacySubsystem::Deinitialize()
 
 void UTerritoryDiplomacySubsystem::DeclareWar(FGameplayTag FactionA, FGameplayTag FactionB)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::War);
 	RecordEvent(EDiplomacyEventType::DeclaredWar, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::DeclarePeace(FGameplayTag FactionA, FGameplayTag FactionB)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::Ceasefire);
 	RecordEvent(EDiplomacyEventType::DeclaredPeace, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::Alliance);
 	RecordEvent(EDiplomacyEventType::FormedAlliance, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	if (GetDiplomacyState(FactionA, FactionB) != EDiplomacyState::Alliance) return;
 
 	// Remove treaty metadata, then reset Narrative attitude to Neutral
@@ -87,6 +91,7 @@ void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGamepla
 
 void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGameplayTag FactionB, float DurationGameTime)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	// FIX: Don't call SetDiplomacyState after adding the treaty — it would
 	// see the treaty already exists and early-return without syncing Narrative.
 	RemoveTreaty(FactionA, FactionB);
@@ -198,6 +203,7 @@ bool UTerritoryDiplomacySubsystem::HasTradeAgreement(FGameplayTag FactionA, FGam
 
 void UTerritoryDiplomacySubsystem::AddReputation(FGameplayTag Faction, int32 Amount)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	if (!Faction.IsValid()) return;
 	int32& Rep = FactionReputation.FindOrAdd(Faction);
 	Rep += Amount;
@@ -206,6 +212,7 @@ void UTerritoryDiplomacySubsystem::AddReputation(FGameplayTag Faction, int32 Amo
 
 void UTerritoryDiplomacySubsystem::SetReputation(FGameplayTag Faction, int32 Value)
 {
+	if (!GetWorld()->GetAuthGameMode()) return;
 	if (!Faction.IsValid()) return;
 	FactionReputation.FindOrAdd(Faction) = Value;
 	OnReputationChanged.Broadcast(Faction, Value);
