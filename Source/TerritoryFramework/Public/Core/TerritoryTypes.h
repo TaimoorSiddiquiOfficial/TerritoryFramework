@@ -101,8 +101,24 @@ struct FTerritoryEconomySnapshot
 	int32 TerritoryCount = 0;
 };
 
+/** Maps a faction tag to a specific NPC definition for guard spawning. */
+USTRUCT(BlueprintType)
+struct FTerritoryFactionGuardDefinition
+{
+	GENERATED_BODY()
+
+	/** Faction that triggers this definition. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
+		meta = (Categories = "Narrative.Factions"))
+	FGameplayTag Faction;
+
+	/** NPC definition to use when this faction owns the territory. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards")
+	TObjectPtr<class UNPCDefinition> NPCDefinition;
+};
+
 /**
- * Transaction ledger entry — immutable audit trail for every economy mutation.
+ * Transaction ledger entry — immutable audit trail for every economy mutations.
  * Records who, what, when, why, and how much.
  */
 USTRUCT(BlueprintType)

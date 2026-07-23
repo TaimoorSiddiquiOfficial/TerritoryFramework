@@ -196,6 +196,9 @@ public:
 	/** Re-indexes spatial grid if bounds have changed. Called by registry poll. */
 	void CheckBoundsForReindex();
 
+	/** Resolve the NPC definition for a given faction — checks FactionGuardDefinitions first. */
+	UNPCDefinition* ResolveGuardDefinition(const FGameplayTag& Faction) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -263,9 +266,17 @@ protected:
 
 	// ─── Guard Configuration ───
 
+	/** Default guard definition — used when no faction-specific entry matches. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
 		meta = (AllowedClasses = "/Script/NarrativeArsenal.NPCDefinition"))
 	TObjectPtr<UNPCDefinition> GuardNPCDefinition;
+
+	/** Per-faction guard definitions. When territory owner changes, guards
+	 *  spawn using the definition for the new owner's faction. Falls back
+	 *  to GuardNPCDefinition if no matching entry exists. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
+		meta = (TitleProperty = "{Faction}"))
+	TArray<FTerritoryFactionGuardDefinition> FactionGuardDefinitions;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards")
 	int32 GuardSpawnCount = 3;

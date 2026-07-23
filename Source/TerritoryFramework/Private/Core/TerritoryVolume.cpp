@@ -748,9 +748,31 @@ void ATerritoryVolume::CheckBoundsForReindex()
 // Guard Spawning
 // ═══════════════════════════════════════════════════════════════════════════════
 
+UNPCDefinition* ATerritoryVolume::ResolveGuardDefinition(const FGameplayTag& Faction) const
+{
+	// Check faction-specific definitions first
+	for (const FTerritoryFactionGuardDefinition& Entry : FactionGuardDefinitions)
+	{
+		if (Entry.Faction == Faction && Entry.NPCDefinition)
+		{
+			return Entry.NPCDefinition;
+		}
+	}
+	// Fall back to default
+	return GuardNPCDefinition;
+}
+
 void ATerritoryVolume::SpawnGuards()
 {
-	if (!HasAuthority() || !GuardNPCDefinition) return;
+	if (!HasAuthority()) return;
+
+	// Resolve definition for current owner faction
+	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
+	if (!EffectiveDef) return;
+
+	// Prevent double-spawn if guards already exist
+	if (SpawnedGuards.Num() > 0) return;
 
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -758,15 +780,13 @@ void ATerritoryVolume::SpawnGuards()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugGuards();
 
-	// Determine NPC class from definition — sync load if not already loaded
-	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.LoadSynchronous();
+	// Determine NPC class from resolved definition — sync load
+	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 
-	// Guards take their faction from the TERRITORY OWNER
-	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
 	if (!OwnerFaction.IsValid())
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("SpawnGuards: territory %s has no OwningFaction, skipping"),
@@ -847,7 +867,7 @@ void ATerritoryVolume::SpawnGuards()
 
 		// Single deterministic entrypoint — sets SpawnParams before SetNPCDefinition
 		Guard->ConfigureTerritorySpawn(
-			GuardNPCDefinition,
+			EffectiveDef,
 			EffectiveFaction,
 			TerritoryGUID,
 			GuardSaveGUID);
@@ -881,14 +901,17 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	UClass* NPCClass = GuardNPCDefinition->NPCClassPath.LoadSynchronous();
+	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+	if (!OwnerFaction.IsValid()) return;
+
+	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
+	if (!EffectiveDef) return;
+
+	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
-
-	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
-	if (!OwnerFaction.IsValid()) return;
 
 	FTransform SpawnTransform = SpawnPoint->GetSpawnTransform();
 
@@ -911,7 +934,7 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 
 	// Single deterministic entrypoint
 	Guard->ConfigureTerritorySpawn(
-		GuardNPCDefinition,
+		EffectiveDef,
 		EffectiveFaction,
 		TerritoryGUID,
 		GuardSaveGUID);
