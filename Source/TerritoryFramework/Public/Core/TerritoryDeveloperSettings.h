@@ -255,6 +255,8 @@ public:
 	bool ShouldDebugSpatial() const { return bEnableDebug && bDebugSpatialIndex; }
 	bool ShouldDebugMarkers() const { return bEnableDebug && bDebugMapMarkers; }
 	bool ShouldDebugTales() const { return bEnableDebug && bDebugTales; }
+	UFUNCTION(BlueprintPure, Category = "Territory|Debug")
 	bool ShouldDebugBT() const { return bEnableDebug && bDebugBT; }
+	UFUNCTION(BlueprintPure, Category = "Territory|Debug")
 	bool ShouldDebugCombat() const { return bEnableDebug && bDebugCombat; }
 };

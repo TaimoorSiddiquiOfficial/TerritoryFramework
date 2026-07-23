@@ -310,6 +310,14 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 	TArray<ATerritoryVolume*> Territories = Registry->GetTerritoriesOwnedByFaction(Faction);
 
 	FTerritoryTreasury& Treasury = FactionTreasuries.FindOrAdd(Faction);
+
+	// Apply EconomyStartingGold from developer settings for newly created treasuries
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Treasury.TerritoryCount == 0 && Treasury.Gold == 0)
+	{
+		Treasury.Gold = Settings->EconomyStartingGold;
+	}
+
 	Treasury.IncomePerTick = 0;
 	Treasury.CostsPerTick = 0;
 	Treasury.TerritoryCount = Territories.Num();
@@ -324,7 +332,15 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 			const ATerritoryProperty* Property = Cast<const ATerritoryProperty>(Territory);
 			Treasury.IncomePerTick += Property->GetEffectiveIncome();
 		}
-		Treasury.CostsPerTick += Territory->GetGuardCost();
+
+		// Only count guard costs for territories that actually spawn guards.
+		// Cities and Districts are containers — counting their GuardCost would
+		// double-count costs for hierarchical territories (city + districts + properties).
+		// Use GetSpawnedGuardCount() as proxy — if guards are alive, this territory spawns guards.
+		if (Territory->GetSpawnedGuardCount() > 0)
+		{
+			Treasury.CostsPerTick += Territory->GetGuardCost();
+		}
 	}
 }
 

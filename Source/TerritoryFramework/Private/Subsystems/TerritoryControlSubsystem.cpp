@@ -239,8 +239,17 @@ void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory,
 void UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner)
 {
 	if (!Territory || !NewOwner.IsValid()) return;
+
+	FGameplayTag OldOwner = Territory->GetOwningFaction();
 	TerritoryCaptureState.Remove(Territory);
+	Territory->SetContestingFaction(FGameplayTag());
 	Territory->SetOwningFaction(NewOwner);
+
+	UE_LOG(LogTerritory, Log, TEXT("[ForceCapture] %s captured by %s (was %s)"),
+		*Territory->GetTerritoryTag().ToString(),
+		*NewOwner.ToString(), *OldOwner.ToString());
+
+	OnTerritoryControlChanged.Broadcast(Territory, OldOwner, NewOwner);
 }
 
 void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
@@ -371,6 +380,9 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	const float ProgressRate = Settings ? Settings->CaptureProgressPerSecond : 0.1f;
 	const float DecayRate = Settings ? Settings->CaptureProgressDecayPerSecond : 0.05f;
 
+	// Defender check on every tick — guards that spawn/arrive mid-contest must halt progress
+	const bool bDefendersPresent = Territory->GetDefenderCount() > 0 && Territory->GetOwningFaction().IsValid();
+
 	FGameplayTag BestFaction;
 	float BestProgress = 0.f;
 	int32 BestAttackerCount = 0;
@@ -382,7 +394,15 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 
 		if (AttackerCount > 0)
 		{
-			Pair.Value = FMath::Clamp(Pair.Value + DeltaTime * ProgressRate, 0.f, 1.f);
+			// Defenders present → halt progress (decay instead of advance)
+			if (bDefendersPresent)
+			{
+				Pair.Value = FMath::Max(0.f, Pair.Value - DeltaTime * DecayRate);
+			}
+			else
+			{
+				Pair.Value = FMath::Clamp(Pair.Value + DeltaTime * ProgressRate, 0.f, 1.f);
+			}
 		}
 		else
 		{
@@ -449,6 +469,16 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner)
 {
 	if (!Territory || !NewOwner.IsValid()) return;
+
+	// Re-validate lock state — territory may have been locked via quest event
+	// between progress start and completion.
+	if (Territory->IsLocked())
+	{
+		TerritoryCaptureState.Remove(Territory);
+		UE_LOG(LogTerritory, Warning, TEXT("[Capture] %s was locked before completion — capture aborted"),
+			*Territory->GetTerritoryTag().ToString());
+		return;
+	}
 
 	FGameplayTag OldOwner = Territory->GetOwningFaction();
 	TerritoryCaptureState.Remove(Territory);

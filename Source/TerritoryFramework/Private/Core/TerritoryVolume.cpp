@@ -585,7 +585,7 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 	}
 	else if (NewState == ETerritoryState::Claimed && OldState == ETerritoryState::Contested)
 	{
-		if (HasAuthority() && GuardNPCDefinition && GuardSpawnCount > 0 && SpawnedGuards.Num() == 0)
+		if (HasAuthority() && ResolveGuardDefinition(OwnershipData.OwningFaction) && GuardSpawnCount > 0 && SpawnedGuards.Num() == 0)
 		{
 			SpawnGuards();
 		}
@@ -863,8 +863,9 @@ void ATerritoryVolume::SpawnGuards()
 	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
 	if (!EffectiveDef) return;
 
-	// Prevent double-spawn if guards already exist
-	if (SpawnedGuards.Num() > 0) return;
+	// Prevent double-spawn if guards already exist (check live count, not array size —
+	// array may contain stale weak pointers from destroyed guards)
+	if (GetSpawnedGuardCount() > 0) return;
 
 	UWorld* World = GetWorld();
 	if (!World) return;

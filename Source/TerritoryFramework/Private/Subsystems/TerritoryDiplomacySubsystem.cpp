@@ -262,11 +262,15 @@ void UTerritoryDiplomacySubsystem::SyncToGameState()
 
 void UTerritoryDiplomacySubsystem::LoadFromGameState()
 {
-	// Rebuild treaty metadata from Narrative GameState attitudes
+	// Rebuild treaty metadata from Narrative GameState attitudes.
+	// Preserve metadata (timing, permanence, expiry) for treaties that already exist
+	// and whose attitude hasn't changed. Only create new treaties for attitudes that
+	// have no corresponding treaty record.
 	ANarrativeGameState* GS = GetNarrativeGameState();
 	if (!GS) return;
 
-	ActiveTreaties.Empty();
+	// Track which faction pairs we've seen from GameState attitudes
+	TSet<FGuid> SeenPairs;
 
 	for (const auto& Pair : GS->FactionAllianceMap)
 	{
@@ -279,9 +283,38 @@ void UTerritoryDiplomacySubsystem::LoadFromGameState()
 			// Avoid duplicates (A→B and B→A)
 			if (GetTypeHash(FactionA) > GetTypeHash(FactionB)) continue;
 
+			const uint32 HashA = GetTypeHash(FactionA);
+			const uint32 HashB = GetTypeHash(FactionB);
+			FGuid CanonicalKey = FGuid(FMath::Min(HashA, HashB), FMath::Max(HashA, HashB), 0, 0);
+			SeenPairs.Add(CanonicalKey);
+
 			EDiplomacyState State = AttitudeToDiplomacyState(Attitude);
-			if (State != EDiplomacyState::None)
+			if (State == EDiplomacyState::None)
 			{
+				// Neutral attitude — remove any existing treaty for this pair
+				FTreatyRecord* Existing = FindTreaty(FactionA, FactionB);
+				if (Existing)
+				{
+					RemoveTreaty(FactionA, FactionB);
+				}
+				continue;
+			}
+
+			// Check if treaty already exists with same state — preserve metadata
+			FTreatyRecord* Existing = FindTreaty(FactionA, FactionB);
+			if (Existing && Existing->State == State)
+			{
+				// Keep existing treaty with its metadata (timing, permanence, expiry)
+				continue;
+			}
+			else if (Existing)
+			{
+				// State changed — update state but preserve metadata
+				Existing->State = State;
+			}
+			else
+			{
+				// New treaty from attitude
 				FTreatyRecord Treaty;
 				Treaty.FactionA = FactionA;
 				Treaty.FactionB = FactionB;
@@ -289,6 +322,20 @@ void UTerritoryDiplomacySubsystem::LoadFromGameState()
 				Treaty.bPermanent = true;
 				ActiveTreaties.Add(Treaty);
 			}
+		}
+	}
+
+	// Remove treaties for faction pairs that no longer have any attitude entry
+	for (int32 i = ActiveTreaties.Num() - 1; i >= 0; --i)
+	{
+		FTreatyRecord& Treaty = ActiveTreaties[i];
+		FGuid Key = FGuid(
+			FMath::Min(GetTypeHash(Treaty.FactionA), GetTypeHash(Treaty.FactionB)),
+			FMath::Max(GetTypeHash(Treaty.FactionA), GetTypeHash(Treaty.FactionB)),
+			0, 0);
+		if (!SeenPairs.Contains(Key))
+		{
+			ActiveTreaties.RemoveAt(i);
 		}
 	}
 }

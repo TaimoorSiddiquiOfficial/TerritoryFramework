@@ -152,10 +152,10 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("UnregisterDefender")));
 
 	// ─── Delegates ───
-	TestTrue(TEXT("Has OnTerritoryControlChanged delegate"),
-		TFTestUtils::HasProperty(Class, TEXT("OnTerritoryControlChanged")));
-	TestTrue(TEXT("Has OnTerritoryStateChanged delegate"),
-		TFTestUtils::HasProperty(Class, TEXT("OnTerritoryStateChanged")));
+	TestTrue(TEXT("Has OnTerritoryOwnershipChanged delegate"),
+		TFTestUtils::HasProperty(Class, TEXT("OnTerritoryOwnershipChanged")));
+	TestTrue(TEXT("Has OnTerritoryStateChangedDelegate delegate"),
+		TFTestUtils::HasProperty(Class, TEXT("OnTerritoryStateChangedDelegate")));
 
 	// ─── INarrativeSavableActor function overrides ───
 	TestTrue(TEXT("Has GetActorGUID implementation"),

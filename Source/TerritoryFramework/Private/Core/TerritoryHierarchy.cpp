@@ -198,10 +198,43 @@ void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 	UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s lost by %s"),
 		*GetTerritoryTag().ToString(), *PreviousFaction.ToString());
 
-	// Set city to Unclaimed — but don't clobber Locked state
+	// Only unclaim if the old owner holds NO districts. If they still hold some,
+	// transition to Contested — the city is partially held, not fully lost.
 	if (HasAuthority() && !IsLocked())
 	{
-		SetOwningFaction(FGameplayTag());
+		if (AllDistrictsOwnedBy(PreviousFaction))
+		{
+			// Old owner still holds all districts — shouldn't happen, but guard
+		}
+		else
+		{
+			// Check if any other faction has all districts
+			TArray<ATerritoryVolume*> Districts = GetDistricts();
+			bool bAnyFactionOwnsAll = false;
+			for (ATerritoryVolume* District : Districts)
+			{
+				FGameplayTag DistrictOwner = District->GetOwningFaction();
+				if (DistrictOwner.IsValid() && DistrictOwner != PreviousFaction)
+				{
+					if (AllDistrictsOwnedBy(DistrictOwner))
+					{
+						// Another faction fully captured — they own the city now
+						SetOwningFaction(DistrictOwner);
+						bAnyFactionOwnsAll = true;
+						break;
+					}
+				}
+			}
+
+			if (!bAnyFactionOwnsAll)
+			{
+				// No faction owns all districts — city is contested
+				if (OwnershipData.State == ETerritoryState::Claimed)
+				{
+					SetTerritoryState(ETerritoryState::Contested);
+				}
+			}
+		}
 	}
 
 	// Recalculate income for the faction that lost the city

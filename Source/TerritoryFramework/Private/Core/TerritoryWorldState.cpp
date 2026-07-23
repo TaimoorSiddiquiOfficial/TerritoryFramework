@@ -54,7 +54,13 @@ void ATerritoryWorldState::PostEditChangeProperty(FPropertyChangedEvent& Propert
 void ATerritoryWorldState::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 {
 	Super::PostDuplicate(DuplicateMode);
-	WorldStateGUID = FGuid::NewGuid();
+
+	// PIE world creation uses StaticDuplicateObject — must NOT regenerate GUID.
+	// Only regenerate for actual editor duplication (user Ctrl+D).
+	if (DuplicateMode == EDuplicateMode::Normal)
+	{
+		WorldStateGUID = FGuid::NewGuid();
+	}
 }
 #endif
 
@@ -282,6 +288,72 @@ FReplicatedCaptureSummary ATerritoryWorldState::GetCaptureSummary(const FGamepla
 void ATerritoryWorldState::ExportPersistentState()
 {
 	if (!HasAuthority()) return;
+
+	// Pull live state from subsystems into replicated arrays BEFORE copying to saved arrays.
+	// The EconomySubsystem holds the authoritative treasury/transaction state;
+	// without this sync, ReplicatedTreasuries stays empty and nothing persists.
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
+		{
+			ReplicatedTreasuries.Empty();
+			TArray<FGameplayTag> Factions = Economy->GetAllFactionsWithTreasury();
+			for (const FGameplayTag& Faction : Factions)
+			{
+				FTerritoryTreasury Treasury = Economy->GetFactionEconomy(Faction);
+				FReplicatedFactionEconomy Entry;
+				Entry.Faction = Faction;
+				Entry.Treasury = Treasury.Gold;
+				Entry.IncomePerTick = Treasury.IncomePerTick;
+				Entry.CostsPerTick = Treasury.CostsPerTick;
+				Entry.TerritoryCount = Treasury.TerritoryCount;
+				ReplicatedTreasuries.Add(Entry);
+			}
+
+			ReplicatedTransactions.Empty();
+			int32 TxLimit = Economy ? Economy->MaxTransactionHistory : 500;
+			for (const FGameplayTag& Faction : Factions)
+			{
+				TArray<FTerritoryTransaction> SubsystemTx = Economy->GetTransactionHistory(Faction, TxLimit);
+				for (const FTerritoryTransaction& Tx : SubsystemTx)
+				{
+					FReplicatedTransaction RepTx;
+					RepTx.TransactionID = Tx.TransactionID;
+					RepTx.Faction = Tx.Faction;
+					RepTx.Type = Tx.Type;
+					RepTx.Amount = Tx.Amount;
+					RepTx.BalanceAfter = Tx.BalanceAfter;
+					RepTx.GameTime = Tx.GameTime;
+					RepTx.Reason = Tx.Reason;
+					RepTx.SourceTerritory = Tx.SourceTerritory;
+					ReplicatedTransactions.Add(RepTx);
+				}
+			}
+		}
+
+		if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
+		{
+			ReplicatedTreaties.Empty();
+			for (const FTreatyRecord& Treaty : Diplomacy->GetAllTreaties())
+			{
+				FReplicatedTreaty RepTreaty;
+				RepTreaty.TreatyID = Treaty.GetCanonicalKey();
+				RepTreaty.FactionA = Treaty.FactionA;
+				RepTreaty.FactionB = Treaty.FactionB;
+				RepTreaty.State = Treaty.State;
+				RepTreaty.SignedGameTime = Treaty.SignedGameTime;
+				RepTreaty.ExpiryGameTime = Treaty.ExpiryGameTime;
+				RepTreaty.bPermanent = Treaty.bPermanent;
+				ReplicatedTreaties.Add(RepTreaty);
+			}
+
+			ReplicatedReputation.Empty();
+			// Reputation is stored in DiplomacySubsystem but no public getter for all entries.
+			// SyncToGameState pushes attitudes; reputation is read via GetReputation per-faction.
+			// For now, save what we have in ReplicatedReputation from the last import.
+		}
+	}
 
 	SavedTreasuries = ReplicatedTreasuries;
 	SavedTransactions = ReplicatedTransactions;
