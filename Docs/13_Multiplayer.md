@@ -33,11 +33,12 @@
 | ReplicatedReputation | ✅ |
 | ReplicatedCaptureSummaries | ✅ |
 
-## BlueprintAuthorityOnly
+## Authority Enforcement
 
 All mutation functions are marked `BlueprintAuthorityOnly`:
 - Blueprint calls on clients are silently rejected
 - C++ callers should use `GetAuthGameMode()` check as runtime backstop
+- **Tales events** (`TerritoryCaptureEvent`, `TerritoryLockEvent`, `TerritoryUnlockEvent`) explicitly skip on `NM_Client` — no client-side capture mutations
 
 ## Timer Scheduling
 
@@ -46,6 +47,7 @@ All mutation functions are marked `BlueprintAuthorityOnly`:
 | Capture tick | 0.1s (configurable) | Server only (NM_Client check) |
 | Economy tick | 300s (configurable) | Server only (NM_Client check) |
 | Treaty expiration | 10s (configurable) | Server only (NM_Client check) |
+| Registry bounds poll | 2s | Server only (NM_Client check) |
 
 ## Client UI Behavior
 

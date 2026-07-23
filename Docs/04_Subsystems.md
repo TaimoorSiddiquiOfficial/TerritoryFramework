@@ -64,8 +64,7 @@ void UnregisterTerritory(ATerritoryVolume* Volume)
 
 | Delegate | Signature | When |
 |---|---|---|
-| OnTerritoryRegistered | (ATerritoryVolume*) | After RegisterTerritory |
-| OnTerritoryUnregistered | (ATerritoryVolume*) | After UnregisterTerritory |
+| OnTerritoryRegistered | (ATerritoryVolume*, bool bWasUnregistered) | After Register (`false`) or Unregister (`true`) |
 
 Cities subscribe to `OnTerritoryRegistered` to catch districts that spawn after the city.
 
@@ -90,24 +89,26 @@ Manages the capture flow — attacker registration, progress accumulation, captu
 
 ```
 1. RegisterAttacker(Territory, Actor, Faction)
-   └── Checks attack budget via CombatDirector
-   └── Returns false if budget exhausted
+   └── Identity-based: TSet<TWeakObjectPtr<AActor>> per faction (no count inflation)
+   └── Seeds capture progress entry
 
 2. Capture tick (every CaptureTickInterval, server-only)
-   └── For each contested territory:
-       ├── Count attackers present in bounds
-       ├── Progress += Attackers × TickRate
-       ├── If Progress >= 1.0 → ForceCapture(Territory, ContestingFaction)
-       └── Broadcast OnCaptureProgressUpdated
+   └── Phase 1: Evaluate all contested territories (no map mutation)
+       ├── Attacker present → progress += DeltaTime × ProgressRate
+       ├── No attackers → progress decays by DeltaTime × DecayRate
+       ├── Defenders present → progress decays instead of advancing
+       ├── ContestingFaction updated to leading faction (highest progress → most attackers → tag name)
+       └── If progress >= 1.0 → defer Complete command
+   └── Phase 2: Apply deferred commands
+       ├── Complete → CompleteCapture(Territory, Faction)
+       └── Reset → clear capture state, restore Claimed/Unclaimed
 
-3. UnregisterAttacker(Territory, Actor, Faction)
-   └── If no attackers remain, progress decays back to 0
-
-4. On capture complete:
-   └── SetOwningFaction(NewFaction)
-   └── SetTerritoryState(Controlled)
+3. CompleteCapture:
+   └── SetOwningFaction(NewFaction) → state = Claimed, guards respawn
    └── Broadcast OnTerritoryControlChanged
-   └── SpawnGuards() for new owner
+
+4. ForceCapture(Territory, Faction):
+   └── Bypasses all rules, sets state to Claimed explicitly
 ```
 
 ### API
@@ -137,12 +138,12 @@ Manages the capture flow — attacker registration, progress accumulation, captu
 
 | Value | Meaning |
 |---|---|
-| Success | Capture initiated |
+| Success | Capture initiated (territory now Contested) |
 | AlreadyOwned | Attacker owns this territory |
-| Locked | bStartsLocked = true |
-| DiplomaticallyBlocked | Factions are Friendly |
-| DefendersRemain | Guards still alive |
-| NoAttackBudget | CombatDirector denied — too many attackers |
+| Locked | Territory is locked |
+| DiplomaticallyBlocked | Factions are Friendly (via Narrative attitude) |
+| DefendersRemain | Guards/defenders still alive |
+| InvalidTerritory | Null territory or invalid faction |
 
 ### Faction Attitude Check
 
@@ -162,11 +163,10 @@ if (bFriendly) return ECaptureResult::DiplomaticallyBlocked;
 
 ### Delegates
 
-| Delegate | Signature |
-|---|---|
-| OnCaptureStarted | (Territory*, Faction) |
-| OnCaptureProgressUpdated | (Territory*, Faction, Progress) |
-| OnCaptureCompleted | (Territory*, OldFaction, NewFaction) |
+| Delegate | Signature | When |
+|---|---|---|
+| OnTerritoryControlChanged | (Territory*, OldOwner, NewOwner) | After CompleteCapture or ForceCapture |
+| OnCaptureAttempted | (FCaptureAttempt Attempt) | After every AttemptCapture call |
 
 ---
 
@@ -192,11 +192,12 @@ See [07_Economy_System.md](07_Economy_System.md) for full economy documentation.
 
 ### Key Behaviors
 
-1. **Income recalculation** — triggered on territory register, ownership change, property upgrade
-2. **Transaction ledger** — every mutation (add/debit) records a `FTerritoryTransaction`
-3. **Server-only timer** — economy tick fires every `EconomyTickIntervalSeconds` (default 300s)
+1. **Deferred income recalculation** — ownership changes mark factions dirty via `MarkFactionDirty()`. Actual `RecalculateIncome` runs once per economy tick (not immediately). This avoids O(3N) redundant scans during capture cascades.
+2. **Transaction ledger** — every mutation (add/debit) records a `FTerritoryTransaction`. Ledger is trimmed once per tick (not per faction).
+3. **Server-only timer** — economy tick fires every `EconomyTickIntervalSeconds` (default 300s). Processes dirty factions first, then applies income/upkeep per faction.
 4. **OnTransactionRecorded** — broadcast after every transaction (UI binds to this)
-5. **MaxTransactionHistory** — caps stored transactions (default 500 per faction)
+5. **MaxTransactionHistory** — caps stored transactions globally (default 500)
+6. **Delegate cleanup** — per-territory `OnTerritoryOwnershipChanged` delegates are unbound on `Deinitialize`
 
 ### Runtime Backstop
 
@@ -226,16 +227,20 @@ See [08_Diplomacy_System.md](08_Diplomacy_System.md) for full diplomacy document
 
 ### Key Behaviors
 
-1. **Attitude bridge** — `SetNarrativeAttitude()` directly sets Narrative attitude (no early-return bug)
-2. **Treaty expiration** — timer checks every `TreatyExpirationCheckInterval` (default 10s)
-3. **Dead treaty cleanup** — `OnFactionAttitudeChanged` removes treaty records when Narrative attitude shifts away from the treaty type
-4. **Reset to Neutral** — `SetDiplomacyState(None)` resets Narrative attitude to Neutral
+1. **Attitude bridge** — `SetNarrativeAttitude()` pushes treaty-derived attitudes to Narrative. `OnFactionAttitudeChanged` reconciles treaties when Narrative changes: Friendly creates Alliance only if no treaty exists (preserves TradeAgreement/NonAggression), Hostile overrides any peaceful treaty, Neutral removes treaty record.
+2. **Reentrancy guard** — `bSuppressSync` RAII guard prevents recursive mutation during diplomacy broadcasts
+3. **Treaty expiration** — timer checks every `TreatyExpirationCheckInterval` (default 10s)
+4. **History cap** — DiplomacyHistory capped at 500 entries
+5. **Reset to Neutral** — `SetDiplomacyState(None)` resets Narrative attitude to Neutral
 
 ---
 
 ## UTerritoryCombatDirector
 
-Manages attack permissions — limits how many attackers a faction can field against a single territory.
+Strategic assault budget manager — limits how many AI can simultaneously attack within a territory. This is **separate** from Narrative Pro's per-target attack tokens:
+
+- **Narrative tokens** = tactical: limits how many AI gang up on ONE defender
+- **Assault slots** = strategic: limits how many AI participate in a territory assault
 
 ### API
 
@@ -243,43 +248,49 @@ Manages attack permissions — limits how many attackers a faction can field aga
 
 | Function | Parameters | Returns | Notes |
 |---|---|---|---|
-| RequestAttackPermission | Territory, Faction, Actor | bool | Returns false if budget exhausted |
-| ReleaseAttackPermission | Territory, Faction, Actor | void | Frees a slot |
-| ReleaseAllPermissions | Territory, Faction | void | Frees all slots for faction |
+| RequestAssaultSlot | Territory, NPCController | bool | Returns false if budget exhausted or territory locked |
+| ReleaseAssaultSlot | Territory, NPCController | void | Frees one slot |
+| ReleaseAllSlots | NPCController | void | Frees all slots across all territories |
 
 #### Queries (BlueprintPure)
 
-| Function | Returns |
-|---|---|
-| GetActiveAttackers(Territory, Faction) | int32 |
-| GetAttackBudget(Territory, Faction) | int32 |
-| HasAttackBudget(Territory, Faction) | bool |
+| Function | Returns | Notes |
+|---|---|---|
+| HasAssaultSlot(Territory, Controller) | bool | Does controller hold a slot? |
+| GetGrantedSlots(Territory) | int32 | Active slots (filters dead controllers) |
+| GetAvailableSlots(Territory) | int32 | MaxSlots - GrantedSlots |
 
 ### Budget Source
 
-Each `ATerritoryVolume` has `MaxConcurrentAttackers` (default 4). The CombatDirector enforces this:
+Each `ATerritoryVolume` has `MaxConcurrentAttackers` (default 3). The CombatDirector enforces this:
 
 ```
-If ActiveAttackers(Faction) >= MaxConcurrentAttackers → deny new attacker
+If GrantedSlots(Territory) >= MaxConcurrentAttackers → deny new slot
 ```
+
+### Death Hook
+
+When an assault slot is granted, the CombatDirector binds to the controller's ASC `OnDied` delegate. If the NPC dies while holding a slot, all slots are automatically released — no BT cleanup needed.
+
+### Stale Entry Cleanup
+
+- `CleanupInvalidControllers` removes dead controller references per territory (runs on each `RequestAssaultSlot`)
+- `CleanupStaleTerritoryKeys` removes destroyed territory entries from SlotMap (runs on each `RequestAssaultSlot`)
 
 ### Integration with ControlSubsystem
 
-`RegisterAttacker` in ControlSubsystem calls `CombatDirector->RequestAttackPermission` internally:
+The CombatDirector is a standalone strategic gate. BT tasks call it directly:
 
 ```
-ControlSubsystem::RegisterAttacker
-  └── CombatDirector->RequestAttackPermission
-      └── Returns false → RegisterAttacker returns false
-      └── Returns true → attacker added to capture flow
+BTTask_RequestTerritoryPermission
+  └── CombatDirector->RequestAssaultSlot(Territory, NPCController)
+      └── Returns false → BT Failed (denied)
+      └── Returns true → BT Succeeded (slot granted)
+
+BTTask_ReleaseTerritoryPermission
+  └── Reads TerritoryKey from blackboard
+  └── CombatDirector->ReleaseAssaultSlot(Territory, NPCController)
 ```
-
-### Delegates
-
-| Delegate | Signature |
-|---|---|
-| OnAttackPermissionGranted | (Territory*, Faction, Actor) |
-| OnAttackPermissionDenied | (Territory*, Faction, Actor) |
 
 ---
 

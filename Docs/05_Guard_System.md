@@ -52,11 +52,13 @@ No custom Territory BT needed — thin adapter into Narrative's infrastructure.
 
 ## Capture Flow
 
-1. Kill all guards → `OnAllGuardsDefeated` → territory goes Unclaimed
+1. Kill all defenders → `OnAllGuardsDefeated` → territory goes Unclaimed
+   - **Note:** checks ALL `RegisteredDefenders` (guards + any non-guard defenders registered via `RegisterDefender`), not just `SpawnedGuards`
+   - Super call in BP override is **CRITICAL** — clears owner, resets progress, sets Unclaimed
 2. Designer triggers capture via:
-   - `RegisterAttacker(Territory, Actor, Faction)` — progressive capture
-   - `ForceCapture(Territory, Faction)` — instant capture
-   - `TerritoryCaptureEvent` — from quest/dialogue
+   - `RegisterAttacker(Territory, Actor, Faction)` — progressive capture (identity-based, TSet per faction)
+   - `ForceCapture(Territory, Faction)` — instant capture, sets state to Claimed
+   - `TerritoryCaptureEvent` — from quest/dialogue (server-authoritative, skips on client)
 3. On capture → `SetOwningFaction` → guards respawn for new owner
 
 ## Debug

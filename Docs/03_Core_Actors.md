@@ -29,35 +29,38 @@ ATerritoryVolume (base — placed in level for any territory)
 | ParentTerritoryTag | GameplayTag | — | Parent territory for hierarchy |
 | bAutoCreateMapMarker | bool | true | Auto-creates TerritoryNavigationMarkerComponent on BeginPlay |
 | GuardNPCDefinition | NPCDefinition* | — | NPC template for guards |
-| GuardBehaviorTree | BehaviorTree* | — | BT to run on spawned guards |
-| GuardBlackboardAsset | BlackboardData* | — | BB override (optional) |
+| FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> | — | Per-faction NPC definition overrides |
 | GuardSpawnCount | int32 | 3 | How many guards to spawn |
-| GuardSpawnPoints | Array<Actor> | — | Optional spawn point actors |
+| GuardSpawnPoints | Array<Actor> | — | Optional spawn point actors (use GetGuardSpawnPoints() for typed access) |
+| GuardSpawnRadius | float | 500 | Random spawn radius when no spawn points available |
 
 ### Key Events (BlueprintNativeEvent)
 
-| Event | When | Override For |
-|---|---|---|
-| OnOwnershipChanged(Old, New) | Faction changes | Custom capture effects, sounds |
-| OnStateChanged(OldState, NewState) | State transition | Guard despawn on Contested, respawn on Claimed, despawn on Locked |
-| OnAllGuardsDefeated() | All guards are dead | Trigger undefended state, open capture |
-| OnTerritoryInitialized() | BeginPlay completes | Custom initialization logic |
+| Event | When | Super Required? | Override For |
+|---|---|---|---|
+| OnOwnershipChanged(Old, New) | After faction changes + guard lifecycle | No | Custom capture effects, sounds |
+| OnStateChanged(OldState, NewState) | After state transition + guard lifecycle | No | Custom state reactions |
+| OnAllGuardsDefeated() | All RegisteredDefenders dead | **YES** | Custom defeat reactions (Super clears owner + sets Unclaimed) |
+| OnTerritoryInitialized() | BeginPlay completes | No | Custom initialization logic |
+
+See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-call requirements.
 
 ### Key Delegates (BlueprintAssignable)
 
-| Delegate | Signature |
-|---|---|
-| OnTerritoryControlChanged | (Volume*, OldOwner, NewOwner) |
-| OnTerritoryStateChanged | (Volume*, NewState) |
-| OnGuardDied | (Volume*, Faction, ContestingFaction) |
-| OnAllGuardsDefeatedDelegate | (Volume*) |
+| Delegate | Signature | Fires After |
+|---|---|---|
+| OnTerritoryOwnershipChanged | (Volume*, OldOwner, NewOwner) | SetOwningFaction + OnOwnershipChanged BP event |
+| OnTerritoryStateChangedDelegate | (Volume*, NewState) | SetTerritoryState + OnStateChanged BP event |
+| OnGuardKilled | (Volume*, Guard, Killer, RemainingDefenders) | Per defender death, before all-defeated check |
+| OnAllGuardsDefeatedDelegate | (Volume*) | OnAllGuardsDefeated BP event |
 
 ### State Transition Logic (C++)
 
-OnStateChanged_Implementation now handles:
-- **Claimed → Contested**: Despawns guards (territory under attack)
-- **Contested → Claimed**: Respawns guards (recaptured by owner)
-- **Any → Locked**: Despawns all guards (locked territory)
+Guard lifecycle runs in the **non-virtual** SetTerritoryState/SetOwningFaction, BEFORE the BP virtual fires:
+- **Claimed → Contested**: Clears OwningFaction (territory has no owner while contested), despawns guards
+- **Contested → Claimed**: Respawns guards for new owner
+- **Any → Locked**: Despawns all guards
+- **Contested → Unclaimed** (all defenders dead): Cleared by OnAllGuardsDefeated Super call
 
 ### Map Marker Auto-Creation
 

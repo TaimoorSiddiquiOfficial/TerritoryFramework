@@ -46,21 +46,27 @@ bool bCanAfford = Economy->CanAfford(Faction, Cost);
 
 ## Income Calculation
 
-Income is automatically recalculated when:
-- Territory is registered
-- Territory ownership changes
-- Property is upgraded
+Income recalculation is **deferred** — ownership changes mark factions dirty, actual recalculation runs once per economy tick. This avoids redundant O(N) scans during capture cascades (property → district → city = 3× recalc reduced to 1×).
 
-### Income Formula
+Triggers for deferred recalculation:
+- Territory registered/unregistered
+- Territory ownership changes (via `MarkFactionDirty`)
+- Property upgraded (via `SetUpgradeLevel` → `MarkFactionDirty`)
+- Property captured (via `OnPropertyCaptured` → `SetUpgradeLevel(0)` → `MarkFactionDirty`)
+
+### Income Formula (Leaf-Only)
+
+Only `ATerritoryProperty` contributes income — cities and districts are containers, not income sources.
 
 ```
 FactionIncome = Sum of:
-  For each owned TerritoryVolume:
-    If ATerritoryProperty: GetEffectiveIncome() = PeriodicIncome + (UpgradeLevel × IncomeBonusPerLevel)
-    Else: GetPeriodicIncome()
+  For each owned ATerritoryProperty:
+    GetEffectiveIncome() = PeriodicIncome + (UpgradeLevel × IncomeBonusPerLevel)
+    Capital district multiplier applied if property's district has bIsCapital
 
 FactionCosts = Sum of:
-  For each owned TerritoryVolume: GetGuardCost()
+  For each owned TerritoryVolume with spawned guards:
+    GetGuardCost()
 
 NetPerTick = FactionIncome - FactionCosts
 ```
@@ -138,15 +144,23 @@ Example: PeriodicIncome=50, IncomeBonusPerLevel=25
 
 ```
 Every EconomyTickIntervalSeconds (server only):
-  For each faction with territories:
-    NetIncome = IncomePerTick - CostsPerTick
-    Treasury += NetIncome
-    If Treasury < 0: Treasury = 0
+  1. Process dirty factions:
+     For each faction in DirtyFactions:
+       RecalculateIncome(faction) → updates IncomePerTick, CostsPerTick, TerritoryCount
+     Clear DirtyFactions
 
-    Record Income transaction (+IncomePerTick)
-    Record GuardUpkeep transaction (-CostsPerTick)
+  2. For each faction with treasury:
+     a. Apply income: Treasury.Gold += IncomePerTick
+        Record Income transaction (BalanceAfter = current gold)
 
-    Broadcast OnEconomyTickFired(Faction, Snapshot)
+     b. Apply upkeep: clamp to available gold
+        If CostsPerTick > Treasury.Gold: ActualUpkeep = Treasury.Gold
+        Treasury.Gold -= ActualUpkeep
+        Record GuardUpkeep transaction (negative amount, partial noted in Reason)
+
+     c. Broadcast OnEconomyTickFired(Faction, Snapshot)
+
+  3. Trim TransactionLedger to MaxTransactionHistory (once, not per-faction)
 ```
 
 ## Developer Settings
@@ -161,6 +175,6 @@ Every EconomyTickIntervalSeconds (server only):
 
 Economy state is saved through:
 - `ATerritoryWorldState` (multiplayer — replicated arrays)
-- `ATerritorySavableData` (single-player — SaveGame properties)
+- `ATerritorySavableData` (single-player — SaveGame properties, **DEPRECATED** — use WorldState)
 
-On load, treasuries are **directly assigned** (no artificial transactions created).
+On load, treasuries are **directly assigned** via `SetFactionTreasury` (exact restore, no additive double-counting).
