@@ -63,24 +63,20 @@ void ATerritoryVolume::BeginPlay()
 
 	if (HasAuthority())
 	{
-		// GUID must be persistent from editor placement — don't generate at runtime.
+		// GUID must be baked at editor placement time.
+		// If missing here, it means the level wasn't saved after GUID baking.
 		if (!TerritoryGUID.IsValid())
 		{
 			if (TerritoryTag.IsValid())
 			{
+				// Deterministic fallback — NOT ideal but prevents total breakage
 				uint32 Hash = FCrc::StrCrc_DEPRECATED(*TerritoryTag.ToString());
 				TerritoryGUID = FGuid(Hash, 0, 0, 0);
-				UE_LOG(LogTerritory, Error,
-					TEXT("%s has no persistent TerritoryGUID — using tag hash fallback. Run Validate Assets."),
-					*GetPathName());
 			}
-			else
-			{
-				TerritoryGUID = FGuid::NewGuid();
-				UE_LOG(LogTerritory, Error,
-					TEXT("%s has no TerritoryGUID and no TerritoryTag — save/load broken."),
-					*GetPathName());
-			}
+			UE_LOG(LogTerritory, Error,
+				TEXT("%s has no TerritoryGUID. Open the level in editor, select the actor, "
+					"move it slightly, and save the level to bake a GUID."),
+				*GetPathName());
 		}
 
 		bool bSuccessfullyLoaded = USaveSystemStatics::LoadSingleActor(this);
@@ -323,22 +319,37 @@ void ATerritoryVolume::PostEditChangeProperty(FPropertyChangedEvent& PropertyCha
 void ATerritoryVolume::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 {
 	Super::PostDuplicate(DuplicateMode);
-	TerritoryGUID = FGuid::NewGuid();
-	MarkPackageDirty();
+
+	// PIE world creation uses StaticDuplicateObject — must NOT regenerate GUID.
+	// Only regenerate for actual editor duplication (user Ctrl+D).
+	if (DuplicateMode == EDuplicateMode::Normal)
+	{
+		TerritoryGUID = FGuid::NewGuid();
+		MarkPackageDirty();
+	}
 }
 
 void ATerritoryVolume::PostActorCreated()
 {
 	Super::PostActorCreated();
-	EnsurePersistentTerritoryGUID();
+
+	// Only generate GUID in editor (not during PIE world duplication)
+	if (GetWorld() && !GetWorld()->IsGameWorld())
+	{
+		EnsurePersistentTerritoryGUID();
+	}
 }
 
 void ATerritoryVolume::PostEditImport()
 {
 	Super::PostEditImport();
-	// Pasted/imported actors must get a new GUID
-	TerritoryGUID = FGuid::NewGuid();
-	MarkPackageDirty();
+
+	// Only regenerate in editor
+	if (GetWorld() && !GetWorld()->IsGameWorld())
+	{
+		TerritoryGUID = FGuid::NewGuid();
+		MarkPackageDirty();
+	}
 }
 #endif
 
