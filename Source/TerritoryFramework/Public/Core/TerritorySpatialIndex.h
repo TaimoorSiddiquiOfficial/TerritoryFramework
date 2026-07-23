@@ -25,6 +25,9 @@ struct FTerritorySpatialIndex
 	void Insert(ATerritoryVolume* Territory);
 	void Remove(ATerritoryVolume* Territory);
 
+	/** Re-insert a territory after it has moved or been resized. */
+	void Update(ATerritoryVolume* Territory);
+
 	/** Returns candidate territories in the cell containing WorldLocation (O(1) hash + O(k) candidates) */
 	TArray<ATerritoryVolume*> QueryPoint(const FVector& WorldLocation) const;
 

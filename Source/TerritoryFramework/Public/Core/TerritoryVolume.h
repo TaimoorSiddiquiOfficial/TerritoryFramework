@@ -190,6 +190,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Debug")
 	FString GetDebugString() const;
 
+	/** Re-indexes spatial grid if bounds have changed. Called by registry poll. */
+	void CheckBoundsForReindex();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -285,6 +288,9 @@ private:
 
 	FGameplayTag PreviousOwningFaction;
 	ETerritoryState PreviousState = ETerritoryState::Unclaimed;
+
+	/** Cached bounds for change detection. */
+	FBox LastKnownBounds;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);

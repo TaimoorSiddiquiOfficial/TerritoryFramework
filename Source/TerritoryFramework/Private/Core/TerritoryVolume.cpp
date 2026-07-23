@@ -116,6 +116,7 @@ void ATerritoryVolume::BeginPlay()
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{
 		Registry->RegisterTerritory(this);
+		LastKnownBounds = GetTerritoryBounds();
 	}
 
 	// Fire BP-exposed initialization event
@@ -690,6 +691,22 @@ void ATerritoryVolume::UnbindDefenderDeath(AActor* Defender)
 void ATerritoryVolume::CleanupInvalidDefenders()
 {
 	RegisteredDefenders.RemoveAll([](const TWeakObjectPtr<AActor>& Ptr) { return !Ptr.IsValid(); });
+}
+
+void ATerritoryVolume::CheckBoundsForReindex()
+{
+	FBox CurrentBounds = GetTerritoryBounds();
+	if (!CurrentBounds.Equals(LastKnownBounds))
+	{
+		LastKnownBounds = CurrentBounds;
+		if (UWorld* World = GetWorld())
+		{
+			if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+			{
+				Registry->UpdateTerritoryBounds(this);
+			}
+		}
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

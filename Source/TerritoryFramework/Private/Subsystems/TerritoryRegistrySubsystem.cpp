@@ -4,6 +4,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritorySpatialIndex.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 void UTerritoryRegistrySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -13,16 +14,42 @@ void UTerritoryRegistrySubsystem::Initialize(FSubsystemCollectionBase& Collectio
 	float CellSize = Settings ? Settings->SpatialCellSize : 2000.f;
 	SpatialIndex.Initialize(CellSize);
 
+	// Periodically check if any territory has moved/resized (every 2s — cheap bounds compare)
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			BoundsCheckTimerHandle,
+			this,
+			&UTerritoryRegistrySubsystem::PollBoundsChanges,
+			2.f,
+			true);
+	}
+
 	UE_LOG(LogTerritory, Log, TEXT("TerritoryRegistrySubsystem initialized (spatial cell: %.0fu)"), CellSize);
 }
 
 void UTerritoryRegistrySubsystem::Deinitialize()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BoundsCheckTimerHandle);
+	}
 	RegisteredTerritories.Empty();
 	TagToTerritoryMap.Empty();
 	GUIDToTerritoryMap.Empty();
 	SpatialIndex.Clear();
 	Super::Deinitialize();
+}
+
+void UTerritoryRegistrySubsystem::PollBoundsChanges()
+{
+	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
+	{
+		if (Territory)
+		{
+			Territory->CheckBoundsForReindex();
+		}
+	}
 }
 
 void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
@@ -124,6 +151,12 @@ void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territor
 	SpatialIndex.Remove(Territory);
 
 	OnTerritoryUnregistered.Broadcast(Territory, true);
+}
+
+void UTerritoryRegistrySubsystem::UpdateTerritoryBounds(ATerritoryVolume* Territory)
+{
+	if (!Territory) return;
+	SpatialIndex.Update(Territory);
 }
 
 ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryByTag(const FGameplayTag& TerritoryTag) const

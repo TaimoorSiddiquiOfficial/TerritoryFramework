@@ -75,6 +75,13 @@ void FTerritorySpatialIndex::Remove(ATerritoryVolume* Territory)
 	}
 }
 
+void FTerritorySpatialIndex::Update(ATerritoryVolume* Territory)
+{
+	if (!Territory) return;
+	Remove(Territory);
+	Insert(Territory);
+}
+
 TArray<ATerritoryVolume*> FTerritorySpatialIndex::QueryPoint(const FVector& WorldLocation) const
 {
 	TArray<ATerritoryVolume*> Result;

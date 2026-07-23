@@ -24,6 +24,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory")
 	void UnregisterTerritory(ATerritoryVolume* Territory);
 
+	/** Re-index a territory after it has been moved or resized at runtime. */
+	UFUNCTION(BlueprintCallable, Category = "Territory")
+	void UpdateTerritoryBounds(ATerritoryVolume* Territory);
+
 	UFUNCTION(BlueprintCallable, Category = "Territory")
 	ATerritoryVolume* GetTerritoryByTag(const FGameplayTag& TerritoryTag) const;
 
@@ -67,4 +71,7 @@ private:
 	TMap<FGameplayTag, TWeakObjectPtr<ATerritoryVolume>> TagToTerritoryMap;
 	TMap<FGuid, TWeakObjectPtr<ATerritoryVolume>> GUIDToTerritoryMap;
 	FTerritorySpatialIndex SpatialIndex;
+
+	FTimerHandle BoundsCheckTimerHandle;
+	void PollBoundsChanges();
 };
