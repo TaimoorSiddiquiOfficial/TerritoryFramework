@@ -145,11 +145,6 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 			TransactionLedger.Add(UpkeepTx);
 			OnTransactionRecorded.Broadcast(UpkeepTx);
 		}
-		while (TransactionLedger.Num() > MaxTransactionHistory)
-		{
-			TransactionLedger.RemoveAt(0);
-		}
-
 		if (bDebugTicks)
 		{
 			UE_LOG(LogTerritory, Log, TEXT("[EconomyTick] %s: gold=%d, income=%d, costs=%d, net=%d, territories=%d"),
@@ -171,6 +166,12 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		Snapshot.TerritoryCount = Treasury.TerritoryCount;
 
 		OnEconomyTickFired.Broadcast(Pair.Key, Snapshot);
+	}
+
+	// Trim ledger once after all factions processed (not per-faction)
+	while (TransactionLedger.Num() > MaxTransactionHistory)
+	{
+		TransactionLedger.RemoveAt(0);
 	}
 }
 

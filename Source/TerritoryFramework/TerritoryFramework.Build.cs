@@ -11,14 +11,18 @@ public class TerritoryFramework : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
-			"NarrativeArsenal",
-			"NarrativeSaveSystem",
 			"GameplayAbilities",
 			"GameplayTags",
 			"AIModule",
-			"DeveloperSettings",
 			"UMG",
 			"NavigationSystem"
+		});
+
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"NarrativeArsenal",
+			"NarrativeSaveSystem",
+			"DeveloperSettings"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

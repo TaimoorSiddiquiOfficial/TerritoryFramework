@@ -22,7 +22,9 @@ bool UTerritoryOwnershipCondition::CheckCondition_Implementation(APawn* Target, 
 	ATerritoryVolume* Territory = Registry->GetTerritoryByTag(TerritoryToCheck);
 	if (!Territory)
 	{
-		UE_LOG(LogTerritory, Verbose, TEXT("[TalesOwnershipCondition] Territory '%s' not found in registry"),
+		// Warning-level so designers catch unregistered territory references during testing.
+		// Territories may not be registered yet during early quest evaluation (save/load, streaming).
+		UE_LOG(LogTerritory, Warning, TEXT("[TalesOwnershipCondition] Territory '%s' not found in registry — condition returns false"),
 			*TerritoryToCheck.ToString());
 		return false;
 	}

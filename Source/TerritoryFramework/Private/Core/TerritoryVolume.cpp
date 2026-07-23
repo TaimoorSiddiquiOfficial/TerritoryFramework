@@ -754,15 +754,12 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 			GetDefenderCount());
 	}
 
-	// Broadcast purpose-specific guard death delegate
+	// Broadcast purpose-specific guard death delegate with best-effort killer attribution
 	AActor* Killer = nullptr;
 	if (KilledASC && KilledASC->AbilityActorInfo.IsValid())
 	{
-		if (AActor* Avatar = KilledASC->AbilityActorInfo->AvatarActor.Get())
-		{
-			// The ASC's LastDamageInstigator may be available via GameplayEffectSpec
-			// For now use the avatar as a best-effort killer attribution
-		}
+		// Use the ASC's avatar (the pawn that dealt the killing blow) as killer
+		Killer = KilledASC->AbilityActorInfo->AvatarActor.Get();
 	}
 	OnGuardKilled.Broadcast(this, KilledActor, Killer, GetDefenderCount());
 

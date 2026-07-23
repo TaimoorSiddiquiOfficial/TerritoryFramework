@@ -618,10 +618,11 @@ void ATerritoryProperty::OnPropertyCaptured_Implementation(FGameplayTag NewOwner
 	UE_LOG(LogTerritory, Log, TEXT("[PropertyCapture] %s captured by %s"),
 		*GetTerritoryTag().ToString(), *NewOwner.ToString());
 
-	// Reset upgrade level on capture by a new faction
+	// Reset upgrade level on capture by a new faction — use SetUpgradeLevel to
+	// ensure income recalculation and logging are triggered.
 	if (HasAuthority() && UpgradeLevel > 0)
 	{
-		UpgradeLevel = 0;
+		SetUpgradeLevel(0);
 	}
 }
 

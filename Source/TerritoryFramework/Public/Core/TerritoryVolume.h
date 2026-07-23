@@ -294,6 +294,7 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Guards",
 		meta = (AllowedClasses = "/Script/TerritoryFramework.TerritoryGuardSpawnPoint"))
+	// Stored as AActor for BP editor flexibility — use GetGuardSpawnPoints() for typed access.
 	TArray<TObjectPtr<AActor>> GuardSpawnPoints;
 
 	// ─── Guard Spawn Point Delegate (Blueprint) ───

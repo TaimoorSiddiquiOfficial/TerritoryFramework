@@ -176,8 +176,9 @@ void UTerritoryMapMarker::MarkerOnPaint_Implementation(FPaintContext& Context, F
 	TArray<FVector2f> LinePoints;
 	for (int32 i = 0; i < 4; ++i)
 	{
-		// Offset from the territory actor to this corner in world space (XY only)
-		FVector2D WorldOffset = FVector2D(WorldCorners[i]) - FVector2D(TerritoryVolume->GetActorLocation());
+		// Offset from the box center to this corner in world space (XY only).
+		// Uses BoxCenter (not actor location) so offset boxes render correctly.
+		FVector2D WorldOffset = FVector2D(WorldCorners[i]) - FVector2D(BoxCenter);
 
 		// Apply the same offset in map-local space (world units map 1:1 to map-local units)
 		FVector2D CornerPaintLocal = MarkerPaintLocal + WorldOffset;

@@ -21,10 +21,9 @@ void UTerritoryNavigationMarkerComponent::BeginPlay()
 		return;
 	}
 	{
-		CachedTerritory->OnTerritoryOwnershipChanged.AddDynamic(this,
-			&UTerritoryNavigationMarkerComponent::OnTerritoryControlChanged);
-		CachedTerritory->OnTerritoryStateChangedDelegate.AddDynamic(this,
-			&UTerritoryNavigationMarkerComponent::OnTerritoryStateChanged);
+		// Don't bind component-level delegates — the TerritoryMapMarker already binds
+		// to these same delegates in SetTerritoryVolume and handles RefreshMarker directly.
+		// Binding here would cause double-refresh per state change.
 
 		// Create the territory map marker
 		TerritoryMapMarker = NewObject<UTerritoryMapMarker>(this);
@@ -50,14 +49,7 @@ void UTerritoryNavigationMarkerComponent::EndPlay(const EEndPlayReason::Type End
 	// 4. Call Super::EndPlay (parent uses MarkerObject to remove marker)
 	// 5. Null references LAST (parent needs MarkerObject during its EndPlay)
 
-	if (CachedTerritory.IsValid())
-	{
-		CachedTerritory->OnTerritoryOwnershipChanged.RemoveDynamic(this,
-			&UTerritoryNavigationMarkerComponent::OnTerritoryControlChanged);
-		CachedTerritory->OnTerritoryStateChangedDelegate.RemoveDynamic(this,
-			&UTerritoryNavigationMarkerComponent::OnTerritoryStateChanged);
-	}
-
+	// Component no longer binds delegates (marker handles it) — nothing to unbind here.
 	if (TerritoryMapMarker)
 	{
 		TerritoryMapMarker->ClearTerritoryBinding();

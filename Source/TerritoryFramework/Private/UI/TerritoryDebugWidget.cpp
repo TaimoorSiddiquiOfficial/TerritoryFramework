@@ -30,8 +30,29 @@ void UTerritoryDebugWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 		return;
 	}
 
+	// Throttle rebuilds — avoid per-frame string allocation pressure.
+	TimeSinceLastUpdate += InDeltaTime;
+	if (TimeSinceLastUpdate < UpdateInterval)
+	{
+		return;
+	}
+	TimeSinceLastUpdate = 0.f;
+
+	CacheSubsystems();
 	FText DebugText = BuildDebugString();
 	OnUpdateDebugText(DebugText);
+}
+
+void UTerritoryDebugWidget::CacheSubsystems() const
+{
+	if (bSubsystemsCached) return;
+	const UWorld* World = GetWorld();
+	if (!World) return;
+	CachedRegistry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	CachedControl = World->GetSubsystem<UTerritoryControlSubsystem>();
+	CachedEconomy = World->GetSubsystem<UTerritoryEconomySubsystem>();
+	CachedDiplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	bSubsystemsCached = true;
 }
 
 FText UTerritoryDebugWidget::BuildDebugString() const
@@ -48,11 +69,8 @@ FText UTerritoryDebugWidget::BuildDebugString() const
 
 FText UTerritoryDebugWidget::BuildTerritorySummary() const
 {
-	const UWorld* World = GetWorld();
-	if (!World) return FText::GetEmpty();
-
-	const UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
-	if (!Registry) return FText::GetEmpty();
+	if (!CachedRegistry) return FText::GetEmpty();
+	const UTerritoryRegistrySubsystem* Registry = CachedRegistry;
 
 	FString Result = TEXT("--- Territories ---\n");
 	Result += FString::Printf(TEXT("Total: %d\n"), Registry->GetTerritoryCount());
@@ -72,6 +90,7 @@ FText UTerritoryDebugWidget::BuildTerritorySummary() const
 		case ETerritoryState::Claimed: StateStr = TEXT("Claimed"); break;
 		case ETerritoryState::Contested: StateStr = TEXT("Contested"); break;
 		case ETerritoryState::Locked: StateStr = TEXT("Locked"); break;
+		default: StateStr = TEXT("Unknown"); break;
 		}
 
 		Result += FString::Printf(TEXT("  %s [%s] Owner=%s State=%s Guards=%d Income=%d\n"),
@@ -88,11 +107,8 @@ FText UTerritoryDebugWidget::BuildTerritorySummary() const
 
 FText UTerritoryDebugWidget::BuildEconomySummary() const
 {
-	const UWorld* World = GetWorld();
-	if (!World) return FText::GetEmpty();
-
-	const UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>();
-	if (!Economy) return FText::GetEmpty();
+	if (!CachedEconomy) return FText::GetEmpty();
+	const UTerritoryEconomySubsystem* Economy = CachedEconomy;
 
 	FString Result = TEXT("--- Economy ---\n");
 
@@ -113,11 +129,8 @@ FText UTerritoryDebugWidget::BuildEconomySummary() const
 
 FText UTerritoryDebugWidget::BuildDiplomacySummary() const
 {
-	const UWorld* World = GetWorld();
-	if (!World) return FText::GetEmpty();
-
-	const UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>();
-	if (!Diplomacy) return FText::GetEmpty();
+	if (!CachedDiplomacy) return FText::GetEmpty();
+	const UTerritoryDiplomacySubsystem* Diplomacy = CachedDiplomacy;
 
 	FString Result = TEXT("--- Diplomacy ---\n");
 
@@ -151,19 +164,15 @@ FText UTerritoryDebugWidget::BuildDiplomacySummary() const
 
 FText UTerritoryDebugWidget::BuildCaptureSummary() const
 {
-	const UWorld* World = GetWorld();
-	if (!World) return FText::GetEmpty();
-
-	const UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
-	if (!Control) return FText::GetEmpty();
+	if (!CachedControl) return FText::GetEmpty();
+	const UTerritoryControlSubsystem* Control = CachedControl;
 
 	FString Result = TEXT("--- Capture ---\n");
 
 	TArray<ATerritoryVolume*> AllTerritories;
-	const UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
-	if (Registry)
+	if (CachedRegistry)
 	{
-		AllTerritories = Registry->GetAllTerritories();
+		AllTerritories = CachedRegistry->GetAllTerritories();
 	}
 
 	bool bAnyContested = false;

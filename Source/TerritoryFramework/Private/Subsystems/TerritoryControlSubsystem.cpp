@@ -455,7 +455,8 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 		DeferredCommands.Add({FDeferredCommand::Complete, Territory, BestFaction});
 	}
 
-	// Cleanup zero-progress factions
+	// Cleanup zero-progress factions — collect keys first, then remove after iteration
+	// to avoid mutating the TMap while iterating it (safe even if reentered).
 	TArray<FGameplayTag> ToRemove;
 	for (const auto& Pair : State->CaptureProgressByFaction)
 	{
@@ -469,6 +470,11 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 		State->CaptureProgressByFaction.Remove(Tag);
 		State->AttackersByFaction.Remove(Tag);
 	}
+
+	// Re-fetch State pointer in case deferred commands or delegate listeners
+	// invalidated the TMap value references during cleanup above.
+	State = TerritoryCaptureState.Find(Territory);
+	if (!State) return;
 
 	// DEFER reset — don't mutate map during iteration
 	if (State->CaptureProgressByFaction.Num() == 0)

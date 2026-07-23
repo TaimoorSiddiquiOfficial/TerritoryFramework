@@ -53,6 +53,22 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 	{
 		ValidateLevel(Level, Errors, Warnings);
 	}
+	else if (ATerritoryWorldState* WS = Cast<ATerritoryWorldState>(InAsset))
+	{
+		// Validate WorldState has a valid GUID
+		if (!WS->GetActorGUID_Implementation().IsValid())
+		{
+			Warnings.Add(TEXT("ATerritoryWorldState has no GUID — save/load will not match this actor"));
+		}
+	}
+	else if (ATerritorySavableData* SD = Cast<ATerritorySavableData>(InAsset))
+	{
+		// Validate SavableData has a valid GUID
+		if (!SD->GetActorGUID_Implementation().IsValid())
+		{
+			Warnings.Add(TEXT("ATerritorySavableData has no GUID — save/load will not match this actor"));
+		}
+	}
 
 	// Emit errors
 	for (const FString& Error : Errors)

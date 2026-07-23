@@ -52,7 +52,8 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 			const ECaptureResult Result = Control->AttemptCapture(Territory, CapturingFaction);
 			if (Result == ECaptureResult::Success)
 			{
-				// AttemptCapture initiated contested state — complete it directly
+				// AttemptCapture initiated contested state — add full progress to complete.
+				// AddCaptureProgress routes through AttemptCapture validation internally.
 				Control->AddCaptureProgress(Territory, CapturingFaction, 1.f);
 			}
 			else
@@ -65,6 +66,12 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	}
 	else
 	{
+		// No control subsystem available — log warning and use direct ownership.
+		// This bypasses capture rules (lock, diplomacy, defenders) but is the only
+		// path when the subsystem is missing (e.g. stripped world, test harness).
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[TalesCaptureEvent] ControlSubsystem unavailable for %s — falling back to direct SetOwningFaction"),
+			*TargetTerritoryTag.ToString());
 		Territory->SetOwningFaction(CapturingFaction);
 	}
 

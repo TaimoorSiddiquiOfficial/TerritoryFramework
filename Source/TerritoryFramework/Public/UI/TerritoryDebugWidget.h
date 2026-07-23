@@ -37,6 +37,19 @@ protected:
 private:
 	bool bDebugEnabled = false;
 
+	/** Seconds between debug text rebuilds — avoids per-frame string allocation. */
+	float UpdateInterval = 0.5f;
+	float TimeSinceLastUpdate = 0.f;
+
+	// Cached subsystem pointers — resolved once, avoids 4× GetSubsystem per rebuild.
+	mutable UTerritoryRegistrySubsystem* CachedRegistry = nullptr;
+	mutable UTerritoryControlSubsystem* CachedControl = nullptr;
+	mutable UTerritoryEconomySubsystem* CachedEconomy = nullptr;
+	mutable UTerritoryDiplomacySubsystem* CachedDiplomacy = nullptr;
+	mutable bool bSubsystemsCached = false;
+
+	void CacheSubsystems() const;
+
 	FText BuildDebugString() const;
 	FText BuildTerritorySummary() const;
 	FText BuildEconomySummary() const;
