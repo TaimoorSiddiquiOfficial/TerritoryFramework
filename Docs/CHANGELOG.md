@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.2.1 — 2026-07-23 (Session 2)
+
+Additional 22 fixes from deep re-audit session 2. All P1 and P2 findings resolved.
+
+### Diplomacy (P0)
+- **Inbound bridge fixed**: `OnFactionAttitudeChanged` no longer collapses TradeAgreement/NonAggression/Ceasefire to Alliance when external Friendly attitude arrives. Rich treaties are preserved. Hostile always overrides.
+- **Reentrancy guard**: `bSuppressSync` RAII guard prevents recursive mutation during diplomacy broadcasts
+- **const_cast removed**: Uses non-const `FindTreaty` overload instead of `const_cast`
+
+### Save/Load (P0/P1)
+- **SavableData gold fixed**: `LoadFromSelf` uses `SetFactionTreasury` (exact restore) instead of `AddToTreasury` (additive, caused double gold with WorldState)
+- **PIE duplicate guard**: `PostDuplicate` only regenerates GUID for editor duplication, not PIE world creation
+
+### Economy (P0/P1/P2)
+- **Null-guard GetWorld**: EconomySubsystem `Initialize`/`Deinitialize` check `GetWorld()` before dereferencing
+- **Deferred RecalculateIncome**: Ownership changes mark factions dirty, actual recalculation runs once per economy tick (was O(3N) per capture cascade)
+- **Delegate cleanup**: EconomySubsystem unbinds per-territory `OnTerritoryOwnershipChanged` delegates on `Deinitialize`
+- **Ledger trim moved**: `TransactionLedger` trimming runs once after all factions processed, not per-faction
+
+### Capture (P1)
+- **ForceCapture state**: Explicitly sets state to Claimed after `SetOwningFaction` (was stuck Contested)
+- **ContestingFaction tracks leader**: Updated by `EvaluateCaptureState` based on highest progress, not last-registered attacker
+- **EvaluateCaptureState safety**: Re-fetches State pointer after cleanup to handle potential reentrancy
+
+### Guards (P1)
+- **RegisteredDefenders check**: `OnAllGuardsDefeated` checks ALL `RegisteredDefenders` (includes non-guard defenders), not just `SpawnedGuards`
+- **CombatDirector death hook**: Binds ASC `OnDied` when granting assault slots, auto-releases on NPC death
+- **Stale slot counts**: `GetGrantedSlots` filters dead weak pointers
+- **Stale map keys**: `CleanupStaleTerritoryKeys` removes dead territory entries from SlotMap
+
+### Hierarchy (P1/P2)
+- **Empty district protected**: `AllPropertiesOwnedBy` returns false for empty property list (was trivially true)
+- **Contested clears owner**: `SetTerritoryState(Contested)` clears `OwningFaction` so `IsOwnedByFaction` and `GetOwningFaction` agree
+- **Cascade single event**: `CascadeCaptureToProperties` no longer double-fires `OnPropertyCaptured`
+- **Property upgrade reset**: Uses `SetUpgradeLevel(0)` instead of direct assignment (triggers income recalc)
+
+### Combat (P1/P2)
+- **BTTask_Release targeted**: Reads `TerritoryKey` from blackboard for per-territory slot release, fallback to `ReleaseAllSlots`
+- **BTTask_Request validates**: Fails on unconfigured `bPermissionGrantedKey` instead of silent success
+
+### Tales (P1)
+- **Server authority**: `TerritoryCaptureEvent`, `TerritoryLockEvent`, `TerritoryUnlockEvent` skip on `NM_Client`
+- **Capture fallback**: Logs warning when ControlSubsystem is unavailable instead of silent direct `SetOwningFaction`
+
+### Registry (P1)
+- **Client timer removed**: `PollBoundsChanges` timer only starts on server (`NM_Client` guard added)
+
+### UI (P2)
+- **DebugWidget throttled**: Rebuilds every 0.5s instead of every frame; caches subsystem pointers
+- **Switch default**: `ETerritoryState` switch adds `default: "Unknown"` case
+
+### Navigation (P2)
+- **MapMarker outline**: Uses `BoxCenter` as reference (handles offset BoxComponents correctly)
+- **Double bind removed**: `TerritoryNavigationMarkerComponent` no longer binds delegates that the marker already binds
+
+### Validator (P2)
+- **WorldState/SavableData**: Individual asset validation now checks GUID validity
+
+### Build (P2)
+- **Private dependencies**: `NarrativeArsenal`, `NarrativeSaveSystem`, `DeveloperSettings` moved from Public to Private
+
+### Documentation
+- **Blueprint Extension Guide**: Complete rewrite with Super-call quick reference table, all delegates with fire context, interface reference, state model diagram, and common patterns
+
+---
+
 ## v0.2.0 — 2026-07-23
 
 Comprehensive audit-driven stabilization release. 32+ fixes across capture, guards, hierarchy, economy, diplomacy, replication, and Narrative Pro integration.

@@ -14,7 +14,11 @@ TerritoryFramework (TREATY METADATA only)
 └── DiplomacyHistory — event log
 
 Bridge: SetNarrativeAttitude() pushes treaty-derived attitudes to Narrative
-        OnFactionAttitudeChanged() reconciles treaties when Narrative changes
+        OnFactionAttitudeChanged() reconciles treaties when Narrative changes:
+          - Friendly attitude → creates Alliance only if NO treaty exists (preserves TradeAgreement/NonAggression)
+          - Hostile attitude → overrides any peaceful treaty to War
+          - Neutral attitude → removes treaty record
+        Reentrancy guard (bSuppressSync) prevents recursive mutation from delegate listeners
 ```
 
 ## Treaty Types

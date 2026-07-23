@@ -1,341 +1,509 @@
-# Territory Framework — Blueprint Extension Guide
+# Blueprint Extension Guide — TerritoryFramework v0.2.0
 
-> How to create BP subclasses, which events to call Parent on, and the full save/load lifecycle.
+> Complete reference for every Blueprint override point, delegate, and interface.
+> **Critical:** some `BlueprintNativeEvent` overrides MUST call Parent (Super) — skipping Super silently breaks guard lifecycle, economy, or hierarchy propagation.
 
 ---
 
-## Creating BP Subclasses
+## Table of Contents
 
-When you create a Blueprint child of `ATerritoryVolume`, `ATerritoryCity`, `ATerritoryDistrict`, or `ATerritoryProperty`, certain BlueprintNativeEvents **must call `Parent:`** for correct behavior.
+1. [Super-Call Quick Reference](#super-call-quick-reference)
+2. [BlueprintNativeEvent Overrides — Super Required](#blueprintnativeevent-overrides--super-required)
+3. [BlueprintNativeEvent Overrides — Super Optional](#blueprintnativeevent-overrides--super-optional)
+4. [BlueprintImplementableEvent — BP Only, No Super](#blueprintimplementableevent--bp-only-no-super)
+5. [BlueprintAssignable Delegates](#blueprintassignable-delegates)
+6. [Interfaces](#interfaces)
+7. [State Model Reference](#state-model-reference)
+8. [Common Patterns](#common-patterns)
 
-### Events Where Calling Parent is REQUIRED
+---
 
-| Class | Event | What Parent Does | If You Don't Call Parent |
+## Super-Call Quick Reference
+
+| Event | Class | Super Required? | What Breaks Without Super |
 |---|---|---|---|
-| **TerritoryVolume** | `OnAllGuardsDefeated` | Clears ownership → sets Unclaimed → enables capture | Territory stays Claimed, capture impossible |
-| **TerritoryCity** | `OnDistrictCapturedInCity` | Cascade capture to city level | City never detects district changes |
-| **TerritoryCity** | `OnCityFullyCaptured` | Economy bonus + delegate broadcast | No capital bonus gold |
-| **TerritoryDistrict** | `OnDistrictFullyCaptured` | District capture events | Events don't fire |
-| **TerritoryProperty** | `OnPropertyCaptured` | Resets upgrade level to 0 | Captured property keeps enemy upgrades |
+| `OnOwnershipChanged` | `ATerritoryVolume` | **No** | Nothing — invariants run before this event |
+| `OnStateChanged` | `ATerritoryVolume` | **No** | Nothing — invariants run before this event |
+| `OnAllGuardsDefeated` | `ATerritoryVolume` | **YES — CRITICAL** | Territory stays Claimed with dead guards; capture stuck |
+| `OnTerritoryInitialized` | `ATerritoryVolume` | **No** | Nothing — extension hook only |
+| `OnPropertyCaptured` | `ATerritoryProperty` | **YES — HIGH** | Upgrade level retained by new owner; income not recalculated |
+| `OnCityFullyCaptured` | `ATerritoryCity` | **YES — HIGH** | Income not recalculated; capital bonus (1000g) lost |
+| `OnCityLost` | `ATerritoryCity` | **YES — HIGH** | Ownership cascade skipped; income not recalculated |
+| `OnDistrictCapturedInCity` | `ATerritoryCity` | **No** | Nothing — notification only |
+| `OnDistrictFullyCaptured` | `ATerritoryDistrict` | **YES — MEDIUM** | Capital district bonus (500g) lost |
 
-### Events Where Calling Parent is OPTIONAL
+---
 
-| Class | Event | What Parent Does | Notes |
+## BlueprintNativeEvent Overrides — Super Required
+
+These events have C++ `_Implementation` that performs **critical invariant work**. If your Blueprint override does NOT call Parent/Super, the invariants are silently skipped.
+
+### `ATerritoryVolume::OnAllGuardsDefeated()`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryVolume` (and all subclasses: City, District, Property) |
+| **Category** | `Territory\|Guards` |
+| **When it fires** | After the last `RegisteredDefender` dies (guards AND any non-guard defenders registered via `RegisterDefender`) |
+| **Parameters** | None |
+
+**What the C++ `_Implementation` does:**
+1. Calls `SetOwningFaction(FGameplayTag())` — clears the territory owner
+2. Calls `SetControlProgress(0.f)` — resets capture progress
+3. Calls `SetTerritoryState(Unclaimed)` — unless territory is Locked
+
+**If you skip Super:**
+- **CRITICAL:** Territory stays Claimed by the old faction even though all defenders are dead. Capture system cannot start because the territory appears owned. Economy continues paying income to the old owner. Guards do not respawn because the ownership never changed.
+
+**Correct BP override pattern:**
+```
+Event: OnAllGuardsDefeated
+  → Call Parent (Super::OnAllGuardsDefeated)
+  → [Your custom logic: play defeat cinematic, notify quest system, etc.]
+```
+
+---
+
+### `ATerritoryProperty::OnPropertyCaptured(FGameplayTag NewOwner)`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryProperty` |
+| **Category** | `Territory\|Property` |
+| **When it fires** | Every time ownership changes on a property (from `OnOwnershipChanged_Implementation`) |
+| **Parameters** | `NewOwner` — the faction that now owns this property |
+
+**What the C++ `_Implementation` does:**
+1. Calls `SetUpgradeLevel(0)` — resets property upgrades, which also:
+   - Triggers `MarkFactionDirty` for deferred income recalculation
+   - Logs the level change
+
+**If you skip Super:**
+- **HIGH:** Property retains its upgrade level after capture. The new owner gets the old owner's upgrade income bonus. Economy recalculation is skipped for this property.
+
+**Correct BP override pattern:**
+```
+Event: OnPropertyCaptured
+  → Call Parent (Super::OnPropertyCaptured)
+  → [Your custom logic: play capture VFX, drop loot, etc.]
+```
+
+---
+
+### `ATerritoryCity::OnCityFullyCaptured(FGameplayTag CapturingFaction)`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryCity` |
+| **Category** | `Territory\|Hierarchy` |
+| **When it fires** | When ALL districts in the city are owned by the same faction |
+| **Parameters** | `CapturingFaction` — the faction that now owns the entire city |
+
+**What the C++ `_Implementation` does:**
+1. Calls `Economy->MarkFactionDirty(CapturingFaction)` — queues income recalculation for next economy tick
+2. If city has a capital district: awards **1000 gold** bonus to capturing faction via `AddToTreasury`
+
+**If you skip Super:**
+- **HIGH:** Income is never recalculated for the capturing faction. Capital district bonus (1000 gold) is never awarded.
+
+**Correct BP override pattern:**
+```
+Event: OnCityFullyCaptured
+  → Call Parent (Super::OnCityFullyCaptured)
+  → [Your custom logic: city-wide celebration, unlock city quests, etc.]
+```
+
+---
+
+### `ATerritoryCity::OnCityLost(FGameplayTag PreviousFaction)`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryCity` |
+| **Category** | `Territory\|Hierarchy` |
+| **When it fires** | When a faction that owned all districts loses at least one district |
+| **Parameters** | `PreviousFaction` — the faction that lost the city |
+
+**What the C++ `_Implementation` does:**
+1. Checks if any other faction now owns ALL districts → if so, calls `SetOwningFaction` for that faction (cascade capture)
+2. If no faction owns all districts → sets city state to `Contested`
+3. Calls `Economy->MarkFactionDirty(PreviousFaction)` — queues income recalculation for the losing faction
+
+**If you skip Super:**
+- **HIGH:** City ownership cascade is skipped — new faction doesn't gain the city. Income recalculation for the losing faction is skipped. City may stay Claimed by old faction even after losing districts.
+
+**Correct BP override pattern:**
+```
+Event: OnCityLost
+  → Call Parent (Super::OnCityLost)
+  → [Your custom logic: city loss notification, penalty, etc.]
+```
+
+---
+
+### `ATerritoryDistrict::OnDistrictFullyCaptured(FGameplayTag CapturingFaction)`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryDistrict` |
+| **Category** | `Territory\|Hierarchy` |
+| **When it fires** | When ALL properties in the district are owned by the same faction |
+| **Parameters** | `CapturingFaction` — the faction that now owns the entire district |
+
+**What the C++ `_Implementation` does:**
+1. If district is a capital (`bIsCapital`): awards **500 gold** bonus via `AddToTreasury`
+
+**If you skip Super:**
+- **MEDIUM:** Capital district bonus (500 gold) is not awarded.
+
+**Correct BP override pattern:**
+```
+Event: OnDistrictFullyCaptured
+  → Call Parent (Super::OnDistrictFullyCaptured)
+  → [Your custom logic: district celebration, strategic buff, etc.]
+```
+
+---
+
+## BlueprintNativeEvent Overrides — Super Optional
+
+These events have C++ `_Implementation` that is either **empty** or does only cosmetic work. Safe to override without calling Super.
+
+### `ATerritoryVolume::OnOwnershipChanged(FGameplayTag OldOwner, FGameplayTag NewOwner)`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryVolume` (and all subclasses) |
+| **Category** | `Territory` |
+| **When it fires** | After `SetOwningFaction` completes ALL invariant work (guards despawned/spawned, state set, replication data updated) |
+| **Parameters** | `OldOwner`, `NewOwner` — faction tags before and after |
+
+**C++ `_Implementation`:** Empty. All guard lifecycle, state transitions, and replication are handled in the non-virtual `SetOwningFaction` BEFORE this event fires.
+
+**Super required:** **No.** Safe to override freely.
+
+**Guaranteed state when this fires:**
+- `GetOwningFaction()` returns `NewOwner`
+- `GetTerritoryState()` returns `Claimed` (if NewOwner is valid) or `Unclaimed` (if invalid)
+- Old guards are destroyed, new guards are spawned
+- `OnTerritoryOwnershipChanged` delegate has NOT fired yet (fires after this event)
+
+**Note for `ATerritoryProperty`:** This class overrides `OnOwnershipChanged_Implementation` to call `OnPropertyCaptured(NewOwner)` and broadcast `OnPropertyCapturedDelegate`. If you create a BP child of `ATerritoryProperty`, override `OnPropertyCaptured` instead — it has the Super-call requirements documented above.
+
+---
+
+### `ATerritoryVolume::OnStateChanged(ETerritoryState OldState, ETerritoryState NewState)`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryVolume` (and all subclasses) |
+| **Category** | `Territory` |
+| **When it fires** | After `SetTerritoryState` completes all invariant work (guard despawn/spawn for state transitions) |
+| **Parameters** | `OldState`, `NewState` |
+
+**C++ `_Implementation`:** Empty. Guard lifecycle for state transitions (Contested→Locked despawns guards, Contested→Claimed respawns guards) runs in the non-virtual `SetTerritoryState` BEFORE this event fires.
+
+**Super required:** **No.**
+
+**Important state change (Claimed → Contested):** When transitioning to Contested, the C++ code **clears OwningFaction**. `GetOwningFaction()` returns invalid during Contested state. The previous owner is cached in `PreviousOwningFaction` for RepNotify diff.
+
+---
+
+### `ATerritoryVolume::OnTerritoryInitialized()`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryVolume` (and all subclasses) |
+| **Category** | `Territory` |
+| **When it fires** | At the end of `BeginPlay`, after registration, save/load, and guard reconciliation |
+| **Parameters** | None |
+
+**C++ `_Implementation`:** Empty. Extension hook only.
+
+**Super required:** **No.**
+
+**Guaranteed state when this fires:**
+- Territory is registered in the RegistrySubsystem
+- Save data has been loaded (if available)
+- Guards have been reconciled (despawned stale, spawned for current owner)
+- Spatial index includes this territory
+
+---
+
+### `ATerritoryCity::OnDistrictCapturedInCity(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner)`
+
+| | |
+|---|---|
+| **Class** | `ATerritoryCity` |
+| **Category** | `Territory\|Hierarchy` |
+| **When it fires** | Every time any district within this city changes ownership |
+| **Parameters** | `District` — the district actor, `OldOwner`, `NewOwner` |
+
+**C++ `_Implementation`:** Log message only. Notification hook.
+
+**Super required:** **No.**
+
+**Note:** This fires BEFORE city-level capture checks. After this event, the city checks `AllDistrictsOwnedBy` and may fire `OnCityFullyCaptured` or `OnCityLost`.
+
+---
+
+## BlueprintImplementableEvent — BP Only, No Super
+
+These events are implemented entirely in Blueprint. There is no C++ `_Implementation`. No Super call is possible or needed.
+
+### `UTerritoryInfoWidget`
+
+| Event | Parameters | When |
+|---|---|---|
+| `OnTerritoryBound(Territory)` | `ATerritoryVolume* Territory` | First time the widget binds to a territory. Populate initial UI data here. |
+| `OnTerritoryOwnershipChanged(OldOwner, NewOwner)` | `FGameplayTag OldOwner, NewOwner` | Bound territory's ownership changed. Update owner display. |
+| `OnTerritoryStateChanged(NewState)` | `ETerritoryState NewState` | Bound territory's state changed. Update state display (color, text). |
+
+### `UTerritoryEconomyWidget`
+
+| Event | Parameters | When |
+|---|---|---|
+| `OnEconomyUpdated(Faction, Snapshot)` | `FGameplayTag Faction`, `FTerritoryEconomySnapshot Snapshot` | Every economy tick (default 300s). Snapshot contains Gold, TotalIncome, TotalCosts, TerritoryCount. |
+| `OnTransactionRecorded(Transaction)` | `FTerritoryTransaction Transaction` | Every treasury mutation. Transaction contains TransactionID, Faction, Type, Amount, BalanceAfter, GameTime, Reason. |
+
+### `UTerritoryDebugWidget`
+
+| Event | Parameters | When |
+|---|---|---|
+| `OnUpdateDebugText(DebugText)` | `FText DebugText` | Every 0.5 seconds when debug is enabled. Pre-formatted text with territory, economy, diplomacy, and capture summaries. |
+
+### `ATerritoryProperty`
+
+| Event | Parameters | When |
+|---|---|---|
+| `OnUpgradeLevelChanged(NewLevel)` | `int32 NewLevel` | RepNotify — fires on clients when UpgradeLevel replicates. Update visual model. |
+
+---
+
+## BlueprintAssignable Delegates
+
+Bind to these in Blueprint Event Graph with custom event nodes. They fire at specific points in the mutation pipeline.
+
+### `ATerritoryVolume` Delegates
+
+| Delegate | Signature | Fires When | Guaranteed State |
 |---|---|---|---|
-| **TerritoryVolume** | `OnOwnershipChanged` | Empty — invariants are in the non-virtual setter | BP-only hook, no harm skipping Super |
-| **TerritoryVolume** | `OnStateChanged` | Empty — invariants are in the non-virtual setter | BP-only hook |
-| **TerritoryVolume** | `OnTerritoryInitialized` | Empty — exists for BP init | No-op |
-| **TerritoryCity** | `OnCityLost` | Sets Unclaimed (if not Locked) + economy recalc | Skip if custom loss logic |
-| **TerritoryDistrict** | `OnDistrictCapturedInCity` | BP hook only | Cosmetic |
+| `OnTerritoryOwnershipChanged` | `(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER `SetOwningFaction` completes and AFTER `OnOwnershipChanged` BP event | All invariants done. Guards spawned. State is Claimed/Unclaimed. Replication data updated. |
+| `OnTerritoryStateChangedDelegate` | `(ATerritoryVolume* Territory, ETerritoryState NewState)` | AFTER `SetTerritoryState` completes and AFTER `OnStateChanged` BP event | Guard lifecycle done. State is finalized. |
+| `OnAllGuardsDefeatedDelegate` | `(ATerritoryVolume* Territory)` | AFTER `OnAllGuardsDefeated` BP event completes | Territory is Unclaimed (if Super was called). Progress is 0. |
+| `OnGuardKilled` | `(ATerritoryVolume* Territory, AActor* Guard, AActor* Killer, int32 RemainingDefenders)` | Immediately after a defender dies, before all-guards-defeated check | Killer is best-effort (ASC avatar). RemainingDefenders is count AFTER removal. |
 
-### Guard Lifecycle Invariants (Non-Overridable)
+### `ATerritoryCity` Delegates
 
-These run inside the non-virtual `SetOwningFaction()` and `SetTerritoryState()` setters. BP subclasses **cannot break these**:
+| Delegate | Signature | Fires When |
+|---|---|---|
+| `OnCityCapturedDelegate` | `(ATerritoryCity* City, FGameplayTag CapturingFaction)` | AFTER `OnCityFullyCaptured` BP event. Income recalculated. Capital bonus awarded. |
+| `OnCityLostDelegate` | `(ATerritoryCity* City, FGameplayTag PreviousFaction)` | AFTER `OnCityLost` BP event. Cascade logic completed. |
 
-- `DespawnGuards()` — always runs on ownership change
-- `SpawnGuards()` — always runs when new owner has a guard definition
-- Guards despawn on `Contested` entry from `Claimed`
-- Guards respawn on `Claimed` from `Contested` (if definition exists)
+### `ATerritoryDistrict` Delegates
+
+| Delegate | Signature | Fires When |
+|---|---|---|
+| `OnDistrictCapturedDelegate` | `(ATerritoryDistrict* District, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER `OnDistrictFullyCaptured` BP event. Capital bonus awarded if applicable. |
+
+### `ATerritoryProperty` Delegates
+
+| Delegate | Signature | Fires When |
+|---|---|---|
+| `OnPropertyCapturedDelegate` | `(ATerritoryProperty* Property, FGameplayTag NewOwner)` | From `OnOwnershipChanged_Implementation`. Upgrade level already reset by Super. |
+
+### `UTerritoryControlSubsystem` Delegates
+
+| Delegate | Signature | Fires When |
+|---|---|---|
+| `OnTerritoryControlChanged` | `(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER `CompleteCapture` or `ForceCapture` completes. Ownership changed, state set to Claimed. |
+| `OnCaptureAttempted` | `(FCaptureAttempt Attempt)` | After every `AttemptCapture` call. Attempt struct contains Result (Success/Locked/DefendersRemain/DiplomaticallyBlocked/AlreadyOwned/InvalidTerritory). |
+
+### `UTerritoryEconomySubsystem` Delegates
+
+| Delegate | Signature | Fires When |
+|---|---|---|
+| `OnEconomyTickFired` | `(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot)` | Every economy tick per faction. |
+| `OnTransactionRecorded` | `(FTerritoryTransaction Transaction)` | Every treasury mutation (income, upkeep, upgrade cost, purchase, reward, manual). |
+
+### `UTerritoryDiplomacySubsystem` Delegates
+
+| Delegate | Signature | Fires When |
+|---|---|---|
+| `OnDiplomacyStateChanged` | `(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)` | After any diplomacy state change (war, peace, alliance, trade, ceasefire, expiration). |
+| `OnDiplomacyEvent` | `(FDiplomacyEvent Event)` | After diplomacy events. Event contains EventType, FactionA, FactionB, GameTime. |
+| `OnReputationChanged` | `(FGameplayTag Faction, int32 NewReputation)` | After reputation add/set. |
+
+### `UTerritoryRegistrySubsystem` Delegates
+
+| Delegate | Signature | Fires When |
+|---|---|---|
+| `OnTerritoryRegistered` | `(ATerritoryVolume* Territory, bool bWasUnregistered)` | On registration (`bWasUnregistered=false`) and unregistration (`bWasUnregistered=true`). |
 
 ---
 
-## Capture Flow — Complete Lifecycle
+## Interfaces
 
-### Capture Trigger Methods
+### `ITerritoryOwnershipInterface`
 
-| Method | Function | Speed |
+Query ownership state. Default implementations read from `ATerritoryVolume::OwnershipData`.
+
+| Function | Returns | Notes |
 |---|---|---|
-| **Progressive** | `RegisterAttacker(Territory, Actor, Faction)` | ~10s at default rate (0.1/s) |
-| **Instant** | `ForceCapture(Territory, Faction)` | Immediate |
-| **Progress boost** | `AddCaptureProgress(Territory, Faction, Delta)` | Custom speed |
-| **Quest/Dialogue** | `TerritoryCaptureEvent` on quest node | Immediate or progressive |
-| **Guard death** | Bind to `OnAllGuardsDefeatedDelegate` | Designer chooses |
+| `GetTerritoryOwner()` | `FGameplayTag` | Returns `OwningFaction`. Invalid when Contested or Unclaimed. |
+| `GetTerritoryControlProgress()` | `float` | 0.0–1.0 progress of current capture. |
+| `IsTerritoryContested()` | `bool` | True when State == Contested. |
+| `GetContestingFaction()` | `FGameplayTag` | Leading faction by capture progress. Updated each capture tick. |
 
-### Capture State Machine
+### `ITerritoryEconomyInterface`
 
-```
-                    ┌──────────┐
-         ┌─────────►│  Locked  │◄──── LockTerritory()
-         │          └────┬─────┘
-         │               │ TryUnlock() / TerritoryUnlockEvent
-         │               ▼
-    SetLocked()    ┌──────────┐
-         │         │ Unclaimed │◄──── All guards defeated
-         │          └────┬─────┘
-         │               │ RegisterAttacker()
-         │               ▼
-         │          ┌──────────┐
-         │     ┌───►│Contested │◄──── Attacker enters
-         │     │    └────┬─────┘
-         │     │         │ Progress reaches 1.0
-         │     │         ▼
-         │     │    ┌──────────┐
-         │     │    │  Claimed  │──── Spawns guards for new owner
-         │     │    └────┬─────┘
-         │     │         │ Enemy captures a child property
-         │     └─────────┘ (back to Contested)
-         │
-         └── LockTerritory() at any time
-```
+Query economy state. Default implementations read from `UTerritoryEconomySubsystem`.
 
-### Contesting Faction
-
-`ContestingFaction` is maintained by `TerritoryControlSubsystem`:
-- Set when `RegisterAttacker` is called
-- Updated each tick to the leading faction
-- Cleared on `CompleteCapture` or `ResetCapture`
-- Replicated as part of `OwnershipData`
-
----
-
-## Save/Load Lifecycle
-
-### How Territory Data Persists
-
-TerritoryFramework uses Narrative's `INarrativeSavableActor` interface. The save system serializes all `UPROPERTY(SaveGame)` fields.
-
-### What Gets Saved
-
-| Property | Saved | Notes |
+| Function | Returns | Notes |
 |---|---|---|
-| `OwnershipData` (full struct) | ✅ | Owner, State, Progress, ContestingFaction, DefenderCount, LockReason |
-| `TerritoryGUID` | ✅ | Must be stable — generated from tag hash if not editor-baked |
-| `TerritoryTag` | ✅ | Level-config |
-| `InitialOwningFaction` | ✅ | Level-config |
-| `GuardNPCDefinition` | ✅ | Level-config |
-| `FactionGuardDefinitions` | ✅ | Level-config |
-| `SpawnedGuards` | ❌ | Transient — guards respawn from saved ownership |
-| `RegisteredDefenders` | ❌ | Transient — rebuilt on spawn |
+| `GetTreasury(Faction)` | `int32` | Current gold balance. |
+| `GetPeriodicIncome(Faction)` | `int32` | Income per economy tick. |
+| `CanAfford(Faction, Cost)` | `bool` | True if Treasury >= Cost. |
 
-### What Gets Saved on Guards
+### `ITerritoryEventReceiverInterface`
 
-Guards (`ATerritoryGuardCharacter`) return `ShouldRespawn = false` — Narrative's save system does **NOT** restore guard actors on load. TerritoryVolume spawns fresh guards from saved ownership data.
+Receive territory events. Implement on any actor that needs to react to territory changes.
 
-### BeginPlay Load Sequence
-
-```
-1. Generate deterministic GUID from TerritoryTag (if not editor-baked)
-2. LoadSingleActor(this)
-   └─ Narrative deserializes saved SaveGame UPROPERTYs into this actor
-   └─ Calls Load_Implementation()
-3. Sync level-config settings (income, attacker cap, guard cost)
-4. If no owner after load AND InitialOwningFaction set → apply initial owner
-5. If bStartsLocked AND no owner → set Locked
-6. Spawn guards from loaded OwnershipData.OwningFaction
-7. Register with TerritoryRegistrySubsystem + bind hierarchy delegates
-8. Fire OnTerritoryInitialized()
-```
-
-### Why GUID Must Be Stable
-
-`LoadSingleActor` searches for saved data by the actor's GUID. If the GUID changes between sessions, the lookup fails and saved data is lost.
-
-| Source | When Applied |
+| Function | When |
 |---|---|
-| Editor hook (`PostEditChangeProperty`) | When designer edits any property in the Details panel |
-| Editor hook (`PostDuplicate`) | When actor is duplicated in the editor |
-| Runtime fallback (`FCrc::StrCrc_DEPRECATED(tag)`) | If no editor-baked GUID exists — deterministic from tag |
-
-**Always set a TerritoryTag on placed actors** — it's the fallback for GUID generation.
-
----
-
-## Per-Faction Guard Definitions
-
-TerritoryVolume supports per-faction NPC definitions so each faction spawns its own guard type.
-
-### Setup
-
-On the TerritoryVolume Details panel under **Territory|Guards**:
-
-1. **GuardNPCDefinition** — default fallback (used when no faction-specific entry matches)
-2. **FactionGuardDefinitions** — array of per-faction overrides:
-   - `Faction` = `Narrative.Factions.Bandits` → `NPC_BanditGuard`
-   - `Faction` = `Narrative.Factions.Heroes` → `NPC_HeroGuard`
-
-### Resolution Order
-
-```
-ResolveGuardDefinition(Faction):
-  1. Check FactionGuardDefinitions for matching faction tag
-  2. If found → use that definition
-  3. If not found → fall back to GuardNPCDefinition
-  4. If neither → no guards spawn
-```
-
-### Faction Assignment During Spawn
-
-Faction is determined by precedence:
-
-1. `SpawnPoint->FactionOverride` (if valid)
-2. `TerritoryVolume->OwnershipData.OwningFaction`
-
-Faction is set via `FNPCSpawnParams.bOverride_DefaultFactions` before `SetNPCDefinition` — Narrative's initialization reads ONLY the territory owner faction.
+| `OnTerritoryControlChanged(TerritoryTag, OldOwner, NewOwner)` | Territory ownership changed. |
+| `OnTerritoryContested(TerritoryTag, ContestingFaction)` | Territory became contested. |
+| `OnTerritoryUncontested(TerritoryTag)` | Contesting ended (captured or decayed). |
+| `OnTerritoryStateChanged(TerritoryTag, NewState)` | Territory state changed. |
 
 ---
 
-## Hierarchy Capture Rules
-
-### Unanimity Policy
-
-A district is captured **ONLY** when ALL its properties are owned by the same faction. A city is captured **ONLY** when ALL its districts are owned by the same faction.
+## State Model Reference
 
 ```
-City: HavenReach
-  └── District: MarketSquare
-       ├── Property: Blacksmith     ← must be same faction
-       ├── Property: Tavern         ← must be same faction
-       └── Property: General Store  ← must be same faction
+Unclaimed ──(attacker enters)──→ Contested ──(progress >= 1.0)──→ Claimed
+    ↑                                │                                │
+    │                                │                                │
+    └────(all guards die)────────────┘                                │
+    ↑                                                                 │
+    │                                                                 │
+    └────(all guards die / force unclaim)─────────────────────────────┘
+
+Claimed ──(LockTerritory)──→ Locked ──(TryUnlock)──→ Claimed or Unclaimed
+    ↑                         │
+    │                         │
+    └─────────────────────────┘
+
+Any State ──(ForceCapture)──→ Claimed (by NewOwner)
 ```
 
-### State Transitions
-
-| Event | State Change |
-|---|---|
-| Any child property captured by enemy | District → **Contested** |
-| All properties owned by one faction | District → **Claimed** by that faction |
-| Any district captured by enemy | City → **Contested** |
-| All districts owned by one faction | City → **Claimed** by that faction |
-
-### Scripted Override (Cascade)
-
-`CascadeCaptureToProperties` force-reassigns all child properties when a district is explicitly captured via `ForceCapture` or quest event. This is a **scripted override**, not the default path.
+**Contested state:** `OwningFaction` is **cleared** (invalid). The territory has no owner while contested. `IsOwnedByFaction()` returns false for all factions. `GetContestingFaction()` returns the leading faction by progress.
 
 ---
 
-## Lock System
+## Common Patterns
 
-### Lock API
-
-| Function | Access | Effect |
-|---|---|---|
-| `IsLocked()` | BlueprintPure | Returns true if state is Locked |
-| `CanUnlock()` | BlueprintPure | Checks all LockConditions pass |
-| `LockTerritory(Reason)` | BlueprintAuthorityOnly | Sets state to Locked |
-| `TryUnlock(bForce)` | BlueprintAuthorityOnly | Unlocks if conditions pass or forced |
-| `GetLockReason()` | BlueprintPure | Returns lock reason text |
-
-### Locked Territory Behavior
-
-- **No marker** on map (zero alpha)
-- **No guards** spawn
-- **No capture** possible
-- **No display text**
-
-### Quest Integration
-
-| Asset | Effect |
-|---|---|
-| `TerritoryLockEvent` | Locks territory from quest/dialogue node |
-| `TerritoryUnlockEvent` | Unlocks territory from quest/dialogue node |
-| `LockConditions` array | `UNarrativeCondition` instances — all must pass for `TryUnlock` |
-
----
-
-## Map Markers
-
-### Color Resolution
+### Pattern: Custom capture reward
 
 ```
-GetMarkerColor():
-  1. State == Locked → zero alpha (invisible)
-  2. State == Contested → ContestedColor (yellow)
-  3. Owner has FactionColorMap entry → that color (e.g., green for player)
-  4. Owner valid but no entry → EnemyOwnedColor (red)
-  5. No owner → UnclaimedColor (red)
+ATerritoryVolume BP → Event Graph:
+  OnOwnershipChanged:
+    → [No Super needed]
+    → If NewOwner == PlayerFaction:
+        → AddToTreasury(PlayerFaction, 200, "Capture reward")
 ```
 
-### Customization
-
-All colors are `BlueprintReadWrite` on `UTerritoryMapMarker`:
-
-| Property | Default |
-|---|---|
-| `UnclaimedColor` | Red |
-| `EnemyOwnedColor` | Red |
-| `ContestedColor` | Yellow |
-| `LockedColor` | Purple (unused — locked = invisible) |
-| `FactionColorMap` | Empty — add entries for per-faction colors |
-
-Set player faction to green:
-```
-MapMarkerComponent → FactionColorMap → Add Entry:
-  Key: Narrative.Factions.Heroes
-  Value: (R=0, G=1, B=0, A=1)
-```
-
----
-
-## Delegates Reference
-
-### TerritoryVolume
-
-| Delegate | Parameters | When Fired |
-|---|---|---|
-| `OnTerritoryOwnershipChanged` | (Territory, OldOwner, NewOwner) | Faction changes |
-| `OnTerritoryStateChangedDelegate` | (Territory, NewState) | State changes |
-| `OnGuardKilled` | (Territory, Guard, Killer, RemainingDefenders) | A guard dies |
-| `OnAllGuardsDefeatedDelegate` | (Territory) | Last guard dies |
-
-### TerritoryCity
-
-| Delegate | Parameters | When Fired |
-|---|---|---|
-| `OnCityCapturedDelegate` | (City, CapturingFaction) | All districts owned by one faction |
-| `OnCityLostDelegate` | (City, PreviousFaction) | City owner loses a district |
-
-### TerritoryDistrict
-
-| Delegate | Parameters | When Fired |
-|---|---|---|
-| `OnDistrictCapturedDelegate` | (District, OldOwner, NewOwner) | All properties owned by one faction |
-
-### TerritoryProperty
-
-| Delegate | Parameters | When Fired |
-|---|---|---|
-| `OnPropertyCapturedDelegate` | (Property, NewOwner) | Property ownership changes |
-
-### TerritoryControlSubsystem
-
-| Delegate | Parameters | When Fired |
-|---|---|---|
-| `OnCaptureAttempted` | (FCaptureAttempt) | AttemptCapture is called |
-| `OnTerritoryControlChanged` | (Territory, OldOwner, NewOwner) | CompleteCapture fires |
-
-### TerritoryRegistrySubsystem
-
-| Delegate | Parameters | When Fired |
-|---|---|---|
-| `OnTerritoryRegistered` | (Territory, bWasUnregistered) | Territory registers with subsystem |
-
----
-
-## Debug Settings
-
-Enable in **Project Settings → Plugins → Territory Framework**:
-
-| Setting | Effect |
-|---|---|
-| `bEnableDebug` | Master toggle |
-| `bDebugOwnership` | Log ownership changes |
-| `bDebugCapture` | Log capture progress ticks |
-| `bDebugCaptureAttempts` | Log AttemptCapture results |
-| `bDebugGuards` | Log guard spawn/despawn |
-| `bDebugGuardDeaths` | Log guard deaths |
-| `bDebugStateTransitions` | Log state changes |
-| `bDebugDiplomacy` | Log diplomacy changes |
-| `bDebugTransactions` | Log economy transactions |
-| `bDebugSaveLoad` | Log save/load results |
-| `bDebugSpatial` | Log spatial index queries |
-| `bDrawTerritoryBounds` | Debug box in PIE |
-| `bDrawOwnershipOverlay` | Green overlay for owned |
-| `bDrawCaptureProgress` | Progress bar above contested |
-| `bDrawGuardSpawnPoints` | Spheres + patrol routes |
-
-### Blueprint Debug Helpers
+### Pattern: Quest-gated territory
 
 ```
-PrintTerritoryDebug(WorldContext, Territory, Duration)
-PrintAllTerritoryDebug(WorldContext, Duration)
+ATerritoryVolume BP:
+  LockConditions: [QuestComplete_Q001]
+  → Territory stays Locked until quest Q001 completes
+  → TryUnlock checks all conditions automatically
+```
+
+### Pattern: Custom guard behavior on defeat
+
+```
+ATerritoryVolume BP → Event Graph:
+  OnAllGuardsDefeated:
+    → MUST Call Parent (Super::OnAllGuardsDefeated)
+    → PlayDefeatCinematic
+    → NotifyQuestSystem("TerritoryLost")
+```
+
+### Pattern: Hierarchy cascade reaction
+
+```
+ATerritoryCity BP → Event Graph:
+  OnCityFullyCaptured:
+    → MUST Call Parent (Super::OnCityFullyCaptured) [income + capital bonus]
+    → SpawnCelebrationVFX
+    → UnlockCityContent
+
+  OnCityLost:
+    → MUST Call Parent (Super::OnCityLost) [cascade + income recalc]
+    → NotifyStrategicMap
+```
+
+### Pattern: Economy HUD widget
+
+```
+UTerritoryEconomyWidget BP:
+  Event Graph:
+    OnEconomyUpdated:
+      → SetGoldText(Snapshot.Treasury)
+      → SetIncomeText(Snapshot.TotalIncome)
+      → SetCostsText(Snapshot.TotalCosts)
+
+    OnTransactionRecorded:
+      → AnimateGoldChange(Transaction.Amount)
+      → ShowTransactionReason(Transaction.Reason)
+```
+
+### Pattern: Property upgrade visual
+
+```
+ATerritoryProperty BP:
+  OnPropertyCaptured (override):
+    → Call Parent (resets UpgradeLevel to 0)
+    → SwapMesh(DefaultMesh)
+    → ResetUpgradeVFX
+
+  OnUpgradeLevelChanged (BP event):
+    → SwapMesh(UpgradeMeshes[NewLevel])
+    → PlayUpgradeVFX(NewLevel)
+```
+
+### Pattern: Map marker customization
+
+```
+UTerritoryMapMarker BP:
+  GetMarkerColor (override):
+    → If Locked → return transparent (invisible marker)
+    → If Contested → return pulsing orange
+    → If owned by player → return green
+    → If owned by enemy → return red
+
+  GetMarkerDisplayText (override):
+    → Return territory display name
+    → Set OutSubtitleText to owner faction or "Contested"
+
+  MarkerOnPaint (override):
+    → Call Parent for default rendering
+    → Draw territory outline if bDrawTerritoryOutline is true
+```
+
+### Pattern: Guard spawn point with patrol
+
+```
+ATerritoryGuardSpawnPoint placed in level:
+  PatrolRoute: [Node0(Location, WaitTime=2), Node1(Location, WaitTime=5), Node2(Location, WaitTime=2)]
+  bLoopPatrol: true
+  ReserveSlots: 2
+  Priority: 75
+
+  → Guards spawn at this point and follow the patrol route
+  → When a guard dies, a reserve guard spawns (up to ReserveSlots times)
+  → Patrol route data available via GetPatrolRouteAsTransforms() for Narrative activities
 ```
