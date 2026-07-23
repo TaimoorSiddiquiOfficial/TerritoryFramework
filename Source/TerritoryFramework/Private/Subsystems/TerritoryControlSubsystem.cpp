@@ -272,8 +272,8 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 		Territory->SetTerritoryState(ETerritoryState::Contested);
 	}
 
-	// Set contesting faction so UI/events can display who is attacking
-	Territory->SetContestingFaction(Faction);
+	// Don't overwrite ContestingFaction here — it's set by EvaluateCaptureState
+	// based on the leading faction's progress, not the last-registered attacker.
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
 	TSet<TWeakObjectPtr<AActor>>& ActorSet = State.AttackersByFaction.FindOrAdd(Faction);
@@ -444,6 +444,10 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	}
 
 	Territory->SetControlProgress(BestProgress);
+
+	// Update ContestingFaction to the leading faction (highest progress, most attackers)
+	// so UI/events always show the faction most likely to capture.
+	Territory->SetContestingFaction(BestFaction);
 
 	// DEFER completion — don't mutate map during iteration (P0-01)
 	if (BestProgress >= 1.f && BestFaction.IsValid())

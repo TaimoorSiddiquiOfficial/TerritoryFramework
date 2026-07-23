@@ -25,6 +25,10 @@ bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, A
 
 	if (Territory->GetTerritoryState() == ETerritoryState::Locked) return false;
 
+	// Periodically clean stale territory keys (destroyed territories) to prevent
+	// SlotMap from accumulating dead entries over time.
+	CleanupStaleTerritoryKeys();
+
 	FPerTerritorySlots& Slots = SlotMap.FindOrAdd(Territory);
 	CleanupInvalidControllers(Slots);
 
@@ -99,7 +103,15 @@ int32 UTerritoryCombatDirector::GetGrantedSlots(const ATerritoryVolume* Territor
 {
 	if (!Territory) return 0;
 	const FPerTerritorySlots* Slots = SlotMap.Find(Territory);
-	return Slots ? Slots->GrantedControllers.Num() : 0;
+	if (!Slots) return 0;
+
+	// Count only valid (alive) controllers — dead weak pointers should not consume budget
+	int32 Count = 0;
+	for (const TWeakObjectPtr<ANarrativeNPCController>& Ptr : Slots->GrantedControllers)
+	{
+		if (Ptr.IsValid()) ++Count;
+	}
+	return Count;
 }
 
 int32 UTerritoryCombatDirector::GetAvailableSlots(const ATerritoryVolume* Territory) const
@@ -113,6 +125,22 @@ int32 UTerritoryCombatDirector::GetAvailableSlots(const ATerritoryVolume* Territ
 void UTerritoryCombatDirector::CleanupInvalidControllers(FPerTerritorySlots& Slots)
 {
 	Slots.GrantedControllers.RemoveAll([](const TWeakObjectPtr<ANarrativeNPCController>& Ptr) { return !Ptr.IsValid(); });
+}
+
+void UTerritoryCombatDirector::CleanupStaleTerritoryKeys()
+{
+	TArray<TWeakObjectPtr<ATerritoryVolume>> StaleKeys;
+	for (const auto& Pair : SlotMap)
+	{
+		if (!Pair.Key.IsValid())
+		{
+			StaleKeys.Add(Pair.Key);
+		}
+	}
+	for (const TWeakObjectPtr<ATerritoryVolume>& Key : StaleKeys)
+	{
+		SlotMap.Remove(Key);
+	}
 }
 
 void UTerritoryCombatDirector::BindControllerDeath(ANarrativeNPCController* Controller)

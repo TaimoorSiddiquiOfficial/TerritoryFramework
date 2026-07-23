@@ -66,6 +66,9 @@ private:
 
 	void CleanupInvalidControllers(FPerTerritorySlots& Slots);
 
+	/** Remove SlotMap entries whose territory weak pointer is no longer valid. */
+	void CleanupStaleTerritoryKeys();
+
 	/** Bind to controller's ASC OnDied so slots are released if NPC dies mid-assault. */
 	void BindControllerDeath(ANarrativeNPCController* Controller);
 

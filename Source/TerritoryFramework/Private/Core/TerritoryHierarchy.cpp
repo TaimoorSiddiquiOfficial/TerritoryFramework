@@ -177,7 +177,7 @@ void ATerritoryCity::OnCityFullyCaptured_Implementation(FGameplayTag CapturingFa
 	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 	if (Economy)
 	{
-		Economy->RecalculateIncome(CapturingFaction);
+		Economy->MarkFactionDirty(CapturingFaction);
 	}
 
 	// Economy bonus for capturing a city with a capital district
@@ -241,7 +241,7 @@ void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 	if (Economy && PreviousFaction.IsValid())
 	{
-		Economy->RecalculateIncome(PreviousFaction);
+		Economy->MarkFactionDirty(PreviousFaction);
 	}
 }
 
@@ -387,12 +387,13 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 	// Server-only mutations
 	if (!HasAuthority()) return;
 
-	// When a property changes owner, recalculate income for both factions
+	// Mark factions dirty for economy recalculation — deferred to next economy tick
+	// to avoid redundant O(N) scans from property → district → city cascade.
 	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 	if (Economy)
 	{
-		if (OldOwner.IsValid()) Economy->RecalculateIncome(OldOwner);
-		if (NewOwner.IsValid()) Economy->RecalculateIncome(NewOwner);
+		if (OldOwner.IsValid()) Economy->MarkFactionDirty(OldOwner);
+		if (NewOwner.IsValid()) Economy->MarkFactionDirty(NewOwner);
 	}
 
 	// ─── Hierarchy Capture Policy: Unanimity ───
@@ -686,7 +687,7 @@ bool ATerritoryProperty::TryUpgrade()
 	UpgradeLevel++;
 
 	// Recalculate income for the owning faction
-	Economy->RecalculateIncome(OwnerFaction);
+	Economy->MarkFactionDirty(OwnerFaction);
 
 	UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s upgraded to level %d (cost: %d, faction: %s)"),
 		*GetTerritoryTag().ToString(), UpgradeLevel, Cost, *OwnerFaction.ToString());
@@ -706,7 +707,7 @@ void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 		if (OwnerFaction.IsValid())
 		{
 			UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
-			if (Economy) Economy->RecalculateIncome(OwnerFaction);
+			if (Economy) Economy->MarkFactionDirty(OwnerFaction);
 		}
 
 		UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s set to level %d (was %d)"),

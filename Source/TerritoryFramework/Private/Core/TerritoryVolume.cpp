@@ -581,6 +581,11 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 	}
 	else if (NewState == ETerritoryState::Contested && OldState == ETerritoryState::Claimed)
 	{
+		// Clear OwningFaction on transition to Contested so IsOwnedByFaction and
+		// GetOwningFaction agree: territory is contested, nobody owns it yet.
+		// PreviousOwningFaction is already cached for RepNotify diff.
+		PreviousOwningFaction = OwnershipData.OwningFaction;
+		OwnershipData.OwningFaction = FGameplayTag();
 		DespawnGuards();
 	}
 	else if (NewState == ETerritoryState::Claimed && OldState == ETerritoryState::Contested)
@@ -779,10 +784,13 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 		return !Ptr.IsValid() || Ptr.Get() == KilledActor;
 	});
 
-	// If all guards are dead, fire OnAllGuardsDefeated
-	if (SpawnedGuards.Num() == 0 && HasGuardsAlive() == false)
+	// Check ALL registered defenders (includes non-guard defenders registered via
+	// RegisterDefender Blueprint API), not just SpawnedGuards — otherwise territory
+	// flips to Unclaimed while player/pawn defenders are still alive.
+	CleanupInvalidDefenders();
+	if (RegisteredDefenders.Num() == 0)
 	{
-		UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All guards defeated in %s"),
+		UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All defenders defeated in %s"),
 			*GetTerritoryTag().ToString());
 		OnAllGuardsDefeated();
 		OnAllGuardsDefeatedDelegate.Broadcast(this);

@@ -23,12 +23,24 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::ExecuteTask(UBehaviorTre
 	ANarrativeNPCController* NPCController = Cast<ANarrativeNPCController>(AIController);
 	if (!NPCController) return EBTNodeResult::Failed;
 
-	UTerritoryCombatDirector* Director = AIController->GetWorld()->GetSubsystem<UTerritoryCombatDirector>();
+	UWorld* World = AIController->GetWorld();
+	if (!World) return EBTNodeResult::Failed;
+
+	UTerritoryCombatDirector* Director = World->GetSubsystem<UTerritoryCombatDirector>();
 	if (!Director) return EBTNodeResult::Failed;
 
+	// Validate BB keys are configured — unconfigured keys write to NAME_None (no-op)
+	UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
+	if (!BB || bPermissionGrantedKey.SelectedKeyName == NAME_None)
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("BTTask_RequestTerritoryPermission: bPermissionGrantedKey not configured"));
+		return EBTNodeResult::Failed;
+	}
+
 	// Get territory from blackboard or from current location
-	ATerritoryVolume* Territory = Cast<ATerritoryVolume>(
-		OwnerComp.GetBlackboardComponent()->GetValueAsObject(TerritoryKey.SelectedKeyName));
+	ATerritoryVolume* Territory = TerritoryKey.SelectedKeyName != NAME_None
+		? Cast<ATerritoryVolume>(BB->GetValueAsObject(TerritoryKey.SelectedKeyName))
+		: nullptr;
 
 	if (!Territory)
 	{
@@ -46,13 +58,13 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::ExecuteTask(UBehaviorTre
 		// No territory at location — wilderness, no restriction
 		if (!Territory)
 		{
-			OwnerComp.GetBlackboardComponent()->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, true);
+			BB->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, true);
 			return EBTNodeResult::Succeeded;
 		}
 	}
 
 	bool bGranted = Director->RequestAssaultSlot(Territory, NPCController);
-	OwnerComp.GetBlackboardComponent()->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, bGranted);
+	BB->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, bGranted);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings && Settings->IsDebugEnabled())

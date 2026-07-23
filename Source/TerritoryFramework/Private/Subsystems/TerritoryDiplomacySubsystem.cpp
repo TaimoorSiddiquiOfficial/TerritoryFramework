@@ -465,6 +465,14 @@ void UTerritoryDiplomacySubsystem::RecordEvent(EDiplomacyEventType EventType, FG
 	}
 
 	DiplomacyHistory.Add(Event);
+
+	// Cap history to prevent unbounded growth in long sessions
+	constexpr int32 MaxDiplomacyHistory = 500;
+	while (DiplomacyHistory.Num() > MaxDiplomacyHistory)
+	{
+		DiplomacyHistory.RemoveAt(0);
+	}
+
 	OnDiplomacyEvent.Broadcast(Event);
 }
 

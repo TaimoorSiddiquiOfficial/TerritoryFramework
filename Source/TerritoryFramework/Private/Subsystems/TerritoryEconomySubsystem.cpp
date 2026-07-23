@@ -52,14 +52,24 @@ void UTerritoryEconomySubsystem::Deinitialize()
 	{
 		World->GetTimerManager().ClearTimer(EconomyTickTimerHandle);
 
+		// Unbind per-territory ownership delegates to prevent dangling references
 		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
 			Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
 			Registry->OnTerritoryUnregistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
+
+			for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
+			{
+				if (Territory)
+				{
+					Territory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+				}
+			}
 		}
 	}
 
 	FactionTreasuries.Empty();
+	DirtyFactions.Empty();
 	Super::Deinitialize();
 }
 
@@ -72,6 +82,17 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebugTicks = Settings && Settings->ShouldDebugEconomy();
 	const bool bDebugTx = Settings && Settings->ShouldDebugTransactions();
+
+	// Process deferred income recalculations — factions marked dirty by capture/ownership
+	// events get recalculated once per tick instead of O(N) times per capture cascade.
+	for (const FGameplayTag& DirtyFaction : DirtyFactions)
+	{
+		if (DirtyFaction.IsValid())
+		{
+			RecalculateIncome(DirtyFaction);
+		}
+	}
+	DirtyFactions.Empty();
 
 	for (auto& Pair : FactionTreasuries)
 	{
@@ -354,14 +375,10 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 
 void UTerritoryEconomySubsystem::OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
-	if (OldOwner.IsValid())
-	{
-		RecalculateIncome(OldOwner);
-	}
-	if (NewOwner.IsValid())
-	{
-		RecalculateIncome(NewOwner);
-	}
+	// Mark factions dirty — actual recalculation deferred to next economy tick
+	// to avoid O(3N) redundant scans per capture cascade.
+	if (OldOwner.IsValid()) DirtyFactions.Add(OldOwner);
+	if (NewOwner.IsValid()) DirtyFactions.Add(NewOwner);
 }
 
 void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)

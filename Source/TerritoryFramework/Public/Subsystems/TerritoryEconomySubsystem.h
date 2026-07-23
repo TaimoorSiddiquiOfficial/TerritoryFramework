@@ -69,6 +69,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	void RecalculateIncome(const FGameplayTag& Faction);
 
+	/** Mark a faction for deferred income recalculation (processed on next economy tick). */
+	void MarkFactionDirty(const FGameplayTag& Faction) { if (Faction.IsValid()) DirtyFactions.Add(Faction); }
+
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
 	FOnEconomyTick OnEconomyTickFired;
 
@@ -89,6 +92,9 @@ private:
 	TArray<FTerritoryTransaction> TransactionLedger;
 
 	FTimerHandle EconomyTickTimerHandle;
+
+	/** Factions whose income needs recalculation — processed once per economy tick. */
+	TSet<FGameplayTag> DirtyFactions;
 
 	UFUNCTION()
 	void OnEconomyTick();
