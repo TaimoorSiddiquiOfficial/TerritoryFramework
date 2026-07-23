@@ -36,9 +36,15 @@ private:
 	UFUNCTION()
 	void OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
+	UFUNCTION()
+	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
 	UPROPERTY()
 	TWeakObjectPtr<ATerritoryVolume> CachedTerritory;
 
 	/** Faction that owned the territory when the task started (for loss detection) */
 	FGameplayTag InitialOwner;
+
+	/** True while subscribed to OnTerritoryRegistered for late binding */
+	bool bWaitingForRegistration = false;
 };

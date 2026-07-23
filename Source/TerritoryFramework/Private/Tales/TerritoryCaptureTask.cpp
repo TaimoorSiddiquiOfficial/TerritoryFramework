@@ -35,8 +35,10 @@ void UTerritoryCaptureTask::BeginTask()
 
 	if (!CachedTerritory.IsValid())
 	{
-		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureTask] Territory '%s' not found in registry"),
+		UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureTask] Territory '%s' not registered yet — waiting for registration"),
 			*TargetTerritoryTag.ToString());
+		bWaitingForRegistration = true;
+		Registry->OnTerritoryRegistered.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryRegistered);
 		return;
 	}
 
@@ -72,6 +74,18 @@ void UTerritoryCaptureTask::EndTask()
 		CachedTerritory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 	}
 
+	if (bWaitingForRegistration)
+	{
+		if (UWorld* World = OwningComp ? OwningComp->GetWorld() : nullptr)
+		{
+			if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+			{
+				Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryCaptureTask::OnTerritoryRegistered);
+			}
+		}
+		bWaitingForRegistration = false;
+	}
+
 	Super::EndTask();
 }
 
@@ -88,8 +102,6 @@ void UTerritoryCaptureTask::OnTerritoryControlChanged(ATerritoryVolume* Territor
 
 	if (bCompleteOnLoss)
 	{
-		// Complete when territory is lost by its initial owner.
-		// Only fires if there WAS an initial owner — capturing an unclaimed territory is not a "loss".
 		if (InitialOwner.IsValid() && (!NewOwner.IsValid() || NewOwner != InitialOwner))
 		{
 			CompleteTask();
@@ -105,6 +117,47 @@ void UTerritoryCaptureTask::OnTerritoryControlChanged(ATerritoryVolume* Territor
 	else if (NewOwner.IsValid())
 	{
 		CompleteTask();
+	}
+}
+
+void UTerritoryCaptureTask::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	if (!bWaitingForRegistration) return;
+	if (!Territory || Territory->GetTerritoryTag() != TargetTerritoryTag) return;
+
+	// Territory just registered — bind now
+	CachedTerritory = Territory;
+	bWaitingForRegistration = false;
+
+	if (UWorld* World = OwningComp ? OwningComp->GetWorld() : nullptr)
+	{
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryCaptureTask::OnTerritoryRegistered);
+		}
+	}
+
+	Territory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
+
+	InitialOwner = Territory->GetOwningFaction();
+
+	UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureTask] Territory '%s' late-bound after registration"),
+		*TargetTerritoryTag.ToString());
+
+	// Check if already in desired state
+	if (bCompleteOnLoss)
+	{
+		if (!Territory->GetOwningFaction().IsValid())
+		{
+			CompleteTask();
+		}
+	}
+	else if (RequiredCapturingFaction.IsValid())
+	{
+		if (Territory->IsOwnedByFaction(RequiredCapturingFaction))
+		{
+			CompleteTask();
+		}
 	}
 }
 

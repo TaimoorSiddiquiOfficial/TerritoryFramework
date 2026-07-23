@@ -54,12 +54,22 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 		ValidateLevel(Level, Errors, Warnings);
 	}
 
-	// Convert to FText
+	// Emit errors
 	for (const FString& Error : Errors)
 	{
 		ValidationErrors.Add(FText::FromString(Error));
 	}
 
+	// Emit warnings — UE 5.7 ValidateLoadedAsset only has ValidationErrors,
+	// so we append warnings as non-blocking entries with a [WARNING] prefix.
+	// Data Validation UI shows all ValidationErrors but only treats the
+	// returned result as pass/fail.
+	for (const FString& Warning : Warnings)
+	{
+		ValidationErrors.Add(FText::FromString(TEXT("[WARNING] ") + Warning));
+	}
+
+	// Invalid if any errors; warnings alone don't fail validation
 	return Errors.Num() == 0 ? EDataValidationResult::Valid : EDataValidationResult::Invalid;
 }
 
