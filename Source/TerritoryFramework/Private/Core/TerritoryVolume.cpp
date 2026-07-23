@@ -81,36 +81,32 @@ void ATerritoryVolume::BeginPlay()
 			}
 		}
 
-		// Store initial values BEFORE load — if save exists, LoadSingleActor overwrites.
-		// If no save, these become the runtime defaults.
-		FTerritoryOwnershipData InitialDefaults;
-		InitialDefaults.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
-		InitialDefaults.PeriodicIncome = InitialPeriodicIncome;
-		InitialDefaults.GuardCost = InitialGuardCost;
-
-		if (InitialOwningFaction.IsValid())
-		{
-			InitialDefaults.OwningFaction = InitialOwningFaction;
-			InitialDefaults.State = ETerritoryState::Claimed;
-		}
-
-		if (bStartsLocked)
-		{
-			InitialDefaults.State = ETerritoryState::Locked;
-		}
-
-		// Try loading saved data
+		// Try loading saved data — LoadSingleActor deserializes saved UPROPERTY(SaveGame)
+		// fields directly into this actor, then calls Load_Implementation.
 		USaveSystemStatics::LoadSingleActor(this);
 
-		// Check if OwnershipData was restored from save (has valid owner or non-default state)
-		const bool bSaveLoaded = OwnershipData.OwningFaction.IsValid()
-			|| OwnershipData.State != ETerritoryState::Unclaimed
-			|| OwnershipData.ControlProgress > 0.f;
+		// We can't reliably detect whether LoadSingleActor succeeded by checking
+		// OwnershipData state, because a legitimately saved Unclaimed territory
+		// looks the same as "no save found." Instead, always sync the non-ownership
+		// Initial* settings (income, attacker count, guard cost) which are level
+		// config, not gameplay state. The ownership fields (OwningFaction, State,
+		// ControlProgress, ContestingFaction) come from save if available.
+		OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
+		OwnershipData.PeriodicIncome = InitialPeriodicIncome;
+		OwnershipData.GuardCost = InitialGuardCost;
 
-		if (!bSaveLoaded)
+		// If OwnershipData still has no faction after load (fresh level, no save),
+		// apply the level-configured initial owner.
+		if (!OwnershipData.OwningFaction.IsValid() && InitialOwningFaction.IsValid())
 		{
-			// No save data — apply initial defaults
-			OwnershipData = InitialDefaults;
+			OwnershipData.OwningFaction = InitialOwningFaction;
+			OwnershipData.State = ETerritoryState::Claimed;
+		}
+
+		// bStartsLocked overrides everything for first-time init only
+		if (bStartsLocked && !OwnershipData.OwningFaction.IsValid())
+		{
+			OwnershipData.State = ETerritoryState::Locked;
 		}
 
 		{
