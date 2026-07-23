@@ -112,6 +112,9 @@ private:
 
 	FTimerHandle TreatyExpirationTimerHandle;
 
+	/** Reentrancy guard — prevents recursive mutation when delegate listeners modify diplomacy. */
+	bool bSuppressSync = false;
+
 	UFUNCTION()
 	void OnTreatyExpirationTick();
 };

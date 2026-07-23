@@ -9,6 +9,9 @@ void UTerritoryLockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerCont
 	UWorld* World = GetWorld();
 	if (!World || !TargetTerritoryTag.IsValid()) return;
 
+	// Lock/unlock mutations are server-authoritative
+	if (World->GetNetMode() == NM_Client) return;
+
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return;
 
@@ -34,6 +37,9 @@ void UTerritoryUnlockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerCo
 {
 	UWorld* World = GetWorld();
 	if (!World || !TargetTerritoryTag.IsValid()) return;
+
+	// Lock/unlock mutations are server-authoritative
+	if (World->GetNetMode() == NM_Client) return;
 
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return;

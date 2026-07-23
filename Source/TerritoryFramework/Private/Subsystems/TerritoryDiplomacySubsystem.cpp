@@ -121,7 +121,7 @@ void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGa
 
 void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)
 {
-	if (!GetWorld()->GetAuthGameMode()) return;
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -349,37 +349,67 @@ void UTerritoryDiplomacySubsystem::SetNarrativeAttitude(FGameplayTag FactionA, F
 
 void UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged(FGameplayTag Faction, FGameplayTag OtherFaction, ETeamAttitude::Type NewAttitude)
 {
+	// Reentrancy guard — prevent recursive mutation from delegate listeners
+	if (bSuppressSync) return;
+	bSuppressSync = true;
+	struct FSyncGuard { bool& Flag; ~FSyncGuard() { Flag = false; } } Guard{bSuppressSync};
+
 	// External attitude change from Narrative GameState.
-	// Reconcile treaty metadata with the new attitude.
+	// Reconcile treaty metadata WITHOUT collapsing rich treaty states.
+	//
+	// Key invariant: TerritoryFramework is authoritative for rich treaty metadata
+	// (TradeAgreement, NonAggression, Ceasefire). Narrative is authoritative for
+	// combat attitude only. When an external attitude change arrives:
+	// - If a rich treaty exists and the new attitude is compatible, KEEP the treaty.
+	// - Only create/overwrite a treaty when NONE exists, or when Hostile (war is
+	//   always intentional and overrides peaceful treaties).
 
-	EDiplomacyState NewState = AttitudeToDiplomacyState(NewAttitude);
-	const FTreatyRecord* Existing = FindTreaty(Faction, OtherFaction);
+	FTreatyRecord* Existing = FindTreaty(Faction, OtherFaction);
 
-	if (NewState == EDiplomacyState::None)
+	if (NewAttitude == ETeamAttitude::Neutral)
 	{
-		// FIX: Narrative set to Neutral — remove dead treaty record
+		// Narrative set to Neutral — remove treaty record if present
 		if (Existing)
 		{
 			RemoveTreaty(Faction, OtherFaction);
 			OnDiplomacyStateChanged.Broadcast(Faction, OtherFaction, EDiplomacyState::None);
 		}
 	}
-	else if (Existing && Existing->State != NewState)
+	else if (NewAttitude == ETeamAttitude::Hostile)
 	{
-		// FIX: Attitude changed — update treaty state, preserve metadata (timing, permanence)
-		FTreatyRecord* MutableTreaty = const_cast<FTreatyRecord*>(Existing);
-		MutableTreaty->State = NewState;
-		OnDiplomacyStateChanged.Broadcast(Faction, OtherFaction, NewState);
+		// Hostile is always authoritative — overrides any peaceful treaty
+		if (Existing && Existing->State != EDiplomacyState::War)
+		{
+			Existing->State = EDiplomacyState::War;
+			OnDiplomacyStateChanged.Broadcast(Faction, OtherFaction, EDiplomacyState::War);
+		}
+		else if (!Existing)
+		{
+			FTreatyRecord Treaty;
+			Treaty.FactionA = Faction;
+			Treaty.FactionB = OtherFaction;
+			Treaty.State = EDiplomacyState::War;
+			Treaty.bPermanent = true;
+			ActiveTreaties.Add(Treaty);
+			OnDiplomacyStateChanged.Broadcast(Faction, OtherFaction, EDiplomacyState::War);
+		}
 	}
-	else if (!Existing && NewState != EDiplomacyState::None)
+	else if (NewAttitude == ETeamAttitude::Friendly)
 	{
-		FTreatyRecord Treaty;
-		Treaty.FactionA = Faction;
-		Treaty.FactionB = OtherFaction;
-		Treaty.State = NewState;
-		Treaty.bPermanent = true;
-		ActiveTreaties.Add(Treaty);
-		OnDiplomacyStateChanged.Broadcast(Faction, OtherFaction, NewState);
+		// Friendly attitude is compatible with Alliance, TradeAgreement, NonAggression.
+		// If a rich treaty already exists, DO NOT overwrite it to Alliance.
+		// Only create a new Alliance treaty when none exists.
+		if (!Existing)
+		{
+			FTreatyRecord Treaty;
+			Treaty.FactionA = Faction;
+			Treaty.FactionB = OtherFaction;
+			Treaty.State = EDiplomacyState::Alliance;
+			Treaty.bPermanent = true;
+			ActiveTreaties.Add(Treaty);
+			OnDiplomacyStateChanged.Broadcast(Faction, OtherFaction, EDiplomacyState::Alliance);
+		}
+		// else: existing treaty (Alliance/TradeAgreement/NonAggression) is preserved
 	}
 }
 

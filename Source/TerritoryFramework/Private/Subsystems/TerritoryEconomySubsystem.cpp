@@ -19,15 +19,19 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 		TickIntervalSeconds = Settings->EconomyTickIntervalSeconds;
 	}
 
+	UWorld* World = GetWorld();
+
 	// Register for territory events
-	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+	if (World)
 	{
-		Registry->OnTerritoryRegistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
-		Registry->OnTerritoryUnregistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
+			Registry->OnTerritoryUnregistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
+		}
 	}
 
 	// Start economy tick timer (server-only — economy state is server-authoritative)
-	UWorld* World = GetWorld();
 	if (World && World->GetNetMode() != NM_Client)
 	{
 		World->GetTimerManager().SetTimer(
@@ -47,12 +51,12 @@ void UTerritoryEconomySubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(EconomyTickTimerHandle);
-	}
 
-	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
-	{
-		Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
-		Registry->OnTerritoryUnregistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
+			Registry->OnTerritoryUnregistered.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
+		}
 	}
 
 	FactionTreasuries.Empty();

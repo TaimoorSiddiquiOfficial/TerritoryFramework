@@ -245,6 +245,13 @@ void UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const
 	Territory->SetContestingFaction(FGameplayTag());
 	Territory->SetOwningFaction(NewOwner);
 
+	// SetOwningFaction already sets State=Claimed, but if the territory was
+	// Contested before force capture, ensure the state is explicitly Claimed.
+	if (Territory->GetTerritoryState() != ETerritoryState::Claimed)
+	{
+		Territory->SetTerritoryState(ETerritoryState::Claimed);
+	}
+
 	UE_LOG(LogTerritory, Log, TEXT("[ForceCapture] %s captured by %s (was %s)"),
 		*Territory->GetTerritoryTag().ToString(),
 		*NewOwner.ToString(), *OldOwner.ToString());

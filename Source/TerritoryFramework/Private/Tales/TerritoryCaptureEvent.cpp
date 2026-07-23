@@ -14,6 +14,9 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	UWorld* World = GetWorld();
 	if (!World) return;
 
+	// Capture mutations are server-authoritative — skip on clients to prevent desync.
+	if (World->GetNetMode() == NM_Client) return;
+
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return;
 

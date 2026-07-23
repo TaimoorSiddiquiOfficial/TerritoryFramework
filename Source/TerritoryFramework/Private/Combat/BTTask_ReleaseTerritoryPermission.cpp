@@ -20,12 +20,31 @@ EBTNodeResult::Type UBTTask_ReleaseTerritoryPermission::ExecuteTask(UBehaviorTre
 	ANarrativeNPCController* NPCController = Cast<ANarrativeNPCController>(AIController);
 	if (!NPCController) return EBTNodeResult::Succeeded;
 
-	UTerritoryCombatDirector* Director = AIController->GetWorld()->GetSubsystem<UTerritoryCombatDirector>();
+	UWorld* World = AIController->GetWorld();
+	if (!World) return EBTNodeResult::Succeeded;
+
+	UTerritoryCombatDirector* Director = World->GetSubsystem<UTerritoryCombatDirector>();
 	if (!Director) return EBTNodeResult::Succeeded;
 
-	// Release all permissions for this controller
-	Director->ReleaseAllSlots(NPCController);
+	// Release permission for the specific territory from the blackboard key,
+	// not ALL territories — the NPC may hold slots in other territories.
+	if (TerritoryKey.SelectedKeyName != NAME_None)
+	{
+		UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
+		if (BB)
+		{
+			UObject* TerrObj = BB->GetValueAsObject(TerritoryKey.SelectedKeyName);
+			ATerritoryVolume* Territory = Cast<ATerritoryVolume>(TerrObj);
+			if (Territory)
+			{
+				Director->ReleaseAssaultSlot(Territory, NPCController);
+				return EBTNodeResult::Succeeded;
+			}
+		}
+	}
 
+	// Fallback: no territory key configured — release all (legacy behavior)
+	Director->ReleaseAllSlots(NPCController);
 	return EBTNodeResult::Succeeded;
 }
 

@@ -65,4 +65,13 @@ private:
 	TMap<TWeakObjectPtr<ATerritoryVolume>, FPerTerritorySlots> SlotMap;
 
 	void CleanupInvalidControllers(FPerTerritorySlots& Slots);
+
+	/** Bind to controller's ASC OnDied so slots are released if NPC dies mid-assault. */
+	void BindControllerDeath(ANarrativeNPCController* Controller);
+
+	UFUNCTION()
+	void OnAssaultControllerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
+
+	/** Track which controllers we've already bound to avoid duplicate bindings. */
+	TSet<TWeakObjectPtr<ANarrativeNPCController>> BoundControllers;
 };

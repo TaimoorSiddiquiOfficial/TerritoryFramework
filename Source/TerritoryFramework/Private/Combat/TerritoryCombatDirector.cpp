@@ -15,6 +15,7 @@ void UTerritoryCombatDirector::Initialize(FSubsystemCollectionBase& Collection)
 void UTerritoryCombatDirector::Deinitialize()
 {
 	SlotMap.Empty();
+	BoundControllers.Empty();
 	Super::Deinitialize();
 }
 
@@ -40,6 +41,10 @@ bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, A
 	}
 
 	Slots.GrantedControllers.Add(Controller);
+
+	// Bind to the controller's death so slots are released even if the BT never
+	// reaches BTTask_ReleaseTerritoryPermission (e.g. NPC killed mid-assault).
+	BindControllerDeath(Controller);
 
 	UE_LOG(LogTerritory, Verbose, TEXT("Assault slot granted in %s (%d/%d)"),
 		*Territory->GetTerritoryTag().ToString(),
@@ -108,4 +113,41 @@ int32 UTerritoryCombatDirector::GetAvailableSlots(const ATerritoryVolume* Territ
 void UTerritoryCombatDirector::CleanupInvalidControllers(FPerTerritorySlots& Slots)
 {
 	Slots.GrantedControllers.RemoveAll([](const TWeakObjectPtr<ANarrativeNPCController>& Ptr) { return !Ptr.IsValid(); });
+}
+
+void UTerritoryCombatDirector::BindControllerDeath(ANarrativeNPCController* Controller)
+{
+	if (!Controller || BoundControllers.Contains(Controller)) return;
+
+	if (IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Controller))
+	{
+		if (UNarrativeAbilitySystemComponent* ASC =
+			Cast<UNarrativeAbilitySystemComponent>(ASCInterface->GetAbilitySystemComponent()))
+		{
+			ASC->OnDied.AddUniqueDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
+			BoundControllers.Add(Controller);
+		}
+	}
+}
+
+void UTerritoryCombatDirector::OnAssaultControllerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC)
+{
+	if (!KilledActor) return;
+
+	// Find the controller that owns this ASC — it could be the pawn's controller
+	APawn* Pawn = Cast<APawn>(KilledActor);
+	ANarrativeNPCController* DeadController = Pawn ? Cast<ANarrativeNPCController>(Pawn->GetController()) : nullptr;
+	if (!DeadController)
+	{
+		// Try direct cast — the killed actor might be the controller itself
+		DeadController = Cast<ANarrativeNPCController>(KilledActor);
+	}
+	if (!DeadController) return;
+
+	// Release all assault slots held by the dead controller
+	ReleaseAllSlots(DeadController);
+	BoundControllers.Remove(DeadController);
+
+	UE_LOG(LogTerritory, Verbose, TEXT("CombatDirector: released assault slots for dead controller %s"),
+		*DeadController->GetName());
 }

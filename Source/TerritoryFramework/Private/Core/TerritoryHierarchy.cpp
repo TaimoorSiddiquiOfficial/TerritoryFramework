@@ -332,14 +332,9 @@ void ATerritoryCity::CascadeCaptureToProperties(ATerritoryVolume* District, FGam
 				*PropOwner.ToString(), *NewOwner.ToString(),
 				*District->GetTerritoryTag().ToString());
 
+			// SetOwningFaction → OnOwnershipChanged → OnPropertyCaptured + delegate broadcast.
+			// Do NOT call OnPropertyCaptured/Broadcast again here — that would fire events twice.
 			Property->SetOwningFaction(NewOwner);
-
-			// Fire property captured event
-			if (ATerritoryProperty* Prop = Cast<ATerritoryProperty>(Property))
-			{
-				Prop->OnPropertyCaptured(NewOwner);
-				Prop->OnPropertyCapturedDelegate.Broadcast(Prop, NewOwner);
-			}
 		}
 	}
 }
@@ -506,7 +501,9 @@ int32 ATerritoryDistrict::GetPropertyCountForFaction(FGameplayTag Faction) const
 bool ATerritoryDistrict::AllPropertiesOwnedBy(FGameplayTag Faction) const
 {
 	TArray<ATerritoryVolume*> Properties = GetProperties();
-	if (Properties.Num() == 0) return true;
+	// A district with no properties cannot be "fully captured" by any faction —
+	// returning true would let any attacker trivially capture empty districts.
+	if (Properties.Num() == 0) return false;
 
 	for (const ATerritoryVolume* Prop : Properties)
 	{

@@ -41,8 +41,12 @@ void ATerritorySavableData::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 {
 	Super::PostDuplicate(DuplicateMode);
 
-	// Duplicated actors must get a NEW GUID to prevent save/load conflicts
-	SavableDataGUID = FGuid::NewGuid();
+	// PIE world creation uses StaticDuplicateObject — must NOT regenerate GUID.
+	// Only regenerate for actual editor duplication (user Ctrl+D).
+	if (DuplicateMode == EDuplicateMode::Normal)
+	{
+		SavableDataGUID = FGuid::NewGuid();
+	}
 }
 #endif
 
@@ -99,13 +103,12 @@ void ATerritorySavableData::LoadFromSelf()
 	// ─── Load Economy ───
 	if (UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
 	{
+		// Use SetFactionTreasury to restore exact saved state — NOT AddToTreasury,
+		// which would add saved gold on top of whatever the subsystem already has
+		// (e.g. from ATerritoryWorldState), doubling the balance.
 		for (const auto& Pair : SavedTreasuries)
 		{
-			// Restore accumulated gold (always positive)
-			if (Pair.Value.Gold > 0)
-			{
-				Economy->AddToTreasury(Pair.Key, Pair.Value.Gold);
-			}
+			Economy->SetFactionTreasury(Pair.Key, Pair.Value);
 		}
 		// Recalculate income from current territory ownership
 		for (const auto& Pair : SavedTreasuries)

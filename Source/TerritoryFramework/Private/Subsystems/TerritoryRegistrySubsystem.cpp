@@ -14,8 +14,9 @@ void UTerritoryRegistrySubsystem::Initialize(FSubsystemCollectionBase& Collectio
 	float CellSize = Settings ? Settings->SpatialCellSize : 2000.f;
 	SpatialIndex.Initialize(CellSize);
 
-	// Periodically check if any territory has moved/resized (every 2s — cheap bounds compare)
-	if (UWorld* World = GetWorld())
+	// Periodically check if any territory has moved/resized (every 2s — cheap bounds compare).
+	// Server-only — spatial index mutations on clients would conflict with replication.
+	if (UWorld* World = GetWorld(); World && World->GetNetMode() != NM_Client)
 	{
 		World->GetTimerManager().SetTimer(
 			BoundsCheckTimerHandle,
