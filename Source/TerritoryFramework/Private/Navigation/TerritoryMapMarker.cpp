@@ -144,68 +144,52 @@ FText UTerritoryMapMarker::GetMarkerDisplayText_Implementation(UNarrativeNavigat
 
 void UTerritoryMapMarker::MarkerOnPaint_Implementation(FPaintContext& Context, FMarkerOnPaintData& OnPaintData) const
 {
-	// Call base implementation first (draws breadcrumbs if enabled)
 	Super::MarkerOnPaint_Implementation(Context, OnPaintData);
 
 	if (!bDrawTerritoryOutline || !TerritoryVolume.IsValid()) return;
 
-	// Get the territory's box bounds
+	// Check for invalid map data (not yet initialized)
+	if (OnPaintData.MapOrigin.X == TNumericLimits<double>::Max()) return;
+
+	// Get the territory's bounds shape
 	UBoxComponent* Box = Cast<UBoxComponent>(TerritoryVolume->GetComponentByClass(UBoxComponent::StaticClass()));
 	if (!Box) return;
 
-	// Get world-space bounds
+	// Calculate the 4 corners of the box in world space using the component transform
+	// (respects rotation, unlike the old axis-aligned approach)
 	FVector BoxCenter = Box->GetComponentLocation();
 	FVector BoxExtent = Box->GetScaledBoxExtent();
+	FQuat BoxRotation = Box->GetComponentQuat();
 
-	// Calculate the 4 corners of the box in world space (XY plane, ignoring Z)
-	FVector2D Corners[4];
-	Corners[0] = FVector2D(BoxCenter.X - BoxExtent.X, BoxCenter.Y - BoxExtent.Y); // SW
-	Corners[1] = FVector2D(BoxCenter.X + BoxExtent.X, BoxCenter.Y - BoxExtent.Y); // SE
-	Corners[2] = FVector2D(BoxCenter.X + BoxExtent.X, BoxCenter.Y + BoxExtent.Y); // NE
-	Corners[3] = FVector2D(BoxCenter.X - BoxExtent.X, BoxCenter.Y + BoxExtent.Y); // NW
+	FVector WorldCorners[4];
+	WorldCorners[0] = BoxCenter + BoxRotation.RotateVector(FVector(-BoxExtent.X, -BoxExtent.Y, 0));
+	WorldCorners[1] = BoxCenter + BoxRotation.RotateVector(FVector( BoxExtent.X, -BoxExtent.Y, 0));
+	WorldCorners[2] = BoxCenter + BoxRotation.RotateVector(FVector( BoxExtent.X,  BoxExtent.Y, 0));
+	WorldCorners[3] = BoxCenter + BoxRotation.RotateVector(FVector(-BoxExtent.X,  BoxExtent.Y, 0));
 
-	// Calculate scale using MapOrigin and MapPan from Narrative's FMarkerOnPaintData
-	FVector2D MapSize = OnPaintData.MapGeometry.GetLocalSize();
-	FVector2D Origin = OnPaintData.MapOrigin;
-	FVector2D Pan = OnPaintData.MapPan;
+	// Convert each world corner to paint space using the marker's own world position
+	// as reference. We compute the offset from the territory volume's location to
+	// each corner, then apply that offset in map-local space.
+	FVector2D MarkerMapLocal = GetMarkerMapLocalPosition(OnPaintData.MapOrigin, OnPaintData.MapPan);
+	FVector2D MarkerPaintLocal = GetMarkerTopLeftLocalPosition(OnPaintData);
 
-	// MapScale: pixels per world unit
-	// Narrative's Navigator uses MapSize to represent the world extent
-	// The scale is derived from the ratio of map widget size to world coverage
-	// If MapOrigin is valid (map is active), compute from available data
-	float MapScale = 1.f;
-	if (Origin.X != TNumericLimits<double>::Max())
-	{
-		// Default assumption: map widget covers 20000x20000 world units at 1:1 zoom
-		// Adjust this based on actual Narrative Navigator zoom level in Blueprint
-		MapScale = MapSize.X / 20000.f;
-	}
-
-	// Convert corners to local map space, accounting for MapPan offset
 	TArray<FVector2f> LinePoints;
 	for (int32 i = 0; i < 4; ++i)
 	{
-		FVector2D WorldCorner = Corners[i];
-		FVector2D MapCorner;
-		MapCorner.X = (WorldCorner.X - Origin.X) * MapScale + MapSize.X * 0.5f;
-		MapCorner.Y = (WorldCorner.Y - Origin.Y) * MapScale + MapSize.Y * 0.5f;
+		// Offset from the territory actor to this corner in world space (XY only)
+		FVector2D WorldOffset = FVector2D(WorldCorners[i]) - FVector2D(TerritoryVolume->GetActorLocation());
 
-		// Apply pan offset if valid
-		if (Pan.X != TNumericLimits<double>::Max())
-		{
-			MapCorner += Pan;
-		}
+		// Apply the same offset in map-local space (world units map 1:1 to map-local units)
+		FVector2D CornerPaintLocal = MarkerPaintLocal + WorldOffset;
 
-		LinePoints.Add(FVector2f(MapCorner.X, MapCorner.Y));
+		LinePoints.Add(FVector2f(CornerPaintLocal));
 	}
-	// Close the loop
-	LinePoints.Add(LinePoints[0]);
+	LinePoints.Add(LinePoints[0]); // Close the loop
 
-	// Get the current color based on territory state
+	// Draw the outline with current territory color
 	FLinearColor DrawColor = GetMarkerColor(nullptr, FGameplayTag());
-	DrawColor.A = 0.6f; // Semi-transparent outline
+	DrawColor.A = 0.6f;
 
-	// Draw the outline
 	Context.MaxLayer++;
 	FSlateDrawElement::MakeLines(
 		Context.OutDrawElements,
