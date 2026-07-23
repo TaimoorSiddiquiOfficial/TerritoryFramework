@@ -199,6 +199,9 @@ public:
 	/** Resolve the NPC definition for a given faction — checks FactionGuardDefinitions first. */
 	UNPCDefinition* ResolveGuardDefinition(const FGameplayTag& Faction) const;
 
+	/** Despawn stale guards and respawn for loaded/current owner. Called from BeginPlay and Load. */
+	void ReconcileGuardsAfterLoad();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -208,7 +211,12 @@ protected:
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
+	virtual void PostActorCreated() override;
+	virtual void PostEditImport() override;
 #endif
+
+	/** Called from editor hooks to bake GUID into level data. */
+	void EnsurePersistentTerritoryGUID();
 
 	UFUNCTION()
 	void OnRep_OwnershipData();
@@ -305,6 +313,9 @@ private:
 
 	/** Cached bounds for change detection. */
 	FBox LastKnownBounds;
+
+	/** True after Narrative's Load() restored this actor from save. */
+	bool bLoadedFromSave = false;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);

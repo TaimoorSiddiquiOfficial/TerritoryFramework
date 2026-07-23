@@ -63,77 +63,70 @@ void ATerritoryVolume::BeginPlay()
 
 	if (HasAuthority())
 	{
-		// Ensure GUID is stable across save/load sessions.
-		// Editor hooks (PostEditChangeProperty/PostDuplicate) bake it at edit time.
-		// For actors that were never edited (fresh placement), generate a deterministic
-		// GUID from the territory tag so it's the same every session.
+		// GUID must be persistent from editor placement — don't generate at runtime.
 		if (!TerritoryGUID.IsValid())
 		{
 			if (TerritoryTag.IsValid())
 			{
-				// Deterministic GUID from tag string hash — stable across sessions
 				uint32 Hash = FCrc::StrCrc_DEPRECATED(*TerritoryTag.ToString());
 				TerritoryGUID = FGuid(Hash, 0, 0, 0);
+				UE_LOG(LogTerritory, Error,
+					TEXT("%s has no persistent TerritoryGUID — using tag hash fallback. Run Validate Assets."),
+					*GetPathName());
 			}
 			else
 			{
 				TerritoryGUID = FGuid::NewGuid();
+				UE_LOG(LogTerritory, Error,
+					TEXT("%s has no TerritoryGUID and no TerritoryTag — save/load broken."),
+					*GetPathName());
 			}
 		}
 
-		// Try loading saved data — LoadSingleActor deserializes saved UPROPERTY(SaveGame)
-		// fields directly into this actor, then calls Load_Implementation.
-		USaveSystemStatics::LoadSingleActor(this);
+		bool bSuccessfullyLoaded = USaveSystemStatics::LoadSingleActor(this);
 
-		// We can't reliably detect whether LoadSingleActor succeeded by checking
-		// OwnershipData state, because a legitimately saved Unclaimed territory
-		// looks the same as "no save found." Instead, always sync the non-ownership
-		// Initial* settings (income, attacker count, guard cost) which are level
-		// config, not gameplay state. The ownership fields (OwningFaction, State,
-		// ControlProgress, ContestingFaction) come from save if available.
-		OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
-		OwnershipData.PeriodicIncome = InitialPeriodicIncome;
-		OwnershipData.GuardCost = InitialGuardCost;
-
-		// If OwnershipData still has no faction after load (fresh level, no save),
-		// apply the level-configured initial owner.
-		if (!OwnershipData.OwningFaction.IsValid() && InitialOwningFaction.IsValid())
+		if (!bSuccessfullyLoaded && !bLoadedFromSave)
 		{
-			OwnershipData.OwningFaction = InitialOwningFaction;
-			OwnershipData.State = ETerritoryState::Claimed;
+			// Fresh territory — initialize from level defaults
+			OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
+			OwnershipData.PeriodicIncome = InitialPeriodicIncome;
+			OwnershipData.GuardCost = InitialGuardCost;
+
+			if (InitialOwningFaction.IsValid())
+			{
+				OwnershipData.OwningFaction = InitialOwningFaction;
+				OwnershipData.State = ETerritoryState::Claimed;
+			}
+
+			if (bStartsLocked)
+			{
+				OwnershipData.State = ETerritoryState::Locked;
+			}
+		}
+		else
+		{
+			// Save loaded — sync level-config settings only
+			OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
+			OwnershipData.PeriodicIncome = InitialPeriodicIncome;
+			OwnershipData.GuardCost = InitialGuardCost;
 		}
 
-		// bStartsLocked overrides everything for first-time init only
-		if (bStartsLocked && !OwnershipData.OwningFaction.IsValid())
-		{
-			OwnershipData.State = ETerritoryState::Locked;
-		}
+		PreviousOwningFaction = OwnershipData.OwningFaction;
+		PreviousState = OwnershipData.State;
 
 		{
 			const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
 			if (DevSettings && DevSettings->ShouldDebugSaveLoad())
 			{
-				UE_LOG(LogTerritory, Log, TEXT("[SaveLoad] %s loaded: owner=%s, state=%d, progress=%.2f"),
+				UE_LOG(LogTerritory, Log, TEXT("[SaveLoad] %s BeginPlay: owner=%s, state=%d, loaded=%d"),
 					*GetTerritoryTag().ToString(),
 					*OwnershipData.OwningFaction.ToString(),
 					static_cast<int32>(OwnershipData.State),
-					OwnershipData.ControlProgress);
+					bSuccessfullyLoaded || bLoadedFromSave ? 1 : 0);
 			}
 		}
 
-		// Sync RepNotify cache — prevents false ownership/state events after load
-		PreviousOwningFaction = OwnershipData.OwningFaction;
-		PreviousState = OwnershipData.State;
-
-		// Spawn initial guards if territory is claimed and has a guard definition
-		if (OwnershipData.State == ETerritoryState::Claimed
-			&& OwnershipData.OwningFaction.IsValid()
-			&& ResolveGuardDefinition(OwnershipData.OwningFaction)
-			&& GuardSpawnCount > 0
-			&& SpawnedGuards.Num() == 0)
-		{
-			SpawnGuards();
-		}
+		ReconcileGuardsAfterLoad();
 	}
 
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
@@ -330,13 +323,42 @@ void ATerritoryVolume::PostEditChangeProperty(FPropertyChangedEvent& PropertyCha
 void ATerritoryVolume::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 {
 	Super::PostDuplicate(DuplicateMode);
-
-	// Duplicated actors must get a NEW GUID to prevent save/load conflicts
 	TerritoryGUID = FGuid::NewGuid();
-	UE_LOG(LogTerritory, Log, TEXT("Assigned new GUID to duplicated territory %s: %s"),
-		*GetName(), *TerritoryGUID.ToString());
+	MarkPackageDirty();
+}
+
+void ATerritoryVolume::PostActorCreated()
+{
+	Super::PostActorCreated();
+	EnsurePersistentTerritoryGUID();
+}
+
+void ATerritoryVolume::PostEditImport()
+{
+	Super::PostEditImport();
+	// Pasted/imported actors must get a new GUID
+	TerritoryGUID = FGuid::NewGuid();
+	MarkPackageDirty();
 }
 #endif
+
+void ATerritoryVolume::EnsurePersistentTerritoryGUID()
+{
+	if (HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+	{
+		return;
+	}
+
+	if (!TerritoryGUID.IsValid())
+	{
+		TerritoryGUID = FGuid::NewGuid();
+
+#if WITH_EDITOR
+		Modify();
+		MarkPackageDirty();
+#endif
+	}
+}
 
 FGuid ATerritoryVolume::GetActorGUID_Implementation() const { return TerritoryGUID; }
 void ATerritoryVolume::SetActorGUID_Implementation(const FGuid& NewGUID) { TerritoryGUID = NewGUID; }
@@ -344,19 +366,13 @@ void ATerritoryVolume::PrepareForSave_Implementation() { /* OwnershipData auto-s
 
 void ATerritoryVolume::Load_Implementation()
 {
-	// Narrative's save system just deserialized all SaveGame UPROPERTYs.
-	// OwnershipData now reflects the saved state. Spawn guards for the
-	// loaded owner if appropriate — BeginPlay ran before the save was
-	// loaded, so guards weren't spawned for the correct faction yet.
+	bLoadedFromSave = true;
 
-	if (HasAuthority()
-		&& OwnershipData.State == ETerritoryState::Claimed
-		&& OwnershipData.OwningFaction.IsValid()
-		&& ResolveGuardDefinition(OwnershipData.OwningFaction)
-		&& GuardSpawnCount > 0
-		&& SpawnedGuards.Num() == 0)
+	// Narrative's Serialize(Ar) just restored OwnershipData from the save.
+	// Reconcile guards — despawn any stale BeginPlay guards, respawn for loaded owner.
+	if (HasAuthority())
 	{
-		SpawnGuards();
+		ReconcileGuardsAfterLoad();
 	}
 
 	const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
@@ -368,6 +384,31 @@ void ATerritoryVolume::Load_Implementation()
 			static_cast<int32>(OwnershipData.State),
 			SpawnedGuards.Num());
 	}
+}
+
+void ATerritoryVolume::ReconcileGuardsAfterLoad()
+{
+	if (!HasAuthority()) return;
+
+	// Despawn ALL existing guards (may be stale from BeginPlay initial faction)
+	DespawnGuards();
+
+	// Clean stale defender registrations
+	RegisteredDefenders.RemoveAll([](const TWeakObjectPtr<AActor>& Ptr) { return !Ptr.IsValid(); });
+	OwnershipData.DefenderCount = RegisteredDefenders.Num();
+
+	// Spawn guards for the loaded/current owner
+	if (OwnershipData.State == ETerritoryState::Claimed
+		&& OwnershipData.OwningFaction.IsValid()
+		&& ResolveGuardDefinition(OwnershipData.OwningFaction)
+		&& GuardSpawnCount > 0)
+	{
+		SpawnGuards();
+	}
+
+	// Sync RepNotify cache
+	PreviousOwningFaction = OwnershipData.OwningFaction;
+	PreviousState = OwnershipData.State;
 }
 
 bool ATerritoryVolume::ShouldRespawn_Implementation() const { return false; }
