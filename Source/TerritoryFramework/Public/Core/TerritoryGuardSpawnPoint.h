@@ -133,6 +133,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
 	bool HasPatrolRoute() const;
 
+	/**
+	 * Get patrol route as transforms — for populating a Narrative Goal_Patrol's
+	 * PatrolPoints array from Blueprint. Each node becomes an FTransform with
+	 * WaitTime stored separately via GetPatrolWaitTimes().
+	 *
+	 * Usage in BP:
+	 *   1. Spawn guard with Territory ConfigureTerritorySpawn
+	 *   2. Get the spawn point's PatrolRouteAsTransforms
+	 *   3. Set them on a Goal_Patrol asset or BPA_Patrol activity
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn|Patrol")
+	TArray<FTransform> GetPatrolRouteAsTransforms() const;
+
+	/** Get wait times for each patrol node — parallel to GetPatrolRouteAsTransforms. */
+	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn|Patrol")
+	TArray<float> GetPatrolWaitTimes() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

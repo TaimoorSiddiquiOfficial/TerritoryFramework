@@ -231,3 +231,25 @@ bool ATerritoryGuardSpawnPoint::HasPatrolRoute() const
 {
 	return PatrolRoute.Num() >= 2;
 }
+
+TArray<FTransform> ATerritoryGuardSpawnPoint::GetPatrolRouteAsTransforms() const
+{
+	TArray<FTransform> Transforms;
+	Transforms.Reserve(PatrolRoute.Num());
+	for (const FTerritoryPatrolNode& Node : PatrolRoute)
+	{
+		Transforms.Add(FTransform(Node.Rotation, Node.Location));
+	}
+	return Transforms;
+}
+
+TArray<float> ATerritoryGuardSpawnPoint::GetPatrolWaitTimes() const
+{
+	TArray<float> Times;
+	Times.Reserve(PatrolRoute.Num());
+	for (const FTerritoryPatrolNode& Node : PatrolRoute)
+	{
+		Times.Add(Node.WaitTime);
+	}
+	return Times;
+}
