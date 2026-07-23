@@ -4,6 +4,10 @@
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "TerritoryGuardCharacter.generated.h"
 
+class UNPCDefinition;
+class UNPCActivityConfiguration;
+class UTriggerSet;
+
 /**
  * Territory-specific NPC character that properly implements GetActorGUID
  * by returning SpawnInfo.SpawnAssignedSaveGUID. This prevents the
@@ -25,13 +29,21 @@ public:
 	virtual FGuid GetActorGUID_Implementation() const override;
 	virtual void SetActorGUID_Implementation(const FGuid& NewGUID) override;
 
-	// Blueprint-accessible helper to set the save GUID before FinishSpawning
-	UFUNCTION(BlueprintCallable, Category = "Territory|Guard")
-	void SetTerritorySaveGUID(const FGuid& NewGUID);
-
-	// Blueprint-accessible helper to set the owning territory GUID
-	UFUNCTION(BlueprintCallable, Category = "Territory|Guard")
-	void SetOwningTerritoryGUID(const FGuid& TerritoryGUID);
+	/**
+	 * Single entrypoint for deterministic territory guard configuration.
+	 * Sets up SpawnInfo.SpawnParams BEFORE SetNPCDefinition so Narrative's
+	 * definition initialization reads the correct faction, GUIDs, and overrides.
+	 *
+	 * Call this during deferred spawn (between BeginDeferredActorSpawnFromClass
+	 * and FinishSpawningActor), NOT after FinishSpawningActor.
+	 */
+	void ConfigureTerritorySpawn(
+		UNPCDefinition* Definition,
+		const FGameplayTag& ExactFaction,
+		const FGuid& TerritoryGuid,
+		const FGuid& SaveGuid,
+		UNPCActivityConfiguration* OptionalActivityOverride = nullptr,
+		const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides = {});
 
 protected:
 	virtual void BeginPlay() override;

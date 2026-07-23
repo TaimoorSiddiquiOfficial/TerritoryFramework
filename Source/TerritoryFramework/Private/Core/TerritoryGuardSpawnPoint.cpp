@@ -29,6 +29,51 @@ void ATerritoryGuardSpawnPoint::BeginPlay()
 	Super::BeginPlay();
 	ResolveOwningTerritory();
 	InitializeReserves();
+
+	// If resolution failed, subscribe to territory registration for late binding
+	// (handles World Partition streaming and actor init order races)
+	if (!CachedTerritory.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+			{
+				Registry->OnTerritoryRegistered.AddDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
+			}
+		}
+	}
+}
+
+void ATerritoryGuardSpawnPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bIsNew)
+{
+	if (CachedTerritory.IsValid()) return;
+	if (!Territory) return;
+
+	// Check if this is our territory
+	if (OwnerTerritoryTag.IsValid() && Territory->GetTerritoryTag() == OwnerTerritoryTag)
+	{
+		CachedTerritory = Territory;
+		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s late-bound to territory %s"),
+			*GetName(), *OwnerTerritoryTag.ToString());
+
+		// Unsubscribe — resolved
+		if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
+		}
+	}
 }
 
 #if WITH_EDITOR

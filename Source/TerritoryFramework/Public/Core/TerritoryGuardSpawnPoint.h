@@ -135,6 +135,11 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/** Late-binding handler for when a territory registers after this spawn point. */
+	UFUNCTION()
+	void OnTerritoryRegistered(class ATerritoryVolume* Territory, bool bIsNew);
 
 #if WITH_EDITOR
 	virtual void OnConstruction(const FTransform& Transform) override;

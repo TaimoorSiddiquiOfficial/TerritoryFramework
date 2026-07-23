@@ -763,11 +763,11 @@ void ATerritoryVolume::SpawnGuards()
 		// Use GuardSpawnPoints if available, otherwise random within bounds
 		if (SpawnPointActors.Num() > 0)
 		{
-			// Find next available spawn point
+			// Find next available spawn point — active slots only, NOT reserves
 			for (int32 j = 0; j < SpawnPointActors.Num(); ++j)
 			{
 				ATerritoryGuardSpawnPoint* SP = SpawnPointActors[(NextSPIdx + j) % SpawnPointActors.Num()];
-				if (SP->HasAvailableSlot() || SP->HasReserveAvailable())
+				if (SP->HasAvailableSlot())
 				{
 					UsedSP = SP;
 					SpawnTransform = SP->GetSpawnTransform();
@@ -802,15 +802,20 @@ void ATerritoryVolume::SpawnGuards()
 		}
 
 		FGuid GuardSaveGUID = FGuid::NewGuid();
-		Guard->SetTerritorySaveGUID(GuardSaveGUID);
-		Guard->SetOwningTerritoryGUID(TerritoryGUID);
-		Guard->SetNPCDefinition(GuardNPCDefinition);
 
-		// Set faction BEFORE FinishSpawningActor so Narrative's BeginPlay reads correct faction
-		if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
+		// Determine effective faction: spawn point override > territory owner
+		FGameplayTag EffectiveFaction = OwnerFaction;
+		if (UsedSP && UsedSP->FactionOverride.IsValid())
 		{
-			TeamAgent->AddFaction(OwnerFaction);
+			EffectiveFaction = UsedSP->FactionOverride;
 		}
+
+		// Single deterministic entrypoint — sets SpawnParams before SetNPCDefinition
+		Guard->ConfigureTerritorySpawn(
+			GuardNPCDefinition,
+			EffectiveFaction,
+			TerritoryGUID,
+			GuardSaveGUID);
 
 		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
@@ -827,9 +832,9 @@ void ATerritoryVolume::SpawnGuards()
 			UE_LOG(LogTerritory, Log, TEXT("  Guard %d/%d spawned for %s (faction=%s, GUID=%s, SP=%s)"),
 				i + 1, GuardSpawnCount,
 				*GetTerritoryTag().ToString(),
-				*OwnerFaction.ToString(),
+				*EffectiveFaction.ToString(),
 				*GuardSaveGUID.ToString(),
-				UsedSP ? *UsedSP->GetActorLabel() : TEXT("random"));
+				UsedSP ? *UsedSP->GetName() : TEXT("random"));
 		}
 	}
 }
@@ -861,15 +866,20 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 	if (!Guard) return;
 
 	FGuid GuardSaveGUID = FGuid::NewGuid();
-	Guard->SetTerritorySaveGUID(GuardSaveGUID);
-	Guard->SetOwningTerritoryGUID(TerritoryGUID);
-	Guard->SetNPCDefinition(GuardNPCDefinition);
 
-	// Set faction BEFORE FinishSpawningActor so Narrative's BeginPlay reads correct faction
-	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard))
+	// Determine effective faction: spawn point override > territory owner
+	FGameplayTag EffectiveFaction = OwnerFaction;
+	if (SpawnPoint->FactionOverride.IsValid())
 	{
-		TeamAgent->AddFaction(OwnerFaction);
+		EffectiveFaction = SpawnPoint->FactionOverride;
 	}
+
+	// Single deterministic entrypoint
+	Guard->ConfigureTerritorySpawn(
+		GuardNPCDefinition,
+		EffectiveFaction,
+		TerritoryGUID,
+		GuardSaveGUID);
 
 	UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
