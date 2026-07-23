@@ -81,8 +81,8 @@ On the territory volume:
 | Problem | Solution |
 |---|---|
 | Guards don't spawn | Assign GuardNPCDefinition on the territory volume |
-| Guards don't fight | Assign GuardBehaviorTree (e.g., BT_Attack_Generic) |
-| Territory doesn't save | Place TerritorySavableData actor in level |
+| Guards don't fight | Configure ActivityConfiguration + TriggerSets on the NPCDefinition asset |
+| Territory doesn't save | Place TerritoryWorldState actor in level |
 | Capture doesn't work | Check faction attitudes (Friendly factions can't capture each other) |
-| Guards float on hit | Already fixed — BoundShape has NoCollision |
-| Map marker not showing | Add TerritoryNavigationMarkerComponent to the territory volume |
+| Guards float on hit | Already fixed — BoundsShape has NoCollision |
+| Map marker not showing | MapMarkerComponent is auto-created — check marker color settings |

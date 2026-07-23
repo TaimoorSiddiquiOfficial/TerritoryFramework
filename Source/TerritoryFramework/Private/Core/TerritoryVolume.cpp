@@ -515,11 +515,22 @@ bool ATerritoryVolume::CanUnlock() const
 	// No lock conditions → always unlockable
 	if (LockConditions.Num() == 0) return true;
 
-	// All conditions must pass (no target pawn/controller needed for territory conditions)
+	// Resolve player context for conditions that need it (e.g., quest completion checks)
+	APlayerController* ContextPC = nullptr;
+	APawn* ContextPawn = nullptr;
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			ContextPC = PC;
+			ContextPawn = PC->GetPawn();
+		}
+	}
+
 	for (const TObjectPtr<UNarrativeCondition>& Cond : LockConditions)
 	{
 		if (!Cond) continue;
-		if (!Cond->CheckCondition(nullptr, nullptr, nullptr)) return false;
+		if (!Cond->CheckCondition(ContextPawn, ContextPC, nullptr)) return false;
 	}
 	return true;
 }
