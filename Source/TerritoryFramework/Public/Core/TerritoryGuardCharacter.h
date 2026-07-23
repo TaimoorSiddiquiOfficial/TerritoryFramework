@@ -7,6 +7,8 @@
 class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
+class ATerritoryVolume;
+class ATerritoryGuardSpawnPoint;
 
 /**
  * Territory-specific NPC character that properly implements GetActorGUID
@@ -31,8 +33,8 @@ public:
 
 	/**
 	 * Single entrypoint for deterministic territory guard configuration.
-	 * Sets up SpawnInfo.SpawnParams BEFORE SetNPCDefinition so Narrative's
-	 * definition initialization reads the correct faction, GUIDs, and overrides.
+	 * Fills ALL SpawnInfo fields that Narrative activities need, including
+	 * SpawnTransform (critical for BPA_ReturnToSpawn) and faction overrides.
 	 *
 	 * Call this during deferred spawn (between BeginDeferredActorSpawnFromClass
 	 * and FinishSpawningActor), NOT after FinishSpawningActor.
@@ -42,17 +44,31 @@ public:
 		const FGameplayTag& ExactFaction,
 		const FGuid& TerritoryGuid,
 		const FGuid& SaveGuid,
+		const FTransform& InSpawnTransform,
+		FName SpawnPointName = NAME_None,
 		UNPCActivityConfiguration* OptionalActivityOverride = nullptr,
 		const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides = {});
+
+	// ─── Territory AI context ───
+
+	/** Home position for ReturnToTerritory activity — the spawn point transform. */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|AI")
+	FTransform TerritoryHomeTransform;
+
+	/** Owning territory volume. */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|AI")
+	TWeakObjectPtr<ATerritoryVolume> OwningTerritory;
+
+	/** Spawn point this guard was spawned from (may be null for random spawns). */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|AI")
+	TWeakObjectPtr<ATerritoryGuardSpawnPoint> OwningTerritorySpawnPoint;
 
 protected:
 	virtual void BeginPlay() override;
 
 	// Prevent Narrative save system from restoring stale guards on load.
-	// TerritoryVolume manages guard lifecycle via SpawnGuards/DespawnGuards.
 	virtual bool ShouldRespawn_Implementation() const override;
 
 private:
-	/** Cached fallback GUID — generated once if SpawnAssignedSaveGUID is invalid */
 	FGuid CachedFallbackGUID;
 };

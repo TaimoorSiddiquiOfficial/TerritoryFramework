@@ -957,12 +957,18 @@ void ATerritoryVolume::SpawnGuards()
 			EffectiveFaction = UsedSP->FactionOverride;
 		}
 
-		// Single deterministic entrypoint — sets SpawnParams before SetNPCDefinition
+		// Single deterministic entrypoint — fills ALL SpawnInfo fields
 		Guard->ConfigureTerritorySpawn(
 			EffectiveDef,
 			EffectiveFaction,
 			TerritoryGUID,
-			GuardSaveGUID);
+			GuardSaveGUID,
+			SpawnTransform,
+			UsedSP ? UsedSP->GetFName() : NAME_None);
+
+		// Set territory AI context before FinishSpawningActor
+		Guard->OwningTerritory = this;
+		Guard->OwningTerritorySpawnPoint = UsedSP;
 
 		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 
@@ -1024,12 +1030,18 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 		EffectiveFaction = SpawnPoint->FactionOverride;
 	}
 
-	// Single deterministic entrypoint
+	// Single deterministic entrypoint — fills ALL SpawnInfo fields
 	Guard->ConfigureTerritorySpawn(
 		EffectiveDef,
 		EffectiveFaction,
 		TerritoryGUID,
-		GuardSaveGUID);
+		GuardSaveGUID,
+		SpawnTransform,
+		SpawnPoint->GetFName());
+
+	// Set territory AI context before FinishSpawningActor
+	Guard->OwningTerritory = this;
+	Guard->OwningTerritorySpawnPoint = SpawnPoint;
 
 	UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
 

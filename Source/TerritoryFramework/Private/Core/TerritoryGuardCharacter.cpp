@@ -1,20 +1,17 @@
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryVolume.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "Tales/TriggerSet.h"
 
 ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	// Guards are managed by TerritoryVolume — don't let Narrative's save system
-	// restore stale guard actors on load. TerritoryVolume respawns fresh guards.
-	bNetTemporary = false; // Keep for replication during play
 }
 
 bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
 {
-	// Territory guards are NOT restored by Narrative's save system.
-	// TerritoryVolume handles spawning/despawning based on saved ownership.
 	return false;
 }
 
@@ -28,15 +25,27 @@ void ATerritoryGuardCharacter::ConfigureTerritorySpawn(
 	const FGameplayTag& ExactFaction,
 	const FGuid& TerritoryGuid,
 	const FGuid& SaveGuid,
+	const FTransform& InSpawnTransform,
+	FName SpawnPointName,
 	UNPCActivityConfiguration* OptionalActivityOverride,
 	const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides)
 {
-	// Set spawn info GUIDs before SetNPCDefinition
-	SpawnInfo.OwningSpawnerGUID = TerritoryGuid;
-	SpawnInfo.SpawnAssignedSaveGUID = SaveGuid;
+	// Fill ALL SpawnInfo fields that Narrative activities need.
+	// BPA_ReturnToSpawn reads SpawnTransform — without it, SetupBlackboard fails.
 
-	// Override factions to exactly the territory owner — prevents
-	// the NPC definition's default factions from leaking through.
+	SpawnInfo.SpawnAssignedSaveGUID = SaveGuid;
+	SpawnInfo.SpawnTransform = InSpawnTransform;
+	SpawnInfo.SpawnName = SpawnPointName;
+
+	// TerritoryVolume is not a Narrative NPCSpawnComponent.
+	// Mark OwningSpawnerGUID as the territory's GUID for identification,
+	// but OwningSpawn is left null since there's no UNPCSpawnComponent.
+	SpawnInfo.OwningSpawnerGUID = TerritoryGuid;
+
+	// Store territory context for BP-accessible ReturnToTerritory activity
+	TerritoryHomeTransform = InSpawnTransform;
+
+	// Override factions to exactly the territory owner
 	if (ExactFaction.IsValid())
 	{
 		SpawnInfo.SpawnParams.bOverride_DefaultFactions = true;
