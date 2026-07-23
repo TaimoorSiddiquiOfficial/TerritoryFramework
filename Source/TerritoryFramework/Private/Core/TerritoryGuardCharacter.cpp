@@ -6,6 +6,16 @@
 ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	// Guards are managed by TerritoryVolume — don't let Narrative's save system
+	// restore stale guard actors on load. TerritoryVolume respawns fresh guards.
+	bNetTemporary = false; // Keep for replication during play
+}
+
+bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
+{
+	// Territory guards are NOT restored by Narrative's save system.
+	// TerritoryVolume handles spawning/despawning based on saved ownership.
+	return false;
 }
 
 void ATerritoryGuardCharacter::BeginPlay()

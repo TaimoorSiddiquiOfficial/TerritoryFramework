@@ -48,6 +48,10 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	// Prevent Narrative save system from restoring stale guards on load.
+	// TerritoryVolume manages guard lifecycle via SpawnGuards/DespawnGuards.
+	virtual bool ShouldRespawn_Implementation() const override;
+
 private:
 	/** Cached fallback GUID — generated once if SpawnAssignedSaveGUID is invalid */
 	FGuid CachedFallbackGUID;

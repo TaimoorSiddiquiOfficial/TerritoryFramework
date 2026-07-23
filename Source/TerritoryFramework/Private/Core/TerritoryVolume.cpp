@@ -6,6 +6,7 @@
 #include "SaveSystemStatics.h"
 #include "Components/BoxComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Misc/Crc.h"
 #include "Engine/World.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
@@ -62,33 +63,55 @@ void ATerritoryVolume::BeginPlay()
 
 	if (HasAuthority())
 	{
+		// Ensure GUID is stable across save/load sessions.
+		// Editor hooks (PostEditChangeProperty/PostDuplicate) bake it at edit time.
+		// For actors that were never edited (fresh placement), generate a deterministic
+		// GUID from the territory tag so it's the same every session.
 		if (!TerritoryGUID.IsValid())
 		{
-			TerritoryGUID = FGuid::NewGuid();
+			if (TerritoryTag.IsValid())
+			{
+				// Deterministic GUID from tag string hash — stable across sessions
+				uint32 Hash = FCrc::StrCrc_DEPRECATED(*TerritoryTag.ToString());
+				TerritoryGUID = FGuid(Hash, 0, 0, 0);
+			}
+			else
+			{
+				TerritoryGUID = FGuid::NewGuid();
+			}
 		}
 
-		// Sync Initial* → OwnershipData.* using instance values (not CDO defaults).
-		// This must happen in BeginPlay, not the constructor, because Blueprint CDO
-		// overrides for InitialPeriodicIncome/InitialMaxConcurrentAttackers/InitialGuardCost
-		// are not yet applied when the constructor runs.
-		OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
-		OwnershipData.PeriodicIncome = InitialPeriodicIncome;
-		OwnershipData.GuardCost = InitialGuardCost;
+		// Store initial values BEFORE load — if save exists, LoadSingleActor overwrites.
+		// If no save, these become the runtime defaults.
+		FTerritoryOwnershipData InitialDefaults;
+		InitialDefaults.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
+		InitialDefaults.PeriodicIncome = InitialPeriodicIncome;
+		InitialDefaults.GuardCost = InitialGuardCost;
 
 		if (InitialOwningFaction.IsValid())
 		{
-			OwnershipData.OwningFaction = InitialOwningFaction;
-			OwnershipData.State = ETerritoryState::Claimed;
+			InitialDefaults.OwningFaction = InitialOwningFaction;
+			InitialDefaults.State = ETerritoryState::Claimed;
 		}
 
-		// bStartsLocked takes priority — territory starts Locked regardless of initial owner
 		if (bStartsLocked)
 		{
-			OwnershipData.State = ETerritoryState::Locked;
+			InitialDefaults.State = ETerritoryState::Locked;
 		}
 
-		// Load saved data — overrides the Initial* defaults above if a save exists
+		// Try loading saved data
 		USaveSystemStatics::LoadSingleActor(this);
+
+		// Check if OwnershipData was restored from save (has valid owner or non-default state)
+		const bool bSaveLoaded = OwnershipData.OwningFaction.IsValid()
+			|| OwnershipData.State != ETerritoryState::Unclaimed
+			|| OwnershipData.ControlProgress > 0.f;
+
+		if (!bSaveLoaded)
+		{
+			// No save data — apply initial defaults
+			OwnershipData = InitialDefaults;
+		}
 
 		{
 			const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
@@ -105,7 +128,7 @@ void ATerritoryVolume::BeginPlay()
 		// Spawn initial guards if territory is claimed and has a guard definition
 		if (OwnershipData.State == ETerritoryState::Claimed
 			&& OwnershipData.OwningFaction.IsValid()
-			&& GuardNPCDefinition
+			&& ResolveGuardDefinition(OwnershipData.OwningFaction)
 			&& GuardSpawnCount > 0
 			&& SpawnedGuards.Num() == 0)
 		{
@@ -450,7 +473,7 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	// Guard lifecycle invariants — run BEFORE BP virtual so BP can react to final state.
 	// Not overridable: despawn old owner guards, spawn new owner guards.
 	DespawnGuards();
-	if (NewFaction.IsValid() && GuardNPCDefinition && GuardSpawnCount > 0)
+	if (NewFaction.IsValid() && ResolveGuardDefinition(NewFaction) && GuardSpawnCount > 0)
 	{
 		SpawnGuards();
 	}

@@ -198,8 +198,8 @@ void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 	UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s lost by %s"),
 		*GetTerritoryTag().ToString(), *PreviousFaction.ToString());
 
-	// Clear city ownership — this is the bug fix: previously OnCityLost never called SetOwningFaction
-	if (HasAuthority())
+	// Set city to Unclaimed — but don't clobber Locked state
+	if (HasAuthority() && !IsLocked())
 	{
 		SetOwningFaction(FGameplayTag());
 	}
