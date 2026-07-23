@@ -2,7 +2,6 @@
 #include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Engine/World.h"
-#include "Kismet/GameplayStatics.h"
 
 void UTerritoryInfoWidget::NativeConstruct()
 {
@@ -33,7 +32,7 @@ void UTerritoryInfoWidget::BindToTerritoryAtPlayer()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+	APlayerController* PC = GetOwningPlayer();
 	if (!PC || !PC->GetPawn()) return;
 
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();

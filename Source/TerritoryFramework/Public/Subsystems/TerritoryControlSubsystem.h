@@ -76,7 +76,7 @@ private:
 	/** Deferred commands to apply AFTER iteration to avoid map mutation during range-for */
 	struct FDeferredCommand
 	{
-		enum EType { Complete, Reset, RemoveInvalid };
+		enum EType { Complete, Reset };
 		EType Type;
 		TWeakObjectPtr<ATerritoryVolume> Territory;
 		FGameplayTag Faction;

@@ -177,18 +177,23 @@ void ATerritoryVolume::Tick(float DeltaSeconds)
 
 	const FVector Center = GetActorLocation();
 	const FBox Bounds = GetTerritoryBounds();
+	FQuat BoxRotation = FQuat::Identity;
+	if (UBoxComponent* Box = Cast<UBoxComponent>(BoundsShape))
+	{
+		BoxRotation = Box->GetComponentQuat();
+	}
 
 	// Draw territory bounds
 	if (Settings->bDrawTerritoryBounds)
 	{
-		DrawDebugBox(World, Bounds.GetCenter(), Bounds.GetExtent(), FQuat::Identity,
+		DrawDebugBox(World, Bounds.GetCenter(), Bounds.GetExtent(), BoxRotation,
 			FColor::White, false, 0.f, 0, 1.f);
 	}
 
 	// Draw ownership color overlay
 	if (Settings->bDrawOwnershipOverlay && OwnershipData.OwningFaction.IsValid())
 	{
-		DrawDebugBox(World, Bounds.GetCenter(), Bounds.GetExtent(), FQuat::Identity,
+		DrawDebugBox(World, Bounds.GetCenter(), Bounds.GetExtent(), BoxRotation,
 			FColor::Green, false, 0.f, 1, 2.f);
 	}
 
@@ -295,7 +300,7 @@ void ATerritoryVolume::PostEditChangeProperty(FPropertyChangedEvent& PropertyCha
 	{
 		TerritoryGUID = FGuid::NewGuid();
 		UE_LOG(LogTerritory, Log, TEXT("Generated editor-stable GUID for %s: %s"),
-			*GetActorLabel(), *TerritoryGUID.ToString());
+			*GetName(), *TerritoryGUID.ToString());
 	}
 }
 
@@ -306,7 +311,7 @@ void ATerritoryVolume::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 	// Duplicated actors must get a NEW GUID to prevent save/load conflicts
 	TerritoryGUID = FGuid::NewGuid();
 	UE_LOG(LogTerritory, Log, TEXT("Assigned new GUID to duplicated territory %s: %s"),
-		*GetActorLabel(), *TerritoryGUID.ToString());
+		*GetName(), *TerritoryGUID.ToString());
 }
 #endif
 
@@ -907,7 +912,7 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 	SpawnPoint->RegisterSpawnedGuard(Guard);
 
 	UE_LOG(LogTerritory, Log, TEXT("[GuardReserve] 1 replacement spawned at %s for %s (faction=%s)"),
-		*SpawnPoint->GetActorLabel(),
+		*SpawnPoint->GetName(),
 		*GetTerritoryTag().ToString(),
 		*OwnerFaction.ToString());
 }

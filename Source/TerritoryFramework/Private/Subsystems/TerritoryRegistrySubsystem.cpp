@@ -65,7 +65,7 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 	if (bDebug)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[Registry] Registering %s (tag=%s, GUID=%s)"),
-			*Territory->GetActorLabel(), *Tag.ToString(), *GUID.ToString());
+			*Territory->GetName(), *Tag.ToString(), *GUID.ToString());
 	}
 
 	// ─── Duplicate Tag Validation ───

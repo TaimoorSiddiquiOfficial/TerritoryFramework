@@ -111,12 +111,12 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 	if (CachedTerritory.IsValid())
 	{
 		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s resolved to territory %s"),
-			*GetActorLabel(), *OwnerTerritoryTag.ToString());
+			*GetName(), *OwnerTerritoryTag.ToString());
 	}
 	else
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("GuardSpawnPoint %s could not find owning territory"),
-			*GetActorLabel());
+			*GetName());
 	}
 }
 
@@ -202,7 +202,7 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)
 	{
 		CurrentReserveCount--;
 		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: guard died, using reserve (%d remaining)"),
-			*GetActorLabel(), CurrentReserveCount);
+			*GetName(), CurrentReserveCount);
 
 		// Spawn ONE replacement guard — not a full batch
 		if (ATerritoryVolume* Territory = GetOwningTerritory())
@@ -213,7 +213,7 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)
 	else
 	{
 		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: guard died, no reserves"),
-			*GetActorLabel());
+			*GetName());
 	}
 }
 
