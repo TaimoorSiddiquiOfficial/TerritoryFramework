@@ -367,34 +367,34 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 		if (NewOwner.IsValid()) Economy->RecalculateIncome(NewOwner);
 	}
 
-	// ─── Hierarchy Lock Propagation ───
-	// If any property in this district is still owned by a different faction,
-	// the district can't be fully captured by any single faction.
+	// ─── Hierarchy Capture Policy: Unanimity ───
+	// A district is captured ONLY when ALL its properties are owned by the same faction.
+	// No majority capture, no partial control — clean and predictable.
+	// Designers can use ForceCapture/SetOwningFaction for scripted overrides.
 	if (NewOwner.IsValid())
 	{
 		FGameplayTag DistrictOwner = GetOwningFaction();
-		if (!DistrictOwner.IsValid() || DistrictOwner != NewOwner)
+		if (DistrictOwner != NewOwner)
 		{
-			// Check if all properties now owned by the same faction
 			if (AllPropertiesOwnedBy(NewOwner))
 			{
-				// All properties aligned — district can be captured
+				// All properties aligned — district captured
 				if (IsLocked())
 				{
 					TryUnlock(true);
 				}
+				SetOwningFaction(NewOwner);
+				OnDistrictFullyCaptured(NewOwner);
+				OnDistrictCapturedDelegate.Broadcast(this, DistrictOwner, NewOwner);
 			}
-		}
-
-		// If a property was just captured by a new faction but others remain
-		// under different ownership, the district stays contested
-		FGameplayTag MajorityOwner = GetMajorityPropertyOwner();
-		if (MajorityOwner.IsValid() && MajorityOwner != DistrictOwner)
-		{
-			// A faction now holds majority of properties — capture the district
-			SetOwningFaction(MajorityOwner);
-			OnDistrictFullyCaptured(MajorityOwner);
-			OnDistrictCapturedDelegate.Broadcast(this, DistrictOwner, MajorityOwner);
+			else if (DistrictOwner.IsValid() && !AllPropertiesOwnedBy(DistrictOwner))
+			{
+				// District owner no longer holds all properties — contest it
+				if (OwnershipData.State == ETerritoryState::Claimed)
+				{
+					SetTerritoryState(ETerritoryState::Contested);
+				}
+			}
 		}
 	}
 }
