@@ -20,8 +20,8 @@
 - [UTerritoryInfoWidget](#uterritoryinfowidget)
 - [UTerritoryEconomyWidget](#uterritoryeconomywidget)
 - [UTerritoryDebugWidget](#uterritorydebugwidget)
-- [BTTask_MoveToPatrolNode](#btask_movetopatrolnode)
-- [BTService_UpdatePatrolRoute](#btservice_updatepatrolroute)
+- [BTTask_RequestTerritoryPermission](#btask_requestterritorypermission)
+- [BTTask_ReleaseTerritoryPermission](#btask_releaseterritorypermission)
 - [UTerritoryCaptureTask](#uterritorycapturetask)
 - [UTerritoryCaptureEvent](#uterritorycaptureevent)
 - [UTerritoryOwnershipCondition](#uterritoryownershipcondition)
@@ -71,9 +71,8 @@ Base territory actor. Place in level to define a capturable zone.
 | ParentTerritoryTag | FGameplayTag | Territory | — | — | Parent city tag (for districts) |
 | TerritoryGUID | FGuid | Territory | ✅ | — | Editor-stable unique ID |
 | BoundsShape | UShapeComponent* | Territory\|Bounds | — | — | Collision shape for bounds |
-| GuardNPCDefinition | UNarrativeNPCDefinition* | Territory\|Guards | — | — | NPC definition for guards |
-| GuardBehaviorTree | UBehaviorTree* | Territory\|Guards | — | — | BT for guard AI |
-| GuardBlackboardAsset | UBlackboardData* | Territory\|Guards | — | — | Blackboard for guard AI |
+| GuardNPCDefinition | UNarrativeNPCDefinition* | Territory\|Guards | — | — | Default NPC definition for guards |
+| FactionGuardDefinitions | TArray<FTerritoryFactionGuardDefinition> | Territory\|Guards | — | — | Per-faction NPC definition overrides |
 | GuardSpawnCount | int32 | Territory\|Guards | — | — | Number to spawn |
 | GuardSpawnRadius | float | Territory\|Guards | — | — | Radius around spawn point |
 | GuardSpawnPoints | TArray<AActor*> | Territory\|Guards | — | — | Spawn point actors |
@@ -138,9 +137,10 @@ Base territory actor. Place in level to define a capturable zone.
 
 | Delegate | Signature |
 |---|---|
-| OnTerritoryControlChanged | (ATerritoryVolume*, OldOwner, NewOwner) |
-| OnTerritoryStateChanged | (ATerritoryVolume*, NewState) |
-| OnGuardDied | (ATerritoryVolume*, Faction, EmptyTag) |
+| OnTerritoryOwnershipChanged | (ATerritoryVolume*, OldOwner, NewOwner) |
+| OnTerritoryStateChangedDelegate | (ATerritoryVolume*, NewState) |
+| OnGuardKilled | (ATerritoryVolume*, Guard, Killer, RemainingDefenders) |
+| OnAllGuardsDefeatedDelegate | (ATerritoryVolume*) |
 
 ---
 
@@ -160,8 +160,8 @@ Extends `ATerritoryVolume`. Represents a city that controls districts.
 | Function | Returns | Description |
 |---|---|---|
 | GetOwnedDistricts | TArray<ATerritoryDistrict*> | All districts owned by this city's faction |
-| IsFullyControlled | bool | City owns all its districts |
-| GetControlPercentage | float | 0.0–1.0 of districts controlled |
+| IsFullyCaptured | bool | City owns all its districts |
+| GetCityControlPercentage | float | 0.0–1.0 of districts owned by faction |
 
 ### Behavior
 
@@ -372,8 +372,8 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | IsCaptureInProgress(Territory) | bool |
 | GetCaptureProgress(Territory) | float |
 | GetContestingFaction(Territory) | GameplayTag |
-| HasAttackBudget(Territory, Faction) | bool |
-| GetActiveAttackers(Territory, Faction) | int32 |
+| HasAttackBudget(Territory, Faction) | bool | Checks CombatDirector slot availability |
+| GetActiveAttackers(Territory, Faction) | int32 | Count of identity-based attackers |
 
 ### Delegates
 
@@ -476,17 +476,17 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 | Function | Parameters | Returns |
 |---|---|---|
-| RequestAttackPermission | Territory, Faction, Actor | bool |
-| ReleaseAttackPermission | Territory, Faction, Actor | void |
-| ReleaseAllPermissions | Territory, Faction | void |
+| RequestAssaultSlot | Territory, NPCController | bool | Returns false if budget exhausted or locked |
+| ReleaseAssaultSlot | Territory, NPCController | void | Frees one slot |
+| ReleaseAllSlots | NPCController | void | Frees all slots across all territories |
 
 ### Queries (BlueprintPure)
 
 | Function | Returns |
 |---|---|
-| GetActiveAttackers(Territory, Faction) | int32 |
-| GetAttackBudget(Territory, Faction) | int32 |
-| HasAttackBudget(Territory, Faction) | bool |
+| GetGrantedSlots(Territory) | int32 | Active slots (filters dead controllers) |
+| GetAvailableSlots(Territory) | int32 | MaxSlots - GrantedSlots |
+| HasAssaultSlot(Territory, Controller) | bool | Does controller hold a slot? |
 
 ### Delegates
 
@@ -605,43 +605,43 @@ Tick-based debug overlay.
 
 ---
 
-## BTTask_MoveToPatrolNode
+## BTTask_RequestTerritoryPermission
 
-Behavior tree task. Moves guard to next patrol node.
+Behavior tree task. Requests a strategic assault slot from the CombatDirector before allowing an NPC to attack within a territory.
 
-### Blackboard Keys Written
+### Blackboard Keys
 
-| Key | Type | Value |
-|---|---|---|
-| TargetLocation | FVector | Patrol node position |
-| TargetRotation | FRotator | Patrol node facing |
-| PatrolWaitTime | float | Wait time at node |
-
-### Node Properties
-
-| Property | Type | Default | Notes |
+| Key | Type | Direction | Notes |
 |---|---|---|---|
-| AcceptanceRadius | float | 50.0 | Move completion distance |
+| TerritoryKey | UObject (ATerritoryVolume) | Read | Target territory. Falls back to spatial lookup if not set. |
+| bPermissionGrantedKey | bool | Write | True if slot granted, false if denied |
+
+### Behavior
+
+1. Gets NPCController from AI owner
+2. Reads TerritoryKey from blackboard (or finds territory at NPC location)
+3. Calls `CombatDirector->RequestAssaultSlot(Territory, NPCController)`
+4. Writes result to `bPermissionGrantedKey`
+5. Returns Succeeded (granted) or Failed (denied)
+
+**Note:** Fails immediately if `bPermissionGrantedKey` is not configured (prevents silent success).
 
 ---
 
-## BTService_UpdatePatrolRoute
+## BTTask_ReleaseTerritoryPermission
 
-Behavior tree service. Advances patrol index when guard arrives at node.
+Behavior tree task. Releases assault slot(s) for an NPC.
 
-### Node Properties
+### Blackboard Keys
 
-| Property | Type | Default | Notes |
+| Key | Type | Direction | Notes |
 |---|---|---|---|
-| ArrivalThreshold | float | 100.0 | Distance to consider "arrived" |
-| bLoopPatrol | bool | true | Loop back to first node |
+| TerritoryKey | UObject (ATerritoryVolume) | Read | Target territory for targeted release |
 
-### Blackboard Keys Read
+### Behavior
 
-| Key | Type | Notes |
-|---|---|---|
-| PatrolNodeIndex | int32 | Current node index |
-| TargetLocation | FVector | Current move target |
+1. If TerritoryKey is configured and resolves: calls `ReleaseAssaultSlot(Territory, NPCController)` for that territory only
+2. If TerritoryKey is not configured: calls `ReleaseAllSlots(NPCController)` across all territories (legacy fallback)
 
 ---
 
@@ -660,7 +660,7 @@ Extends `UNarrativeTask`. Quest task for territory capture objectives.
 ### Behavior
 
 - Tracks `InitialOwner` at activation
-- Completes when `OnTerritoryControlChanged` fires and new owner == `RequiredCapturingFaction`
+- Completes when `OnTerritoryOwnershipChanged` fires and new owner == `RequiredCapturingFaction`
 - If `bCompleteOnLoss`, completes on ANY ownership change from `InitialOwner`
 
 ---
@@ -748,7 +748,7 @@ BlueprintNativeEvent — implement to receive territory events.
 | Value | Description |
 |---|---|
 | Unclaimed | No owner |
-| Controlled | Owned and stable |
+| Claimed | Owned and stable |
 | Contested | Capture in progress |
 | Locked | Cannot be captured |
 
@@ -927,9 +927,10 @@ Mirrors `FTreatyRecord` for network replication.
 
 | Delegate | Signature | BlueprintAssignable |
 |---|---|---|
-| FOnTerritoryControlChanged | (ATerritoryVolume*, OldFaction, NewFaction) | ✅ |
+| FOnTerritoryControlChanged | (ATerritoryVolume*, OldOwner, NewOwner) | ✅ |
 | FOnTerritoryStateChanged | (ATerritoryVolume*, ETerritoryState) | ✅ |
-| FOnGuardDied | (ATerritoryVolume*, FGameplayTag, FGameplayTag) | ✅ |
+| FOnGuardKilled | (ATerritoryVolume*, AActor* Guard, AActor* Killer, int32 RemainingDefenders) | ✅ |
+| FOnAllGuardsDefeated | (ATerritoryVolume*) | ✅ |
 | FOnUpgradeLevelChanged | (ATerritoryProperty*, int32) | ✅ |
 
 ### Subsystem Delegates

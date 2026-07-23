@@ -2,7 +2,7 @@
 
 ## Overview
 
-TerritoryFramework has 18 individual debug toggles organized into categories, plus 5 visual debug toggles. All are in **Project Settings → Territory Framework → Debug**.
+TerritoryFramework has 16 individual debug toggles organized into categories, plus 5 visual debug toggles. All are in **Project Settings → Territory Framework → Debug**.
 
 ## Master Toggle
 
@@ -27,29 +27,29 @@ TerritoryFramework has 18 individual debug toggles organized into categories, pl
 | Debug Spatial | `[Spatial]` | QueryPoint results |
 | Debug Map Markers | `[Marker]` | Refresh events |
 | Debug Tales | `[TalesCaptureTask/Event]` | Task/event integration |
-| **Debug BT** | `[PatrolAI]` | **New** — BT move tasks, route advancement |
-| **Debug Combat** | `[Combat]` | **New** — Attack permissions, budget |
+| Debug Combat | `[Combat]` | Assault slot grants/denials, slot cleanup |
 
 ## Visual Debug Toggles
 
 | Toggle | Effect |
 |---|---|
-| Draw Territory Bounds | (Not implemented yet — placeholder) |
-| Draw Ownership Overlay | (Not implemented yet — placeholder) |
-| Draw Capture Progress | (Not implemented yet — placeholder) |
-| Draw Guard Spawn Points | (Not implemented yet — placeholder) |
-| Draw Spatial Grid | (Not implemented yet — placeholder) |
+| Draw Territory Bounds | ✅ Draws box bounds in PIE (respects rotation) |
+| Draw Ownership Overlay | ✅ Green overlay for owned territories |
+| Draw Capture Progress | ✅ Progress bar above contested territories |
+| Draw Guard Spawn Points | ✅ Yellow spheres at spawn points, cyan for patrol nodes |
+| Draw Spatial Grid | ✅ Spatial index cell visualization |
 
-## Developer Settings — Guard / Patrol
+## Developer Settings — Economy / Capture
 
 | Setting | Default | Range | Description |
 |---|---|---|---|
-| DefaultPatrolArrivalThreshold | 100.0 | 50–500 | Distance to consider "arrived" at patrol node |
-| DefaultPatrolAcceptanceRadius | 50.0 | 10–200 | Move completion distance for BT task |
-| DefaultPatrolWaitTime | 2.0 | 0–30 | Wait time at patrol nodes |
-| MaxPatrolRouteNodes | 32 | 0–100 | Sanity cap for patrol route length |
 | EconomyStartingGold | 0 | 0+ | Starting gold for new factions |
-| MaxCaptureHistory | 50 | 10–500 | Max capture history per territory |
+| EconomyTickIntervalSeconds | 300 | 10–3600 | Seconds between economy ticks |
+| CaptureTickInterval | 0.1 | 0.01–1.0 | Seconds between capture ticks |
+| CaptureProgressPerSecond | 0.1 | 0.01–1.0 | Progress rate per second per attacker |
+| CaptureProgressDecayPerSecond | 0.05 | 0.01–0.5 | Decay rate when no attackers present |
+| TreatyExpirationCheckInterval | 10 | 1–60 | Seconds between treaty expiration checks |
+| SpatialCellSize | 2000 | 500–10000 | Spatial index cell size in UU |
 
 ## UTerritoryDebugWidget
 
@@ -61,6 +61,8 @@ A tick-based live overlay widget showing all territory state.
 2. Override `OnUpdateDebugText(FText)` to update a TextBlock
 3. Add widget to viewport
 4. Call `SetDebugEnabled(true)` to start polling
+
+**Performance:** Widget throttles rebuilds to every **0.5 seconds** (not every frame). Subsystem pointers are cached on first access.
 
 ### Sections Displayed
 

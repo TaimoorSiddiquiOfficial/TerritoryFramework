@@ -52,9 +52,9 @@
 
 | Delegate | Signature |
 |---|---|
-| OnTerritoryControlChanged | (Volume*, OldOwner, NewOwner) |
-| OnTerritoryStateChanged | (Volume*, NewState) |
-| OnGuardDied | (Volume*, Faction, ContestingFaction) |
+| OnTerritoryOwnershipChanged | (Volume*, OldOwner, NewOwner) |
+| OnTerritoryStateChangedDelegate | (Volume*, NewState) |
+| OnGuardKilled | (Volume*, Guard, Killer, RemainingDefenders) |
 | OnAllGuardsDefeatedDelegate | (Volume*) |
 
 ### BlueprintReadWrite Properties
@@ -73,8 +73,7 @@
 | TerritoryGUID | FGuid |
 | BoundsShape | ShapeComponent* |
 | GuardNPCDefinition | NPCDefinition* |
-| GuardBehaviorTree | BehaviorTree* |
-| GuardBlackboardAsset | BlackboardData* |
+| FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> |
 | GuardSpawnCount | int32 |
 | GuardSpawnRadius | float |
 | GuardSpawnPoints | Array<Actor*> |

@@ -78,9 +78,17 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 4. ATerritoryWorldState::Load — ImportPersistentState:
    a. Direct assignment (no artificial transactions)
    b. SyncSubsystemsFromReplicatedState:
-      - Push treasuries to EconomySubsystem
+      - Push treasuries to EconomySubsystem via SetFactionTreasury (exact restore — NOT additive AddToTreasury)
       - Push treaties to DiplomacySubsystem
       - Diplomacy syncs to Narrative GameState attitudes
+
+**Important:** `ATerritorySavableData` (deprecated) also uses `SetFactionTreasury` for load.
+If both WorldState and SavableData exist in the level, only one should be active to avoid conflicts.
+
+### PIE Safety
+
+`PostDuplicate` on all territory actors checks `DuplicateMode == Normal` before regenerating GUIDs.
+PIE world creation uses `StaticDuplicateObject` which would otherwise generate new GUIDs, breaking save/load matching.
 ```
 
 ## Placement Requirements
