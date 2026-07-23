@@ -227,6 +227,9 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 	// Fire the BP-exposed hook for any district capture within this city
 	OnDistrictCapturedInCity(District, OldOwner, NewOwner);
 
+	// Server-only mutations from here
+	if (!HasAuthority()) return;
+
 	// Cascade ownership change to child properties of the district
 	CascadeCaptureToProperties(District, NewOwner);
 
@@ -353,6 +356,9 @@ void ATerritoryDistrict::OnTerritoryRegistered(ATerritoryVolume* Territory, bool
 
 void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	// Server-only mutations
+	if (!HasAuthority()) return;
+
 	// When a property changes owner, recalculate income for both factions
 	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 	if (Economy)
@@ -364,7 +370,7 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 	// ─── Hierarchy Lock Propagation ───
 	// If any property in this district is still owned by a different faction,
 	// the district can't be fully captured by any single faction.
-	if (NewOwner.IsValid() && HasAuthority())
+	if (NewOwner.IsValid())
 	{
 		FGameplayTag DistrictOwner = GetOwningFaction();
 		if (!DistrictOwner.IsValid() || DistrictOwner != NewOwner)
@@ -585,6 +591,16 @@ void ATerritoryProperty::OnPropertyCaptured_Implementation(FGameplayTag NewOwner
 	if (HasAuthority() && UpgradeLevel > 0)
 	{
 		UpgradeLevel = 0;
+	}
+}
+
+void ATerritoryProperty::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	// Invoke property-specific side effects on every ownership change path
+	if (NewOwner.IsValid() && OldOwner != NewOwner)
+	{
+		OnPropertyCaptured(NewOwner);
+		OnPropertyCapturedDelegate.Broadcast(this, NewOwner);
 	}
 }
 

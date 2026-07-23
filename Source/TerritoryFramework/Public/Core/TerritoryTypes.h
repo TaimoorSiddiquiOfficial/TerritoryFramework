@@ -222,3 +222,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnAllGuardsDefeated,
 	class ATerritoryVolume*, Territory);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+	FOnGuardKilled,
+	class ATerritoryVolume*, Territory,
+	AActor*, Guard,
+	AActor*, Killer,
+	int32, RemainingDefenders);

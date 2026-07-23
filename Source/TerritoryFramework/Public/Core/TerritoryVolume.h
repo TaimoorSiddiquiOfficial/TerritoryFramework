@@ -110,6 +110,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory")
 	TArray<AActor*> GetRegisteredDefenders() const;
 
+	/** Set contesting faction (authority only). Used by capture subsystem. */
+	void SetContestingFaction(const FGameplayTag& Faction) { OwnershipData.ContestingFaction = Faction; }
+
 	// ─── Blueprint Events (BlueprintNativeEvent) ───
 
 	UFUNCTION(BlueprintNativeEvent, Category = "Territory")
@@ -277,7 +280,7 @@ protected:
 	// ─── Guard Spawn Point Delegate (Blueprint) ───
 
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Guards")
-	FOnTerritoryControlChanged OnGuardDied;
+	FOnGuardKilled OnGuardKilled;
 
 private:
 	UPROPERTY()

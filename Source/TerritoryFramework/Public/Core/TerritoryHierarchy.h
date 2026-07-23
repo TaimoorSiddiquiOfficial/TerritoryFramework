@@ -201,6 +201,10 @@ public:
 	virtual void OnPropertyCaptured_Implementation(FGameplayTag NewOwner);
 
 protected:
+	// Override base class ownership change to invoke property-specific side effects
+	// on every ownership path (direct capture, hierarchy cascade, quest event).
+	virtual void OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner) override;
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION()

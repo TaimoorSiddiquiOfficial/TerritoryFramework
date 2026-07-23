@@ -86,7 +86,14 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 			if (Territory)
 			{
 				TerritoryCaptureState.Remove(Territory);
+				Territory->SetContestingFaction(FGameplayTag());
 				Territory->SetControlProgress(0.f);
+				if (Territory->GetTerritoryState() == ETerritoryState::Contested)
+				{
+					Territory->SetTerritoryState(Territory->GetOwningFaction().IsValid()
+						? ETerritoryState::Claimed
+						: ETerritoryState::Unclaimed);
+				}
 			}
 		}
 	}
@@ -248,6 +255,9 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 	{
 		Territory->SetTerritoryState(ETerritoryState::Contested);
 	}
+
+	// Set contesting faction so UI/events can display who is attacking
+	Territory->SetContestingFaction(Faction);
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
 	TSet<TWeakObjectPtr<AActor>>& ActorSet = State.AttackersByFaction.FindOrAdd(Faction);
@@ -442,6 +452,7 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 
 	FGameplayTag OldOwner = Territory->GetOwningFaction();
 	TerritoryCaptureState.Remove(Territory);
+	Territory->SetContestingFaction(FGameplayTag());
 	Territory->SetOwningFaction(NewOwner);
 
 	UE_LOG(LogTerritory, Log, TEXT("[Capture] %s captured by %s (was %s)"),

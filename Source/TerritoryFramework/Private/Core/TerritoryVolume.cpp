@@ -631,8 +631,17 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 			GetDefenderCount());
 	}
 
-	// Broadcast OnGuardDied delegate for Blueprint
-	OnGuardDied.Broadcast(this, GetOwningFaction(), OwnershipData.ContestingFaction);
+	// Broadcast purpose-specific guard death delegate
+	AActor* Killer = nullptr;
+	if (KilledASC && KilledASC->AbilityActorInfo.IsValid())
+	{
+		if (AActor* Avatar = KilledASC->AbilityActorInfo->AvatarActor.Get())
+		{
+			// The ASC's LastDamageInstigator may be available via GameplayEffectSpec
+			// For now use the avatar as a best-effort killer attribution
+		}
+	}
+	OnGuardKilled.Broadcast(this, KilledActor, Killer, GetDefenderCount());
 
 	// Notify spawn points that a guard died (triggers reserve replacement)
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
