@@ -121,6 +121,10 @@ void ATerritoryVolume::BeginPlay()
 			}
 		}
 
+		// Sync RepNotify cache — prevents false ownership/state events after load
+		PreviousOwningFaction = OwnershipData.OwningFaction;
+		PreviousState = OwnershipData.State;
+
 		// Spawn initial guards if territory is claimed and has a guard definition
 		if (OwnershipData.State == ETerritoryState::Claimed
 			&& OwnershipData.OwningFaction.IsValid()
@@ -340,12 +344,29 @@ void ATerritoryVolume::PrepareForSave_Implementation() { /* OwnershipData auto-s
 
 void ATerritoryVolume::Load_Implementation()
 {
-	for (const TWeakObjectPtr<AActor>& DefenderPtr : RegisteredDefenders)
+	// Narrative's save system just deserialized all SaveGame UPROPERTYs.
+	// OwnershipData now reflects the saved state. Spawn guards for the
+	// loaded owner if appropriate — BeginPlay ran before the save was
+	// loaded, so guards weren't spawned for the correct faction yet.
+
+	if (HasAuthority()
+		&& OwnershipData.State == ETerritoryState::Claimed
+		&& OwnershipData.OwningFaction.IsValid()
+		&& ResolveGuardDefinition(OwnershipData.OwningFaction)
+		&& GuardSpawnCount > 0
+		&& SpawnedGuards.Num() == 0)
 	{
-		if (DefenderPtr.IsValid())
-		{
-			BindDefenderDeath(DefenderPtr.Get());
-		}
+		SpawnGuards();
+	}
+
+	const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
+	if (DevSettings && DevSettings->ShouldDebugSaveLoad())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[SaveLoad] %s Load_Implementation: owner=%s, state=%d, guards=%d"),
+			*GetTerritoryTag().ToString(),
+			*OwnershipData.OwningFaction.ToString(),
+			static_cast<int32>(OwnershipData.State),
+			SpawnedGuards.Num());
 	}
 }
 
