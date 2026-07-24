@@ -4,7 +4,7 @@
 > **Depends on:** Narrative Pro 2.3.3
 > **Engine:** UE 5.7
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
-> **Tests:** 41 automation test suites (contract + functional + integration)
+> **Tests:** 47 automation test suites (contract + functional + integration + v0.2.1 extended contracts)
 
 ## Table of Contents
 

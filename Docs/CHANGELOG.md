@@ -1,33 +1,71 @@
 # Changelog
 
-## v0.2.1 — 2026-07-23 (Session 2)
+## v0.2.1 — 2026-07-24 (Sessions 2 + 3)
 
-Additional 22 fixes from deep re-audit session 2. All P1 and P2 findings resolved.
+Deep re-audit sessions 2 and 3. All P0, P1, P2 findings resolved plus NarrativePro currency bridge and 47 automation tests.
 
-### Diplomacy (P0)
+### Core Bugs (P0)
+- **OnCityLost fires correctly**: Added fallback for contested transition — `SetTerritoryState(Contested)` clears `OwningFaction` before hierarchy check, so loss detection now handles the empty-tag case
+- **TryUnlock respawns guards**: Extended guard respawn guard to cover `Locked→Claimed` transition (was only `Contested→Claimed`)
+- **BT abort releases slots**: Added `AbortTask` override to `BTTask_RequestTerritoryPermission` — prevents assault slot leak when behavior tree aborts between request and release
+
+### BoundControllers (P1)
+- **Memory leak fixed**: `BoundControllers` set now pruned in both `ReleaseAssaultSlot` and `ReleaseAllSlots` — prevents slot exhaustion when NPC re-enters combat after ASC recreation
+
+### Reputation Persistence (P1/P2)
+- **Added `GetAllReputation`**: New method on `UTerritoryDiplomacySubsystem` to export full reputation map — enables save/load of reputation via `ATerritoryWorldState`
+- **WorldState serialization**: `ExportPersistentState` now writes reputation to `ReplicatedReputation` array; `SaveGame` preserves reputation across sessions
+
+### Economy Subsystem (P1/P2)
+- **Init order sensitivity**: Added `InitializeDependency<UTerritoryRegistrySubsystem>()` to economy init — ensures dependency order regardless of plugin load sequence
+- **Guard cost heuristic**: Changed `GetConfiguredGuardCost` to use `GuardSpawnCount` (configured) instead of `SpawnedGuards.Num()` (runtime) — eliminates one-tick undercount after guard wipe
+- **Deferred RecalculateIncome**: Ownership changes mark factions dirty, actual recalculation runs once per economy tick (was O(3N) per capture cascade)
+
+### Debug Widget (P1)
+- **Cache invalidation**: Added `NativeDestruct` override to reset cached subsystem pointers and `bSubsystemsCached` flag — prevents use-after-free when widget is destroyed
+
+### Diplomacy (P1/P2)
+- **SignNonAggression API**: New `SignNonAggression(FactionA, FactionB)` method creates non-aggression pacts
+- **BreakCeasefire API**: New `BreakCeasefire(FactionA, FactionB)` method ends ceasefires cleanly
 - **Inbound bridge fixed**: `OnFactionAttitudeChanged` no longer collapses TradeAgreement/NonAggression/Ceasefire to Alliance when external Friendly attitude arrives. Rich treaties are preserved. Hostile always overrides.
 - **Reentrancy guard**: `bSuppressSync` RAII guard prevents recursive mutation during diplomacy broadcasts
 - **const_cast removed**: Uses non-const `FindTreaty` overload instead of `const_cast`
 
+### Guards (P1)
+- **Null-guard KilledActor**: `OnDefenderDied` adds null check before accessing `KilledActor` (defense against ASC fire-on-destroy edge case)
+- **RegisteredDefenders check**: `OnAllGuardsDefeated` checks ALL `RegisteredDefenders` (includes non-guard defenders), not just `SpawnedGuards`
+- **CombatDirector death hook**: Binds ASC `OnDied` when granting assault slots, auto-releases on NPC death
+- **Stale slot counts**: `GetGrantedSlots` filters dead weak pointers
+
+### Validation (P1)
+- **Faction prefix**: Validator now accepts `Narrative.Factions.` OR `Narrative.Faction` (trailing dot optional)
+- **Coexistence error**: `CheckSingletonActors` now errors if both `ATerritoryWorldState` and `ATerritorySavableData` exist (prevents save corruption)
+
 ### Save/Load (P0/P1)
 - **SavableData gold fixed**: `LoadFromSelf` uses `SetFactionTreasury` (exact restore) instead of `AddToTreasury` (additive, caused double gold with WorldState)
 - **PIE duplicate guard**: `PostDuplicate` only regenerates GUID for editor duplication, not PIE world creation
-
-### Economy (P0/P1/P2)
 - **Null-guard GetWorld**: EconomySubsystem `Initialize`/`Deinitialize` check `GetWorld()` before dereferencing
-- **Deferred RecalculateIncome**: Ownership changes mark factions dirty, actual recalculation runs once per economy tick (was O(3N) per capture cascade)
-- **Delegate cleanup**: EconomySubsystem unbinds per-territory `OnTerritoryOwnershipChanged` delegates on `Deinitialize`
-- **Ledger trim moved**: `TransactionLedger` trimming runs once after all factions processed, not per-faction
 
 ### Capture (P1)
 - **ForceCapture state**: Explicitly sets state to Claimed after `SetOwningFaction` (was stuck Contested)
 - **ContestingFaction tracks leader**: Updated by `EvaluateCaptureState` based on highest progress, not last-registered attacker
 - **EvaluateCaptureState safety**: Re-fetches State pointer after cleanup to handle potential reentrancy
 
-### Guards (P1)
-- **RegisteredDefenders check**: `OnAllGuardsDefeated` checks ALL `RegisteredDefenders` (includes non-guard defenders), not just `SpawnedGuards`
-- **CombatDirector death hook**: Binds ASC `OnDied` when granting assault slots, auto-releases on NPC death
-- **Stale slot counts**: `GetGrantedSlots` filters dead weak pointers
+### Delegate Cleanup (P1)
+- **Ledger trim moved**: `TransactionLedger` trimming runs once after all factions processed, not per-faction
+- **Registry unbind**: EconomySubsystem unbinds per-territory `OnTerritoryOwnershipChanged` delegates on `Deinitialize`
+
+### Performance (P2)
+- **Spatial index Remove()**: Now uses reverse map `TerritoryToCells` to remove only from occupied cells (O(cells occupied) instead of O(all cells))
+- **Tag matching direction**: `GetParentCity()` and `GetOwningDistrict()` now use `MatchesTag` with correct child→parent direction (was backwards)
+
+### Testing
+- Added 6 new contract tests for v0.2.1 API surface: `DiplomacySubsystemExtended`, `DiplomacyEventTypeExtended`, `EconomySubsystemExtended`, `VolumeExtended`, `BTAbortTask`, `DebugWidgetExtended`
+- Total: **47 automation test suites** (up from 41)
+
+### Documentation
+- Updated 8 stale docs: `14_API_Reference` (18 fixes), `09_Map_Navigation`, `12_Blueprint_Reference`, `03_Core_Actors`, `04_Subsystems`, `01_Quick_Start`, `Blueprint_Setup_Tutorial`, `README`
+- All docs now reflect v0.2.1 API surface
 - **Stale map keys**: `CleanupStaleTerritoryKeys` removes dead territory entries from SlotMap
 
 ### Hierarchy (P1/P2)
