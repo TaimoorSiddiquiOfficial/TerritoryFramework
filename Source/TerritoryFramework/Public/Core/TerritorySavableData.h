@@ -42,6 +42,9 @@ protected:
 	TMap<FGameplayTag, FTerritoryTreasury> SavedTreasuries;
 
 	UPROPERTY(SaveGame)
+	TArray<FTerritoryTransaction> SavedTransactions;
+
+	UPROPERTY(SaveGame)
 	TArray<FTreatyRecord> SavedTreaties;
 
 	UPROPERTY(SaveGame)

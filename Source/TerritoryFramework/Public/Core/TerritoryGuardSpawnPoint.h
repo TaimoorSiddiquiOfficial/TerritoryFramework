@@ -9,43 +9,58 @@ class ATerritoryVolume;
 class ATerritoryGuardCharacter;
 
 /**
- * Patrol waypoint — a single node in a guard's patrol route.
+ * A single waypoint in a guard's patrol route.
+ *
+ * Use these in pairs/triples inside ATerritoryGuardSpawnPoint's PatrolRoute array.
+ * Guards walk Node0 -> Node1 -> Node2 ... and optionally loop back to Node0.
  */
-USTRUCT(BlueprintType)
+USTRUCT(BlueprintType, meta=(DisplayName="Territory Patrol Node"))
 struct FTerritoryPatrolNode
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Patrol")
+	/** World-space location the guard walks to. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol", meta=(DisplayName="Location"))
 	FVector Location = FVector::ZeroVector;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Patrol")
+	/** Rotation the guard faces when arriving at this node. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol", meta=(DisplayName="Rotation"))
 	FRotator Rotation = FRotator::ZeroRotator;
 
-	/** Time in seconds the guard waits at this node before moving to next */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Patrol",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "30.0"))
+	/**
+	 * Seconds the guard waits at this node before proceeding.
+	 * Use 0 for continuous patrol with no waiting. Typical rest/inspect: 2-5s.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol",
+		meta=(ClampMin="0.0", UIMin="0.0", UIMax="30.0", DisplayName="Wait Time"))
 	float WaitTime = 2.f;
 
-	/** Optional activity tag (e.g., Guard.Activity.Inspect, Guard.Activity.Rest) */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Patrol",
-		meta = (Categories = "Guard.Activity"))
+	/**
+	 * Optional activity tag (e.g., Guard.Activity.Inspect, Guard.Activity.Rest).
+	 * If set, the guard plays this activity at the node instead of standing idle.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol",
+		meta=(Categories="Guard.Activity", DisplayName="Activity Tag"))
 	FGameplayTag ActivityTag;
 };
 
 /**
- * Dedicated guard spawn point actor for territory districts.
+ * Dedicated spawn point for territory guards. Place these inside a territory volume
+ * to define where guards spawn, what patrol they walk, and how many reserves are held.
  *
- * Place these inside a territory volume to define:
- * - Where guards spawn (instead of random within bounds)
- * - Patrol routes (ordered list of waypoints)
- * - Reserve slots (guards that spawn only when needed)
- * - Activity assignments (what guards do at each patrol node)
+ * Key design points:
+ *   - Each spawn point owns its own PatrolRoute (TArray<FTerritoryPatrolNode>).
+ *   - Guards spawned from this point access the route via ATerritoryGuardCharacter
+ *     helpers (GetTerritoryPatrolRoute, HasTerritoryPatrolRoute, GetPatrolNodeCount).
+ *   - When slots run out, remaining guards fall back to random positions inside the
+ *     territory volume (their OwningTerritorySpawnPoint will be null).
  *
- * The owning ATerritoryVolume references these spawn points
- * instead of using random positions within its BoundsShape.
+ * Quick Blueprint Example:
+ *   for spawn point in territory->GetGuardSpawnPoints():
+ *     if spawn point->HasAvailableSlot() and spawn point->HasPatrolRoute():
+ *       spawn guard here -> configure spawn -> start patrol
  */
-UCLASS(BlueprintType, Blueprintable, meta = (DisplayName = "Territory Guard Spawn Point"))
+UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="Territory Guard Spawn Point"))
 class TERRITORYFRAMEWORK_API ATerritoryGuardSpawnPoint : public AActor
 {
 	GENERATED_BODY()
@@ -55,100 +70,181 @@ public:
 
 	// ─── Configuration ───
 
-	/** Which territory this spawn point belongs to (auto-resolved by proximity at BeginPlay) */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|GuardSpawn")
+	/**
+	 * Which territory this spawn point belongs to. Auto-resolved by proximity at BeginPlay.
+	 * You can set this manually if proximity resolution fails.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+		meta=(Categories="Territory", DisplayName="Owner Territory"))
 	FGameplayTag OwnerTerritoryTag;
 
-	/** Maximum guards that can spawn at this point */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|GuardSpawn",
-		meta = (ClampMin = "1", UIMin = "1", UIMax = "20"))
+	/**
+	 * Maximum guards this spawn point can emit concurrently.
+	 * Typical value: 2-5 per spawn point.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+		meta=(ClampMin="1", UIMin="1", UIMax="20", DisplayName="Max Guards"))
 	int32 MaxGuards = 3;
 
-	/** Number of reserve slots — guards that only spawn when active guards die */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|GuardSpawn",
-		meta = (ClampMin = "0", UIMin = "0", UIMax = "10"))
+	/**
+	 * Number of reserve guards that spawn on demand when active guards die.
+	 * Set to 0 for no reserves. Typical value: 1-2.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+		meta=(ClampMin="0", UIMin="0", UIMax="10", DisplayName="Reserve Slots"))
 	int32 ReserveSlots = 1;
 
-	/** Patrol route waypoints (ordered). Empty = guard stays at spawn point */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|GuardSpawn|Patrol")
+	/**
+	 * The patrol route this spawn point's guards walk through.
+	 * Empty = guard stands idle at spawn. Minimum useful route: 2 nodes.
+	 * Guarded access via GetPatrolRoute() or HasPatrolRoute().
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Patrol Route"))
 	TArray<FTerritoryPatrolNode> PatrolRoute;
 
-	/** If true, patrol route loops back to start after last node */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|GuardSpawn|Patrol")
+	/** If true, the patrol loop returns to Node0 after the last node. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Loop Patrol"))
 	bool bLoopPatrol = true;
 
-	/** Faction override — if invalid, uses territory owner's faction */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|GuardSpawn",
-		meta = (Categories = "Narrative.Factions"))
+	/**
+	 * Faction override. If invalid, the guard uses the territory owner's faction.
+	 * Useful for "neutral" garrisons or captured territories.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+		meta=(Categories="Narrative.Factions", DisplayName="Faction Override"))
 	FGameplayTag FactionOverride;
 
-	/** Priority — higher priority spawn points fill first */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|GuardSpawn",
-		meta = (ClampMin = "0", UIMin = "0", UIMax = "100"))
+	/** Higher-priority spawn points fill first when territory guards spawn. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+		meta=(ClampMin="0", UIMin="0", UIMax="100", DisplayName="Priority"))
 	int32 Priority = 50;
 
-	// ─── Runtime API ───
+	// ─── Slot Queries (BlueprintPure) ───
 
-	/** Get the spawn transform for the next available slot */
-	UFUNCTION(BlueprintCallable, Category = "Territory|GuardSpawn")
-	FTransform GetSpawnTransform() const;
-
-	/** Check if this spawn point has available slots */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
+	/**
+	 * Returns true if this spawn point has at least one free active slot.
+	 * Use before calling SpawnSingleGuard() to avoid exceeding MaxGuards.
+	 *
+	 * Example: if spawn point->HasAvailableSlot() -> spawn guard
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Slot",
+		meta=(DisplayName="Has Available Slot"))
 	bool HasAvailableSlot() const;
 
-	/** Check if this spawn point has reserve guards available */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
+	/**
+	 * Returns true if this spawn point has reserve guards that can be deployed.
+	 * Reserves spawn only after an active guard is killed/despawned.
+	 *
+	 * Example: if (ActiveGuard->Died) { if spawn point->HasReserveAvailable() -> SpawnReserve(); }
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Slot",
+		meta=(DisplayName="Has Reserve Available"))
 	bool HasReserveAvailable() const;
 
-	/** Get current active guard count */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
+	/**
+	 * Returns the number of currently-alive guards spawned from this point.
+	 * MaxGuards - GetActiveGuardCount() == available slots.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Slot",
+		meta=(DisplayName="Get Active Guard Count"))
 	int32 GetActiveGuardCount() const;
 
-	/** Get current reserve count */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
+	/**
+	 * Returns the number of reserve guards currently held at this point.
+	 * Reserves start at ReserveSlots and decrease as they deploy.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Slot",
+		meta=(DisplayName="Get Reserve Count"))
 	int32 GetReserveCount() const;
 
-	/** Register a guard spawned from this point */
-	UFUNCTION(BlueprintCallable, Category = "Territory|GuardSpawn")
+	// ─── Transform Query ───
+
+	/**
+	 * Returns the spawn transform for the next guard spawned from this point.
+	 * Defaults to the actor's transform; C++ subclasses can override it for per-slot offsets.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
+		meta=(DisplayName="Get Spawn Transform"))
+	virtual FTransform GetSpawnTransform() const;
+
+	// ─── Guard Registration ───
+
+	/**
+	 * Registers a guard as spawned from this point. Decrements available slots.
+	 * Called automatically by TerritoryVolume after spawn; you usually don't call this directly.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|GuardSpawn",
+		meta=(DisplayName="Register Spawned Guard"))
 	void RegisterSpawnedGuard(ATerritoryGuardCharacter* Guard);
 
-	/** Unregister a guard (death, despawn) — frees slot or uses reserve */
-	UFUNCTION(BlueprintCallable, Category = "Territory|GuardSpawn")
+	/**
+	 * Unregisters a guard (death or despawn). Frees the active slot and may spawn a reserve.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|GuardSpawn",
+		meta=(DisplayName="Unregister Guard"))
 	void UnregisterGuard(ATerritoryGuardCharacter* Guard);
 
-	/** Get the patrol route for a guard */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
-	const TArray<FTerritoryPatrolNode>& GetPatrolRoute() const;
+	// ─── Patrol Route Access ───
 
-	/** Whether the patrol route loops back to start after the last node */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
-	bool GetLoopPatrol() const { return bLoopPatrol; }
+	/**
+	 * Returns the patrol route stored on this spawn point.
+	 *
+	 * For patrol AI, prefer the ATerritoryGuardCharacter helpers (GetTerritoryPatrolRoute)
+	 * which read this array via the guard's bound spawn point.
+	 *
+	 * Returns every configured node. Use HasPatrolRoute() when AI requires at least two nodes.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Get Patrol Route", CompactNodeTitle="Patrol Route"))
+	TArray<FTerritoryPatrolNode> GetPatrolRoute() const;
 
-	/** Get the owning territory volume (resolved at BeginPlay) */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
-	ATerritoryVolume* GetOwningTerritory() const;
-
-	/** Check if patrol route is valid (has at least 2 nodes for meaningful patrol) */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn")
+	/**
+	 * Returns true if this spawn point has a meaningful patrol route (>= 2 nodes).
+	 *
+	 * Example: if (spawn point->HasPatrolRoute()) { RunPatrolActivity(); } else { StandIdle(); }
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Has Patrol Route"))
 	bool HasPatrolRoute() const;
 
 	/**
-	 * Get patrol route as transforms — for populating a Narrative Goal_Patrol's
-	 * PatrolPoints array from Blueprint. Each node becomes an FTransform with
-	 * WaitTime stored separately via GetPatrolWaitTimes().
-	 *
-	 * Usage in BP:
-	 *   1. Spawn guard with Territory ConfigureTerritorySpawn
-	 *   2. Get the spawn point's PatrolRouteAsTransforms
-	 *   3. Set them on a Goal_Patrol asset or BPA_Patrol activity
+	 * Returns whether the patrol route loops back to the first node after the last.
+	 * Used by patrol AI to decide whether to keep walking or stop.
 	 */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn|Patrol")
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Is Looping Patrol"))
+	bool GetLoopPatrol() const { return bLoopPatrol; }
+
+	/**
+	 * Returns the patrol route as an array of FTransforms — convenient for Narrative
+	 * GoalItem's PatrolPoints input. Each node's Location+Rotation becomes a transform.
+	 *
+	 * Parallel to GetPatrolWaitTimes() for duration per node.
+	 *
+	 * Example:
+	 *   Transforms = spawn point->GetPatrolRouteAsTransforms();
+	 *   WaitTimes  = spawn point->GetPatrolWaitTimes();
+	 *   for i in range(Transforms.Num()): SetBlackboardValue(Transforms[i], WaitTimes[i]);
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Get Patrol Route As Transforms"))
 	TArray<FTransform> GetPatrolRouteAsTransforms() const;
 
-	/** Get wait times for each patrol node — parallel to GetPatrolRouteAsTransforms. */
-	UFUNCTION(BlueprintPure, Category = "Territory|GuardSpawn|Patrol")
+	/**
+	 * Returns an array of wait times (seconds), parallel to GetPatrolRouteAsTransforms().
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Get Patrol Wait Times"))
 	TArray<float> GetPatrolWaitTimes() const;
+
+	/**
+	 * Returns the owning territory volume (resolved at BeginPlay from OwnerTerritoryTag).
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
+		meta=(DisplayName="Get Owning Territory"))
+	ATerritoryVolume* GetOwningTerritory() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -162,7 +258,7 @@ protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 #endif
 
-	UPROPERTY()
+	UPROPERTY(BlueprintReadOnly, Category="Territory|GuardSpawn", meta=(DisplayName="Cached Territory"))
 	TWeakObjectPtr<ATerritoryVolume> CachedTerritory;
 
 	UPROPERTY()
@@ -171,17 +267,22 @@ protected:
 	UPROPERTY()
 	int32 CurrentReserveCount = 0;
 
-	/** Visualize spawn point and patrol route in editor */
-	UPROPERTY(EditDefaultsOnly, Category = "Territory|GuardSpawn|Visual")
+	// ─── Editor Visualization ───
+
+	UPROPERTY(EditDefaultsOnly, Category="Territory|GuardSpawn|Visual",
+		meta=(DisplayName="Show Patrol Route In Editor"))
 	bool bShowPatrolRouteInEditor = true;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Territory|GuardSpawn|Visual")
+	UPROPERTY(EditDefaultsOnly, Category="Territory|GuardSpawn|Visual",
+		meta=(DisplayName="Spawn Point Color"))
 	FLinearColor SpawnPointColor = FLinearColor(0.f, 1.f, 0.f, 1.f);
 
-	UPROPERTY(EditDefaultsOnly, Category = "Territory|GuardSpawn|Visual")
+	UPROPERTY(EditDefaultsOnly, Category="Territory|GuardSpawn|Visual",
+		meta=(DisplayName="Patrol Route Color"))
 	FLinearColor PatrolRouteColor = FLinearColor(1.f, 1.f, 0.f, 1.f);
 
-	UPROPERTY(EditDefaultsOnly, Category = "Territory|GuardSpawn|Visual")
+	UPROPERTY(EditDefaultsOnly, Category="Territory|GuardSpawn|Visual",
+		meta=(DisplayName="Reserve Color"))
 	FLinearColor ReserveColor = FLinearColor(0.f, 0.5f, 1.f, 1.f);
 
 private:

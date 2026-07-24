@@ -143,20 +143,20 @@ ATerritoryVolume::SpawnGuards()                          [C++]
   └─ Narrative handles all AI from here
 ```
 
-**Key:** `ConfigureTerritorySpawn` sets `SpawnInfo.SpawnTransform` — this is what `BPA_ReturnToSpawn` and `BPA_ReturnToTerritory` read as the "home" position. Without this, guards don't know where to return.
+**Key:** the spawn-point actor transform (or random fallback) is projected to NavMesh before spawn. The same resolved transform is passed to deferred spawn, `ConfigureTerritorySpawn`, and `FinishSpawningActor`, and is stored in both `SpawnInfo.SpawnTransform` and replicated `TerritoryHomeTransform`. `GetSpawnTransform()` returns that stored home transform.
 
 ### 2. Territory Home Transform (BP_TerritoryGuard)
 
 ```
 ATerritoryGuardCharacter (C++ base class)
-  ├─ TerritoryHomeTransform: FTransform                  → set by ConfigureTerritorySpawn
-  ├─ OwningTerritory: TWeakObjectPtr<ATerritoryVolume>  → territory back-reference
-  └─ OwningTerritorySpawnPoint: TWeakObjectPtr          → spawn point back-reference
+  ├─ TerritoryHomeTransform: FTransform                 → replicated, set by ConfigureTerritorySpawn
+  ├─ OwningTerritory: TObjectPtr<ATerritoryVolume>      → replicated territory back-reference
+  └─ OwningTerritorySpawnPoint: TObjectPtr              → replicated spawn point back-reference
 
 BP_TerritoryGuard (Blueprint)
   ├─ Inherits TerritoryHomeTransform from C++ parent
-  ├─ GetActorGUID override → returns SpawnAssignedSaveGUID (prevents crash)
-  └─ ShouldRespawn → returns false (prevents stale guard restoration on load)
+  ├─ Inherits stable GetActorGUID behavior from C++ parent
+  └─ Inherits ShouldRespawn=false from C++ parent (prevents stale guard restoration on load)
 ```
 
 ### 3. Activity Scoring & Selection

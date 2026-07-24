@@ -67,6 +67,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
 	TArray<FTerritoryTransaction> GetTransactionHistory(const FGameplayTag& Faction, int32 MaxEntries = 50) const;
 
+	/** Native persistence bridge. Returns the ledger in chronological order. */
+	TArray<FTerritoryTransaction> GetAllTransactionHistory() const { return TransactionLedger; }
+
+	/** Native persistence bridge. Replaces the ledger without emitting gameplay delegates. */
+	void RestoreTransactionHistory(const TArray<FTerritoryTransaction>& Transactions);
+
+	/** Native persistence bridge. Replaces all tracked faction economy parameters. */
+	void RestoreTreasuryState(const TMap<FGameplayTag, FTerritoryTreasury>& Treasuries);
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	void RecalculateIncome(const FGameplayTag& Faction);
 

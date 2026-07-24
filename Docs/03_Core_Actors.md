@@ -56,11 +56,13 @@ See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-
 ### State Transition Logic (C++)
 
 Guard lifecycle runs in the **non-virtual** SetTerritoryState/SetOwningFaction, BEFORE the BP virtual fires:
-- **Claimed → Contested**: Clears OwningFaction (territory has no owner while contested), despawns guards
-- **Contested → Claimed**: Respawns guards for new owner
+- **Claimed → Contested**: Preserves the incumbent `OwningFaction`, but suspends active ownership and despawns guards
+- **Contested → Claimed**: Restores active ownership for the incumbent or captured owner and respawns guards
 - **Locked → Claimed**: Respawns guards for owner (territory was locked, now defended again)
 - **Any → Locked**: Despawns all guards
 - **Contested → Unclaimed** (all defenders dead): Cleared by OnAllGuardsDefeated Super call
+
+`GetOwningFaction()` therefore returns the incumbent defender while contested. `IsOwnedByFaction()` requires `State == Claimed`, so it returns false while the territory is Contested, Locked, or Unclaimed.
 
 ### Map Marker Component
 
@@ -245,18 +247,36 @@ BP_TerritoryProperty "Blacksmith"
 Extends `ANarrativeNPCCharacter` from Narrative Pro.
 
 ### Additional Functions
-| Function | Purpose |
-|---|---|
-| SetTerritorySaveGUID(GUID) | Set save GUID before FinishSpawning |
-| SetOwningTerritoryGUID(GUID) | Link to parent territory |
+| Function | Returns | Purpose |
+|---|---|---|
+| ConfigureTerritorySpawn(...) | void | Configure Narrative definition, exact faction, stable IDs, home transform, and optional activity/trigger overrides during deferred spawn |
+| GetTerritoryPatrolRoute() | Array<PatrolNode> | Copy the assigned spawn point's route |
+| HasTerritoryPatrolRoute() | bool | True when an assigned route has at least two nodes |
+| GetPatrolNodeCount() | int32 | Number of assigned patrol nodes |
+| GetSafePatrolNode(Index, OutNode) | bool | Bounds-checked patrol node access |
+| GetSpawnTransform() | Transform | Stored `TerritoryHomeTransform` used for return-to-home behavior |
+| GetOwningTerritory() | TerritoryVolume* | Replicated territory back-reference |
+| GetGuardFaction() | GameplayTag | Guard's Narrative faction, including spawn-point overrides |
+| IsSpawnPointGuard() | bool | Whether a replicated spawn-point back-reference is assigned |
+
+### Replicated Guard Context
+
+| Property | Type | Purpose |
+|---|---|---|
+| TerritoryHomeTransform | Transform | Resolved, NavMesh-projected home transform |
+| OwningTerritory | TerritoryVolume* | Territory back-reference |
+| OwningTerritorySpawnPoint | GuardSpawnPoint* | Spawn point back-reference; null for random fallback spawns |
 
 ## ATerritoryWorldState
 
-**Place ONE in the level** for multiplayer-persistent territory state.
+**Place ONE in the level** when a replicated save snapshot is needed. It is not continuously synchronized with every subsystem mutation.
 
 ### What It Stores (replicated)
 - Faction economy params (income, costs, territory count) — faction wealth lives in NarrativePro player inventories
 - Transaction history (audit trail)
 - Active treaties (with timing, expiry, permanence)
 - Faction reputation
+- Diplomacy history
 - Capture summaries (per territory)
+
+Economy, diplomacy, reputation, transaction, and capture-summary arrays are rebuilt by `ExportPersistentState()` or explicit setters. Saved contests resume from their leading faction/progress, but attacker identities and non-leading faction progress are not persisted.

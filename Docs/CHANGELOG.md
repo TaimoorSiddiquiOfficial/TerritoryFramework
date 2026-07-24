@@ -1,11 +1,87 @@
 # Changelog
 
+## v0.2.3 — 2026-07-24 (API Refactor: Pure Function Markers + Tooltips)
+
+Comprehensive API refactor for improved Blueprint usability. Read-only getters are marked BlueprintPure (no exec pin needed), with rich tooltips and contract coverage for Pure/Callable invariants.
+
+### API Purity Fixes
+- **TerritoryVolume**: All query getters now `BlueprintPure` (GetOwningFaction, GetTerritoryState, GetControlProgress, IsContested, GetTerritoryTag, GetTerritoryDisplayName, IsLocked, GetLockReason, GetSpawnedGuardCount, GetConfiguredGuardCount, HasGuardsAlive, IsOwnedByFaction, ContainsPoint, etc.)
+- **TerritoryGuardSpawnPoint**: All getters now `BlueprintPure` (HasAvailableSlot, HasReserveAvailable, GetActiveGuardCount, GetReserveCount, GetSpawnTransform, GetPatrolRoute, HasPatrolRoute, IsLoopPatrol, GetOwningTerritory, GetPatrolRouteAsTransforms, GetPatrolWaitTimes)
+- **TerritoryGuardCharacter**: Added 3 new BlueprintPure functions (GetTerritoryPatrolRoute, HasTerritoryPatrolRoute, GetPatrolNodeCount) and 4 new helper functions (GetSafePatrolNode, GetSpawnTransform, GetOwningTerritory, GetGuardFaction, IsSpawnPointGuard)
+- **TerritoryBlueprintLibrary**: GetTerritoryByTag, GetTerritoryAtLocation, IsTerritoryAtLocation now `BlueprintPure`
+- **TerritoryRegistrySubsystem**: GetTerritoryByTag, GetTerritoryByGUID, GetTerritoryAtLocation, GetAllTerritories, GetTerritoryCount, GetTerritoryCountForFaction now `BlueprintPure`
+
+### New Guard Patrolling API
+Added 7 new BlueprintPure functions on ATerritoryGuardCharacter to simplify patrol route access:
+
+```cpp
+/** Returns this guard's patrol route via spawn point */
+UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol")
+TArray<FTerritoryPatrolNode> GetTerritoryPatrolRoute() const;
+
+/** Returns true if this guard has a configured patrol route */
+UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol")
+bool HasTerritoryPatrolRoute() const;
+
+/** Returns the number of patrol nodes in this route */
+UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol")
+int32 GetPatrolNodeCount() const;
+
+/** Safely fetches a single patrol node by index */
+UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol")
+bool GetSafePatrolNode(int32 Index, FTerritoryPatrolNode& OutNode) const;
+
+/** Returns the spawn transform for this guard */
+UFUNCTION(BlueprintPure, Category="Territory|Guard")
+FTransform GetSpawnTransform() const;
+
+/** Returns the owning territory for this guard */
+UFUNCTION(BlueprintPure, Category="Territory|Guard")
+ATerritoryVolume* GetOwningTerritory() const;
+
+/** Returns the faction tag this guard belongs to */
+UFUNCTION(BlueprintPure, Category="Territory|Guard")
+FGameplayTag GetGuardFaction() const;
+```
+
+### Blueprint Tooltips Added
+All public getters across TerritoryVolume, TerritoryGuardSpawnPoint, TerritoryGuardCharacter, TerritoryBlueprintLibrary, and TerritoryRegistrySubsystem now have rich `ToolTip` meta with usage examples that appear on hover in Blueprint editor.
+
+Examples:
+- `TerritoryVolume::GetOwningFaction()`: returns the stable owner, or the incumbent defender while contested; it is empty only when unclaimed.
+- `TerritoryGuardCharacter::GetTerritoryPatrolRoute()`: "Returns this guard's patrol route via spawn point. Use HasTerritoryPatrolRoute() to check if a route is configured."
+- `TerritoryGuardSpawnPoint::HasPatrolRoute()`: "Returns true if this spawn point has a configured patrol route. Use before accessing GetPatrolRoute() to avoid empty array issues."
+
+### Signature Changes (Breaking)
+- `ATerritoryGuardSpawnPoint::GetPatrolRoute()` signature changed from `const TArray<FTerritoryPatrolNode>&` to `TArray<FTerritoryPatrolNode>` (returns by value to match BlueprintPure requirement)
+
+### Current Automation Coverage (53/53 Passing)
+- **FTFContract_TerritoryGuardCharacter**: Verifies the replicated guard context and 8 BlueprintPure helpers (GetTerritoryPatrolRoute, HasTerritoryPatrolRoute, GetPatrolNodeCount, GetSafePatrolNode, GetSpawnTransform, GetOwningTerritory, GetGuardFaction, IsSpawnPointGuard)
+- **FTFContract_GuardSpawnPointPure**: Verifies 11 BlueprintPure functions
+- **FTFContract_VolumePureGetters**: Verifies the BlueprintPure volume query API
+- **FTFContract_BlueprintLibraryPure**: Verifies pure subsystem/query helpers and `ForceCaptureTerritory` authority metadata
+- **FTFContract_RegistrySubsystemPure**: Verifies 6 BlueprintPure functions
+- **FTFFunctional_RuntimeInvariants**: Verifies contested ownership and guard spawn context behavior
+
+### Audit Stabilization
+- **Contested ownership invariant**: entering `Contested` preserves the incumbent defending faction; `IsOwnedByFaction()` remains false unless state is `Claimed`
+- **Capture authority and validation**: capture mutations reject native client calls; external progress and attacker registration revalidate gameplay rules; registration enforces the attack budget
+- **Capture cleanup**: invalid weak attackers are pruned, locked captures reset, and reset/decay clears the contesting faction while restoring the incumbent to `Claimed`
+- **ForceCapture contract**: valid server calls set progress to 1.0, clear runtime capture state, set `Claimed`, and broadcast old/new owner tags
+- **Guard context**: home transform, owning territory, and owning spawn point now replicate; helpers return the stored home transform and Narrative faction
+- **API authority**: `ForceCaptureTerritory` is now `BlueprintAuthorityOnly`
+- **Economy integrity**: ticks credit income before debiting affordable upkeep, redistribute member debits without partial mutation, and suppress direct ghost credits when no member can receive currency
+- **Persistence completeness**: transaction ledgers and rich treaty metadata restore through WorldState/SavableData; WorldState exports capture summaries; saved contests resume decay in ControlSubsystem
+- **Diplomacy bridge**: treaty-derived attitudes synchronize in both directions, internal writes suppress their delegate echo, external Neutral ends ceasefires, and `OnFinishedLoad` reapplies rich metadata after every Narrative load
+
+---
+
 ## v0.2.2 — 2026-07-24 (Session 4: Security & Integration Audit)
 
 Session 4 audit findings resolved. 4 HIGH-severity issues fixed in currency bridge and combat systems.
 
 ### Economy Subsystem (HIGH)
-- **Ghost transactions prevented**: Transaction recording now gated on `Members.Num() > 0` — no more phantom ledger entries when faction has no online players
+- **Periodic ghost transactions prevented**: Economy-tick transaction recording is gated on `Members.Num() > 0`; the direct credit path was completed in v0.2.3
 - **TryDebitTreasury atomicity**: Implemented two-phase commit — first validate all members can afford their share, then apply all debits. No partial debits recorded as full transactions
 - **Delegate lifecycle fixed**: Added `UnbindControllerDeath()` to properly unbind `OnDied` delegate when releasing assault slots
 

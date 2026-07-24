@@ -205,7 +205,7 @@ These events have C++ `_Implementation` that is either **empty** or does only co
 
 **Super required:** **No.**
 
-**Important state change (Claimed → Contested):** When transitioning to Contested, the C++ code **clears OwningFaction**. `GetOwningFaction()` returns invalid during Contested state. The previous owner is cached in `PreviousOwningFaction` for RepNotify diff.
+**Important state change (Claimed → Contested):** The C++ code preserves the incumbent `OwningFaction` while suspending active ownership and despawning guards. `GetOwningFaction()` returns the incumbent, but `IsOwnedByFaction()` returns false because it requires `State == Claimed`.
 
 ---
 
@@ -291,7 +291,7 @@ Bind to these in Blueprint Event Graph with custom event nodes. They fire at spe
 | `OnTerritoryOwnershipChanged` | `(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER `SetOwningFaction` completes and AFTER `OnOwnershipChanged` BP event | All invariants done. Guards spawned. State is Claimed/Unclaimed. Replication data updated. |
 | `OnTerritoryStateChangedDelegate` | `(ATerritoryVolume* Territory, ETerritoryState NewState)` | AFTER `SetTerritoryState` completes and AFTER `OnStateChanged` BP event | Guard lifecycle done. State is finalized. |
 | `OnAllGuardsDefeatedDelegate` | `(ATerritoryVolume* Territory)` | AFTER `OnAllGuardsDefeated` BP event completes | Territory is Unclaimed (if Super was called). Progress is 0. |
-| `OnGuardKilled` | `(ATerritoryVolume* Territory, AActor* Guard, AActor* Killer, int32 RemainingDefenders)` | Immediately after a defender dies, before all-guards-defeated check | Killer is best-effort (ASC avatar). RemainingDefenders is count AFTER removal. |
+| `OnGuardKilled` | `(ATerritoryVolume* Territory, AActor* Guard, AActor* Killer, int32 RemainingDefenders)` | Immediately after a defender dies, before all-guards-defeated check | Narrative's death delegate does not provide the instigator, so Killer is currently null. RemainingDefenders is count AFTER removal. |
 
 ### `ATerritoryCity` Delegates
 
@@ -316,7 +316,7 @@ Bind to these in Blueprint Event Graph with custom event nodes. They fire at spe
 
 | Delegate | Signature | Fires When |
 |---|---|---|
-| `OnTerritoryControlChanged` | `(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER `CompleteCapture` or `ForceCapture` completes. Ownership changed, state set to Claimed. |
+| `OnTerritoryControlChanged` | `(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER `CompleteCapture` or valid `ForceCapture` completes. State is Claimed; force capture also sets progress to 1.0 and may report equal old/new owner tags. |
 | `OnCaptureAttempted` | `(FCaptureAttempt Attempt)` | After every `AttemptCapture` call. Attempt struct contains Result (Success/Locked/DefendersRemain/DiplomaticallyBlocked/AlreadyOwned/InvalidTerritory). |
 
 ### `UTerritoryEconomySubsystem` Delegates
@@ -350,7 +350,7 @@ Query ownership state. Default implementations read from `ATerritoryVolume::Owne
 
 | Function | Returns | Notes |
 |---|---|---|
-| `GetTerritoryOwner()` | `FGameplayTag` | Returns `OwningFaction`. Invalid when Contested or Unclaimed. |
+| `GetTerritoryOwner()` | `FGameplayTag` | Returns `OwningFaction`, including the incumbent defender while Contested. Invalid when Unclaimed. |
 | `GetTerritoryControlProgress()` | `float` | 0.0–1.0 progress of current capture. |
 | `IsTerritoryContested()` | `bool` | True when State == Contested. |
 | `GetContestingFaction()` | `FGameplayTag` | Leading faction by capture progress. Updated each capture tick. |
@@ -397,7 +397,7 @@ Claimed ──(LockTerritory)──→ Locked ──(TryUnlock)──→ Claimed
 Any State ──(ForceCapture)──→ Claimed (by NewOwner)
 ```
 
-**Contested state:** `OwningFaction` is **cleared** (invalid). The territory has no owner while contested. `IsOwnedByFaction()` returns false for all factions. `GetContestingFaction()` returns the leading faction by progress.
+**Contested state:** `OwningFaction` retains the incumbent defender for rollback and UI context, but active ownership is suspended. `IsOwnedByFaction()` returns false for all factions because it requires `Claimed`. `GetContestingFaction()` returns the leading faction by progress.
 
 ---
 

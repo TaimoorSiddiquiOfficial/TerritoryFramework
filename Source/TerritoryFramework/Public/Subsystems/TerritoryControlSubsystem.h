@@ -56,6 +56,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	int32 GetActiveAttackers(const ATerritoryVolume* Territory, const FGameplayTag& Faction) const;
 
+	/** Native persistence bridge for resuming a saved contested territory. */
+	void RestoreCaptureState(
+		ATerritoryVolume* Territory,
+		const FGameplayTag& ContestingFaction,
+		float ControlProgress);
+
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Capture")
 	FOnTerritoryControlChanged OnTerritoryControlChanged;
 
@@ -90,4 +96,8 @@ private:
 
 	void EvaluateCaptureState(ATerritoryVolume* Territory, float DeltaTime);
 	void CompleteCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
+	ECaptureResult ValidateAndBeginCapture(
+		ATerritoryVolume* Territory,
+		const FGameplayTag& AttackingFaction,
+		bool bBroadcastAttempt);
 };

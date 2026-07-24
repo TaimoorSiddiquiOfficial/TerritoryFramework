@@ -10,9 +10,7 @@
 
 class ATerritoryVolume;
 
-/**
- * Replicated snapshot of a faction's economy state.
- */
+/** Replicated snapshot of a faction's economy parameters. */
 USTRUCT(BlueprintType)
 struct FReplicatedFactionEconomy
 {
@@ -21,6 +19,7 @@ struct FReplicatedFactionEconomy
 	UPROPERTY(BlueprintReadOnly, Category = "Territory|Economy")
 	FGameplayTag Faction;
 
+	/** Reserved for compatibility; currency is stored in Narrative character inventories. */
 	UPROPERTY(BlueprintReadOnly, Category = "Territory|Economy")
 	int32 Treasury = 0;
 
@@ -137,12 +136,11 @@ struct FReplicatedFactionReputation
 };
 
 /**
- * Replicated, Narrative-savable actor containing all persistent,
- * multiplayer-visible territory state. This is the single authoritative
- * source for economy, diplomacy, reputation, and capture summaries.
+ * Replicated, Narrative-savable snapshot of multiplayer-visible territory state.
+ * ExportPersistentState pulls current subsystem data at save/sync boundaries;
+ * subsystem mutations do not continuously update this actor.
  *
- * Place one instance in the level (or auto-spawn from GameMode).
- * Subsystems read from and write to this actor for all persistent state.
+ * Place at most one instance in the level (or auto-spawn from GameMode).
  */
 UCLASS(BlueprintType, Blueprintable)
 class TERRITORYFRAMEWORK_API ATerritoryWorldState : public AActor, public INarrativeSavableActor
@@ -249,6 +247,9 @@ protected:
 	TArray<FReplicatedFactionReputation> ReplicatedReputation;
 
 	UPROPERTY(Replicated)
+	TArray<FDiplomacyEvent> ReplicatedDiplomacyHistory;
+
+	UPROPERTY(Replicated)
 	TArray<FReplicatedCaptureSummary> ReplicatedCaptureSummaries;
 
 	// ─── Save Data (mirrors replicated state) ───
@@ -264,6 +265,9 @@ protected:
 
 	UPROPERTY(SaveGame)
 	TArray<FReplicatedFactionReputation> SavedReputation;
+
+	UPROPERTY(SaveGame)
+	TArray<FDiplomacyEvent> SavedDiplomacyHistory;
 
 	UPROPERTY(SaveGame)
 	TArray<FReplicatedCaptureSummary> SavedCaptureSummaries;

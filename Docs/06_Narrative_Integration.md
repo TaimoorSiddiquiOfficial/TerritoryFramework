@@ -35,8 +35,8 @@ TerritoryFramework uses Narrative Pro's faction tags (`Narrative.Factions.*`).
 | Narrative API | TerritoryFramework Usage |
 |---|---|
 | `GetFactionAttitudeTowardsFaction` | Pre-capture attitude check |
-| `SetFactionAttitude` | Sync diplomacy changes |
-| `OnFactionAttitudeChanged` | Reconcile treaty metadata |
+| `SetFactionAttitude` | Sync diplomacy changes symmetrically in both directions |
+| `OnFactionAttitudeChanged` | Reconcile external attitude changes without collapsing compatible rich treaties |
 | `FactionAllianceMap` | Load treaty state from save |
 
 ## GAS Integration
@@ -71,9 +71,11 @@ TerritoryFramework uses Narrative Pro's faction tags (`Narrative.Factions.*`).
 
 | Save Class | What It Saves |
 |---|---|
-| `ATerritoryVolume` | OwnershipData (owner, state, progress, income, guards) |
-| `ATerritoryWorldState` | Economy, treaties, reputation, transactions |
+| `ATerritoryVolume` | OwnershipData (owner, state, progress, income parameters, defender count) |
+| `ATerritoryWorldState` | Exported economy parameters, treaties, reputation, transactions, and territory capture summaries |
 | `ATerritorySavableData` | Legacy single-player save adapter |
+
+OwnershipData stores only the defender count, not individual guard state. WorldState is an exported snapshot rather than a continuously synchronized store; call `ExportPersistentState()` at save/sync boundaries. Individual guards are recreated fresh for claimed territories after load.
 
 ## Navigation Integration
 
@@ -87,7 +89,7 @@ TerritoryFramework uses Narrative Pro's faction tags (`Narrative.Factions.*`).
 These Narrative Pro systems already exist — TerritoryFramework does **not** re-implement:
 
 - ❌ Faction attitude storage (use `ANarrativeGameState`)
-- ❌ NPC spawning framework (use `ANarrativeNPCCharacter` + `UNPCDefinition`)
+- ❌ NPC definitions and character framework (use `ANarrativeNPCCharacter` + `UNPCDefinition`). TerritoryFramework still owns its deferred guard-spawn orchestration and does not use `UNPCSpawnComponent`.
 - ❌ Behavior tree nodes (reuse `BTTask_MoveTo`, `BTTask_RotateToGoal_C`, etc.)
 - ❌ Save serialization (use `INarrativeSavableActor`)
 - ❌ Map widget rendering (use Narrative Navigator)

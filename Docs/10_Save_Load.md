@@ -30,13 +30,17 @@
 | Transaction history | ✅ |
 | Active treaties (with timing) | ✅ |
 | Faction reputation | ✅ |
+| Diplomacy history | ✅ |
 | Capture summaries | ✅ |
+
+WorldState arrays are snapshots rebuilt by `ExportPersistentState()` or explicit setters, not continuously synchronized subsystem state. Export rebuilds capture summaries from all registered territories.
 
 ### ATerritorySavableData (single-player legacy)
 
 | Property | Saved? |
 |---|---|
 | SavedTreasuries | ✅ |
+| SavedTransactions | ✅ |
 | SavedTreaties | ✅ |
 | SavedReputation | ✅ |
 | SavedDiplomacyHistory | ✅ |
@@ -64,7 +68,7 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 ```
 1. Narrative Save System calls PrepareForSave on all INarrativeSavableActor
 2. ATerritoryVolume::PrepareForSave — OwnershipData auto-serialized via SaveGame flags
-3. ATerritoryWorldState::PrepareForSave — ExportPersistentState copies replicated → saved arrays
+3. ATerritoryWorldState::PrepareForSave — ExportPersistentState rebuilds subsystem snapshots, then copies replicated → saved arrays
 4. Narrative serializes actors to FNarrativeActorRecord
 5. UGameplayStatics::SaveGameToSlot
 ```
@@ -78,12 +82,18 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 4. ATerritoryWorldState::Load — ImportPersistentState:
    a. Direct assignment (no artificial transactions)
    b. SyncSubsystemsFromReplicatedState:
-      - Push treasuries to EconomySubsystem via SetFactionTreasury (exact restore — NOT additive AddToTreasury)
-      - Push treaties to DiplomacySubsystem
-      - Diplomacy syncs to Narrative GameState attitudes
+       - Push income/cost/count parameters to EconomySubsystem via SetFactionTreasury (Narrative inventory currency is separate)
+       - Replay treaty states and reputation to DiplomacySubsystem
+       - Diplomacy syncs to Narrative GameState attitudes
 
 **Important:** `ATerritorySavableData` (deprecated) also uses `SetFactionTreasury` for load.
 If both WorldState and SavableData exist in the level, only one should be active to avoid conflicts.
+
+### State Not Reconstructed
+
+- A contested TerritoryVolume restores its leading faction/progress into ControlSubsystem so decay resumes, but attacker identities and non-leading faction progress are not persisted.
+- Individual guards, health/activity state, spawn-point reserve counts, and active guard rosters are not persisted.
+- Claimed territories destroy/recreate a fresh guard population on load; new guards receive new spawn GUIDs.
 
 ### PIE Safety
 

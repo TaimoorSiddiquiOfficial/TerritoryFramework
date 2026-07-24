@@ -57,7 +57,7 @@ No custom Territory BT needed — thin adapter into Narrative's infrastructure.
    - Super call in BP override is **CRITICAL** — clears owner, resets progress, sets Unclaimed
 2. Designer triggers capture via:
    - `RegisterAttacker(Territory, Actor, Faction)` — progressive capture (identity-based, TSet per faction)
-   - `ForceCapture(Territory, Faction)` — instant capture, sets state to Claimed
+   - `ForceCapture(Territory, Faction)` — authority-only instant capture; validates inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed
    - `TerritoryCaptureEvent` — from quest/dialogue (server-authoritative, skips on client)
 3. On capture → `SetOwningFaction` → guards respawn for new owner
 

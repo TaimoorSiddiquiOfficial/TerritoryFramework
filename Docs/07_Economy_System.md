@@ -9,7 +9,7 @@ The subsystem tracks per faction:
 - **CostsPerTick**: guard upkeep from owned territories
 - **TerritoryCount**: number of owned territories
 
-Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. Each tick distributes net income (income - upkeep) evenly to all online faction members via `UInventoryComponent::AddCurrency()`.
+Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. Each tick credits income across online faction members, then debits affordable guard upkeep via `UInventoryComponent::AddCurrency()`.
 
 ## Wealth API
 
@@ -40,11 +40,9 @@ int32 Wealth = Economy->GetTreasury(Faction);
 int32 Income = Economy->GetIncome(Faction);
 int32 Costs = Economy->GetCosts(Faction);
 bool bCanAfford = Economy->CanAfford(Faction, Cost);
-
-// Get all online faction members
-TArray<ANarrativeCharacter*> Members = Economy->GetFactionMembers(Faction);
-int32 Aggregate = Economy->GetFactionAggregateCurrency(Faction);
 ```
+
+Faction member enumeration and aggregate-currency helpers are private implementation details. Use `GetTreasury()` for the public aggregate query.
 
 ## Income Calculation
 
@@ -152,15 +150,11 @@ Every EconomyTickIntervalSeconds (server only):
      Clear DirtyFactions
 
   2. For each faction with treasury:
-     a. Apply income: Treasury.Gold += IncomePerTick
-        Record Income transaction (BalanceAfter = current gold)
-
-     b. Apply upkeep: clamp to available gold
-        If CostsPerTick > Treasury.Gold: ActualUpkeep = Treasury.Gold
-        Treasury.Gold -= ActualUpkeep
-        Record GuardUpkeep transaction (negative amount, partial noted in Reason)
-
-     c. Broadcast OnEconomyTickFired(Faction, Snapshot)
+     a. Split IncomePerTick across online faction members and record the resulting balance
+     b. Clamp upkeep to the post-income aggregate balance
+     c. Debit that affordable upkeep across members, redistributing shares when one member is short
+     d. Record the actual (possibly partial) upkeep and resulting balance
+     e. Broadcast OnEconomyTickFired(Faction, Snapshot)
 
   3. Trim TransactionLedger to MaxTransactionHistory (once, not per-faction)
 ```
@@ -179,4 +173,6 @@ Economy state is saved through:
 - `ATerritoryWorldState` (multiplayer — replicated arrays)
 - `ATerritorySavableData` (single-player — SaveGame properties, **DEPRECATED** — use WorldState)
 
-On load, treasuries are **directly assigned** via `SetFactionTreasury` (exact restore, no additive double-counting).
+On load, `SetFactionTreasury` restores only `IncomePerTick`, `CostsPerTick`, and `TerritoryCount`. Currency belongs to Narrative player inventories and is not restored by TerritoryFramework. Offline and NPC-only factions therefore have no persistent TerritoryFramework balance.
+
+Credit and periodic transaction records are suppressed when no online member receives currency.

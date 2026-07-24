@@ -217,7 +217,7 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)
 	}
 }
 
-const TArray<FTerritoryPatrolNode>& ATerritoryGuardSpawnPoint::GetPatrolRoute() const
+TArray<FTerritoryPatrolNode> ATerritoryGuardSpawnPoint::GetPatrolRoute() const
 {
 	return PatrolRoute;
 }

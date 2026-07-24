@@ -1,6 +1,7 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Subsystems/TerritoryControlSubsystem.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 #include "SaveSystemStatics.h"
@@ -384,6 +385,10 @@ void ATerritoryVolume::Load_Implementation()
 	if (HasAuthority())
 	{
 		ReconcileGuardsAfterLoad();
+		if (UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
+		{
+			Control->RestoreCaptureState(this, OwnershipData.ContestingFaction, OwnershipData.ControlProgress);
+		}
 	}
 
 	const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
@@ -574,18 +579,14 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 	OwnershipData.State = NewState;
 
 	// Guard lifecycle invariants — run BEFORE BP virtual.
-	// Not overridable: despawn on Contested/Locked, respawn on Claimed-from-Contested.
+	// Keep the incumbent owner while contested so an abandoned capture can restore
+	// Claimed state and capture delegates retain the real defending faction.
 	if (NewState == ETerritoryState::Locked)
 	{
 		DespawnGuards();
 	}
 	else if (NewState == ETerritoryState::Contested && OldState == ETerritoryState::Claimed)
 	{
-		// Clear OwningFaction on transition to Contested so IsOwnedByFaction and
-		// GetOwningFaction agree: territory is contested, nobody owns it yet.
-		// PreviousOwningFaction is already cached for RepNotify diff.
-		PreviousOwningFaction = OwnershipData.OwningFaction;
-		OwnershipData.OwningFaction = FGameplayTag();
 		DespawnGuards();
 	}
 	else if (NewState == ETerritoryState::Claimed && (OldState == ETerritoryState::Contested || OldState == ETerritoryState::Locked))
@@ -609,6 +610,8 @@ bool ATerritoryVolume::IsLocked() const
 
 bool ATerritoryVolume::CanUnlock() const
 {
+	if (!IsLocked()) return true;
+
 	// No lock conditions → always unlockable
 	if (LockConditions.Num() == 0) return true;
 
@@ -757,14 +760,9 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 			GetDefenderCount());
 	}
 
-	// Broadcast purpose-specific guard death delegate with best-effort killer attribution
-	AActor* Killer = nullptr;
-	if (KilledASC && KilledASC->AbilityActorInfo.IsValid())
-	{
-		// Use the ASC's avatar (the pawn that dealt the killing blow) as killer
-		Killer = KilledASC->AbilityActorInfo->AvatarActor.Get();
-	}
-	OnGuardKilled.Broadcast(this, KilledActor, Killer, GetDefenderCount());
+	// Narrative's death delegate provides the victim ASC, not the damage instigator.
+	// Do not misattribute the victim as its own killer.
+	OnGuardKilled.Broadcast(this, KilledActor, nullptr, GetDefenderCount());
 
 	// Notify spawn points that a guard died (triggers reserve replacement)
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
@@ -847,6 +845,11 @@ void ATerritoryVolume::CheckBoundsForReindex()
 // ═══════════════════════════════════════════════════════════════════════════════
 // Guard Spawning
 // ═══════════════════════════════════════════════════════════════════════════════
+
+UNPCDefinition* ATerritoryVolume::GetResolvedGuardDefinition(const FGameplayTag& Faction) const
+{
+	return ResolveGuardDefinition(Faction);
+}
 
 UNPCDefinition* ATerritoryVolume::ResolveGuardDefinition(const FGameplayTag& Faction) const
 {
@@ -973,7 +976,9 @@ void ATerritoryVolume::SpawnGuards()
 			TerritoryGUID,
 			GuardSaveGUID,
 			SpawnTransform,
-			UsedSP ? UsedSP->GetFName() : NAME_None);
+			UsedSP ? UsedSP->GetFName() : NAME_None,
+			nullptr,
+			TArray<TSoftObjectPtr<UTriggerSet>>());
 
 		// Set territory AI context before FinishSpawningActor
 		Guard->OwningTerritory = this;
@@ -1003,7 +1008,7 @@ void ATerritoryVolume::SpawnGuards()
 
 void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 {
-	if (!HasAuthority() || !GuardNPCDefinition || !SpawnPoint) return;
+	if (!HasAuthority() || !SpawnPoint) return;
 
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -1046,7 +1051,9 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 		TerritoryGUID,
 		GuardSaveGUID,
 		SpawnTransform,
-		SpawnPoint->GetFName());
+		SpawnPoint->GetFName(),
+		nullptr,
+		TArray<TSoftObjectPtr<UTriggerSet>>());
 
 	// Set territory AI context before FinishSpawningActor
 	Guard->OwningTerritory = this;

@@ -1,5 +1,6 @@
 #include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
@@ -12,6 +13,7 @@ ATerritoryWorldState::ATerritoryWorldState()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
+	bAlwaysRelevant = true;
 }
 
 void ATerritoryWorldState::BeginPlay()
@@ -37,6 +39,7 @@ void ATerritoryWorldState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTransactions);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTreaties);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedReputation);
+	DOREPLIFETIME(ATerritoryWorldState, ReplicatedDiplomacyHistory);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedCaptureSummaries);
 }
 
@@ -287,7 +290,7 @@ void ATerritoryWorldState::ExportPersistentState()
 	if (!HasAuthority()) return;
 
 	// Pull live state from subsystems into replicated arrays BEFORE copying to saved arrays.
-	// The EconomySubsystem holds the authoritative treasury/transaction state;
+	// The EconomySubsystem holds the authoritative economy parameters and ledger;
 	// without this sync, ReplicatedTreasuries stays empty and nothing persists.
 	UWorld* World = GetWorld();
 	if (World)
@@ -310,23 +313,18 @@ void ATerritoryWorldState::ExportPersistentState()
 			}
 
 			ReplicatedTransactions.Empty();
-			int32 TxLimit = Economy ? Economy->MaxTransactionHistory : 500;
-			for (const FGameplayTag& Faction : Factions)
+			for (const FTerritoryTransaction& Tx : Economy->GetAllTransactionHistory())
 			{
-				TArray<FTerritoryTransaction> SubsystemTx = Economy->GetTransactionHistory(Faction, TxLimit);
-				for (const FTerritoryTransaction& Tx : SubsystemTx)
-				{
-					FReplicatedTransaction RepTx;
-					RepTx.TransactionID = Tx.TransactionID;
-					RepTx.Faction = Tx.Faction;
-					RepTx.Type = Tx.Type;
-					RepTx.Amount = Tx.Amount;
-					RepTx.BalanceAfter = Tx.BalanceAfter;
-					RepTx.GameTime = Tx.GameTime;
-					RepTx.Reason = Tx.Reason;
-					RepTx.SourceTerritory = Tx.SourceTerritory;
-					ReplicatedTransactions.Add(RepTx);
-				}
+				FReplicatedTransaction RepTx;
+				RepTx.TransactionID = Tx.TransactionID;
+				RepTx.Faction = Tx.Faction;
+				RepTx.Type = Tx.Type;
+				RepTx.Amount = Tx.Amount;
+				RepTx.BalanceAfter = Tx.BalanceAfter;
+				RepTx.GameTime = Tx.GameTime;
+				RepTx.Reason = Tx.Reason;
+				RepTx.SourceTerritory = Tx.SourceTerritory;
+				ReplicatedTransactions.Add(RepTx);
 			}
 		}
 
@@ -355,6 +353,23 @@ void ATerritoryWorldState::ExportPersistentState()
 				RepRep.Reputation = Pair.Value;
 				ReplicatedReputation.Add(RepRep);
 			}
+			ReplicatedDiplomacyHistory = Diplomacy->GetDiplomacyHistory();
+		}
+
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			ReplicatedCaptureSummaries.Empty();
+			for (const ATerritoryVolume* Territory : Registry->GetAllTerritories())
+			{
+				if (!Territory) continue;
+				FReplicatedCaptureSummary Summary;
+				Summary.TerritoryTag = Territory->GetTerritoryTag();
+				Summary.CurrentOwner = Territory->GetOwningFaction();
+				Summary.ContestingFaction = Territory->GetContestingFaction();
+				Summary.ControlProgress = Territory->GetControlProgress();
+				Summary.State = Territory->GetTerritoryState();
+				ReplicatedCaptureSummaries.Add(Summary);
+			}
 		}
 	}
 
@@ -362,6 +377,7 @@ void ATerritoryWorldState::ExportPersistentState()
 	SavedTransactions = ReplicatedTransactions;
 	SavedTreaties = ReplicatedTreaties;
 	SavedReputation = ReplicatedReputation;
+	SavedDiplomacyHistory = ReplicatedDiplomacyHistory;
 	SavedCaptureSummaries = ReplicatedCaptureSummaries;
 }
 
@@ -374,6 +390,7 @@ void ATerritoryWorldState::ImportPersistentState()
 	ReplicatedTransactions = SavedTransactions;
 	ReplicatedTreaties = SavedTreaties;
 	ReplicatedReputation = SavedReputation;
+	ReplicatedDiplomacyHistory = SavedDiplomacyHistory;
 	ReplicatedCaptureSummaries = SavedCaptureSummaries;
 
 	SyncSubsystemsFromReplicatedState();
@@ -389,27 +406,57 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 	// not in TerritoryFramework state.
 	if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
 	{
+		TMap<FGameplayTag, FTerritoryTreasury> Treasuries;
 		for (const FReplicatedFactionEconomy& Entry : ReplicatedTreasuries)
 		{
 			FTerritoryTreasury Treasury;
 			Treasury.IncomePerTick = Entry.IncomePerTick;
 			Treasury.CostsPerTick = Entry.CostsPerTick;
 			Treasury.TerritoryCount = Entry.TerritoryCount;
-			Economy->SetFactionTreasury(Entry.Faction, Treasury);
+			Treasuries.Add(Entry.Faction, Treasury);
 		}
+		Economy->RestoreTreasuryState(Treasuries);
+
+		TArray<FTerritoryTransaction> Transactions;
+		Transactions.Reserve(ReplicatedTransactions.Num());
+		for (const FReplicatedTransaction& Entry : ReplicatedTransactions)
+		{
+			FTerritoryTransaction Transaction;
+			Transaction.TransactionID = Entry.TransactionID;
+			Transaction.Faction = Entry.Faction;
+			Transaction.Type = Entry.Type;
+			Transaction.Amount = Entry.Amount;
+			Transaction.BalanceAfter = Entry.BalanceAfter;
+			Transaction.GameTime = Entry.GameTime;
+			Transaction.Reason = Entry.Reason;
+			Transaction.SourceTerritory = Entry.SourceTerritory;
+			Transactions.Add(Transaction);
+		}
+		Economy->RestoreTransactionHistory(Transactions);
 	}
 
 	// Sync diplomacy subsystem
 	if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
 	{
+		TArray<FTreatyRecord> Treaties;
+		Treaties.Reserve(ReplicatedTreaties.Num());
 		for (const FReplicatedTreaty& Treaty : ReplicatedTreaties)
 		{
-			Diplomacy->SetDiplomacyState(Treaty.FactionA, Treaty.FactionB, Treaty.State);
+			FTreatyRecord Record;
+			Record.FactionA = Treaty.FactionA;
+			Record.FactionB = Treaty.FactionB;
+			Record.State = Treaty.State;
+			Record.SignedGameTime = Treaty.SignedGameTime;
+			Record.ExpiryGameTime = Treaty.ExpiryGameTime;
+			Record.bPermanent = Treaty.bPermanent;
+			Treaties.Add(Record);
 		}
+
+		TMap<FGameplayTag, int32> Reputation;
 		for (const FReplicatedFactionReputation& Entry : ReplicatedReputation)
 		{
-			Diplomacy->SetReputation(Entry.Faction, Entry.Reputation);
+			Reputation.Add(Entry.Faction, Entry.Reputation);
 		}
-		Diplomacy->SyncToGameState();
+		Diplomacy->RestorePersistentState(Treaties, Reputation, ReplicatedDiplomacyHistory);
 	}
 }

@@ -122,7 +122,7 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::AbortTask(UBehaviorTreeC
 	// Release the specific territory slot, not all slots
 	if (Territory)
 	{
-		Director->ReleaseSlot(Territory, NPCController);
+		Director->ReleaseAssaultSlot(Territory, NPCController);
 
 		const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 		if (Settings && Settings->IsDebugEnabled())

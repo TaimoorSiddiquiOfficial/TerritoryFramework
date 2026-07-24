@@ -4,6 +4,7 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "Tales/TriggerSet.h"
+#include "Net/UnrealNetwork.h"
 
 ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -18,6 +19,14 @@ bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
 void ATerritoryGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+}
+
+void ATerritoryGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(ATerritoryGuardCharacter, TerritoryHomeTransform);
+	DOREPLIFETIME(ATerritoryGuardCharacter, OwningTerritory);
+	DOREPLIFETIME(ATerritoryGuardCharacter, OwningTerritorySpawnPoint);
 }
 
 void ATerritoryGuardCharacter::ConfigureTerritorySpawn(
@@ -95,7 +104,7 @@ void ATerritoryGuardCharacter::SetActorGUID_Implementation(const FGuid& NewGUID)
 
 TArray<FTerritoryPatrolNode> ATerritoryGuardCharacter::GetTerritoryPatrolRoute() const
 {
-	if (OwningTerritorySpawnPoint.IsValid())
+	if (IsValid(OwningTerritorySpawnPoint))
 	{
 		return OwningTerritorySpawnPoint->GetPatrolRoute();
 	}
@@ -104,9 +113,59 @@ TArray<FTerritoryPatrolNode> ATerritoryGuardCharacter::GetTerritoryPatrolRoute()
 
 bool ATerritoryGuardCharacter::HasTerritoryPatrolRoute() const
 {
-	if (!OwningTerritorySpawnPoint.IsValid())
+	if (!IsValid(OwningTerritorySpawnPoint))
 	{
 		return false;
 	}
 	return OwningTerritorySpawnPoint->HasPatrolRoute();
+}
+
+int32 ATerritoryGuardCharacter::GetPatrolNodeCount() const
+{
+	if (IsValid(OwningTerritorySpawnPoint))
+	{
+		return OwningTerritorySpawnPoint->GetPatrolRoute().Num();
+	}
+	return 0;
+}
+
+bool ATerritoryGuardCharacter::GetSafePatrolNode(int32 Index, FTerritoryPatrolNode& OutNode) const
+{
+	if (!IsValid(OwningTerritorySpawnPoint))
+	{
+		return false;
+	}
+	const TArray<FTerritoryPatrolNode>& Route = OwningTerritorySpawnPoint->GetPatrolRoute();
+	if (!Route.IsValidIndex(Index))
+	{
+		return false;
+	}
+	OutNode = Route[Index];
+	return true;
+}
+
+FTransform ATerritoryGuardCharacter::GetSpawnTransform() const
+{
+	return TerritoryHomeTransform;
+}
+
+ATerritoryVolume* ATerritoryGuardCharacter::GetOwningTerritory() const
+{
+	return OwningTerritory;
+}
+
+FGameplayTag ATerritoryGuardCharacter::GetGuardFaction() const
+{
+	TArray<FGameplayTag> Factions;
+	GetFactions().GetGameplayTagArray(Factions);
+	if (!Factions.IsEmpty())
+	{
+		return Factions[0];
+	}
+	return FGameplayTag();
+}
+
+bool ATerritoryGuardCharacter::IsSpawnPointGuard() const
+{
+	return IsValid(OwningTerritorySpawnPoint);
 }

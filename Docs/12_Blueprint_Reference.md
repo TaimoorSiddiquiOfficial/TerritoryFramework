@@ -27,6 +27,8 @@
 | GetRegisteredDefenders() | Array<Actor*> | Territory |
 | GetMapMarkerComponent() | TerritoryNavigationMarkerComponent* | Territory\|Visual |
 
+`GetOwningFaction()` returns the incumbent defending faction while a claimed territory is contested. `IsOwnedByFaction()` returns true only in the `Claimed` state, so it is false while Contested, Locked, or Unclaimed.
+
 ### BlueprintCallable (AuthorityOnly) Functions
 
 | Function | Category |
@@ -77,6 +79,60 @@
 | GuardSpawnCount | int32 |
 | GuardSpawnRadius | float |
 | GuardSpawnPoints | Array<Actor*> |
+
+## ATerritoryGuardCharacter
+
+### BlueprintPure Functions
+
+| Function | Returns | Category |
+|---|---|---|
+| GetTerritoryPatrolRoute() | Array<TerritoryPatrolNode> | Territory\|Guard\|Patrol |
+| HasTerritoryPatrolRoute() | bool | Territory\|Guard\|Patrol |
+| GetPatrolNodeCount() | int32 | Territory\|Guard\|Patrol |
+| GetSafePatrolNode(Index, OutNode) | bool | Territory\|Guard\|Patrol |
+| GetSpawnTransform() | Transform | Territory\|Guard |
+| GetOwningTerritory() | TerritoryVolume* | Territory\|Guard |
+| GetGuardFaction() | GameplayTag | Territory\|Guard |
+| IsSpawnPointGuard() | bool | Territory\|Guard |
+
+### BlueprintCallable Functions
+
+| Function | Notes |
+|---|---|
+| ConfigureTerritorySpawn(...) | Deferred-spawn configuration entrypoint; call before `FinishSpawningActor` |
+
+### BlueprintReadOnly Replicated Properties
+
+| Property | Type |
+|---|---|
+| TerritoryHomeTransform | Transform |
+| OwningTerritory | TerritoryVolume* |
+| OwningTerritorySpawnPoint | TerritoryGuardSpawnPoint* |
+
+## ATerritoryGuardSpawnPoint
+
+### BlueprintPure Functions
+
+| Function | Returns |
+|---|---|
+| HasAvailableSlot() | bool |
+| HasReserveAvailable() | bool |
+| GetActiveGuardCount() | int32 |
+| GetReserveCount() | int32 |
+| GetSpawnTransform() | Transform |
+| GetPatrolRoute() | Array<TerritoryPatrolNode> |
+| HasPatrolRoute() | bool (requires at least two nodes) |
+| GetLoopPatrol() | bool |
+| GetPatrolRouteAsTransforms() | Array<Transform> |
+| GetPatrolWaitTimes() | Array<float> |
+| GetOwningTerritory() | TerritoryVolume* |
+
+### BlueprintCallable Functions
+
+| Function | Notes |
+|---|---|
+| RegisterSpawnedGuard(Guard) | Internal spawn bookkeeping; normally called by TerritoryVolume |
+| UnregisterGuard(Guard) | Frees the slot and may consume one reserve replacement |
 
 ## ATerritoryCity (extends ATerritoryVolume)
 
@@ -224,7 +280,7 @@
 |---|---|
 | GetTerritoryState(WorldContext, Tag) | ETerritoryState |
 | GetCaptureProgress(WorldContext, Tag) | float |
-| ForceCaptureTerritory(WorldContext, Tag, Faction) | void |
+| ForceCaptureTerritory(WorldContext, Tag, Faction) | AuthorityOnly → void |
 
 ### Diplomacy Shortcuts
 

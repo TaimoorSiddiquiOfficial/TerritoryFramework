@@ -101,14 +101,16 @@ Manages the capture flow — attacker registration, progress accumulation, captu
        └── If progress >= 1.0 → defer Complete command
    └── Phase 2: Apply deferred commands
        ├── Complete → CompleteCapture(Territory, Faction)
-       └── Reset → clear capture state, restore Claimed/Unclaimed
+       └── Reset → clear capture state and contester; restore the retained incumbent to Claimed, otherwise Unclaimed
 
 3. CompleteCapture:
    └── SetOwningFaction(NewFaction) → state = Claimed, guards respawn
    └── Broadcast OnTerritoryControlChanged
 
 4. ForceCapture(Territory, Faction):
-   └── Bypasses all rules, sets state to Claimed explicitly
+   └── Requires server authority, a territory, and a valid owner tag
+   └── Bypasses gameplay capture rules, clears runtime capture state, sets progress to 1.0 and state to Claimed
+   └── Broadcasts OnTerritoryControlChanged (not OnCaptureAttempted)
 ```
 
 ### API
@@ -118,10 +120,10 @@ Manages the capture flow — attacker registration, progress accumulation, captu
 | Function | Parameters | Returns | Notes |
 |---|---|---|---|
 | AttemptCapture | Territory, Faction | ECaptureResult | Checks diplomacy, locks, defenders |
-| ForceCapture | Territory, Faction | void | Bypasses all checks — admin/quest |
+| ForceCapture | Territory, Faction | void | Bypasses lock/defender/diplomacy/AttemptCapture rules; still validates authority, territory, and owner tag |
 | ResetCapture | Territory | void | Resets progress to 0 |
 | AddCaptureProgress | Territory, Faction, Delta | void | Manual progress injection |
-| RegisterAttacker | Territory, Actor, Faction | bool | Returns false if budget full |
+| RegisterAttacker | Territory, Actor, Faction | void | Revalidates capture rules and ignores registration if the attack budget is full |
 | UnregisterAttacker | Territory, Actor, Faction | void | Releases attack slot |
 
 #### Queries (BlueprintPure)
@@ -166,7 +168,9 @@ if (bFriendly) return ECaptureResult::DiplomaticallyBlocked;
 | Delegate | Signature | When |
 |---|---|---|
 | OnTerritoryControlChanged | (Territory*, OldOwner, NewOwner) | After CompleteCapture or ForceCapture |
-| OnCaptureAttempted | (FCaptureAttempt Attempt) | After every AttemptCapture call |
+| OnCaptureAttempted | (FCaptureAttempt Attempt) | After each authority-side AttemptCapture call, with the populated result and participant counts |
+
+`ForceCapture` always broadcasts the subsystem control delegate for a valid call, including same-owner calls where old and new tags match. The volume's ownership delegate only fires if `SetOwningFaction` actually changes the owner.
 
 ---
 
@@ -202,10 +206,10 @@ See [07_Economy_System.md](07_Economy_System.md) for full economy documentation.
 
 ### Runtime Backstop
 
-All mutations use `GetAuthGameMode()` check in C++ even though BlueprintAuthorityOnly covers BP callers:
+Economy mutations now use a native server backstop in addition to Blueprint authority metadata:
 
 ```cpp
-if (!GetWorld()->GetAuthGameMode()) return;  // C++ backstop
+if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
 ```
 
 ---
@@ -228,11 +232,12 @@ See [08_Diplomacy_System.md](08_Diplomacy_System.md) for full diplomacy document
 
 ### Key Behaviors
 
-1. **Attitude bridge** — `SetNarrativeAttitude()` pushes treaty-derived attitudes to Narrative. `OnFactionAttitudeChanged` reconciles treaties when Narrative changes: Friendly creates Alliance only if no treaty exists (preserves TradeAgreement/NonAggression), Hostile overrides any peaceful treaty, Neutral removes treaty record.
+1. **Attitude bridge** — `SetNarrativeAttitude()` writes both Narrative directions. `OnFactionAttitudeChanged` preserves compatible TradeAgreement/NonAggression metadata for Friendly attitudes, maps incompatible Friendly/Hostile changes to Alliance/War, and treats an external Neutral change as treaty removal. Internal writes suppress their own delegate echo.
 2. **Reentrancy guard** — `bSuppressSync` RAII guard prevents recursive mutation during diplomacy broadcasts
 3. **Treaty expiration** — timer checks every `TreatyExpirationCheckInterval` (default 10s)
 4. **History cap** — DiplomacyHistory capped at 500 entries
 5. **Reset to Neutral** — `SetDiplomacyState(None)` resets Narrative attitude to Neutral
+6. **Load-order reconciliation** — startup next-tick sync and Narrative SaveSubsystem `OnFinishedLoad` reapply rich treaty-derived attitudes after actor serialization completes
 
 ---
 
@@ -316,9 +321,9 @@ GetTerritoryEconomy(WorldContext)    → Economy
 GetTerritoryCombatDirector(WorldContext) → CombatDirector
 ```
 
-Diplomacy has no static helper — access via:
+Diplomacy is also available from `GetTerritoryDiplomacy(WorldContext)`. Direct Blueprint access uses the World Subsystem node, not a GameInstance subsystem cast:
 ```
-GetGameInstanceSubsystem → Cast to UTerritoryDiplomacySubsystem
+Get World Subsystem (TerritoryDiplomacySubsystem)
 ```
 Or use `GetWorld()->GetSubsystem` in C++.
 
@@ -339,7 +344,7 @@ UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegis
 5. Subsystem timers start (server only)
 ```
 
-Late-registering territories (spawned at runtime) are handled by `OnTerritoryRegistered` delegate — cities and WorldState subscribe to catch them.
+Late-registering territories (spawned at runtime) are handled by `OnTerritoryRegistered`; cities subscribe to catch newly available districts. WorldState does not subscribe and must be refreshed explicitly with `ExportPersistentState()`.
 
 ## Cross-Subsystem Dependencies
 

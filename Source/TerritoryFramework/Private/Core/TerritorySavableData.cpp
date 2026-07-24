@@ -75,6 +75,7 @@ void ATerritorySavableData::SaveToSelf()
 		{
 			SavedTreasuries.Add(Faction, Economy->GetFactionEconomy(Faction));
 		}
+		SavedTransactions = Economy->GetAllTransactionHistory();
 	}
 
 	// ─── Save Diplomacy ───
@@ -83,18 +84,7 @@ void ATerritorySavableData::SaveToSelf()
 		SavedTreaties = Diplomacy->GetAllTreaties();
 		SavedDiplomacyHistory = Diplomacy->GetDiplomacyHistory();
 
-		// Save reputation
-		SavedReputation.Empty();
-		TArray<FGameplayTag> RepFactions;
-		for (const FTreatyRecord& Treaty : SavedTreaties)
-		{
-			RepFactions.AddUnique(Treaty.FactionA);
-			RepFactions.AddUnique(Treaty.FactionB);
-		}
-		for (const FGameplayTag& Faction : RepFactions)
-		{
-			SavedReputation.Add(Faction, Diplomacy->GetReputation(Faction));
-		}
+		SavedReputation = Diplomacy->GetAllReputation();
 	}
 }
 
@@ -103,37 +93,14 @@ void ATerritorySavableData::LoadFromSelf()
 	// ─── Load Economy ───
 	if (UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
 	{
-		// Use SetFactionTreasury to restore exact saved state — NOT AddToTreasury,
-		// which would add saved gold on top of whatever the subsystem already has
-		// (e.g. from ATerritoryWorldState), doubling the balance.
-		for (const auto& Pair : SavedTreasuries)
-		{
-			Economy->SetFactionTreasury(Pair.Key, Pair.Value);
-		}
-		// Recalculate income from current territory ownership
-		for (const auto& Pair : SavedTreasuries)
-		{
-			Economy->RecalculateIncome(Pair.Key);
-		}
+		Economy->RestoreTreasuryState(SavedTreasuries);
+		Economy->RestoreTransactionHistory(SavedTransactions);
 	}
 
 	// ─── Load Diplomacy ───
 	if (UTerritoryDiplomacySubsystem* Diplomacy = GetWorld()->GetSubsystem<UTerritoryDiplomacySubsystem>())
 	{
-		// Restore treaties by replaying state changes
-		for (const FTreatyRecord& Treaty : SavedTreaties)
-		{
-			Diplomacy->SetDiplomacyState(Treaty.FactionA, Treaty.FactionB, Treaty.State);
-		}
-
-		// Restore reputation
-		for (const auto& Pair : SavedReputation)
-		{
-			Diplomacy->SetReputation(Pair.Key, Pair.Value);
-		}
-
-		// Sync to game state
-		Diplomacy->SyncToGameState();
+		Diplomacy->RestorePersistentState(SavedTreaties, SavedReputation, SavedDiplomacyHistory);
 	}
 
 	UE_LOG(LogTerritory, Log, TEXT("TerritorySavableData loaded: %d treasuries, %d treaties"),

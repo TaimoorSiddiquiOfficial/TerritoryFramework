@@ -1,5 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include <type_traits>
+
 #include "Misc/AutomationTest.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
@@ -8,6 +10,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Core/TerritoryWorldState.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -79,6 +82,13 @@ namespace TFTestUtils
 		if (!Class) return false;
 		UFunction* Func = Class->FindFunctionByName(FName(*FunctionName));
 		return Func && Func->HasAnyFunctionFlags(FUNC_BlueprintCallable) && Func->HasAnyFunctionFlags(FUNC_BlueprintPure);
+	}
+
+	static bool IsBlueprintAuthorityOnly(const UClass* Class, const FString& FunctionName)
+	{
+		if (!Class) return false;
+		UFunction* Func = Class->FindFunctionByName(FName(*FunctionName));
+		return Func && Func->HasAnyFunctionFlags(FUNC_BlueprintAuthorityOnly);
 	}
 }
 
@@ -1069,6 +1079,7 @@ bool FTFContract_DiplomacySubsystem::RunTest(const FString& Parameters)
 	// ─── Sync API ───
 	TestTrue(TEXT("SyncToGameState is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("SyncToGameState")));
 	TestTrue(TEXT("LoadFromGameState is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("LoadFromGameState")));
+	TestTrue(TEXT("SyncToGameState is authority-only"), TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("SyncToGameState")));
 
 	// ─── Delegates ───
 	TestTrue(TEXT("Has OnDiplomacyStateChanged delegate"), TFTestUtils::HasProperty(Class, TEXT("OnDiplomacyStateChanged")));
@@ -1363,12 +1374,27 @@ bool FTFIntegration_SaveSystemContract::RunTest(const FString& Parameters)
 		// All economy/diplomacy data must be SaveGame
 		TestTrue(TEXT("SavedTreasuries has SaveGame flag"),
 			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedTreasuries")));
+		TestTrue(TEXT("SavedTransactions has SaveGame flag"),
+			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedTransactions")));
 		TestTrue(TEXT("SavedTreaties has SaveGame flag"),
 			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedTreaties")));
 		TestTrue(TEXT("SavedReputation has SaveGame flag"),
 			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedReputation")));
 		TestTrue(TEXT("SavedDiplomacyHistory has SaveGame flag"),
 			TFTestUtils::IsSaveGame(SavableClass, TEXT("SavedDiplomacyHistory")));
+	}
+
+	// ─── ATerritoryWorldState replicated save contract ───
+	{
+		const UClass* WorldStateClass = ATerritoryWorldState::StaticClass();
+		TestTrue(TEXT("WorldState implements INarrativeSavableActor"),
+			WorldStateClass->ImplementsInterface(UNarrativeSavableActor::StaticClass()));
+		TestTrue(TEXT("ReplicatedDiplomacyHistory is replicated"),
+			TFTestUtils::IsReplicated(WorldStateClass, TEXT("ReplicatedDiplomacyHistory")));
+		TestTrue(TEXT("SavedDiplomacyHistory has SaveGame flag"),
+			TFTestUtils::IsSaveGame(WorldStateClass, TEXT("SavedDiplomacyHistory")));
+		TestTrue(TEXT("WorldState is always network relevant"),
+			GetDefault<ATerritoryWorldState>()->bAlwaysRelevant);
 	}
 
 	// ─── Hierarchy classes inherit save contract ───
@@ -2087,7 +2113,9 @@ bool FTFContract_DiplomacySubsystemExtended::RunTest(const FString& Parameters)
 	// ─── New diplomacy operations added in v0.2.1 ───
 	TestTrue(TEXT("Has SignNonAggression"), TFTestUtils::HasFunction(Class, TEXT("SignNonAggression")));
 	TestTrue(TEXT("Has BreakCeasefire"), TFTestUtils::HasFunction(Class, TEXT("BreakCeasefire")));
-	TestTrue(TEXT("Has GetAllReputation"), TFTestUtils::HasFunction(Class, TEXT("GetAllReputation")));
+	using FGetAllReputationSignature = TMap<FGameplayTag, int32> (UTerritoryDiplomacySubsystem::*)() const;
+	TestTrue(TEXT("Has native GetAllReputation API"),
+		std::is_same_v<decltype(&UTerritoryDiplomacySubsystem::GetAllReputation), FGetAllReputationSignature>);
 
 	// ─── Existing diplomacy operations still present ───
 	TestTrue(TEXT("Has DeclareWar"), TFTestUtils::HasFunction(Class, TEXT("DeclareWar")));
@@ -2200,8 +2228,10 @@ bool FTFContract_BTAbortTask::RunTest(const FString& Parameters)
 	// ─── P0-03 fix: BT task must have AbortTask override to prevent slot leaks ───
 	UClass* ReqClass = UBTTask_RequestTerritoryPermission::StaticClass();
 	TestTrue(TEXT("RequestTerritoryPermission class exists"), ReqClass != nullptr);
+	using FAbortTaskSignature = EBTNodeResult::Type (UBTTask_RequestTerritoryPermission::*)(
+		UBehaviorTreeComponent&, uint8*);
 	TestTrue(TEXT("Has AbortTask override (releases slots on BT abort)"),
-		TFTestUtils::HasFunction(ReqClass, TEXT("AbortTask")));
+		std::is_same_v<decltype(&UBTTask_RequestTerritoryPermission::AbortTask), FAbortTaskSignature>);
 
 	UClass* RelClass = UBTTask_ReleaseTerritoryPermission::StaticClass();
 	TestTrue(TEXT("ReleaseTerritoryPermission class exists"), RelClass != nullptr);
@@ -2219,8 +2249,13 @@ bool FTFContract_DebugWidgetExtended::RunTest(const FString& Parameters)
 	TestTrue(TEXT("TerritoryDebugWidget class exists"), Class != nullptr);
 
 	// ─── P1-04 fix: NativeDestruct override for cache invalidation ───
+	struct FNativeDestructAccess : UTerritoryDebugWidget
+	{
+		static auto GetPointer() { return &FNativeDestructAccess::NativeDestruct; }
+	};
+	using FNativeDestructSignature = void (UTerritoryDebugWidget::*)();
 	TestTrue(TEXT("Has NativeDestruct override (cache invalidation)"),
-		TFTestUtils::HasFunction(Class, TEXT("NativeDestruct")));
+		std::is_same_v<decltype(FNativeDestructAccess::GetPointer()), FNativeDestructSignature>);
 
 	// ─── Existing debug widget API ───
 	TestTrue(TEXT("Has SetDebugEnabled"),
@@ -2251,9 +2286,220 @@ bool FTFContract_TerritoryGuardCharacter::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryPatrolRoute")));
 	TestTrue(TEXT("Has HasTerritoryPatrolRoute (BlueprintPure)"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("HasTerritoryPatrolRoute")));
+	TestTrue(TEXT("Has GetPatrolNodeCount (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPatrolNodeCount")));
+	TestTrue(TEXT("Has GetSafePatrolNode (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetSafePatrolNode")));
+	TestTrue(TEXT("Has GetSpawnTransform (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetSpawnTransform")));
+
+	TestTrue(TEXT("Has GetOwningTerritory (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetOwningTerritory")));
+
+	TestTrue(TEXT("Has GetGuardFaction (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetGuardFaction")));
+
+	TestTrue(TEXT("Has IsSpawnPointGuard (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("IsSpawnPointGuard")));
+
+	TestTrue(TEXT("TerritoryHomeTransform is replicated"),
+		TFTestUtils::IsReplicated(Class, TEXT("TerritoryHomeTransform")));
+	TestTrue(TEXT("OwningTerritory is replicated"),
+		TFTestUtils::IsReplicated(Class, TEXT("OwningTerritory")));
+	TestTrue(TEXT("OwningTerritorySpawnPoint is replicated"),
+		TFTestUtils::IsReplicated(Class, TEXT("OwningTerritorySpawnPoint")));
 
 	TestTrue(TEXT("Has ConfigureTerritorySpawn"),
 		TFTestUtils::HasFunction(Class, TEXT("ConfigureTerritorySpawn")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_GuardSpawnPointPure,
+	"TerritoryFramework.Contract.GuardSpawnPointPure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_GuardSpawnPointPure::RunTest(const FString& Parameters)
+{
+	UClass* Class = ATerritoryGuardSpawnPoint::StaticClass();
+	TestTrue(TEXT("TerritoryGuardSpawnPoint class exists"), Class != nullptr);
+
+	// ─── All getters must be BlueprintPure for clean graph layout ───
+	TestTrue(TEXT("HasAvailableSlot is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasAvailableSlot")));
+	TestTrue(TEXT("HasReserveAvailable is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasReserveAvailable")));
+	TestTrue(TEXT("GetActiveGuardCount is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetActiveGuardCount")));
+	TestTrue(TEXT("GetReserveCount is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetReserveCount")));
+	TestTrue(TEXT("GetSpawnTransform is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetSpawnTransform")));
+	TestTrue(TEXT("GetPatrolRoute is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPatrolRoute")));
+	TestTrue(TEXT("HasPatrolRoute is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasPatrolRoute")));
+	TestTrue(TEXT("GetLoopPatrol is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetLoopPatrol")));
+	TestTrue(TEXT("GetPatrolRouteAsTransforms is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPatrolRouteAsTransforms")));
+	TestTrue(TEXT("GetPatrolWaitTimes is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPatrolWaitTimes")));
+	TestTrue(TEXT("GetOwningTerritory is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetOwningTerritory")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_VolumePureGetters,
+	"TerritoryFramework.Contract.VolumePureGetters",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_VolumePureGetters::RunTest(const FString& Parameters)
+{
+	UClass* Class = ATerritoryVolume::StaticClass();
+	TestTrue(TEXT("TerritoryVolume class exists"), Class != nullptr);
+
+	// ─── All read-only getters must be BlueprintPure ───
+	TestTrue(TEXT("GetOwningFaction is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetOwningFaction")));
+	TestTrue(TEXT("GetTerritoryState is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryState")));
+	TestTrue(TEXT("GetControlProgress is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetControlProgress")));
+	TestTrue(TEXT("IsContested is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("IsContested")));
+	TestTrue(TEXT("GetTerritoryTag is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryTag")));
+	TestTrue(TEXT("IsOwnedByFaction is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("IsOwnedByFaction")));
+	TestTrue(TEXT("ContainsPoint is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("ContainsPoint")));
+	TestTrue(TEXT("IsLocked is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("IsLocked")));
+	TestTrue(TEXT("CanUnlock is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("CanUnlock")));
+	TestTrue(TEXT("GetSpawnedGuardCount is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetSpawnedGuardCount")));
+	TestTrue(TEXT("GetConfiguredGuardCount is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetConfiguredGuardCount")));
+	TestTrue(TEXT("HasGuardsAlive is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasGuardsAlive")));
+	TestTrue(TEXT("GetGuardSpawnPoints is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetGuardSpawnPoints")));
+	TestTrue(TEXT("GetResolvedGuardDefinition is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetResolvedGuardDefinition")));
+	TestTrue(TEXT("GetDebugString is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetDebugString")));
+
+	// ─── Mutation functions must remain BlueprintCallable (NOT Pure) ───
+	TestTrue(TEXT("SetOwningFaction is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("SetOwningFaction")));
+	TestTrue(TEXT("LockTerritory is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("LockTerritory")));
+	TestTrue(TEXT("SpawnGuards is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("SpawnGuards")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_BlueprintLibraryPure,
+	"TerritoryFramework.Contract.BlueprintLibraryPure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_BlueprintLibraryPure::RunTest(const FString& Parameters)
+{
+	UClass* Class = UTerritoryBlueprintLibrary::StaticClass();
+	TestTrue(TEXT("TerritoryBlueprintLibrary class exists"), Class != nullptr);
+
+	// Subsystem accessors must be BlueprintPure
+	TestTrue(TEXT("GetTerritoryRegistry is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryRegistry")));
+	TestTrue(TEXT("GetTerritoryControl is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryControl")));
+	TestTrue(TEXT("GetTerritoryEconomy is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryEconomy")));
+	TestTrue(TEXT("GetTerritoryCombatDirector is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryCombatDirector")));
+	TestTrue(TEXT("GetTerritoryDiplomacy is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryDiplomacy")));
+
+	// Query functions must be BlueprintPure
+	TestTrue(TEXT("GetTerritoryAtLocation is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryAtLocation")));
+	TestTrue(TEXT("GetAllTerritories is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetAllTerritories")));
+	TestTrue(TEXT("IsSameFaction is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("IsSameFaction")));
+	TestTrue(TEXT("ForceCaptureTerritory is authority-only"),
+		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("ForceCaptureTerritory")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFFunctional_RuntimeInvariants,
+	"TerritoryFramework.Functional.RuntimeInvariants",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFFunctional_RuntimeInvariants::RunTest(const FString& Parameters)
+{
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Narrative.Factions.Heroes")), false);
+	TestTrue(TEXT("Heroes faction exists"), Heroes.IsValid());
+
+	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
+	Territory->SetOwningFaction(Heroes);
+	Territory->SetTerritoryState(ETerritoryState::Contested);
+	TestEqual(TEXT("Contested territory preserves incumbent faction"),
+		Territory->GetOwningFaction(), Heroes);
+	TestFalse(TEXT("Contested incumbent is not active ownership"),
+		Territory->IsOwnedByFaction(Heroes));
+	Territory->SetTerritoryState(ETerritoryState::Claimed);
+	TestTrue(TEXT("Restored claim belongs to incumbent"),
+		Territory->IsOwnedByFaction(Heroes));
+
+	ATerritoryGuardCharacter* Guard = NewObject<ATerritoryGuardCharacter>();
+	const FTransform Home(FRotator(0.f, 45.f, 0.f), FVector(100.f, 200.f, 300.f));
+	Guard->TerritoryHomeTransform = Home;
+	INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Guard);
+	TestNotNull(TEXT("Guard implements Narrative team interface"), TeamAgent);
+	TeamAgent->AddFaction(Heroes);
+	TestTrue(TEXT("Guard spawn getter returns stored projected home transform"),
+		Guard->GetSpawnTransform().Equals(Home));
+	TestEqual(TEXT("Guard faction getter returns Narrative faction"),
+		Guard->GetGuardFaction(), Heroes);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_RegistrySubsystemPure,
+	"TerritoryFramework.Contract.RegistrySubsystemPure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_RegistrySubsystemPure::RunTest(const FString& Parameters)
+{
+	UClass* Class = UTerritoryRegistrySubsystem::StaticClass();
+	TestTrue(TEXT("TerritoryRegistrySubsystem class exists"), Class != nullptr);
+
+	// ─── All read-only getters must be BlueprintPure ───
+	TestTrue(TEXT("GetTerritoryByTag is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryByTag")));
+	TestTrue(TEXT("GetTerritoryByGUID is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryByGUID")));
+	TestTrue(TEXT("GetTerritoryAtLocation is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryAtLocation")));
+	TestTrue(TEXT("GetAllTerritories is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetAllTerritories")));
+	TestTrue(TEXT("GetTerritoryCount is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryCount")));
+	TestTrue(TEXT("GetTerritoryCountForFaction is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryCountForFaction")));
+
+	// ─── Mutation functions stay Callable ───
+	TestTrue(TEXT("RegisterTerritory is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("RegisterTerritory")));
+	TestTrue(TEXT("UnregisterTerritory is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("UnregisterTerritory")));
 
 	return true;
 }

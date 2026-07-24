@@ -52,6 +52,12 @@ Static Blueprint-callable helpers. Use these as the primary entry point from Blu
 | GetTerritoryByTag | WorldContextObject, Tag (GameplayTag) | ATerritoryVolume* | Find territory by tag |
 | IsSameFaction | A (GameplayTag), B (GameplayTag) | bool | Check if two factions are the same |
 
+### Functions (BlueprintCallable)
+
+| Function | Parameters | Authority | Description |
+|---|---|---|---|
+| ForceCaptureTerritory | WorldContextObject, TerritoryTag, NewOwner | BlueprintAuthorityOnly | Resolve the territory and invoke ControlSubsystem `ForceCapture` |
+
 ---
 
 ## ATerritoryVolume
@@ -82,7 +88,7 @@ Base territory actor. Place in level to define a capturable zone.
 
 | Field | Type | Notes |
 |---|---|---|
-| OwningFaction | FGameplayTag | Current owner |
+| OwningFaction | FGameplayTag | Stable owner; retains the incumbent defender while Contested |
 | TerritoryState | ETerritoryState | Current state |
 | ControlProgress | float | 0.0–1.0 |
 | ContestingFaction | FGameplayTag | Who is attacking |
@@ -114,6 +120,8 @@ Base territory actor. Place in level to define a capturable zone.
 | HasGuardsAlive | bool | Territory\|Guards |
 | GetGuardSpawnPoints | Array<Actor*> | Territory\|Guards |
 | GetRegisteredDefenders | Array<Actor*> | Territory |
+
+`IsOwnedByFaction(Faction)` requires both a matching owner tag and `TerritoryState == Claimed`. It returns false while Contested, Locked, or Unclaimed even when `GetOwningFaction()` still reports the incumbent.
 
 ### BlueprintCallable (AuthorityOnly)
 
@@ -221,21 +229,52 @@ Extends `ATerritoryVolume`. An upgradeable property within a district.
 
 Extends `ANarrativeNPCCharacter`. Guard NPC spawned by territory volumes.
 
-### Key Override
+### Stable GUID Override
 
 ```cpp
 virtual FGuid GetActorGUID_Implementation() const override
 {
-    return SpawnInfo.SpawnAssignedSaveGUID;
+    if (SpawnInfo.SpawnAssignedSaveGUID.IsValid())
+    {
+        return SpawnInfo.SpawnAssignedSaveGUID;
+    }
+    if (!CachedFallbackGUID.IsValid())
+    {
+        const_cast<ATerritoryGuardCharacter*>(this)->CachedFallbackGUID = FGuid::NewGuid();
+    }
+    return CachedFallbackGUID;
 }
 ```
 
-This returns the save-system-assigned GUID instead of generating one — prevents `NarrativeStableActor` assertion crashes on deferred spawn.
+This returns the save-system-assigned GUID when valid. Otherwise it generates and caches one fallback GUID, preventing `NarrativeStableActor` assertion crashes without changing identity on repeated calls.
+
+### Replicated Context
+
+| Property | Type | Description |
+|---|---|---|
+| TerritoryHomeTransform | FTransform | Resolved home transform used by return activities |
+| OwningTerritory | ATerritoryVolume* | Owning territory back-reference |
+| OwningTerritorySpawnPoint | ATerritoryGuardSpawnPoint* | Spawn point back-reference; null for random fallback guards |
+
+### Blueprint API
+
+| Function | Returns | Description |
+|---|---|---|
+| ConfigureTerritorySpawn(...) | void | Configure Narrative definition, exact faction, stable IDs, home transform, and optional activity/trigger overrides during deferred spawn |
+| GetTerritoryPatrolRoute | TArray<FTerritoryPatrolNode> | Copy assigned patrol route |
+| HasTerritoryPatrolRoute | bool | True when an assigned route has at least two nodes |
+| GetPatrolNodeCount | int32 | Number of assigned nodes |
+| GetSafePatrolNode | bool | Bounds-checked node lookup |
+| GetSpawnTransform | FTransform | Stored `TerritoryHomeTransform` |
+| GetOwningTerritory | ATerritoryVolume* | Replicated owning territory |
+| GetGuardFaction | FGameplayTag | Narrative faction, including spawn overrides |
+| IsSpawnPointGuard | bool | Whether a spawn point is assigned |
 
 ### Behavior
 
-- BeginPlay binds `OnTakeAnyDamage` to force `MOVE_Walking` movement mode (fixes floating-on-hit)
-- Faction set from owning territory (not NPC definition's default)
+- `ConfigureTerritorySpawn` sets Narrative `SpawnInfo` before `SetNPCDefinition`
+- Exact faction overrides come from the selected spawn point or owning territory
+- `ShouldRespawn_Implementation()` returns false so Narrative does not restore stale individual guard actors
 
 ---
 
@@ -274,23 +313,23 @@ Actor placed in level to define guard spawn locations and patrol routes.
 | GetReserveCount | int32 | Remaining reserve guards |
 | RegisterSpawnedGuard | void | Notify that a guard was spawned from this point |
 | UnregisterGuard | void | Notify that a guard died/was removed from this point |
-| GetPatrolRoute | const TArray<FTerritoryPatrolNode>& | Full patrol node array |
+| GetPatrolRoute | TArray<FTerritoryPatrolNode> | Full patrol node array, returned by value |
 | GetPatrolRouteAsTransforms | TArray<FTransform> | Patrol route as transforms (for behavior trees) |
 | GetPatrolWaitTimes | TArray<float> | Wait times parallel to GetPatrolRouteAsTransforms |
-| HasPatrolRoute | bool | Whether PatrolRoute is non-empty |
-| GetSpawnTransform | FTransform | Transform for the next available slot |
+| HasPatrolRoute | bool | Whether PatrolRoute contains at least two nodes |
+| GetSpawnTransform | FTransform | Actor transform with its location projected to NavMesh when possible |
 
 ### Death Handling
 
 When a guard dies:
 1. `ATerritoryGuardSpawnPoint::UnregisterGuard()` is called
-2. If reserves depleted → `Territory->SpawnGuards()` to produce replacement
+2. If a reserve is available, consume one and call `Territory->SpawnSingleGuard(this)` for one replacement
 
 ---
 
 ## ATerritoryWorldState
 
-Replicated actor for multiplayer economy/diplomacy state. Place exactly 1 per level for multiplayer.
+Replicated save snapshot for multiplayer-visible economy/diplomacy state. Place at most one per level. It is not continuously synchronized with subsystem mutations.
 
 ### Replicated Arrays
 
@@ -299,8 +338,9 @@ Replicated actor for multiplayer economy/diplomacy state. Place exactly 1 per le
 | ReplicatedTreasuries | FReplicatedFactionEconomy | Faction treasuries |
 | ReplicatedTransactions | FReplicatedTransaction | Transaction history |
 | ReplicatedTreaties | FReplicatedTreaty | Active treaties |
-| ReplicatedCaptureSummaries | FReplicatedCaptureSummary | Recent captures |
+| ReplicatedCaptureSummaries | FReplicatedCaptureSummary | Per-territory state at the last export/setter update |
 | ReplicatedReputation | FReplicatedFactionReputation | Faction reputation |
+| ReplicatedDiplomacyHistory | FDiplomacyEvent | Diplomacy event history |
 
 ### Functions
 
@@ -308,7 +348,8 @@ Replicated actor for multiplayer economy/diplomacy state. Place exactly 1 per le
 |---|---|---|
 | ExportPersistentState | AuthorityOnly | Copy subsystem state → replicated arrays |
 | ImportPersistentState | AuthorityOnly | Copy replicated arrays → subsystems |
-| SyncSubsystemsFromReplicatedState | AuthorityOnly | Push to Economy/Diplomacy subsystems |
+
+`ExportPersistentState` rebuilds economy, transaction, treaty, reputation, and capture-summary arrays. Import restores the economy ledger and rich treaty metadata. TerritoryVolume load resumes the leading saved contest for decay, but actor identities and non-leading faction progress are not persisted.
 
 ### Delegates
 
@@ -367,10 +408,10 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | Function | Parameters | Returns |
 |---|---|---|
 | AttemptCapture | Territory, Faction | ECaptureResult |
-| ForceCapture | Territory, Faction | void |
+| ForceCapture | Territory, Faction | void; validates authority/inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed |
 | ResetCapture | Territory | void |
 | AddCaptureProgress | Territory, Faction, Delta | void |
-| RegisterAttacker | Territory, Actor, Faction | bool |
+| RegisterAttacker | Territory, Actor, Faction | void; invalid, duplicate, blocked, or over-budget registrations are ignored |
 | UnregisterAttacker | Territory, Actor, Faction | void |
 
 ### Queries (BlueprintPure)
@@ -388,7 +429,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | Delegate | Signature | BlueprintAssignable |
 |---|---|---|
 | OnTerritoryControlChanged | (ATerritoryVolume*, FGameplayTag OldOwner, FGameplayTag NewOwner) | ✅ |
-| OnCaptureAttempted | (ATerritoryVolume*, FGameplayTag Attacker) | ✅ |
+| OnCaptureAttempted | (const FCaptureAttempt& Attempt) | ✅ |
 
 ---
 
@@ -475,8 +516,12 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 | Function | Description |
 |---|---|
-| SyncToGameState | Push diplomacy state into ATerritoryWorldState for replication |
-| LoadFromGameState | Pull diplomacy state back from ATerritoryWorldState after load |
+| SyncToGameState | Push treaty-derived attitudes into both `ANarrativeGameState` directions |
+| LoadFromGameState | Reconcile treaty state from Narrative attitudes while preserving compatible rich metadata |
+
+`SyncToGameState` is `BlueprintAuthorityOnly`; `LoadFromGameState` remains a read/reconciliation operation available on clients.
+
+The native `SetNarrativeAttitude(A, B, Attitude)` API directly applies the requested attitude symmetrically. Treaty-derived sync is separately reconciled after startup and every Narrative `OnFinishedLoad` event.
 
 ### Delegates
 
@@ -690,11 +735,11 @@ Extends `UNarrativeEvent`. Fires when territory is captured.
 | Property | Type | Notes |
 |---|---|---|
 | TargetTerritoryTag | FGameplayTag | Territory to capture |
-| bForceCapture | bool | Bypass AttemptCapture rules |
+| bForceCapture | bool | Bypass gameplay AttemptCapture rules |
 
 ### Behavior
 
-- If `bForceCapture` → calls `ForceCapture` (bypasses all checks)
+- If `bForceCapture` → calls `ForceCapture` (still requires server authority, a resolved territory, and a valid owner tag; bypasses lock, defenders, diplomacy, and AttemptCapture)
 - If not → calls `AttemptCapture` (respects diplomacy, lock, defender checks)
 
 ---
@@ -723,7 +768,7 @@ Implement on actors that need to expose territory ownership.
 
 | Function | Returns | Notes |
 |---|---|---|
-| GetTerritoryOwner_Implementation | FGameplayTag | Current owner |
+| GetTerritoryOwner_Implementation | FGameplayTag | Stable owner, including the incumbent defender while Contested |
 | GetTerritoryControlProgress_Implementation | float | 0.0–1.0 |
 | IsTerritoryContested_Implementation | bool | Whether territory is contested |
 | GetContestingFaction_Implementation | FGameplayTag | Contester (invalid if not contested) |
@@ -778,7 +823,7 @@ BlueprintNativeEvent — implement to receive territory events.
 | AlreadyOwned | Attacker already owns territory |
 | Locked | Territory is locked |
 | DefendersRemain | Guards still alive |
-| DiplomaticallyBlocked | Factions diplomatically blocked (e.g., alliance, ceasefire) |
+| DiplomaticallyBlocked | Factions have a Friendly Narrative attitude (Alliance, TradeAgreement, or NonAggression) |
 | InvalidTerritory | No valid territory provided |
 
 ### ETerritoryTransactionType
@@ -802,7 +847,7 @@ BlueprintNativeEvent — implement to receive territory events.
 | Alliance | Friendly, can't capture |
 | TradeAgreement | Friendly, timed |
 | NonAggression | Friendly, permanent |
-| Ceasefire | Neutral, temporary |
+| Ceasefire | Neutral; permanent until explicitly changed or broken |
 | War | Hostile, can capture |
 
 ### EDiplomacyEventType
@@ -879,13 +924,12 @@ BlueprintNativeEvent — implement to receive territory events.
 
 | Field | Type | Notes |
 |---|---|---|
-| TreatyID | FGuid | Unique ID |
 | FactionA | FGameplayTag | Party A |
 | FactionB | FGameplayTag | Party B |
-| Type | EDiplomacyState | Treaty type |
-| StartGameTime | double | When signed |
-| DurationGameTime | double | 0 = permanent |
-| bIsPermanent | bool | Permanent flag |
+| State | EDiplomacyState | Treaty type |
+| SignedGameTime | float | When signed |
+| ExpiryGameTime | float | Absolute expiry time; -1 when not timed |
+| bPermanent | bool | Permanent flag |
 
 ### FDiplomacyEvent
 
@@ -894,8 +938,7 @@ BlueprintNativeEvent — implement to receive territory events.
 | EventType | EDiplomacyEventType | What happened |
 | FactionA | FGameplayTag | Party A |
 | FactionB | FGameplayTag | Party B |
-| GameTime | double | When |
-| Description | FString | Details |
+| GameTime | float | When |
 
 ### FCaptureAttempt
 
@@ -903,15 +946,17 @@ BlueprintNativeEvent — implement to receive territory events.
 |---|---|---|
 | Territory | ATerritoryVolume* | Target |
 | AttackingFaction | FGameplayTag | Who |
+| DefendingFaction | FGameplayTag | Incumbent owner at attempt time |
 | Result | ECaptureResult | Outcome |
-| GameTime | double | When |
+| AttackersPresent | int32 | Registered attackers for the attacking faction |
+| DefendersPresent | int32 | Territory defender count |
 
 ### FReplicatedFactionEconomy
 
 | Field | Type | Notes |
 |---|---|---|
 | Faction | FGameplayTag | Faction |
-| Treasury | int32 | Aggregate faction wealth (read from player inventories) |
+| Treasury | int32 | Reserved snapshot field; current export leaves this at 0 because wealth lives in Narrative inventories |
 | IncomePerTick | int32 | Income |
 | CostsPerTick | int32 | Costs |
 | TerritoryCount | int32 | Owned territories |
@@ -922,16 +967,17 @@ Mirrors `FTerritoryTransaction` for network replication.
 
 ### FReplicatedTreaty
 
-Mirrors `FTreatyRecord` for network replication.
+Replicates the treaty parties, state, signed/expiry times, permanence, and a canonical `TreatyID`. WorldState import restores the rich metadata directly to the DiplomacySubsystem.
 
 ### FReplicatedCaptureSummary
 
 | Field | Type | Notes |
 |---|---|---|
 | TerritoryTag | FGameplayTag | Which territory |
-| OldOwner | FGameplayTag | Previous owner |
-| NewOwner | FGameplayTag | New owner |
-| GameTime | double | When |
+| CurrentOwner | FGameplayTag | Stable owner/incumbent defender |
+| ContestingFaction | FGameplayTag | Leading attacker |
+| ControlProgress | float | Leading capture progress |
+| State | ETerritoryState | Territory state |
 
 ### FReplicatedFactionReputation
 
@@ -961,7 +1007,7 @@ Mirrors `FTreatyRecord` for network replication.
 | FOnTerritoryRegistered | (ATerritoryVolume*) | Registry |
 | FOnTerritoryUnregistered | (ATerritoryVolume*) | Registry |
 | FOnTerritoryControlChanged | (ATerritoryVolume*, FGameplayTag, FGameplayTag) | Control |
-| FOnCaptureAttempted | (ATerritoryVolume*, FGameplayTag) | Control |
+| FOnCaptureAttempted | (const FCaptureAttempt&) | Control |
 | FOnEconomyTickFired | (FGameplayTag, FTerritoryEconomySnapshot) | Economy |
 | FOnTransactionRecorded | (FTerritoryTransaction) | Economy + WorldState |
 | FOnDiplomacyStateChanged | (FGameplayTag, FGameplayTag, EDiplomacyState) | Diplomacy |

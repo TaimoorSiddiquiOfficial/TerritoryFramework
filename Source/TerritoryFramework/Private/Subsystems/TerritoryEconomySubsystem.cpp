@@ -146,7 +146,6 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 {
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebugTicks = Settings && Settings->ShouldDebugEconomy();
-	const bool bDebugTx = Settings && Settings->ShouldDebugTransactions();
 
 	// Process deferred income recalculations — factions marked dirty by capture/ownership
 	// events get recalculated once per tick instead of O(N) times per capture cascade.
@@ -159,96 +158,53 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 	}
 	DirtyFactions.Empty();
 
-	for (auto& Pair : FactionTreasuries)
+	TArray<FGameplayTag> Factions;
+	FactionTreasuries.GetKeys(Factions);
+	for (const FGameplayTag& Faction : Factions)
 	{
-		const FGameplayTag& Faction = Pair.Key;
-		FTerritoryTreasury& Treasury = Pair.Value;
+		const FTerritoryTreasury* Treasury = FactionTreasuries.Find(Faction);
+		if (!Treasury) continue;
+		const FTerritoryTreasury TickTreasury = *Treasury;
 
-		int32 NetIncome = Treasury.IncomePerTick - Treasury.CostsPerTick;
-
-		// Distribute to faction members' UInventoryComponent::Currency
-		TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
-
-		if (Members.Num() > 0 && NetIncome != 0)
+		if (TickTreasury.IncomePerTick > 0)
 		{
-			// Split evenly; remainder (from integer division) goes to first member
-			int32 BaseShare = NetIncome / Members.Num();
-			int32 Remainder = NetIncome - (BaseShare * Members.Num());
-
-			for (int32 i = 0; i < Members.Num(); ++i)
-			{
-				ANarrativeCharacter* Member = Members[i];
-				UNarrativeInventoryComponent* Inv = Member->GetInventoryComponent();
-				if (!Inv) continue;
-
-				int32 Share = BaseShare + (i == 0 ? Remainder : 0);
-				if (Share != 0)
-				{
-					Inv->AddCurrency(Share);
-				}
-			}
+			AddToTreasury(Faction, TickTreasury.IncomePerTick,
+				TEXT("Periodic income"), ETerritoryTransactionType::Income);
 		}
 
-		// Record transactions for audit trail (only if actual distribution occurred)
-		// Gate on Members.Num() > 0 to prevent ghost transactions
-		if (Members.Num() > 0)
+		const int32 AvailableForUpkeep = GetFactionAggregateCurrency(Faction);
+		const int32 ActualUpkeep = FMath::Min(TickTreasury.CostsPerTick, AvailableForUpkeep);
+		if (ActualUpkeep > 0)
 		{
-			int32 Aggregate = GetFactionAggregateCurrency(Faction);
-
-			if (Treasury.IncomePerTick > 0)
-			{
-				FTerritoryTransaction IncomeTx;
-				IncomeTx.TransactionID = FGuid::NewGuid();
-				IncomeTx.Faction = Faction;
-				IncomeTx.Type = ETerritoryTransactionType::Income;
-				IncomeTx.Amount = Treasury.IncomePerTick;
-				IncomeTx.BalanceAfter = Aggregate;
-				IncomeTx.Reason = FString::Printf(TEXT("Periodic income (%d members)"), Members.Num());
-				if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
-				{
-					IncomeTx.GameTime = GS->GetAccumulatedTime();
-				}
-				TransactionLedger.Add(IncomeTx);
-				OnTransactionRecorded.Broadcast(IncomeTx);
-			}
-
-			if (Treasury.CostsPerTick > 0)
-			{
-				FTerritoryTransaction UpkeepTx;
-				UpkeepTx.TransactionID = FGuid::NewGuid();
-				UpkeepTx.Faction = Faction;
-				UpkeepTx.Type = ETerritoryTransactionType::GuardUpkeep;
-				UpkeepTx.Amount = -Treasury.CostsPerTick;
-				UpkeepTx.BalanceAfter = Aggregate;
-				UpkeepTx.Reason = TEXT("Guard upkeep (deducted from faction members)");
-				if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
-				{
-					UpkeepTx.GameTime = GS->GetAccumulatedTime();
-				}
-				TransactionLedger.Add(UpkeepTx);
-				OnTransactionRecorded.Broadcast(UpkeepTx);
-			}
+			const FString Reason = ActualUpkeep == TickTreasury.CostsPerTick
+				? TEXT("Guard upkeep")
+				: FString::Printf(TEXT("Guard upkeep (partial: %d/%d)"), ActualUpkeep, TickTreasury.CostsPerTick);
+			TryDebitTreasury(Faction, ActualUpkeep, Reason, ETerritoryTransactionType::GuardUpkeep);
 		}
+
+		const int32 Aggregate = GetFactionAggregateCurrency(Faction);
+		const int32 NetIncome = TickTreasury.IncomePerTick - TickTreasury.CostsPerTick;
+		const int32 MemberCount = GetFactionMembers(Faction).Num();
 
 		if (bDebugTicks)
 		{
 			UE_LOG(LogTerritory, Log, TEXT("[EconomyTick] %s: aggregate=%d, income=%d, costs=%d, net=%d, members=%d, territories=%d"),
-				*Faction.ToString(), Aggregate, Treasury.IncomePerTick,
-				Treasury.CostsPerTick, NetIncome, Members.Num(), Treasury.TerritoryCount);
+				*Faction.ToString(), Aggregate, TickTreasury.IncomePerTick,
+				TickTreasury.CostsPerTick, NetIncome, MemberCount, TickTreasury.TerritoryCount);
 
 			if (Settings->IsDebugEnabled())
 			{
 				const FString Msg = FString::Printf(TEXT("[Economy] %s: $%d (+%d/-%d) [%d members]"),
-					*Faction.ToString(), Aggregate, Treasury.IncomePerTick, Treasury.CostsPerTick, Members.Num());
+					*Faction.ToString(), Aggregate, TickTreasury.IncomePerTick, TickTreasury.CostsPerTick, MemberCount);
 				GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan, Msg);
 			}
 		}
 
 		FTerritoryEconomySnapshot Snapshot;
 		Snapshot.Treasury = Aggregate;
-		Snapshot.TotalIncome = Treasury.IncomePerTick;
-		Snapshot.TotalCosts = Treasury.CostsPerTick;
-		Snapshot.TerritoryCount = Treasury.TerritoryCount;
+		Snapshot.TotalIncome = TickTreasury.IncomePerTick;
+		Snapshot.TotalCosts = TickTreasury.CostsPerTick;
+		Snapshot.TerritoryCount = TickTreasury.TerritoryCount;
 
 		OnEconomyTickFired.Broadcast(Faction, Snapshot);
 	}
@@ -306,7 +262,7 @@ TArray<FGameplayTag> UTerritoryEconomySubsystem::GetAllFactionsWithTreasury() co
 
 void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
-	if (!GetWorld()->GetAuthGameMode()) return;
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
 	if (!Faction.IsValid() || PositiveAmount <= 0) return;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -314,20 +270,19 @@ void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int3
 
 	// Distribute to faction members' UInventoryComponent::Currency
 	TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
-	if (Members.Num() > 0)
+	if (Members.IsEmpty()) return;
+
+	int32 BaseShare = PositiveAmount / Members.Num();
+	int32 Remainder = PositiveAmount - (BaseShare * Members.Num());
+
+	for (int32 i = 0; i < Members.Num(); ++i)
 	{
-		int32 BaseShare = PositiveAmount / Members.Num();
-		int32 Remainder = PositiveAmount - (BaseShare * Members.Num());
+		ANarrativeCharacter* Member = Members[i];
+		UNarrativeInventoryComponent* Inv = Member->GetInventoryComponent();
+		if (!Inv) continue;
 
-		for (int32 i = 0; i < Members.Num(); ++i)
-		{
-			ANarrativeCharacter* Member = Members[i];
-			UNarrativeInventoryComponent* Inv = Member->GetInventoryComponent();
-			if (!Inv) continue;
-
-			int32 Share = BaseShare + (i == 0 ? Remainder : 0);
-			Inv->AddCurrency(Share);
-		}
+		int32 Share = BaseShare + (i == 0 ? Remainder : 0);
+		Inv->AddCurrency(Share);
 	}
 
 	// Record transaction
@@ -362,7 +317,7 @@ void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int3
 
 bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
-	if (!GetWorld()->GetAuthGameMode()) return false;
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return false;
 	if (!Faction.IsValid() || PositiveAmount <= 0) return false;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -403,12 +358,21 @@ bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, i
 		}
 	}
 
-	// Only succeed if we debited the full requested amount
-	// If individual members couldn't afford their proportional share, fail the entire transaction
-	if (Debited < PositiveAmount)
+	// Redistribute any shortfall to members with spare currency. Aggregate affordability
+	// was checked above, so this completes the debit without partial mutation.
+	int32 Remaining = PositiveAmount - Debited;
+	for (int32 i = 0; i < Members.Num() && Remaining > 0; ++i)
 	{
-		return false;
+		if (UNarrativeInventoryComponent* Inv = Members[i]->GetInventoryComponent())
+		{
+			const int32 SpareCurrency = Inv->GetCurrency() - ActualDebits[i];
+			const int32 AdditionalDebit = FMath::Min(SpareCurrency, Remaining);
+			ActualDebits[i] += AdditionalDebit;
+			Debited += AdditionalDebit;
+			Remaining -= AdditionalDebit;
+		}
 	}
+	if (Remaining > 0) return false;
 
 	// Second pass: actually apply the debits
 	for (int32 i = 0; i < Members.Num(); ++i)
@@ -466,17 +430,42 @@ TArray<FTerritoryTransaction> UTerritoryEconomySubsystem::GetTransactionHistory(
 	return Result;
 }
 
+void UTerritoryEconomySubsystem::RestoreTransactionHistory(const TArray<FTerritoryTransaction>& Transactions)
+{
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client) return;
+
+	TransactionLedger = Transactions;
+	if (TransactionLedger.Num() > MaxTransactionHistory)
+	{
+		TransactionLedger.RemoveAt(0, TransactionLedger.Num() - MaxTransactionHistory);
+	}
+}
+
+void UTerritoryEconomySubsystem::RestoreTreasuryState(const TMap<FGameplayTag, FTerritoryTreasury>& Treasuries)
+{
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client) return;
+
+	FactionTreasuries = Treasuries;
+	DirtyFactions.Empty();
+}
+
 void UTerritoryEconomySubsystem::SetFactionTreasury(const FGameplayTag& Faction, const FTerritoryTreasury& Treasury)
 {
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client) return;
 	if (!Faction.IsValid()) return;
 	FactionTreasuries.Add(Faction, Treasury);
 }
 
 void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 {
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client) return;
 	if (!Faction.IsValid()) return;
 
-	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return;
 
 	TArray<ATerritoryVolume*> Territories = Registry->GetTerritoriesOwnedByFaction(Faction);

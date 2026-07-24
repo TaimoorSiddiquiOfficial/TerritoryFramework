@@ -9,9 +9,15 @@ class UTerritoryNavigationMarkerComponent;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ATerritoryCity
+//
+/// Hierarchy: City contains Districts. City captured when all districts are owned
+/// by the same faction. Use GetDistricts() / GetDistrictCount() to iterate.
+///
+/// Delegates: OnCityCapturedDelegate, OnCityLostDelegate — bind from Blueprint to
+/// react to city-wide capture/loss events (UI, quests, economy bonuses).
 // ═══════════════════════════════════════════════════════════════════════════════
 
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="Territory City", ToolTip="City-level territory — auto-captures when all districts belong to one faction"))
 class TERRITORYFRAMEWORK_API ATerritoryCity : public ATerritoryVolume
 {
 	GENERATED_BODY()

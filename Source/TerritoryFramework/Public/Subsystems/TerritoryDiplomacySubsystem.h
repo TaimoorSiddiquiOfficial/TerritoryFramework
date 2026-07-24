@@ -17,6 +17,7 @@ class TERRITORYFRAMEWORK_API UTerritoryDiplomacySubsystem : public UWorldSubsyst
 public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void DeclareWar(FGameplayTag FactionA, FGameplayTag FactionB);
@@ -77,11 +78,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	TArray<FDiplomacyEvent> GetDiplomacyHistory() const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SyncToGameState();
 
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	void LoadFromGameState();
+
+	/** Native persistence bridge. Restores rich treaty metadata without recording gameplay events. */
+	void RestorePersistentState(
+		const TArray<FTreatyRecord>& Treaties,
+		const TMap<FGameplayTag, int32>& Reputation,
+		const TArray<FDiplomacyEvent>& History);
 
 	/** Direct Narrative attitude setter — Narrative is sole authority for AI attitudes */
 	void SetNarrativeAttitude(FGameplayTag FactionA, FGameplayTag FactionB, ETeamAttitude::Type Attitude);
@@ -120,6 +127,8 @@ private:
 	void OnFactionAttitudeChanged(FGameplayTag Faction, FGameplayTag OtherFaction, ETeamAttitude::Type NewAttitude);
 
 	void CheckTreatyExpirations();
+	void FinalizeGameStateSync();
+	void SyncNarrativeAttitudeForTreaty(FGameplayTag FactionA, FGameplayTag FactionB);
 
 	FTimerHandle TreatyExpirationTimerHandle;
 
@@ -128,4 +137,7 @@ private:
 
 	UFUNCTION()
 	void OnTreatyExpirationTick();
+
+	UFUNCTION()
+	void OnNarrativeLoadFinished();
 };

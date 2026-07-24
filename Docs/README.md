@@ -1,10 +1,18 @@
 # Territory Framework — Complete Integration Guide
 
-> **Plugin:** TerritoryFramework (v0.2.2)
+> **Plugin:** TerritoryFramework (v0.2.3)
 > **Depends on:** Narrative Pro 2.3.3
 > **Engine:** UE 5.7
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
-> **Tests:** 47 automation test suites (contract + functional + integration + v0.2.1 extended contracts)
+> **Tests:** 53/53 automation test suites passing (contract + functional + integration)
+
+## Current Implementation Limits
+
+- `ATerritoryWorldState` is a replicated save snapshot, not a continuously synchronized authoritative store. Call `ExportPersistentState()` before relying on its economy, diplomacy, reputation, or transaction arrays.
+- Faction wealth is derived from online Narrative character inventories. Offline and NPC-only factions do not have a persistent TerritoryFramework currency balance.
+- Saved contests restore the leading faction/progress for decay, but attacker identities and non-leading faction progress are not persisted.
+- Individual guard health, activity, reserve counts, and active rosters are not persisted. Claimed territories recreate a fresh guard population after load.
+- Narrative attitudes collapse multiple friendly treaty types to the same attitude when treaty metadata is rebuilt from GameState alone; WorldState/SavableData restore the richer saved metadata directly.
 
 ## Table of Contents
 

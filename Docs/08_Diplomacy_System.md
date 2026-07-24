@@ -13,11 +13,11 @@ TerritoryFramework (TREATY METADATA only)
 ├── FactionReputation — per-faction reputation score
 └── DiplomacyHistory — event log
 
-Bridge: SetNarrativeAttitude() pushes treaty-derived attitudes to Narrative
+Bridge: SetNarrativeAttitude() writes both directions in Narrative
         OnFactionAttitudeChanged() reconciles treaties when Narrative changes:
-          - Friendly attitude → creates Alliance only if NO treaty exists (preserves TradeAgreement/NonAggression)
-          - Hostile attitude → overrides any peaceful treaty to War
-          - Neutral attitude → removes treaty record
+          - Compatible Friendly → preserves TradeAgreement/NonAggression metadata
+          - Incompatible Friendly/Hostile → maps to Alliance/War
+          - External Neutral → removes the treaty record, including Ceasefire
         Reentrancy guard (bSuppressSync) prevents recursive mutation from delegate listeners
 ```
 
@@ -28,7 +28,7 @@ Bridge: SetNarrativeAttitude() pushes treaty-derived attitudes to Narrative
 | Alliance | Friendly | No | Strongest bond |
 | TradeAgreement | Friendly | No | Economic cooperation |
 | NonAggression | Friendly | No | Peace pact |
-| Ceasefire | Neutral | Yes | Temporary peace after war |
+| Ceasefire | Neutral | Yes | Peace after war; permanent until explicitly changed or broken |
 | War | Hostile | Yes | Full hostility |
 | None | Neutral | Yes | Default state |
 
@@ -42,6 +42,8 @@ Diplomacy->DeclarePeace(FactionA, FactionB);     // Sets Ceasefire
 Diplomacy->FormAlliance(FactionA, FactionB);     // Sets Friendly
 Diplomacy->BreakAlliance(FactionA, FactionB);    // Resets to Neutral
 Diplomacy->SignTradeAgreement(A, B, Duration);   // Timed trade agreement
+Diplomacy->SignNonAggression(A, B);              // Permanent Friendly treaty
+Diplomacy->BreakCeasefire(A, B);                 // Return ceasefire to None/Neutral
 ```
 
 ### Queries
@@ -68,6 +70,14 @@ Timed treaties (e.g., trade agreements with `DurationGameTime > 0`) are checked 
 1. `ExpiredTreaty` event recorded
 2. `SetDiplomacyState(None)` called
 3. Narrative attitude reset to Neutral
+
+`DeclarePeace` creates a permanent Ceasefire; it is not processed by the expiration timer.
+
+### Persistence
+
+WorldState and SavableData restore treaty state, signed time, expiry, permanence, reputation, and available history directly before syncing Narrative attitudes. Narrative's attitude map alone cannot distinguish Alliance, TradeAgreement, and NonAggression because all three map to Friendly, so use the TerritoryFramework persistence actors when rich treaty identity matters.
+
+The subsystem binds Narrative SaveSubsystem `OnFinishedLoad` and reapplies treaty-derived attitudes after each completed load, avoiding actor deserialization order races.
 
 ## Delegates
 

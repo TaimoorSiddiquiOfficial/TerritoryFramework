@@ -98,7 +98,7 @@ Choose ONE capture method per territory:
 2. Add **TerritoryCaptureEvent** to the quest node:
    - **Target Territory Tag** = `Territory.HavenReach.MarketSquare.Blacksmith`
    - **Capturing Faction** = `Narrative.Factions.Heroes`
-   - **Force Capture** = false (respects rules) or true (bypasses all checks)
+   - **Force Capture** = false (respects gameplay rules) or true (bypasses lock, defenders, diplomacy, and AttemptCapture; still requires server authority and valid territory/faction inputs)
 
 **Flow:** Kill all guards → territory goes red → complete quest objective → capture fires → territory turns green → guards respawn for player faction.
 
