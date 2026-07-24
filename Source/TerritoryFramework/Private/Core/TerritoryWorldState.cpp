@@ -91,7 +91,6 @@ void ATerritoryWorldState::SetFactionTreasury(const FGameplayTag& Faction, const
 	{
 		if (Entry.Faction == Faction)
 		{
-			Entry.Treasury = Treasury.Gold;
 			Entry.IncomePerTick = Treasury.IncomePerTick;
 			Entry.CostsPerTick = Treasury.CostsPerTick;
 			Entry.TerritoryCount = Treasury.TerritoryCount;
@@ -101,7 +100,6 @@ void ATerritoryWorldState::SetFactionTreasury(const FGameplayTag& Faction, const
 
 	FReplicatedFactionEconomy NewEntry;
 	NewEntry.Faction = Faction;
-	NewEntry.Treasury = Treasury.Gold;
 	NewEntry.IncomePerTick = Treasury.IncomePerTick;
 	NewEntry.CostsPerTick = Treasury.CostsPerTick;
 	NewEntry.TerritoryCount = Treasury.TerritoryCount;
@@ -115,7 +113,6 @@ FTerritoryTreasury ATerritoryWorldState::GetFactionTreasury(const FGameplayTag& 
 		if (Entry.Faction == Faction)
 		{
 			FTerritoryTreasury Result;
-			Result.Gold = Entry.Treasury;
 			Result.IncomePerTick = Entry.IncomePerTick;
 			Result.CostsPerTick = Entry.CostsPerTick;
 			Result.TerritoryCount = Entry.TerritoryCount;
@@ -304,7 +301,8 @@ void ATerritoryWorldState::ExportPersistentState()
 				FTerritoryTreasury Treasury = Economy->GetFactionEconomy(Faction);
 				FReplicatedFactionEconomy Entry;
 				Entry.Faction = Faction;
-				Entry.Treasury = Treasury.Gold;
+				// FReplicatedFactionEconomy::Treasury no longer used — faction wealth lives in
+				// NarrativePro UInventoryComponent::Currency on each player's character (saved by NarrativePro).
 				Entry.IncomePerTick = Treasury.IncomePerTick;
 				Entry.CostsPerTick = Treasury.CostsPerTick;
 				Entry.TerritoryCount = Treasury.TerritoryCount;
@@ -381,13 +379,14 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// Sync economy subsystem
+	// Sync economy subsystem — only income/cost/territory params.
+	// Faction gold lives in NarrativePro player inventories (UInventoryComponent::Currency),
+	// not in TerritoryFramework state.
 	if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
 	{
 		for (const FReplicatedFactionEconomy& Entry : ReplicatedTreasuries)
 		{
 			FTerritoryTreasury Treasury;
-			Treasury.Gold = Entry.Treasury;
 			Treasury.IncomePerTick = Entry.IncomePerTick;
 			Treasury.CostsPerTick = Entry.CostsPerTick;
 			Treasury.TerritoryCount = Entry.TerritoryCount;

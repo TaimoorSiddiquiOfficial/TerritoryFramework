@@ -116,9 +116,10 @@ FText UTerritoryDebugWidget::BuildEconomySummary() const
 	for (const FGameplayTag& Faction : Factions)
 	{
 		FTerritoryTreasury Treasury = Economy->GetFactionEconomy(Faction);
-		Result += FString::Printf(TEXT("  %s: Gold=%d Income=%d Costs=%d Territories=%d\n"),
+		int32 Aggregate = Economy->GetTreasury(Faction);
+		Result += FString::Printf(TEXT("  %s: Wealth=%d Income=%d Costs=%d Territories=%d\n"),
 			*Faction.ToString(),
-			Treasury.Gold,
+			Aggregate,
 			Treasury.IncomePerTick,
 			Treasury.CostsPerTick,
 			Treasury.TerritoryCount);

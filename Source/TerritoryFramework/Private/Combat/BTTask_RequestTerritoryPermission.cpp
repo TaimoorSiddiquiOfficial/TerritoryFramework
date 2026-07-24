@@ -86,6 +86,36 @@ void UBTTask_RequestTerritoryPermission::OnTaskFinished(UBehaviorTreeComponent& 
 	// Do NOT auto-release here — the NPC may continue attacking across multiple BT ticks
 }
 
+EBTNodeResult::Type UBTTask_RequestTerritoryPermission::AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
+{
+	Super::AbortTask(OwnerComp, NodeMemory);
+
+	// If the BT subtree aborts between request and release, the slot would leak until NPC death.
+	// Release here to prevent slot exhaustion.
+	AAIController* AIController = OwnerComp.GetAIOwner();
+	if (!AIController) return EBTNodeResult::Aborted;
+
+	ANarrativeNPCController* NPCController = Cast<ANarrativeNPCController>(AIController);
+	if (!NPCController) return EBTNodeResult::Aborted;
+
+	UWorld* World = AIController->GetWorld();
+	if (!World) return EBTNodeResult::Aborted;
+
+	UTerritoryCombatDirector* Director = World->GetSubsystem<UTerritoryCombatDirector>();
+	if (!Director) return EBTNodeResult::Aborted;
+
+	Director->ReleaseAllSlots(NPCController);
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->IsDebugEnabled())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[BT] RequestPermission ABORTED — released all slots for %s"),
+			*AIController->GetName());
+	}
+
+	return EBTNodeResult::Aborted;
+}
+
 FString UBTTask_RequestTerritoryPermission::GetStaticDescription() const
 {
 	return FString::Printf(TEXT("Territory: %s, Result: %s"),

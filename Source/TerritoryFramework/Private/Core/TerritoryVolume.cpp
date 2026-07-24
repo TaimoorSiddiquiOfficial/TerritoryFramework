@@ -588,7 +588,7 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 		OwnershipData.OwningFaction = FGameplayTag();
 		DespawnGuards();
 	}
-	else if (NewState == ETerritoryState::Claimed && OldState == ETerritoryState::Contested)
+	else if (NewState == ETerritoryState::Claimed && (OldState == ETerritoryState::Contested || OldState == ETerritoryState::Locked))
 	{
 		if (HasAuthority() && ResolveGuardDefinition(OwnershipData.OwningFaction) && GuardSpawnCount > 0 && SpawnedGuards.Num() == 0)
 		{

@@ -298,11 +298,26 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 		}
 	}
 
-	// Check if city was lost — the previous owner no longer controls all districts
+	// Check if city was lost — the previous owner no longer controls all districts.
+	// Must use DistrictOldOwner (cached before SetTerritoryState cleared OwningFaction)
+	// because SetTerritoryState(Contested) clears the city's OwningFaction.
 	if (OldOwner.IsValid())
 	{
 		FGameplayTag CityOwner = GetOwningFaction();
+		bool bCityLost = false;
+
 		if (CityOwner == OldOwner && !AllDistrictsOwnedBy(OldOwner))
+		{
+			bCityLost = true;
+		}
+		else if (!CityOwner.IsValid() && OldOwner.IsValid() && !AllDistrictsOwnedBy(OldOwner))
+		{
+			// City transitioned to Contested — OwningFaction was cleared by SetTerritoryState.
+			// OldOwner was the city's faction before the contested transition.
+			bCityLost = true;
+		}
+
+		if (bCityLost)
 		{
 			OnCityLost(OldOwner);
 			OnCityLostDelegate.Broadcast(this, OldOwner);

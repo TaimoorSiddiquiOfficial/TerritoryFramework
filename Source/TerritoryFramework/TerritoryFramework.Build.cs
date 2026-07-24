@@ -15,13 +15,13 @@ public class TerritoryFramework : ModuleRules
 			"GameplayTags",
 			"AIModule",
 			"UMG",
-			"NavigationSystem"
+			"NavigationSystem",
+			"NarrativeArsenal",
+			"NarrativeSaveSystem"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"NarrativeArsenal",
-			"NarrativeSaveSystem",
 			"DeveloperSettings"
 		});
 

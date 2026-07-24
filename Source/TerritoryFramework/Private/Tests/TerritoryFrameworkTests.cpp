@@ -804,33 +804,23 @@ bool FTFFunctional_TreasuryStruct::RunTest(const FString& Parameters)
 {
 	FTerritoryTreasury Treasury;
 
-	// Default state
-	TestEqual(TEXT("Default Gold is 0"), Treasury.Gold, 0);
+	// Default state — Gold no longer exists (faction wealth = player inventory aggregate).
 	TestEqual(TEXT("Default IncomePerTick is 0"), Treasury.IncomePerTick, 0);
 	TestEqual(TEXT("Default CostsPerTick is 0"), Treasury.CostsPerTick, 0);
 	TestEqual(TEXT("Default TerritoryCount is 0"), Treasury.TerritoryCount, 0);
 
-	// Simulate economy operations
-	Treasury.Gold = 1000;
+	// Simulate territory ownership
 	Treasury.IncomePerTick = 300;
 	Treasury.CostsPerTick = 150;
 	Treasury.TerritoryCount = 3;
 
-	// Simulate one economy tick
+	// Net income per tick (distributed to player inventories by EconomySubsystem)
 	int32 NetIncome = Treasury.IncomePerTick - Treasury.CostsPerTick;
 	TestEqual(TEXT("Net income per tick = 150"), NetIncome, 150);
 
-	Treasury.Gold += NetIncome;
-	TestEqual(TEXT("Treasury after one tick = 1150"), Treasury.Gold, 1150);
-
-	// Simulate deduction
-	int32 Cost = 500;
-	TestTrue(TEXT("Can afford 500"), Treasury.Gold >= Cost);
-	Treasury.Gold -= Cost;
-	TestEqual(TEXT("Treasury after deduction = 650"), Treasury.Gold, 650);
-
-	// Simulate overdraft check
-	TestFalse(TEXT("Cannot afford 1000"), Treasury.Gold >= 1000);
+	// CanAfford is based on aggregate player inventory currency, not Treasury struct
+	// EconomySubsystem::CanAfford checks GetTreasury() which reads live player inventories
+	TestTrue(TEXT("Struct holds income/cost parameters"), Treasury.IncomePerTick > 0);
 
 	return true;
 }
@@ -1911,21 +1901,20 @@ bool FTFFunctional_EconomyEdgeCases::RunTest(const FString& Parameters)
 {
 	FTerritoryTreasury Treasury;
 
-	// ─── Zero-gold edge cases ───
-	Treasury.Gold = 0;
-	TestFalse(TEXT("Cannot afford anything with 0 gold"), Treasury.Gold >= 1);
-	TestFalse(TEXT("Cannot afford 0 cost with 0 gold (depends on >= semantics)"), Treasury.Gold >= 0 && 0 > 0);
+	// ─── Income/cost edge cases ───
+	Treasury.IncomePerTick = 0;
+	Treasury.CostsPerTick = 0;
+	TestEqual(TEXT("Net income is 0 when no territories"), Treasury.IncomePerTick - Treasury.CostsPerTick, 0);
 
-	// ─── Negative-gold protection ───
-	Treasury.Gold = 100;
-	Treasury.Gold -= 200;
-	// Economy tick clamps: if (Treasury.Gold < 0) Treasury.Gold = 0;
-	if (Treasury.Gold < 0) Treasury.Gold = 0;
-	TestEqual(TEXT("Gold clamped to 0 after overdraft"), Treasury.Gold, 0);
+	// ─── Costs exceed income (net negative) ───
+	Treasury.IncomePerTick = 50;
+	Treasury.CostsPerTick = 200;
+	int32 NetDeficit = Treasury.IncomePerTick - Treasury.CostsPerTick;
+	TestEqual(TEXT("Net deficit when upkeep exceeds income"), NetDeficit, -150);
 
 	// ─── Large amounts ───
-	Treasury.Gold = 2147483647; // INT32_MAX
-	TestTrue(TEXT("Max int32 gold is valid"), Treasury.Gold == INT32_MAX);
+	Treasury.IncomePerTick = INT32_MAX;
+	TestTrue(TEXT("Max int32 income is valid"), Treasury.IncomePerTick == INT32_MAX);
 
 	// ─── Transaction struct ───
 	FTerritoryTransaction Tx;

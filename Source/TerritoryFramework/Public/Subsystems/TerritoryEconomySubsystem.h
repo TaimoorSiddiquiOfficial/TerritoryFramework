@@ -13,8 +13,9 @@ struct FTerritoryTreasury
 {
 	GENERATED_BODY()
 
-	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
-	int32 Gold = 0;
+	// No separate Gold field — faction wealth is the aggregate of faction
+	// members' UInventoryComponent::Currency. GetTreasury() reads live from
+	// player inventories; there is nothing to save/serialize here.
 
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 IncomePerTick = 0;
@@ -107,4 +108,10 @@ private:
 
 	UFUNCTION()
 	void OnTerritoryUnregistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	/** Get all online faction member characters with valid inventory components. */
+	TArray<class ANarrativeCharacter*> GetFactionMembers(const FGameplayTag& Faction) const;
+
+	/** Sum of all online faction members' GetCurrency(). */
+	int32 GetFactionAggregateCurrency(const FGameplayTag& Faction) const;
 };
