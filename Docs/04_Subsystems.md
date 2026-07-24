@@ -176,10 +176,11 @@ Manages faction treasuries, income calculation, and transaction ledger.
 
 ### Treasury Structure
 
+Faction wealth is the **aggregate of all online faction members' `UInventoryComponent::Currency`** (NarrativePro). There is no separate `Gold` field — `GetTreasury()` reads live from player inventories each call. The tracked parameters are:
+
 ```cpp
 struct FTerritoryTreasury
 {
-    int32 Gold;
     int32 IncomePerTick;
     int32 CostsPerTick;
     int32 TerritoryCount;

@@ -852,20 +852,20 @@ BlueprintNativeEvent — implement to receive territory events.
 
 | Field | Type | Notes |
 |---|---|---|
-| Faction | FGameplayTag | Faction tag |
-| Gold | int32 | Current treasury |
-| Income | int32 | Per-tick income |
-| Costs | int32 | Per-tick costs |
+| Treasury | int32 | Current aggregate faction wealth (sum of online members' Currency) |
+| TotalIncome | int32 | Per-tick income |
+| TotalCosts | int32 | Per-tick costs |
 | TerritoryCount | int32 | Owned territories |
 
 ### FTerritoryTreasury
 
 | Field | Type | Notes |
 |---|---|---|
-| Gold | int32 | Current balance |
 | IncomePerTick | int32 | Calculated income |
 | CostsPerTick | int32 | Calculated costs |
 | TerritoryCount | int32 | Owned territories |
+
+> **Note**: No `Gold` field — faction wealth is the aggregate of all online faction members' `UInventoryComponent::Currency` (NarrativePro). `GetTreasury()` reads live from player inventories.
 
 ### FTerritoryPatrolNode
 
@@ -911,9 +911,10 @@ BlueprintNativeEvent — implement to receive territory events.
 | Field | Type | Notes |
 |---|---|---|
 | Faction | FGameplayTag | Faction |
-| Gold | int32 | Treasury |
-| Income | int32 | Income |
-| Costs | int32 | Costs |
+| Treasury | int32 | Aggregate faction wealth (read from player inventories) |
+| IncomePerTick | int32 | Income |
+| CostsPerTick | int32 | Costs |
+| TerritoryCount | int32 | Owned territories |
 
 ### FReplicatedTransaction
 

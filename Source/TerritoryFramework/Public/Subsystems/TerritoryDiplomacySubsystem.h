@@ -32,7 +32,7 @@ public:
 	void FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB);
 
 	/** Sign a non-aggression pact (Friendly attitude, no shared territory control) */
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SignNonAggression(FGameplayTag FactionA, FGameplayTag FactionB);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")

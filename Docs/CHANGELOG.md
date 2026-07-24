@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.2.2 — 2026-07-24 (Session 4: Security & Integration Audit)
+
+Session 4 audit findings resolved. 4 HIGH-severity issues fixed in currency bridge and combat systems.
+
+### Economy Subsystem (HIGH)
+- **Ghost transactions prevented**: Transaction recording now gated on `Members.Num() > 0` — no more phantom ledger entries when faction has no online players
+- **TryDebitTreasury atomicity**: Implemented two-phase commit — first validate all members can afford their share, then apply all debits. No partial debits recorded as full transactions
+- **Delegate lifecycle fixed**: Added `UnbindControllerDeath()` to properly unbind `OnDied` delegate when releasing assault slots
+
+### Combat Director (HIGH)
+- **Territory-specific abort**: `BTTask_RequestTerritoryPermission::AbortTask` now releases only the specific territory slot from BB, not all slots across all territories
+- **Delegate unbinding**: `ReleaseAssaultSlot`, `ReleaseAllSlots`, and `OnAssaultControllerDied` all call `UnbindControllerDeath()` to prevent delegate accumulation
+
+### Documentation (CRITICAL/HIGH)
+- **04_Subsystems.md**: Removed deprecated `Gold` field from `FTerritoryTreasury` documentation (field removed in v0.2.1)
+- **14_API_Reference.md**: Fixed `FTerritoryEconomySnapshot` (correct field: `Treasury`), `FTerritoryTreasury` (removed `Gold`), `FReplicatedFactionEconomy` (removed `Gold`/`Income`), added `GetAllReputation` method
+- **06_Narrative_Integration.md**: Updated WorldState description to clarify currency bridge architecture
+
+### Testing
+- Added 6 new contract tests for v0.2.1 APIs (47 total)
+
+---
+
 ## v0.2.1 — 2026-07-24 (Sessions 2 + 3)
 
 Deep re-audit sessions 2 and 3. All P0, P1, P2 findings resolved plus NarrativePro currency bridge and 47 automation tests.

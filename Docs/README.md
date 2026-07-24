@@ -1,6 +1,6 @@
 # Territory Framework — Complete Integration Guide
 
-> **Plugin:** TerritoryFramework (v0.2.1)
+> **Plugin:** TerritoryFramework (v0.2.2)
 > **Depends on:** Narrative Pro 2.3.3
 > **Engine:** UE 5.7
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
