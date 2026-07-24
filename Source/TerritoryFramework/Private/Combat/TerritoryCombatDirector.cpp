@@ -70,12 +70,16 @@ void UTerritoryCombatDirector::ReleaseAssaultSlot(ATerritoryVolume* Territory, A
 			return Ptr.Get() == Controller;
 		});
 
-	BoundControllers.Remove(Controller);
+	// Unbind delegate before removing from BoundControllers
+	UnbindControllerDeath(Controller);
 }
 
 void UTerritoryCombatDirector::ReleaseAllSlots(ANarrativeNPCController* Controller)
 {
 	if (!Controller) return;
+
+	// Unbind delegate before processing all territories
+	UnbindControllerDeath(Controller);
 
 	for (auto& Pair : SlotMap)
 	{
@@ -85,8 +89,6 @@ void UTerritoryCombatDirector::ReleaseAllSlots(ANarrativeNPCController* Controll
 				return Ptr.Get() == Controller;
 			});
 	}
-
-	BoundControllers.Remove(Controller);
 }
 
 bool UTerritoryCombatDirector::HasAssaultSlot(const ATerritoryVolume* Territory, const ANarrativeNPCController* Controller) const
@@ -158,6 +160,21 @@ void UTerritoryCombatDirector::BindControllerDeath(ANarrativeNPCController* Cont
 		{
 			ASC->OnDied.AddUniqueDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
 			BoundControllers.Add(Controller);
+		}
+	}
+}
+
+void UTerritoryCombatDirector::UnbindControllerDeath(ANarrativeNPCController* Controller)
+{
+	if (!Controller || !BoundControllers.Contains(Controller)) return;
+
+	if (IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Controller))
+	{
+		if (UNarrativeAbilitySystemComponent* ASC =
+			Cast<UNarrativeAbilitySystemComponent>(ASCInterface->GetAbilitySystemComponent()))
+		{
+			ASC->OnDied.RemoveDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
+			BoundControllers.Remove(Controller);
 		}
 	}
 }

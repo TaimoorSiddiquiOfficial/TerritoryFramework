@@ -189,41 +189,45 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 			}
 		}
 
-		// Record transactions for audit trail (uses aggregate faction wealth)
-		int32 Aggregate = GetFactionAggregateCurrency(Faction);
-
-		if (Treasury.IncomePerTick > 0)
+		// Record transactions for audit trail (only if actual distribution occurred)
+		// Gate on Members.Num() > 0 to prevent ghost transactions
+		if (Members.Num() > 0)
 		{
-			FTerritoryTransaction IncomeTx;
-			IncomeTx.TransactionID = FGuid::NewGuid();
-			IncomeTx.Faction = Faction;
-			IncomeTx.Type = ETerritoryTransactionType::Income;
-			IncomeTx.Amount = Treasury.IncomePerTick;
-			IncomeTx.BalanceAfter = Aggregate;
-			IncomeTx.Reason = FString::Printf(TEXT("Periodic income (%d members)"), Members.Num());
-			if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
-			{
-				IncomeTx.GameTime = GS->GetAccumulatedTime();
-			}
-			TransactionLedger.Add(IncomeTx);
-			OnTransactionRecorded.Broadcast(IncomeTx);
-		}
+			int32 Aggregate = GetFactionAggregateCurrency(Faction);
 
-		if (Treasury.CostsPerTick > 0)
-		{
-			FTerritoryTransaction UpkeepTx;
-			UpkeepTx.TransactionID = FGuid::NewGuid();
-			UpkeepTx.Faction = Faction;
-			UpkeepTx.Type = ETerritoryTransactionType::GuardUpkeep;
-			UpkeepTx.Amount = -Treasury.CostsPerTick;
-			UpkeepTx.BalanceAfter = Aggregate;
-			UpkeepTx.Reason = TEXT("Guard upkeep (deducted from faction members)");
-			if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+			if (Treasury.IncomePerTick > 0)
 			{
-				UpkeepTx.GameTime = GS->GetAccumulatedTime();
+				FTerritoryTransaction IncomeTx;
+				IncomeTx.TransactionID = FGuid::NewGuid();
+				IncomeTx.Faction = Faction;
+				IncomeTx.Type = ETerritoryTransactionType::Income;
+				IncomeTx.Amount = Treasury.IncomePerTick;
+				IncomeTx.BalanceAfter = Aggregate;
+				IncomeTx.Reason = FString::Printf(TEXT("Periodic income (%d members)"), Members.Num());
+				if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+				{
+					IncomeTx.GameTime = GS->GetAccumulatedTime();
+				}
+				TransactionLedger.Add(IncomeTx);
+				OnTransactionRecorded.Broadcast(IncomeTx);
 			}
-			TransactionLedger.Add(UpkeepTx);
-			OnTransactionRecorded.Broadcast(UpkeepTx);
+
+			if (Treasury.CostsPerTick > 0)
+			{
+				FTerritoryTransaction UpkeepTx;
+				UpkeepTx.TransactionID = FGuid::NewGuid();
+				UpkeepTx.Faction = Faction;
+				UpkeepTx.Type = ETerritoryTransactionType::GuardUpkeep;
+				UpkeepTx.Amount = -Treasury.CostsPerTick;
+				UpkeepTx.BalanceAfter = Aggregate;
+				UpkeepTx.Reason = TEXT("Guard upkeep (deducted from faction members)");
+				if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+				{
+					UpkeepTx.GameTime = GS->GetAccumulatedTime();
+				}
+				TransactionLedger.Add(UpkeepTx);
+				OnTransactionRecorded.Broadcast(UpkeepTx);
+			}
 		}
 
 		if (bDebugTicks)
@@ -368,14 +372,19 @@ bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, i
 	int32 Aggregate = GetFactionAggregateCurrency(Faction);
 	if (Aggregate < PositiveAmount) return false;
 
-	// Debit proportionally from each member's inventory
+	// Get faction members
 	TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
 	if (Members.Num() == 0) return false;
+
+	// Track actual debits per member for rollback if needed
+	TArray<int32> ActualDebits;
+	ActualDebits.Init(0, Members.Num());
 
 	int32 DebitPerMember = PositiveAmount / Members.Num();
 	int32 Remainder = PositiveAmount - (DebitPerMember * Members.Num());
 	int32 Debited = 0;
 
+	// First pass: attempt proportional debits
 	for (int32 i = 0; i < Members.Num(); ++i)
 	{
 		ANarrativeCharacter* Member = Members[i];
@@ -389,8 +398,27 @@ bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, i
 		int32 ActualDebit = FMath::Min(MemberDebit, CurrentCurrency);
 		if (ActualDebit > 0)
 		{
-			Inv->AddCurrency(-ActualDebit);
+			ActualDebits[i] = ActualDebit;
 			Debited += ActualDebit;
+		}
+	}
+
+	// Only succeed if we debited the full requested amount
+	// If individual members couldn't afford their proportional share, fail the entire transaction
+	if (Debited < PositiveAmount)
+	{
+		return false;
+	}
+
+	// Second pass: actually apply the debits
+	for (int32 i = 0; i < Members.Num(); ++i)
+	{
+		if (ActualDebits[i] > 0)
+		{
+			if (UNarrativeInventoryComponent* Inv = Members[i]->GetInventoryComponent())
+			{
+				Inv->AddCurrency(-ActualDebits[i]);
+			}
 		}
 	}
 

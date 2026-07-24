@@ -98,7 +98,7 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::AbortTask(UBehaviorTreeC
 	Super::AbortTask(OwnerComp, NodeMemory);
 
 	// If the BT subtree aborts between request and release, the slot would leak until NPC death.
-	// Release here to prevent slot exhaustion.
+	// Release the specific territory slot to prevent slot exhaustion.
 	AAIController* AIController = OwnerComp.GetAIOwner();
 	if (!AIController) return EBTNodeResult::Aborted;
 
@@ -111,12 +111,32 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::AbortTask(UBehaviorTreeC
 	UTerritoryCombatDirector* Director = World->GetSubsystem<UTerritoryCombatDirector>();
 	if (!Director) return EBTNodeResult::Aborted;
 
-	Director->ReleaseAllSlots(NPCController);
-
-	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	if (Settings && Settings->IsDebugEnabled())
+	// Get the territory from the blackboard (stored in ExecuteTask at line 63-66)
+	UBlackboardComponent* BB = OwnerComp.GetBlackboardComponent();
+	ATerritoryVolume* Territory = nullptr;
+	if (BB && TerritoryKey.SelectedKeyName != NAME_None)
 	{
-		UE_LOG(LogTerritory, Log, TEXT("[BT] RequestPermission ABORTED — released all slots for %s"),
+		Territory = Cast<ATerritoryVolume>(BB->GetValueAsObject(TerritoryKey.SelectedKeyName));
+	}
+
+	// Release the specific territory slot, not all slots
+	if (Territory)
+	{
+		Director->ReleaseSlot(Territory, NPCController);
+
+		const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+		if (Settings && Settings->IsDebugEnabled())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[BT] RequestPermission ABORTED — released slot for %s (%s)"),
+				*Territory->GetTerritoryTag().ToString(),
+				*AIController->GetName());
+		}
+	}
+	else
+	{
+		// Fallback: if territory not in BB, release all slots (shouldn't happen in normal flow)
+		Director->ReleaseAllSlots(NPCController);
+		UE_LOG(LogTerritory, Warning, TEXT("[BT] RequestPermission ABORTED — territory not in BB, released all slots for %s"),
 			*AIController->GetName());
 	}
 

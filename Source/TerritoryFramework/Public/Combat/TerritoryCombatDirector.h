@@ -72,6 +72,9 @@ private:
 	/** Bind to controller's ASC OnDied so slots are released if NPC dies mid-assault. */
 	void BindControllerDeath(ANarrativeNPCController* Controller);
 
+	/** Unbind from controller's ASC OnDied to prevent delegate leaks. */
+	void UnbindControllerDeath(ANarrativeNPCController* Controller);
+
 	UFUNCTION()
 	void OnAssaultControllerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
 
