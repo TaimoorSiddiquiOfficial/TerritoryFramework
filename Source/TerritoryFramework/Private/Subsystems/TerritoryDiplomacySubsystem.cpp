@@ -70,6 +70,15 @@ void UTerritoryDiplomacySubsystem::DeclarePeace(FGameplayTag FactionA, FGameplay
 	RecordEvent(EDiplomacyEventType::DeclaredPeace, FactionA, FactionB);
 }
 
+void UTerritoryDiplomacySubsystem::BreakCeasefire(FGameplayTag FactionA, FGameplayTag FactionB)
+{
+	if (!GetWorld()->GetAuthGameMode()) return;
+	if (GetDiplomacyState(FactionA, FactionB) != EDiplomacyState::Ceasefire) return;
+
+	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::None);
+	RecordEvent(EDiplomacyEventType::BrokeCeasefire, FactionA, FactionB);
+}
+
 void UTerritoryDiplomacySubsystem::FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
 {
 	if (!GetWorld()->GetAuthGameMode()) return;

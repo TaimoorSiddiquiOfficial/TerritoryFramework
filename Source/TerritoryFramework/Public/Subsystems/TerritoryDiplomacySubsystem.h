@@ -24,6 +24,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void DeclarePeace(FGameplayTag FactionA, FGameplayTag FactionB);
 
+	/** Break an active ceasefire, returning relations to None */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
+	void BreakCeasefire(FGameplayTag FactionA, FGameplayTag FactionB);
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB);
 

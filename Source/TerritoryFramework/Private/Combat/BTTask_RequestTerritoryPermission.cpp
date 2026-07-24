@@ -61,6 +61,13 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::ExecuteTask(UBehaviorTre
 			BB->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, true);
 			return EBTNodeResult::Succeeded;
 		}
+
+		// Write resolved territory back to BB so the paired release task doesn't need
+		// to re-resolve from location (the NPC may have moved since request).
+		if (TerritoryKey.SelectedKeyName != NAME_None)
+		{
+			BB->SetValueAsObject(TerritoryKey.SelectedKeyName, Territory);
+		}
 	}
 
 	bool bGranted = Director->RequestAssaultSlot(Territory, NPCController);

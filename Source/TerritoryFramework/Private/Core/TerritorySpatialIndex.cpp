@@ -10,6 +10,7 @@ void FTerritorySpatialIndex::Initialize(float InCellSize)
 void FTerritorySpatialIndex::Clear()
 {
 	Cells.Empty();
+	TerritoryToCells.Empty();
 }
 
 FIntVector FTerritorySpatialIndex::WorldToCell(const FVector& Location) const
@@ -34,6 +35,8 @@ void FTerritorySpatialIndex::Insert(ATerritoryVolume* Territory)
 	FIntVector MinCell, MaxCell;
 	GetCellRange(Bounds, MinCell, MaxCell);
 
+	TArray<FIntVector>& OccupiedCells = TerritoryToCells.FindOrAdd(Territory);
+
 	for (int32 X = MinCell.X; X <= MaxCell.X; ++X)
 	{
 		for (int32 Y = MinCell.Y; Y <= MaxCell.Y; ++Y)
@@ -43,6 +46,7 @@ void FTerritorySpatialIndex::Insert(ATerritoryVolume* Territory)
 				FIntVector CellKey(X, Y, Z);
 				TArray<TWeakObjectPtr<ATerritoryVolume>>& Cell = Cells.FindOrAdd(CellKey);
 				Cell.AddUnique(Territory);
+				OccupiedCells.AddUnique(CellKey);
 			}
 		}
 	}
@@ -52,26 +56,25 @@ void FTerritorySpatialIndex::Remove(ATerritoryVolume* Territory)
 {
 	if (!Territory) return;
 
-	for (auto& Pair : Cells)
+	// Use reverse map to find only cells this territory occupies (O(k) vs O(all cells))
+	const TArray<FIntVector>* OccupiedCells = TerritoryToCells.Find(Territory);
+	if (OccupiedCells)
 	{
-		Pair.Value.RemoveAll([Territory](const TWeakObjectPtr<ATerritoryVolume>& Ptr)
+		for (const FIntVector& CellKey : *OccupiedCells)
 		{
-			return !Ptr.IsValid() || Ptr.Get() == Territory;
-		});
-	}
-
-	// Clean up empty cells
-	TArray<FIntVector> EmptyCells;
-	for (const auto& Pair : Cells)
-	{
-		if (Pair.Value.Num() == 0)
-		{
-			EmptyCells.Add(Pair.Key);
+			if (TArray<TWeakObjectPtr<ATerritoryVolume>>* Cell = Cells.Find(CellKey))
+			{
+				Cell->RemoveAll([Territory](const TWeakObjectPtr<ATerritoryVolume>& Ptr)
+				{
+					return !Ptr.IsValid() || Ptr.Get() == Territory;
+				});
+				if (Cell->Num() == 0)
+				{
+					Cells.Remove(CellKey);
+				}
+			}
 		}
-	}
-	for (const FIntVector& Key : EmptyCells)
-	{
-		Cells.Remove(Key);
+		TerritoryToCells.Remove(Territory);
 	}
 }
 

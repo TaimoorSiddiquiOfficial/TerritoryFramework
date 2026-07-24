@@ -178,6 +178,7 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
 	int32 GetSpawnedGuardCount() const;
+	int32 GetConfiguredGuardCount() const { return GuardSpawnCount; }
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Guards")
 	bool HasGuardsAlive() const;

@@ -321,6 +321,11 @@ void UTerritoryDataValidator::CheckSingletonActors(ULevel* Level, TArray<FString
 	{
 		OutWarnings.Add(TEXT("No TerritoryWorldState or TerritorySavableData actor found — economy/diplomacy state will not persist"));
 	}
+
+	if (WorldStateCount > 0 && SavableDataCount > 0)
+	{
+		OutErrors.Add(TEXT("Both ATerritoryWorldState and ATerritorySavableData actors found — ATerritorySavableData is deprecated and will cause save/load conflicts. Remove ATerritorySavableData and use only ATerritoryWorldState."));
+	}
 }
 
 void UTerritoryDataValidator::CheckEconomyConfig(ATerritoryVolume* Territory, TArray<FString>& OutWarnings)

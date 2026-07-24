@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 2,
-	"VersionName": "0.2.0",
+	"VersionName": "0.2.1",
 	"FriendlyName": "Territory Framework",
 	"Description": "Territory control, economy, and diplomacy system built on Narrative Pro.",
 	"Category": "Gameplay",

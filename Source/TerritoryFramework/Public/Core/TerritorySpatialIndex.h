@@ -44,6 +44,9 @@ private:
 	// Cell key → list of territory weak pointers
 	TMap<FIntVector, TArray<TWeakObjectPtr<ATerritoryVolume>>> Cells;
 
+	// Reverse map: territory → set of cell keys it occupies (for O(k) Remove)
+	TMap<TWeakObjectPtr<ATerritoryVolume>, TArray<FIntVector>> TerritoryToCells;
+
 	FIntVector WorldToCell(const FVector& Location) const;
 	void GetCellRange(const FBox& Bounds, FIntVector& OutMin, FIntVector& OutMax) const;
 };

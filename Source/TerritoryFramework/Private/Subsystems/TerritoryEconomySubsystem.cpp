@@ -470,11 +470,10 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 			Treasury.IncomePerTick += Property->GetEffectiveIncome();
 		}
 
-		// Only count guard costs for territories that actually spawn guards.
-		// Cities and Districts are containers — counting their GuardCost would
-		// double-count costs for hierarchical territories (city + districts + properties).
-		// Use GetSpawnedGuardCount() as proxy — if guards are alive, this territory spawns guards.
-		if (Territory->GetSpawnedGuardCount() > 0)
+		// Only count guard costs for territories that are configured to spawn guards.
+		// Use GuardSpawnCount (configured max) rather than GetSpawnedGuardCount() (currently alive)
+		// to avoid undercounting upkeep for one tick after a guard wipe.
+		if (Territory->GetConfiguredGuardCount() > 0)
 		{
 			Treasury.CostsPerTick += Territory->GetGuardCost();
 		}
