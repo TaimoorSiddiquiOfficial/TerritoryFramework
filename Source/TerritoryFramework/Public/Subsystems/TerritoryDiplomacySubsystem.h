@@ -27,6 +27,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB);
 
+	/** Sign a non-aggression pact (Friendly attitude, no shared territory control) */
+	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	void SignNonAggression(FGameplayTag FactionA, FGameplayTag FactionB);
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void BreakAlliance(FGameplayTag FactionA, FGameplayTag FactionB);
 
@@ -56,6 +60,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	int32 GetReputation(FGameplayTag Faction) const;
+
+	/** Returns all faction reputation entries (used by WorldState save/load). */
+	TMap<FGameplayTag, int32> GetAllReputation() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	TArray<FTreatyRecord> GetAllTreaties() const;

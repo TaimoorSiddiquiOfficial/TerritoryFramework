@@ -147,7 +147,7 @@ bool UTerritoryDataValidator::ValidateTerritory(ATerritoryVolume* Territory, TAr
 
 	if (FactionTag.IsValid())
 	{
-		if (!FactionTag.ToString().StartsWith(TEXT("Narrative.Factions")))
+		if (!FactionTag.ToString().StartsWith(TEXT("Narrative.Factions.")))
 		{
 			OutWarnings.Add(FString::Printf(TEXT("%s: InitialOwningFaction '%s' doesn't start with Narrative.Factions"),
 				*Label, *FactionTag.ToString()));

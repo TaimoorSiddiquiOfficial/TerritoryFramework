@@ -24,7 +24,8 @@ enum class EDiplomacyEventType : uint8
 	BrokeAlliance,
 	SignedTradeAgreement,
 	ExpiredTreaty,
-	BrokeCeasefire
+	BrokeCeasefire,
+	SignedNonAggression
 };
 
 USTRUCT(BlueprintType)

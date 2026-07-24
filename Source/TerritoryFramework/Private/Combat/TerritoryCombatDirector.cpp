@@ -69,6 +69,8 @@ void UTerritoryCombatDirector::ReleaseAssaultSlot(ATerritoryVolume* Territory, A
 		{
 			return Ptr.Get() == Controller;
 		});
+
+	BoundControllers.Remove(Controller);
 }
 
 void UTerritoryCombatDirector::ReleaseAllSlots(ANarrativeNPCController* Controller)
@@ -83,6 +85,8 @@ void UTerritoryCombatDirector::ReleaseAllSlots(ANarrativeNPCController* Controll
 				return Ptr.Get() == Controller;
 			});
 	}
+
+	BoundControllers.Remove(Controller);
 }
 
 bool UTerritoryCombatDirector::HasAssaultSlot(const ATerritoryVolume* Territory, const ANarrativeNPCController* Controller) const

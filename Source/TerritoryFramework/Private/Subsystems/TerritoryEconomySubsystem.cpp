@@ -32,6 +32,22 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 		{
 			Registry->OnTerritoryRegistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryRegistered);
 			Registry->OnTerritoryUnregistered.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryUnregistered);
+
+			// Also bind delegates for territories already registered before this subsystem initialized.
+			// Without this, if EconomySubsystem initializes after RegistrySubsystem, we'd miss
+			// territories that registered between RegistrySubsystem::Initialize and now.
+			for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
+			{
+				if (Territory)
+				{
+					Territory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+					FGameplayTag Owner = Territory->GetOwningFaction();
+					if (Owner.IsValid())
+					{
+						RecalculateIncome(Owner);
+					}
+				}
+			}
 		}
 	}
 

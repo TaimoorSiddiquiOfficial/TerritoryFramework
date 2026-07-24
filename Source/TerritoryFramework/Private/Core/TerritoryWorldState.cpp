@@ -347,9 +347,14 @@ void ATerritoryWorldState::ExportPersistentState()
 			}
 
 			ReplicatedReputation.Empty();
-			// Reputation is stored in DiplomacySubsystem but no public getter for all entries.
-			// SyncToGameState pushes attitudes; reputation is read via GetReputation per-faction.
-			// For now, save what we have in ReplicatedReputation from the last import.
+			TMap<FGameplayTag, int32> AllRep = Diplomacy->GetAllReputation();
+			for (const auto& Pair : AllRep)
+			{
+				FReplicatedFactionReputation RepRep;
+				RepRep.Faction = Pair.Key;
+				RepRep.Reputation = Pair.Value;
+				ReplicatedReputation.Add(RepRep);
+			}
 		}
 	}
 

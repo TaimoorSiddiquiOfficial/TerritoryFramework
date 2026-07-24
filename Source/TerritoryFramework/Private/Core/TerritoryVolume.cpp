@@ -741,6 +741,9 @@ void ATerritoryVolume::OnTerritoryInitialized_Implementation()
 
 void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC)
 {
+	// Early return if nothing useful — actor already GC'd or delegate fired with null.
+	if (!KilledActor && !KilledASC) return;
+
 	UnregisterDefender(KilledActor);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();

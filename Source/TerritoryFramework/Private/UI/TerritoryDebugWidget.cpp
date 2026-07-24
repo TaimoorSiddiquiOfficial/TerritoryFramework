@@ -43,6 +43,16 @@ void UTerritoryDebugWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 	OnUpdateDebugText(DebugText);
 }
 
+void UTerritoryDebugWidget::NativeDestruct()
+{
+	CachedRegistry = nullptr;
+	CachedControl = nullptr;
+	CachedEconomy = nullptr;
+	CachedDiplomacy = nullptr;
+	bSubsystemsCached = false;
+	Super::NativeDestruct();
+}
+
 void UTerritoryDebugWidget::CacheSubsystems() const
 {
 	if (bSubsystemsCached) return;

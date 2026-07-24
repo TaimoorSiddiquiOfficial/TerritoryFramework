@@ -29,6 +29,7 @@ public:
 
 protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual void NativeDestruct() override;
 
 	/** Called when territory summary text updates — override in BP for custom layout */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|Debug")

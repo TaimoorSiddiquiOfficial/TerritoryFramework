@@ -77,6 +77,13 @@ void UTerritoryDiplomacySubsystem::FormAlliance(FGameplayTag FactionA, FGameplay
 	RecordEvent(EDiplomacyEventType::FormedAlliance, FactionA, FactionB);
 }
 
+void UTerritoryDiplomacySubsystem::SignNonAggression(FGameplayTag FactionA, FGameplayTag FactionB)
+{
+	if (!GetWorld()->GetAuthGameMode()) return;
+	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::NonAggression);
+	RecordEvent(EDiplomacyEventType::SignedNonAggression, FactionA, FactionB);
+}
+
 void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
 {
 	if (!GetWorld()->GetAuthGameMode()) return;
@@ -222,6 +229,11 @@ int32 UTerritoryDiplomacySubsystem::GetReputation(FGameplayTag Faction) const
 {
 	const int32* Rep = FactionReputation.Find(Faction);
 	return Rep ? *Rep : 0;
+}
+
+TMap<FGameplayTag, int32> UTerritoryDiplomacySubsystem::GetAllReputation() const
+{
+	return FactionReputation;
 }
 
 TArray<FTreatyRecord> UTerritoryDiplomacySubsystem::GetAllTreaties() const
