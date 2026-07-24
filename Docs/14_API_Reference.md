@@ -286,7 +286,7 @@ Actor placed in level to define guard spawn locations and patrol routes.
 
 | Property | Type | Notes |
 |---|---|---|
-| OwnerTerritoryTag | FGameplayTag | Auto-resolved to owning territory at BeginPlay |
+| OwnerTerritoryTag | FGameplayTag | Optional explicit owner; territory `GuardSpawnPoints` references take precedence, then this tag, then proximity |
 | MaxGuards | int32 | Maximum guards that can spawn at this point (default 3) |
 | ReserveSlots | int32 | Guards that only spawn when active guards die (default 1) |
 | PatrolRoute | TArray<FTerritoryPatrolNode> | Ordered waypoints for patrol. Empty = guard stays at spawn point |

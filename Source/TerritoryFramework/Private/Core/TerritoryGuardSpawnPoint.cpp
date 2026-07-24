@@ -24,15 +24,39 @@ ATerritoryGuardSpawnPoint::ATerritoryGuardSpawnPoint()
 	CurrentReserveCount = 0;
 }
 
+void ATerritoryGuardSpawnPoint::BindToTerritory(ATerritoryVolume* Territory)
+{
+	if (!Territory) return;
+
+	const FGameplayTag TerritoryTag = Territory->GetTerritoryTag();
+	if (OwnerTerritoryTag.IsValid() && OwnerTerritoryTag != TerritoryTag)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("GuardSpawnPoint %s owner tag %s overridden by territory reference %s"),
+			*GetName(), *OwnerTerritoryTag.ToString(), *TerritoryTag.ToString());
+	}
+
+	CachedTerritory = Territory;
+	OwnerTerritoryTag = TerritoryTag;
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
+		}
+	}
+}
+
 void ATerritoryGuardSpawnPoint::BeginPlay()
 {
 	Super::BeginPlay();
 	ResolveOwningTerritory();
 	InitializeReserves();
 
-	// If resolution failed, subscribe to territory registration for late binding
-	// (handles World Partition streaming and actor init order races)
-	if (!CachedTerritory.IsValid())
+	// Untagged points keep listening so a more-specific streamed territory can replace
+	// an earlier proximity match (for example, Property replacing City).
+	if (!OwnerTerritoryTag.IsValid() || !CachedTerritory.IsValid())
 	{
 		if (UWorld* World = GetWorld())
 		{
@@ -58,20 +82,32 @@ void ATerritoryGuardSpawnPoint::EndPlay(const EEndPlayReason::Type EndPlayReason
 
 void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bIsNew)
 {
-	if (CachedTerritory.IsValid()) return;
 	if (!Territory) return;
 
-	// Check if this is our territory
-	if (OwnerTerritoryTag.IsValid() && Territory->GetTerritoryTag() == OwnerTerritoryTag)
+	if (OwnerTerritoryTag.IsValid())
 	{
-		CachedTerritory = Territory;
-		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s late-bound to territory %s"),
-			*GetName(), *OwnerTerritoryTag.ToString());
-
-		// Unsubscribe — resolved
-		if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+		if (!CachedTerritory.IsValid() && Territory->GetTerritoryTag() == OwnerTerritoryTag)
 		{
-			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
+			CachedTerritory = Territory;
+			UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s late-bound to territory %s"),
+				*GetName(), *OwnerTerritoryTag.ToString());
+
+			if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+			{
+				Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
+			}
+		}
+		return;
+	}
+
+	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+	{
+		ATerritoryVolume* ResolvedTerritory = Registry->GetTerritoryAtLocation(GetActorLocation());
+		if (ResolvedTerritory && CachedTerritory.Get() != ResolvedTerritory)
+		{
+			CachedTerritory = ResolvedTerritory;
+			UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s proximity-bound to territory %s"),
+				*GetName(), *ResolvedTerritory->GetTerritoryTag().ToString());
 		}
 	}
 }
@@ -92,26 +128,20 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return;
 
-	// First try by tag
+	// Explicit tags must not fall back to a different territory while their target streams in.
 	if (OwnerTerritoryTag.IsValid())
 	{
 		CachedTerritory = Registry->GetTerritoryByTag(OwnerTerritoryTag);
 	}
-
-	// Fallback: find by proximity
-	if (!CachedTerritory.IsValid())
+	else
 	{
 		CachedTerritory = Registry->GetTerritoryAtLocation(GetActorLocation());
-		if (CachedTerritory.IsValid())
-		{
-			OwnerTerritoryTag = CachedTerritory->GetTerritoryTag();
-		}
 	}
 
 	if (CachedTerritory.IsValid())
 	{
 		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s resolved to territory %s"),
-			*GetName(), *OwnerTerritoryTag.ToString());
+			*GetName(), *CachedTerritory->GetTerritoryTag().ToString());
 	}
 	else
 	{

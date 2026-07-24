@@ -226,7 +226,7 @@ BP_TerritoryProperty "Blacksmith"
 ### Properties
 | Property | Type | Default | Purpose |
 |---|---|---|---|
-| OwnerTerritoryTag | GameplayTag | — | Which territory this belongs to |
+| OwnerTerritoryTag | GameplayTag | — | Optional explicit owner; authored territory references take precedence, then tag, then proximity |
 | MaxGuards | int32 | 3 | Active guard slots |
 | ReserveSlots | int32 | 1 | Replacement guards |
 | PatrolRoute | Array<PatrolNode> | — | Ordered waypoints |

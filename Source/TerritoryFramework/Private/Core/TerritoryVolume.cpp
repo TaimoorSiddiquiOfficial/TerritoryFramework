@@ -62,6 +62,13 @@ void ATerritoryVolume::BeginPlay()
 		BoundsShape->SetVisibility(false, true); // Hide in game
 	}
 
+	// Authored references are authoritative, including spawn points intentionally
+	// placed outside this volume's bounds.
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+	{
+		SpawnPoint->BindToTerritory(this);
+	}
+
 	if (HasAuthority())
 	{
 		// GUID must be baked at editor placement time.

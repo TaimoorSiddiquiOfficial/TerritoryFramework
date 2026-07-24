@@ -71,8 +71,8 @@ public:
 	// ─── Configuration ───
 
 	/**
-	 * Which territory this spawn point belongs to. Auto-resolved by proximity at BeginPlay.
-	 * You can set this manually if proximity resolution fails.
+	 * Which territory this spawn point belongs to. A territory's authored GuardSpawnPoints
+	 * reference takes precedence, followed by this tag, then proximity at BeginPlay.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
 		meta=(Categories="Territory", DisplayName="Owner Territory"))
@@ -240,7 +240,7 @@ public:
 	TArray<float> GetPatrolWaitTimes() const;
 
 	/**
-	 * Returns the owning territory volume (resolved at BeginPlay from OwnerTerritoryTag).
+	 * Returns the owning territory volume resolved from an authored reference, tag, or proximity.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Get Owning Territory"))
@@ -286,6 +286,10 @@ protected:
 	FLinearColor ReserveColor = FLinearColor(0.f, 0.5f, 1.f, 1.f);
 
 private:
+	friend class ATerritoryVolume;
+
+	/** Bind from a territory's authored GuardSpawnPoints array, which overrides proximity. */
+	void BindToTerritory(ATerritoryVolume* Territory);
 	void ResolveOwningTerritory();
 	void InitializeReserves();
 };

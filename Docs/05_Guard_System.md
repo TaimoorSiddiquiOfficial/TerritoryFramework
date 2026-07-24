@@ -45,6 +45,8 @@ No custom Territory BT needed — thin adapter into Narrative's infrastructure.
 
 ## Reserve System
 
+- Spawn-point ownership resolves by precedence: the territory's authored `GuardSpawnPoints` reference, `OwnerTerritoryTag`, then proximity
+- Authored references support spawn points intentionally placed outside territory bounds
 - `MaxGuards` per spawn point = active slots
 - `ReserveSlots` = replacement entitlements for when active guards die
 - Initial population uses `HasAvailableSlot()` only — reserves not consumed
