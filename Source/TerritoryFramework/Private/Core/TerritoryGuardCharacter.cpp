@@ -92,3 +92,21 @@ void ATerritoryGuardCharacter::SetActorGUID_Implementation(const FGuid& NewGUID)
 {
 	SpawnInfo.SpawnAssignedSaveGUID = NewGUID;
 }
+
+TArray<FTerritoryPatrolNode> ATerritoryGuardCharacter::GetTerritoryPatrolRoute() const
+{
+	if (OwningTerritorySpawnPoint.IsValid())
+	{
+		return OwningTerritorySpawnPoint->GetPatrolRoute();
+	}
+	return TArray<FTerritoryPatrolNode>();
+}
+
+bool ATerritoryGuardCharacter::HasTerritoryPatrolRoute() const
+{
+	if (!OwningTerritorySpawnPoint.IsValid())
+	{
+		return false;
+	}
+	return OwningTerritorySpawnPoint->HasPatrolRoute();
+}

@@ -2,13 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "TerritoryGuardSpawnPoint.h"
 #include "TerritoryGuardCharacter.generated.h"
 
 class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
 class ATerritoryVolume;
-class ATerritoryGuardSpawnPoint;
 
 /**
  * Territory-specific NPC character that properly implements GetActorGUID
@@ -62,6 +62,21 @@ public:
 	/** Spawn point this guard was spawned from (may be null for random spawns). */
 	UPROPERTY(BlueprintReadOnly, Category = "Territory|AI")
 	TWeakObjectPtr<ATerritoryGuardSpawnPoint> OwningTerritorySpawnPoint;
+
+	/**
+	 * Get the patrol route for this guard's spawn point.
+	 * Returns an empty array if no spawn point is assigned (random fallback spawn).
+	 *
+	 * Preferred Blueprint access path:
+	 *   Guard->GetTerritoryPatrolRoute() → Length check → index node safely
+	 * Safer than chaining through OwningTerritorySpawnPoint directly in BP.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|AI")
+	TArray<FTerritoryPatrolNode> GetTerritoryPatrolRoute() const;
+
+	/** Whether this guard has a valid patrol route attached via its spawn point. */
+	UFUNCTION(BlueprintPure, Category = "Territory|AI")
+	bool HasTerritoryPatrolRoute() const;
 
 protected:
 	virtual void BeginPlay() override;

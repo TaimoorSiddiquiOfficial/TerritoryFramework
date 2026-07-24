@@ -6,6 +6,8 @@
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -2223,6 +2225,35 @@ bool FTFContract_DebugWidgetExtended::RunTest(const FString& Parameters)
 	// ─── Existing debug widget API ───
 	TestTrue(TEXT("Has SetDebugEnabled"),
 		TFTestUtils::HasFunction(Class, TEXT("SetDebugEnabled")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_TerritoryGuardCharacter,
+	"TerritoryFramework.Contract.TerritoryGuardCharacter",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_TerritoryGuardCharacter::RunTest(const FString& Parameters)
+{
+	UClass* Class = ATerritoryGuardCharacter::StaticClass();
+	TestTrue(TEXT("TerritoryGuardCharacter class exists"), Class != nullptr);
+
+	// ─── Territory AI context properties ───
+	TestTrue(TEXT("Has OwningTerritory property"),
+		TFTestUtils::HasProperty(Class, TEXT("OwningTerritory")));
+	TestTrue(TEXT("Has OwningTerritorySpawnPoint property"),
+		TFTestUtils::HasProperty(Class, TEXT("OwningTerritorySpawnPoint")));
+	TestTrue(TEXT("Has TerritoryHomeTransform property"),
+		TFTestUtils::HasProperty(Class, TEXT("TerritoryHomeTransform")));
+
+	// ─── Patrol route helper methods ───
+	TestTrue(TEXT("Has GetTerritoryPatrolRoute (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryPatrolRoute")));
+	TestTrue(TEXT("Has HasTerritoryPatrolRoute (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasTerritoryPatrolRoute")));
+
+	TestTrue(TEXT("Has ConfigureTerritorySpawn"),
+		TFTestUtils::HasFunction(Class, TEXT("ConfigureTerritorySpawn")));
 
 	return true;
 }
