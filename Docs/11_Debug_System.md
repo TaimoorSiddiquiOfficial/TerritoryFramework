@@ -43,13 +43,17 @@ TerritoryFramework has 16 individual debug toggles organized into categories, pl
 
 | Setting | Default | Range | Description |
 |---|---|---|---|
-| EconomyStartingGold | 0 | 0+ | Starting gold for new factions |
 | EconomyTickIntervalSeconds | 300 | 10–3600 | Seconds between economy ticks |
 | CaptureTickInterval | 0.1 | 0.01–1.0 | Seconds between capture ticks |
 | CaptureProgressPerSecond | 0.1 | 0.01–1.0 | Progress rate per second per attacker |
 | CaptureProgressDecayPerSecond | 0.05 | 0.01–0.5 | Decay rate when no attackers present |
 | TreatyExpirationCheckInterval | 10 | 1–60 | Seconds between treaty expiration checks |
 | SpatialCellSize | 2000 | 500–10000 | Spatial index cell size in UU |
+| DefaultPatrolArrivalThreshold | 50 | 5–200 | Distance to consider patrol node reached |
+| DefaultPatrolAcceptanceRadius | 30 | 5–100 | Movement acceptance radius for patrol |
+| DefaultPatrolWaitTime | 3.0 | 0.5–30 | Default wait time at patrol nodes |
+| MaxPatrolRouteNodes | 32 | 2–128 | Maximum patrol route length |
+| MaxConcurrentAttackers | 3 | 1–10 | Default NPC attack slot limit per territory |
 
 ## UTerritoryDebugWidget
 
@@ -67,7 +71,7 @@ A tick-based live overlay widget showing all territory state.
 ### Sections Displayed
 
 - **Territories**: Name, tag, owner, state, guard count, income
-- **Economy**: Faction gold, income, costs, territory count
+- **Economy**: Faction wealth (aggregate from player inventories), income, costs, territory count
 - **Diplomacy**: Active treaties with state type
 - **Capture**: Contested territories with progress %
 

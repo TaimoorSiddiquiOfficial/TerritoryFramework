@@ -51,10 +51,9 @@ Add territory tags to `Config/DefaultGameplayTags.ini`:
 ## Step 6: Configure Guards (Optional)
 
 On the territory volume:
-1. Set **Guard NPC Definition** → your NPC data asset
-2. Set **Guard Behavior Tree** → `BT_Attack_Generic` from NarrativePro
-3. Set **Guard Blackboard Asset** → `BB_Attack` from NarrativePro
-4. Set **Guard Spawn Count** → 3
+1. Set **Guard NPC Definition** → your NPC data asset (or use **Faction Guard Definitions** for per-faction guards)
+2. Set **Guard Spawn Count** → 3
+3. Guards inherit combat AI from the NPCDefinition asset (configured in NarrativePro)
 
 ## Step 7: Test in PIE
 

@@ -4,7 +4,7 @@
 > **Depends on:** Narrative Pro 2.3.3
 > **Engine:** UE 5.7
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
-> **Tests:** 36 automation tests (contract + functional)
+> **Tests:** 41 automation test suites (contract + functional + integration)
 
 ## Table of Contents
 
@@ -14,7 +14,7 @@
 4. [Subsystems](04_Subsystems.md) — Registry, Control, Economy, Diplomacy, Combat
 5. [Guard System](05_Guard_System.md) — Guard spawning, patrol routes, reserves, BT integration
 6. [Narrative Pro Integration](06_Narrative_Integration.md) — Factions, GAS, Tales, Save, Navigation
-7. [Economy System](07_Economy_System.md) — Treasury, income, transactions, upgrades
+7. [Economy System](07_Economy_System.md) — Income, transactions, upgrades, NarrativePro currency bridge
 8. [Diplomacy System](08_Diplomacy_System.md) — Treaties, wars, reputation
 9. [Map & Navigation](09_Map_Navigation.md) — Markers, territory outline drawing
 10. [Save/Load](10_Save_Load.md) — Savable actors, WorldState, SavableData
@@ -22,6 +22,9 @@
 12. [Blueprint Reference](12_Blueprint_Reference.md) — All BlueprintCallable/Pure/Assignable
 13. [Multiplayer Guide](13_Multiplayer.md) — Authority, replication, client behavior
 14. [API Reference](14_API_Reference.md) — Complete C++ function signatures
+15. [AI Integration](15_AI_Integration.md) — CombatDirector, BT tasks, Tales integration
+16. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
+17. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
 
 ## Document Index
 
@@ -33,11 +36,14 @@
 | Subsystems | Programmers | Query and mutate territory state from code |
 | Guard System | AI Designers | Spawn points, patrol routes, reserve guards |
 | Narrative Integration | All | How Territory extends Narrative without modifying it |
-| Economy | Game Designers | Faction treasury, income ticks, property upgrades |
-| Diplomacy | Game Designers | War/peace/alliance treaties with Narrative attitudes |
+| Economy | Game Designers | Faction wealth (NarrativePro Currency), income ticks, property upgrades |
+| Diplomacy | Game Designers | War/peace/alliance/non-aggression treaties with Narrative attitudes |
 | Map & Navigation | UI Designers | Map markers, ownership colors, outline painting |
 | Save/Load | Programmers | Narrative save adapter, stable GUIDs, WorldState |
 | Debug System | All | Enable debug in Project Settings, read output |
 | Blueprint Reference | BP Devs | Every Blueprint-exposed function, property, delegate |
 | Multiplayer | Programmers | Server authority, client replication, known limits |
 | API Reference | C++ Devs | Complete function signatures with return types |
+| AI Integration | AI Designers | CombatDirector, BT tasks, Tales events/conditions |
+| Blueprint Extension Guide | C++/BP Devs | Subclassing patterns, Super-call requirements |
+| Blueprint Setup Tutorial | BP Devs | Step-by-step Blueprint configuration |

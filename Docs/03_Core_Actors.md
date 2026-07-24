@@ -27,7 +27,6 @@ ATerritoryVolume (base — placed in level for any territory)
 | InitialGuardCost | int32 | 50 | Upkeep cost per tick |
 | bStartsLocked | bool | false | If true, territory can't be captured until unlocked |
 | ParentTerritoryTag | GameplayTag | — | Parent territory for hierarchy |
-| bAutoCreateMapMarker | bool | true | Auto-creates TerritoryNavigationMarkerComponent on BeginPlay |
 | GuardNPCDefinition | NPCDefinition* | — | NPC template for guards |
 | FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> | — | Per-faction NPC definition overrides |
 | GuardSpawnCount | int32 | 3 | How many guards to spawn |
@@ -59,16 +58,13 @@ See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-
 Guard lifecycle runs in the **non-virtual** SetTerritoryState/SetOwningFaction, BEFORE the BP virtual fires:
 - **Claimed → Contested**: Clears OwningFaction (territory has no owner while contested), despawns guards
 - **Contested → Claimed**: Respawns guards for new owner
+- **Locked → Claimed**: Respawns guards for owner (territory was locked, now defended again)
 - **Any → Locked**: Despawns all guards
 - **Contested → Unclaimed** (all defenders dead): Cleared by OnAllGuardsDefeated Super call
 
-### Map Marker Auto-Creation
+### Map Marker Component
 
-When `bAutoCreateMapMarker = true`, the volume automatically creates a `UTerritoryNavigationMarkerComponent` on BeginPlay. This component:
-- Creates a `UTerritoryMapMarker` instance
-- Subscribes to ownership/state changes for auto-refresh
-- Registers with the Narrative navigation subsystem
-- Can be retrieved via `GetMapMarkerComponent()`
+The volume has a `MapMarkerComponent` property (UTerritoryNavigationMarkerComponent) that can be retrieved via `GetMapMarkerComponent()`.
 
 ## ATerritoryCity
 
@@ -144,6 +140,7 @@ When a city with capital districts is fully captured:
 | IsCapitalDistrict() | bool | Returns bIsCapital |
 | GetPropertyCountForFaction(Faction) | int32 | Properties owned by faction |
 | AllPropertiesOwnedBy(Faction) | bool | All properties owned by faction |
+| GetMajorityPropertyOwner() | GameplayTag | Faction owning >50% of properties |
 
 ### Events (BlueprintNativeEvent)
 | Event | When |
@@ -258,7 +255,7 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 **Place ONE in the level** for multiplayer-persistent territory state.
 
 ### What It Stores (replicated)
-- Faction treasuries (gold, income, costs, territory count)
+- Faction economy params (income, costs, territory count) — faction wealth lives in NarrativePro player inventories
 - Transaction history (audit trail)
 - Active treaties (with timing, expiry, permanence)
 - Faction reputation

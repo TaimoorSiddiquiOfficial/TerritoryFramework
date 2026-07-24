@@ -47,6 +47,7 @@ Static Blueprint-callable helpers. Use these as the primary entry point from Blu
 | GetTerritoryControl | WorldContextObject | UTerritoryControlSubsystem* | Get control subsystem |
 | GetTerritoryEconomy | WorldContextObject | UTerritoryEconomySubsystem* | Get economy subsystem |
 | GetTerritoryCombatDirector | WorldContextObject | UTerritoryCombatDirector* | Get combat director |
+| GetAllFactions | WorldContextObject | TArray<FGameplayTag> | All factions known to subsystems |
 | GetTerritoryAtLocation | WorldContextObject, Location (FVector) | ATerritoryVolume* | Find territory at point |
 | GetTerritoryByTag | WorldContextObject, Tag (GameplayTag) | ATerritoryVolume* | Find territory by tag |
 | IsSameFaction | A (GameplayTag), B (GameplayTag) | bool | Check if two factions are the same |
@@ -150,16 +151,14 @@ Extends `ATerritoryVolume`. Represents a city that controls districts.
 
 ### Properties
 
-| Property | Type | Notes |
-|---|---|---|
-| bIsCapital | bool | Capital city flag |
-| RequiredDistrictTags | TArray<FGameplayTag> | Districts that belong to this city |
+Cities inherit all `ATerritoryVolume` properties. Parent-child relationships are established via `ParentTerritoryTag` on each `ATerritoryDistrict`.
 
 ### Functions
 
 | Function | Returns | Description |
 |---|---|---|
-| GetOwnedDistricts | TArray<ATerritoryDistrict*> | All districts owned by this city's faction |
+| GetDistricts | TArray<ATerritoryVolume*> | All districts belonging to this city (resolved via Registry) |
+| HasCapitalDistrict | bool | True if any district in this city has `bIsCapital` set |
 | IsFullyCaptured | bool | City owns all its districts |
 | GetCityControlPercentage | float | 0.0–1.0 of districts owned by faction |
 
@@ -177,7 +176,7 @@ Extends `ATerritoryVolume`. A sub-zone within a city.
 
 | Property | Type | Notes |
 |---|---|---|
-| bIsCapital | bool | BlueprintReadWrite — capital district flag |
+| bIsCapital | bool | BlueprintReadWrite — capital district flag (only district, not city has this; city uses `HasCapitalDistrict()` instead) |
 
 ---
 
@@ -248,36 +247,44 @@ Actor placed in level to define guard spawn locations and patrol routes.
 
 | Property | Type | Notes |
 |---|---|---|
-| PatrolRoute | TArray<FTerritoryPatrolNode> | Waypoints for patrol |
-| MaxReserveSlots | int32 | Total guards this point can produce |
-| Priority | int32 | Lower = higher priority |
-| FactionOverride | GameplayTag | Override territory's faction for this point |
+| OwnerTerritoryTag | FGameplayTag | Auto-resolved to owning territory at BeginPlay |
+| MaxGuards | int32 | Maximum guards that can spawn at this point (default 3) |
+| ReserveSlots | int32 | Guards that only spawn when active guards die (default 1) |
+| PatrolRoute | TArray<FTerritoryPatrolNode> | Ordered waypoints for patrol. Empty = guard stays at spawn point |
+| bLoopPatrol | bool | Whether patrol route loops back to start (default true) |
+| FactionOverride | FGameplayTag | Override territory's faction for this point |
+| Priority | int32 | Higher priority spawn points fill first (default 50) |
 
 ### Struct: FTerritoryPatrolNode
 
 | Field | Type | Notes |
 |---|---|---|
 | Location | FVector | World position |
-| WaitTime | float | Seconds to wait at node |
 | Rotation | FRotator | Face direction |
+| WaitTime | float | Seconds to wait at node |
+| ActivityTag | FGameplayTag | Optional activity tag (e.g., Guard.Activity.Inspect) |
 
 ### Functions
 
 | Function | Returns | Description |
 |---|---|---|
-| GetLoopPatrol | bool | Whether patrol loops |
-| GetNextPatrolNode | FTerritoryPatrolNode | Next waypoint |
-| GetRemainingReserves | int32 | Guards still available |
-| ConsumeReserve | bool | Take one reserve slot |
-| ResetReserves | void | Restore all slots |
+| HasAvailableSlot | bool | Whether active guard count < MaxGuards |
+| HasReserveAvailable | bool | Whether reserve guards remain |
+| GetActiveGuardCount | int32 | Currently alive spawned guards |
+| GetReserveCount | int32 | Remaining reserve guards |
+| RegisterSpawnedGuard | void | Notify that a guard was spawned from this point |
+| UnregisterGuard | void | Notify that a guard died/was removed from this point |
+| GetPatrolRoute | const TArray<FTerritoryPatrolNode>& | Full patrol node array |
+| GetPatrolRouteAsTransforms | TArray<FTransform> | Patrol route as transforms (for behavior trees) |
+| GetPatrolWaitTimes | TArray<float> | Wait times parallel to GetPatrolRouteAsTransforms |
+| HasPatrolRoute | bool | Whether PatrolRoute is non-empty |
+| GetSpawnTransform | FTransform | Transform for the next available slot |
 
 ### Death Handling
 
 When a guard dies:
-1. `ATerritoryVolume::OnDefenderDied` is called
-2. Checks `bWasTracked` — only processes if guard was registered from this spawn point
-3. Calls `SpawnPoint->ConsumeReserve()`
-4. If reserves depleted → `Territory->SpawnGuards()` to produce replacement
+1. `ATerritoryGuardSpawnPoint::UnregisterGuard()` is called
+2. If reserves depleted → `Territory->SpawnGuards()` to produce replacement
 
 ---
 
@@ -313,14 +320,15 @@ Replicated actor for multiplayer economy/diplomacy state. Place exactly 1 per le
 
 ## ATerritorySavableData
 
-Legacy single-player save adapter. Place exactly 1 per level for single-player.
+Legacy single-player save adapter. Place exactly 1 per level for single-player. Implements `INarrativeSavableActor` overrides.
 
-### Functions
+### Functions (INarrativeSavableActor overrides)
 
 | Function | Description |
 |---|---|
-| SaveState | Save all subsystem state to SaveGame properties |
-| LoadState | Restore all subsystem state from SaveGame properties |
+| PrepareForSave_Implementation | Save all subsystem state to SaveGame properties |
+| Load_Implementation | Restore all subsystem state from SaveGame properties |
+| ShouldRespawn_Implementation | Returns false (persistent save-game adapter never respawns) |
 
 ### Editor-Stable GUID
 
@@ -377,11 +385,10 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 ### Delegates
 
-| Delegate | Signature |
-|---|---|
-| OnCaptureStarted | (ATerritoryVolume*, FGameplayTag) |
-| OnCaptureProgressUpdated | (ATerritoryVolume*, FGameplayTag, float) |
-| OnCaptureCompleted | (ATerritoryVolume*, FGameplayTag, FGameplayTag) |
+| Delegate | Signature | BlueprintAssignable |
+|---|---|---|
+| OnTerritoryControlChanged | (ATerritoryVolume*, FGameplayTag OldOwner, FGameplayTag NewOwner) | ✅ |
+| OnCaptureAttempted | (ATerritoryVolume*, FGameplayTag Attacker) | ✅ |
 
 ---
 
@@ -439,6 +446,8 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | FormAlliance | FactionA, FactionB | void |
 | BreakAlliance | FactionA, FactionB | void |
 | SignTradeAgreement | FactionA, FactionB, Duration | void |
+| SignNonAggression | FactionA, FactionB | void |
+| BreakCeasefire | FactionA, FactionB | void |
 | SetDiplomacyState | FactionA, FactionB, State | void |
 | AddReputation | Faction, Amount | void |
 | SetReputation | Faction, Value | void |
@@ -459,6 +468,15 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 |---|---|
 | GetAllTreaties | TArray<FTreatyRecord> |
 | GetTreatiesForFaction(Faction) | TArray<FTreatyRecord> |
+| GetDiplomacyHistory | TArray<FDiplomacyEvent> |
+| GetAllReputation | TMap<FGameplayTag, int32> |
+
+### Save/Sync (BlueprintCallable)
+
+| Function | Description |
+|---|---|
+| SyncToGameState | Push diplomacy state into ATerritoryWorldState for replication |
+| LoadFromGameState | Pull diplomacy state back from ATerritoryWorldState after load |
 
 ### Delegates
 
@@ -488,12 +506,9 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | GetAvailableSlots(Territory) | int32 | MaxSlots - GrantedSlots |
 | HasAssaultSlot(Territory, Controller) | bool | Does controller hold a slot? |
 
-### Delegates
+### Notes
 
-| Delegate | Signature |
-|---|---|
-| OnAttackPermissionGranted | (ATerritoryVolume*, Faction, Actor) |
-| OnAttackPermissionDenied | (ATerritoryVolume*, Faction, Actor) |
+CombatDirector has no `BlueprintAssignable` delegates. Slot lifecycle events are reported through the subsystem actions (`RequestAssaultSlot` returns true/false).
 
 ---
 
@@ -550,17 +565,18 @@ UMG widget for displaying territory info.
 
 | Function | Description |
 |---|---|
-| SetTerritoryByTag(Tag) | Bind to territory by GameplayTag |
-| SetTerritoryByLocation(Location) | Bind to nearest territory |
-| GetCurrentTerritory | Get bound ATerritoryVolume* |
+| BindToTerritory(Tag) | Bind to territory by FGameplayTag |
+| BindToTerritoryAtPlayer() | Bind to territory at player's current location |
+| UnbindFromTerritory() | Remove delegate bindings and clear territory reference |
+| GetBoundTerritory | Get bound ATerritoryVolume* |
 
 ### Blueprint Events
 
 | Event | Parameters |
 |---|---|
-| OnUpdateOwnership | OldOwner, NewOwner |
-| OnUpdateState | NewState |
-| OnUpdateProgress | Progress (float) |
+| OnTerritoryOwnershipChanged | OldOwner (FGameplayTag), NewOwner (FGameplayTag) |
+| OnTerritoryStateChanged | NewState (ETerritoryState) |
+| OnTerritoryBound | Territory (ATerritoryVolume*) |
 
 ---
 
@@ -582,8 +598,8 @@ UMG widget for displaying faction economy.
 
 | Event | Parameters |
 |---|---|
-| OnEconomyTick | (Faction, FTerritoryEconomySnapshot) |
-| OnTransaction | (FTerritoryTransaction) |
+| OnEconomyUpdated | (Faction, FTerritoryEconomySnapshot) |
+| OnTransactionRecorded | (FTerritoryTransaction) |
 
 ---
 
@@ -707,9 +723,10 @@ Implement on actors that need to expose territory ownership.
 
 | Function | Returns | Notes |
 |---|---|---|
-| GetOwningFaction_Implementation | FGameplayTag | Current owner |
-| GetTerritoryState_Implementation | ETerritoryState | Current state |
-| GetControlProgress_Implementation | float | 0.0–1.0 |
+| GetTerritoryOwner_Implementation | FGameplayTag | Current owner |
+| GetTerritoryControlProgress_Implementation | float | 0.0–1.0 |
+| IsTerritoryContested_Implementation | bool | Whether territory is contested |
+| GetContestingFaction_Implementation | FGameplayTag | Contester (invalid if not contested) |
 
 ---
 
@@ -717,13 +734,13 @@ Implement on actors that need to expose territory ownership.
 
 Implement on actors that participate in economy.
 
-### Functions
+### Functions (BlueprintNativeEvent)
 
 | Function | Returns | Notes |
 |---|---|---|
-| GetPeriodicIncome_Implementation | int32 | Income contribution |
-| GetGuardCost_Implementation | int32 | Upkeep cost |
-| GetEffectiveIncome_Implementation | int32 | Including upgrades |
+| GetTreasury(Faction) | int32 | Current treasury for faction |
+| GetPeriodicIncome(Faction) | int32 | Per-tick income for faction |
+| CanAfford(Faction, Cost) | bool | Whether faction can afford the cost |
 
 ---
 
@@ -731,13 +748,14 @@ Implement on actors that participate in economy.
 
 BlueprintNativeEvent — implement to receive territory events.
 
-### Functions
+### Functions (BlueprintNativeEvent)
 
 | Function | Notes |
 |---|---|
-| OnTerritoryCaptured_Implementation | Called when territory is captured |
-| OnTerritoryContested_Implementation | Called when capture starts |
-| OnTerritoryUpgraded_Implementation | Called when property upgrades |
+| OnTerritoryControlChanged | Called when ownership changes (TerritoryTag, OldOwner, NewOwner) |
+| OnTerritoryContested | Called when attack starts (TerritoryTag, ContestingFaction) |
+| OnTerritoryUncontested | Called when attack ends (TerritoryTag) |
+| OnTerritoryStateChanged | Called when territory state transitions (TerritoryTag, NewState) |
 
 ---
 
@@ -756,23 +774,25 @@ BlueprintNativeEvent — implement to receive territory events.
 
 | Value | Description |
 |---|---|
-| Success | Capture initiated |
-| AlreadyOwned | Attacker already owns |
+| Success | Capture initiated successfully |
+| AlreadyOwned | Attacker already owns territory |
 | Locked | Territory is locked |
-| DiplomaticallyBlocked | Factions are Friendly |
 | DefendersRemain | Guards still alive |
-| NoAttackBudget | Too many attackers |
+| DiplomaticallyBlocked | Factions diplomatically blocked (e.g., alliance, ceasefire) |
+| InvalidTerritory | No valid territory provided |
 
 ### ETerritoryTransactionType
 
 | Value | Description |
 |---|---|
 | Income | Economy tick income |
-| GuardUpkeep | Economy tick cost |
+| GuardUpkeep | Economy tick guard cost |
 | UpgradeCost | Property upgrade |
-| Reward | External reward (quest, etc.) |
-| Manual | Direct add/debit |
-| Capture | Capture-related |
+| Purchase | Territory or asset purchase |
+| Reward | External reward (quest, event) |
+| Scripted | Scripted economy change |
+| ManualCredit | Manual credit via API |
+| ManualDebit | Manual debit via API |
 
 ### EDiplomacyState
 
@@ -789,14 +809,14 @@ BlueprintNativeEvent — implement to receive territory events.
 
 | Value | Description |
 |---|---|
-| WarDeclared | War started |
-| PeaceDeclared | War ended |
-| AllianceFormed | Alliance created |
-| AllianceBroken | Alliance dissolved |
-| TradeSigned | Trade agreement |
-| TradeExpired | Trade timed out |
-| TreatyExpired | Any treaty expired |
-| AttitudeChanged | Narrative attitude shifted |
+| DeclaredWar | War started |
+| DeclaredPeace | War ended |
+| FormedAlliance | Alliance created |
+| BrokeAlliance | Alliance dissolved |
+| SignedTradeAgreement | Trade agreement signed |
+| ExpiredTreaty | Any treaty expired |
+| BrokeCeasefire | Ceasefire broken |
+| SignedNonAggression | Non-aggression pact signed |
 
 ---
 
@@ -939,16 +959,15 @@ Mirrors `FTreatyRecord` for network replication.
 |---|---|---|
 | FOnTerritoryRegistered | (ATerritoryVolume*) | Registry |
 | FOnTerritoryUnregistered | (ATerritoryVolume*) | Registry |
-| FOnCaptureStarted | (ATerritoryVolume*, FGameplayTag) | Control |
-| FOnCaptureProgressUpdated | (ATerritoryVolume*, FGameplayTag, float) | Control |
-| FOnCaptureCompleted | (ATerritoryVolume*, FGameplayTag, FGameplayTag) | Control |
+| FOnTerritoryControlChanged | (ATerritoryVolume*, FGameplayTag, FGameplayTag) | Control |
+| FOnCaptureAttempted | (ATerritoryVolume*, FGameplayTag) | Control |
 | FOnEconomyTickFired | (FGameplayTag, FTerritoryEconomySnapshot) | Economy |
 | FOnTransactionRecorded | (FTerritoryTransaction) | Economy + WorldState |
 | FOnDiplomacyStateChanged | (FGameplayTag, FGameplayTag, EDiplomacyState) | Diplomacy |
 | FOnDiplomacyEvent | (const FDiplomacyEvent&) | Diplomacy |
 | FOnReputationChanged | (FGameplayTag, int32) | Diplomacy |
-| FOnAttackPermissionGranted | (ATerritoryVolume*, FGameplayTag, AActor*) | CombatDirector |
-| FOnAttackPermissionDenied | (ATerritoryVolume*, FGameplayTag, AActor*) | CombatDirector |
+
+> **Note:** `UTerritoryCombatDirector` has no `BlueprintAssignable` delegates. Slot grant/denial is signaled via return values on `RequestAssaultSlot`.
 
 ---
 

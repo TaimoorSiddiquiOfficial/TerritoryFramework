@@ -231,7 +231,7 @@ Get Territory Economy → GetTreasury(FactionTag)
 ## 11. Debug
 
 Enable in **Project Settings → Territory Framework**:
-- `bDebugEnabled` = true — enables OnScreen messages
+- `bEnableDebug` = true — enables OnScreen messages
 - `bDebugOwnership` = true — logs ownership changes
 - `bDebugCapture` = true — logs capture progress
 - `bDebugGuardDeaths` = true — logs guard deaths

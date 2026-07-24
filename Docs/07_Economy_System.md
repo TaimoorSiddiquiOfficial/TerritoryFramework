@@ -1,47 +1,49 @@
-# Economy System — Treasury, Income, Transactions, Upgrades
+# Economy System — Income, Transactions, Upgrades
 
 ## Overview
 
-Each faction has a treasury with:
-- **Gold**: accumulated currency
+Each faction's wealth is the **aggregate of all online faction members' `UInventoryComponent::Currency`** (NarrativePro). There is no separate gold/treasury storage — faction economy flows directly to/from player inventories via the economy tick.
+
+The subsystem tracks per faction:
 - **IncomePerTick**: income from owned territories
 - **CostsPerTick**: guard upkeep from owned territories
 - **TerritoryCount**: number of owned territories
 
-Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server.
+Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. Each tick distributes net income (income - upkeep) evenly to all online faction members via `UInventoryComponent::AddCurrency()`.
 
-## Treasury API
+## Wealth API
 
-### Adding Gold
+### Adding to Faction Wealth
 
 ```cpp
-// C++
-Economy->AddToTreasury(Faction, 1000, TEXT("Quest reward"), ETerritoryTransactionType::Reward);
-
-// Blueprint
-GetTerritoryEconomy → AddToTreasury(Faction, 1000, "Quest reward", Reward)
+// C++ — distributes evenly across online faction members' Currency
+Economy->AddToTreasury(Faction, 1000, TEXT("Quest reward"), ETerritoryTransactionType::ManualCredit);
 ```
 
-### Spending Gold
+### Spending Faction Wealth
 
 ```cpp
-// C++
-if (Economy->TryDebitTreasury(Faction, 500, TEXT("Upgrade blacksmith"), ETerritoryTransactionType::UpgradeCost))
+// C++ — debits proportionally from faction members' inventories
+if (Economy->TryDebitTreasury(Faction, 500, TEXT("Upgrade"), ETerritoryTransactionType::ManualDebit))
 {
-    // Success — gold deducted
+    // Success — deducted
 }
-
-// Blueprint
-GetTerritoryEconomy → TryDebitTreasury(Faction, 500, "Upgrade", UpgradeCost) → Branch
 ```
 
 ### Checking Balance
 
 ```cpp
-int32 Gold = Economy->GetTreasury(Faction);
+// Faction wealth = aggregate of all online members' Currency
+int32 Wealth = Economy->GetTreasury(Faction);
+// ^ reads live from player inventories, no separate storage
+
 int32 Income = Economy->GetIncome(Faction);
 int32 Costs = Economy->GetCosts(Faction);
 bool bCanAfford = Economy->CanAfford(Faction, Cost);
+
+// Get all online faction members
+TArray<ANarrativeCharacter*> Members = Economy->GetFactionMembers(Faction);
+int32 Aggregate = Economy->GetFactionAggregateCurrency(Faction);
 ```
 
 ## Income Calculation
@@ -65,7 +67,7 @@ FactionIncome = Sum of:
     Capital district multiplier applied if property's district has bIsCapital
 
 FactionCosts = Sum of:
-  For each owned TerritoryVolume with spawned guards:
+  For each owned TerritoryVolume with configured guards (GuardSpawnCount > 0):
     GetGuardCost()
 
 NetPerTick = FactionIncome - FactionCosts
