@@ -14,14 +14,20 @@ void UTerritoryCombatDirector::Initialize(FSubsystemCollectionBase& Collection)
 
 void UTerritoryCombatDirector::Deinitialize()
 {
+	TArray<TWeakObjectPtr<ANarrativeNPCController>> Controllers = BoundControllers.Array();
+	for (const TWeakObjectPtr<ANarrativeNPCController>& Controller : Controllers)
+	{
+		UnbindControllerDeath(Controller.Get());
+	}
 	SlotMap.Empty();
 	BoundControllers.Empty();
+	BoundControllerASCs.Empty();
 	Super::Deinitialize();
 }
 
 bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
 {
-	if (!Territory || !Controller) return false;
+	if (!Territory || !Controller || !GetWorld() || GetWorld()->GetNetMode() == NM_Client) return false;
 
 	if (Territory->GetTerritoryState() == ETerritoryState::Locked) return false;
 
@@ -32,16 +38,16 @@ bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, A
 	FPerTerritorySlots& Slots = SlotMap.FindOrAdd(Territory);
 	CleanupInvalidControllers(Slots);
 
-	int32 MaxSlots = Territory->GetMaxConcurrentAttackers();
-	if (Slots.GrantedControllers.Num() >= MaxSlots)
-	{
-		return false;
-	}
-
 	// Check if this controller already has a slot
 	for (const TWeakObjectPtr<ANarrativeNPCController>& Existing : Slots.GrantedControllers)
 	{
 		if (Existing.Get() == Controller) return true;
+	}
+
+	int32 MaxSlots = Territory->GetMaxConcurrentAttackers();
+	if (Slots.GrantedControllers.Num() >= MaxSlots)
+	{
+		return false;
 	}
 
 	Slots.GrantedControllers.Add(Controller);
@@ -59,7 +65,7 @@ bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, A
 
 void UTerritoryCombatDirector::ReleaseAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
 {
-	if (!Territory || !Controller) return;
+	if (!Territory || !Controller || !GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
 
 	FPerTerritorySlots* Slots = SlotMap.Find(Territory);
 	if (!Slots) return;
@@ -70,13 +76,15 @@ void UTerritoryCombatDirector::ReleaseAssaultSlot(ATerritoryVolume* Territory, A
 			return Ptr.Get() == Controller;
 		});
 
-	// Unbind delegate before removing from BoundControllers
-	UnbindControllerDeath(Controller);
+	if (!ControllerHasAnySlot(Controller))
+	{
+		UnbindControllerDeath(Controller);
+	}
 }
 
 void UTerritoryCombatDirector::ReleaseAllSlots(ANarrativeNPCController* Controller)
 {
-	if (!Controller) return;
+	if (!Controller || !GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
 
 	// Unbind delegate before processing all territories
 	UnbindControllerDeath(Controller);
@@ -153,14 +161,11 @@ void UTerritoryCombatDirector::BindControllerDeath(ANarrativeNPCController* Cont
 {
 	if (!Controller || BoundControllers.Contains(Controller)) return;
 
-	if (IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Controller))
+	if (UNarrativeAbilitySystemComponent* ASC = ResolveControllerASC(Controller))
 	{
-		if (UNarrativeAbilitySystemComponent* ASC =
-			Cast<UNarrativeAbilitySystemComponent>(ASCInterface->GetAbilitySystemComponent()))
-		{
-			ASC->OnDied.AddUniqueDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
-			BoundControllers.Add(Controller);
-		}
+		ASC->OnDied.AddUniqueDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
+		BoundControllers.Add(Controller);
+		BoundControllerASCs.Add(Controller, ASC);
 	}
 }
 
@@ -168,15 +173,15 @@ void UTerritoryCombatDirector::UnbindControllerDeath(ANarrativeNPCController* Co
 {
 	if (!Controller || !BoundControllers.Contains(Controller)) return;
 
-	if (IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Controller))
+	if (const TWeakObjectPtr<UNarrativeAbilitySystemComponent>* FoundASC = BoundControllerASCs.Find(Controller))
 	{
-		if (UNarrativeAbilitySystemComponent* ASC =
-			Cast<UNarrativeAbilitySystemComponent>(ASCInterface->GetAbilitySystemComponent()))
+		if (FoundASC->IsValid())
 		{
-			ASC->OnDied.RemoveDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
-			BoundControllers.Remove(Controller);
+			FoundASC->Get()->OnDied.RemoveDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
 		}
 	}
+	BoundControllerASCs.Remove(Controller);
+	BoundControllers.Remove(Controller);
 }
 
 void UTerritoryCombatDirector::OnAssaultControllerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC)
@@ -188,8 +193,18 @@ void UTerritoryCombatDirector::OnAssaultControllerDied(AActor* KilledActor, UNar
 	ANarrativeNPCController* DeadController = Pawn ? Cast<ANarrativeNPCController>(Pawn->GetController()) : nullptr;
 	if (!DeadController)
 	{
-		// Try direct cast — the killed actor might be the controller itself
 		DeadController = Cast<ANarrativeNPCController>(KilledActor);
+	}
+	if (!DeadController && KilledASC)
+	{
+		for (const auto& Pair : BoundControllerASCs)
+		{
+			if (Pair.Value.Get() == KilledASC)
+			{
+				DeadController = Pair.Key.Get();
+				break;
+			}
+		}
 	}
 	if (!DeadController) return;
 
@@ -199,4 +214,34 @@ void UTerritoryCombatDirector::OnAssaultControllerDied(AActor* KilledActor, UNar
 
 	UE_LOG(LogTerritory, Verbose, TEXT("CombatDirector: released assault slots for dead controller %s"),
 		*DeadController->GetName());
+}
+
+bool UTerritoryCombatDirector::ControllerHasAnySlot(const ANarrativeNPCController* Controller) const
+{
+	if (!Controller) return false;
+	for (const auto& Pair : SlotMap)
+	{
+		for (const TWeakObjectPtr<ANarrativeNPCController>& Granted : Pair.Value.GrantedControllers)
+		{
+			if (Granted.Get() == Controller)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+UNarrativeAbilitySystemComponent* UTerritoryCombatDirector::ResolveControllerASC(ANarrativeNPCController* Controller) const
+{
+	if (!Controller) return nullptr;
+	if (IAbilitySystemInterface* PawnASC = Cast<IAbilitySystemInterface>(Controller->GetPawn()))
+	{
+		return Cast<UNarrativeAbilitySystemComponent>(PawnASC->GetAbilitySystemComponent());
+	}
+	if (IAbilitySystemInterface* ControllerASC = Cast<IAbilitySystemInterface>(Controller))
+	{
+		return Cast<UNarrativeAbilitySystemComponent>(ControllerASC->GetAbilitySystemComponent());
+	}
+	return nullptr;
 }

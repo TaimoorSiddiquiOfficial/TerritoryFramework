@@ -125,6 +125,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	FGameplayTag GetMajorityPropertyOwner() const;
 
+	/** Sum of effective income from child properties currently held by the district owner. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
+	int32 GetEffectiveIncome() const;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|District")
 	bool bIsCapital = false;
 
@@ -139,6 +143,8 @@ public:
 	FOnDistrictCaptured OnDistrictCapturedDelegate;
 
 protected:
+	virtual void OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner) override;
+
 	UFUNCTION(BlueprintNativeEvent, Category = "Territory|Hierarchy")
 	void OnDistrictFullyCaptured(FGameplayTag CapturingFaction);
 	virtual void OnDistrictFullyCaptured_Implementation(FGameplayTag CapturingFaction);

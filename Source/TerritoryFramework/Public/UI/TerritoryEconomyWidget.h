@@ -7,6 +7,7 @@
 #include "TerritoryEconomyWidget.generated.h"
 
 class UTerritoryEconomySubsystem;
+class UTextBlock;
 
 /**
  * Base widget for displaying faction economy information.
@@ -46,6 +47,24 @@ public:
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyFactionText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyTreasuryText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyIncomeText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyCostsText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyTerritoryCountText;
+
+	UFUNCTION(BlueprintCallable, Category="Territory|Economy|UI")
+	void RefreshEconomyDisplay();
 
 	/** Called every economy tick with updated snapshot */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|Economy|UI")

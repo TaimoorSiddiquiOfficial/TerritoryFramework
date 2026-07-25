@@ -78,6 +78,10 @@ struct FTerritoryOwnershipData
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	int32 GuardCost = 0;
 
+	/** Persistent target garrison size, including guards purchased after capture. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
+	int32 DesiredGuardCount = INDEX_NONE;
+
 	/** Why the territory is locked. Empty when not locked. Replicated + saved. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	FText LockReason;

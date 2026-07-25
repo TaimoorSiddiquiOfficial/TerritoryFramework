@@ -8,6 +8,8 @@
 
 class ATerritoryVolume;
 class UTerritoryRegistrySubsystem;
+class UProgressBar;
+class UTextBlock;
 
 /**
  * Base widget for displaying territory information.
@@ -40,6 +42,25 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
+	/** Optional native-backed fields used by the supplied Territory info WBP. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TerritoryNameText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TerritoryOwnerText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TerritoryStateText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TerritoryGuardCountText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UProgressBar> TerritoryCaptureProgress;
+
+	UFUNCTION(BlueprintCallable, Category="Territory|UI")
+	void RefreshTerritoryDisplay();
+
 	/** Called when the bound territory's ownership changes */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|UI")
 	void OnTerritoryOwnershipChanged(FGameplayTag OldOwner, FGameplayTag NewOwner);
@@ -57,6 +78,7 @@ private:
 	TWeakObjectPtr<ATerritoryVolume> BoundTerritory;
 
 	FGameplayTag BoundTerritoryTag;
+	FTimerHandle DisplayRefreshTimerHandle;
 
 	UFUNCTION()
 	void HandleControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);

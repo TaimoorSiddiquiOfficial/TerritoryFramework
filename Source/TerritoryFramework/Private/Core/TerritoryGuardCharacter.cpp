@@ -2,13 +2,17 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "AI/TerritoryPatrolGoal.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
+#include "AI/Activities/NPCActivityComponent.h"
 #include "Tales/TriggerSet.h"
 #include "Net/UnrealNetwork.h"
+#include "TimerManager.h"
 
 ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	PatrolGoalClass = UTerritoryPatrolGoal::StaticClass();
 }
 
 bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
@@ -19,6 +23,20 @@ bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
 void ATerritoryGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (HasAuthority())
+	{
+		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			InitializeTerritoryPatrolGoal();
+		}));
+	}
+}
+
+void ATerritoryGuardCharacter::ApplyActivityConfig_Implementation(UNPCActivityConfiguration* NPCActivityConfig)
+{
+	Super::ApplyActivityConfig_Implementation(NPCActivityConfig);
+	InitializeTerritoryPatrolGoal();
 }
 
 void ATerritoryGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -168,4 +186,41 @@ FGameplayTag ATerritoryGuardCharacter::GetGuardFaction() const
 bool ATerritoryGuardCharacter::IsSpawnPointGuard() const
 {
 	return IsValid(OwningTerritorySpawnPoint);
+}
+
+bool ATerritoryGuardCharacter::InitializeTerritoryPatrolGoal()
+{
+	if (!HasAuthority() || !HasTerritoryPatrolRoute() || !PatrolGoalClass)
+	{
+		return false;
+	}
+
+	UNPCActivityComponent* ActivityComponent = GetActivityComponent();
+	if (!ActivityComponent)
+	{
+		return false;
+	}
+
+	UObject* GoalKey = OwningTerritorySpawnPoint ? static_cast<UObject*>(OwningTerritorySpawnPoint) : this;
+	bool bFoundExisting = false;
+	if (UTerritoryPatrolGoal* ExistingGoal = Cast<UTerritoryPatrolGoal>(
+		ActivityComponent->GetGoalByKey(PatrolGoalClass, GoalKey, bFoundExisting)))
+	{
+		ExistingGoal->TerritoryPatrol = GetTerritoryPatrolRoute();
+		TerritoryPatrolGoal = ExistingGoal;
+		return true;
+	}
+
+	UTerritoryPatrolGoal* NewGoal = NewObject<UTerritoryPatrolGoal>(ActivityComponent, PatrolGoalClass);
+	if (!NewGoal)
+	{
+		return false;
+	}
+
+	NewGoal->GoalKey = GoalKey;
+	NewGoal->TerritoryPatrol = GetTerritoryPatrolRoute();
+	NewGoal->bSaveGoal = false;
+	NewGoal->bRemoveOnSucceeded = false;
+	TerritoryPatrolGoal = Cast<UTerritoryPatrolGoal>(ActivityComponent->AddGoal(NewGoal, true));
+	return IsValid(TerritoryPatrolGoal);
 }

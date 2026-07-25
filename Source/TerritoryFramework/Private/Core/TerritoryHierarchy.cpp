@@ -425,18 +425,25 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 					TryUnlock(true);
 				}
 				SetOwningFaction(NewOwner);
-				OnDistrictFullyCaptured(NewOwner);
-				OnDistrictCapturedDelegate.Broadcast(this, DistrictOwner, NewOwner);
-			}
-			else if (DistrictOwner.IsValid() && !AllPropertiesOwnedBy(DistrictOwner))
-			{
-				// District owner no longer holds all properties — contest it
-				if (OwnershipData.State == ETerritoryState::Claimed)
-				{
-					SetTerritoryState(ETerritoryState::Contested);
-				}
 			}
 		}
+	}
+
+	const FGameplayTag DistrictOwner = GetOwningFaction();
+	if (DistrictOwner.IsValid() && !AllPropertiesOwnedBy(DistrictOwner)
+		&& OwnershipData.State == ETerritoryState::Claimed)
+	{
+		SetTerritoryState(ETerritoryState::Contested);
+	}
+}
+
+void ATerritoryDistrict::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	Super::OnOwnershipChanged_Implementation(OldOwner, NewOwner);
+	if (NewOwner.IsValid())
+	{
+		OnDistrictFullyCaptured(NewOwner);
+		OnDistrictCapturedDelegate.Broadcast(this, OldOwner, NewOwner);
 	}
 }
 
@@ -557,6 +564,23 @@ FGameplayTag ATerritoryDistrict::GetMajorityPropertyOwner() const
 	// Only return majority if > 50%
 	if (BestCount * 2 > Properties.Num()) return Best;
 	return FGameplayTag();
+}
+
+int32 ATerritoryDistrict::GetEffectiveIncome() const
+{
+	const FGameplayTag DistrictOwner = GetOwningFaction();
+	if (!DistrictOwner.IsValid()) return 0;
+
+	int32 TotalIncome = 0;
+	for (ATerritoryVolume* Volume : GetProperties())
+	{
+		if (const ATerritoryProperty* Property = Cast<ATerritoryProperty>(Volume);
+			Property && Property->IsOwnedByFaction(DistrictOwner))
+		{
+			TotalIncome += Property->GetEffectiveIncome();
+		}
+	}
+	return TotalIncome;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

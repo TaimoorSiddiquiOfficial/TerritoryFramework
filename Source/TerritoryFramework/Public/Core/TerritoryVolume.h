@@ -278,6 +278,22 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Configured Guard Count"))
 	int32 GetConfiguredGuardCount() const { return GuardSpawnCount; }
 
+	/** Persistent garrison target, including guards purchased after capture. */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Desired Guard Count"))
+	int32 GetDesiredGuardCount() const { return FMath::Max(0, OwnershipData.DesiredGuardCount); }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Maximum Guard Count"))
+	int32 GetMaxGuardCount() const { return FMath::Max(GuardSpawnCount, MaxGuardCount); }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Purchase Cost"))
+	int32 GetGuardPurchaseCost(int32 Count = 1) const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Can Purchase Guards"))
+	bool CanPurchaseGuards(const FGameplayTag& Faction, int32 Count, FText& OutFailureReason) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Purchase Guards"))
+	bool TryPurchaseGuards(const FGameplayTag& Faction, int32 Count, FText& OutResult);
+
 	/** Returns true if at least one guard is alive and spawned from this territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Has Guards Alive"))
 	bool HasGuardsAlive() const;
@@ -418,6 +434,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
 		meta=(ClampMin="0", DisplayName="Guard Spawn Count"))
 	int32 GuardSpawnCount = 3;
+
+	/** Maximum live garrison after player purchases. Never lower than Guard Spawn Count. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
+		meta=(ClampMin="0", DisplayName="Maximum Guard Count"))
+	int32 MaxGuardCount = 10;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
 		meta=(ClampMin="0.0", DisplayName="Guard Spawn Radius"))

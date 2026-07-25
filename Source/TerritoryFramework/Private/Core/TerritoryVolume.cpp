@@ -2,6 +2,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Subsystems/TerritoryEconomySubsystem.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 #include "SaveSystemStatics.h"
@@ -95,6 +96,7 @@ void ATerritoryVolume::BeginPlay()
 			OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
 			OwnershipData.PeriodicIncome = InitialPeriodicIncome;
 			OwnershipData.GuardCost = InitialGuardCost;
+			OwnershipData.DesiredGuardCount = FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount());
 
 			if (InitialOwningFaction.IsValid())
 			{
@@ -113,6 +115,10 @@ void ATerritoryVolume::BeginPlay()
 			OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
 			OwnershipData.PeriodicIncome = InitialPeriodicIncome;
 			OwnershipData.GuardCost = InitialGuardCost;
+			if (OwnershipData.DesiredGuardCount < 0)
+			{
+				OwnershipData.DesiredGuardCount = FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount());
+			}
 		}
 
 		PreviousOwningFaction = OwnershipData.OwningFaction;
@@ -424,7 +430,7 @@ void ATerritoryVolume::ReconcileGuardsAfterLoad()
 	if (OwnershipData.State == ETerritoryState::Claimed
 		&& OwnershipData.OwningFaction.IsValid()
 		&& ResolveGuardDefinition(OwnershipData.OwningFaction)
-		&& GuardSpawnCount > 0)
+		&& GetDesiredGuardCount() > 0)
 	{
 		SpawnGuards();
 	}
@@ -550,11 +556,14 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	OwnershipData.State = NewFaction.IsValid() ? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
 	OwnershipData.ContestingFaction = FGameplayTag();
 	OwnershipData.ControlProgress = NewFaction.IsValid() ? 1.f : 0.f;
+	OwnershipData.DesiredGuardCount = NewFaction.IsValid()
+		? FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount())
+		: 0;
 
 	// Guard lifecycle invariants — run BEFORE BP virtual so BP can react to final state.
 	// Not overridable: despawn old owner guards, spawn new owner guards.
 	DespawnGuards();
-	if (NewFaction.IsValid() && ResolveGuardDefinition(NewFaction) && GuardSpawnCount > 0)
+	if (NewFaction.IsValid() && ResolveGuardDefinition(NewFaction) && GetDesiredGuardCount() > 0)
 	{
 		SpawnGuards();
 	}
@@ -598,7 +607,7 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 	}
 	else if (NewState == ETerritoryState::Claimed && (OldState == ETerritoryState::Contested || OldState == ETerritoryState::Locked))
 	{
-		if (HasAuthority() && ResolveGuardDefinition(OwnershipData.OwningFaction) && GuardSpawnCount > 0 && SpawnedGuards.Num() == 0)
+		if (HasAuthority() && ResolveGuardDefinition(OwnershipData.OwningFaction) && GetDesiredGuardCount() > 0 && SpawnedGuards.Num() == 0)
 		{
 			SpawnGuards();
 		}
@@ -917,11 +926,12 @@ void ATerritoryVolume::SpawnGuards()
 	if (bDebug)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("SpawnGuards: %s spawning %d guards, faction=%s, spawn points=%d"),
-			*GetTerritoryTag().ToString(), GuardSpawnCount, *OwnerFaction.ToString(),
+			*GetTerritoryTag().ToString(), GetDesiredGuardCount(), *OwnerFaction.ToString(),
 			SpawnPointActors.Num());
 	}
 
-	for (int32 i = 0; i < GuardSpawnCount; ++i)
+	const int32 TargetGuardCount = GetDesiredGuardCount();
+	for (int32 i = 0; i < TargetGuardCount; ++i)
 	{
 		FTransform SpawnTransform;
 		ATerritoryGuardSpawnPoint* UsedSP = nullptr;
@@ -963,7 +973,7 @@ void ATerritoryVolume::SpawnGuards()
 		if (!Guard)
 		{
 			UE_LOG(LogTerritory, Warning, TEXT("Failed deferred spawn guard %d/%d of %s"),
-				i + 1, GuardSpawnCount, *GetTerritoryTag().ToString());
+				i + 1, TargetGuardCount, *GetTerritoryTag().ToString());
 			continue;
 		}
 
@@ -1004,7 +1014,7 @@ void ATerritoryVolume::SpawnGuards()
 		if (bDebug)
 		{
 			UE_LOG(LogTerritory, Log, TEXT("  Guard %d/%d spawned for %s (faction=%s, GUID=%s, SP=%s)"),
-				i + 1, GuardSpawnCount,
+				i + 1, TargetGuardCount,
 				*GetTerritoryTag().ToString(),
 				*EffectiveFaction.ToString(),
 				*GuardSaveGUID.ToString(),
@@ -1015,7 +1025,7 @@ void ATerritoryVolume::SpawnGuards()
 
 void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 {
-	if (!HasAuthority() || !SpawnPoint) return;
+	if (!HasAuthority()) return;
 
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -1032,7 +1042,9 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 
-	FTransform SpawnTransform = SpawnPoint->GetSpawnTransform();
+	FTransform SpawnTransform = SpawnPoint
+		? SpawnPoint->GetSpawnTransform()
+		: FTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), GetRandomSpawnPoint());
 
 	ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
 		UGameplayStatics::BeginDeferredActorSpawnFromClass(
@@ -1046,7 +1058,7 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 
 	// Determine effective faction: spawn point override > territory owner
 	FGameplayTag EffectiveFaction = OwnerFaction;
-	if (SpawnPoint->FactionOverride.IsValid())
+	if (SpawnPoint && SpawnPoint->FactionOverride.IsValid())
 	{
 		EffectiveFaction = SpawnPoint->FactionOverride;
 	}
@@ -1058,7 +1070,7 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 		TerritoryGUID,
 		GuardSaveGUID,
 		SpawnTransform,
-		SpawnPoint->GetFName(),
+		SpawnPoint ? SpawnPoint->GetFName() : NAME_None,
 		nullptr,
 		TArray<TSoftObjectPtr<UTriggerSet>>());
 
@@ -1070,12 +1082,111 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 
 	SpawnedGuards.Add(Guard);
 	RegisterDefender(Guard);
-	SpawnPoint->RegisterSpawnedGuard(Guard);
+	if (SpawnPoint)
+	{
+		SpawnPoint->RegisterSpawnedGuard(Guard);
+	}
 
 	UE_LOG(LogTerritory, Log, TEXT("[GuardReserve] 1 replacement spawned at %s for %s (faction=%s)"),
-		*SpawnPoint->GetName(),
+		SpawnPoint ? *SpawnPoint->GetName() : TEXT("random"),
 		*GetTerritoryTag().ToString(),
 		*OwnerFaction.ToString());
+}
+
+int32 ATerritoryVolume::GetGuardPurchaseCost(int32 Count) const
+{
+	return FMath::Max(0, Count) * FMath::Max(0, OwnershipData.GuardCost);
+}
+
+bool ATerritoryVolume::CanPurchaseGuards(const FGameplayTag& Faction, int32 Count, FText& OutFailureReason) const
+{
+	OutFailureReason = FText::GetEmpty();
+	if (!Faction.IsValid() || Count <= 0)
+	{
+		OutFailureReason = FText::FromString(TEXT("Invalid faction or guard count."));
+		return false;
+	}
+	if (OwnershipData.State != ETerritoryState::Claimed || OwnershipData.OwningFaction != Faction)
+	{
+		OutFailureReason = FText::FromString(TEXT("Your faction must own this claimed territory."));
+		return false;
+	}
+	if (!ResolveGuardDefinition(Faction))
+	{
+		OutFailureReason = FText::FromString(TEXT("No guard NPC definition is configured for this faction."));
+		return false;
+	}
+	if (GetSpawnedGuardCount() + Count > GetMaxGuardCount())
+	{
+		OutFailureReason = FText::FromString(TEXT("The garrison is at maximum capacity."));
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	const UTerritoryEconomySubsystem* Economy = World ? World->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
+	if (!Economy || !Economy->CanAfford(Faction, GetGuardPurchaseCost(Count)))
+	{
+		OutFailureReason = FText::FromString(TEXT("Your faction cannot afford this guard purchase."));
+		return false;
+	}
+	return true;
+}
+
+bool ATerritoryVolume::TryPurchaseGuards(const FGameplayTag& Faction, int32 Count, FText& OutResult)
+{
+	if (!HasAuthority() || !CanPurchaseGuards(Faction, Count, OutResult))
+	{
+		return false;
+	}
+
+	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
+	const int32 TotalCost = GetGuardPurchaseCost(Count);
+	const FString PurchaseReason = FString::Printf(TEXT("Purchased %d guard(s) for %s"), Count, *GetTerritoryTag().ToString());
+	if (!Economy || !Economy->TryDebitTreasury(Faction, TotalCost, PurchaseReason, ETerritoryTransactionType::Purchase))
+	{
+		OutResult = FText::FromString(TEXT("The treasury changed before the purchase completed."));
+		return false;
+	}
+
+	TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
+	SpawnPoints.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
+	{
+		return A.Priority > B.Priority;
+	});
+
+	int32 SpawnedCount = 0;
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		ATerritoryGuardSpawnPoint* SelectedPoint = nullptr;
+		for (ATerritoryGuardSpawnPoint* Point : SpawnPoints)
+		{
+			if (Point && Point->HasAvailableSlot())
+			{
+				SelectedPoint = Point;
+				break;
+			}
+		}
+
+		const int32 BeforeSpawn = GetSpawnedGuardCount();
+		SpawnSingleGuard(SelectedPoint);
+		if (GetSpawnedGuardCount() > BeforeSpawn)
+		{
+			++SpawnedCount;
+		}
+	}
+
+	if (SpawnedCount < Count)
+	{
+		const int32 Refund = GetGuardPurchaseCost(Count - SpawnedCount);
+		Economy->AddToTreasury(Faction, Refund,
+			FString::Printf(TEXT("Refunded failed guard spawn for %s"), *GetTerritoryTag().ToString()),
+			ETerritoryTransactionType::Purchase);
+	}
+
+	OwnershipData.DesiredGuardCount = FMath::Max(GetDesiredGuardCount(), GetSpawnedGuardCount());
+	OutResult = FText::FromString(FString::Printf(TEXT("Added %d guard(s) to %s."),
+		SpawnedCount, *GetTerritoryDisplayName().ToString()));
+	return SpawnedCount == Count;
 }
 
 void ATerritoryVolume::DespawnGuards()

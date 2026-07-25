@@ -1,7 +1,10 @@
 #include "UI/TerritoryInfoWidget.h"
 #include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Components/ProgressBar.h"
+#include "Components/TextBlock.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 void UTerritoryInfoWidget::NativeConstruct()
 {
@@ -12,11 +15,20 @@ void UTerritoryInfoWidget::NativeConstruct()
 	{
 		ResolveTerritoryFromTag();
 	}
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(DisplayRefreshTimerHandle, this,
+			&UTerritoryInfoWidget::RefreshTerritoryDisplay, 0.5f, true);
+	}
 }
 
 void UTerritoryInfoWidget::NativeDestruct()
 {
 	UnbindDelegates();
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DisplayRefreshTimerHandle);
+	}
 	Super::NativeDestruct();
 }
 
@@ -45,6 +57,7 @@ void UTerritoryInfoWidget::BindToTerritoryAtPlayer()
 		BoundTerritory = Territory;
 		BoundTerritoryTag = Territory->GetTerritoryTag();
 		BindDelegates();
+		RefreshTerritoryDisplay();
 		OnTerritoryBound(Territory);
 	}
 }
@@ -72,8 +85,10 @@ void UTerritoryInfoWidget::ResolveTerritoryFromTag()
 	ATerritoryVolume* Territory = Registry->GetTerritoryByTag(BoundTerritoryTag);
 	if (Territory)
 	{
+		UnbindDelegates();
 		BoundTerritory = Territory;
 		BindDelegates();
+		RefreshTerritoryDisplay();
 		OnTerritoryBound(Territory);
 	}
 }
@@ -82,6 +97,8 @@ void UTerritoryInfoWidget::BindDelegates()
 {
 	if (BoundTerritory.IsValid())
 	{
+		BoundTerritory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryInfoWidget::HandleControlChanged);
+		BoundTerritory->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryInfoWidget::HandleStateChanged);
 		BoundTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryInfoWidget::HandleControlChanged);
 		BoundTerritory->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryInfoWidget::HandleStateChanged);
 	}
@@ -98,10 +115,34 @@ void UTerritoryInfoWidget::UnbindDelegates()
 
 void UTerritoryInfoWidget::HandleControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	RefreshTerritoryDisplay();
 	OnTerritoryOwnershipChanged(OldOwner, NewOwner);
 }
 
 void UTerritoryInfoWidget::HandleStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState)
 {
+	RefreshTerritoryDisplay();
 	OnTerritoryStateChanged(NewState);
+}
+
+void UTerritoryInfoWidget::RefreshTerritoryDisplay()
+{
+	ATerritoryVolume* Territory = GetBoundTerritory();
+	if (!Territory) return;
+
+	if (TerritoryNameText) TerritoryNameText->SetText(Territory->GetTerritoryDisplayName());
+	if (TerritoryOwnerText) TerritoryOwnerText->SetText(FText::FromString(Territory->GetOwningFaction().ToString()));
+	if (TerritoryStateText)
+	{
+		const UEnum* StateEnum = StaticEnum<ETerritoryState>();
+		TerritoryStateText->SetText(StateEnum
+			? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(Territory->GetTerritoryState()))
+			: FText::GetEmpty());
+	}
+	if (TerritoryGuardCountText)
+	{
+		TerritoryGuardCountText->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"),
+			Territory->GetSpawnedGuardCount(), Territory->GetMaxGuardCount())));
+	}
+	if (TerritoryCaptureProgress) TerritoryCaptureProgress->SetPercent(Territory->GetControlProgress());
 }

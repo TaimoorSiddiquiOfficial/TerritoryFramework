@@ -36,9 +36,21 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
 	bool RequestAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
 
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat", meta=(DisplayName="Request Slot"))
+	bool RequestSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
+	{
+		return RequestAssaultSlot(Territory, Controller);
+	}
+
 	/** Release an assault slot. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
 	void ReleaseAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat", meta=(DisplayName="Release Slot"))
+	void ReleaseSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
+	{
+		ReleaseAssaultSlot(Territory, Controller);
+	}
 
 	/** Release all assault slots held by this controller across all territories. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
@@ -80,4 +92,8 @@ private:
 
 	/** Track which controllers we've already bound to avoid duplicate bindings. */
 	TSet<TWeakObjectPtr<ANarrativeNPCController>> BoundControllers;
+	TMap<TWeakObjectPtr<ANarrativeNPCController>, TWeakObjectPtr<UNarrativeAbilitySystemComponent>> BoundControllerASCs;
+
+	bool ControllerHasAnySlot(const ANarrativeNPCController* Controller) const;
+	UNarrativeAbilitySystemComponent* ResolveControllerASC(ANarrativeNPCController* Controller) const;
 };

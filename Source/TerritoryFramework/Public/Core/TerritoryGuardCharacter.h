@@ -9,6 +9,7 @@ class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
 class ATerritoryVolume;
+class UTerritoryPatrolGoal;
 
 /**
  * Territory guard NPC character. Bridges NarrativePro's NPC framework with
@@ -67,6 +68,14 @@ public:
 	/** Spawn point this guard was spawned from. May be null for random-spawned guards. */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category="Territory|AI", meta=(DisplayName="Owning Spawn Point"))
 	TObjectPtr<ATerritoryGuardSpawnPoint> OwningTerritorySpawnPoint;
+
+	/** Goal class added after Narrative's activity configuration is ready. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Patrol")
+	TSubclassOf<UTerritoryPatrolGoal> PatrolGoalClass;
+
+	/** Live per-guard goal populated from the assigned spawn point. */
+	UPROPERTY(Transient, BlueprintReadOnly, Category="Territory|AI|Patrol")
+	TObjectPtr<UTerritoryPatrolGoal> TerritoryPatrolGoal;
 
 	// ─── Patrol Route Helpers ───
 
@@ -141,8 +150,13 @@ public:
 		meta=(DisplayName="Is Spawn Point Guard"))
 	bool IsSpawnPointGuard() const;
 
+	/** Creates or refreshes this guard's per-instance Narrative patrol goal. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Guard|Patrol")
+	bool InitializeTerritoryPatrolGoal();
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void ApplyActivityConfig_Implementation(UNPCActivityConfiguration* NPCActivityConfig) override;
 
 	// Prevent Narrative save system from restoring stale guards on load.
 	virtual bool ShouldRespawn_Implementation() const override;

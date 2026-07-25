@@ -1,11 +1,13 @@
 #include "UI/TerritoryEconomyWidget.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
+#include "Components/TextBlock.h"
 #include "Engine/World.h"
 
 void UTerritoryEconomyWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	BindDelegates();
+	RefreshEconomyDisplay();
 }
 
 void UTerritoryEconomyWidget::NativeDestruct()
@@ -30,6 +32,7 @@ void UTerritoryEconomyWidget::SetDisplayFaction(const FGameplayTag& Faction)
 			Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
 			Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
 			OnEconomyUpdated(DisplayFaction, Snapshot);
+			RefreshEconomyDisplay();
 		}
 	}
 }
@@ -112,6 +115,7 @@ void UTerritoryEconomyWidget::ClientPollRefresh()
 	Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
 	Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
 	OnEconomyUpdated(DisplayFaction, Snapshot);
+	RefreshEconomyDisplay();
 }
 
 void UTerritoryEconomyWidget::HandleEconomyTick(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot)
@@ -119,6 +123,7 @@ void UTerritoryEconomyWidget::HandleEconomyTick(FGameplayTag Faction, FTerritory
 	if (Faction == DisplayFaction)
 	{
 		OnEconomyUpdated(Faction, Snapshot);
+		RefreshEconomyDisplay();
 	}
 }
 
@@ -127,7 +132,17 @@ void UTerritoryEconomyWidget::HandleTransactionRecorded(const FTerritoryTransact
 	if (Transaction.Faction == DisplayFaction)
 	{
 		OnTransactionRecorded(Transaction);
+		RefreshEconomyDisplay();
 	}
+}
+
+void UTerritoryEconomyWidget::RefreshEconomyDisplay()
+{
+	if (EconomyFactionText) EconomyFactionText->SetText(FText::FromString(DisplayFaction.ToString()));
+	if (EconomyTreasuryText) EconomyTreasuryText->SetText(FText::AsNumber(GetCurrentGold()));
+	if (EconomyIncomeText) EconomyIncomeText->SetText(FText::AsNumber(GetCurrentIncome()));
+	if (EconomyCostsText) EconomyCostsText->SetText(FText::AsNumber(GetCurrentCosts()));
+	if (EconomyTerritoryCountText) EconomyTerritoryCountText->SetText(FText::AsNumber(GetTerritoryCount()));
 }
 
 UTerritoryEconomySubsystem* UTerritoryEconomyWidget::GetEconomySubsystem() const

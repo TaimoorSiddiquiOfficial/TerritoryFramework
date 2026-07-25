@@ -1,0 +1,113 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Navigation/POIActor.h"
+#include "Navigation/MapMarker.h"
+#include "Navigation/NavigationMarkerComponent.h"
+#include "Interaction/InteractableComponent.h"
+#include "GameplayTagContainer.h"
+#include "TerritoryDistrictManagementPoint.generated.h"
+
+class ATerritoryDistrict;
+class UTerritoryDistrictManagementWidget;
+class USphereComponent;
+
+UCLASS(BlueprintType, Blueprintable, EditInlineNew)
+class TERRITORYFRAMEWORK_API UTerritoryDistrictPOIMarker : public UMapMarker
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryDistrictPOIMarker(const FObjectInitializer& ObjectInitializer);
+	void SetManagementPoint(class ATerritoryDistrictManagementPoint* Point);
+	void ClearManagementPoint();
+
+	virtual FText GetMarkerActionText_Implementation(UNarrativeNavigationComponent* Selector) const override;
+	virtual FText GetMarkerDisplayText_Implementation(UNarrativeNavigationComponent* Selector,
+		const FGameplayTag& NavigatorType, FText& OutSubtitleText) const override;
+	virtual FLinearColor GetMarkerColor_Implementation(UNarrativeNavigationComponent* Selector,
+		const FGameplayTag& NavigatorType) const override;
+	virtual bool CanInteract_Implementation(UNarrativeNavigationComponent* Selector) const override;
+	virtual void OnSelect_Implementation(UNarrativeNavigationComponent* Selector) override;
+
+private:
+	TWeakObjectPtr<class ATerritoryDistrictManagementPoint> ManagementPoint;
+};
+
+UCLASS(ClassGroup=(Territory), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
+class TERRITORYFRAMEWORK_API UTerritoryDistrictNavigationMarkerComponent : public UNavigationMarkerComponent
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryDistrictNavigationMarkerComponent(const FObjectInitializer& ObjectInitializer);
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<UTerritoryDistrictPOIMarker> DistrictMarker;
+};
+
+UCLASS(ClassGroup=(Territory), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
+class TERRITORYFRAMEWORK_API UTerritoryDistrictInteractableComponent : public UNarrativeInteractableComponent
+{
+	GENERATED_BODY()
+
+public:
+	virtual FText GetInteractableNameText_Implementation(APawn* Interactor,
+		UNarrativeInteractionComponent* InteractionComp) const override;
+	virtual FText GetInteractableActionText_Implementation(APawn* Interactor,
+		UNarrativeInteractionComponent* InteractionComp) const override;
+
+protected:
+	virtual bool CanInteract_Implementation(APawn* Interactor,
+		UNarrativeInteractionComponent* InteractionComp, FText& OutErrorText) override;
+	virtual void OnInteract_Implementation(APawn* Interactor,
+		UNarrativeInteractionComponent* InteractionComp) override;
+};
+
+/** Project-owned Narrative POI and interactable used to manage a captured District. */
+UCLASS(BlueprintType, Blueprintable)
+class TERRITORYFRAMEWORK_API ATerritoryDistrictManagementPoint : public APOIActor
+{
+	GENERATED_BODY()
+
+public:
+	ATerritoryDistrictManagementPoint(const FObjectInitializer& ObjectInitializer);
+	virtual void BeginPlay() override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management", meta=(Categories="Territory"))
+	FGameplayTag DistrictTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management")
+	TSubclassOf<UTerritoryDistrictManagementWidget> ManagementWidgetClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management", meta=(ClampMin="100"))
+	float ManagementDistance = 600.f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Management")
+	TObjectPtr<USphereComponent> InteractionSphere;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Management")
+	TObjectPtr<UTerritoryDistrictInteractableComponent> InteractableComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Management")
+	TObjectPtr<UTerritoryDistrictNavigationMarkerComponent> DistrictMarkerComponent;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	ATerritoryDistrict* ResolveDistrict() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	bool CanManage(APawn* Interactor, FText& OutFailureReason) const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	bool IsInteractorInRange(APawn* Interactor) const;
+
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void OpenManagementWidget(APlayerController* PlayerController);
+
+	void HandleInteraction(APawn* Interactor);
+};
