@@ -17,6 +17,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category="Territory|Patrol")
 	TArray<FTerritoryPatrolNode> TerritoryPatrol;
 
+	virtual float GetGoalScore_Implementation() const override;
 	virtual FString GetDebugString_Implementation() const override;
 	virtual bool ShouldCleanup_Implementation() const override;
 };

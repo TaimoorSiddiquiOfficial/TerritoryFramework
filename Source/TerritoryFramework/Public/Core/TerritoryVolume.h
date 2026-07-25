@@ -261,6 +261,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Spawn Single Guard"))
 	void SpawnSingleGuard(class ATerritoryGuardSpawnPoint* SpawnPoint);
 
+	/** Attempts one guard spawn and reports whether it completed successfully. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Spawn Single Guard"))
+	bool TrySpawnSingleGuard(class ATerritoryGuardSpawnPoint* SpawnPoint, bool bRequireConcealment = false);
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Despawn Guards"))
 	void DespawnGuards();
 
@@ -471,6 +475,10 @@ private:
 	void BindDefenderDeath(AActor* Defender);
 	void UnbindDefenderDeath(AActor* Defender);
 	void CleanupInvalidDefenders();
+	bool HasPendingReserveDeployments() const;
+	bool FindGuardSpawnTransform(ATerritoryGuardSpawnPoint* SpawnPoint, UClass* GuardClass,
+		bool bRequireConcealment, FTransform& OutTransform) const;
+	bool IsGuardSpawnLocationClear(UClass* GuardClass, const FVector& Location) const;
 
 	FVector GetRandomSpawnPoint() const;
 };

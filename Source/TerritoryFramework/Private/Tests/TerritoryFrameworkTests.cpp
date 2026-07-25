@@ -10,6 +10,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "AI/TerritoryPatrolGoal.h"
 #include "Core/TerritoryWorldState.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
@@ -2312,6 +2313,12 @@ bool FTFContract_TerritoryGuardCharacter::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Has ConfigureTerritorySpawn"),
 		TFTestUtils::HasFunction(Class, TEXT("ConfigureTerritorySpawn")));
 
+	UTerritoryPatrolGoal* PatrolGoal = NewObject<UTerritoryPatrolGoal>();
+	TestEqual(TEXT("Empty patrol goals do not score"), PatrolGoal->GetGoalScore(), 0.f);
+	PatrolGoal->TerritoryPatrol.SetNum(2);
+	TestEqual(TEXT("Populated patrol goals retain their configured score"),
+		PatrolGoal->GetGoalScore(), PatrolGoal->DefaultScore);
+
 	return true;
 }
 
@@ -2347,6 +2354,25 @@ bool FTFContract_GuardSpawnPointPure::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPatrolWaitTimes")));
 	TestTrue(TEXT("GetOwningTerritory is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetOwningTerritory")));
+	TestTrue(TEXT("HasPendingReserveSpawn is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasPendingReserveSpawn")));
+	TestTrue(TEXT("SpawnReserveGuard is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("SpawnReserveGuard")));
+	TestTrue(TEXT("SpawnReserveGuard is authority-only"),
+		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("SpawnReserveGuard")));
+	TestTrue(TEXT("Has automatic reserve policy"),
+		TFTestUtils::HasProperty(Class, TEXT("bAutoSpawnReserves")));
+	TestTrue(TEXT("Has reserve deployment delay"),
+		TFTestUtils::HasProperty(Class, TEXT("ReserveSpawnDelay")));
+	TestTrue(TEXT("Has randomized reserve radius"),
+		TFTestUtils::HasProperty(Class, TEXT("ReserveSpawnRadius")));
+	TestTrue(TEXT("Has reserve player clearance"),
+		TFTestUtils::HasProperty(Class, TEXT("ReserveMinimumPlayerDistance")));
+
+	const ATerritoryGuardSpawnPoint* DefaultSpawnPoint = Class->GetDefaultObject<ATerritoryGuardSpawnPoint>();
+	TestTrue(TEXT("Automatic reserve spawning defaults enabled"), DefaultSpawnPoint->bAutoSpawnReserves);
+	TestTrue(TEXT("Automatic reserves are delayed"), DefaultSpawnPoint->ReserveSpawnDelay > 0.f);
+	TestTrue(TEXT("Automatic reserves sample multiple candidates"), DefaultSpawnPoint->ReserveSpawnCandidateCount > 1);
 
 	return true;
 }
@@ -2399,6 +2425,10 @@ bool FTFContract_VolumePureGetters::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("LockTerritory")));
 	TestTrue(TEXT("SpawnGuards is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("SpawnGuards")));
+	TestTrue(TEXT("TrySpawnSingleGuard is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("TrySpawnSingleGuard")));
+	TestTrue(TEXT("TrySpawnSingleGuard is authority-only"),
+		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("TrySpawnSingleGuard")));
 
 	return true;
 }

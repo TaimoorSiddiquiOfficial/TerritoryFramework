@@ -94,6 +94,36 @@ public:
 		meta=(ClampMin="0", UIMin="0", UIMax="10", DisplayName="Reserve Slots"))
 	int32 ReserveSlots = 1;
 
+	/** Automatically deploy queued reserves after a tracked guard dies. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+		meta=(DisplayName="Auto Spawn Reserves"))
+	bool bAutoSpawnReserves = true;
+
+	/** Delay before the first automatic reserve deployment. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+		meta=(ClampMin="0.1", UIMin="0.1", UIMax="30.0", Units="s", DisplayName="Reserve Spawn Delay"))
+	float ReserveSpawnDelay = 3.f;
+
+	/** Retry interval while no concealed, collision-free spawn location is available. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+		meta=(ClampMin="0.1", UIMin="0.1", UIMax="30.0", Units="s", DisplayName="Reserve Retry Interval"))
+	float ReserveSpawnRetryInterval = 2.f;
+
+	/** Radius around this actor used to randomize automatic reserve placement. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+		meta=(ClampMin="100.0", UIMin="100.0", UIMax="3000.0", Units="cm", DisplayName="Reserve Spawn Radius"))
+	float ReserveSpawnRadius = 600.f;
+
+	/** Minimum distance automatic reserve spawns keep from every player camera. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+		meta=(ClampMin="0.0", UIMin="0.0", UIMax="3000.0", Units="cm", DisplayName="Reserve Player Clearance"))
+	float ReserveMinimumPlayerDistance = 500.f;
+
+	/** Number of random navmesh candidates considered per automatic deployment attempt. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+		meta=(ClampMin="1", ClampMax="64", UIMin="1", UIMax="32", DisplayName="Reserve Spawn Attempts"))
+	int32 ReserveSpawnCandidateCount = 12;
+
 	/**
 	 * The patrol route this spawn point's guards walk through.
 	 * Empty = guard stands idle at spawn. Minimum useful route: 2 nodes.
@@ -158,6 +188,19 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Slot",
 		meta=(DisplayName="Get Reserve Count"))
 	int32 GetReserveCount() const;
+
+	/** Returns true while a dead active slot is waiting for reserve deployment. */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Reserve",
+		meta=(DisplayName="Has Pending Reserve Spawn"))
+	bool HasPendingReserveSpawn() const;
+
+	/**
+	 * Deploys one reserve into a free active slot. This is the manual path when
+	 * Auto Spawn Reserves is disabled and intentionally does not require concealment.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|GuardSpawn|Reserve",
+		meta=(DisplayName="Spawn Reserve Guard"))
+	bool SpawnReserveGuard();
 
 	// ─── Transform Query ───
 
@@ -267,6 +310,11 @@ protected:
 	UPROPERTY()
 	int32 CurrentReserveCount = 0;
 
+	UPROPERTY()
+	int32 PendingReserveSpawns = 0;
+
+	FTimerHandle ReserveSpawnTimer;
+
 	// ─── Editor Visualization ───
 
 	UPROPERTY(EditDefaultsOnly, Category="Territory|GuardSpawn|Visual",
@@ -292,4 +340,10 @@ private:
 	void BindToTerritory(ATerritoryVolume* Territory);
 	void ResolveOwningTerritory();
 	void InitializeReserves();
+	void QueueReserveSpawn();
+	void ScheduleAutomaticReserveSpawn(float Delay);
+	void TryAutomaticReserveSpawn();
+	bool TrySpawnReserveGuard(bool bRequireConcealment);
+	void CancelPendingReserveSpawns();
+	void ResetReserveState();
 };

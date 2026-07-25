@@ -18,6 +18,7 @@ class TERRITORYFRAMEWORK_API UBTService_TerritoryAssaultPermission : public UBTS
 public:
 	UBTService_TerritoryAssaultPermission();
 
+	/** Territory or target Actor whose current Territory owns the assault limit. */
 	UPROPERTY(EditAnywhere, Category="Blackboard")
 	FBlackboardKeySelector TerritoryKey;
 

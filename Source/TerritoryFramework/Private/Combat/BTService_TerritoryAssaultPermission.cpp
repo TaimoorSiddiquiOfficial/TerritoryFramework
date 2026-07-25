@@ -16,7 +16,7 @@ UBTService_TerritoryAssaultPermission::UBTService_TerritoryAssaultPermission()
 	bNotifyTick = true;
 	Interval = 0.5f;
 	RandomDeviation = 0.f;
-	TerritoryKey.AddObjectFilter(this, GET_MEMBER_NAME_CHECKED(UBTService_TerritoryAssaultPermission, TerritoryKey), ATerritoryVolume::StaticClass());
+	TerritoryKey.AddObjectFilter(this, GET_MEMBER_NAME_CHECKED(UBTService_TerritoryAssaultPermission, TerritoryKey), AActor::StaticClass());
 	PermissionGrantedKey.AddBoolFilter(this, GET_MEMBER_NAME_CHECKED(UBTService_TerritoryAssaultPermission, PermissionGrantedKey));
 }
 
@@ -43,9 +43,20 @@ ATerritoryVolume* UBTService_TerritoryAssaultPermission::ResolveTerritory(UBehav
 	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
 	if (Blackboard && TerritoryKey.SelectedKeyType)
 	{
-		if (ATerritoryVolume* Territory = Cast<ATerritoryVolume>(Blackboard->GetValueAsObject(TerritoryKey.SelectedKeyName)))
+		AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(TerritoryKey.SelectedKeyName));
+		if (ATerritoryVolume* Territory = Cast<ATerritoryVolume>(TargetActor))
 		{
 			return Territory;
+		}
+		if (TargetActor)
+		{
+			if (UTerritoryRegistrySubsystem* Registry = TargetActor->GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+			{
+				if (ATerritoryVolume* Territory = Registry->GetTerritoryAtLocation(TargetActor->GetActorLocation()))
+				{
+					return Territory;
+				}
+			}
 		}
 	}
 

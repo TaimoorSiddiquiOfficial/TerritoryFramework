@@ -8,6 +8,11 @@ UTerritoryPatrolGoal::UTerritoryPatrolGoal(const FObjectInitializer& ObjectIniti
 	bSaveGoal = false;
 }
 
+float UTerritoryPatrolGoal::GetGoalScore_Implementation() const
+{
+	return TerritoryPatrol.Num() >= 2 ? Super::GetGoalScore_Implementation() : 0.f;
+}
+
 FString UTerritoryPatrolGoal::GetDebugString_Implementation() const
 {
 	return FString::Printf(TEXT("Territory patrol (%d nodes)"), TerritoryPatrol.Num());

@@ -7,6 +7,7 @@
 #include "AbilitySystemInterface.h"
 #include "SaveSystemStatics.h"
 #include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Misc/Crc.h"
 #include "Engine/World.h"
@@ -19,6 +20,7 @@
 #include "Character/CharacterDefinition.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "GameFramework/PlayerController.h"
 #include "DrawDebugHelpers.h"
 #include "NavigationSystem.h"
 #include "Navigation/TerritoryNavigationMarkerComponent.h"
@@ -776,11 +778,14 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 			GetDefenderCount());
 	}
 
-	// Narrative's death delegate provides the victim ASC, not the damage instigator.
-	// Do not misattribute the victim as its own killer.
-	OnGuardKilled.Broadcast(this, KilledActor, nullptr, GetDefenderCount());
+	// Remove the dead guard before any replacement attempt so capacity checks are accurate.
+	SpawnedGuards.RemoveAll([KilledActor](const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr)
+	{
+		return !Ptr.IsValid() || Ptr.Get() == KilledActor;
+	});
 
-	// Notify spawn points that a guard died (triggers reserve replacement)
+	// Queue reserve deployment before broadcasting so a manual Blueprint listener can
+	// satisfy the same request without racing a synchronous automatic spawn.
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
 	{
 		for (const TObjectPtr<AActor>& SPActor : GuardSpawnPoints)
@@ -792,17 +797,15 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 		}
 	}
 
-	// Remove from spawned guards list
-	SpawnedGuards.RemoveAll([KilledActor](const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr)
-	{
-		return !Ptr.IsValid() || Ptr.Get() == KilledActor;
-	});
+	// Narrative's death delegate provides the victim ASC, not the damage instigator.
+	// Do not misattribute the victim as its own killer.
+	OnGuardKilled.Broadcast(this, KilledActor, nullptr, GetDefenderCount());
 
 	// Check ALL registered defenders (includes non-guard defenders registered via
 	// RegisterDefender Blueprint API), not just SpawnedGuards — otherwise territory
 	// flips to Unclaimed while player/pawn defenders are still alive.
 	CleanupInvalidDefenders();
-	if (RegisteredDefenders.Num() == 0)
+	if (RegisteredDefenders.Num() == 0 && !HasPendingReserveDeployments())
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All defenders defeated in %s"),
 			*GetTerritoryTag().ToString());
@@ -840,6 +843,18 @@ void ATerritoryVolume::UnbindDefenderDeath(AActor* Defender)
 void ATerritoryVolume::CleanupInvalidDefenders()
 {
 	RegisteredDefenders.RemoveAll([](const TWeakObjectPtr<AActor>& Ptr) { return !Ptr.IsValid(); });
+}
+
+bool ATerritoryVolume::HasPendingReserveDeployments() const
+{
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+	{
+		if (SpawnPoint && SpawnPoint->HasPendingReserveSpawn())
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 void ATerritoryVolume::CheckBoundsForReindex()
@@ -921,6 +936,13 @@ void ATerritoryVolume::SpawnGuards()
 	{
 		return A.Priority > B.Priority;
 	});
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPointActors)
+	{
+		if (SpawnPoint)
+		{
+			SpawnPoint->ResetReserveState();
+		}
+	}
 	int32 NextSPIdx = 0;
 
 	if (bDebug)
@@ -1025,16 +1047,29 @@ void ATerritoryVolume::SpawnGuards()
 
 void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 {
-	if (!HasAuthority()) return;
+	TrySpawnSingleGuard(SpawnPoint, false);
+}
+
+bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint, bool bRequireConcealment)
+{
+	if (!HasAuthority() || OwnershipData.State != ETerritoryState::Claimed)
+	{
+		return false;
+	}
 
 	UWorld* World = GetWorld();
-	if (!World) return;
+	if (!World) return false;
 
 	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
-	if (!OwnerFaction.IsValid()) return;
+	if (!OwnerFaction.IsValid()) return false;
+	if (GetSpawnedGuardCount() >= GetMaxGuardCount()) return false;
+	if (SpawnPoint && (SpawnPoint->GetOwningTerritory() != this || !SpawnPoint->HasAvailableSlot()))
+	{
+		return false;
+	}
 
 	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
-	if (!EffectiveDef) return;
+	if (!EffectiveDef) return false;
 
 	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
@@ -1042,17 +1077,19 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 
-	FTransform SpawnTransform = SpawnPoint
-		? SpawnPoint->GetSpawnTransform()
-		: FTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), GetRandomSpawnPoint());
+	FTransform SpawnTransform;
+	if (!FindGuardSpawnTransform(SpawnPoint, NPCClass, bRequireConcealment, SpawnTransform))
+	{
+		return false;
+	}
 
 	ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
 		UGameplayStatics::BeginDeferredActorSpawnFromClass(
 			this, NPCClass, SpawnTransform,
-			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn,
+			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding,
 			this));
 
-	if (!Guard) return;
+	if (!Guard) return false;
 
 	FGuid GuardSaveGUID = FGuid::NewGuid();
 
@@ -1078,7 +1115,11 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 	Guard->OwningTerritory = this;
 	Guard->OwningTerritorySpawnPoint = SpawnPoint;
 
-	UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
+	AActor* FinishedGuard = UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
+	if (!IsValid(FinishedGuard) || Guard->IsActorBeingDestroyed())
+	{
+		return false;
+	}
 
 	SpawnedGuards.Add(Guard);
 	RegisterDefender(Guard);
@@ -1091,6 +1132,147 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 		SpawnPoint ? *SpawnPoint->GetName() : TEXT("random"),
 		*GetTerritoryTag().ToString(),
 		*OwnerFaction.ToString());
+	return true;
+}
+
+bool ATerritoryVolume::FindGuardSpawnTransform(ATerritoryGuardSpawnPoint* SpawnPoint, UClass* GuardClass,
+	bool bRequireConcealment, FTransform& OutTransform) const
+{
+	if (!SpawnPoint)
+	{
+		OutTransform = FTransform(FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f), GetRandomSpawnPoint());
+		return true;
+	}
+
+	if (!bRequireConcealment)
+	{
+		OutTransform = SpawnPoint->GetSpawnTransform();
+		return true;
+	}
+
+	UWorld* World = GetWorld();
+	UNavigationSystemV1* NavSystem = World
+		? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World)
+		: nullptr;
+	if (!World || !NavSystem || !GuardClass)
+	{
+		return false;
+	}
+
+	float CapsuleHalfHeight = 88.f;
+	if (const ATerritoryGuardCharacter* GuardCDO = GuardClass->GetDefaultObject<ATerritoryGuardCharacter>())
+	{
+		if (const UCapsuleComponent* Capsule = GuardCDO->GetCapsuleComponent())
+		{
+			CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+		}
+	}
+
+	struct FPlayerView
+	{
+		FVector Location;
+		FVector Forward;
+	};
+	TArray<FPlayerView> PlayerViews;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PlayerController = It->Get();
+		if (!PlayerController) continue;
+
+		FVector ViewLocation;
+		FRotator ViewRotation;
+		PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+		FVector ViewForward = ViewRotation.Vector();
+		ViewForward.Z = 0.f;
+		if (!ViewForward.Normalize()) continue;
+		PlayerViews.Add({ViewLocation, ViewForward});
+	}
+
+	const FVector Origin = SpawnPoint->GetSpawnTransform().GetLocation();
+	const int32 Attempts = FMath::Clamp(SpawnPoint->ReserveSpawnCandidateCount, 1, 64);
+	const float Radius = FMath::Max(100.f, SpawnPoint->ReserveSpawnRadius);
+	const float MinimumPlayerDistanceSq = FMath::Square(FMath::Max(0.f, SpawnPoint->ReserveMinimumPlayerDistance));
+	float BestFacingScore = TNumericLimits<float>::Max();
+	bool bFoundCandidate = false;
+	FVector BestLocation = FVector::ZeroVector;
+
+	for (int32 Attempt = 0; Attempt < Attempts; ++Attempt)
+	{
+		FNavLocation NavLocation;
+		if (!NavSystem->GetRandomReachablePointInRadius(Origin, Radius, NavLocation))
+		{
+			continue;
+		}
+
+		const FVector Candidate = NavLocation.Location + FVector(0.f, 0.f, CapsuleHalfHeight + 2.f);
+		if (!IsGuardSpawnLocationClear(GuardClass, Candidate))
+		{
+			continue;
+		}
+
+		bool bConcealed = true;
+		float WorstFacingScore = -1.f;
+		for (const FPlayerView& View : PlayerViews)
+		{
+			FVector ToCandidate = Candidate - View.Location;
+			if (ToCandidate.SizeSquared() < MinimumPlayerDistanceSq)
+			{
+				bConcealed = false;
+				break;
+			}
+
+			ToCandidate.Z = 0.f;
+			if (!ToCandidate.Normalize())
+			{
+				bConcealed = false;
+				break;
+			}
+
+			const float FacingScore = FVector::DotProduct(View.Forward, ToCandidate);
+			WorstFacingScore = FMath::Max(WorstFacingScore, FacingScore);
+			if (FacingScore > 0.f)
+			{
+				bConcealed = false;
+				break;
+			}
+		}
+
+		if (bConcealed && WorstFacingScore < BestFacingScore)
+		{
+			BestFacingScore = WorstFacingScore;
+			BestLocation = Candidate;
+			bFoundCandidate = true;
+		}
+	}
+
+	if (!bFoundCandidate)
+	{
+		return false;
+	}
+
+	OutTransform = FTransform(FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f), BestLocation);
+	return true;
+}
+
+bool ATerritoryVolume::IsGuardSpawnLocationClear(UClass* GuardClass, const FVector& Location) const
+{
+	const UWorld* World = GetWorld();
+	const ATerritoryGuardCharacter* GuardCDO = GuardClass
+		? GuardClass->GetDefaultObject<ATerritoryGuardCharacter>()
+		: nullptr;
+	const UCapsuleComponent* Capsule = GuardCDO ? GuardCDO->GetCapsuleComponent() : nullptr;
+	if (!World || !Capsule)
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(TerritoryReserveSpawn), false, this);
+	return !World->OverlapBlockingTestByProfile(
+		Location,
+		FQuat::Identity,
+		Capsule->GetCollisionProfileName(),
+		FCollisionShape::MakeCapsule(Capsule->GetScaledCapsuleRadius(), Capsule->GetScaledCapsuleHalfHeight()),
+		QueryParams);
 }
 
 int32 ATerritoryVolume::GetGuardPurchaseCost(int32 Count) const
@@ -1167,9 +1349,7 @@ bool ATerritoryVolume::TryPurchaseGuards(const FGameplayTag& Faction, int32 Coun
 			}
 		}
 
-		const int32 BeforeSpawn = GetSpawnedGuardCount();
-		SpawnSingleGuard(SelectedPoint);
-		if (GetSpawnedGuardCount() > BeforeSpawn)
+		if (TrySpawnSingleGuard(SelectedPoint, false))
 		{
 			++SpawnedCount;
 		}
@@ -1191,6 +1371,14 @@ bool ATerritoryVolume::TryPurchaseGuards(const FGameplayTag& Faction, int32 Coun
 
 void ATerritoryVolume::DespawnGuards()
 {
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+	{
+		if (SpawnPoint)
+		{
+			SpawnPoint->CancelPendingReserveSpawns();
+		}
+	}
+
 	for (TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
 	{
 		if (GuardPtr.IsValid())
