@@ -386,6 +386,23 @@ protected:
 		meta=(DisplayName="Starts Locked"))
 	bool bStartsLocked = false;
 
+	// ─── State Configuration (Conditions & Events) ───
+
+	/**
+	 * State configuration map — assign conditions and events per territory state.
+	 * EntryConditions must all pass to enter that state; EntryEvents fire on entry;
+	 * ExitEvents fire on exit. Evaluated in SetTerritoryState before/after transition.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|States",
+		meta=(DisplayName="State Configs"))
+	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
+
+	/** Check if all EntryConditions for the given state pass. */
+	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason) const;
+
+	/** Fire EntryEvents (bEntering=true) or ExitEvents (bEntering=false) for the given state. */
+	void FireStateEvents(ETerritoryState State, bool bEntering);
+
 	// ─── Lock System ───
 
 	/**

@@ -23,6 +23,12 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Management")
 	FOnTerritoryGuardPurchaseResult OnGuardPurchaseResult;
 
+	UPROPERTY(EditDefaultsOnly, Category="Territory|Management", meta=(ClampMin="0"))
+	float PurchaseCooldown = 0.5f;
+
+	UPROPERTY(EditDefaultsOnly, Category="Territory|Management", meta=(ClampMin="1"))
+	int32 MaxGuardPurchaseCount = 10;
+
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestPurchaseGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count = 1);
 
@@ -38,4 +44,6 @@ private:
 
 	void PerformPurchase(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count);
 	APawn* GetManagingPawn() const;
+
+	float LastPurchaseRequestTime = 0.f;
 };

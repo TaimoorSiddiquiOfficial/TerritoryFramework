@@ -183,6 +183,28 @@ struct FCaptureAttempt
 	int32 DefendersPresent = 0;
 };
 
+/**
+ * Per-state configuration for Narrative conditions and events.
+ * Conditions must pass for the state to be entered; events fire on transition.
+ */
+USTRUCT(BlueprintType)
+struct FTerritoryStateConfig
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
+		meta=(DisplayName="Entry Conditions"))
+	TArray<TObjectPtr<class UNarrativeCondition>> EntryConditions;
+
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",
+		meta=(DisplayName="Entry Events"))
+	TArray<TObjectPtr<class UNarrativeEvent>> EntryEvents;
+
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",
+		meta=(DisplayName="Exit Events"))
+	TArray<TObjectPtr<class UNarrativeEvent>> ExitEvents;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Delegates
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -76,6 +76,12 @@ public:
 	/** Native persistence bridge. Replaces all tracked faction economy parameters. */
 	void RestoreTreasuryState(const TMap<FGameplayTag, FTerritoryTreasury>& Treasuries);
 
+	/** Native persistence bridge. Replaces the faction gold balance map. */
+	void RestoreFactionGold(const TMap<FGameplayTag, int32>& Gold);
+
+	/** Native access to the faction gold map for save serialization. */
+	const TMap<FGameplayTag, int32>& GetAllFactionGold() const { return FactionGold; }
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	void RecalculateIncome(const FGameplayTag& Faction);
 
@@ -97,6 +103,12 @@ public:
 private:
 	UPROPERTY(SaveGame)
 	TMap<FGameplayTag, FTerritoryTreasury> FactionTreasuries;
+
+	/** Dedicated faction gold balance — persists independently of member inventories.
+	 *  Income adds here; purchases deduct from here first, then from member inventories.
+	 *  Enables NPC-only factions to accumulate wealth and survives full-member-offline periods. */
+	UPROPERTY(SaveGame)
+	TMap<FGameplayTag, int32> FactionGold;
 
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryTransaction> TransactionLedger;

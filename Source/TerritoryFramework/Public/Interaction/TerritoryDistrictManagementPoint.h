@@ -109,5 +109,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void OpenManagementWidget(APlayerController* PlayerController);
 
+	UFUNCTION(Client, Reliable)
+	void Client_OpenManagementWidget(APlayerController* PlayerController);
+
 	void HandleInteraction(APawn* Interactor);
 };

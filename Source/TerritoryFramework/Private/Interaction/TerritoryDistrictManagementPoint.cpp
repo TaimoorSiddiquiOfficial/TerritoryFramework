@@ -68,7 +68,9 @@ bool UTerritoryDistrictPOIMarker::CanInteract_Implementation(UNarrativeNavigatio
 	if (!ManagementPoint.IsValid() || !Selector) return false;
 	const APlayerController* PlayerController = Cast<APlayerController>(Selector->GetOwner());
 	FText FailureReason;
-	return PlayerController && ManagementPoint->CanManage(PlayerController->GetPawn(), FailureReason);
+	return PlayerController
+		&& ManagementPoint->CanManage(PlayerController->GetPawn(), FailureReason)
+		&& ManagementPoint->IsInteractorInRange(PlayerController->GetPawn());
 }
 
 void UTerritoryDistrictPOIMarker::OnSelect_Implementation(UNarrativeNavigationComponent* Selector)
@@ -173,6 +175,10 @@ void ATerritoryDistrictManagementPoint::BeginPlay()
 		POITag = District->GetTerritoryTag();
 		POIDisplayName = District->GetTerritoryDisplayName();
 	}
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(ManagementDistance);
+	}
 	if (InteractableComponent)
 	{
 		InteractableComponent->InteractionDistance = ManagementDistance;
@@ -215,10 +221,15 @@ bool ATerritoryDistrictManagementPoint::IsInteractorInRange(APawn* Interactor) c
 
 void ATerritoryDistrictManagementPoint::HandleInteraction(APawn* Interactor)
 {
-	if (Interactor && Interactor->IsLocallyControlled())
+	if (Interactor)
 	{
-		OpenManagementWidget(Cast<APlayerController>(Interactor->GetController()));
+		Client_OpenManagementWidget(Cast<APlayerController>(Interactor->GetController()));
 	}
+}
+
+void ATerritoryDistrictManagementPoint::Client_OpenManagementWidget_Implementation(APlayerController* PlayerController)
+{
+	OpenManagementWidget(PlayerController);
 }
 
 void ATerritoryDistrictManagementPoint::OpenManagementWidget(APlayerController* PlayerController)

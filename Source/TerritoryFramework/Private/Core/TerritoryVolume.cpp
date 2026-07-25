@@ -25,6 +25,7 @@
 #include "NavigationSystem.h"
 #include "Navigation/TerritoryNavigationMarkerComponent.h"
 #include "Tales/NarrativeCondition.h"
+#include "Tales/NarrativeEvent.h"
 
 ATerritoryVolume::ATerritoryVolume()
 {
@@ -594,7 +595,26 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 			static_cast<int32>(OldState), static_cast<int32>(NewState));
 	}
 
+	// Fire exit events for the current state
+	FireStateEvents(OldState, false);
+
+	// Check entry conditions for the new state — block transition if they fail
+	FText ConditionFailure;
+	if (!CheckStateConditions(NewState, ConditionFailure))
+	{
+		if (Settings && Settings->ShouldDebugStateTransitions())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s: blocked → %d — %s"),
+				*GetTerritoryTag().ToString(),
+				static_cast<int32>(NewState), *ConditionFailure.ToString());
+		}
+		return;
+	}
+
 	OwnershipData.State = NewState;
+
+	// Fire entry events for the new state
+	FireStateEvents(NewState, true);
 
 	// Guard lifecycle invariants — run BEFORE BP virtual.
 	// Keep the incumbent owner while contested so an abandoned capture can restore
@@ -617,6 +637,53 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 
 	OnStateChanged(OldState, NewState);
 	OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
+}
+
+bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason) const
+{
+	const FTerritoryStateConfig* Config = StateConfigs.Find(State);
+	if (!Config || Config->EntryConditions.IsEmpty())
+	{
+		OutFailureReason = FText::GetEmpty();
+		return true;
+	}
+
+	UWorld* World = GetWorld();
+	APlayerController* ContextPC = World ? World->GetFirstPlayerController() : nullptr;
+	APawn* ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
+
+	for (const TObjectPtr<UNarrativeCondition>& Cond : Config->EntryConditions)
+	{
+		if (!Cond) continue;
+		if (!Cond->CheckCondition(ContextPawn, ContextPC, nullptr))
+		{
+			OutFailureReason = FText::FromString(FString::Printf(TEXT("Condition '%s' not met."),
+				*Cond->GetGraphDisplayText()));
+			return false;
+		}
+	}
+
+	OutFailureReason = FText::GetEmpty();
+	return true;
+}
+
+void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering)
+{
+	const FTerritoryStateConfig* Config = StateConfigs.Find(State);
+	if (!Config) return;
+
+	const TArray<TObjectPtr<UNarrativeEvent>>* Events = bEntering ? &Config->EntryEvents : &Config->ExitEvents;
+	if (!Events || Events->IsEmpty()) return;
+
+	UWorld* World = GetWorld();
+	APlayerController* ContextPC = World ? World->GetFirstPlayerController() : nullptr;
+	APawn* ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
+
+	for (const TObjectPtr<UNarrativeEvent>& Event : *Events)
+	{
+		if (!Event) continue;
+		Event->ExecuteEvent(ContextPawn, ContextPC, nullptr);
+	}
 }
 
 // ─── Lock System ───

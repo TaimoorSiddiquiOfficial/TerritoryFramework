@@ -20,6 +20,17 @@ void UTerritoryPlayerManagementComponent::RequestPurchaseGuards(
 		return;
 	}
 
+	// Anti-spam: ignore requests within cooldown window
+	if (UWorld* World = GetWorld())
+	{
+		const float Now = World->GetTimeSeconds();
+		if (Now - LastPurchaseRequestTime < PurchaseCooldown)
+		{
+			return;
+		}
+		LastPurchaseRequestTime = Now;
+	}
+
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
 		PerformPurchase(ManagementPoint, Count);
@@ -48,7 +59,7 @@ void UTerritoryPlayerManagementComponent::PerformPurchase(
 	{
 		Result = FText::FromString(TEXT("District management context is unavailable."));
 	}
-	else if (Count <= 0 || Count > 10)
+	else if (Count <= 0 || Count > MaxGuardPurchaseCount)
 	{
 		Result = FText::FromString(TEXT("Guard purchase count is invalid."));
 	}
