@@ -44,6 +44,10 @@ ATerritoryVolume (base — placed in level for any territory)
 
 See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-call requirements.
 
+> **Startup GUID Fallback:** If `TerritoryGUID` is not baked (missed editor save), a deterministic GUID is derived from `TerritoryTag` via `FCrc::StrCrc32`. This GUID only varies in the first `uint32` component, so two territories sharing the same hash would collide. Always save the level after placement to bake a proper GUID.
+>
+> **Actor Tick:** `bStartWithTickEnabled` is `false` on all territory volumes. All periodic logic (capture, economy, diplomacy, bounds tracking) runs through subsystem timers. The volume's native `Tick` is unused and only logs a deprecation warning.
+
 ### Key Delegates (BlueprintAssignable)
 
 | Delegate | Signature | Fires After |

@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.2.4 — 2026-07-25 (Deep Audit Fixes)
+
+Bug fixes from the complete codebase audit:
+
+### Bugs Fixed
+- **A1 — Deprecated CRC API**: Replaced `FCrc::StrCrc_DEPRECATED` with `FCrc::StrCrc32` in territory GUID fallback (`TerritoryVolume.cpp`)
+- **A2 — Stale weak-pointer guard spawn guard**: Changed `SpawnedGuards.Num() == 0` to `GetSpawnedGuardCount() == 0` in state-transition guard check to avoid stale weak-pointer false negatives (`TerritoryVolume.cpp`)
+- **A3 — OnGuardKilled null killer**: Added `LastDamagingInstigator` tracking via `TakeDamage` override on `ATerritoryGuardCharacter`; the broadcast now passes the actual killer instead of `nullptr` (`TerritoryGuardCharacter`, `TerritoryVolume.cpp`)
+- **A4 — Reserve spawn chain loss**: Removed `IsTimerActive` guard in `ScheduleAutomaticReserveSpawn` so multiple pending reserve spawns chain correctly when guards die between timer ticks (`TerritoryGuardSpawnPoint.cpp`)
+- **A5 — Validation order**: Swapped `DefendersRemain` check before `DiplomaticallyBlocked` in `ValidateAndBeginCapture` so allied defenders return the correct result code (`TerritoryControlSubsystem.cpp`)
+- **A6 — Capture summary restore gap**: Added capture summary sync (ownership, state, contesting faction, control progress) in `SyncSubsystemsFromReplicatedState` via `RestoreCaptureState` — summaries were exported/imported but never restored to the ControlSubsystem (`TerritoryWorldState.cpp`)
+- **A7 — Transaction ledger fragmentation**: Replaced O(N²) `while` + `RemoveAt(0)` loop with a single `RemoveAt(0, Excess)` bulk call (`TerritoryEconomySubsystem.cpp`)
+- **A8 — SpatialIndex stale keys**: Added `RemoveInvalidTerritories()` to clean up GC'd territory entries from the forward and reverse maps; called periodically from `PollBoundsChanges` (`TerritorySpatialIndex`, `TerritoryRegistrySubsystem.cpp`)
+
+### Documentation Updated
+- `03_Core_Actors.md`: Added notes about GUID fallback hash limitation and volume tick being disabled
+- `04_Subsystems.md`: Updated `SyncSubsystemsFromReplicatedState` description to include capture state restore
+- `10_Save_Load.md`: Updated load flow and state-reconstructed section; added deprecation note for `ATerritorySavableData`
+- `13_Multiplayer.md`: Updated capture persistence limitation to reference the fix
+
 ## v0.2.3 — 2026-07-24 (API Refactor: Pure Function Markers + Tooltips)
 
 Comprehensive API refactor for improved Blueprint usability. Read-only getters are marked BlueprintPure (no exec pin needed), with rich tooltips and contract coverage for Pure/Callable invariants.

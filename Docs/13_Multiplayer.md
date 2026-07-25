@@ -72,7 +72,7 @@ Clients should:
 1. **Economy subsystem state is not replicated directly** — client-side economy queries return empty/stale data. `ATerritoryWorldState` provides a client-visible snapshot only after `ExportPersistentState()` or explicit setters update it.
 2. **Capture actor identities are server-only** — clients receive the leading `ControlProgress`, state, owner, and contesting faction through replicated `OwnershipData`, but not the ControlSubsystem's per-faction attacker/progress maps.
 3. **WorldState is snapshot-based** — economy, diplomacy, reputation, transaction, and capture arrays update on export or explicit setter calls rather than streaming continuously.
-4. **Capture participants are not persisted** — a saved contest restores its leading faction/progress for decay, but attacker actor identities and non-leading faction progress are lost.
+4. **Capture participants are not persisted** — a saved contest restores its leading faction/progress via `RestoreCaptureState` and the capture summary is synced back from WorldState, but attacker actor identities and non-leading faction progress are lost.
 
 ## Dedicated Server Setup
 

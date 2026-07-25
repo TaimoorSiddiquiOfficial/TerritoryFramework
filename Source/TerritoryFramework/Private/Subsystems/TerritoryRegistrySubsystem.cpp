@@ -51,6 +51,9 @@ void UTerritoryRegistrySubsystem::PollBoundsChanges()
 			Territory->CheckBoundsForReindex();
 		}
 	}
+
+	// Cleanup stale entries from destroyed territories that were never properly removed.
+	SpatialIndex.RemoveInvalidTerritories();
 }
 
 void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)

@@ -189,6 +189,13 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 		return FinishValidation(ECaptureResult::AlreadyOwned);
 	}
 
+	// DefendersRemain must be checked BEFORE diplomacy so a faction with active defenders
+	// inside the territory gets the correct result code instead of DiplomaticallyBlocked.
+	if (Territory->GetDefenderCount() > 0 && DefendingFaction.IsValid())
+	{
+		return FinishValidation(ECaptureResult::DefendersRemain);
+	}
+
 	// Check Narrative faction attitudes
 	if (DefendingFaction.IsValid())
 	{
@@ -201,11 +208,6 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 				return FinishValidation(ECaptureResult::DiplomaticallyBlocked);
 			}
 		}
-	}
-
-	if (Territory->GetDefenderCount() > 0 && DefendingFaction.IsValid())
-	{
-		return FinishValidation(ECaptureResult::DefendersRemain);
 	}
 
 	// Initiate capture

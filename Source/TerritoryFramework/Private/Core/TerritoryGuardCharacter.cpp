@@ -8,6 +8,7 @@
 #include "Tales/TriggerSet.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
+#include "GameFramework/DamageType.h"
 
 ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -18,6 +19,15 @@ ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& Obj
 bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
 {
 	return false;
+}
+
+float ATerritoryGuardCharacter::TakeDamage(float Damage, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	if (DamageCauser)
+	{
+		LastDamagingInstigator = DamageCauser;
+	}
+	return Super::TakeDamage(Damage, DamageEvent, EventInstigator, DamageCauser);
 }
 
 void ATerritoryGuardCharacter::BeginPlay()

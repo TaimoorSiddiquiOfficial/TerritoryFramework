@@ -340,7 +340,7 @@ UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegis
 1. World initialized
 2. Subsystems created (engine-managed)
 3. ATerritoryVolume::BeginPlay → Registry->RegisterTerritory
-4. ATerritoryWorldState::BeginPlay → SyncSubsystemsFromReplicatedState
+4. ATerritoryWorldState::BeginPlay → SyncSubsystemsFromReplicatedState (restores economy, diplomacy, and capture state to subsystems)
 5. Subsystem timers start (server only)
 ```
 

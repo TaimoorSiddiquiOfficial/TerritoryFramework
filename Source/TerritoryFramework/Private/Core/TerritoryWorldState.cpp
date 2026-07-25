@@ -459,4 +459,29 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 		}
 		Diplomacy->RestorePersistentState(Treaties, Reputation, ReplicatedDiplomacyHistory);
 	}
+
+	// Sync capture state — restore in-progress contests from saved summaries.
+	// Territories are guaranteed to be registered at this point (BeginPlay order).
+	if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+	{
+		if (UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>())
+		{
+			for (const FReplicatedCaptureSummary& Summary : ReplicatedCaptureSummaries)
+			{
+				ATerritoryVolume* Territory = Registry->GetTerritoryByTag(Summary.TerritoryTag);
+				if (!Territory) continue;
+
+				Territory->SetOwningFaction(Summary.CurrentOwner);
+				if (Summary.State == ETerritoryState::Contested)
+				{
+					Territory->SetTerritoryState(ETerritoryState::Contested);
+					Control->RestoreCaptureState(Territory, Summary.ContestingFaction, Summary.ControlProgress);
+				}
+				else if (Summary.CurrentOwner.IsValid())
+				{
+					Territory->SetTerritoryState(ETerritoryState::Claimed);
+				}
+			}
+		}
+	}
 }

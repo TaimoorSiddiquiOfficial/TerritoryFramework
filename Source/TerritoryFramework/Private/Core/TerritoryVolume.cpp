@@ -81,7 +81,7 @@ void ATerritoryVolume::BeginPlay()
 			if (TerritoryTag.IsValid())
 			{
 				// Deterministic fallback — NOT ideal but prevents total breakage
-				uint32 Hash = FCrc::StrCrc_DEPRECATED(*TerritoryTag.ToString());
+				uint32 Hash = FCrc::StrCrc32(*TerritoryTag.ToString());
 				TerritoryGUID = FGuid(Hash, 0, 0, 0);
 			}
 			UE_LOG(LogTerritory, Error,
@@ -609,7 +609,7 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 	}
 	else if (NewState == ETerritoryState::Claimed && (OldState == ETerritoryState::Contested || OldState == ETerritoryState::Locked))
 	{
-		if (HasAuthority() && ResolveGuardDefinition(OwnershipData.OwningFaction) && GetDesiredGuardCount() > 0 && SpawnedGuards.Num() == 0)
+		if (HasAuthority() && ResolveGuardDefinition(OwnershipData.OwningFaction) && GetDesiredGuardCount() > 0 && GetSpawnedGuardCount() == 0)
 		{
 			SpawnGuards();
 		}
@@ -797,9 +797,14 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 		}
 	}
 
-	// Narrative's death delegate provides the victim ASC, not the damage instigator.
-	// Do not misattribute the victim as its own killer.
-	OnGuardKilled.Broadcast(this, KilledActor, nullptr, GetDefenderCount());
+	// Determine the killer from the guard's tracked last damaging instigator.
+	// This is populated by ATerritoryGuardCharacter::TakeDamage.
+	AActor* Killer = nullptr;
+	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
+	{
+		Killer = Guard->LastDamagingInstigator.Get();
+	}
+	OnGuardKilled.Broadcast(this, KilledActor, Killer, GetDefenderCount());
 
 	// Check ALL registered defenders (includes non-guard defenders registered via
 	// RegisterDefender Blueprint API), not just SpawnedGuards — otherwise territory

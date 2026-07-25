@@ -148,3 +148,30 @@ int32 FTerritorySpatialIndex::GetEntryCount() const
 	}
 	return Count;
 }
+
+void FTerritorySpatialIndex::RemoveInvalidTerritories()
+{
+	TArray<TWeakObjectPtr<ATerritoryVolume>> InvalidKeys;
+	for (const auto& Pair : TerritoryToCells)
+	{
+		if (!Pair.Key.IsValid())
+		{
+			InvalidKeys.Add(Pair.Key);
+			for (const FIntVector& CellKey : Pair.Value)
+			{
+				if (TArray<TWeakObjectPtr<ATerritoryVolume>>* Cell = Cells.Find(CellKey))
+				{
+					Cell->RemoveAll([](const TWeakObjectPtr<ATerritoryVolume>& Ptr) { return !Ptr.IsValid(); });
+					if (Cell->Num() == 0)
+					{
+						Cells.Remove(CellKey);
+					}
+				}
+			}
+		}
+	}
+	for (const TWeakObjectPtr<ATerritoryVolume>& Key : InvalidKeys)
+	{
+		TerritoryToCells.Remove(Key);
+	}
+}

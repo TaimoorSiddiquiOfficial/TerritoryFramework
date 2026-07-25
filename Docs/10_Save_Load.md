@@ -81,17 +81,25 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 3. ATerritoryVolume::Load — re-binds defender death delegates
 4. ATerritoryWorldState::Load — ImportPersistentState:
    a. Direct assignment (no artificial transactions)
-   b. SyncSubsystemsFromReplicatedState:
-       - Push income/cost/count parameters to EconomySubsystem via SetFactionTreasury (Narrative inventory currency is separate)
-       - Replay treaty states and reputation to DiplomacySubsystem
-       - Diplomacy syncs to Narrative GameState attitudes
+    b. SyncSubsystemsFromReplicatedState:
+        - Push income/cost/count parameters to EconomySubsystem via SetFactionTreasury (Narrative inventory currency is separate)
+        - Replay treaty states and reputation to DiplomacySubsystem
+        - Diplomacy syncs to Narrative GameState attitudes
+        - Restore capture summaries (ownership, state, contesting faction, control progress) back to territories and ControlSubsystem
 
-**Important:** `ATerritorySavableData` (deprecated) also uses `SetFactionTreasury` for load.
-If both WorldState and SavableData exist in the level, only one should be active to avoid conflicts.
+**Important:** `ATerritorySavableData` (deprecated) is a legacy alternative to `ATerritoryWorldState`.
+If both exist in the level, only one should be active to avoid conflicts.
+Prefer `ATerritoryWorldState` for new projects — `ATerritorySavableData` will be removed in a future version.
+
+### State Reconstructed on Load
+
+- A contested TerritoryVolume restores its leading faction/progress into ControlSubsystem via `RestoreCaptureState` so capture decay resumes correctly.
+- Claimed territories restore their owning faction and respawn guards.
+- WorldState restores economy treasury parameters, transaction history, treaties, reputation, and capture summaries.
 
 ### State Not Reconstructed
 
-- A contested TerritoryVolume restores its leading faction/progress into ControlSubsystem so decay resumes, but attacker identities and non-leading faction progress are not persisted.
+- Attacker actor identities and non-leading faction progress from a multi-faction contest are not persisted.
 - Individual guards, health/activity state, spawn-point reserve counts, and active guard rosters are not persisted.
 - Claimed territories destroy/recreate a fresh guard population on load; new guards receive new spawn GUIDs.
 

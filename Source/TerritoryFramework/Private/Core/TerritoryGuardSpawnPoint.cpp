@@ -272,12 +272,12 @@ void ATerritoryGuardSpawnPoint::QueueReserveSpawn()
 void ATerritoryGuardSpawnPoint::ScheduleAutomaticReserveSpawn(float Delay)
 {
 	UWorld* World = GetWorld();
-	if (!World || !HasPendingReserveSpawn() || !bAutoSpawnReserves
-		|| World->GetTimerManager().IsTimerActive(ReserveSpawnTimer))
+	if (!World || !HasPendingReserveSpawn() || !bAutoSpawnReserves)
 	{
 		return;
 	}
 
+	World->GetTimerManager().ClearTimer(ReserveSpawnTimer);
 	World->GetTimerManager().SetTimer(
 		ReserveSpawnTimer,
 		this,

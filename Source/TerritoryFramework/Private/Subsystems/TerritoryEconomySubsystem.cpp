@@ -210,9 +210,10 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 	}
 
 	// Trim ledger once after all factions processed (not per-faction)
-	while (TransactionLedger.Num() > MaxTransactionHistory)
+	const int32 Excess = TransactionLedger.Num() - MaxTransactionHistory;
+	if (Excess > 0)
 	{
-		TransactionLedger.RemoveAt(0);
+		TransactionLedger.RemoveAt(0, Excess);
 	}
 }
 
