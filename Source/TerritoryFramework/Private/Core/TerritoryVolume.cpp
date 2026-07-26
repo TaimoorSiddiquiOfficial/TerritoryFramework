@@ -813,15 +813,11 @@ void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
 	if (HasAuthority())
 	{
 		// Territory becomes unclaimed — owner lost all defenders.
-		// Marker turns red. Player (or any faction) can now claim it.
+		// SetOwningFaction handles the Claimed→Unclaimed state transition,
+		// guard despawn, and delegates. The Locked state is not reachable
+		// here because SetTerritoryState(Locked) despawns all guards.
 		SetOwningFaction(FGameplayTag());
 		SetControlProgress(0.f);
-
-		// Transition to Unclaimed so capture flow can begin
-		if (OwnershipData.State != ETerritoryState::Locked)
-		{
-			SetTerritoryState(ETerritoryState::Unclaimed);
-		}
 
 		// Do NOT respawn guards here — the territory is undefended.
 		// Guards only respawn when a new faction claims the territory.

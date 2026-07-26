@@ -105,6 +105,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnReputationChanged OnReputationChanged;
 
+	/** Broadcast when a timed treaty expires. FactionA/B are the treaty parties. */
+	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
+	FOnDiplomacyStateChanged OnTreatyExpired;
+
 protected:
 	UPROPERTY(SaveGame)
 	TArray<FTreatyRecord> ActiveTreaties;

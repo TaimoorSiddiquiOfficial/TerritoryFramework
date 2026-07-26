@@ -669,6 +669,10 @@ void UTerritoryDiplomacySubsystem::CheckTreatyExpirations()
 
 		SetDiplomacyState(ExpiredTreaty.FactionA, ExpiredTreaty.FactionB, EDiplomacyState::None);
 		RecordEvent(EDiplomacyEventType::ExpiredTreaty, ExpiredTreaty.FactionA, ExpiredTreaty.FactionB);
+
+		// Broadcast dedicated delegate so Blueprint can react without
+		// filtering the generic OnDiplomacyEvent by event type.
+		OnTreatyExpired.Broadcast(ExpiredTreaty.FactionA, ExpiredTreaty.FactionB, EDiplomacyState::None);
 	}
 }
 

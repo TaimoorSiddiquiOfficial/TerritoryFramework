@@ -118,6 +118,12 @@ FGuid ATerritoryGuardCharacter::GetActorGUID_Implementation() const
 		return SpawnInfo.SpawnAssignedSaveGUID;
 	}
 
+	// WARNING: This fallback generates a runtime GUID that differs each session.
+	// Currently safe because ShouldRespawn_Implementation returns false — guards
+	// are never saved. If a subclass overrides ShouldRespawn to return true, the
+	// GUID will not match between save and load sessions, silently breaking save/load.
+	// Override GetActorGUID in the subclass to provide a stable GUID (e.g. from
+	// SpawnAssignedSaveGUID which is set in ConfigureTerritorySpawn).
 	if (!CachedFallbackGUID.IsValid())
 	{
 		const_cast<ATerritoryGuardCharacter*>(this)->CachedFallbackGUID = FGuid::NewGuid();
