@@ -85,14 +85,13 @@ Anti-spam: 1-second cooldown between purchase requests on the player management 
 
 ## POI Marker Refresh
 
-The district POI marker (`UTerritoryDistrictPOIMarker`) auto-refreshes when the district's ownership or state changes. Color semantics:
+The district POI marker (`UTerritoryDistrictPOIMarker`) auto-refreshes when the district's ownership or state changes. The marker is only visible for **Claimed** districts — unclaimed, contested, and locked districts are hidden (alpha 0). Color semantics:
 
 | State/Faction | Color |
 |---|---|
 | Claimed by player faction | Green (0.1, 0.75, 0.35) |
-| Contested | Orange (1.0, 0.65, 0.0) |
-| Locked | Purple (0.35, 0.2, 0.55) |
-| Unclaimed / enemy-owned | Red |
+| Claimed by enemy faction | Red |
+| Unclaimed / Contested / Locked | Hidden (alpha 0) |
 
 ## Blueprint API
 

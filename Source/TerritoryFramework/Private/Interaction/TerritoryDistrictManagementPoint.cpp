@@ -46,6 +46,12 @@ FText UTerritoryDistrictPOIMarker::GetMarkerDisplayText_Implementation(UNarrativ
 {
 	if (ATerritoryDistrict* District = ManagementPoint.IsValid() ? ManagementPoint->ResolveDistrict() : nullptr)
 	{
+		// Hide text for non-claimed territories — marker is invisible anyway
+		if (District->GetTerritoryState() != ETerritoryState::Claimed)
+		{
+			OutSubtitleText = FText::GetEmpty();
+			return FText::GetEmpty();
+		}
 		OutSubtitleText = FText::FromString(District->GetOwningFaction().ToString());
 		return District->GetTerritoryDisplayName();
 	}
@@ -58,8 +64,17 @@ FLinearColor UTerritoryDistrictPOIMarker::GetMarkerColor_Implementation(UNarrati
 {
 	const ATerritoryDistrict* District = ManagementPoint.IsValid() ? ManagementPoint->ResolveDistrict() : nullptr;
 	if (!District) return FLinearColor::Gray;
-	if (District->GetTerritoryState() == ETerritoryState::Contested) return FLinearColor(1.f, 0.65f, 0.f, 1.f);
-	if (District->GetTerritoryState() == ETerritoryState::Locked) return FLinearColor(0.35f, 0.2f, 0.55f, 1.f);
+
+	const ETerritoryState State = District->GetTerritoryState();
+
+	// Only show the management POI for captured districts. Unclaimed, contested,
+	// and locked districts have no management to offer — hide the marker entirely.
+	if (State != ETerritoryState::Claimed)
+	{
+		return FLinearColor(0.f, 0.f, 0.f, 0.f);
+	}
+
+	// Claimed: green for the owning faction's members, red for enemies
 	return District->GetOwningFaction().IsValid() ? FLinearColor(0.1f, 0.75f, 0.35f, 1.f) : FLinearColor::Red;
 }
 
