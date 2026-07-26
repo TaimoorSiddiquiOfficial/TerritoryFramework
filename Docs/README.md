@@ -1,10 +1,10 @@
 # Territory Framework — Complete Integration Guide
 
-> **Plugin:** TerritoryFramework (v0.2.3)
+> **Plugin:** TerritoryFramework (v0.2.4)
 > **Depends on:** Narrative Pro 2.3.3
 > **Engine:** UE 5.7
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
-> **Tests:** 53/53 automation test suites passing (contract + functional + integration)
+> **Tests:** 47/47 automation test suites passing (contract + functional + integration)
 
 ## Current Implementation Limits
 
@@ -31,8 +31,9 @@
 13. [Multiplayer Guide](13_Multiplayer.md) — Authority, replication, client behavior
 14. [API Reference](14_API_Reference.md) — Complete C++ function signatures
 15. [AI Integration](15_AI_Integration.md) — CombatDirector, BT tasks, Tales integration
-16. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
-17. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
+16. [District Management](16_District_Management.md) — In-world management UI, guard purchasing, POI markers
+17. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
+18. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
 
 ## Document Index
 
@@ -53,5 +54,6 @@
 | Multiplayer | Programmers | Server authority, client replication, known limits |
 | API Reference | C++ Devs | Complete function signatures with return types |
 | AI Integration | AI Designers | CombatDirector, BT tasks, Tales events/conditions |
+| District Management | Game/UI Designers | In-world UI, guard purchasing, POI markers |
 | Blueprint Extension Guide | C++/BP Devs | Subclassing patterns, Super-call requirements |
 | Blueprint Setup Tutorial | BP Devs | Step-by-step Blueprint configuration |

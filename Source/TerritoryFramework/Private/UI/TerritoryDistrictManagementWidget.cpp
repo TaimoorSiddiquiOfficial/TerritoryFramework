@@ -37,11 +37,9 @@ void UTerritoryDistrictManagementWidget::NativeConstruct()
 		CloseButton->OnClicked.AddUniqueDynamic(this, &UTerritoryDistrictManagementWidget::HandleCloseClicked);
 	}
 	BindManagementComponent();
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().SetTimer(RefreshTimerHandle, this,
-			&UTerritoryDistrictManagementWidget::RefreshManagementDisplay, 0.5f, true);
-	}
+	// Base class (UTerritoryInfoWidget) already runs a 0.5s refresh timer
+	// in its own NativeConstruct via Super::NativeConstruct().
+	RefreshManagementDisplay();
 }
 
 void UTerritoryDistrictManagementWidget::NativeDestruct()
@@ -59,10 +57,7 @@ void UTerritoryDistrictManagementWidget::NativeDestruct()
 		ManagementComponent->OnGuardPurchaseResult.RemoveDynamic(
 			this, &UTerritoryDistrictManagementWidget::HandleGuardPurchaseResult);
 	}
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(RefreshTimerHandle);
-	}
+	// Base class NativeDestruct clears the 0.5s refresh timer.
 	Super::NativeDestruct();
 }
 

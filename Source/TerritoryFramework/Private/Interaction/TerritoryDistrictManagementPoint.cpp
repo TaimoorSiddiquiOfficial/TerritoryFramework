@@ -98,6 +98,14 @@ void UTerritoryDistrictNavigationMarkerComponent::BeginPlay()
 		DistrictMarker->SetManagementPoint(Point);
 		MarkerObject = DistrictMarker;
 		RegisterMarker();
+
+		// Subscribe to territory state changes for dynamic marker refresh.
+		// Without this, the POI marker color/text stays stale after a capture.
+		if (ATerritoryDistrict* District = Point->ResolveDistrict())
+		{
+			District->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged);
+			District->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged);
+		}
 	}
 }
 
@@ -106,6 +114,15 @@ void UTerritoryDistrictNavigationMarkerComponent::EndPlay(const EEndPlayReason::
 	if (DistrictMarker)
 	{
 		DistrictMarker->ClearManagementPoint();
+	}
+	// Unsubscribe from territory delegates
+	if (ATerritoryDistrictManagementPoint* Point = Cast<ATerritoryDistrictManagementPoint>(GetOwner()))
+	{
+		if (ATerritoryDistrict* District = Point->ResolveDistrict())
+		{
+			District->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged);
+			District->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged);
+		}
 	}
 	RemoveMarker();
 	Super::EndPlay(EndPlayReason);

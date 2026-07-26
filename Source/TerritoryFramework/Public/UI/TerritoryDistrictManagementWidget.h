@@ -77,7 +77,6 @@ private:
 	TWeakObjectPtr<ATerritoryDistrictManagementPoint> ManagementPoint;
 	TWeakObjectPtr<UTerritoryPlayerManagementComponent> ManagementComponent;
 	FGameplayTag ManagedFaction;
-	FTimerHandle RefreshTimerHandle;
 
 	UFUNCTION()
 	void HandleAddGuardClicked();

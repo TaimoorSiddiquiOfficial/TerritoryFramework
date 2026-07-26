@@ -46,6 +46,18 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	UFUNCTION()
+	void OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState)
+	{
+		if (DistrictMarker) DistrictMarker->RefreshMarker();
+	}
+
+	UFUNCTION()
+	void OnTerritoryOwnershipChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
+	{
+		if (DistrictMarker) DistrictMarker->RefreshMarker();
+	}
+
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTerritoryDistrictPOIMarker> DistrictMarker;
