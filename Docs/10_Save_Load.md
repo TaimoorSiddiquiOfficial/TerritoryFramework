@@ -87,9 +87,8 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
         - Diplomacy syncs to Narrative GameState attitudes
         - Restore capture summaries (ownership, state, contesting faction, control progress) back to territories and ControlSubsystem
 
-**Important:** `ATerritorySavableData` (deprecated) is a legacy alternative to `ATerritoryWorldState`.
-If both exist in the level, only one should be active to avoid conflicts.
-Prefer `ATerritoryWorldState` for new projects — `ATerritorySavableData` will be removed in a future version.
+**Important:** `ATerritorySavableData` is **deprecated** — use `ATerritoryWorldState` instead.
+`ATerritoryWorldState` handles both single-player and multiplayer. `ATerritorySavableData` will be removed in a future version; do not use it for new projects.
 
 ### State Reconstructed on Load
 
@@ -114,8 +113,8 @@ PIE world creation uses `StaticDuplicateObject` which would otherwise generate n
 | Actor | Count | Required? |
 |---|---|---|
 | ATerritoryVolume | 1+ per district | Yes |
-| ATerritoryWorldState | Exactly 1 | For multiplayer |
-| ATerritorySavableData | Exactly 1 | For single-player (alternative to WorldState) |
+| ATerritoryWorldState | Exactly 1 | Persists economy, diplomacy, and capture state |
+| ATerritorySavableData | Exactly 1 | **Deprecated** — single-player legacy (use WorldState instead) |
 
 The editor validator detects:
 - Multiple WorldState actors → Error

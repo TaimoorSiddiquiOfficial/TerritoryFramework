@@ -2,7 +2,7 @@
 
 ## Overview
 
-Each faction's wealth is the **aggregate of all online faction members' `UInventoryComponent::Currency`** (NarrativePro). There is no separate gold/treasury storage — faction economy flows directly to/from player inventories via the economy tick.
+Each faction has a treasury stored in `FactionGold` (TMap&lt;FGameplayTag, int32&gt;, SaveGame) on `UTerritoryEconomySubsystem`. `GetTreasury()` returns the sum of `FactionGold` plus the aggregate of all online faction members' `UInventoryComponent::Currency`. Economy ticks credit income into `FactionGold`, then distribute to player inventories.
 
 The subsystem tracks per faction:
 - **IncomePerTick**: income from owned territories
@@ -33,9 +33,9 @@ if (Economy->TryDebitTreasury(Faction, 500, TEXT("Upgrade"), ETerritoryTransacti
 ### Checking Balance
 
 ```cpp
-// Faction wealth = aggregate of all online members' Currency
+// Combined from FactionGold (treasury) + online members' Currency
 int32 Wealth = Economy->GetTreasury(Faction);
-// ^ reads live from player inventories, no separate storage
+// ^ includes stored treasury + live member inventory aggregate
 
 int32 Income = Economy->GetIncome(Faction);
 int32 Costs = Economy->GetCosts(Faction);

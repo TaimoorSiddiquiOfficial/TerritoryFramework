@@ -71,7 +71,6 @@
 | InitialGuardCost | int32 |
 | bStartsLocked | bool |
 | ParentTerritoryTag | GameplayTag |
-| bAutoCreateMapMarker | bool |
 | TerritoryGUID | FGuid |
 | BoundsShape | ShapeComponent* |
 | GuardNPCDefinition | NPCDefinition* |
@@ -237,7 +236,7 @@
 | Property | Type |
 |---|---|
 | UpgradeLevel | int32 (SaveGame, Replicated) |
-| MaxUpgradeLevel | int32 |
+| MaxUpgradeLevel | int32 (default 3, no SaveGame, no Replicated) |
 | UpgradeCostPerLevel | int32 |
 | IncomeBonusPerLevel | int32 |
 
@@ -316,6 +315,8 @@
 | Function | Returns |
 |---|---|
 | IsSameFaction(A, B) | bool |
+| PrintTerritoryDebug(WorldContext, Territory, Duration) | void |
+| PrintAllTerritoryDebug(WorldContext, Duration) | void |
 
 ## Subsystem API Summary
 

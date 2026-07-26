@@ -64,7 +64,8 @@ void UnregisterTerritory(ATerritoryVolume* Volume)
 
 | Delegate | Signature | When |
 |---|---|---|
-| OnTerritoryRegistered | (ATerritoryVolume*, bool bWasUnregistered) | After Register (`false`) or Unregister (`true`) |
+| OnTerritoryRegistered | (ATerritoryVolume*, bool bWasUnregistered) | After Register (`false`) |
+| OnTerritoryUnregistered | (ATerritoryVolume*, bool bWasUnregistered) | After Unregister (`true`) |
 
 Cities subscribe to `OnTerritoryRegistered` to catch districts that spawn after the city.
 

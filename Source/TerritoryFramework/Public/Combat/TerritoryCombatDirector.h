@@ -17,7 +17,7 @@ class UNarrativeAbilitySystemComponent;
  * - Narrative tokens = tactical: limits how many AI gang up on ONE defender
  * - Assault slots = strategic: limits how many AI participate in a territory assault
  *
- * AI should use both: RequestAssaultSlot (strategic gate) → RequestAttackToken (tactical).
+ * AI should use both: RequestAssaultSlot (strategic gate) then TryClaimToken (tactical).
  */
 UCLASS()
 class TERRITORYFRAMEWORK_API UTerritoryCombatDirector : public UWorldSubsystem

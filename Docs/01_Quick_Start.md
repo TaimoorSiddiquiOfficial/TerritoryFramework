@@ -45,8 +45,10 @@ Add territory tags to `Config/DefaultGameplayTags.ini`:
 
 ## Step 5: Place Persistence Actor
 
-1. Drag `BP_TerritorySavableData` (or `BP_TerritoryWorldState` for multiplayer) into level
-2. One instance is enough — it persists economy and diplomacy state
+1. Drag `BP_TerritoryWorldState` into level. **Single-player projects: use only `BP_TerritoryWorldState`** — it handles both single-player and multiplayer.
+2. One instance is enough — it persists economy, diplomacy, and capture state.
+
+> **Note:** `BP_TerritorySavableData` is **deprecated**. Do not use it for new projects. Use `BP_TerritoryWorldState` instead. If both exist in the level, an editor validator will report an error.
 
 ## Step 6: Configure Guards (Optional)
 

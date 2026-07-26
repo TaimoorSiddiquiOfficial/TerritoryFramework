@@ -1,6 +1,6 @@
 # Territory AI Integration — Complete Setup Guide
 
-> **Version:** v0.2.1 (2026-07-23)
+> **Version:** v0.2.4 (2026-07-25)
 > **Depends on:** NarrativePro 2.3.3
 > **All assets in `/Game/TerritoryFramework/`** — zero NarrativePro content modified
 

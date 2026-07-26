@@ -197,7 +197,7 @@ Extends `ATerritoryVolume`. An upgradeable property within a district.
 | Property | Type | SaveGame | Replicated | RepNotify | Notes |
 |---|---|---|---|---|---|
 | UpgradeLevel | int32 | ✅ | ✅ | ✅ OnRep_UpgradeLevel | Current upgrade tier |
-| MaxUpgradeLevel | int32 | — | — | — | Cap (default 5) |
+| MaxUpgradeLevel | int32 | — | — | — | Cap (default 3) |
 | UpgradeCostPerLevel | int32 | — | — | — | Base cost per level |
 | IncomeBonusPerLevel | int32 | — | — | — | Income added per level |
 
@@ -396,8 +396,8 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 | Delegate | Signature |
 |---|---|
-| OnTerritoryRegistered | (ATerritoryVolume*) |
-| OnTerritoryUnregistered | (ATerritoryVolume*) |
+| OnTerritoryRegistered | (ATerritoryVolume*, bool bWasUnregistered) |
+| OnTerritoryUnregistered | (ATerritoryVolume*, bool bWasUnregistered) |
 
 ---
 
@@ -1004,8 +1004,8 @@ Replicates the treaty parties, state, signed/expiry times, permanence, and a can
 
 | Delegate | Signature | Source |
 |---|---|---|
-| FOnTerritoryRegistered | (ATerritoryVolume*) | Registry |
-| FOnTerritoryUnregistered | (ATerritoryVolume*) | Registry |
+| FOnTerritoryRegistered | (ATerritoryVolume*, bool bWasUnregistered) | Registry |
+| FOnTerritoryUnregistered | (ATerritoryVolume*, bool bWasUnregistered) | Registry |
 | FOnTerritoryControlChanged | (ATerritoryVolume*, FGameplayTag, FGameplayTag) | Control |
 | FOnCaptureAttempted | (const FCaptureAttempt&) | Control |
 | FOnEconomyTickFired | (FGameplayTag, FTerritoryEconomySnapshot) | Economy |
@@ -1036,12 +1036,8 @@ Replicates the treaty parties, state, signed/expiry times, permanence, and a can
 | bDebugSpatialIndex | bool | false | Log spatial index queries |
 | bDebugCombatDirector | bool | false | Log attack permissions |
 | bDebugSaveLoad | bool | false | Log save/load operations |
-| bDebugHierarchy | bool | false | Log city/district bindings |
-| bDebugNavigation | bool | false | Log map marker creation |
-| bDebugReplication | bool | false | Log replicated state sync |
 | bDebugTransactions | bool | false | Log every transaction |
 | bDebugUpgrades | bool | false | Log property upgrades |
-| bDebugBlueprintBridges | bool | false | Log BP bridge calls |
 
 ### Visual Debug Toggles
 
@@ -1068,7 +1064,7 @@ Each debug toggle has a matching `ShouldDebug*()` helper:
 ```cpp
 bool ShouldDebugCaptureFlow() const { return bDebugCaptureFlow; }
 bool ShouldDebugEconomyTick() const { return bDebugEconomyTick; }
-// ... etc for all 16 toggles
+// ... etc for all 17 toggles
 ```
 
 Access in C++:

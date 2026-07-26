@@ -2,7 +2,7 @@
 
 ## Overview
 
-TerritoryFramework has 16 individual debug toggles organized into categories, plus 5 visual debug toggles. All are in **Project Settings → Territory Framework → Debug**.
+TerritoryFramework has 17 individual debug toggles organized into categories, plus 5 visual debug toggles. All are in **Project Settings → Territory Framework → Debug**.
 
 ## Master Toggle
 
@@ -28,6 +28,7 @@ TerritoryFramework has 16 individual debug toggles organized into categories, pl
 | Debug Map Markers | `[Marker]` | Refresh events |
 | Debug Tales | `[TalesCaptureTask/Event]` | Task/event integration |
 | Debug Combat | `[Combat]` | Assault slot grants/denials, slot cleanup |
+| Debug BT | `[BT]` | Behavior tree execution and state |
 
 ## Visual Debug Toggles
 
@@ -49,9 +50,9 @@ TerritoryFramework has 16 individual debug toggles organized into categories, pl
 | CaptureProgressDecayPerSecond | 0.05 | 0.01–0.5 | Decay rate when no attackers present |
 | TreatyExpirationCheckInterval | 10 | 1–60 | Seconds between treaty expiration checks |
 | SpatialCellSize | 2000 | 500–10000 | Spatial index cell size in UU |
-| DefaultPatrolArrivalThreshold | 50 | 5–200 | Distance to consider patrol node reached |
-| DefaultPatrolAcceptanceRadius | 30 | 5–100 | Movement acceptance radius for patrol |
-| DefaultPatrolWaitTime | 3.0 | 0.5–30 | Default wait time at patrol nodes |
+| DefaultPatrolArrivalThreshold | 100 | 5–200 | Distance to consider patrol node reached |
+| DefaultPatrolAcceptanceRadius | 50 | 5–100 | Movement acceptance radius for patrol |
+| DefaultPatrolWaitTime | 2.0 | 0.5–30 | Default wait time at patrol nodes |
 | MaxPatrolRouteNodes | 32 | 2–128 | Maximum patrol route length |
 | MaxConcurrentAttackers | 3 | 1–10 | Default NPC attack slot limit per territory |
 

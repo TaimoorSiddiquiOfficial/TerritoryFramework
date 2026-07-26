@@ -291,7 +291,7 @@ Bind to these in Blueprint Event Graph with custom event nodes. They fire at spe
 | `OnTerritoryOwnershipChanged` | `(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER `SetOwningFaction` completes and AFTER `OnOwnershipChanged` BP event | All invariants done. Guards spawned. State is Claimed/Unclaimed. Replication data updated. |
 | `OnTerritoryStateChangedDelegate` | `(ATerritoryVolume* Territory, ETerritoryState NewState)` | AFTER `SetTerritoryState` completes and AFTER `OnStateChanged` BP event | Guard lifecycle done. State is finalized. |
 | `OnAllGuardsDefeatedDelegate` | `(ATerritoryVolume* Territory)` | AFTER `OnAllGuardsDefeated` BP event completes | Territory is Unclaimed (if Super was called). Progress is 0. |
-| `OnGuardKilled` | `(ATerritoryVolume* Territory, AActor* Guard, AActor* Killer, int32 RemainingDefenders)` | Immediately after a defender dies, before all-guards-defeated check | Narrative's death delegate does not provide the instigator, so Killer is currently null. RemainingDefenders is count AFTER removal. |
+| `OnGuardKilled` | `(ATerritoryVolume* Territory, AActor* Guard, AActor* Killer, int32 RemainingDefenders)` | Immediately after a defender dies, before all-guards-defeated check | Killer is the last damaging instigator, tracked via the territory's `TakeDamage` override. RemainingDefenders is count AFTER removal. |
 
 ### `ATerritoryCity` Delegates
 
