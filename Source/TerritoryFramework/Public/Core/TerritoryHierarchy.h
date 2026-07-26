@@ -172,6 +172,7 @@ public:
 	ATerritoryProperty();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	ATerritoryDistrict* GetOwningDistrict() const;
@@ -211,6 +212,15 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory|Property")
 	void OnPropertyCaptured(FGameplayTag NewOwner);
 	virtual void OnPropertyCaptured_Implementation(FGameplayTag NewOwner);
+
+	/** Late-binding support — listens for districts registered after this property. */
+	UFUNCTION()
+	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	void BindToOwningDistrict(class ATerritoryDistrict* District);
+
+	UFUNCTION()
+	void OnDistrictOwnershipChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
 protected:
 	// Override base class ownership change to invoke property-specific side effects

@@ -153,6 +153,7 @@ void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGamepla
 void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGameplayTag FactionB, float DurationGameTime)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
 	// FIX: Don't call SetDiplomacyState after adding the treaty — it would
 	// see the treaty already exists and early-return without syncing Narrative.
 	RemoveTreaty(FactionA, FactionB);

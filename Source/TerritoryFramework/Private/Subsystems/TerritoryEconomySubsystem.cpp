@@ -338,24 +338,25 @@ bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, i
 	int32& Gold = FactionGold.FindOrAdd(Faction);
 	int32 Debited = 0;
 
-	// Phase 1: deduct from dedicated FactionGold first
+	// ─── Phase 1: Collect — determine what to take from each source,
+	// without modifying any balance yet ───
+
+	// FactionGold contribution
 	int32 FromGold = FMath::Min(Gold, PositiveAmount);
-	Gold -= FromGold;
-	Debited += FromGold;
 	int32 Remaining = PositiveAmount - FromGold;
 
-	// Phase 2: if more needed, try member inventories
+	// Member contributions
+	TArray<ANarrativeCharacter*> Members;
+	TArray<int32> MemberDebits; // parallel array, 0 = no debit
+
 	if (Remaining > 0)
 	{
-		TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
-
-		// Track actual debits per member
-		TArray<int32> ActualDebits;
-		ActualDebits.Init(0, Members.Num());
+		Members = GetFactionMembers(Faction);
+		MemberDebits.Init(0, Members.Num());
 
 		int32 DebitPerMember = Remaining / FMath::Max(1, Members.Num());
 		int32 Remainder = Remaining - (DebitPerMember * Members.Num());
-		int32 MemberDebited = 0;
+		int32 MemberCollected = 0;
 
 		// First pass: proportional debits
 		for (int32 i = 0; i < Members.Num(); ++i)
@@ -369,48 +370,48 @@ bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, i
 			int32 ActualDebit = FMath::Min(AttemptDebit, CurrentCurrency);
 			if (ActualDebit > 0)
 			{
-				ActualDebits[i] = ActualDebit;
-				MemberDebited += ActualDebit;
+				MemberDebits[i] = ActualDebit;
+				MemberCollected += ActualDebit;
 			}
 		}
 
 		// Second pass: redistribute shortfall
-		int32 MemberRemaining = Remaining - MemberDebited;
+		int32 MemberRemaining = Remaining - MemberCollected;
 		for (int32 i = 0; i < Members.Num() && MemberRemaining > 0; ++i)
 		{
 			if (UNarrativeInventoryComponent* Inv = Members[i]->GetInventoryComponent())
 			{
-				const int32 SpareCurrency = Inv->GetCurrency() - ActualDebits[i];
+				const int32 SpareCurrency = Inv->GetCurrency() - MemberDebits[i];
 				const int32 AdditionalDebit = FMath::Min(SpareCurrency, MemberRemaining);
-				ActualDebits[i] += AdditionalDebit;
-				MemberDebited += AdditionalDebit;
+				MemberDebits[i] += AdditionalDebit;
+				MemberCollected += AdditionalDebit;
 				MemberRemaining -= AdditionalDebit;
 			}
 		}
 
-		// Apply member debits
-		for (int32 i = 0; i < Members.Num(); ++i)
+		// If still short after members, abort without mutating anything
+		if (MemberRemaining > 0)
 		{
-			if (ActualDebits[i] > 0)
-			{
-				if (UNarrativeInventoryComponent* Inv = Members[i]->GetInventoryComponent())
-				{
-					Inv->AddCurrency(-ActualDebits[i]);
-				}
-			}
+			return false;
 		}
 
-		Debited += MemberDebited;
-		Remaining = MemberRemaining;
+		Remaining = MemberRemaining; // 0
 	}
 
-	// If still not fully covered after FactionGold + members, we should not happen
-	// because GetTreasury check passed above — but guard against edge case.
-	if (Remaining > 0)
+	// ─── Phase 2: Apply — atomically apply all collected debits ───
+	Gold -= FromGold;
+	Debited += FromGold;
+
+	for (int32 i = 0; i < Members.Num(); ++i)
 	{
-		// Restore partial gold debit
-		Gold += FromGold;
-		return false;
+		if (MemberDebits[i] > 0)
+		{
+			if (UNarrativeInventoryComponent* Inv = Members[i]->GetInventoryComponent())
+			{
+				Inv->AddCurrency(-MemberDebits[i]);
+				Debited += MemberDebits[i];
+			}
+		}
 	}
 
 	// Record transaction

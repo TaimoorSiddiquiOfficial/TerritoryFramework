@@ -304,11 +304,22 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 		}
 	}
 
-	if (!HasAttackBudget(Territory, Faction)) return;
 	if (ValidateAndBeginCapture(Territory, Faction, false) != ECaptureResult::Success) return;
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
 	TSet<TWeakObjectPtr<AActor>>& ActorSet = State.AttackersByFaction.FindOrAdd(Faction);
+
+	// Prune stale entries before the budget check so dead weak pointers don't
+	// count against the budget.
+	PruneInvalidAttackers(ActorSet);
+
+	// Re-check attack budget right before insertion — ValidateAndBeginCapture may
+	// have triggered reentrant delegate broadcasts that registered other attackers,
+	// consuming the available budget (TOCTOU prevention).
+	if (ActorSet.Num() >= Territory->GetMaxConcurrentAttackers())
+	{
+		return;
+	}
 
 	// Identity-based — adding the same actor twice is a no-op
 	int32 BeforeCount = ActorSet.Num();

@@ -595,6 +595,25 @@ void ATerritoryProperty::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Bind to registry for late-registered districts (World Partition, streaming)
+	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+	{
+		Registry->OnTerritoryRegistered.AddDynamic(this, &ATerritoryProperty::OnTerritoryRegistered);
+
+		// Also scan the registry for already-registered districts
+		if (GetParentTerritoryTag().IsValid())
+		{
+			TArray<ATerritoryVolume*> Candidates = Registry->GetChildTerritories(GetParentTerritoryTag());
+			for (ATerritoryVolume* Candidate : Candidates)
+			{
+				if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Candidate))
+				{
+					BindToOwningDistrict(District);
+				}
+			}
+		}
+	}
+
 	// Only sync to district owner if property has NO owner (first-time init).
 	// Do NOT overwrite saved ownership — SaveSystem already restored it in Super::BeginPlay.
 	if (HasAuthority() && !GetOwningFaction().IsValid())
@@ -608,6 +627,54 @@ void ATerritoryProperty::BeginPlay()
 				SetOwningFaction(DistrictOwner);
 			}
 		}
+	}
+}
+
+void ATerritoryProperty::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryProperty::OnTerritoryRegistered);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void ATerritoryProperty::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	if (bWasUnregistered) return;
+
+	// Check if this territory is a district that should own this property
+	if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory))
+	{
+		FGameplayTag DistrictTag = District->GetTerritoryTag();
+		// Match by ParentTerritoryTag or tag hierarchy
+		if (DistrictTag.IsValid() && (GetParentTerritoryTag() == DistrictTag ||
+			(!GetParentTerritoryTag().IsValid() && GetTerritoryTag().MatchesTag(DistrictTag))))
+		{
+			BindToOwningDistrict(District);
+		}
+	}
+}
+
+void ATerritoryProperty::BindToOwningDistrict(ATerritoryDistrict* District)
+{
+	if (!District) return;
+	District->OnTerritoryOwnershipChanged.AddUniqueDynamic(this, &ATerritoryProperty::OnDistrictOwnershipChanged);
+}
+
+void ATerritoryProperty::OnDistrictOwnershipChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	// When the owning district changes ownership, sync this property to the new owner
+	// if it currently belongs to the old owner. This handles world-partition late binding
+	// where the property loads before the district has been set up.
+	if (!HasAuthority() || !NewOwner.IsValid()) return;
+
+	if (!GetOwningFaction().IsValid() || GetOwningFaction() == OldOwner)
+	{
+		SetOwningFaction(NewOwner);
 	}
 }
 

@@ -22,9 +22,14 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(UObject* InAsset) 
 	// Validate any level/world that contains territory actors
 	if (ULevel* Level = Cast<ULevel>(InAsset))
 	{
-		for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
+		// During editor asset validation (non-PIE), Level->GetWorld() returns
+		// nullptr — the TActorIterator would crash on dereference.
+		if (Level->GetWorld())
 		{
-			return true;
+			for (TActorIterator<ATerritoryVolume> It(Level->GetWorld()); It; ++It)
+			{
+				return true;
+			}
 		}
 	}
 

@@ -13,9 +13,11 @@ struct FTerritoryTreasury
 {
 	GENERATED_BODY()
 
-	// No separate Gold field — faction wealth is the aggregate of faction
-	// members' UInventoryComponent::Currency. GetTreasury() reads live from
-	// player inventories; there is nothing to save/serialize here.
+	// Income/cost snapshot for a faction. Faction wealth is stored in two places:
+	//   - FactionGold (persistent treasury on UTerritoryEconomySubsystem, SaveGame)
+	//   - UInventoryComponent::Currency on each online faction member character
+	// GetTreasury() returns FactionGold + aggregate member currency.
+	// This struct is a tick-level summary — not a wallet.
 
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 IncomePerTick = 0;
