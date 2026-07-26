@@ -485,6 +485,7 @@ private:
 	ETerritoryState PreviousState = ETerritoryState::Unclaimed;
 	FBox LastKnownBounds;
 	bool bLoadedFromSave = false;
+	bool bGuardsReconciled = false;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);

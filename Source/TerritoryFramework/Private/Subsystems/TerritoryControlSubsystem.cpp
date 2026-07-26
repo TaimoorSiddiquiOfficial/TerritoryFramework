@@ -462,6 +462,11 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	// Defender check on every tick — guards that spawn/arrive mid-contest must halt progress
 	const bool bDefendersPresent = Territory->GetDefenderCount() > 0 && Territory->GetOwningFaction().IsValid();
 
+	// Diplomacy check on every tick — if a treaty was signed mid-capture (e.g. via quest
+	// event), progress for factions that are no longer Hostile should decay instead of advance.
+	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
+	ANarrativeGameState* NarrativeGS = DefendingFaction.IsValid() ? Cast<ANarrativeGameState>(GetWorld()->GetGameState()) : nullptr;
+
 	FGameplayTag BestFaction;
 	float BestProgress = 0.f;
 	int32 BestAttackerCount = 0;
@@ -471,10 +476,22 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 		TSet<TWeakObjectPtr<AActor>>* ActorSet = State->AttackersByFaction.Find(Pair.Key);
 		int32 AttackerCount = ActorSet ? PruneInvalidAttackers(*ActorSet) : 0;
 
+		// Re-validate diplomacy: if a peace treaty was signed mid-capture, this faction
+		// should not advance. Decay instead, same as if defenders were present.
+		bool bDiplomaticallyBlocked = false;
+		if (DefendingFaction.IsValid() && NarrativeGS && AttackerCount > 0)
+		{
+			const ETeamAttitude::Type Attitude = NarrativeGS->GetFactionAttitudeTowardsFaction(Pair.Key, DefendingFaction);
+			if (Attitude != ETeamAttitude::Hostile)
+			{
+				bDiplomaticallyBlocked = true;
+			}
+		}
+
 		if (AttackerCount > 0)
 		{
-			// Defenders present → halt progress (decay instead of advance)
-			if (bDefendersPresent)
+			// Diplomatically blocked or defenders present → halt progress (decay instead of advance)
+			if (bDefendersPresent || bDiplomaticallyBlocked)
 			{
 				Pair.Value = FMath::Max(0.f, Pair.Value - DeltaTime * DecayRate);
 			}

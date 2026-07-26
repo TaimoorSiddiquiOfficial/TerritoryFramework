@@ -471,7 +471,12 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 				ATerritoryVolume* Territory = Registry->GetTerritoryByTag(Summary.TerritoryTag);
 				if (!Territory) continue;
 
-				Territory->SetOwningFaction(Summary.CurrentOwner);
+				// Only set ownership if it actually changed — avoids unnecessary
+				// guard despawn/re-spawn and duplicate ownership-change events.
+				if (Summary.CurrentOwner != Territory->GetOwningFaction())
+				{
+					Territory->SetOwningFaction(Summary.CurrentOwner);
+				}
 				if (Summary.State == ETerritoryState::Contested)
 				{
 					Territory->SetTerritoryState(ETerritoryState::Contested);

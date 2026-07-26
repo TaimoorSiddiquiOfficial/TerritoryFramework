@@ -118,7 +118,9 @@ void UTerritoryDiplomacySubsystem::BreakCeasefire(FGameplayTag FactionA, FGamepl
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
 	if (GetDiplomacyState(FactionA, FactionB) != EDiplomacyState::Ceasefire) return;
 
-	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::None);
+	// Breaking a ceasefire is a hostile act — escalate to War so the action has
+	// gameplay consequences (capture remains valid, faction attitudes reflect hostility).
+	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::War);
 	RecordEvent(EDiplomacyEventType::BrokeCeasefire, FactionA, FactionB);
 }
 

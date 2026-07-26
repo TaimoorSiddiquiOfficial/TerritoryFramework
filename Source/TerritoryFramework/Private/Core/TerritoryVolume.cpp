@@ -139,7 +139,11 @@ void ATerritoryVolume::BeginPlay()
 			}
 		}
 
-		ReconcileGuardsAfterLoad();
+		if (!bGuardsReconciled)
+		{
+			ReconcileGuardsAfterLoad();
+			bGuardsReconciled = true;
+		}
 	}
 
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
@@ -401,6 +405,7 @@ void ATerritoryVolume::Load_Implementation()
 	if (HasAuthority())
 	{
 		ReconcileGuardsAfterLoad();
+		bGuardsReconciled = true;
 		if (UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
 		{
 			Control->RestoreCaptureState(this, OwnershipData.ContestingFaction, OwnershipData.ControlProgress);
