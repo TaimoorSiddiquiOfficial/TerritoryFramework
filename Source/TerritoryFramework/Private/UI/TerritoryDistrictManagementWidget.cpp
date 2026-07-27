@@ -4,19 +4,15 @@
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
-#include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
+#include "Widgets/NarrativeCommonButtonBase.h"
 
 void UTerritoryDistrictManagementWidget::InitializeManagement(
 	ATerritoryDistrictManagementPoint* InManagementPoint)
 {
 	ManagementPoint = InManagementPoint;
-	if (ATerritoryDistrict* District = GetManagedDistrict())
-	{
-		BindToTerritory(District->GetTerritoryTag());
-	}
 	if (APlayerController* PlayerController = GetOwningPlayer())
 	{
 		ManagedFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, PlayerController->GetPawn());
@@ -30,11 +26,18 @@ void UTerritoryDistrictManagementWidget::NativeConstruct()
 	Super::NativeConstruct();
 	if (AddGuardButton)
 	{
-		AddGuardButton->OnClicked.AddUniqueDynamic(this, &UTerritoryDistrictManagementWidget::HandleAddGuardClicked);
+		AddGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictManagementWidget::HandleAddGuardClicked);
+		AddGuardButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "AddGuard", "ADD GUARD"));
+	}
+	if (RemoveGuardButton)
+	{
+		RemoveGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictManagementWidget::HandleRemoveGuardClicked);
+		RemoveGuardButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "RemoveGuard", "REMOVE GUARD"));
 	}
 	if (CloseButton)
 	{
-		CloseButton->OnClicked.AddUniqueDynamic(this, &UTerritoryDistrictManagementWidget::HandleCloseClicked);
+		CloseButton->OnClicked().AddUObject(this, &UTerritoryDistrictManagementWidget::HandleCloseClicked);
+		CloseButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "Close", "CLOSE"));
 	}
 	BindManagementComponent();
 	if (UWorld* World = GetWorld())
@@ -48,11 +51,15 @@ void UTerritoryDistrictManagementWidget::NativeDestruct()
 {
 	if (AddGuardButton)
 	{
-		AddGuardButton->OnClicked.RemoveDynamic(this, &UTerritoryDistrictManagementWidget::HandleAddGuardClicked);
+		AddGuardButton->OnClicked().RemoveAll(this);
+	}
+	if (RemoveGuardButton)
+	{
+		RemoveGuardButton->OnClicked().RemoveAll(this);
 	}
 	if (CloseButton)
 	{
-		CloseButton->OnClicked.RemoveDynamic(this, &UTerritoryDistrictManagementWidget::HandleCloseClicked);
+		CloseButton->OnClicked().RemoveAll(this);
 	}
 	if (ManagementComponent.IsValid())
 	{
@@ -68,7 +75,7 @@ void UTerritoryDistrictManagementWidget::NativeDestruct()
 
 ATerritoryDistrict* UTerritoryDistrictManagementWidget::GetManagedDistrict() const
 {
-	return ManagementPoint.IsValid() ? ManagementPoint->ResolveDistrict() : Cast<ATerritoryDistrict>(GetBoundTerritory());
+	return ManagementPoint.IsValid() ? ManagementPoint->ResolveDistrict() : nullptr;
 }
 
 FGameplayTag UTerritoryDistrictManagementWidget::GetManagedFaction() const
@@ -95,13 +102,34 @@ bool UTerritoryDistrictManagementWidget::CanPurchaseGuard(FText& OutFailureReaso
 		&& District->CanPurchaseGuards(PlayerController, 1, OutFailureReason);
 }
 
+bool UTerritoryDistrictManagementWidget::CanRemoveGuard(FText& OutFailureReason) const
+{
+	const ATerritoryDistrict* District = GetManagedDistrict();
+	APlayerController* PlayerController = GetOwningPlayer();
+	if (!ManagementComponent.IsValid())
+	{
+		OutFailureReason = FText::FromString(TEXT("Territory management is not installed on this PlayerController."));
+		return false;
+	}
+	if (!ManagementPoint.IsValid() || !PlayerController || !ManagementPoint->CanManage(PlayerController->GetPawn(), OutFailureReason))
+	{
+		return false;
+	}
+	if (!ManagementPoint->IsInteractorInRange(PlayerController->GetPawn()))
+	{
+		OutFailureReason = FText::FromString(TEXT("Move closer to the district management point."));
+		return false;
+	}
+	return District && District->CanRemoveGuards(PlayerController, 1, OutFailureReason);
+}
+
 void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 {
 	ATerritoryDistrict* District = GetManagedDistrict();
 	if (!District) return;
 
 	if (DistrictNameText) DistrictNameText->SetText(District->GetTerritoryDisplayName());
-	if (OwnerText) OwnerText->SetText(FText::FromString(District->GetOwningFaction().ToString()));
+	if (OwnerText) OwnerText->SetText(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(District->GetOwningFaction()));
 	if (StateText)
 	{
 		const UEnum* StateEnum = StaticEnum<ETerritoryState>();
@@ -126,9 +154,12 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	FText FailureReason;
 	const bool bCanPurchase = CanPurchaseGuard(FailureReason);
 	if (AddGuardButton) AddGuardButton->SetIsEnabled(bCanPurchase);
+	FText RemoveFailureReason;
+	const bool bCanRemove = CanRemoveGuard(RemoveFailureReason);
+	if (RemoveGuardButton) RemoveGuardButton->SetIsEnabled(bCanRemove);
 	if (StatusText)
 	{
-		StatusText->SetText(bCanPurchase ? FText::GetEmpty() : FailureReason);
+		StatusText->SetText(bCanPurchase || bCanRemove ? FText::GetEmpty() : FailureReason);
 	}
 	OnManagementRefreshed();
 }
@@ -145,6 +176,21 @@ void UTerritoryDistrictManagementWidget::HandleAddGuardClicked()
 	{
 		if (StatusText) StatusText->SetText(FText::FromString(TEXT("Purchasing guard...")));
 		ManagementComponent->RequestPurchaseGuards(ManagementPoint.Get(), 1);
+	}
+}
+
+void UTerritoryDistrictManagementWidget::HandleRemoveGuardClicked()
+{
+	FText FailureReason;
+	if (!CanRemoveGuard(FailureReason))
+	{
+		if (StatusText) StatusText->SetText(FailureReason);
+		return;
+	}
+	if (ManagementComponent.IsValid() && ManagementPoint.IsValid())
+	{
+		if (StatusText) StatusText->SetText(FText::FromString(TEXT("Removing guard...")));
+		ManagementComponent->RequestRemoveGuards(ManagementPoint.Get(), 1);
 	}
 }
 

@@ -1,5 +1,6 @@
 #include "UI/TerritoryInfoWidget.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
@@ -131,7 +132,10 @@ void UTerritoryInfoWidget::RefreshTerritoryDisplay()
 	if (!Territory) return;
 
 	if (TerritoryNameText) TerritoryNameText->SetText(Territory->GetTerritoryDisplayName());
-	if (TerritoryOwnerText) TerritoryOwnerText->SetText(FText::FromString(Territory->GetOwningFaction().ToString()));
+	if (TerritoryOwnerText)
+	{
+		TerritoryOwnerText->SetText(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Territory->GetOwningFaction()));
+	}
 	if (TerritoryStateText)
 	{
 		const UEnum* StateEnum = StaticEnum<ETerritoryState>();

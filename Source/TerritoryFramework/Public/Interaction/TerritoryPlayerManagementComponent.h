@@ -6,6 +6,7 @@
 #include "TerritoryPlayerManagementComponent.generated.h"
 
 class ATerritoryDistrictManagementPoint;
+class ATerritoryDistrict;
 class ATerritoryVolume;
 class APlayerController;
 
@@ -36,6 +37,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestPurchaseGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count = 1);
 
+	/** Remote management action used by the territory journal for owned districts. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void RequestPurchaseGuardsForDistrict(ATerritoryDistrict* District, int32 Count = 1);
+
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void RequestRemoveGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count = 1);
+
+	/** Remote management action used by the territory journal for owned districts. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void RequestRemoveGuardsForDistrict(ATerritoryDistrict* District, int32 Count = 1);
+
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	FGameplayTag GetManagedFaction() const;
 
@@ -43,10 +55,23 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestPurchaseGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 
+	UFUNCTION(Server, Reliable)
+	void ServerRequestPurchaseGuardsForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestRemoveGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestRemoveGuardsForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
+
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveGuardPurchaseResult(ATerritoryVolume* Territory, bool bSuccess, const FText& Message, int32 RequestId);
 
 	void PerformPurchase(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
+	void PerformPurchaseForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
+	void PerformRemove(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
+	void PerformRemoveForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
+	bool CanManageDistrict(ATerritoryDistrict* District, APawn* Pawn, FText& OutFailureReason) const;
 	APawn* GetManagingPawn() const;
 
 	float LastPurchaseRequestTime = 0.f;

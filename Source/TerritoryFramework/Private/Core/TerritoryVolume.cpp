@@ -1580,9 +1580,84 @@ bool ATerritoryVolume::TryPurchaseGuards(AActor* Requester, int32 Count, FText& 
 	}
 
 	OwnershipData.DesiredGuardCount = FMath::Max(GetDesiredGuardCount(), GetSpawnedGuardCount());
+	if (UTerritoryEconomySubsystem* UpdatedEconomy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
+	{
+		UpdatedEconomy->RecalculateIncome(OwnershipData.OwningFaction);
+	}
 	OutResult = FText::FromString(FString::Printf(TEXT("Added %d guard(s) to %s."),
 		SpawnedCount, *GetTerritoryDisplayName().ToString()));
 	return SpawnedCount == Count;
+}
+
+bool ATerritoryVolume::CanRemoveGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const
+{
+	OutFailureReason = FText::GetEmpty();
+	if (!Requester || Count <= 0)
+	{
+		OutFailureReason = FText::FromString(TEXT("Invalid requester or guard count."));
+		return false;
+	}
+	if (OwnershipData.State != ETerritoryState::Claimed)
+	{
+		OutFailureReason = FText::FromString(TEXT("The territory must be claimed."));
+		return false;
+	}
+	if (!UTerritoryBlueprintLibrary::IsActorInFaction(this, const_cast<AActor*>(Requester), OwnershipData.OwningFaction))
+	{
+		OutFailureReason = FText::FromString(TEXT("Only the owning faction can remove guards."));
+		return false;
+	}
+	if (GetDesiredGuardCount() < Count)
+	{
+		OutFailureReason = FText::FromString(TEXT("The garrison has no guards available to remove."));
+		return false;
+	}
+	return true;
+}
+
+bool ATerritoryVolume::TryRemoveGuards(AActor* Requester, int32 Count, FText& OutResult)
+{
+	if (!HasAuthority() || !CanRemoveGuards(Requester, Count, OutResult))
+	{
+		return false;
+	}
+
+	int32 RemainingToDestroy = Count;
+	for (int32 Index = SpawnedGuards.Num() - 1; Index >= 0 && RemainingToDestroy > 0; --Index)
+	{
+		ATerritoryGuardCharacter* Guard = SpawnedGuards[Index].Get();
+		if (!Guard)
+		{
+			SpawnedGuards.RemoveAtSwap(Index);
+			continue;
+		}
+
+		if (ATerritoryGuardSpawnPoint* SpawnPoint = Guard->OwningTerritorySpawnPoint)
+		{
+			SpawnPoint->UnregisterGuard(Guard);
+		}
+		UnbindDefenderDeath(Guard);
+		RegisteredDefenders.Remove(Guard);
+		SpawnedGuards.RemoveAtSwap(Index);
+		Guard->Destroy();
+		--RemainingToDestroy;
+	}
+
+	OwnershipData.DesiredGuardCount = FMath::Max(0, GetDesiredGuardCount() - Count);
+	CleanupInvalidDefenders();
+	OwnershipData.DefenderCount = RegisteredDefenders.Num();
+	ForceNetUpdate();
+
+	if (UTerritoryEconomySubsystem* UpdatedEconomy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
+	{
+		UpdatedEconomy->RecalculateIncome(OwnershipData.OwningFaction);
+	}
+
+	OutResult = FText::Format(
+		NSLOCTEXT("TerritoryVolume", "RemovedGuards", "Removed {0} guard(s) from {1}. Future upkeep reduced."),
+		FText::AsNumber(Count),
+		GetTerritoryDisplayName());
+	return true;
 }
 
 void ATerritoryVolume::DespawnGuards()

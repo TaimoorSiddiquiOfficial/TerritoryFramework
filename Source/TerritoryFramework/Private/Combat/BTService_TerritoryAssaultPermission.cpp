@@ -4,8 +4,10 @@
 #include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "AI/NarrativeNPCController.h"
+#include "BehaviorTree/BehaviorTree.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/BlackboardData.h"
 
 UBTService_TerritoryAssaultPermission::UBTService_TerritoryAssaultPermission()
 {
@@ -18,6 +20,22 @@ UBTService_TerritoryAssaultPermission::UBTService_TerritoryAssaultPermission()
 	RandomDeviation = 0.f;
 	TerritoryKey.AddObjectFilter(this, GET_MEMBER_NAME_CHECKED(UBTService_TerritoryAssaultPermission, TerritoryKey), AActor::StaticClass());
 	PermissionGrantedKey.AddBoolFilter(this, GET_MEMBER_NAME_CHECKED(UBTService_TerritoryAssaultPermission, PermissionGrantedKey));
+}
+
+void UBTService_TerritoryAssaultPermission::InitializeFromAsset(UBehaviorTree& Asset)
+{
+	Super::InitializeFromAsset(Asset);
+
+	if (const UBlackboardData* BlackboardAsset = GetBlackboardAsset())
+	{
+		TerritoryKey.ResolveSelectedKey(*BlackboardAsset);
+		PermissionGrantedKey.ResolveSelectedKey(*BlackboardAsset);
+	}
+	else
+	{
+		TerritoryKey.InvalidateResolvedKey();
+		PermissionGrantedKey.InvalidateResolvedKey();
+	}
 }
 
 void UBTService_TerritoryAssaultPermission::OnBecomeRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
@@ -41,7 +59,7 @@ void UBTService_TerritoryAssaultPermission::OnCeaseRelevant(UBehaviorTreeCompone
 ATerritoryVolume* UBTService_TerritoryAssaultPermission::ResolveTerritory(UBehaviorTreeComponent& OwnerComp) const
 {
 	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
-	if (Blackboard && TerritoryKey.SelectedKeyType)
+	if (Blackboard && TerritoryKey.IsSet())
 	{
 		AActor* TargetActor = Cast<AActor>(Blackboard->GetValueAsObject(TerritoryKey.SelectedKeyName));
 		if (ATerritoryVolume* Territory = Cast<ATerritoryVolume>(TargetActor))
@@ -106,7 +124,7 @@ void UBTService_TerritoryAssaultPermission::UpdatePermission(UBehaviorTreeCompon
 		}
 	}
 
-	if (UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent(); Blackboard && PermissionGrantedKey.SelectedKeyType)
+	if (UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent(); Blackboard && PermissionGrantedKey.IsSet())
 	{
 		Blackboard->SetValueAsBool(PermissionGrantedKey.SelectedKeyName, bGranted);
 	}
@@ -124,7 +142,7 @@ void UBTService_TerritoryAssaultPermission::ReleasePermission(UBehaviorTreeCompo
 	GrantedTerritory = nullptr;
 	GrantedController = nullptr;
 
-	if (UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent(); Blackboard && PermissionGrantedKey.SelectedKeyType)
+	if (UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent(); Blackboard && PermissionGrantedKey.IsSet())
 	{
 		Blackboard->SetValueAsBool(PermissionGrantedKey.SelectedKeyName, false);
 	}

@@ -59,7 +59,7 @@ protected:
 	TObjectPtr<UProgressBar> TerritoryCaptureProgress;
 
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
-	void RefreshTerritoryDisplay();
+	virtual void RefreshTerritoryDisplay();
 
 	/** Called when the bound territory's ownership changes */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|UI")

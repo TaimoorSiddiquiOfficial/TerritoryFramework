@@ -8,6 +8,7 @@
 
 class ATerritoryVolume;
 class ANarrativeNPCController;
+class UBehaviorTree;
 
 /** Holds a Territory strategic assault slot for the lifetime of an attack BT branch. */
 UCLASS(meta=(DisplayName="Territory Assault Permission"))
@@ -17,6 +18,8 @@ class TERRITORYFRAMEWORK_API UBTService_TerritoryAssaultPermission : public UBTS
 
 public:
 	UBTService_TerritoryAssaultPermission();
+
+	virtual void InitializeFromAsset(UBehaviorTree& Asset) override;
 
 	/** Territory or target Actor whose current Territory owns the assault limit. */
 	UPROPERTY(EditAnywhere, Category="Blackboard")

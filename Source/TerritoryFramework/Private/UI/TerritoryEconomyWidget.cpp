@@ -1,5 +1,6 @@
 #include "UI/TerritoryEconomyWidget.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Components/TextBlock.h"
 #include "Engine/World.h"
 
@@ -138,7 +139,7 @@ void UTerritoryEconomyWidget::HandleTransactionRecorded(const FTerritoryTransact
 
 void UTerritoryEconomyWidget::RefreshEconomyDisplay()
 {
-	if (EconomyFactionText) EconomyFactionText->SetText(FText::FromString(DisplayFaction.ToString()));
+	if (EconomyFactionText) EconomyFactionText->SetText(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(DisplayFaction));
 	if (EconomyTreasuryText) EconomyTreasuryText->SetText(FText::AsNumber(GetCurrentGold()));
 	if (EconomyIncomeText) EconomyIncomeText->SetText(FText::AsNumber(GetCurrentIncome()));
 	if (EconomyCostsText) EconomyCostsText->SetText(FText::AsNumber(GetCurrentCosts()));

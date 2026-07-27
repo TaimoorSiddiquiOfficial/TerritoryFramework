@@ -150,6 +150,33 @@ bool UTerritoryBlueprintLibrary::IsSameFaction(const FGameplayTag& FactionA, con
 	return FactionA == FactionB && FactionA.IsValid();
 }
 
+FText UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(const FGameplayTag& Tag)
+{
+	if (!Tag.IsValid())
+	{
+		return FText::GetEmpty();
+	}
+
+	FString FriendlyName = Tag.ToString();
+	int32 LastSeparator = INDEX_NONE;
+	if (FriendlyName.FindLastChar(TEXT('.'), LastSeparator))
+	{
+		FriendlyName = FriendlyName.Mid(LastSeparator + 1);
+	}
+	FriendlyName.ReplaceInline(TEXT("_"), TEXT(" "));
+
+	for (int32 Index = 1; Index < FriendlyName.Len(); ++Index)
+	{
+		if (FChar::IsUpper(FriendlyName[Index]) && FChar::IsLower(FriendlyName[Index - 1]))
+		{
+			FriendlyName.InsertAt(Index, TEXT(' '));
+			++Index;
+		}
+	}
+
+	return FText::FromString(FriendlyName);
+}
+
 // ─── Narrative Pro Faction Bridge ───
 
 FGameplayTagContainer UTerritoryBlueprintLibrary::GetActorFactions(const UObject* WorldContextObject, AActor* Actor)

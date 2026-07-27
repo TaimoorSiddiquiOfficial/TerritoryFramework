@@ -1,4 +1,5 @@
 #include "Core/TerritoryWorldState.h"
+#include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -388,7 +389,8 @@ void ATerritoryWorldState::ExportPersistentState()
 				Summary.TerritoryTag = Territory->GetTerritoryTag();
 				Summary.TerritoryGUID = Territory->GetActorGUID_Implementation();
 				Summary.CurrentOwner = Territory->GetOwningFaction();
-				Summary.ContestingFaction = Territory->GetContestingFaction();
+				Summary.ContestingFaction =
+					ITerritoryOwnershipInterface::Execute_GetContestingFaction(Territory);
 				Summary.ControlProgress = Territory->GetControlProgress();
 				Summary.State = Territory->GetTerritoryState();
 				ReplicatedCaptureSummaries.Add(Summary);

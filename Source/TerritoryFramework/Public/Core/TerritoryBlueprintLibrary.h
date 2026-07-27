@@ -188,6 +188,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Utility", meta=(DisplayName="Is Same Faction"))
 	static bool IsSameFaction(const FGameplayTag& FactionA, const FGameplayTag& FactionB);
 
+	/** Converts a gameplay tag into UI-friendly text without exposing the full hierarchy. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI", meta=(DisplayName="Get Friendly Tag Display Name"))
+	static FText GetFriendlyTagDisplayName(const FGameplayTag& Tag);
+
 	// ═══════════════════════════════════════════════════════════════════════════════
 	// Narrative Pro Faction Bridge
 	// ═══════════════════════════════════════════════════════════════════════════════

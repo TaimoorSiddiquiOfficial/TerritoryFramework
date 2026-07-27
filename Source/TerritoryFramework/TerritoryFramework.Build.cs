@@ -15,8 +15,11 @@ public class TerritoryFramework : ModuleRules
 			"GameplayTags",
 			"AIModule",
 			"UMG",
+			"CommonUI",
+			"EnhancedInput",
 			"NavigationSystem",
 			"NarrativeArsenal",
+			"NarrativeCommonUI",
 			"NarrativeSaveSystem"
 		});
 

@@ -169,5 +169,10 @@ public:
 	TWeakObjectPtr<AActor> LastDamagingInstigator;
 
 private:
+	void TryWieldDefaultWeapon();
+
+	FTimerHandle DefaultWeaponWieldTimer;
+	int32 DefaultWeaponWieldAttempts = 0;
+
 	FGuid CachedFallbackGUID;
 };

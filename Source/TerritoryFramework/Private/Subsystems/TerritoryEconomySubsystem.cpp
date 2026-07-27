@@ -510,13 +510,14 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 			Treasury.IncomePerTick += Property->GetEffectiveIncome();
 		}
 
-		// Only count guard costs for territories that are configured to spawn guards.
-		// Use GuardSpawnCount (configured max) rather than GetSpawnedGuardCount() (currently alive)
-		// to avoid undercounting upkeep for one tick after a guard wipe.
-		if (Territory->GetConfiguredGuardCount() > 0)
-		{
-			Treasury.CostsPerTick += Territory->GetGuardCost();
-		}
+		// GuardCost is the per-guard upkeep. Use the persistent desired garrison
+		// rather than the configured maximum so add/remove commands affect finances.
+		const int64 GuardUpkeep = static_cast<int64>(FMath::Max(0, Territory->GetGuardCost()))
+			* static_cast<int64>(Territory->GetDesiredGuardCount());
+		Treasury.CostsPerTick = FMath::Clamp<int64>(
+			static_cast<int64>(Treasury.CostsPerTick) + GuardUpkeep,
+			0,
+			MAX_int32);
 	}
 }
 

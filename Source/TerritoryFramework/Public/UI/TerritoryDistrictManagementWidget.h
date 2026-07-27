@@ -7,8 +7,8 @@
 class ATerritoryDistrict;
 class ATerritoryDistrictManagementPoint;
 class ATerritoryVolume;
+class UNarrativeCommonButtonBase;
 class UTerritoryPlayerManagementComponent;
-class UButton;
 class UTextBlock;
 
 /** Native-backed District management panel. Layout is supplied by a project Widget Blueprint. */
@@ -32,6 +32,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	bool CanPurchaseGuard(FText& OutFailureReason) const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	bool CanRemoveGuard(FText& OutFailureReason) const;
 
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RefreshManagementDisplay();
@@ -65,10 +68,13 @@ protected:
 	TObjectPtr<UTextBlock> StatusText;
 
 	UPROPERTY(meta=(BindWidgetOptional))
-	TObjectPtr<UButton> AddGuardButton;
+	TObjectPtr<UNarrativeCommonButtonBase> AddGuardButton;
 
 	UPROPERTY(meta=(BindWidgetOptional))
-	TObjectPtr<UButton> CloseButton;
+	TObjectPtr<UNarrativeCommonButtonBase> RemoveGuardButton;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> CloseButton;
 
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|Management")
 	void OnManagementRefreshed();
@@ -81,6 +87,9 @@ protected:
 
 	UFUNCTION()
 	void HandleAddGuardClicked();
+
+	UFUNCTION()
+	void HandleRemoveGuardClicked();
 
 	UFUNCTION()
 	void HandleCloseClicked();

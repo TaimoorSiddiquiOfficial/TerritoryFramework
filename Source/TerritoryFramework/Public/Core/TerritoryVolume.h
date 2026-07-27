@@ -310,6 +310,12 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Purchase Guards"))
 	bool TryPurchaseGuards(AActor* Requester, int32 Count, FText& OutResult);
 
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Can Remove Guards"))
+	bool CanRemoveGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Remove Guards"))
+	bool TryRemoveGuards(AActor* Requester, int32 Count, FText& OutResult);
+
 	/** Returns true if at least one guard is alive and spawned from this territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Has Guards Alive"))
 	bool HasGuardsAlive() const;

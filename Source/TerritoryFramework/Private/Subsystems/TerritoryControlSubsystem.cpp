@@ -1,4 +1,5 @@
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -220,7 +221,7 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 			}
 			Territory->SetContestingFaction(AttackingFaction);
 		}
-		else if (!Territory->GetContestingFaction().IsValid())
+		else if (!ITerritoryOwnershipInterface::Execute_GetContestingFaction(Territory).IsValid())
 		{
 			Territory->SetContestingFaction(AttackingFaction);
 		}
@@ -661,7 +662,7 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		? CaptureState->CaptureProgressByFaction.Find(NewOwner)
 		: nullptr;
 	if (Territory->GetTerritoryState() != ETerritoryState::Contested
-		|| Territory->GetContestingFaction() != NewOwner
+		|| ITerritoryOwnershipInterface::Execute_GetContestingFaction(Territory) != NewOwner
 		|| ActiveAttackers <= 0
 		|| !Progress || *Progress < 1.f
 		|| Territory->GetDefenderCount() > 0

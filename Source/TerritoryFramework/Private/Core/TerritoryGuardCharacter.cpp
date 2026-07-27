@@ -5,6 +5,8 @@
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "AI/Activities/NPCActivityComponent.h"
+#include "Components/EquipmentComponent.h"
+#include "Items/WeaponItem.h"
 #include "Tales/TriggerSet.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -40,6 +42,67 @@ void ATerritoryGuardCharacter::BeginPlay()
 		{
 			InitializeTerritoryPatrolGoal();
 		}));
+
+		// NPC definitions populate inventory after BeginPlay; retry briefly until the
+		// first equipped weapon is available, then make it the mainhand weapon.
+		GetWorldTimerManager().SetTimer(
+			DefaultWeaponWieldTimer,
+			this,
+			&ATerritoryGuardCharacter::TryWieldDefaultWeapon,
+			0.25f,
+			true,
+			0.25f);
+	}
+}
+
+void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
+{
+	if (++DefaultWeaponWieldAttempts > 40)
+	{
+		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+		return;
+	}
+
+	if (GetWeapon(true))
+	{
+		return;
+	}
+
+	UEquipmentComponent* Equipment = GetEquipmentComponent();
+	if (!Equipment)
+	{
+		return;
+	}
+
+	const FGameplayTag MainhandWieldSlot = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Narrative.Equipment.WieldSlot.Mainhand")), false);
+	const TArray<FGameplayTag> WeaponSlots =
+	{
+		FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Equipment.Slot.Weapon.HipLeft")), false),
+		FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Equipment.Slot.Weapon.HipRight")), false),
+		FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Equipment.Slot.Weapon.Back")), false),
+		FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Equipment.Slot.Weapon.BackA")), false),
+		FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Equipment.Slot.Weapon.BackB")), false),
+		FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Equipment.Slot.Weapon.Hip")), false)
+	};
+
+	for (const FGameplayTag& EquipSlot : WeaponSlots)
+	{
+		UWeaponItem* Weapon = Equipment->GetEquippedWeaponAtSlot(EquipSlot);
+		if (!Weapon)
+		{
+			Weapon = Cast<UWeaponItem>(Equipment->GetEquippedItemAtSlot(EquipSlot));
+		}
+		if (!Weapon)
+		{
+			continue;
+		}
+
+		FWeaponWieldState DesiredWieldState;
+		DesiredWieldState.EquipSlots.AddTag(EquipSlot);
+		DesiredWieldState.WieldSlots.AddTag(MainhandWieldSlot);
+		SetWieldState(DesiredWieldState);
+		return;
 	}
 }
 
@@ -47,6 +110,7 @@ void ATerritoryGuardCharacter::ApplyActivityConfig_Implementation(UNPCActivityCo
 {
 	Super::ApplyActivityConfig_Implementation(NPCActivityConfig);
 	InitializeTerritoryPatrolGoal();
+	TryWieldDefaultWeapon();
 }
 
 void ATerritoryGuardCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
