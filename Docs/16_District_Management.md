@@ -20,7 +20,7 @@ UTerritoryDistrictManagementWidget (UTerritoryInfoWidget)
 Two independent entry points to open the management widget:
 
 1. **Map marker**: Player clicks the district marker on map/compass → `OnSelect()` → `OpenManagementWidget()`
-2. **Physical interaction**: Player walks within range and presses interact → `OnInteract()` → `HandleInteraction()` → `Client_OpenManagementWidget()` (Client RPC) → `OpenManagementWidget()`
+2. **Physical interaction**: Player walks within range and presses interact → `OnInteract()` → `HandleInteraction()` → local `OpenManagementWidget()`
 
 ## Setup
 
@@ -59,7 +59,7 @@ The widget (`UTerritoryDistrictManagementWidget`) extends `UTerritoryInfoWidget`
 | Guard Count | `District->GetSpawnedGuardCount() / GetMaxGuardCount()` | 0.5s poll |
 | Guard Cost | `District->GetGuardPurchaseCost(1)` | 0.5s poll |
 | District Income | `District->GetEffectiveIncome()` | 0.5s poll |
-| Treasury | `Economy->GetTreasury(ManagedFaction)` | 0.5s poll |
+| Player Currency | `Economy->GetActorCurrency(GetOwningPlayer())` | 0.5s poll |
 | Add Guard Button | `District->CanPurchaseGuards()` | 0.5s poll |
 
 The base class `UTerritoryInfoWidget` subscribes to ownership/state change delegates for immediate refresh on capture/contest events. Economy and guard data is polled because those subsystems don't push per-change delegate updates.
@@ -73,15 +73,15 @@ Widget "Add Guard" button
       → (Client) ServerRequestPurchaseGuards (RPC)
         → PerformPurchase()
           → Validate: district, pawn, faction, range
-          → District->TryPurchaseGuards(Faction, Count)
-            → Validate budget, capacity
-            → Economy->TryDebitTreasury()
+           → District->TryPurchaseGuards(RequestingPawn, Count)
+             → Validate owner, range, budget, capacity
+             → Economy->TryDebitCurrency(RequestingPawn)
             → SpawnGuards()
           → ClientReceiveGuardPurchaseResult (RPC)
             → HandleGuardPurchaseResult()
 ```
 
-Anti-spam: 1-second cooldown between purchase requests on the player management component.
+Anti-spam: server-enforced cooldown and monotonic request IDs on the player-owned management component. The management point is never used as a client RPC owner.
 
 ## POI Marker Refresh
 
@@ -121,7 +121,7 @@ The district POI marker (`UTerritoryDistrictPOIMarker`) auto-refreshes when the 
 | Function | Type | Purpose |
 |---|---|---|
 | `RequestPurchaseGuards(Point, Count)` | BlueprintCallable | Initiate guard purchase |
-| `OnGuardPurchaseResult` | BlueprintAssignable | Result delegate: (Territory, Success, Message) |
+| `OnGuardPurchaseResult` | BlueprintAssignable | Result delegate: (Territory, Success, Message, RequestId) |
 
 ## Lifecycle Notes
 

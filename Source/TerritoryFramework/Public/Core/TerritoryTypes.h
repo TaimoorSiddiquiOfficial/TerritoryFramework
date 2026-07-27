@@ -22,6 +22,17 @@ enum class ETerritoryState : uint8
 };
 
 UENUM(BlueprintType)
+enum class ETerritoryControlMode : uint8
+{
+	/** Territory may be captured directly by the capture subsystem. */
+	Independent,
+	/** Ownership is derived from child territories and cannot be directly captured. */
+	AggregateOnly,
+	/** Direct capture is allowed and child ownership may cascade from it. */
+	Cascading
+};
+
+UENUM(BlueprintType)
 enum class ECaptureResult : uint8
 {
 	Success,
@@ -43,6 +54,17 @@ enum class ETerritoryTransactionType : uint8
 	Scripted,
 	ManualCredit,
 	ManualDebit
+};
+
+/** Explicit policy for distributing territory-generated currency. */
+UENUM(BlueprintType)
+enum class ETerritoryIncomePayoutPolicy : uint8
+{
+	CapturingPlayer,
+	FactionLeader,
+	EqualSplitOnlineMembers,
+	SharedNarrativeAccount,
+	NoCurrencyPayout
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

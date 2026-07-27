@@ -73,10 +73,11 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|Management")
 	void OnManagementRefreshed();
 
-private:
+	private:
 	TWeakObjectPtr<ATerritoryDistrictManagementPoint> ManagementPoint;
 	TWeakObjectPtr<UTerritoryPlayerManagementComponent> ManagementComponent;
 	FGameplayTag ManagedFaction;
+	FTimerHandle RefreshTimerHandle;
 
 	UFUNCTION()
 	void HandleAddGuardClicked();
@@ -85,7 +86,7 @@ private:
 	void HandleCloseClicked();
 
 	UFUNCTION()
-	void HandleGuardPurchaseResult(ATerritoryVolume* Territory, bool bSuccess, FText Message);
+	void HandleGuardPurchaseResult(ATerritoryVolume* Territory, bool bSuccess, FText Message, int32 RequestId);
 
 	void BindManagementComponent();
 };

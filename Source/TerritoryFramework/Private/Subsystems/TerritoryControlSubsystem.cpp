@@ -3,6 +3,8 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Core/TerritoryDiplomacyTypes.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -140,7 +142,8 @@ ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Terr
 ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 	ATerritoryVolume* Territory,
 	const FGameplayTag& AttackingFaction,
-	bool bBroadcastAttempt)
+	bool bBroadcastAttempt,
+	bool bCommitContestState)
 {
 	UWorld* World = GetWorld();
 	if (!World || !World->GetAuthGameMode()) return ECaptureResult::InvalidTerritory;
@@ -164,6 +167,10 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 	};
 
 	if (!Territory || !AttackingFaction.IsValid()) return FinishValidation(ECaptureResult::InvalidTerritory);
+	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
+	{
+		return FinishValidation(ECaptureResult::InvalidTerritory);
+	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebugAttempts = Settings && Settings->ShouldDebugCaptureAttempts();
@@ -196,29 +203,27 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 		return FinishValidation(ECaptureResult::DefendersRemain);
 	}
 
-	// Check Narrative faction attitudes
-	if (DefendingFaction.IsValid())
+	if (DefendingFaction.IsValid() && !CanFactionCaptureTerritory(Territory, AttackingFaction))
 	{
-		ANarrativeGameState* NarrativeGS = Cast<ANarrativeGameState>(World->GetGameState());
-		if (NarrativeGS)
-		{
-			ETeamAttitude::Type Attitude = NarrativeGS->GetFactionAttitudeTowardsFaction(AttackingFaction, DefendingFaction);
-			if (Attitude == ETeamAttitude::Friendly)
-			{
-				return FinishValidation(ECaptureResult::DiplomaticallyBlocked);
-			}
-		}
+		return FinishValidation(ECaptureResult::DiplomaticallyBlocked);
 	}
 
-	// Initiate capture
-	if (CurrentState != ETerritoryState::Contested)
+	if (bCommitContestState)
 	{
-		Territory->SetTerritoryState(ETerritoryState::Contested);
-		Territory->SetContestingFaction(AttackingFaction);
-	}
-	else if (!Territory->GetContestingFaction().IsValid())
-	{
-		Territory->SetContestingFaction(AttackingFaction);
+		// Initiate capture only after all admission checks pass.
+		if (CurrentState != ETerritoryState::Contested)
+		{
+			Territory->SetTerritoryState(ETerritoryState::Contested);
+			if (Territory->GetTerritoryState() != ETerritoryState::Contested)
+			{
+				return FinishValidation(ECaptureResult::InvalidTerritory);
+			}
+			Territory->SetContestingFaction(AttackingFaction);
+		}
+		else if (!Territory->GetContestingFaction().IsValid())
+		{
+			Territory->SetContestingFaction(AttackingFaction);
+		}
 	}
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
@@ -228,6 +233,46 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 	}
 
 	return FinishValidation(ECaptureResult::Success);
+}
+
+bool UTerritoryControlSubsystem::CanFactionCaptureTerritory(
+	const ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction) const
+{
+	if (!Territory || !AttackingFaction.IsValid()) return false;
+
+	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
+	if (!DefendingFaction.IsValid() || DefendingFaction == AttackingFaction) return true;
+
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UTerritoryDiplomacySubsystem* Diplomacy =
+			World->GetSubsystem<UTerritoryDiplomacySubsystem>())
+		{
+			switch (Diplomacy->GetDiplomacyState(AttackingFaction, DefendingFaction))
+			{
+			case EDiplomacyState::War:
+				return true;
+			case EDiplomacyState::Alliance:
+			case EDiplomacyState::TradeAgreement:
+			case EDiplomacyState::NonAggression:
+			case EDiplomacyState::Ceasefire:
+				return false;
+			case EDiplomacyState::None:
+			default:
+				break;
+			}
+
+			// With no rich treaty, preserve Narrative's neutral policy: only
+			// Friendly explicitly blocks capture; Neutral and Hostile allow it.
+			if (ANarrativeGameState* NarrativeGS = Cast<ANarrativeGameState>(const_cast<UWorld*>(World)->GetGameState()))
+			{
+				return NarrativeGS->GetFactionAttitudeTowardsFaction(
+					AttackingFaction, DefendingFaction) != ETeamAttitude::Friendly;
+			}
+		}
+	}
+
+	return true;
 }
 
 void UTerritoryControlSubsystem::ResetCapture(ATerritoryVolume* Territory)
@@ -266,17 +311,23 @@ void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory,
 void UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !NewOwner.IsValid()) return;
+	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("[ForceCapture] %s is AggregateOnly; direct capture rejected"),
+			*Territory->GetTerritoryTag().ToString());
+		return;
+	}
 
 	FGameplayTag OldOwner = Territory->GetOwningFaction();
 	TerritoryCaptureState.Remove(Territory);
 	Territory->SetContestingFaction(FGameplayTag());
-	Territory->SetOwningFaction(NewOwner);
+	Territory->ForceSetOwningFaction(NewOwner);
 
 	// SetOwningFaction already sets State=Claimed, but if the territory was
 	// Contested before force capture, ensure the state is explicitly Claimed.
 	if (Territory->GetTerritoryState() != ETerritoryState::Claimed)
 	{
-		Territory->SetTerritoryState(ETerritoryState::Claimed);
+		Territory->ForceSetTerritoryState(ETerritoryState::Claimed);
 	}
 	Territory->SetControlProgress(1.f);
 
@@ -304,7 +355,7 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 		}
 	}
 
-	if (ValidateAndBeginCapture(Territory, Faction, false) != ECaptureResult::Success) return;
+	if (ValidateAndBeginCapture(Territory, Faction, false, false) != ECaptureResult::Success) return;
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
 	TSet<TWeakObjectPtr<AActor>>& ActorSet = State.AttackersByFaction.FindOrAdd(Faction);
@@ -339,6 +390,20 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 	{
 		State.CaptureProgressByFaction.Add(Faction, 0.f);
 	}
+
+	// Commit contested state only after the attacker has been admitted. If the
+	// state transition is rejected, roll back the reservation completely.
+	if (Territory->GetTerritoryState() != ETerritoryState::Contested)
+	{
+		Territory->SetTerritoryState(ETerritoryState::Contested);
+		if (Territory->GetTerritoryState() != ETerritoryState::Contested)
+		{
+			ActorSet.Remove(Attacker);
+			State.CaptureProgressByFaction.Remove(Faction);
+			return;
+		}
+	}
+	Territory->SetContestingFaction(Faction);
 }
 
 void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
@@ -473,11 +538,6 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	// Defender check on every tick — guards that spawn/arrive mid-contest must halt progress
 	const bool bDefendersPresent = Territory->GetDefenderCount() > 0 && Territory->GetOwningFaction().IsValid();
 
-	// Diplomacy check on every tick — if a treaty was signed mid-capture (e.g. via quest
-	// event), progress for factions that are no longer Hostile should decay instead of advance.
-	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
-	ANarrativeGameState* NarrativeGS = DefendingFaction.IsValid() ? Cast<ANarrativeGameState>(GetWorld()->GetGameState()) : nullptr;
-
 	FGameplayTag BestFaction;
 	float BestProgress = 0.f;
 	int32 BestAttackerCount = 0;
@@ -489,15 +549,8 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 
 		// Re-validate diplomacy: if a peace treaty was signed mid-capture, this faction
 		// should not advance. Decay instead, same as if defenders were present.
-		bool bDiplomaticallyBlocked = false;
-		if (DefendingFaction.IsValid() && NarrativeGS && AttackerCount > 0)
-		{
-			const ETeamAttitude::Type Attitude = NarrativeGS->GetFactionAttitudeTowardsFaction(Pair.Key, DefendingFaction);
-			if (Attitude != ETeamAttitude::Hostile)
-			{
-				bDiplomaticallyBlocked = true;
-			}
-		}
+		const bool bDiplomaticallyBlocked = AttackerCount > 0
+			&& !CanFactionCaptureTerritory(Territory, Pair.Key);
 
 		if (AttackerCount > 0)
 		{
@@ -599,10 +652,36 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		return;
 	}
 
+	FPerTerritoryState* CaptureState = TerritoryCaptureState.Find(Territory);
+	const TSet<TWeakObjectPtr<AActor>>* Attackers = CaptureState
+		? CaptureState->AttackersByFaction.Find(NewOwner)
+		: nullptr;
+	const int32 ActiveAttackers = Attackers ? GetActiveAttackers(Territory, NewOwner) : 0;
+	const float* Progress = CaptureState
+		? CaptureState->CaptureProgressByFaction.Find(NewOwner)
+		: nullptr;
+	if (Territory->GetTerritoryState() != ETerritoryState::Contested
+		|| Territory->GetContestingFaction() != NewOwner
+		|| ActiveAttackers <= 0
+		|| !Progress || *Progress < 1.f
+		|| Territory->GetDefenderCount() > 0
+		|| !CanFactionCaptureTerritory(Territory, NewOwner))
+	{
+		ResetCapture(Territory);
+		UE_LOG(LogTerritory, Warning, TEXT("[Capture] %s failed final admission validation for %s"),
+			*Territory->GetTerritoryTag().ToString(), *NewOwner.ToString());
+		return;
+	}
+
 	FGameplayTag OldOwner = Territory->GetOwningFaction();
+	Territory->SetOwningFaction(NewOwner);
+	if (Territory->GetOwningFaction() != NewOwner
+		|| Territory->GetTerritoryState() != ETerritoryState::Claimed)
+	{
+		return;
+	}
 	TerritoryCaptureState.Remove(Territory);
 	Territory->SetContestingFaction(FGameplayTag());
-	Territory->SetOwningFaction(NewOwner);
 
 	UE_LOG(LogTerritory, Log, TEXT("[Capture] %s captured by %s (was %s)"),
 		*Territory->GetTerritoryTag().ToString(),

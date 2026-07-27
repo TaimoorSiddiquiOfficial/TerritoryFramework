@@ -1,5 +1,6 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -493,6 +494,25 @@ int32 ATerritoryVolume::GetDefenderCount() const { return OwnershipData.Defender
 int32 ATerritoryVolume::GetPeriodicIncome() const { return OwnershipData.PeriodicIncome; }
 int32 ATerritoryVolume::GetGuardCost() const { return OwnershipData.GuardCost; }
 
+int32 ATerritoryVolume::GetMaxGuardCount() const
+{
+	const TArray<ATerritoryGuardSpawnPoint*> AuthoredSpawnPoints = GetGuardSpawnPoints();
+	if (!AuthoredSpawnPoints.IsEmpty())
+	{
+		int32 Capacity = 0;
+		for (const ATerritoryGuardSpawnPoint* SpawnPoint : AuthoredSpawnPoints)
+		{
+			if (SpawnPoint)
+			{
+				Capacity = FMath::Max(0, Capacity + FMath::Max(0, SpawnPoint->MaxGuards));
+			}
+		}
+		return Capacity;
+	}
+
+	return FMath::Max(GuardSpawnCount, MaxGuardCount);
+}
+
 bool ATerritoryVolume::IsOwnedByFaction(const FGameplayTag& Faction) const
 {
 	return OwnershipData.State == ETerritoryState::Claimed && OwnershipData.OwningFaction == Faction;
@@ -535,12 +555,30 @@ FGameplayTag ATerritoryVolume::GetInitialOwningFaction() const
 	return InitialOwningFaction;
 }
 
+ETerritoryControlMode ATerritoryVolume::GetControlMode() const
+{
+	return ControlMode;
+}
+
 void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || bTransitionInProgress
+		|| (ControlMode == ETerritoryControlMode::AggregateOnly && !bApplyingDerivedOwnership)) return;
 
 	FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	if (OldOwner == NewFaction) return;
+
+	const ETerritoryState OldState = OwnershipData.State;
+	const ETerritoryState NewState = NewFaction.IsValid() ? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+	FText ConditionFailure;
+	if (!bBypassTransitionConditions && !CheckStateConditions(NewState, ConditionFailure))
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("[Ownership] %s: rejected owner change %s -> %s because state entry conditions failed: %s"),
+			*GetTerritoryTag().ToString(), *OldOwner.ToString(), *NewFaction.ToString(), *ConditionFailure.ToString());
+		return;
+	}
+
+	bTransitionInProgress = true;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings && Settings->ShouldDebugOwnership())
@@ -561,12 +599,22 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	PreviousOwningFaction = OldOwner;
 
 	OwnershipData.OwningFaction = NewFaction;
-	OwnershipData.State = NewFaction.IsValid() ? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+	OwnershipData.State = NewState;
 	OwnershipData.ContestingFaction = FGameplayTag();
 	OwnershipData.ControlProgress = NewFaction.IsValid() ? 1.f : 0.f;
 	OwnershipData.DesiredGuardCount = NewFaction.IsValid()
 		? FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount())
 		: 0;
+	if (NewState != ETerritoryState::Locked)
+	{
+		OwnershipData.LockReason = FText();
+	}
+
+	if (OldState != NewState)
+	{
+		FireStateEvents(OldState, false);
+		FireStateEvents(NewState, true);
+	}
 
 	// Guard lifecycle invariants — run BEFORE BP virtual so BP can react to final state.
 	// Not overridable: despawn old owner guards, spawn new owner guards.
@@ -578,6 +626,33 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 
 	OnOwnershipChanged(OldOwner, NewFaction);
 	OnTerritoryOwnershipChanged.Broadcast(this, OldOwner, NewFaction);
+	if (OldState != NewState)
+	{
+		OnStateChanged(OldState, NewState);
+		OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
+	}
+	bTransitionInProgress = false;
+}
+
+void ATerritoryVolume::SetDerivedOwningFaction(const FGameplayTag& NewFaction)
+{
+	if (!HasAuthority()) return;
+	const bool bWasApplyingDerivedOwnership = bApplyingDerivedOwnership;
+	bApplyingDerivedOwnership = true;
+	SetOwningFaction(NewFaction);
+	bApplyingDerivedOwnership = bWasApplyingDerivedOwnership;
+}
+
+void ATerritoryVolume::ForceSetOwningFaction(const FGameplayTag& NewFaction)
+{
+	if (!HasAuthority()) return;
+	const bool bWasBypassing = bBypassTransitionConditions;
+	const bool bWasApplyingDerivedOwnership = bApplyingDerivedOwnership;
+	bBypassTransitionConditions = true;
+	bApplyingDerivedOwnership = true;
+	SetOwningFaction(NewFaction);
+	bBypassTransitionConditions = bWasBypassing;
+	bApplyingDerivedOwnership = bWasApplyingDerivedOwnership;
 }
 
 void ATerritoryVolume::SetControlProgress(float Progress)
@@ -588,9 +663,23 @@ void ATerritoryVolume::SetControlProgress(float Progress)
 
 void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || bTransitionInProgress) return;
 	ETerritoryState OldState = OwnershipData.State;
 	if (OldState == NewState) return;
+
+	FText ConditionFailure;
+	if (!bBypassTransitionConditions && !CheckStateConditions(NewState, ConditionFailure))
+	{
+		const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+		if (Settings && Settings->ShouldDebugStateTransitions())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s: blocked -> %d — %s"),
+				*GetTerritoryTag().ToString(), static_cast<int32>(NewState), *ConditionFailure.ToString());
+		}
+		return;
+	}
+
+	bTransitionInProgress = true;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings && Settings->ShouldDebugStateTransitions())
@@ -600,25 +689,11 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 			static_cast<int32>(OldState), static_cast<int32>(NewState));
 	}
 
-	// Fire exit events for the current state
-	FireStateEvents(OldState, false);
-
-	// Check entry conditions for the new state — block transition if they fail
-	FText ConditionFailure;
-	if (!CheckStateConditions(NewState, ConditionFailure))
-	{
-		if (Settings && Settings->ShouldDebugStateTransitions())
-		{
-			UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s: blocked → %d — %s"),
-				*GetTerritoryTag().ToString(),
-				static_cast<int32>(NewState), *ConditionFailure.ToString());
-		}
-		return;
-	}
-
 	OwnershipData.State = NewState;
 
-	// Fire entry events for the new state
+	// Commit the state before running any exit or entry side effects. Rejected
+	// transitions therefore cannot fire events or mutate gameplay state.
+	FireStateEvents(OldState, false);
 	FireStateEvents(NewState, true);
 
 	// Guard lifecycle invariants — run BEFORE BP virtual.
@@ -642,6 +717,16 @@ void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
 
 	OnStateChanged(OldState, NewState);
 	OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
+	bTransitionInProgress = false;
+}
+
+void ATerritoryVolume::ForceSetTerritoryState(ETerritoryState NewState)
+{
+	if (!HasAuthority()) return;
+	const bool bWasBypassing = bBypassTransitionConditions;
+	bBypassTransitionConditions = true;
+	SetTerritoryState(NewState);
+	bBypassTransitionConditions = bWasBypassing;
 }
 
 bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason) const
@@ -729,10 +814,24 @@ void ATerritoryVolume::LockTerritory(const FText& Reason)
 {
 	if (!HasAuthority()) return;
 
+	FText ConditionFailure;
+	if (!CheckStateConditions(ETerritoryState::Locked, ConditionFailure))
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("[Lock] %s lock rejected: %s"),
+			*GetTerritoryTag().ToString(), *ConditionFailure.ToString());
+		return;
+	}
+
+	const FText PreviousLockReason = OwnershipData.LockReason;
 	OwnershipData.LockReason = Reason;
 	if (OwnershipData.State != ETerritoryState::Locked)
 	{
 		SetTerritoryState(ETerritoryState::Locked);
+		if (OwnershipData.State != ETerritoryState::Locked)
+		{
+			OwnershipData.LockReason = PreviousLockReason;
+			return;
+		}
 	}
 
 	UE_LOG(LogTerritory, Log, TEXT("[Lock] %s locked: %s"),
@@ -751,10 +850,32 @@ bool ATerritoryVolume::TryUnlock(bool bForce)
 		return false;
 	}
 
-	OwnershipData.LockReason = FText();
-	SetTerritoryState(OwnershipData.OwningFaction.IsValid()
+	const ETerritoryState TargetState = OwnershipData.OwningFaction.IsValid()
 		? ETerritoryState::Claimed
-		: ETerritoryState::Unclaimed);
+		: ETerritoryState::Unclaimed;
+	FText ConditionFailure;
+	if (!bForce && !CheckStateConditions(TargetState, ConditionFailure))
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlock blocked — state conditions not met: %s"),
+			*GetTerritoryTag().ToString(), *ConditionFailure.ToString());
+		return false;
+	}
+
+	const FText PreviousLockReason = OwnershipData.LockReason;
+	OwnershipData.LockReason = FText();
+	if (bForce)
+	{
+		ForceSetTerritoryState(TargetState);
+	}
+	else
+	{
+		SetTerritoryState(TargetState);
+	}
+	if (OwnershipData.State == ETerritoryState::Locked)
+	{
+		OwnershipData.LockReason = PreviousLockReason;
+		return false;
+	}
 
 	UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlocked"),
 		*GetTerritoryTag().ToString());
@@ -816,7 +937,7 @@ void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
 		// SetOwningFaction handles the Claimed→Unclaimed state transition,
 		// guard despawn, and delegates. The Locked state is not reachable
 		// here because SetTerritoryState(Locked) despawns all guards.
-		SetOwningFaction(FGameplayTag());
+		SetDerivedOwningFaction(FGameplayTag());
 		SetControlProgress(0.f);
 
 		// Do NOT respawn guards here — the territory is undefended.
@@ -978,10 +1099,6 @@ void ATerritoryVolume::SpawnGuards()
 	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
 	if (!EffectiveDef) return;
 
-	// Prevent double-spawn if guards already exist (check live count, not array size —
-	// array may contain stale weak pointers from destroyed guards)
-	if (GetSpawnedGuardCount() > 0) return;
-
 	UWorld* World = GetWorld();
 	if (!World) return;
 
@@ -1002,18 +1119,28 @@ void ATerritoryVolume::SpawnGuards()
 		return;
 	}
 
-	// Resolve GuardSpawnPoints
+	const int32 TargetGuardCount = FMath::Min(GetDesiredGuardCount(), GetMaxGuardCount());
+	const int32 ExistingGuardCount = GetSpawnedGuardCount();
+	if (TargetGuardCount <= ExistingGuardCount)
+	{
+		return;
+	}
+
+	// Resolve GuardSpawnPoints. Authored points define both placement and capacity.
 	TArray<ATerritoryGuardSpawnPoint*> SpawnPointActors = GetGuardSpawnPoints();
 	// Sort by priority (higher = fills first)
 	SpawnPointActors.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
 	{
 		return A.Priority > B.Priority;
 	});
-	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPointActors)
+	if (ExistingGuardCount == 0)
 	{
-		if (SpawnPoint)
+		for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPointActors)
 		{
-			SpawnPoint->ResetReserveState();
+			if (SpawnPoint)
+			{
+				SpawnPoint->ResetReserveState();
+			}
 		}
 	}
 	int32 NextSPIdx = 0;
@@ -1021,12 +1148,12 @@ void ATerritoryVolume::SpawnGuards()
 	if (bDebug)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("SpawnGuards: %s spawning %d guards, faction=%s, spawn points=%d"),
-			*GetTerritoryTag().ToString(), GetDesiredGuardCount(), *OwnerFaction.ToString(),
+			*GetTerritoryTag().ToString(), TargetGuardCount, *OwnerFaction.ToString(),
 			SpawnPointActors.Num());
 	}
 
-	const int32 TargetGuardCount = GetDesiredGuardCount();
-	for (int32 i = 0; i < TargetGuardCount; ++i)
+	const int32 GuardsToSpawn = TargetGuardCount - ExistingGuardCount;
+	for (int32 i = 0; i < GuardsToSpawn; ++i)
 	{
 		FTransform SpawnTransform;
 		ATerritoryGuardSpawnPoint* UsedSP = nullptr;
@@ -1046,11 +1173,14 @@ void ATerritoryVolume::SpawnGuards()
 					break;
 				}
 			}
-			// Fallback: all points full, use random
+			// Authored points are authoritative. Do not bypass their capacity with
+			// a random overflow spawn.
 			if (!UsedSP)
 			{
-				if (bDebug) UE_LOG(LogTerritory, Warning, TEXT("  All spawn points full, using random"));
-				SpawnTransform = FTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), GetRandomSpawnPoint());
+				UE_LOG(LogTerritory, Warning,
+					TEXT("SpawnGuards: all authored spawn point slots are full for %s (%d/%d guards spawned)"),
+					*GetTerritoryTag().ToString(), ExistingGuardCount + i, TargetGuardCount);
+				break;
 			}
 		}
 		else
@@ -1109,7 +1239,7 @@ void ATerritoryVolume::SpawnGuards()
 		if (bDebug)
 		{
 			UE_LOG(LogTerritory, Log, TEXT("  Guard %d/%d spawned for %s (faction=%s, GUID=%s, SP=%s)"),
-				i + 1, TargetGuardCount,
+				ExistingGuardCount + i + 1, TargetGuardCount,
 				*GetTerritoryTag().ToString(),
 				*EffectiveFaction.ToString(),
 				*GuardSaveGUID.ToString(),
@@ -1136,7 +1266,14 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
 	if (!OwnerFaction.IsValid()) return false;
 	if (GetSpawnedGuardCount() >= GetMaxGuardCount()) return false;
-	if (SpawnPoint && (SpawnPoint->GetOwningTerritory() != this || !SpawnPoint->HasAvailableSlot()))
+
+	const TArray<ATerritoryGuardSpawnPoint*> AuthoredSpawnPoints = GetGuardSpawnPoints();
+	if (!SpawnPoint && !AuthoredSpawnPoints.IsEmpty())
+	{
+		return false;
+	}
+	if (SpawnPoint && (!AuthoredSpawnPoints.Contains(SpawnPoint)
+		|| SpawnPoint->GetOwningTerritory() != this || !SpawnPoint->HasAvailableSlot()))
 	{
 		return false;
 	}
@@ -1350,23 +1487,29 @@ bool ATerritoryVolume::IsGuardSpawnLocationClear(UClass* GuardClass, const FVect
 
 int32 ATerritoryVolume::GetGuardPurchaseCost(int32 Count) const
 {
-	return FMath::Max(0, Count) * FMath::Max(0, OwnershipData.GuardCost);
+	const int64 SafeCost = static_cast<int64>(FMath::Max(0, Count)) * FMath::Max(0, OwnershipData.GuardCost);
+	return SafeCost > MAX_int32 ? MAX_int32 : static_cast<int32>(SafeCost);
 }
 
-bool ATerritoryVolume::CanPurchaseGuards(const FGameplayTag& Faction, int32 Count, FText& OutFailureReason) const
+bool ATerritoryVolume::CanPurchaseGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const
 {
 	OutFailureReason = FText::GetEmpty();
-	if (!Faction.IsValid() || Count <= 0)
+	if (!Requester || Count <= 0 || GetGuardPurchaseCost(Count) == MAX_int32)
 	{
-		OutFailureReason = FText::FromString(TEXT("Invalid faction or guard count."));
+		OutFailureReason = FText::FromString(TEXT("Invalid requester or guard count."));
 		return false;
 	}
-	if (OwnershipData.State != ETerritoryState::Claimed || OwnershipData.OwningFaction != Faction)
+	if (OwnershipData.State != ETerritoryState::Claimed)
 	{
-		OutFailureReason = FText::FromString(TEXT("Your faction must own this claimed territory."));
+		OutFailureReason = FText::FromString(TEXT("The territory must be claimed."));
 		return false;
 	}
-	if (!ResolveGuardDefinition(Faction))
+	if (!UTerritoryBlueprintLibrary::IsActorInFaction(this, const_cast<AActor*>(Requester), OwnershipData.OwningFaction))
+	{
+		OutFailureReason = FText::FromString(TEXT("Only the owning faction can purchase guards."));
+		return false;
+	}
+	if (!ResolveGuardDefinition(OwnershipData.OwningFaction))
 	{
 		OutFailureReason = FText::FromString(TEXT("No guard NPC definition is configured for this faction."));
 		return false;
@@ -1379,7 +1522,7 @@ bool ATerritoryVolume::CanPurchaseGuards(const FGameplayTag& Faction, int32 Coun
 
 	const UWorld* World = GetWorld();
 	const UTerritoryEconomySubsystem* Economy = World ? World->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
-	if (!Economy || !Economy->CanAfford(Faction, GetGuardPurchaseCost(Count)))
+	if (!Economy || !Economy->CanActorAfford(Requester, GetGuardPurchaseCost(Count)))
 	{
 		OutFailureReason = FText::FromString(TEXT("Your faction cannot afford this guard purchase."));
 		return false;
@@ -1387,9 +1530,9 @@ bool ATerritoryVolume::CanPurchaseGuards(const FGameplayTag& Faction, int32 Coun
 	return true;
 }
 
-bool ATerritoryVolume::TryPurchaseGuards(const FGameplayTag& Faction, int32 Count, FText& OutResult)
+bool ATerritoryVolume::TryPurchaseGuards(AActor* Requester, int32 Count, FText& OutResult)
 {
-	if (!HasAuthority() || !CanPurchaseGuards(Faction, Count, OutResult))
+	if (!HasAuthority() || !CanPurchaseGuards(Requester, Count, OutResult))
 	{
 		return false;
 	}
@@ -1397,7 +1540,7 @@ bool ATerritoryVolume::TryPurchaseGuards(const FGameplayTag& Faction, int32 Coun
 	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 	const int32 TotalCost = GetGuardPurchaseCost(Count);
 	const FString PurchaseReason = FString::Printf(TEXT("Purchased %d guard(s) for %s"), Count, *GetTerritoryTag().ToString());
-	if (!Economy || !Economy->TryDebitTreasury(Faction, TotalCost, PurchaseReason, ETerritoryTransactionType::Purchase))
+	if (!Economy || !Economy->TryDebitCurrency(Requester, TotalCost, OwnershipData.OwningFaction, PurchaseReason, ETerritoryTransactionType::Purchase))
 	{
 		OutResult = FText::FromString(TEXT("The treasury changed before the purchase completed."));
 		return false;
@@ -1431,7 +1574,7 @@ bool ATerritoryVolume::TryPurchaseGuards(const FGameplayTag& Faction, int32 Coun
 	if (SpawnedCount < Count)
 	{
 		const int32 Refund = GetGuardPurchaseCost(Count - SpawnedCount);
-		Economy->AddToTreasury(Faction, Refund,
+		Economy->CreditCurrency(Requester, Refund, OwnershipData.OwningFaction,
 			FString::Printf(TEXT("Refunded failed guard spawn for %s"), *GetTerritoryTag().ToString()),
 			ETerritoryTransactionType::Purchase);
 	}
@@ -1548,6 +1691,6 @@ FString ATerritoryVolume::GetDebugString() const
 		static_cast<int32>(OwnershipData.State),
 		OwnershipData.ControlProgress,
 		GetSpawnedGuardCount(),
-		GuardSpawnCount,
+		GetMaxGuardCount(),
 		GetDefenderCount());
 }

@@ -439,8 +439,9 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 | Function | Parameters | Returns |
 |---|---|---|
-| AddToTreasury | Faction, Amount, Reason, Type | void |
-| TryDebitTreasury | Faction, Amount, Reason, Type | bool |
+| CreditCurrency | Beneficiary, Amount, Faction, Reason, Type | bool |
+| TryDebitCurrency | Requester, Amount, Faction, Reason, Type | bool |
+| CreditCurrencyToFaction | Faction, Amount, Policy, Reason, Type | int32 paid |
 | SetFactionTreasury | Faction, Treasury | void |
 | RecalculateIncome | Faction | void |
 
@@ -448,10 +449,10 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 | Function | Returns |
 |---|---|
-| GetTreasury(Faction) | int32 |
+| GetActorCurrency(Requester) | int32 |
 | GetIncome(Faction) | int32 |
 | GetCosts(Faction) | int32 |
-| CanAfford(Faction, Cost) | bool |
+| CanActorAfford(Requester, Cost) | bool |
 | GetFactionEconomy(Faction) | FTerritoryTreasury |
 | GetAllFactionsWithTreasury | TArray<FGameplayTag> |
 
@@ -783,9 +784,11 @@ Implement on actors that participate in economy.
 
 | Function | Returns | Notes |
 |---|---|---|
-| GetTreasury(Faction) | int32 | Current treasury for faction |
+| GetTreasury(Faction) | int32 | Deprecated; no faction wallet |
 | GetPeriodicIncome(Faction) | int32 | Per-tick income for faction |
-| CanAfford(Faction, Cost) | bool | Whether faction can afford the cost |
+| CanAfford(Faction, Cost) | bool | Deprecated; use CanActorAfford |
+| GetActorCurrency(Requester) | int32 | Narrative inventory currency |
+| CanActorAfford(Requester, Cost) | bool | Exact-account affordability |
 
 ---
 
@@ -910,7 +913,7 @@ BlueprintNativeEvent — implement to receive territory events.
 | CostsPerTick | int32 | Calculated costs |
 | TerritoryCount | int32 | Owned territories |
 
-> **Note**: No `Gold` field — faction wealth is the aggregate of all online faction members' `UInventoryComponent::Currency` (NarrativePro). `GetTreasury()` reads live from player inventories.
+> **Note**: Narrative Pro's `UInventoryComponent::Currency` is the sole balance. TerritoryFramework stores only income/cost rates and transaction metadata; it does not maintain a faction wallet.
 
 ### FTerritoryPatrolNode
 

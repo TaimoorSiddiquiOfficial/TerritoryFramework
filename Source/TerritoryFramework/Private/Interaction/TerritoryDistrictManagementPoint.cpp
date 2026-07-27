@@ -1,4 +1,5 @@
 #include "Interaction/TerritoryDistrictManagementPoint.h"
+#include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
@@ -9,6 +10,7 @@
 #include "NarrativeArsenal.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/GameModeBase.h"
 
 UTerritoryDistrictPOIMarker::UTerritoryDistrictPOIMarker(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -74,8 +76,11 @@ FLinearColor UTerritoryDistrictPOIMarker::GetMarkerColor_Implementation(UNarrati
 		return FLinearColor(0.f, 0.f, 0.f, 0.f);
 	}
 
-	// Claimed: green for the owning faction's members, red for enemies
-	return District->GetOwningFaction().IsValid() ? FLinearColor(0.1f, 0.75f, 0.35f, 1.f) : FLinearColor::Red;
+	// Viewer-relative color: friendly owner = green, enemy = red.
+	const FGameplayTag Owner = District->GetOwningFaction();
+	const bool bIsFriendly = Selector
+		&& UTerritoryBlueprintLibrary::IsActorInFaction(this, Selector->GetOwner(), Owner);
+	return bIsFriendly ? FLinearColor(0.1f, 0.75f, 0.35f, 1.f) : FLinearColor(0.85f, 0.15f, 0.15f, 1.f);
 }
 
 bool UTerritoryDistrictPOIMarker::CanInteract_Implementation(UNarrativeNavigationComponent* Selector) const
@@ -202,6 +207,18 @@ ATerritoryDistrictManagementPoint::ATerritoryDistrictManagementPoint(const FObje
 void ATerritoryDistrictManagementPoint::BeginPlay()
 {
 	Super::BeginPlay();
+	if (HasAuthority())
+	{
+		FGameModeEvents::OnGameModePostLoginEvent().AddUObject(
+			this, &ATerritoryDistrictManagementPoint::OnPlayerPostLogin);
+		if (UWorld* World = GetWorld())
+		{
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(It->Get());
+			}
+		}
+	}
 	if (ATerritoryDistrict* District = ResolveDistrict())
 	{
 		POITag = District->GetTerritoryTag();
@@ -214,6 +231,24 @@ void ATerritoryDistrictManagementPoint::BeginPlay()
 	if (InteractableComponent)
 	{
 		InteractableComponent->InteractionDistance = ManagementDistance;
+	}
+}
+
+void ATerritoryDistrictManagementPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (HasAuthority())
+	{
+		FGameModeEvents::OnGameModePostLoginEvent().RemoveAll(this);
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+void ATerritoryDistrictManagementPoint::OnPlayerPostLogin(
+	AGameModeBase* GameMode, APlayerController* NewPlayer)
+{
+	if (GameMode && GameMode->GetWorld() == GetWorld())
+	{
+		UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(NewPlayer);
 	}
 }
 
@@ -253,15 +288,12 @@ bool ATerritoryDistrictManagementPoint::IsInteractorInRange(APawn* Interactor) c
 
 void ATerritoryDistrictManagementPoint::HandleInteraction(APawn* Interactor)
 {
-	if (Interactor)
-	{
-		Client_OpenManagementWidget(Cast<APlayerController>(Interactor->GetController()));
-	}
-}
+	if (!Interactor) return;
 
-void ATerritoryDistrictManagementPoint::Client_OpenManagementWidget_Implementation(APlayerController* PlayerController)
-{
-	OpenManagementWidget(PlayerController);
+	if (APlayerController* PC = Cast<APlayerController>(Interactor->GetController()))
+	{
+		OpenManagementWidget(PC);
+	}
 }
 
 void ATerritoryDistrictManagementPoint::OpenManagementWidget(APlayerController* PlayerController)
@@ -269,6 +301,7 @@ void ATerritoryDistrictManagementPoint::OpenManagementWidget(APlayerController* 
 	if (!PlayerController || !PlayerController->IsLocalController() || !ManagementWidgetClass) return;
 	FText FailureReason;
 	if (!CanManage(PlayerController->GetPawn(), FailureReason)) return;
+	UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);
 	if (UTerritoryDistrictManagementWidget* Widget = CreateWidget<UTerritoryDistrictManagementWidget>(
 		PlayerController, ManagementWidgetClass))
 	{

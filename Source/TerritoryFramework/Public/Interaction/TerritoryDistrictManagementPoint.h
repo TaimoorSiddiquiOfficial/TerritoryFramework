@@ -9,6 +9,7 @@
 #include "TerritoryDistrictManagementPoint.generated.h"
 
 class ATerritoryDistrict;
+class AGameModeBase;
 class UTerritoryDistrictManagementWidget;
 class USphereComponent;
 
@@ -90,6 +91,7 @@ class TERRITORYFRAMEWORK_API ATerritoryDistrictManagementPoint : public APOIActo
 public:
 	ATerritoryDistrictManagementPoint(const FObjectInitializer& ObjectInitializer);
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management", meta=(Categories="Territory"))
 	FGameplayTag DistrictTag;
@@ -121,8 +123,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void OpenManagementWidget(APlayerController* PlayerController);
 
-	UFUNCTION(Client, Reliable)
-	void Client_OpenManagementWidget(APlayerController* PlayerController);
-
 	void HandleInteraction(APawn* Interactor);
+
+private:
+	void OnPlayerPostLogin(AGameModeBase* GameMode, APlayerController* NewPlayer);
 };

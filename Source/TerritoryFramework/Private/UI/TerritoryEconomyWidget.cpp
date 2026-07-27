@@ -27,7 +27,7 @@ void UTerritoryEconomyWidget::SetDisplayFaction(const FGameplayTag& Faction)
 		if (Economy)
 		{
 			FTerritoryEconomySnapshot Snapshot;
-			Snapshot.Treasury = Economy->GetTreasury(DisplayFaction);
+			Snapshot.Treasury = Economy->GetActorCurrency(GetOwningPlayer());
 			Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
 			Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
 			Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
@@ -45,7 +45,7 @@ FGameplayTag UTerritoryEconomyWidget::GetDisplayFaction() const
 int32 UTerritoryEconomyWidget::GetCurrentGold() const
 {
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
-	return Economy ? Economy->GetTreasury(DisplayFaction) : 0;
+	return Economy ? Economy->GetActorCurrency(GetOwningPlayer()) : 0;
 }
 
 int32 UTerritoryEconomyWidget::GetCurrentIncome() const
@@ -110,7 +110,7 @@ void UTerritoryEconomyWidget::ClientPollRefresh()
 	if (!Economy) return;
 
 	FTerritoryEconomySnapshot Snapshot;
-	Snapshot.Treasury = Economy->GetTreasury(DisplayFaction);
+	Snapshot.Treasury = Economy->GetActorCurrency(GetOwningPlayer());
 	Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
 	Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
 	Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;

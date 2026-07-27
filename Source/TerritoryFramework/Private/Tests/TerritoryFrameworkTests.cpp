@@ -12,6 +12,8 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "Core/TerritoryWorldState.h"
+#include "Interaction/TerritoryDistrictManagementPoint.h"
+#include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -325,6 +327,10 @@ bool FTFContract_Interfaces::RunTest(const FString& Parameters)
 			TFTestUtils::HasFunction(IC, TEXT("GetPeriodicIncome")));
 		TestTrue(TEXT("CanAfford function exists"),
 			TFTestUtils::HasFunction(IC, TEXT("CanAfford")));
+		TestTrue(TEXT("GetActorCurrency function exists"),
+			TFTestUtils::HasFunction(IC, TEXT("GetActorCurrency")));
+		TestTrue(TEXT("CanActorAfford function exists"),
+			TFTestUtils::HasFunction(IC, TEXT("CanActorAfford")));
 	}
 
 	// ─── ITerritoryEventReceiverInterface ───
@@ -2171,14 +2177,17 @@ bool FTFContract_EconomySubsystemExtended::RunTest(const FString& Parameters)
 	UClass* Class = UTerritoryEconomySubsystem::StaticClass();
 	TestTrue(TEXT("EconomySubsystem class exists"), Class != nullptr);
 
-	// ─── NarrativePro Currency bridge methods added in v0.2.1 ───
-	// GetFactionMembers and GetFactionAggregateCurrency are NOT UFUNCTION (no BlueprintCallable)
-	// so we only verify the class compiles and the public Blueprint API exists.
+	// ─── NarrativePro Currency bridge ───
 
 	TestTrue(TEXT("Has GetTreasury"), TFTestUtils::HasFunction(Class, TEXT("GetTreasury")));
 	TestTrue(TEXT("Has GetIncome"), TFTestUtils::HasFunction(Class, TEXT("GetIncome")));
 	TestTrue(TEXT("Has GetCosts"), TFTestUtils::HasFunction(Class, TEXT("GetCosts")));
 	TestTrue(TEXT("Has CanAfford"), TFTestUtils::HasFunction(Class, TEXT("CanAfford")));
+	TestTrue(TEXT("Has GetActorCurrency"), TFTestUtils::HasFunction(Class, TEXT("GetActorCurrency")));
+	TestTrue(TEXT("Has CanActorAfford"), TFTestUtils::HasFunction(Class, TEXT("CanActorAfford")));
+	TestTrue(TEXT("Has TryDebitCurrency"), TFTestUtils::HasFunction(Class, TEXT("TryDebitCurrency")));
+	TestTrue(TEXT("Has CreditCurrency"), TFTestUtils::HasFunction(Class, TEXT("CreditCurrency")));
+	TestTrue(TEXT("Has CreditCurrencyToFaction"), TFTestUtils::HasFunction(Class, TEXT("CreditCurrencyToFaction")));
 	TestTrue(TEXT("Has AddToTreasury"), TFTestUtils::HasFunction(Class, TEXT("AddToTreasury")));
 	TestTrue(TEXT("Has TryDebitTreasury"), TFTestUtils::HasFunction(Class, TEXT("TryDebitTreasury")));
 	TestTrue(TEXT("Has SetFactionTreasury"), TFTestUtils::HasFunction(Class, TEXT("SetFactionTreasury")));
@@ -2210,6 +2219,10 @@ bool FTFContract_VolumeExtended::RunTest(const FString& Parameters)
 	// ─── New public helper added in v0.2.1 ───
 	TestTrue(TEXT("Has GetConfiguredGuardCount"),
 		TFTestUtils::HasFunction(Class, TEXT("GetConfiguredGuardCount")));
+	TestTrue(TEXT("Has GetControlMode"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetControlMode")));
+	TestTrue(TEXT("Has ControlMode property"),
+		TFTestUtils::HasProperty(Class, TEXT("ControlMode")));
 
 	// ─── Existing guard API still present ───
 	TestTrue(TEXT("Has GetSpawnedGuardCount"),
@@ -2217,6 +2230,28 @@ bool FTFContract_VolumeExtended::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Has DespawnGuards"),
 		TFTestUtils::HasFunction(Class, TEXT("DespawnGuards")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_DistrictManagement,
+	"TerritoryFramework.Contract.DistrictManagement",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_DistrictManagement::RunTest(const FString& Parameters)
+{
+	const UClass* PointClass = ATerritoryDistrictManagementPoint::StaticClass();
+	TestTrue(TEXT("District management point class exists"), PointClass != nullptr);
+	TestTrue(TEXT("Has ResolveDistrict"), TFTestUtils::HasFunction(PointClass, TEXT("ResolveDistrict")));
+	TestTrue(TEXT("Has CanManage"), TFTestUtils::HasFunction(PointClass, TEXT("CanManage")));
+	TestTrue(TEXT("Has OpenManagementWidget"), TFTestUtils::HasFunction(PointClass, TEXT("OpenManagementWidget")));
+	TestTrue(TEXT("Has DistrictTag property"), TFTestUtils::HasProperty(PointClass, TEXT("DistrictTag")));
+
+	const UClass* ComponentClass = UTerritoryPlayerManagementComponent::StaticClass();
+	TestTrue(TEXT("Player management component class exists"), ComponentClass != nullptr);
+	TestTrue(TEXT("Has RequestPurchaseGuards"),
+		TFTestUtils::IsBlueprintCallable(ComponentClass, TEXT("RequestPurchaseGuards")));
+	TestTrue(TEXT("Has OnGuardPurchaseResult delegate"),
+		TFTestUtils::HasProperty(ComponentClass, TEXT("OnGuardPurchaseResult")));
 	return true;
 }
 

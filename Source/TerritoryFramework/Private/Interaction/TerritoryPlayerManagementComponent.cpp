@@ -11,14 +11,36 @@ UTerritoryPlayerManagementComponent::UTerritoryPlayerManagementComponent()
 	SetIsReplicatedByDefault(true);
 }
 
+UTerritoryPlayerManagementComponent* UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(
+	APlayerController* PlayerController)
+{
+	if (!PlayerController) return nullptr;
+	if (UTerritoryPlayerManagementComponent* Existing =
+		PlayerController->FindComponentByClass<UTerritoryPlayerManagementComponent>())
+	{
+		return Existing;
+	}
+
+	UTerritoryPlayerManagementComponent* Component =
+		NewObject<UTerritoryPlayerManagementComponent>(PlayerController,
+			TEXT("TerritoryPlayerManagement"), RF_Transient);
+	if (!Component) return nullptr;
+
+	PlayerController->AddInstanceComponent(Component);
+	Component->RegisterComponent();
+	return Component;
+}
+
 void UTerritoryPlayerManagementComponent::RequestPurchaseGuards(
 	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count)
 {
-	if (!ManagementPoint)
+	if (!ManagementPoint || Count <= 0 || Count > MaxGuardPurchaseCount)
 	{
-		OnGuardPurchaseResult.Broadcast(nullptr, false, FText::FromString(TEXT("District management point is unavailable.")));
+		OnGuardPurchaseResult.Broadcast(nullptr, false,
+			FText::FromString(TEXT("Guard purchase request is invalid.")), ++NextRequestId);
 		return;
 	}
+	const int32 RequestId = ++NextRequestId;
 
 	// Anti-spam: ignore requests within cooldown window
 	if (UWorld* World = GetWorld())
@@ -33,22 +55,42 @@ void UTerritoryPlayerManagementComponent::RequestPurchaseGuards(
 
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
-		PerformPurchase(ManagementPoint, Count);
+		LastPurchaseRequestTime = GetWorld() ? GetWorld()->GetTimeSeconds() : LastPurchaseRequestTime;
+		PerformPurchase(ManagementPoint, Count, RequestId);
 	}
 	else
 	{
-		ServerRequestPurchaseGuards(ManagementPoint, Count);
+		ServerRequestPurchaseGuards(ManagementPoint, Count, RequestId);
 	}
 }
 
 void UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuards_Implementation(
-	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count)
+	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId)
 {
-	PerformPurchase(ManagementPoint, Count);
+	if (!GetWorld()) return;
+	if (RequestId <= LastServerRequestId)
+	{
+		return;
+	}
+	LastServerRequestId = RequestId;
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now - LastPurchaseRequestTime < PurchaseCooldown)
+	{
+		return;
+	}
+	LastPurchaseRequestTime = Now;
+
+	if (Count <= 0 || Count > MaxGuardPurchaseCount)
+	{
+		ClientReceiveGuardPurchaseResult(nullptr, false,
+			FText::FromString(TEXT("Guard purchase request is invalid.")), RequestId);
+		return;
+	}
+	PerformPurchase(ManagementPoint, Count, RequestId);
 }
 
 void UTerritoryPlayerManagementComponent::PerformPurchase(
-	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count)
+	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId)
 {
 	ATerritoryDistrict* District = ManagementPoint ? ManagementPoint->ResolveDistrict() : nullptr;
 	APawn* Pawn = GetManagingPawn();
@@ -73,16 +115,16 @@ void UTerritoryPlayerManagementComponent::PerformPurchase(
 	}
 	else
 	{
-		bSuccess = District->TryPurchaseGuards(GetManagedFaction(), Count, Result);
+		bSuccess = District->TryPurchaseGuards(Pawn, Count, Result);
 	}
 
-	ClientReceiveGuardPurchaseResult(District, bSuccess, Result);
+	ClientReceiveGuardPurchaseResult(District, bSuccess, Result, RequestId);
 }
 
 void UTerritoryPlayerManagementComponent::ClientReceiveGuardPurchaseResult_Implementation(
-	ATerritoryVolume* Territory, bool bSuccess, const FText& Message)
+	ATerritoryVolume* Territory, bool bSuccess, const FText& Message, int32 RequestId)
 {
-	OnGuardPurchaseResult.Broadcast(Territory, bSuccess, Message);
+	OnGuardPurchaseResult.Broadcast(Territory, bSuccess, Message, RequestId);
 }
 
 APawn* UTerritoryPlayerManagementComponent::GetManagingPawn() const

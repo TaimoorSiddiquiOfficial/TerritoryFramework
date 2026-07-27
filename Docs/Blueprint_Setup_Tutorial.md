@@ -193,13 +193,13 @@ Territory income flows automatically:
 
 - Each territory has **Periodic Income** (default: 100 gold)
 - Economy subsystem ticks every 300s (configurable in Project Settings)
-- Income goes to the owning faction's treasury
+- Income is paid according to `IncomePayoutPolicy` into Narrative inventory accounts
 - Capital districts give 2x income multiplier
-- Capital city capture gives bonus gold
+- Capital city capture pays a currency reward through the configured payout policy
 
 Check treasury via Blueprint:
 ```
-Get Territory Economy → GetTreasury(FactionTag)
+Get Territory Economy → GetActorCurrency(RequestingActor)
 ```
 
 ---

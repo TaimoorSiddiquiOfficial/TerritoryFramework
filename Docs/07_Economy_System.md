@@ -2,29 +2,36 @@
 
 ## Overview
 
-Each faction has a treasury stored in `FactionGold` (TMap&lt;FGameplayTag, int32&gt;, SaveGame) on `UTerritoryEconomySubsystem`. `GetTreasury()` returns the sum of `FactionGold` plus the aggregate of all online faction members' `UInventoryComponent::Currency`. Economy ticks credit income into `FactionGold`, then distribute to player inventories.
+Narrative Pro's `UNarrativeInventoryComponent::Currency` is the only currency balance. TerritoryFramework does not maintain `FactionGold`, a faction wallet, or a second saved currency value. The economy subsystem calculates rates and applies transactions to an explicit Narrative inventory account.
 
 The subsystem tracks per faction:
 - **IncomePerTick**: income from owned territories
 - **CostsPerTick**: guard upkeep from owned territories
 - **TerritoryCount**: number of owned territories
 
-Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. Each tick credits income across online faction members, then debits affordable guard upkeep via `UInventoryComponent::AddCurrency()`.
+Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. The configured `IncomePayoutPolicy` determines the recipients. Upkeep debits are applied to online faction members using Narrative's `AddCurrency()`.
 
 ## Wealth API
 
-### Adding to Faction Wealth
+### Credit and Debit API
 
 ```cpp
-// C++ — distributes evenly across online faction members' Currency
-Economy->AddToTreasury(Faction, 1000, TEXT("Quest reward"), ETerritoryTransactionType::ManualCredit);
+// C++ — credit one explicit Narrative inventory account
+Economy->CreditCurrency(Beneficiary, 1000, Faction, TEXT("Quest reward"),
+    ETerritoryTransactionType::ManualCredit);
+
+// For territory-generated income, select an explicit distribution policy.
+Economy->CreditCurrencyToFaction(Faction, 1000,
+    ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers,
+    TEXT("Territory reward"), ETerritoryTransactionType::Reward);
 ```
 
-### Spending Faction Wealth
+### Spending Currency
 
 ```cpp
-// C++ — debits proportionally from faction members' inventories
-if (Economy->TryDebitTreasury(Faction, 500, TEXT("Upgrade"), ETerritoryTransactionType::ManualDebit))
+// C++ — debits only the requesting player's Narrative inventory
+if (Economy->TryDebitCurrency(Requester, 500, Faction, TEXT("Upgrade"),
+    ETerritoryTransactionType::UpgradeCost))
 {
     // Success — deducted
 }
@@ -33,16 +40,14 @@ if (Economy->TryDebitTreasury(Faction, 500, TEXT("Upgrade"), ETerritoryTransacti
 ### Checking Balance
 
 ```cpp
-// Combined from FactionGold (treasury) + online members' Currency
-int32 Wealth = Economy->GetTreasury(Faction);
-// ^ includes stored treasury + live member inventory aggregate
+int32 Currency = Economy->GetActorCurrency(Requester);
+bool bCanAfford = Economy->CanActorAfford(Requester, Cost);
 
 int32 Income = Economy->GetIncome(Faction);
 int32 Costs = Economy->GetCosts(Faction);
-bool bCanAfford = Economy->CanAfford(Faction, Cost);
 ```
 
-Faction member enumeration and aggregate-currency helpers are private implementation details. Use `GetTreasury()` for the public aggregate query.
+`GetTreasury`, `CanAfford`, `AddToTreasury`, and `TryDebitTreasury` are deprecated compatibility functions and do not mutate a wallet. New gameplay code must provide the exact payer or beneficiary actor.
 
 ## Income Calculation
 
@@ -81,7 +86,7 @@ Every economy mutation records a transaction:
 | Faction | GameplayTag | Narrative.Factions.Heroes |
 | Type | ETerritoryTransactionType | Income, GuardUpkeep, UpgradeCost, Reward... |
 | Amount | int32 | +100 (credit) or -50 (debit) |
-| BalanceAfter | int32 | Treasury balance after transaction |
+| BalanceAfter | int32 | Narrative account balance after transaction |
 | GameTime | double | Accumulated game time |
 | Reason | FString | "Quest reward", "Property upgrade", "Guard upkeep" |
 | SourceTerritory | GameplayTag | Optional territory that generated the transaction |
@@ -104,16 +109,16 @@ if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
     if (Property->CanUpgrade())
     {
         int32 Cost = Property->GetUpgradeCost();  // e.g., 500
-        if (Economy->CanAfford(OwnerFaction, Cost))
+        if (Economy->CanActorAfford(Requester, Cost))
         {
-            Property->TryUpgrade();  // Debits treasury, increments level
+            Property->TryUpgrade(Requester);  // Debits Requester's Narrative inventory
         }
     }
 }
 
 // Blueprint
 Property → CanUpgrade() → Branch
-  True → GetUpgradeCost() → Economy → CanAfford(Faction, Cost)
+  True → GetUpgradeCost() → Economy → CanActorAfford(Requester, Cost)
     True → TryUpgrade()
 ```
 
@@ -149,10 +154,9 @@ Every EconomyTickIntervalSeconds (server only):
        RecalculateIncome(faction) → updates IncomePerTick, CostsPerTick, TerritoryCount
      Clear DirtyFactions
 
-  2. For each faction with treasury:
-     a. Split IncomePerTick across online faction members and record the resulting balance
-     b. Clamp upkeep to the post-income aggregate balance
-     c. Debit that affordable upkeep across members, redistributing shares when one member is short
+   2. For each faction with tracked rates:
+      a. Apply IncomePayoutPolicy to distribute IncomePerTick
+      b. Debit affordable upkeep from online member Narrative inventories
      d. Record the actual (possibly partial) upkeep and resulting balance
      e. Broadcast OnEconomyTickFired(Faction, Snapshot)
 

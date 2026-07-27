@@ -13,11 +13,7 @@ struct FTerritoryTreasury
 {
 	GENERATED_BODY()
 
-	// Income/cost snapshot for a faction. Faction wealth is stored in two places:
-	//   - FactionGold (persistent treasury on UTerritoryEconomySubsystem, SaveGame)
-	//   - UInventoryComponent::Currency on each online faction member character
-	// GetTreasury() returns FactionGold + aggregate member currency.
-	// This struct is a tick-level summary — not a wallet.
+	/** Income/cost snapshot for a faction. This struct is not a wallet. */
 
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 IncomePerTick = 0;
@@ -38,8 +34,36 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
+	UFUNCTION(BlueprintCallable, Category = "Territory|Economy",
+		meta=(DeprecatedFunction, DeprecationMessage="TerritoryFramework has no faction wallet; use GetActorCurrency(Requester)."))
 	int32 GetTreasury(const FGameplayTag& Faction) const;
+
+	/** Return the Narrative currency of the requesting actor's inventory account. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
+	int32 GetActorCurrency(const AActor* RequestingActor) const;
+
+	/** Check the requesting actor's Narrative inventory account. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
+	bool CanActorAfford(const AActor* RequestingActor, int32 Cost) const;
+
+	/** Debit exactly the requesting actor's Narrative inventory account. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	bool TryDebitCurrency(AActor* RequestingActor, int32 PositiveAmount,
+		const FGameplayTag& Faction, const FString& Reason = TEXT(""),
+		ETerritoryTransactionType Type = ETerritoryTransactionType::ManualDebit);
+
+	/** Credit exactly the beneficiary actor's Narrative inventory account. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	bool CreditCurrency(AActor* Beneficiary, int32 PositiveAmount,
+		const FGameplayTag& Faction, const FString& Reason = TEXT(""),
+		ETerritoryTransactionType Type = ETerritoryTransactionType::ManualCredit);
+
+	/** Apply an explicit payout policy to territory-generated currency. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	int32 CreditCurrencyToFaction(const FGameplayTag& Faction, int32 PositiveAmount,
+		ETerritoryIncomePayoutPolicy Policy, const FString& Reason = TEXT(""),
+		ETerritoryTransactionType Type = ETerritoryTransactionType::Income,
+		AActor* PreferredBeneficiary = nullptr);
 
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
 	int32 GetIncome(const FGameplayTag& Faction) const;
@@ -47,13 +71,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
 	int32 GetCosts(const FGameplayTag& Faction) const;
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
+	UFUNCTION(BlueprintCallable, Category = "Territory|Economy",
+		meta=(DeprecatedFunction, DeprecationMessage="Use CanActorAfford(Requester, Cost)."))
 	bool CanAfford(const FGameplayTag& Faction, int32 Cost) const;
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy",
+		meta=(DeprecatedFunction, DeprecationMessage="Use CreditCurrency(Beneficiary, Amount, Faction, Reason, Type)."))
 	void AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason = TEXT(""), ETerritoryTransactionType Type = ETerritoryTransactionType::ManualCredit);
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy",
+		meta=(DeprecatedFunction, DeprecationMessage="Use TryDebitCurrency(Requester, Amount, Faction, Reason, Type)."))
 	bool TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason = TEXT(""), ETerritoryTransactionType Type = ETerritoryTransactionType::ManualDebit);
 
 	/** Direct treasury state assignment (used by WorldState actor during load/restore) */
@@ -78,12 +105,6 @@ public:
 	/** Native persistence bridge. Replaces all tracked faction economy parameters. */
 	void RestoreTreasuryState(const TMap<FGameplayTag, FTerritoryTreasury>& Treasuries);
 
-	/** Native persistence bridge. Replaces the faction gold balance map. */
-	void RestoreFactionGold(const TMap<FGameplayTag, int32>& Gold);
-
-	/** Native access to the faction gold map for save serialization. */
-	const TMap<FGameplayTag, int32>& GetAllFactionGold() const { return FactionGold; }
-
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	void RecalculateIncome(const FGameplayTag& Faction);
 
@@ -102,15 +123,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Territory|Economy")
 	int32 MaxTransactionHistory = 500;
 
-private:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory|Economy")
+	ETerritoryIncomePayoutPolicy IncomePayoutPolicy = ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers;
+
+	private:
 	UPROPERTY(SaveGame)
 	TMap<FGameplayTag, FTerritoryTreasury> FactionTreasuries;
-
-	/** Dedicated faction gold balance — persists independently of member inventories.
-	 *  Income adds here; purchases deduct from here first, then from member inventories.
-	 *  Enables NPC-only factions to accumulate wealth and survives full-member-offline periods. */
-	UPROPERTY(SaveGame)
-	TMap<FGameplayTag, int32> FactionGold;
 
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryTransaction> TransactionLedger;
@@ -134,7 +152,10 @@ private:
 
 	/** Get all online faction member characters with valid inventory components. */
 	TArray<class ANarrativeCharacter*> GetFactionMembers(const FGameplayTag& Faction) const;
-
-	/** Sum of all online faction members' GetCurrency(). */
-	int32 GetFactionAggregateCurrency(const FGameplayTag& Faction) const;
+	class UNarrativeInventoryComponent* ResolveCurrencyAccount(const AActor* RequestingActor) const;
+	void RecordCurrencyTransaction(const FGameplayTag& Faction, int32 Amount,
+		int32 BalanceAfter, const FString& Reason, ETerritoryTransactionType Type,
+		const AActor* AccountActor);
+	bool TryDebitFactionMembers(const FGameplayTag& Faction, int32 PositiveAmount,
+		const FString& Reason, ETerritoryTransactionType Type);
 };

@@ -269,7 +269,7 @@
 
 | Function | Returns |
 |---|---|
-| GetFactionGold(WorldContext, Faction) | int32 |
+| GetFactionGold(WorldContext, Faction) | int32 | Deprecated; no faction wallet |
 | GetFactionIncome(WorldContext, Faction) | int32 |
 | GetAllFactions(WorldContext) | Array<GameplayTag> |
 
@@ -340,14 +340,15 @@
 
 | Function | Type |
 |---|---|
-| AddToTreasury(Faction, Amount, Reason, Type) | AuthorityOnly |
-| TryDebitTreasury(Faction, Amount, Reason, Type) | AuthorityOnly → bool |
+| CreditCurrency(Beneficiary, Amount, Faction, Reason, Type) | AuthorityOnly → bool |
+| TryDebitCurrency(Requester, Amount, Faction, Reason, Type) | AuthorityOnly → bool |
+| CreditCurrencyToFaction(Faction, Amount, Policy, Reason, Type) | AuthorityOnly → int32 |
 | SetFactionTreasury(Faction, Treasury) | AuthorityOnly |
 | RecalculateIncome(Faction) | AuthorityOnly |
-| GetTreasury(Faction) | Pure → int32 |
+| GetActorCurrency(Requester) | Pure → int32 |
 | GetIncome(Faction) | Pure → int32 |
 | GetCosts(Faction) | Pure → int32 |
-| CanAfford(Faction, Cost) | Pure → bool |
+| CanActorAfford(Requester, Cost) | Pure → bool |
 | GetFactionEconomy(Faction) | Pure → TerritoryTreasury |
 | GetAllFactionsWithTreasury() | Pure → Array<GameplayTag> |
 | GetTransactionHistory(Faction, Max) | → Array<Transaction> |

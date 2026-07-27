@@ -26,7 +26,7 @@ class ATerritoryDistrict;
  * Quick start:
  *   GetTerritoryControl(MyActor)->IsTerritoryContested(Tag) -> bool
  *   GetTerritoryAtLocation(MyActor, Location) -> ATerritoryVolume*
- *   GetTerritoryEconomy(MyActor)->GetFactionGold(Faction) -> int32
+ *   GetTerritoryEconomy(MyActor)->GetActorCurrency(Requester) -> int32
  *   TerritoryBlueprintLibrary::IsSameFaction(FactionA, FactionB) -> bool
  */
 UCLASS(BlueprintType)
@@ -120,12 +120,10 @@ public:
 	// Economy Shortcuts
 	// ═══════════════════════════════════════════════════════════════════════════════
 
-	/**
-	 * Returns the faction treasury (gold balance). Reads live from subsystem.
-	 * Economy subsystem must be enabled in project settings.
-	 */
+	/** Deprecated compatibility query. TerritoryFramework does not maintain a faction wallet. */
 	UFUNCTION(BlueprintPure, Category="Territory|Economy",
-		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction Gold"))
+		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction Gold", DeprecatedFunction,
+			DeprecationMessage="Use TerritoryEconomy->GetActorCurrency(Requester) instead."))
 	static int32 GetFactionGold(const UObject* WorldContextObject, const FGameplayTag& FactionTag);
 
 	/** Returns the sum of periodic income across all territories owned by faction. */

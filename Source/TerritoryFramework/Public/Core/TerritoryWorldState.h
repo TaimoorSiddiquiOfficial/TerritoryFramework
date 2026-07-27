@@ -107,6 +107,10 @@ struct FReplicatedCaptureSummary
 	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag TerritoryTag;
 
+	/** Stable actor identity used when the territory is streamed or its tag changes. */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	FGuid TerritoryGUID;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag CurrentOwner;
 
@@ -225,6 +229,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 #if WITH_EDITOR
@@ -278,4 +283,13 @@ protected:
 
 private:
 	void SyncSubsystemsFromReplicatedState();
+	void ApplyPendingCaptureSummaries();
+
+	UFUNCTION()
+	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	UPROPERTY(Transient)
+	TArray<FReplicatedCaptureSummary> PendingCaptureSummaries;
+
+	FTimerHandle PendingCaptureRetryTimerHandle;
 };

@@ -66,13 +66,12 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	}
 	else
 	{
-		// No control subsystem available — log warning and use direct ownership.
-		// This bypasses capture rules (lock, diplomacy, defenders) but is the only
-		// path when the subsystem is missing (e.g. stripped world, test harness).
+		// Never bypass the centralized capture authority when the subsystem is
+		// unavailable; direct ownership would violate hierarchy and lock rules.
 		UE_LOG(LogTerritory, Warning,
-			TEXT("[TalesCaptureEvent] ControlSubsystem unavailable for %s — falling back to direct SetOwningFaction"),
+			TEXT("[TalesCaptureEvent] ControlSubsystem unavailable for %s — capture skipped"),
 			*TargetTerritoryTag.ToString());
-		Territory->SetOwningFaction(CapturingFaction);
+		return;
 	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();

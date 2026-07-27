@@ -379,7 +379,7 @@ void UTerritoryDiplomacySubsystem::LoadFromGameState()
 	if (!GS) return;
 
 	// Track which faction pairs we've seen from GameState attitudes
-	TSet<FGuid> SeenPairs;
+	TSet<FString> SeenPairs;
 
 	for (const auto& Pair : GS->FactionAllianceMap)
 	{
@@ -389,9 +389,11 @@ void UTerritoryDiplomacySubsystem::LoadFromGameState()
 			const FGameplayTag& FactionB = AttitudePair.Key;
 			if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) continue;
 
-			const uint32 HashA = GetTypeHash(FactionA);
-			const uint32 HashB = GetTypeHash(FactionB);
-			FGuid CanonicalKey = FGuid(FMath::Min(HashA, HashB), FMath::Max(HashA, HashB), 0, 0);
+			const FString NameA = FactionA.ToString();
+			const FString NameB = FactionB.ToString();
+			const FString CanonicalKey = NameA < NameB
+				? NameA + TEXT("|") + NameB
+				: NameB + TEXT("|") + NameA;
 			if (SeenPairs.Contains(CanonicalKey)) continue;
 			SeenPairs.Add(CanonicalKey);
 
@@ -454,10 +456,11 @@ void UTerritoryDiplomacySubsystem::LoadFromGameState()
 	for (int32 i = ActiveTreaties.Num() - 1; i >= 0; --i)
 	{
 		FTreatyRecord& Treaty = ActiveTreaties[i];
-		FGuid Key = FGuid(
-			FMath::Min(GetTypeHash(Treaty.FactionA), GetTypeHash(Treaty.FactionB)),
-			FMath::Max(GetTypeHash(Treaty.FactionA), GetTypeHash(Treaty.FactionB)),
-			0, 0);
+		const FString NameA = Treaty.FactionA.ToString();
+		const FString NameB = Treaty.FactionB.ToString();
+		const FString Key = NameA < NameB
+			? NameA + TEXT("|") + NameB
+			: NameB + TEXT("|") + NameA;
 		if (!SeenPairs.Contains(Key))
 		{
 			ActiveTreaties.RemoveAt(i);

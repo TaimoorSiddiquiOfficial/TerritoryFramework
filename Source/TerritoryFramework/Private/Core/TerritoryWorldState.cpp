@@ -8,6 +8,7 @@
 #include "SaveSystemStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 
 ATerritoryWorldState::ATerritoryWorldState()
 {
@@ -24,11 +25,32 @@ void ATerritoryWorldState::BeginPlay()
 	{
 		if (!WorldStateGUID.IsValid())
 		{
-			WorldStateGUID = FGuid::NewGuid();
+			UE_LOG(LogTerritory, Error, TEXT("TerritoryWorldState %s has no authored WorldStateGUID; save/load is disabled."),
+				*GetPathName());
+			return;
 		}
 
+		if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryWorldState::OnTerritoryRegistered);
+		}
 		USaveSystemStatics::LoadSingleActor(this);
+		GetWorld()->GetTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateUObject(this, &ATerritoryWorldState::ApplyPendingCaptureSummaries));
 	}
+}
+
+void ATerritoryWorldState::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(PendingCaptureRetryTimerHandle);
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryWorldState::OnTerritoryRegistered);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void ATerritoryWorldState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -364,6 +386,7 @@ void ATerritoryWorldState::ExportPersistentState()
 				if (!Territory) continue;
 				FReplicatedCaptureSummary Summary;
 				Summary.TerritoryTag = Territory->GetTerritoryTag();
+				Summary.TerritoryGUID = Territory->GetActorGUID_Implementation();
 				Summary.CurrentOwner = Territory->GetOwningFaction();
 				Summary.ContestingFaction = Territory->GetContestingFaction();
 				Summary.ControlProgress = Territory->GetControlProgress();
@@ -460,33 +483,62 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 		Diplomacy->RestorePersistentState(Treaties, Reputation, ReplicatedDiplomacyHistory);
 	}
 
-	// Sync capture state — restore in-progress contests from saved summaries.
-	// Territories are guaranteed to be registered at this point (BeginPlay order).
-	if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+	// Sync capture state. Registry registration can happen after WorldState load,
+	// especially with streaming, so retain unresolved summaries and apply them from
+	// OnTerritoryRegistered instead of dropping them.
+	PendingCaptureSummaries = ReplicatedCaptureSummaries;
+	ApplyPendingCaptureSummaries();
+	if (PendingCaptureSummaries.Num() > 0)
 	{
-		if (UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>())
-		{
-			for (const FReplicatedCaptureSummary& Summary : ReplicatedCaptureSummaries)
-			{
-				ATerritoryVolume* Territory = Registry->GetTerritoryByTag(Summary.TerritoryTag);
-				if (!Territory) continue;
+		World->GetTimerManager().SetTimer(PendingCaptureRetryTimerHandle, this,
+			&ATerritoryWorldState::ApplyPendingCaptureSummaries, 1.f, true);
+	}
+}
 
-				// Only set ownership if it actually changed — avoids unnecessary
-				// guard despawn/re-spawn and duplicate ownership-change events.
-				if (Summary.CurrentOwner != Territory->GetOwningFaction())
-				{
-					Territory->SetOwningFaction(Summary.CurrentOwner);
-				}
-				if (Summary.State == ETerritoryState::Contested)
-				{
-					Territory->SetTerritoryState(ETerritoryState::Contested);
-					Control->RestoreCaptureState(Territory, Summary.ContestingFaction, Summary.ControlProgress);
-				}
-				else if (Summary.CurrentOwner.IsValid())
-				{
-					Territory->SetTerritoryState(ETerritoryState::Claimed);
-				}
-			}
+void ATerritoryWorldState::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	if (bWasUnregistered || !Territory || PendingCaptureSummaries.Num() == 0) return;
+	ApplyPendingCaptureSummaries();
+}
+
+void ATerritoryWorldState::ApplyPendingCaptureSummaries()
+{
+	UWorld* World = GetWorld();
+	UTerritoryRegistrySubsystem* Registry = World ? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	UTerritoryControlSubsystem* Control = World ? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
+	if (!Registry || !Control) return;
+
+	for (int32 Index = PendingCaptureSummaries.Num() - 1; Index >= 0; --Index)
+	{
+		const FReplicatedCaptureSummary& Summary = PendingCaptureSummaries[Index];
+		ATerritoryVolume* Territory = Summary.TerritoryGUID.IsValid()
+			? Registry->GetTerritoryByGUID(Summary.TerritoryGUID)
+			: nullptr;
+		if (!Territory && Summary.TerritoryTag.IsValid())
+		{
+			Territory = Registry->GetTerritoryByTag(Summary.TerritoryTag);
 		}
+		if (!Territory) continue;
+
+		if (Summary.CurrentOwner != Territory->GetOwningFaction())
+		{
+			Territory->ForceSetOwningFaction(Summary.CurrentOwner);
+		}
+		if (Summary.State == ETerritoryState::Contested)
+		{
+			Territory->ForceSetTerritoryState(ETerritoryState::Contested);
+			Control->RestoreCaptureState(Territory, Summary.ContestingFaction, Summary.ControlProgress);
+		}
+		else if (Territory->GetTerritoryState() != Summary.State)
+		{
+			Territory->ForceSetTerritoryState(Summary.State);
+		}
+
+		PendingCaptureSummaries.RemoveAtSwap(Index);
+	}
+
+	if (PendingCaptureSummaries.Num() == 0 && World)
+	{
+		World->GetTimerManager().ClearTimer(PendingCaptureRetryTimerHandle);
 	}
 }

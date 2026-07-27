@@ -199,7 +199,7 @@ public:
 	int32 GetEffectiveIncome() const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property")
-	bool TryUpgrade();
+	bool TryUpgrade(AActor* Requester);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property")
 	void SetUpgradeLevel(int32 NewLevel);

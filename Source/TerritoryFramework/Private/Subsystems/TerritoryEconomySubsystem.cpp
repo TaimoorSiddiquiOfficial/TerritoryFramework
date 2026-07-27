@@ -89,7 +89,6 @@ void UTerritoryEconomySubsystem::Deinitialize()
 	}
 
 	FactionTreasuries.Empty();
-	FactionGold.Empty();
 	DirtyFactions.Empty();
 	Super::Deinitialize();
 }
@@ -126,17 +125,64 @@ TArray<ANarrativeCharacter*> UTerritoryEconomySubsystem::GetFactionMembers(const
 	return Members;
 }
 
-int32 UTerritoryEconomySubsystem::GetFactionAggregateCurrency(const FGameplayTag& Faction) const
+UNarrativeInventoryComponent* UTerritoryEconomySubsystem::ResolveCurrencyAccount(const AActor* RequestingActor) const
 {
-	int32 Total = 0;
-	for (const ANarrativeCharacter* Member : GetFactionMembers(Faction))
+	if (!RequestingActor) return nullptr;
+
+	const AActor* AccountActor = RequestingActor;
+	if (const APlayerController* Controller = Cast<APlayerController>(RequestingActor))
 	{
-		if (UNarrativeInventoryComponent* Inv = Member->GetInventoryComponent())
-		{
-			Total += Inv->GetCurrency();
-		}
+		AccountActor = Controller->GetPawn();
 	}
-	return Total;
+
+	if (!AccountActor) return nullptr;
+	if (const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(AccountActor))
+	{
+		return Character->GetInventoryComponent();
+	}
+
+	return const_cast<AActor*>(AccountActor)->FindComponentByClass<UNarrativeInventoryComponent>();
+}
+
+int32 UTerritoryEconomySubsystem::GetActorCurrency(const AActor* RequestingActor) const
+{
+	if (const UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(RequestingActor))
+	{
+		return Inventory->GetCurrency();
+	}
+	return 0;
+}
+
+bool UTerritoryEconomySubsystem::CanActorAfford(const AActor* RequestingActor, int32 Cost) const
+{
+	return Cost >= 0 && GetActorCurrency(RequestingActor) >= Cost;
+}
+
+void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
+	const FGameplayTag& Faction, int32 Amount, int32 BalanceAfter,
+	const FString& Reason, ETerritoryTransactionType Type, const AActor* AccountActor)
+{
+	FTerritoryTransaction Tx;
+	Tx.TransactionID = FGuid::NewGuid();
+	Tx.Faction = Faction;
+	Tx.Type = Type;
+	Tx.Amount = Amount;
+	Tx.BalanceAfter = BalanceAfter;
+	Tx.Reason = AccountActor
+		? FString::Printf(TEXT("%s [Account=%s]"), *Reason, *AccountActor->GetName())
+		: Reason;
+
+	if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+	{
+		Tx.GameTime = GS->GetAccumulatedTime();
+	}
+
+	TransactionLedger.Add(Tx);
+	while (TransactionLedger.Num() > MaxTransactionHistory)
+	{
+		TransactionLedger.RemoveAt(0);
+	}
+	OnTransactionRecorded.Broadcast(Tx);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -169,40 +215,47 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 
 		if (TickTreasury.IncomePerTick > 0)
 		{
-			AddToTreasury(Faction, TickTreasury.IncomePerTick,
+			CreditCurrencyToFaction(Faction, TickTreasury.IncomePerTick, IncomePayoutPolicy,
 				TEXT("Periodic income"), ETerritoryTransactionType::Income);
 		}
 
-		const int32 AvailableForUpkeep = GetTreasury(Faction);
+		int32 AvailableForUpkeep = 0;
+		for (const ANarrativeCharacter* Member : GetFactionMembers(Faction))
+		{
+			if (const UNarrativeInventoryComponent* Inventory = Member->GetInventoryComponent())
+			{
+				AvailableForUpkeep += Inventory->GetCurrency();
+			}
+		}
 		const int32 ActualUpkeep = FMath::Min(TickTreasury.CostsPerTick, AvailableForUpkeep);
 		if (ActualUpkeep > 0)
 		{
 			const FString Reason = ActualUpkeep == TickTreasury.CostsPerTick
 				? TEXT("Guard upkeep")
 				: FString::Printf(TEXT("Guard upkeep (partial: %d/%d)"), ActualUpkeep, TickTreasury.CostsPerTick);
-			TryDebitTreasury(Faction, ActualUpkeep, Reason, ETerritoryTransactionType::GuardUpkeep);
+			TryDebitFactionMembers(Faction, ActualUpkeep, Reason, ETerritoryTransactionType::GuardUpkeep);
 		}
 
-		const int32 Aggregate = GetFactionAggregateCurrency(Faction);
 		const int32 NetIncome = TickTreasury.IncomePerTick - TickTreasury.CostsPerTick;
 		const int32 MemberCount = GetFactionMembers(Faction).Num();
 
 		if (bDebugTicks)
 		{
-			UE_LOG(LogTerritory, Log, TEXT("[EconomyTick] %s: aggregate=%d, income=%d, costs=%d, net=%d, members=%d, territories=%d"),
-				*Faction.ToString(), Aggregate, TickTreasury.IncomePerTick,
+			UE_LOG(LogTerritory, Log, TEXT("[EconomyTick] %s: income=%d, costs=%d, net=%d, members=%d, territories=%d"),
+				*Faction.ToString(), TickTreasury.IncomePerTick,
 				TickTreasury.CostsPerTick, NetIncome, MemberCount, TickTreasury.TerritoryCount);
 
 			if (Settings->IsDebugEnabled())
 			{
-				const FString Msg = FString::Printf(TEXT("[Economy] %s: $%d (+%d/-%d) [%d members]"),
-					*Faction.ToString(), Aggregate, TickTreasury.IncomePerTick, TickTreasury.CostsPerTick, MemberCount);
+				const FString Msg = FString::Printf(TEXT("[Economy] %s: +%d/-%d [%d members]"),
+					*Faction.ToString(), TickTreasury.IncomePerTick, TickTreasury.CostsPerTick, MemberCount);
 				GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Cyan, Msg);
 			}
 		}
 
 		FTerritoryEconomySnapshot Snapshot;
-		Snapshot.Treasury = Aggregate;
+		// TerritoryFramework owns rates; Narrative inventory accounts own currency.
+		Snapshot.Treasury = 0;
 		Snapshot.TotalIncome = TickTreasury.IncomePerTick;
 		Snapshot.TotalCosts = TickTreasury.CostsPerTick;
 		Snapshot.TerritoryCount = TickTreasury.TerritoryCount;
@@ -224,8 +277,8 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 
 int32 UTerritoryEconomySubsystem::GetTreasury(const FGameplayTag& Faction) const
 {
-	// Faction wealth = dedicated faction gold + aggregate of all online members' Currency
-	return FactionGold.FindRef(Faction) + GetFactionAggregateCurrency(Faction);
+	// Deprecated: TerritoryFramework no longer exposes a faction wallet.
+	return 0;
 }
 
 int32 UTerritoryEconomySubsystem::GetIncome(const FGameplayTag& Faction) const
@@ -242,7 +295,8 @@ int32 UTerritoryEconomySubsystem::GetCosts(const FGameplayTag& Faction) const
 
 bool UTerritoryEconomySubsystem::CanAfford(const FGameplayTag& Faction, int32 Cost) const
 {
-	return Cost >= 0 && GetTreasury(Faction) >= Cost;
+	// Deprecated: callers must provide an exact Narrative inventory account.
+	return Cost == 0;
 }
 
 FTerritoryTreasury UTerritoryEconomySubsystem::GetFactionEconomy(const FGameplayTag& Faction) const
@@ -264,183 +318,124 @@ TArray<FGameplayTag> UTerritoryEconomySubsystem::GetAllFactionsWithTreasury() co
 
 void UTerritoryEconomySubsystem::AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
-	if (!Faction.IsValid() || PositiveAmount <= 0) return;
-
-	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	const bool bDebugTx = Settings && Settings->ShouldDebugTransactions();
-
-	// Add to dedicated faction gold balance (primary treasury)
-	int32& Gold = FactionGold.FindOrAdd(Faction);
-	Gold += PositiveAmount;
-
-	// Also distribute to online members' UInventoryComponent::Currency so they see
-	// the income in their personal inventory. This is a secondary effect — the
-	// canonical treasury is FactionGold.
-	TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
-	if (!Members.IsEmpty())
-	{
-		int32 BaseShare = PositiveAmount / Members.Num();
-		int32 Remainder = PositiveAmount - (BaseShare * Members.Num());
-
-		for (int32 i = 0; i < Members.Num(); ++i)
-		{
-			ANarrativeCharacter* Member = Members[i];
-			UNarrativeInventoryComponent* Inv = Member->GetInventoryComponent();
-			if (!Inv) continue;
-
-			int32 Share = BaseShare + (i == 0 ? Remainder : 0);
-			Inv->AddCurrency(Share);
-		}
-	}
-
-	// Record transaction
-	FTerritoryTransaction Tx;
-	Tx.TransactionID = FGuid::NewGuid();
-	Tx.Faction = Faction;
-	Tx.Type = Type;
-	Tx.Amount = PositiveAmount;
-	Tx.BalanceAfter = GetTreasury(Faction);
-	Tx.Reason = Reason;
-
-	if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
-	{
-		Tx.GameTime = GS->GetAccumulatedTime();
-	}
-
-	TransactionLedger.Add(Tx);
-
-	while (TransactionLedger.Num() > MaxTransactionHistory)
-	{
-		TransactionLedger.RemoveAt(0);
-	}
-
-	OnTransactionRecorded.Broadcast(Tx);
-
-	if (bDebugTx)
-	{
-		UE_LOG(LogTerritory, Log, TEXT("[Transaction] CREDIT %s: +%d (%s) treasury=%d, gold=%d, members=%d"),
-			*Faction.ToString(), PositiveAmount, *Reason, Tx.BalanceAfter, Gold, Members.Num());
-	}
+	UE_LOG(LogTerritory, Warning, TEXT("AddToTreasury is deprecated and ignored for faction %s: %s"),
+		*Faction.ToString(), *Reason);
 }
 
 bool UTerritoryEconomySubsystem::TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason, ETerritoryTransactionType Type)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return false;
+	UE_LOG(LogTerritory, Warning, TEXT("TryDebitTreasury is deprecated and rejected for faction %s: %s"),
+		*Faction.ToString(), *Reason);
+	return false;
+}
+
+bool UTerritoryEconomySubsystem::TryDebitCurrency(
+	AActor* RequestingActor, int32 PositiveAmount, const FGameplayTag& Faction,
+	const FString& Reason, ETerritoryTransactionType Type)
+{
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0) return false;
+
+	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(RequestingActor);
+	if (!Inventory || Inventory->GetCurrency() < PositiveAmount) return false;
+
+	Inventory->AddCurrency(-PositiveAmount);
+	RecordCurrencyTransaction(Faction, -PositiveAmount, Inventory->GetCurrency(), Reason, Type, RequestingActor);
+	return true;
+}
+
+bool UTerritoryEconomySubsystem::CreditCurrency(
+	AActor* Beneficiary, int32 PositiveAmount, const FGameplayTag& Faction,
+	const FString& Reason, ETerritoryTransactionType Type)
+{
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0) return false;
+
+	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Beneficiary);
+	if (!Inventory) return false;
+
+	Inventory->AddCurrency(PositiveAmount);
+	RecordCurrencyTransaction(Faction, PositiveAmount, Inventory->GetCurrency(), Reason, Type, Beneficiary);
+	return true;
+}
+
+int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
+	const FGameplayTag& Faction, int32 PositiveAmount, ETerritoryIncomePayoutPolicy Policy,
+	const FString& Reason, ETerritoryTransactionType Type, AActor* PreferredBeneficiary)
+{
+	if (!Faction.IsValid() || PositiveAmount <= 0 || Policy == ETerritoryIncomePayoutPolicy::NoCurrencyPayout)
+	{
+		return 0;
+	}
+
+	if (Policy == ETerritoryIncomePayoutPolicy::CapturingPlayer
+		|| Policy == ETerritoryIncomePayoutPolicy::SharedNarrativeAccount)
+	{
+		return PreferredBeneficiary
+			&& CreditCurrency(PreferredBeneficiary, PositiveAmount, Faction, Reason, Type)
+			? PositiveAmount
+			: 0;
+	}
+
+	TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
+	if (Members.IsEmpty()) return 0;
+
+	if (Policy == ETerritoryIncomePayoutPolicy::FactionLeader)
+	{
+		return CreditCurrency(Members[0], PositiveAmount, Faction, Reason, Type) ? PositiveAmount : 0;
+	}
+
+	const int32 BaseShare = PositiveAmount / Members.Num();
+	const int32 Remainder = PositiveAmount - (BaseShare * Members.Num());
+	int32 Paid = 0;
+	for (int32 Index = 0; Index < Members.Num(); ++Index)
+	{
+		const int32 Share = BaseShare + (Index == 0 ? Remainder : 0);
+		if (Share > 0 && CreditCurrency(Members[Index], Share, Faction, Reason, Type))
+		{
+			Paid += Share;
+		}
+	}
+	return Paid;
+}
+
+bool UTerritoryEconomySubsystem::TryDebitFactionMembers(
+	const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason,
+	ETerritoryTransactionType Type)
+{
 	if (!Faction.IsValid() || PositiveAmount <= 0) return false;
 
-	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	const bool bDebugTx = Settings && Settings->ShouldDebugTransactions();
+	TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
+	TArray<int32> Debits;
+	Debits.Init(0, Members.Num());
 
-	// Check total treasury (FactionGold + member aggregate) before proceeding
-	if (GetTreasury(Faction) < PositiveAmount) return false;
-
-	int32& Gold = FactionGold.FindOrAdd(Faction);
-	int32 Debited = 0;
-
-	// ─── Phase 1: Collect — determine what to take from each source,
-	// without modifying any balance yet ───
-
-	// FactionGold contribution
-	int32 FromGold = FMath::Min(Gold, PositiveAmount);
-	int32 Remaining = PositiveAmount - FromGold;
-
-	// Member contributions
-	TArray<ANarrativeCharacter*> Members;
-	TArray<int32> MemberDebits; // parallel array, 0 = no debit
-
-	if (Remaining > 0)
+	int32 TotalCurrency = 0;
+	for (ANarrativeCharacter* Member : Members)
 	{
-		Members = GetFactionMembers(Faction);
-		MemberDebits.Init(0, Members.Num());
-
-		int32 DebitPerMember = Remaining / FMath::Max(1, Members.Num());
-		int32 Remainder = Remaining - (DebitPerMember * Members.Num());
-		int32 MemberCollected = 0;
-
-		// First pass: proportional debits
-		for (int32 i = 0; i < Members.Num(); ++i)
+		if (const UNarrativeInventoryComponent* Inventory = Member->GetInventoryComponent())
 		{
-			ANarrativeCharacter* Member = Members[i];
-			UNarrativeInventoryComponent* Inv = Member ? Member->GetInventoryComponent() : nullptr;
-			if (!Inv) continue;
-
-			int32 AttemptDebit = DebitPerMember + (i == 0 ? Remainder : 0);
-			int32 CurrentCurrency = Inv->GetCurrency();
-			int32 ActualDebit = FMath::Min(AttemptDebit, CurrentCurrency);
-			if (ActualDebit > 0)
-			{
-				MemberDebits[i] = ActualDebit;
-				MemberCollected += ActualDebit;
-			}
-		}
-
-		// Second pass: redistribute shortfall
-		int32 MemberRemaining = Remaining - MemberCollected;
-		for (int32 i = 0; i < Members.Num() && MemberRemaining > 0; ++i)
-		{
-			if (UNarrativeInventoryComponent* Inv = Members[i]->GetInventoryComponent())
-			{
-				const int32 SpareCurrency = Inv->GetCurrency() - MemberDebits[i];
-				const int32 AdditionalDebit = FMath::Min(SpareCurrency, MemberRemaining);
-				MemberDebits[i] += AdditionalDebit;
-				MemberCollected += AdditionalDebit;
-				MemberRemaining -= AdditionalDebit;
-			}
-		}
-
-		// If still short after members, abort without mutating anything
-		if (MemberRemaining > 0)
-		{
-			return false;
-		}
-
-		Remaining = MemberRemaining; // 0
-	}
-
-	// ─── Phase 2: Apply — atomically apply all collected debits ───
-	Gold -= FromGold;
-	Debited += FromGold;
-
-	for (int32 i = 0; i < Members.Num(); ++i)
-	{
-		if (MemberDebits[i] > 0)
-		{
-			if (UNarrativeInventoryComponent* Inv = Members[i]->GetInventoryComponent())
-			{
-				Inv->AddCurrency(-MemberDebits[i]);
-				Debited += MemberDebits[i];
-			}
+			TotalCurrency += Inventory->GetCurrency();
 		}
 	}
+	if (TotalCurrency < PositiveAmount) return false;
 
-	// Record transaction
-	FTerritoryTransaction Tx;
-	Tx.TransactionID = FGuid::NewGuid();
-	Tx.Faction = Faction;
-	Tx.Type = Type;
-	Tx.Amount = -Debited;
-	Tx.BalanceAfter = GetTreasury(Faction);
-	Tx.Reason = Reason;
-
-	if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+	int32 Remaining = PositiveAmount;
+	for (int32 Index = 0; Index < Members.Num() && Remaining > 0; ++Index)
 	{
-		Tx.GameTime = GS->GetAccumulatedTime();
+		if (const UNarrativeInventoryComponent* Inventory = Members[Index]->GetInventoryComponent())
+		{
+			Debits[Index] = FMath::Min(Inventory->GetCurrency(), Remaining);
+			Remaining -= Debits[Index];
+		}
 	}
+	if (Remaining > 0) return false;
 
-	TransactionLedger.Add(Tx);
-
-	while (TransactionLedger.Num() > MaxTransactionHistory)
+	for (int32 Index = 0; Index < Members.Num(); ++Index)
 	{
-		TransactionLedger.RemoveAt(0);
-	}
-
-	OnTransactionRecorded.Broadcast(Tx);
-
-	if (bDebugTx)
-	{
-		UE_LOG(LogTerritory, Log, TEXT("[Transaction] DEBIT %s: -%d (%s) treasury=%d, gold=%d"),
-			*Faction.ToString(), Debited, *Reason, Tx.BalanceAfter, Gold);
+		if (Debits[Index] <= 0) continue;
+		if (UNarrativeInventoryComponent* Inventory = Members[Index]->GetInventoryComponent())
+		{
+			Inventory->AddCurrency(-Debits[Index]);
+			RecordCurrencyTransaction(Faction, -Debits[Index], Inventory->GetCurrency(), Reason, Type, Members[Index]);
+		}
 	}
 	return true;
 }
@@ -477,14 +472,6 @@ void UTerritoryEconomySubsystem::RestoreTreasuryState(const TMap<FGameplayTag, F
 
 	FactionTreasuries = Treasuries;
 	DirtyFactions.Empty();
-}
-
-void UTerritoryEconomySubsystem::RestoreFactionGold(const TMap<FGameplayTag, int32>& Gold)
-{
-	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client) return;
-
-	FactionGold = Gold;
 }
 
 void UTerritoryEconomySubsystem::SetFactionTreasury(const FGameplayTag& Faction, const FTerritoryTreasury& Treasury)

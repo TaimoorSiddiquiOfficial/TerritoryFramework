@@ -52,8 +52,8 @@ struct FTerritoryPatrolNode
  *   - Each spawn point owns its own PatrolRoute (TArray<FTerritoryPatrolNode>).
  *   - Guards spawned from this point access the route via ATerritoryGuardCharacter
  *     helpers (GetTerritoryPatrolRoute, HasTerritoryPatrolRoute, GetPatrolNodeCount).
- *   - When slots run out, remaining guards fall back to random positions inside the
- *     territory volume (their OwningTerritorySpawnPoint will be null).
+ *   - Authored spawn points are authoritative. When their slots run out, no
+ *     random overflow guards are created.
  *
  * Quick Blueprint Example:
  *   for spawn point in territory->GetGuardSpawnPoints():

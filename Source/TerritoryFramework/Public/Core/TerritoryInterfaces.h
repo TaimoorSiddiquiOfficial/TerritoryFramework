@@ -49,6 +49,12 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory|Economy")
 	bool CanAfford(FGameplayTag Faction, int32 Cost) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory|Economy")
+	int32 GetActorCurrency(AActor* Requester) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory|Economy")
+	bool CanActorAfford(AActor* Requester, int32 Cost) const;
 };
 
 UINTERFACE(BlueprintType)

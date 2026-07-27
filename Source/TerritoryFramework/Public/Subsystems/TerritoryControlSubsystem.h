@@ -62,6 +62,9 @@ public:
 		const FGameplayTag& ContestingFaction,
 		float ControlProgress);
 
+	/** Single capture-admission policy used by requests, progress ticks, and completion. */
+	bool CanFactionCaptureTerritory(const ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction) const;
+
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Capture")
 	FOnTerritoryControlChanged OnTerritoryControlChanged;
 
@@ -99,5 +102,6 @@ private:
 	ECaptureResult ValidateAndBeginCapture(
 		ATerritoryVolume* Territory,
 		const FGameplayTag& AttackingFaction,
-		bool bBroadcastAttempt);
+		bool bBroadcastAttempt,
+		bool bCommitContestState = true);
 };

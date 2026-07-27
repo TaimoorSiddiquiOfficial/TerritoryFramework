@@ -177,11 +177,11 @@ if (bFriendly) return ECaptureResult::DiplomaticallyBlocked;
 
 ## UTerritoryEconomySubsystem
 
-Manages faction treasuries, income calculation, and transaction ledger.
+Calculates faction income/upkeep rates and records transactions applied to Narrative inventory accounts.
 
 ### Treasury Structure
 
-Faction wealth is the **aggregate of all online faction members' `UInventoryComponent::Currency`** (NarrativePro). There is no separate `Gold` field — `GetTreasury()` reads live from player inventories each call. The tracked parameters are:
+Narrative Pro's `UInventoryComponent::Currency` is the only currency balance. TerritoryFramework does not own a faction wallet. The tracked parameters are:
 
 ```cpp
 struct FTerritoryTreasury
@@ -199,7 +199,7 @@ See [07_Economy_System.md](07_Economy_System.md) for full economy documentation.
 ### Key Behaviors
 
 1. **Deferred income recalculation** — ownership changes mark factions dirty via `MarkFactionDirty()`. Actual `RecalculateIncome` runs once per economy tick (not immediately). This avoids O(3N) redundant scans during capture cascades.
-2. **Transaction ledger** — every mutation (add/debit) records a `FTerritoryTransaction`. Ledger is trimmed once per tick (not per faction).
+2. **Transaction ledger** — every explicit Narrative-account credit/debit records a `FTerritoryTransaction`. Ledger is trimmed once per tick (not per faction).
 3. **Server-only timer** — economy tick fires every `EconomyTickIntervalSeconds` (default 300s). Processes dirty factions first, then applies income/upkeep per faction.
 4. **OnTransactionRecorded** — broadcast after every transaction (UI binds to this)
 5. **MaxTransactionHistory** — caps stored transactions globally (default 500)

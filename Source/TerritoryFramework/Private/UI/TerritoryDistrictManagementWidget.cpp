@@ -37,9 +37,11 @@ void UTerritoryDistrictManagementWidget::NativeConstruct()
 		CloseButton->OnClicked.AddUniqueDynamic(this, &UTerritoryDistrictManagementWidget::HandleCloseClicked);
 	}
 	BindManagementComponent();
-	// Base class (UTerritoryInfoWidget) already runs a 0.5s refresh timer
-	// in its own NativeConstruct via Super::NativeConstruct().
-	RefreshManagementDisplay();
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(RefreshTimerHandle, this,
+			&UTerritoryDistrictManagementWidget::RefreshManagementDisplay, 0.5f, true);
+	}
 }
 
 void UTerritoryDistrictManagementWidget::NativeDestruct()
@@ -57,7 +59,10 @@ void UTerritoryDistrictManagementWidget::NativeDestruct()
 		ManagementComponent->OnGuardPurchaseResult.RemoveDynamic(
 			this, &UTerritoryDistrictManagementWidget::HandleGuardPurchaseResult);
 	}
-	// Base class NativeDestruct clears the 0.5s refresh timer.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(RefreshTimerHandle);
+	}
 	Super::NativeDestruct();
 }
 
@@ -80,7 +85,14 @@ int32 UTerritoryDistrictManagementWidget::GetDistrictIncome() const
 bool UTerritoryDistrictManagementWidget::CanPurchaseGuard(FText& OutFailureReason) const
 {
 	const ATerritoryDistrict* District = GetManagedDistrict();
-	return District && District->CanPurchaseGuards(ManagedFaction, 1, OutFailureReason);
+	APlayerController* PlayerController = GetOwningPlayer();
+	if (!ManagementComponent.IsValid())
+	{
+		OutFailureReason = FText::FromString(TEXT("Territory management is not installed on this PlayerController."));
+		return false;
+	}
+	return District && PlayerController
+		&& District->CanPurchaseGuards(PlayerController, 1, OutFailureReason);
 }
 
 void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
@@ -108,13 +120,16 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	if (TreasuryText)
 	{
 		const UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
-		TreasuryText->SetText(FText::AsNumber(Economy ? Economy->GetTreasury(ManagedFaction) : 0));
+		TreasuryText->SetText(FText::AsNumber(Economy ? Economy->GetActorCurrency(GetOwningPlayer()) : 0));
 	}
 
 	FText FailureReason;
 	const bool bCanPurchase = CanPurchaseGuard(FailureReason);
 	if (AddGuardButton) AddGuardButton->SetIsEnabled(bCanPurchase);
-	if (StatusText && !bCanPurchase) StatusText->SetText(FailureReason);
+	if (StatusText)
+	{
+		StatusText->SetText(bCanPurchase ? FText::GetEmpty() : FailureReason);
+	}
 	OnManagementRefreshed();
 }
 
@@ -144,8 +159,9 @@ void UTerritoryDistrictManagementWidget::HandleCloseClicked()
 }
 
 void UTerritoryDistrictManagementWidget::HandleGuardPurchaseResult(
-	ATerritoryVolume* Territory, bool bSuccess, FText Message)
+	ATerritoryVolume* Territory, bool bSuccess, FText Message, int32 RequestId)
 {
+	(void)RequestId;
 	if (!Territory || Territory == GetManagedDistrict())
 	{
 		if (StatusText) StatusText->SetText(Message);

@@ -101,10 +101,10 @@ Event: OnPropertyCaptured
 
 **What the C++ `_Implementation` does:**
 1. Calls `Economy->MarkFactionDirty(CapturingFaction)` — queues income recalculation for next economy tick
-2. If city has a capital district: awards **1000 gold** bonus to capturing faction via `AddToTreasury`
+2. If city has a capital district: pays a **1000 currency** reward through `CreditCurrencyToFaction` using the configured payout policy
 
 **If you skip Super:**
-- **HIGH:** Income is never recalculated for the capturing faction. Capital district bonus (1000 gold) is never awarded.
+- **HIGH:** Income is never recalculated for the capturing faction. The capital reward is never paid.
 
 **Correct BP override pattern:**
 ```
@@ -125,7 +125,7 @@ Event: OnCityFullyCaptured
 | **Parameters** | `PreviousFaction` — the faction that lost the city |
 
 **What the C++ `_Implementation` does:**
-1. Checks if any other faction now owns ALL districts → if so, calls `SetOwningFaction` for that faction (cascade capture)
+1. Checks if any other faction now owns ALL districts → if so, applies derived ownership for that faction (cascade capture)
 2. If no faction owns all districts → sets city state to `Contested`
 3. Calls `Economy->MarkFactionDirty(PreviousFaction)` — queues income recalculation for the losing faction
 
@@ -151,10 +151,10 @@ Event: OnCityLost
 | **Parameters** | `CapturingFaction` — the faction that now owns the entire district |
 
 **What the C++ `_Implementation` does:**
-1. If district is a capital (`bIsCapital`): awards **500 gold** bonus via `AddToTreasury`
+1. If district is a capital (`bIsCapital`): pays a **500 currency** reward through `CreditCurrencyToFaction`
 
 **If you skip Super:**
-- **MEDIUM:** Capital district bonus (500 gold) is not awarded.
+- **MEDIUM:** Capital district reward is not paid.
 
 **Correct BP override pattern:**
 ```
@@ -361,9 +361,11 @@ Query economy state. Default implementations read from `UTerritoryEconomySubsyst
 
 | Function | Returns | Notes |
 |---|---|---|
-| `GetTreasury(Faction)` | `int32` | Current gold balance. |
+| `GetTreasury(Faction)` | `int32` | Deprecated; no faction wallet is maintained. |
 | `GetPeriodicIncome(Faction)` | `int32` | Income per economy tick. |
-| `CanAfford(Faction, Cost)` | `bool` | True if Treasury >= Cost. |
+| `CanAfford(Faction, Cost)` | `bool` | Deprecated; use an exact requesting actor. |
+| `GetActorCurrency(Requester)` | `int32` | Narrative inventory currency for the actor. |
+| `CanActorAfford(Requester, Cost)` | `bool` | Checks the actor's Narrative inventory. |
 
 ### `ITerritoryEventReceiverInterface`
 
@@ -410,7 +412,7 @@ ATerritoryVolume BP → Event Graph:
   OnOwnershipChanged:
     → [No Super needed]
     → If NewOwner == PlayerFaction:
-        → AddToTreasury(PlayerFaction, 200, "Capture reward")
+        → Economy → CreditCurrency(RequestingActor, 200, PlayerFaction, "Capture reward")
 ```
 
 ### Pattern: Quest-gated territory

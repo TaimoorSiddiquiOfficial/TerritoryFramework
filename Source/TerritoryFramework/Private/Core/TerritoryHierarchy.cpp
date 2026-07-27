@@ -1,5 +1,6 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -12,6 +13,7 @@
 
 ATerritoryCity::ATerritoryCity()
 {
+	ControlMode = ETerritoryControlMode::AggregateOnly;
 }
 
 void ATerritoryCity::BeginPlay()
@@ -185,7 +187,8 @@ void ATerritoryCity::OnCityFullyCaptured_Implementation(FGameplayTag CapturingFa
 	{
 		if (Economy)
 		{
-			Economy->AddToTreasury(CapturingFaction, 1000, TEXT("Capital city captured"),
+			Economy->CreditCurrencyToFaction(CapturingFaction, 1000,
+				ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers, TEXT("Capital city captured"),
 				ETerritoryTransactionType::Reward);
 			UE_LOG(LogTerritory, Log, TEXT("[CityCapture] Capital bonus: 1000 gold to %s"),
 				*CapturingFaction.ToString());
@@ -219,7 +222,7 @@ void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 					if (AllDistrictsOwnedBy(DistrictOwner))
 					{
 						// Another faction fully captured — they own the city now
-						SetOwningFaction(DistrictOwner);
+						SetDerivedOwningFaction(DistrictOwner);
 						bAnyFactionOwnsAll = true;
 						break;
 					}
@@ -283,7 +286,7 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 				{
 					TryUnlock(true);
 				}
-				SetOwningFaction(NewOwner);
+				SetDerivedOwningFaction(NewOwner);
 				OnCityFullyCaptured(NewOwner);
 				OnCityCapturedDelegate.Broadcast(this, NewOwner);
 			}
@@ -357,6 +360,7 @@ void ATerritoryCity::CascadeCaptureToProperties(ATerritoryVolume* District, FGam
 
 ATerritoryDistrict::ATerritoryDistrict()
 {
+	ControlMode = ETerritoryControlMode::AggregateOnly;
 }
 
 void ATerritoryDistrict::BeginPlay()
@@ -424,7 +428,7 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 				{
 					TryUnlock(true);
 				}
-				SetOwningFaction(NewOwner);
+				SetDerivedOwningFaction(NewOwner);
 			}
 		}
 	}
@@ -458,7 +462,8 @@ void ATerritoryDistrict::OnDistrictFullyCaptured_Implementation(FGameplayTag Cap
 		UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 		if (Economy)
 		{
-			Economy->AddToTreasury(CapturingFaction, 500, TEXT("Capital district captured"),
+			Economy->CreditCurrencyToFaction(CapturingFaction, 500,
+				ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers, TEXT("Capital district captured"),
 				ETerritoryTransactionType::Reward);
 		}
 	}
@@ -764,12 +769,13 @@ int32 ATerritoryProperty::GetEffectiveIncome() const
 	return BaseIncome + (UpgradeLevel * IncomeBonusPerLevel);
 }
 
-bool ATerritoryProperty::TryUpgrade()
+bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 {
-	if (!HasAuthority() || !CanUpgrade()) return false;
+	if (!HasAuthority() || !CanUpgrade() || !Requester) return false;
 
 	FGameplayTag OwnerFaction = GetOwningFaction();
 	if (!OwnerFaction.IsValid()) return false;
+	if (!UTerritoryBlueprintLibrary::IsActorInFaction(this, Requester, OwnerFaction)) return false;
 
 	int32 Cost = GetUpgradeCost();
 
@@ -777,12 +783,12 @@ bool ATerritoryProperty::TryUpgrade()
 	if (!Economy) return false;
 
 	// Check if faction can afford the upgrade
-	if (!Economy->CanAfford(OwnerFaction, Cost)) return false;
+	if (!Economy->CanActorAfford(Requester, Cost)) return false;
 
 	// Debit treasury
 	FString Reason = FString::Printf(TEXT("Property upgrade %s level %d→%d"),
 		*GetTerritoryTag().ToString(), UpgradeLevel, UpgradeLevel + 1);
-	if (!Economy->TryDebitTreasury(OwnerFaction, Cost, Reason, ETerritoryTransactionType::UpgradeCost))
+	if (!Economy->TryDebitCurrency(Requester, Cost, OwnerFaction, Reason, ETerritoryTransactionType::UpgradeCost))
 	{
 		return false;
 	}

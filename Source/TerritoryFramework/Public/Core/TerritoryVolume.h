@@ -133,6 +133,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Initial Owning Faction"))
 	FGameplayTag GetInitialOwningFaction() const;
 
+	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy", meta=(DisplayName="Get Control Mode"))
+	ETerritoryControlMode GetControlMode() const;
+
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Mutation API (BlueprintAuthorityOnly — server-only)
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -140,11 +143,20 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership", meta=(DisplayName="Set Owning Faction"))
 	void SetOwningFaction(const FGameplayTag& NewFaction);
 
+	/** Internal hierarchy path for aggregate-only City/District ownership. */
+	void SetDerivedOwningFaction(const FGameplayTag& NewFaction);
+
+	/** Internal authority path for explicit quest/script overrides and save restore. */
+	void ForceSetOwningFaction(const FGameplayTag& NewFaction);
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership", meta=(DisplayName="Set Control Progress"))
 	void SetControlProgress(float Progress);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership", meta=(DisplayName="Set Territory State"))
 	void SetTerritoryState(ETerritoryState NewState);
+
+	/** Internal authority path for explicit quest/script overrides and save restore. */
+	void ForceSetTerritoryState(ETerritoryState NewState);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Defenders", meta=(DisplayName="Register Defender"))
 	void RegisterDefender(AActor* Defender);
@@ -287,16 +299,16 @@ public:
 	int32 GetDesiredGuardCount() const { return FMath::Max(0, OwnershipData.DesiredGuardCount); }
 
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Maximum Guard Count"))
-	int32 GetMaxGuardCount() const { return FMath::Max(GuardSpawnCount, MaxGuardCount); }
+	int32 GetMaxGuardCount() const;
 
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Purchase Cost"))
 	int32 GetGuardPurchaseCost(int32 Count = 1) const;
 
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Can Purchase Guards"))
-	bool CanPurchaseGuards(const FGameplayTag& Faction, int32 Count, FText& OutFailureReason) const;
+	bool CanPurchaseGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Purchase Guards"))
-	bool TryPurchaseGuards(const FGameplayTag& Faction, int32 Count, FText& OutResult);
+	bool TryPurchaseGuards(AActor* Requester, int32 Count, FText& OutResult);
 
 	/** Returns true if at least one guard is alive and spawned from this territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Has Guards Alive"))
@@ -370,6 +382,10 @@ protected:
 		meta=(Categories="Narrative.Factions", DisplayName="Initial Owning Faction"))
 	FGameplayTag InitialOwningFaction;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Hierarchy",
+		meta=(DisplayName="Control Mode"))
+	ETerritoryControlMode ControlMode = ETerritoryControlMode::Independent;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
 		meta=(ClampMin="1", UIMin="1", UIMax="20", DisplayName="Max Concurrent Attackers"))
 	int32 InitialMaxConcurrentAttackers = 3;
@@ -417,7 +433,8 @@ protected:
 		meta=(Categories="Territory", DisplayName="Parent Territory Tag"))
 	FGameplayTag ParentTerritoryTag;
 
-	UPROPERTY(SaveGame, ReplicatedUsing = OnRep_OwnershipData, BlueprintReadWrite)
+	UPROPERTY(SaveGame, ReplicatedUsing = OnRep_OwnershipData, BlueprintReadWrite,
+		Category="Territory|Ownership")
 	FTerritoryOwnershipData OwnershipData;
 
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadWrite, Category="Territory|Identity",
@@ -456,7 +473,11 @@ protected:
 		meta=(ClampMin="0", DisplayName="Guard Spawn Count"))
 	int32 GuardSpawnCount = 3;
 
-	/** Maximum live garrison after player purchases. Never lower than Guard Spawn Count. */
+	/**
+	 * Maximum live garrison after player purchases. When authored spawn points exist,
+	 * this is the sum of their MaxGuards values; otherwise the configured fallback
+	 * maximum is used.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
 		meta=(ClampMin="0", DisplayName="Maximum Guard Count"))
 	int32 MaxGuardCount = 10;
@@ -486,6 +507,9 @@ private:
 	FBox LastKnownBounds;
 	bool bLoadedFromSave = false;
 	bool bGuardsReconciled = false;
+	bool bTransitionInProgress = false;
+	bool bApplyingDerivedOwnership = false;
+	bool bBypassTransitionConditions = false;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);

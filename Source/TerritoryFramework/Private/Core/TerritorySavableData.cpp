@@ -3,7 +3,9 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "SaveSystemStatics.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryWorldState.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 
 ATerritorySavableData::ATerritorySavableData()
 {
@@ -17,6 +19,12 @@ void ATerritorySavableData::BeginPlay()
 
 	if (HasAuthority())
 	{
+		if (IsSuppressedByWorldState())
+		{
+			UE_LOG(LogTerritory, Error, TEXT("ATerritorySavableData %s is disabled because ATerritoryWorldState exists. Remove the deprecated actor."),
+				*GetPathName());
+			return;
+		}
 		if (!SavableDataGUID.IsValid())
 		{
 			SavableDataGUID = FGuid::NewGuid();
@@ -56,16 +64,29 @@ bool ATerritorySavableData::ShouldRespawn_Implementation() const { return false;
 
 void ATerritorySavableData::PrepareForSave_Implementation()
 {
+	if (IsSuppressedByWorldState()) return;
 	SaveToSelf();
 }
 
 void ATerritorySavableData::Load_Implementation()
 {
+	if (IsSuppressedByWorldState()) return;
 	LoadFromSelf();
+}
+
+bool ATerritorySavableData::IsSuppressedByWorldState() const
+{
+	if (!GetWorld()) return false;
+	for (TActorIterator<ATerritoryWorldState> It(GetWorld()); It; ++It)
+	{
+		return true;
+	}
+	return false;
 }
 
 void ATerritorySavableData::SaveToSelf()
 {
+	if (IsSuppressedByWorldState()) return;
 	// ─── Save Economy ───
 	SavedTreasuries.Empty();
 	if (UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
@@ -90,6 +111,7 @@ void ATerritorySavableData::SaveToSelf()
 
 void ATerritorySavableData::LoadFromSelf()
 {
+	if (IsSuppressedByWorldState()) return;
 	// ─── Load Economy ───
 	if (UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
 	{

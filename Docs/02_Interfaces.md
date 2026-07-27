@@ -131,9 +131,13 @@ bool AMyGuardTower::IsTerritoryContested_Implementation() const
 ### Contract
 
 ```cpp
-int32 GetTreasury(FGameplayTag Faction) const;       // Gold for this faction
-int32 GetPeriodicIncome(FGameplayTag Faction) const;  // Income per tick
-bool CanAfford(FGameplayTag Faction, int32 Cost) const; // Can they pay?
+// Legacy query names retained for interface compatibility; they are not wallets.
+int32 GetTreasury(FGameplayTag Faction) const;       // Deprecated; no faction balance
+bool CanAfford(FGameplayTag Faction, int32 Cost) const; // Deprecated; only Cost==0 succeeds
+
+int32 GetActorCurrency(AActor* Requester) const;       // Narrative inventory currency
+int32 GetPeriodicIncome(FGameplayTag Faction) const;   // Income rate
+bool CanActorAfford(AActor* Requester, int32 Cost) const;
 ```
 
 ### Real-World Examples
@@ -141,19 +145,17 @@ bool CanAfford(FGameplayTag Faction, int32 Cost) const; // Can they pay?
 #### Example A: Shop Keeper (Checks Player Can Afford)
 
 ```cpp
-// A shop that checks if the player's faction can afford items
+// A shop that checks the requesting player's Narrative inventory
 bool AMyShopKeeper::CanPlayerAffordItem(int32 ItemCost)
 {
-    // Implement ITerritoryEconomyInterface on the shop or economy subsystem
-    FGameplayTag PlayerFaction = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
-    return CanAfford(PlayerFaction, ItemCost);
+    return CanActorAfford(PlayerCharacter, ItemCost);
 }
 ```
 
 #### Example B: Vehicle Repair Station (Faction-Shared Economy)
 
 ```cpp
-// A repair station that uses faction treasury instead of player gold
+// A repair station that charges the requesting player's Narrative inventory
 int32 AMyRepairStation::GetRepairCost_Implementation() const
 {
     return RepairCostPerVehicle;
@@ -161,12 +163,11 @@ int32 AMyRepairStation::GetRepairCost_Implementation() const
 
 bool AMyRepairStation::TryRepair(AVehicle* Vehicle)
 {
-    FGameplayTag Faction = GetFactionFromVehicle(Vehicle);
-    if (!CanAfford(Faction, GetRepairCost_Implementation()))
+    if (!CanActorAfford(Vehicle->GetInstigator(), GetRepairCost_Implementation()))
     {
         return false;  // Faction can't afford
     }
-    // Deduct from faction treasury via subsystem
+    // Debit the same exact account through UTerritoryEconomySubsystem
     // Repair the vehicle
     return true;
 }
@@ -175,11 +176,10 @@ bool AMyRepairStation::TryRepair(AVehicle* Vehicle)
 #### Example C: Crafting Station (Resource-Based Economy)
 
 ```cpp
-// A crafting station that extends economy interface with resource costs
-int32 AMyCraftingStation::GetTreasury_Implementation(FGameplayTag Faction) const
+// A crafting station can keep non-currency materials separate from Narrative currency.
+bool AMyCraftingStation::CanPayMaterials(AActor* Requester, int32 Cost) const
 {
-    // Return the faction's material count instead of gold
-    return FactionMaterials.Contains(Faction) ? FactionMaterials[Faction] : 0;
+    return Requester && GetMaterialCount(Requester) >= Cost;
 }
 ```
 

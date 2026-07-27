@@ -54,6 +54,7 @@ protected:
 	TArray<FDiplomacyEvent> SavedDiplomacyHistory;
 
 private:
+	bool IsSuppressedByWorldState() const;
 	void SaveToSelf();
 	void LoadFromSelf();
 };
