@@ -15,7 +15,6 @@
 ATerritoryGuardSpawnPoint::ATerritoryGuardSpawnPoint()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	bReplicates = true;
 
 	// Visual root — billboard in editor, invisible in game
 	UBillboardComponent* Billboard = CreateDefaultSubobject<UBillboardComponent>(TEXT("Billboard"));

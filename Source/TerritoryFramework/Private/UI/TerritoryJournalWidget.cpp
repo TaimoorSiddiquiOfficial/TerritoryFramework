@@ -378,8 +378,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	const FText StateText = StateEnum
 		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(District->GetTerritoryState()))
 		: FText::GetEmpty();
-	const int32 GuardUpkeep = District->GetGuardCost() * District->GetDesiredGuardCount();
-	const int32 Net = District->GetEffectiveIncome() - GuardUpkeep;
+	const int64 GuardUpkeep = static_cast<int64>(District->GetGuardCost()) * District->GetDesiredGuardCount();
+	const int64 Net = District->GetEffectiveIncome() - GuardUpkeep;
 	const FText DetailText = FText::Format(
 		NSLOCTEXT("TerritoryJournal", "DistrictDetails", "Owner: {0}\nState: {1}\nGarrison: {2}/{3}\nGuard cost: {4} each\nIncome: {5}\nNet: {6}"),
 		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(District->GetOwningFaction()),

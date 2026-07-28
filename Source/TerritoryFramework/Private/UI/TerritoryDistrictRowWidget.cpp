@@ -118,7 +118,7 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			FText::AsNumber(CurrentDistrict->GetDesiredGuardCount()),
 			FText::AsNumber(CurrentDistrict->GetMaxGuardCount()),
 			FText::AsNumber(CurrentDistrict->GetEffectiveIncome()
-				- (CurrentDistrict->GetGuardCost() * CurrentDistrict->GetDesiredGuardCount()))));
+				- (static_cast<int64>(CurrentDistrict->GetGuardCost()) * CurrentDistrict->GetDesiredGuardCount()))));
 	}
 	if (AddGuardButton)
 	{

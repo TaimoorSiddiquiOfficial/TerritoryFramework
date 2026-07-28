@@ -24,6 +24,7 @@ ITerritoryEventReceiverInterface — "Notify me when territory changes"
 FGameplayTag GetTerritoryOwner() const;       // Which faction owns this?
 float GetTerritoryControlProgress() const;     // 0.0 to 1.0 capture progress
 bool IsTerritoryContested() const;             // Is someone fighting over it?
+FGameplayTag GetContestingFaction() const;     // Who is attacking (invalid if not contested)
 ```
 
 ### Real-World Examples
@@ -194,6 +195,8 @@ bool AMyCraftingStation::CanPayMaterials(AActor* Requester, int32 Cost) const
 ```cpp
 void OnTerritoryControlChanged(FGameplayTag TerritoryTag, FGameplayTag OldOwner, FGameplayTag NewOwner);
 void OnTerritoryContested(FGameplayTag TerritoryTag, FGameplayTag ContestingFaction);
+void OnTerritoryUncontested(FGameplayTag TerritoryTag);
+void OnTerritoryStateChanged(FGameplayTag TerritoryTag, ETerritoryState NewState);
 ```
 
 ### Real-World Examples
@@ -333,7 +336,7 @@ void AMyActor::BeginPlay()
 
     if (UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
     {
-        Control->OnTerritoryControlChanged.AddDynamic(this, &AMyActor::HandleTerritoryChange);
+        Control->OnTerritoryOwnershipChanged.AddDynamic(this, &AMyActor::HandleTerritoryChange);
     }
 }
 
@@ -343,15 +346,15 @@ void AMyActor::BeginPlay()
     Super::BeginPlay();
 
     ATerritoryVolume* MyTerritory = ...; // Get your territory
-    MyTerritory->OnTerritoryControlChanged.AddDynamic(this, &AMyActor::HandleTerritoryChange);
+    MyTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &AMyActor::HandleTerritoryChange);
 }
 ```
 
 ### Blueprint Method
 
 1. Get the `TerritoryControl` subsystem (via `GetTerritoryControl` from BlueprintLibrary)
-2. Bind event to `OnTerritoryControlChanged` delegate
-3. Or get a specific territory actor and bind to its `OnTerritoryControlChanged`
+2. Bind event to `OnTerritoryOwnershipChanged` delegate
+3. Or get a specific territory actor and bind to its `OnTerritoryOwnershipChanged`
 
 ---
 

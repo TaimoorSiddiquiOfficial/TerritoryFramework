@@ -516,6 +516,7 @@ private:
 	bool bTransitionInProgress = false;
 	bool bApplyingDerivedOwnership = false;
 	bool bBypassTransitionConditions = false;
+	bool bSpawningGuards = false;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);

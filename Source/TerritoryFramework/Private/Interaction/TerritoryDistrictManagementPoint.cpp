@@ -188,7 +188,6 @@ void UTerritoryDistrictInteractableComponent::OnInteract_Implementation(
 ATerritoryDistrictManagementPoint::ATerritoryDistrictManagementPoint(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	bReplicates = true;
 	bCreateMapMarker = false;
 	bSupportsFastTravel = false;
 	POIDisplayName = FText::FromString(TEXT("District Management"));

@@ -10,7 +10,6 @@
 ATerritorySavableData::ATerritorySavableData()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	bReplicates = true;
 }
 
 void ATerritorySavableData::BeginPlay()

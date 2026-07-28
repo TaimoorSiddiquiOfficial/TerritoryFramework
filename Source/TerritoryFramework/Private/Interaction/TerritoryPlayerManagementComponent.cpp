@@ -154,6 +154,12 @@ void UTerritoryPlayerManagementComponent::RequestRemoveGuardsForDistrict(
 	}
 }
 
+bool UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuards_Validate(
+	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId)
+{
+	return Count > 0 && Count <= MaxGuardPurchaseCount && RequestId > LastServerRequestId;
+}
+
 void UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuards_Implementation(
 	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId)
 {
@@ -179,6 +185,12 @@ void UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuards_Implementa
 	PerformPurchase(ManagementPoint, Count, RequestId);
 }
 
+bool UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuardsForDistrict_Validate(
+	ATerritoryDistrict* District, int32 Count, int32 RequestId)
+{
+	return Count > 0 && Count <= MaxGuardPurchaseCount && RequestId > LastServerRequestId;
+}
+
 void UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuardsForDistrict_Implementation(
 	ATerritoryDistrict* District, int32 Count, int32 RequestId)
 {
@@ -202,6 +214,12 @@ void UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuardsForDistrict
 	PerformPurchaseForDistrict(District, Count, RequestId);
 }
 
+bool UTerritoryPlayerManagementComponent::ServerRequestRemoveGuards_Validate(
+	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId)
+{
+	return Count > 0 && Count <= MaxGuardPurchaseCount && RequestId > LastServerRequestId;
+}
+
 void UTerritoryPlayerManagementComponent::ServerRequestRemoveGuards_Implementation(
 	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId)
 {
@@ -223,6 +241,12 @@ void UTerritoryPlayerManagementComponent::ServerRequestRemoveGuards_Implementati
 		return;
 	}
 	PerformRemove(ManagementPoint, Count, RequestId);
+}
+
+bool UTerritoryPlayerManagementComponent::ServerRequestRemoveGuardsForDistrict_Validate(
+	ATerritoryDistrict* District, int32 Count, int32 RequestId)
+{
+	return Count > 0 && Count <= MaxGuardPurchaseCount && RequestId > LastServerRequestId;
 }
 
 void UTerritoryPlayerManagementComponent::ServerRequestRemoveGuardsForDistrict_Implementation(

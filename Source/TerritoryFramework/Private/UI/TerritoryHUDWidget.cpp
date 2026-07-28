@@ -54,7 +54,7 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	}
 	if (DistrictDescriptionText)
 	{
-		const int32 GuardUpkeep = Territory->GetGuardCost() * Territory->GetDesiredGuardCount();
+		const int64 GuardUpkeep = static_cast<int64>(Territory->GetGuardCost()) * Territory->GetDesiredGuardCount();
 		DistrictDescriptionText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryHUD", "DistrictSummary", "Guards {0}/{1}   Income {2}   Upkeep {3}"),
 			FText::AsNumber(Territory->GetDesiredGuardCount()),

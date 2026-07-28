@@ -35,7 +35,7 @@ struct FTerritorySpatialIndex
 	TArray<ATerritoryVolume*> QueryBox(const FBox& QueryBox) const;
 
 	int32 GetCellCount() const { return Cells.Num(); }
-	int32 GetEntryCount() const;
+	int32 GetTotalCellEntries() const;
 
 	/** Removes entries for destroyed/GC'd territories from both the forward and reverse maps. */
 	void RemoveInvalidTerritories();

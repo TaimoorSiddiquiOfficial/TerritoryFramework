@@ -207,7 +207,8 @@ void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 	{
 		if (AllDistrictsOwnedBy(PreviousFaction))
 		{
-			// Old owner still holds all districts — shouldn't happen, but guard
+			UE_LOG(LogTerritory, Warning, TEXT("[CityCapture] OnCityLost fired for %s but previous faction %s still holds all districts — unexpected state"),
+				*GetTerritoryTag().ToString(), *PreviousFaction.ToString());
 		}
 		else
 		{
@@ -736,6 +737,8 @@ void ATerritoryProperty::OnPropertyCaptured_Implementation(FGameplayTag NewOwner
 
 void ATerritoryProperty::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	Super::OnOwnershipChanged_Implementation(OldOwner, NewOwner);
+
 	// Invoke property-specific side effects on every ownership change path
 	if (NewOwner.IsValid() && OldOwner != NewOwner)
 	{
@@ -822,5 +825,7 @@ void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 
 		UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s set to level %d (was %d)"),
 			*GetTerritoryTag().ToString(), UpgradeLevel, OldLevel);
+
+		OnUpgradeLevelChanged(UpgradeLevel);
 	}
 }

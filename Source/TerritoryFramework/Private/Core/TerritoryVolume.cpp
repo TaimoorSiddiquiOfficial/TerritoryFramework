@@ -740,6 +740,11 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 
 	UWorld* World = GetWorld();
 	APlayerController* ContextPC = World ? World->GetFirstPlayerController() : nullptr;
+	if (!ContextPC)
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("CheckStateConditions: no PlayerController available (dedicated server?). Conditions requiring player context will fail for %s"),
+			*GetTerritoryTag().ToString());
+	}
 	APawn* ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
 
 	for (const TObjectPtr<UNarrativeCondition>& Cond : Config->EntryConditions)
@@ -1093,6 +1098,13 @@ UNPCDefinition* ATerritoryVolume::ResolveGuardDefinition(const FGameplayTag& Fac
 void ATerritoryVolume::SpawnGuards()
 {
 	if (!HasAuthority()) return;
+	if (bSpawningGuards)
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("SpawnGuards: reentrant call blocked for %s"), *GetTerritoryTag().ToString());
+		return;
+	}
+	bSpawningGuards = true;
+	struct FScopeGuard { bool& Ref; ~FScopeGuard() { Ref = false; } } GuardRef{bSpawningGuards};
 
 	// Resolve definition for current owner faction
 	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
@@ -1662,7 +1674,8 @@ bool ATerritoryVolume::TryRemoveGuards(AActor* Requester, int32 Count, FText& Ou
 
 void ATerritoryVolume::DespawnGuards()
 {
-	for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+	TArray<ATerritoryGuardSpawnPoint*> CachedSpawnPoints = GetGuardSpawnPoints();
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : CachedSpawnPoints)
 	{
 		if (SpawnPoint)
 		{
