@@ -14,6 +14,38 @@ class UNPCDefinition;
 class ATerritoryGuardCharacter;
 class ATerritoryGuardSpawnPoint;
 class UTerritoryNavigationMarkerComponent;
+class UTalesComponent;
+
+/**
+ * Explicit context for territory state transitions. Replaces GetFirstPlayerController().
+ * Pass the actual instigator, pawn, and faction that caused the transition.
+ * Global/scripted transitions use a default-constructed (empty) context.
+ */
+USTRUCT(BlueprintType)
+struct FTerritoryTransitionContext
+{
+	GENERATED_BODY()
+
+	/** The actor that initiated the transition (e.g., capturing pawn). */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	TObjectPtr<AActor> Instigator = nullptr;
+
+	/** The pawn involved (for condition/event evaluation). */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	TObjectPtr<APawn> TargetPawn = nullptr;
+
+	/** The player controller (may be null on dedicated servers or AI-driven captures). */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	TObjectPtr<APlayerController> PlayerController = nullptr;
+
+	/** Tales component for quest/dialogue event context. */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	TObjectPtr<UTalesComponent> TalesComponent = nullptr;
+
+	/** The faction requesting or causing the transition. */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	FGameplayTag RequestingFaction;
+};
 
 /**
  * Base class for all territory volumes (City / District / Property inherit from this).
@@ -419,11 +451,11 @@ protected:
 		meta=(DisplayName="State Configs"))
 	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
 
-	/** Check if all EntryConditions for the given state pass. */
-	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason) const;
+	/** Check if all EntryConditions for the given state pass. Uses TransitionContext for player/faction info. */
+	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
-	/** Fire EntryEvents (bEntering=true) or ExitEvents (bEntering=false) for the given state. */
-	void FireStateEvents(ETerritoryState State, bool bEntering);
+	/** Fire EntryEvents (bEntering=true) or ExitEvents (bEntering=false) for the given state. Uses TransitionContext for instigator. */
+	void FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
 
 	// ─── Lock System ───
 

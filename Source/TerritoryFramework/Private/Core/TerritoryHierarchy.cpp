@@ -282,7 +282,7 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 			FGameplayTag CityOldOwner = GetOwningFaction();
 			if (CityOldOwner != NewOwner)
 			{
-				// City fully captured — unlock if it was locked
+				// City fully captured by new faction — unlock if it was locked
 				if (IsLocked())
 				{
 					TryUnlock(true);
@@ -290,6 +290,16 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 				SetDerivedOwningFaction(NewOwner);
 				OnCityFullyCaptured(NewOwner);
 				OnCityCapturedDelegate.Broadcast(this, NewOwner);
+			}
+			else
+			{
+				// Incumbent retakes all districts — recover from Contested to Claimed
+				if (OwnershipData.State == ETerritoryState::Contested)
+				{
+					SetTerritoryState(ETerritoryState::Claimed);
+					UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s recovered from Contested to Claimed — incumbent %s retakes all districts"),
+						*GetTerritoryTag().ToString(), *NewOwner.ToString());
+				}
 			}
 		}
 		else
@@ -424,7 +434,7 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 		{
 			if (AllPropertiesOwnedBy(NewOwner))
 			{
-				// All properties aligned — district captured
+				// All properties aligned — district captured by new faction
 				if (IsLocked())
 				{
 					TryUnlock(true);
@@ -432,10 +442,20 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 				SetDerivedOwningFaction(NewOwner);
 			}
 		}
+		else if (AllPropertiesOwnedBy(DistrictOwner))
+		{
+			// Incumbent retakes all properties — recover from Contested to Claimed
+			if (OwnershipData.State == ETerritoryState::Contested)
+			{
+				SetTerritoryState(ETerritoryState::Claimed);
+				UE_LOG(LogTerritory, Log, TEXT("[DistrictCapture] %s recovered from Contested to Claimed — incumbent %s retakes all properties"),
+					*GetTerritoryTag().ToString(), *DistrictOwner.ToString());
+			}
+		}
 	}
 
-	const FGameplayTag DistrictOwner = GetOwningFaction();
-	if (DistrictOwner.IsValid() && !AllPropertiesOwnedBy(DistrictOwner)
+	const FGameplayTag DistrictOwnerCheck = GetOwningFaction();
+	if (DistrictOwnerCheck.IsValid() && !AllPropertiesOwnedBy(DistrictOwnerCheck)
 		&& OwnershipData.State == ETerritoryState::Claimed)
 	{
 		SetTerritoryState(ETerritoryState::Contested);

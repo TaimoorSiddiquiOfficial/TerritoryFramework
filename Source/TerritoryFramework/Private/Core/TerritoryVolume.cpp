@@ -729,7 +729,7 @@ void ATerritoryVolume::ForceSetTerritoryState(ETerritoryState NewState)
 	bBypassTransitionConditions = bWasBypassing;
 }
 
-bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason) const
+bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext) const
 {
 	const FTerritoryStateConfig* Config = StateConfigs.Find(State);
 	if (!Config || Config->EntryConditions.IsEmpty())
@@ -738,14 +738,15 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 		return true;
 	}
 
-	UWorld* World = GetWorld();
-	APlayerController* ContextPC = World ? World->GetFirstPlayerController() : nullptr;
-	if (!ContextPC)
+	// Use explicit transition context; fall back to first player only if context is empty
+	APlayerController* ContextPC = TransitionContext.PlayerController;
+	APawn* ContextPawn = TransitionContext.TargetPawn;
+	if (!ContextPC && !ContextPawn)
 	{
-		UE_LOG(LogTerritory, Warning, TEXT("CheckStateConditions: no PlayerController available (dedicated server?). Conditions requiring player context will fail for %s"),
-			*GetTerritoryTag().ToString());
+		UWorld* World = GetWorld();
+		ContextPC = World ? World->GetFirstPlayerController() : nullptr;
+		ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
 	}
-	APawn* ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
 
 	for (const TObjectPtr<UNarrativeCondition>& Cond : Config->EntryConditions)
 	{
@@ -762,7 +763,7 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 	return true;
 }
 
-void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering)
+void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext)
 {
 	const FTerritoryStateConfig* Config = StateConfigs.Find(State);
 	if (!Config) return;
@@ -770,14 +771,20 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering)
 	const TArray<TObjectPtr<UNarrativeEvent>>* Events = bEntering ? &Config->EntryEvents : &Config->ExitEvents;
 	if (!Events || Events->IsEmpty()) return;
 
-	UWorld* World = GetWorld();
-	APlayerController* ContextPC = World ? World->GetFirstPlayerController() : nullptr;
-	APawn* ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
+	// Use explicit transition context; fall back to first player only if context is empty
+	APlayerController* ContextPC = TransitionContext.PlayerController;
+	APawn* ContextPawn = TransitionContext.TargetPawn;
+	if (!ContextPC && !ContextPawn)
+	{
+		UWorld* World = GetWorld();
+		ContextPC = World ? World->GetFirstPlayerController() : nullptr;
+		ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
+	}
 
 	for (const TObjectPtr<UNarrativeEvent>& Event : *Events)
 	{
 		if (!Event) continue;
-		Event->ExecuteEvent(ContextPawn, ContextPC, nullptr);
+		Event->ExecuteEvent(ContextPawn, ContextPC, TransitionContext.TalesComponent);
 	}
 }
 

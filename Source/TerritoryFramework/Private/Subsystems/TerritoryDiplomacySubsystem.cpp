@@ -643,7 +643,7 @@ EDiplomacyState UTerritoryDiplomacySubsystem::AttitudeToDiplomacyState(ETeamAtti
 {
 	switch (Attitude)
 	{
-	case ETeamAttitude::Friendly: return EDiplomacyState::Ceasefire;
+	case ETeamAttitude::Friendly: return EDiplomacyState::Alliance;
 	case ETeamAttitude::Hostile: return EDiplomacyState::War;
 	default: return EDiplomacyState::None;
 	}
