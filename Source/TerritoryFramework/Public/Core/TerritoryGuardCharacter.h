@@ -150,7 +150,18 @@ public:
 		meta=(DisplayName="Is Spawn Point Guard"))
 	bool IsSpawnPointGuard() const;
 
-	/** Creates or refreshes this guard's per-instance Narrative patrol goal. */
+	/**
+	 * Creates or refreshes this guard's per-instance Narrative patrol goal.
+	 *
+	 * P1-12 PIE verification required:
+	 *   1. Spawn NPC from UNPCDefinition — verify definition data is ready
+	 *   2. Verify activity configuration is active on UNPCActivityComponent
+	 *   3. Add Territory patrol goal via this function
+	 *   4. Assert the expected Narrative activity becomes selected
+	 *   5. Assert the NPC reaches at least two patrol nodes
+	 *   6. Assert combat interruption and patrol resumption work
+	 * Until a PIE test proves this, patrol is integrated but unverified.
+	 */
 	UFUNCTION(BlueprintCallable, Category="Territory|Guard|Patrol")
 	bool InitializeTerritoryPatrolGoal();
 

@@ -238,6 +238,14 @@ protected:
 #endif
 
 	// ─── Replicated State (TArray-based — TMap cannot be replicated in UE5) ───
+	// P2-13 migration path: These arrays replicate the full state on every change.
+	// For production scale (large transaction/diplomacy histories), migrate to
+	// FFastArraySerializer with per-row delta replication:
+	//   1. Create FFastArraySerializer subclass per data type (e.g., FFactionEconomyArray)
+	//   2. Each entry becomes a FFastArraySerializerEntry with stable ID
+	//   3. Replace UPROPERTY(Replicated) TArray with UPROPERTY FFastArraySerializer member
+	//   4. Bind OnRep callbacks to update client read models
+	//   5. ExportPersistentState reads live FastArray data, not a second representation
 
 	UPROPERTY(Replicated)
 	TArray<FReplicatedFactionEconomy> ReplicatedTreasuries;

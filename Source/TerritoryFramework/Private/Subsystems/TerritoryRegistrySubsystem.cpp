@@ -45,6 +45,10 @@ void UTerritoryRegistrySubsystem::Deinitialize()
 
 void UTerritoryRegistrySubsystem::PollBoundsChanges()
 {
+	// P2-08: Spatial index is server-authoritative. Clients use their own local actor bounds
+	// for GetTerritoryAtLocation queries, which is correct for static level-placed territories.
+	// For runtime-moved/resized territories, call UpdateTerritoryBounds explicitly on the server
+	// and replicate the new transform via the volume's ReplicatedMovement or a custom RepNotify.
 	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
 	{
 		if (Territory)

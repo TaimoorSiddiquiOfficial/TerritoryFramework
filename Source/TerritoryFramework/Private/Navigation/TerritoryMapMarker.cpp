@@ -167,9 +167,12 @@ void UTerritoryMapMarker::MarkerOnPaint_Implementation(FPaintContext& Context, F
 	WorldCorners[2] = BoxCenter + BoxRotation.RotateVector(FVector( BoxExtent.X,  BoxExtent.Y, 0));
 	WorldCorners[3] = BoxCenter + BoxRotation.RotateVector(FVector(-BoxExtent.X,  BoxExtent.Y, 0));
 
-	// Convert each world corner to paint space using the marker's own world position
-	// as reference. We compute the offset from the territory volume's location to
-	// each corner, then apply that offset in map-local space.
+	// P2-15: Convert each world corner to paint space using offset-from-center approach.
+	// GetMarkerMapLocalPosition and GetMarkerTopLeftLocalPosition (inherited from base
+	// NarrativeMapMarker) handle the full world-to-map transform including map scale,
+	// zoom, pan, and tile offsets. The world-space offset from BoxCenter to each corner
+	// is then applied in paint-local space, which is correct because the base class
+	// positions the marker center correctly in the map's coordinate system.
 	FVector2D MarkerMapLocal = GetMarkerMapLocalPosition(OnPaintData.MapOrigin, OnPaintData.MapPan);
 	FVector2D MarkerPaintLocal = GetMarkerTopLeftLocalPosition(OnPaintData);
 
