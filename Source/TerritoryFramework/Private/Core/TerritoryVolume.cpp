@@ -135,6 +135,20 @@ void ATerritoryVolume::BeginPlay()
 			}
 		}
 
+		// P1-04: Register BEFORE guard activation — rejected actors must not spawn guards
+		if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			ETerritoryRegistrationResult RegResult = Registry->RegisterTerritory(this);
+			if (RegResult != ETerritoryRegistrationResult::Success)
+			{
+				UE_LOG(LogTerritory, Error, TEXT("%s registration rejected (%d) — aborting gameplay activation"),
+					*GetPathName(), static_cast<int32>(RegResult));
+				SetActorTickEnabled(false);
+				return;
+			}
+			LastKnownBounds = GetTerritoryBounds();
+		}
+
 		if (!bGuardsReconciled)
 		{
 			ReconcileGuardsAfterLoad();
@@ -142,13 +156,7 @@ void ATerritoryVolume::BeginPlay()
 		}
 	}
 
-	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
-	{
-		Registry->RegisterTerritory(this);
-		LastKnownBounds = GetTerritoryBounds();
-	}
-
-	// Fire BP-exposed initialization event
+	// Fire BP-exposed initialization event (only reached if registration succeeded)
 	OnTerritoryInitialized();
 
 	// Enable ticking only when debug visual draw is enabled (PIE only)

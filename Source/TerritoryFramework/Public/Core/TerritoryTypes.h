@@ -43,6 +43,19 @@ enum class ECaptureResult : uint8
 	InvalidTerritory
 };
 
+/**
+ * Result of a territory registration attempt.
+ * P1-04: Registration must return a result so rejected actors can abort gameplay activation.
+ */
+UENUM(BlueprintType)
+enum class ETerritoryRegistrationResult : uint8
+{
+	Success,
+	DuplicateTag,
+	DuplicateGUID,
+	InvalidTerritory
+};
+
 UENUM(BlueprintType)
 enum class ETerritoryTransactionType : uint8
 {

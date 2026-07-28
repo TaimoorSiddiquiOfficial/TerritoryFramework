@@ -43,13 +43,13 @@ public:
 
 	/**
 	 * Register a territory volume. Called automatically by ATerritoryVolume::BeginPlay.
-	 * Safe to call multiple times — duplicate registrations are ignored.
+	 * Returns Success if registered, or a failure reason if rejected (duplicate tag/GUID, null).
 	 *
 	 * Binds the volume's ownership + state delegates and adds it to the spatial index.
-	 * Emits OnTerritoryRegistered delegate.
+	 * Emits OnTerritoryRegistered delegate only on success.
 	 */
 	UFUNCTION(BlueprintCallable, Category="Territory|Registry", meta=(DisplayName="Register Territory"))
-	void RegisterTerritory(ATerritoryVolume* Territory);
+	ETerritoryRegistrationResult RegisterTerritory(ATerritoryVolume* Territory);
 
 	/**
 	 * Unregister a territory volume. Called automatically by ATerritoryVolume::EndPlay.

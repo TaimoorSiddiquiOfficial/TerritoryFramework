@@ -57,9 +57,9 @@ void UTerritoryRegistrySubsystem::PollBoundsChanges()
 	SpatialIndex.RemoveInvalidTerritories();
 }
 
-void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
+ETerritoryRegistrationResult UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 {
-	if (!Territory) return;
+	if (!Territory) return ETerritoryRegistrationResult::InvalidTerritory;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugRegistry();
@@ -83,7 +83,7 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 				UE_LOG(LogTerritory, Error,
 					TEXT("DUPLICATE TAG: %s already registered by %s, rejecting %s"),
 					*Tag.ToString(), *Existing->Get()->GetName(), *Territory->GetName());
-				return;
+				return ETerritoryRegistrationResult::DuplicateTag;
 			}
 		}
 	}
@@ -98,7 +98,7 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 				UE_LOG(LogTerritory, Error,
 					TEXT("DUPLICATE GUID: %s already registered by %s, rejecting %s"),
 					*GUID.ToString(), *Existing->Get()->GetName(), *Territory->GetName());
-				return;
+				return ETerritoryRegistrationResult::DuplicateGUID;
 			}
 		}
 		GUIDToTerritoryMap.Add(GUID, Territory);
@@ -118,6 +118,8 @@ void UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 	UE_LOG(LogTerritory, Log, TEXT("Registered territory: %s (tag: %s, GUID: %s, cells: %d)"),
 		*Territory->GetName(), *Tag.ToString(), *GUID.ToString(),
 		SpatialIndex.GetCellCount());
+
+	return ETerritoryRegistrationResult::Success;
 }
 
 void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territory)
