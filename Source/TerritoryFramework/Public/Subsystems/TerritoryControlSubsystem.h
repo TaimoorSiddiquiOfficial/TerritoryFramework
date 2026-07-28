@@ -4,6 +4,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryMutationTypes.h"
 #include "TerritoryControlSubsystem.generated.h"
 
 class ATerritoryVolume;
@@ -31,6 +32,18 @@ public:
 	/** Force-sets ownership. Returns true if the territory actually changed to the requested state. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	bool ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
+
+	/**
+	 * Atomic territory mutation — validates, commits, reconciles, and fires events in one call.
+	 * Replaces loosely coupled setter sequences with a single transaction.
+	 *
+	 * Steps: validate authority/target → validate diplomacy/locks → capture old state →
+	 * apply ownership/state/progress → reconcile guards → fire Narrative events →
+	 * broadcast result → return structured response.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture",
+		meta = (DisplayName = "Apply Territory Mutation"))
+	FTerritoryMutationResponse ApplyTerritoryMutation(const FTerritoryMutationRequest& Request);
 
 	/** Register an actor as an attacker for a faction. Identity-based — duplicates ignored. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")

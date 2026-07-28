@@ -2,6 +2,7 @@
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryMutationTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
@@ -347,6 +348,107 @@ bool UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const
 		*Territory->GetOwningFaction().ToString(),
 		*UEnum::GetValueAsString(Territory->GetTerritoryState()));
 	return false;
+}
+
+FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(const FTerritoryMutationRequest& Request)
+{
+	FTerritoryMutationResponse Response;
+	Response.Territory = Request.Territory;
+
+	// ─── Step 1: Validate authority and target ───
+	UWorld* World = GetWorld();
+	if (!World || !World->GetAuthGameMode())
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_Authority;
+		Response.Explanation = FText::FromString(TEXT("No authority — server-only mutation"));
+		return Response;
+	}
+
+	ATerritoryVolume* Territory = Request.Territory;
+	if (!Territory)
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_NullTerritory;
+		Response.Explanation = FText::FromString(TEXT("Null territory"));
+		return Response;
+	}
+
+	if (!Request.NewOwner.IsValid())
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_InvalidFaction;
+		Response.Explanation = FText::FromString(TEXT("Invalid NewOwner faction tag"));
+		return Response;
+	}
+
+	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_AggregateOnly;
+		Response.Explanation = FText::FromString(TEXT("AggregateOnly territory cannot be directly mutated"));
+		return Response;
+	}
+
+	// ─── Step 2: Validate locks ───
+	if (Territory->IsLocked() && Request.DesiredState != ETerritoryState::Locked)
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_Locked;
+		Response.Explanation = FText::FromString(TEXT("Territory is locked"));
+		return Response;
+	}
+
+	// ─── Step 3: Check if state is actually changing ───
+	Response.OldOwner = Territory->GetOwningFaction();
+	Response.OldState = Territory->GetTerritoryState();
+
+	if (Response.OldOwner == Request.NewOwner && Response.OldState == Request.DesiredState)
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_StateUnchanged;
+		Response.NewOwner = Response.OldOwner;
+		Response.NewState = Response.OldState;
+		Response.Explanation = FText::FromString(TEXT("State already matches requested"));
+		return Response;
+	}
+
+	// ─── Step 4: Commit atomically ───
+	TerritoryCaptureState.Remove(Territory);
+
+	if (Request.bClearCaptureState)
+	{
+		Territory->SetContestingFaction(FGameplayTag());
+		Territory->SetControlProgress(Request.DesiredState == ETerritoryState::Claimed ? 1.f : 0.f);
+	}
+
+	Territory->ForceSetOwningFaction(Request.NewOwner);
+
+	if (Territory->GetTerritoryState() != Request.DesiredState)
+	{
+		Territory->ForceSetTerritoryState(Request.DesiredState);
+	}
+
+	// ─── Step 5: Verify final state ───
+	Response.NewOwner = Territory->GetOwningFaction();
+	Response.NewState = Territory->GetTerritoryState();
+
+	if (Response.NewOwner != Request.NewOwner || Response.NewState != Request.DesiredState)
+	{
+		Response.Result = ETerritoryMutationResult::Failed_FinalStateMismatch;
+		Response.Explanation = FText::Format(
+			NSLOCTEXT("Territory", "MutationMismatch", "Final state mismatch: owner={0} state={1}"),
+			FText::FromString(Response.NewOwner.ToString()),
+			FText::AsNumber(static_cast<int32>(Response.NewState)));
+		return Response;
+	}
+
+	// ─── Step 6: Fire events and broadcast ───
+	Response.Result = ETerritoryMutationResult::Success;
+	Response.Explanation = FText::Format(
+		NSLOCTEXT("Territory", "MutationSuccess", "{0}: {1} → {2}"),
+		FText::FromString(Territory->GetTerritoryTag().ToString()),
+		FText::FromString(Response.OldOwner.ToString()),
+		FText::FromString(Response.NewOwner.ToString()));
+
+	UE_LOG(LogTerritory, Log, TEXT("[Mutation] %s"), *Response.Explanation.ToString());
+	OnTerritoryControlChanged.Broadcast(Territory, Response.OldOwner, Response.NewOwner);
+
+	return Response;
 }
 
 void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)

@@ -20,6 +20,7 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryGuardPostDefinition.h"
+#include "Core/TerritoryMutationTypes.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Tales/TerritoryCaptureTask.h"
 #include "Tales/TerritoryCaptureEvent.h"
@@ -2825,6 +2826,69 @@ bool FTFContract_GuardPostDefinition::RunTest(const FString& Parameters)
 	const UClass* SPClass = ATerritoryGuardSpawnPoint::StaticClass();
 	TestTrue(TEXT("GuardSpawnPoint has GuardPostDefinition"),
 		TFTestUtils::HasProperty(SPClass, TEXT("GuardPostDefinition")));
+
+	return true;
+}
+
+// ─── 5.3: Atomic mutation API contract ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_AtomicMutation,
+	"TerritoryFramework.Contract.AtomicMutation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_AtomicMutation::RunTest(const FString& Parameters)
+{
+	// Verify the result enum
+	const UEnum* ResultEnum = StaticEnum<ETerritoryMutationResult>();
+	TestNotNull(TEXT("ETerritoryMutationResult enum exists"), ResultEnum);
+	if (ResultEnum)
+	{
+		TestTrue(TEXT("Success value exists"), ResultEnum->GetValueByName(FName(TEXT("Success"))) != INDEX_NONE);
+		TestTrue(TEXT("Rejected_Authority exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_Authority"))) != INDEX_NONE);
+		TestTrue(TEXT("Rejected_NullTerritory exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_NullTerritory"))) != INDEX_NONE);
+		TestTrue(TEXT("Rejected_AggregateOnly exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_AggregateOnly"))) != INDEX_NONE);
+		TestTrue(TEXT("Rejected_InvalidFaction exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_InvalidFaction"))) != INDEX_NONE);
+		TestTrue(TEXT("Rejected_Locked exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_Locked"))) != INDEX_NONE);
+		TestTrue(TEXT("Rejected_StateUnchanged exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_StateUnchanged"))) != INDEX_NONE);
+		TestTrue(TEXT("Failed_FinalStateMismatch exists"), ResultEnum->GetValueByName(FName(TEXT("Failed_FinalStateMismatch"))) != INDEX_NONE);
+	}
+
+	// Verify request struct fields
+	UScriptStruct* RequestStruct = FTerritoryMutationRequest::StaticStruct();
+	TestNotNull(TEXT("FTerritoryMutationRequest struct exists"), RequestStruct);
+	if (RequestStruct)
+	{
+		TestTrue(TEXT("Request has Territory"), RequestStruct->FindPropertyByName(FName(TEXT("Territory"))) != nullptr);
+		TestTrue(TEXT("Request has NewOwner"), RequestStruct->FindPropertyByName(FName(TEXT("NewOwner"))) != nullptr);
+		TestTrue(TEXT("Request has DesiredState"), RequestStruct->FindPropertyByName(FName(TEXT("DesiredState"))) != nullptr);
+		TestTrue(TEXT("Request has bClearCaptureState"), RequestStruct->FindPropertyByName(FName(TEXT("bClearCaptureState"))) != nullptr);
+		TestTrue(TEXT("Request has bReconcileGuards"), RequestStruct->FindPropertyByName(FName(TEXT("bReconcileGuards"))) != nullptr);
+		TestTrue(TEXT("Request has TransitionContext"), RequestStruct->FindPropertyByName(FName(TEXT("TransitionContext"))) != nullptr);
+	}
+
+	// Verify response struct fields
+	UScriptStruct* ResponseStruct = FTerritoryMutationResponse::StaticStruct();
+	TestNotNull(TEXT("FTerritoryMutationResponse struct exists"), ResponseStruct);
+	if (ResponseStruct)
+	{
+		TestTrue(TEXT("Response has Result"), ResponseStruct->FindPropertyByName(FName(TEXT("Result"))) != nullptr);
+		TestTrue(TEXT("Response has Territory"), ResponseStruct->FindPropertyByName(FName(TEXT("Territory"))) != nullptr);
+		TestTrue(TEXT("Response has OldOwner"), ResponseStruct->FindPropertyByName(FName(TEXT("OldOwner"))) != nullptr);
+		TestTrue(TEXT("Response has NewOwner"), ResponseStruct->FindPropertyByName(FName(TEXT("NewOwner"))) != nullptr);
+		TestTrue(TEXT("Response has OldState"), ResponseStruct->FindPropertyByName(FName(TEXT("OldState"))) != nullptr);
+		TestTrue(TEXT("Response has NewState"), ResponseStruct->FindPropertyByName(FName(TEXT("NewState"))) != nullptr);
+		TestTrue(TEXT("Response has Explanation"), ResponseStruct->FindPropertyByName(FName(TEXT("Explanation"))) != nullptr);
+	}
+
+	// Verify the function exists on ControlSubsystem
+	const UClass* ControlClass = UTerritoryControlSubsystem::StaticClass();
+	TestTrue(TEXT("ApplyTerritoryMutation is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(ControlClass, TEXT("ApplyTerritoryMutation")));
+	TestTrue(TEXT("ApplyTerritoryMutation is BlueprintAuthorityOnly"),
+		TFTestUtils::IsBlueprintAuthorityOnly(ControlClass, TEXT("ApplyTerritoryMutation")));
+
+	// Verify ForceCapture still exists (backward compat)
+	TestTrue(TEXT("ForceCapture still exists"),
+		TFTestUtils::HasFunction(ControlClass, TEXT("ForceCapture")));
 
 	return true;
 }

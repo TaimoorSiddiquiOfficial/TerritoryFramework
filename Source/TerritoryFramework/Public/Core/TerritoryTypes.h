@@ -7,6 +7,42 @@
 DECLARE_LOG_CATEGORY_EXTERN(LogTerritory, Log, All);
 
 class ATerritoryVolume;
+class UTalesComponent;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Transition Context (P0-03)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Explicit context for territory state transitions. Replaces GetFirstPlayerController().
+ * Pass the actual instigator, pawn, and faction that caused the transition.
+ * Global/scripted transitions use a default-constructed (empty) context.
+ */
+USTRUCT(BlueprintType)
+struct FTerritoryTransitionContext
+{
+	GENERATED_BODY()
+
+	/** The actor that initiated the transition (e.g., capturing pawn). */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	TObjectPtr<AActor> Instigator = nullptr;
+
+	/** The pawn involved (for condition/event evaluation). */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	TObjectPtr<APawn> TargetPawn = nullptr;
+
+	/** The player controller (may be null on dedicated servers or AI-driven captures). */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	TObjectPtr<APlayerController> PlayerController = nullptr;
+
+	/** Tales component for quest/dialogue event context. */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	TObjectPtr<UTalesComponent> TalesComponent = nullptr;
+
+	/** The faction requesting or causing the transition. */
+	UPROPERTY(BlueprintReadWrite, Category="Territory|Transition")
+	FGameplayTag RequestingFaction;
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Enums
