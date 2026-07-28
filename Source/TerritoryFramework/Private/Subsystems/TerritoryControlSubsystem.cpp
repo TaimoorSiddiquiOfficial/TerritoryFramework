@@ -508,7 +508,9 @@ void UTerritoryControlSubsystem::RestoreCaptureState(
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client || !Territory) return;
 
-	// Loading replaces all transient capture participants/progress for this territory.
+	// Contested capture resume policy: progress is restored but attackers are transient
+	// (not saved). On next EvaluateCaptureState tick with zero attackers, progress decays.
+	// This is intentional — contested saves resume as decay-only, not true "resume with participants."
 	TerritoryCaptureState.Remove(Territory);
 	if (Territory->GetTerritoryState() != ETerritoryState::Contested) return;
 	if (!ContestingFaction.IsValid())

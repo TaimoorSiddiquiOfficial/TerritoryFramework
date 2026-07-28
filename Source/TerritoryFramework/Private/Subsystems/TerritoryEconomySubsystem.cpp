@@ -178,10 +178,7 @@ void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 	}
 
 	TransactionLedger.Add(Tx);
-	while (TransactionLedger.Num() > MaxTransactionHistory)
-	{
-		TransactionLedger.RemoveAt(0);
-	}
+	// Trimming deferred to OnEconomyTick batch trim — avoids per-insert O(N) shift
 	OnTransactionRecorded.Broadcast(Tx);
 }
 
@@ -473,9 +470,11 @@ void UTerritoryEconomySubsystem::RestoreTransactionHistory(const TArray<FTerrito
 	if (!World || World->GetNetMode() == NM_Client) return;
 
 	TransactionLedger = Transactions;
-	if (TransactionLedger.Num() > MaxTransactionHistory)
+	// Trim on restore to cap loaded data
+	const int32 RestoreExcess = TransactionLedger.Num() - MaxTransactionHistory;
+	if (RestoreExcess > 0)
 	{
-		TransactionLedger.RemoveAt(0, TransactionLedger.Num() - MaxTransactionHistory);
+		TransactionLedger.RemoveAt(0, RestoreExcess);
 	}
 }
 

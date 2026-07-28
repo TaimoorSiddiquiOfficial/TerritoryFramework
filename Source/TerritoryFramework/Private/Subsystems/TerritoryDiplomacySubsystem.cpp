@@ -102,15 +102,17 @@ void UTerritoryDiplomacySubsystem::OnNarrativeLoadFinished()
 void UTerritoryDiplomacySubsystem::DeclareWar(FGameplayTag FactionA, FGameplayTag FactionB)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::War);
-	RecordEvent(EDiplomacyEventType::DeclaredWar, FactionA, FactionB);
+	if (OldState != EDiplomacyState::War) RecordEvent(EDiplomacyEventType::DeclaredWar, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::DeclarePeace(FGameplayTag FactionA, FGameplayTag FactionB)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::Ceasefire);
-	RecordEvent(EDiplomacyEventType::DeclaredPeace, FactionA, FactionB);
+	if (OldState != EDiplomacyState::Ceasefire) RecordEvent(EDiplomacyEventType::DeclaredPeace, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::BreakCeasefire(FGameplayTag FactionA, FGameplayTag FactionB)
@@ -127,15 +129,17 @@ void UTerritoryDiplomacySubsystem::BreakCeasefire(FGameplayTag FactionA, FGamepl
 void UTerritoryDiplomacySubsystem::FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::Alliance);
-	RecordEvent(EDiplomacyEventType::FormedAlliance, FactionA, FactionB);
+	if (OldState != EDiplomacyState::Alliance) RecordEvent(EDiplomacyEventType::FormedAlliance, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::SignNonAggression(FGameplayTag FactionA, FGameplayTag FactionB)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::NonAggression);
-	RecordEvent(EDiplomacyEventType::SignedNonAggression, FactionA, FactionB);
+	if (OldState != EDiplomacyState::NonAggression) RecordEvent(EDiplomacyEventType::SignedNonAggression, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGameplayTag FactionB)

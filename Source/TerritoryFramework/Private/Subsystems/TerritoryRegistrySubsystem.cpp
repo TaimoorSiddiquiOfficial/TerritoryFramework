@@ -1,5 +1,6 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritorySpatialIndex.h"
@@ -184,19 +185,29 @@ ATerritoryVolume* UTerritoryRegistrySubsystem::GetTerritoryAtLocation(const FVec
 
 	if (Candidates.Num() == 0) return nullptr;
 
-	// Return the most specific (smallest volume) territory.
-	// Property < District < City — smallest bounds = most specific.
-	ATerritoryVolume* Best = Candidates[0];
+	// Return the most specific territory.
+	// Priority: class type (Property > District > City), then smallest bounds volume as tiebreaker.
+	ATerritoryVolume* Best = nullptr;
+	int32 BestPriority = -1;
 	float BestVolume = TNumericLimits<float>::Max();
 
 	for (ATerritoryVolume* Candidate : Candidates)
 	{
 		if (!Candidate) continue;
+
+		// Class priority: Property=3, District=2, City=1, Volume=0
+		int32 ClassPriority = 0;
+		if (Candidate->IsA(ATerritoryProperty::StaticClass())) ClassPriority = 3;
+		else if (Candidate->IsA(ATerritoryDistrict::StaticClass())) ClassPriority = 2;
+		else if (Candidate->IsA(ATerritoryCity::StaticClass())) ClassPriority = 1;
+
 		FBox Bounds = Candidate->GetTerritoryBounds();
 		FVector Size = Bounds.GetSize();
 		float Volume = Size.X * Size.Y * Size.Z;
-		if (Volume < BestVolume)
+
+		if (ClassPriority > BestPriority || (ClassPriority == BestPriority && Volume < BestVolume))
 		{
+			BestPriority = ClassPriority;
 			BestVolume = Volume;
 			Best = Candidate;
 		}

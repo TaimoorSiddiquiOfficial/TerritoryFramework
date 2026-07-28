@@ -470,6 +470,7 @@ void ATerritoryVolume::OnTerritoryContested_Implementation(FGameplayTag InTerrit
 
 void ATerritoryVolume::OnTerritoryUncontested_Implementation(FGameplayTag InTerritoryTag)
 {
+	if (InTerritoryTag != TerritoryTag) return;
 	OwnershipData.ContestingFaction = FGameplayTag();
 }
 
@@ -1129,6 +1130,9 @@ void ATerritoryVolume::SpawnGuards()
 	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
+		UE_LOG(LogTerritory, Warning, TEXT("SpawnGuards: NPCDefinition '%s' class '%s' is not a TerritoryGuardCharacter — falling back to base class"),
+			*GetNameSafe(EffectiveDef),
+			NPCClass ? *NPCClass->GetName() : TEXT("null"));
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 
@@ -1313,6 +1317,9 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
+		UE_LOG(LogTerritory, Warning, TEXT("TrySpawnSingleGuard: NPCDefinition '%s' class '%s' is not a TerritoryGuardCharacter — falling back to base class"),
+			*GetNameSafe(EffectiveDef),
+			NPCClass ? *NPCClass->GetName() : TEXT("null"));
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 

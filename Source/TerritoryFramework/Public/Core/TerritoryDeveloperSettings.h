@@ -88,14 +88,12 @@ public:
 		meta = (ClampMin = "0", UIMin = "0", UIMax = "100"))
 	int32 MaxPatrolRouteNodes = 32;
 
-	/** Starting gold for new factions (first time a faction appears in economy) */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy",
-		meta = (ClampMin = "0"))
+	/** @deprecated Unused — factions start with zero gold. Remove in v0.3.0. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Unused. Remove in v0.3.0."))
 	int32 EconomyStartingGold = 0;
 
-	/** Max capture history entries stored per territory */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Capture",
-		meta = (ClampMin = "10", UIMin = "10", UIMax = "500"))
+	/** @deprecated Unused — no capture history system exists. Remove in v0.3.0. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Unused. Remove in v0.3.0."))
 	int32 MaxCaptureHistory = 50;
 
 	// ═══════════════════════════════════════════════════════════════════════════
