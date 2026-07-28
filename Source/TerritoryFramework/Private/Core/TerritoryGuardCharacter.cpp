@@ -102,6 +102,7 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 		DesiredWieldState.EquipSlots.AddTag(EquipSlot);
 		DesiredWieldState.WieldSlots.AddTag(MainhandWieldSlot);
 		SetWieldState(DesiredWieldState);
+		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 		return;
 	}
 }

@@ -33,6 +33,16 @@ void ATerritoryCity::BeginPlay()
 		{
 			BindToDistrict(District);
 		}
+
+		// Reconcile derived state from already-registered children (World Partition / save-load order)
+		if (!Districts.IsEmpty())
+		{
+			FGameplayTag MajorityOwner = GetMajorityOwner();
+			if (MajorityOwner.IsValid() && AllDistrictsOwnedBy(MajorityOwner) && GetOwningFaction() != MajorityOwner)
+			{
+				SetDerivedOwningFaction(MajorityOwner);
+			}
+		}
 	}
 }
 
@@ -290,6 +300,7 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 				SetDerivedOwningFaction(NewOwner);
 				OnCityFullyCaptured(NewOwner);
 				OnCityCapturedDelegate.Broadcast(this, NewOwner);
+				bCityLostFired = false;
 			}
 			else
 			{
@@ -300,6 +311,7 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 					UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s recovered from Contested to Claimed — incumbent %s retakes all districts"),
 						*GetTerritoryTag().ToString(), *NewOwner.ToString());
 				}
+				bCityLostFired = false;
 			}
 		}
 		else
@@ -328,8 +340,9 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 			bCityLost = true;
 		}
 
-		if (bCityLost)
+		if (bCityLost && !bCityLostFired)
 		{
+			bCityLostFired = true;
 			OnCityLost(OldOwner);
 			OnCityLostDelegate.Broadcast(this, OldOwner);
 		}
@@ -388,6 +401,25 @@ void ATerritoryDistrict::BeginPlay()
 		for (ATerritoryVolume* Property : Properties)
 		{
 			BindToProperty(Property);
+		}
+
+		// Reconcile derived state from already-registered children
+		if (!Properties.IsEmpty())
+		{
+			// Check if all properties share one owner
+			FGameplayTag FirstOwner;
+			bool bAllSame = true;
+			for (const ATerritoryVolume* Prop : Properties)
+			{
+				FGameplayTag PropOwner = Prop->GetOwningFaction();
+				if (!PropOwner.IsValid()) { bAllSame = false; break; }
+				if (!FirstOwner.IsValid()) FirstOwner = PropOwner;
+				else if (PropOwner != FirstOwner) { bAllSame = false; break; }
+			}
+			if (bAllSame && FirstOwner.IsValid() && GetOwningFaction() != FirstOwner)
+			{
+				SetDerivedOwningFaction(FirstOwner);
+			}
 		}
 	}
 }

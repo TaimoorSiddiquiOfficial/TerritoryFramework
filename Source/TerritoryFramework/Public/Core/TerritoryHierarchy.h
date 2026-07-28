@@ -88,6 +88,9 @@ private:
 	void BindToDistrict(ATerritoryVolume* District);
 
 	void CascadeCaptureToProperties(ATerritoryVolume* District, FGameplayTag NewOwner);
+
+	/** Prevents OnCityLost from firing multiple times for the same loss episode. */
+	bool bCityLostFired = false;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

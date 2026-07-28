@@ -80,15 +80,10 @@ void ATerritoryVolume::BeginPlay()
 		// If missing here, it means the level wasn't saved after GUID baking.
 		if (!TerritoryGUID.IsValid())
 		{
-			if (TerritoryTag.IsValid())
-			{
-				// Deterministic fallback — NOT ideal but prevents total breakage
-				uint32 Hash = FCrc::StrCrc32(*TerritoryTag.ToString());
-				TerritoryGUID = FGuid(Hash, 0, 0, 0);
-			}
 			UE_LOG(LogTerritory, Error,
-				TEXT("%s has no TerritoryGUID. Open the level in editor, select the actor, "
-					"move it slightly, and save the level to bake a GUID."),
+				TEXT("%s has no valid TerritoryGUID — save/load will fail. "
+					"Open the level in editor, select the actor, move it slightly, "
+					"and save the level to bake a GUID."),
 				*GetPathName());
 		}
 
