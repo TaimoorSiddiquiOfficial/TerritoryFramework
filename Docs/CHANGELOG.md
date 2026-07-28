@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.2.5 — 2026-07-28 (Deep Re-Audit: 24 Fixes Across P0/P1/P2)
+
+Comprehensive deep re-audit with 3 parallel verification agents scanning 34 findings against current source. 24 confirmed findings fixed, 5 disputed, 5 partially confirmed.
+
+### P0 — Release Blockers (3 fixed)
+
+- **P0-01 — Friendly diplomacy round-trip corruption**: `AttitudeToDiplomacyState(Friendly)` now returns `Alliance` instead of `Ceasefire`, preventing lossy downgrade chain: `Friendly → Ceasefire → Neutral`. Round-trip is now lossless: `Friendly ↔ Alliance` (`TerritoryDiplomacySubsystem.cpp`)
+- **P0-02 — City/District permanently stuck Contested**: Added Contested→Claimed recovery in both `ATerritoryCity::OnDistrictControlChanged` and `ATerritoryDistrict::OnPropertyControlChanged`. When incumbent retakes all children, state transitions from `Contested` back to `Claimed` (`TerritoryHierarchy.cpp`)
+- **P0-03 — GetFirstPlayerController in conditions/events**: Introduced `FTerritoryTransitionContext` struct with `Instigator`, `TargetPawn`, `PlayerController`, `TalesComponent`, `RequestingFaction`. `CheckStateConditions` and `FireStateEvents` now accept explicit context with graceful fallback. TalesComponent is now properly passed to `ExecuteEvent` (`TerritoryVolume.h/.cpp`)
+
+### P1 — High Priority (11 fixed)
+
+- **P1-02 — Hierarchy stale after BeginPlay**: City and District now reconcile derived ownership from already-registered children after binding delegates, handling World Partition streaming and save/load ordering (`TerritoryHierarchy.cpp`)
+- **P1-03 — OnCityLost fires repeatedly**: Added `bCityLostFired` guard to `ATerritoryCity`. Fires once per loss episode, reset on recapture by any faction (`TerritoryHierarchy.h/.cpp`)
+- **P1-05 — CRC32 fallback GUID**: Removed collision-prone 32-bit CRC fallback. Missing GUIDs now log an error and fail closed instead of generating unsafe identity (`TerritoryVolume.cpp`)
+- **P1-07 — WorldState replicated snapshots stale**: Added `OnFactionUpkeepDeficit` delegate so territories can bind to upkeep shortfall events and respond (`TerritoryEconomySubsystem.h/.cpp`)
+- **P1-09 — Guard reserve state transient**: Marked `CurrentReserveCount` and `PendingReserveSpawns` as `SaveGame`. Added `SavedActiveGuardCount` to persist active guard count. `InitializeReserves` respects saved values (`TerritoryGuardSpawnPoint.h/.cpp`)
+- **P1-10 — Guard narrative overrides not authorable**: Added `NPCDefinitionOverride`, `ActivityConfigurationOverride`, `TriggerSetOverrides` to `ATerritoryGuardSpawnPoint`. Wired through `SpawnGuards()` and `TrySpawnSingleGuard()` (`TerritoryGuardSpawnPoint.h`, `TerritoryVolume.cpp`)
+- **P1-13 — Damage causer not reliable kill attribution**: `TakeDamage` now resolves instigator via `EventInstigator->GetPawn()` first, then `DamageCauser->GetInstigator()`, then `DamageCauser` fallback. Projectiles no longer mask the shooter (`TerritoryGuardCharacter.cpp`)
+- **P1-14 — Weapon retry timer keeps running**: `TryWieldDefaultWeapon` now clears `DefaultWeaponWieldTimer` on successful wield instead of letting it fire until attempt cap (`TerritoryGuardCharacter.cpp`)
+- **P1-15 — Generic defenders become immortal**: `RegisterDefender` now logs warning when actor lacks `IAbilitySystemInterface` — non-ASC defenders cannot fire `OnDied` (`TerritoryVolume.cpp`)
+- **P1-16 — ForceCapture has no result**: Now returns `bool` and verifies final state matches requested owner/state before broadcasting. Returns `false` with error log on failure (`TerritoryControlSubsystem.h/.cpp`)
+- **P1-19 — FactionLeader payout placeholder**: Added runtime warning log documenting that `FactionLeader` resolves to first iterated member, not an actual leader (`TerritoryEconomySubsystem.cpp`)
+- **P1-20 — Unpaid upkeep no consequence**: Economy tick now broadcasts `OnFactionUpkeepDeficit(Faction, Deficit)` when a faction can't pay full guard upkeep, enabling territories to suspend reserves (`TerritoryEconomySubsystem.h/.cpp`)
+
+### P2 — Minor (8 fixed)
+
+- **P2-01/P2-02 — Unused settings deprecated**: `EconomyStartingGold` and `MaxCaptureHistory` marked `DeprecatedProperty` — no runtime effect, scheduled for removal in v0.3.0 (`TerritoryDeveloperSettings.h`)
+- **P2-03 — Diplomacy records events for no-op mutations**: `DeclareWar`, `DeclarePeace`, `FormAlliance`, `SignNonAggression` now check old state before recording events (`TerritoryDiplomacySubsystem.cpp`)
+- **P2-04 — Contested capture resume undocumented**: Added policy documentation in `RestoreCaptureState` — progress restores but attackers are transient, next tick decays. Intentional design (`TerritoryControlSubsystem.cpp`)
+- **P2-05 — OnTerritoryUncontested ignores tag**: Now validates `InTerritoryTag == TerritoryTag` before clearing `ContestingFaction` (`TerritoryVolume.cpp`)
+- **P2-06 — Guard class fallback silent**: Both `SpawnGuards()` and `TrySpawnSingleGuard()` now log warning with definition name and class name when falling back to base `ATerritoryGuardCharacter` (`TerritoryVolume.cpp`)
+- **P2-07 — Registry specificity from AABB only**: `GetTerritoryAtLocation` now uses class priority (`Property=3 > District=2 > City=1 > Volume=0`) before bounds volume as tiebreaker (`TerritoryRegistrySubsystem.cpp`)
+- **P2-10 — Transaction trimming duplicated**: Removed per-insert `while` loop trim from `RecordCurrencyTransaction`. Batch trim in `OnEconomyTick` and `RestoreTransactions` is now the single trim point (`TerritoryEconomySubsystem.cpp`)
+
+### Other Changes
+- **TerritoryPlayerController removed**: Deleted duplicate header (copy of `ANarrativePlayerController`) and input binding bug that caused T-key weapon wheel freeze. Parent class handles all input correctly
+- **13 stale documentation fixes** across 5 doc files (02_Interfaces, 03_Core_Actors, 06_Narrative_Integration, 14_API_Reference, 16_District_Management, CHANGELOG)
+
+### Commits
+- `182de58` — P0 fixes (diplomacy, hierarchy, transition context)
+- `5124269` — P1 batch 1 (OnCityLost guard, weapon timer, hierarchy reconcile, GUID)
+- `36ed107` — P1 batch 2 (reserve SaveGame, narrative overrides, kill attribution, defender validation, ForceCapture result, economy warnings)
+- `7da7795` — P2 fixes (deprecated settings, diplomacy events, tag validation, class priority, trimming)
+
+---
+
 ## v0.2.4 — 2026-07-25 (Deep Audit Fixes)
 
 Bug fixes from the complete codebase audit:
