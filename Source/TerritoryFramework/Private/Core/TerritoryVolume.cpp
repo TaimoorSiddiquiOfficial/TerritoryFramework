@@ -14,6 +14,7 @@
 #include "Engine/World.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "AI/NPCDefinition.h"
 #include "AI/NarrativeCharacterSubsystem.h"
@@ -1123,9 +1124,18 @@ void ATerritoryVolume::SpawnGuards()
 	bSpawningGuards = true;
 	struct FScopeGuard { bool& Ref; ~FScopeGuard() { Ref = false; } } GuardRef{bSpawningGuards};
 
-	// Resolve definition for current owner faction
+	// Resolve definition: GuardPostDefinition > FactionGuardDefinitions > GuardNPCDefinition
 	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
 	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
+	// Check if any spawn point has a GuardPostDefinition with an NPC override
+	for (ATerritoryGuardSpawnPoint* SP : GetGuardSpawnPoints())
+	{
+		if (SP && SP->GuardPostDefinition && SP->GuardPostDefinition->NPCDefinition)
+		{
+			EffectiveDef = SP->GuardPostDefinition->NPCDefinition;
+			break;
+		}
+	}
 	if (!EffectiveDef) return;
 
 	UWorld* World = GetWorld();
@@ -1244,11 +1254,19 @@ void ATerritoryVolume::SpawnGuards()
 			EffectiveFaction = UsedSP->FactionOverride;
 		}
 
-		// Resolve narrative overrides from spawn point if available
-		UNPCActivityConfiguration* ActivityConfig = UsedSP ? UsedSP->ActivityConfigurationOverride : nullptr;
-		const TArray<TSoftObjectPtr<UTriggerSet>>& TriggerSets = UsedSP && !UsedSP->TriggerSetOverrides.IsEmpty()
-			? UsedSP->TriggerSetOverrides
-			: DefaultTriggerSets;
+		// Resolve narrative overrides: spawn point inline > GuardPostDefinition > territory defaults
+		UNPCActivityConfiguration* ActivityConfig = nullptr;
+		const TArray<TSoftObjectPtr<UTriggerSet>>* TriggerSetsPtr = &DefaultTriggerSets;
+		if (UsedSP)
+		{
+			ActivityConfig = UsedSP->ActivityConfigurationOverride;
+			if (!ActivityConfig && UsedSP->GuardPostDefinition)
+				ActivityConfig = UsedSP->GuardPostDefinition->ActivityConfiguration;
+			if (!UsedSP->TriggerSetOverrides.IsEmpty())
+				TriggerSetsPtr = &UsedSP->TriggerSetOverrides;
+			else if (UsedSP->GuardPostDefinition && !UsedSP->GuardPostDefinition->TriggerSetOverrides.IsEmpty())
+				TriggerSetsPtr = &UsedSP->GuardPostDefinition->TriggerSetOverrides;
+		}
 
 		// Single deterministic entrypoint — fills ALL SpawnInfo fields
 		Guard->ConfigureTerritorySpawn(
@@ -1259,7 +1277,7 @@ void ATerritoryVolume::SpawnGuards()
 			SpawnTransform,
 			UsedSP ? UsedSP->GetFName() : NAME_None,
 			ActivityConfig,
-			TriggerSets);
+			*TriggerSetsPtr);
 
 		// Set territory AI context before FinishSpawningActor
 		Guard->OwningTerritory = this;

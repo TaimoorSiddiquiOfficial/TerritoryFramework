@@ -154,6 +154,17 @@ public:
 		meta=(ClampMin="0", UIMin="0", UIMax="100", DisplayName="Priority"))
 	int32 Priority = 50;
 
+	// ─── Guard Post Definition (Data Asset) ───
+
+	/**
+	 * Optional data-driven guard post configuration. When assigned, provides NPC definition,
+	 * activity config, trigger sets, patrol route, capacity, and reserve settings from a
+	 * reusable UPrimaryDataAsset. Inline properties below act as overrides when this is set.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+		meta=(DisplayName="Guard Post Definition"))
+	TObjectPtr<class UTerritoryGuardPostDefinition> GuardPostDefinition;
+
 	// ─── Narrative Overrides ───
 
 	/** Optional NPC definition override for guards spawned from this point. Uses territory default if null. */

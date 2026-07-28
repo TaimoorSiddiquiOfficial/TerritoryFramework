@@ -19,6 +19,7 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryGuardPostDefinition.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Tales/TerritoryCaptureTask.h"
 #include "Tales/TerritoryCaptureEvent.h"
@@ -2783,6 +2784,47 @@ bool FTFBehavior_RegistryReturnsResult::RunTest(const FString& Parameters)
 		FProperty* ReturnProp = RegFunc->GetReturnProperty();
 		TestNotNull(TEXT("RegisterTerritory has return value"), ReturnProp);
 	}
+
+	return true;
+}
+
+// ─── 5.2: GuardPostDefinition data asset contract ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_GuardPostDefinition,
+	"TerritoryFramework.Contract.GuardPostDefinition",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_GuardPostDefinition::RunTest(const FString& Parameters)
+{
+	const UClass* Class = UTerritoryGuardPostDefinition::StaticClass();
+	TestNotNull(TEXT("GuardPostDefinition class exists"), Class);
+	if (!Class) return false;
+
+	// Identity
+	TestTrue(TEXT("Has DisplayName"), TFTestUtils::HasProperty(Class, TEXT("DisplayName")));
+	TestTrue(TEXT("Has FactionOverride"), TFTestUtils::HasProperty(Class, TEXT("FactionOverride")));
+
+	// NPC
+	TestTrue(TEXT("Has NPCDefinition"), TFTestUtils::HasProperty(Class, TEXT("NPCDefinition")));
+	TestTrue(TEXT("Has ActivityConfiguration"), TFTestUtils::HasProperty(Class, TEXT("ActivityConfiguration")));
+	TestTrue(TEXT("Has TriggerSetOverrides"), TFTestUtils::HasProperty(Class, TEXT("TriggerSetOverrides")));
+
+	// Patrol
+	TestTrue(TEXT("Has PatrolRoute"), TFTestUtils::HasProperty(Class, TEXT("PatrolRoute")));
+	TestTrue(TEXT("Has bLoopPatrol"), TFTestUtils::HasProperty(Class, TEXT("bLoopPatrol")));
+
+	// Capacity
+	TestTrue(TEXT("Has MaxGuards"), TFTestUtils::HasProperty(Class, TEXT("MaxGuards")));
+	TestTrue(TEXT("Has ReserveSlots"), TFTestUtils::HasProperty(Class, TEXT("ReserveSlots")));
+	TestTrue(TEXT("Has ReserveSpawnDelay"), TFTestUtils::HasProperty(Class, TEXT("ReserveSpawnDelay")));
+
+	// Verify it's a PrimaryDataAsset
+	TestTrue(TEXT("Inherits from UPrimaryDataAsset"),
+		Class->IsChildOf(UPrimaryDataAsset::StaticClass()));
+
+	// Verify spawn point has GuardPostDefinition property
+	const UClass* SPClass = ATerritoryGuardSpawnPoint::StaticClass();
+	TestTrue(TEXT("GuardSpawnPoint has GuardPostDefinition"),
+		TFTestUtils::HasProperty(SPClass, TEXT("GuardPostDefinition")));
 
 	return true;
 }
