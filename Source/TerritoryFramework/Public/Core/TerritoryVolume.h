@@ -78,6 +78,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Owning Faction"))
 	FGameplayTag GetOwningFaction() const;
 
+	/** Returns a copy of the current ownership data struct (for building mutation candidates). */
+	FTerritoryOwnershipData GetOwnershipData() const { return OwnershipData; }
+
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Territory State"))
 	ETerritoryState GetTerritoryState() const;
 
@@ -174,6 +177,21 @@ public:
 			OwnershipData.ContestingFaction = Faction;
 		}
 	}
+
+	/**
+	 * P0-05: Atomically commit a new FTerritoryOwnershipData struct.
+	 * Writes the entire struct in one operation, then fires ONE ordered event bundle:
+	 *   1. Despawn old guards
+	 *   2. Spawn new guards (if applicable)
+	 *   3. BP virtual OnOwnershipChanged
+	 *   4. OnTerritoryOwnershipChanged delegate
+	 *   5. BP virtual OnStateChanged (if state changed)
+	 *   6. OnTerritoryStateChangedDelegate (if state changed)
+	 *
+	 * No intermediate state is visible to listeners between steps.
+	 * Returns true if the commit was applied (old != new).
+	 */
+	bool CommitOwnershipData(const FTerritoryOwnershipData& NewData, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Blueprint Events (BlueprintNativeEvent — subclasses can override)

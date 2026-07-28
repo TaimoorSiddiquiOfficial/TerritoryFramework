@@ -660,6 +660,93 @@ void ATerritoryVolume::ForceSetOwningFaction(const FGameplayTag& NewFaction)
 	bApplyingDerivedOwnership = bWasApplyingDerivedOwnership;
 }
 
+bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewData, const FTerritoryTransitionContext& TransitionContext)
+{
+	if (!HasAuthority()) return false;
+
+	const FGameplayTag OldOwner = OwnershipData.OwningFaction;
+	const ETerritoryState OldState = OwnershipData.State;
+	const FGameplayTag NewOwner = NewData.OwningFaction;
+	const ETerritoryState NewState = NewData.State;
+
+	// No-op check: if nothing changed, skip the entire commit
+	if (OldOwner == NewOwner && OldState == NewState
+		&& OwnershipData.ContestingFaction == NewData.ContestingFaction
+		&& FMath::IsNearlyEqual(OwnershipData.ControlProgress, NewData.ControlProgress))
+	{
+		return false;
+	}
+
+	bTransitionInProgress = true;
+
+	// Cache previous values for RepNotify diff
+	PreviousOwningFaction = OldOwner;
+	PreviousState = OldState;
+
+	// ─── Atomic struct write ───
+	OwnershipData = NewData;
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (Settings && Settings->ShouldDebugOwnership())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[CommitOwnership] %s: owner %s→%s, state %d→%d, progress %.2f"),
+			*GetTerritoryTag().ToString(),
+			*OldOwner.ToString(), *NewOwner.ToString(),
+			static_cast<int32>(OldState), static_cast<int32>(NewState),
+			NewData.ControlProgress);
+	}
+
+	// ─── Guard lifecycle (BEFORE BP virtuals so BP sees final guard state) ───
+	if (OldOwner != NewOwner)
+	{
+		DespawnGuards();
+		if (NewOwner.IsValid() && ResolveGuardDefinition(NewOwner) && NewData.DesiredGuardCount > 0)
+		{
+			SpawnGuards();
+		}
+	}
+	else if (OldState != NewState)
+	{
+		if (NewState == ETerritoryState::Locked)
+		{
+			DespawnGuards();
+		}
+		else if (NewState == ETerritoryState::Contested && OldState == ETerritoryState::Claimed)
+		{
+			DespawnGuards();
+		}
+		else if (NewState == ETerritoryState::Claimed && (OldState == ETerritoryState::Contested || OldState == ETerritoryState::Locked))
+		{
+			if (ResolveGuardDefinition(OwnershipData.OwningFaction) && NewData.DesiredGuardCount > 0 && GetSpawnedGuardCount() == 0)
+			{
+				SpawnGuards();
+			}
+		}
+	}
+
+	// ─── ONE ordered event bundle ───
+	if (OldState != NewState)
+	{
+		FireStateEvents(OldState, false, TransitionContext);
+		FireStateEvents(NewState, true, TransitionContext);
+	}
+
+	if (OldOwner != NewOwner)
+	{
+		OnOwnershipChanged(OldOwner, NewOwner);
+		OnTerritoryOwnershipChanged.Broadcast(this, OldOwner, NewOwner);
+	}
+
+	if (OldState != NewState)
+	{
+		OnStateChanged(OldState, NewState);
+		OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
+	}
+
+	bTransitionInProgress = false;
+	return true;
+}
+
 void ATerritoryVolume::SetControlProgress(float Progress)
 {
 	if (!HasAuthority()) return;

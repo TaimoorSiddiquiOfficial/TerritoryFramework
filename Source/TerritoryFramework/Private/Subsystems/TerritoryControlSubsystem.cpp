@@ -355,7 +355,9 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	FTerritoryMutationResponse Response;
 	Response.Territory = Request.Territory;
 
-	// ─── Step 1: Validate authority and target ───
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 1: Validate authority and target
+	// ═══════════════════════════════════════════════════════════════════════════
 	UWorld* World = GetWorld();
 	if (!World || !World->GetAuthGameMode())
 	{
@@ -372,13 +374,6 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		return Response;
 	}
 
-	if (!Request.NewOwner.IsValid())
-	{
-		Response.Result = ETerritoryMutationResult::Rejected_InvalidFaction;
-		Response.Explanation = FText::FromString(TEXT("Invalid NewOwner faction tag"));
-		return Response;
-	}
-
 	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_AggregateOnly;
@@ -386,7 +381,9 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		return Response;
 	}
 
-	// ─── Step 2: Validate locks ───
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 2: Validate locks
+	// ═══════════════════════════════════════════════════════════════════════════
 	if (Territory->IsLocked() && Request.DesiredState != ETerritoryState::Locked)
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_Locked;
@@ -394,10 +391,47 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		return Response;
 	}
 
-	// ─── Step 3: Check if state is actually changing ───
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 3: Validate diplomacy — attacker faction vs current owner
+	// ═══════════════════════════════════════════════════════════════════════════
 	Response.OldOwner = Territory->GetOwningFaction();
 	Response.OldState = Territory->GetTerritoryState();
 
+	if (Request.NewOwner.IsValid() && Response.OldOwner.IsValid() && Request.NewOwner != Response.OldOwner)
+	{
+		if (!CanFactionCaptureTerritory(Territory, Request.NewOwner))
+		{
+			Response.Result = ETerritoryMutationResult::Rejected_DiplomacyBlocked;
+			Response.Explanation = FText::Format(
+				NSLOCTEXT("Territory", "DiploBlocked", "Diplomacy blocks {0} from capturing {1}"),
+				FText::FromString(Request.NewOwner.ToString()),
+				FText::FromString(Territory->GetTerritoryTag().ToString()));
+			return Response;
+		}
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 4: Validate invariant — owner/state/progress consistency
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Unclaimed requires: invalid owner, progress 0
+	// Claimed requires: valid owner, progress 1, invalid contesting
+	// Contested requires: valid contesting, progress in [0,1]
+	if (Request.DesiredState == ETerritoryState::Unclaimed && Request.NewOwner.IsValid())
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_InvalidFaction;
+		Response.Explanation = FText::FromString(TEXT("Unclaimed state requires invalid NewOwner"));
+		return Response;
+	}
+	if (Request.DesiredState == ETerritoryState::Claimed && !Request.NewOwner.IsValid())
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_InvalidFaction;
+		Response.Explanation = FText::FromString(TEXT("Claimed state requires valid NewOwner"));
+		return Response;
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 5: No-op check
+	// ═══════════════════════════════════════════════════════════════════════════
 	if (Response.OldOwner == Request.NewOwner && Response.OldState == Request.DesiredState)
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_StateUnchanged;
@@ -407,23 +441,53 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		return Response;
 	}
 
-	// ─── Step 4: Commit atomically ───
-	TerritoryCaptureState.Remove(Territory);
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 6: Build candidate FTerritoryOwnershipData
+	// ═══════════════════════════════════════════════════════════════════════════
+	FTerritoryOwnershipData Candidate = Territory->GetOwnershipData();
+	Candidate.OwningFaction = Request.NewOwner;
+	Candidate.State = Request.DesiredState;
 
 	if (Request.bClearCaptureState)
 	{
-		Territory->SetContestingFaction(FGameplayTag());
-		Territory->SetControlProgress(Request.DesiredState == ETerritoryState::Claimed ? 1.f : 0.f);
+		Candidate.ContestingFaction = FGameplayTag();
+		Candidate.ControlProgress = Request.DesiredState == ETerritoryState::Claimed ? 1.f : 0.f;
 	}
 
-	Territory->ForceSetOwningFaction(Request.NewOwner);
-
-	if (Territory->GetTerritoryState() != Request.DesiredState)
+	// DesiredGuardCount follows the new owner's configuration
+	if (Request.NewOwner.IsValid() && Request.DesiredState == ETerritoryState::Claimed)
 	{
-		Territory->ForceSetTerritoryState(Request.DesiredState);
+		Candidate.DesiredGuardCount = FMath::Clamp(Territory->GetMaxGuardCount(), 0, Territory->GetMaxGuardCount());
+	}
+	else
+	{
+		Candidate.DesiredGuardCount = 0;
 	}
 
-	// ─── Step 5: Verify final state ───
+	// Clear lock reason unless transitioning to Locked
+	if (Request.DesiredState != ETerritoryState::Locked)
+	{
+		Candidate.LockReason = FText();
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 7: Atomic commit — one struct write, one event bundle
+	// ═══════════════════════════════════════════════════════════════════════════
+	TerritoryCaptureState.Remove(Territory);
+
+	const bool bApplied = Territory->CommitOwnershipData(Candidate, Request.TransitionContext);
+	if (!bApplied)
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_StateUnchanged;
+		Response.NewOwner = Response.OldOwner;
+		Response.NewState = Response.OldState;
+		Response.Explanation = FText::FromString(TEXT("CommitOwnershipData returned false — no change applied"));
+		return Response;
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 8: Verify final state and guard reconciliation
+	// ═══════════════════════════════════════════════════════════════════════════
 	Response.NewOwner = Territory->GetOwningFaction();
 	Response.NewState = Territory->GetTerritoryState();
 
@@ -437,7 +501,16 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		return Response;
 	}
 
-	// ─── Step 6: Fire events and broadcast ───
+	// Optional guard reconciliation — if bReconcileGuards is set and guards need adjusting
+	if (Request.bReconcileGuards && Request.NewOwner.IsValid())
+	{
+		Territory->DespawnGuards();
+		Territory->SpawnGuards();
+	}
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 9: Success — broadcast subsystem delegate
+	// ═══════════════════════════════════════════════════════════════════════════
 	Response.Result = ETerritoryMutationResult::Success;
 	Response.Explanation = FText::Format(
 		NSLOCTEXT("Territory", "MutationSuccess", "{0}: {1} → {2}"),
