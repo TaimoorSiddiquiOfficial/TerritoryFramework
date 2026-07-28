@@ -38,6 +38,9 @@ void ATerritoryWorldState::BeginPlay()
 		USaveSystemStatics::LoadSingleActor(this);
 		GetWorld()->GetTimerManager().SetTimerForNextTick(
 			FTimerDelegate::CreateUObject(this, &ATerritoryWorldState::ApplyPendingCaptureSummaries));
+
+		// P0-02: Subscribe to subsystem delegates for live replication
+		SubscribeToLiveUpdates();
 	}
 }
 
@@ -50,6 +53,8 @@ void ATerritoryWorldState::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		{
 			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryWorldState::OnTerritoryRegistered);
 		}
+		// P0-02: Unsubscribe from live replication delegates
+		UnsubscribeFromLiveUpdates();
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -564,4 +569,174 @@ void ATerritoryWorldState::ApplyPendingCaptureSummaries()
 			PendingCaptureRetryCount = 0;
 		}
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P0-02: Live Replication Handlers
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void ATerritoryWorldState::SubscribeToLiveUpdates()
+{
+	if (!HasAuthority()) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
+	{
+		Economy->OnEconomyTickFired.AddDynamic(this, &ATerritoryWorldState::OnEconomyTickLive);
+		Economy->OnTransactionRecorded.AddDynamic(this, &ATerritoryWorldState::OnTransactionRecordedLive);
+	}
+
+	if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
+	{
+		Diplomacy->OnDiplomacyStateChanged.AddDynamic(this, &ATerritoryWorldState::OnDiplomacyChangedLive);
+		Diplomacy->OnReputationChanged.AddDynamic(this, &ATerritoryWorldState::OnReputationChangedLive);
+	}
+
+	if (UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>())
+	{
+		Control->OnTerritoryControlChanged.AddDynamic(this, &ATerritoryWorldState::OnTerritoryControlChangedLive);
+	}
+}
+
+void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
+	{
+		Economy->OnEconomyTickFired.RemoveDynamic(this, &ATerritoryWorldState::OnEconomyTickLive);
+		Economy->OnTransactionRecorded.RemoveDynamic(this, &ATerritoryWorldState::OnTransactionRecordedLive);
+	}
+
+	if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
+	{
+		Diplomacy->OnDiplomacyStateChanged.RemoveDynamic(this, &ATerritoryWorldState::OnDiplomacyChangedLive);
+		Diplomacy->OnReputationChanged.RemoveDynamic(this, &ATerritoryWorldState::OnReputationChangedLive);
+	}
+
+	if (UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>())
+	{
+		Control->OnTerritoryControlChanged.RemoveDynamic(this, &ATerritoryWorldState::OnTerritoryControlChangedLive);
+	}
+}
+
+void ATerritoryWorldState::OnEconomyTickLive(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot)
+{
+	if (!HasAuthority() || !Faction.IsValid()) return;
+
+	// Update or add the faction's treasury entry
+	for (FReplicatedFactionEconomy& Entry : ReplicatedTreasuries)
+	{
+		if (Entry.Faction == Faction)
+		{
+			Entry.IncomePerTick = Snapshot.TotalIncome;
+			Entry.CostsPerTick = Snapshot.TotalCosts;
+			Entry.Treasury = Snapshot.Treasury;
+			Entry.TerritoryCount = Snapshot.TerritoryCount;
+			return;
+		}
+	}
+
+	// Faction not yet in replicated array — add it
+	FReplicatedFactionEconomy NewEntry;
+	NewEntry.Faction = Faction;
+	NewEntry.IncomePerTick = Snapshot.TotalIncome;
+	NewEntry.CostsPerTick = Snapshot.TotalCosts;
+	NewEntry.Treasury = Snapshot.Treasury;
+	NewEntry.TerritoryCount = Snapshot.TerritoryCount;
+	ReplicatedTreasuries.Add(NewEntry);
+}
+
+void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction& Transaction)
+{
+	if (!HasAuthority()) return;
+
+	FReplicatedTransaction RepTx;
+	RepTx.TransactionID = Transaction.TransactionID;
+	RepTx.Faction = Transaction.Faction;
+	RepTx.Type = Transaction.Type;
+	RepTx.Amount = Transaction.Amount;
+	RepTx.BalanceAfter = Transaction.BalanceAfter;
+	RepTx.GameTime = Transaction.GameTime;
+	RepTx.Reason = Transaction.Reason;
+	RepTx.SourceTerritory = Transaction.SourceTerritory;
+	ReplicatedTransactions.Add(RepTx);
+}
+
+void ATerritoryWorldState::OnDiplomacyChangedLive(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)
+{
+	if (!HasAuthority()) return;
+
+	// Update or add treaty entry
+	for (FReplicatedTreaty& Treaty : ReplicatedTreaties)
+	{
+		if ((Treaty.FactionA == FactionA && Treaty.FactionB == FactionB)
+			|| (Treaty.FactionA == FactionB && Treaty.FactionB == FactionA))
+		{
+			Treaty.State = NewState;
+			return;
+		}
+	}
+
+	// New treaty
+	FReplicatedTreaty NewTreaty;
+	NewTreaty.TreatyID = FGuid::NewGuid();
+	NewTreaty.FactionA = FactionA;
+	NewTreaty.FactionB = FactionB;
+	NewTreaty.State = NewState;
+	ReplicatedTreaties.Add(NewTreaty);
+}
+
+void ATerritoryWorldState::OnReputationChangedLive(FGameplayTag Faction, int32 NewReputation)
+{
+	if (!HasAuthority() || !Faction.IsValid()) return;
+
+	// Update or add reputation entry
+	for (FReplicatedFactionReputation& Entry : ReplicatedReputation)
+	{
+		if (Entry.Faction == Faction)
+		{
+			Entry.Reputation = NewReputation;
+			return;
+		}
+	}
+
+	// New faction
+	FReplicatedFactionReputation NewEntry;
+	NewEntry.Faction = Faction;
+	NewEntry.Reputation = NewReputation;
+	ReplicatedReputation.Add(NewEntry);
+}
+
+void ATerritoryWorldState::OnTerritoryControlChangedLive(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	if (!HasAuthority() || !Territory) return;
+
+	const FGameplayTag TerrTag = Territory->GetTerritoryTag();
+
+	// Update or add capture summary
+	for (FReplicatedCaptureSummary& Summary : ReplicatedCaptureSummaries)
+	{
+		if (Summary.TerritoryTag == TerrTag)
+		{
+			Summary.CurrentOwner = NewOwner;
+			Summary.ContestingFaction = Territory->IsContested() ? OldOwner : FGameplayTag();
+			Summary.State = Territory->GetTerritoryState();
+			Summary.ControlProgress = Territory->GetControlProgress();
+			return;
+		}
+	}
+
+	// New territory
+	FReplicatedCaptureSummary NewSummary;
+	NewSummary.TerritoryTag = TerrTag;
+	NewSummary.TerritoryGUID = Territory->GetActorGUID_Implementation();
+	NewSummary.CurrentOwner = NewOwner;
+	NewSummary.ContestingFaction = Territory->IsContested() ? OldOwner : FGameplayTag();
+	NewSummary.State = Territory->GetTerritoryState();
+	NewSummary.ControlProgress = Territory->GetControlProgress();
+	ReplicatedCaptureSummaries.Add(NewSummary);
 }

@@ -293,8 +293,32 @@ private:
 	void SyncSubsystemsFromReplicatedState();
 	void ApplyPendingCaptureSummaries();
 
+	// ─── P0-02: Live replication handlers ───
+	// Subscribe to subsystem delegates so replicated arrays stay current between saves.
+
 	UFUNCTION()
 	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	UFUNCTION()
+	void OnEconomyTickLive(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot);
+
+	UFUNCTION()
+	void OnTransactionRecordedLive(const FTerritoryTransaction& Transaction);
+
+	UFUNCTION()
+	void OnDiplomacyChangedLive(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState);
+
+	UFUNCTION()
+	void OnReputationChangedLive(FGameplayTag Faction, int32 NewReputation);
+
+	UFUNCTION()
+	void OnTerritoryControlChangedLive(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);
+
+	/** Subscribe to all subsystem delegates for live replication. */
+	void SubscribeToLiveUpdates();
+
+	/** Unsubscribe from all subsystem delegates. */
+	void UnsubscribeFromLiveUpdates();
 
 	UPROPERTY(Transient)
 	TArray<FReplicatedCaptureSummary> PendingCaptureSummaries;

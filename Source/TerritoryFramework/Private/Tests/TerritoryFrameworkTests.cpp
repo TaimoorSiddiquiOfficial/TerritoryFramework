@@ -2825,6 +2825,30 @@ bool FTFBehavior_ClientRegistryRegistration::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ─── P0-02: Live replication subscriptions ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_LiveReplicationSubscriptions,
+	"TerritoryFramework.Behavior.LiveReplicationSubscriptions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFBehavior_LiveReplicationSubscriptions::RunTest(const FString& Parameters)
+{
+	const UClass* WSClass = ATerritoryWorldState::StaticClass();
+
+	// Verify live handler functions exist (UFUNCTION for delegate binding)
+	TestTrue(TEXT("OnEconomyTickLive handler exists"),
+		TFTestUtils::HasFunction(WSClass, TEXT("OnEconomyTickLive")));
+	TestTrue(TEXT("OnTransactionRecordedLive handler exists"),
+		TFTestUtils::HasFunction(WSClass, TEXT("OnTransactionRecordedLive")));
+	TestTrue(TEXT("OnDiplomacyChangedLive handler exists"),
+		TFTestUtils::HasFunction(WSClass, TEXT("OnDiplomacyChangedLive")));
+	TestTrue(TEXT("OnReputationChangedLive handler exists"),
+		TFTestUtils::HasFunction(WSClass, TEXT("OnReputationChangedLive")));
+	TestTrue(TEXT("OnTerritoryControlChangedLive handler exists"),
+		TFTestUtils::HasFunction(WSClass, TEXT("OnTerritoryControlChangedLive")));
+
+	return true;
+}
+
 // ─── 5.2: GuardPostDefinition data asset contract ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_GuardPostDefinition,
 	"TerritoryFramework.Contract.GuardPostDefinition",
