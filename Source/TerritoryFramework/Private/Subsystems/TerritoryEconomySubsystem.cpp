@@ -551,6 +551,11 @@ void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territo
 {
 	if (!Territory || bWasUnregistered) return;
 
+	// P0-01: Economy is server-authoritative. On clients, registration populates the
+	// registry for lookups only — no income mutation or delegate binding.
+	UWorld* World = GetWorld();
+	if (World && World->GetNetMode() == NM_Client) return;
+
 	// When a territory registers, bind its control-changed delegate
 	Territory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
 

@@ -506,8 +506,10 @@ void ATerritoryWorldState::OnTerritoryRegistered(ATerritoryVolume* Territory, bo
 void ATerritoryWorldState::ApplyPendingCaptureSummaries()
 {
 	UWorld* World = GetWorld();
-	UTerritoryRegistrySubsystem* Registry = World ? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
-	UTerritoryControlSubsystem* Control = World ? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
+	// P0-01: Capture summary application is server-authoritative — requires ForceSetOwningFaction
+	if (!World || World->GetNetMode() == NM_Client) return;
+	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
 	if (!Registry || !Control) return;
 
 	for (int32 Index = PendingCaptureSummaries.Num() - 1; Index >= 0; --Index)

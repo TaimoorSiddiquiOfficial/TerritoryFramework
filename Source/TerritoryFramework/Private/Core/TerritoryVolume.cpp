@@ -75,6 +75,23 @@ void ATerritoryVolume::BeginPlay()
 		SpawnPoint->BindToTerritory(this);
 	}
 
+	// ═══════════════════════════════════════════════════════════════════════════
+	// P0-01: Register on ALL net modes so clients can resolve territory lookups.
+	// Save/load, guards, and authority mutations remain server-only below.
+	// ═══════════════════════════════════════════════════════════════════════════
+	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+	{
+		ETerritoryRegistrationResult RegResult = Registry->RegisterTerritory(this);
+		if (RegResult != ETerritoryRegistrationResult::Success)
+		{
+			UE_LOG(LogTerritory, Error, TEXT("%s registration rejected (%d) — aborting gameplay activation"),
+				*GetPathName(), static_cast<int32>(RegResult));
+			SetActorTickEnabled(false);
+			return;
+		}
+		LastKnownBounds = GetTerritoryBounds();
+	}
+
 	if (HasAuthority())
 	{
 		// GUID must be baked at editor placement time.
@@ -134,20 +151,6 @@ void ATerritoryVolume::BeginPlay()
 					static_cast<int32>(OwnershipData.State),
 					bSuccessfullyLoaded || bLoadedFromSave ? 1 : 0);
 			}
-		}
-
-		// P1-04: Register BEFORE guard activation — rejected actors must not spawn guards
-		if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
-		{
-			ETerritoryRegistrationResult RegResult = Registry->RegisterTerritory(this);
-			if (RegResult != ETerritoryRegistrationResult::Success)
-			{
-				UE_LOG(LogTerritory, Error, TEXT("%s registration rejected (%d) — aborting gameplay activation"),
-					*GetPathName(), static_cast<int32>(RegResult));
-				SetActorTickEnabled(false);
-				return;
-			}
-			LastKnownBounds = GetTerritoryBounds();
 		}
 
 		if (!bGuardsReconciled)
