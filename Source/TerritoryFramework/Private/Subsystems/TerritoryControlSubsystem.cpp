@@ -309,14 +309,14 @@ void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory,
 	}
 }
 
-void UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner)
+bool UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !NewOwner.IsValid()) return;
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !NewOwner.IsValid()) return false;
 	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("[ForceCapture] %s is AggregateOnly; direct capture rejected"),
 			*Territory->GetTerritoryTag().ToString());
-		return;
+		return false;
 	}
 
 	FGameplayTag OldOwner = Territory->GetOwningFaction();
@@ -332,11 +332,21 @@ void UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const
 	}
 	Territory->SetControlProgress(1.f);
 
-	UE_LOG(LogTerritory, Log, TEXT("[ForceCapture] %s captured by %s (was %s)"),
-		*Territory->GetTerritoryTag().ToString(),
-		*NewOwner.ToString(), *OldOwner.ToString());
+	// Verify final state matches requested
+	if (Territory->GetOwningFaction() == NewOwner && Territory->GetTerritoryState() == ETerritoryState::Claimed)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[ForceCapture] %s captured by %s (was %s)"),
+			*Territory->GetTerritoryTag().ToString(),
+			*NewOwner.ToString(), *OldOwner.ToString());
+		OnTerritoryControlChanged.Broadcast(Territory, OldOwner, NewOwner);
+		return true;
+	}
 
-	OnTerritoryControlChanged.Broadcast(Territory, OldOwner, NewOwner);
+	UE_LOG(LogTerritory, Error, TEXT("[ForceCapture] %s failed to reach requested state (owner=%s, state=%s)"),
+		*Territory->GetTerritoryTag().ToString(),
+		*Territory->GetOwningFaction().ToString(),
+		*UEnum::GetValueAsString(Territory->GetTerritoryState()));
+	return false;
 }
 
 void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)

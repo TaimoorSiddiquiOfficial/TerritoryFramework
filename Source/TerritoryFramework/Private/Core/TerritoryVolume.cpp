@@ -893,6 +893,12 @@ void ATerritoryVolume::RegisterDefender(AActor* Defender)
 {
 	if (!Defender || !HasAuthority()) return;
 
+	if (!Cast<IAbilitySystemInterface>(Defender))
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("RegisterDefender: %s has no AbilitySystemComponent — death will not be detected, defender may become immortal in %s"),
+			*GetNameSafe(Defender), *GetTerritoryTag().ToString());
+	}
+
 	RegisteredDefenders.AddUnique(Defender);
 	OwnershipData.DefenderCount = RegisteredDefenders.Num();
 	BindDefenderDeath(Defender);
@@ -1167,6 +1173,7 @@ void ATerritoryVolume::SpawnGuards()
 	}
 
 	const int32 GuardsToSpawn = TargetGuardCount - ExistingGuardCount;
+	const TArray<TSoftObjectPtr<UTriggerSet>> DefaultTriggerSets;
 	for (int32 i = 0; i < GuardsToSpawn; ++i)
 	{
 		FTransform SpawnTransform;
@@ -1225,6 +1232,12 @@ void ATerritoryVolume::SpawnGuards()
 			EffectiveFaction = UsedSP->FactionOverride;
 		}
 
+		// Resolve narrative overrides from spawn point if available
+		UNPCActivityConfiguration* ActivityConfig = UsedSP ? UsedSP->ActivityConfigurationOverride : nullptr;
+		const TArray<TSoftObjectPtr<UTriggerSet>>& TriggerSets = UsedSP && !UsedSP->TriggerSetOverrides.IsEmpty()
+			? UsedSP->TriggerSetOverrides
+			: DefaultTriggerSets;
+
 		// Single deterministic entrypoint — fills ALL SpawnInfo fields
 		Guard->ConfigureTerritorySpawn(
 			EffectiveDef,
@@ -1233,8 +1246,8 @@ void ATerritoryVolume::SpawnGuards()
 			GuardSaveGUID,
 			SpawnTransform,
 			UsedSP ? UsedSP->GetFName() : NAME_None,
-			nullptr,
-			TArray<TSoftObjectPtr<UTriggerSet>>());
+			ActivityConfig,
+			TriggerSets);
 
 		// Set territory AI context before FinishSpawningActor
 		Guard->OwningTerritory = this;
@@ -1295,6 +1308,8 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
 	if (!EffectiveDef) return false;
 
+	const TArray<TSoftObjectPtr<UTriggerSet>> DefaultSingleTriggerSets;
+
 	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
@@ -1324,6 +1339,12 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		EffectiveFaction = SpawnPoint->FactionOverride;
 	}
 
+	// Resolve narrative overrides from spawn point if available
+	UNPCActivityConfiguration* SingleActivityConfig = SpawnPoint ? SpawnPoint->ActivityConfigurationOverride : nullptr;
+	const TArray<TSoftObjectPtr<UTriggerSet>>& SingleTriggerSets = SpawnPoint && !SpawnPoint->TriggerSetOverrides.IsEmpty()
+		? SpawnPoint->TriggerSetOverrides
+		: DefaultSingleTriggerSets;
+
 	// Single deterministic entrypoint — fills ALL SpawnInfo fields
 	Guard->ConfigureTerritorySpawn(
 		EffectiveDef,
@@ -1332,8 +1353,8 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		GuardSaveGUID,
 		SpawnTransform,
 		SpawnPoint ? SpawnPoint->GetFName() : NAME_None,
-		nullptr,
-		TArray<TSoftObjectPtr<UTriggerSet>>());
+		SingleActivityConfig,
+		SingleTriggerSets);
 
 	// Set territory AI context before FinishSpawningActor
 	Guard->OwningTerritory = this;

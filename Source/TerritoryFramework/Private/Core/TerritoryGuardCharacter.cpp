@@ -25,9 +25,16 @@ bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
 
 float ATerritoryGuardCharacter::TakeDamage(float Damage, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
-	if (DamageCauser)
+	// Resolve the actual instigator pawn for reliable kill attribution.
+	// Priority: EventInstigator->GetPawn() > DamageCauser->GetInstigator() > DamageCauser
+	if (EventInstigator && EventInstigator->GetPawn())
 	{
-		LastDamagingInstigator = DamageCauser;
+		LastDamagingInstigator = EventInstigator->GetPawn();
+	}
+	else if (DamageCauser)
+	{
+		APawn* InstigatorPawn = DamageCauser->GetInstigator();
+		LastDamagingInstigator = InstigatorPawn ? InstigatorPawn : DamageCauser;
 	}
 	return Super::TakeDamage(Damage, DamageEvent, EventInstigator, DamageCauser);
 }

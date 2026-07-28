@@ -228,12 +228,23 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 			}
 		}
 		const int32 ActualUpkeep = FMath::Min(TickTreasury.CostsPerTick, AvailableForUpkeep);
+		const bool bUpkeepFullyPaid = (ActualUpkeep >= TickTreasury.CostsPerTick);
 		if (ActualUpkeep > 0)
 		{
-			const FString Reason = ActualUpkeep == TickTreasury.CostsPerTick
+			const FString Reason = bUpkeepFullyPaid
 				? TEXT("Guard upkeep")
 				: FString::Printf(TEXT("Guard upkeep (partial: %d/%d)"), ActualUpkeep, TickTreasury.CostsPerTick);
 			TryDebitFactionMembers(Faction, ActualUpkeep, Reason, ETerritoryTransactionType::GuardUpkeep);
+		}
+
+		// Upkeep consequence: when a faction can't pay full upkeep, broadcast deficit
+		// so territories can suspend reserve respawns or reduce desired guard count.
+		if (!bUpkeepFullyPaid && TickTreasury.CostsPerTick > 0)
+		{
+			const int32 Deficit = TickTreasury.CostsPerTick - ActualUpkeep;
+			UE_LOG(LogTerritory, Warning, TEXT("[EconomyTick] %s has upkeep deficit: paid %d/%d (short %d) — reserves may be suspended"),
+				*Faction.ToString(), ActualUpkeep, TickTreasury.CostsPerTick, Deficit);
+			OnFactionUpkeepDeficit.Broadcast(Faction, Deficit);
 		}
 
 		const int32 NetIncome = TickTreasury.IncomePerTick - TickTreasury.CostsPerTick;
@@ -380,6 +391,9 @@ int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
 
 	if (Policy == ETerritoryIncomePayoutPolicy::FactionLeader)
 	{
+		// FactionLeader is a placeholder — resolves to first iterated online member,
+		// not a true leader. Use CapturingPlayer or SharedNarrativeAccount instead.
+		UE_LOG(LogTerritory, Warning, TEXT("CreditCurrencyToFaction: FactionLeader policy is placeholder — pays first member, not actual leader"));
 		return CreditCurrency(Members[0], PositiveAmount, Faction, Reason, Type) ? PositiveAmount : 0;
 	}
 

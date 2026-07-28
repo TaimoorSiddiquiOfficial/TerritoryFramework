@@ -154,8 +154,13 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 
 void ATerritoryGuardSpawnPoint::InitializeReserves()
 {
-	CurrentReserveCount = ReserveSlots;
-	PendingReserveSpawns = 0;
+	// Only reset if not already loaded from save (SaveGame values are non-zero or save loaded)
+	// If CurrentReserveCount is 0 and no save loaded, initialize to full
+	if (CurrentReserveCount <= 0 && SavedActiveGuardCount <= 0)
+	{
+		CurrentReserveCount = ReserveSlots;
+	}
+	PendingReserveSpawns = FMath::Max(PendingReserveSpawns, 0);
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(ReserveSpawnTimer);
@@ -214,6 +219,7 @@ void ATerritoryGuardSpawnPoint::RegisterSpawnedGuard(ATerritoryGuardCharacter* G
 {
 	if (!HasAuthority() || !Guard) return;
 	ActiveGuards.AddUnique(Guard);
+	SavedActiveGuardCount = ActiveGuards.Num();
 }
 
 void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)

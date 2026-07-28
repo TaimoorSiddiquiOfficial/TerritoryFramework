@@ -117,6 +117,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
 	FOnTransactionRecorded OnTransactionRecorded;
 
+	/** Broadcast when a faction cannot pay full guard upkeep. Deficit = required - paid. */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFactionUpkeepDeficit, FGameplayTag, Faction, int32, Deficit);
+	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
+	FOnFactionUpkeepDeficit OnFactionUpkeepDeficit;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Territory|Economy")
 	float TickIntervalSeconds = 300.f;
 

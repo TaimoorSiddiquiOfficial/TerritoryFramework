@@ -28,8 +28,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void AddCaptureProgress(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction, float ProgressDelta);
 
+	/** Force-sets ownership. Returns true if the territory actually changed to the requested state. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
-	void ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
+	bool ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
 
 	/** Register an actor as an attacker for a faction. Identity-based — duplicates ignored. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")

@@ -7,6 +7,9 @@
 
 class ATerritoryVolume;
 class ATerritoryGuardCharacter;
+class UNPCDefinition;
+class UNPCActivityConfiguration;
+class UTriggerSet;
 
 /**
  * A single waypoint in a guard's patrol route.
@@ -150,6 +153,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
 		meta=(ClampMin="0", UIMin="0", UIMax="100", DisplayName="Priority"))
 	int32 Priority = 50;
+
+	// ─── Narrative Overrides ───
+
+	/** Optional NPC definition override for guards spawned from this point. Uses territory default if null. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Narrative",
+		meta=(DisplayName="NPC Definition Override"))
+	TObjectPtr<UNPCDefinition> NPCDefinitionOverride;
+
+	/** Optional activity configuration override. Uses territory default if null. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Narrative",
+		meta=(DisplayName="Activity Configuration Override"))
+	TObjectPtr<UNPCActivityConfiguration> ActivityConfigurationOverride;
+
+	/** Optional trigger set overrides. Uses territory default if empty. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Narrative",
+		meta=(DisplayName="Trigger Set Overrides"))
+	TArray<TSoftObjectPtr<UTriggerSet>> TriggerSetOverrides;
 
 	// ─── Slot Queries (BlueprintPure) ───
 
@@ -307,11 +327,17 @@ protected:
 	UPROPERTY()
 	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> ActiveGuards;
 
-	UPROPERTY()
+	/** Saved across sessions so depleted reserves don't reset to full on load. */
+	UPROPERTY(SaveGame)
 	int32 CurrentReserveCount = 0;
 
-	UPROPERTY()
+	/** Saved across sessions so pending reserve requests survive save/load. */
+	UPROPERTY(SaveGame)
 	int32 PendingReserveSpawns = 0;
+
+	/** Count of active guards at save time — restored on load to avoid recounting. */
+	UPROPERTY(SaveGame)
+	int32 SavedActiveGuardCount = 0;
 
 	FTimerHandle ReserveSpawnTimer;
 
