@@ -13,6 +13,7 @@ class UShapeComponent;
 class UNPCDefinition;
 class ATerritoryGuardCharacter;
 class ATerritoryGuardSpawnPoint;
+class ATerritoryPatrolPoint;
 class UTerritoryNavigationMarkerComponent;
 
 /**
