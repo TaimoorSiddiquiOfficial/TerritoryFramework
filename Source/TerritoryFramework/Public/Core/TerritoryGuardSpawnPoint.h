@@ -107,7 +107,7 @@ public:
 		meta=(ClampMin="0.1", UIMin="0.1", UIMax="30.0", Units="s", DisplayName="Reserve Spawn Delay"))
 	float ReserveSpawnDelay = 3.f;
 
-	/** Retry interval while no concealed, collision-free spawn location is available. */
+	/** Retry interval while no camera-frustum-avoided, collision-free spawn location is available. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
 		meta=(ClampMin="0.1", UIMin="0.1", UIMax="30.0", Units="s", DisplayName="Reserve Retry Interval"))
 	float ReserveSpawnRetryInterval = 2.f;
@@ -216,7 +216,7 @@ public:
 
 	/**
 	 * Deploys one reserve into a free active slot. This is the manual path when
-	 * Auto Spawn Reserves is disabled and intentionally does not require concealment.
+	 * Auto Spawn Reserves is disabled and intentionally does not require camera-frustum avoidance.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|GuardSpawn|Reserve",
 		meta=(DisplayName="Spawn Reserve Guard"))
@@ -369,7 +369,8 @@ private:
 	void QueueReserveSpawn();
 	void ScheduleAutomaticReserveSpawn(float Delay);
 	void TryAutomaticReserveSpawn();
-	bool TrySpawnReserveGuard(bool bRequireConcealment);
+	/** @param bRequireCameraAvoidance If true, spawn location must be outside player camera frustums. */
+	bool TrySpawnReserveGuard(bool bRequireCameraAvoidance);
 	void CancelPendingReserveSpawns();
 	void ResetReserveState();
 };

@@ -542,5 +542,24 @@ void ATerritoryWorldState::ApplyPendingCaptureSummaries()
 	if (PendingCaptureSummaries.Num() == 0 && World)
 	{
 		World->GetTimerManager().ClearTimer(PendingCaptureRetryTimerHandle);
+		PendingCaptureRetryCount = 0;
+	}
+	else if (World)
+	{
+		// P2-14: Bounded retries — stop after MaxPendingCaptureRetries and log unresolved
+		++PendingCaptureRetryCount;
+		if (PendingCaptureRetryCount >= MaxPendingCaptureRetries)
+		{
+			World->GetTimerManager().ClearTimer(PendingCaptureRetryTimerHandle);
+			for (const FReplicatedCaptureSummary& Orphan : PendingCaptureSummaries)
+			{
+				UE_LOG(LogTerritory, Warning, TEXT("[WorldState] Unresolved capture summary after %d retries — tag=%s guid=%s (territory may have been removed/renamed)"),
+					MaxPendingCaptureRetries,
+					*Orphan.TerritoryTag.ToString(),
+					*Orphan.TerritoryGUID.ToString());
+			}
+			PendingCaptureSummaries.Empty();
+			PendingCaptureRetryCount = 0;
+		}
 	}
 }

@@ -206,8 +206,13 @@ ATerritoryDistrictManagementPoint::ATerritoryDistrictManagementPoint(const FObje
 void ATerritoryDistrictManagementPoint::BeginPlay()
 {
 	Super::BeginPlay();
-	if (HasAuthority())
+	// P1-18: Only the first management point registers for PostLogin and creates components.
+	// FindOrCreateForPlayerController prevents duplicate components, but we avoid redundant
+	// PostLogin registrations (N management points × M players = N×M redundant work).
+	static TWeakObjectPtr<ATerritoryDistrictManagementPoint> RegisteredPoint;
+	if (HasAuthority() && !RegisteredPoint.IsValid())
 	{
+		RegisteredPoint = this;
 		FGameModeEvents::OnGameModePostLoginEvent().AddUObject(
 			this, &ATerritoryDistrictManagementPoint::OnPlayerPostLogin);
 		if (UWorld* World = GetWorld())
@@ -238,6 +243,8 @@ void ATerritoryDistrictManagementPoint::EndPlay(const EEndPlayReason::Type EndPl
 	if (HasAuthority())
 	{
 		FGameModeEvents::OnGameModePostLoginEvent().RemoveAll(this);
+		// Static TWeakObjectPtr in BeginPlay auto-invalidates when this actor is destroyed,
+		// so the next PIE session will naturally re-register a new management point.
 	}
 	Super::EndPlay(EndPlayReason);
 }

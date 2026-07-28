@@ -807,7 +807,9 @@ bool ATerritoryProperty::CanUpgrade() const
 int32 ATerritoryProperty::GetUpgradeCost() const
 {
 	if (!CanUpgrade()) return 0;
-	return UpgradeCostPerLevel * (UpgradeLevel + 1);
+	// P2-12: Calculate in int64 to prevent overflow, then clamp to int32 range
+	const int64 Cost = static_cast<int64>(UpgradeCostPerLevel) * static_cast<int64>(UpgradeLevel + 1);
+	return static_cast<int32>(FMath::Clamp(Cost, 0LL, static_cast<int64>(TNumericLimits<int32>::Max())));
 }
 
 int32 ATerritoryProperty::GetEffectiveIncome() const

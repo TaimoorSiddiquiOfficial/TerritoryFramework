@@ -17,10 +17,8 @@ void UTerritoryHUDWidget::NativeConstruct()
 
 void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 {
-	if (!GetBoundTerritory())
-	{
-		BindToTerritoryAtPlayer();
-	}
+	// Always re-query territory at player location — handles player moving between territories
+	BindToTerritoryAtPlayer();
 
 	Super::RefreshTerritoryDisplay();
 

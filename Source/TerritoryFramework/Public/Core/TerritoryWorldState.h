@@ -292,4 +292,10 @@ private:
 	TArray<FReplicatedCaptureSummary> PendingCaptureSummaries;
 
 	FTimerHandle PendingCaptureRetryTimerHandle;
+
+	/** Number of retry attempts for pending capture summaries. Bounded to prevent infinite retries. */
+	int32 PendingCaptureRetryCount = 0;
+
+	/** Maximum retry attempts before giving up and logging unresolved summaries. */
+	static constexpr int32 MaxPendingCaptureRetries = 30;
 };

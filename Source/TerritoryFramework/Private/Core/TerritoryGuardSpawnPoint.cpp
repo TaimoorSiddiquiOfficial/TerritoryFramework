@@ -321,7 +321,7 @@ bool ATerritoryGuardSpawnPoint::SpawnReserveGuard()
 	return TrySpawnReserveGuard(false);
 }
 
-bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireConcealment)
+bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidance)
 {
 	if (!HasAuthority() || CurrentReserveCount <= 0 || !HasAvailableSlot())
 	{
@@ -330,7 +330,7 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireConcealment)
 
 	ATerritoryVolume* Territory = GetOwningTerritory();
 	if (!Territory || Territory->GetTerritoryState() != ETerritoryState::Claimed
-		|| !Territory->TrySpawnSingleGuard(this, bRequireConcealment))
+		|| !Territory->TrySpawnSingleGuard(this, bRequireCameraAvoidance))
 	{
 		return false;
 	}

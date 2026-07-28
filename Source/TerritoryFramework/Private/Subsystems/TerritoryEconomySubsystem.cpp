@@ -36,6 +36,7 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 			// Also bind delegates for territories already registered before this subsystem initialized.
 			// Without this, if EconomySubsystem initializes after RegistrySubsystem, we'd miss
 			// territories that registered between RegistrySubsystem::Initialize and now.
+			// P2-09: Mark factions dirty instead of recalculating per-territory — batched on first economy tick.
 			for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
 			{
 				if (Territory)
@@ -44,7 +45,7 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 					FGameplayTag Owner = Territory->GetOwningFaction();
 					if (Owner.IsValid())
 					{
-						RecalculateIncome(Owner);
+						MarkFactionDirty(Owner);
 					}
 				}
 			}

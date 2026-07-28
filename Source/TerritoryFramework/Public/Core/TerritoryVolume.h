@@ -525,8 +525,8 @@ protected:
 	float GuardSpawnRadius = 500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
-		meta=(AllowedClasses="/Script/TerritoryFramework.TerritoryGuardSpawnPoint", DisplayName="Guard Spawn Points"))
-	TArray<TObjectPtr<AActor>> GuardSpawnPoints;
+		meta=(DisplayName="Guard Spawn Points"))
+	TArray<TObjectPtr<ATerritoryGuardSpawnPoint>> GuardSpawnPoints;
 
 	// ─── Guard Events ───
 
