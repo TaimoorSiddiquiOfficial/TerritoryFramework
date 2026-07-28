@@ -128,45 +128,15 @@ public:
 	 * The patrol route this spawn point's guards walk through.
 	 * Empty = guard stands idle at spawn. Minimum useful route: 2 nodes.
 	 * Guarded access via GetPatrolRoute() or HasPatrolRoute().
-	 *
-	 * These struct nodes are merged with any assigned PatrolPoint actors (below).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Patrol",
 		meta=(DisplayName="Patrol Route"))
 	TArray<FTerritoryPatrolNode> PatrolRoute;
 
-	/**
-	 * Other spawn points used as patrol waypoints for guards spawned here.
-	 * Each referenced spawn point's world transform IS the patrol node — no manual entry needed.
-	 * Merged with struct PatrolRoute above (PatrolPoints come first, in array order).
-	 * Guards spawned here patrol through these points and return to this spawn point as "home".
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Patrol",
-		meta=(DisplayName="Patrol Points"))
-	TArray<TObjectPtr<ATerritoryGuardSpawnPoint>> PatrolPoints;
-
 	/** If true, the patrol loop returns to Node0 after the last node. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Patrol",
 		meta=(DisplayName="Loop Patrol"))
 	bool bLoopPatrol = true;
-
-	/**
-	 * Guard character class override. If set, guards spawned from this point use this
-	 * class instead of the territory's resolved NPCDefinition class.
-	 * Must be a child of ATerritoryGuardCharacter. Leave None to use territory default.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
-		meta=(DisplayName="Guard Class Override", AllowAbstract="false"))
-	TObjectPtr<UClass> GuardClassOverride;
-
-	/**
-	 * NPC Definition override. If set, this spawn point uses its own definition
-	 * (abilities, appearance, etc.) instead of the territory's resolved definition.
-	 * Leave None to use territory default.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
-		meta=(DisplayName="NPC Definition Override"))
-	TObjectPtr<class UNPCDefinition> NPCDefinitionOverride;
 
 	/**
 	 * Faction override. If invalid, the guard uses the territory owner's faction.
@@ -318,16 +288,6 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Get Owning Territory"))
 	ATerritoryVolume* GetOwningTerritory() const;
-
-	/** Returns the effective guard class: GuardClassOverride if set, otherwise nullptr (caller falls back to territory default). */
-	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
-		meta=(DisplayName="Get Guard Class Override"))
-	UClass* GetGuardClassOverride() const { return GuardClassOverride; }
-
-	/** Returns the effective NPC definition: NPCDefinitionOverride if set, otherwise nullptr (caller falls back to territory default). */
-	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
-		meta=(DisplayName="Get NPC Definition Override"))
-	UNPCDefinition* GetNPCDefinitionOverride() const { return NPCDefinitionOverride; }
 
 protected:
 	virtual void BeginPlay() override;

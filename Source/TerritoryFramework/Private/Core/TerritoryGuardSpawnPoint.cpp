@@ -358,25 +358,7 @@ void ATerritoryGuardSpawnPoint::ResetReserveState()
 
 TArray<FTerritoryPatrolNode> ATerritoryGuardSpawnPoint::GetPatrolRoute() const
 {
-	TArray<FTerritoryPatrolNode> Merged;
-
-	// Other spawn points used as patrol waypoints — each actor's transform becomes a node
-	for (const TObjectPtr<ATerritoryGuardSpawnPoint>& Ptr : PatrolPoints)
-	{
-		if (ATerritoryGuardSpawnPoint* SP = Ptr.Get())
-		{
-			FTerritoryPatrolNode Node;
-			Node.Location = SP->GetActorLocation();
-			Node.Rotation = SP->GetActorRotation();
-			Node.WaitTime = 2.f;
-			Merged.Add(Node);
-		}
-	}
-
-	// Append struct-based patrol route nodes
-	Merged.Append(PatrolRoute);
-
-	return Merged;
+	return PatrolRoute;
 }
 
 ATerritoryVolume* ATerritoryGuardSpawnPoint::GetOwningTerritory() const

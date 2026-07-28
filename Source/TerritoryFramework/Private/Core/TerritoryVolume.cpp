@@ -14,7 +14,6 @@
 #include "Engine/World.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
-#include "Core/TerritoryPatrolPoint.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "AI/NPCDefinition.h"
 #include "AI/NarrativeCharacterSubsystem.h"
@@ -1107,10 +1106,10 @@ void ATerritoryVolume::SpawnGuards()
 	bSpawningGuards = true;
 	struct FScopeGuard { bool& Ref; ~FScopeGuard() { Ref = false; } } GuardRef{bSpawningGuards};
 
-	// Resolve default definition for current owner faction (spawn points may override per-point)
+	// Resolve definition for current owner faction
 	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
-	UNPCDefinition* DefaultDef = ResolveGuardDefinition(OwnerFaction);
-	if (!DefaultDef) return;
+	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
+	if (!EffectiveDef) return;
 
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -1118,11 +1117,11 @@ void ATerritoryVolume::SpawnGuards()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugGuards();
 
-	// Default NPC class from territory definition (spawn points may override per-point)
-	UClass* DefaultNPCClass = DefaultDef->NPCClassPath.LoadSynchronous();
-	if (!DefaultNPCClass || !DefaultNPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
+	// Determine NPC class from resolved definition — sync load
+	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
+	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
-		DefaultNPCClass = ATerritoryGuardCharacter::StaticClass();
+		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 
 	if (!OwnerFaction.IsValid())
@@ -1201,19 +1200,10 @@ void ATerritoryVolume::SpawnGuards()
 			SpawnTransform = FTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), GetRandomSpawnPoint());
 		}
 
-		// Resolve per-spawn-point overrides (class + definition)
-		UNPCDefinition* EffectiveDef = DefaultDef;
-		UClass* EffectiveNPCClass = DefaultNPCClass;
-		if (UsedSP)
-		{
-			if (UsedSP->GetNPCDefinitionOverride()) EffectiveDef = UsedSP->GetNPCDefinitionOverride();
-			if (UsedSP->GetGuardClassOverride()) EffectiveNPCClass = UsedSP->GetGuardClassOverride();
-		}
-
 		// Deferred spawning for save system GUID safety
 		ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
 			UGameplayStatics::BeginDeferredActorSpawnFromClass(
-				this, EffectiveNPCClass, SpawnTransform,
+				this, NPCClass, SpawnTransform,
 				ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn,
 				this));
 
@@ -1300,16 +1290,10 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		return false;
 	}
 
-	// Resolve NPC definition — spawn point override takes priority
-	UNPCDefinition* EffectiveDef = SpawnPoint && SpawnPoint->GetNPCDefinitionOverride()
-		? SpawnPoint->GetNPCDefinitionOverride()
-		: ResolveGuardDefinition(OwnerFaction);
+	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
 	if (!EffectiveDef) return false;
 
-	// Resolve NPC class — spawn point class override takes priority
-	UClass* NPCClass = SpawnPoint && SpawnPoint->GetGuardClassOverride()
-		? SpawnPoint->GetGuardClassOverride()
-		: EffectiveDef->NPCClassPath.LoadSynchronous();
+	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
@@ -1781,7 +1765,6 @@ TArray<ATerritoryGuardSpawnPoint*> ATerritoryVolume::GetGuardSpawnPoints() const
 	}
 	return Result;
 }
-
 
 UTerritoryNavigationMarkerComponent* ATerritoryVolume::GetMapMarkerComponent() const
 {
