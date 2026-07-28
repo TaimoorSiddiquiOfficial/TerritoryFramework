@@ -139,7 +139,7 @@ TArray<ATerritoryVolume*> FTerritorySpatialIndex::QueryBox(const FBox& QueryBox)
 	return Result;
 }
 
-int32 FTerritorySpatialIndex::GetEntryCount() const
+int32 FTerritorySpatialIndex::GetTotalCellEntries() const
 {
 	int32 Count = 0;
 	for (const auto& Pair : Cells)

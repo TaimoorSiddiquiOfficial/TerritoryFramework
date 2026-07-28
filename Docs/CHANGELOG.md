@@ -189,7 +189,7 @@ Deep re-audit sessions 2 and 3. All P0, P1, P2 findings resolved plus NarrativeP
 
 ### Hierarchy (P1/P2)
 - **Empty district protected**: `AllPropertiesOwnedBy` returns false for empty property list (was trivially true)
-- **Contested clears owner**: `SetTerritoryState(Contested)` clears `OwningFaction` so `IsOwnedByFaction` and `GetOwningFaction` agree
+- **Contested clears owner**: `SetTerritoryState(Contested)` clears `OwningFaction` so `IsOwnedByFaction` and `GetOwningFaction` agree. *Correction (v0.2.3): SetTerritoryState(Contested) now preserves the incumbent owner until capture completes.*
 - **Cascade single event**: `CascadeCaptureToProperties` no longer double-fires `OnPropertyCaptured`
 - **Property upgrade reset**: Uses `SetUpgradeLevel(0)` instead of direct assignment (triggers income recalc)
 

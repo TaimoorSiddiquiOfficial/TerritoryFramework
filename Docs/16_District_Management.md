@@ -120,7 +120,10 @@ The district POI marker (`UTerritoryDistrictPOIMarker`) auto-refreshes when the 
 
 | Function | Type | Purpose |
 |---|---|---|
-| `RequestPurchaseGuards(Point, Count)` | BlueprintCallable | Initiate guard purchase |
+| `RequestPurchaseGuards(Point, Count)` | BlueprintCallable | Initiate guard purchase via management point |
+| `RequestPurchaseGuardsForDistrict(District, Count)` | BlueprintCallable | Initiate guard purchase directly on a district |
+| `RequestRemoveGuards(Point, Count)` | BlueprintCallable | Initiate guard removal via management point |
+| `RequestRemoveGuardsForDistrict(District, Count)` | BlueprintCallable | Initiate guard removal directly on a district |
 | `OnGuardPurchaseResult` | BlueprintAssignable | Result delegate: (Territory, Success, Message, RequestId) |
 
 ## Lifecycle Notes

@@ -175,9 +175,14 @@ void UTerritoryCombatDirector::UnbindControllerDeath(ANarrativeNPCController* Co
 
 	if (const TWeakObjectPtr<UNarrativeAbilitySystemComponent>* FoundASC = BoundControllerASCs.Find(Controller))
 	{
-		if (FoundASC->IsValid())
+		if (UNarrativeAbilitySystemComponent* ASC = FoundASC->Get())
 		{
-			FoundASC->Get()->OnDied.RemoveDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
+			ASC->OnDied.RemoveDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
+		}
+		else
+		{
+			UE_LOG(LogTerritory, Warning, TEXT("UnbindControllerDeath: ASC already destroyed for %s, delegate may be dangling"),
+				*GetNameSafe(Controller));
 		}
 	}
 	BoundControllerASCs.Remove(Controller);

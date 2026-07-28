@@ -15,7 +15,6 @@
 ATerritoryGuardSpawnPoint::ATerritoryGuardSpawnPoint()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	bReplicates = true;
 
 	// Visual root — billboard in editor, invisible in game
 	UBillboardComponent* Billboard = CreateDefaultSubobject<UBillboardComponent>(TEXT("Billboard"));
@@ -359,7 +358,25 @@ void ATerritoryGuardSpawnPoint::ResetReserveState()
 
 TArray<FTerritoryPatrolNode> ATerritoryGuardSpawnPoint::GetPatrolRoute() const
 {
-	return PatrolRoute;
+	TArray<FTerritoryPatrolNode> Merged;
+
+	// Other spawn points used as patrol waypoints — each actor's transform becomes a node
+	for (const TObjectPtr<ATerritoryGuardSpawnPoint>& Ptr : PatrolPoints)
+	{
+		if (ATerritoryGuardSpawnPoint* SP = Ptr.Get())
+		{
+			FTerritoryPatrolNode Node;
+			Node.Location = SP->GetActorLocation();
+			Node.Rotation = SP->GetActorRotation();
+			Node.WaitTime = 2.f;
+			Merged.Add(Node);
+		}
+	}
+
+	// Append struct-based patrol route nodes
+	Merged.Append(PatrolRoute);
+
+	return Merged;
 }
 
 ATerritoryVolume* ATerritoryGuardSpawnPoint::GetOwningTerritory() const

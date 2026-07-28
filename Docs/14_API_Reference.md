@@ -50,6 +50,13 @@ Static Blueprint-callable helpers. Use these as the primary entry point from Blu
 | GetAllFactions | WorldContextObject | TArray<FGameplayTag> | All factions known to subsystems |
 | GetTerritoryAtLocation | WorldContextObject, Location (FVector) | ATerritoryVolume* | Find territory at point |
 | GetTerritoryByTag | WorldContextObject, Tag (GameplayTag) | ATerritoryVolume* | Find territory by tag |
+| GetDistrictsForCity | WorldContextObject, City (ATerritoryCity*) | TArray<ATerritoryDistrict*> | All districts belonging to a city |
+| GetPropertiesForDistrict | WorldContextObject, District (ATerritoryDistrict*) | TArray<ATerritoryProperty*> | All properties within a district |
+| GetOwningDistrict | WorldContextObject, Property (ATerritoryProperty*) | ATerritoryDistrict* | Parent district for a property |
+| GetOwningCity | WorldContextObject, Territory (ATerritoryVolume*) | ATerritoryCity* | Parent city for a territory |
+| GetAllCities | WorldContextObject | TArray<ATerritoryCity*> | All registered cities |
+| GetAllDistricts | WorldContextObject | TArray<ATerritoryDistrict*> | All registered districts |
+| GetDistrictByTag | WorldContextObject, Tag (GameplayTag) | ATerritoryDistrict* | Find district by tag |
 | IsSameFaction | A (GameplayTag), B (GameplayTag) | bool | Check if two factions are the same |
 
 ### Functions (BlueprintCallable)
@@ -119,6 +126,14 @@ Base territory actor. Place in level to define a capturable zone.
 | GetSpawnedGuardCount | int32 | Territory\|Guards |
 | HasGuardsAlive | bool | Territory\|Guards |
 | GetGuardSpawnPoints | Array<Actor*> | Territory\|Guards |
+| GetDesiredGuardCount | int32 | Territory\|Guards |
+| GetMaxGuardCount | int32 | Territory\|Guards |
+| GetEffectiveIncome | int32 | Territory\|Economy |
+| IsFullyCaptured | bool | Territory |
+| GetCapturingFaction | GameplayTag | Territory |
+| IsLocked | bool | Territory |
+| GetUpgradeLevel | int32 | Territory |
+| GetContestingFaction | GameplayTag | Territory |
 | GetRegisteredDefenders | Array<Actor*> | Territory |
 
 `IsOwnedByFaction(Faction)` requires both a matching owner tag and `TerritoryState == Claimed`. It returns false while Contested, Locked, or Unclaimed even when `GetOwningFaction()` still reports the incumbent.
@@ -134,6 +149,9 @@ Base territory actor. Place in level to define a capturable zone.
 | UnregisterDefender | Defender (Actor*) | Remove from defender list |
 | SpawnGuards | — | Spawn all guards per config |
 | DespawnGuards | — | Despawn all guards |
+| TryPurchaseGuards | RequestingPawn, Count | Purchase additional guards (debits treasury) |
+| TryRemoveGuards | Count | Remove guards from territory |
+| SetUpgradeLevel | Level (int32) | Force-set property upgrade level |
 
 ### BlueprintNativeEvent
 
@@ -318,6 +336,10 @@ Actor placed in level to define guard spawn locations and patrol routes.
 | GetPatrolWaitTimes | TArray<float> | Wait times parallel to GetPatrolRouteAsTransforms |
 | HasPatrolRoute | bool | Whether PatrolRoute contains at least two nodes |
 | GetSpawnTransform | FTransform | Actor transform with its location projected to NavMesh when possible |
+| HasPendingReserveSpawn | bool | Whether a reserve guard spawn is pending |
+| SpawnReserveGuard | void | Manually trigger a reserve guard spawn |
+| GetLoopPatrol | bool | Whether patrol route loops back to start |
+| IsLoopingPatrol | bool | Whether patrol is currently looping |
 
 ### Death Handling
 
@@ -423,6 +445,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | GetContestingFaction(Territory) | GameplayTag |
 | HasAttackBudget(Territory, Faction) | bool | Checks CombatDirector slot availability |
 | GetActiveAttackers(Territory, Faction) | int32 | Count of identity-based attackers |
+| CanFactionCaptureTerritory(Territory, Faction) | bool | Whether faction can initiate capture |
 
 ### Delegates
 
@@ -466,7 +489,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 | Property | Type | Default | Notes |
 |---|---|---|---|
-| MaxTransactionHistory | int32 | 500 | Per-faction cap |
+| MaxTransactionHistory | int32 | 500 | Global ledger cap |
 
 ### Delegates
 
@@ -565,10 +588,10 @@ CombatDirector has no `BlueprintAssignable` delegates. Slot lifecycle events are
 | Property | Type | Default |
 |---|---|---|
 | bAutoCreateMarker | bool | true |
-| MarkerDisplayText | FText | (from territory) |
-| bShowOwnerColor | bool | true |
-| bShowContestedFlash | bool | true |
-| bShowOutline | bool | true |
+| MarkerDisplayText | FText | (from territory) *(inherited from UNavigationMarkerComponent)* |
+| bShowOwnerColor | bool | true *(inherited from UNavigationMarkerComponent)* |
+| bShowContestedFlash | bool | true *(inherited from UNavigationMarkerComponent)* |
+| bShowOutline | bool | true *(inherited from UNavigationMarkerComponent)* |
 
 ### Functions
 

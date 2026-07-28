@@ -13,6 +13,7 @@ class UShapeComponent;
 class UNPCDefinition;
 class ATerritoryGuardCharacter;
 class ATerritoryGuardSpawnPoint;
+class ATerritoryPatrolPoint;
 class UTerritoryNavigationMarkerComponent;
 
 /**
@@ -516,6 +517,7 @@ private:
 	bool bTransitionInProgress = false;
 	bool bApplyingDerivedOwnership = false;
 	bool bBypassTransitionConditions = false;
+	bool bSpawningGuards = false;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);

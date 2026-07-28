@@ -60,6 +60,8 @@ TerritoryFramework uses Narrative Pro's faction tags (`Narrative.Factions.*`).
 | Class | Parent | Trigger |
 |---|---|---|
 | `UTerritoryCaptureEvent` | `UNarrativeEvent` | Fired by quest/dialogue to capture territory |
+| `UTerritoryLockEvent` | `UNarrativeEvent` | Fired by quest/dialogue to lock a territory |
+| `UTerritoryUnlockEvent` | `UNarrativeEvent` | Fired by quest/dialogue to unlock a territory |
 
 ### Dialogue Conditions
 
