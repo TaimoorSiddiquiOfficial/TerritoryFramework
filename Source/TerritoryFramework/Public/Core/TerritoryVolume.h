@@ -11,6 +11,8 @@
 class UNarrativeAbilitySystemComponent;
 class UShapeComponent;
 class UNPCDefinition;
+class UNPCActivityConfiguration;
+class UTriggerSet;
 class ATerritoryGuardCharacter;
 class ATerritoryGuardSpawnPoint;
 class UTerritoryNavigationMarkerComponent;
@@ -371,6 +373,16 @@ public:
 
 	void CheckBoundsForReindex();
 	UNPCDefinition* ResolveGuardDefinition(const FGameplayTag& Faction) const;
+
+	/** P0-07: Unified narrative override resolver — inline > GuardPostDefinition > territory default. */
+	void ResolveSpawnPointNarrativeOverrides(
+		class ATerritoryGuardSpawnPoint* SpawnPoint,
+		UNPCDefinition*& OutDef,
+		UClass*& OutNPCClass,
+		UNPCActivityConfiguration*& OutActivityConfig,
+		const TArray<TSoftObjectPtr<UTriggerSet>>*& OutTriggerSets,
+		const TArray<TSoftObjectPtr<UTriggerSet>>& DefaultTriggerSets);
+
 	void ReconcileGuardsAfterLoad();
 
 protected:

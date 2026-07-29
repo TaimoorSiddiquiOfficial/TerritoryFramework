@@ -1203,6 +1203,64 @@ UNPCDefinition* ATerritoryVolume::ResolveGuardDefinition(const FGameplayTag& Fac
 	return GuardNPCDefinition;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// P0-07: Unified narrative override resolver
+// Cascade: SP inline override → GuardPostDefinition → territory default
+// ═══════════════════════════════════════════════════════════════════════════════
+void ATerritoryVolume::ResolveSpawnPointNarrativeOverrides(
+	ATerritoryGuardSpawnPoint* SpawnPoint,
+	UNPCDefinition*& OutDef,
+	UClass*& OutNPCClass,
+	UNPCActivityConfiguration*& OutActivityConfig,
+	const TArray<TSoftObjectPtr<UTriggerSet>>*& OutTriggerSets,
+	const TArray<TSoftObjectPtr<UTriggerSet>>& DefaultTriggerSets)
+{
+	OutActivityConfig = nullptr;
+	OutTriggerSets = &DefaultTriggerSets;
+
+	if (!SpawnPoint) return;
+
+	// NPCDefinition cascade: inline > GuardPostDefinition > (territory default already in OutDef)
+	if (SpawnPoint->NPCDefinitionOverride)
+	{
+		OutDef = SpawnPoint->NPCDefinitionOverride;
+	}
+	else if (SpawnPoint->GuardPostDefinition && SpawnPoint->GuardPostDefinition->NPCDefinition)
+	{
+		OutDef = SpawnPoint->GuardPostDefinition->NPCDefinition;
+	}
+
+	// NPCClass from resolved definition
+	if (OutDef)
+	{
+		UClass* ResolvedClass = OutDef->NPCClassPath.LoadSynchronous();
+		if (ResolvedClass && ResolvedClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
+		{
+			OutNPCClass = ResolvedClass;
+		}
+	}
+
+	// ActivityConfig cascade: inline > GuardPostDefinition > nullptr
+	if (SpawnPoint->ActivityConfigurationOverride)
+	{
+		OutActivityConfig = SpawnPoint->ActivityConfigurationOverride;
+	}
+	else if (SpawnPoint->GuardPostDefinition && SpawnPoint->GuardPostDefinition->ActivityConfiguration)
+	{
+		OutActivityConfig = SpawnPoint->GuardPostDefinition->ActivityConfiguration;
+	}
+
+	// TriggerSets cascade: inline > GuardPostDefinition > empty default
+	if (!SpawnPoint->TriggerSetOverrides.IsEmpty())
+	{
+		OutTriggerSets = &SpawnPoint->TriggerSetOverrides;
+	}
+	else if (SpawnPoint->GuardPostDefinition && !SpawnPoint->GuardPostDefinition->TriggerSetOverrides.IsEmpty())
+	{
+		OutTriggerSets = &SpawnPoint->GuardPostDefinition->TriggerSetOverrides;
+	}
+}
+
 void ATerritoryVolume::SpawnGuards()
 {
 	if (!HasAuthority()) return;
@@ -1214,19 +1272,11 @@ void ATerritoryVolume::SpawnGuards()
 	bSpawningGuards = true;
 	struct FScopeGuard { bool& Ref; ~FScopeGuard() { Ref = false; } } GuardRef{bSpawningGuards};
 
-	// Resolve definition: GuardPostDefinition > FactionGuardDefinitions > GuardNPCDefinition
+	// P0-07: Resolve territory-level default definition.
+	// Per-guard overrides (inline > GuardPostDefinition) are resolved inside the loop.
 	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
-	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
-	// Check if any spawn point has a GuardPostDefinition with an NPC override
-	for (ATerritoryGuardSpawnPoint* SP : GetGuardSpawnPoints())
-	{
-		if (SP && SP->GuardPostDefinition && SP->GuardPostDefinition->NPCDefinition)
-		{
-			EffectiveDef = SP->GuardPostDefinition->NPCDefinition;
-			break;
-		}
-	}
-	if (!EffectiveDef) return;
+	UNPCDefinition* DefaultDef = ResolveGuardDefinition(OwnerFaction);
+	if (!DefaultDef) return;
 
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -1234,14 +1284,14 @@ void ATerritoryVolume::SpawnGuards()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugGuards();
 
-	// Determine NPC class from resolved definition — sync load
-	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
-	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
+	// Default NPC class from territory definition
+	UClass* DefaultNPCClass = DefaultDef->NPCClassPath.LoadSynchronous();
+	if (!DefaultNPCClass || !DefaultNPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("SpawnGuards: NPCDefinition '%s' class '%s' is not a TerritoryGuardCharacter — falling back to base class"),
-			*GetNameSafe(EffectiveDef),
-			NPCClass ? *NPCClass->GetName() : TEXT("null"));
-		NPCClass = ATerritoryGuardCharacter::StaticClass();
+			*GetNameSafe(DefaultDef),
+			DefaultNPCClass ? *DefaultNPCClass->GetName() : TEXT("null"));
+		DefaultNPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
 
 	if (!OwnerFaction.IsValid())
@@ -1321,10 +1371,17 @@ void ATerritoryVolume::SpawnGuards()
 			SpawnTransform = FTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), GetRandomSpawnPoint());
 		}
 
+		// P0-07: Resolve per-guard narrative overrides using unified cascade
+		UNPCDefinition* EffectiveDef = DefaultDef;
+		UClass* EffectiveNPCClass = DefaultNPCClass;
+		UNPCActivityConfiguration* ActivityConfig = nullptr;
+		const TArray<TSoftObjectPtr<UTriggerSet>>* TriggerSetsPtr = &DefaultTriggerSets;
+		ResolveSpawnPointNarrativeOverrides(UsedSP, EffectiveDef, EffectiveNPCClass, ActivityConfig, TriggerSetsPtr, DefaultTriggerSets);
+
 		// Deferred spawning for save system GUID safety
 		ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
 			UGameplayStatics::BeginDeferredActorSpawnFromClass(
-				this, NPCClass, SpawnTransform,
+				this, EffectiveNPCClass, SpawnTransform,
 				ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn,
 				this));
 
@@ -1342,20 +1399,6 @@ void ATerritoryVolume::SpawnGuards()
 		if (UsedSP && UsedSP->FactionOverride.IsValid())
 		{
 			EffectiveFaction = UsedSP->FactionOverride;
-		}
-
-		// Resolve narrative overrides: spawn point inline > GuardPostDefinition > territory defaults
-		UNPCActivityConfiguration* ActivityConfig = nullptr;
-		const TArray<TSoftObjectPtr<UTriggerSet>>* TriggerSetsPtr = &DefaultTriggerSets;
-		if (UsedSP)
-		{
-			ActivityConfig = UsedSP->ActivityConfigurationOverride;
-			if (!ActivityConfig && UsedSP->GuardPostDefinition)
-				ActivityConfig = UsedSP->GuardPostDefinition->ActivityConfiguration;
-			if (!UsedSP->TriggerSetOverrides.IsEmpty())
-				TriggerSetsPtr = &UsedSP->TriggerSetOverrides;
-			else if (UsedSP->GuardPostDefinition && !UsedSP->GuardPostDefinition->TriggerSetOverrides.IsEmpty())
-				TriggerSetsPtr = &UsedSP->GuardPostDefinition->TriggerSetOverrides;
 		}
 
 		// Single deterministic entrypoint — fills ALL SpawnInfo fields
@@ -1425,19 +1468,20 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		return false;
 	}
 
+	// P0-07: Resolve territory-level default, then per-SP overrides via unified cascade
 	UNPCDefinition* EffectiveDef = ResolveGuardDefinition(OwnerFaction);
 	if (!EffectiveDef) return false;
 
 	const TArray<TSoftObjectPtr<UTriggerSet>> DefaultSingleTriggerSets;
-
 	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
 	{
-		UE_LOG(LogTerritory, Warning, TEXT("TrySpawnSingleGuard: NPCDefinition '%s' class '%s' is not a TerritoryGuardCharacter — falling back to base class"),
-			*GetNameSafe(EffectiveDef),
-			NPCClass ? *NPCClass->GetName() : TEXT("null"));
 		NPCClass = ATerritoryGuardCharacter::StaticClass();
 	}
+
+	UNPCActivityConfiguration* SingleActivityConfig = nullptr;
+	const TArray<TSoftObjectPtr<UTriggerSet>>* SingleTriggerSetsPtr = &DefaultSingleTriggerSets;
+	ResolveSpawnPointNarrativeOverrides(SpawnPoint, EffectiveDef, NPCClass, SingleActivityConfig, SingleTriggerSetsPtr, DefaultSingleTriggerSets);
 
 	FTransform SpawnTransform;
 	if (!FindGuardSpawnTransform(SpawnPoint, NPCClass, bRequireConcealment, SpawnTransform))
@@ -1462,11 +1506,7 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		EffectiveFaction = SpawnPoint->FactionOverride;
 	}
 
-	// Resolve narrative overrides from spawn point if available
-	UNPCActivityConfiguration* SingleActivityConfig = SpawnPoint ? SpawnPoint->ActivityConfigurationOverride : nullptr;
-	const TArray<TSoftObjectPtr<UTriggerSet>>& SingleTriggerSets = SpawnPoint && !SpawnPoint->TriggerSetOverrides.IsEmpty()
-		? SpawnPoint->TriggerSetOverrides
-		: DefaultSingleTriggerSets;
+	// P0-07: Narrative overrides already resolved by unified cascade above
 
 	// Single deterministic entrypoint — fills ALL SpawnInfo fields
 	Guard->ConfigureTerritorySpawn(
@@ -1477,7 +1517,7 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		SpawnTransform,
 		SpawnPoint ? SpawnPoint->GetFName() : NAME_None,
 		SingleActivityConfig,
-		SingleTriggerSets);
+		*SingleTriggerSetsPtr);
 
 	// Set territory AI context before FinishSpawningActor
 	Guard->OwningTerritory = this;

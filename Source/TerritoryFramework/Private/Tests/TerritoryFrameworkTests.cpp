@@ -2866,6 +2866,45 @@ bool FTFBehavior_LiveReplicationSubscriptions::RunTest(const FString& Parameters
 	return true;
 }
 
+// ─── P0-07: Unified guard spawn config cascade ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_GuardSpawnConfigParity,
+	"TerritoryFramework.Contract.GuardSpawnConfigParity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_GuardSpawnConfigParity::RunTest(const FString& Parameters)
+{
+	const UClass* VolumeClass = ATerritoryVolume::StaticClass();
+
+	// Verify the unified cascade is available (helper is C++ only, not UFUNCTION —
+	// verify via its consumers: both SpawnGuards and TrySpawnSingleGuard exist)
+	TestTrue(TEXT("SpawnGuards exists (uses unified cascade)"),
+		TFTestUtils::HasFunction(VolumeClass, TEXT("SpawnGuards")));
+	TestTrue(TEXT("TrySpawnSingleGuard exists (uses unified cascade)"),
+		TFTestUtils::HasFunction(VolumeClass, TEXT("TrySpawnSingleGuard")));
+
+	// Verify GuardSpawnPoint has all three override channels
+	const UClass* SPClass = ATerritoryGuardSpawnPoint::StaticClass();
+	TestTrue(TEXT("SP has NPCDefinitionOverride"),
+		TFTestUtils::HasProperty(SPClass, TEXT("NPCDefinitionOverride")));
+	TestTrue(TEXT("SP has ActivityConfigurationOverride"),
+		TFTestUtils::HasProperty(SPClass, TEXT("ActivityConfigurationOverride")));
+	TestTrue(TEXT("SP has TriggerSetOverrides"),
+		TFTestUtils::HasProperty(SPClass, TEXT("TriggerSetOverrides")));
+	TestTrue(TEXT("SP has GuardPostDefinition"),
+		TFTestUtils::HasProperty(SPClass, TEXT("GuardPostDefinition")));
+
+	// Verify GuardPostDefinition data asset has all three config channels
+	const UClass* PostClass = UTerritoryGuardPostDefinition::StaticClass();
+	TestTrue(TEXT("Post has NPCDefinition"),
+		TFTestUtils::HasProperty(PostClass, TEXT("NPCDefinition")));
+	TestTrue(TEXT("Post has ActivityConfiguration"),
+		TFTestUtils::HasProperty(PostClass, TEXT("ActivityConfiguration")));
+	TestTrue(TEXT("Post has TriggerSetOverrides"),
+		TFTestUtils::HasProperty(PostClass, TEXT("TriggerSetOverrides")));
+
+	return true;
+}
+
 // ─── P0-06: GuardSpawnPoint implements INarrativeSavableActor ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_GuardSpawnPointSaveGame,
 	"TerritoryFramework.Contract.GuardSpawnPointSaveGame",
