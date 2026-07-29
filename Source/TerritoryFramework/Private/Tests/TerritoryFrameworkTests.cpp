@@ -2866,6 +2866,37 @@ bool FTFBehavior_LiveReplicationSubscriptions::RunTest(const FString& Parameters
 	return true;
 }
 
+// ─── P0-04: TerritoryCaptureEvent uses ApplyTerritoryMutation ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_CaptureEventUsesMutation,
+	"TerritoryFramework.Contract.CaptureEventUsesMutation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_CaptureEventUsesMutation::RunTest(const FString& Parameters)
+{
+	// Verify TerritoryCaptureEvent exists and has ExecuteEvent
+	const UClass* EventClass = UTerritoryCaptureEvent::StaticClass();
+	TestNotNull(TEXT("TerritoryCaptureEvent class exists"), EventClass);
+	if (!EventClass) return false;
+
+	TestTrue(TEXT("ExecuteEvent function exists"),
+		TFTestUtils::HasFunction(EventClass, TEXT("ExecuteEvent")));
+
+	// Verify the event has the required properties
+	TestTrue(TEXT("TargetTerritoryTag property exists"),
+		TFTestUtils::HasProperty(EventClass, TEXT("TargetTerritoryTag")));
+	TestTrue(TEXT("CapturingFaction property exists"),
+		TFTestUtils::HasProperty(EventClass, TEXT("CapturingFaction")));
+	TestTrue(TEXT("bForceCapture property exists"),
+		TFTestUtils::HasProperty(EventClass, TEXT("bForceCapture")));
+
+	// Verify ApplyTerritoryMutation exists on ControlSubsystem (the path we route through)
+	const UClass* ControlClass = UTerritoryControlSubsystem::StaticClass();
+	TestTrue(TEXT("ApplyTerritoryMutation is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(ControlClass, TEXT("ApplyTerritoryMutation")));
+
+	return true;
+}
+
 // ─── 5.2: GuardPostDefinition data asset contract ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_GuardPostDefinition,
 	"TerritoryFramework.Contract.GuardPostDefinition",

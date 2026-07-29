@@ -4,6 +4,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Core/TerritoryMutationTypes.h"
 #include "Tales/TalesComponent.h"
 #include "Engine/World.h"
 
@@ -37,41 +38,50 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 		return;
 	}
 
-	// Route through the control subsystem — centralized capture authority
+	// P0-04: Route through ApplyTerritoryMutation — the atomic mutation API.
+	// The old path (AttemptCapture + AddCaptureProgress) failed because Narrative
+	// events never call RegisterAttacker, so CompleteCapture rejected with
+	// ActiveAttackers <= 0 and reset the capture.
 	UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
-	if (Control)
+	if (!Control)
 	{
-		if (bForceCapture)
-		{
-			// Forced: bypass all rules (quest/dialogue override)
-			Control->ForceCapture(Territory, CapturingFaction);
-		}
-		else
-		{
-			// Normal: respect all capture rules, then complete capture
-			const ECaptureResult Result = Control->AttemptCapture(Territory, CapturingFaction);
-			if (Result == ECaptureResult::Success)
-			{
-				// AttemptCapture initiated contested state — add full progress to complete.
-				// AddCaptureProgress routes through AttemptCapture validation internally.
-				Control->AddCaptureProgress(Territory, CapturingFaction, 1.f);
-			}
-			else
-			{
-				UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureEvent] AttemptCapture failed: %s, result=%d"),
-					*TargetTerritoryTag.ToString(), static_cast<int32>(Result));
-				return;
-			}
-		}
-	}
-	else
-	{
-		// Never bypass the centralized capture authority when the subsystem is
-		// unavailable; direct ownership would violate hierarchy and lock rules.
 		UE_LOG(LogTerritory, Warning,
 			TEXT("[TalesCaptureEvent] ControlSubsystem unavailable for %s — capture skipped"),
 			*TargetTerritoryTag.ToString());
 		return;
+	}
+
+	FTerritoryMutationRequest Request;
+	Request.Territory = Territory;
+	Request.NewOwner = CapturingFaction;
+	Request.DesiredState = ETerritoryState::Claimed;
+	Request.bClearCaptureState = true;
+	Request.bReconcileGuards = true;
+
+	// Build transition context with TalesComponent for Narrative event/condition evaluation
+	Request.TransitionContext.Instigator = Target;
+	Request.TransitionContext.TargetPawn = Target;
+	Request.TransitionContext.PlayerController = Controller;
+	Request.TransitionContext.TalesComponent = NarrativeComponent;
+	Request.TransitionContext.RequestingFaction = CapturingFaction;
+
+	if (bForceCapture)
+	{
+		// Forced: bypass diplomacy/lock checks via ForceCapture (backward compat)
+		Control->ForceCapture(Territory, CapturingFaction);
+	}
+	else
+	{
+		// Normal: respect diplomacy, locks, and all validation rules
+		const FTerritoryMutationResponse Response = Control->ApplyTerritoryMutation(Request);
+		if (Response.Result != ETerritoryMutationResult::Success)
+		{
+			UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureEvent] Mutation rejected for %s: %s (result=%d)"),
+				*TargetTerritoryTag.ToString(),
+				*Response.Explanation.ToString(),
+				static_cast<int32>(Response.Result));
+			return;
+		}
 	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
