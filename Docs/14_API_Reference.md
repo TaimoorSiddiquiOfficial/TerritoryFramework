@@ -152,6 +152,7 @@ Base territory actor. Place in level to define a capturable zone.
 | TryPurchaseGuards | RequestingPawn, Count | Purchase additional guards (debits treasury) |
 | TryRemoveGuards | Count | Remove guards from territory |
 | SetUpgradeLevel | Level (int32) | Force-set property upgrade level |
+| CommitOwnershipData | NewData (FTerritoryOwnershipData), TransitionContext (FTerritoryTransitionContext) | bool | Atomically commits new ownership data — single struct write, one ordered event bundle (guards → state events → ownership delegates → state delegates). Returns false if no-op. |
 
 ### BlueprintNativeEvent
 
@@ -435,6 +436,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | AddCaptureProgress | Territory, Faction, Delta | void |
 | RegisterAttacker | Territory, Actor, Faction | void; invalid, duplicate, blocked, or over-budget registrations are ignored |
 | UnregisterAttacker | Territory, Actor, Faction | void |
+| ApplyTerritoryMutation | FTerritoryMutationRequest | FTerritoryMutationResponse | Atomic territory mutation — validates authority, diplomacy, invariants, commits ownership atomically, fires one ordered event bundle |
 
 ### Queries (BlueprintPure)
 
@@ -905,6 +907,45 @@ BlueprintNativeEvent — implement to receive territory events.
 | MaxConcurrentAttackers | int32 | ✅ | ✅ |
 | PeriodicIncome | int32 | ✅ | ✅ |
 | GuardCost | int32 | ✅ | ✅ |
+
+### FTerritoryTransitionContext
+
+Explicit context for territory state transitions. Replaces `GetFirstPlayerController()` with the actual instigator. Pass to `CommitOwnershipData` and `ApplyTerritoryMutation`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| Instigator | AActor* | The actor that initiated the transition |
+| TargetPawn | APawn* | The pawn involved in condition/event evaluation |
+| PlayerController | APlayerController* | The player controller (null on dedicated servers) |
+| TalesComponent | UTalesComponent* | Tales component for quest/dialogue event context |
+| RequestingFaction | FGameplayTag | The faction requesting or causing the transition |
+
+### FTerritoryMutationRequest
+
+Request struct for `ApplyTerritoryMutation`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| Territory | ATerritoryVolume* | null | The territory to mutate |
+| NewOwner | FGameplayTag | Invalid | Faction that should own the territory |
+| DesiredState | ETerritoryState | Claimed | Target state after mutation |
+| bClearCaptureState | bool | true | Clear contesting faction and progress |
+| bReconcileGuards | bool | true | Despawn/respawn guards after commit |
+| TransitionContext | FTerritoryTransitionContext | Default | Context for Narrative conditions/events |
+
+### FTerritoryMutationResponse
+
+Response struct from `ApplyTerritoryMutation`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| Result | ETerritoryMutationResult | Success, Rejected_Authority, Rejected_NullTerritory, Rejected_AggregateOnly, Rejected_InvalidFaction, Rejected_DiplomacyBlocked, Rejected_Locked, Rejected_StateUnchanged, Failed_FinalStateMismatch |
+| Territory | ATerritoryVolume* | The territory that was mutated |
+| OldOwner | FGameplayTag | Owner before mutation |
+| NewOwner | FGameplayTag | Owner after mutation |
+| OldState | ETerritoryState | State before mutation |
+| NewState | ETerritoryState | State after mutation |
+| Explanation | FText | Human-readable explanation |
 
 ### FTerritoryTransaction
 

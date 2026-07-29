@@ -49,9 +49,10 @@ void UTerritoryRegistrySubsystem::PollBoundsChanges()
 	// for GetTerritoryAtLocation queries, which is correct for static level-placed territories.
 	// For runtime-moved/resized territories, call UpdateTerritoryBounds explicitly on the server
 	// and replicate the new transform via the volume's ReplicatedMovement or a custom RepNotify.
-	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
+	// P2-N06: RegisteredTerritories uses weak refs — null check handles stale entries
+	for (const TWeakObjectPtr<ATerritoryVolume>& TerritoryPtr : RegisteredTerritories)
 	{
-		if (Territory)
+		if (ATerritoryVolume* Territory = TerritoryPtr.Get())
 		{
 			Territory->CheckBoundsForReindex();
 		}
@@ -242,11 +243,14 @@ TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetTerritoriesInBox(const
 TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetTerritoriesOwnedByFaction(const FGameplayTag& Faction) const
 {
 	TArray<ATerritoryVolume*> Result;
-	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
+	for (const TWeakObjectPtr<ATerritoryVolume>& TerritoryPtr : RegisteredTerritories)
 	{
-		if (Territory && Territory->IsOwnedByFaction(Faction))
+		if (ATerritoryVolume* Territory = TerritoryPtr.Get())
 		{
-			Result.Add(Territory);
+			if (Territory->IsOwnedByFaction(Faction))
+			{
+				Result.Add(Territory);
+			}
 		}
 	}
 	return Result;
@@ -255,9 +259,9 @@ TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetTerritoriesOwnedByFact
 TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetAllTerritories() const
 {
 	TArray<ATerritoryVolume*> Result;
-	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
+	for (const TWeakObjectPtr<ATerritoryVolume>& TerritoryPtr : RegisteredTerritories)
 	{
-		if (Territory)
+		if (ATerritoryVolume* Territory = TerritoryPtr.Get())
 		{
 			Result.Add(Territory);
 		}
@@ -273,11 +277,14 @@ int32 UTerritoryRegistrySubsystem::GetTerritoryCount() const
 int32 UTerritoryRegistrySubsystem::GetTerritoryCountForFaction(const FGameplayTag& Faction) const
 {
 	int32 Count = 0;
-	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
+	for (const TWeakObjectPtr<ATerritoryVolume>& TerritoryPtr : RegisteredTerritories)
 	{
-		if (Territory && Territory->IsOwnedByFaction(Faction))
+		if (ATerritoryVolume* Territory = TerritoryPtr.Get())
 		{
-			++Count;
+			if (Territory->IsOwnedByFaction(Faction))
+			{
+				++Count;
+			}
 		}
 	}
 	return Count;
@@ -288,14 +295,15 @@ TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetChildTerritories(const
 	TArray<ATerritoryVolume*> Result;
 	if (!ParentTag.IsValid()) return Result;
 
-	for (const TObjectPtr<ATerritoryVolume>& Territory : RegisteredTerritories)
+	for (const TWeakObjectPtr<ATerritoryVolume>& TerritoryPtr : RegisteredTerritories)
 	{
-		if (!Territory) continue;
-
-		FGameplayTag ParentRef = Territory->GetParentTerritoryTag();
-		if (ParentRef == ParentTag)
+		if (ATerritoryVolume* Territory = TerritoryPtr.Get())
 		{
-			Result.Add(Territory);
+			FGameplayTag ParentRef = Territory->GetParentTerritoryTag();
+			if (ParentRef == ParentTag)
+			{
+				Result.Add(Territory);
+			}
 		}
 	}
 	return Result;

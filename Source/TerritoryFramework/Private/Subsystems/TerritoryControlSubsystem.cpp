@@ -698,6 +698,20 @@ void UTerritoryControlSubsystem::RestoreCaptureState(
 		return;
 	}
 
+	// P2-N05: Validate diplomacy before restoring — if peace was signed between save and load,
+	// don't resume capture for an allied faction
+	if (!CanFactionCaptureTerritory(Territory, ContestingFaction))
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("[RestoreCaptureState] %s: diplomacy blocks %s — skipping restore"),
+			*Territory->GetTerritoryTag().ToString(), *ContestingFaction.ToString());
+		Territory->SetContestingFaction(FGameplayTag());
+		Territory->SetControlProgress(0.f);
+		Territory->SetTerritoryState(Territory->GetOwningFaction().IsValid()
+			? ETerritoryState::Claimed
+			: ETerritoryState::Unclaimed);
+		return;
+	}
+
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
 	const float ClampedProgress = FMath::Clamp(ControlProgress, 0.f, 1.f);
 	State.CaptureProgressByFaction.Add(ContestingFaction, ClampedProgress);

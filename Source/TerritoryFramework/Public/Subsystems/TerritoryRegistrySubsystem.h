@@ -137,8 +137,9 @@ public:
 	FOnTerritoryRegistered OnTerritoryUnregistered;
 
 private:
+	// P2-N06: Weak references to avoid blocking World Partition unload
 	UPROPERTY()
-	TArray<TObjectPtr<ATerritoryVolume>> RegisteredTerritories;
+	TArray<TWeakObjectPtr<ATerritoryVolume>> RegisteredTerritories;
 
 	TMap<FGameplayTag, TWeakObjectPtr<ATerritoryVolume>> TagToTerritoryMap;
 	TMap<FGuid, TWeakObjectPtr<ATerritoryVolume>> GUIDToTerritoryMap;

@@ -2,6 +2,7 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryGuardPostDefinition.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Engine/World.h"
 #include "Components/BillboardComponent.h"
@@ -230,7 +231,10 @@ void ATerritoryGuardSpawnPoint::InitializeReserves()
 	}
 	else if (CurrentReserveCount <= 0 && SavedActiveGuardCount <= 0)
 	{
-		CurrentReserveCount = ReserveSlots;
+		// P2-N15: Read GuardPostDefinition overrides if assigned
+		const int32 EffectiveReserveSlots = (GuardPostDefinition && GuardPostDefinition->ReserveSlots > 0)
+			? GuardPostDefinition->ReserveSlots : ReserveSlots;
+		CurrentReserveCount = EffectiveReserveSlots;
 	}
 	PendingReserveSpawns = FMath::Max(PendingReserveSpawns, 0);
 	if (UWorld* World = GetWorld())
@@ -346,7 +350,10 @@ void ATerritoryGuardSpawnPoint::QueueReserveSpawn()
 
 	if (bAutoSpawnReserves)
 	{
-		ScheduleAutomaticReserveSpawn(ReserveSpawnDelay);
+		// P2-N15: GuardPostDefinition override for ReserveSpawnDelay
+		const float EffectiveDelay = (GuardPostDefinition && GuardPostDefinition->ReserveSpawnDelay > 0.f)
+			? GuardPostDefinition->ReserveSpawnDelay : ReserveSpawnDelay;
+		ScheduleAutomaticReserveSpawn(EffectiveDelay);
 	}
 }
 

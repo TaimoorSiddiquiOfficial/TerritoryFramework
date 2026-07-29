@@ -399,10 +399,10 @@ int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
 
 	if (Policy == ETerritoryIncomePayoutPolicy::FactionLeader)
 	{
-		// FactionLeader is a placeholder — resolves to first iterated online member,
-		// not a true leader. Use CapturingPlayer or SharedNarrativeAccount instead.
-		UE_LOG(LogTerritory, Warning, TEXT("CreditCurrencyToFaction: FactionLeader policy is placeholder — pays first member, not actual leader"));
-		return CreditCurrency(Members[0], PositiveAmount, Faction, Reason, Type) ? PositiveAmount : 0;
+		// P2-N11: FactionLeader is a placeholder — no actual leader resolution exists.
+		// Fall through to equal split to avoid dropping income.
+		UE_LOG(LogTerritory, Warning, TEXT("CreditCurrencyToFaction: FactionLeader fallback — distributing equally among %d members"),
+			Members.Num());
 	}
 
 	const int32 BaseShare = PositiveAmount / Members.Num();
