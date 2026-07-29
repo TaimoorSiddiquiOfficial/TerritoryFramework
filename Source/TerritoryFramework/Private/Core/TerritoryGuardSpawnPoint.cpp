@@ -306,7 +306,7 @@ void ATerritoryGuardSpawnPoint::RegisterSpawnedGuard(ATerritoryGuardCharacter* G
 	SavedActiveGuardCount = ActiveGuards.Num();
 }
 
-void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)
+void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard, EGuardRemovalReason Reason)
 {
 	if (!HasAuthority() || !Guard) return;
 
@@ -332,11 +332,14 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)
 	// (e.g. delta calculations in economy tick) see the correct active count.
 	SavedActiveGuardCount = ActiveGuards.Num();
 
-	if (CurrentReserveCount > PendingReserveSpawns)
+	// P1-04: Only queue reserve replacement when guard was killed.
+	// Manual removal, ownership change, load reconcile, and territory destruction
+	// should not consume reserves.
+	if (Reason == EGuardRemovalReason::Killed && CurrentReserveCount > PendingReserveSpawns)
 	{
 		QueueReserveSpawn();
 	}
-	else
+	else if (Reason == EGuardRemovalReason::Killed)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: guard died, no uncommitted reserves"),
 			*GetName());

@@ -27,6 +27,25 @@ enum class EReserveOwnershipPolicy : uint8
 };
 
 /**
+ * P1-04: Reason a guard was removed from a spawn point.
+ * Only Killed queues a reserve replacement. Manual removal does not.
+ */
+UENUM(BlueprintType)
+enum class EGuardRemovalReason : uint8
+{
+	/** Guard was killed in combat — queues reserve if available */
+	Killed,
+	/** Guard was manually removed by player/system — no reserve queued */
+	ManualRemoval,
+	/** Ownership changed — reserves handled by ownership policy */
+	OwnerChanged,
+	/** Load reconciliation — despawning old-owner guards */
+	LoadReconcile,
+	/** Territory destroyed — cleanup only */
+	TerritoryDestroyed
+};
+
+/**
  * A single waypoint in a guard's patrol route.
  *
  * Use these in pairs/triples inside ATerritoryGuardSpawnPoint's PatrolRoute array.
@@ -290,7 +309,7 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Unregister Guard"))
-	void UnregisterGuard(ATerritoryGuardCharacter* Guard);
+	void UnregisterGuard(ATerritoryGuardCharacter* Guard, EGuardRemovalReason Reason = EGuardRemovalReason::Killed);
 
 	// ─── Patrol Route Access ───
 

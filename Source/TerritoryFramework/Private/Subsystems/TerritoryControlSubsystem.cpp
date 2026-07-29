@@ -326,49 +326,30 @@ void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory,
 
 bool UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !NewOwner.IsValid()) return false;
-	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
-	{
-		UE_LOG(LogTerritory, Warning, TEXT("[ForceCapture] %s is AggregateOnly; direct capture rejected"),
-			*Territory->GetTerritoryTag().ToString());
-		return false;
-	}
+	// P1-06: Route through ApplyTerritoryMutation with all bypass flags set.
+	// This ensures single authoritative path, proper event ordering, and structured response.
+	FTerritoryMutationRequest Request;
+	Request.Territory = Territory;
+	Request.NewOwner = NewOwner;
+	Request.DesiredState = ETerritoryState::Claimed;
+	Request.bBypassConditions = true;
+	Request.bBypassDiplomacy = true;
 
-	FGameplayTag OldOwner = Territory->GetOwningFaction();
-	const ETerritoryState OldState = Territory->GetTerritoryState();
+	const FTerritoryMutationResponse Response = ApplyTerritoryMutation(Request);
 
-	// P1-03: If already in the requested state, return false — nothing changed
-	if (OldOwner == NewOwner && OldState == ETerritoryState::Claimed)
-	{
-		return false;
-	}
-
-	TerritoryCaptureState.Remove(Territory);
-	Territory->SetContestingFaction(FGameplayTag());
-	Territory->ForceSetOwningFaction(NewOwner);
-
-	// SetOwningFaction already sets State=Claimed, but if the territory was
-	// Contested before force capture, ensure the state is explicitly Claimed.
-	if (Territory->GetTerritoryState() != ETerritoryState::Claimed)
-	{
-		Territory->ForceSetTerritoryState(ETerritoryState::Claimed);
-	}
-	Territory->SetControlProgress(1.f);
-
-	// Verify final state matches requested
-	if (Territory->GetOwningFaction() == NewOwner && Territory->GetTerritoryState() == ETerritoryState::Claimed)
+	if (Response.Result == ETerritoryMutationResult::Success)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[ForceCapture] %s captured by %s (was %s)"),
 			*Territory->GetTerritoryTag().ToString(),
-			*NewOwner.ToString(), *OldOwner.ToString());
-		OnTerritoryControlChanged.Broadcast(Territory, OldOwner, NewOwner);
+			*NewOwner.ToString(), *Response.OldOwner.ToString());
 		return true;
 	}
 
-	UE_LOG(LogTerritory, Error, TEXT("[ForceCapture] %s failed to reach requested state (owner=%s, state=%s)"),
+	// P1-06: Log structured failure instead of silently returning false
+	UE_LOG(LogTerritory, Warning, TEXT("[ForceCapture] %s rejected: %s (result=%d)"),
 		*Territory->GetTerritoryTag().ToString(),
-		*Territory->GetOwningFaction().ToString(),
-		*UEnum::GetValueAsString(Territory->GetTerritoryState()));
+		*Response.Explanation.ToString(),
+		static_cast<int32>(Response.Result));
 	return false;
 }
 
@@ -421,7 +402,8 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 
 	if (Request.NewOwner.IsValid() && Response.OldOwner.IsValid() && Request.NewOwner != Response.OldOwner)
 	{
-		if (!CanFactionCaptureTerritory(Territory, Request.NewOwner))
+		// P1-06: Skip diplomacy check when bypass is requested (ForceCapture)
+		if (!Request.bBypassDiplomacy && !CanFactionCaptureTerritory(Territory, Request.NewOwner))
 		{
 			Response.Result = ETerritoryMutationResult::Rejected_DiplomacyBlocked;
 			Response.Explanation = FText::Format(
