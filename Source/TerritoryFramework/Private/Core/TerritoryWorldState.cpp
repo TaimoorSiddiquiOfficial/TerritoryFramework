@@ -546,9 +546,10 @@ void ATerritoryWorldState::OnEconomyTickLive(FGameplayTag Faction, FTerritoryEco
 	{
 		if (Entry.Faction == Faction)
 		{
+			// P0-N2: Treasury field intentionally excluded — matches ExportPersistentState
+			// which documents "Treasury no longer used". Faction wealth lives in member inventories.
 			Entry.IncomePerTick = Snapshot.TotalIncome;
 			Entry.CostsPerTick = Snapshot.TotalCosts;
-			Entry.Treasury = Snapshot.Treasury;
 			Entry.TerritoryCount = Snapshot.TerritoryCount;
 			return;
 		}
@@ -559,7 +560,6 @@ void ATerritoryWorldState::OnEconomyTickLive(FGameplayTag Faction, FTerritoryEco
 	NewEntry.Faction = Faction;
 	NewEntry.IncomePerTick = Snapshot.TotalIncome;
 	NewEntry.CostsPerTick = Snapshot.TotalCosts;
-	NewEntry.Treasury = Snapshot.Treasury;
 	NewEntry.TerritoryCount = Snapshot.TerritoryCount;
 	ReplicatedTreasuries.Add(NewEntry);
 }
@@ -578,6 +578,15 @@ void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction
 	RepTx.Reason = Transaction.Reason;
 	RepTx.SourceTerritory = Transaction.SourceTerritory;
 	ReplicatedTransactions.Add(RepTx);
+
+	// P0-N1: Cap replicated transactions to prevent unbounded array growth.
+	// Mirrors EconomySubsystem's MaxTransactionHistory cap.
+	const int32 MaxReplicatedTransactions = 200;
+	const int32 Excess = ReplicatedTransactions.Num() - MaxReplicatedTransactions;
+	if (Excess > 0)
+	{
+		ReplicatedTransactions.RemoveAt(0, Excess);
+	}
 }
 
 void ATerritoryWorldState::OnDiplomacyChangedLive(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)
