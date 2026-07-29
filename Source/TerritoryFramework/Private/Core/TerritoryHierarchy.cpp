@@ -25,7 +25,8 @@ void ATerritoryCity::BeginPlay()
 	if (Registry)
 	{
 		// Bind to registry for late-registered districts (World Partition, streaming)
-		Registry->OnTerritoryRegistered.AddDynamic(this, &ATerritoryCity::OnTerritoryRegistered);
+		// P1-N06: AddUniqueDynamic prevents duplicate bindings on PIE restart
+		Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryCity::OnTerritoryRegistered);
 
 		// Bind to currently registered districts
 		TArray<ATerritoryVolume*> Districts = Registry->GetChildTerritories(GetTerritoryTag());
@@ -64,6 +65,18 @@ void ATerritoryCity::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWa
 	{
 		BindToDistrict(Territory);
 	}
+}
+
+void ATerritoryCity::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryCity::OnTerritoryRegistered);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 TArray<ATerritoryVolume*> ATerritoryCity::GetDistricts() const
@@ -371,9 +384,11 @@ void ATerritoryCity::CascadeCaptureToProperties(ATerritoryVolume* District, FGam
 				*PropOwner.ToString(), *NewOwner.ToString(),
 				*District->GetTerritoryTag().ToString());
 
-			// SetOwningFaction → OnOwnershipChanged → OnPropertyCaptured + delegate broadcast.
+			// ForceSetOwningFaction bypasses state conditions (Contested, etc.) so the
+			// hierarchy cascade can enforce unanimous ownership regardless of current property state.
+			// OnOwnershipChanged → OnPropertyCaptured + delegate broadcast still fires.
 			// Do NOT call OnPropertyCaptured/Broadcast again here — that would fire events twice.
-			Property->SetOwningFaction(NewOwner);
+			Property->ForceSetOwningFaction(NewOwner);
 		}
 	}
 }
@@ -395,7 +410,8 @@ void ATerritoryDistrict::BeginPlay()
 	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (Registry)
 	{
-		Registry->OnTerritoryRegistered.AddDynamic(this, &ATerritoryDistrict::OnTerritoryRegistered);
+		// P1-N06: AddUniqueDynamic prevents duplicate bindings
+		Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryDistrict::OnTerritoryRegistered);
 
 		TArray<ATerritoryVolume*> Properties = Registry->GetChildTerritories(GetTerritoryTag());
 		for (ATerritoryVolume* Property : Properties)
@@ -428,6 +444,18 @@ void ATerritoryDistrict::BindToProperty(ATerritoryVolume* Property)
 {
 	if (!Property) return;
 	Property->OnTerritoryOwnershipChanged.AddUniqueDynamic(this, &ATerritoryDistrict::OnPropertyControlChanged);
+}
+
+void ATerritoryDistrict::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryDistrict::OnTerritoryRegistered);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
 }
 
 void ATerritoryDistrict::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
@@ -656,7 +684,8 @@ void ATerritoryProperty::BeginPlay()
 	// Bind to registry for late-registered districts (World Partition, streaming)
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{
-		Registry->OnTerritoryRegistered.AddDynamic(this, &ATerritoryProperty::OnTerritoryRegistered);
+		// P1-N06: AddUniqueDynamic prevents duplicate bindings
+		Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryProperty::OnTerritoryRegistered);
 
 		// Also scan the registry for already-registered districts
 		if (GetParentTerritoryTag().IsValid())

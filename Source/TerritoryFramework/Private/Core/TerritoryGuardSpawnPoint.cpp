@@ -316,6 +316,9 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard)
 	{
 		return !Ptr.IsValid() || Ptr.Get() == Guard;
 	});
+	// P1-N11: Keep saved count in sync after removal so subsequent queries
+	// (e.g. delta calculations in economy tick) see the correct active count.
+	SavedActiveGuardCount = ActiveGuards.Num();
 
 	if (CurrentReserveCount > PendingReserveSpawns)
 	{
@@ -407,6 +410,9 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 		return false;
 	}
 
+	// P1-N12: Decrement happens AFTER TrySpawnSingleGuard returns true, so the
+	// reserve is only consumed when a guard is actually placed in the world.
+	// This order is correct — do not move the decrement above the spawn call.
 	--CurrentReserveCount;
 	PendingReserveSpawns = FMath::Max(0, PendingReserveSpawns - 1);
 	UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: deployed one reserve (%d remaining, %d pending)"),

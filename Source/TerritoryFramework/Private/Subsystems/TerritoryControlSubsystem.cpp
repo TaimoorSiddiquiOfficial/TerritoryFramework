@@ -866,6 +866,11 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 	if (Territory->GetOwningFaction() != NewOwner
 		|| Territory->GetTerritoryState() != ETerritoryState::Claimed)
 	{
+		// P1-N04: SetOwningFaction was silently rejected (state conditions failed).
+		// Clean up capture state to prevent infinite retry loop.
+		ResetCapture(Territory);
+		UE_LOG(LogTerritory, Warning, TEXT("[Capture] %s: SetOwningFaction rejected for %s — capture state cleaned"),
+			*Territory->GetTerritoryTag().ToString(), *NewOwner.ToString());
 		return;
 	}
 	TerritoryCaptureState.Remove(Territory);

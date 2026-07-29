@@ -26,6 +26,7 @@ public:
 	ATerritoryCity();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	TArray<ATerritoryVolume*> GetDistricts() const;
@@ -106,6 +107,7 @@ public:
 	ATerritoryDistrict();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	ATerritoryCity* GetOwningCity() const;

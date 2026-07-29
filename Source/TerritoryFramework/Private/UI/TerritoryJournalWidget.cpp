@@ -285,8 +285,22 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 		RefreshFilterOptions();
 	}
 
-	DistrictList->ClearChildren();
+	// P1-N16: Skip full tree rebuild if district count and filter state are unchanged.
+	// A simple hash of the three filter strings is sufficient — this is a UI optimization,
+	// not a correctness-critical path. Delegate-driven invalidation (HandleTerritoryRegistered)
+	// resets LastDistrictCount to force a rebuild when the underlying data actually changes.
 	TArray<ATerritoryDistrict*> Districts = UTerritoryBlueprintLibrary::GetAllDistricts(this);
+	const int32 CurrentFilterHash = GetTypeHash(SelectedOwnerFilter)
+		^ (GetTypeHash(SelectedStateFilter) * 31)
+		^ (GetTypeHash(SearchFilter) * 97);
+	if (LastDistrictCount == Districts.Num() && LastFilterHash == CurrentFilterHash)
+	{
+		return;
+	}
+	LastDistrictCount = Districts.Num();
+	LastFilterHash = CurrentFilterHash;
+
+	DistrictList->ClearChildren();
 	Districts.Sort([](const ATerritoryDistrict& A, const ATerritoryDistrict& B)
 	{
 		return A.GetTerritoryDisplayName().ToString() < B.GetTerritoryDisplayName().ToString();
@@ -460,6 +474,8 @@ void UTerritoryJournalWidget::HandleTerritoryRegistered(ATerritoryVolume* Territ
 {
 	(void)Territory;
 	(void)bWasUnregistered;
+	// P1-N16: Invalidate district-count cache so the next RefreshDistrictList rebuilds.
+	LastDistrictCount = -1;
 	RefreshFilterOptions();
 	RefreshDistrictList();
 }
@@ -468,6 +484,8 @@ void UTerritoryJournalWidget::HandleTerritoryUnregistered(ATerritoryVolume* Terr
 {
 	(void)Territory;
 	(void)bWasUnregistered;
+	// P1-N16: Invalidate district-count cache so the next RefreshDistrictList rebuilds.
+	LastDistrictCount = -1;
 	RefreshFilterOptions();
 	RefreshDistrictList();
 }

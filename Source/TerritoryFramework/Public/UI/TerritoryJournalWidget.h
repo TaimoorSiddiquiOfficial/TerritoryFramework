@@ -88,6 +88,8 @@ private:
 	FString SelectedStateFilter;
 	FString SearchFilter;
 	bool bFiltersInitialized = false;
+	int32 LastDistrictCount = -1;
+	int32 LastFilterHash = 0;
 	FTimerHandle RefreshTimerHandle;
 
 	void BindTerritoryDelegates();

@@ -474,6 +474,8 @@ void ATerritoryVolume::OnTerritoryControlChanged_Implementation(FGameplayTag InT
 
 void ATerritoryVolume::OnTerritoryContested_Implementation(FGameplayTag InTerritoryTag, FGameplayTag ContestingFaction)
 {
+	// P1-N01: Server-authoritative — don't write replicated data on clients
+	if (!HasAuthority()) return;
 	if (InTerritoryTag == TerritoryTag && OwnershipData.ContestingFaction != ContestingFaction)
 	{
 		OwnershipData.ContestingFaction = ContestingFaction;
@@ -482,6 +484,8 @@ void ATerritoryVolume::OnTerritoryContested_Implementation(FGameplayTag InTerrit
 
 void ATerritoryVolume::OnTerritoryUncontested_Implementation(FGameplayTag InTerritoryTag)
 {
+	// P1-N02: Server-authoritative — don't write replicated data on clients
+	if (!HasAuthority()) return;
 	if (InTerritoryTag != TerritoryTag) return;
 	OwnershipData.ContestingFaction = FGameplayTag();
 }
@@ -744,6 +748,18 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	{
 		OnStateChanged(OldState, NewState);
 		OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
+	}
+
+	// P1-N03: Clear any stale capture state in ControlSubsystem when ownership changes
+	if (OldOwner != NewOwner)
+	{
+		if (UWorld* W = GetWorld())
+		{
+			if (UTerritoryControlSubsystem* Control = W->GetSubsystem<UTerritoryControlSubsystem>())
+			{
+				Control->ResetCapture(this);
+			}
+		}
 	}
 
 	bTransitionInProgress = false;

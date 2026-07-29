@@ -232,7 +232,17 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 			const FString Reason = bUpkeepFullyPaid
 				? TEXT("Guard upkeep")
 				: FString::Printf(TEXT("Guard upkeep (partial: %d/%d)"), ActualUpkeep, TickTreasury.CostsPerTick);
-			TryDebitFactionMembers(Faction, ActualUpkeep, Reason, ETerritoryTransactionType::GuardUpkeep);
+			// P1-N15: TOCTOU fix — the AvailableForUpkeep scan above is a snapshot. Between
+			// that scan and the actual debit, another system may have drained the same funds.
+			// If TryDebitFactionMembers returns false despite ActualUpkeep > 0, treat as full
+			// deficit and broadcast accordingly.
+			const bool bDebitSucceeded = TryDebitFactionMembers(Faction, ActualUpkeep, Reason, ETerritoryTransactionType::GuardUpkeep);
+			if (!bDebitSucceeded && TickTreasury.CostsPerTick > 0)
+			{
+				UE_LOG(LogTerritory, Warning, TEXT("[EconomyTick] %s TOCTOU: debit failed despite %d available — treating as full deficit"),
+					*Faction.ToString(), TickTreasury.CostsPerTick);
+				OnFactionUpkeepDeficit.Broadcast(Faction, TickTreasury.CostsPerTick);
+			}
 		}
 
 		// Upkeep consequence: when a faction can't pay full upkeep, broadcast deficit

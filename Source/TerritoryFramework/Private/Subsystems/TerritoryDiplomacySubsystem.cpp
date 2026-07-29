@@ -214,9 +214,15 @@ void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGam
 	else if (Existing)
 	{
 		Existing->State = NewState;
-		// Sync Narrative attitude based on new treaty state
-		Existing->bPermanent = true;
-		Existing->ExpiryGameTime = -1.f;
+		// P1-N09: Preserve existing timing data. Only reset to permanent when the
+		// treaty transitions from None (newly created) or when the new state is
+		// more restrictive (War/None), which should clear any pending expiry.
+		const EDiplomacyState PrevState = OldState;
+		if (PrevState == EDiplomacyState::None || NewState == EDiplomacyState::War)
+		{
+			Existing->bPermanent = true;
+			Existing->ExpiryGameTime = -1.f;
+		}
 		SyncNarrativeAttitudeForTreaty(FactionA, FactionB);
 	}
 	else
@@ -541,7 +547,10 @@ void UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged(FGameplayTag Faction
 		Treaty.FactionA = Faction;
 		Treaty.FactionB = OtherFaction;
 		Treaty.State = NewState;
-		Treaty.bPermanent = true;
+		// P1-N10: Default to timed treaties. Callers that want permanent should
+		// explicitly set bPermanent=true after creating the treaty via SetDiplomacyState.
+		Treaty.bPermanent = false;
+		Treaty.ExpiryGameTime = -1.f;
 		if (ANarrativeGameState* GS = GetNarrativeGameState())
 		{
 			Treaty.SignedGameTime = GS->GetAccumulatedTime();

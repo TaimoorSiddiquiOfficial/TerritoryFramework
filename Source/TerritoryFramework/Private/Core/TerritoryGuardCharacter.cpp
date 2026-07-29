@@ -25,18 +25,23 @@ bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
 
 float ATerritoryGuardCharacter::TakeDamage(float Damage, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
-	// Resolve the actual instigator pawn for reliable kill attribution.
-	// Priority: EventInstigator->GetPawn() > DamageCauser->GetInstigator() > DamageCauser
-	if (EventInstigator && EventInstigator->GetPawn())
+	// P1-N14: Only update LastDamagingInstigator when actual damage is applied (> 0).
+	// When damage is fully absorbed (e.g. shield, invulnerability), we don't want
+	// to attribute a "last damager" that had zero effect.
+	const float ActualDamage = Super::TakeDamage(Damage, DamageEvent, EventInstigator, DamageCauser);
+	if (ActualDamage > 0.f)
 	{
-		LastDamagingInstigator = EventInstigator->GetPawn();
+		if (EventInstigator && EventInstigator->GetPawn())
+		{
+			LastDamagingInstigator = EventInstigator->GetPawn();
+		}
+		else if (DamageCauser)
+		{
+			APawn* InstigatorPawn = DamageCauser->GetInstigator();
+			LastDamagingInstigator = InstigatorPawn ? InstigatorPawn : DamageCauser;
+		}
 	}
-	else if (DamageCauser)
-	{
-		APawn* InstigatorPawn = DamageCauser->GetInstigator();
-		LastDamagingInstigator = InstigatorPawn ? InstigatorPawn : DamageCauser;
-	}
-	return Super::TakeDamage(Damage, DamageEvent, EventInstigator, DamageCauser);
+	return ActualDamage;
 }
 
 void ATerritoryGuardCharacter::BeginPlay()
@@ -176,7 +181,10 @@ void ATerritoryGuardCharacter::ConfigureTerritorySpawn(
 		SpawnInfo.SpawnParams.TriggerSets = OptionalTriggerOverrides;
 	}
 
-	// Apply the definition — Narrative reads SpawnParams during this call
+	// P1-N13: SetNPCDefinition must be called here, but OwningTerritory and
+	// OwningTerritorySpawnPoint are NOT set in this function — they must be
+	// assigned by the caller after ConfigureTerritorySpawn returns. This is
+	// by design: the caller owns the territory↔spawn-point binding lifecycle.
 	if (Definition)
 	{
 		SetNPCDefinition(Definition);
