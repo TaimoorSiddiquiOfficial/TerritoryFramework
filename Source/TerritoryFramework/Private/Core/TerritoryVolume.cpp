@@ -265,7 +265,7 @@ void ATerritoryVolume::Tick(float DeltaSeconds)
 				DrawDebugSphere(World, SP->GetActorLocation(), 30.f, 8, FColor::Yellow, false, 0.f, 0, 1.f);
 
 				// Draw patrol route
-				const TArray<FTerritoryPatrolNode>& Route = SP->PatrolRoute;
+				const TArray<FTerritoryPatrolNode>& Route = SP->GetEffectivePatrolRoute();
 				for (int32 i = 0; i < Route.Num(); ++i)
 				{
 					const FVector& Node = Route[i].Location;
@@ -274,7 +274,7 @@ void ATerritoryVolume::Tick(float DeltaSeconds)
 					{
 						DrawDebugLine(World, Node, Route[i + 1].Location, FColor::Cyan, false, 0.f, 0, 1.f);
 					}
-					else if (SP->bLoopPatrol && Route.Num() > 1)
+					else if (SP->GetEffectiveLoopPatrol() && Route.Num() > 1)
 					{
 						DrawDebugLine(World, Node, Route[0].Location, FColor::Turquoise, false, 0.f, 0, 0.5f);
 					}
@@ -516,7 +516,7 @@ int32 ATerritoryVolume::GetMaxGuardCount() const
 		{
 			if (SpawnPoint)
 			{
-				Capacity = FMath::Max(0, Capacity + FMath::Max(0, SpawnPoint->MaxGuards));
+				Capacity = FMath::Max(0, Capacity + FMath::Max(0, SpawnPoint->GetEffectiveMaxGuards()));
 			}
 		}
 		return Capacity;
@@ -1378,9 +1378,9 @@ void ATerritoryVolume::SpawnGuards()
 
 		// Determine effective faction: spawn point override > territory owner
 		FGameplayTag EffectiveFaction = OwnerFaction;
-		if (UsedSP && UsedSP->FactionOverride.IsValid())
+		if (UsedSP && UsedSP->GetEffectiveFactionOverride().IsValid())
 		{
-			EffectiveFaction = UsedSP->FactionOverride;
+			EffectiveFaction = UsedSP->GetEffectiveFactionOverride();
 		}
 
 		// Single deterministic entrypoint — fills ALL SpawnInfo fields
@@ -1483,9 +1483,9 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 
 	// Determine effective faction: spawn point override > territory owner
 	FGameplayTag EffectiveFaction = OwnerFaction;
-	if (SpawnPoint && SpawnPoint->FactionOverride.IsValid())
+	if (SpawnPoint && SpawnPoint->GetEffectiveFactionOverride().IsValid())
 	{
-		EffectiveFaction = SpawnPoint->FactionOverride;
+		EffectiveFaction = SpawnPoint->GetEffectiveFactionOverride();
 	}
 
 	// P0-07: Narrative overrides already resolved by unified cascade above
@@ -1579,9 +1579,9 @@ bool ATerritoryVolume::FindGuardSpawnTransform(ATerritoryGuardSpawnPoint* SpawnP
 	}
 
 	const FVector Origin = SpawnPoint->GetSpawnTransform().GetLocation();
-	const int32 Attempts = FMath::Clamp(SpawnPoint->ReserveSpawnCandidateCount, 1, 64);
-	const float Radius = FMath::Max(100.f, SpawnPoint->ReserveSpawnRadius);
-	const float MinimumPlayerDistanceSq = FMath::Square(FMath::Max(0.f, SpawnPoint->ReserveMinimumPlayerDistance));
+	const int32 Attempts = FMath::Clamp(SpawnPoint->GetEffectiveCandidateCount(), 1, 64);
+	const float Radius = FMath::Max(100.f, SpawnPoint->GetEffectiveReserveRadius());
+	const float MinimumPlayerDistanceSq = FMath::Square(FMath::Max(0.f, SpawnPoint->GetEffectiveMinimumPlayerDistance()));
 	float BestFacingScore = TNumericLimits<float>::Max();
 	bool bFoundCandidate = false;
 	FVector BestLocation = FVector::ZeroVector;

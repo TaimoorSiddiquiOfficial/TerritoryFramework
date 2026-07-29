@@ -398,6 +398,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	FGameplayTag GetEffectiveFactionOverride() const;
 
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	const TArray<FTerritoryPatrolNode>& GetEffectivePatrolRoute() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	bool GetEffectiveLoopPatrol() const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

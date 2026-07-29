@@ -271,7 +271,7 @@ FTransform ATerritoryGuardSpawnPoint::GetSpawnTransform() const
 
 bool ATerritoryGuardSpawnPoint::HasAvailableSlot() const
 {
-	return GetActiveGuardCount() < MaxGuards;
+	return GetActiveGuardCount() < GetEffectiveMaxGuards();
 }
 
 bool ATerritoryGuardSpawnPoint::HasReserveAvailable() const
@@ -348,7 +348,7 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard,
 
 void ATerritoryGuardSpawnPoint::QueueReserveSpawn()
 {
-	const int32 FreeSlots = FMath::Max(0, MaxGuards - GetActiveGuardCount());
+	const int32 FreeSlots = FMath::Max(0, GetEffectiveMaxGuards() - GetActiveGuardCount());
 	const int32 MaximumPending = FMath::Min(CurrentReserveCount, FreeSlots);
 	if (PendingReserveSpawns >= MaximumPending)
 	{
@@ -362,8 +362,7 @@ void ATerritoryGuardSpawnPoint::QueueReserveSpawn()
 	if (bAutoSpawnReserves)
 	{
 		// P2-N15: GuardPostDefinition override for ReserveSpawnDelay
-		const float EffectiveDelay = (GuardPostDefinition && GuardPostDefinition->ReserveSpawnDelay > 0.f)
-			? GuardPostDefinition->ReserveSpawnDelay : ReserveSpawnDelay;
+		const float EffectiveDelay = GetEffectiveReserveSpawnDelay();
 		ScheduleAutomaticReserveSpawn(EffectiveDelay);
 	}
 }
@@ -561,4 +560,22 @@ FGameplayTag ATerritoryGuardSpawnPoint::GetEffectiveFactionOverride() const
 	if (GuardPostDefinition && GuardPostDefinition->FactionOverride.IsValid())
 		return GuardPostDefinition->FactionOverride;
 	return FGameplayTag();
+}
+
+const TArray<FTerritoryPatrolNode>& ATerritoryGuardSpawnPoint::GetEffectivePatrolRoute() const
+{
+	if (!PatrolRoute.IsEmpty()) return PatrolRoute;
+	if (GuardPostDefinition && !GuardPostDefinition->PatrolRoute.IsEmpty())
+		return GuardPostDefinition->PatrolRoute;
+	static const TArray<FTerritoryPatrolNode> Empty;
+	return Empty;
+}
+
+bool ATerritoryGuardSpawnPoint::GetEffectiveLoopPatrol() const
+{
+	// Inline value takes precedence if explicitly set (always true by default).
+	// GuardPostDefinition provides fallback only when inline is false.
+	if (bLoopPatrol) return true;
+	if (GuardPostDefinition) return GuardPostDefinition->bLoopPatrol;
+	return false;
 }
