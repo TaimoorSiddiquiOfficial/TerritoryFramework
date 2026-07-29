@@ -321,6 +321,14 @@ bool UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const
 	}
 
 	FGameplayTag OldOwner = Territory->GetOwningFaction();
+	const ETerritoryState OldState = Territory->GetTerritoryState();
+
+	// P1-03: If already in the requested state, return false — nothing changed
+	if (OldOwner == NewOwner && OldState == ETerritoryState::Claimed)
+	{
+		return false;
+	}
+
 	TerritoryCaptureState.Remove(Territory);
 	Territory->SetContestingFaction(FGameplayTag());
 	Territory->ForceSetOwningFaction(NewOwner);
@@ -412,10 +420,15 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Step 4: Validate invariant — owner/state/progress consistency
+	// P0-01: Restrict to terminal states only. Contested state is managed by
+	// AttemptCapture/RegisterAttacker/EvaluateCaptureState, not by this API.
 	// ═══════════════════════════════════════════════════════════════════════════
-	// Unclaimed requires: invalid owner, progress 0
-	// Claimed requires: valid owner, progress 1, invalid contesting
-	// Contested requires: valid contesting, progress in [0,1]
+	if (Request.DesiredState == ETerritoryState::Contested)
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_InvalidFaction;
+		Response.Explanation = FText::FromString(TEXT("Contested state cannot be set via ApplyTerritoryMutation — use AttemptCapture/RegisterAttacker"));
+		return Response;
+	}
 	if (Request.DesiredState == ETerritoryState::Unclaimed && Request.NewOwner.IsValid())
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_InvalidFaction;
@@ -427,6 +440,20 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		Response.Result = ETerritoryMutationResult::Rejected_InvalidFaction;
 		Response.Explanation = FText::FromString(TEXT("Claimed state requires valid NewOwner"));
 		return Response;
+	}
+
+	// P0-02: Validate Narrative conditions through the transition context
+	if (!Request.bBypassConditions)
+	{
+		FText ConditionFailure;
+		if (!Territory->CheckStateConditions(Request.DesiredState, ConditionFailure, Request.TransitionContext))
+		{
+			Response.Result = ETerritoryMutationResult::Rejected_ConditionsFailed;
+			Response.Explanation = ConditionFailure.IsEmpty()
+				? FText::FromString(TEXT("State entry conditions not met"))
+				: ConditionFailure;
+			return Response;
+		}
 	}
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -472,9 +499,8 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Step 7: Atomic commit — one struct write, one event bundle
+	// P1-05: Do NOT clear capture state before commit — clear only after success
 	// ═══════════════════════════════════════════════════════════════════════════
-	TerritoryCaptureState.Remove(Territory);
-
 	const bool bApplied = Territory->CommitOwnershipData(Candidate, Request.TransitionContext);
 	if (!bApplied)
 	{
@@ -486,7 +512,9 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	}
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// Step 8: Verify final state and guard reconciliation
+	// Step 8: Verify final state
+	// P1-02: Guard reconciliation already happened inside CommitOwnershipData.
+	// Do NOT call DespawnGuards/SpawnGuards again here.
 	// ═══════════════════════════════════════════════════════════════════════════
 	Response.NewOwner = Territory->GetOwningFaction();
 	Response.NewState = Territory->GetTerritoryState();
@@ -501,16 +529,12 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		return Response;
 	}
 
-	// Optional guard reconciliation — if bReconcileGuards is set and guards need adjusting
-	if (Request.bReconcileGuards && Request.NewOwner.IsValid())
-	{
-		Territory->DespawnGuards();
-		Territory->SpawnGuards();
-	}
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Step 9: Success — clear capture state and broadcast subsystem delegate
+	// P1-05: Only clear capture state AFTER commit succeeded (post-commit cleanup)
+	// ═══════════════════════════════════════════════════════════════════════════
+	TerritoryCaptureState.Remove(Territory);
 
-	// ═══════════════════════════════════════════════════════════════════════════
-	// Step 9: Success — broadcast subsystem delegate
-	// ═══════════════════════════════════════════════════════════════════════════
 	Response.Result = ETerritoryMutationResult::Success;
 	Response.Explanation = FText::Format(
 		NSLOCTEXT("Territory", "MutationSuccess", "{0}: {1} → {2}"),

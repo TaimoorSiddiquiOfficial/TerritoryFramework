@@ -574,78 +574,30 @@ ETerritoryControlMode ATerritoryVolume::GetControlMode() const
 
 void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 {
+	// P0-04: Thin wrapper — delegate to CommitOwnershipData for single authoritative path
 	if (!HasAuthority() || bTransitionInProgress
 		|| (ControlMode == ETerritoryControlMode::AggregateOnly && !bApplyingDerivedOwnership)) return;
 
 	FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	if (OldOwner == NewFaction) return;
 
-	const ETerritoryState OldState = OwnershipData.State;
 	const ETerritoryState NewState = NewFaction.IsValid() ? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
-	FText ConditionFailure;
-	if (!bBypassTransitionConditions && !CheckStateConditions(NewState, ConditionFailure))
-	{
-		UE_LOG(LogTerritory, Warning, TEXT("[Ownership] %s: rejected owner change %s -> %s because state entry conditions failed: %s"),
-			*GetTerritoryTag().ToString(), *OldOwner.ToString(), *NewFaction.ToString(), *ConditionFailure.ToString());
-		return;
-	}
 
-	bTransitionInProgress = true;
-
-	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	if (Settings && Settings->ShouldDebugOwnership())
-	{
-		UE_LOG(LogTerritory, Log, TEXT("[Ownership] %s: %s → %s"),
-			*GetTerritoryTag().ToString(), *OldOwner.ToString(), *NewFaction.ToString());
-
-		if (Settings->IsDebugEnabled())
-		{
-			const FString Msg = FString::Printf(TEXT("[Territory] %s: %s → %s"),
-				*GetTerritoryDisplayName().ToString(),
-				*OldOwner.ToString(), *NewFaction.ToString());
-			GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Yellow, Msg);
-		}
-	}
-
-	// Cache previous owner for RepNotify
-	PreviousOwningFaction = OldOwner;
-
-	OwnershipData.OwningFaction = NewFaction;
-	OwnershipData.State = NewState;
-	OwnershipData.ContestingFaction = FGameplayTag();
-	OwnershipData.ControlProgress = NewFaction.IsValid() ? 1.f : 0.f;
-	OwnershipData.DesiredGuardCount = NewFaction.IsValid()
+	// Build candidate and commit atomically
+	FTerritoryOwnershipData Candidate = OwnershipData;
+	Candidate.OwningFaction = NewFaction;
+	Candidate.State = NewState;
+	Candidate.ContestingFaction = FGameplayTag();
+	Candidate.ControlProgress = NewFaction.IsValid() ? 1.f : 0.f;
+	Candidate.DesiredGuardCount = NewFaction.IsValid()
 		? FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount())
 		: 0;
-
-	if (OldState != NewState)
-	{
-		FireStateEvents(OldState, false);
-		FireStateEvents(NewState, true);
-	}
-
-	// P2-N03: Clear LockReason AFTER exit events fire so event consumers can still read it
 	if (NewState != ETerritoryState::Locked)
 	{
-		OwnershipData.LockReason = FText();
+		Candidate.LockReason = FText();
 	}
 
-	// Guard lifecycle invariants — run BEFORE BP virtual so BP can react to final state.
-	// Not overridable: despawn old owner guards, spawn new owner guards.
-	DespawnGuards();
-	if (NewFaction.IsValid() && ResolveGuardDefinition(NewFaction) && GetDesiredGuardCount() > 0)
-	{
-		SpawnGuards();
-	}
-
-	OnOwnershipChanged(OldOwner, NewFaction);
-	OnTerritoryOwnershipChanged.Broadcast(this, OldOwner, NewFaction);
-	if (OldState != NewState)
-	{
-		OnStateChanged(OldState, NewState);
-		OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
-	}
-	bTransitionInProgress = false;
+	CommitOwnershipData(Candidate);
 }
 
 void ATerritoryVolume::SetDerivedOwningFaction(const FGameplayTag& NewFaction)
@@ -894,10 +846,18 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 	// conditions requiring a pawn/controller will evaluate against null and fail.
 	// Callers must provide explicit TransitionContext for player-dependent conditions.
 
+	// P0-03: Use Narrative event lifecycle — OnActivate for entry, OnDeactivate for exit
 	for (const TObjectPtr<UNarrativeEvent>& Event : *Events)
 	{
 		if (!Event) continue;
-		Event->ExecuteEvent(ContextPawn, ContextPC, TransitionContext.TalesComponent);
+		if (bEntering)
+		{
+			Event->OnActivate(ContextPawn, ContextPC, TransitionContext.TalesComponent);
+		}
+		else
+		{
+			Event->OnDeactivate(ContextPawn, ContextPC, TransitionContext.TalesComponent);
+		}
 	}
 }
 

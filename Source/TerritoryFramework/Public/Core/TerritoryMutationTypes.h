@@ -23,6 +23,7 @@ enum class ETerritoryMutationResult : uint8
 	Rejected_InvalidFaction,
 	Rejected_DiplomacyBlocked,
 	Rejected_Locked,
+	Rejected_ConditionsFailed,
 	Rejected_StateUnchanged,
 	Failed_FinalStateMismatch
 };
@@ -56,6 +57,10 @@ struct FTerritoryMutationRequest
 	/** Whether to reconcile guards after the mutation. */
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
 	bool bReconcileGuards = true;
+
+	/** Whether to bypass Narrative state entry conditions. Default = false (conditions checked). */
+	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
+	bool bBypassConditions = false;
 
 	/** Optional transition context for Narrative conditions/events. */
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")

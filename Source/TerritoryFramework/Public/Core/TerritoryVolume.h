@@ -385,6 +385,10 @@ public:
 
 	void ReconcileGuardsAfterLoad();
 
+public:
+	/** Check if all EntryConditions for the given state pass. Public for atomic mutation validation. */
+	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -447,9 +451,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|States",
 		meta=(DisplayName="State Configs"))
 	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
-
-	/** Check if all EntryConditions for the given state pass. Uses TransitionContext for player/faction info. */
-	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 	/** Fire EntryEvents (bEntering=true) or ExitEvents (bEntering=false) for the given state. Uses TransitionContext for instigator. */
 	void FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
