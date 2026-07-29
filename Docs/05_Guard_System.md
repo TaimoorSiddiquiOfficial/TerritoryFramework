@@ -52,6 +52,36 @@ No custom Territory BT needed — thin adapter into Narrative's infrastructure.
 - Initial population uses `HasAvailableSlot()` only — reserves not consumed
 - When a guard dies: `UnregisterGuard()` → if reserves available → `SpawnSingleGuard()` (one replacement, not full batch)
 
+## Guard Post Definitions (Data-Driven Configuration)
+
+`UTerritoryGuardPostDefinition` is a `UPrimaryDataAsset` that packages a complete guard configuration for reuse across multiple spawn points. Instead of configuring NPC definitions, activities, patrol routes, and reserve parameters individually on each spawn point, create a single GuardPostDefinition asset and assign it to `ATerritoryGuardSpawnPoint::GuardPostDefinition`.
+
+### When to Use
+
+- Multiple spawn points sharing the same guard type and behavior
+- Shared reserve deployment parameters (delay, radius, player distance)
+- Consistent patrol route templates across a district or city
+
+### Configuration Workflow
+
+1. Create a `UTerritoryGuardPostDefinition` data asset in the Content Browser (primary asset type: `TerritoryGuardPost`)
+2. Set `NPCDefinition`, `ActivityConfiguration`, and optional `TriggerSetOverrides`
+3. Configure `PatrolRoute` waypoints and `bLoopPatrol`
+4. Set capacity: `MaxGuards`, `ReserveSlots`
+5. Tune reserve behavior: `ReserveSpawnDelay`, `ReserveSpawnRetryInterval`, `ReserveSpawnRadius`, `ReserveMinimumPlayerDistance`, `ReserveSpawnCandidateCount`
+6. Assign the asset to one or more `ATerritoryGuardSpawnPoint::GuardPostDefinition` references
+
+### Override Precedence
+
+Per-spawn-point overrides take precedence over the data asset:
+
+1. `SpawnPoint->NPCDefinitionOverride` (if set, overrides `GuardPostDefinition->NPCDefinition`)
+2. `SpawnPoint->ActivityConfigurationOverride` (if set, overrides data asset)
+3. `SpawnPoint->TriggerSetOverrides` (if non-empty, overrides data asset)
+4. `SpawnPoint->FactionOverride` (if valid, overrides `GuardPostDefinition->FactionOverride`)
+
+If no `GuardPostDefinition` is assigned, the territory's `GuardNPCDefinition` and `FactionGuardDefinitions` are used as fallback.
+
 ## Capture Flow
 
 1. Kill all defenders → `OnAllGuardsDefeated` → territory goes Unclaimed
@@ -59,7 +89,7 @@ No custom Territory BT needed — thin adapter into Narrative's infrastructure.
    - Super call in BP override is **CRITICAL** — clears owner, resets progress, sets Unclaimed
 2. Designer triggers capture via:
    - `RegisterAttacker(Territory, Actor, Faction)` — progressive capture (identity-based, TSet per faction)
-   - `ForceCapture(Territory, Faction)` — authority-only instant capture; validates inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed
+   - `ForceCapture(Territory, Faction)` → bool — authority-only instant capture; validates inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed. Returns true if territory actually changed.
    - `TerritoryCaptureEvent` — from quest/dialogue (server-authoritative, skips on client)
 3. On capture → `SetOwningFaction` → guards respawn for new owner
 

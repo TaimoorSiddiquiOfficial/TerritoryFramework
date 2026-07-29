@@ -8,6 +8,7 @@
 - [ATerritoryProperty](#aterritoryproperty)
 - [ATerritoryGuardCharacter](#aterritoryguardcharacter)
 - [ATerritoryGuardSpawnPoint](#aterritoryguardspawnpoint)
+- [UTerritoryGuardPostDefinition](#uterritoryguardpostdefinition-uprimarydataasset)
 - [ATerritoryWorldState](#aterritoryworldstate)
 - [ATerritorySavableData](#aterritorysavabledata)
 - [UTerritoryRegistrySubsystem](#uterritoryregistrysubsystem)
@@ -20,6 +21,7 @@
 - [UTerritoryInfoWidget](#uterritoryinfowidget)
 - [UTerritoryEconomyWidget](#uterritoryeconomywidget)
 - [UTerritoryDebugWidget](#uterritorydebugwidget)
+- [UTerritoryPatrolGoal](#uterritorypatrolgoal)
 - [BTTask_RequestTerritoryPermission](#btask_requestterritorypermission)
 - [BTTask_ReleaseTerritoryPermission](#btask_releaseterritorypermission)
 - [UTerritoryCaptureTask](#uterritorycapturetask)
@@ -90,6 +92,8 @@ Base territory actor. Place in level to define a capturable zone.
 | GuardSpawnCount | int32 | Territory\|Guards | — | — | Number to spawn |
 | GuardSpawnRadius | float | Territory\|Guards | — | — | Radius around spawn point |
 | GuardSpawnPoints | TArray<AActor*> | Territory\|Guards | — | — | Spawn point actors |
+| ControlMode | ETerritoryControlMode | Territory\|Hierarchy | — | — | Independent (default), AggregateOnly, or Cascading |
+| StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Territory\|State | — | — | Per-state entry conditions and entry/exit events; designer-configured |
 
 ### OwnershipData (Replicated, RepNotify)
 
@@ -135,6 +139,8 @@ Base territory actor. Place in level to define a capturable zone.
 | GetUpgradeLevel | int32 | Territory |
 | GetContestingFaction | GameplayTag | Territory |
 | GetRegisteredDefenders | Array<Actor*> | Territory |
+| GetOwnershipData | FTerritoryOwnershipData | Territory — returns copy of current ownership data struct (C++ only) |
+| GetControlMode | ETerritoryControlMode | Territory\|Hierarchy |
 
 `IsOwnedByFaction(Faction)` requires both a matching owner tag and `TerritoryState == Claimed`. It returns false while Contested, Locked, or Unclaimed even when `GetOwningFaction()` still reports the incumbent.
 
@@ -153,6 +159,20 @@ Base territory actor. Place in level to define a capturable zone.
 | TryRemoveGuards | Count | Remove guards from territory |
 | SetUpgradeLevel | Level (int32) | Force-set property upgrade level |
 | CommitOwnershipData | NewData (FTerritoryOwnershipData), TransitionContext (FTerritoryTransitionContext) | bool | Atomically commits new ownership data — single struct write, one ordered event bundle (guards → state events → ownership delegates → state delegates). Returns false if no-op. |
+| LockTerritory | Reason (FText) | void | Lock the territory with optional reason |
+| TryUnlock | bForce (bool) | bool | Unlock — force bypasses conditions |
+| SpawnSingleGuard | SpawnPoint (ATerritoryGuardSpawnPoint*) | void | Spawn one guard at the given spawn point |
+| TrySpawnSingleGuard | SpawnPoint (ATerritoryGuardSpawnPoint*), bRequireConcealment (bool) | bool | Attempt one guard spawn with optional camera avoidance |
+
+### BlueprintPure (Guard Queries)
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| CanUnlock | (none) | bool | Read-only check if unlock would succeed |
+| GetLockReason | (none) | FText | Returns the lock reason text |
+| CanPurchaseGuards | Requester (AActor*), Count (int32), OutFailureReason (FText&) | bool | Check if guard purchase is allowed |
+| CanRemoveGuards | Requester (AActor*), Count (int32), OutFailureReason (FText&) | bool | Check if guard removal is allowed |
+| GetGuardPurchaseCost | Count (int32) | int32 | Calculate cost for N guards |
 
 ### BlueprintNativeEvent
 
@@ -279,7 +299,7 @@ This returns the save-system-assigned GUID when valid. Otherwise it generates an
 
 | Function | Returns | Description |
 |---|---|---|
-| ConfigureTerritorySpawn(...) | void | Configure Narrative definition, exact faction, stable IDs, home transform, and optional activity/trigger overrides during deferred spawn |
+| ConfigureTerritorySpawn(Definition, ExactFaction, TerritoryGuid, SaveGuid, InSpawnTransform, SpawnPointName, OptionalActivityOverride, OptionalTriggerOverrides) | void | Configure Narrative definition, exact faction, stable IDs, home transform, and optional activity/trigger overrides during deferred spawn. Full 8-parameter signature: `UNPCDefinition*`, `FGameplayTag`, `FGuid`, `FGuid`, `FTransform`, `FName`, `UNPCActivityConfiguration*`, `TArray<TSoftObjectPtr<UTriggerSet>>` |
 | GetTerritoryPatrolRoute | TArray<FTerritoryPatrolNode> | Copy assigned patrol route |
 | HasTerritoryPatrolRoute | bool | True when an assigned route has at least two nodes |
 | GetPatrolNodeCount | int32 | Number of assigned nodes |
@@ -303,15 +323,25 @@ Actor placed in level to define guard spawn locations and patrol routes.
 
 ### Properties
 
-| Property | Type | Notes |
-|---|---|---|
-| OwnerTerritoryTag | FGameplayTag | Optional explicit owner; territory `GuardSpawnPoints` references take precedence, then this tag, then proximity |
-| MaxGuards | int32 | Maximum guards that can spawn at this point (default 3) |
-| ReserveSlots | int32 | Guards that only spawn when active guards die (default 1) |
-| PatrolRoute | TArray<FTerritoryPatrolNode> | Ordered waypoints for patrol. Empty = guard stays at spawn point |
-| bLoopPatrol | bool | Whether patrol route loops back to start (default true) |
-| FactionOverride | FGameplayTag | Override territory's faction for this point |
-| Priority | int32 | Higher priority spawn points fill first (default 50) |
+| Property | Type | Default | Notes |
+|---|---|---|---|
+| OwnerTerritoryTag | FGameplayTag | — | Optional explicit owner; territory `GuardSpawnPoints` references take precedence, then this tag, then proximity |
+| MaxGuards | int32 | 3 | Maximum guards that can spawn at this point |
+| ReserveSlots | int32 | 1 | Guards that only spawn when active guards die |
+| PatrolRoute | TArray<FTerritoryPatrolNode> | empty | Ordered waypoints for patrol. Empty = guard stays at spawn point |
+| bLoopPatrol | bool | true | Whether patrol route loops back to start |
+| FactionOverride | FGameplayTag | — | Override territory's faction for this point |
+| Priority | int32 | 50 | Higher priority spawn points fill first |
+| bAutoSpawnReserves | bool | true | Auto-deploy reserves on guard death |
+| ReserveSpawnDelay | float | 3.0 | Delay before reserve deployment |
+| ReserveSpawnRetryInterval | float | 2.0 | Retry interval for blocked spawns |
+| ReserveSpawnRadius | float | 600.0 | Random placement radius (uu) |
+| ReserveMinimumPlayerDistance | float | 500.0 | Minimum distance from players for reserve spawns |
+| ReserveSpawnCandidateCount | int32 | 12 | NavMesh candidate locations per spawn attempt |
+| GuardPostDefinition | UTerritoryGuardPostDefinition* | null | Data asset for reusable guard configuration |
+| NPCDefinitionOverride | UNPCDefinition* | null | Per-point NPC definition override |
+| ActivityConfigurationOverride | UNPCActivityConfiguration* | null | Per-point activity configuration override |
+| TriggerSetOverrides | TArray<TSoftObjectPtr<UTriggerSet>> | empty | Per-point trigger set overrides |
 
 ### Struct: FTerritoryPatrolNode
 
@@ -338,15 +368,46 @@ Actor placed in level to define guard spawn locations and patrol routes.
 | HasPatrolRoute | bool | Whether PatrolRoute contains at least two nodes |
 | GetSpawnTransform | FTransform | Actor transform with its location projected to NavMesh when possible |
 | HasPendingReserveSpawn | bool | Whether a reserve guard spawn is pending |
-| SpawnReserveGuard | void | Manually trigger a reserve guard spawn |
+| SpawnReserveGuard | bool | Manually trigger a reserve guard spawn. Returns true if a reserve was consumed and spawn initiated |
 | GetLoopPatrol | bool | Whether patrol route loops back to start |
 | IsLoopingPatrol | bool | Whether patrol is currently looping |
+
+### Save System
+
+`ATerritoryGuardSpawnPoint` implements `INarrativeSavableActor` — persists `SpawnPointGUID`, `CurrentReserveCount`, `PendingReserveSpawns`, and `SavedActiveGuardCount` across save/load cycles. The spawn point uses an editor-baked GUID for stable identity.
 
 ### Death Handling
 
 When a guard dies:
 1. `ATerritoryGuardSpawnPoint::UnregisterGuard()` is called
-2. If a reserve is available, consume one and call `Territory->SpawnSingleGuard(this)` for one replacement
+2. If `bAutoSpawnReserves` is true and a reserve is available, consume one and call `Territory->SpawnSingleGuard(this)` for one replacement
+
+---
+
+## UTerritoryGuardPostDefinition (UPrimaryDataAsset)
+
+Reusable guard configuration asset. Assign to `ATerritoryGuardSpawnPoint::GuardPostDefinition` to share guard settings across multiple spawn points.
+
+### Properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| DisplayName | FText | — | Display name for editor identification |
+| FactionOverride | FGameplayTag | — | Override territory faction for guards spawned from this post |
+| NPCDefinition | UNPCDefinition* | null | NPC definition for guards |
+| ActivityConfiguration | UNPCActivityConfiguration* | null | Activity config override |
+| TriggerSetOverrides | TArray<TSoftObjectPtr<UTriggerSet>> | empty | Trigger set overrides |
+| PatrolRoute | TArray<FTerritoryPatrolNode> | empty | Patrol waypoints |
+| bLoopPatrol | bool | true | Loop patrol route |
+| MaxGuards | int32 | 3 | Maximum concurrent guards |
+| ReserveSlots | int32 | 1 | Reserve guard count |
+| ReserveSpawnDelay | float | 3.0 | Delay before reserve deployment |
+| ReserveSpawnRetryInterval | float | 2.0 | Retry interval for blocked spawns |
+| ReserveSpawnRadius | float | 600.0 | Random placement radius (uu) |
+| ReserveMinimumPlayerDistance | float | 500.0 | Minimum distance from players |
+| ReserveSpawnCandidateCount | int32 | 12 | NavMesh candidates per attempt |
+
+Primary asset type: `TerritoryGuardPost`.
 
 ---
 
@@ -431,7 +492,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | Function | Parameters | Returns |
 |---|---|---|
 | AttemptCapture | Territory, Faction | ECaptureResult |
-| ForceCapture | Territory, Faction | void; validates authority/inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed |
+| ForceCapture | Territory, Faction | bool; validates authority/inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed. Returns true if territory actually changed to requested state |
 | ResetCapture | Territory | void |
 | AddCaptureProgress | Territory, Faction, Delta | void |
 | RegisterAttacker | Territory, Actor, Faction | void; invalid, duplicate, blocked, or over-budget registrations are ignored |
@@ -499,6 +560,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 |---|---|
 | OnEconomyTickFired | (Faction, FTerritoryEconomySnapshot) |
 | OnTransactionRecorded | (FTerritoryTransaction) |
+| OnFactionUpkeepDeficit | (Faction, Deficit) — fires when a faction can't pay full guard upkeep; Deficit = required − paid |
 
 ---
 
@@ -549,6 +611,12 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 The native `SetNarrativeAttitude(A, B, Attitude)` API directly applies the requested attitude symmetrically. Treaty-derived sync is separately reconciled after startup and every Narrative `OnFinishedLoad` event.
 
+### Native Persistence Bridge
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| RestorePersistentState | Treaties (TArray<FTreatyRecord>&), Reputation (TMap<FGameplayTag, int32>&), History (TArray<FDiplomacyEvent>&) | void | Restore diplomacy state from WorldState without recording gameplay events. C++ only (not UFUNCTION). |
+
 ### Delegates
 
 | Delegate | Signature |
@@ -556,6 +624,7 @@ The native `SetNarrativeAttitude(A, B, Attitude)` API directly applies the reque
 | OnDiplomacyStateChanged | (FactionA, FactionB, EDiplomacyState) |
 | OnDiplomacyEvent | (const FDiplomacyEvent&) |
 | OnReputationChanged | (Faction, NewReputation) |
+| OnTreatyExpired | (FactionA, FactionB, EDiplomacyState) — fires when a timed treaty expires; reuses `FOnDiplomacyStateChanged` delegate type |
 
 ---
 
@@ -689,6 +758,25 @@ Tick-based debug overlay.
 | Event | Parameters |
 |---|---|
 | OnUpdateDebugText | FString (multi-line debug summary) |
+
+---
+
+## UTerritoryPatrolGoal
+
+Extends `UNPCGoalItem` (Narrative Pro). Goal instance populated from a territory guard's assigned spawn point patrol route. Automatically created during `ATerritoryGuardCharacter::InitializeTerritoryPatrolGoal()` when the guard has a valid patrol route.
+
+### Properties
+
+| Property | Type | Description |
+|---|---|---|
+| TerritoryPatrol | TArray<FTerritoryPatrolNode> | Patrol waypoints copied from the spawn point's `PatrolRoute` |
+
+### Overrides
+
+| Function | Behavior |
+|---|---|
+| GetGoalScore_Implementation | Returns parent score when ≥2 patrol nodes; 0 otherwise (prevents goal activation with insufficient route) |
+| ShouldCleanup_Implementation | Returns true when no patrol nodes remain |
 
 ---
 
@@ -834,6 +922,14 @@ BlueprintNativeEvent — implement to receive territory events.
 
 ## Enums
 
+### ETerritoryControlMode
+
+| Value | Description |
+|---|---|
+| Independent | Standard territory — owns its own state, can be captured directly |
+| AggregateOnly | Parent-only — state derived from children, cannot be directly captured |
+| Cascading | Capture cascades to children; direct capture allowed and child ownership follows |
+
 ### ETerritoryState
 
 | Value | Description |
@@ -842,6 +938,15 @@ BlueprintNativeEvent — implement to receive territory events.
 | Claimed | Owned and stable |
 | Contested | Capture in progress |
 | Locked | Cannot be captured |
+
+### ETerritoryRegistrationResult
+
+| Value | Description |
+|---|---|
+| Success | Territory registered normally |
+| DuplicateTag | Another territory already has this tag |
+| DuplicateGUID | Another territory already has this GUID |
+| InvalidTerritory | Null or invalid territory actor |
 
 ### ECaptureResult
 
@@ -897,16 +1002,28 @@ BlueprintNativeEvent — implement to receive territory events.
 
 ### FTerritoryOwnershipData
 
-| Field | Type | SaveGame | Replicated |
-|---|---|---|---|
-| OwningFaction | FGameplayTag | ✅ | ✅ |
-| TerritoryState | ETerritoryState | ✅ | ✅ |
-| ControlProgress | float | ✅ | ✅ |
-| ContestingFaction | FGameplayTag | ✅ | ✅ |
-| DefenderCount | int32 | ✅ | ✅ |
-| MaxConcurrentAttackers | int32 | ✅ | ✅ |
-| PeriodicIncome | int32 | ✅ | ✅ |
-| GuardCost | int32 | ✅ | ✅ |
+| Field | Type | SaveGame | Replicated | Notes |
+|---|---|---|---|---|
+| OwningFaction | FGameplayTag | ✅ | ✅ | Stable owner |
+| TerritoryState | ETerritoryState | ✅ | ✅ | Current state |
+| ControlProgress | float | ✅ | ✅ | 0.0–1.0 |
+| ContestingFaction | FGameplayTag | ✅ | ✅ | Who is attacking |
+| DefenderCount | int32 | ✅ | ✅ | Active defenders |
+| MaxConcurrentAttackers | int32 | ✅ | ✅ | Budget limit |
+| PeriodicIncome | int32 | ✅ | ✅ | Current income value |
+| GuardCost | int32 | ✅ | ✅ | Current upkeep cost |
+| DesiredGuardCount | int32 | ✅ | ✅ | Target garrison size (INDEX_NONE = unset) |
+| LockReason | FText | ✅ | ✅ | Reason text when territory is locked; empty when not locked |
+
+### FTerritoryStateConfig
+
+Per-state configuration for territory transitions. Designer-authored via `StateConfigs` TMap on ATerritoryVolume.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| EntryConditions | TArray<UNarrativeCondition*> | Conditions that must pass before entering this state |
+| EntryEvents | TArray<UNarrativeEvent*> | Events fired when entering this state |
+| ExitEvents | TArray<UNarrativeEvent*> | Events fired when leaving this state |
 
 ### FTerritoryTransitionContext
 
@@ -1077,9 +1194,11 @@ Replicates the treaty parties, state, signed/expiry times, permanence, and a can
 | FOnCaptureAttempted | (const FCaptureAttempt&) | Control |
 | FOnEconomyTickFired | (FGameplayTag, FTerritoryEconomySnapshot) | Economy |
 | FOnTransactionRecorded | (FTerritoryTransaction) | Economy + WorldState |
+| FOnFactionUpkeepDeficit | (FGameplayTag Faction, int32 Deficit) | Economy |
 | FOnDiplomacyStateChanged | (FGameplayTag, FGameplayTag, EDiplomacyState) | Diplomacy |
 | FOnDiplomacyEvent | (const FDiplomacyEvent&) | Diplomacy |
 | FOnReputationChanged | (FGameplayTag, int32) | Diplomacy |
+| FOnTreatyExpired | (FGameplayTag, FGameplayTag, EDiplomacyState) | Diplomacy — fires when timed treaty expires |
 
 > **Note:** `UTerritoryCombatDirector` has no `BlueprintAssignable` delegates. Slot grant/denial is signaled via return values on `RequestAssaultSlot`.
 
