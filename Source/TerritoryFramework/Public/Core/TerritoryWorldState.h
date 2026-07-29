@@ -282,8 +282,9 @@ protected:
 	UPROPERTY(SaveGame)
 	TArray<FDiplomacyEvent> SavedDiplomacyHistory;
 
-	UPROPERTY(SaveGame)
-	TArray<FReplicatedCaptureSummary> SavedCaptureSummaries;
+	// P0-03: SavedCaptureSummaries removed — TerritoryVolume is sole authority
+	// for its own ownership persistence via SaveGame on OwnershipData.
+	// ReplicatedCaptureSummaries remains for runtime client visibility only.
 
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
 		meta = (DisplayName = "World State GUID (auto-generated)"))
@@ -291,13 +292,11 @@ protected:
 
 private:
 	void SyncSubsystemsFromReplicatedState();
-	void ApplyPendingCaptureSummaries();
 
 	// ─── P0-02: Live replication handlers ───
 	// Subscribe to subsystem delegates so replicated arrays stay current between saves.
 
-	UFUNCTION()
-	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+	// P0-03: OnTerritoryRegistered removed — Volume is sole ownership authority
 
 	UFUNCTION()
 	void OnEconomyTickLive(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot);
@@ -320,14 +319,6 @@ private:
 	/** Unsubscribe from all subsystem delegates. */
 	void UnsubscribeFromLiveUpdates();
 
-	UPROPERTY(Transient)
-	TArray<FReplicatedCaptureSummary> PendingCaptureSummaries;
-
-	FTimerHandle PendingCaptureRetryTimerHandle;
-
-	/** Number of retry attempts for pending capture summaries. Bounded to prevent infinite retries. */
-	int32 PendingCaptureRetryCount = 0;
-
-	/** Maximum retry attempts before giving up and logging unresolved summaries. */
-	static constexpr int32 MaxPendingCaptureRetries = 30;
+	// P0-03: PendingCaptureSummaries retry machinery removed — TerritoryVolume
+	// is sole authority for ownership persistence. No cross-actor sync needed.
 };

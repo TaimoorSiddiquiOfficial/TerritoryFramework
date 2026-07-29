@@ -31,13 +31,9 @@ void ATerritoryWorldState::BeginPlay()
 			return;
 		}
 
-		if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
-		{
-			Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryWorldState::OnTerritoryRegistered);
-		}
+		// P0-03: OnTerritoryRegistered and ApplyPendingCaptureSummaries removed —
+		// TerritoryVolume is sole authority for ownership persistence.
 		USaveSystemStatics::LoadSingleActor(this);
-		GetWorld()->GetTimerManager().SetTimerForNextTick(
-			FTimerDelegate::CreateUObject(this, &ATerritoryWorldState::ApplyPendingCaptureSummaries));
 
 		// P0-02: Subscribe to subsystem delegates for live replication
 		SubscribeToLiveUpdates();
@@ -48,11 +44,6 @@ void ATerritoryWorldState::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(PendingCaptureRetryTimerHandle);
-		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
-		{
-			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryWorldState::OnTerritoryRegistered);
-		}
 		// P0-02: Unsubscribe from live replication delegates
 		UnsubscribeFromLiveUpdates();
 	}
@@ -408,7 +399,7 @@ void ATerritoryWorldState::ExportPersistentState()
 	SavedTreaties = ReplicatedTreaties;
 	SavedReputation = ReplicatedReputation;
 	SavedDiplomacyHistory = ReplicatedDiplomacyHistory;
-	SavedCaptureSummaries = ReplicatedCaptureSummaries;
+	// P0-03: SavedCaptureSummaries removed — Volume is sole authority for ownership
 }
 
 void ATerritoryWorldState::ImportPersistentState()
@@ -421,7 +412,7 @@ void ATerritoryWorldState::ImportPersistentState()
 	ReplicatedTreaties = SavedTreaties;
 	ReplicatedReputation = SavedReputation;
 	ReplicatedDiplomacyHistory = SavedDiplomacyHistory;
-	ReplicatedCaptureSummaries = SavedCaptureSummaries;
+	// P0-03: ReplicatedCaptureSummaries not restored from save — Volume owns persistence
 
 	SyncSubsystemsFromReplicatedState();
 }
@@ -490,85 +481,8 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 		Diplomacy->RestorePersistentState(Treaties, Reputation, ReplicatedDiplomacyHistory);
 	}
 
-	// Sync capture state. Registry registration can happen after WorldState load,
-	// especially with streaming, so retain unresolved summaries and apply them from
-	// OnTerritoryRegistered instead of dropping them.
-	PendingCaptureSummaries = ReplicatedCaptureSummaries;
-	ApplyPendingCaptureSummaries();
-	if (PendingCaptureSummaries.Num() > 0)
-	{
-		World->GetTimerManager().SetTimer(PendingCaptureRetryTimerHandle, this,
-			&ATerritoryWorldState::ApplyPendingCaptureSummaries, 1.f, true);
-	}
-}
-
-void ATerritoryWorldState::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
-{
-	if (bWasUnregistered || !Territory || PendingCaptureSummaries.Num() == 0) return;
-	ApplyPendingCaptureSummaries();
-}
-
-void ATerritoryWorldState::ApplyPendingCaptureSummaries()
-{
-	UWorld* World = GetWorld();
-	// P0-01: Capture summary application is server-authoritative — requires ForceSetOwningFaction
-	if (!World || World->GetNetMode() == NM_Client) return;
-	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
-	UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
-	if (!Registry || !Control) return;
-
-	for (int32 Index = PendingCaptureSummaries.Num() - 1; Index >= 0; --Index)
-	{
-		const FReplicatedCaptureSummary& Summary = PendingCaptureSummaries[Index];
-		ATerritoryVolume* Territory = Summary.TerritoryGUID.IsValid()
-			? Registry->GetTerritoryByGUID(Summary.TerritoryGUID)
-			: nullptr;
-		if (!Territory && Summary.TerritoryTag.IsValid())
-		{
-			Territory = Registry->GetTerritoryByTag(Summary.TerritoryTag);
-		}
-		if (!Territory) continue;
-
-		if (Summary.CurrentOwner != Territory->GetOwningFaction())
-		{
-			Territory->ForceSetOwningFaction(Summary.CurrentOwner);
-		}
-		if (Summary.State == ETerritoryState::Contested)
-		{
-			Territory->ForceSetTerritoryState(ETerritoryState::Contested);
-			Control->RestoreCaptureState(Territory, Summary.ContestingFaction, Summary.ControlProgress);
-		}
-		else if (Territory->GetTerritoryState() != Summary.State)
-		{
-			Territory->ForceSetTerritoryState(Summary.State);
-		}
-
-		PendingCaptureSummaries.RemoveAtSwap(Index);
-	}
-
-	if (PendingCaptureSummaries.Num() == 0 && World)
-	{
-		World->GetTimerManager().ClearTimer(PendingCaptureRetryTimerHandle);
-		PendingCaptureRetryCount = 0;
-	}
-	else if (World)
-	{
-		// P2-14: Bounded retries — stop after MaxPendingCaptureRetries and log unresolved
-		++PendingCaptureRetryCount;
-		if (PendingCaptureRetryCount >= MaxPendingCaptureRetries)
-		{
-			World->GetTimerManager().ClearTimer(PendingCaptureRetryTimerHandle);
-			for (const FReplicatedCaptureSummary& Orphan : PendingCaptureSummaries)
-			{
-				UE_LOG(LogTerritory, Warning, TEXT("[WorldState] Unresolved capture summary after %d retries — tag=%s guid=%s (territory may have been removed/renamed)"),
-					MaxPendingCaptureRetries,
-					*Orphan.TerritoryTag.ToString(),
-					*Orphan.TerritoryGUID.ToString());
-			}
-			PendingCaptureSummaries.Empty();
-			PendingCaptureRetryCount = 0;
-		}
-	}
+	// P0-03: Capture summary sync removed — TerritoryVolume is sole ownership authority.
+	// ApplyPendingCaptureSummaries and OnTerritoryRegistered removed entirely.
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -2817,9 +2817,9 @@ bool FTFBehavior_ClientRegistryRegistration::RunTest(const FString& Parameters)
 	TestTrue(TEXT("EconomySubsystem has OnTerritoryRegistered handler"),
 		TFTestUtils::HasFunction(EconClass, TEXT("OnTerritoryRegistered")));
 
-	// Verify WorldState has the handler too (also server-authoritative)
+	// P0-03: WorldState no longer has OnTerritoryRegistered — Volume is sole ownership authority
 	const UClass* WSClass = ATerritoryWorldState::StaticClass();
-	TestTrue(TEXT("WorldState has OnTerritoryRegistered handler"),
+	TestFalse(TEXT("WorldState OnTerritoryRegistered removed (P0-03)"),
 		TFTestUtils::HasFunction(WSClass, TEXT("OnTerritoryRegistered")));
 
 	return true;
@@ -2845,6 +2845,23 @@ bool FTFBehavior_LiveReplicationSubscriptions::RunTest(const FString& Parameters
 		TFTestUtils::HasFunction(WSClass, TEXT("OnReputationChangedLive")));
 	TestTrue(TEXT("OnTerritoryControlChangedLive handler exists"),
 		TFTestUtils::HasFunction(WSClass, TEXT("OnTerritoryControlChangedLive")));
+
+	// ─── P0-03: Verify single-authority persistence ───
+	// SavedCaptureSummaries should NOT exist on WorldState (Volume is sole authority)
+	TestFalse(TEXT("SavedCaptureSummaries removed from WorldState (P0-03)"),
+		TFTestUtils::HasProperty(WSClass, TEXT("SavedCaptureSummaries")));
+
+	// ApplyPendingCaptureSummaries should NOT exist (dead code removed)
+	TestFalse(TEXT("ApplyPendingCaptureSummaries removed from WorldState (P0-03)"),
+		TFTestUtils::HasFunction(WSClass, TEXT("ApplyPendingCaptureSummaries")));
+
+	// OnTerritoryRegistered should NOT exist on WorldState (removed)
+	TestFalse(TEXT("OnTerritoryRegistered removed from WorldState (P0-03)"),
+		TFTestUtils::HasFunction(WSClass, TEXT("OnTerritoryRegistered")));
+
+	// ReplicatedCaptureSummaries should still exist (runtime replication, not persistence)
+	TestTrue(TEXT("ReplicatedCaptureSummaries still exists for runtime replication"),
+		TFTestUtils::HasProperty(WSClass, TEXT("ReplicatedCaptureSummaries")));
 
 	return true;
 }
