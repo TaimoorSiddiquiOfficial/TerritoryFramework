@@ -212,6 +212,7 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 
 	if (bCommitContestState)
 	{
+		// P1-06: Only mutate territory state and create capture entries when committing
 		// Initiate capture only after all admission checks pass.
 		if (CurrentState != ETerritoryState::Contested)
 		{
@@ -226,13 +227,15 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 		{
 			Territory->SetContestingFaction(AttackingFaction);
 		}
-	}
 
-	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
-	if (!State.CaptureProgressByFaction.Contains(AttackingFaction))
-	{
-		State.CaptureProgressByFaction.Add(AttackingFaction, 0.f);
+		FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
+		if (!State.CaptureProgressByFaction.Contains(AttackingFaction))
+		{
+			State.CaptureProgressByFaction.Add(AttackingFaction, 0.f);
+		}
 	}
+	// P1-06: When bCommitContestState=false (validation-only from RegisterAttacker),
+	// do NOT create capture state entries or mutate territory state.
 
 	return FinishValidation(ECaptureResult::Success);
 }
@@ -456,17 +459,8 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		}
 	}
 
-	// ═══════════════════════════════════════════════════════════════════════════
-	// Step 5: No-op check
-	// ═══════════════════════════════════════════════════════════════════════════
-	if (Response.OldOwner == Request.NewOwner && Response.OldState == Request.DesiredState)
-	{
-		Response.Result = ETerritoryMutationResult::Rejected_StateUnchanged;
-		Response.NewOwner = Response.OldOwner;
-		Response.NewState = Response.OldState;
-		Response.Explanation = FText::FromString(TEXT("State already matches requested"));
-		return Response;
-	}
+	// P1-04: No-op detection is now handled by CommitOwnershipData's full-field comparison.
+	// Removed the owner/state-only early return that missed contesting faction, progress, and guard count changes.
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Step 6: Build candidate FTerritoryOwnershipData
@@ -481,10 +475,10 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		Candidate.ControlProgress = Request.DesiredState == ETerritoryState::Claimed ? 1.f : 0.f;
 	}
 
-	// DesiredGuardCount follows the new owner's configuration
+	// P1-01: Use GuardSpawnCount (authored config) not GetMaxGuardCount
 	if (Request.NewOwner.IsValid() && Request.DesiredState == ETerritoryState::Claimed)
 	{
-		Candidate.DesiredGuardCount = FMath::Clamp(Territory->GetMaxGuardCount(), 0, Territory->GetMaxGuardCount());
+		Candidate.DesiredGuardCount = FMath::Clamp(Territory->GetConfiguredGuardCount(), 0, Territory->GetMaxGuardCount());
 	}
 	else
 	{

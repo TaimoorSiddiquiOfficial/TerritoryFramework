@@ -227,7 +227,13 @@ void ATerritoryGuardSpawnPoint::InitializeReserves()
 	// Only initialize to full on fresh (non-save) start.
 	if (bLoadedFromSave)
 	{
-		// Keep saved CurrentReserveCount and PendingReserveSpawns as-is
+		// P1-08: Resume pending reserve deployment timer if reserves were pending at save time
+		if (bAutoSpawnReserves && PendingReserveSpawns > 0 && CurrentReserveCount > 0)
+		{
+			const float EffectiveDelay = (GuardPostDefinition && GuardPostDefinition->ReserveSpawnDelay > 0.f)
+				? GuardPostDefinition->ReserveSpawnDelay : ReserveSpawnDelay;
+			ScheduleAutomaticReserveSpawn(EffectiveDelay);
+		}
 	}
 	else if (CurrentReserveCount <= 0 && SavedActiveGuardCount <= 0)
 	{
@@ -443,7 +449,20 @@ void ATerritoryGuardSpawnPoint::CancelPendingReserveSpawns()
 
 void ATerritoryGuardSpawnPoint::ResetReserveState()
 {
-	InitializeReserves();
+	// P1-09: Respect reserve ownership policy on ownership change
+	switch (ReserveOwnershipPolicy)
+	{
+	case EReserveOwnershipPolicy::PersistWithPost:
+		// Keep current reserve state — don't reset
+		break;
+	case EReserveOwnershipPolicy::ResetToDefinitionOnOwnerChange:
+		CurrentReserveCount = GetEffectiveReserveSlots();
+		break;
+	case EReserveOwnershipPolicy::RefillOnOwnerChange:
+	default:
+		InitializeReserves();
+		break;
+	}
 	ActiveGuards.Reset();
 }
 
@@ -482,4 +501,59 @@ TArray<float> ATerritoryGuardSpawnPoint::GetPatrolWaitTimes() const
 		Times.Add(Node.WaitTime);
 	}
 	return Times;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P1-07: Effective Configuration Getters
+// GuardPostDefinition overrides inline values when assigned.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+int32 ATerritoryGuardSpawnPoint::GetEffectiveMaxGuards() const
+{
+	return (GuardPostDefinition && GuardPostDefinition->MaxGuards > 0)
+		? GuardPostDefinition->MaxGuards : MaxGuards;
+}
+
+int32 ATerritoryGuardSpawnPoint::GetEffectiveReserveSlots() const
+{
+	return (GuardPostDefinition && GuardPostDefinition->ReserveSlots >= 0)
+		? GuardPostDefinition->ReserveSlots : ReserveSlots;
+}
+
+float ATerritoryGuardSpawnPoint::GetEffectiveReserveSpawnDelay() const
+{
+	return (GuardPostDefinition && GuardPostDefinition->ReserveSpawnDelay > 0.f)
+		? GuardPostDefinition->ReserveSpawnDelay : ReserveSpawnDelay;
+}
+
+float ATerritoryGuardSpawnPoint::GetEffectiveReserveRetryInterval() const
+{
+	return (GuardPostDefinition && GuardPostDefinition->ReserveSpawnRetryInterval > 0.f)
+		? GuardPostDefinition->ReserveSpawnRetryInterval : ReserveSpawnRetryInterval;
+}
+
+float ATerritoryGuardSpawnPoint::GetEffectiveReserveRadius() const
+{
+	return (GuardPostDefinition && GuardPostDefinition->ReserveSpawnRadius > 0.f)
+		? GuardPostDefinition->ReserveSpawnRadius : ReserveSpawnRadius;
+}
+
+float ATerritoryGuardSpawnPoint::GetEffectiveMinimumPlayerDistance() const
+{
+	return (GuardPostDefinition && GuardPostDefinition->ReserveMinimumPlayerDistance >= 0.f)
+		? GuardPostDefinition->ReserveMinimumPlayerDistance : ReserveMinimumPlayerDistance;
+}
+
+int32 ATerritoryGuardSpawnPoint::GetEffectiveCandidateCount() const
+{
+	return (GuardPostDefinition && GuardPostDefinition->ReserveSpawnCandidateCount > 0)
+		? GuardPostDefinition->ReserveSpawnCandidateCount : ReserveSpawnCandidateCount;
+}
+
+FGameplayTag ATerritoryGuardSpawnPoint::GetEffectiveFactionOverride() const
+{
+	if (FactionOverride.IsValid()) return FactionOverride;
+	if (GuardPostDefinition && GuardPostDefinition->FactionOverride.IsValid())
+		return GuardPostDefinition->FactionOverride;
+	return FGameplayTag();
 }

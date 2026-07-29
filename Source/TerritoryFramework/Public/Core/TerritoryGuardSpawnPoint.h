@@ -13,6 +13,20 @@ class UNPCActivityConfiguration;
 class UTriggerSet;
 
 /**
+ * P1-09: Policy for what happens to reserves when ownership changes.
+ */
+UENUM(BlueprintType)
+enum class EReserveOwnershipPolicy : uint8
+{
+	/** Reserves persist with the post regardless of who owns it */
+	PersistWithPost,
+	/** Reserves refill to full when a new faction takes ownership */
+	RefillOnOwnerChange,
+	/** Reserves reset to the GuardPostDefinition's configured value on owner change */
+	ResetToDefinitionOnOwnerChange
+};
+
+/**
  * A single waypoint in a guard's patrol route.
  *
  * Use these in pairs/triples inside ATerritoryGuardSpawnPoint's PatrolRoute array.
@@ -166,6 +180,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
 		meta=(ClampMin="0", UIMin="0", UIMax="100", DisplayName="Priority"))
 	int32 Priority = 50;
+
+	/** P1-09: What happens to reserves when territory ownership changes. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Reserve",
+		meta=(DisplayName="Reserve Ownership Policy"))
+	EReserveOwnershipPolicy ReserveOwnershipPolicy = EReserveOwnershipPolicy::RefillOnOwnerChange;
 
 	// ─── Guard Post Definition (Data Asset) ───
 
@@ -332,6 +351,33 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Get Owning Territory"))
 	ATerritoryVolume* GetOwningTerritory() const;
+
+	// ─── P1-07: Effective Configuration Getters ───
+	// GuardPostDefinition overrides inline values when assigned.
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	int32 GetEffectiveMaxGuards() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	int32 GetEffectiveReserveSlots() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	float GetEffectiveReserveSpawnDelay() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	float GetEffectiveReserveRetryInterval() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	float GetEffectiveReserveRadius() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	float GetEffectiveMinimumPlayerDistance() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	int32 GetEffectiveCandidateCount() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
+	FGameplayTag GetEffectiveFactionOverride() const;
 
 protected:
 	virtual void BeginPlay() override;

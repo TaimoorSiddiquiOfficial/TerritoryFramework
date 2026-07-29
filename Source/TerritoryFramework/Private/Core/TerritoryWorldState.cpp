@@ -26,16 +26,17 @@ void ATerritoryWorldState::BeginPlay()
 	{
 		if (!WorldStateGUID.IsValid())
 		{
+			// P1-10: Missing GUID disables save/load only — live replication still subscribes
 			UE_LOG(LogTerritory, Error, TEXT("TerritoryWorldState %s has no authored WorldStateGUID; save/load is disabled."),
 				*GetPathName());
-			return;
+		}
+		else
+		{
+			USaveSystemStatics::LoadSingleActor(this);
 		}
 
-		// P0-03: OnTerritoryRegistered and ApplyPendingCaptureSummaries removed —
-		// TerritoryVolume is sole authority for ownership persistence.
-		USaveSystemStatics::LoadSingleActor(this);
-
 		// P0-02: Subscribe to subsystem delegates for live replication
+		// P1-10: Always subscribe regardless of GUID — live replication works without save
 		SubscribeToLiveUpdates();
 	}
 }

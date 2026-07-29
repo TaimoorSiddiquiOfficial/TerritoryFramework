@@ -2574,12 +2574,14 @@ bool FTFContract_RegistrySubsystemPure::RunTest(const FString& Parameters)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Behavioral Tests — verify v0.2.5 fix correctness
+// P1-11: These tests verify reflection contracts (property/function existence), not runtime behavior.
+// Renamed from "Behavior" to "Contract" to accurately describe what they test.
+// Real behavioral tests require PIE/world fixtures (see audit Phase 3).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── P0-01: Diplomacy Friendly round-trip preserves Alliance ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_DiplomacyFriendlyRoundTrip,
-	"TerritoryFramework.Behavior.DiplomacyFriendlyRoundTrip",
+	"TerritoryFramework.Contract.DiplomacyFriendlyRoundTrip",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFBehavior_DiplomacyFriendlyRoundTrip::RunTest(const FString& Parameters)
@@ -2612,7 +2614,7 @@ bool FTFBehavior_DiplomacyFriendlyRoundTrip::RunTest(const FString& Parameters)
 
 // ─── P0-02: Hierarchy Contested→Claimed recovery ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_HierarchyContestedRecovery,
-	"TerritoryFramework.Behavior.HierarchyContestedRecovery",
+	"TerritoryFramework.Contract.HierarchyContestedRecovery",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFBehavior_HierarchyContestedRecovery::RunTest(const FString& Parameters)
@@ -2651,7 +2653,7 @@ bool FTFBehavior_HierarchyContestedRecovery::RunTest(const FString& Parameters)
 
 // ─── P1-03: OnCityLost fires only once (bCityLostFired guard) ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_CityLostFiresOnce,
-	"TerritoryFramework.Behavior.CityLostFiresOnce",
+	"TerritoryFramework.Contract.CityLostFiresOnce",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFBehavior_CityLostFiresOnce::RunTest(const FString& Parameters)
@@ -2676,7 +2678,7 @@ bool FTFBehavior_CityLostFiresOnce::RunTest(const FString& Parameters)
 
 // ─── P0-03: FTerritoryTransitionContext exists ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_TransitionContext,
-	"TerritoryFramework.Behavior.TransitionContext",
+	"TerritoryFramework.Contract.TransitionContext",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFBehavior_TransitionContext::RunTest(const FString& Parameters)
@@ -2716,7 +2718,7 @@ bool FTFBehavior_TransitionContext::RunTest(const FString& Parameters)
 
 // ─── P1-09: Guard reserve state has SaveGame ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_GuardReserveSaveGame,
-	"TerritoryFramework.Behavior.GuardReserveSaveGame",
+	"TerritoryFramework.Contract.GuardReserveSaveGame",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFBehavior_GuardReserveSaveGame::RunTest(const FString& Parameters)
@@ -2752,7 +2754,7 @@ bool FTFBehavior_GuardReserveSaveGame::RunTest(const FString& Parameters)
 
 // ─── P1-04: RegisterTerritory returns result enum ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_RegistryReturnsResult,
-	"TerritoryFramework.Behavior.RegistryReturnsResult",
+	"TerritoryFramework.Contract.RegistryReturnsResult",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFBehavior_RegistryReturnsResult::RunTest(const FString& Parameters)
@@ -2791,7 +2793,7 @@ bool FTFBehavior_RegistryReturnsResult::RunTest(const FString& Parameters)
 
 // ─── P0-01: Client registry registration path ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_ClientRegistryRegistration,
-	"TerritoryFramework.Behavior.ClientRegistryRegistration",
+	"TerritoryFramework.Contract.ClientRegistryRegistration",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFBehavior_ClientRegistryRegistration::RunTest(const FString& Parameters)
@@ -2827,7 +2829,7 @@ bool FTFBehavior_ClientRegistryRegistration::RunTest(const FString& Parameters)
 
 // ─── P0-02: Live replication subscriptions ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_LiveReplicationSubscriptions,
-	"TerritoryFramework.Behavior.LiveReplicationSubscriptions",
+	"TerritoryFramework.Contract.LiveReplicationSubscriptions",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFBehavior_LiveReplicationSubscriptions::RunTest(const FString& Parameters)
