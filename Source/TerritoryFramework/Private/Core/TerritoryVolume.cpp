@@ -711,13 +711,16 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	}
 
 	// P1-N03: Clear any stale capture state in ControlSubsystem when ownership changes
+	// P0-01: Clean up runtime capture tracking only — do NOT mutate terminal
+	// ownership fields (progress, contesting faction, state). Those were just
+	// committed atomically and must not be zeroed by ResetCapture.
 	if (OldOwner != NewOwner)
 	{
 		if (UWorld* W = GetWorld())
 		{
 			if (UTerritoryControlSubsystem* Control = W->GetSubsystem<UTerritoryControlSubsystem>())
 			{
-				Control->ResetCapture(this);
+				Control->ClearCaptureTrackingOnly(this);
 			}
 		}
 	}
@@ -819,7 +822,8 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 	for (const TObjectPtr<UNarrativeCondition>& Cond : Config->EntryConditions)
 	{
 		if (!Cond) continue;
-		if (!Cond->CheckCondition(ContextPawn, ContextPC, nullptr))
+		// P0-02: Pass TalesComponent from transition context for full Narrative condition evaluation
+		if (!Cond->CheckCondition(ContextPawn, ContextPC, TransitionContext.TalesComponent))
 		{
 			OutFailureReason = FText::FromString(FString::Printf(TEXT("Condition '%s' not met."),
 				*Cond->GetGraphDisplayText()));

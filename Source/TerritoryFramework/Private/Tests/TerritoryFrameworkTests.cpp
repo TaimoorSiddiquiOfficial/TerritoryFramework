@@ -3052,7 +3052,7 @@ bool FTFContract_AtomicMutation::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Request has NewOwner"), RequestStruct->FindPropertyByName(FName(TEXT("NewOwner"))) != nullptr);
 		TestTrue(TEXT("Request has DesiredState"), RequestStruct->FindPropertyByName(FName(TEXT("DesiredState"))) != nullptr);
 		TestTrue(TEXT("Request has bClearCaptureState"), RequestStruct->FindPropertyByName(FName(TEXT("bClearCaptureState"))) != nullptr);
-		TestTrue(TEXT("Request has bReconcileGuards"), RequestStruct->FindPropertyByName(FName(TEXT("bReconcileGuards"))) != nullptr);
+		TestTrue(TEXT("Request has bBypassConditions"), RequestStruct->FindPropertyByName(FName(TEXT("bBypassConditions"))) != nullptr);
 		TestTrue(TEXT("Request has TransitionContext"), RequestStruct->FindPropertyByName(FName(TEXT("TransitionContext"))) != nullptr);
 	}
 

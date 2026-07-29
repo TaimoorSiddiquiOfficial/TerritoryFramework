@@ -26,6 +26,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void ResetCapture(ATerritoryVolume* Territory);
 
+	/** P0-01: Remove only the runtime capture tracking map entry — does NOT mutate territory state. */
+	void ClearCaptureTrackingOnly(ATerritoryVolume* Territory);
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void AddCaptureProgress(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction, float ProgressDelta);
 

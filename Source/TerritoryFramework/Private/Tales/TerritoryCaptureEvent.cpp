@@ -55,8 +55,6 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	Request.Territory = Territory;
 	Request.NewOwner = CapturingFaction;
 	Request.DesiredState = ETerritoryState::Claimed;
-	Request.bClearCaptureState = true;
-	Request.bReconcileGuards = true;
 
 	// Build transition context with TalesComponent for Narrative event/condition evaluation
 	Request.TransitionContext.Instigator = Target;

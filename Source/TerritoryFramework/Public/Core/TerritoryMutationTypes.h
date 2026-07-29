@@ -54,10 +54,6 @@ struct FTerritoryMutationRequest
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
 	bool bClearCaptureState = true;
 
-	/** Whether to reconcile guards after the mutation. */
-	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
-	bool bReconcileGuards = true;
-
 	/** Whether to bypass Narrative state entry conditions. Default = false (conditions checked). */
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
 	bool bBypassConditions = false;

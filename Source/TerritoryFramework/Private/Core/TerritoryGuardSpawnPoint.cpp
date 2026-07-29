@@ -223,6 +223,12 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 
 void ATerritoryGuardSpawnPoint::InitializeReserves()
 {
+	// P1-02: Clear old timer FIRST, before any scheduling
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(ReserveSpawnTimer);
+	}
+
 	// P0-06: If loaded from save, preserve the saved reserve state.
 	// Only initialize to full on fresh (non-save) start.
 	if (bLoadedFromSave)
@@ -243,10 +249,6 @@ void ATerritoryGuardSpawnPoint::InitializeReserves()
 		CurrentReserveCount = EffectiveReserveSlots;
 	}
 	PendingReserveSpawns = FMath::Max(PendingReserveSpawns, 0);
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(ReserveSpawnTimer);
-	}
 }
 
 FTransform ATerritoryGuardSpawnPoint::GetSpawnTransform() const

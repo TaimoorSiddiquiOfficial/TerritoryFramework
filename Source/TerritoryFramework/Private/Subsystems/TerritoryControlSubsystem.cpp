@@ -294,6 +294,17 @@ void UTerritoryControlSubsystem::ResetCapture(ATerritoryVolume* Territory)
 	Territory->SetControlProgress(0.f);
 }
 
+void UTerritoryControlSubsystem::ClearCaptureTrackingOnly(ATerritoryVolume* Territory)
+{
+	// P0-01: Remove only the internal tracking map — do NOT call SetContestingFaction,
+	// SetTerritoryState, or SetControlProgress. Those fields were already committed
+	// atomically by CommitOwnershipData and must not be overwritten.
+	if (Territory)
+	{
+		TerritoryCaptureState.Remove(Territory);
+	}
+}
+
 void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction, float ProgressDelta)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !AttackingFaction.IsValid()) return;
@@ -469,21 +480,37 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	Candidate.OwningFaction = Request.NewOwner;
 	Candidate.State = Request.DesiredState;
 
-	if (Request.bClearCaptureState)
+	// P0-04: Terminal-state normalization is mandatory — always enforce invariants
+	// regardless of bClearCaptureState. Terminal states have strict contracts:
+	//   Claimed:   valid owner, no contesting faction, progress 1.0
+	//   Unclaimed: no owner, no contesting faction, progress 0.0
+	//   Locked:    no contesting faction, progress 0.0
+	Candidate.ContestingFaction = FGameplayTag();
+	switch (Request.DesiredState)
 	{
-		Candidate.ContestingFaction = FGameplayTag();
-		Candidate.ControlProgress = Request.DesiredState == ETerritoryState::Claimed ? 1.f : 0.f;
+	case ETerritoryState::Claimed:
+		Candidate.ControlProgress = 1.f;
+		break;
+	case ETerritoryState::Unclaimed:
+	case ETerritoryState::Locked:
+		Candidate.ControlProgress = 0.f;
+		break;
+	default:
+		break;
 	}
 
-	// P1-01: Use GuardSpawnCount (authored config) not GetMaxGuardCount
-	if (Request.NewOwner.IsValid() && Request.DesiredState == ETerritoryState::Claimed)
+	// P1-01/P1-07: Only reset guard count when owner actually changes.
+	// Same-owner mutations preserve purchased garrison targets.
+	const bool bOwnerChanged = (Response.OldOwner != Request.NewOwner);
+	if (bOwnerChanged && Request.NewOwner.IsValid() && Request.DesiredState == ETerritoryState::Claimed)
 	{
 		Candidate.DesiredGuardCount = FMath::Clamp(Territory->GetConfiguredGuardCount(), 0, Territory->GetMaxGuardCount());
 	}
-	else
+	else if (bOwnerChanged && !Request.NewOwner.IsValid())
 	{
 		Candidate.DesiredGuardCount = 0;
 	}
+	// else: same owner — preserve existing DesiredGuardCount
 
 	// Clear lock reason unless transitioning to Locked
 	if (Request.DesiredState != ETerritoryState::Locked)
