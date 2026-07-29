@@ -147,7 +147,9 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	if (EarningsText) EarningsText->SetText(FText::AsNumber(GetDistrictIncome()));
 	if (TreasuryText)
 	{
-		const UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
+		// P2-N17: Null guard on GetWorld
+		UWorld* W = GetWorld();
+		const UTerritoryEconomySubsystem* Economy = W ? W->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
 		TreasuryText->SetText(FText::AsNumber(Economy ? Economy->GetActorCurrency(GetOwningPlayer()) : 0));
 	}
 

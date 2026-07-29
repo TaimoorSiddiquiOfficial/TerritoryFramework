@@ -235,21 +235,26 @@ void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 		}
 		else
 		{
-			// Check if any other faction has all districts
+			// P2-N08: O(N) ownership count instead of O(N²) AllDistrictsOwnedBy calls
 			TArray<ATerritoryVolume*> Districts = GetDistricts();
-			bool bAnyFactionOwnsAll = false;
+			TMap<FGameplayTag, int32> OwnerCounts;
 			for (ATerritoryVolume* District : Districts)
 			{
 				FGameplayTag DistrictOwner = District->GetOwningFaction();
-				if (DistrictOwner.IsValid() && DistrictOwner != PreviousFaction)
+				if (DistrictOwner.IsValid())
 				{
-					if (AllDistrictsOwnedBy(DistrictOwner))
-					{
-						// Another faction fully captured — they own the city now
-						SetDerivedOwningFaction(DistrictOwner);
-						bAnyFactionOwnsAll = true;
-						break;
-					}
+					OwnerCounts.FindOrAdd(DistrictOwner)++;
+				}
+			}
+			const int32 TotalDistricts = Districts.Num();
+			bool bAnyFactionOwnsAll = false;
+			for (const auto& Pair : OwnerCounts)
+			{
+				if (Pair.Value >= TotalDistricts && Pair.Key != PreviousFaction)
+				{
+					SetDerivedOwningFaction(Pair.Key);
+					bAnyFactionOwnsAll = true;
+					break;
 				}
 			}
 
@@ -569,7 +574,8 @@ ATerritoryCity* ATerritoryDistrict::GetOwningCity() const
 	for (ATerritoryVolume* Volume : All)
 	{
 		ATerritoryCity* City = Cast<ATerritoryCity>(Volume);
-		if (City && MyTag.MatchesTag(City->GetTerritoryTag()) && static_cast<const AActor*>(City) != this)
+		// P2-N09: Exact equality — MatchesTag could match wrong city with shared tag prefix
+		if (City && MyTag == City->GetTerritoryTag() && static_cast<const AActor*>(City) != this)
 		{
 			return City;
 		}

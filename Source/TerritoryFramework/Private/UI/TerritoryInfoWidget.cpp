@@ -52,6 +52,9 @@ void UTerritoryInfoWidget::BindToTerritoryAtPlayer()
 	if (!Registry) return;
 
 	ATerritoryVolume* Territory = Registry->GetTerritoryAtLocation(PC->GetPawn()->GetActorLocation());
+	// P2-N18: Skip rebind if territory hasn't changed
+	if (Territory == BoundTerritory.Get()) return;
+
 	if (Territory)
 	{
 		UnbindDelegates();

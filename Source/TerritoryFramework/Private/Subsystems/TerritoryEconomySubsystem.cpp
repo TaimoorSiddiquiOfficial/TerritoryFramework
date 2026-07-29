@@ -173,9 +173,13 @@ void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 		? FString::Printf(TEXT("%s [Account=%s]"), *Reason, *AccountActor->GetName())
 		: Reason;
 
-	if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(GetWorld()->GetGameState()))
+	// P2-N12: Null guard on GetWorld to prevent crash during shutdown
+	if (UWorld* W = GetWorld())
 	{
-		Tx.GameTime = GS->GetAccumulatedTime();
+		if (ANarrativeGameState* GS = Cast<ANarrativeGameState>(W->GetGameState()))
+		{
+			Tx.GameTime = GS->GetAccumulatedTime();
+		}
 	}
 
 	TransactionLedger.Add(Tx);
@@ -211,6 +215,9 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		if (!Treasury) continue;
 		const FTerritoryTreasury TickTreasury = *Treasury;
 
+		// P2-N10: Cache faction members once per tick instead of 3 separate GetFactionMembers calls
+		const TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
+
 		if (TickTreasury.IncomePerTick > 0)
 		{
 			CreditCurrencyToFaction(Faction, TickTreasury.IncomePerTick, IncomePayoutPolicy,
@@ -218,7 +225,7 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		}
 
 		int32 AvailableForUpkeep = 0;
-		for (const ANarrativeCharacter* Member : GetFactionMembers(Faction))
+		for (const ANarrativeCharacter* Member : Members)
 		{
 			if (const UNarrativeInventoryComponent* Inventory = Member->GetInventoryComponent())
 			{
@@ -236,6 +243,7 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 			// that scan and the actual debit, another system may have drained the same funds.
 			// If TryDebitFactionMembers returns false despite ActualUpkeep > 0, treat as full
 			// deficit and broadcast accordingly.
+			// P2-N10: TryDebitFactionMembers calls GetFactionMembers internally (separate function scope)
 			const bool bDebitSucceeded = TryDebitFactionMembers(Faction, ActualUpkeep, Reason, ETerritoryTransactionType::GuardUpkeep);
 			if (!bDebitSucceeded && TickTreasury.CostsPerTick > 0)
 			{
@@ -256,7 +264,8 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		}
 
 		const int32 NetIncome = TickTreasury.IncomePerTick - TickTreasury.CostsPerTick;
-		const int32 MemberCount = GetFactionMembers(Faction).Num();
+		// P2-N10: Use cached Members instead of calling GetFactionMembers again
+		const int32 MemberCount = Members.Num();
 
 		if (bDebugTicks)
 		{

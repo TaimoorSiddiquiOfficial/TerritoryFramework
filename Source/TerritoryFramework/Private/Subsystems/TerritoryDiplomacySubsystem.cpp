@@ -14,7 +14,8 @@ void UTerritoryDiplomacySubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	if (ANarrativeGameState* GS = GetNarrativeGameState())
 	{
 		GS->OnFactionAttitudeChanged.AddDynamic(this, &UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged);
-		LoadFromGameState();
+		// P2-N14: LoadFromGameState deferred to OnWorldBeginPlay — avoids double-load
+		// when GameState is partially initialized during subsystem Initialize
 	}
 	if (UWorld* World = GetWorld())
 	{
@@ -618,11 +619,12 @@ void UTerritoryDiplomacySubsystem::RecordEvent(EDiplomacyEventType EventType, FG
 
 	DiplomacyHistory.Add(Event);
 
-	// Cap history to prevent unbounded growth in long sessions
+	// P2-N13: Batch removal instead of O(N²) loop
 	constexpr int32 MaxDiplomacyHistory = 500;
-	while (DiplomacyHistory.Num() > MaxDiplomacyHistory)
+	const int32 Excess = DiplomacyHistory.Num() - MaxDiplomacyHistory;
+	if (Excess > 0)
 	{
-		DiplomacyHistory.RemoveAt(0);
+		DiplomacyHistory.RemoveAt(0, Excess);
 	}
 
 	OnDiplomacyEvent.Broadcast(Event);

@@ -117,6 +117,13 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 		return;
 	}
+
+	// P2-N16: Warn if no valid weapon slots found on first attempt
+	if (DefaultWeaponWieldAttempts == 1)
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("GuardCharacter %s: no valid weapon slot tags found — guard will retry wielding 40 times"),
+			*GetName());
+	}
 }
 
 void ATerritoryGuardCharacter::ApplyActivityConfig_Implementation(UNPCActivityConfiguration* NPCActivityConfig)

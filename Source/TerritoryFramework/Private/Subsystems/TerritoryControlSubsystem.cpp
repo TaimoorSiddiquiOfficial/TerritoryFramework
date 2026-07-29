@@ -815,8 +815,9 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	TArray<FGameplayTag> ToRemove;
 	for (const auto& Pair : State->CaptureProgressByFaction)
 	{
+		// P2-N04: Already pruned in first loop above — just check remaining count
 		TSet<TWeakObjectPtr<AActor>>* ActorSet = State->AttackersByFaction.Find(Pair.Key);
-		const bool bHasValidAttackers = ActorSet && PruneInvalidAttackers(*ActorSet) > 0;
+		const bool bHasValidAttackers = ActorSet && ActorSet->Num() > 0;
 		if (Pair.Value <= 0.f && !bHasValidAttackers)
 		{
 			ToRemove.Add(Pair.Key);

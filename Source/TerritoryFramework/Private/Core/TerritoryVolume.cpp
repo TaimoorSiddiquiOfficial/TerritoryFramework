@@ -617,15 +617,17 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	OwnershipData.DesiredGuardCount = NewFaction.IsValid()
 		? FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount())
 		: 0;
-	if (NewState != ETerritoryState::Locked)
-	{
-		OwnershipData.LockReason = FText();
-	}
 
 	if (OldState != NewState)
 	{
 		FireStateEvents(OldState, false);
 		FireStateEvents(NewState, true);
+	}
+
+	// P2-N03: Clear LockReason AFTER exit events fire so event consumers can still read it
+	if (NewState != ETerritoryState::Locked)
+	{
+		OwnershipData.LockReason = FText();
 	}
 
 	// Guard lifecycle invariants — run BEFORE BP virtual so BP can react to final state.
@@ -676,10 +678,16 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	const FGameplayTag NewOwner = NewData.OwningFaction;
 	const ETerritoryState NewState = NewData.State;
 
-	// No-op check: if nothing changed, skip the entire commit
+	// P2-N01: Compare all ownership data fields, not just owner/state/contest/progress
 	if (OldOwner == NewOwner && OldState == NewState
 		&& OwnershipData.ContestingFaction == NewData.ContestingFaction
-		&& FMath::IsNearlyEqual(OwnershipData.ControlProgress, NewData.ControlProgress))
+		&& FMath::IsNearlyEqual(OwnershipData.ControlProgress, NewData.ControlProgress)
+		&& OwnershipData.DesiredGuardCount == NewData.DesiredGuardCount
+		&& OwnershipData.PeriodicIncome == NewData.PeriodicIncome
+		&& OwnershipData.GuardCost == NewData.GuardCost
+		&& OwnershipData.MaxConcurrentAttackers == NewData.MaxConcurrentAttackers
+		&& OwnershipData.DefenderCount == NewData.DefenderCount
+		&& OwnershipData.LockReason.EqualTo(NewData.LockReason))
 	{
 		return false;
 	}
@@ -849,15 +857,12 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 		return true;
 	}
 
-	// Use explicit transition context; fall back to first player only if context is empty
+	// Use explicit transition context
 	APlayerController* ContextPC = TransitionContext.PlayerController;
 	APawn* ContextPawn = TransitionContext.TargetPawn;
-	if (!ContextPC && !ContextPawn)
-	{
-		UWorld* World = GetWorld();
-		ContextPC = World ? World->GetFirstPlayerController() : nullptr;
-		ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
-	}
+	// P2-N02: No fallback to GetFirstPlayerController. If TransitionContext is empty,
+	// conditions requiring a pawn/controller will evaluate against null and fail.
+	// Callers must provide explicit TransitionContext for player-dependent conditions.
 
 	for (const TObjectPtr<UNarrativeCondition>& Cond : Config->EntryConditions)
 	{
@@ -882,15 +887,12 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 	const TArray<TObjectPtr<UNarrativeEvent>>* Events = bEntering ? &Config->EntryEvents : &Config->ExitEvents;
 	if (!Events || Events->IsEmpty()) return;
 
-	// Use explicit transition context; fall back to first player only if context is empty
+	// Use explicit transition context
 	APlayerController* ContextPC = TransitionContext.PlayerController;
 	APawn* ContextPawn = TransitionContext.TargetPawn;
-	if (!ContextPC && !ContextPawn)
-	{
-		UWorld* World = GetWorld();
-		ContextPC = World ? World->GetFirstPlayerController() : nullptr;
-		ContextPawn = ContextPC ? ContextPC->GetPawn() : nullptr;
-	}
+	// P2-N02: No fallback to GetFirstPlayerController. If TransitionContext is empty,
+	// conditions requiring a pawn/controller will evaluate against null and fail.
+	// Callers must provide explicit TransitionContext for player-dependent conditions.
 
 	for (const TObjectPtr<UNarrativeEvent>& Event : *Events)
 	{

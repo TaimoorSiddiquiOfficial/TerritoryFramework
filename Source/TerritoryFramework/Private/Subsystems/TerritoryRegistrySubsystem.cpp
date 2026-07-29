@@ -60,6 +60,16 @@ void UTerritoryRegistrySubsystem::PollBoundsChanges()
 
 	// Cleanup stale entries from destroyed territories that were never properly removed.
 	SpatialIndex.RemoveInvalidTerritories();
+
+	// P2-N07: Prune stale tag/GUID map entries for destroyed territories
+	for (auto It = TagToTerritoryMap.CreateIterator(); It; ++It)
+	{
+		if (!It->Value.IsValid()) It.RemoveCurrent();
+	}
+	for (auto It = GUIDToTerritoryMap.CreateIterator(); It; ++It)
+	{
+		if (!It->Value.IsValid()) It.RemoveCurrent();
+	}
 }
 
 ETerritoryRegistrationResult UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
