@@ -2866,6 +2866,48 @@ bool FTFBehavior_LiveReplicationSubscriptions::RunTest(const FString& Parameters
 	return true;
 }
 
+// ─── P0-06: GuardSpawnPoint implements INarrativeSavableActor ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_GuardSpawnPointSaveGame,
+	"TerritoryFramework.Contract.GuardSpawnPointSaveGame",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_GuardSpawnPointSaveGame::RunTest(const FString& Parameters)
+{
+	const UClass* SPClass = ATerritoryGuardSpawnPoint::StaticClass();
+	TestNotNull(TEXT("GuardSpawnPoint class exists"), SPClass);
+	if (!SPClass) return false;
+
+	// Verify INarrativeSavableActor interface
+	TestTrue(TEXT("Implements INarrativeSavableActor"),
+		SPClass->ImplementsInterface(UNarrativeSavableActor::StaticClass()));
+
+	// Verify SaveGame interface methods exist
+	TestTrue(TEXT("GetActorGUID exists"),
+		TFTestUtils::HasFunction(SPClass, TEXT("GetActorGUID")));
+	TestTrue(TEXT("PrepareForSave exists"),
+		TFTestUtils::HasFunction(SPClass, TEXT("PrepareForSave")));
+	TestTrue(TEXT("Load exists"),
+		TFTestUtils::HasFunction(SPClass, TEXT("Load")));
+	TestTrue(TEXT("ShouldRespawn exists"),
+		TFTestUtils::HasFunction(SPClass, TEXT("ShouldRespawn")));
+
+	// Verify GUID property exists and is SaveGame
+	TestTrue(TEXT("SpawnPointGUID property exists"),
+		TFTestUtils::HasProperty(SPClass, TEXT("SpawnPointGUID")));
+	TestTrue(TEXT("SpawnPointGUID is SaveGame"),
+		TFTestUtils::IsSaveGame(SPClass, TEXT("SpawnPointGUID")));
+
+	// Verify reserve state properties are SaveGame
+	TestTrue(TEXT("CurrentReserveCount is SaveGame"),
+		TFTestUtils::IsSaveGame(SPClass, TEXT("CurrentReserveCount")));
+	TestTrue(TEXT("PendingReserveSpawns is SaveGame"),
+		TFTestUtils::IsSaveGame(SPClass, TEXT("PendingReserveSpawns")));
+	TestTrue(TEXT("SavedActiveGuardCount is SaveGame"),
+		TFTestUtils::IsSaveGame(SPClass, TEXT("SavedActiveGuardCount")));
+
+	return true;
+}
+
 // ─── P0-04: TerritoryCaptureEvent uses ApplyTerritoryMutation ───
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_CaptureEventUsesMutation,
 	"TerritoryFramework.Contract.CaptureEventUsesMutation",

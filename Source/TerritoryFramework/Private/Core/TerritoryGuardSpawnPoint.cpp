@@ -7,6 +7,7 @@
 #include "Components/BillboardComponent.h"
 #include "NavigationSystem.h"
 #include "TimerManager.h"
+#include "SaveSystemStatics.h"
 
 #if WITH_EDITOR
 #include "Components/ArrowComponent.h"
@@ -24,6 +25,65 @@ ATerritoryGuardSpawnPoint::ATerritoryGuardSpawnPoint()
 
 	CurrentReserveCount = 0;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// P0-06: INarrativeSavableActor — persist reserve state across save/load
+// ═══════════════════════════════════════════════════════════════════════════════
+
+FGuid ATerritoryGuardSpawnPoint::GetActorGUID_Implementation() const
+{
+	return SpawnPointGUID;
+}
+
+void ATerritoryGuardSpawnPoint::SetActorGUID_Implementation(const FGuid& InGUID)
+{
+	SpawnPointGUID = InGUID;
+}
+
+void ATerritoryGuardSpawnPoint::PrepareForSave_Implementation()
+{
+	// SaveGame UPROPERTYs auto-serialized: CurrentReserveCount, PendingReserveSpawns, SavedActiveGuardCount
+	SavedActiveGuardCount = GetActiveGuardCount();
+}
+
+void ATerritoryGuardSpawnPoint::Load_Implementation()
+{
+	// Mark that we loaded from save — prevents InitializeReserves from resetting to full
+	bLoadedFromSave = true;
+}
+
+bool ATerritoryGuardSpawnPoint::ShouldRespawn_Implementation() const
+{
+	// Spawn points are level-placed, not dynamically spawned — don't respawn
+	return false;
+}
+
+void ATerritoryGuardSpawnPoint::EnsurePersistentSpawnPointGUID()
+{
+	if (!SpawnPointGUID.IsValid())
+	{
+		SpawnPointGUID = FGuid::NewGuid();
+#if WITH_EDITOR
+		MarkPackageDirty();
+#endif
+	}
+}
+
+#if WITH_EDITOR
+void ATerritoryGuardSpawnPoint::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	EnsurePersistentSpawnPointGUID();
+}
+
+void ATerritoryGuardSpawnPoint::PostDuplicate(EDuplicateMode::Type DuplicateMode)
+{
+	Super::PostDuplicate(DuplicateMode);
+	// Invalidate GUID on duplicate — must be re-baked
+	SpawnPointGUID.Invalidate();
+	EnsurePersistentSpawnPointGUID();
+}
+#endif
 
 void ATerritoryGuardSpawnPoint::BindToTerritory(ATerritoryVolume* Territory)
 {
@@ -52,6 +112,14 @@ void ATerritoryGuardSpawnPoint::BindToTerritory(ATerritoryVolume* Territory)
 void ATerritoryGuardSpawnPoint::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// P0-06: Ensure GUID is baked; load persisted reserve state if available
+	EnsurePersistentSpawnPointGUID();
+	if (HasAuthority())
+	{
+		USaveSystemStatics::LoadSingleActor(this);
+	}
+
 	ResolveOwningTerritory();
 	InitializeReserves();
 
@@ -154,9 +222,13 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 
 void ATerritoryGuardSpawnPoint::InitializeReserves()
 {
-	// Only reset if not already loaded from save (SaveGame values are non-zero or save loaded)
-	// If CurrentReserveCount is 0 and no save loaded, initialize to full
-	if (CurrentReserveCount <= 0 && SavedActiveGuardCount <= 0)
+	// P0-06: If loaded from save, preserve the saved reserve state.
+	// Only initialize to full on fresh (non-save) start.
+	if (bLoadedFromSave)
+	{
+		// Keep saved CurrentReserveCount and PendingReserveSpawns as-is
+	}
+	else if (CurrentReserveCount <= 0 && SavedActiveGuardCount <= 0)
 	{
 		CurrentReserveCount = ReserveSlots;
 	}

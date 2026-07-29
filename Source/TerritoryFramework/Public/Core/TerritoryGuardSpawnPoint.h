@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "NarrativeSavableActor.h"
 #include "TerritoryGuardSpawnPoint.generated.h"
 
 class ATerritoryVolume;
@@ -64,12 +65,24 @@ struct FTerritoryPatrolNode
  *       spawn guard here -> configure spawn -> start patrol
  */
 UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="Territory Guard Spawn Point"))
-class TERRITORYFRAMEWORK_API ATerritoryGuardSpawnPoint : public AActor
+class TERRITORYFRAMEWORK_API ATerritoryGuardSpawnPoint : public AActor, public INarrativeSavableActor
 {
 	GENERATED_BODY()
 
 public:
 	ATerritoryGuardSpawnPoint();
+
+	// ─── INarrativeSavableActor (P0-06) ───
+	virtual FGuid GetActorGUID_Implementation() const override;
+	virtual void SetActorGUID_Implementation(const FGuid& InGUID) override;
+	virtual void PrepareForSave_Implementation() override;
+	virtual void Load_Implementation() override;
+	virtual bool ShouldRespawn_Implementation() const override;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
+#endif
 
 	// ─── Configuration ───
 
@@ -369,6 +382,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category="Territory|GuardSpawn|Visual",
 		meta=(DisplayName="Reserve Color"))
 	FLinearColor ReserveColor = FLinearColor(0.f, 0.5f, 1.f, 1.f);
+
+	// ─── P0-06: Persistence ───
+
+	/** Baked GUID for save/load. Set at editor placement time, not at runtime. */
+	UPROPERTY(SaveGame, VisibleAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Persistence",
+		meta=(DisplayName="Spawn Point GUID (auto-generated)"))
+	FGuid SpawnPointGUID;
+
+	/** Whether reserve state was loaded from save (prevents reset on reconcile). */
+	bool bLoadedFromSave = false;
+
+	/** Ensure GUID is baked at editor time. */
+	void EnsurePersistentSpawnPointGUID();
 
 private:
 	friend class ATerritoryVolume;
