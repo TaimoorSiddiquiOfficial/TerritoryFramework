@@ -250,11 +250,14 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 				UE_LOG(LogTerritory, Warning, TEXT("[EconomyTick] %s TOCTOU: debit failed despite %d available — treating as full deficit"),
 					*Faction.ToString(), TickTreasury.CostsPerTick);
 				OnFactionUpkeepDeficit.Broadcast(Faction, TickTreasury.CostsPerTick);
+				// P2-06: Skip the partial deficit broadcast below — we already broadcast full deficit
+				continue; // skip to next faction
 			}
 		}
 
 		// Upkeep consequence: when a faction can't pay full upkeep, broadcast deficit
 		// so territories can suspend reserve respawns or reduce desired guard count.
+		// P2-06: Only broadcast if we didn't already broadcast from TOCTOU path above
 		if (!bUpkeepFullyPaid && TickTreasury.CostsPerTick > 0)
 		{
 			const int32 Deficit = TickTreasury.CostsPerTick - ActualUpkeep;

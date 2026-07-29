@@ -567,19 +567,9 @@ ATerritoryCity* ATerritoryDistrict::GetOwningCity() const
 		return Cast<ATerritoryCity>(Parent);
 	}
 
-	FGameplayTag MyTag = GetTerritoryTag();
-	if (!MyTag.IsValid()) return nullptr;
-
-	TArray<ATerritoryVolume*> All = Registry->GetAllTerritories();
-	for (ATerritoryVolume* Volume : All)
-	{
-		ATerritoryCity* City = Cast<ATerritoryCity>(Volume);
-		// P2-N09: Exact equality — MatchesTag could match wrong city with shared tag prefix
-		if (City && MyTag == City->GetTerritoryTag() && static_cast<const AActor*>(City) != this)
-		{
-			return City;
-		}
-	}
+	// P2-07: Removed dead fallback — a district without ParentTerritoryTag cannot resolve its city.
+	// The tag comparison fallback could never match (district and city have different tags).
+	// Require ParentTerritoryTag to be set in the editor.
 	return nullptr;
 }
 

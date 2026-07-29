@@ -84,6 +84,12 @@ public:
 	 * Returns the territory containing a world location. Uses spatial index for O(1) lookup.
 	 * If multiple territories overlap, returns the highest-priority one.
 	 */
+	/**
+	 * P2-04: Client spatial index is populated at BeginPlay but NOT updated for
+	 * runtime bounds changes (PollBoundsChanges is server-only). For static
+	 * level-placed territories this is correct. For dynamic territories, call
+	 * UpdateTerritoryBounds explicitly on the server.
+	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Registry", meta=(DisplayName="Get Territory At Location"))
 	ATerritoryVolume* GetTerritoryAtLocation(const FVector& WorldLocation) const;
 

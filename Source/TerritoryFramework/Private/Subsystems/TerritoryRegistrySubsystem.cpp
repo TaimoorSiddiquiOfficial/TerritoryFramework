@@ -76,11 +76,25 @@ ETerritoryRegistrationResult UTerritoryRegistrySubsystem::RegisterTerritory(ATer
 {
 	if (!Territory) return ETerritoryRegistrationResult::InvalidTerritory;
 
-	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	const bool bDebug = Settings && Settings->ShouldDebugRegistry();
-
+	// P2-01: Reject territories with no usable identity
 	FGameplayTag Tag = Territory->GetTerritoryTag();
 	FGuid GUID = Territory->GetActorGUID_Implementation();
+
+	if (!Tag.IsValid())
+	{
+		UE_LOG(LogTerritory, Error, TEXT("[Registry] Rejecting %s — invalid TerritoryTag"),
+			*Territory->GetName());
+		return ETerritoryRegistrationResult::InvalidTerritory;
+	}
+	if (!GUID.IsValid())
+	{
+		UE_LOG(LogTerritory, Error, TEXT("[Registry] Rejecting %s — invalid TerritoryGUID"),
+			*Territory->GetName());
+		return ETerritoryRegistrationResult::InvalidTerritory;
+	}
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bDebug = Settings && Settings->ShouldDebugRegistry();
 
 	if (bDebug)
 	{
@@ -281,7 +295,13 @@ TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetAllTerritories() const
 
 int32 UTerritoryRegistrySubsystem::GetTerritoryCount() const
 {
-	return RegisteredTerritories.Num();
+	// P2-05: Count only valid (non-stale) entries
+	int32 Count = 0;
+	for (const TWeakObjectPtr<ATerritoryVolume>& Ptr : RegisteredTerritories)
+	{
+		if (Ptr.IsValid()) ++Count;
+	}
+	return Count;
 }
 
 int32 UTerritoryRegistrySubsystem::GetTerritoryCountForFaction(const FGameplayTag& Faction) const
