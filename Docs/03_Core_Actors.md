@@ -273,7 +273,7 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 
 ## ATerritoryWorldState
 
-**Place ONE in the level** when a replicated save snapshot is needed. It is not continuously synchronized with every subsystem mutation.
+**Place exactly ONE in the level** for global persistence and late-join read models. Server subsystem delegates maintain the replicated projection between saves.
 
 ### What It Stores (replicated)
 - Faction economy params (income, costs, territory count) — faction wealth lives in NarrativePro player inventories
@@ -282,5 +282,6 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 - Faction reputation
 - Diplomacy history
 - Capture summaries (per territory)
+- Counterattack decisions, lifecycle state, and finite casualty counts
 
-Economy, diplomacy, reputation, transaction, and capture-summary arrays are rebuilt by `ExportPersistentState()` or explicit setters. Saved contests resume from their leading faction/progress, but attacker identities and non-leading faction progress are not persisted.
+`ExportPersistentState()` rebuilds the authoritative snapshot at save time. Live economy, diplomacy, capture, and assault delegates keep it current between saves; RepNotify hydrates client query subsystems. Saved contests resume leading progress without attacker identities. Saved active assaults reconstruct surviving finite force without saving pawn pointers.

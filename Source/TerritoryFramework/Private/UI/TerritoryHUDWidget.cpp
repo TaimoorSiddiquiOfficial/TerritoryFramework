@@ -6,13 +6,34 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryVolume.h"
+#include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "Widgets/NarrativeGameplayHUD.h"
 
 void UTerritoryHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	if (APlayerController* PlayerController = GetOwningPlayer())
+	{
+		ManagementComponent = UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);
+		if (ManagementComponent.IsValid())
+		{
+			ManagementComponent->OnAssaultNotification.AddUniqueDynamic(
+				this, &UTerritoryHUDWidget::HandleAssaultNotification);
+		}
+	}
 	BindToTerritoryAtPlayer();
+}
+
+void UTerritoryHUDWidget::NativeDestruct()
+{
+	if (ManagementComponent.IsValid())
+	{
+		ManagementComponent->OnAssaultNotification.RemoveDynamic(
+			this, &UTerritoryHUDWidget::HandleAssaultNotification);
+	}
+	Super::NativeDestruct();
 }
 
 void UTerritoryHUDWidget::RefreshTerritoryDisplay()
@@ -25,7 +46,15 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	ATerritoryVolume* Territory = GetBoundTerritory();
 	if (!Territory)
 	{
+		if (bCollapseWhenOutsideTerritory)
+		{
+			SetVisibility(ESlateVisibility::Collapsed);
+		}
 		return;
+	}
+	if (bCollapseWhenOutsideTerritory && GetVisibility() == ESlateVisibility::Collapsed)
+	{
+		SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	}
 
 	const ETerritoryState State = Territory->GetTerritoryState();
@@ -52,13 +81,27 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	}
 	if (DistrictDescriptionText)
 	{
-		const int64 GuardUpkeep = static_cast<int64>(Territory->GetGuardCost()) * Territory->GetDesiredGuardCount();
-		DistrictDescriptionText->SetText(FText::Format(
-			NSLOCTEXT("TerritoryHUD", "DistrictSummary", "Guards {0}/{1}   Income {2}   Upkeep {3}"),
-			FText::AsNumber(Territory->GetDesiredGuardCount()),
-			FText::AsNumber(Territory->GetMaxGuardCount()),
-			FText::AsNumber(Territory->GetPeriodicIncome()),
-			FText::AsNumber(GuardUpkeep)));
+		FTerritoryDistrictOperationsView View;
+		if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory);
+			District && UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
+				this, District, GetOwningPlayer(), View))
+		{
+			DistrictDescriptionText->SetText(FText::Format(
+				NSLOCTEXT("TerritoryHUD", "DistrictOperationsSummary", "Active {0} / Assigned {1} / Max {2}   Net {3}   {4}"),
+				FText::AsNumber(View.ActiveGuards), FText::AsNumber(View.DesiredGuards),
+				FText::AsNumber(View.MaximumGuards), FText::AsNumber(View.NetIncome),
+				View.ThreatSummary));
+		}
+		else
+		{
+			const int64 GuardUpkeep = static_cast<int64>(Territory->GetGuardCost()) * Territory->GetDesiredGuardCount();
+			DistrictDescriptionText->SetText(FText::Format(
+				NSLOCTEXT("TerritoryHUD", "TerritorySummary", "Guards {0}/{1}   Income {2}   Upkeep {3}"),
+				FText::AsNumber(Territory->GetDesiredGuardCount()),
+				FText::AsNumber(Territory->GetMaxGuardCount()),
+				FText::AsNumber(Territory->GetPeriodicIncome()),
+				FText::AsNumber(GuardUpkeep)));
+		}
 	}
 
 	const FGameplayTag ContestingFaction =
@@ -85,4 +128,25 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	bHasObservedState = true;
 	LastObservedState = State;
 	LastObservedContestingFaction = ContestingFaction;
+}
+
+void UTerritoryHUDWidget::HandleAssaultNotification(const FTerritoryAssaultRecord& Assault)
+{
+	if (ANarrativePlayerController* PlayerController = Cast<ANarrativePlayerController>(GetOwningPlayer()))
+	{
+		if (UNarrativeGameplayHUD* HUD = PlayerController->GetNarrativeGameplayHUD())
+		{
+			HUD->ShowMajorNotification(
+				FText::Format(
+					NSLOCTEXT("TerritoryHUD", "CounterAttackWarningTitle", "Counterattack warning: {0}"),
+					UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.TargetTerritory)),
+				FText::Format(
+					NSLOCTEXT("TerritoryHUD", "CounterAttackWarningBody", "{0} is mobilizing {1} attackers. Reinforce the district before they arrive."),
+					UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.AttackingFaction),
+					FText::AsNumber(Assault.PlannedForce)),
+				8.f,
+				true);
+		}
+	}
+	RefreshTerritoryDisplay();
 }

@@ -81,7 +81,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SyncToGameState();
 
-	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void LoadFromGameState();
 
 	/** Native persistence bridge. Restores rich treaty metadata without recording gameplay events. */

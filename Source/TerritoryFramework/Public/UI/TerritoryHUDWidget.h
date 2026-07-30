@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Combat/TerritoryCounterAttackTypes.h"
 #include "UI/TerritoryInfoWidget.h"
 #include "TerritoryHUDWidget.generated.h"
 
@@ -15,7 +16,11 @@ class TERRITORYFRAMEWORK_API UTerritoryHUDWidget : public UTerritoryInfoWidget
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual void RefreshTerritoryDisplay() override;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|UI")
+	bool bCollapseWhenOutsideTerritory = true;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_DistrictName;
@@ -33,7 +38,11 @@ protected:
 	TObjectPtr<UProgressBar> ProgressBar_Capture;
 
 private:
+	TWeakObjectPtr<class UTerritoryPlayerManagementComponent> ManagementComponent;
 	bool bHasObservedState = false;
 	ETerritoryState LastObservedState = ETerritoryState::Unclaimed;
 	FGameplayTag LastObservedContestingFaction;
+
+	UFUNCTION()
+	void HandleAssaultNotification(const FTerritoryAssaultRecord& Assault);
 };

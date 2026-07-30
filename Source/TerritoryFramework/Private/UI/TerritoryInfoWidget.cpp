@@ -1,7 +1,9 @@
 #include "UI/TerritoryInfoWidget.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Engine/World.h"
@@ -64,6 +66,10 @@ void UTerritoryInfoWidget::BindToTerritoryAtPlayer()
 		RefreshTerritoryDisplay();
 		OnTerritoryBound(Territory);
 	}
+	else if (BoundTerritory.IsValid())
+	{
+		UnbindFromTerritory();
+	}
 }
 
 void UTerritoryInfoWidget::UnbindFromTerritory()
@@ -71,6 +77,8 @@ void UTerritoryInfoWidget::UnbindFromTerritory()
 	UnbindDelegates();
 	BoundTerritory = nullptr;
 	BoundTerritoryTag = FGameplayTag();
+	ClearTerritoryDisplay();
+	OnTerritoryUnbound();
 }
 
 ATerritoryVolume* UTerritoryInfoWidget::GetBoundTerritory() const
@@ -132,7 +140,11 @@ void UTerritoryInfoWidget::HandleStateChanged(ATerritoryVolume* Territory, ETerr
 void UTerritoryInfoWidget::RefreshTerritoryDisplay()
 {
 	ATerritoryVolume* Territory = GetBoundTerritory();
-	if (!Territory) return;
+	if (!Territory)
+	{
+		ClearTerritoryDisplay();
+		return;
+	}
 
 	if (TerritoryNameText) TerritoryNameText->SetText(Territory->GetTerritoryDisplayName());
 	if (TerritoryOwnerText)
@@ -148,8 +160,40 @@ void UTerritoryInfoWidget::RefreshTerritoryDisplay()
 	}
 	if (TerritoryGuardCountText)
 	{
-		TerritoryGuardCountText->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"),
-			Territory->GetSpawnedGuardCount(), Territory->GetMaxGuardCount())));
+		TerritoryGuardCountText->SetText(FText::Format(
+			NSLOCTEXT("TerritoryInfo", "GuardCounts", "{0} active / {1} assigned / {2} max"),
+			FText::AsNumber(Territory->GetSpawnedGuardCount()),
+			FText::AsNumber(Territory->GetDesiredGuardCount()),
+			FText::AsNumber(Territory->GetMaxGuardCount())));
 	}
 	if (TerritoryCaptureProgress) TerritoryCaptureProgress->SetPercent(Territory->GetControlProgress());
+
+	if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory))
+	{
+		FTerritoryDistrictOperationsView View;
+		if (UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
+			this, District, GetOwningPlayer(), View))
+		{
+			if (TerritoryAvailabilityText) TerritoryAvailabilityText->SetText(View.AvailabilityReason);
+			if (TerritoryThreatText) TerritoryThreatText->SetText(View.ThreatSummary);
+			if (TerritoryNetIncomeText)
+			{
+				TerritoryNetIncomeText->SetText(FText::Format(
+					NSLOCTEXT("TerritoryInfo", "NetIncome", "Net per cycle: {0}"),
+					FText::AsNumber(View.NetIncome)));
+			}
+		}
+	}
+}
+
+void UTerritoryInfoWidget::ClearTerritoryDisplay()
+{
+	if (TerritoryNameText) TerritoryNameText->SetText(FText::GetEmpty());
+	if (TerritoryOwnerText) TerritoryOwnerText->SetText(FText::GetEmpty());
+	if (TerritoryStateText) TerritoryStateText->SetText(FText::GetEmpty());
+	if (TerritoryGuardCountText) TerritoryGuardCountText->SetText(FText::GetEmpty());
+	if (TerritoryCaptureProgress) TerritoryCaptureProgress->SetPercent(0.f);
+	if (TerritoryAvailabilityText) TerritoryAvailabilityText->SetText(FText::GetEmpty());
+	if (TerritoryThreatText) TerritoryThreatText->SetText(FText::GetEmpty());
+	if (TerritoryNetIncomeText) TerritoryNetIncomeText->SetText(FText::GetEmpty());
 }

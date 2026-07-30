@@ -100,7 +100,7 @@ Choose ONE capture method per territory:
    - **Capturing Faction** = `Narrative.Factions.Heroes`
    - **Force Capture** = false (respects gameplay rules) or true (bypasses lock, defenders, diplomacy, and AttemptCapture; still requires server authority and valid territory/faction inputs)
 
-**Flow:** Kill all guards → territory goes red → complete quest objective → capture fires → territory turns green → guards respawn for player faction.
+**Flow:** Kill all guards → territory remains enemy-owned but undefended → register/complete the physical or Tales capture → atomic ownership change → territory turns green → guards respawn for the player faction.
 
 ### Method B: Overlap Trigger Capture
 

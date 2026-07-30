@@ -6,6 +6,7 @@
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Blueprint/WidgetTree.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
@@ -14,7 +15,29 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	BuildNativeLayout();
+	if (SelectDistrictButton)
+	{
+		SelectDistrictButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleSelected);
+	}
+	if (AddGuardButton)
+	{
+		AddGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleAddGuard);
+		AddGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "AddGuard", "+ GUARD"));
+	}
+	if (RemoveGuardButton)
+	{
+		RemoveGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleRemoveGuard);
+		RemoveGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "RemoveGuard", "- GUARD"));
+	}
 	RefreshRow();
+}
+
+void UTerritoryDistrictRowWidget::NativeDestruct()
+{
+	if (SelectDistrictButton) SelectDistrictButton->OnClicked().RemoveAll(this);
+	if (AddGuardButton) AddGuardButton->OnClicked().RemoveAll(this);
+	if (RemoveGuardButton) RemoveGuardButton->OnClicked().RemoveAll(this);
+	Super::NativeDestruct();
 }
 
 void UTerritoryDistrictRowWidget::BuildNativeLayout()
@@ -27,45 +50,64 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	UHorizontalBox* Root = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("DistrictRowRoot"));
 	WidgetTree->RootWidget = Root;
 
-	const TSubclassOf<UNarrativeCommonButtonBase> NarrativeButtonClass = LoadClass<UNarrativeCommonButtonBase>(
-		nullptr,
-		TEXT("/NarrativePro/Pro/Core/UI/Widgets/Base/WBP_NarrativeButton_Text.WBP_NarrativeButton_Text_C"));
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const TSubclassOf<UNarrativeCommonButtonBase> NarrativeButtonClass = Settings
+		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
 	if (!NarrativeButtonClass)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Territory district row could not load Narrative button class."));
-		return;
+		UE_LOG(LogTerritory, Warning,
+			TEXT("Territory district row has no valid DefaultNarrativeButtonClass; rendering read-only details."));
 	}
 
-	SelectButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("SelectDistrictButton"));
 	UOverlay* SelectOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SelectDistrictOverlay"));
 	UVerticalBox* Details = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DistrictDetails"));
-	NameText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictName"));
-	SummaryText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictSummary"));
-	StatusText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictStatus"));
-	Details->AddChild(NameText);
-	Details->AddChild(SummaryText);
-	Details->AddChild(StatusText);
+	DistrictName = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictName"));
+	DistrictSummary = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictSummary"));
+	DistrictStatus = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictStatus"));
+	Details->AddChild(DistrictName);
+	Details->AddChild(DistrictSummary);
+	Details->AddChild(DistrictStatus);
 	Details->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-	SelectOverlay->AddChild(SelectButton);
+	if (NarrativeButtonClass)
+	{
+		SelectDistrictButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("SelectDistrictButton"));
+		SelectOverlay->AddChild(SelectDistrictButton);
+	}
 	SelectOverlay->AddChild(Details);
 	Root->AddChild(SelectOverlay);
 
-	AddGuardButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("AddGuardButton"));
-	AddGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "AddGuard", "+ GUARD"));
-	Root->AddChild(AddGuardButton);
+	if (NarrativeButtonClass)
+	{
+		AddGuardButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("AddGuardButton"));
+		Root->AddChild(AddGuardButton);
 
-	RemoveGuardButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("RemoveGuardButton"));
-	RemoveGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "RemoveGuard", "- GUARD"));
-	Root->AddChild(RemoveGuardButton);
-
-	SelectButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleSelected);
-	AddGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleAddGuard);
-	RemoveGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleRemoveGuard);
+		RemoveGuardButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("RemoveGuardButton"));
+		Root->AddChild(RemoveGuardButton);
+	}
 }
 
 void UTerritoryDistrictRowWidget::InitializeDistrict(ATerritoryDistrict* InDistrict)
 {
 	District = InDistrict;
+	OperationsView = FTerritoryDistrictOperationsView();
+	OperationsView.District = InDistrict;
+	RefreshRow();
+}
+
+void UTerritoryDistrictRowWidget::InitializeOperationsView(
+	const FTerritoryDistrictOperationsView& InView)
+{
+	OperationsView = InView;
+	District = InView.District;
+	bCanAddGuard = InView.bCanAddGuard;
+	bCanRemoveGuard = InView.bCanRemoveGuard;
+	ActionStatus = InView.bUnderAttack || InView.bAttackScheduled
+		? InView.ThreatSummary
+		: (!InView.bCanAddGuard && !InView.bCanRemoveGuard
+			? (!InView.AddGuardFailureReason.IsEmpty()
+				? InView.AddGuardFailureReason
+				: InView.RemoveGuardFailureReason)
+			: FText::GetEmpty());
 	RefreshRow();
 }
 
@@ -82,9 +124,9 @@ void UTerritoryDistrictRowWidget::SetGuardActionState(bool bCanAdd, bool bCanRem
 	{
 		RemoveGuardButton->SetIsEnabled(bCanRemove);
 	}
-	if (StatusText)
+	if (DistrictStatus)
 	{
-		StatusText->SetText(ActionStatus);
+		DistrictStatus->SetText(ActionStatus);
 	}
 }
 
@@ -105,20 +147,29 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 	const FText StateText = StateEnum
 		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(CurrentDistrict->GetTerritoryState()))
 		: FText::GetEmpty();
-	if (NameText)
+	if (DistrictName)
 	{
-		NameText->SetText(CurrentDistrict->GetTerritoryDisplayName());
+		DistrictName->SetText(OperationsView.DisplayName.IsEmpty()
+			? CurrentDistrict->GetTerritoryDisplayName()
+			: OperationsView.DisplayName);
 	}
-	if (SummaryText)
+	if (DistrictSummary)
 	{
-		SummaryText->SetText(FText::Format(
-			NSLOCTEXT("TerritoryDistrictRow", "Summary", "{0}  |  {1}  |  Guards {2}/{3}  |  Net {4}"),
+		const int32 Active = OperationsView.District ? OperationsView.ActiveGuards : CurrentDistrict->GetSpawnedGuardCount();
+		const int32 Desired = OperationsView.District ? OperationsView.DesiredGuards : CurrentDistrict->GetDesiredGuardCount();
+		const int32 Maximum = OperationsView.District ? OperationsView.MaximumGuards : CurrentDistrict->GetMaxGuardCount();
+		const int64 Net = OperationsView.District ? OperationsView.NetIncome
+			: CurrentDistrict->GetEffectiveIncome()
+				- (static_cast<int64>(CurrentDistrict->GetGuardCost()) * CurrentDistrict->GetDesiredGuardCount());
+		DistrictSummary->SetText(FText::Format(
+			NSLOCTEXT("TerritoryDistrictRow", "Summary", "{0}  |  {1}  |  Active {2} / Assigned {3} / Max {4}  |  Net {5}  |  {6}"),
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(CurrentDistrict->GetOwningFaction()),
 			StateText,
-			FText::AsNumber(CurrentDistrict->GetDesiredGuardCount()),
-			FText::AsNumber(CurrentDistrict->GetMaxGuardCount()),
-			FText::AsNumber(CurrentDistrict->GetEffectiveIncome()
-				- (static_cast<int64>(CurrentDistrict->GetGuardCost()) * CurrentDistrict->GetDesiredGuardCount()))));
+			FText::AsNumber(Active),
+			FText::AsNumber(Desired),
+			FText::AsNumber(Maximum),
+			FText::AsNumber(Net),
+			UTerritoryUIBlueprintLibrary::GetThreatLevelText(OperationsView.ThreatLevel)));
 	}
 	if (AddGuardButton)
 	{
@@ -128,9 +179,9 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 	{
 		RemoveGuardButton->SetIsEnabled(bCanRemoveGuard);
 	}
-	if (StatusText)
+	if (DistrictStatus)
 	{
-		StatusText->SetText(ActionStatus);
+		DistrictStatus->SetText(ActionStatus);
 	}
 }
 

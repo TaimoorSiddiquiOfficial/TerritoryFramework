@@ -80,9 +80,12 @@ void ATerritoryGuardSpawnPoint::PostEditChangeProperty(FPropertyChangedEvent& Pr
 void ATerritoryGuardSpawnPoint::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 {
 	Super::PostDuplicate(DuplicateMode);
-	// Invalidate GUID on duplicate — must be re-baked
-	SpawnPointGUID.Invalidate();
-	EnsurePersistentSpawnPointGUID();
+	// PIE/world duplication must preserve the editor-authored persistent identity.
+	if (DuplicateMode == EDuplicateMode::Normal)
+	{
+		SpawnPointGUID = FGuid::NewGuid();
+		MarkPackageDirty();
+	}
 }
 #endif
 
@@ -471,10 +474,12 @@ void ATerritoryGuardSpawnPoint::HandleOwnershipTransition(EOwnershipTransitionRe
 		break;
 	case EReserveOwnershipPolicy::RefillOnOwnerChange:
 	default:
-		InitializeReserves();
+		CurrentReserveCount = FMath::Max(0, ReserveSlots);
 		break;
 	}
+	CancelPendingReserveSpawns();
 	ActiveGuards.Reset();
+	SavedActiveGuardCount = 0;
 }
 
 void ATerritoryGuardSpawnPoint::ResetReserveState()

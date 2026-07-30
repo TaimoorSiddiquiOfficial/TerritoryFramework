@@ -6,9 +6,11 @@
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Components/TextBlock.h"
 
 void UTerritoryDebugWidget::SetDebugEnabled(bool bEnabled)
 {
@@ -40,6 +42,10 @@ void UTerritoryDebugWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 	CacheSubsystems();
 	FText DebugText = BuildDebugString();
+	if (DebugTextBlock)
+	{
+		DebugTextBlock->SetText(DebugText);
+	}
 	OnUpdateDebugText(DebugText);
 }
 
@@ -49,6 +55,7 @@ void UTerritoryDebugWidget::NativeDestruct()
 	CachedControl = nullptr;
 	CachedEconomy = nullptr;
 	CachedDiplomacy = nullptr;
+	CachedCounterattacks = nullptr;
 	bSubsystemsCached = false;
 	Super::NativeDestruct();
 }
@@ -62,6 +69,7 @@ void UTerritoryDebugWidget::CacheSubsystems() const
 	CachedControl = World->GetSubsystem<UTerritoryControlSubsystem>();
 	CachedEconomy = World->GetSubsystem<UTerritoryEconomySubsystem>();
 	CachedDiplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	CachedCounterattacks = World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
 	bSubsystemsCached = true;
 }
 
@@ -73,6 +81,7 @@ FText UTerritoryDebugWidget::BuildDebugString() const
 	Result += BuildEconomySummary().ToString();
 	Result += BuildDiplomacySummary().ToString();
 	Result += BuildCaptureSummary().ToString();
+	Result += BuildCounterAttackSummary().ToString();
 
 	return FText::FromString(Result);
 }
@@ -207,5 +216,34 @@ FText UTerritoryDebugWidget::BuildCaptureSummary() const
 		Result += TEXT("  (no active captures)\n");
 	}
 
+	return FText::FromString(Result);
+}
+
+FText UTerritoryDebugWidget::BuildCounterAttackSummary() const
+{
+	if (!CachedCounterattacks) return FText::GetEmpty();
+	FString Result = TEXT("--- Counterattacks ---\n");
+	const TArray<FTerritoryAssaultRecord> Assaults = CachedCounterattacks->GetAllAssaults();
+	int32 NonTerminalCount = 0;
+	for (const FTerritoryAssaultRecord& Assault : Assaults)
+	{
+		if (Assault.IsTerminal()) continue;
+		++NonTerminalCount;
+		Result += FString::Printf(
+			TEXT("  %s: attacker=%s state=%d force=%d/%d reserve=%d killed=%d launch=%.2f success=%.2f\n"),
+			*Assault.TargetTerritory.ToString(),
+			*Assault.AttackingFaction.ToString(),
+			static_cast<int32>(Assault.State),
+			Assault.AliveForce,
+			Assault.PlannedForce,
+			Assault.PendingReserveForce,
+			Assault.KilledForce,
+			Assault.EvaluationResult.LaunchProbability,
+			Assault.EvaluationResult.EstimatedSuccessProbability);
+	}
+	if (NonTerminalCount == 0)
+	{
+		Result += TEXT("  (no scheduled or active assaults)\n");
+	}
 	return FText::FromString(Result);
 }

@@ -2,134 +2,128 @@
 
 ## Overview
 
-The District Management system provides a physical in-world interaction point for players to view and manage a captured district. Each district has a `ATerritoryDistrictManagementPoint` POI actor that appears on the map and can be interacted with directly.
+District management provides an in-world Narrative POI and a Narrative CommonUI command screen for an owned district. Players can inspect current security and finance, add guards, remove active guards, and see capture or counterattack risk without giving the widget gameplay authority.
+
+The same guarded management flow is available from the journal's District Command Center. Selecting a captured/owned row opens the district detail surface and exposes atomic `+1`, `-1`, `+5`, and `-5` controls. Those controls are presentation adapters over `UTerritoryPlayerManagementComponent`; they do not create another guard, economy, or ownership authority.
 
 ## Architecture
 
-```
-ATerritoryDistrictManagementPoint (APOIActor)
-  ├── UTerritoryDistrictNavigationMarkerComponent   — Map marker + POI marker
-  │     └── UTerritoryDistrictPOIMarker              — Custom marker for district info
-  ├── UTerritoryDistrictInteractableComponent        — In-world interaction
-  └── USphereComponent                               — Interaction sphere trigger
-  
-UTerritoryDistrictManagementWidget (UTerritoryInfoWidget)
-  └── Reads from ATerritoryDistrict + UTerritoryEconomySubsystem
+```text
+ATerritoryDistrictManagementPoint (Narrative APOIActor)
+  ├─ UTerritoryDistrictNavigationMarkerComponent
+  ├─ UTerritoryDistrictInteractableComponent
+  └─ USphereComponent
+
+UTerritoryDistrictManagementWidget (UTerritoryActivatableWidget)
+  ├─ FTerritoryDistrictOperationsView
+  ├─ Narrative Common buttons/text
+  └─ UTerritoryPlayerManagementComponent RPC bridge
 ```
 
-Two independent entry points to open the management widget:
+`ATerritoryDistrict` remains the owner/state/guard authority. The control, economy, counterattack, registry, and Narrative inventory systems supply their respective projections.
 
-1. **Map marker**: Player clicks the district marker on map/compass → `OnSelect()` → `OpenManagementWidget()`
-2. **Physical interaction**: Player walks within range and presses interact → `OnInteract()` → `HandleInteraction()` → local `OpenManagementWidget()`
+## Opening the screen
+
+The management point resolves `DistrictTag`, validates the local player, and calls `UTerritoryUIBlueprintLibrary::OpenTerritoryMenu` with `ManagementLayerTag` (default `UI.Layer.Menu`). The widget is pushed into the registered Narrative gameplay-HUD CommonUI container.
+
+Do not add the screen directly to the viewport or manually set controller input/cursor state. CommonUI activation, back handling, focus restore, and input routing own that lifecycle.
 
 ## Setup
 
-### Placing a Management Point
+1. Place `ATerritoryDistrictManagementPoint` near the district command location.
+2. Assign a stable editor GUID and a `DistrictTag` matching the district.
+3. Set `ManagementWidgetClass` to a Blueprint child of `UTerritoryDistrictManagementWidget`.
+4. Keep `ManagementLayerTag` on a layer registered by the Narrative HUD.
+5. Configure `ManagementDistance` for the physical interaction policy.
 
-1. Place an `ATerritoryDistrictManagementPoint` actor in the level near its district
-2. Set `DistrictTag` to match the district's `TerritoryTag`
-3. Assign a `ManagementWidgetClass` (a Widget Blueprint subclass of `UTerritoryDistrictManagementWidget`)
-4. Adjust `ManagementDistance` (default 600uu) for interaction range
+The district must be registered by `UTerritoryRegistrySubsystem`. World Partition load order is handled by tag/stable identity resolution; do not save a widget or actor pointer as district identity.
 
-### Required Dependencies
+## Displayed operations
 
-The management point resolves the district by tag through `UTerritoryRegistrySubsystem`. The district must be:
-- Registered in the registry (auto-registered in `ATerritoryVolume::BeginPlay()`)
-- Have its `TerritoryTag` set in the editor
-
-## Access Control (`CanManage`)
-
-Three conditions must all pass:
-
-1. **District exists** — `DistrictTag` resolves to a registered `ATerritoryDistrict`
-2. **District is Claimed** — state != Contested/Locked/Unclaimed
-3. **Interactor is owner** — interactor's primary faction matches district's `GetOwningFaction()`
-
-Faction is resolved via `UTerritoryBlueprintLibrary::GetActorPrimaryFaction()` which reads `INarrativeTeamAgentInterface::GetFactions()`.
-
-## Management Widget
-
-The widget (`UTerritoryDistrictManagementWidget`) extends `UTerritoryInfoWidget` and displays:
-
-| Field | Source | Update |
-|---|---|---|
-| District Name | `District->GetTerritoryDisplayName()` | 0.5s poll + delegate |
-| Owner Faction | `District->GetOwningFaction()` | 0.5s poll + delegate |
-| State | `District->GetTerritoryState()` | 0.5s poll + delegate |
-| Guard Count | `District->GetSpawnedGuardCount() / GetMaxGuardCount()` | 0.5s poll |
-| Guard Cost | `District->GetGuardPurchaseCost(1)` | 0.5s poll |
-| District Income | `District->GetEffectiveIncome()` | 0.5s poll |
-| Player Currency | `Economy->GetActorCurrency(GetOwningPlayer())` | 0.5s poll |
-| Add Guard Button | `District->CanPurchaseGuards()` | 0.5s poll |
-
-The base class `UTerritoryInfoWidget` subscribes to ownership/state change delegates for immediate refresh on capture/contest events. Economy and guard data is polled because those subsystems don't push per-change delegate updates.
-
-### Guard Purchase Flow
-
-```
-Widget "Add Guard" button
-  → HandleAddGuardClicked()
-    → ManagementComponent->RequestPurchaseGuards(Point, Count)
-      → (Client) ServerRequestPurchaseGuards (RPC)
-        → PerformPurchase()
-          → Validate: district, pawn, faction, range
-           → District->TryPurchaseGuards(RequestingPawn, Count)
-             → Validate owner, range, budget, capacity
-             → Economy->TryDebitCurrency(RequestingPawn)
-            → SpawnGuards()
-          → ClientReceiveGuardPurchaseResult (RPC)
-            → HandleGuardPurchaseResult()
-```
-
-Anti-spam: server-enforced cooldown and monotonic request IDs on the player-owned management component. The management point is never used as a client RPC owner.
-
-## POI Marker Refresh
-
-The district POI marker (`UTerritoryDistrictPOIMarker`) auto-refreshes when the district's ownership or state changes. The marker is only visible for **Claimed** districts — unclaimed, contested, and locked districts are hidden (alpha 0). Color semantics:
-
-| State/Faction | Color |
+| Field | Authority |
 |---|---|
-| Claimed by player faction | Green (0.1, 0.75, 0.35) |
-| Claimed by enemy faction | Red |
-| Unclaimed / Contested / Locked | Hidden (alpha 0) |
+| Name, owner, state | `ATerritoryDistrict` |
+| Active / desired / maximum guards | `ATerritoryDistrict` and guard posts |
+| Reserve count | Server guard-post snapshot when available |
+| Guard purchase cost and upkeep | Territory configuration/economy |
+| Available funds | Owning pawn's Narrative inventory/account |
+| Income and net per cycle | `UTerritoryEconomySubsystem` projection |
+| Availability and exact failure reason | Registry/control/management validation |
+| Threat and finite assault force | `UTerritoryCounterAttackSubsystem` / WorldState projection |
+
+The screen refreshes its operations view and also reacts to management results. Unknown server-only values are labelled unknown rather than displayed as zero.
+
+## Access control
+
+All of the following must pass on the server:
+
+1. the request comes from the owning player controller and a valid pawn;
+2. the management point and district exist in the same world;
+3. the district is registered, claimed, and owned by the pawn's Narrative faction;
+4. the pawn is within `ManagementDistance` when using a physical point;
+5. count, request ID, and cooldown are valid;
+6. add requests fit capacity and the Narrative account can pay;
+7. remove requests do not exceed removable active guards.
+
+The client cannot supply a trusted faction, price, balance, owner, power, or final state.
+
+## Guard command flow
+
+```text
+Narrative Common button / Blueprint RequestAddGuards or RequestRemoveGuards
+  -> player-owned UTerritoryPlayerManagementComponent
+  -> validated server RPC
+  -> ATerritoryDistrict authoritative guard mutation
+  -> Narrative inventory debit when adding
+  -> owning-client result delegate
+  -> operations-view refresh
+```
+
+The implementation selects and validates the complete removal set before commit. Success is not reported after a partial multi-guard removal.
 
 ## Blueprint API
 
-### UTerritoryDistrictManagementWidget (native-backed)
+### `UTerritoryDistrictManagementWidget`
 
 | Function | Type | Purpose |
 |---|---|---|
-| `InitializeManagement(ManagementPoint)` | BlueprintCallable | Bind widget to a management point |
-| `GetManagedDistrict()` | BlueprintPure | Returns resolved ATerritoryDistrict |
-| `GetManagedFaction()` | BlueprintPure | Returns player's faction tag |
-| `GetDistrictIncome()` | BlueprintPure | Sum of property incomes |
-| `CanPurchaseGuard(OutFailureReason)` | BlueprintPure | Guard purchase validation |
-| `RefreshManagementDisplay()` | BlueprintCallable | Force display refresh |
-| `OnManagementRefreshed()` | BlueprintImplementableEvent | BP hook after each refresh |
+| `InitializeManagement(Point)` | Callable | Bind the screen to a management point |
+| `GetManagedDistrict()` | Pure | Resolve the authoritative district |
+| `GetManagedFaction()` | Pure | Viewer faction resolved from the pawn |
+| `GetDistrictIncome()` | Pure | Current district income |
+| `GetOperationsView()` | Pure | Complete viewer-relative operations projection |
+| `CanPurchaseGuard(Reason)` | Pure | Exact add eligibility |
+| `CanRemoveGuard(Reason)` | Pure | Exact remove eligibility |
+| `RequestAddGuards(Count)` | Callable | Submit a validated server request |
+| `RequestRemoveGuards(Count)` | Callable | Submit a validated server request |
+| `RefreshManagementDisplay()` | Callable | Rebuild current display state |
+| `OnManagementRefreshed()` | Implementable event | Project presentation hook |
 
-### ATerritoryDistrictManagementPoint
+### `ATerritoryDistrictManagementPoint`
 
-| Function | Type | Purpose |
-|---|---|---|
-| `ResolveDistrict()` | BlueprintPure | Get district from DistrictTag |
-| `CanManage(Interactor, OutFailureReason)` | BlueprintPure | Access control check |
-| `IsInteractorInRange(Interactor)` | BlueprintPure | Distance check |
-| `OpenManagementWidget(PlayerController)` | BlueprintCallable | Open the management UI |
+| Function/property | Purpose |
+|---|---|
+| `ResolveDistrict()` | Resolve `DistrictTag` through the registry |
+| `CanManage(Interactor, Reason)` | Read-only access validation |
+| `IsInteractorInRange(Interactor)` | Physical range policy |
+| `OpenManagementWidget(PlayerController)` | Push screen to the Narrative HUD layer |
+| `ManagementLayerTag` | Registered CommonUI target layer |
 
-### UTerritoryPlayerManagementComponent
+### `UTerritoryPlayerManagementComponent`
 
-| Function | Type | Purpose |
-|---|---|---|
-| `RequestPurchaseGuards(Point, Count)` | BlueprintCallable | Initiate guard purchase via management point |
-| `RequestPurchaseGuardsForDistrict(District, Count)` | BlueprintCallable | Initiate guard purchase directly on a district |
-| `RequestRemoveGuards(Point, Count)` | BlueprintCallable | Initiate guard removal via management point |
-| `RequestRemoveGuardsForDistrict(District, Count)` | BlueprintCallable | Initiate guard removal directly on a district |
-| `OnGuardPurchaseResult` | BlueprintAssignable | Result delegate: (Territory, Success, Message, RequestId) |
+| Function/delegate | Purpose |
+|---|---|
+| `RequestPurchaseGuards*` | Add guards through a point or direct district policy |
+| `RequestRemoveGuards*` | Remove guards through a point or direct district policy |
+| `OnGuardPurchaseResult` | Owning-client result for both add/remove operations |
+| `OnAssaultNotification` | Owning-client strategic assault notification |
 
-## Lifecycle Notes
+## POI behavior
 
-- The management widget polls display data every 0.5s via the base class timer
-- Guard purchase results arrive asynchronously via RPC and update the status text
-- The widget auto-unsubscribes from territory delegates in `NativeDestruct()`
-- The navigation marker auto-unsubscribes from territory delegates in `EndPlay()`
-- Multiple management points can exist in a level (one per district)
+The management marker reuses Narrative POI/navigation presentation. It refreshes with ownership/state and is visible according to district policy. No duplicate map, minimap, compass, or marker stack is created.
+
+## Known limits
+
+- A live reserve count is intentionally hidden on clients when no replicated reserve snapshot is available.
+- The screen does not directly schedule/cancel assaults or alter diplomacy; those actions require their authoritative systems and project policy.
+- Dedicated-server/two-client input, focus, and interaction remain required runtime release tests.

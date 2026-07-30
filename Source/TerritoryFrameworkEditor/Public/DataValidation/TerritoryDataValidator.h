@@ -6,6 +6,8 @@
 
 class ATerritoryVolume;
 class ULevel;
+class UWorld;
+class UTerritoryCounterAttackProfile;
 
 /**
  * Editor data validator for TerritoryFramework assets.
@@ -44,6 +46,7 @@ public:
 
 	// Manual validation API (callable from editor utilities)
 	static bool ValidateLevel(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
+	static bool ValidateWorld(UWorld* World, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static bool ValidateTerritory(ATerritoryVolume* Territory, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 
 private:
@@ -53,7 +56,8 @@ private:
 	static void CheckSingletonActors(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static void CheckEconomyConfig(ATerritoryVolume* Territory, TArray<FString>& OutWarnings);
 	static void CheckDuplicateDisplayNames(ULevel* Level, TArray<FString>& OutWarnings);
-	static void CheckGuardConfig(ATerritoryVolume* Territory, TArray<FString>& OutWarnings);
+	static void CheckGuardConfig(ATerritoryVolume* Territory, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
+	static void CheckCounterAttackConfig(ATerritoryVolume* Territory, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static void CheckBoundsShape(ATerritoryVolume* Territory, TArray<FString>& OutWarnings);
 	static void CheckOrphanedSpawnPoints(ULevel* Level, TArray<FString>& OutWarnings);
 	static void CheckMissingParentTags(ULevel* Level, TArray<FString>& OutWarnings);

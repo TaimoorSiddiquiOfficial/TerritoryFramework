@@ -16,6 +16,15 @@
 | GuardCost | ✅ | SaveGame on OwnershipData |
 | TerritoryGUID | ✅ | SaveGame (editor-stable) |
 
+### ATerritoryGuardSpawnPoint
+
+| Property | Saved? |
+|---|---|
+| SpawnPointGUID | ✅ editor-stable identity |
+| CurrentReserveCount | ✅ |
+| PendingReserveSpawns | ✅ |
+| SavedActiveGuardCount | ✅ finite reconstruction count |
+
 ### ATerritoryProperty (extends Volume)
 
 | Property | Saved? |
@@ -31,9 +40,10 @@
 | Active treaties (with timing) | ✅ |
 | Faction reputation | ✅ |
 | Diplomacy history | ✅ |
-| Capture summaries | ✅ |
+| Capture summaries | Replicated projection; ownership persists on each Volume |
+| Counterattack records | ✅ SaveGame + replicated |
 
-WorldState arrays are snapshots rebuilt by `ExportPersistentState()` or explicit setters, not continuously synchronized subsystem state. Export rebuilds capture summaries from all registered territories.
+Server subsystem delegates keep WorldState projections current between saves. `ExportPersistentState()` rebuilds them at the save boundary. Capture summaries are not a second durable ownership source; `ATerritoryVolume::OwnershipData` remains authoritative.
 
 ### ATerritorySavableData (single-player legacy)
 
@@ -78,14 +88,15 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 ```
 1. Narrative Save System loads save game
 2. For each INarrativeSavableActor in world: Load_Implementation
-3. ATerritoryVolume::Load — re-binds defender death delegates
+3. ATerritoryVolume::Load — hydrates referenced guard posts, reconstructs finite active guards, and restores capture decay state
 4. ATerritoryWorldState::Load — ImportPersistentState:
    a. Direct assignment (no artificial transactions)
     b. SyncSubsystemsFromReplicatedState:
         - Push income/cost/count parameters to EconomySubsystem via SetFactionTreasury (Narrative inventory currency is separate)
         - Replay treaty states and reputation to DiplomacySubsystem
         - Diplomacy syncs to Narrative GameState attitudes
-        - Restore capture summaries (ownership, state, contesting faction, control progress) back to territories and ControlSubsystem
+        - Hydrate client-side economy/diplomacy query models from RepNotify
+        - Restore counterattack decisions and reconstruct saved active survivors as finite pending force
 
 **Important:** `ATerritorySavableData` is **deprecated** — use `ATerritoryWorldState` instead.
 `ATerritoryWorldState` handles both single-player and multiplayer. `ATerritorySavableData` will be removed in a future version; do not use it for new projects.
@@ -93,14 +104,16 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 ### State Reconstructed on Load
 
 - A contested TerritoryVolume restores its leading faction/progress into ControlSubsystem via `RestoreCaptureState` so capture decay resumes correctly.
-- Claimed territories restore their owning faction and respawn guards.
-- WorldState restores economy treasury parameters, transaction history, treaties, reputation, and capture summaries.
+- Claimed territories restore their owning faction and only the saved finite active guard count.
+- Guard posts restore reserve and pending deployment counts.
+- WorldState restores economy rate parameters, transaction history, treaties, reputation, and counterattack records.
+- A saved active assault preserves its decision/casualties and moves surviving live count into pending reconstruction.
 
 ### State Not Reconstructed
 
 - Attacker actor identities and non-leading faction progress from a multi-faction contest are not persisted.
-- Individual guards, health/activity state, spawn-point reserve counts, and active guard rosters are not persisted.
-- Claimed territories destroy/recreate a fresh guard population on load; new guards receive new spawn GUIDs.
+- Individual pawn identities, health, controllers, ASC pointers, and activity UObject instances are not persisted.
+- Recreated guards and assault participants receive new runtime spawn GUIDs while durable Territory/guard-post/assault IDs remain stable.
 
 ### PIE Safety
 
@@ -113,8 +126,8 @@ PIE world creation uses `StaticDuplicateObject` which would otherwise generate n
 | Actor | Count | Required? |
 |---|---|---|
 | ATerritoryVolume | 1+ per district | Yes |
-| ATerritoryWorldState | Exactly 1 | Persists economy, diplomacy, and capture state |
-| ATerritorySavableData | Exactly 1 | **Deprecated** — single-player legacy (use WorldState instead) |
+| ATerritoryWorldState | Exactly 1 | Persists economy, diplomacy, and assault state; replicates late-join projections |
+| ATerritorySavableData | 0 | **Deprecated** — never place beside WorldState |
 
 The editor validator detects:
 - Multiple WorldState actors → Error

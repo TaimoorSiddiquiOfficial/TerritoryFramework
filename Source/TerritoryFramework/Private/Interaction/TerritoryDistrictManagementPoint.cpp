@@ -4,13 +4,16 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "UI/TerritoryDistrictManagementWidget.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Components/SphereComponent.h"
 #include "Navigation/NarrativeNavigationComponent.h"
 #include "Navigation/NavigatorGameplayTags.h"
 #include "NarrativeArsenal.h"
+#include "UnrealFramework/NarrativePlayerController.h"
+#include "Widgets/NarrativeGameplayHUD.h"
+#include "Widgets/CommonActivatableWidgetContainer.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerController.h"
-#include "GameFramework/GameModeBase.h"
 
 UTerritoryDistrictPOIMarker::UTerritoryDistrictPOIMarker(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -191,6 +194,7 @@ ATerritoryDistrictManagementPoint::ATerritoryDistrictManagementPoint(const FObje
 	bCreateMapMarker = false;
 	bSupportsFastTravel = false;
 	POIDisplayName = FText::FromString(TEXT("District Management"));
+	ManagementLayerTag = FGameplayTag::RequestGameplayTag(FName(TEXT("UI.Layer.Menu")), false);
 
 	InteractionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("InteractionSphere"));
 	InteractionSphere->SetupAttachment(RootComponent);
@@ -206,23 +210,6 @@ ATerritoryDistrictManagementPoint::ATerritoryDistrictManagementPoint(const FObje
 void ATerritoryDistrictManagementPoint::BeginPlay()
 {
 	Super::BeginPlay();
-	// P1-18: Only the first management point registers for PostLogin and creates components.
-	// FindOrCreateForPlayerController prevents duplicate components, but we avoid redundant
-	// PostLogin registrations (N management points × M players = N×M redundant work).
-	static TWeakObjectPtr<ATerritoryDistrictManagementPoint> RegisteredPoint;
-	if (HasAuthority() && !RegisteredPoint.IsValid())
-	{
-		RegisteredPoint = this;
-		FGameModeEvents::OnGameModePostLoginEvent().AddUObject(
-			this, &ATerritoryDistrictManagementPoint::OnPlayerPostLogin);
-		if (UWorld* World = GetWorld())
-		{
-			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-			{
-				UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(It->Get());
-			}
-		}
-	}
 	if (ATerritoryDistrict* District = ResolveDistrict())
 	{
 		POITag = District->GetTerritoryTag();
@@ -235,26 +222,6 @@ void ATerritoryDistrictManagementPoint::BeginPlay()
 	if (InteractableComponent)
 	{
 		InteractableComponent->InteractionDistance = ManagementDistance;
-	}
-}
-
-void ATerritoryDistrictManagementPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-	if (HasAuthority())
-	{
-		FGameModeEvents::OnGameModePostLoginEvent().RemoveAll(this);
-		// Static TWeakObjectPtr in BeginPlay auto-invalidates when this actor is destroyed,
-		// so the next PIE session will naturally re-register a new management point.
-	}
-	Super::EndPlay(EndPlayReason);
-}
-
-void ATerritoryDistrictManagementPoint::OnPlayerPostLogin(
-	AGameModeBase* GameMode, APlayerController* NewPlayer)
-{
-	if (GameMode && GameMode->GetWorld() == GetWorld())
-	{
-		UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(NewPlayer);
 	}
 }
 
@@ -308,14 +275,17 @@ void ATerritoryDistrictManagementPoint::OpenManagementWidget(APlayerController* 
 	FText FailureReason;
 	if (!CanManage(PlayerController->GetPawn(), FailureReason)) return;
 	UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);
-	if (UTerritoryDistrictManagementWidget* Widget = CreateWidget<UTerritoryDistrictManagementWidget>(
-		PlayerController, ManagementWidgetClass))
+
+	if (UTerritoryDistrictManagementWidget* Widget = Cast<UTerritoryDistrictManagementWidget>(
+		UTerritoryUIBlueprintLibrary::OpenTerritoryMenu(
+			PlayerController, ManagementWidgetClass, ManagementLayerTag)))
 	{
 		Widget->InitializeManagement(this);
-		Widget->AddToViewport(50);
-		FInputModeGameAndUI InputMode;
-		InputMode.SetHideCursorDuringCapture(false);
-		PlayerController->SetInputMode(InputMode);
-		PlayerController->SetShowMouseCursor(true);
+	}
+	else
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("Cannot open district management: Narrative HUD or layer %s is unavailable."),
+			*ManagementLayerTag.ToString());
 	}
 }

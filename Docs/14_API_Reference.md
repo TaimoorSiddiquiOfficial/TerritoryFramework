@@ -20,6 +20,9 @@
 - [UTerritoryMapMarker](#uterritorymapmarker)
 - [UTerritoryInfoWidget](#uterritoryinfowidget)
 - [UTerritoryEconomyWidget](#uterritoryeconomywidget)
+- [UTerritoryUIBlueprintLibrary](#uterritoryuiblueprintlibrary)
+- [UTerritoryJournalWidget](#uterritoryjournalwidget)
+- [UTerritoryDistrictManagementWidget](#uterritorydistrictmanagementwidget)
 - [UTerritoryDebugWidget](#uterritorydebugwidget)
 - [UTerritoryPatrolGoal](#uterritorypatrolgoal)
 - [BTTask_RequestTerritoryPermission](#btask_requestterritorypermission)
@@ -413,7 +416,7 @@ Primary asset type: `TerritoryGuardPost`.
 
 ## ATerritoryWorldState
 
-Replicated save snapshot for multiplayer-visible economy/diplomacy state. Place at most one per level. It is not continuously synchronized with subsystem mutations.
+Global persistence and late-join projection for economy, diplomacy, capture summaries, and counterattacks. Place exactly one per world. Authority delegates keep its arrays current and RepNotify hydrates client query subsystems.
 
 ### Replicated Arrays
 
@@ -425,6 +428,7 @@ Replicated save snapshot for multiplayer-visible economy/diplomacy state. Place 
 | ReplicatedCaptureSummaries | FReplicatedCaptureSummary | Per-territory state at the last export/setter update |
 | ReplicatedReputation | FReplicatedFactionReputation | Faction reputation |
 | ReplicatedDiplomacyHistory | FDiplomacyEvent | Diplomacy event history |
+| ReplicatedAssaults | FTerritoryAssaultRecord | Deterministic decisions, lifecycle, and finite force counts |
 
 ### Functions
 
@@ -433,7 +437,7 @@ Replicated save snapshot for multiplayer-visible economy/diplomacy state. Place 
 | ExportPersistentState | AuthorityOnly | Copy subsystem state → replicated arrays |
 | ImportPersistentState | AuthorityOnly | Copy replicated arrays → subsystems |
 
-`ExportPersistentState` rebuilds economy, transaction, treaty, reputation, and capture-summary arrays. Import restores the economy ledger and rich treaty metadata. TerritoryVolume load resumes the leading saved contest for decay, but actor identities and non-leading faction progress are not persisted.
+`ExportPersistentState` rebuilds economy, transaction, treaty, reputation, capture projections, and assault records. Import restores the economy ledger, rich treaty metadata, and finite assault state. TerritoryVolume owns durable ownership; participant actor identities are not persisted.
 
 ### Delegates
 
@@ -467,7 +471,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 
 | Function | Type | Returns | Description |
 |---|---|---|---|
-| RegisterTerritory | — | void | Called by ATerritoryVolume::BeginPlay |
+| RegisterTerritory | — | ETerritoryRegistrationResult | Called by ATerritoryVolume::BeginPlay; rejects invalid/duplicate tag or GUID |
 | UnregisterTerritory | — | void | Called by ATerritoryVolume::EndPlay (identity-safe) |
 | GetTerritoryByTag | Pure | ATerritoryVolume* | O(1) lookup |
 | GetTerritoryByGUID | Pure | ATerritoryVolume* | O(1) lookup |
@@ -707,7 +711,7 @@ UMG widget for displaying territory info.
 |---|---|
 | BindToTerritory(Tag) | Bind to territory by FGameplayTag |
 | BindToTerritoryAtPlayer() | Bind to territory at player's current location |
-| UnbindFromTerritory() | Remove delegate bindings and clear territory reference |
+| UnbindFromTerritory() | Remove delegate bindings, clear territory reference, and clear stale display fields |
 | GetBoundTerritory | Get bound ATerritoryVolume* |
 
 ### Blueprint Events
@@ -717,6 +721,7 @@ UMG widget for displaying territory info.
 | OnTerritoryOwnershipChanged | OldOwner (FGameplayTag), NewOwner (FGameplayTag) |
 | OnTerritoryStateChanged | NewState (ETerritoryState) |
 | OnTerritoryBound | Territory (ATerritoryVolume*) |
+| OnTerritoryUnbound | none |
 
 ---
 
@@ -729,10 +734,13 @@ UMG widget for displaying faction economy.
 | Function | Returns | Description |
 |---|---|---|
 | SetDisplayFaction | void | Set faction to display |
-| GetCurrentGold | int32 | Treasury gold |
+| GetCurrentGold | int32 | Owning pawn's Narrative inventory/account balance |
 | GetCurrentIncome | int32 | Per-tick income |
 | GetCurrentCosts | int32 | Per-tick costs |
 | GetTerritoryCount | int32 | Owned territories |
+| GetNetIncome | int64 | Income minus costs |
+| IsOperatingAtDeficit | bool | True when costs exceed income |
+| GetEconomyOperationsView | FTerritoryEconomyOperationsView | Funds, rates, deficit, and bounded recent activity |
 
 ### Blueprint Events
 
@@ -740,6 +748,58 @@ UMG widget for displaying faction economy.
 |---|---|
 | OnEconomyUpdated | (Faction, FTerritoryEconomySnapshot) |
 | OnTransactionRecorded | (FTerritoryTransaction) |
+
+---
+
+## UTerritoryUIBlueprintLibrary
+
+Shared read-model and Narrative CommonUI bridge. It owns no gameplay state.
+
+| Function | Returns | Description |
+|---|---|---|
+| OpenTerritoryMenu | UTerritoryActivatableWidget* | Push a Territory screen into a registered Narrative HUD layer |
+| BuildDistrictOperationsView | bool + OutView | Build one viewer-relative district projection |
+| GetDistrictOperationsViews | Array<View> | List districts matching an operational filter |
+| DoesDistrictMatchFilter | bool | Evaluate one projection against a filter |
+| GetDistrictOperationsRevision | int32 | Hash all displayed state used for list invalidation |
+| BuildEconomyOperationsView | EconomyView | Narrative funds plus Territory income/cost/activity projection |
+| GetThreatLevelText | FText | Localizable threat label |
+| GetAssaultStateText | FText | Localizable assault-state label |
+
+`ETerritoryOperationsFilter` values are All, Unlocked, Available, Owned, Manageable, UnderAttack, Contested, Locked, and FinancialRisk. `ETerritoryThreatLevel` values are None, Watch, Warning, and Critical.
+
+---
+
+## UTerritoryJournalWidget
+
+Narrative-activatable operations dashboard.
+
+| Function | Returns | Description |
+|---|---|---|
+| RefreshDistrictList | void | Rebuild when the complete operations revision changes |
+| SetOperationsFilter | void | Apply the viewer-relative operational filter |
+| GetSelectedDistrictOperationsView | View | Current detail/security/finance/threat projection |
+
+The supplied widget populates unlocked/active, captured/owned, earnings, and loss/threat lists. Guard controls route through `UTerritoryPlayerManagementComponent`.
+
+---
+
+## UTerritoryDistrictManagementWidget
+
+Narrative-activatable in-world district command screen.
+
+| Function | Returns | Description |
+|---|---|---|
+| InitializeManagement | void | Bind a management point |
+| GetManagedDistrict | ATerritoryDistrict* | Resolve the current district |
+| GetManagedFaction | FGameplayTag | Faction resolved from the owning pawn |
+| GetDistrictIncome | int32 | Effective district income |
+| CanPurchaseGuard | bool + reason | Exact read-only add validation |
+| CanRemoveGuard | bool + reason | Exact read-only remove validation |
+| GetOperationsView | View | Complete current projection |
+| RequestAddGuards | void | Submit server-validated bulk addition |
+| RequestRemoveGuards | void | Submit server-validated bulk removal |
+| RefreshManagementDisplay | void | Refresh presentation |
 
 ---
 
@@ -751,7 +811,7 @@ Tick-based debug overlay.
 
 | Function | Description |
 |---|---|
-| SetDebugEnabled(bool) | Toggle live debug display |
+| SetDebugEnabled(bool) | Toggle live territory and counterattack debug display |
 
 ### Blueprint Events
 
@@ -919,6 +979,32 @@ BlueprintNativeEvent — implement to receive territory events.
 | OnTerritoryStateChanged | Called when territory state transitions (TerritoryTag, NewState) |
 
 ---
+
+## UTerritoryCounterAttackSubsystem
+
+Server-authoritative scheduler for deterministic, finite physical assaults. It never changes ownership directly.
+
+| Function | Type | Returns |
+|---|---|---|
+| ScheduleCounterAttack(Territory, AttackingFaction) | AuthorityOnly | bool |
+| CancelAssault(AssaultID, Reason) | AuthorityOnly | bool |
+| GetAssault(AssaultID, OutAssault) | Pure | bool |
+| GetAllAssaults() | Pure | Array<AssaultRecord> |
+| GetAssaultsForTerritory(Tag) | Pure | Array<AssaultRecord> |
+| IsAssaultActive(AssaultID) | Pure | bool |
+| GetAssaultDebugString(AssaultID) | Pure | string |
+
+Native persistence functions are `GetPersistentState` and `RestorePersistentState`. `CalculateEvaluation` is a deterministic pure native calculator.
+
+## UTerritoryCounterAttackProfile
+
+`UPrimaryDataAsset` containing grace/proximity/notification policy, launch probability weights, maximum approaches, and per-faction `FTerritoryFactionAssaultConfig` values.
+
+## ATerritoryAssaultCharacter and Narrative activity
+
+`ATerritoryAssaultCharacter` derives from `ANarrativeNPCCharacter`. `UTerritoryAssaultParticipantComponent` owns replicated assault identity and exact-once capture/death registration. `UTerritoryAssaultGoal` derives from `UNPCGoalItem`; `UTerritoryAssaultActivity` derives from `UNPCActivity` and is interruptible.
+
+See [17_Counterattack_System.md](17_Counterattack_System.md) for lifecycle and configuration.
 
 ## Enums
 
@@ -1208,55 +1294,49 @@ Replicates the treaty parties, state, signed/expiry times, permanence, and a can
 
 `UTerritoryDeveloperSettings` — configure via Project Settings → Plugins → Territory Framework.
 
-### Debug Toggles
+### Runtime Settings
 
-| Setting | Type | Default | Description |
-|---|---|---|---|
-| bDebugTerritoryRegistration | bool | false | Log register/unregister |
-| bDebugCaptureFlow | bool | false | Log capture tick + progress |
-| bDebugEconomyTick | bool | false | Log economy tick + transactions |
-| bDebugDiplomacy | bool | false | Log diplomacy changes |
-| bDebugGuardSpawning | bool | false | Log spawn/despawn |
-| bDebugGuardDeath | bool | false | Log guard death + reserves |
-| bDebugAttitudes | bool | false | Log faction attitude checks |
-| bDebugSpatialIndex | bool | false | Log spatial index queries |
-| bDebugCombatDirector | bool | false | Log attack permissions |
-| bDebugSaveLoad | bool | false | Log save/load operations |
-| bDebugTransactions | bool | false | Log every transaction |
-| bDebugUpgrades | bool | false | Log property upgrades |
+| Category | Settings and defaults |
+|---|---|
+| Economy | `EconomyTickIntervalSeconds=300`, `DefaultTerritoryIncome=100`, `DefaultGuardCost=50` |
+| Capture | `CaptureProgressPerSecond=0.1`, `CaptureProgressDecayPerSecond=0.05`, `DefaultMaxConcurrentAttackers=3`, `CaptureTickInterval=0.1`, `TreatyExpirationCheckInterval=10` |
+| Counterattack | `CounterAttackCampaignSeed=1337`, `CounterAttackUpdateInterval=2`, `MaxConcurrentScheduledAssaults=8`, `MaxConcurrentAssaultsPerFaction=2`, `MaxLiveCounterAttackNPCs=24`, `MaxRetainedAssaultRecords=100` |
+| Spatial | `SpatialCellSize=2000` Unreal units |
+| Guards | `DefaultPatrolArrivalThreshold=100`, `DefaultPatrolAcceptanceRadius=50`, `DefaultPatrolWaitTime=2`, `MaxPatrolRouteNodes=32` |
+| Identity/UI | `DefaultPlayerFaction`, `DefaultNarrativeButtonClass` |
 
-### Visual Debug Toggles
+`EconomyStartingGold` and `MaxCaptureHistory` are deprecated, unused compatibility properties scheduled for removal in v0.3.0.
 
-| Setting | Type | Default | Description |
-|---|---|---|---|
-| bShowTerritoryBounds | bool | false | Draw debug boxes in-game |
-| bShowCaptureProgress | bool | false | Draw progress bars |
-| bShowAttackerCount | bool | false | Draw attacker counts |
-| bShowDefenderCount | bool | false | Draw defender counts |
-| bShowTerritoryLabels | bool | false | Draw territory names |
+### Debug Settings
 
-### Timer Settings
+All category flags require the master `bEnableDebug` switch.
 
-| Setting | Type | Default | Range | Description |
-|---|---|---|---|---|
-| CaptureTickInterval | float | 0.1 | 0.01–1.0 | Seconds between capture ticks |
-| TreatyExpirationCheckInterval | float | 10.0 | 1.0–60.0 | Seconds between treaty checks |
-| SpatialCellSize | float | 2000.0 | 500–10000 | Spatial grid cell size (uu) |
+| Group | Exact property names |
+|---|---|
+| Registry/capture | `bDebugRegistry`, `bDebugCapture`, `bDebugCaptureAttempts` |
+| Ownership | `bDebugOwnershipChanges`, `bDebugStateTransitions` |
+| Economy | `bDebugEconomyTicks`, `bDebugTransactions` |
+| Guards/AI | `bDebugGuardSpawning`, `bDebugGuardDeaths`, `bDebugBT` |
+| Diplomacy | `bDebugDiplomacy`, `bDebugFactionAttitudes` |
+| Integration | `bDebugSaveLoad`, `bDebugSpatialIndex`, `bDebugMapMarkers`, `bDebugTales`, `bDebugCombat` |
+| Visual | `bDrawTerritoryBounds`, `bDrawOwnershipOverlay`, `bDrawCaptureProgress`, `bDrawGuardSpawnPoints`, `bDrawSpatialGrid` |
+| Verbosity | `DebugVerbosityLevel=5` (0–6) |
 
 ### Debug Helper Functions
 
 Each debug toggle has a matching `ShouldDebug*()` helper:
 
 ```cpp
-bool ShouldDebugCaptureFlow() const { return bDebugCaptureFlow; }
-bool ShouldDebugEconomyTick() const { return bDebugEconomyTick; }
-// ... etc for all 17 toggles
+bool ShouldDebugCapture() const;
+bool ShouldDebugEconomy() const;
+bool ShouldDebugGuardDeaths() const;
+bool ShouldDebugCombat() const;
 ```
 
 Access in C++:
 ```cpp
 const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-if (Settings->ShouldDebugCaptureFlow())
+if (Settings->ShouldDebugCapture())
 {
     UE_LOG(LogTerritory, Log, TEXT("Capture tick processing..."));
 }

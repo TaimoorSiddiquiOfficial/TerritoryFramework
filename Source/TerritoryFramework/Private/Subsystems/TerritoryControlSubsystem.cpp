@@ -8,30 +8,14 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "UnrealFramework/NarrativeGameState.h"
+#include "Tales/NarrativeFunctionLibrary.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
+#include "GameFramework/Controller.h"
+#include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "TimerManager.h"
-
-namespace
-{
-	int32 PruneInvalidAttackers(TSet<TWeakObjectPtr<AActor>>& Attackers)
-	{
-		TArray<TWeakObjectPtr<AActor>> InvalidAttackers;
-		for (const TWeakObjectPtr<AActor>& Attacker : Attackers)
-		{
-			if (!Attacker.IsValid())
-			{
-				InvalidAttackers.Add(Attacker);
-			}
-		}
-
-		for (const TWeakObjectPtr<AActor>& Attacker : InvalidAttackers)
-		{
-			Attackers.Remove(Attacker);
-		}
-		return Attackers.Num();
-	}
-}
 
 void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -61,8 +45,218 @@ void UTerritoryControlSubsystem::Deinitialize()
 	{
 		World->GetTimerManager().ClearTimer(CaptureTickTimerHandle);
 	}
+	TArray<TWeakObjectPtr<ATerritoryVolume>> Territories;
+	TerritoryCaptureState.GetKeys(Territories);
+	for (const TWeakObjectPtr<ATerritoryVolume>& Territory : Territories)
+	{
+		ReleaseTerritoryAttackers(Territory.Get());
+	}
+	for (const auto& Pair : BoundAttackerASCs)
+	{
+		if (UNarrativeAbilitySystemComponent* ASC = Pair.Value.Get())
+		{
+			ASC->OnDied.RemoveDynamic(this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
+		}
+	}
 	TerritoryCaptureState.Empty();
+	AttackerRegistrationCounts.Empty();
+	BoundAttackerASCs.Empty();
 	Super::Deinitialize();
+}
+
+UNarrativeAbilitySystemComponent* UTerritoryControlSubsystem::ResolveAttackerASC(AActor* Attacker) const
+{
+	if (!Attacker) return nullptr;
+	if (IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Attacker))
+	{
+		return Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent());
+	}
+	if (const AController* Controller = Cast<AController>(Attacker))
+	{
+		if (IAbilitySystemInterface* PawnAbilityOwner = Cast<IAbilitySystemInterface>(Controller->GetPawn()))
+		{
+			return Cast<UNarrativeAbilitySystemComponent>(PawnAbilityOwner->GetAbilitySystemComponent());
+		}
+	}
+	return nullptr;
+}
+
+void UTerritoryControlSubsystem::AddAttackerRegistration(AActor* Attacker)
+{
+	if (!Attacker) return;
+	TWeakObjectPtr<AActor> WeakAttacker(Attacker);
+	int32& RegistrationCount = AttackerRegistrationCounts.FindOrAdd(WeakAttacker);
+	++RegistrationCount;
+	if (RegistrationCount != 1) return;
+
+	if (UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Attacker))
+	{
+		ASC->OnDied.AddUniqueDynamic(this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
+		BoundAttackerASCs.Add(WeakAttacker, ASC);
+	}
+}
+
+void UTerritoryControlSubsystem::ReleaseAttackerRegistration(const TWeakObjectPtr<AActor>& Attacker)
+{
+	int32* RegistrationCount = AttackerRegistrationCounts.Find(Attacker);
+	if (!RegistrationCount) return;
+	--(*RegistrationCount);
+	if (*RegistrationCount > 0) return;
+
+	if (const TWeakObjectPtr<UNarrativeAbilitySystemComponent>* FoundASC = BoundAttackerASCs.Find(Attacker))
+	{
+		if (UNarrativeAbilitySystemComponent* ASC = FoundASC->Get())
+		{
+			ASC->OnDied.RemoveDynamic(this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
+		}
+	}
+	BoundAttackerASCs.Remove(Attacker);
+	AttackerRegistrationCounts.Remove(Attacker);
+}
+
+int32 UTerritoryControlSubsystem::PruneInvalidAttackers(TSet<TWeakObjectPtr<AActor>>& Attackers)
+{
+	TArray<TWeakObjectPtr<AActor>> InvalidAttackers;
+	for (const TWeakObjectPtr<AActor>& Attacker : Attackers)
+	{
+		if (!Attacker.IsValid())
+		{
+			InvalidAttackers.Add(Attacker);
+		}
+	}
+	for (const TWeakObjectPtr<AActor>& Attacker : InvalidAttackers)
+	{
+		Attackers.Remove(Attacker);
+		ReleaseAttackerRegistration(Attacker);
+	}
+	return Attackers.Num();
+}
+
+void UTerritoryControlSubsystem::ReleaseTerritoryAttackers(ATerritoryVolume* Territory)
+{
+	if (!Territory) return;
+	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
+	if (!State) return;
+	for (auto& Pair : State->AttackersByFaction)
+	{
+		for (const TWeakObjectPtr<AActor>& Attacker : Pair.Value)
+		{
+			ReleaseAttackerRegistration(Attacker);
+		}
+	}
+	TerritoryCaptureState.Remove(Territory);
+}
+
+void UTerritoryControlSubsystem::RemoveAttackerFromAllCaptures(AActor* Attacker)
+{
+	if (!Attacker) return;
+	TWeakObjectPtr<AActor> WeakAttacker(Attacker);
+	int32 RemovedRegistrations = 0;
+	for (auto& TerritoryPair : TerritoryCaptureState)
+	{
+		TArray<FGameplayTag> EmptyFactions;
+		for (auto& FactionPair : TerritoryPair.Value.AttackersByFaction)
+		{
+			if (FactionPair.Value.Remove(WeakAttacker) > 0)
+			{
+				++RemovedRegistrations;
+			}
+			if (FactionPair.Value.IsEmpty())
+			{
+				EmptyFactions.Add(FactionPair.Key);
+			}
+		}
+		for (const FGameplayTag& Faction : EmptyFactions)
+		{
+			TerritoryPair.Value.AttackersByFaction.Remove(Faction);
+		}
+	}
+
+	for (int32 Index = 0; Index < RemovedRegistrations; ++Index)
+	{
+		ReleaseAttackerRegistration(WeakAttacker);
+	}
+}
+
+void UTerritoryControlSubsystem::OnRegisteredAttackerDied(
+	AActor* KilledActor,
+	UNarrativeAbilitySystemComponent* KilledASC)
+{
+	AActor* RegisteredAttacker = KilledActor;
+	if (!AttackerRegistrationCounts.Contains(RegisteredAttacker) && KilledASC)
+	{
+		for (const auto& Pair : BoundAttackerASCs)
+		{
+			if (Pair.Value.Get() == KilledASC)
+			{
+				RegisteredAttacker = Pair.Key.Get();
+				break;
+			}
+		}
+	}
+	if (!RegisteredAttacker) return;
+
+	RemoveAttackerFromAllCaptures(RegisteredAttacker);
+	UE_LOG(LogTerritory, Verbose, TEXT("[Capture] Removed dead attacker %s from all capture participation"),
+		*GetNameSafe(RegisteredAttacker));
+}
+
+FTerritoryTransitionContext UTerritoryControlSubsystem::BuildTransitionContext(
+	AActor* Attacker,
+	const FGameplayTag& Faction) const
+{
+	FTerritoryTransitionContext Context;
+	Context.Instigator = Attacker;
+	Context.RequestingFaction = Faction;
+
+	if (APawn* Pawn = Cast<APawn>(Attacker))
+	{
+		Context.TargetPawn = Pawn;
+		Context.PlayerController = Cast<APlayerController>(Pawn->GetController());
+	}
+	else if (AController* Controller = Cast<AController>(Attacker))
+	{
+		Context.TargetPawn = Controller->GetPawn();
+		Context.PlayerController = Cast<APlayerController>(Controller);
+	}
+	else if (Attacker)
+	{
+		Context.TargetPawn = Cast<APawn>(Attacker->GetOwner());
+		Context.PlayerController = Context.TargetPawn
+			? Cast<APlayerController>(Context.TargetPawn->GetController())
+			: nullptr;
+	}
+
+	AActor* TalesTarget = Context.PlayerController
+		? static_cast<AActor*>(Context.PlayerController.Get())
+		: static_cast<AActor*>(Context.TargetPawn.Get());
+	Context.TalesComponent = UNarrativeFunctionLibrary::GetTalesComponentFromTarget(TalesTarget);
+	return Context;
+}
+
+FTerritoryTransitionContext UTerritoryControlSubsystem::ResolveCaptureContext(
+	const ATerritoryVolume* Territory,
+	const FGameplayTag& Faction) const
+{
+	if (!Territory) return FTerritoryTransitionContext();
+	const FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
+	const TSet<TWeakObjectPtr<AActor>>* Attackers = State
+		? State->AttackersByFaction.Find(Faction)
+		: nullptr;
+	if (!Attackers) return FTerritoryTransitionContext();
+
+	TArray<AActor*> ValidAttackers;
+	for (const TWeakObjectPtr<AActor>& Attacker : *Attackers)
+	{
+		if (AActor* Actor = Attacker.Get()) ValidAttackers.Add(Actor);
+	}
+	ValidAttackers.Sort([](const AActor& A, const AActor& B)
+	{
+		return A.GetPathName() < B.GetPathName();
+	});
+	return ValidAttackers.IsEmpty()
+		? FTerritoryTransitionContext()
+		: BuildTransitionContext(ValidAttackers[0], Faction);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -110,7 +304,7 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 			ATerritoryVolume* Territory = Cmd.Territory.Get();
 			if (Territory)
 			{
-				TerritoryCaptureState.Remove(Territory);
+				ReleaseTerritoryAttackers(Territory);
 				Territory->SetContestingFaction(FGameplayTag());
 				Territory->SetControlProgress(0.f);
 				if (Territory->GetTerritoryState() == ETerritoryState::Contested)
@@ -128,6 +322,16 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 	// Cleanup invalid keys
 	for (const TWeakObjectPtr<ATerritoryVolume>& WeakTerritory : InvalidKeys)
 	{
+		if (FPerTerritoryState* State = TerritoryCaptureState.Find(WeakTerritory))
+		{
+			for (auto& FactionPair : State->AttackersByFaction)
+			{
+				for (const TWeakObjectPtr<AActor>& Attacker : FactionPair.Value)
+				{
+					ReleaseAttackerRegistration(Attacker);
+				}
+			}
+		}
 		TerritoryCaptureState.Remove(WeakTerritory);
 	}
 }
@@ -143,8 +347,6 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 	const ATerritoryVolume* Territory,
 	const FGameplayTag& AttackingFaction) const
 {
-	UWorld* World = GetWorld();
-	if (!World || !World->GetAuthGameMode()) return ECaptureResult::InvalidTerritory;
 	if (!Territory || !AttackingFaction.IsValid()) return ECaptureResult::InvalidTerritory;
 	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
 	{
@@ -176,6 +378,13 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 	}
 
 	return ECaptureResult::Success;
+}
+
+ECaptureResult UTerritoryControlSubsystem::GetCaptureEligibility(
+	const ATerritoryVolume* Territory,
+	const FGameplayTag& AttackingFaction) const
+{
+	return ValidateCaptureAttempt(Territory, AttackingFaction);
 }
 
 ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction)
@@ -304,7 +513,7 @@ bool UTerritoryControlSubsystem::CanFactionCaptureTerritory(
 void UTerritoryControlSubsystem::ResetCapture(ATerritoryVolume* Territory)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory) return;
-	TerritoryCaptureState.Remove(Territory);
+	ReleaseTerritoryAttackers(Territory);
 	Territory->SetContestingFaction(FGameplayTag());
 	if (Territory->GetTerritoryState() == ETerritoryState::Contested)
 	{
@@ -322,7 +531,7 @@ void UTerritoryControlSubsystem::ClearCaptureTrackingOnly(ATerritoryVolume* Terr
 	// atomically by CommitOwnershipData and must not be overwritten.
 	if (Territory)
 	{
-		TerritoryCaptureState.Remove(Territory);
+		ReleaseTerritoryAttackers(Territory);
 	}
 }
 
@@ -557,7 +766,7 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	// Step 9: Success — clear capture state and broadcast subsystem delegate
 	// P1-05: Only clear capture state AFTER commit succeeded (post-commit cleanup)
 	// ═══════════════════════════════════════════════════════════════════════════
-	TerritoryCaptureState.Remove(Territory);
+	ReleaseTerritoryAttackers(Territory);
 
 	Response.Result = ETerritoryMutationResult::Success;
 	Response.Explanation = FText::Format(
@@ -574,7 +783,16 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 
 void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Attacker || !Faction.IsValid()) return;
+	TryRegisterAttacker(Territory, Attacker, Faction);
+}
+
+bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
+{
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Attacker || !Faction.IsValid()) return false;
+	if (const UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Attacker))
+	{
+		if (ASC->IsDead()) return false;
+	}
 
 	FPerTerritoryState* ExistingState = TerritoryCaptureState.Find(Territory);
 	if (ExistingState)
@@ -584,12 +802,12 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 			PruneInvalidAttackers(*ExistingActors);
 			for (const TWeakObjectPtr<AActor>& Existing : *ExistingActors)
 			{
-				if (Existing.Get() == Attacker) return;
+				if (Existing.Get() == Attacker) return true;
 			}
 		}
 	}
 
-	if (ValidateAndBeginCapture(Territory, Faction, false, false) != ECaptureResult::Success) return;
+	if (ValidateAndBeginCapture(Territory, Faction, false, false) != ECaptureResult::Success) return false;
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
 	TSet<TWeakObjectPtr<AActor>>& ActorSet = State.AttackersByFaction.FindOrAdd(Faction);
@@ -603,13 +821,17 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 	// consuming the available budget (TOCTOU prevention).
 	if (ActorSet.Num() >= Territory->GetMaxConcurrentAttackers())
 	{
-		return;
+		return false;
 	}
 
 	// Identity-based — adding the same actor twice is a no-op
 	int32 BeforeCount = ActorSet.Num();
 	ActorSet.Add(Attacker);
 	int32 AfterCount = ActorSet.Num();
+	if (AfterCount > BeforeCount)
+	{
+		AddAttackerRegistration(Attacker);
+	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings && Settings->ShouldDebugCapture() && AfterCount > BeforeCount)
@@ -633,11 +855,13 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 		if (Territory->GetTerritoryState() != ETerritoryState::Contested)
 		{
 			ActorSet.Remove(Attacker);
+			ReleaseAttackerRegistration(Attacker);
 			State.CaptureProgressByFaction.Remove(Faction);
-			return;
+			return false;
 		}
 	}
 	Territory->SetContestingFaction(Faction);
+	return ActorSet.Contains(Attacker);
 }
 
 void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
@@ -649,7 +873,10 @@ void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory,
 	TSet<TWeakObjectPtr<AActor>>* ActorSet = State->AttackersByFaction.Find(Faction);
 	if (ActorSet)
 	{
-		ActorSet->Remove(Attacker);
+		if (ActorSet->Remove(Attacker) > 0)
+		{
+			ReleaseAttackerRegistration(Attacker);
+		}
 		if (PruneInvalidAttackers(*ActorSet) == 0)
 		{
 			State->AttackersByFaction.Remove(Faction);
@@ -718,7 +945,10 @@ int32 UTerritoryControlSubsystem::GetActiveAttackers(const ATerritoryVolume* Ter
 	int32 Count = 0;
 	for (const TWeakObjectPtr<AActor>& Attacker : *ActorSet)
 	{
-		if (Attacker.IsValid()) ++Count;
+		AActor* Actor = Attacker.Get();
+		if (!Actor) continue;
+		const UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Actor);
+		if (!ASC || !ASC->IsDead()) ++Count;
 	}
 	return Count;
 }
@@ -734,7 +964,7 @@ void UTerritoryControlSubsystem::RestoreCaptureState(
 	// Contested capture resume policy: progress is restored but attackers are transient
 	// (not saved). On next EvaluateCaptureState tick with zero attackers, progress decays.
 	// This is intentional — contested saves resume as decay-only, not true "resume with participants."
-	TerritoryCaptureState.Remove(Territory);
+	ReleaseTerritoryAttackers(Territory);
 	if (Territory->GetTerritoryState() != ETerritoryState::Contested) return;
 	if (!ContestingFaction.IsValid())
 	{
@@ -924,20 +1154,21 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		return;
 	}
 
-	FGameplayTag OldOwner = Territory->GetOwningFaction();
-	Territory->SetOwningFaction(NewOwner);
-	if (Territory->GetOwningFaction() != NewOwner
-		|| Territory->GetTerritoryState() != ETerritoryState::Claimed)
+	const FGameplayTag OldOwner = Territory->GetOwningFaction();
+	FTerritoryMutationRequest Request;
+	Request.Territory = Territory;
+	Request.NewOwner = NewOwner;
+	Request.DesiredState = ETerritoryState::Claimed;
+	Request.TransitionContext = ResolveCaptureContext(Territory, NewOwner);
+	const FTerritoryMutationResponse Response = ApplyTerritoryMutation(Request);
+	if (Response.Result != ETerritoryMutationResult::Success)
 	{
-		// P1-N04: SetOwningFaction was silently rejected (state conditions failed).
-		// Clean up capture state to prevent infinite retry loop.
 		ResetCapture(Territory);
-		UE_LOG(LogTerritory, Warning, TEXT("[Capture] %s: SetOwningFaction rejected for %s — capture state cleaned"),
-			*Territory->GetTerritoryTag().ToString(), *NewOwner.ToString());
+		UE_LOG(LogTerritory, Warning, TEXT("[Capture] %s: atomic completion rejected for %s — %s"),
+			*Territory->GetTerritoryTag().ToString(), *NewOwner.ToString(),
+			*Response.Explanation.ToString());
 		return;
 	}
-	TerritoryCaptureState.Remove(Territory);
-	Territory->SetContestingFaction(FGameplayTag());
 
 	UE_LOG(LogTerritory, Log, TEXT("[Capture] %s captured by %s (was %s)"),
 		*Territory->GetTerritoryTag().ToString(),
@@ -952,5 +1183,4 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, Msg);
 	}
 
-	OnTerritoryControlChanged.Broadcast(Territory, OldOwner, NewOwner);
 }

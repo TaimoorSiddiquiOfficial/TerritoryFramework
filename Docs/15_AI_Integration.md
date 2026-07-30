@@ -1,8 +1,10 @@
 # Territory AI Integration — Complete Setup Guide
 
-> **Version:** v0.2.5 (2026-07-28)
+> **Version:** v0.2.5 (re-audited 2026-07-30)
 > **Depends on:** NarrativePro 2.3.3
 > **All assets in `/Game/TerritoryFramework/`** — zero NarrativePro content modified
+
+> **Authority note:** Narrative `UNPCDefinition`, `FNPCSpawnInfo`, `UNPCActivityConfiguration`, `UNPCActivityComponent`, goals, TriggerSets, ASC/death delegates, and navigation remain the AI foundation. Territory patrol and counterattack intent are expressed as Narrative goals/activities. The Territory-named Behavior Tree assets documented below are existing compatibility/tactical content used by selected Narrative activities; they are not a second AI controller, scheduler, or capture system.
 
 ---
 
@@ -32,6 +34,12 @@ NPCDefinition (NPC_TerritoryBandit)
                       ├─ score: 1.0
                       └─ owned_tags: Narrative.State.Movement.Walking
 ```
+
+### Counterattack Activity Path
+
+Counterattack NPCs use `ATerritoryAssaultCharacter`, which still derives through Narrative's character stack. `UTerritoryAssaultGoal` carries the durable assault/territory/faction intent, while `UTerritoryAssaultActivity` consumes that goal and routes the NPC toward the selected typed approach and target Territory. The profile's NPC definition must resolve to an `ATerritoryAssaultCharacter` subclass and its activity configuration must report support for assault goals. Invalid definitions/configurations are rejected by runtime activation and by TerritoryFramework data validation; no generic fallback pawn is spawned.
+
+Combat may interrupt the assault activity through Narrative's normal activity scoring. The durable goal remains until death, withdrawal, cancellation, or resolution, so the activity can resume without inventing a parallel Behavior Tree authority.
 
 ### Decision Flow at Runtime
 

@@ -13,11 +13,14 @@ TerritoryFramework (TREATY METADATA only)
 ├── FactionReputation — per-faction reputation score
 └── DiplomacyHistory — event log
 
-Bridge: SetNarrativeAttitude() writes both directions in Narrative
+Bridge: UTerritoryNarrativeProAdapter is the sole TerritoryFramework access point
+        to Narrative's public faction-attitude API. Server mutations write both
+        directions in Narrative; clients hydrate treaty read models from WorldState.
         OnFactionAttitudeChanged() reconciles treaties when Narrative changes:
           - Compatible Friendly → preserves TradeAgreement/NonAggression metadata
           - Incompatible Friendly/Hostile → maps to Alliance/War
           - External Neutral → removes the treaty record, including Ceasefire
+          - Externally authored attitudes are imported as permanent records
         Reentrancy guard (bSuppressSync) prevents recursive mutation from delegate listeners
 ```
 
@@ -78,6 +81,8 @@ Timed treaties (e.g., trade agreements with `DurationGameTime > 0`) are checked 
 WorldState and SavableData restore treaty state, signed time, expiry, permanence, reputation, and available history directly before syncing Narrative attitudes. Narrative's attitude map alone cannot distinguish Alliance, TradeAgreement, and NonAggression because all three map to Friendly, so use the TerritoryFramework persistence actors when rich treaty identity matters.
 
 The subsystem binds Narrative SaveSubsystem `OnFinishedLoad` and reapplies treaty-derived attitudes after each completed load, avoiding actor deserialization order races.
+
+TerritoryFramework never edits Narrative Pro's faction database. Narrative faction tags remain identity and Narrative GameState remains combat-attitude authority; TerritoryFramework owns only the richer treaty/reputation metadata and its replicated read model.
 
 ## Delegates
 

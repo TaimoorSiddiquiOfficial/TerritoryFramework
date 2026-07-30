@@ -48,12 +48,12 @@ These events have C++ `_Implementation` that performs **critical invariant work*
 | **Parameters** | None |
 
 **What the C++ `_Implementation` does:**
-1. Calls `SetOwningFaction(FGameplayTag())` — clears the territory owner
-2. Calls `SetControlProgress(0.f)` — resets capture progress
-3. Calls `SetTerritoryState(Unclaimed)` — unless territory is Locked
+1. Commits `DefenderCount = 0`
+2. Leaves the incumbent owner/state intact
+3. Makes the territory eligible for the existing physical capture flow
 
 **If you skip Super:**
-- **CRITICAL:** Territory stays Claimed by the old faction even though all defenders are dead. Capture system cannot start because the territory appears owned. Economy continues paying income to the old owner. Guards do not respawn because the ownership never changed.
+- The replicated defender read model may remain stale. Do not clear ownership in the override; casualties are not an ownership transition.
 
 **Correct BP override pattern:**
 ```
@@ -384,12 +384,11 @@ Receive territory events. Implement on any actor that needs to react to territor
 
 ```
 Unclaimed ──(attacker enters)──→ Contested ──(progress >= 1.0)──→ Claimed
-    ↑                                │                                │
-    │                                │                                │
-    └────(all guards die)────────────┘                                │
-    ↑                                                                 │
-    │                                                                 │
-    └────(all guards die / force unclaim)─────────────────────────────┘
+                                     │                                │
+                                     └────(attackers leave)───────────┘
+
+Claimed ──(all defenders die)──→ Claimed + vulnerable
+    └────(physical capture completes)──→ Claimed by attacker
 
 Claimed ──(LockTerritory)──→ Locked ──(TryUnlock)──→ Claimed or Unclaimed
     ↑                         │

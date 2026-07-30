@@ -84,14 +84,16 @@ If no `GuardPostDefinition` is assigned, the territory's `GuardNPCDefinition` an
 
 ## Capture Flow
 
-1. Kill all defenders → `OnAllGuardsDefeated` → territory goes Unclaimed
-   - **Note:** checks ALL `RegisteredDefenders` (guards + any non-guard defenders registered via `RegisterDefender`), not just `SpawnedGuards`
-   - Super call in BP override is **CRITICAL** — clears owner, resets progress, sets Unclaimed
+1. Kill all defenders → `OnAllGuardsDefeated` → defender count becomes zero; the incumbent owner remains authoritative but the territory is vulnerable
+	- **Note:** checks ALL `RegisteredDefenders` (guards + any non-guard defenders registered via `RegisterDefender`), not just `SpawnedGuards`
+	- A BP override may call Super for the native zero-defence update; it must never clear ownership as a casualty side effect
 2. Designer triggers capture via:
    - `RegisterAttacker(Territory, Actor, Faction)` — progressive capture (identity-based, TSet per faction)
    - `ForceCapture(Territory, Faction)` → bool — authority-only instant capture; validates inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed. Returns true if territory actually changed.
    - `TerritoryCaptureEvent` — from quest/dialogue (server-authoritative, skips on client)
-3. On capture → `SetOwningFaction` → guards respawn for new owner
+3. On capture → `ApplyTerritoryMutation` atomically commits Claimed ownership → guards respawn for the new owner
+
+On save, each guard post records reserves, pending deployments, and its finite active count. Load recreates only the saved survivors (or uses the bounded legacy aggregate defender count for older saves); pawn health/activity and live pointers are intentionally not persisted.
 
 ## Debug
 

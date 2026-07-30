@@ -8,6 +8,7 @@
 #include "TerritoryControlSubsystem.generated.h"
 
 class ATerritoryVolume;
+class UNarrativeAbilitySystemComponent;
 
 UCLASS()
 class TERRITORYFRAMEWORK_API UTerritoryControlSubsystem : public UWorldSubsystem
@@ -52,6 +53,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
 
+	/** Register and report whether this exact actor was admitted to capture pressure. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
+	bool TryRegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
+
 	/** Unregister an actor. Removes identity, decrements count only if actor was registered. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
@@ -72,6 +77,16 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	int32 GetActiveAttackers(const ATerritoryVolume* Territory, const FGameplayTag& Faction) const;
+
+	/**
+	 * Side-effect-free capture admission result for planning UI and AI.
+	 * This query is safe on clients because it only reads replicated Territory state,
+	 * diplomacy, and Narrative faction attitude. It never starts capture progress.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
+	ECaptureResult GetCaptureEligibility(
+		const ATerritoryVolume* Territory,
+		const FGameplayTag& AttackingFaction) const;
 
 	/** Native persistence bridge for resuming a saved contested territory. */
 	void RestoreCaptureState(
@@ -99,6 +114,12 @@ private:
 
 	TMap<TWeakObjectPtr<ATerritoryVolume>, FPerTerritoryState> TerritoryCaptureState;
 
+	/** Number of live capture registrations held by each actor across all territories. */
+	TMap<TWeakObjectPtr<AActor>, int32> AttackerRegistrationCounts;
+
+	/** ASC used for the one death binding owned by each registered attacker. */
+	TMap<TWeakObjectPtr<AActor>, TWeakObjectPtr<UNarrativeAbilitySystemComponent>> BoundAttackerASCs;
+
 	/** Deferred commands to apply AFTER iteration to avoid map mutation during range-for */
 	struct FDeferredCommand
 	{
@@ -116,6 +137,19 @@ private:
 
 	void EvaluateCaptureState(ATerritoryVolume* Territory, float DeltaTime);
 	void CompleteCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
+	FTerritoryTransitionContext BuildTransitionContext(AActor* Attacker, const FGameplayTag& Faction) const;
+	FTerritoryTransitionContext ResolveCaptureContext(
+		const ATerritoryVolume* Territory,
+		const FGameplayTag& Faction) const;
+	void AddAttackerRegistration(AActor* Attacker);
+	void ReleaseAttackerRegistration(const TWeakObjectPtr<AActor>& Attacker);
+	int32 PruneInvalidAttackers(TSet<TWeakObjectPtr<AActor>>& Attackers);
+	void ReleaseTerritoryAttackers(ATerritoryVolume* Territory);
+	void RemoveAttackerFromAllCaptures(AActor* Attacker);
+	UNarrativeAbilitySystemComponent* ResolveAttackerASC(AActor* Attacker) const;
+
+	UFUNCTION()
+	void OnRegisteredAttackerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
 
 	/**
 	 * P1-08: Pure validation — no side effects. Checks territory validity,
