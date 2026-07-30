@@ -172,12 +172,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Defenders", meta=(DisplayName="Get Registered Defenders"))
 	TArray<AActor*> GetRegisteredDefenders() const;
 
+	/** P0-03: Set contesting faction with no-op detection. Replicates via OwnershipData RepNotify. */
 	void SetContestingFaction(const FGameplayTag& Faction)
 	{
-		if (HasAuthority())
-		{
-			OwnershipData.ContestingFaction = Faction;
-		}
+		if (!HasAuthority()) return;
+		if (OwnershipData.ContestingFaction == Faction) return;
+		OwnershipData.ContestingFaction = Faction;
 	}
 
 	/**
