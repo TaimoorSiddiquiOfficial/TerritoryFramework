@@ -116,6 +116,21 @@ private:
 
 	void EvaluateCaptureState(ATerritoryVolume* Territory, float DeltaTime);
 	void CompleteCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
+
+	/**
+	 * P1-08: Pure validation — no side effects. Checks territory validity,
+	 * aggregate-only, locked, already-owned, defenders-remain, and diplomacy.
+	 * Returns the first rejection code, or Success if all checks pass.
+	 * Does NOT mutate territory state, create capture entries, or broadcast.
+	 */
+	ECaptureResult ValidateCaptureAttempt(
+		const ATerritoryVolume* Territory,
+		const FGameplayTag& AttackingFaction) const;
+
+	/**
+	 * Validate + optionally commit contested state and broadcast.
+	 * Calls ValidateCaptureAttempt internally, then applies side effects if requested.
+	 */
 	ECaptureResult ValidateAndBeginCapture(
 		ATerritoryVolume* Territory,
 		const FGameplayTag& AttackingFaction,

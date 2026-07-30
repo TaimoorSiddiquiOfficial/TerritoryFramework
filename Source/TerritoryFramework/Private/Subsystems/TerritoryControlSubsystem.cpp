@@ -136,6 +136,48 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 // Capture API (Authority-Only Mutations)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// P1-08: Pure validation — no side effects
+// ═══════════════════════════════════════════════════════════════════════════════
+ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
+	const ATerritoryVolume* Territory,
+	const FGameplayTag& AttackingFaction) const
+{
+	UWorld* World = GetWorld();
+	if (!World || !World->GetAuthGameMode()) return ECaptureResult::InvalidTerritory;
+	if (!Territory || !AttackingFaction.IsValid()) return ECaptureResult::InvalidTerritory;
+	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
+	{
+		return ECaptureResult::InvalidTerritory;
+	}
+
+	const ETerritoryState CurrentState = Territory->GetTerritoryState();
+	if (CurrentState == ETerritoryState::Locked)
+	{
+		return ECaptureResult::Locked;
+	}
+
+	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
+	if (DefendingFaction.IsValid() && DefendingFaction == AttackingFaction)
+	{
+		return ECaptureResult::AlreadyOwned;
+	}
+
+	// DefendersRemain must be checked BEFORE diplomacy so a faction with active defenders
+	// inside the territory gets the correct result code instead of DiplomaticallyBlocked.
+	if (Territory->GetDefenderCount() > 0 && DefendingFaction.IsValid())
+	{
+		return ECaptureResult::DefendersRemain;
+	}
+
+	if (DefendingFaction.IsValid() && !CanFactionCaptureTerritory(Territory, AttackingFaction))
+	{
+		return ECaptureResult::DiplomaticallyBlocked;
+	}
+
+	return ECaptureResult::Success;
+}
+
 ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction)
 {
 	return ValidateAndBeginCapture(Territory, AttackingFaction, true);
@@ -168,10 +210,11 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 		return bBroadcastAttempt ? FinishAttempt(Result) : Result;
 	};
 
-	if (!Territory || !AttackingFaction.IsValid()) return FinishValidation(ECaptureResult::InvalidTerritory);
-	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
+	// P1-08: Delegate to pure validation
+	const ECaptureResult ValidateResult = ValidateCaptureAttempt(Territory, AttackingFaction);
+	if (ValidateResult != ECaptureResult::Success)
 	{
-		return FinishValidation(ECaptureResult::InvalidTerritory);
+		return FinishValidation(ValidateResult);
 	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -186,29 +229,7 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 			static_cast<int32>(Territory->GetTerritoryState()));
 	}
 
-	ETerritoryState CurrentState = Territory->GetTerritoryState();
-
-	if (CurrentState == ETerritoryState::Locked)
-	{
-		return FinishValidation(ECaptureResult::Locked);
-	}
-
-	if (DefendingFaction.IsValid() && DefendingFaction == AttackingFaction)
-	{
-		return FinishValidation(ECaptureResult::AlreadyOwned);
-	}
-
-	// DefendersRemain must be checked BEFORE diplomacy so a faction with active defenders
-	// inside the territory gets the correct result code instead of DiplomaticallyBlocked.
-	if (Territory->GetDefenderCount() > 0 && DefendingFaction.IsValid())
-	{
-		return FinishValidation(ECaptureResult::DefendersRemain);
-	}
-
-	if (DefendingFaction.IsValid() && !CanFactionCaptureTerritory(Territory, AttackingFaction))
-	{
-		return FinishValidation(ECaptureResult::DiplomaticallyBlocked);
-	}
+	const ETerritoryState CurrentState = Territory->GetTerritoryState();
 
 	if (bCommitContestState)
 	{
