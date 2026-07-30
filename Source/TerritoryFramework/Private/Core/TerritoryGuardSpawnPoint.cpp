@@ -451,9 +451,16 @@ void ATerritoryGuardSpawnPoint::CancelPendingReserveSpawns()
 	}
 }
 
-void ATerritoryGuardSpawnPoint::ResetReserveState()
+void ATerritoryGuardSpawnPoint::HandleOwnershipTransition(EOwnershipTransitionReason Reason)
 {
-	// P1-09: Respect reserve ownership policy on ownership change
+	// P1-03: Only apply reserve ownership policy when ownership actually changes.
+	// InitialSpawn and AdminOverride do not trigger the policy.
+	if (Reason != EOwnershipTransitionReason::OwnerChanged
+		&& Reason != EOwnershipTransitionReason::RevertedToUnclaimed)
+	{
+		return;
+	}
+
 	switch (ReserveOwnershipPolicy)
 	{
 	case EReserveOwnershipPolicy::PersistWithPost:
@@ -467,6 +474,13 @@ void ATerritoryGuardSpawnPoint::ResetReserveState()
 		InitializeReserves();
 		break;
 	}
+	ActiveGuards.Reset();
+}
+
+void ATerritoryGuardSpawnPoint::ResetReserveState()
+{
+	// Initial spawn / load reconcile — always reinitialize reserves to full
+	InitializeReserves();
 	ActiveGuards.Reset();
 }
 

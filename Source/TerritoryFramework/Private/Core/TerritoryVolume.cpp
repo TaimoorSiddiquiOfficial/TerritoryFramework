@@ -1011,6 +1011,22 @@ TArray<AActor*> ATerritoryVolume::GetRegisteredDefenders() const
 
 void ATerritoryVolume::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	// P1-03: Notify spawn points about ownership change for reserve policy
+	if (OldOwner != NewOwner)
+	{
+		const EOwnershipTransitionReason Reason = NewOwner.IsValid()
+			? EOwnershipTransitionReason::OwnerChanged
+			: EOwnershipTransitionReason::RevertedToUnclaimed;
+
+		for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+		{
+			if (SpawnPoint)
+			{
+				SpawnPoint->HandleOwnershipTransition(Reason);
+			}
+		}
+	}
+
 	// Guard lifecycle invariants are handled in SetOwningFaction (non-virtual).
 	// This virtual exists for BP subclasses to add behavior — calling Super is optional.
 }

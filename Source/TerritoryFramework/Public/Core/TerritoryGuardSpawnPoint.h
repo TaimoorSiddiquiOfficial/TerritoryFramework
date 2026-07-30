@@ -27,6 +27,23 @@ enum class EReserveOwnershipPolicy : uint8
 };
 
 /**
+ * P1-03: Why an ownership transition occurred.
+ * Spawn points use this to decide whether to apply reserve ownership policy.
+ */
+UENUM(BlueprintType)
+enum class EOwnershipTransitionReason : uint8
+{
+	/** First-time spawn during BeginPlay or load reconcile — no ownership change */
+	InitialSpawn,
+	/** Ownership changed from one faction to another */
+	OwnerChanged,
+	/** Territory reverted to unclaimed */
+	RevertedToUnclaimed,
+	/** Manual editor/admin override */
+	AdminOverride
+};
+
+/**
  * P1-04: Reason a guard was removed from a spawn point.
  * Only Killed queues a reserve replacement. Manual removal does not.
  */
@@ -480,5 +497,13 @@ private:
 	/** @param bRequireCameraAvoidance If true, spawn location must be outside player camera frustums. */
 	bool TrySpawnReserveGuard(bool bRequireCameraAvoidance);
 	void CancelPendingReserveSpawns();
+
+	/**
+	 * P1-03: Called when the owning territory changes ownership.
+	 * Applies reserve ownership policy only for OwnerChanged/RevertedToUnclaimed reasons.
+	 */
+	void HandleOwnershipTransition(EOwnershipTransitionReason Reason);
+
+	/** Reset reserves to initial state — called during BeginPlay/load reconcile only. */
 	void ResetReserveState();
 };
