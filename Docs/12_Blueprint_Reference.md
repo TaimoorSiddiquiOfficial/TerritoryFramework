@@ -1,5 +1,36 @@
 # Blueprint Reference — All Exposed Functions, Properties, Delegates
 
+## Operations UI
+
+### `UTerritoryUIBlueprintLibrary`
+
+| Function | Returns | Notes |
+|---|---|---|
+| `OpenTerritoryMenu(PlayerController, WidgetClass, LayerTag)` | `UTerritoryActivatableWidget*` | Pushes into a registered Narrative HUD CommonUI layer |
+| `BuildDistrictOperationsView(Context, District, Viewer, OutView)` | bool | Viewer-relative district/security/finance/threat projection |
+| `GetDistrictOperationsViews(Context, Viewer, Filter)` | Array | Sorted district list for one operational filter |
+| `DoesDistrictMatchFilter(View, Filter)` | bool | Pure filter predicate |
+| `GetDistrictOperationsRevision(View)` | int32 | UI invalidation key covering displayed authorities |
+| `BuildEconomyOperationsView(Context, Viewer, Faction, MaxRecent)` | struct | Narrative funds plus Territory economy projection |
+| `GetThreatLevelText(Level)` | Text | Localizable threat label |
+| `GetAssaultStateText(State)` | Text | Localizable assault-state label |
+
+### UI enums
+
+- `ETerritoryOperationsFilter`: `All`, `Unlocked`, `Available`, `Owned`, `Manageable`, `UnderAttack`, `Contested`, `Locked`, `FinancialRisk`.
+- `ETerritoryThreatLevel`: `None`, `Watch`, `Warning`, `Critical`.
+
+### Interactive widgets
+
+| Class | Blueprint API |
+|---|---|
+| `UTerritoryActivatableWidget` | `CloseTerritoryWidget`, `GetTerritoryPlayerController`, `DesiredFocusTargetName` |
+| `UTerritoryJournalWidget` | `RefreshDistrictList`, `SetOperationsFilter`, `GetSelectedDistrictOperationsView` |
+| `UTerritoryDistrictManagementWidget` | `GetOperationsView`, `CanPurchaseGuard`, `CanRemoveGuard`, `RequestAddGuards`, `RequestRemoveGuards` |
+| `UTerritoryEconomyWidget` | `GetNetIncome`, `IsOperatingAtDeficit`, `GetEconomyOperationsView` |
+
+Currency is read from the owning pawn's Narrative inventory/account. Guard mutations use the player-owned server RPC bridge. A client widget never owns or trusts owner, faction, price, balance, reserve, capture, or assault state.
+
 ## ATerritoryVolume
 
 ### BlueprintPure Functions
@@ -336,6 +367,8 @@
 | HasAttackBudget(Territory, Faction) | Pure → bool |
 | GetActiveAttackers(Territory, Faction) | Pure → int32 |
 
+`TryRegisterAttacker(Territory, Actor, Faction)` is the result-bearing registration API. The legacy `RegisterAttacker` wrapper remains for Blueprint compatibility but callers that must know whether capture pressure was admitted should use `TryRegisterAttacker`.
+
 ### UTerritoryEconomySubsystem
 
 | Function | Type |
@@ -343,6 +376,8 @@
 | CreditCurrency(Beneficiary, Amount, Faction, Reason, Type) | AuthorityOnly → bool |
 | TryDebitCurrency(Requester, Amount, Faction, Reason, Type) | AuthorityOnly → bool |
 | CreditCurrencyToFaction(Faction, Amount, Policy, Reason, Type) | AuthorityOnly → int32 |
+| RegisterFactionCurrencyAccount(Faction, Role, AccountActor) | AuthorityOnly → bool |
+| UnregisterFactionCurrencyAccount(Faction, AccountActor) | AuthorityOnly |
 | SetFactionTreasury(Faction, Treasury) | AuthorityOnly |
 | RecalculateIncome(Faction) | AuthorityOnly |
 | GetActorCurrency(Requester) | Pure → int32 |
@@ -372,6 +407,32 @@
 | GetReputation(Faction) | Pure → int32 |
 | GetAllTreaties() | → Array<TreatyRecord> |
 | GetTreatiesForFaction(Faction) | → Array<TreatyRecord> |
+
+### UTerritoryCounterAttackSubsystem
+
+| Function / delegate | Type |
+|---|---|
+| ScheduleCounterAttack(Territory, AttackingFaction) | AuthorityOnly → bool |
+| CancelAssault(AssaultID, Reason) | AuthorityOnly → bool |
+| GetAssault(AssaultID, OutAssault) | Pure → bool |
+| GetAllAssaults() | Pure → Array<AssaultRecord> |
+| GetAssaultsForTerritory(TerritoryTag) | Pure → Array<AssaultRecord> |
+| IsAssaultActive(AssaultID) | Pure → bool |
+| GetAssaultDebugString(AssaultID) | Pure → String |
+| OnAssaultChanged | BlueprintAssignable |
+| OnAssaultWarning | BlueprintAssignable |
+
+The warning state is notification-only: it creates no physical NPCs and no capture pressure. Physical activation occurs once, on the server, when a relevant player enters the configured radius.
+
+### Context-aware territory transitions
+
+Use `LockTerritoryWithContext`, `TryUnlockWithContext`, and `CanUnlockWithContext` whenever conditions or Tales hooks depend on the actual instigator. The context carries pawn, controller, Tales component, and requesting faction; world-level transitions may deliberately pass an empty context.
+
+Counterattack setup queries on `ATerritoryVolume` are `GetCounterAttackProfile`, `GetCounterAttackApproaches`, `GetGuardQuality`, `GetFortificationStrength`, `GetNearbyAlliedSupport`, and `GetStrategicValue`.
+
+### Player management notifications
+
+The server-owned `UTerritoryPlayerManagementComponent` exposes `OnAssaultNotification` to the owning client. Bind UI there for targeted warnings; do not query server-only subsystem maps from a client widget.
 
 ## ITerritoryOwnershipInterface (Extended)
 

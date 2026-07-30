@@ -5,6 +5,8 @@
 #include "GameplayTagContainer.h"
 #include "TerritoryDeveloperSettings.generated.h"
 
+class UNarrativeCommonButtonBase;
+
 UCLASS(BlueprintType, config = Engine, defaultconfig, meta = (DisplayName = "Territory Framework"))
 class TERRITORYFRAMEWORK_API UTerritoryDeveloperSettings : public UDeveloperSettings
 {
@@ -56,6 +58,33 @@ public:
 	float TreatyExpirationCheckInterval = 10.f;
 
 	// ═══════════════════════════════════════════════════════════════════════════
+	// Counterattacks
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack")
+	int32 CounterAttackCampaignSeed = 1337;
+
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
+		meta=(ClampMin="0.25", ClampMax="60.0"))
+	float CounterAttackUpdateInterval = 2.f;
+
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
+		meta=(ClampMin="1"))
+	int32 MaxConcurrentScheduledAssaults = 8;
+
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
+		meta=(ClampMin="1"))
+	int32 MaxConcurrentAssaultsPerFaction = 2;
+
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
+		meta=(ClampMin="1"))
+	int32 MaxLiveCounterAttackNPCs = 24;
+
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
+		meta=(ClampMin="1"))
+	int32 MaxRetainedAssaultRecords = 100;
+
+	// ═══════════════════════════════════════════════════════════════════════════
 	// Spatial Index
 	// ═══════════════════════════════════════════════════════════════════════════
 
@@ -103,6 +132,10 @@ public:
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Tags",
 		meta = (Categories = "Narrative.Factions"))
 	FGameplayTag DefaultPlayerFaction;
+
+	/** Configurable Narrative CommonUI button used by native fallback Territory rows. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI")
+	TSoftClassPtr<UNarrativeCommonButtonBase> DefaultNarrativeButtonClass;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Debug — Toggle individual debug categories

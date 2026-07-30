@@ -58,6 +58,15 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UProgressBar> TerritoryCaptureProgress;
 
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TerritoryAvailabilityText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TerritoryThreatText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TerritoryNetIncomeText;
+
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	virtual void RefreshTerritoryDisplay();
 
@@ -72,6 +81,9 @@ protected:
 	/** Called when first bound to a territory — populate initial data */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|UI")
 	void OnTerritoryBound(ATerritoryVolume* Territory);
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|UI")
+	void OnTerritoryUnbound();
 
 private:
 	UPROPERTY()
@@ -89,4 +101,5 @@ private:
 	void BindDelegates();
 	void UnbindDelegates();
 	void ResolveTerritoryFromTag();
+	void ClearTerritoryDisplay();
 };

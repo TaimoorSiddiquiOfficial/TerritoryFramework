@@ -3,10 +3,20 @@
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Components/TextBlock.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 
 void UTerritoryEconomyWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	if (!DisplayFaction.IsValid())
+	{
+		APlayerController* PlayerController = GetOwningPlayer();
+		DisplayFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+			this, PlayerController && PlayerController->GetPawn()
+				? static_cast<AActor*>(PlayerController->GetPawn())
+				: PlayerController);
+	}
 	BindDelegates();
 	RefreshEconomyDisplay();
 }
@@ -28,7 +38,11 @@ void UTerritoryEconomyWidget::SetDisplayFaction(const FGameplayTag& Faction)
 		if (Economy)
 		{
 			FTerritoryEconomySnapshot Snapshot;
-			Snapshot.Treasury = Economy->GetActorCurrency(GetOwningPlayer());
+			APlayerController* PlayerController = GetOwningPlayer();
+			Snapshot.Treasury = Economy->GetActorCurrency(
+				PlayerController && PlayerController->GetPawn()
+					? static_cast<AActor*>(PlayerController->GetPawn())
+					: PlayerController);
 			Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
 			Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
 			Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
@@ -46,7 +60,11 @@ FGameplayTag UTerritoryEconomyWidget::GetDisplayFaction() const
 int32 UTerritoryEconomyWidget::GetCurrentGold() const
 {
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
-	return Economy ? Economy->GetActorCurrency(GetOwningPlayer()) : 0;
+	APlayerController* PlayerController = GetOwningPlayer();
+	AActor* AccountActor = PlayerController && PlayerController->GetPawn()
+		? static_cast<AActor*>(PlayerController->GetPawn())
+		: PlayerController;
+	return Economy ? Economy->GetActorCurrency(AccountActor) : 0;
 }
 
 int32 UTerritoryEconomyWidget::GetCurrentIncome() const
@@ -65,6 +83,23 @@ int32 UTerritoryEconomyWidget::GetTerritoryCount() const
 {
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
 	return Economy ? Economy->GetFactionEconomy(DisplayFaction).TerritoryCount : 0;
+}
+
+int64 UTerritoryEconomyWidget::GetNetIncome() const
+{
+	return static_cast<int64>(GetCurrentIncome()) - GetCurrentCosts();
+}
+
+bool UTerritoryEconomyWidget::IsOperatingAtDeficit() const
+{
+	return GetNetIncome() < 0;
+}
+
+FTerritoryEconomyOperationsView UTerritoryEconomyWidget::GetEconomyOperationsView(
+	int32 MaxRecentTransactions) const
+{
+	return UTerritoryUIBlueprintLibrary::BuildEconomyOperationsView(
+		this, GetOwningPlayer(), DisplayFaction, MaxRecentTransactions);
 }
 
 void UTerritoryEconomyWidget::BindDelegates()
@@ -111,7 +146,11 @@ void UTerritoryEconomyWidget::ClientPollRefresh()
 	if (!Economy) return;
 
 	FTerritoryEconomySnapshot Snapshot;
-	Snapshot.Treasury = Economy->GetActorCurrency(GetOwningPlayer());
+	APlayerController* PlayerController = GetOwningPlayer();
+	Snapshot.Treasury = Economy->GetActorCurrency(
+		PlayerController && PlayerController->GetPawn()
+			? static_cast<AActor*>(PlayerController->GetPawn())
+			: PlayerController);
 	Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
 	Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
 	Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
@@ -139,11 +178,30 @@ void UTerritoryEconomyWidget::HandleTransactionRecorded(const FTerritoryTransact
 
 void UTerritoryEconomyWidget::RefreshEconomyDisplay()
 {
-	if (EconomyFactionText) EconomyFactionText->SetText(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(DisplayFaction));
-	if (EconomyTreasuryText) EconomyTreasuryText->SetText(FText::AsNumber(GetCurrentGold()));
-	if (EconomyIncomeText) EconomyIncomeText->SetText(FText::AsNumber(GetCurrentIncome()));
-	if (EconomyCostsText) EconomyCostsText->SetText(FText::AsNumber(GetCurrentCosts()));
-	if (EconomyTerritoryCountText) EconomyTerritoryCountText->SetText(FText::AsNumber(GetTerritoryCount()));
+	const FTerritoryEconomyOperationsView View = GetEconomyOperationsView(10);
+	if (EconomyFactionText) EconomyFactionText->SetText(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.Faction));
+	if (EconomyTreasuryText) EconomyTreasuryText->SetText(FText::AsNumber(View.AvailableFunds));
+	if (EconomyIncomeText) EconomyIncomeText->SetText(FText::AsNumber(View.IncomePerTick));
+	if (EconomyCostsText) EconomyCostsText->SetText(FText::AsNumber(View.CostsPerTick));
+	if (EconomyTerritoryCountText) EconomyTerritoryCountText->SetText(FText::AsNumber(View.TerritoryCount));
+	if (EconomyNetText)
+	{
+		EconomyNetText->SetText(FText::Format(
+			NSLOCTEXT("TerritoryEconomy", "NetPerCycle", "Net per cycle: {0}"),
+			FText::AsNumber(View.NetPerTick)));
+	}
+	if (EconomyHealthText)
+	{
+		EconomyHealthText->SetText(View.bDeficit
+			? NSLOCTEXT("TerritoryEconomy", "Deficit", "DEFICIT — reduce upkeep or increase income")
+			: NSLOCTEXT("TerritoryEconomy", "Sustainable", "SUSTAINABLE"));
+	}
+	if (EconomyRecentActivityText)
+	{
+		EconomyRecentActivityText->SetText(FText::Format(
+			NSLOCTEXT("TerritoryEconomy", "RecentActivity", "Recent credits {0}  |  Recent debits {1}"),
+			FText::AsNumber(View.RecentCredits), FText::AsNumber(View.RecentDebits)));
+	}
 }
 
 UTerritoryEconomySubsystem* UTerritoryEconomyWidget::GetEconomySubsystem() const

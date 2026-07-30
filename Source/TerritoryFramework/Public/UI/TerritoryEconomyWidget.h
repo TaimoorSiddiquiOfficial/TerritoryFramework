@@ -4,6 +4,7 @@
 #include "Blueprint/UserWidget.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "TerritoryEconomyWidget.generated.h"
 
 class UTerritoryEconomySubsystem;
@@ -28,7 +29,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
 	FGameplayTag GetDisplayFaction() const;
 
-	/** Get current treasury gold for the display faction */
+	/** Get the owning player's Narrative inventory balance. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
 	int32 GetCurrentGold() const;
 
@@ -43,6 +44,15 @@ public:
 	/** Get number of territories owned by the display faction */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
 	int32 GetTerritoryCount() const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
+	int64 GetNetIncome() const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
+	bool IsOperatingAtDeficit() const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
+	FTerritoryEconomyOperationsView GetEconomyOperationsView(int32 MaxRecentTransactions = 10) const;
 
 protected:
 	virtual void NativeConstruct() override;
@@ -62,6 +72,15 @@ protected:
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> EconomyTerritoryCountText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyNetText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyHealthText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyRecentActivityText;
 
 	UFUNCTION(BlueprintCallable, Category="Territory|Economy|UI")
 	void RefreshEconomyDisplay();

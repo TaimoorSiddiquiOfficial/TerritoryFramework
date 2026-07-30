@@ -2,10 +2,12 @@
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "SaveSystemStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
@@ -39,6 +41,12 @@ void ATerritoryWorldState::BeginPlay()
 		// P1-10: Always subscribe regardless of GUID — live replication works without save
 		SubscribeToLiveUpdates();
 	}
+	else
+	{
+		// Initial replication normally invokes the OnRep handlers. This also hydrates
+		// clients that join after an empty/default snapshot was established.
+		SyncSubsystemsFromReplicatedState();
+	}
 }
 
 void ATerritoryWorldState::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -61,6 +69,7 @@ void ATerritoryWorldState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedReputation);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedDiplomacyHistory);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedCaptureSummaries);
+	DOREPLIFETIME(ATerritoryWorldState, ReplicatedAssaults);
 }
 
 #if WITH_EDITOR
@@ -393,6 +402,12 @@ void ATerritoryWorldState::ExportPersistentState()
 				ReplicatedCaptureSummaries.Add(Summary);
 			}
 		}
+
+		if (UTerritoryCounterAttackSubsystem* Counterattacks =
+			World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
+		{
+			ReplicatedAssaults = Counterattacks->GetPersistentState();
+		}
 	}
 
 	SavedTreasuries = ReplicatedTreasuries;
@@ -400,6 +415,7 @@ void ATerritoryWorldState::ExportPersistentState()
 	SavedTreaties = ReplicatedTreaties;
 	SavedReputation = ReplicatedReputation;
 	SavedDiplomacyHistory = ReplicatedDiplomacyHistory;
+	SavedAssaults = ReplicatedAssaults;
 	// P0-03: SavedCaptureSummaries removed — Volume is sole authority for ownership
 }
 
@@ -413,12 +429,37 @@ void ATerritoryWorldState::ImportPersistentState()
 	ReplicatedTreaties = SavedTreaties;
 	ReplicatedReputation = SavedReputation;
 	ReplicatedDiplomacyHistory = SavedDiplomacyHistory;
+	ReplicatedAssaults = SavedAssaults;
 	// P0-03: ReplicatedCaptureSummaries not restored from save — Volume owns persistence
 
 	SyncSubsystemsFromReplicatedState();
 }
 
 void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
+{
+	SyncEconomySubsystemFromReplicatedState();
+	SyncDiplomacySubsystemFromReplicatedState();
+	SyncCounterAttackSubsystemFromReplicatedState();
+	// P0-03: Capture summary sync removed — TerritoryVolume is sole ownership authority.
+	// ApplyPendingCaptureSummaries and OnTerritoryRegistered removed entirely.
+}
+
+void ATerritoryWorldState::OnRep_EconomyState()
+{
+	SyncEconomySubsystemFromReplicatedState();
+}
+
+void ATerritoryWorldState::OnRep_DiplomacyState()
+{
+	SyncDiplomacySubsystemFromReplicatedState();
+}
+
+void ATerritoryWorldState::OnRep_AssaultState()
+{
+	SyncCounterAttackSubsystemFromReplicatedState();
+}
+
+void ATerritoryWorldState::SyncEconomySubsystemFromReplicatedState()
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -456,6 +497,12 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 		}
 		Economy->RestoreTransactionHistory(Transactions);
 	}
+}
+
+void ATerritoryWorldState::SyncDiplomacySubsystemFromReplicatedState()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
 
 	// Sync diplomacy subsystem
 	if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
@@ -481,9 +528,18 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 		}
 		Diplomacy->RestorePersistentState(Treaties, Reputation, ReplicatedDiplomacyHistory);
 	}
+}
 
-	// P0-03: Capture summary sync removed — TerritoryVolume is sole ownership authority.
-	// ApplyPendingCaptureSummaries and OnTerritoryRegistered removed entirely.
+void ATerritoryWorldState::SyncCounterAttackSubsystemFromReplicatedState()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryCounterAttackSubsystem* Counterattacks =
+			World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
+		{
+			Counterattacks->RestorePersistentState(ReplicatedAssaults);
+		}
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -513,6 +569,11 @@ void ATerritoryWorldState::SubscribeToLiveUpdates()
 	{
 		Control->OnTerritoryControlChanged.AddDynamic(this, &ATerritoryWorldState::OnTerritoryControlChangedLive);
 	}
+	if (UTerritoryCounterAttackSubsystem* Counterattacks =
+		World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
+	{
+		Counterattacks->OnAssaultChanged.AddDynamic(this, &ATerritoryWorldState::OnAssaultChangedLive);
+	}
 }
 
 void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
@@ -536,6 +597,44 @@ void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
 	{
 		Control->OnTerritoryControlChanged.RemoveDynamic(this, &ATerritoryWorldState::OnTerritoryControlChangedLive);
 	}
+	if (UTerritoryCounterAttackSubsystem* Counterattacks =
+		World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
+	{
+		Counterattacks->OnAssaultChanged.RemoveDynamic(this, &ATerritoryWorldState::OnAssaultChangedLive);
+	}
+}
+
+void ATerritoryWorldState::OnAssaultChangedLive(const FTerritoryAssaultRecord& Assault)
+{
+	if (!HasAuthority() || !Assault.AssaultID.IsValid()) return;
+	if (FTerritoryAssaultRecord* Existing = ReplicatedAssaults.FindByPredicate(
+		[&Assault](const FTerritoryAssaultRecord& Record)
+		{
+			return Record.AssaultID == Assault.AssaultID;
+		}))
+	{
+		*Existing = Assault;
+	}
+	else
+	{
+		ReplicatedAssaults.Add(Assault);
+	}
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const int32 MaximumRecords = Settings ? Settings->MaxRetainedAssaultRecords : 100;
+	if (ReplicatedAssaults.Num() > MaximumRecords)
+	{
+		ReplicatedAssaults.Sort([](const FTerritoryAssaultRecord& A, const FTerritoryAssaultRecord& B)
+		{
+			if (A.IsTerminal() != B.IsTerminal()) return A.IsTerminal();
+			return A.CapturedGameTime < B.CapturedGameTime;
+		});
+		while (ReplicatedAssaults.Num() > MaximumRecords
+			&& ReplicatedAssaults[0].IsTerminal())
+		{
+			ReplicatedAssaults.RemoveAt(0);
+		}
+	}
+	ForceNetUpdate();
 }
 
 void ATerritoryWorldState::OnEconomyTickLive(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot)

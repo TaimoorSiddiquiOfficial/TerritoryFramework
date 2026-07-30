@@ -10,6 +10,7 @@
 | Diplomacy | ✅ Server | Read-only via Narrative GameState |
 | Guard spawning | ✅ Server | Guards replicate normally |
 | Combat permissions | ✅ Server | BT tasks run server-side for AI |
+| Counterattack schedule/spawn/casualties | ✅ Server | Replicated record + physical NPC replication |
 
 ## Replicated Properties
 
@@ -40,6 +41,9 @@
 | ReplicatedReputation | ✅ |
 | ReplicatedDiplomacyHistory | ✅ |
 | ReplicatedCaptureSummaries | ✅ |
+| ReplicatedAssaults | ✅ RepNotify |
+
+RepNotify handlers hydrate client-side economy, diplomacy, and counterattack query subsystems. Clients do not mutate those maps.
 
 ## Authority Enforcement
 
@@ -48,6 +52,7 @@ Gameplay-facing capture, ownership, lock, economy, diplomacy, WorldState, and co
 - Actor C++ mutations should use `HasAuthority()`; world-subsystem mutations should reject `NM_Client` or require `GetAuthGameMode()`
 - `BlueprintAuthorityOnly` does not protect direct native C++ calls
 - Registry registration, guard spawn-point bookkeeping, and diplomacy `LoadFromGameState` are intentionally not authority-marked APIs
+- `LoadFromGameState` is authority-only; client diplomacy comes from WorldState RepNotify
 - **Tales events** (`TerritoryCaptureEvent`, `TerritoryLockEvent`, `TerritoryUnlockEvent`) explicitly skip on `NM_Client` — no client-side capture mutations
 
 ## Timer Scheduling
@@ -58,6 +63,7 @@ Gameplay-facing capture, ownership, lock, economy, diplomacy, WorldState, and co
 | Economy tick | 300s (configurable) | Server only (NM_Client check) |
 | Treaty expiration | 10s (configurable) | Server only (NM_Client check) |
 | Registry bounds poll | 2s | Server only (NM_Client check) |
+| Counterattack lifecycle | 2s (configurable) | Server only |
 
 ## Client UI Behavior
 
@@ -69,14 +75,15 @@ Clients should:
 
 ## Known Multiplayer Limitations
 
-1. **Economy subsystem state is not replicated directly** — client-side economy queries return empty/stale data. `ATerritoryWorldState` provides a client-visible snapshot only after `ExportPersistentState()` or explicit setters update it.
-2. **Capture actor identities are server-only** — clients receive the leading `ControlProgress`, state, owner, and contesting faction through replicated `OwnershipData`, but not the ControlSubsystem's per-faction attacker/progress maps.
-3. **WorldState is snapshot-based** — economy, diplomacy, reputation, transaction, and capture arrays update on export or explicit setter calls rather than streaming continuously.
-4. **Capture participants are not persisted** — a saved contest restores its leading faction/progress via `RestoreCaptureState` and the capture summary is synced back from WorldState, but attacker actor identities and non-leading faction progress are lost.
+1. **Capture actor identities are server-only** — clients receive leading `ControlProgress`, state, owner, and contesting faction, not the ControlSubsystem's per-faction participant maps.
+2. **Capture participants are transient** — a saved contest restores its leading faction/progress for decay, but actor identities and non-leading progress are not saved.
+3. **Assault records are replicated; live pointers are not** — physical attacker actors replicate normally, while campaign save/load reconstructs survivors from finite counts.
+4. **Offscreen assault simulation is disabled** — warning/waiting assaults produce no pawns and no capture pressure until a relevant player enters the activation radius.
+5. **Runtime verification remains required** — dedicated-server/two-client PIE must prove one-time proximity activation, immediate death removal, and late-join state for each project NPC configuration.
 
 ## Dedicated Server Setup
 
-1. Place `ATerritoryWorldState` if clients need a replicated persistence snapshot, and export it at the appropriate save/sync points; the actor is always network relevant
+1. Place exactly one `ATerritoryWorldState`; it is always relevant and provides live late-join projections plus save snapshots
 2. All territory volumes auto-replicate (`bReplicates = true`)
 3. All spawned guards auto-replicate (inherited from `ANarrativeNPCCharacter`)
 4. Subsystem timers auto-start on server only

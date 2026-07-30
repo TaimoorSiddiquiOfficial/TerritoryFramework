@@ -434,6 +434,22 @@ void ATerritoryVolume::Load_Implementation()
 void ATerritoryVolume::ReconcileGuardsAfterLoad()
 {
 	if (!HasAuthority()) return;
+	const TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
+	int32 SavedActiveGuards = 0;
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
+	{
+		if (!SpawnPoint) continue;
+		// Narrative loads actors independently. Explicitly hydrate referenced posts
+		// before reading their saved active counts so BeginPlay order cannot reroll
+		// the garrison strength.
+		if (bLoadedFromSave)
+		{
+			USaveSystemStatics::LoadSingleActor(SpawnPoint);
+		}
+		SavedActiveGuards += SpawnPoint->GetSavedActiveGuardCount();
+	}
+	SavedActiveGuards = CalculateGuardRestoreCount(bLoadedFromSave, GetDesiredGuardCount(),
+		SavedActiveGuards, OwnershipData.DefenderCount);
 
 	// Despawn ALL existing guards (may be stale from BeginPlay initial faction)
 	DespawnGuards();
@@ -446,14 +462,29 @@ void ATerritoryVolume::ReconcileGuardsAfterLoad()
 	if (OwnershipData.State == ETerritoryState::Claimed
 		&& OwnershipData.OwningFaction.IsValid()
 		&& ResolveGuardDefinition(OwnershipData.OwningFaction)
-		&& GetDesiredGuardCount() > 0)
+		&& SavedActiveGuards > 0)
 	{
-		SpawnGuards();
+		SpawnGuardsToCount(SavedActiveGuards);
 	}
 
 	// Sync RepNotify cache
 	PreviousOwningFaction = OwnershipData.OwningFaction;
 	PreviousState = OwnershipData.State;
+}
+
+int32 ATerritoryVolume::CalculateGuardRestoreCount(bool bWasLoadedFromSave,
+	int32 DesiredGuards, int32 SavedActiveGuards, int32 LegacyDefenderCount)
+{
+	const int32 BoundedDesired = FMath::Max(0, DesiredGuards);
+	if (!bWasLoadedFromSave)
+	{
+		return BoundedDesired;
+	}
+	if (SavedActiveGuards <= 0 && LegacyDefenderCount > 0)
+	{
+		SavedActiveGuards = LegacyDefenderCount;
+	}
+	return FMath::Clamp(SavedActiveGuards, 0, BoundedDesired);
 }
 
 bool ATerritoryVolume::ShouldRespawn_Implementation() const { return false; }
@@ -661,6 +692,19 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 			*OldOwner.ToString(), *NewOwner.ToString(),
 			static_cast<int32>(OldState), static_cast<int32>(NewState),
 			NewData.ControlProgress);
+	}
+
+	// Apply the post-owned reserve policy before spawning the new owner's guards.
+	// Doing this from OnOwnershipChanged would erase guards registered during SpawnGuards.
+	if (OldOwner != NewOwner)
+	{
+		const EOwnershipTransitionReason Reason = NewOwner.IsValid()
+			? EOwnershipTransitionReason::OwnerChanged
+			: EOwnershipTransitionReason::RevertedToUnclaimed;
+		for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+		{
+			if (SpawnPoint) SpawnPoint->HandleOwnershipTransition(Reason);
+		}
 	}
 
 	// ─── Guard lifecycle (BEFORE BP virtuals so BP sees final guard state) ───
@@ -877,65 +921,71 @@ bool ATerritoryVolume::IsLocked() const
 
 bool ATerritoryVolume::CanUnlock() const
 {
+	return CanUnlockWithContext(FTerritoryTransitionContext());
+}
+
+bool ATerritoryVolume::CanUnlockWithContext(const FTerritoryTransitionContext& TransitionContext) const
+{
 	if (!IsLocked()) return true;
 
 	// No lock conditions → always unlockable
 	if (LockConditions.Num() == 0) return true;
 
-	// Resolve player context for conditions that need it (e.g., quest completion checks)
-	APlayerController* ContextPC = nullptr;
-	APawn* ContextPawn = nullptr;
-	if (UWorld* World = GetWorld())
-	{
-		if (APlayerController* PC = World->GetFirstPlayerController())
-		{
-			ContextPC = PC;
-			ContextPawn = PC->GetPawn();
-		}
-	}
-
 	for (const TObjectPtr<UNarrativeCondition>& Cond : LockConditions)
 	{
 		if (!Cond) continue;
-		if (!Cond->CheckCondition(ContextPawn, ContextPC, nullptr)) return false;
+		if (!Cond->CheckCondition(
+			TransitionContext.TargetPawn,
+			TransitionContext.PlayerController,
+			TransitionContext.TalesComponent)) return false;
 	}
 	return true;
 }
 
 void ATerritoryVolume::LockTerritory(const FText& Reason)
 {
-	if (!HasAuthority()) return;
+	LockTerritoryWithContext(Reason, FTerritoryTransitionContext());
+}
+
+bool ATerritoryVolume::LockTerritoryWithContext(
+	const FText& Reason,
+	const FTerritoryTransitionContext& TransitionContext)
+{
+	if (!HasAuthority()) return false;
 
 	FText ConditionFailure;
-	if (!CheckStateConditions(ETerritoryState::Locked, ConditionFailure))
+	if (!CheckStateConditions(ETerritoryState::Locked, ConditionFailure, TransitionContext))
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("[Lock] %s lock rejected: %s"),
 			*GetTerritoryTag().ToString(), *ConditionFailure.ToString());
-		return;
+		return false;
 	}
 
-	const FText PreviousLockReason = OwnershipData.LockReason;
-	OwnershipData.LockReason = Reason;
-	if (OwnershipData.State != ETerritoryState::Locked)
-	{
-		SetTerritoryState(ETerritoryState::Locked);
-		if (OwnershipData.State != ETerritoryState::Locked)
-		{
-			OwnershipData.LockReason = PreviousLockReason;
-			return;
-		}
-	}
+	FTerritoryOwnershipData Candidate = OwnershipData;
+	Candidate.State = ETerritoryState::Locked;
+	Candidate.ContestingFaction = FGameplayTag();
+	Candidate.ControlProgress = 0.f;
+	Candidate.LockReason = Reason;
+	if (!CommitOwnershipData(Candidate, TransitionContext)) return false;
 
 	UE_LOG(LogTerritory, Log, TEXT("[Lock] %s locked: %s"),
 		*GetTerritoryTag().ToString(), *Reason.ToString());
+	return true;
 }
 
 bool ATerritoryVolume::TryUnlock(bool bForce)
 {
+	return TryUnlockWithContext(FTerritoryTransitionContext(), bForce);
+}
+
+bool ATerritoryVolume::TryUnlockWithContext(
+	const FTerritoryTransitionContext& TransitionContext,
+	bool bForce)
+{
 	if (!HasAuthority()) return false;
 	if (!IsLocked()) return true;
 
-	if (!bForce && !CanUnlock())
+	if (!bForce && !CanUnlockWithContext(TransitionContext))
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlock blocked — conditions not met"),
 			*GetTerritoryTag().ToString());
@@ -946,28 +996,19 @@ bool ATerritoryVolume::TryUnlock(bool bForce)
 		? ETerritoryState::Claimed
 		: ETerritoryState::Unclaimed;
 	FText ConditionFailure;
-	if (!bForce && !CheckStateConditions(TargetState, ConditionFailure))
+	if (!bForce && !CheckStateConditions(TargetState, ConditionFailure, TransitionContext))
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlock blocked — state conditions not met: %s"),
 			*GetTerritoryTag().ToString(), *ConditionFailure.ToString());
 		return false;
 	}
 
-	const FText PreviousLockReason = OwnershipData.LockReason;
-	OwnershipData.LockReason = FText();
-	if (bForce)
-	{
-		ForceSetTerritoryState(TargetState);
-	}
-	else
-	{
-		SetTerritoryState(TargetState);
-	}
-	if (OwnershipData.State == ETerritoryState::Locked)
-	{
-		OwnershipData.LockReason = PreviousLockReason;
-		return false;
-	}
+	FTerritoryOwnershipData Candidate = OwnershipData;
+	Candidate.State = TargetState;
+	Candidate.ContestingFaction = FGameplayTag();
+	Candidate.ControlProgress = OwnershipData.OwningFaction.IsValid() ? 1.f : 0.f;
+	Candidate.LockReason = FText();
+	if (!CommitOwnershipData(Candidate, TransitionContext)) return false;
 
 	UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlocked"),
 		*GetTerritoryTag().ToString());
@@ -1014,22 +1055,6 @@ TArray<AActor*> ATerritoryVolume::GetRegisteredDefenders() const
 
 void ATerritoryVolume::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
-	// P1-03: Notify spawn points about ownership change for reserve policy
-	if (OldOwner != NewOwner)
-	{
-		const EOwnershipTransitionReason Reason = NewOwner.IsValid()
-			? EOwnershipTransitionReason::OwnerChanged
-			: EOwnershipTransitionReason::RevertedToUnclaimed;
-
-		for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
-		{
-			if (SpawnPoint)
-			{
-				SpawnPoint->HandleOwnershipTransition(Reason);
-			}
-		}
-	}
-
 	// Guard lifecycle invariants are handled in SetOwningFaction (non-virtual).
 	// This virtual exists for BP subclasses to add behavior — calling Super is optional.
 }
@@ -1047,15 +1072,10 @@ void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
 
 	if (HasAuthority())
 	{
-		// Territory becomes unclaimed — owner lost all defenders.
-		// SetOwningFaction handles the Claimed→Unclaimed state transition,
-		// guard despawn, and delegates. The Locked state is not reachable
-		// here because SetTerritoryState(Locked) despawns all guards.
-		SetDerivedOwningFaction(FGameplayTag());
-		SetControlProgress(0.f);
-
-		// Do NOT respawn guards here — the territory is undefended.
-		// Guards only respawn when a new faction claims the territory.
+		// Defence reaching zero makes the territory vulnerable; ownership remains
+		// authoritative until physical attackers complete the existing capture flow.
+		OwnershipData.DefenderCount = 0;
+		ForceNetUpdate();
 	}
 }
 
@@ -1264,6 +1284,11 @@ void ATerritoryVolume::ResolveSpawnPointNarrativeOverrides(
 
 void ATerritoryVolume::SpawnGuards()
 {
+	SpawnGuardsToCount(GetDesiredGuardCount());
+}
+
+void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
+{
 	if (!HasAuthority()) return;
 	if (bSpawningGuards)
 	{
@@ -1302,7 +1327,7 @@ void ATerritoryVolume::SpawnGuards()
 		return;
 	}
 
-	const int32 TargetGuardCount = FMath::Min(GetDesiredGuardCount(), GetMaxGuardCount());
+	const int32 TargetGuardCount = FMath::Clamp(RequestedGuardCount, 0, GetMaxGuardCount());
 	const int32 ExistingGuardCount = GetSpawnedGuardCount();
 	if (TargetGuardCount <= ExistingGuardCount)
 	{
@@ -1806,9 +1831,9 @@ bool ATerritoryVolume::CanRemoveGuards(const AActor* Requester, int32 Count, FTe
 		OutFailureReason = FText::FromString(TEXT("Only the owning faction can remove guards."));
 		return false;
 	}
-	if (GetDesiredGuardCount() < Count)
+	if (GetDesiredGuardCount() < Count || GetSpawnedGuardCount() < Count)
 	{
-		OutFailureReason = FText::FromString(TEXT("The garrison has no guards available to remove."));
+		OutFailureReason = FText::FromString(TEXT("The garrison does not have that many active guards available to remove."));
 		return false;
 	}
 	return true;
@@ -1821,28 +1846,40 @@ bool ATerritoryVolume::TryRemoveGuards(AActor* Requester, int32 Count, FText& Ou
 		return false;
 	}
 
-	int32 RemainingToDestroy = Count;
-	for (int32 Index = SpawnedGuards.Num() - 1; Index >= 0 && RemainingToDestroy > 0; --Index)
+	// Select the complete mutation set before changing any garrison state. A stale weak
+	// pointer must not turn an otherwise rejected request into a partial removal.
+	TArray<ATerritoryGuardCharacter*> GuardsToRemove;
+	GuardsToRemove.Reserve(Count);
+	for (int32 Index = SpawnedGuards.Num() - 1; Index >= 0 && GuardsToRemove.Num() < Count; --Index)
 	{
-		ATerritoryGuardCharacter* Guard = SpawnedGuards[Index].Get();
-		if (!Guard)
+		if (ATerritoryGuardCharacter* Guard = SpawnedGuards[Index].Get())
 		{
-			SpawnedGuards.RemoveAtSwap(Index);
-			continue;
+			GuardsToRemove.Add(Guard);
 		}
+	}
 
+	if (GuardsToRemove.Num() != Count)
+	{
+		OutResult = FText::FromString(TEXT("The garrison changed before the removal could be committed."));
+		return false;
+	}
+
+	for (ATerritoryGuardCharacter* Guard : GuardsToRemove)
+	{
 		if (ATerritoryGuardSpawnPoint* SpawnPoint = Guard->OwningTerritorySpawnPoint)
 		{
-			SpawnPoint->UnregisterGuard(Guard);
+			SpawnPoint->UnregisterGuard(Guard, EGuardRemovalReason::ManualRemoval);
 		}
 		UnbindDefenderDeath(Guard);
 		RegisteredDefenders.Remove(Guard);
-		SpawnedGuards.RemoveAtSwap(Index);
+		SpawnedGuards.RemoveAllSwap([Guard](const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr)
+		{
+			return GuardPtr.Get() == Guard;
+		});
 		Guard->Destroy();
-		--RemainingToDestroy;
 	}
 
-	OwnershipData.DesiredGuardCount = FMath::Max(0, GetDesiredGuardCount() - Count);
+	OwnershipData.DesiredGuardCount = FMath::Max(0, GetDesiredGuardCount() - GuardsToRemove.Num());
 	CleanupInvalidDefenders();
 	OwnershipData.DefenderCount = RegisteredDefenders.Num();
 	ForceNetUpdate();
@@ -1854,7 +1891,7 @@ bool ATerritoryVolume::TryRemoveGuards(AActor* Requester, int32 Count, FText& Ou
 
 	OutResult = FText::Format(
 		NSLOCTEXT("TerritoryVolume", "RemovedGuards", "Removed {0} guard(s) from {1}. Future upkeep reduced."),
-		FText::AsNumber(Count),
+		FText::AsNumber(GuardsToRemove.Num()),
 		GetTerritoryDisplayName());
 	return true;
 }

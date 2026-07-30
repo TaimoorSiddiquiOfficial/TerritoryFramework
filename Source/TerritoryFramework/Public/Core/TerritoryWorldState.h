@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "NarrativeSavableActor.h"
 #include "Core/TerritoryDiplomacyTypes.h"
+#include "Combat/TerritoryCounterAttackTypes.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "TerritoryWorldState.generated.h"
 
@@ -247,23 +248,26 @@ protected:
 	//   4. Bind OnRep callbacks to update client read models
 	//   5. ExportPersistentState reads live FastArray data, not a second representation
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_EconomyState)
 	TArray<FReplicatedFactionEconomy> ReplicatedTreasuries;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_EconomyState)
 	TArray<FReplicatedTransaction> ReplicatedTransactions;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_DiplomacyState)
 	TArray<FReplicatedTreaty> ReplicatedTreaties;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_DiplomacyState)
 	TArray<FReplicatedFactionReputation> ReplicatedReputation;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing=OnRep_DiplomacyState)
 	TArray<FDiplomacyEvent> ReplicatedDiplomacyHistory;
 
 	UPROPERTY(Replicated)
 	TArray<FReplicatedCaptureSummary> ReplicatedCaptureSummaries;
+
+	UPROPERTY(ReplicatedUsing=OnRep_AssaultState)
+	TArray<FTerritoryAssaultRecord> ReplicatedAssaults;
 
 	// ─── Save Data (mirrors replicated state) ───
 
@@ -282,6 +286,9 @@ protected:
 	UPROPERTY(SaveGame)
 	TArray<FDiplomacyEvent> SavedDiplomacyHistory;
 
+	UPROPERTY(SaveGame)
+	TArray<FTerritoryAssaultRecord> SavedAssaults;
+
 	// P0-03: SavedCaptureSummaries removed — TerritoryVolume is sole authority
 	// for its own ownership persistence via SaveGame on OwnershipData.
 	// ReplicatedCaptureSummaries remains for runtime client visibility only.
@@ -292,6 +299,20 @@ protected:
 
 private:
 	void SyncSubsystemsFromReplicatedState();
+	void SyncEconomySubsystemFromReplicatedState();
+	void SyncDiplomacySubsystemFromReplicatedState();
+	void SyncCounterAttackSubsystemFromReplicatedState();
+
+	/** Hydrate the client-side economy query model after authoritative snapshots replicate. */
+	UFUNCTION()
+	void OnRep_EconomyState();
+
+	/** Hydrate the client-side diplomacy query model after authoritative snapshots replicate. */
+	UFUNCTION()
+	void OnRep_DiplomacyState();
+
+	UFUNCTION()
+	void OnRep_AssaultState();
 
 	// ─── P0-02: Live replication handlers ───
 	// Subscribe to subsystem delegates so replicated arrays stay current between saves.
@@ -312,6 +333,9 @@ private:
 
 	UFUNCTION()
 	void OnTerritoryControlChangedLive(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);
+
+	UFUNCTION()
+	void OnAssaultChangedLive(const FTerritoryAssaultRecord& Assault);
 
 	/** Subscribe to all subsystem delegates for live replication. */
 	void SubscribeToLiveUpdates();

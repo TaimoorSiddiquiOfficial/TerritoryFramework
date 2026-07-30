@@ -1,4 +1,4 @@
-# Subsystems — Registry, Control, Economy, Diplomacy, CombatDirector
+# Subsystems — Registry, Control, Economy, Diplomacy, Counterattacks, CombatDirector
 
 ## Architecture Overview
 
@@ -8,7 +8,9 @@ GameInstance / World
 ├── UTerritoryControlSubsystem     (capture flow — attackers, progress, tick)
 ├── UTerritoryEconomySubsystem     (treasury — income, costs, transactions)
 ├── UTerritoryDiplomacySubsystem    (treaties — war, peace, reputation)
-└── UTerritoryCombatDirector        (attack permissions — budget per territory)
+├── UTerritoryCounterAttackSubsystem (deterministic finite physical assaults)
+├── UTerritoryCombatDirector        (attack permissions — budget per territory)
+└── UTerritoryPlayerManagementSubsystem (per-controller RPC component lifecycle)
 ```
 
 All subsystems are `UWorldSubsystem` — one instance per world, auto-created by engine. Access via `GetWorld()->GetSubsystem<U...>()` or the Blueprint Library helpers.
@@ -105,8 +107,8 @@ Manages the capture flow — attacker registration, progress accumulation, captu
        └── Reset → clear capture state and contester; restore the retained incumbent to Claimed, otherwise Unclaimed
 
 3. CompleteCapture:
-   └── SetOwningFaction(NewFaction) → state = Claimed, guards respawn
-   └── Broadcast OnTerritoryControlChanged
+   └── ApplyTerritoryMutation(NewFaction, Claimed, exact participant context)
+   └── Verify final owner/state, clear participants, then broadcast once
 
 4. ForceCapture(Territory, Faction):
    └── Requires server authority, a territory, and a valid owner tag
@@ -125,6 +127,7 @@ Manages the capture flow — attacker registration, progress accumulation, captu
 | ResetCapture | Territory | void | Resets progress to 0 |
 | AddCaptureProgress | Territory, Faction, Delta | void | Manual progress injection |
 | RegisterAttacker | Territory, Actor, Faction | void | Revalidates capture rules and ignores registration if the attack budget is full |
+| TryRegisterAttacker | Territory, Actor, Faction | bool | Same path, returning exact admission success; dead ASC actors are rejected |
 | UnregisterAttacker | Territory, Actor, Faction | void | Releases attack slot |
 
 #### Queries (BlueprintPure)
@@ -153,9 +156,9 @@ Manages the capture flow — attacker registration, progress accumulation, captu
 Before allowing capture, the subsystem queries Narrative GameState for the relationship between attacker and owner:
 
 ```cpp
-// Internal — uses NarrativePro's attitude system
-bool bFriendly = NarrativeGameState->GetAttitude(AttackerFaction, OwnerFaction) == EAttitude::Friendly;
-if (bFriendly) return ECaptureResult::DiplomaticallyBlocked;
+// Internal policy: rich Territory treaties first, Narrative attitude fallback.
+if (!CanFactionCaptureTerritory(Territory, AttackerFaction))
+    return ECaptureResult::DiplomaticallyBlocked;
 ```
 
 ### Timer
@@ -212,6 +215,8 @@ Economy mutations now use a native server backstop in addition to Blueprint auth
 ```cpp
 if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
 ```
+
+Loaded Narrative NPC inventories participate with player inventories. Shared-account and faction-leader payout policies route through explicitly registered live Narrative accounts and fall back to deterministic member distribution. Every currency mutation validates exact Narrative faction membership and `int64` intermediates prevent overflow.
 
 ---
 
@@ -299,6 +304,8 @@ BTTask_ReleaseTerritoryPermission
   └── CombatDirector->ReleaseAssaultSlot(Territory, NPCController)
 ```
 
+`UTerritoryCounterAttackSubsystem` also requests these slots when a physical assault NPC actually enters the target. See [17_Counterattack_System.md](17_Counterattack_System.md).
+
 ---
 
 ## Subsystem Access Patterns
@@ -311,6 +318,7 @@ UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControl
 UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 UTerritoryDiplomacySubsystem* Diplomacy = GetWorld()->GetSubsystem<UTerritoryDiplomacySubsystem>();
 UTerritoryCombatDirector* Combat = GetWorld()->GetSubsystem<UTerritoryCombatDirector>();
+UTerritoryCounterAttackSubsystem* Counterattacks = GetWorld()->GetSubsystem<UTerritoryCounterAttackSubsystem>();
 ```
 
 ### Blueprint
@@ -341,11 +349,11 @@ UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegis
 1. World initialized
 2. Subsystems created (engine-managed)
 3. ATerritoryVolume::BeginPlay → Registry->RegisterTerritory
-4. ATerritoryWorldState::BeginPlay → SyncSubsystemsFromReplicatedState (restores economy, diplomacy, and capture state to subsystems)
+4. ATerritoryWorldState::BeginPlay → authority imports saved economy/diplomacy/assault state; clients hydrate read models through RepNotify
 5. Subsystem timers start (server only)
 ```
 
-Late-registering territories (spawned at runtime) are handled by `OnTerritoryRegistered`; cities subscribe to catch newly available districts. WorldState does not subscribe and must be refreshed explicitly with `ExportPersistentState()`.
+Late-registering territories are handled by `OnTerritoryRegistered`; cities catch newly available districts and saved counterattacks wait for their stable GUID/tag target. WorldState subscribes to live subsystem changes and also rebuilds snapshots in `ExportPersistentState()`.
 
 ## Cross-Subsystem Dependencies
 
@@ -357,3 +365,4 @@ Late-registering territories (spawned at runtime) are handled by `OnTerritoryReg
 | Economy | Registry | Enumerate territories for income calc |
 | Diplomacy | Narrative GameState | Sole authority for attitudes |
 | CombatDirector | — | Standalone budget tracker |
+| CounterAttack | Control, Registry, Diplomacy, CombatDirector, Narrative NPC/activity/navigation | Schedule and activate finite physical assaults |

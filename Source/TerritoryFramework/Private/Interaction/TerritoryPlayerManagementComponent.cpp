@@ -20,6 +20,13 @@ UTerritoryPlayerManagementComponent* UTerritoryPlayerManagementComponent::FindOr
 	{
 		return Existing;
 	}
+	if (!PlayerController->HasAuthority())
+	{
+		// Runtime replicated components must be authored by the server. Creating a
+		// same-named client-only bridge can prevent the authoritative component from
+		// resolving correctly when it later replicates.
+		return nullptr;
+	}
 
 	UTerritoryPlayerManagementComponent* Component =
 		NewObject<UTerritoryPlayerManagementComponent>(PlayerController,
@@ -27,7 +34,9 @@ UTerritoryPlayerManagementComponent* UTerritoryPlayerManagementComponent::FindOr
 	if (!Component) return nullptr;
 
 	PlayerController->AddInstanceComponent(Component);
+	Component->SetIsReplicated(true);
 	Component->RegisterComponent();
+	PlayerController->ForceNetUpdate();
 	return Component;
 }
 
@@ -48,6 +57,8 @@ void UTerritoryPlayerManagementComponent::RequestPurchaseGuards(
 		const float Now = World->GetTimeSeconds();
 		if (Now - LastPurchaseRequestTime < PurchaseCooldown)
 		{
+			OnGuardPurchaseResult.Broadcast(ManagementPoint->ResolveDistrict(), false,
+				FText::FromString(TEXT("Please wait before making another guard request.")), RequestId);
 			return;
 		}
 		LastPurchaseRequestTime = Now;
@@ -79,6 +90,8 @@ void UTerritoryPlayerManagementComponent::RequestPurchaseGuardsForDistrict(
 		const float Now = World->GetTimeSeconds();
 		if (Now - LastPurchaseRequestTime < PurchaseCooldown)
 		{
+			OnGuardPurchaseResult.Broadcast(District, false,
+				FText::FromString(TEXT("Please wait before making another guard request.")), RequestId);
 			return;
 		}
 		LastPurchaseRequestTime = Now;
@@ -109,6 +122,8 @@ void UTerritoryPlayerManagementComponent::RequestRemoveGuards(
 		const float Now = World->GetTimeSeconds();
 		if (Now - LastPurchaseRequestTime < PurchaseCooldown)
 		{
+			OnGuardPurchaseResult.Broadcast(ManagementPoint->ResolveDistrict(), false,
+				FText::FromString(TEXT("Please wait before making another guard request.")), RequestId);
 			return;
 		}
 		LastPurchaseRequestTime = Now;
@@ -139,6 +154,8 @@ void UTerritoryPlayerManagementComponent::RequestRemoveGuardsForDistrict(
 		const float Now = World->GetTimeSeconds();
 		if (Now - LastPurchaseRequestTime < PurchaseCooldown)
 		{
+			OnGuardPurchaseResult.Broadcast(District, false,
+				FText::FromString(TEXT("Please wait before making another guard request.")), RequestId);
 			return;
 		}
 		LastPurchaseRequestTime = Now;
@@ -172,6 +189,8 @@ void UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuards_Implementa
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (Now - LastPurchaseRequestTime < PurchaseCooldown)
 	{
+		ClientReceiveGuardPurchaseResult(ManagementPoint ? ManagementPoint->ResolveDistrict() : nullptr,
+			false, FText::FromString(TEXT("Please wait before making another guard request.")), RequestId);
 		return;
 	}
 	LastPurchaseRequestTime = Now;
@@ -202,6 +221,8 @@ void UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuardsForDistrict
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (Now - LastPurchaseRequestTime < PurchaseCooldown)
 	{
+		ClientReceiveGuardPurchaseResult(District, false,
+			FText::FromString(TEXT("Please wait before making another guard request.")), RequestId);
 		return;
 	}
 	LastPurchaseRequestTime = Now;
@@ -231,6 +252,8 @@ void UTerritoryPlayerManagementComponent::ServerRequestRemoveGuards_Implementati
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (Now - LastPurchaseRequestTime < PurchaseCooldown)
 	{
+		ClientReceiveGuardPurchaseResult(ManagementPoint ? ManagementPoint->ResolveDistrict() : nullptr,
+			false, FText::FromString(TEXT("Please wait before making another guard request.")), RequestId);
 		return;
 	}
 	LastPurchaseRequestTime = Now;
@@ -260,6 +283,8 @@ void UTerritoryPlayerManagementComponent::ServerRequestRemoveGuardsForDistrict_I
 	const float Now = GetWorld()->GetTimeSeconds();
 	if (Now - LastPurchaseRequestTime < PurchaseCooldown)
 	{
+		ClientReceiveGuardPurchaseResult(District, false,
+			FText::FromString(TEXT("Please wait before making another guard request.")), RequestId);
 		return;
 	}
 	LastPurchaseRequestTime = Now;
@@ -402,6 +427,21 @@ void UTerritoryPlayerManagementComponent::ClientReceiveGuardPurchaseResult_Imple
 	ATerritoryVolume* Territory, bool bSuccess, const FText& Message, int32 RequestId)
 {
 	OnGuardPurchaseResult.Broadcast(Territory, bSuccess, Message, RequestId);
+}
+
+void UTerritoryPlayerManagementComponent::SendAssaultNotification(
+	const FTerritoryAssaultRecord& Assault)
+{
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		ClientReceiveAssaultNotification(Assault);
+	}
+}
+
+void UTerritoryPlayerManagementComponent::ClientReceiveAssaultNotification_Implementation(
+	const FTerritoryAssaultRecord& Assault)
+{
+	OnAssaultNotification.Broadcast(Assault);
 }
 
 APawn* UTerritoryPlayerManagementComponent::GetManagingPawn() const

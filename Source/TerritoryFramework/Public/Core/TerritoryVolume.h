@@ -6,6 +6,7 @@
 #include "NarrativeSavableActor.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryInterfaces.h"
+#include "Combat/TerritoryCounterAttackTypes.h"
 #include "TerritoryVolume.generated.h"
 
 class UNarrativeAbilitySystemComponent;
@@ -16,6 +17,7 @@ class UTriggerSet;
 class ATerritoryGuardCharacter;
 class ATerritoryGuardSpawnPoint;
 class UTerritoryNavigationMarkerComponent;
+class UTerritoryCounterAttackProfile;
 /**
  * Base class for all territory volumes (City / District / Property inherit from this).
  *
@@ -42,6 +44,7 @@ class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrative
 {
 	GENERATED_BODY()
 	friend class UTerritoryDataValidator;
+	friend class FTFBehavior_GuardRestoreCount;
 
 public:
 	ATerritoryVolume();
@@ -140,6 +143,26 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy", meta=(DisplayName="Get Control Mode"))
 	ETerritoryControlMode GetControlMode() const;
 
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
+	UTerritoryCounterAttackProfile* GetCounterAttackProfile() const { return CounterAttackProfile; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
+	const TArray<FTerritoryAssaultApproach>& GetCounterAttackApproaches() const { return CounterAttackApproaches; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
+	float GetGuardQuality() const { return GuardQuality; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
+	float GetFortificationStrength() const { return FortificationStrength; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
+	float GetNearbyAlliedSupport() const { return NearbyAlliedSupport; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
+	float GetStrategicValue() const { return StrategicValue; }
+
+	FGuid GetTerritoryGUID() const { return TerritoryGUID; }
+
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Mutation API (BlueprintAuthorityOnly — server-only)
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -212,8 +235,9 @@ public:
 	virtual void OnStateChanged_Implementation(ETerritoryState OldState, ETerritoryState NewState);
 
 	/**
-	 * Fires when all defenders have been defeated. Default behavior: marks territory Unclaimed.
-	 * Override in Blueprint to change outcome (e.g., auto-spawn reserves, trigger quest).
+	 * Fires when all defenders have been defeated. The default keeps the current owner and
+	 * makes the garrison vulnerable; ownership can change only through the capture flow.
+	 * Override in Blueprint for presentation or story hooks, not direct ownership rolls.
 	 */
 	UFUNCTION(BlueprintNativeEvent, Category="Territory|Guards", meta=(DisplayName="On All Guards Defeated"))
 	void OnAllGuardsDefeated();
@@ -254,6 +278,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Lock", meta=(DisplayName="Lock Territory"))
 	void LockTerritory(const FText& Reason = FText());
 
+	/** Lock using the exact pawn/controller/Tales context that caused the transition. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Lock", meta=(DisplayName="Lock Territory With Context"))
+	bool LockTerritoryWithContext(const FText& Reason, const FTerritoryTransitionContext& TransitionContext);
+
 	/**
 	 * Attempts to unlock. Returns true if successful.
 	 * Checks:
@@ -263,12 +291,19 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Lock", meta=(DisplayName="Try Unlock"))
 	bool TryUnlock(bool bForce = false);
 
+	/** Unlock using the exact pawn/controller/Tales context that must satisfy lock conditions. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Lock", meta=(DisplayName="Try Unlock With Context"))
+	bool TryUnlockWithContext(const FTerritoryTransitionContext& TransitionContext, bool bForce = false);
+
 	/**
 	 * Read-only check: would TryUnlock() succeed right now?
 	 * True if not locked OR all LockConditions pass.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Can Unlock"))
 	bool CanUnlock() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Can Unlock With Context"))
+	bool CanUnlockWithContext(const FTerritoryTransitionContext& TransitionContext) const;
 
 	/** Returns the reason this territory was locked. Empty if not locked. */
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Get Lock Reason"))
@@ -384,6 +419,7 @@ public:
 		const TArray<TSoftObjectPtr<UTriggerSet>>& DefaultTriggerSets);
 
 	void ReconcileGuardsAfterLoad();
+	void SpawnGuardsToCount(int32 TargetGuardCount);
 
 public:
 	/** Check if all EntryConditions for the given state pass. Public for atomic mutation validation. */
@@ -440,6 +476,27 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
 		meta=(DisplayName="Starts Locked"))
 	bool bStartsLocked = false;
+
+	// ─── Strategic counterattack configuration ───
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack")
+	TObjectPtr<UTerritoryCounterAttackProfile> CounterAttackProfile;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack",
+		meta=(TitleProperty="ApproachID"))
+	TArray<FTerritoryAssaultApproach> CounterAttackApproaches;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	float GuardQuality = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	float FortificationStrength = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	float NearbyAlliedSupport = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	float StrategicValue = 1.f;
 
 	// ─── State Configuration (Conditions & Events) ───
 
@@ -532,6 +589,9 @@ protected:
 	FOnGuardKilled OnGuardKilled;
 
 private:
+	static int32 CalculateGuardRestoreCount(bool bLoadedFromSave, int32 DesiredGuards,
+		int32 SavedActiveGuards, int32 LegacyDefenderCount);
+
 	UPROPERTY()
 	TArray<TWeakObjectPtr<AActor>> RegisteredDefenders;
 

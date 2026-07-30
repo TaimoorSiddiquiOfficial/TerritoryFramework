@@ -65,6 +65,19 @@ public:
 		ETerritoryTransactionType Type = ETerritoryTransactionType::Income,
 		AActor* PreferredBeneficiary = nullptr);
 
+	/**
+	 * Register a live Narrative inventory account for a policy that requires one
+	 * explicit faction account. Narrative remains the currency/save authority.
+	 * Re-register the actor after it streams or respawns; UObject pointers are not
+	 * stored as campaign state.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	bool RegisterFactionCurrencyAccount(const FGameplayTag& Faction,
+		ETerritoryIncomePayoutPolicy AccountRole, AActor* AccountActor);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	void UnregisterFactionCurrencyAccount(const FGameplayTag& Faction, AActor* AccountActor);
+
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
 	int32 GetIncome(const FGameplayTag& Faction) const;
 
@@ -143,6 +156,10 @@ public:
 	/** Factions whose income needs recalculation — processed once per economy tick. */
 	TSet<FGameplayTag> DirtyFactions;
 
+	/** Runtime routing only. Narrative inventories own and persist the actual balances. */
+	TMap<FGameplayTag, TWeakObjectPtr<AActor>> SharedFactionAccounts;
+	TMap<FGameplayTag, TWeakObjectPtr<AActor>> FactionLeaderAccounts;
+
 	UFUNCTION()
 	void OnEconomyTick();
 
@@ -155,9 +172,12 @@ public:
 	UFUNCTION()
 	void OnTerritoryUnregistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 
-	/** Get all online faction member characters with valid inventory components. */
+	/** Get all loaded faction member characters with valid Narrative inventory accounts. */
 	TArray<class ANarrativeCharacter*> GetFactionMembers(const FGameplayTag& Faction) const;
 	class UNarrativeInventoryComponent* ResolveCurrencyAccount(const AActor* RequestingActor) const;
+	bool DoesAccountBelongToFaction(const AActor* AccountActor, const FGameplayTag& Faction) const;
+	AActor* ResolveRegisteredCurrencyAccount(const FGameplayTag& Faction,
+		ETerritoryIncomePayoutPolicy AccountRole) const;
 	void RecordCurrencyTransaction(const FGameplayTag& Faction, int32 Amount,
 		int32 BalanceAfter, const FString& Reason, ETerritoryTransactionType Type,
 		const AActor* AccountActor);

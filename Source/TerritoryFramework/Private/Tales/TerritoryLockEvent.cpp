@@ -23,7 +23,12 @@ void UTerritoryLockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerCont
 		return;
 	}
 
-	Territory->LockTerritory(LockReason);
+	FTerritoryTransitionContext Context;
+	Context.Instigator = Target;
+	Context.TargetPawn = Target;
+	Context.PlayerController = Controller;
+	Context.TalesComponent = NarrativeComponent;
+	Territory->LockTerritoryWithContext(LockReason, Context);
 }
 
 FString UTerritoryLockEvent::GetGraphDisplayText_Implementation()
@@ -52,7 +57,12 @@ void UTerritoryUnlockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerCo
 		return;
 	}
 
-	Territory->TryUnlock(bForceUnlock);
+	FTerritoryTransitionContext Context;
+	Context.Instigator = Target;
+	Context.TargetPawn = Target;
+	Context.PlayerController = Controller;
+	Context.TalesComponent = NarrativeComponent;
+	Territory->TryUnlockWithContext(Context, bForceUnlock);
 }
 
 FString UTerritoryUnlockEvent::GetGraphDisplayText_Implementation()

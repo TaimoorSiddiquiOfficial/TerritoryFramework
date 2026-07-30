@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "TerritoryDistrictRowWidget.generated.h"
 
 class ATerritoryDistrict;
@@ -22,10 +23,16 @@ public:
 	void InitializeDistrict(ATerritoryDistrict* InDistrict);
 
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
+	void InitializeOperationsView(const FTerritoryDistrictOperationsView& InView);
+
+	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void SetGuardActionState(bool bCanAdd, bool bCanRemove, const FText& Status);
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	ATerritoryDistrict* GetDistrict() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|UI")
+	FTerritoryDistrictOperationsView GetOperationsView() const { return OperationsView; }
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryDistrictRowSelected OnDistrictSelected;
@@ -35,15 +42,29 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> SelectDistrictButton;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> AddGuardButton;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> RemoveGuardButton;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonTextBlock> DistrictName;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonTextBlock> DistrictSummary;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonTextBlock> DistrictStatus;
 
 	private:
 	TWeakObjectPtr<ATerritoryDistrict> District;
-	TObjectPtr<UNarrativeCommonButtonBase> SelectButton;
-	TObjectPtr<UNarrativeCommonButtonBase> AddGuardButton;
-	TObjectPtr<UNarrativeCommonButtonBase> RemoveGuardButton;
-	TObjectPtr<UNarrativeCommonTextBlock> NameText;
-	TObjectPtr<UNarrativeCommonTextBlock> SummaryText;
-	TObjectPtr<UNarrativeCommonTextBlock> StatusText;
+	FTerritoryDistrictOperationsView OperationsView;
 	bool bCanAddGuard = false;
 	bool bCanRemoveGuard = false;
 	FText ActionStatus;

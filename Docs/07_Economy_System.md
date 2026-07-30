@@ -9,7 +9,7 @@ The subsystem tracks per faction:
 - **CostsPerTick**: guard upkeep from owned territories
 - **TerritoryCount**: number of owned territories
 
-Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. The configured `IncomePayoutPolicy` determines the recipients. Upkeep debits are applied to online faction members using Narrative's `AddCurrency()`.
+Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. The configured `IncomePayoutPolicy` determines the recipients. Faction-member discovery includes loaded Narrative player and NPC characters, sorts them deterministically, and mutates only Narrative inventory accounts whose Narrative faction matches the requested faction.
 
 ## Wealth API
 
@@ -24,6 +24,10 @@ Economy->CreditCurrency(Beneficiary, 1000, Faction, TEXT("Quest reward"),
 Economy->CreditCurrencyToFaction(Faction, 1000,
     ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers,
     TEXT("Territory reward"), ETerritoryTransactionType::Reward);
+
+// SharedAccount and FactionLeader policies require an explicit live account.
+Economy->RegisterFactionCurrencyAccount(Faction,
+    ETerritoryIncomePayoutPolicy::SharedAccount, FactionAccountActor);
 ```
 
 ### Spending Currency
@@ -70,8 +74,8 @@ FactionIncome = Sum of:
     Capital district multiplier applied if property's district has bIsCapital
 
 FactionCosts = Sum of:
-  For each owned TerritoryVolume with configured guards (GuardSpawnCount > 0):
-    GetGuardCost()
+  For each owned TerritoryVolume:
+    GetGuardCost() × GetDesiredGuardCount()
 
 NetPerTick = FactionIncome - FactionCosts
 ```
@@ -156,9 +160,9 @@ Every EconomyTickIntervalSeconds (server only):
 
    2. For each faction with tracked rates:
       a. Apply IncomePayoutPolicy to distribute IncomePerTick
-      b. Debit affordable upkeep from online member Narrative inventories
-     d. Record the actual (possibly partial) upkeep and resulting balance
-     e. Broadcast OnEconomyTickFired(Faction, Snapshot)
+      b. Debit affordable upkeep from loaded faction-member Narrative inventories
+      c. Record the actual (possibly partial) upkeep and resulting balance
+      d. Broadcast OnEconomyTickFired(Faction, Snapshot)
 
   3. Trim TransactionLedger to MaxTransactionHistory (once, not per-faction)
 ```
@@ -177,6 +181,6 @@ Economy state is saved through:
 - `ATerritoryWorldState` (multiplayer — replicated arrays)
 - `ATerritorySavableData` (single-player — SaveGame properties, **DEPRECATED** — use WorldState)
 
-On load, `SetFactionTreasury` restores only `IncomePerTick`, `CostsPerTick`, and `TerritoryCount`. Currency belongs to Narrative player inventories and is not restored by TerritoryFramework. Offline and NPC-only factions therefore have no persistent TerritoryFramework balance.
+On load, `SetFactionTreasury` restores only `IncomePerTick`, `CostsPerTick`, and `TerritoryCount`. Currency belongs to Narrative inventory accounts and is not restored by TerritoryFramework. Explicit shared/leader registrations are live references only and must be registered again after their account actors stream or respawn.
 
-Credit and periodic transaction records are suppressed when no online member receives currency.
+Credits reject overflow rather than wrapping. Equal distribution pays only what loaded Narrative accounts can store and logs any remainder; no transaction is recorded for currency that was not actually delivered.

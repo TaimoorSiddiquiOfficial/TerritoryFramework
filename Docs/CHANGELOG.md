@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased — 2026-07-30 (TerritoryFramework lifecycle and integration re-audit)
+
+### Correctness and architecture
+
+- Added the complete deterministic counterattack lifecycle: grace, evaluation, warning, relevant-player proximity activation, finite physical Narrative NPC force, capture participation, casualty accounting, resolution, persistence, replication, and bounded history.
+- Added Territory-owned Narrative goal/activity/participant adapters without modifying Narrative Pro or creating another AI controller, faction system, currency wallet, or capture subsystem.
+- Capture registration now reports admission, tracks exact participant identity, binds Narrative ASC death, and removes dead/withdrawn attackers from capture pressure exactly once.
+- Guard defeat no longer directly unclaims a territory. Fresh and saved garrison restoration are distinguished, referenced streamed spawn points are loaded during restore, and manual multi-guard removal selects the full mutation set before committing.
+- Added explicit transition context APIs for lock/unlock and removed implicit first-player-controller selection from gameplay transitions.
+- Added server-owned per-player management components and targeted assault notification RPCs; clients no longer construct an unauthorized local management bridge.
+- Economy now validates world/faction ownership of Narrative accounts, supports explicit shared/leader account registration, includes loaded Narrative NPC members, uses `int64` intermediates, and refuses currency overflow.
+- Centralized Narrative attitude access in `UTerritoryNarrativeProAdapter`; external Friendly attitudes import as Alliance without the previous Friendly→Neutral round-trip loss.
+- WorldState now hydrates replicated economy, diplomacy, capture, and assault read models and retains only the configured number of terminal assault records.
+- Editor validation now covers stable GUIDs, hierarchy cycles, streamed World Partition actors, guard Narrative definitions/configuration, and counterattack profiles/approaches.
+
+### Documentation and tests
+
+- Added `17_Counterattack_System.md`, `18_Operations_UI.md`, and `DEEP_REAUDIT_2026-07-30.md`; corrected API, economy, diplomacy, guard, multiplayer, save/load, AI, Blueprint, UI, and setup documentation against current symbols.
+- Added deterministic/monotonic counterattack tests, notification-without-force regression coverage, active-force reconstruction coverage, authority/replication/Narrative contract checks, and fresh-vs-saved garrison-count regression coverage.
+- Narrative Pro vendor source remains unchanged.
+
+### Narrative CommonUI operations
+
+- Added `FTerritoryDistrictOperationsView` and `FTerritoryEconomyOperationsView`, with Blueprint filters for unlocked, available, owned, manageable, under-attack, contested, locked, and financial-risk districts.
+- Redesigned `WBP_HopTerritoryJournalWidget` as a three-column District Command Center with live KPI cards, actionable and captured queues, a searchable directory, selected-district security/finance/threat/assault detail, atomic `+1/-1/+5/-5` guard controls, and separate finance/exposure views.
+- Made the Command Center resolution-safe with a 1920×1080 `ScaleToFit` design surface, automatic text wrapping, and a focus-aware scrolling command column so the journal and lower controls remain inside constrained viewports.
+- Added project-styled `WBP_TerritoryCommandRow` rows. Selecting a district from any queue or ledger opens the same command detail surface and reuses the existing guarded management delegates.
+- Corrected the actionable queue contract to require registered, unlocked, currently available, non-owned districts. Captured/owned uses its own mutually exclusive predicate, and counts now derive from the exact population predicates.
+- Fixed journal invalidation so guard, capture, finance, lock, and assault changes refresh existing rows even when list count and filter text are unchanged.
+- Added captured/unlocked side lists, finance/loss lists, guard add/remove controls, exact disabled reasons, threat/assault summaries, and targeted Narrative HUD assault notifications.
+- Replaced direct viewport/input manipulation with pushes into the Narrative gameplay HUD's registered CommonUI layer.
+- Fixed stale current-territory display, pawn-versus-controller faction/account lookups, and misleading reserve/treasury values.
+- Made Territory activatable widgets focusable by default, fixed nested journal activation focus, and added explicit bidirectional keyboard/gamepad navigation, accessible names, control tooltips, and Narrative CommonText accessibility styling to the supplied Territory widgets.
+- Added native UI contract, operations-filter, and live-revision regression tests. All Territory widget assets compile cleanly through scoped MCP.
+
 ## v0.2.5 — 2026-07-28 (Deep Re-Audit: 24 Fixes Across P0/P1/P2)
 
 Comprehensive deep re-audit with 3 parallel verification agents scanning 34 findings against current source. 24 confirmed findings fixed, 5 disputed, 5 partially confirmed.

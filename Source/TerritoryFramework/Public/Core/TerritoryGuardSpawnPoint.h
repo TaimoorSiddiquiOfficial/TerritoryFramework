@@ -280,6 +280,9 @@ public:
 		meta=(DisplayName="Get Active Guard Count"))
 	int32 GetActiveGuardCount() const;
 
+	/** Number of active guards persisted by the most recent Narrative save. */
+	int32 GetSavedActiveGuardCount() const { return FMath::Max(0, SavedActiveGuardCount); }
+
 	/**
 	 * Returns the number of reserve guards currently held at this point.
 	 * Reserves start at ReserveSlots and decrease as they deploy.

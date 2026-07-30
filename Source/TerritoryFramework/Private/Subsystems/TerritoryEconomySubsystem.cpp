@@ -7,9 +7,12 @@
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativePlayerState.h"
 #include "UnrealFramework/NarrativeCharacter.h"
+#include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Items/InventoryComponent.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "TimerManager.h"
 #include "GameFramework/PlayerController.h"
 
@@ -91,6 +94,8 @@ void UTerritoryEconomySubsystem::Deinitialize()
 
 	FactionTreasuries.Empty();
 	DirtyFactions.Empty();
+	SharedFactionAccounts.Empty();
+	FactionLeaderAccounts.Empty();
 	Super::Deinitialize();
 }
 
@@ -123,6 +128,23 @@ TArray<ANarrativeCharacter*> UTerritoryEconomySubsystem::GetFactionMembers(const
 			Members.Add(Char);
 		}
 	}
+
+	// Narrative NPC inventories are real faction accounts too. Only loaded/live NPCs
+	// participate; Narrative's own save system remains responsible for their balances.
+	for (TActorIterator<ANarrativeNPCCharacter> It(World); It; ++It)
+	{
+		ANarrativeNPCCharacter* NPC = *It;
+		if (NPC && NPC->GetFactions().HasTagExact(Faction) && NPC->GetInventoryComponent())
+		{
+			Members.AddUnique(NPC);
+		}
+	}
+
+	// Make remainder distribution and multi-account debits deterministic.
+	Members.Sort([](const ANarrativeCharacter& A, const ANarrativeCharacter& B)
+	{
+		return A.GetPathName() < B.GetPathName();
+	});
 	return Members;
 }
 
@@ -143,6 +165,18 @@ UNarrativeInventoryComponent* UTerritoryEconomySubsystem::ResolveCurrencyAccount
 	}
 
 	return const_cast<AActor*>(AccountActor)->FindComponentByClass<UNarrativeInventoryComponent>();
+}
+
+bool UTerritoryEconomySubsystem::DoesAccountBelongToFaction(
+	const AActor* AccountActor, const FGameplayTag& Faction) const
+{
+	if (!AccountActor || !Faction.IsValid()) return false;
+	if (const APlayerController* Controller = Cast<APlayerController>(AccountActor))
+	{
+		AccountActor = Controller->GetPawn();
+	}
+	const INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(AccountActor);
+	return TeamAgent && TeamAgent->GetFactions().HasTagExact(Faction);
 }
 
 int32 UTerritoryEconomySubsystem::GetActorCurrency(const AActor* RequestingActor) const
@@ -224,15 +258,16 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 				TEXT("Periodic income"), ETerritoryTransactionType::Income);
 		}
 
-		int32 AvailableForUpkeep = 0;
+		int64 AvailableForUpkeep = 0;
 		for (const ANarrativeCharacter* Member : Members)
 		{
 			if (const UNarrativeInventoryComponent* Inventory = Member->GetInventoryComponent())
 			{
-				AvailableForUpkeep += Inventory->GetCurrency();
+				AvailableForUpkeep += FMath::Max(0, Inventory->GetCurrency());
 			}
 		}
-		const int32 ActualUpkeep = FMath::Min(TickTreasury.CostsPerTick, AvailableForUpkeep);
+		const int32 ActualUpkeep = static_cast<int32>(FMath::Min<int64>(
+			static_cast<int64>(TickTreasury.CostsPerTick), AvailableForUpkeep));
 		const bool bUpkeepFullyPaid = (ActualUpkeep >= TickTreasury.CostsPerTick);
 		bool bDeficitAlreadyBroadcast = false;
 		if (ActualUpkeep > 0)
@@ -364,7 +399,8 @@ bool UTerritoryEconomySubsystem::TryDebitCurrency(
 	AActor* RequestingActor, int32 PositiveAmount, const FGameplayTag& Faction,
 	const FString& Reason, ETerritoryTransactionType Type)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0) return false;
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0
+		|| !DoesAccountBelongToFaction(RequestingActor, Faction)) return false;
 
 	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(RequestingActor);
 	if (!Inventory || Inventory->GetCurrency() < PositiveAmount) return false;
@@ -378,10 +414,13 @@ bool UTerritoryEconomySubsystem::CreditCurrency(
 	AActor* Beneficiary, int32 PositiveAmount, const FGameplayTag& Faction,
 	const FString& Reason, ETerritoryTransactionType Type)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0) return false;
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0
+		|| !DoesAccountBelongToFaction(Beneficiary, Faction)) return false;
 
 	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Beneficiary);
 	if (!Inventory) return false;
+	const int64 FinalBalance = static_cast<int64>(Inventory->GetCurrency()) + PositiveAmount;
+	if (FinalBalance > MAX_int32) return false;
 
 	Inventory->AddCurrency(PositiveAmount);
 	RecordCurrencyTransaction(Faction, PositiveAmount, Inventory->GetCurrency(), Reason, Type, Beneficiary);
@@ -397,38 +436,124 @@ int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
 		return 0;
 	}
 
-	if (Policy == ETerritoryIncomePayoutPolicy::CapturingPlayer
-		|| Policy == ETerritoryIncomePayoutPolicy::SharedNarrativeAccount)
+	if (Policy == ETerritoryIncomePayoutPolicy::CapturingPlayer)
 	{
-		return PreferredBeneficiary
-			&& CreditCurrency(PreferredBeneficiary, PositiveAmount, Faction, Reason, Type)
-			? PositiveAmount
-			: 0;
+		if (PreferredBeneficiary
+			&& CreditCurrency(PreferredBeneficiary, PositiveAmount, Faction, Reason, Type))
+		{
+			return PositiveAmount;
+		}
+		UE_LOG(LogTerritory, Warning,
+			TEXT("CreditCurrencyToFaction: CapturingPlayer has no valid beneficiary; falling back to deterministic member split for %s"),
+			*Faction.ToString());
+	}
+	else if (Policy == ETerritoryIncomePayoutPolicy::SharedNarrativeAccount
+		|| Policy == ETerritoryIncomePayoutPolicy::FactionLeader)
+	{
+		AActor* ExplicitAccount = PreferredBeneficiary
+			? PreferredBeneficiary
+			: ResolveRegisteredCurrencyAccount(Faction, Policy);
+		if (ExplicitAccount && CreditCurrency(ExplicitAccount, PositiveAmount, Faction, Reason, Type))
+		{
+			return PositiveAmount;
+		}
+		UE_LOG(LogTerritory, Warning,
+			TEXT("CreditCurrencyToFaction: policy %d has no valid registered Narrative account for %s; falling back to deterministic member split"),
+			static_cast<int32>(Policy), *Faction.ToString());
 	}
 
 	TArray<ANarrativeCharacter*> Members = GetFactionMembers(Faction);
 	if (Members.IsEmpty()) return 0;
 
-	if (Policy == ETerritoryIncomePayoutPolicy::FactionLeader)
-	{
-		// P2-N11: FactionLeader is a placeholder — no actual leader resolution exists.
-		// Fall through to equal split to avoid dropping income.
-		UE_LOG(LogTerritory, Warning, TEXT("CreditCurrencyToFaction: FactionLeader fallback — distributing equally among %d members"),
-			Members.Num());
-	}
-
-	const int32 BaseShare = PositiveAmount / Members.Num();
-	const int32 Remainder = PositiveAmount - (BaseShare * Members.Num());
+	int32 Remaining = PositiveAmount;
 	int32 Paid = 0;
 	for (int32 Index = 0; Index < Members.Num(); ++Index)
 	{
-		const int32 Share = BaseShare + (Index == 0 ? Remainder : 0);
+		UNarrativeInventoryComponent* Inventory = Members[Index]->GetInventoryComponent();
+		const int64 Capacity = Inventory
+			? static_cast<int64>(MAX_int32) - FMath::Max(0, Inventory->GetCurrency())
+			: 0;
+		const int32 AccountsRemaining = Members.Num() - Index;
+		const int32 FairShare = AccountsRemaining > 0
+			? FMath::DivideAndRoundUp(Remaining, AccountsRemaining) : 0;
+		const int32 Share = static_cast<int32>(FMath::Min<int64>(FairShare, Capacity));
 		if (Share > 0 && CreditCurrency(Members[Index], Share, Faction, Reason, Type))
 		{
 			Paid += Share;
+			Remaining -= Share;
 		}
 	}
+	if (Remaining > 0)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("CreditCurrencyToFaction: %d currency could not be stored because every Narrative faction account is at capacity for %s"),
+			Remaining, *Faction.ToString());
+	}
 	return Paid;
+}
+
+bool UTerritoryEconomySubsystem::RegisterFactionCurrencyAccount(
+	const FGameplayTag& Faction, ETerritoryIncomePayoutPolicy AccountRole, AActor* AccountActor)
+{
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || !Faction.IsValid()
+		|| !AccountActor || AccountActor->GetWorld() != World
+		|| !ResolveCurrencyAccount(AccountActor)
+		|| !DoesAccountBelongToFaction(AccountActor, Faction))
+	{
+		return false;
+	}
+
+	if (AccountRole == ETerritoryIncomePayoutPolicy::SharedNarrativeAccount)
+	{
+		SharedFactionAccounts.Add(Faction, AccountActor);
+		return true;
+	}
+	if (AccountRole == ETerritoryIncomePayoutPolicy::FactionLeader)
+	{
+		FactionLeaderAccounts.Add(Faction, AccountActor);
+		return true;
+	}
+	return false;
+}
+
+void UTerritoryEconomySubsystem::UnregisterFactionCurrencyAccount(
+	const FGameplayTag& Faction, AActor* AccountActor)
+{
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || !Faction.IsValid()) return;
+
+	auto RemoveMatchingAccount = [&Faction, AccountActor](TMap<FGameplayTag, TWeakObjectPtr<AActor>>& Accounts)
+	{
+		if (const TWeakObjectPtr<AActor>* Existing = Accounts.Find(Faction))
+		{
+			if (!AccountActor || Existing->Get() == AccountActor)
+			{
+				Accounts.Remove(Faction);
+			}
+		}
+	};
+	RemoveMatchingAccount(SharedFactionAccounts);
+	RemoveMatchingAccount(FactionLeaderAccounts);
+}
+
+AActor* UTerritoryEconomySubsystem::ResolveRegisteredCurrencyAccount(
+	const FGameplayTag& Faction, ETerritoryIncomePayoutPolicy AccountRole) const
+{
+	const TMap<FGameplayTag, TWeakObjectPtr<AActor>>* Accounts = nullptr;
+	if (AccountRole == ETerritoryIncomePayoutPolicy::SharedNarrativeAccount)
+	{
+		Accounts = &SharedFactionAccounts;
+	}
+	else if (AccountRole == ETerritoryIncomePayoutPolicy::FactionLeader)
+	{
+		Accounts = &FactionLeaderAccounts;
+	}
+	if (!Accounts) return nullptr;
+
+	const TWeakObjectPtr<AActor>* Account = Accounts->Find(Faction);
+	AActor* Actor = Account ? Account->Get() : nullptr;
+	return Actor && ResolveCurrencyAccount(Actor) ? Actor : nullptr;
 }
 
 bool UTerritoryEconomySubsystem::TryDebitFactionMembers(
@@ -441,7 +566,7 @@ bool UTerritoryEconomySubsystem::TryDebitFactionMembers(
 	TArray<int32> Debits;
 	Debits.Init(0, Members.Num());
 
-	int32 TotalCurrency = 0;
+	int64 TotalCurrency = 0;
 	for (ANarrativeCharacter* Member : Members)
 	{
 		if (const UNarrativeInventoryComponent* Inventory = Member->GetInventoryComponent())
@@ -449,7 +574,7 @@ bool UTerritoryEconomySubsystem::TryDebitFactionMembers(
 			TotalCurrency += Inventory->GetCurrency();
 		}
 	}
-	if (TotalCurrency < PositiveAmount) return false;
+	if (TotalCurrency < static_cast<int64>(PositiveAmount)) return false;
 
 	int32 Remaining = PositiveAmount;
 	for (int32 Index = 0; Index < Members.Num() && Remaining > 0; ++Index)
@@ -490,7 +615,7 @@ TArray<FTerritoryTransaction> UTerritoryEconomySubsystem::GetTransactionHistory(
 void UTerritoryEconomySubsystem::RestoreTransactionHistory(const TArray<FTerritoryTransaction>& Transactions)
 {
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client) return;
+	if (!World) return;
 
 	TransactionLedger = Transactions;
 	// Trim on restore to cap loaded data
@@ -504,7 +629,7 @@ void UTerritoryEconomySubsystem::RestoreTransactionHistory(const TArray<FTerrito
 void UTerritoryEconomySubsystem::RestoreTreasuryState(const TMap<FGameplayTag, FTerritoryTreasury>& Treasuries)
 {
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client) return;
+	if (!World) return;
 
 	FactionTreasuries = Treasuries;
 	DirtyFactions.Empty();
@@ -531,8 +656,8 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 
 	FTerritoryTreasury& Treasury = FactionTreasuries.FindOrAdd(Faction);
 
-	Treasury.IncomePerTick = 0;
-	Treasury.CostsPerTick = 0;
+	int64 TotalIncome = 0;
+	int64 TotalCosts = 0;
 	Treasury.TerritoryCount = Territories.Num();
 
 	for (const ATerritoryVolume* Territory : Territories)
@@ -543,18 +668,17 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 		if (Territory->IsA<ATerritoryProperty>())
 		{
 			const ATerritoryProperty* Property = Cast<const ATerritoryProperty>(Territory);
-			Treasury.IncomePerTick += Property->GetEffectiveIncome();
+			TotalIncome += static_cast<int64>(Property->GetEffectiveIncome());
 		}
 
 		// GuardCost is the per-guard upkeep. Use the persistent desired garrison
 		// rather than the configured maximum so add/remove commands affect finances.
 		const int64 GuardUpkeep = static_cast<int64>(FMath::Max(0, Territory->GetGuardCost()))
 			* static_cast<int64>(Territory->GetDesiredGuardCount());
-		Treasury.CostsPerTick = FMath::Clamp<int64>(
-			static_cast<int64>(Treasury.CostsPerTick) + GuardUpkeep,
-			0,
-			MAX_int32);
+		TotalCosts += GuardUpkeep;
 	}
+	Treasury.IncomePerTick = static_cast<int32>(FMath::Clamp<int64>(TotalIncome, 0, MAX_int32));
+	Treasury.CostsPerTick = static_cast<int32>(FMath::Clamp<int64>(TotalCosts, 0, MAX_int32));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

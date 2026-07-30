@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
+#include "Combat/TerritoryCounterAttackTypes.h"
 #include "TerritoryPlayerManagementComponent.generated.h"
 
 class ATerritoryDistrictManagementPoint;
@@ -12,6 +13,8 @@ class APlayerController;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnTerritoryGuardPurchaseResult,
 	ATerritoryVolume*, Territory, bool, bSuccess, FText, Message, int32, RequestId);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryAssaultNotification,
+	const FTerritoryAssaultRecord&, Assault);
 
 /** Owned client-to-server bridge for district management actions. */
 UCLASS(ClassGroup=(Territory), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
@@ -27,6 +30,12 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Management")
 	FOnTerritoryGuardPurchaseResult OnGuardPurchaseResult;
+
+	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
+	FOnTerritoryAssaultNotification OnAssaultNotification;
+
+	/** Server-side targeted notification route for this owning controller only. */
+	void SendAssaultNotification(const FTerritoryAssaultRecord& Assault);
 
 	UPROPERTY(EditDefaultsOnly, Category="Territory|Management", meta=(ClampMin="0"))
 	float PurchaseCooldown = 0.5f;
@@ -71,6 +80,9 @@ private:
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveGuardPurchaseResult(ATerritoryVolume* Territory, bool bSuccess, const FText& Message, int32 RequestId);
 
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveAssaultNotification(const FTerritoryAssaultRecord& Assault);
+
 	void PerformPurchase(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	void PerformPurchaseForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
 	void PerformRemove(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
@@ -78,7 +90,7 @@ private:
 	bool CanManageDistrict(ATerritoryDistrict* District, APawn* Pawn, FText& OutFailureReason) const;
 	APawn* GetManagingPawn() const;
 
-	float LastPurchaseRequestTime = 0.f;
+	float LastPurchaseRequestTime = -BIG_NUMBER;
 	int32 NextRequestId = 0;
 	int32 LastServerRequestId = 0;
 };

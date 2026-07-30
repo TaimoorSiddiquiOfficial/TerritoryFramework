@@ -1,6 +1,7 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Engine/World.h"
@@ -11,14 +12,13 @@ void UTerritoryDiplomacySubsystem::Initialize(FSubsystemCollectionBase& Collecti
 {
 	Super::Initialize(Collection);
 
-	if (ANarrativeGameState* GS = GetNarrativeGameState())
+	UWorld* World = GetWorld();
+	if (World && World->GetNetMode() != NM_Client)
 	{
-		GS->OnFactionAttitudeChanged.AddDynamic(this, &UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged);
-		// P2-N14: LoadFromGameState deferred to OnWorldBeginPlay — avoids double-load
-		// when GameState is partially initialized during subsystem Initialize
-	}
-	if (UWorld* World = GetWorld())
-	{
+		if (ANarrativeGameState* GS = GetNarrativeGameState())
+		{
+			GS->OnFactionAttitudeChanged.AddDynamic(this, &UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged);
+		}
 		if (UNarrativeSaveSubsystem* SaveSubsystem = World->GetSubsystem<UNarrativeSaveSubsystem>())
 		{
 			SaveSubsystem->OnFinishedLoad.AddUniqueDynamic(this, &UTerritoryDiplomacySubsystem::OnNarrativeLoadFinished);
@@ -26,7 +26,6 @@ void UTerritoryDiplomacySubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	}
 
 	// Treaty expiration timer — server only
-	UWorld* World = GetWorld();
 	if (World && World->GetNetMode() != NM_Client)
 	{
 		const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -68,17 +67,17 @@ void UTerritoryDiplomacySubsystem::Deinitialize()
 void UTerritoryDiplomacySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
-	if (ANarrativeGameState* GS = GetNarrativeGameState())
-	{
-		GS->OnFactionAttitudeChanged.AddUniqueDynamic(this, &UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged);
-		LoadFromGameState();
-	}
-	if (UNarrativeSaveSubsystem* SaveSubsystem = InWorld.GetSubsystem<UNarrativeSaveSubsystem>())
-	{
-		SaveSubsystem->OnFinishedLoad.AddUniqueDynamic(this, &UTerritoryDiplomacySubsystem::OnNarrativeLoadFinished);
-	}
 	if (InWorld.GetNetMode() != NM_Client)
 	{
+		if (ANarrativeGameState* GS = GetNarrativeGameState())
+		{
+			GS->OnFactionAttitudeChanged.AddUniqueDynamic(this, &UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged);
+			LoadFromGameState();
+		}
+		if (UNarrativeSaveSubsystem* SaveSubsystem = InWorld.GetSubsystem<UNarrativeSaveSubsystem>())
+		{
+			SaveSubsystem->OnFinishedLoad.AddUniqueDynamic(this, &UTerritoryDiplomacySubsystem::OnNarrativeLoadFinished);
+		}
 		InWorld.GetTimerManager().SetTimerForNextTick(
 			FTimerDelegate::CreateUObject(this, &UTerritoryDiplomacySubsystem::FinalizeGameStateSync));
 	}
@@ -350,7 +349,7 @@ void UTerritoryDiplomacySubsystem::RestorePersistentState(
 	const TArray<FDiplomacyEvent>& History)
 {
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client) return;
+	if (!World) return;
 
 	const TArray<FTreatyRecord> PreviousTreaties = ActiveTreaties;
 	ActiveTreaties.Reset();
@@ -387,79 +386,51 @@ void UTerritoryDiplomacySubsystem::LoadFromGameState()
 	// and whose attitude hasn't changed. Only create new treaties for attitudes that
 	// have no corresponding treaty record.
 	ANarrativeGameState* GS = GetNarrativeGameState();
-	if (!GS) return;
+	UWorld* World = GetWorld();
+	if (!GS || !World || World->GetNetMode() == NM_Client) return;
 
 	// Track which faction pairs we've seen from GameState attitudes
 	TSet<FString> SeenPairs;
 
-	for (const auto& Pair : GS->FactionAllianceMap)
+	for (const FTerritoryNarrativeAttitudeSnapshot& Snapshot
+		: FTerritoryNarrativeProAdapter::ReadFactionAttitudes(GS))
 	{
-		const FGameplayTag& FactionA = Pair.Key;
-		for (const auto& AttitudePair : Pair.Value.AttitudeMap)
+		const FGameplayTag& FactionA = Snapshot.FactionA;
+		const FGameplayTag& FactionB = Snapshot.FactionB;
+		const FString CanonicalKey = FTerritoryNarrativeProAdapter::MakeCanonicalFactionPairKey(FactionA, FactionB);
+		SeenPairs.Add(CanonicalKey);
+		const ETeamAttitude::Type Attitude = Snapshot.Attitude;
+
+		const EDiplomacyState State = AttitudeToDiplomacyState(Attitude);
+		FTreatyRecord* Existing = FindTreaty(FactionA, FactionB);
+		if (Existing && DiplomacyStateToAttitude(Existing->State) == Attitude)
 		{
-			const FGameplayTag& FactionB = AttitudePair.Key;
-			if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) continue;
+			// Preserve compatible rich metadata (trade, non-aggression, ceasefire).
+			continue;
+		}
 
-			const FString NameA = FactionA.ToString();
-			const FString NameB = FactionB.ToString();
-			const FString CanonicalKey = NameA < NameB
-				? NameA + TEXT("|") + NameB
-				: NameB + TEXT("|") + NameA;
-			if (SeenPairs.Contains(CanonicalKey)) continue;
-			SeenPairs.Add(CanonicalKey);
+		if (State == EDiplomacyState::None)
+		{
+			RemoveTreaty(FactionA, FactionB);
+			continue;
+		}
 
-			ETeamAttitude::Type Attitude = AttitudePair.Value;
-			if (const auto* ReverseData = GS->FactionAllianceMap.Find(FactionB))
-			{
-				if (const auto* ReverseAttitude = ReverseData->AttitudeMap.Find(FactionA))
-				{
-					const ETeamAttitude::Type ReverseValue = ReverseAttitude->GetValue();
-					if (Attitude == ETeamAttitude::Hostile || ReverseValue == ETeamAttitude::Hostile)
-					{
-						Attitude = ETeamAttitude::Hostile;
-					}
-					else if (Attitude == ETeamAttitude::Friendly || ReverseValue == ETeamAttitude::Friendly)
-					{
-						Attitude = ETeamAttitude::Friendly;
-					}
-					else
-					{
-						Attitude = ETeamAttitude::Neutral;
-					}
-				}
-			}
-
-			EDiplomacyState State = AttitudeToDiplomacyState(Attitude);
-			FTreatyRecord* Existing = FindTreaty(FactionA, FactionB);
-			if (Existing && DiplomacyStateToAttitude(Existing->State) == Attitude)
-			{
-				// Preserve compatible rich metadata (trade, non-aggression, ceasefire).
-				continue;
-			}
-
-			if (State == EDiplomacyState::None)
-			{
-				RemoveTreaty(FactionA, FactionB);
-				continue;
-			}
-
-			if (Existing)
-			{
-				Existing->State = State;
-				Existing->bPermanent = true;
-				Existing->ExpiryGameTime = -1.f;
-			}
-			else
-			{
-				// New treaty from attitude
-				FTreatyRecord Treaty;
-				Treaty.FactionA = FactionA;
-				Treaty.FactionB = FactionB;
-				Treaty.State = State;
-				Treaty.bPermanent = true;
-				Treaty.SignedGameTime = GS->GetAccumulatedTime();
-				ActiveTreaties.Add(Treaty);
-			}
+		if (Existing)
+		{
+			Existing->State = State;
+			Existing->bPermanent = true;
+			Existing->ExpiryGameTime = -1.f;
+		}
+		else
+		{
+			// New treaty from attitude
+			FTreatyRecord Treaty;
+			Treaty.FactionA = FactionA;
+			Treaty.FactionB = FactionB;
+			Treaty.State = State;
+			Treaty.bPermanent = true;
+			Treaty.SignedGameTime = GS->GetAccumulatedTime();
+			ActiveTreaties.Add(Treaty);
 		}
 	}
 
@@ -467,11 +438,8 @@ void UTerritoryDiplomacySubsystem::LoadFromGameState()
 	for (int32 i = ActiveTreaties.Num() - 1; i >= 0; --i)
 	{
 		FTreatyRecord& Treaty = ActiveTreaties[i];
-		const FString NameA = Treaty.FactionA.ToString();
-		const FString NameB = Treaty.FactionB.ToString();
-		const FString Key = NameA < NameB
-			? NameA + TEXT("|") + NameB
-			: NameB + TEXT("|") + NameA;
+		const FString Key = FTerritoryNarrativeProAdapter::MakeCanonicalFactionPairKey(
+			Treaty.FactionA, Treaty.FactionB);
 		if (!SeenPairs.Contains(Key))
 		{
 			ActiveTreaties.RemoveAt(i);
@@ -489,8 +457,7 @@ void UTerritoryDiplomacySubsystem::SetNarrativeAttitude(FGameplayTag FactionA, F
 	// setting a Ceasefire to Neutral immediately removes the treaty metadata.
 	const bool bWasSuppressingSync = bSuppressSync;
 	bSuppressSync = true;
-	GS->SetFactionAttitude(FactionA, FactionB, Attitude);
-	GS->SetFactionAttitude(FactionB, FactionA, Attitude);
+	FTerritoryNarrativeProAdapter::SetSymmetricFactionAttitude(GS, FactionA, FactionB, Attitude);
 	bSuppressSync = bWasSuppressingSync;
 }
 
@@ -516,6 +483,8 @@ void UTerritoryDiplomacySubsystem::SyncNarrativeAttitudeForTreaty(FGameplayTag F
 
 void UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged(FGameplayTag Faction, FGameplayTag OtherFaction, ETeamAttitude::Type NewAttitude)
 {
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client) return;
 	// Reentrancy guard — prevent recursive mutation from delegate listeners
 	if (bSuppressSync) return;
 	bSuppressSync = true;
@@ -548,9 +517,9 @@ void UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged(FGameplayTag Faction
 		Treaty.FactionA = Faction;
 		Treaty.FactionB = OtherFaction;
 		Treaty.State = NewState;
-		// P1-N10: Default to timed treaties. Callers that want permanent should
-		// explicitly set bPermanent=true after creating the treaty via SetDiplomacyState.
-		Treaty.bPermanent = false;
+		// Narrative attitudes do not carry an expiry, so the only lossless import is
+		// a permanent Territory treaty until another explicit change arrives.
+		Treaty.bPermanent = true;
 		Treaty.ExpiryGameTime = -1.f;
 		if (ANarrativeGameState* GS = GetNarrativeGameState())
 		{

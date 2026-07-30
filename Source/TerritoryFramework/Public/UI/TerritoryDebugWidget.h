@@ -11,6 +11,8 @@ class UTerritoryRegistrySubsystem;
 class UTerritoryControlSubsystem;
 class UTerritoryEconomySubsystem;
 class UTerritoryDiplomacySubsystem;
+class UTerritoryCounterAttackSubsystem;
+class UTextBlock;
 
 /**
  * Debug overlay widget that displays live territory state when added to the viewport.
@@ -31,6 +33,9 @@ protected:
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual void NativeDestruct() override;
 
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> DebugTextBlock;
+
 	/** Called when territory summary text updates — override in BP for custom layout */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|Debug")
 	void OnUpdateDebugText(const FText& DebugText);
@@ -47,6 +52,7 @@ private:
 	mutable UTerritoryControlSubsystem* CachedControl = nullptr;
 	mutable UTerritoryEconomySubsystem* CachedEconomy = nullptr;
 	mutable UTerritoryDiplomacySubsystem* CachedDiplomacy = nullptr;
+	mutable UTerritoryCounterAttackSubsystem* CachedCounterattacks = nullptr;
 	mutable bool bSubsystemsCached = false;
 
 	void CacheSubsystems() const;
@@ -56,4 +62,5 @@ private:
 	FText BuildEconomySummary() const;
 	FText BuildDiplomacySummary() const;
 	FText BuildCaptureSummary() const;
+	FText BuildCounterAttackSummary() const;
 };

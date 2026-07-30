@@ -20,7 +20,8 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"Slate",
 			"SlateCore",
 			"DataValidation",
-			"GameplayTags"
+			"GameplayTags",
+			"NarrativeArsenal"
 		});
 	}
 }

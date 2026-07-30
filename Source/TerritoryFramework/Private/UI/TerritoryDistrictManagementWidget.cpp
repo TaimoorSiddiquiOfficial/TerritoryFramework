@@ -3,10 +3,10 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
-#include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 
 void UTerritoryDistrictManagementWidget::InitializeManagement(
@@ -73,6 +73,12 @@ void UTerritoryDistrictManagementWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
+void UTerritoryDistrictManagementWidget::NativeOnActivated()
+{
+	Super::NativeOnActivated();
+	RefreshManagementDisplay();
+}
+
 ATerritoryDistrict* UTerritoryDistrictManagementWidget::GetManagedDistrict() const
 {
 	return ManagementPoint.IsValid() ? ManagementPoint->ResolveDistrict() : nullptr;
@@ -98,8 +104,17 @@ bool UTerritoryDistrictManagementWidget::CanPurchaseGuard(FText& OutFailureReaso
 		OutFailureReason = FText::FromString(TEXT("Territory management is not installed on this PlayerController."));
 		return false;
 	}
-	return District && PlayerController
-		&& District->CanPurchaseGuards(PlayerController, 1, OutFailureReason);
+	if (!ManagementPoint.IsValid() || !PlayerController
+		|| !ManagementPoint->CanManage(PlayerController->GetPawn(), OutFailureReason))
+	{
+		return false;
+	}
+	if (!ManagementPoint->IsInteractorInRange(PlayerController->GetPawn()))
+	{
+		OutFailureReason = FText::FromString(TEXT("Move closer to the district management point."));
+		return false;
+	}
+	return District && District->CanPurchaseGuards(PlayerController->GetPawn(), 1, OutFailureReason);
 }
 
 bool UTerritoryDistrictManagementWidget::CanRemoveGuard(FText& OutFailureReason) const
@@ -120,38 +135,62 @@ bool UTerritoryDistrictManagementWidget::CanRemoveGuard(FText& OutFailureReason)
 		OutFailureReason = FText::FromString(TEXT("Move closer to the district management point."));
 		return false;
 	}
-	return District && District->CanRemoveGuards(PlayerController, 1, OutFailureReason);
+	return District && District->CanRemoveGuards(PlayerController->GetPawn(), 1, OutFailureReason);
 }
 
 void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 {
 	ATerritoryDistrict* District = GetManagedDistrict();
-	if (!District) return;
+	if (!District)
+	{
+		OperationsView = FTerritoryDistrictOperationsView();
+		if (StatusText)
+		{
+			StatusText->SetText(NSLOCTEXT("TerritoryManagement", "DistrictUnavailable", "District is not loaded or registered."));
+		}
+		return;
+	}
 
-	if (DistrictNameText) DistrictNameText->SetText(District->GetTerritoryDisplayName());
-	if (OwnerText) OwnerText->SetText(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(District->GetOwningFaction()));
+	UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
+		this, District, GetOwningPlayer(), OperationsView);
+
+	if (DistrictNameText) DistrictNameText->SetText(OperationsView.DisplayName);
+	if (OwnerText) OwnerText->SetText(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(OperationsView.OwnerFaction));
 	if (StateText)
 	{
 		const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-		StateText->SetText(StateEnum ? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(District->GetTerritoryState())) : FText::GetEmpty());
+		StateText->SetText(StateEnum ? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(OperationsView.TerritoryState)) : FText::GetEmpty());
 	}
 	if (GuardCountText)
 	{
-		GuardCountText->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"),
-			District->GetSpawnedGuardCount(), District->GetMaxGuardCount())));
+		GuardCountText->SetText(FText::Format(
+			NSLOCTEXT("TerritoryManagement", "GuardCounts", "Active {0}  |  Assigned {1}  |  Capacity {2}"),
+			FText::AsNumber(OperationsView.ActiveGuards),
+			FText::AsNumber(OperationsView.DesiredGuards),
+			FText::AsNumber(OperationsView.MaximumGuards)));
 	}
 	if (GuardCostText)
 	{
-		GuardCostText->SetText(FText::AsNumber(District->GetGuardPurchaseCost(1)));
+		GuardCostText->SetText(FText::AsNumber(OperationsView.GuardPurchaseCost));
 	}
-	if (EarningsText) EarningsText->SetText(FText::AsNumber(GetDistrictIncome()));
-	if (TreasuryText)
+	if (EarningsText) EarningsText->SetText(FText::AsNumber(OperationsView.PeriodicIncome));
+	if (TreasuryText) TreasuryText->SetText(FText::AsNumber(OperationsView.AvailableFunds));
+	if (NetIncomeText)
 	{
-		// P2-N17: Null guard on GetWorld
-		UWorld* W = GetWorld();
-		const UTerritoryEconomySubsystem* Economy = W ? W->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
-		TreasuryText->SetText(FText::AsNumber(Economy ? Economy->GetActorCurrency(GetOwningPlayer()) : 0));
+		NetIncomeText->SetText(FText::Format(
+			NSLOCTEXT("TerritoryManagement", "NetIncome", "Net per cycle: {0}"),
+			FText::AsNumber(OperationsView.NetIncome)));
 	}
+	if (ReserveGuardText)
+	{
+		ReserveGuardText->SetText(OperationsView.bReserveCountKnown
+			? FText::Format(
+				NSLOCTEXT("TerritoryManagement", "ReserveCount", "Reserve: {0}"),
+				FText::AsNumber(OperationsView.ReserveGuards))
+			: NSLOCTEXT("TerritoryManagement", "ReserveUnknown", "Reserve: server snapshot required"));
+	}
+	if (ThreatText) ThreatText->SetText(OperationsView.ThreatSummary);
+	if (AvailabilityText) AvailabilityText->SetText(OperationsView.AvailabilityReason);
 
 	FText FailureReason;
 	const bool bCanPurchase = CanPurchaseGuard(FailureReason);
@@ -161,49 +200,55 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	if (RemoveGuardButton) RemoveGuardButton->SetIsEnabled(bCanRemove);
 	if (StatusText)
 	{
-		StatusText->SetText(bCanPurchase || bCanRemove ? FText::GetEmpty() : FailureReason);
+		const FText DisabledReason = !FailureReason.IsEmpty() ? FailureReason : RemoveFailureReason;
+		StatusText->SetText(bCanPurchase || bCanRemove ? FText::GetEmpty() : DisabledReason);
 	}
 	OnManagementRefreshed();
 }
 
 void UTerritoryDistrictManagementWidget::HandleAddGuardClicked()
 {
-	FText FailureReason;
-	if (!CanPurchaseGuard(FailureReason))
-	{
-		if (StatusText) StatusText->SetText(FailureReason);
-		return;
-	}
-	if (ManagementComponent.IsValid() && ManagementPoint.IsValid())
-	{
-		if (StatusText) StatusText->SetText(FText::FromString(TEXT("Purchasing guard...")));
-		ManagementComponent->RequestPurchaseGuards(ManagementPoint.Get(), 1);
-	}
+	RequestAddGuards(1);
 }
 
 void UTerritoryDistrictManagementWidget::HandleRemoveGuardClicked()
 {
+	RequestRemoveGuards(1);
+}
+
+void UTerritoryDistrictManagementWidget::RequestAddGuards(int32 Count)
+{
 	FText FailureReason;
-	if (!CanRemoveGuard(FailureReason))
+	if (Count <= 0 || !CanPurchaseGuard(FailureReason))
 	{
 		if (StatusText) StatusText->SetText(FailureReason);
 		return;
 	}
 	if (ManagementComponent.IsValid() && ManagementPoint.IsValid())
 	{
-		if (StatusText) StatusText->SetText(FText::FromString(TEXT("Removing guard...")));
-		ManagementComponent->RequestRemoveGuards(ManagementPoint.Get(), 1);
+		if (StatusText) StatusText->SetText(NSLOCTEXT("TerritoryManagement", "AddingGuards", "Submitting guard assignment..."));
+		ManagementComponent->RequestPurchaseGuards(ManagementPoint.Get(), Count);
+	}
+}
+
+void UTerritoryDistrictManagementWidget::RequestRemoveGuards(int32 Count)
+{
+	FText FailureReason;
+	if (Count <= 0 || !CanRemoveGuard(FailureReason))
+	{
+		if (StatusText) StatusText->SetText(FailureReason);
+		return;
+	}
+	if (ManagementComponent.IsValid() && ManagementPoint.IsValid())
+	{
+		if (StatusText) StatusText->SetText(NSLOCTEXT("TerritoryManagement", "RemovingGuards", "Submitting guard removal..."));
+		ManagementComponent->RequestRemoveGuards(ManagementPoint.Get(), Count);
 	}
 }
 
 void UTerritoryDistrictManagementWidget::HandleCloseClicked()
 {
-	if (APlayerController* PlayerController = GetOwningPlayer())
-	{
-		PlayerController->SetInputMode(FInputModeGameOnly());
-		PlayerController->SetShowMouseCursor(false);
-	}
-	RemoveFromParent();
+	CloseTerritoryWidget();
 }
 
 void UTerritoryDistrictManagementWidget::HandleGuardPurchaseResult(
@@ -221,7 +266,7 @@ void UTerritoryDistrictManagementWidget::BindManagementComponent()
 {
 	APlayerController* PlayerController = GetOwningPlayer();
 	UTerritoryPlayerManagementComponent* Component = PlayerController
-		? PlayerController->FindComponentByClass<UTerritoryPlayerManagementComponent>()
+		? UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController)
 		: nullptr;
 	if (ManagementComponent.Get() == Component) return;
 
@@ -236,4 +281,21 @@ void UTerritoryDistrictManagementWidget::BindManagementComponent()
 		ManagementComponent->OnGuardPurchaseResult.AddUniqueDynamic(
 			this, &UTerritoryDistrictManagementWidget::HandleGuardPurchaseResult);
 	}
+}
+
+UWidget* UTerritoryDistrictManagementWidget::NativeGetDesiredFocusTarget() const
+{
+	if (AddGuardButton && AddGuardButton->GetIsEnabled() && AddGuardButton->IsVisible())
+	{
+		return AddGuardButton;
+	}
+	if (RemoveGuardButton && RemoveGuardButton->GetIsEnabled() && RemoveGuardButton->IsVisible())
+	{
+		return RemoveGuardButton;
+	}
+	if (CloseButton && CloseButton->GetIsEnabled() && CloseButton->IsVisible())
+	{
+		return CloseButton;
+	}
+	return Super::NativeGetDesiredFocusTarget();
 }

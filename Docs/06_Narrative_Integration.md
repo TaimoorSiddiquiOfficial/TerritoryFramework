@@ -74,10 +74,10 @@ TerritoryFramework uses Narrative Pro's faction tags (`Narrative.Factions.*`).
 | Save Class | What It Saves |
 |---|---|
 | `ATerritoryVolume` | OwnershipData (owner, state, progress, income parameters, defender count) |
-| `ATerritoryWorldState` | Exported economy parameters, treaties, reputation, transactions, and territory capture summaries |
+| `ATerritoryWorldState` | Economy parameters, treaties, reputation, transactions, capture projections, and durable assault records |
 | `ATerritorySavableData` | Legacy single-player save adapter |
 
-OwnershipData stores only the defender count, not individual guard state. WorldState is an exported snapshot rather than a continuously synchronized store; call `ExportPersistentState()` at save/sync boundaries. Individual guards are recreated fresh for claimed territories after load.
+OwnershipData stores aggregate defender/desired counts, while each guard post saves reserve, pending, and active counts. Live pawns, health, and activity objects are not saved; saved survivors are recreated as Narrative NPCs. WorldState is refreshed by live subsystem delegates and rebuilt again by `ExportPersistentState()` at save boundaries.
 
 ## Navigation Integration
 

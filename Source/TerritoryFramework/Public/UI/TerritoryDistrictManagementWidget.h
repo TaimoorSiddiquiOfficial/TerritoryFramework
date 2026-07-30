@@ -1,7 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "UI/TerritoryInfoWidget.h"
+#include "GameplayTagContainer.h"
+#include "UI/TerritoryActivatableWidget.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "TerritoryDistrictManagementWidget.generated.h"
 
 class ATerritoryDistrict;
@@ -13,7 +15,7 @@ class UTextBlock;
 
 /** Native-backed District management panel. Layout is supplied by a project Widget Blueprint. */
 UCLASS(Abstract, BlueprintType, Blueprintable)
-class TERRITORYFRAMEWORK_API UTerritoryDistrictManagementWidget : public UTerritoryInfoWidget
+class TERRITORYFRAMEWORK_API UTerritoryDistrictManagementWidget : public UTerritoryActivatableWidget
 {
 	GENERATED_BODY()
 
@@ -39,9 +41,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RefreshManagementDisplay();
 
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	FTerritoryDistrictOperationsView GetOperationsView() const { return OperationsView; }
+
+	/** Blueprint-friendly bulk commands; the server bridge validates count, ownership, and funds. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void RequestAddGuards(int32 Count = 1);
+
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void RequestRemoveGuards(int32 Count = 1);
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	virtual void NativeOnActivated() override;
+	virtual UWidget* NativeGetDesiredFocusTarget() const override;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> DistrictNameText;
@@ -65,6 +79,18 @@ protected:
 	TObjectPtr<UTextBlock> GuardCostText;
 
 	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> NetIncomeText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> ReserveGuardText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> ThreatText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> AvailabilityText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> StatusText;
 
 	UPROPERTY(meta=(BindWidgetOptional))
@@ -83,6 +109,7 @@ protected:
 	TWeakObjectPtr<ATerritoryDistrictManagementPoint> ManagementPoint;
 	TWeakObjectPtr<UTerritoryPlayerManagementComponent> ManagementComponent;
 	FGameplayTag ManagedFaction;
+	FTerritoryDistrictOperationsView OperationsView;
 	FTimerHandle RefreshTimerHandle;
 
 	UFUNCTION()
