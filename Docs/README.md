@@ -35,9 +35,11 @@
 16. [District Management](16_District_Management.md) — In-world management UI, guard purchasing, POI markers
 17. [Counterattack System](17_Counterattack_System.md) — Deterministic scheduling, proximity activation, finite Narrative NPC forces
 18. [Operations UI](18_Operations_UI.md) — Narrative CommonUI district dashboard, filters, guards, finance, and threats
-19. [Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Confirmed fixes, remaining project gates, MCP findings
-20. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
-21. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
+19. [Garrison Command Flow](19_Garrison_Command_Flow.md) — Complete capture, staffing, economy, replication, save, and UI lifecycle
+20. [Garrison Command Reaudit](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md) — Root causes, implemented fixes, MCP evidence, and remaining release gates
+21. [Earlier Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Broader confirmed fixes and MCP findings
+22. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
+23. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
 
 ## Document Index
 
@@ -53,6 +55,7 @@
 | Diplomacy | Game Designers | War/peace/alliance/non-aggression treaties with Narrative attitudes |
 | Map & Navigation | UI Designers | Map markers, ownership colors, outline painting |
 | Save/Load | Programmers | Narrative save adapter, stable GUIDs, WorldState |
+| Garrison Command Flow | All | End-to-end authority, capture policy, staffing transaction, P&L, replication, migration, and validation |
 | Debug System | All | Enable debug in Project Settings, read output |
 | Blueprint Reference | BP Devs | Every Blueprint-exposed function, property, delegate |
 | Multiplayer | Programmers | Server authority, client replication, known limits |

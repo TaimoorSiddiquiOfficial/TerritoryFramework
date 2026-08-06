@@ -64,7 +64,10 @@ Create an `NPCDefinition` data asset for your territory guards:
 
 On the Property/District volume:
 - **Guard NPC Definition** = your NPCDefinition asset
-- **Guard Spawn Count** = 3
+- **Guard Spawn Count** = 3 (authored target for existing ownership and non-player capture)
+- **Post Capture Garrison Policy** = Player Chooses (a capture by a matching live Narrative player faction starts at 0)
+- **Initial Guard Recruitment Cost** = one-time price per newly assigned guard
+- **Initial Guard Cost** = recurring upkeep per assigned guard
 - **Guard Spawn Radius** = 500 (fallback if no spawn points)
 
 ---
@@ -100,7 +103,7 @@ Choose ONE capture method per territory:
    - **Capturing Faction** = `Narrative.Factions.Heroes`
    - **Force Capture** = false (respects gameplay rules) or true (bypasses lock, defenders, diplomacy, and AttemptCapture; still requires server authority and valid territory/faction inputs)
 
-**Flow:** Kill all guards → territory remains enemy-owned but undefended → register/complete the physical or Tales capture → atomic ownership change → territory turns green → guards respawn for the player faction.
+**Flow:** Kill all guards → territory remains enemy-owned but undefended → register/complete the physical or Tales capture → atomic ownership change → territory turns green. With the default `PlayerChooses` policy, a capture with a matching player context starts at target 0; the backward-compatible `ForceCapture` node resolves that context from the requested Narrative faction. Use `ForceCaptureWithContext` when the exact player/Tales instigator matters. Truly global or AI ownership changes without player context keep the authored target unless the policy is changed.
 
 ### Method B: Overlap Trigger Capture
 

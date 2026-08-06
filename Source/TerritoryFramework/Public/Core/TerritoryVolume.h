@@ -45,6 +45,8 @@ class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrative
 	GENERATED_BODY()
 	friend class UTerritoryDataValidator;
 	friend class FTFBehavior_GuardRestoreCount;
+	friend class FTFBehavior_TagBoundSpawnPointRegistration;
+	friend class FTFFunctional_PlayerManagedGarrisonPolicy;
 
 public:
 	ATerritoryVolume();
@@ -170,11 +172,22 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership", meta=(DisplayName="Set Owning Faction"))
 	void SetOwningFaction(const FGameplayTag& NewFaction);
 
+	/** Internal explicit-context ownership path used by synchronous hierarchy cascades. */
+	void SetOwningFactionWithContext(const FGameplayTag& NewFaction,
+		const FTerritoryTransitionContext& TransitionContext);
+
 	/** Internal hierarchy path for aggregate-only City/District ownership. */
 	void SetDerivedOwningFaction(const FGameplayTag& NewFaction);
+	void SetDerivedOwningFaction(const FGameplayTag& NewFaction,
+		const FTerritoryTransitionContext& TransitionContext);
+
+	/** Valid only while an atomic transition is broadcasting its synchronous event bundle. */
+	const FTerritoryTransitionContext& GetActiveTransitionContext() const { return ActiveTransitionContext; }
 
 	/** Internal authority path for explicit quest/script overrides and save restore. */
 	void ForceSetOwningFaction(const FGameplayTag& NewFaction);
+	void ForceSetOwningFactionWithContext(const FGameplayTag& NewFaction,
+		const FTerritoryTransitionContext& TransitionContext);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership", meta=(DisplayName="Set Control Progress"))
 	void SetControlProgress(float Progress);
@@ -260,6 +273,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On All Guards Defeated"))
 	FOnAllGuardsDefeated OnAllGuardsDefeatedDelegate;
 
+	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Garrison Changed"))
+	FOnTerritoryGarrisonChanged OnGarrisonChanged;
+
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Lock System API
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -342,18 +358,36 @@ public:
 	int32 GetSpawnedGuardCount() const;
 
 	/**
-	 * Returns the configured maximum number of guards (GuardSpawnCount property).
-	 * This is different from GetSpawnedGuardCount — which is the current live count.
+	 * Returns the number of unique authored/resolved guard spawn points. Each point is
+	 * exactly one active combat slot. This differs from GetSpawnedGuardCount, the live count.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Configured Guard Count"))
 	int32 GetConfiguredGuardCount() const { return GuardSpawnCount; }
 
 	/** Persistent garrison target, including guards purchased after capture. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Desired Guard Count"))
-	int32 GetDesiredGuardCount() const { return FMath::Max(0, OwnershipData.DesiredGuardCount); }
+	int32 GetDesiredGuardCount() const
+	{
+		return FMath::Max(0, HasAuthority()
+			? OwnershipData.DesiredGuardCount : GarrisonSnapshot.DesiredGuards);
+	}
 
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Maximum Guard Count"))
 	int32 GetMaxGuardCount() const;
+
+	/** Resolves the initial target for a new owner without mutating territory state. */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Post Capture Guard Count"))
+	int32 GetPostCaptureGuardCount(const FTerritoryTransitionContext& TransitionContext) const;
+
+	/** Owner-aware form used by atomic capture paths. */
+	int32 GetPostCaptureGuardCountForOwner(const FTerritoryTransitionContext& TransitionContext,
+		const FGameplayTag& NewOwner) const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Garrison Snapshot"))
+	FTerritoryGarrisonSnapshot GetGarrisonSnapshot() const { return GarrisonSnapshot; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Recruitment Cost"))
+	int32 GetGuardRecruitmentCost(int32 Count = 1) const;
 
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Purchase Cost"))
 	int32 GetGuardPurchaseCost(int32 Count = 1) const;
@@ -369,6 +403,16 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Remove Guards"))
 	bool TryRemoveGuards(AActor* Requester, int32 Count, FText& OutResult);
+
+	/** Validate an absolute staffing target. Lower targets do not require live guards. */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Can Set Desired Guard Count"))
+	bool CanSetDesiredGuardCount(const AActor* Requester, int32 NewDesiredGuardCount,
+		FText& OutFailureReason, int32& OutRecruitmentCost) const;
+
+	/** Atomically apply an absolute target, its Narrative currency debit, and physical withdrawals/deployments. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards",
+		meta=(DisplayName="Try Set Desired Guard Count"))
+	FTerritoryGarrisonMutationResult TrySetDesiredGuardCount(AActor* Requester, int32 NewDesiredGuardCount);
 
 	/** Returns true if at least one guard is alive and spawned from this territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Has Guards Alive"))
@@ -420,6 +464,7 @@ public:
 
 	void ReconcileGuardsAfterLoad();
 	void SpawnGuardsToCount(int32 TargetGuardCount);
+	void RefreshGarrisonSnapshot();
 
 public:
 	/** Check if all EntryConditions for the given state pass. Public for atomic mutation validation. */
@@ -442,6 +487,9 @@ protected:
 
 	UFUNCTION()
 	void OnRep_OwnershipData();
+
+	UFUNCTION()
+	void OnRep_GarrisonSnapshot();
 
 	// ─── Editable Properties ───
 
@@ -470,8 +518,12 @@ protected:
 	int32 InitialPeriodicIncome = 100;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy",
-		meta=(ClampMin="0", DisplayName="Guard Cost"))
+		meta=(ClampMin="0", DisplayName="Guard Upkeep Per Cycle"))
 	int32 InitialGuardCost = 50;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy",
+		meta=(ClampMin="0", DisplayName="Guard Recruitment Cost"))
+	int32 InitialGuardRecruitmentCost = 50;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
 		meta=(DisplayName="Starts Locked"))
@@ -530,6 +582,10 @@ protected:
 		Category="Territory|Ownership")
 	FTerritoryOwnershipData OwnershipData;
 
+	UPROPERTY(ReplicatedUsing=OnRep_GarrisonSnapshot, BlueprintReadOnly,
+		Category="Territory|Guards")
+	FTerritoryGarrisonSnapshot GarrisonSnapshot;
+
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadWrite, Category="Territory|Identity",
 		meta=(DisplayName="Territory GUID"))
 	FGuid TerritoryGUID;
@@ -566,17 +622,26 @@ protected:
 		meta=(ClampMin="0", DisplayName="Guard Spawn Count"))
 	int32 GuardSpawnCount = 3;
 
+	/** Player captures start unstaffed by default so the player explicitly controls profit and loss. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
+		meta=(DisplayName="Post Capture Garrison Policy"))
+	ETerritoryPostCaptureGarrisonPolicy PostCaptureGarrisonPolicy =
+		ETerritoryPostCaptureGarrisonPolicy::PlayerChooses;
+
 	/**
-	 * Maximum live garrison after player purchases. When authored spawn points exist,
-	 * this is the sum of their MaxGuards values; otherwise the configured fallback
-	 * maximum is used.
+	 * Legacy fallback maximum. Ignored: active capacity is the unique spawn-point count.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
-		meta=(ClampMin="0", DisplayName="Maximum Guard Count"))
+		meta=(DeprecatedProperty,
+			DeprecationMessage="Ignored. Add guard spawn-point actors to increase capacity.",
+			ClampMin="0", DisplayName="Legacy Maximum Guard Count (Ignored)"))
 	int32 MaxGuardCount = 10;
 
+	/** Legacy random-spawn radius. Ignored because active guards require authored spawn points. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
-		meta=(ClampMin="0.0", DisplayName="Guard Spawn Radius"))
+		meta=(DeprecatedProperty,
+			DeprecationMessage="Ignored. Active guards deploy only at authored spawn points.",
+			ClampMin="0.0", DisplayName="Legacy Guard Spawn Radius (Ignored)"))
 	float GuardSpawnRadius = 500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
@@ -589,6 +654,8 @@ protected:
 	FOnGuardKilled OnGuardKilled;
 
 private:
+	friend class ATerritoryGuardSpawnPoint;
+
 	static int32 CalculateGuardRestoreCount(bool bLoadedFromSave, int32 DesiredGuards,
 		int32 SavedActiveGuards, int32 LegacyDefenderCount);
 
@@ -598,15 +665,22 @@ private:
 	UPROPERTY()
 	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> SpawnedGuards;
 
+	/** Runtime union members resolved by stable OwnerTerritoryTag or proximity. */
+	UPROPERTY(Transient)
+	TArray<TWeakObjectPtr<ATerritoryGuardSpawnPoint>> ResolvedGuardSpawnPoints;
+
 	FGameplayTag PreviousOwningFaction;
 	ETerritoryState PreviousState = ETerritoryState::Unclaimed;
 	FBox LastKnownBounds;
 	bool bLoadedFromSave = false;
 	bool bGuardsReconciled = false;
 	bool bTransitionInProgress = false;
+	UPROPERTY(Transient)
+	FTerritoryTransitionContext ActiveTransitionContext;
 	bool bApplyingDerivedOwnership = false;
 	bool bBypassTransitionConditions = false;
 	bool bSpawningGuards = false;
+	bool bGarrisonMutationInProgress = false;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
@@ -615,9 +689,13 @@ private:
 	void UnbindDefenderDeath(AActor* Defender);
 	void CleanupInvalidDefenders();
 	bool HasPendingReserveDeployments() const;
+	void CancelPendingReserveDeployments();
+	void RemoveGuardWithoutReplacement(ATerritoryGuardCharacter* Guard);
+	void RegisterResolvedGuardSpawnPoint(ATerritoryGuardSpawnPoint* SpawnPoint);
+	void UnregisterResolvedGuardSpawnPoint(ATerritoryGuardSpawnPoint* SpawnPoint);
+	void EnsureCounterAttackApproachIDs();
 	bool FindGuardSpawnTransform(ATerritoryGuardSpawnPoint* SpawnPoint, UClass* GuardClass,
 		bool bRequireConcealment, FTransform& OutTransform) const;
 	bool IsGuardSpawnLocationClear(UClass* GuardClass, const FVector& Location) const;
 
-	FVector GetRandomSpawnPoint() const;
 };

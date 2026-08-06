@@ -107,8 +107,8 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | GuardNPCDefinition | NPCDefinition* |
 | FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> |
 | GuardSpawnCount | int32 |
-| GuardSpawnRadius | float |
-| GuardSpawnPoints | Array<Actor*> |
+| GuardSpawnRadius | float (deprecated/ignored) |
+| GuardSpawnPoints | Array<TerritoryGuardSpawnPoint*> |
 
 ## ATerritoryGuardCharacter
 
@@ -356,7 +356,8 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | Function | Type |
 |---|---|
 | AttemptCapture(Territory, Faction) | AuthorityOnly → ECaptureResult |
-| ForceCapture(Territory, Faction) | AuthorityOnly |
+| ForceCapture(Territory, Faction) | AuthorityOnly → bool; resolves a matching live Narrative player context |
+| ForceCaptureWithContext(Territory, Faction, Context) | AuthorityOnly → bool; preferred exact-instigator path |
 | ResetCapture(Territory) | AuthorityOnly |
 | AddCaptureProgress(Territory, Faction, Delta) | AuthorityOnly |
 | RegisterAttacker(Territory, Actor, Faction) | AuthorityOnly |
@@ -413,12 +414,15 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | Function / delegate | Type |
 |---|---|
 | ScheduleCounterAttack(Territory, AttackingFaction) | AuthorityOnly → bool |
+| ScheduleBestCounterAttack(Territory, PreferredFaction) | AuthorityOnly → bool; diplomacy-first strongest configured eligible faction |
 | CancelAssault(AssaultID, Reason) | AuthorityOnly → bool |
 | GetAssault(AssaultID, OutAssault) | Pure → bool |
 | GetAllAssaults() | Pure → Array<AssaultRecord> |
 | GetAssaultsForTerritory(TerritoryTag) | Pure → Array<AssaultRecord> |
 | IsAssaultActive(AssaultID) | Pure → bool |
+| IsAssaultPendingOrActive(AssaultID) | Pure → bool |
 | GetAssaultDebugString(AssaultID) | Pure → String |
+| GetBestEligibleAttackerPreview(Territory, PreferredFaction, ...) | Pure → bool + attacker/input/result/reason; no schedule or roll |
 | OnAssaultChanged | BlueprintAssignable |
 | OnAssaultWarning | BlueprintAssignable |
 
@@ -428,7 +432,10 @@ The warning state is notification-only: it creates no physical NPCs and no captu
 
 Use `LockTerritoryWithContext`, `TryUnlockWithContext`, and `CanUnlockWithContext` whenever conditions or Tales hooks depend on the actual instigator. The context carries pawn, controller, Tales component, and requesting faction; world-level transitions may deliberately pass an empty context.
 
-Counterattack setup queries on `ATerritoryVolume` are `GetCounterAttackProfile`, `GetCounterAttackApproaches`, `GetGuardQuality`, `GetFortificationStrength`, `GetNearbyAlliedSupport`, and `GetStrategicValue`.
+Counterattack setup queries on `ATerritoryVolume` are `GetCounterAttackProfile`,
+`GetCounterAttackApproaches`, `GetGuardQuality`, `GetFortificationStrength`,
+`GetNearbyAlliedSupport`, and `GetStrategicValue`. The profile's
+`UnguardedLaunchProbability` defaults to `1.0` after diplomacy/admission gates.
 
 ### Player management notifications
 

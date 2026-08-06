@@ -68,6 +68,18 @@ enum class ETerritoryControlMode : uint8
 	Cascading
 };
 
+/** Determines the desired garrison assigned when ownership changes. */
+UENUM(BlueprintType)
+enum class ETerritoryPostCaptureGarrisonPolicy : uint8
+{
+	/** Preserve the legacy behaviour and assign GuardSpawnCount to every new owner. */
+	ConfiguredForEveryOwner,
+	/** A live player-faction capture starts unstaffed; AI-only and global scripted captures use GuardSpawnCount. */
+	PlayerChooses,
+	/** Every new owner starts unstaffed. */
+	AlwaysUnstaffed
+};
+
 UENUM(BlueprintType)
 enum class ECaptureResult : uint8
 {
@@ -149,6 +161,10 @@ struct FTerritoryOwnershipData
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	int32 GuardCost = 0;
 
+	/** One-time Narrative inventory debit for each newly-authorized garrison slot. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
+	int32 GuardRecruitmentCost = 0;
+
 	/** Persistent target garrison size, including guards purchased after capture. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	int32 DesiredGuardCount = INDEX_NONE;
@@ -156,6 +172,73 @@ struct FTerritoryOwnershipData
 	/** Why the territory is locked. Empty when not locked. Replicated + saved. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	FText LockReason;
+};
+
+/** Exact replicated read model for guard UI; live pawn pointers remain server-owned. */
+USTRUCT(BlueprintType)
+struct FTerritoryGarrisonSnapshot
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 ActiveGuards = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 DesiredGuards = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 MaximumGuards = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 ReserveGuards = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 PendingDeployments = 0;
+
+	bool operator==(const FTerritoryGarrisonSnapshot& Other) const
+	{
+		return ActiveGuards == Other.ActiveGuards
+			&& DesiredGuards == Other.DesiredGuards
+			&& MaximumGuards == Other.MaximumGuards
+			&& ReserveGuards == Other.ReserveGuards
+			&& PendingDeployments == Other.PendingDeployments;
+	}
+
+	bool operator!=(const FTerritoryGarrisonSnapshot& Other) const { return !(*this == Other); }
+};
+
+/** Structured result for an absolute garrison staffing mutation. */
+USTRUCT(BlueprintType)
+struct FTerritoryGarrisonMutationResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	bool bSuccess = false;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 OldDesiredGuards = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 NewDesiredGuards = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 OldActiveGuards = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 NewActiveGuards = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 RecruitmentCost = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 GuardsDeployed = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	int32 GuardsWithdrawn = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	FText Message;
 };
 
 USTRUCT(BlueprintType)
@@ -335,6 +418,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnAllGuardsDefeated,
 	class ATerritoryVolume*, Territory);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnTerritoryGarrisonChanged,
+	class ATerritoryVolume*, Territory,
+	FTerritoryGarrisonSnapshot, Snapshot);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
 	FOnGuardKilled,

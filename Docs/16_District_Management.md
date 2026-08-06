@@ -2,9 +2,9 @@
 
 ## Overview
 
-District management provides an in-world Narrative POI and a Narrative CommonUI command screen for an owned district. Players can inspect current security and finance, add guards, remove active guards, and see capture or counterattack risk without giving the widget gameplay authority.
+District management provides an in-world Narrative POI and a Narrative CommonUI command screen for an owned district. Players inspect aggregate security/finance, select the District or any loaded child Property garrison, set an absolute staffing target, and see capture/counterattack risk without giving the widget gameplay authority.
 
-The same guarded management flow is available from the journal's District Command Center. Selecting a captured/owned row opens the district detail surface and exposes atomic `+1`, `-1`, `+5`, and `-5` controls. Those controls are presentation adapters over `UTerritoryPlayerManagementComponent`; they do not create another guard, economy, or ownership authority.
+The journal's District Command Center exposes a garrison selector, integer target, Apply/0/Max commands, and compatibility `+1`, `-1`, `+5`, and `-5` controls. Market Square can therefore manage the Blacksmith Property garrison even when the District container itself has zero guard capacity.
 
 ## Architecture
 
@@ -43,15 +43,15 @@ The district must be registered by `UTerritoryRegistrySubsystem`. World Partitio
 | Field | Authority |
 |---|---|
 | Name, owner, state | `ATerritoryDistrict` |
-| Active / desired / maximum guards | `ATerritoryDistrict` and guard posts |
-| Reserve count | Server guard-post snapshot when available |
-| Guard purchase cost and upkeep | Territory configuration/economy |
+| Aggregate active / desired / maximum guards | District plus owned child Property garrisons |
+| Selected active / target / maximum / reserve / pending | Replicated `FTerritoryGarrisonSnapshot` and Territory ownership data |
+| Recruitment cost and recurring upkeep | Selected Territory configuration/economy |
 | Available funds | Owning pawn's Narrative inventory/account |
 | Income and net per cycle | `UTerritoryEconomySubsystem` projection |
 | Availability and exact failure reason | Registry/control/management validation |
 | Threat and finite assault force | `UTerritoryCounterAttackSubsystem` / WorldState projection |
 
-The screen refreshes its operations view and also reacts to management results. Unknown server-only values are labelled unknown rather than displayed as zero.
+The screen refreshes its operations view and reacts to management results. Active, reserve, and pending counts are exact replicated read models on clients; live pawn pointers remain server-only.
 
 ## Access control
 
@@ -61,25 +61,28 @@ All of the following must pass on the server:
 2. the management point and district exist in the same world;
 3. the district is registered, claimed, and owned by the pawn's Narrative faction;
 4. the pawn is within `ManagementDistance` when using a physical point;
-5. count, request ID, and cooldown are valid;
-6. add requests fit capacity and the Narrative account can pay;
-7. remove requests do not exceed removable active guards.
+5. the selected target is the District or a registered child Property;
+6. absolute target, request ID, and cooldown are valid;
+7. increases fit capacity and the exact Narrative account can pay;
+8. reductions may go down to zero even when assigned guards are already dead.
 
 The client cannot supply a trusted faction, price, balance, owner, power, or final state.
 
 ## Guard command flow
 
 ```text
-Narrative Common button / Blueprint RequestAddGuards or RequestRemoveGuards
+Narrative Common button / absolute staffing target
   -> player-owned UTerritoryPlayerManagementComponent
   -> validated server RPC
-  -> ATerritoryDistrict authoritative guard mutation
-  -> Narrative inventory debit when adding
+  -> selected ATerritoryVolume authoritative atomic mutation
+  -> Narrative inventory recruitment debit when raising
+  -> exact deployment or full rollback/refund
+  -> pending reserves cancelled and surplus active guards withdrawn when lowering
   -> owning-client result delegate
   -> operations-view refresh
 ```
 
-The implementation selects and validates the complete removal set before commit. Success is not reported after a partial multi-guard removal.
+Success is reported only after the final desired/live invariant is verified. A partial multi-guard deployment is rolled back rather than committed as a smaller purchase.
 
 ## Blueprint API
 
@@ -115,6 +118,8 @@ The implementation selects and validates the complete removal set before commit.
 |---|---|
 | `RequestPurchaseGuards*` | Add guards through a point or direct district policy |
 | `RequestRemoveGuards*` | Remove guards through a point or direct district policy |
+| `RequestSetGuardTarget(Point, Territory, Target)` | Set a District/Property target through a nearby command point |
+| `RequestSetGuardTargetForTerritory(Territory, Target)` | Remote journal command for an owned target |
 | `OnGuardPurchaseResult` | Owning-client result for both add/remove operations |
 | `OnAssaultNotification` | Owning-client strategic assault notification |
 
@@ -124,6 +129,5 @@ The management marker reuses Narrative POI/navigation presentation. It refreshes
 
 ## Known limits
 
-- A live reserve count is intentionally hidden on clients when no replicated reserve snapshot is available.
 - The screen does not directly schedule/cancel assaults or alter diplomacy; those actions require their authoritative systems and project policy.
 - Dedicated-server/two-client input, focus, and interaction remain required runtime release tests.

@@ -3,12 +3,15 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/EditableTextBox.h"
+#include "Components/HorizontalBox.h"
 #include "Components/ProgressBar.h"
 #include "Components/RichTextBlock.h"
+#include "Components/SpinBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/WidgetSwitcher.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
@@ -17,6 +20,8 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
+#include "Widgets/NarrativeCommonTextBlock.h"
+#include "Widgets/NarrativeSpinBox.h"
 #include "TimerManager.h"
 
 namespace
@@ -116,6 +121,7 @@ void UTerritoryJournalWidget::NativeConstruct()
 		Btn_CommandRemoveFiveGuards->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleCommandRemoveFiveGuardsClicked);
 		Btn_CommandRemoveFiveGuards->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandRemoveFiveGuards", "- 5 GUARDS"));
 	}
+	BuildGarrisonManagementControls();
 	if (DistrictSearchBox)
 	{
 		DistrictSearchBox->OnTextChanged.AddUniqueDynamic(this, &UTerritoryJournalWidget::HandleSearchChanged);
@@ -168,6 +174,19 @@ void UTerritoryJournalWidget::NativeDestruct()
 	if (Btn_CommandRemoveGuard) Btn_CommandRemoveGuard->OnClicked().RemoveAll(this);
 	if (Btn_CommandAddFiveGuards) Btn_CommandAddFiveGuards->OnClicked().RemoveAll(this);
 	if (Btn_CommandRemoveFiveGuards) Btn_CommandRemoveFiveGuards->OnClicked().RemoveAll(this);
+	if (GarrisonTargetSelector)
+	{
+		GarrisonTargetSelector->OnSelectionChanged.RemoveDynamic(
+			this, &UTerritoryJournalWidget::HandleGarrisonTargetChanged);
+	}
+	if (GuardTargetSpinBox)
+	{
+		GuardTargetSpinBox->OnValueChanged.RemoveDynamic(
+			this, &UTerritoryJournalWidget::HandleGuardTargetSpinChanged);
+	}
+	if (Btn_ApplyGuardTarget) Btn_ApplyGuardTarget->OnClicked().RemoveAll(this);
+	if (Btn_ZeroGuardTarget) Btn_ZeroGuardTarget->OnClicked().RemoveAll(this);
+	if (Btn_MaxGuardTarget) Btn_MaxGuardTarget->OnClicked().RemoveAll(this);
 	if (DistrictSearchBox)
 	{
 		DistrictSearchBox->OnTextChanged.RemoveDynamic(this, &UTerritoryJournalWidget::HandleSearchChanged);
@@ -251,6 +270,208 @@ void UTerritoryJournalWidget::BindManagementComponent()
 		ManagementComponent->OnGuardPurchaseResult.AddUniqueDynamic(
 			this, &UTerritoryJournalWidget::HandleGuardManagementResult);
 	}
+}
+
+void UTerritoryJournalWidget::BuildGarrisonManagementControls()
+{
+	if (GarrisonTargetSelector || !WidgetTree) return;
+	UVerticalBox* CommandStack = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("CommandStack")));
+	if (!CommandStack) return;
+
+	UTextBlock* Heading = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonPlannerHeading"));
+	Heading->SetText(NSLOCTEXT("TerritoryJournal", "GarrisonPlannerHeading",
+		"GARRISON STAFFING & PROFIT / LOSS"));
+	CommandStack->AddChild(Heading);
+
+	GarrisonTargetSelector = WidgetTree->ConstructWidget<UNarrativeComboBoxString>(
+		UNarrativeComboBoxString::StaticClass(), TEXT("GarrisonTargetSelector"));
+	GarrisonTargetSelector->SetToolTipText(NSLOCTEXT("TerritoryJournal", "GarrisonSelectorTip",
+		"Select the District container or a child Property garrison to manage."));
+	GarrisonTargetSelector->OnSelectionChanged.AddUniqueDynamic(
+		this, &UTerritoryJournalWidget::HandleGarrisonTargetChanged);
+	CommandStack->AddChild(GarrisonTargetSelector);
+
+	GuardTargetSpinBox = WidgetTree->ConstructWidget<UNarrativeSpinBox>(
+		UNarrativeSpinBox::StaticClass(), TEXT("GuardTargetSpinBox"));
+	GuardTargetSpinBox->SetToolTipText(NSLOCTEXT("TerritoryJournal", "GuardTargetTip",
+		"Set the exact assigned guard target. The preview shows recruitment and recurring upkeep."));
+	GuardTargetSpinBox->SetMinValue(0.f);
+	GuardTargetSpinBox->SetMinSliderValue(0.f);
+	GuardTargetSpinBox->SetDelta(1.f);
+	GuardTargetSpinBox->SetMinFractionalDigits(0);
+	GuardTargetSpinBox->SetMaxFractionalDigits(0);
+	GuardTargetSpinBox->OnValueChanged.AddUniqueDynamic(
+		this, &UTerritoryJournalWidget::HandleGuardTargetSpinChanged);
+	CommandStack->AddChild(GuardTargetSpinBox);
+
+	Text_GarrisonTargetPreview = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonTargetPreview"));
+	Text_GarrisonTargetPreview->SetAutoWrapText(true);
+	CommandStack->AddChild(Text_GarrisonTargetPreview);
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	TSubclassOf<UNarrativeCommonButtonBase> ButtonClass = Settings
+		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
+	if (!ButtonClass) return;
+
+	UHorizontalBox* Actions = WidgetTree->ConstructWidget<UHorizontalBox>(
+		UHorizontalBox::StaticClass(), TEXT("GarrisonTargetActions"));
+	CommandStack->AddChild(Actions);
+	Btn_ApplyGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+		ButtonClass, TEXT("Btn_ApplyGuardTarget"));
+	Btn_ApplyGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "ApplyGuardTarget", "APPLY TARGET"));
+	Btn_ApplyGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "ApplyGuardTargetTip",
+		"Submit the exact target to the authoritative server."));
+	Btn_ApplyGuardTarget->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleApplyGuardTargetClicked);
+	Actions->AddChild(Btn_ApplyGuardTarget);
+	Btn_ZeroGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+		ButtonClass, TEXT("Btn_ZeroGuardTarget"));
+	Btn_ZeroGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "ZeroGuardTarget", "SET 0"));
+	Btn_ZeroGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "ZeroGuardTargetTip",
+		"Withdraw this garrison and reduce its future upkeep to zero."));
+	Btn_ZeroGuardTarget->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleZeroGuardTargetClicked);
+	Actions->AddChild(Btn_ZeroGuardTarget);
+	Btn_MaxGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+		ButtonClass, TEXT("Btn_MaxGuardTarget"));
+	Btn_MaxGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "MaxGuardTarget", "SET MAX"));
+	Btn_MaxGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "MaxGuardTargetTip",
+		"Set this garrison to its authored physical capacity."));
+	Btn_MaxGuardTarget->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleMaxGuardTargetClicked);
+	Actions->AddChild(Btn_MaxGuardTarget);
+}
+
+void UTerritoryJournalWidget::RefreshGarrisonManagementControls(
+	const FTerritoryDistrictOperationsView& View)
+{
+	TWeakObjectPtr<ATerritoryVolume> Preferred = SelectedGarrisonTarget;
+	SelectedGarrisonTarget.Reset();
+	TMap<FString, TWeakObjectPtr<ATerritoryVolume>> NewOptions;
+	TArray<FString> NewOptionOrder;
+
+	for (const FTerritoryGarrisonOperationsView& Garrison : View.GarrisonTargets)
+	{
+		if (!Garrison.Territory) continue;
+		const FString TypeLabel = Garrison.bDistrictGarrison ? TEXT("District") : TEXT("Property");
+		const FString Option = FString::Printf(TEXT("%s — %s [%s]"),
+			*Garrison.DisplayName.ToString(), *TypeLabel, *Garrison.TerritoryTag.ToString());
+		NewOptions.Add(Option, Garrison.Territory);
+		NewOptionOrder.Add(Option);
+		if (Preferred.Get() == Garrison.Territory)
+		{
+			SelectedGarrisonTarget = Garrison.Territory;
+		}
+	}
+	bool bOptionsChanged = NewOptions.Num() != GarrisonTargetOptions.Num();
+	if (!bOptionsChanged)
+	{
+		for (const TPair<FString, TWeakObjectPtr<ATerritoryVolume>>& Pair : NewOptions)
+		{
+			const TWeakObjectPtr<ATerritoryVolume>* Existing = GarrisonTargetOptions.Find(Pair.Key);
+			if (!Existing || *Existing != Pair.Value)
+			{
+				bOptionsChanged = true;
+				break;
+			}
+		}
+	}
+	GarrisonTargetOptions = MoveTemp(NewOptions);
+	if (GarrisonTargetSelector && bOptionsChanged)
+	{
+		GarrisonTargetSelector->ClearOptions();
+		for (const FString& Option : NewOptionOrder)
+		{
+			GarrisonTargetSelector->AddOption(Option);
+		}
+	}
+	if (!SelectedGarrisonTarget.IsValid())
+	{
+		for (const FTerritoryGarrisonOperationsView& Garrison : View.GarrisonTargets)
+		{
+			if (Garrison.bManageable && Garrison.MaximumGuards > 0)
+			{
+				SelectedGarrisonTarget = Garrison.Territory;
+				break;
+			}
+		}
+	}
+	if (!SelectedGarrisonTarget.IsValid() && View.GarrisonTargets.Num() > 0)
+	{
+		SelectedGarrisonTarget = View.GarrisonTargets[0].Territory;
+	}
+	if (GarrisonTargetSelector && SelectedGarrisonTarget.IsValid())
+	{
+		for (const TPair<FString, TWeakObjectPtr<ATerritoryVolume>>& Pair : GarrisonTargetOptions)
+		{
+			if (Pair.Value == SelectedGarrisonTarget)
+			{
+				GarrisonTargetSelector->SetSelectedOption(Pair.Key);
+				break;
+			}
+		}
+	}
+	if (GuardTargetSpinBox)
+	{
+		const ATerritoryVolume* Target = SelectedGarrisonTarget.Get();
+		const float Maximum = Target ? Target->GetMaxGuardCount() : 0.f;
+		GuardTargetSpinBox->SetMaxValue(Maximum);
+		GuardTargetSpinBox->SetMaxSliderValue(Maximum);
+		GuardTargetSpinBox->SetValue(Target ? Target->GetDesiredGuardCount() : 0.f);
+		GuardTargetSpinBox->SetIsEnabled(Target != nullptr && Maximum > 0.f);
+	}
+	UpdateGarrisonTargetPreview();
+}
+
+void UTerritoryJournalWidget::UpdateGarrisonTargetPreview()
+{
+	FTerritoryGarrisonOperationsView View;
+	const bool bHasTarget = UTerritoryUIBlueprintLibrary::BuildGarrisonOperationsView(
+		this, SelectedGarrisonTarget.Get(), GetOwningPlayer(), View);
+	const int32 Proposed = GuardTargetSpinBox
+		? FMath::RoundToInt(GuardTargetSpinBox->GetValue()) : View.DesiredGuards;
+	if (Text_GarrisonTargetPreview)
+	{
+		if (!bHasTarget)
+		{
+			Text_GarrisonTargetPreview->SetText(NSLOCTEXT("TerritoryJournal", "NoGarrisonTarget",
+				"No loaded garrison is available for this district."));
+		}
+		else
+		{
+			const int32 Recruitment = FMath::Max(0, Proposed - View.DesiredGuards)
+				* View.RecruitmentCostPerGuard;
+			const int64 ProposedUpkeep = static_cast<int64>(Proposed) * View.UpkeepPerGuard;
+			Text_GarrisonTargetPreview->SetText(FText::Format(
+				NSLOCTEXT("TerritoryJournal", "GarrisonTargetPreview",
+					"{0}\nActive {1} | Target {2} -> {3} | Capacity {4} | Reserve {5} | Pending {6}\n"
+					"Recruitment now: {7} | Upkeep: {8}/cycle | Local income: {9} | Local net: {10}"),
+				View.DisplayName, FText::AsNumber(View.ActiveGuards), FText::AsNumber(View.DesiredGuards),
+				FText::AsNumber(Proposed), FText::AsNumber(View.MaximumGuards),
+				FText::AsNumber(View.ReserveGuards), FText::AsNumber(View.PendingDeployments),
+				FText::AsNumber(Recruitment), FText::AsNumber(ProposedUpkeep),
+				FText::AsNumber(View.PeriodicIncome), FText::AsNumber(View.PeriodicIncome - ProposedUpkeep)));
+		}
+	}
+	const bool bCanSubmit = bHasTarget && View.bManageable && Proposed != View.DesiredGuards
+		&& Proposed >= 0 && Proposed <= View.MaximumGuards;
+	if (Btn_ApplyGuardTarget) Btn_ApplyGuardTarget->SetIsEnabled(bCanSubmit);
+	if (Btn_ZeroGuardTarget) Btn_ZeroGuardTarget->SetIsEnabled(
+		bHasTarget && View.bManageable && View.DesiredGuards > 0);
+	if (Btn_MaxGuardTarget) Btn_MaxGuardTarget->SetIsEnabled(
+		bHasTarget && View.bManageable && View.DesiredGuards < View.MaximumGuards);
+}
+
+void UTerritoryJournalWidget::SubmitSelectedGuardTarget(int32 NewDesiredGuardCount)
+{
+	BindManagementComponent();
+	ATerritoryVolume* Target = SelectedGarrisonTarget.Get();
+	if (!ManagementComponent.IsValid() || !Target) return;
+	if (Text_CommandStatus)
+	{
+		Text_CommandStatus->SetText(NSLOCTEXT("TerritoryJournal", "SubmittingTarget",
+			"Submitting garrison staffing target..."));
+	}
+	ManagementComponent->RequestSetGuardTargetForTerritory(Target, NewDesiredGuardCount);
 }
 
 void UTerritoryJournalWidget::RefreshFilterOptions()
@@ -401,6 +622,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	}
 
 	int32 VisibleCount = 0;
+	int32 LockedVisibleCount = 0;
 	ATerritoryDistrict* FirstVisibleDistrict = nullptr;
 	bool bSelectedStillVisible = false;
 	for (const FTerritoryDistrictOperationsView& View : AllViews)
@@ -416,6 +638,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 		}
 		bSelectedStillVisible |= SelectedDistrict.Get() == View.District;
 		++VisibleCount;
+		LockedVisibleCount += View.bUnlocked ? 0 : 1;
 
 		if (DistrictList)
 		{
@@ -432,7 +655,11 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 		EmptyText->SetText(NSLOCTEXT("TerritoryJournal", "NoDistricts", "No districts match the current filters."));
 		DistrictList->AddChild(EmptyText);
 	}
-	if (VisibleCount > 0 && (!SelectedDistrict.IsValid() || !bSelectedStillVisible))
+	if (VisibleCount <= 0)
+	{
+		UpdateSelectedDistrict(nullptr);
+	}
+	else if (!SelectedDistrict.IsValid() || !bSelectedStillVisible)
 	{
 		UpdateSelectedDistrict(FirstVisibleDistrict);
 	}
@@ -444,8 +671,8 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	if (Text_FilterSummary)
 	{
 		Text_FilterSummary->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "FilterSummary", "{0} districts"),
-			FText::AsNumber(VisibleCount)));
+			NSLOCTEXT("TerritoryJournal", "FilterSummary", "{0} districts  |  {1} locked but selectable"),
+			FText::AsNumber(VisibleCount), FText::AsNumber(LockedVisibleCount)));
 	}
 	RefreshOperationalSummaries(AllViews);
 }
@@ -473,6 +700,11 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	SelectedDistrict = District;
 	if (!District)
 	{
+		SelectedGarrisonTarget.Reset();
+		GarrisonTargetOptions.Empty();
+		if (GarrisonTargetSelector) GarrisonTargetSelector->ClearOptions();
+		if (GuardTargetSpinBox) GuardTargetSpinBox->SetIsEnabled(false);
+		UpdateGarrisonTargetPreview();
 		if (Text_EmptySelection)
 		{
 			Text_EmptySelection->SetVisibility(ESlateVisibility::Visible);
@@ -494,6 +726,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	{
 		return;
 	}
+	RefreshGarrisonManagementControls(View);
 
 	if (Text_EmptySelection)
 	{
@@ -515,9 +748,16 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	const FText ReserveText = View.bReserveCountKnown
 		? FText::AsNumber(View.ReserveGuards)
 		: NSLOCTEXT("TerritoryJournal", "ReserveUnknown", "server snapshot required");
+	const FText CascadeText = FText::Format(
+		NSLOCTEXT("TerritoryJournal", "DistrictCascade",
+			"{0}/{1} Properties aligned  |  {2} manageable garrisons  |  {3} empty posts"),
+		FText::AsNumber(View.OwnedProperties), FText::AsNumber(View.TotalProperties),
+		FText::AsNumber(View.ManageableGarrisonTargets),
+		FText::AsNumber(View.UnguardedGarrisonTargets));
 	const FText DetailText = FText::Format(
 		NSLOCTEXT("TerritoryJournal", "DistrictDetails",
 			"Owner: {0}\nState: {1}\nAvailability: {2}\n"
+			"Hierarchy: {17}\n"
 			"Garrison: {3} active / {4} assigned / {5} maximum\nReserve: {6}\n"
 			"Guard purchase: {7}\nIncome: {8}\nUpkeep: {9}\nNet: {10}\nAvailable funds: {11}\n"
 			"Security: quality {12}, fortification {13}, allied support {14}, strategic value {15}\nThreat: {16}"),
@@ -537,7 +777,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 		FText::AsNumber(View.Fortification),
 		FText::AsNumber(View.AlliedSupport),
 		FText::AsNumber(View.StrategicValue),
-		View.ThreatSummary);
+		View.ThreatSummary,
+		CascadeText);
 	if (RichText_QuestDescription)
 	{
 		RichText_QuestDescription->SetText(DetailText);
@@ -603,11 +844,18 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 		Text_CommandSecurity->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "CommandSecurity",
 				"SECURITY\nActive {0}  |  Assigned {1}  |  Capacity {2}  |  Reserve {3}\n"
-				"Quality {4}  |  Fortification {5}  |  Allied support {6}  |  Strategic value {7}"),
+				"Quality {4}  |  Fortification {5}  |  Allied support {6}  |  Strategic value {7}\n"
+				"Properties {8}/{9}  |  Manageable garrisons {10}  |  Empty posts {11}  |  District {12}"),
 			FText::AsNumber(View.ActiveGuards), FText::AsNumber(View.DesiredGuards),
 			FText::AsNumber(View.MaximumGuards), ReserveText,
 			FText::AsNumber(View.GuardQuality), FText::AsNumber(View.Fortification),
-			FText::AsNumber(View.AlliedSupport), FText::AsNumber(View.StrategicValue)));
+			FText::AsNumber(View.AlliedSupport), FText::AsNumber(View.StrategicValue),
+			FText::AsNumber(View.OwnedProperties), FText::AsNumber(View.TotalProperties),
+			FText::AsNumber(View.ManageableGarrisonTargets),
+			FText::AsNumber(View.UnguardedGarrisonTargets),
+			View.bUnguarded
+				? NSLOCTEXT("TerritoryJournal", "DistrictUnguarded", "UNGUARDED")
+				: NSLOCTEXT("TerritoryJournal", "DistrictGuarded", "DEFENDED")));
 	}
 	if (Text_CommandFinance)
 	{
@@ -625,29 +873,53 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	{
 		Text_CommandThreat->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "CommandThreat",
-				"THREAT  {0}\n{1}\nContesting faction: {2}  |  Capture attackers: {3}"),
+				"THREAT  {0}\n{1}\nContesting faction: {2}  |  Capture attackers: {3}\nEvaluation: {4}"),
 			UTerritoryUIBlueprintLibrary::GetThreatLevelText(View.ThreatLevel),
 			View.ThreatSummary,
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.ContestingFaction),
 			View.bAttackerCountKnown
 				? FText::AsNumber(View.ActiveAttackers)
-				: NSLOCTEXT("TerritoryJournal", "CommandAttackersUnknown", "unknown")));
+				: NSLOCTEXT("TerritoryJournal", "CommandAttackersUnknown", "unknown"),
+			View.ThreatEvaluationReason));
 	}
 	if (Text_CommandAssault)
 	{
-		Text_CommandAssault->SetText(View.AssaultID.IsValid()
-			? FText::Format(
+		FText AssaultText;
+		if (View.AssaultID.IsValid())
+		{
+			AssaultText = FText::Format(
 				NSLOCTEXT("TerritoryJournal", "CommandAssault",
-					"ASSAULT  {0}\nAttacker {1}\nPlanned {2}  |  Alive {3}  |  Reserve {4}  |  Killed {5}  |  Withdrawn {6}\n"
-					"Launch {7}  |  Estimated success {8}"),
+					"ASSAULT  {0}\nTarget {1}  |  Attacker {2}\nPlanned {3}  |  Alive {4}  |  Reserve {5}  |  Killed {6}  |  Withdrawn {7}\n"
+					"Launch {8}  |  Estimated success {9}  |  Priority {10}"),
 				UTerritoryUIBlueprintLibrary::GetAssaultStateText(View.AssaultState),
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.ThreatTargetTerritory),
 				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.AttackingFaction),
 				FText::AsNumber(View.PlannedAttackers), FText::AsNumber(View.AliveAttackers),
 				FText::AsNumber(View.PendingReserveAttackers), FText::AsNumber(View.KilledAttackers),
 				FText::AsNumber(View.WithdrawnAttackers),
 				FText::AsPercent(FMath::Clamp(View.LaunchProbability, 0.f, 1.f)),
-				FText::AsPercent(FMath::Clamp(View.EstimatedSuccessProbability, 0.f, 1.f)))
-			: NSLOCTEXT("TerritoryJournal", "NoCommandAssault", "ASSAULT\nNo scheduled operation."));
+				FText::AsPercent(FMath::Clamp(View.EstimatedSuccessProbability, 0.f, 1.f)),
+				FText::AsNumber(View.AttackPriority));
+		}
+		else if (View.bThreatPreviewAvailable)
+		{
+			AssaultText = FText::Format(
+				NSLOCTEXT("TerritoryJournal", "ProjectedCommandAssault",
+					"PROJECTED ASSAULT — NOT YET SCHEDULED\nTarget {0}  |  Strongest eligible faction {1}\n"
+					"Launch {2}  |  Estimated success {3}  |  Defence {4}  |  Power ratio {5}  |  Priority {6}"),
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.ThreatTargetTerritory),
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.AttackingFaction),
+				FText::AsPercent(FMath::Clamp(View.LaunchProbability, 0.f, 1.f)),
+				FText::AsPercent(FMath::Clamp(View.EstimatedSuccessProbability, 0.f, 1.f)),
+				FText::AsNumber(View.DistrictDefencePower), FText::AsNumber(View.PowerRatio),
+				FText::AsNumber(View.AttackPriority));
+		}
+		else
+		{
+			AssaultText = NSLOCTEXT("TerritoryJournal", "NoCommandAssault",
+				"ASSAULT\nNo scheduled operation and no eligible configured attacker.");
+		}
+		Text_CommandAssault->SetText(AssaultText);
 	}
 	if (Text_CommandApproaches)
 	{
@@ -670,33 +942,41 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	}
 	if (CommandCaptureProgressBar) CommandCaptureProgressBar->SetPercent(View.CaptureProgress);
 
+	FTerritoryGarrisonOperationsView SelectedGarrison;
+	const bool bHasSelectedGarrison = UTerritoryUIBlueprintLibrary::BuildGarrisonOperationsView(
+		this, SelectedGarrisonTarget.Get(), GetOwningPlayer(), SelectedGarrison);
+	FText AddFiveFailure;
+	FText RemoveFiveFailure;
 	AActor* ViewerActor = GetOwningPlayerPawn()
 		? static_cast<AActor*>(GetOwningPlayerPawn())
 		: static_cast<AActor*>(GetOwningPlayer());
-	FText AddFiveFailure;
-	FText RemoveFiveFailure;
-	const bool bCanAddFive = View.bManageable
-		&& District->CanPurchaseGuards(ViewerActor, 5, AddFiveFailure);
-	const bool bCanRemoveFive = View.bManageable
-		&& District->CanRemoveGuards(ViewerActor, 5, RemoveFiveFailure);
-	if (!View.bManageable)
+	int32 PreviewCost = 0;
+	const bool bCanAddFive = bHasSelectedGarrison && SelectedGarrison.bManageable
+		&& SelectedGarrison.DesiredGuards + 5 <= SelectedGarrison.MaximumGuards
+		&& SelectedGarrison.Territory->CanSetDesiredGuardCount(ViewerActor,
+			SelectedGarrison.DesiredGuards + 5, AddFiveFailure, PreviewCost);
+	const bool bCanRemoveFive = bHasSelectedGarrison && SelectedGarrison.bManageable
+		&& SelectedGarrison.DesiredGuards >= 5
+		&& SelectedGarrison.Territory->CanSetDesiredGuardCount(ViewerActor,
+			SelectedGarrison.DesiredGuards - 5, RemoveFiveFailure, PreviewCost);
+	if (!bHasSelectedGarrison || !SelectedGarrison.bManageable)
 	{
 		AddFiveFailure = View.ManagementFailureReason;
 		RemoveFiveFailure = View.ManagementFailureReason;
 	}
 	if (Btn_CommandAddGuard)
 	{
-		Btn_CommandAddGuard->SetIsEnabled(View.bCanAddGuard);
-		Btn_CommandAddGuard->SetToolTipText(View.bCanAddGuard
-			? NSLOCTEXT("TerritoryJournal", "AddGuardReady", "Purchase and deploy one guard.")
-			: View.AddGuardFailureReason);
+		Btn_CommandAddGuard->SetIsEnabled(bHasSelectedGarrison && SelectedGarrison.bCanIncreaseTarget);
+		Btn_CommandAddGuard->SetToolTipText(bHasSelectedGarrison && SelectedGarrison.bCanIncreaseTarget
+			? NSLOCTEXT("TerritoryJournal", "AddGuardReady", "Raise the selected garrison target by one.")
+			: SelectedGarrison.IncreaseFailureReason);
 	}
 	if (Btn_CommandRemoveGuard)
 	{
-		Btn_CommandRemoveGuard->SetIsEnabled(View.bCanRemoveGuard);
-		Btn_CommandRemoveGuard->SetToolTipText(View.bCanRemoveGuard
-			? NSLOCTEXT("TerritoryJournal", "RemoveGuardReady", "Withdraw one active guard.")
-			: View.RemoveGuardFailureReason);
+		Btn_CommandRemoveGuard->SetIsEnabled(bHasSelectedGarrison && SelectedGarrison.bCanDecreaseTarget);
+		Btn_CommandRemoveGuard->SetToolTipText(bHasSelectedGarrison && SelectedGarrison.bCanDecreaseTarget
+			? NSLOCTEXT("TerritoryJournal", "RemoveGuardReady", "Lower the selected garrison target by one, even if a guard is missing.")
+			: SelectedGarrison.DecreaseFailureReason);
 	}
 	if (Btn_CommandAddFiveGuards)
 	{
@@ -726,19 +1006,26 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	int32 AvailableCount = 0;
 	int32 ThreatCount = 0;
 	int32 AvailableUnlockedCount = 0;
+	int32 IntelQueueCount = 0;
 	int32 RiskCount = 0;
 	int32 GuardShortfall = 0;
-	int64 OwnedIncome = 0;
-	int64 OwnedUpkeep = 0;
 	FGameplayTag ViewerFaction;
 	for (const FTerritoryDistrictOperationsView& View : Views)
 	{
 		if (!ViewerFaction.IsValid()) ViewerFaction = View.ViewerFaction;
 		AvailableCount += View.bAvailable ? 1 : 0;
-		ThreatCount += (View.bUnderAttack || View.bAttackScheduled) ? 1 : 0;
+		ThreatCount += (View.bUnderAttack || View.bAttackScheduled
+			|| View.bThreatPreviewAvailable) ? 1 : 0;
 		if (UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(View))
 		{
 			++AvailableUnlockedCount;
+		}
+		// The intel queue is deliberately broader than capture eligibility. Locked and
+		// aggregate-only Districts remain selectable so their lock reason, child cascade,
+		// diplomacy and projected threat are never hidden from the player.
+		if (View.bRegistered && !View.bOwnedByViewer)
+		{
+			++IntelQueueCount;
 			if (ActiveQuestsBox)
 			{
 				if (UTerritoryDistrictRowWidget* Row = CreateOperationsRow(View))
@@ -750,8 +1037,6 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		if (UTerritoryUIBlueprintLibrary::IsDistrictCapturedOwned(View))
 		{
 			++OwnedCount;
-			OwnedIncome += View.PeriodicIncome;
-			OwnedUpkeep += View.GuardUpkeep;
 			GuardShortfall += FMath::Max(0, View.DesiredGuards - View.ActiveGuards);
 			if (FinishedQuestsBox)
 			{
@@ -768,7 +1053,8 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 				}
 			}
 		}
-		if (View.bUnderAttack || View.bAttackScheduled || View.bFinancialRisk)
+		if (View.bUnderAttack || View.bAttackScheduled || View.bThreatPreviewAvailable
+			|| View.bFinancialRisk)
 		{
 			++RiskCount;
 			if (LossReportList)
@@ -791,10 +1077,10 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		EmptyText->SetText(Message);
 		Box->AddChild(EmptyText);
 	};
-	if (AvailableUnlockedCount == 0)
+	if (IntelQueueCount == 0)
 	{
 		AddEmptyMessage(ActiveQuestsBox,
-			NSLOCTEXT("TerritoryJournal", "NoAvailableUnlocked", "No unlocked districts are currently available."),
+			NSLOCTEXT("TerritoryJournal", "NoDistrictIntel", "No unowned District intel is currently registered."),
 			TEXT("NoAvailableUnlockedDistricts"));
 	}
 	if (OwnedCount == 0)
@@ -816,11 +1102,23 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	const FTerritoryEconomyOperationsView Economy =
 		UTerritoryUIBlueprintLibrary::BuildEconomyOperationsView(
 			this, GetOwningPlayer(), ViewerFaction, 10);
+	TArray<FString> TransactionLines;
+	for (const FTerritoryTransaction& Transaction : Economy.RecentTransactions)
+	{
+		TransactionLines.Add(FString::Printf(TEXT("%+d — %s%s"), Transaction.Amount,
+			Transaction.Reason.IsEmpty() ? TEXT("Unspecified transaction") : *Transaction.Reason,
+			Transaction.SourceTerritory.IsValid()
+				? *FString::Printf(TEXT(" [%s]"), *Transaction.SourceTerritory.ToString()) : TEXT("")));
+	}
+	const FText TransactionAudit = FText::FromString(TransactionLines.IsEmpty()
+		? FString(TEXT("No recent transactions."))
+		: FString::Join(TransactionLines, TEXT("\n")));
 	if (Text_ActiveQuestCount)
 	{
 		Text_ActiveQuestCount->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "ActiveDistrictCount", "AVAILABLE / UNLOCKED  {0}"),
-			FText::AsNumber(AvailableUnlockedCount)));
+			NSLOCTEXT("TerritoryJournal", "ActiveDistrictCount",
+				"DISTRICT INTEL  {0}  |  ACTIONABLE  {1}"),
+			FText::AsNumber(IntelQueueCount), FText::AsNumber(AvailableUnlockedCount)));
 	}
 	if (Text_FinishedQuestCount)
 	{
@@ -863,19 +1161,19 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	{
 		Text_TotalWeeklyEarnings->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "GrossIncomeKPI", "GROSS  {0} / CYCLE"),
-			FText::AsNumber(OwnedIncome)));
+			FText::AsNumber(Economy.IncomePerTick)));
 	}
 	if (Text_TotalGuardCost)
 	{
 		Text_TotalGuardCost->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "GuardUpkeepKPI", "GUARDS  {0} / CYCLE"),
-			FText::AsNumber(OwnedUpkeep)));
+			FText::AsNumber(Economy.CostsPerTick)));
 	}
 	if (Text_NetProfit)
 	{
 		Text_NetProfit->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "NetIncomeKPI", "NET  {0} / CYCLE"),
-			FText::AsNumber(OwnedIncome - OwnedUpkeep)));
+			FText::AsNumber(Economy.NetPerTick)));
 	}
 	if (Text_TotalEarningsLost)
 	{
@@ -887,19 +1185,19 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	{
 		RichText_EarningsSummary->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "EarningsSummary",
-				"Available funds: {0}\nFaction income: {1}\nOperating costs: {2}\nNet per cycle: {3}\nRecent credits: {4}\nOwned districts: {5}"),
+				"Available funds: {0}\nFaction income: {1}\nOperating costs: {2}\nNet per cycle: {3}\nRecent credits: {4}\nOwned districts: {5}\n\nTransaction audit\n{6}"),
 			FText::AsNumber(Economy.AvailableFunds), FText::AsNumber(Economy.IncomePerTick),
 			FText::AsNumber(Economy.CostsPerTick), FText::AsNumber(Economy.NetPerTick),
-			FText::AsNumber(Economy.RecentCredits), FText::AsNumber(OwnedCount)));
+			FText::AsNumber(Economy.RecentCredits), FText::AsNumber(OwnedCount), TransactionAudit));
 	}
 	if (RichText_LossSummary)
 	{
 		RichText_LossSummary->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "LossSummary",
-				"Recent debits: {0}\nOwned district upkeep: {1}\nOwned district net: {2}\nGuard shortfall: {3}\nThreatened districts: {4}\nCurrently available districts: {5}"),
-			FText::AsNumber(Economy.RecentDebits), FText::AsNumber(OwnedUpkeep),
-			FText::AsNumber(OwnedIncome - OwnedUpkeep), FText::AsNumber(GuardShortfall),
-			FText::AsNumber(ThreatCount), FText::AsNumber(AvailableCount)));
+				"Recent debits: {0}\nAuthoritative faction costs: {1}\nAuthoritative faction net: {2}\nGuard shortfall: {3}\nThreatened districts: {4}\nCurrently available districts: {5}\n\nTransaction audit\n{6}"),
+			FText::AsNumber(Economy.RecentDebits), FText::AsNumber(Economy.CostsPerTick),
+			FText::AsNumber(Economy.NetPerTick), FText::AsNumber(GuardShortfall),
+			FText::AsNumber(ThreatCount), FText::AsNumber(AvailableCount), TransactionAudit));
 	}
 }
 
@@ -957,6 +1255,52 @@ void UTerritoryJournalWidget::HandleOperationalFilterChanged(
 	SetOperationsFilter(GetOperationsFilter(SelectedItem));
 }
 
+void UTerritoryJournalWidget::HandleGarrisonTargetChanged(
+	FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	(void)SelectionType;
+	if (const TWeakObjectPtr<ATerritoryVolume>* Target = GarrisonTargetOptions.Find(SelectedItem))
+	{
+		SelectedGarrisonTarget = *Target;
+		if (GuardTargetSpinBox && SelectedGarrisonTarget.IsValid())
+		{
+			const float Maximum = SelectedGarrisonTarget->GetMaxGuardCount();
+			GuardTargetSpinBox->SetMaxValue(Maximum);
+			GuardTargetSpinBox->SetMaxSliderValue(Maximum);
+			GuardTargetSpinBox->SetValue(SelectedGarrisonTarget->GetDesiredGuardCount());
+			GuardTargetSpinBox->SetIsEnabled(Maximum > 0.f);
+		}
+		UpdateGarrisonTargetPreview();
+	}
+}
+
+void UTerritoryJournalWidget::HandleGuardTargetSpinChanged(float NewValue)
+{
+	(void)NewValue;
+	UpdateGarrisonTargetPreview();
+}
+
+void UTerritoryJournalWidget::HandleApplyGuardTargetClicked()
+{
+	if (GuardTargetSpinBox)
+	{
+		SubmitSelectedGuardTarget(FMath::RoundToInt(GuardTargetSpinBox->GetValue()));
+	}
+}
+
+void UTerritoryJournalWidget::HandleZeroGuardTargetClicked()
+{
+	SubmitSelectedGuardTarget(0);
+}
+
+void UTerritoryJournalWidget::HandleMaxGuardTargetClicked()
+{
+	if (SelectedGarrisonTarget.IsValid())
+	{
+		SubmitSelectedGuardTarget(SelectedGarrisonTarget->GetMaxGuardCount());
+	}
+}
+
 void UTerritoryJournalWidget::HandleTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
 {
 	(void)Territory;
@@ -986,32 +1330,22 @@ void UTerritoryJournalWidget::HandleDistrictSelected(ATerritoryDistrict* Distric
 
 void UTerritoryJournalWidget::HandleGuardActionRequested(ATerritoryDistrict* District, int32 Delta)
 {
-	if (!District)
+	if (!District || Delta == 0)
 	{
 		return;
 	}
-	BindManagementComponent();
-	if (!ManagementComponent.IsValid())
+	if (SelectedDistrict.Get() != District)
 	{
-		if (Text_CommandStatus)
-		{
-			Text_CommandStatus->SetText(NSLOCTEXT("TerritoryJournal", "ManagementUnavailable", "Territory management is unavailable."));
-		}
+		UpdateSelectedDistrict(District);
+	}
+	ATerritoryVolume* Target = SelectedGarrisonTarget.Get();
+	if (!Target)
+	{
+		if (Text_CommandStatus) Text_CommandStatus->SetText(NSLOCTEXT(
+			"TerritoryJournal", "NoGarrisonForDistrict", "This district has no loaded garrison target."));
 		return;
 	}
-
-	if (Text_CommandStatus)
-	{
-		Text_CommandStatus->SetText(NSLOCTEXT("TerritoryJournal", "Submitting", "Submitting district command..."));
-	}
-	if (Delta > 0)
-	{
-		ManagementComponent->RequestPurchaseGuardsForDistrict(District, Delta);
-	}
-	else if (Delta < 0)
-	{
-		ManagementComponent->RequestRemoveGuardsForDistrict(District, -Delta);
-	}
+	SubmitSelectedGuardTarget(Target->GetDesiredGuardCount() + Delta);
 }
 
 void UTerritoryJournalWidget::HandleCommandAddGuardClicked()
@@ -1044,7 +1378,7 @@ void UTerritoryJournalWidget::HandleGuardManagementResult(
 		Text_CommandStatus->SetText(Message);
 	}
 	RefreshDistrictList();
-	if (Territory && Territory == SelectedDistrict.Get())
+	if (Territory && (Territory == SelectedDistrict.Get() || Territory == SelectedGarrisonTarget.Get()))
 	{
 		UpdateSelectedDistrict(SelectedDistrict.Get());
 	}

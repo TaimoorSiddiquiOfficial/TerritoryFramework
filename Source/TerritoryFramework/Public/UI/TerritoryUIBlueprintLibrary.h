@@ -9,6 +9,7 @@
 
 class APlayerController;
 class ATerritoryDistrict;
+class ATerritoryVolume;
 class UTerritoryActivatableWidget;
 
 /** Viewer-relative operational scopes used by Territory menus and Blueprint lists. */
@@ -34,6 +35,34 @@ enum class ETerritoryThreatLevel : uint8
 	Watch,
 	Warning,
 	Critical
+};
+
+/** One independently managed district/property garrison and its local P&L. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryGarrisonOperationsView
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") TObjectPtr<ATerritoryVolume> Territory = nullptr;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FGameplayTag TerritoryTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText DisplayName;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bDistrictGarrison = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bOwnedByViewer = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bManageable = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") int32 ActiveGuards = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") int32 DesiredGuards = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") int32 MaximumGuards = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") int32 ReserveGuards = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") int32 PendingDeployments = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int32 RecruitmentCostPerGuard = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int32 UpkeepPerGuard = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 PeriodicIncome = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 GuardUpkeep = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 NetIncome = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bCanIncreaseTarget = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bCanDecreaseTarget = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText IncreaseFailureReason;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText DecreaseFailureReason;
 };
 
 /** A read-only, viewer-relative projection of existing Territory authorities. */
@@ -75,6 +104,11 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float Fortification = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float AlliedSupport = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float StrategicValue = 1.f;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bUnguarded = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 TotalProperties = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 OwnedProperties = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 ManageableGarrisonTargets = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 UnguardedGarrisonTargets = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 AvailableFunds = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 PeriodicIncome = 0;
@@ -87,11 +121,17 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") FText AddGuardFailureReason;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") FText RemoveGuardFailureReason;
 
+	/** District garrison plus every loaded, registered child Property garrison. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") TArray<FTerritoryGarrisonOperationsView> GarrisonTargets;
+
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") ETerritoryThreatLevel ThreatLevel = ETerritoryThreatLevel::None;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") bool bUnderAttack = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") bool bAttackScheduled = false;
+	/** Planning projection only; it is never presented as a scheduled physical assault. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") bool bThreatPreviewAvailable = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") int32 NonTerminalAssaultCount = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") FGuid AssaultID;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") FGameplayTag ThreatTargetTerritory;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") ETerritoryAssaultState AssaultState = ETerritoryAssaultState::Grace;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") ETerritoryAssaultResolution AssaultResolution = ETerritoryAssaultResolution::None;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") FGameplayTag AttackingFaction;
@@ -102,7 +142,11 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") int32 WithdrawnAttackers = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") float LaunchProbability = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") float EstimatedSuccessProbability = 0.f;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") float AttackPriority = 0.f;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") float DistrictDefencePower = 0.f;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") float PowerRatio = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") TArray<FName> SelectedApproaches;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") FText ThreatEvaluationReason;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") FText ThreatSummary;
 };
 
@@ -146,6 +190,21 @@ public:
 		ATerritoryDistrict* District,
 		APlayerController* Viewer,
 		FTerritoryDistrictOperationsView& OutView);
+
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
+		meta=(WorldContext="WorldContextObject"))
+	static bool BuildGarrisonOperationsView(
+		const UObject* WorldContextObject,
+		ATerritoryVolume* Territory,
+		APlayerController* Viewer,
+		FTerritoryGarrisonOperationsView& OutView);
+
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
+		meta=(WorldContext="WorldContextObject"))
+	static TArray<FTerritoryGarrisonOperationsView> GetDistrictGarrisonOperationsViews(
+		const UObject* WorldContextObject,
+		ATerritoryDistrict* District,
+		APlayerController* Viewer);
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
 		meta=(WorldContext="WorldContextObject"))

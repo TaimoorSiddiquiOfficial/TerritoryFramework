@@ -28,14 +28,53 @@ A decision roll can schedule an assault; it cannot capture a territory. `LaunchP
 7. Build navigation from every approach to the territory center.
 8. Place exactly one `ATerritoryWorldState` for persistence and late-join replication.
 
-The editor validator rejects invalid stable GUIDs, duplicate faction definitions, incompatible Narrative NPC classes, invalid force/wave counts, duplicate approach IDs, and territories with no enabled approach. Runtime scheduling revalidates authority, world, state, faction, profile, NPC class, diplomacy, route, and global budgets.
+On ownership change, automatic scheduling calls
+`ScheduleBestCounterAttack(Territory, OldOwner)`. It evaluates every valid force in the
+assigned profile. Diplomacy/capture policy is a hard gate before power scoring; among
+the remaining candidates the highest attack priority wins, followed by estimated
+success, military power, the former owner as a tie-break only, and stable faction-tag
+order. Add every faction that may retaliate to `FactionForces`; the scheduler never
+invents a faction or NPC definition outside that data asset.
+
+Do not point the force at a normal guard definition whose class derives only from
+`ATerritoryGuardCharacter`; runtime evaluation cancels that record as
+`ConfigurationInvalid`. Use a separate assault NPC definition even when it reuses the
+same Narrative character definition, activity configuration, TriggerSets, equipment,
+and visual data. The reference project uses
+`/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault`, whose `NPCClassPath` is
+`/Script/TerritoryFramework.TerritoryAssaultCharacter`.
+
+### Setting Approach ID
+
+`ApproachID` is not stored in the counterattack profile. It belongs to each placed
+Territory actor:
+
+1. Select the capturable Property/District actor in the level.
+2. Open **Territory > Counter Attack > Counter Attack Approaches**.
+3. Add an element and set **Approach ID** to a stable, unique FName such as
+   `Blacksmith_WestRoad` (no display text or localization).
+4. Set its type, relative spawn transform, per-wave limit, and Enabled flag.
+5. Build navigation and verify both the approach position and Territory center project
+   to navigation with a full, non-partial path between them.
+
+New blank entries are editor-filled with a type/index ID such as `Road_01`. Rename that
+ID to a meaningful stable value before shipping; never rename it after saves can contain
+scheduled assault records. The transform is relative to the Territory actor, so actor
+scale and rotation affect the final world position. A valid ID with an invalid route is
+still rejected as `InvalidApproachOrRoute`.
+
+The editor validator rejects invalid stable GUIDs, duplicate faction definitions,
+incompatible Narrative NPC classes, non-positive military power, invalid force/wave
+counts, duplicate approach IDs, and territories with no enabled approach. Runtime
+scheduling revalidates authority, world, state, faction, profile, NPC class, diplomacy,
+route, and global budgets.
 
 ## Narrative Pro reuse
 
 Physical attackers are `ANarrativeNPCCharacter` instances configured through the public Narrative APIs:
 
 - `UNPCDefinition` and `FNPCSpawnInfo`
-- optional `UNPCActivityConfiguration`
+- optional `UNPCActivityConfiguration` (combat/patrol configuration may be reused)
 - optional `UTriggerSet` overrides
 - `UNPCActivityComponent`
 - `UTerritoryAssaultGoal`, derived from `UNPCGoalItem`
@@ -43,6 +82,12 @@ Physical attackers are `ANarrativeNPCCharacter` instances configured through the
 - Narrative factions, ASC death delegate, navigation, and save clock
 
 Spawn information, exact faction, activity configuration, and TriggerSets are filled before `SetNPCDefinition`. The assault activity is interruptible, so Narrative combat can take priority and the movement goal can resume afterward. TerritoryFramework does not add a competing AI controller or custom assault Behavior Tree.
+
+`UTerritoryAssaultParticipantComponent` adds the native `UTerritoryAssaultActivity` to
+the spawned Narrative activity component when it is missing, then adds one finite
+`UTerritoryAssaultGoal`. The assigned activity configuration therefore does not need a
+separate hardcoded assault entry, but it must remain compatible with Narrative's normal
+combat interruption/rescoring.
 
 ## Evaluation inputs
 
@@ -53,7 +98,20 @@ The deterministic calculator consumes:
 - attacker military power, economy readiness, and supply readiness;
 - district strategic value and recent faction momentum.
 
-For the same campaign seed, stable territory GUID, attacking faction, and evaluation cycle, the decision seed is stable. The evaluated result and decision roll are stored in `FTerritoryAssaultRecord`, so save/load does not reroll it.
+Defence cascades without changing capture authority. For a Property target, evaluation
+includes the target, its owning District, and loaded same-owner sibling Properties. For
+a District target, it includes the District and loaded same-owner child Properties.
+Counts, weighted guard quality, fortification, allied support, and strategic value are
+accumulated once. The physical force still attacks one `ATerritoryVolume` and must
+complete that volume's existing capture flow.
+
+After diplomacy and admission gates, `UnguardedLaunchProbability` owns the launch
+policy when the complete local cascade has zero active guards. Its default is `1.0`, so
+an empty front certainly launches after grace. This is not an ownership roll:
+approach/navigation, player proximity, finite physical NPCs, combat casualties,
+defender validation, and normal capture completion remain mandatory.
+
+For the same campaign seed, stable territory GUID, attacking faction, and evaluation cycle, the decision seed is stable. The evaluated result and decision roll are stored in `FTerritoryAssaultRecord`, so save/load does not reroll it. `ATerritoryWorldState` also saves a server-only `FTerritoryAssaultCycleRecord` high-water ledger. Bounded terminal-history trimming therefore cannot reuse an old evaluation cycle or decision seed.
 
 Defence invariants are enforced by tests:
 
@@ -79,6 +137,13 @@ PlannedForce = AliveForce + PendingReserveForce + KilledForce + WithdrawnForce
 
 Waves consume `PendingReserveForce`; no death can replenish it. Each participant reports death or withdrawal exactly once. Death immediately unregisters capture pressure and releases the CombatDirector slot. When alive plus pending force reaches zero, the assault resolves `Defeated` and the existing capture subsystem performs its normal progress decay/reset.
 
+If an activated wave has a valid budget but spawns zero physical NPCs (for example,
+every approach is collision-blocked), the durable `ConsecutiveSpawnFailures` count
+increments. Any successful spawn resets it. At the profile's bounded
+`MaxConsecutiveSpawnFailures` threshold (default 5), the record cancels with
+`SpawnFailed` instead of retrying forever. A temporarily exhausted global NPC budget
+does not count as a deployment failure.
+
 Global limits are configured in Project Settings:
 
 | Setting | Default |
@@ -92,17 +157,25 @@ Global limits are configured in Project Settings:
 
 `FTerritoryAssaultApproach::MaxWaveSize` also limits how many attackers one approach may contribute to a wave.
 
+`IsAssaultActive` means the physical `Active` state only.
+`IsAssaultPendingOrActive` includes grace, evaluation, warning, proximity waiting, and
+physical activation. Use the latter for strategic queue UI.
+
 ## Diplomacy and resolution
 
-Alliance, trade agreement, non-aggression, ceasefire, and Narrative Friendly policy block or cancel an assault. War and supported neutral/hostile policy allow it. Ownership change to the attacking faction resolves success; ownership change to a third faction cancels it. Locking the active target cancels it.
+Alliance, trade agreement, non-aggression, ceasefire, and Narrative Friendly policy block scheduling or cancel an existing assault. War and supported neutral/hostile policy allow it. Ownership change to the attacking faction resolves success; ownership change to a third faction cancels it. A locked/unclaimed target or a removed/incompatible profile/force cancels every non-terminal phase instead of leaving a warning or active record stranded.
+
+The diplomacy gate runs before strongest-faction scoring and is rechecked in every
+non-terminal phase. Military power cannot override a treaty or Friendly Narrative
+attitude.
 
 No counterattack code calls `SetOwningFaction` or produces offscreen capture progress.
 
 ## Save, World Partition, and late join
 
-`ATerritoryWorldState` saves and replicates `FTerritoryAssaultRecord` values only: IDs, tags, counts, timing, probabilities, approaches, state, and resolution. Live pawn/controller/UObject pointers are never campaign state.
+`ATerritoryWorldState` saves and replicates `FTerritoryAssaultRecord` values: IDs, tags, counts, timing, probabilities, approaches, state, and resolution. It additionally saves—but does not replicate—the scheduler's `FTerritoryAssaultCycleRecord` high-water ledger. Live pawn/controller/UObject pointers are never campaign state.
 
-On authoritative load, saved live survivors become pending finite force; killed and withdrawn counts remain consumed. An unloaded World Partition territory is resolved first by stable GUID, then by tag, and the record waits for registry registration. Client RepNotify hydrates the local counterattack read model for UI and late join.
+On authoritative load, saved live survivors become pending finite force; killed and withdrawn counts remain consumed. Evaluation-cycle high-water marks are restored independently of the bounded assault history; a pre-ledger save reconstructs the best available marks from its retained records. An unloaded World Partition territory is resolved first by stable GUID, then by tag, and the record waits for registry registration. Client RepNotify hydrates the local counterattack read model for UI and late join.
 
 Offscreen simulation is intentionally disabled. A future implementation must use multiple saved attrition rounds, not a hidden ownership roll.
 
@@ -111,6 +184,7 @@ Offscreen simulation is intentionally disabled. A future implementation must use
 Server mutations:
 
 - `ScheduleCounterAttack(Territory, AttackingFaction)`
+- `ScheduleBestCounterAttack(Territory, PreferredFaction)`
 - `CancelAssault(AssaultID, Reason)`
 
 Queries:
@@ -120,5 +194,6 @@ Queries:
 - `GetAssaultsForTerritory`
 - `IsAssaultActive`
 - `GetAssaultDebugString`
+- `GetBestEligibleAttackerPreview` (planning only; reserves no cycle and makes no roll)
 
 Bind `UTerritoryPlayerManagementComponent::OnAssaultNotification` for targeted UI warnings. `GetAssaultDebugString` reports target/attacking/defending factions, guard counts, reserve, attacker and defence power, ratio, strategic value, priority, launch/success probability, finite force counts, approaches, notification state, grace time, roll, state, and reason.

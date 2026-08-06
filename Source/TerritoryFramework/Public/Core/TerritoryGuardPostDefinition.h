@@ -77,10 +77,12 @@ public:
 
 	// ─── Capacity & Reserves ───
 
-	/** Maximum guards this post can emit concurrently. Typical: 2-5. */
+	/** Legacy serialized value. Active capacity is always one guard per spawn-point actor. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Capacity",
-		meta = (ClampMin = "1", UIMin = "1", UIMax = "20"))
-	int32 MaxGuards = 3;
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "Ignored. Add more spawn-point actors to increase active capacity.",
+			ClampMin = "1", UIMin = "1", UIMax = "1"))
+	int32 MaxGuards = 1;
 
 	/** Number of reserve guards that spawn on demand when active guards die. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Capacity",

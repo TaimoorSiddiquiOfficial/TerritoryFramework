@@ -23,6 +23,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "DrawDebugHelpers.h"
 #include "NavigationSystem.h"
 #include "Navigation/TerritoryNavigationMarkerComponent.h"
@@ -113,6 +114,7 @@ void ATerritoryVolume::BeginPlay()
 			OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
 			OwnershipData.PeriodicIncome = InitialPeriodicIncome;
 			OwnershipData.GuardCost = InitialGuardCost;
+			OwnershipData.GuardRecruitmentCost = InitialGuardRecruitmentCost;
 			OwnershipData.DesiredGuardCount = FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount());
 
 			if (InitialOwningFaction.IsValid())
@@ -132,6 +134,7 @@ void ATerritoryVolume::BeginPlay()
 			OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
 			OwnershipData.PeriodicIncome = InitialPeriodicIncome;
 			OwnershipData.GuardCost = InitialGuardCost;
+			OwnershipData.GuardRecruitmentCost = InitialGuardRecruitmentCost;
 			if (OwnershipData.DesiredGuardCount < 0)
 			{
 				OwnershipData.DesiredGuardCount = FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount());
@@ -158,6 +161,7 @@ void ATerritoryVolume::BeginPlay()
 			ReconcileGuardsAfterLoad();
 			bGuardsReconciled = true;
 		}
+		RefreshGarrisonSnapshot();
 	}
 
 	// Fire BP-exposed initialization event (only reached if registration succeeded)
@@ -289,6 +293,7 @@ void ATerritoryVolume::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(ATerritoryVolume, OwnershipData);
+	DOREPLIFETIME(ATerritoryVolume, GarrisonSnapshot);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -342,6 +347,44 @@ void ATerritoryVolume::PostEditChangeProperty(FPropertyChangedEvent& PropertyCha
 		TerritoryGUID = FGuid::NewGuid();
 		UE_LOG(LogTerritory, Log, TEXT("Generated editor-stable GUID for %s: %s"),
 			*GetName(), *TerritoryGUID.ToString());
+	}
+	EnsureCounterAttackApproachIDs();
+}
+
+void ATerritoryVolume::EnsureCounterAttackApproachIDs()
+{
+	TSet<FName> UsedIDs;
+	for (const FTerritoryAssaultApproach& Approach : CounterAttackApproaches)
+	{
+		if (!Approach.ApproachID.IsNone()) UsedIDs.Add(Approach.ApproachID);
+	}
+
+	bool bChanged = false;
+	for (int32 Index = 0; Index < CounterAttackApproaches.Num(); ++Index)
+	{
+		FTerritoryAssaultApproach& Approach = CounterAttackApproaches[Index];
+		if (!Approach.ApproachID.IsNone()) continue;
+
+		const UEnum* ApproachTypeEnum = StaticEnum<ETerritoryAttackApproachType>();
+		const FString TypeName = ApproachTypeEnum
+			? ApproachTypeEnum->GetNameStringByValue(static_cast<int64>(Approach.Type))
+			: TEXT("Approach");
+		int32 Suffix = Index + 1;
+		FName Candidate;
+		do
+		{
+			Candidate = FName(*FString::Printf(TEXT("%s_%02d"), *TypeName, Suffix++));
+		}
+		while (UsedIDs.Contains(Candidate));
+
+		Approach.ApproachID = Candidate;
+		UsedIDs.Add(Candidate);
+		bChanged = true;
+	}
+	if (bChanged)
+	{
+		MarkPackageDirty();
+		UE_LOG(LogTerritory, Log, TEXT("Generated stable counterattack Approach IDs for %s"), *GetPathName());
 	}
 }
 
@@ -470,6 +513,12 @@ void ATerritoryVolume::ReconcileGuardsAfterLoad()
 	// Sync RepNotify cache
 	PreviousOwningFaction = OwnershipData.OwningFaction;
 	PreviousState = OwnershipData.State;
+	RefreshGarrisonSnapshot();
+}
+
+void ATerritoryVolume::OnRep_GarrisonSnapshot()
+{
+	OnGarrisonChanged.Broadcast(this, GarrisonSnapshot);
 }
 
 int32 ATerritoryVolume::CalculateGuardRestoreCount(bool bWasLoadedFromSave,
@@ -539,21 +588,87 @@ int32 ATerritoryVolume::GetGuardCost() const { return OwnershipData.GuardCost; }
 
 int32 ATerritoryVolume::GetMaxGuardCount() const
 {
-	const TArray<ATerritoryGuardSpawnPoint*> AuthoredSpawnPoints = GetGuardSpawnPoints();
-	if (!AuthoredSpawnPoints.IsEmpty())
+	if (!HasAuthority())
 	{
-		int32 Capacity = 0;
-		for (const ATerritoryGuardSpawnPoint* SpawnPoint : AuthoredSpawnPoints)
-		{
-			if (SpawnPoint)
-			{
-				Capacity = FMath::Max(0, Capacity + FMath::Max(0, SpawnPoint->GetEffectiveMaxGuards()));
-			}
-		}
-		return Capacity;
+		return FMath::Max(0, GarrisonSnapshot.MaximumGuards);
 	}
 
-	return FMath::Max(GuardSpawnCount, MaxGuardCount);
+	const TArray<ATerritoryGuardSpawnPoint*> AuthoredSpawnPoints = GetGuardSpawnPoints();
+	return AuthoredSpawnPoints.Num();
+}
+
+int32 ATerritoryVolume::GetPostCaptureGuardCount(
+	const FTerritoryTransitionContext& TransitionContext) const
+
+{
+	return GetPostCaptureGuardCountForOwner(
+		TransitionContext, TransitionContext.RequestingFaction);
+}
+
+int32 ATerritoryVolume::GetPostCaptureGuardCountForOwner(
+	const FTerritoryTransitionContext& TransitionContext, const FGameplayTag& NewOwner) const
+{
+	const int32 ConfiguredCount = FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount());
+	switch (PostCaptureGarrisonPolicy)
+	{
+	case ETerritoryPostCaptureGarrisonPolicy::AlwaysUnstaffed:
+		return 0;
+	case ETerritoryPostCaptureGarrisonPolicy::PlayerChooses:
+	{
+		const APlayerController* PlayerController = TransitionContext.PlayerController;
+		auto HasExactNarrativeFaction = [&NewOwner](const AActor* Actor)
+		{
+			const INarrativeTeamAgentInterface* TeamAgent =
+				Cast<INarrativeTeamAgentInterface>(Actor);
+			return TeamAgent && NewOwner.IsValid()
+				&& TeamAgent->GetFactions().HasTagExact(NewOwner);
+		};
+		const bool bPlayerOwnsNewFaction = PlayerController
+			&& (HasExactNarrativeFaction(PlayerController)
+				|| HasExactNarrativeFaction(TransitionContext.TargetPawn)
+				|| HasExactNarrativeFaction(PlayerController->GetPawn())
+				|| HasExactNarrativeFaction(PlayerController->GetPlayerState<APlayerState>()));
+		const bool bRequestMatchesOwner = !TransitionContext.RequestingFaction.IsValid()
+			|| TransitionContext.RequestingFaction == NewOwner;
+
+		// Hierarchy reducers and legacy Blueprint capture nodes can legitimately lose the
+		// original pawn/controller while preserving the authoritative NewOwner. Recover the
+		// player-owned-faction fact from every live controller, never from a first-player guess.
+		// Exact Narrative membership prevents a parent tag from suppressing an unrelated AI
+		// garrison. This makes PlayerChooses durable across Property -> District -> City cascades.
+		bool bLivePlayerOwnsNewFaction = false;
+		if (NewOwner.IsValid())
+		{
+			if (const UWorld* World = GetWorld())
+			{
+				for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+				{
+					const APlayerController* LiveController = It->Get();
+					if (LiveController
+						&& (HasExactNarrativeFaction(LiveController)
+							|| HasExactNarrativeFaction(LiveController->GetPawn())
+							|| HasExactNarrativeFaction(LiveController->GetPlayerState<APlayerState>())))
+					{
+						bLivePlayerOwnsNewFaction = true;
+						break;
+					}
+				}
+			}
+		}
+		return ((bPlayerOwnsNewFaction && bRequestMatchesOwner) || bLivePlayerOwnsNewFaction)
+			? 0 : ConfiguredCount;
+	}
+	case ETerritoryPostCaptureGarrisonPolicy::ConfiguredForEveryOwner:
+	default:
+		return ConfiguredCount;
+	}
+}
+
+int32 ATerritoryVolume::GetGuardRecruitmentCost(int32 Count) const
+{
+	const int64 SafeCost = static_cast<int64>(FMath::Max(0, Count))
+		* FMath::Max(0, OwnershipData.GuardRecruitmentCost);
+	return SafeCost > MAX_int32 ? MAX_int32 : static_cast<int32>(SafeCost);
 }
 
 bool ATerritoryVolume::IsOwnedByFaction(const FGameplayTag& Faction) const
@@ -605,6 +720,12 @@ ETerritoryControlMode ATerritoryVolume::GetControlMode() const
 
 void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 {
+	SetOwningFactionWithContext(NewFaction, FTerritoryTransitionContext());
+}
+
+void ATerritoryVolume::SetOwningFactionWithContext(const FGameplayTag& NewFaction,
+	const FTerritoryTransitionContext& TransitionContext)
+{
 	// P0-04: Thin wrapper — delegate to CommitOwnershipData for single authoritative path
 	if (!HasAuthority() || bTransitionInProgress
 		|| (ControlMode == ETerritoryControlMode::AggregateOnly && !bApplyingDerivedOwnership)) return;
@@ -621,33 +742,45 @@ void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
 	Candidate.ContestingFaction = FGameplayTag();
 	Candidate.ControlProgress = NewFaction.IsValid() ? 1.f : 0.f;
 	Candidate.DesiredGuardCount = NewFaction.IsValid()
-		? FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount())
+		? GetPostCaptureGuardCountForOwner(TransitionContext, NewFaction)
 		: 0;
 	if (NewState != ETerritoryState::Locked)
 	{
 		Candidate.LockReason = FText();
 	}
 
-	CommitOwnershipData(Candidate);
+	CommitOwnershipData(Candidate, TransitionContext);
 }
 
 void ATerritoryVolume::SetDerivedOwningFaction(const FGameplayTag& NewFaction)
 {
+	SetDerivedOwningFaction(NewFaction, FTerritoryTransitionContext());
+}
+
+void ATerritoryVolume::SetDerivedOwningFaction(const FGameplayTag& NewFaction,
+	const FTerritoryTransitionContext& TransitionContext)
+{
 	if (!HasAuthority()) return;
 	const bool bWasApplyingDerivedOwnership = bApplyingDerivedOwnership;
 	bApplyingDerivedOwnership = true;
-	SetOwningFaction(NewFaction);
+	SetOwningFactionWithContext(NewFaction, TransitionContext);
 	bApplyingDerivedOwnership = bWasApplyingDerivedOwnership;
 }
 
 void ATerritoryVolume::ForceSetOwningFaction(const FGameplayTag& NewFaction)
+{
+	ForceSetOwningFactionWithContext(NewFaction, FTerritoryTransitionContext());
+}
+
+void ATerritoryVolume::ForceSetOwningFactionWithContext(const FGameplayTag& NewFaction,
+	const FTerritoryTransitionContext& TransitionContext)
 {
 	if (!HasAuthority()) return;
 	const bool bWasBypassing = bBypassTransitionConditions;
 	const bool bWasApplyingDerivedOwnership = bApplyingDerivedOwnership;
 	bBypassTransitionConditions = true;
 	bApplyingDerivedOwnership = true;
-	SetOwningFaction(NewFaction);
+	SetOwningFactionWithContext(NewFaction, TransitionContext);
 	bBypassTransitionConditions = bWasBypassing;
 	bApplyingDerivedOwnership = bWasApplyingDerivedOwnership;
 }
@@ -668,6 +801,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		&& OwnershipData.DesiredGuardCount == NewData.DesiredGuardCount
 		&& OwnershipData.PeriodicIncome == NewData.PeriodicIncome
 		&& OwnershipData.GuardCost == NewData.GuardCost
+		&& OwnershipData.GuardRecruitmentCost == NewData.GuardRecruitmentCost
 		&& OwnershipData.MaxConcurrentAttackers == NewData.MaxConcurrentAttackers
 		&& OwnershipData.DefenderCount == NewData.DefenderCount
 		&& OwnershipData.LockReason.EqualTo(NewData.LockReason))
@@ -676,6 +810,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	}
 
 	bTransitionInProgress = true;
+	ActiveTransitionContext = TransitionContext;
 
 	// Cache previous values for RepNotify diff
 	PreviousOwningFaction = OldOwner;
@@ -769,6 +904,9 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		}
 	}
 
+	RefreshGarrisonSnapshot();
+	ForceNetUpdate();
+	ActiveTransitionContext = FTerritoryTransitionContext();
 	bTransitionInProgress = false;
 	return true;
 }
@@ -1119,6 +1257,7 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySyst
 			}
 		}
 	}
+	RefreshGarrisonSnapshot();
 
 	// Determine the killer from the guard's tracked last damaging instigator.
 	// This is populated by ATerritoryGuardCharacter::TakeDamage.
@@ -1183,6 +1322,60 @@ bool ATerritoryVolume::HasPendingReserveDeployments() const
 		}
 	}
 	return false;
+}
+
+void ATerritoryVolume::CancelPendingReserveDeployments()
+{
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+	{
+		if (SpawnPoint)
+		{
+			SpawnPoint->CancelPendingReserveSpawns();
+		}
+	}
+	RefreshGarrisonSnapshot();
+}
+
+void ATerritoryVolume::RefreshGarrisonSnapshot()
+{
+	if (!HasAuthority() || bGarrisonMutationInProgress)
+	{
+		return;
+	}
+
+	FTerritoryGarrisonSnapshot NewSnapshot;
+	NewSnapshot.ActiveGuards = GetSpawnedGuardCount();
+	NewSnapshot.DesiredGuards = GetDesiredGuardCount();
+	NewSnapshot.MaximumGuards = GetMaxGuardCount();
+	for (const ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+	{
+		if (!SpawnPoint) continue;
+		NewSnapshot.ReserveGuards += SpawnPoint->GetReserveCount();
+		NewSnapshot.PendingDeployments += SpawnPoint->GetPendingReserveCount();
+	}
+
+	if (NewSnapshot != GarrisonSnapshot)
+	{
+		GarrisonSnapshot = NewSnapshot;
+		OnGarrisonChanged.Broadcast(this, GarrisonSnapshot);
+		ForceNetUpdate();
+	}
+}
+
+void ATerritoryVolume::RemoveGuardWithoutReplacement(ATerritoryGuardCharacter* Guard)
+{
+	if (!Guard) return;
+	if (ATerritoryGuardSpawnPoint* SpawnPoint = Guard->OwningTerritorySpawnPoint)
+	{
+		SpawnPoint->UnregisterGuard(Guard, EGuardRemovalReason::ManualRemoval);
+	}
+	UnbindDefenderDeath(Guard);
+	RegisteredDefenders.Remove(Guard);
+	SpawnedGuards.RemoveAllSwap([Guard](const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr)
+	{
+		return GuardPtr.Get() == Guard;
+	});
+	Guard->Destroy();
 }
 
 void ATerritoryVolume::CheckBoundsForReindex()
@@ -1298,34 +1491,10 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 	bSpawningGuards = true;
 	struct FScopeGuard { bool& Ref; ~FScopeGuard() { Ref = false; } } GuardRef{bSpawningGuards};
 
-	// P0-07: Resolve territory-level default definition.
-	// Per-guard overrides (inline > GuardPostDefinition) are resolved inside the loop.
-	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
-	UNPCDefinition* DefaultDef = ResolveGuardDefinition(OwnerFaction);
-	if (!DefaultDef) return;
-
-	UWorld* World = GetWorld();
-	if (!World) return;
-
+	const FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+	if (!OwnerFaction.IsValid() || !ResolveGuardDefinition(OwnerFaction) || !GetWorld()) return;
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugGuards();
-
-	// Default NPC class from territory definition
-	UClass* DefaultNPCClass = DefaultDef->NPCClassPath.LoadSynchronous();
-	if (!DefaultNPCClass || !DefaultNPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
-	{
-		UE_LOG(LogTerritory, Warning, TEXT("SpawnGuards: NPCDefinition '%s' class '%s' is not a TerritoryGuardCharacter — falling back to base class"),
-			*GetNameSafe(DefaultDef),
-			DefaultNPCClass ? *DefaultNPCClass->GetName() : TEXT("null"));
-		DefaultNPCClass = ATerritoryGuardCharacter::StaticClass();
-	}
-
-	if (!OwnerFaction.IsValid())
-	{
-		UE_LOG(LogTerritory, Warning, TEXT("SpawnGuards: territory %s has no OwningFaction, skipping"),
-			*GetTerritoryTag().ToString());
-		return;
-	}
 
 	const int32 TargetGuardCount = FMath::Clamp(RequestedGuardCount, 0, GetMaxGuardCount());
 	const int32 ExistingGuardCount = GetSpawnedGuardCount();
@@ -1334,13 +1503,21 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 		return;
 	}
 
-	// Resolve GuardSpawnPoints. Authored points define both placement and capacity.
+	// The unique spawn-point union defines both placement and capacity: one point,
+	// one active guard. There is deliberately no random fallback.
 	TArray<ATerritoryGuardSpawnPoint*> SpawnPointActors = GetGuardSpawnPoints();
-	// Sort by priority (higher = fills first)
 	SpawnPointActors.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
 	{
 		return A.Priority > B.Priority;
 	});
+	if (SpawnPointActors.IsEmpty())
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("SpawnGuards: %s has no authored guard spawn points; capacity is zero"),
+			*GetTerritoryTag().ToString());
+		return;
+	}
+
 	if (ExistingGuardCount == 0)
 	{
 		for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPointActors)
@@ -1351,8 +1528,6 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 			}
 		}
 	}
-	int32 NextSPIdx = 0;
-
 	if (bDebug)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("SpawnGuards: %s spawning %d guards, faction=%s, spawn points=%d"),
@@ -1360,108 +1535,27 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 			SpawnPointActors.Num());
 	}
 
-	const int32 GuardsToSpawn = TargetGuardCount - ExistingGuardCount;
-	const TArray<TSoftObjectPtr<UTriggerSet>> DefaultTriggerSets;
-	for (int32 i = 0; i < GuardsToSpawn; ++i)
+	while (GetSpawnedGuardCount() < TargetGuardCount)
 	{
-		FTransform SpawnTransform;
-		ATerritoryGuardSpawnPoint* UsedSP = nullptr;
-
-		// Use GuardSpawnPoints if available, otherwise random within bounds
-		if (SpawnPointActors.Num() > 0)
+		bool bSpawnedAtAuthoredPoint = false;
+		for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPointActors)
 		{
-			// Find next available spawn point — active slots only, NOT reserves
-			for (int32 j = 0; j < SpawnPointActors.Num(); ++j)
+			if (SpawnPoint && SpawnPoint->HasAvailableSlot()
+				&& TrySpawnSingleGuard(SpawnPoint, false))
 			{
-				ATerritoryGuardSpawnPoint* SP = SpawnPointActors[(NextSPIdx + j) % SpawnPointActors.Num()];
-				if (SP->HasAvailableSlot())
-				{
-					UsedSP = SP;
-					SpawnTransform = SP->GetSpawnTransform();
-					NextSPIdx += j + 1;
-					break;
-				}
-			}
-			// Authored points are authoritative. Do not bypass their capacity with
-			// a random overflow spawn.
-			if (!UsedSP)
-			{
-				UE_LOG(LogTerritory, Warning,
-					TEXT("SpawnGuards: all authored spawn point slots are full for %s (%d/%d guards spawned)"),
-					*GetTerritoryTag().ToString(), ExistingGuardCount + i, TargetGuardCount);
+				bSpawnedAtAuthoredPoint = true;
 				break;
 			}
 		}
-		else
+		if (!bSpawnedAtAuthoredPoint)
 		{
-			SpawnTransform = FTransform(FRotator(0, FMath::FRandRange(0.f, 360.f), 0), GetRandomSpawnPoint());
-		}
-
-		// P0-07: Resolve per-guard narrative overrides using unified cascade
-		UNPCDefinition* EffectiveDef = DefaultDef;
-		UClass* EffectiveNPCClass = DefaultNPCClass;
-		UNPCActivityConfiguration* ActivityConfig = nullptr;
-		const TArray<TSoftObjectPtr<UTriggerSet>>* TriggerSetsPtr = &DefaultTriggerSets;
-		ResolveSpawnPointNarrativeOverrides(UsedSP, EffectiveDef, EffectiveNPCClass, ActivityConfig, TriggerSetsPtr, DefaultTriggerSets);
-
-		// Deferred spawning for save system GUID safety
-		ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
-			UGameplayStatics::BeginDeferredActorSpawnFromClass(
-				this, EffectiveNPCClass, SpawnTransform,
-				ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn,
-				this));
-
-		if (!Guard)
-		{
-			UE_LOG(LogTerritory, Warning, TEXT("Failed deferred spawn guard %d/%d of %s"),
-				i + 1, TargetGuardCount, *GetTerritoryTag().ToString());
-			continue;
-		}
-
-		FGuid GuardSaveGUID = FGuid::NewGuid();
-
-		// Determine effective faction: spawn point override > territory owner
-		FGameplayTag EffectiveFaction = OwnerFaction;
-		if (UsedSP && UsedSP->GetEffectiveFactionOverride().IsValid())
-		{
-			EffectiveFaction = UsedSP->GetEffectiveFactionOverride();
-		}
-
-		// Single deterministic entrypoint — fills ALL SpawnInfo fields
-		Guard->ConfigureTerritorySpawn(
-			EffectiveDef,
-			EffectiveFaction,
-			TerritoryGUID,
-			GuardSaveGUID,
-			SpawnTransform,
-			UsedSP ? UsedSP->GetFName() : NAME_None,
-			ActivityConfig,
-			*TriggerSetsPtr);
-
-		// Set territory AI context before FinishSpawningActor
-		Guard->OwningTerritory = this;
-		Guard->OwningTerritorySpawnPoint = UsedSP;
-
-		UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
-
-		SpawnedGuards.Add(Guard);
-		RegisterDefender(Guard);
-
-		if (UsedSP)
-		{
-			UsedSP->RegisterSpawnedGuard(Guard);
-		}
-
-		if (bDebug)
-		{
-			UE_LOG(LogTerritory, Log, TEXT("  Guard %d/%d spawned for %s (faction=%s, GUID=%s, SP=%s)"),
-				ExistingGuardCount + i + 1, TargetGuardCount,
-				*GetTerritoryTag().ToString(),
-				*EffectiveFaction.ToString(),
-				*GuardSaveGUID.ToString(),
-				UsedSP ? *UsedSP->GetName() : TEXT("random"));
+			UE_LOG(LogTerritory, Warning,
+				TEXT("SpawnGuards: %s has no free collision-safe authored slot (%d/%d active)"),
+				*GetTerritoryTag().ToString(), GetSpawnedGuardCount(), TargetGuardCount);
+			break;
 		}
 	}
+	RefreshGarrisonSnapshot();
 }
 
 void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
@@ -1484,12 +1578,8 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	if (GetSpawnedGuardCount() >= GetMaxGuardCount()) return false;
 
 	const TArray<ATerritoryGuardSpawnPoint*> AuthoredSpawnPoints = GetGuardSpawnPoints();
-	if (!SpawnPoint && !AuthoredSpawnPoints.IsEmpty())
-	{
-		return false;
-	}
-	if (SpawnPoint && (!AuthoredSpawnPoints.Contains(SpawnPoint)
-		|| SpawnPoint->GetOwningTerritory() != this || !SpawnPoint->HasAvailableSlot()))
+	if (!SpawnPoint || !AuthoredSpawnPoints.Contains(SpawnPoint)
+		|| SpawnPoint->GetOwningTerritory() != this || !SpawnPoint->HasAvailableSlot())
 	{
 		return false;
 	}
@@ -1518,7 +1608,7 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
 		UGameplayStatics::BeginDeferredActorSpawnFromClass(
 			this, NPCClass, SpawnTransform,
-			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding,
+			ESpawnActorCollisionHandlingMethod::DontSpawnIfColliding,
 			this));
 
 	if (!Guard) return false;
@@ -1561,6 +1651,7 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	{
 		SpawnPoint->RegisterSpawnedGuard(Guard);
 	}
+	RefreshGarrisonSnapshot();
 
 	UE_LOG(LogTerritory, Log, TEXT("[GuardReserve] 1 replacement spawned at %s for %s (faction=%s)"),
 		SpawnPoint ? *SpawnPoint->GetName() : TEXT("random"),
@@ -1574,13 +1665,19 @@ bool ATerritoryVolume::FindGuardSpawnTransform(ATerritoryGuardSpawnPoint* SpawnP
 {
 	if (!SpawnPoint)
 	{
-		OutTransform = FTransform(FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f), GetRandomSpawnPoint());
-		return true;
+		return false;
 	}
 
 	if (!bRequireConcealment)
 	{
-		OutTransform = SpawnPoint->GetSpawnTransform();
+		if (!SpawnPoint->ResolveGuardDeploymentTransform(GuardClass, OutTransform)
+			|| !IsGuardSpawnLocationClear(GuardClass, OutTransform.GetLocation()))
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("Guard spawn point %s is blocked at its authored location; no relocation was attempted"),
+				*SpawnPoint->GetPathName());
+			return false;
+		}
 		return true;
 	}
 
@@ -1711,16 +1808,67 @@ bool ATerritoryVolume::IsGuardSpawnLocationClear(UClass* GuardClass, const FVect
 
 int32 ATerritoryVolume::GetGuardPurchaseCost(int32 Count) const
 {
-	const int64 SafeCost = static_cast<int64>(FMath::Max(0, Count)) * FMath::Max(0, OwnershipData.GuardCost);
-	return SafeCost > MAX_int32 ? MAX_int32 : static_cast<int32>(SafeCost);
+	return GetGuardRecruitmentCost(Count);
 }
 
 bool ATerritoryVolume::CanPurchaseGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const
 {
-	OutFailureReason = FText::GetEmpty();
-	if (!Requester || Count <= 0 || GetGuardPurchaseCost(Count) == MAX_int32)
+	if (Count <= 0 || Count > GetMaxGuardCount() - GetDesiredGuardCount())
 	{
-		OutFailureReason = FText::FromString(TEXT("Invalid requester or guard count."));
+		OutFailureReason = FText::FromString(TEXT("The requested guard increase exceeds capacity."));
+		return false;
+	}
+	int32 RecruitmentCost = 0;
+	return CanSetDesiredGuardCount(Requester, GetDesiredGuardCount() + Count,
+		OutFailureReason, RecruitmentCost);
+}
+
+bool ATerritoryVolume::TryPurchaseGuards(AActor* Requester, int32 Count, FText& OutResult)
+{
+	if (Count <= 0 || Count > GetMaxGuardCount() - GetDesiredGuardCount())
+	{
+		OutResult = FText::FromString(TEXT("The requested guard increase exceeds capacity."));
+		return false;
+	}
+	const FTerritoryGarrisonMutationResult Result =
+		TrySetDesiredGuardCount(Requester, GetDesiredGuardCount() + Count);
+	OutResult = Result.Message;
+	return Result.bSuccess;
+}
+
+bool ATerritoryVolume::CanRemoveGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const
+{
+	if (Count <= 0 || Count > GetDesiredGuardCount())
+	{
+		OutFailureReason = FText::FromString(TEXT("The garrison target cannot be reduced by that amount."));
+		return false;
+	}
+	int32 RecruitmentCost = 0;
+	return CanSetDesiredGuardCount(Requester, GetDesiredGuardCount() - Count,
+		OutFailureReason, RecruitmentCost);
+}
+
+bool ATerritoryVolume::TryRemoveGuards(AActor* Requester, int32 Count, FText& OutResult)
+{
+	if (Count <= 0 || Count > GetDesiredGuardCount())
+	{
+		OutResult = FText::FromString(TEXT("The garrison target cannot be reduced by that amount."));
+		return false;
+	}
+	const FTerritoryGarrisonMutationResult Result =
+		TrySetDesiredGuardCount(Requester, GetDesiredGuardCount() - Count);
+	OutResult = Result.Message;
+	return Result.bSuccess;
+}
+
+bool ATerritoryVolume::CanSetDesiredGuardCount(const AActor* Requester,
+	int32 NewDesiredGuardCount, FText& OutFailureReason, int32& OutRecruitmentCost) const
+{
+	OutFailureReason = FText::GetEmpty();
+	OutRecruitmentCost = 0;
+	if (!Requester || NewDesiredGuardCount < 0 || NewDesiredGuardCount > GetMaxGuardCount())
+	{
+		OutFailureReason = FText::FromString(TEXT("The requested garrison target is invalid."));
 		return false;
 	}
 	if (OwnershipData.State != ETerritoryState::Claimed)
@@ -1728,172 +1876,198 @@ bool ATerritoryVolume::CanPurchaseGuards(const AActor* Requester, int32 Count, F
 		OutFailureReason = FText::FromString(TEXT("The territory must be claimed."));
 		return false;
 	}
-	if (!UTerritoryBlueprintLibrary::IsActorInFaction(this, const_cast<AActor*>(Requester), OwnershipData.OwningFaction))
+	if (!UTerritoryBlueprintLibrary::IsActorInFaction(
+		this, const_cast<AActor*>(Requester), OwnershipData.OwningFaction))
 	{
-		OutFailureReason = FText::FromString(TEXT("Only the owning faction can purchase guards."));
+		OutFailureReason = FText::FromString(TEXT("Only the owning faction can manage this garrison."));
 		return false;
 	}
-	if (!ResolveGuardDefinition(OwnershipData.OwningFaction))
+	if (NewDesiredGuardCount == GetDesiredGuardCount())
+	{
+		OutFailureReason = FText::FromString(TEXT("The garrison already has that staffing target."));
+		return false;
+	}
+	// A missing definition must block new recruitment, but it must never trap the
+	// player at an already-authored/saved target. Reducing a target is valid even
+	// when no guard can currently be spawned (for example after a data migration).
+	if (NewDesiredGuardCount > GetDesiredGuardCount()
+		&& !ResolveGuardDefinition(OwnershipData.OwningFaction))
 	{
 		OutFailureReason = FText::FromString(TEXT("No guard NPC definition is configured for this faction."));
 		return false;
 	}
-	if (GetSpawnedGuardCount() + Count > GetMaxGuardCount())
+
+	const int32 Increase = FMath::Max(0, NewDesiredGuardCount - GetDesiredGuardCount());
+	OutRecruitmentCost = GetGuardRecruitmentCost(Increase);
+	if (OutRecruitmentCost == MAX_int32)
 	{
-		OutFailureReason = FText::FromString(TEXT("The garrison is at maximum capacity."));
+		OutFailureReason = FText::FromString(TEXT("The recruitment cost exceeds the supported currency range."));
 		return false;
 	}
-
-	const UWorld* World = GetWorld();
-	const UTerritoryEconomySubsystem* Economy = World ? World->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
-	if (!Economy || !Economy->CanActorAfford(Requester, GetGuardPurchaseCost(Count)))
+	if (OutRecruitmentCost > 0)
 	{
-		OutFailureReason = FText::FromString(TEXT("Your faction cannot afford this guard purchase."));
-		return false;
+		const UWorld* World = GetWorld();
+		const UTerritoryEconomySubsystem* Economy = World
+			? World->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
+		if (!Economy || !Economy->CanActorAfford(Requester, OutRecruitmentCost))
+		{
+			OutFailureReason = FText::FromString(TEXT("Your Narrative inventory account cannot afford this staffing target."));
+			return false;
+		}
 	}
 	return true;
 }
 
-bool ATerritoryVolume::TryPurchaseGuards(AActor* Requester, int32 Count, FText& OutResult)
+FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
+	AActor* Requester, int32 NewDesiredGuardCount)
 {
-	if (!HasAuthority() || !CanPurchaseGuards(Requester, Count, OutResult))
+	FTerritoryGarrisonMutationResult Result;
+	Result.OldDesiredGuards = GetDesiredGuardCount();
+	Result.NewDesiredGuards = Result.OldDesiredGuards;
+	Result.OldActiveGuards = GetSpawnedGuardCount();
+	Result.NewActiveGuards = Result.OldActiveGuards;
+
+	if (!HasAuthority())
 	{
-		return false;
+		Result.Message = FText::FromString(TEXT("Garrison targets can only be changed by the server."));
+		return Result;
 	}
 
-	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
-	const int32 TotalCost = GetGuardPurchaseCost(Count);
-	const FString PurchaseReason = FString::Printf(TEXT("Purchased %d guard(s) for %s"), Count, *GetTerritoryTag().ToString());
-	if (!Economy || !Economy->TryDebitCurrency(Requester, TotalCost, OwnershipData.OwningFaction, PurchaseReason, ETerritoryTransactionType::Purchase))
+	FText FailureReason;
+	if (!CanSetDesiredGuardCount(Requester, NewDesiredGuardCount,
+		FailureReason, Result.RecruitmentCost))
 	{
-		OutResult = FText::FromString(TEXT("The treasury changed before the purchase completed."));
-		return false;
+		Result.Message = FailureReason;
+		return Result;
 	}
+
+	const int32 Increase = FMath::Max(0, NewDesiredGuardCount - Result.OldDesiredGuards);
+	const int32 GuardsToDeploy = FMath::Min(Increase,
+		FMath::Max(0, NewDesiredGuardCount - Result.OldActiveGuards));
+	const int32 GuardsToWithdraw = FMath::Max(0, Result.OldActiveGuards - NewDesiredGuardCount);
+
+	TArray<ATerritoryGuardCharacter*> WithdrawalPlan;
+	WithdrawalPlan.Reserve(GuardsToWithdraw);
+	for (int32 Index = SpawnedGuards.Num() - 1;
+		Index >= 0 && WithdrawalPlan.Num() < GuardsToWithdraw; --Index)
+	{
+		if (ATerritoryGuardCharacter* Guard = SpawnedGuards[Index].Get())
+		{
+			WithdrawalPlan.Add(Guard);
+		}
+	}
+	if (WithdrawalPlan.Num() != GuardsToWithdraw)
+	{
+		Result.Message = FText::FromString(TEXT("The live garrison changed before the target could be committed."));
+		return Result;
+	}
+
+	UTerritoryEconomySubsystem* Economy = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
+	if (Result.RecruitmentCost > 0)
+	{
+		const FString Reason = FString::Printf(TEXT("Raised garrison target for %s from %d to %d"),
+			*GetTerritoryTag().ToString(), Result.OldDesiredGuards, NewDesiredGuardCount);
+		if (!Economy || !Economy->TryDebitCurrency(Requester, Result.RecruitmentCost,
+			OwnershipData.OwningFaction, Reason, ETerritoryTransactionType::Purchase))
+		{
+			Result.Message = FText::FromString(TEXT("The Narrative inventory balance changed before recruitment committed."));
+			return Result;
+		}
+	}
+
+	TSet<ATerritoryGuardCharacter*> GuardsBeforeDeployment;
+	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
+	{
+		if (GuardPtr.IsValid()) GuardsBeforeDeployment.Add(GuardPtr.Get());
+	}
+	bGarrisonMutationInProgress = true;
 
 	TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
 	SpawnPoints.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
 	{
 		return A.Priority > B.Priority;
 	});
-
-	int32 SpawnedCount = 0;
-	for (int32 Index = 0; Index < Count; ++Index)
+	for (int32 Index = 0; Index < GuardsToDeploy; ++Index)
 	{
-		ATerritoryGuardSpawnPoint* SelectedPoint = nullptr;
+		bool bDeployed = false;
 		for (ATerritoryGuardSpawnPoint* Point : SpawnPoints)
 		{
-			if (Point && Point->HasAvailableSlot())
+			if (Point && Point->HasAvailableSlot()
+				&& TrySpawnSingleGuard(Point, false))
 			{
-				SelectedPoint = Point;
+				++Result.GuardsDeployed;
+				bDeployed = true;
 				break;
 			}
 		}
-
-		if (TrySpawnSingleGuard(SelectedPoint, false))
+		if (!bDeployed)
 		{
-			++SpawnedCount;
+			break;
 		}
 	}
 
-	if (SpawnedCount < Count)
+	if (Result.GuardsDeployed != GuardsToDeploy)
 	{
-		const int32 Refund = GetGuardPurchaseCost(Count - SpawnedCount);
-		Economy->CreditCurrency(Requester, Refund, OwnershipData.OwningFaction,
-			FString::Printf(TEXT("Refunded failed guard spawn for %s"), *GetTerritoryTag().ToString()),
-			ETerritoryTransactionType::Purchase);
-	}
-
-	OwnershipData.DesiredGuardCount = FMath::Max(GetDesiredGuardCount(), GetSpawnedGuardCount());
-	if (UTerritoryEconomySubsystem* UpdatedEconomy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
-	{
-		UpdatedEconomy->RecalculateIncome(OwnershipData.OwningFaction);
-	}
-	OutResult = FText::FromString(FString::Printf(TEXT("Added %d guard(s) to %s."),
-		SpawnedCount, *GetTerritoryDisplayName().ToString()));
-	return SpawnedCount == Count;
-}
-
-bool ATerritoryVolume::CanRemoveGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const
-{
-	OutFailureReason = FText::GetEmpty();
-	if (!Requester || Count <= 0)
-	{
-		OutFailureReason = FText::FromString(TEXT("Invalid requester or guard count."));
-		return false;
-	}
-	if (OwnershipData.State != ETerritoryState::Claimed)
-	{
-		OutFailureReason = FText::FromString(TEXT("The territory must be claimed."));
-		return false;
-	}
-	if (!UTerritoryBlueprintLibrary::IsActorInFaction(this, const_cast<AActor*>(Requester), OwnershipData.OwningFaction))
-	{
-		OutFailureReason = FText::FromString(TEXT("Only the owning faction can remove guards."));
-		return false;
-	}
-	if (GetDesiredGuardCount() < Count || GetSpawnedGuardCount() < Count)
-	{
-		OutFailureReason = FText::FromString(TEXT("The garrison does not have that many active guards available to remove."));
-		return false;
-	}
-	return true;
-}
-
-bool ATerritoryVolume::TryRemoveGuards(AActor* Requester, int32 Count, FText& OutResult)
-{
-	if (!HasAuthority() || !CanRemoveGuards(Requester, Count, OutResult))
-	{
-		return false;
-	}
-
-	// Select the complete mutation set before changing any garrison state. A stale weak
-	// pointer must not turn an otherwise rejected request into a partial removal.
-	TArray<ATerritoryGuardCharacter*> GuardsToRemove;
-	GuardsToRemove.Reserve(Count);
-	for (int32 Index = SpawnedGuards.Num() - 1; Index >= 0 && GuardsToRemove.Num() < Count; --Index)
-	{
-		if (ATerritoryGuardCharacter* Guard = SpawnedGuards[Index].Get())
+		TArray<ATerritoryGuardCharacter*> RollbackGuards;
+		for (const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
 		{
-			GuardsToRemove.Add(Guard);
+			if (GuardPtr.IsValid() && !GuardsBeforeDeployment.Contains(GuardPtr.Get()))
+			{
+				RollbackGuards.Add(GuardPtr.Get());
+			}
 		}
-	}
-
-	if (GuardsToRemove.Num() != Count)
-	{
-		OutResult = FText::FromString(TEXT("The garrison changed before the removal could be committed."));
-		return false;
-	}
-
-	for (ATerritoryGuardCharacter* Guard : GuardsToRemove)
-	{
-		if (ATerritoryGuardSpawnPoint* SpawnPoint = Guard->OwningTerritorySpawnPoint)
+		for (ATerritoryGuardCharacter* Guard : RollbackGuards)
 		{
-			SpawnPoint->UnregisterGuard(Guard, EGuardRemovalReason::ManualRemoval);
+			RemoveGuardWithoutReplacement(Guard);
 		}
-		UnbindDefenderDeath(Guard);
-		RegisteredDefenders.Remove(Guard);
-		SpawnedGuards.RemoveAllSwap([Guard](const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr)
+		if (Economy && Result.RecruitmentCost > 0)
 		{
-			return GuardPtr.Get() == Guard;
-		});
-		Guard->Destroy();
+			Economy->CreditCurrency(Requester, Result.RecruitmentCost, OwnershipData.OwningFaction,
+				FString::Printf(TEXT("Rolled back failed garrison target for %s"), *GetTerritoryTag().ToString()),
+				ETerritoryTransactionType::Purchase);
+		}
+		Result.GuardsDeployed = 0;
+		Result.NewActiveGuards = GetSpawnedGuardCount();
+		Result.Message = FText::FromString(TEXT("The complete garrison deployment could not be placed; no staffing change was committed."));
+		bGarrisonMutationInProgress = false;
+		RefreshGarrisonSnapshot();
+		return Result;
 	}
 
-	OwnershipData.DesiredGuardCount = FMath::Max(0, GetDesiredGuardCount() - GuardsToRemove.Num());
+	if (NewDesiredGuardCount < Result.OldDesiredGuards)
+	{
+		CancelPendingReserveDeployments();
+	}
+	for (ATerritoryGuardCharacter* Guard : WithdrawalPlan)
+	{
+		RemoveGuardWithoutReplacement(Guard);
+		++Result.GuardsWithdrawn;
+	}
+
+	OwnershipData.DesiredGuardCount = NewDesiredGuardCount;
 	CleanupInvalidDefenders();
 	OwnershipData.DefenderCount = RegisteredDefenders.Num();
+	if (Economy)
+	{
+		Economy->RecalculateIncome(OwnershipData.OwningFaction);
+	}
+	bGarrisonMutationInProgress = false;
+	RefreshGarrisonSnapshot();
 	ForceNetUpdate();
 
-	if (UTerritoryEconomySubsystem* UpdatedEconomy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
-	{
-		UpdatedEconomy->RecalculateIncome(OwnershipData.OwningFaction);
-	}
-
-	OutResult = FText::Format(
-		NSLOCTEXT("TerritoryVolume", "RemovedGuards", "Removed {0} guard(s) from {1}. Future upkeep reduced."),
-		FText::AsNumber(GuardsToRemove.Num()),
-		GetTerritoryDisplayName());
-	return true;
+	Result.bSuccess = true;
+	Result.NewDesiredGuards = NewDesiredGuardCount;
+	Result.NewActiveGuards = GetSpawnedGuardCount();
+	Result.Message = FText::Format(
+		NSLOCTEXT("TerritoryVolume", "GarrisonTargetChanged",
+			"{0} staffing target set to {1}. Active {2}; recruitment {3}; upkeep {4} per cycle."),
+		GetTerritoryDisplayName(),
+		FText::AsNumber(NewDesiredGuardCount),
+		FText::AsNumber(Result.NewActiveGuards),
+		FText::AsNumber(Result.RecruitmentCost),
+		FText::AsNumber(static_cast<int64>(FMath::Max(0, OwnershipData.GuardCost)) * NewDesiredGuardCount));
+	return Result;
 }
 
 void ATerritoryVolume::DespawnGuards()
@@ -1919,6 +2093,7 @@ void ATerritoryVolume::DespawnGuards()
 	SpawnedGuards.Empty();
 	CleanupInvalidDefenders();
 	OwnershipData.DefenderCount = RegisteredDefenders.Num();
+	RefreshGarrisonSnapshot();
 
 	UE_LOG(LogTerritory, Log, TEXT("Despawned all guards for %s"),
 		*GetTerritoryTag().ToString());
@@ -1926,6 +2101,10 @@ void ATerritoryVolume::DespawnGuards()
 
 int32 ATerritoryVolume::GetSpawnedGuardCount() const
 {
+	if (!HasAuthority())
+	{
+		return FMath::Max(0, GarrisonSnapshot.ActiveGuards);
+	}
 	int32 Count = 0;
 	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr : SpawnedGuards)
 	{
@@ -1939,44 +2118,6 @@ bool ATerritoryVolume::HasGuardsAlive() const
 	return GetSpawnedGuardCount() > 0;
 }
 
-FVector ATerritoryVolume::GetRandomSpawnPoint() const
-{
-	FVector Center = GetActorLocation();
-	FQuat Rotation = GetActorQuat();
-
-	FVector LocalOffset(0.f);
-	if (UBoxComponent* Box = Cast<UBoxComponent>(BoundsShape))
-	{
-		FVector Extent = Box->GetScaledBoxExtent();
-		LocalOffset = FVector(
-			FMath::FRandRange(-Extent.X, Extent.X),
-			FMath::FRandRange(-Extent.Y, Extent.Y),
-			0.f);
-	}
-	else
-	{
-		LocalOffset = FVector(
-			FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
-			FMath::FRandRange(-GuardSpawnRadius, GuardSpawnRadius),
-			0.f);
-	}
-
-	// Transform local offset by actor rotation so rotated volumes spawn correctly
-	FVector SpawnLoc = Center + Rotation.RotateVector(LocalOffset);
-
-	// Project to NavMesh so guards spawn on walkable ground, not floating at volume Z
-	if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
-	{
-		FNavLocation ProjectedLoc;
-		if (NavSys->ProjectPointToNavigation(SpawnLoc, ProjectedLoc, FVector(500.f, 500.f, 500.f)))
-		{
-			SpawnLoc = ProjectedLoc.Location;
-		}
-	}
-
-	return SpawnLoc;
-}
-
 TArray<ATerritoryGuardSpawnPoint*> ATerritoryVolume::GetGuardSpawnPoints() const
 {
 	TArray<ATerritoryGuardSpawnPoint*> Result;
@@ -1984,10 +2125,53 @@ TArray<ATerritoryGuardSpawnPoint*> ATerritoryVolume::GetGuardSpawnPoints() const
 	{
 		if (ATerritoryGuardSpawnPoint* SP = Cast<ATerritoryGuardSpawnPoint>(Ptr))
 		{
-			Result.Add(SP);
+			Result.AddUnique(SP);
+		}
+	}
+	for (const TWeakObjectPtr<ATerritoryGuardSpawnPoint>& SpawnPointPtr : ResolvedGuardSpawnPoints)
+	{
+		if (ATerritoryGuardSpawnPoint* SpawnPoint = SpawnPointPtr.Get())
+		{
+			Result.AddUnique(SpawnPoint);
 		}
 	}
 	return Result;
+}
+
+void ATerritoryVolume::RegisterResolvedGuardSpawnPoint(ATerritoryGuardSpawnPoint* SpawnPoint)
+{
+	if (!SpawnPoint) return;
+	ResolvedGuardSpawnPoints.RemoveAllSwap([](const TWeakObjectPtr<ATerritoryGuardSpawnPoint>& Entry)
+	{
+		return !Entry.IsValid();
+	});
+	if (!ResolvedGuardSpawnPoints.Contains(SpawnPoint))
+	{
+		ResolvedGuardSpawnPoints.Add(SpawnPoint);
+	}
+
+	if (HasAuthority() && HasActorBegunPlay())
+	{
+		if (OwnershipData.State == ETerritoryState::Claimed
+			&& GetSpawnedGuardCount() < GetDesiredGuardCount())
+		{
+			SpawnGuardsToCount(GetDesiredGuardCount());
+		}
+		RefreshGarrisonSnapshot();
+	}
+}
+
+void ATerritoryVolume::UnregisterResolvedGuardSpawnPoint(ATerritoryGuardSpawnPoint* SpawnPoint)
+{
+	ResolvedGuardSpawnPoints.RemoveAllSwap([SpawnPoint](
+		const TWeakObjectPtr<ATerritoryGuardSpawnPoint>& Entry)
+	{
+		return !Entry.IsValid() || Entry.Get() == SpawnPoint;
+	});
+	if (HasAuthority() && HasActorBegunPlay())
+	{
+		RefreshGarrisonSnapshot();
+	}
 }
 
 UTerritoryNavigationMarkerComponent* ATerritoryVolume::GetMapMarkerComponent() const

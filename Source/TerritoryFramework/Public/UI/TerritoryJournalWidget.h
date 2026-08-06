@@ -11,6 +11,7 @@ class ATerritoryVolume;
 class UNarrativeCommonButtonBase;
 class UEditableTextBox;
 class UProgressBar;
+class USpinBox;
 class UTextBlock;
 class UVerticalBox;
 class UWidgetSwitcher;
@@ -207,7 +208,21 @@ protected:
 
 private:
 	TWeakObjectPtr<ATerritoryDistrict> SelectedDistrict;
+	TWeakObjectPtr<ATerritoryVolume> SelectedGarrisonTarget;
 	TWeakObjectPtr<UTerritoryPlayerManagementComponent> ManagementComponent;
+	TMap<FString, TWeakObjectPtr<ATerritoryVolume>> GarrisonTargetOptions;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeComboBoxString> GarrisonTargetSelector;
+	UPROPERTY(Transient)
+	TObjectPtr<USpinBox> GuardTargetSpinBox;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Text_GarrisonTargetPreview;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_ApplyGuardTarget;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_ZeroGuardTarget;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_MaxGuardTarget;
 	TMap<FString, FGameplayTag> OwnerFilterTags;
 	FString SelectedOwnerFilter;
 	FString SelectedStateFilter;
@@ -221,6 +236,10 @@ private:
 	void UnbindTerritoryDelegates();
 	void BindManagementComponent();
 	void RefreshFilterOptions();
+	void BuildGarrisonManagementControls();
+	void RefreshGarrisonManagementControls(const FTerritoryDistrictOperationsView& View);
+	void UpdateGarrisonTargetPreview();
+	void SubmitSelectedGuardTarget(int32 NewDesiredGuardCount);
 	void UpdateSelectedDistrict(ATerritoryDistrict* District);
 	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
 	UTerritoryDistrictRowWidget* CreateOperationsRow(const FTerritoryDistrictOperationsView& View);
@@ -246,6 +265,21 @@ private:
 
 	UFUNCTION()
 	void HandleOperationalFilterChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void HandleGarrisonTargetChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void HandleGuardTargetSpinChanged(float NewValue);
+
+	UFUNCTION()
+	void HandleApplyGuardTargetClicked();
+
+	UFUNCTION()
+	void HandleZeroGuardTargetClicked();
+
+	UFUNCTION()
+	void HandleMaxGuardTargetClicked();
 
 	UFUNCTION()
 	void HandleTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);

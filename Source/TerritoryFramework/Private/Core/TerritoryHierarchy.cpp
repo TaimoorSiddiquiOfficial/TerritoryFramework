@@ -315,7 +315,7 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 				{
 					TryUnlock(true);
 				}
-				SetDerivedOwningFaction(NewOwner);
+				SetDerivedOwningFaction(NewOwner, District->GetActiveTransitionContext());
 				OnCityFullyCaptured(NewOwner);
 				OnCityCapturedDelegate.Broadcast(this, NewOwner);
 				bCityLostFired = false;
@@ -393,7 +393,8 @@ void ATerritoryCity::CascadeCaptureToProperties(ATerritoryVolume* District, FGam
 			// hierarchy cascade can enforce unanimous ownership regardless of current property state.
 			// OnOwnershipChanged → OnPropertyCaptured + delegate broadcast still fires.
 			// Do NOT call OnPropertyCaptured/Broadcast again here — that would fire events twice.
-			Property->ForceSetOwningFaction(NewOwner);
+			Property->ForceSetOwningFactionWithContext(
+				NewOwner, District->GetActiveTransitionContext());
 		}
 	}
 }
@@ -504,7 +505,8 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 				{
 					TryUnlock(true);
 				}
-				SetDerivedOwningFaction(NewOwner);
+				SetDerivedOwningFaction(NewOwner,
+					Property ? Property->GetActiveTransitionContext() : FTerritoryTransitionContext());
 			}
 		}
 		else if (AllPropertiesOwnedBy(DistrictOwner))
@@ -757,7 +759,9 @@ void ATerritoryProperty::OnDistrictOwnershipChanged(ATerritoryVolume* District, 
 
 	if (!GetOwningFaction().IsValid() || GetOwningFaction() == OldOwner)
 	{
-		SetOwningFaction(NewOwner);
+		const FTerritoryTransitionContext Context = District
+			? District->GetActiveTransitionContext() : FTerritoryTransitionContext();
+		SetOwningFactionWithContext(NewOwner, Context);
 	}
 }
 

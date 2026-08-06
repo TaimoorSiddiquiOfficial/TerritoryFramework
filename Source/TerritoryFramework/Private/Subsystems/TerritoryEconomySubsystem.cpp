@@ -3,6 +3,7 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryWorldState.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativePlayerState.h"
@@ -679,6 +680,14 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 	}
 	Treasury.IncomePerTick = static_cast<int32>(FMath::Clamp<int64>(TotalIncome, 0, MAX_int32));
 	Treasury.CostsPerTick = static_cast<int32>(FMath::Clamp<int64>(TotalCosts, 0, MAX_int32));
+
+	// WorldState owns the replicated/late-join economy read model. Publish every
+	// recalculation so staffing changes do not wait for the next payout interval.
+	for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
+	{
+		It->SetFactionTreasury(Faction, Treasury);
+		break;
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

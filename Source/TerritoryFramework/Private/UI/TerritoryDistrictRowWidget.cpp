@@ -101,7 +101,7 @@ void UTerritoryDistrictRowWidget::InitializeOperationsView(
 	District = InView.District;
 	bCanAddGuard = InView.bCanAddGuard;
 	bCanRemoveGuard = InView.bCanRemoveGuard;
-	ActionStatus = InView.bUnderAttack || InView.bAttackScheduled
+	ActionStatus = InView.bUnderAttack || InView.bAttackScheduled || InView.bThreatPreviewAvailable
 		? InView.ThreatSummary
 		: (!InView.bCanAddGuard && !InView.bCanRemoveGuard
 			? (!InView.AddGuardFailureReason.IsEmpty()
@@ -162,9 +162,11 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			: CurrentDistrict->GetEffectiveIncome()
 				- (static_cast<int64>(CurrentDistrict->GetGuardCost()) * CurrentDistrict->GetDesiredGuardCount());
 		DistrictSummary->SetText(FText::Format(
-			NSLOCTEXT("TerritoryDistrictRow", "Summary", "{0}  |  {1}  |  Active {2} / Assigned {3} / Max {4}  |  Net {5}  |  {6}"),
+			NSLOCTEXT("TerritoryDistrictRow", "Summary", "{0}  |  {1}  |  Properties {2}/{3}  |  Guards {4}/{5}/{6}  |  Net {7}  |  {8}"),
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(CurrentDistrict->GetOwningFaction()),
 			StateText,
+			FText::AsNumber(OperationsView.OwnedProperties),
+			FText::AsNumber(OperationsView.TotalProperties),
 			FText::AsNumber(Active),
 			FText::AsNumber(Desired),
 			FText::AsNumber(Maximum),

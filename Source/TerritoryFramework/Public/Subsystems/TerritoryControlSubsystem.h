@@ -38,6 +38,14 @@ public:
 	bool ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
 
 	/**
+	 * Explicit-context force capture for quests, editor utilities, and scripted transitions.
+	 * RequestingFaction is normalized to NewOwner before the atomic mutation is committed.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
+	bool ForceCaptureWithContext(ATerritoryVolume* Territory, const FGameplayTag& NewOwner,
+		const FTerritoryTransitionContext& TransitionContext);
+
+	/**
 	 * Atomic territory mutation — validates, commits, reconciles, and fires events in one call.
 	 * Replaces loosely coupled setter sequences with a single transaction.
 	 *
@@ -141,6 +149,7 @@ private:
 	FTerritoryTransitionContext ResolveCaptureContext(
 		const ATerritoryVolume* Territory,
 		const FGameplayTag& Faction) const;
+	FTerritoryTransitionContext ResolveFactionPlayerContext(const FGameplayTag& Faction) const;
 	void AddAttackerRegistration(AActor* Attacker);
 	void ReleaseAttackerRegistration(const TWeakObjectPtr<AActor>& Attacker);
 	int32 PruneInvalidAttackers(TSet<TWeakObjectPtr<AActor>>& Attackers);

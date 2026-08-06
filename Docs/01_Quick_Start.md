@@ -54,8 +54,10 @@ Add territory tags to `Config/DefaultGameplayTags.ini`:
 
 On the territory volume:
 1. Set **Guard NPC Definition** → your NPC data asset (or use **Faction Guard Definitions** for per-faction guards)
-2. Set **Guard Spawn Count** → 3
-3. Guards inherit combat AI from the NPCDefinition asset (configured in NarrativePro)
+2. Set **Guard Spawn Count** → 3 (the existing-owner and AI/script capture target)
+3. Keep **Post Capture Garrison Policy** → Player Chooses when captures by a matching live Narrative player faction should begin unstaffed
+4. Set **Initial Guard Recruitment Cost** for the one-time price and **Initial Guard Cost** for recurring upkeep
+5. Guards inherit combat AI from the NPCDefinition asset (configured in NarrativePro)
 
 ## Step 7: Test in PIE
 
@@ -63,12 +65,14 @@ On the territory volume:
 2. Check Output Log for:
    ```
    LogTerritory: Registered territory: ... (tag: Territory.HavenReach.MarketSquare)
-   LogTerritory: SpawnGuards: ... spawning 3 guards, faction=...
-   LogTerritory: Spawned guard 1/3 for ...
+   LogTerritory: Registered territory: ...
+   LogTerritory: ... ownership committed ...
    ```
 3. Use the **Territory Control** subsystem to attempt capture:
    - Blueprint: `GetTerritoryControl → AttemptCapture(Territory, Heroes)`
 4. Check the territory changes ownership
+
+With `PlayerChooses`, a capture whose context belongs to the new owner starts at target zero. The legacy `ForceCapture` node also resolves a matching live Narrative player by faction; use `ForceCaptureWithContext` when the exact instigator matters. Select the District or one of its Properties in the District Command Center, preview recruitment/upkeep/net yield, and submit an exact staffing target.
 
 ## Step 8: Enable Debug (Optional)
 

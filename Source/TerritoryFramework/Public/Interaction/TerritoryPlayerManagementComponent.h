@@ -43,6 +43,19 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category="Territory|Management", meta=(ClampMin="1"))
 	int32 MaxGuardPurchaseCount = 10;
 
+	/** Hard RPC input bound; the selected territory still enforces its authored capacity. */
+	UPROPERTY(EditDefaultsOnly, Category="Territory|Management", meta=(ClampMin="1"))
+	int32 MaxGuardTargetCount = 100;
+
+	/** Sets an absolute garrison staffing target through a nearby district command point. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void RequestSetGuardTarget(ATerritoryDistrictManagementPoint* ManagementPoint,
+		ATerritoryVolume* Territory, int32 NewDesiredGuardCount);
+
+	/** Sets an absolute target remotely from the journal for an owned district or child property. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void RequestSetGuardTargetForTerritory(ATerritoryVolume* Territory, int32 NewDesiredGuardCount);
+
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestPurchaseGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count = 1);
 
@@ -61,6 +74,18 @@ public:
 	FGameplayTag GetManagedFaction() const;
 
 private:
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerRequestSetGuardTarget(ATerritoryDistrictManagementPoint* ManagementPoint,
+		ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);
+	bool ServerRequestSetGuardTarget_Validate(ATerritoryDistrictManagementPoint* ManagementPoint,
+		ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);
+
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerRequestSetGuardTargetForTerritory(ATerritoryVolume* Territory,
+		int32 NewDesiredGuardCount, int32 RequestId);
+	bool ServerRequestSetGuardTargetForTerritory_Validate(ATerritoryVolume* Territory,
+		int32 NewDesiredGuardCount, int32 RequestId);
+
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRequestPurchaseGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	bool ServerRequestPurchaseGuards_Validate(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
@@ -87,7 +112,12 @@ private:
 	void PerformPurchaseForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
 	void PerformRemove(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	void PerformRemoveForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
+	void PerformSetGuardTarget(ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);
+	void PerformSetGuardTargetAtManagementPoint(ATerritoryDistrictManagementPoint* ManagementPoint,
+		ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);
 	bool CanManageDistrict(ATerritoryDistrict* District, APawn* Pawn, FText& OutFailureReason) const;
+	bool CanManageTerritory(ATerritoryVolume* Territory, APawn* Pawn, FText& OutFailureReason) const;
+	bool IsTerritoryManagedByDistrict(ATerritoryDistrict* District, ATerritoryVolume* Territory) const;
 	APawn* GetManagingPawn() const;
 
 	float LastPurchaseRequestTime = -BIG_NUMBER;

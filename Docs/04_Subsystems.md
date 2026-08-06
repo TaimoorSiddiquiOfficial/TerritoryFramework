@@ -111,9 +111,10 @@ Manages the capture flow — attacker registration, progress accumulation, captu
    └── Verify final owner/state, clear participants, then broadcast once
 
 4. ForceCapture(Territory, Faction):
-   └── Requires server authority, a territory, and a valid owner tag
-   └── Bypasses gameplay capture rules, clears runtime capture state, sets progress to 1.0 and state to Claimed
-   └── Broadcasts OnTerritoryControlChanged (not OnCaptureAttempted)
+    └── Requires server authority, a territory, and a valid owner tag
+    └── Resolves a deterministic matching Narrative player context for backward-compatible Blueprint calls
+    └── Bypasses gameplay capture rules, clears runtime capture state, sets progress to 1.0 and state to Claimed
+    └── Verifies the committed owner/state before broadcasting OnTerritoryControlChanged (not OnCaptureAttempted)
 ```
 
 ### API
@@ -123,7 +124,8 @@ Manages the capture flow — attacker registration, progress accumulation, captu
 | Function | Parameters | Returns | Notes |
 |---|---|---|---|
 | AttemptCapture | Territory, Faction | ECaptureResult | Checks diplomacy, locks, defenders |
-| ForceCapture | Territory, Faction | void | Bypasses lock/defender/diplomacy/AttemptCapture rules; still validates authority, territory, and owner tag |
+| ForceCapture | Territory, Faction | bool | Backward-compatible force path; resolves a matching live Narrative player context, bypasses gameplay capture rules, and returns true only after the final owner/state invariant is verified |
+| ForceCaptureWithContext | Territory, Faction, TransitionContext | bool | Preferred exact-instigator force path; normalizes the requesting faction and preserves the supplied player/Tales context |
 | ResetCapture | Territory | void | Resets progress to 0 |
 | AddCaptureProgress | Territory, Faction, Delta | void | Manual progress injection |
 | RegisterAttacker | Territory, Actor, Faction | void | Revalidates capture rules and ignores registration if the attack budget is full |
@@ -174,7 +176,7 @@ if (!CanFactionCaptureTerritory(Territory, AttackerFaction))
 | OnTerritoryControlChanged | (Territory*, OldOwner, NewOwner) | After CompleteCapture or ForceCapture |
 | OnCaptureAttempted | (FCaptureAttempt Attempt) | After each authority-side AttemptCapture call, with the populated result and participant counts |
 
-`ForceCapture` always broadcasts the subsystem control delegate for a valid call, including same-owner calls where old and new tags match. The volume's ownership delegate only fires if `SetOwningFaction` actually changes the owner.
+`ForceCapture` broadcasts the subsystem control delegate only after the final owner and `Claimed` state are verified. Same-owner force calls may still report equal old/new owner tags after the state/progress reconciliation; the volume ownership delegate fires only when the owner changes.
 
 ---
 

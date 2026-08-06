@@ -65,21 +65,22 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 
 	if (bForceCapture)
 	{
-		// Forced: bypass diplomacy/lock checks via ForceCapture (backward compat)
-		Control->ForceCapture(Territory, CapturingFaction);
+		// Preserve the exact Tales/player context while applying the same explicit
+		// bypasses as ForceCapture. Calling the context-free convenience wrapper
+		// here previously made PlayerChooses fall back to the authored guard target.
+		Request.bBypassConditions = true;
+		Request.bBypassDiplomacy = true;
+		Request.bBypassLock = true;
 	}
-	else
+
+	const FTerritoryMutationResponse Response = Control->ApplyTerritoryMutation(Request);
+	if (Response.Result != ETerritoryMutationResult::Success)
 	{
-		// Normal: respect diplomacy, locks, and all validation rules
-		const FTerritoryMutationResponse Response = Control->ApplyTerritoryMutation(Request);
-		if (Response.Result != ETerritoryMutationResult::Success)
-		{
-			UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureEvent] Mutation rejected for %s: %s (result=%d)"),
-				*TargetTerritoryTag.ToString(),
-				*Response.Explanation.ToString(),
-				static_cast<int32>(Response.Result));
-			return;
-		}
+		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureEvent] Mutation rejected for %s: %s (result=%d)"),
+			*TargetTerritoryTag.ToString(),
+			*Response.Explanation.ToString(),
+			static_cast<int32>(Response.Result));
+		return;
 	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();

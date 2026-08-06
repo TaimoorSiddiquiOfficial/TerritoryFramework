@@ -39,10 +39,15 @@ class TERRITORYFRAMEWORKEDITOR_API UTerritoryDataValidator : public UEditorValid
 public:
 	UTerritoryDataValidator();
 
-	// UEditorValidator interface
-	virtual bool CanValidateAsset_Implementation(UObject* InAsset) const override;
+	// UEditorValidatorBase interface (UE 5.5+ native validation path).
+	virtual bool CanValidateAsset_Implementation(
+		const FAssetData& InAssetData,
+		UObject* InAsset,
+		FDataValidationContext& InContext) const override;
 	virtual EDataValidationResult ValidateLoadedAsset_Implementation(
-		UObject* InAsset, TArray<FText>& ValidationErrors) override;
+		const FAssetData& InAssetData,
+		UObject* InAsset,
+		FDataValidationContext& InContext) override;
 
 	// Manual validation API (callable from editor utilities)
 	static bool ValidateLevel(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);

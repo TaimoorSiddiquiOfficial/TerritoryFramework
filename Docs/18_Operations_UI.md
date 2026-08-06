@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The operations UI is the player-facing projection of the Territory authorities. It lists districts that are unlocked, available, owned, manageable, contested, threatened, or operating at a loss, and exposes guarded server commands for adding and removing guards.
+The operations UI is the player-facing projection of the Territory authorities. It lists districts that are unlocked, available, owned, manageable, contested, threatened, or operating at a loss, and exposes guarded absolute staffing commands for District and child Property garrisons.
 
 It does not own territory, capture, guard, economy, diplomacy, assault, or save state. Every displayed value is derived from the existing authority and every mutation still passes through the authoritative gameplay API.
 
@@ -32,11 +32,17 @@ Narrative Pro's current `UNarrativeMenu` constructor is private, so it cannot be
 - identity, owner, viewer faction, contesting faction, and territory state;
 - registration, lock, unlock, availability, capture eligibility, management eligibility, and exact failure reasons;
 - capture progress and known active attacker count;
-- active, desired, maximum, and known reserve guards;
-- guard quality, fortification, allied support, and strategic value;
+- aggregate active, desired, maximum, reserve, and pending guards;
+- guard quality, fortification, allied support, strategic value, unguarded state, and
+  counts for total/aligned Properties and manageable/empty garrison targets;
 - Narrative account funds, district income, guard upkeep, net income, guard purchase cost, and financial-risk state;
 - guard add/remove eligibility and exact failure reasons;
-- assault state, attacker faction, finite-force counts, selected approaches, launch probability, estimated success probability, and threat summary.
+- a `GarrisonTargets` array with each District/Property's exact staffing, recruitment, upkeep, income, and net projection;
+- District and child-Property assault state, exact leaf target, attacker faction,
+  finite-force counts, selected approaches, launch probability, estimated success,
+  attack priority, defence power, power ratio, and threat summary;
+- a separately labelled strongest-eligible projected threat when no assault is scheduled.
+  Projection is planning data and never claims physical attackers exist.
 
 The struct is a read-only projection. Pointer fields are transient UI references and are never campaign save data.
 
@@ -57,7 +63,7 @@ The struct is a read-only projection. Pointer fields are transient UI references
 | `Available` | Viewer can currently participate in capture |
 | `Owned` | Viewer faction owns the claimed district |
 | `Manageable` | Viewer owns it and satisfies management policy |
-| `UnderAttack` | Physical contest or non-terminal scheduled assault |
+| `UnderAttack` | Physical contest, non-terminal scheduled assault, or eligible projected threat |
 | `Contested` | Existing capture subsystem reports an active contest |
 | `Locked` | Territory is locked |
 | `FinancialRisk` | Guard upkeep exceeds district income |
@@ -68,22 +74,36 @@ The struct is a read-only projection. Pointer fields are transient UI references
 
 `WBP_HopTerritoryJournalWidget` is supplied as a three-column command surface:
 
-1. **Operations queues** show districts that are actionable now and districts already controlled by the viewer.
+1. **Operations queues** show every registered unowned District as selectable intel
+   (including locked/aggregate-only entries), and separately show Districts controlled
+   by the viewer. The intel header states how many entries are currently actionable.
 2. **District directory** exposes name, owner, state, and operations filters over every registered district projection.
-3. **District command** shows the selected district's owner/state, availability reason, capture progress, guards, reserve, capacity, income, upkeep, net yield, threat, grace/cooldown, finite assault force, probabilities, and selected attack approaches.
+3. **District command** shows owner/state, availability and lock reason, Property
+   alignment, every local garrison, child-Property capture pressure, income/upkeep/net,
+   strongest diplomacy-eligible attacker, exact target, defence/power ratio,
+   grace/cooldown, finite force, probabilities, and approaches.
 
 The command surface is authored on a 1920×1080 design canvas inside a `ScaleBox` using `ScaleToFit`, so the complete journal remains inside smaller or differently shaped viewports. The selected-district column has its own clipped vertical `ScrollBox`; mouse-wheel and focus navigation scroll lower guard controls into view instead of increasing the screen's desired size. Long operational readouts use automatic wrapping.
 
-The queue contracts are intentionally stricter than their labels were in earlier assets:
+The action and ownership predicates remain strict, while visibility is broader:
 
 ```text
 Available / Unlocked = registered AND unlocked AND currently available AND not owned by viewer
 Captured / Owned     = registered AND owned by viewer AND state is not Unclaimed
+District Intel       = registered AND not owned by viewer (locked entries remain selectable)
 ```
 
-An unlocked district that is diplomatically blocked, still defended, unregistered, or otherwise unavailable is not placed in the actionable queue. An owned district cannot also appear in that queue. Both queue counts are derived from the same predicates used to populate their rows, so the visible count and visible rows cannot drift apart.
+An unlocked District that is diplomatically blocked, defended, or otherwise unavailable
+is not counted as actionable, but a registered locked District is no longer hidden from
+the intel queue or complete directory. Selecting it is read-only: server management
+remains disabled until exact ownership/claimed/capacity rules pass. An owned District
+cannot duplicate into the intel queue. Counts derive from the same row predicates.
 
-Clicking a row in either queue, the directory, finance ledger, or risk report selects that district and returns to the Territory page with its command details open. The project-styled `WBP_TerritoryCommandRow` subclasses `UTerritoryDistrictRowWidget` and therefore reuses the same selection and guarded management delegates as the native fallback. The command panel supports atomic `+1`, `-1`, `+5`, and `-5` guard requests; disabled controls expose the authoritative failure reason as their tooltip.
+Threat and capture details cascade from loaded same-owner child Properties. A Blacksmith
+assault therefore appears in Market Square even though the durable assault correctly
+targets the capturable Property rather than the aggregate-only District.
+
+Clicking a row selects that district and opens its command details. The garrison planner selects the first manageable target with capacity (normally a child Property when the District is a zero-capacity container), exposes an integer target with Apply/0/Max, and retains atomic `+1`, `-1`, `+5`, and `-5` shortcuts for the selected target.
 
 ## Supplied widgets
 
@@ -102,14 +122,15 @@ Project styling can replace `DistrictRowWidgetClass`; the native fallback uses N
 
 ## Guard commands and authority
 
-Rows and management screens call `UTerritoryPlayerManagementComponent` requests. The owning client sends only the management target and requested count. The server resolves the requesting pawn/faction and validates:
+Rows and management screens call `UTerritoryPlayerManagementComponent`. The owning client sends only the selected Territory and absolute desired target. The server resolves the requesting pawn/faction and validates:
 
 1. count bounds and anti-spam request order;
 2. target world and registered district;
 3. ownership, territory state, and diplomacy/capture policy;
 4. management-point identity and range when a point is required;
-5. maximum guard capacity or removable active count;
-6. Narrative inventory affordability for additions.
+5. selected Territory is the District or one of its registered child Properties;
+6. desired target is within authored capacity;
+7. Narrative inventory affordability for increases.
 
 Only the server mutates desired guards, spawns/removes physical guards, or debits currency. The owning client receives one structured result notification and the UI refreshes from authoritative projections.
 
@@ -117,7 +138,7 @@ Only the server mutates desired guards, spawns/removes physical guards, or debit
 
 - Ownership/state/progress and WorldState projections are safe client read models.
 - Narrative funds come from the viewer pawn's Narrative inventory, not the controller.
-- Reserve guards are server/save state and are shown only when the count is known. The UI displays “server snapshot required” instead of inventing a value.
+- Active, reserve, and pending garrison counts come from the replicated `FTerritoryGarrisonSnapshot`.
 - Active attacker counts are labelled known only when the local capture projection supports that detail.
 - Widgets must never query a server-only map and assume an empty result means zero.
 
@@ -139,5 +160,4 @@ Bidirectional navigation naturally forms cycles so users can move forward and ba
 ## Current limits
 
 - The operations dashboard is a strategic snapshot, not an offscreen combat simulator.
-- Reserve visibility remains deliberately conservative until a replicated reserve projection is added.
 - Live dedicated-server/two-client gamepad and screen-reader verification is still a release gate even when native, Blueprint, and static MCP audits pass.

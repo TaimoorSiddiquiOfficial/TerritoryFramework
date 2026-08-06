@@ -175,7 +175,7 @@ These events have C++ `_Implementation` that is either **empty** or does only co
 |---|---|
 | **Class** | `ATerritoryVolume` (and all subclasses) |
 | **Category** | `Territory` |
-| **When it fires** | After `SetOwningFaction` completes ALL invariant work (guards despawned/spawned, state set, replication data updated) |
+| **When it fires** | After the ownership commit finishes guard reconciliation, state, and replicated/save data |
 | **Parameters** | `OldOwner`, `NewOwner` — faction tags before and after |
 
 **C++ `_Implementation`:** Empty. All guard lifecycle, state transitions, and replication are handled in the non-virtual `SetOwningFaction` BEFORE this event fires.
@@ -185,7 +185,7 @@ These events have C++ `_Implementation` that is either **empty** or does only co
 **Guaranteed state when this fires:**
 - `GetOwningFaction()` returns `NewOwner`
 - `GetTerritoryState()` returns `Claimed` (if NewOwner is valid) or `Unclaimed` (if invalid)
-- Old guards are destroyed, new guards are spawned
+- Old-owner guards are destroyed. New guards match the resolved post-capture target: normally zero for a physical player capture under `PlayerChooses`, or the authored target for AI/script ownership.
 - `OnTerritoryOwnershipChanged` delegate has NOT fired yet (fires after this event)
 
 **Note for `ATerritoryProperty`:** This class overrides `OnOwnershipChanged_Implementation` to call `OnPropertyCaptured(NewOwner)` and broadcast `OnPropertyCapturedDelegate`. If you create a BP child of `ATerritoryProperty`, override `OnPropertyCaptured` instead — it has the Super-call requirements documented above.
@@ -288,9 +288,10 @@ Bind to these in Blueprint Event Graph with custom event nodes. They fire at spe
 
 | Delegate | Signature | Fires When | Guaranteed State |
 |---|---|---|---|
-| `OnTerritoryOwnershipChanged` | `(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER `SetOwningFaction` completes and AFTER `OnOwnershipChanged` BP event | All invariants done. Guards spawned. State is Claimed/Unclaimed. Replication data updated. |
+| `OnTerritoryOwnershipChanged` | `(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)` | AFTER the atomic ownership commit and AFTER `OnOwnershipChanged` BP event | State is Claimed/Unclaimed, the post-capture garrison target is resolved, guard reconciliation is done, and replication data is updated. |
 | `OnTerritoryStateChangedDelegate` | `(ATerritoryVolume* Territory, ETerritoryState NewState)` | AFTER `SetTerritoryState` completes and AFTER `OnStateChanged` BP event | Guard lifecycle done. State is finalized. |
-| `OnAllGuardsDefeatedDelegate` | `(ATerritoryVolume* Territory)` | AFTER `OnAllGuardsDefeated` BP event completes | Territory is Unclaimed (if Super was called). Progress is 0. |
+| `OnAllGuardsDefeatedDelegate` | `(ATerritoryVolume* Territory)` | AFTER `OnAllGuardsDefeated` BP event completes | Ownership is unchanged; the territory is physically undefended and must still be captured through the control flow. |
+| `OnGarrisonChanged` | `(ATerritoryVolume* Territory, FTerritoryGarrisonSnapshot Snapshot)` | After the server commits a staffing/reconciliation change, and from `OnRep_GarrisonSnapshot` on clients | Exact active, desired, maximum, reserve, and pending counts are available without replicating pawn pointers. |
 | `OnGuardKilled` | `(ATerritoryVolume* Territory, AActor* Guard, AActor* Killer, int32 RemainingDefenders)` | Immediately after a defender dies, before all-guards-defeated check | Killer is the last damaging instigator, tracked via the territory's `TakeDamage` override. RemainingDefenders is count AFTER removal. |
 
 ### `ATerritoryCity` Delegates

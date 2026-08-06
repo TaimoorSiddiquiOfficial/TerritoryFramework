@@ -6,6 +6,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Engine/World.h"
 #include "Components/BillboardComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "NavigationSystem.h"
 #include "TimerManager.h"
 #include "SaveSystemStatics.h"
@@ -44,11 +45,20 @@ void ATerritoryGuardSpawnPoint::SetActorGUID_Implementation(const FGuid& InGUID)
 void ATerritoryGuardSpawnPoint::PrepareForSave_Implementation()
 {
 	// SaveGame UPROPERTYs auto-serialized: CurrentReserveCount, PendingReserveSpawns, SavedActiveGuardCount
-	SavedActiveGuardCount = GetActiveGuardCount();
+	SavedActiveGuardCount = FMath::Clamp(GetActiveGuardCount(), 0, 1);
+	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
 }
 
 void ATerritoryGuardSpawnPoint::Load_Implementation()
 {
+	if (SavedActiveGuardCount > 1 || PendingReserveSpawns > 1)
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("GuardSpawnPoint %s migrated legacy multi-slot save state to one active combat slot"),
+			*GetPathName());
+	}
+	SavedActiveGuardCount = FMath::Clamp(SavedActiveGuardCount, 0, 1);
+	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
 	// Mark that we loaded from save — prevents InitializeReserves from resetting to full
 	bLoadedFromSave = true;
 }
@@ -101,7 +111,7 @@ void ATerritoryGuardSpawnPoint::BindToTerritory(ATerritoryVolume* Territory)
 			*GetName(), *OwnerTerritoryTag.ToString(), *TerritoryTag.ToString());
 	}
 
-	CachedTerritory = Territory;
+	SetResolvedTerritory(Territory);
 	OwnerTerritoryTag = TerritoryTag;
 
 	if (UWorld* World = GetWorld())
@@ -117,15 +127,28 @@ void ATerritoryGuardSpawnPoint::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// P0-06: Ensure GUID is baked; load persisted reserve state if available
-	EnsurePersistentSpawnPointGUID();
+	// Persistent identities must be editor-authored. A runtime-generated GUID would
+	// silently orphan saved reserve records on every campaign load.
 	if (HasAuthority())
 	{
-		USaveSystemStatics::LoadSingleActor(this);
+		if (!SpawnPointGUID.IsValid())
+		{
+			UE_LOG(LogTerritory, Error,
+				TEXT("GuardSpawnPoint %s has no editor-baked SpawnPointGUID; save/load is disabled for this post"),
+				*GetPathName());
+		}
+		else
+		{
+			USaveSystemStatics::LoadSingleActor(this);
+		}
 	}
 
 	ResolveOwningTerritory();
 	InitializeReserves();
+	if (ATerritoryVolume* Territory = GetOwningTerritory())
+	{
+		Territory->RefreshGarrisonSnapshot();
+	}
 
 	// Untagged points keep listening so a more-specific streamed territory can replace
 	// an earlier proximity match (for example, Property replacing City).
@@ -143,6 +166,11 @@ void ATerritoryGuardSpawnPoint::BeginPlay()
 
 void ATerritoryGuardSpawnPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (ATerritoryVolume* Territory = GetOwningTerritory())
+	{
+		Territory->UnregisterResolvedGuardSpawnPoint(this);
+	}
+	CachedTerritory.Reset();
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(ReserveSpawnTimer);
@@ -162,7 +190,7 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 	{
 		if (!CachedTerritory.IsValid() && Territory->GetTerritoryTag() == OwnerTerritoryTag)
 		{
-			CachedTerritory = Territory;
+			SetResolvedTerritory(Territory);
 			UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s late-bound to territory %s"),
 				*GetName(), *OwnerTerritoryTag.ToString());
 
@@ -179,7 +207,7 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 		ATerritoryVolume* ResolvedTerritory = Registry->GetTerritoryAtLocation(GetActorLocation());
 		if (ResolvedTerritory && CachedTerritory.Get() != ResolvedTerritory)
 		{
-			CachedTerritory = ResolvedTerritory;
+			SetResolvedTerritory(ResolvedTerritory);
 			UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s proximity-bound to territory %s"),
 				*GetName(), *ResolvedTerritory->GetTerritoryTag().ToString());
 		}
@@ -190,9 +218,32 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 void ATerritoryGuardSpawnPoint::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
-	// Editor visualization is handled by the visual properties
+	if (GetWorld() && !GetWorld()->IsGameWorld()
+		&& !HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+	{
+		EnsurePersistentSpawnPointGUID();
+	}
 }
 #endif
+
+void ATerritoryGuardSpawnPoint::SetResolvedTerritory(ATerritoryVolume* Territory)
+{
+	ATerritoryVolume* PreviousTerritory = CachedTerritory.Get();
+	if (PreviousTerritory == Territory)
+	{
+		if (Territory) Territory->RegisterResolvedGuardSpawnPoint(this);
+		return;
+	}
+	if (PreviousTerritory)
+	{
+		PreviousTerritory->UnregisterResolvedGuardSpawnPoint(this);
+	}
+	CachedTerritory = Territory;
+	if (Territory)
+	{
+		Territory->RegisterResolvedGuardSpawnPoint(this);
+	}
+}
 
 void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 {
@@ -205,11 +256,11 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 	// Explicit tags must not fall back to a different territory while their target streams in.
 	if (OwnerTerritoryTag.IsValid())
 	{
-		CachedTerritory = Registry->GetTerritoryByTag(OwnerTerritoryTag);
+		SetResolvedTerritory(Registry->GetTerritoryByTag(OwnerTerritoryTag));
 	}
 	else
 	{
-		CachedTerritory = Registry->GetTerritoryAtLocation(GetActorLocation());
+		SetResolvedTerritory(Registry->GetTerritoryAtLocation(GetActorLocation()));
 	}
 
 	if (CachedTerritory.IsValid())
@@ -251,25 +302,51 @@ void ATerritoryGuardSpawnPoint::InitializeReserves()
 			? GuardPostDefinition->ReserveSlots : ReserveSlots;
 		CurrentReserveCount = EffectiveReserveSlots;
 	}
-	PendingReserveSpawns = FMath::Max(PendingReserveSpawns, 0);
+	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
 }
 
 FTransform ATerritoryGuardSpawnPoint::GetSpawnTransform() const
 {
-	FTransform Transform = GetActorTransform();
+	return GetActorTransform();
+}
 
-	// Project spawn location to NavMesh so guards start on walkable ground
-	FVector SpawnLoc = Transform.GetLocation();
-	if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+bool ATerritoryGuardSpawnPoint::ResolveGuardDeploymentTransform(
+	TSubclassOf<ATerritoryGuardCharacter> GuardClass, FTransform& OutTransform) const
+{
+	if (!GuardClass)
 	{
-		FNavLocation ProjectedLoc;
-		if (NavSys->ProjectPointToNavigation(SpawnLoc, ProjectedLoc, FVector(500.f, 500.f, 500.f)))
+		return false;
+	}
+
+	const ATerritoryGuardCharacter* GuardCDO = GuardClass->GetDefaultObject<ATerritoryGuardCharacter>();
+	const UCapsuleComponent* Capsule = GuardCDO ? GuardCDO->GetCapsuleComponent() : nullptr;
+	if (!Capsule)
+	{
+		return false;
+	}
+
+	OutTransform = GetSpawnTransform();
+	OutTransform.SetScale3D(FVector::OneVector);
+	const FVector MarkerLocation = OutTransform.GetLocation();
+	float GroundZ = MarkerLocation.Z;
+
+	// Keep the designer-authored X/Y exact. Navigation is used only to align the
+	// character's feet vertically to the local walkable surface.
+	if (UNavigationSystemV1* NavSystem = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+	{
+		FNavLocation ProjectedLocation;
+		if (NavSystem->ProjectPointToNavigation(
+			MarkerLocation, ProjectedLocation, FVector(10.f, 10.f, 500.f)))
 		{
-			Transform.SetLocation(ProjectedLoc.Location);
+			GroundZ = ProjectedLocation.Location.Z;
 		}
 	}
 
-	return Transform;
+	OutTransform.SetLocation(FVector(
+		MarkerLocation.X,
+		MarkerLocation.Y,
+		GroundZ + Capsule->GetScaledCapsuleHalfHeight() + 2.f));
+	return true;
 }
 
 bool ATerritoryGuardSpawnPoint::HasAvailableSlot() const
@@ -305,8 +382,20 @@ int32 ATerritoryGuardSpawnPoint::GetReserveCount() const
 void ATerritoryGuardSpawnPoint::RegisterSpawnedGuard(ATerritoryGuardCharacter* Guard)
 {
 	if (!HasAuthority() || !Guard) return;
+	ActiveGuards.RemoveAllSwap([](const TWeakObjectPtr<ATerritoryGuardCharacter>& Entry)
+	{
+		return !Entry.IsValid();
+	});
+	if (ActiveGuards.Contains(Guard)) return;
+	if (!HasAvailableSlot())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("GuardSpawnPoint %s rejected a second active guard; each point is one combat slot"),
+			*GetPathName());
+		return;
+	}
 	ActiveGuards.AddUnique(Guard);
-	SavedActiveGuardCount = ActiveGuards.Num();
+	SavedActiveGuardCount = FMath::Clamp(ActiveGuards.Num(), 0, 1);
 }
 
 void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard, EGuardRemovalReason Reason)
@@ -338,7 +427,11 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard,
 	// P1-04: Only queue reserve replacement when guard was killed.
 	// Manual removal, ownership change, load reconcile, and territory destruction
 	// should not consume reserves.
-	if (Reason == EGuardRemovalReason::Killed && CurrentReserveCount > PendingReserveSpawns)
+	ATerritoryVolume* Territory = GetOwningTerritory();
+	const bool bNeedsReplacement = Territory
+		&& Territory->GetSpawnedGuardCount() < Territory->GetDesiredGuardCount();
+	if (Reason == EGuardRemovalReason::Killed && bNeedsReplacement
+		&& CurrentReserveCount > PendingReserveSpawns)
 	{
 		QueueReserveSpawn();
 	}
@@ -424,6 +517,12 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 	}
 
 	ATerritoryVolume* Territory = GetOwningTerritory();
+	if (Territory && Territory->GetSpawnedGuardCount() >= Territory->GetDesiredGuardCount())
+	{
+		CancelPendingReserveSpawns();
+		Territory->RefreshGarrisonSnapshot();
+		return false;
+	}
 	if (!Territory || Territory->GetTerritoryState() != ETerritoryState::Claimed
 		|| !Territory->TrySpawnSingleGuard(this, bRequireCameraAvoidance))
 	{
@@ -435,6 +534,7 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 	// This order is correct — do not move the decrement above the spawn call.
 	--CurrentReserveCount;
 	PendingReserveSpawns = FMath::Max(0, PendingReserveSpawns - 1);
+	Territory->RefreshGarrisonSnapshot();
 	UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: deployed one reserve (%d remaining, %d pending)"),
 		*GetName(), CurrentReserveCount, PendingReserveSpawns);
 
@@ -533,8 +633,7 @@ TArray<float> ATerritoryGuardSpawnPoint::GetPatrolWaitTimes() const
 
 int32 ATerritoryGuardSpawnPoint::GetEffectiveMaxGuards() const
 {
-	return (GuardPostDefinition && GuardPostDefinition->MaxGuards > 0)
-		? GuardPostDefinition->MaxGuards : MaxGuards;
+	return 1;
 }
 
 int32 ATerritoryGuardSpawnPoint::GetEffectiveReserveSlots() const

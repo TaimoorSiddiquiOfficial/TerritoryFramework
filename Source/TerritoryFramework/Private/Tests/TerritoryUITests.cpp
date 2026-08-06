@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "NarrativeActivatableWidget.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "UI/TerritoryActivatableWidget.h"
 #include "UI/TerritoryDistrictManagementWidget.h"
 #include "UI/TerritoryDistrictRowWidget.h"
@@ -48,6 +49,10 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildDistrictOperationsView")));
 	TestTrue(TEXT("District operations list is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetDistrictOperationsViews")));
+	TestTrue(TEXT("Per-garrison operations builder is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildGarrisonOperationsView")));
+	TestTrue(TEXT("District garrison list is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetDistrictGarrisonOperationsViews")));
 	TestTrue(TEXT("Economy operations builder is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildEconomyOperationsView")));
 	TestTrue(TEXT("Capture eligibility planning query is Blueprint pure"),
@@ -68,7 +73,35 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			ViewStruct->FindPropertyByName(TEXT("KilledAttackers")));
 		TestNotNull(TEXT("View exposes finance net"),
 			ViewStruct->FindPropertyByName(TEXT("NetIncome")));
+		TestNotNull(TEXT("District view exposes child Property garrisons"),
+			ViewStruct->FindPropertyByName(TEXT("GarrisonTargets")));
+		TestNotNull(TEXT("District view exposes Property hierarchy completion"),
+			ViewStruct->FindPropertyByName(TEXT("OwnedProperties")));
+		TestNotNull(TEXT("District view distinguishes a projected threat from a scheduled assault"),
+			ViewStruct->FindPropertyByName(TEXT("bThreatPreviewAvailable")));
+		TestNotNull(TEXT("District view exposes the leaf Territory targeted by a cascaded assault"),
+			ViewStruct->FindPropertyByName(TEXT("ThreatTargetTerritory")));
+		TestNotNull(TEXT("District view exposes deterministic strategic priority"),
+			ViewStruct->FindPropertyByName(TEXT("AttackPriority")));
 	}
+	const UScriptStruct* GarrisonStruct = FTerritoryGarrisonOperationsView::StaticStruct();
+	TestNotNull(TEXT("Garrison operations view is reflected"), GarrisonStruct);
+	if (GarrisonStruct)
+	{
+		TestNotNull(TEXT("Garrison view exposes absolute desired target"),
+			GarrisonStruct->FindPropertyByName(TEXT("DesiredGuards")));
+		TestNotNull(TEXT("Garrison view exposes pending reserve deployments"),
+			GarrisonStruct->FindPropertyByName(TEXT("PendingDeployments")));
+		TestNotNull(TEXT("Garrison view separates recruitment price"),
+			GarrisonStruct->FindPropertyByName(TEXT("RecruitmentCostPerGuard")));
+		TestNotNull(TEXT("Garrison view exposes local profit and loss"),
+			GarrisonStruct->FindPropertyByName(TEXT("NetIncome")));
+	}
+	const UClass* ManagementClass = UTerritoryPlayerManagementComponent::StaticClass();
+	TestTrue(TEXT("Owned bridge exposes remote absolute target RPC request"),
+		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTargetForTerritory")));
+	TestTrue(TEXT("Owned bridge exposes management-point absolute target request"),
+		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTarget")));
 	return true;
 }
 
@@ -102,10 +135,16 @@ bool FTerritoryUIOperationsFilterTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Scheduled warning appears under attack"),
 		UTerritoryUIBlueprintLibrary::DoesDistrictMatchFilter(View, ETerritoryOperationsFilter::UnderAttack));
 	View.bAttackScheduled = false;
+	View.bThreatPreviewAvailable = true;
+	TestTrue(TEXT("Projected eligible threat appears in the threat filter without claiming it is scheduled"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchFilter(View, ETerritoryOperationsFilter::UnderAttack));
+	View.bThreatPreviewAvailable = false;
 	View.bCaptureInProgress = true;
 	TestTrue(TEXT("Capture pressure appears as contested"),
 		UTerritoryUIBlueprintLibrary::DoesDistrictMatchFilter(View, ETerritoryOperationsFilter::Contested));
 	View.bUnlocked = false;
+	TestTrue(TEXT("Locked registered District remains visible in the complete directory"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchFilter(View, ETerritoryOperationsFilter::All));
 	TestTrue(TEXT("Locked district appears in locked filter"),
 		UTerritoryUIBlueprintLibrary::DoesDistrictMatchFilter(View, ETerritoryOperationsFilter::Locked));
 	View.bFinancialRisk = true;
@@ -157,6 +196,25 @@ bool FTerritoryUIRevisionRegressionTest::RunTest(const FString& Parameters)
 	View.LockReason = FText::FromString(TEXT("Quest gate"));
 	const int32 LockRevision = UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(View);
 	TestNotEqual(TEXT("Lock reason change invalidates availability text"), FundsRevision, LockRevision);
+
+	View.bThreatPreviewAvailable = true;
+	View.LaunchProbability = 1.f;
+	View.ThreatTargetTerritory = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Territory.District.MarketSquare.Blacksmith")), false);
+	const int32 PreviewRevision = UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(View);
+	TestNotEqual(TEXT("Projected counterattack change invalidates the Journal row"),
+		LockRevision, PreviewRevision);
+
+	FTerritoryGarrisonOperationsView Garrison;
+	Garrison.TerritoryTag = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Territory.District.MarketSquare.Blacksmith")), false);
+	View.GarrisonTargets.Add(Garrison);
+	const int32 GarrisonRevision = UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(View);
+	Garrison.PendingDeployments = 1;
+	View.GarrisonTargets[0] = Garrison;
+	const int32 PendingRevision = UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(View);
+	TestNotEqual(TEXT("Pending reserve change invalidates the command-center read model"),
+		GarrisonRevision, PendingRevision);
 	return true;
 }
 

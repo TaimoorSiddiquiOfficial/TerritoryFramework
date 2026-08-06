@@ -37,7 +37,7 @@ NPCDefinition (NPC_TerritoryBandit)
 
 ### Counterattack Activity Path
 
-Counterattack NPCs use `ATerritoryAssaultCharacter`, which still derives through Narrative's character stack. `UTerritoryAssaultGoal` carries the durable assault/territory/faction intent, while `UTerritoryAssaultActivity` consumes that goal and routes the NPC toward the selected typed approach and target Territory. The profile's NPC definition must resolve to an `ATerritoryAssaultCharacter` subclass and its activity configuration must report support for assault goals. Invalid definitions/configurations are rejected by runtime activation and by TerritoryFramework data validation; no generic fallback pawn is spawned.
+Counterattack NPCs use `ATerritoryAssaultCharacter`, which still derives through Narrative's character stack. `UTerritoryAssaultGoal` carries the durable assault/territory/faction intent, while `UTerritoryAssaultActivity` consumes that goal and routes the NPC toward the selected typed approach and target Territory. The profile's NPC definition must resolve to an `ATerritoryAssaultCharacter` subclass. The participant adds the native assault activity when the assigned Narrative activity configuration does not already contain it; the configuration can therefore continue to own shared combat/rescoring activities. Invalid NPC classes are rejected by runtime evaluation and TerritoryFramework data validation; no generic fallback pawn is spawned.
 
 Combat may interrupt the assault activity through Narrative's normal activity scoring. The durable goal remains until death, withdrawal, cancellation, or resolution, so the activity can resume without inventing a parallel Behavior Tree authority.
 
@@ -62,7 +62,8 @@ Combat may interrupt the assault activity through Narrative's normal activity sc
 
 | Asset | Path | Type | Notes |
 |---|---|---|---|
-| **NPC_TerritoryBandit** | `/Game/TerritoryFramework/NPC_TerritoryBandit` | NPCDefinition | Bandit NPC. References AC_TerritoryGuard + Triggers_Bandit |
+| **NPC_TerritoryBandit** | `/Game/TerritoryFramework/AI/NPC_TerritoryBandit` | NPCDefinition | Territory guard definition; its class derives from `ATerritoryGuardCharacter` |
+| **NPC_TerritoryBanditAssault** | `/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault` | NPCDefinition | Physical counterattack definition; class path is `ATerritoryAssaultCharacter` and shared Narrative combat/activity data may be reused |
 
 ### Character Blueprints
 
@@ -134,7 +135,7 @@ ATerritoryVolume::SpawnGuards()                          [C++]
   │    └─ Checks FactionGuardDefinitions array first
   │    └─ Falls back to GuardNPCDefinition property
   ├─ GetGuardSpawnPoints()                               → sorted by Priority
-  ├─ For each GuardSpawnCount:
+  ├─ For each free unique spawn point, up to DesiredGuardCount:
   │    ├─ BeginDeferredActorSpawnFromClass(NPCClass)
   │    ├─ Guard->ConfigureTerritorySpawn(                [C++ — single entrypoint]
   │    │      Definition,                                → UNPCDefinition
@@ -151,7 +152,7 @@ ATerritoryVolume::SpawnGuards()                          [C++]
   └─ Narrative handles all AI from here
 ```
 
-**Key:** the spawn-point actor transform (or random fallback) is projected to NavMesh before spawn. The same resolved transform is passed to deferred spawn, `ConfigureTerritorySpawn`, and `FinishSpawningActor`, and is stored in both `SpawnInfo.SpawnTransform` and replicated `TerritoryHomeTransform`. `GetSpawnTransform()` returns that stored home transform.
+**Key:** each unique spawn-point actor is exactly one active combat slot. Its authored X/Y and facing are preserved; only Z is aligned to navigation ground and raised by the NPC capsule half-height. The same resolved transform is passed to deferred spawn, `ConfigureTerritorySpawn`, and `FinishSpawningActor`, then stored in `SpawnInfo.SpawnTransform` and replicated `TerritoryHomeTransform`. Normal deployment uses `DontSpawnIfColliding`, so a blocked slot fails instead of moving the guard away from the staged marker.
 
 ### 2. Territory Home Transform (BP_TerritoryGuard)
 
@@ -236,18 +237,23 @@ BPA_Patrol / BPA_ReturnToTerritory
   └─ BT executes MoveTo → RotateToGoal → Wait → SetNextPatrolPoint cycle
 ```
 
-### 7. Territory Capture → Guard Respawn
+### 7. Territory Capture → Player-Managed Garrison
 
 ```
 Territory captured (SetOwningFaction called):
   1. DespawnGuards()                                → destroys old faction guards
   2. OwnershipData.OwningFaction = NewOwner
   3. OwnershipData.State = Claimed
-  4. SpawnGuards()                                  → spawns new faction guards
-     └─ ResolveGuardDefinition(NewOwner)            → may use different NPC definition
-     └─ ConfigureTerritorySpawn with new faction    → new TerritoryHomeTransform
-     └─ Narrative AI takes over with new faction context
+  4. Resolve post-capture target from explicit transition context
+     ├─ physical player + PlayerChooses             → target 0
+     └─ AI/script or ConfiguredForEveryOwner        → authored GuardSpawnCount
+  5. Reconcile exactly to the resolved target
+     └─ if target > 0, Narrative NPC definition/activity/TriggerSets are applied
+  6. Player may set District/Property target through the server-authoritative
+     management component; an increase is debited and deployed atomically
 ```
+
+City/District/Property cascades preserve the same explicit transition context. A player District capture therefore cannot cause a child Property to silently fall back to the authored three-guard target.
 
 ---
 

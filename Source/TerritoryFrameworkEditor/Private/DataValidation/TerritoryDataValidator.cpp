@@ -12,6 +12,7 @@
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameplayTagContainer.h"
+#include "Misc/DataValidation.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "WorldPartition/WorldPartitionHandle.h"
@@ -52,8 +53,13 @@ UTerritoryDataValidator::UTerritoryDataValidator()
 	bIsEnabled = true;
 }
 
-bool UTerritoryDataValidator::CanValidateAsset_Implementation(UObject* InAsset) const
+bool UTerritoryDataValidator::CanValidateAsset_Implementation(
+	const FAssetData& InAssetData,
+	UObject* InAsset,
+	FDataValidationContext& InContext) const
 {
+	(void)InAssetData;
+	(void)InContext;
 	if (!InAsset) return false;
 
 	// Validate any level/world that contains territory actors
@@ -96,8 +102,11 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(UObject* InAsset) 
 }
 
 EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementation(
-	UObject* InAsset, TArray<FText>& ValidationErrors)
+	const FAssetData& InAssetData,
+	UObject* InAsset,
+	FDataValidationContext& InContext)
 {
+	(void)InAssetData;
 	TArray<FString> Errors;
 	TArray<FString> Warnings;
 
@@ -118,6 +127,14 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 		if (Profile->FactionForces.IsEmpty())
 		{
 			Warnings.Add(TEXT("Counterattack profile has no faction force definitions"));
+		}
+		if (Profile->MaxConsecutiveSpawnFailures <= 0)
+		{
+			Errors.Add(TEXT("Counterattack profile MaxConsecutiveSpawnFailures must be at least one"));
+		}
+		if (!FMath::IsWithinInclusive(Profile->UnguardedLaunchProbability, 0.f, 1.f))
+		{
+			Errors.Add(TEXT("Counterattack profile UnguardedLaunchProbability must be between zero and one"));
 		}
 		TSet<FGameplayTag> SeenFactions;
 		for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
@@ -142,6 +159,8 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 				Errors.Add(FString::Printf(TEXT("Counterattack force %s has invalid planned force/wave size"),
 					*Force.Faction.ToString()));
 			}
+			if (Force.MilitaryPower <= 0.f) Errors.Add(FString::Printf(
+				TEXT("Counterattack force %s must have positive military power"), *Force.Faction.ToString()));
 		}
 	}
 	else if (ATerritoryWorldState* WS = Cast<ATerritoryWorldState>(InAsset))
@@ -164,16 +183,13 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 	// Emit errors
 	for (const FString& Error : Errors)
 	{
-		ValidationErrors.Add(FText::FromString(Error));
+		InContext.AddError(FText::FromString(Error));
 	}
 
-	// Emit warnings — UE 5.7 ValidateLoadedAsset only has ValidationErrors,
-	// so we append warnings as non-blocking entries with a [WARNING] prefix.
-	// Data Validation UI shows all ValidationErrors but only treats the
-	// returned result as pass/fail.
+	// Warnings remain non-blocking and are reported with their correct severity.
 	for (const FString& Warning : Warnings)
 	{
-		ValidationErrors.Add(FText::FromString(TEXT("[WARNING] ") + Warning));
+		InContext.AddWarning(FText::FromString(Warning));
 	}
 
 	// Invalid if any errors; warnings alone don't fail validation
@@ -524,12 +540,17 @@ void UTerritoryDataValidator::CheckGuardConfig(
 
 	FString Label = Territory->GetActorLabel();
 	const bool bHasNPCDef = Territory->GuardNPCDefinition != nullptr;
+	bool bHasFactionNPCDef = false;
+	for (const FTerritoryFactionGuardDefinition& Definition : Territory->FactionGuardDefinitions)
+	{
+		bHasFactionNPCDef |= Definition.NPCDefinition != nullptr;
+	}
 	const bool bHasSpawnCount = Territory->GuardSpawnCount > 0;
 
 	// Spawn count > 0 but no NPC definition
-	if (bHasSpawnCount && !bHasNPCDef)
+	if (bHasSpawnCount && !bHasNPCDef && !bHasFactionNPCDef)
 	{
-		OutWarnings.Add(FString::Printf(TEXT("%s: GuardSpawnCount=%d but no GuardNPCDefinition — SpawnGuards will no-op"), *Label, Territory->GuardSpawnCount));
+		OutWarnings.Add(FString::Printf(TEXT("%s: GuardSpawnCount=%d but no default or per-faction NPC definition — SpawnGuards will no-op"), *Label, Territory->GuardSpawnCount));
 	}
 
 	auto ValidateDefinition = [&OutErrors, &Label](UNPCDefinition* Definition, const FString& Context)
@@ -605,6 +626,18 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 	{
 		OutErrors.Add(FString::Printf(TEXT("%s: counterattack minimum launch probability exceeds maximum"), *Label));
 	}
+	if (!FMath::IsWithinInclusive(Profile->UnguardedLaunchProbability, 0.f, 1.f))
+	{
+		OutErrors.Add(FString::Printf(TEXT("%s: UnguardedLaunchProbability must be between zero and one"), *Label));
+	}
+	if (Profile->MaximumApproaches <= 0)
+	{
+		OutErrors.Add(FString::Printf(TEXT("%s: counterattack MaximumApproaches must be at least one"), *Label));
+	}
+	if (Profile->MaxConsecutiveSpawnFailures <= 0)
+	{
+		OutErrors.Add(FString::Printf(TEXT("%s: counterattack MaxConsecutiveSpawnFailures must be at least one"), *Label));
+	}
 
 	TSet<FGameplayTag> SeenFactions;
 	for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
@@ -636,6 +669,11 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 		if (Force.PlannedForce <= 0 || Force.WaveSize <= 0 || Force.WaveSize > Force.PlannedForce)
 		{
 			OutErrors.Add(FString::Printf(TEXT("%s: counterattack force %s has invalid planned force/wave size"),
+				*Label, *Force.Faction.ToString()));
+		}
+		if (Force.MilitaryPower <= 0.f)
+		{
+			OutErrors.Add(FString::Printf(TEXT("%s: counterattack force %s must have positive military power"),
 				*Label, *Force.Faction.ToString()));
 		}
 	}
@@ -683,10 +721,18 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 {
 	if (!Level) return;
 
-	// Check each spawn point — does any territory reference it?
+	// A post may be connected by the typed Territory array or by its stable owner tag.
+	const TArray<ATerritoryVolume*> Territories = GetActorsForValidation<ATerritoryVolume>(Level);
+	const TArray<ATerritoryGuardSpawnPoint*> SpawnPoints =
+		GetActorsForValidation<ATerritoryGuardSpawnPoint>(Level);
 	TSet<AActor*> ReferencedSpawnPoints;
-	for (ATerritoryVolume* Territory : GetActorsForValidation<ATerritoryVolume>(Level))
+	TSet<FGameplayTag> TerritoryTags;
+	for (ATerritoryVolume* Territory : Territories)
 	{
+		if (Territory->GetTerritoryTag().IsValid())
+		{
+			TerritoryTags.Add(Territory->GetTerritoryTag());
+		}
 		for (AActor* SP : Territory->GuardSpawnPoints)
 		{
 			if (SP) ReferencedSpawnPoints.Add(SP);
@@ -694,12 +740,45 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 	}
 
 	// Find orphaned spawn points
-	for (ATerritoryGuardSpawnPoint* SP : GetActorsForValidation<ATerritoryGuardSpawnPoint>(Level))
+	for (ATerritoryGuardSpawnPoint* SP : SpawnPoints)
 	{
-		if (!ReferencedSpawnPoints.Contains(SP))
+		if (ReferencedSpawnPoints.Contains(SP)) continue;
+		if (SP->OwnerTerritoryTag.IsValid())
 		{
-			OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — not referenced by any territory"),
+			if (TerritoryTags.Contains(SP->OwnerTerritoryTag)) continue;
+			OutWarnings.Add(FString::Printf(
+				TEXT("GuardSpawnPoint '%s' OwnerTerritoryTag '%s' does not resolve to a loaded territory"),
+				*SP->GetActorLabel(), *SP->OwnerTerritoryTag.ToString()));
+		}
+		else
+		{
+			OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — set OwnerTerritoryTag or add it to GuardSpawnPoints"),
 				*SP->GetActorLabel()));
+		}
+	}
+
+	// Capacity is physical. Warn when authored initial staffing cannot ever deploy
+	// because the Territory has no explicit, tag-bound, or contained point.
+	for (ATerritoryVolume* Territory : Territories)
+	{
+		if (!Territory || Territory->GuardSpawnCount <= 0) continue;
+		bool bHasPhysicalSlot = false;
+		for (AActor* ReferencedPoint : Territory->GuardSpawnPoints)
+		{
+			bHasPhysicalSlot |= IsValid(ReferencedPoint);
+		}
+		for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
+		{
+			if (!SpawnPoint || bHasPhysicalSlot) continue;
+			bHasPhysicalSlot = SpawnPoint->OwnerTerritoryTag.IsValid()
+				? SpawnPoint->OwnerTerritoryTag == Territory->GetTerritoryTag()
+				: Territory->ContainsPoint(SpawnPoint->GetActorLocation());
+		}
+		if (!bHasPhysicalSlot)
+		{
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: GuardSpawnCount=%d but no guard spawn-point actor resolves to this Territory; active capacity is zero"),
+				*Territory->GetActorLabel(), Territory->GuardSpawnCount));
 		}
 	}
 }

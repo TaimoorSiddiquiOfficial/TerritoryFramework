@@ -7,6 +7,8 @@
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryWorldState.h"
 #include "Engine/World.h"
@@ -127,6 +129,37 @@ bool FTFCounterAttackDefenceMonotonicity::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackUnguardedGuarantee,
+	"TerritoryFramework.CounterAttack.Regression.UnguardedCascadeLaunchesAfterDiplomacyAdmission",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackUnguardedGuarantee::RunTest(const FString& Parameters)
+{
+	UTerritoryCounterAttackProfile* Profile = NewObject<UTerritoryCounterAttackProfile>();
+	Profile->UnguardedLaunchProbability = 1.f;
+	FTerritoryAssaultEvaluationInput Empty = TerritoryCounterAttackTests::MakeBaselineInput();
+	Empty.ActiveGuards = 0;
+	Empty.DesiredGuards = 0;
+	Empty.ReserveGuards = 0;
+	Empty.Fortification = 0.f;
+	Empty.NearbyAlliedSupport = 0.f;
+	const FTerritoryAssaultEvaluationResult EmptyResult =
+		UTerritoryCounterAttackSubsystem::CalculateEvaluation(Empty, Profile);
+	TestEqual(TEXT("No active guards uses the explicit unguarded launch policy"),
+		EmptyResult.LaunchProbability, 1.f);
+	TestTrue(TEXT("Estimated success remains bounded planning data and is not used as an ownership roll"),
+		EmptyResult.EstimatedSuccessProbability >= 0.f
+		&& EmptyResult.EstimatedSuccessProbability <= 1.f);
+
+	FTerritoryAssaultEvaluationInput Defended = Empty;
+	Defended.ActiveGuards = 1;
+	const FTerritoryAssaultEvaluationResult DefendedResult =
+		UTerritoryCounterAttackSubsystem::CalculateEvaluation(Defended, Profile);
+	TestTrue(TEXT("Adding the first valid guard cannot increase launch probability"),
+		DefendedResult.LaunchProbability <= EmptyResult.LaunchProbability);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackPowerMonotonicity,
 	"TerritoryFramework.CounterAttack.Behavior.AttackerPowerMonotonicity",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -203,11 +236,70 @@ bool FTFCounterAttackSaveRestore::RunTest(const FString& Parameters)
 		Restored.PendingReserveForce, 5);
 	TestEqual(TEXT("Every planned participant remains accounted for"),
 		Restored.GetAccountedForce(), Restored.PlannedForce);
+	TestTrue(TEXT("Restored physically active record reports active"),
+		Subsystem->IsAssaultActive(Saved.AssaultID));
+	TestTrue(TEXT("Restored active record is also pending-or-active"),
+		Subsystem->IsAssaultPendingOrActive(Saved.AssaultID));
+
+	FTerritoryAssaultRecord Warning = Saved;
+	Warning.AssaultID = FGuid::NewGuid();
+	Warning.State = ETerritoryAssaultState::ScheduledWarning;
+	Warning.AliveForce = 0;
+	Warning.PendingReserveForce = Warning.PlannedForce - Warning.KilledForce - Warning.WithdrawnForce;
+	Subsystem->RestorePersistentState({Warning});
+	TestFalse(TEXT("A scheduled warning is not a physically active assault"),
+		Subsystem->IsAssaultActive(Warning.AssaultID));
+	TestTrue(TEXT("A scheduled warning remains a pending assault"),
+		Subsystem->IsAssaultPendingOrActive(Warning.AssaultID));
 
 	FTerritoryAssaultRecord Invalid = Saved;
 	Invalid.AssaultID.Invalidate();
 	Subsystem->RestorePersistentState({Invalid});
 	TestEqual(TEXT("Invalid durable identity is rejected"), Subsystem->GetAllAssaults().Num(), 0);
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackCycleHighWater,
+	"TerritoryFramework.CounterAttack.SaveLoad.TrimmedHistoryDoesNotReuseDecisionCycle",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackCycleHighWater::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Test world created"), World);
+	if (!World) return false;
+	UTerritoryCounterAttackSubsystem* Subsystem =
+		NewObject<UTerritoryCounterAttackSubsystem>(World);
+	TestNotNull(TEXT("Counterattack subsystem created"), Subsystem);
+	if (!Subsystem)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGuid TerritoryGUID = FGuid::NewGuid();
+	const FGameplayTag AttackingFaction = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	FTerritoryAssaultCycleRecord SavedCycle;
+	SavedCycle.TargetTerritoryGUID = TerritoryGUID;
+	SavedCycle.AttackingFaction = AttackingFaction;
+	SavedCycle.HighestEvaluationCycle = 41;
+
+	// No assault history is retained: this is the exact history-trimming regression.
+	Subsystem->RestorePersistentState({}, {SavedCycle});
+	TestEqual(TEXT("The durable high-water mark owns the next decision cycle"),
+		Subsystem->ReserveNextEvaluationCycle(TerritoryGUID, AttackingFaction), 42);
+
+	const TArray<FTerritoryAssaultCycleRecord> Exported =
+		Subsystem->GetPersistentCycleState();
+	TestEqual(TEXT("One cycle ledger entry is exported"), Exported.Num(), 1);
+	if (Exported.Num() == 1)
+	{
+		TestEqual(TEXT("Updated high-water mark persists"),
+			Exported[0].HighestEvaluationCycle, 42);
+	}
+
 	World->DestroyWorld(false);
 	return true;
 }
@@ -241,19 +333,43 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 	const UClass* CounterClass = UTerritoryCounterAttackSubsystem::StaticClass();
 	TestTrue(TEXT("Scheduling is Blueprint authority-only"),
 		HasFunctionFlag(CounterClass, TEXT("ScheduleCounterAttack"), FUNC_BlueprintAuthorityOnly));
+	TestTrue(TEXT("Strongest eligible automatic scheduling is Blueprint authority-only"),
+		HasFunctionFlag(CounterClass, TEXT("ScheduleBestCounterAttack"), FUNC_BlueprintAuthorityOnly));
+	TestTrue(TEXT("Strategic candidate preview is side-effect-free Blueprint data"),
+		HasFunctionFlag(CounterClass, TEXT("GetBestEligibleAttackerPreview"), FUNC_BlueprintPure));
 	TestTrue(TEXT("Cancellation is Blueprint authority-only"),
 		HasFunctionFlag(CounterClass, TEXT("CancelAssault"), FUNC_BlueprintAuthorityOnly));
 	TestTrue(TEXT("Capture registration is Blueprint authority-only"),
 		HasFunctionFlag(UTerritoryControlSubsystem::StaticClass(), TEXT("TryRegisterAttacker"),
 			FUNC_BlueprintAuthorityOnly));
+	TestTrue(TEXT("Explicit-context force capture is Blueprint authority-only"),
+		HasFunctionFlag(UTerritoryControlSubsystem::StaticClass(), TEXT("ForceCaptureWithContext"),
+			FUNC_BlueprintAuthorityOnly));
+	const FProperty* ApproachIDProperty =
+		FTerritoryAssaultApproach::StaticStruct()->FindPropertyByName(TEXT("ApproachID"));
+	TestNotNull(TEXT("ApproachID remains a typed reflected field"), ApproachIDProperty);
+	if (ApproachIDProperty)
+	{
+		TestEqual(TEXT("Approach ID has an understandable editor label"),
+			ApproachIDProperty->GetMetaData(TEXT("DisplayName")), FString(TEXT("Approach ID")));
+	}
 
 	TestTrue(TEXT("WorldState assault read model replicates"),
 		HasPropertyFlag(ATerritoryWorldState::StaticClass(), TEXT("ReplicatedAssaults"), CPF_Net));
 	TestTrue(TEXT("WorldState assault campaign state saves"),
 		HasPropertyFlag(ATerritoryWorldState::StaticClass(), TEXT("SavedAssaults"), CPF_SaveGame));
+	TestTrue(TEXT("WorldState decision-cycle ledger saves"),
+		HasPropertyFlag(ATerritoryWorldState::StaticClass(), TEXT("SavedAssaultCycles"), CPF_SaveGame));
+	for (const FName Field : {TEXT("TargetTerritoryGUID"), TEXT("AttackingFaction"),
+		TEXT("HighestEvaluationCycle")})
+	{
+		TestTrue(FString::Printf(TEXT("Cycle ledger %s is SaveGame"), *Field.ToString()),
+			HasPropertyFlag(FTerritoryAssaultCycleRecord::StaticStruct(), Field, CPF_SaveGame));
+	}
 	for (const FName Field : {TEXT("AssaultID"), TEXT("TargetTerritoryGUID"), TEXT("State"),
 		TEXT("DecisionSeed"), TEXT("DecisionRoll"), TEXT("PlannedForce"), TEXT("AliveForce"),
-		TEXT("PendingReserveForce"), TEXT("KilledForce"), TEXT("WithdrawnForce")})
+		TEXT("PendingReserveForce"), TEXT("KilledForce"), TEXT("WithdrawnForce"),
+		TEXT("ConsecutiveSpawnFailures")})
 	{
 		TestTrue(FString::Printf(TEXT("%s is SaveGame"), *Field.ToString()),
 			HasPropertyFlag(FTerritoryAssaultRecord::StaticStruct(), Field, CPF_SaveGame));
@@ -272,6 +388,10 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 		GetDefault<UTerritoryAssaultActivity>()->SupportsAssaultGoals());
 	TestTrue(TEXT("Assault activity is combat interruptible"),
 		GetDefault<UTerritoryAssaultActivity>()->IsInterruptable());
+	TestTrue(TEXT("Physical spawn retries have a bounded default"),
+		GetDefault<UTerritoryCounterAttackProfile>()->MaxConsecutiveSpawnFailures > 0);
+	TestEqual(TEXT("An empty defence cascade defaults to certain launch after hard admission gates"),
+		GetDefault<UTerritoryCounterAttackProfile>()->UnguardedLaunchProbability, 1.f);
 	return true;
 }
 
@@ -291,6 +411,100 @@ bool FTFBehavior_GuardRestoreCount::RunTest(const FString& Parameters)
 		ATerritoryVolume::CalculateGuardRestoreCount(true, 5, 12, 12), 5);
 	TestEqual(TEXT("Negative saved values are bounded"),
 		ATerritoryVolume::CalculateGuardRestoreCount(true, 5, -2, 0), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_TagBoundSpawnPointRegistration,
+	"TerritoryFramework.Guards.Regression.TagBoundPostsJoinTerritoryCapacity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFBehavior_TagBoundSpawnPointRegistration::RunTest(const FString& Parameters)
+{
+	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
+	ATerritoryGuardSpawnPoint* First = NewObject<ATerritoryGuardSpawnPoint>();
+	ATerritoryGuardSpawnPoint* Second = NewObject<ATerritoryGuardSpawnPoint>();
+	TestNotNull(TEXT("Territory exists"), Territory);
+	TestNotNull(TEXT("First tag-bound post exists"), First);
+	TestNotNull(TEXT("Second tag-bound post exists"), Second);
+	if (!Territory || !First || !Second) return false;
+
+	TestEqual(TEXT("No authored spawn points means zero active garrison capacity"),
+		Territory->GetMaxGuardCount(), 0);
+	First->MaxGuards = 20;
+	Second->MaxGuards = 20;
+	Territory->RegisterResolvedGuardSpawnPoint(First);
+	Territory->RegisterResolvedGuardSpawnPoint(Second);
+	TestEqual(TEXT("Both resolved posts join the existing guard-post read model"),
+		Territory->GetGuardSpawnPoints().Num(), 2);
+	TestEqual(TEXT("Each unique post contributes exactly one active combat slot"),
+		Territory->GetMaxGuardCount(), 2);
+	TestEqual(TEXT("Legacy per-post MaxGuards cannot stack NPCs on one marker"),
+		First->GetEffectiveMaxGuards(), 1);
+
+	Territory->UnregisterResolvedGuardSpawnPoint(First);
+	TestEqual(TEXT("Streamed-out post is removed exactly once"),
+		Territory->GetGuardSpawnPoints().Num(), 1);
+	TestEqual(TEXT("Remaining capacity equals remaining point count"), Territory->GetMaxGuardCount(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_AuthoredGuardSlotPlacement,
+	"TerritoryFramework.Guards.Regression.AuthoredSlotPlacement",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFBehavior_AuthoredGuardSlotPlacement::RunTest(const FString& Parameters)
+{
+	ATerritoryGuardSpawnPoint* SpawnPoint = NewObject<ATerritoryGuardSpawnPoint>();
+	TestNotNull(TEXT("Spawn point exists"), SpawnPoint);
+	if (!SpawnPoint) return false;
+
+	const FTransform Marker(
+		FRotator(0.f, 137.f, 0.f),
+		FVector(12345.f, -6789.f, 250.f),
+		FVector(2.f));
+	SpawnPoint->SetActorTransform(Marker);
+	TestTrue(TEXT("Authored marker transform is returned without broad navmesh projection"),
+		SpawnPoint->GetSpawnTransform().Equals(Marker));
+
+	FTransform Deployment;
+	TestTrue(TEXT("Territory guard class resolves a deployment transform"),
+		SpawnPoint->ResolveGuardDeploymentTransform(ATerritoryGuardCharacter::StaticClass(), Deployment));
+	TestTrue(TEXT("Deployment preserves exact authored X"),
+		FMath::IsNearlyEqual(Deployment.GetLocation().X, Marker.GetLocation().X));
+	TestTrue(TEXT("Deployment preserves exact authored Y"),
+		FMath::IsNearlyEqual(Deployment.GetLocation().Y, Marker.GetLocation().Y));
+	TestTrue(TEXT("Deployment preserves authored facing"),
+		FMath::IsNearlyEqual(Deployment.Rotator().Yaw, Marker.Rotator().Yaw));
+	TestTrue(TEXT("Deployment aligns the capsule above the foot marker"),
+		Deployment.GetLocation().Z > Marker.GetLocation().Z);
+	TestTrue(TEXT("Spawn-point scale never scales the guard actor"),
+		Deployment.GetScale3D().Equals(FVector::OneVector));
+	FTransform InvalidDeployment;
+	TestFalse(TEXT("Deployment rejects a missing typed Territory guard class"),
+		SpawnPoint->ResolveGuardDeploymentTransform(nullptr, InvalidDeployment));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBehavior_GuardSlotSaveMigration,
+	"TerritoryFramework.Guards.SaveLoad.LegacyMultiSlotMigration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFBehavior_GuardSlotSaveMigration::RunTest(const FString& Parameters)
+{
+	ATerritoryGuardSpawnPoint* SpawnPoint = NewObject<ATerritoryGuardSpawnPoint>();
+	TestNotNull(TEXT("Spawn point exists"), SpawnPoint);
+	if (!SpawnPoint) return false;
+
+	SpawnPoint->SavedActiveGuardCount = 7;
+	SpawnPoint->PendingReserveSpawns = 4;
+	SpawnPoint->CurrentReserveCount = 5;
+	SpawnPoint->Load_Implementation();
+	TestEqual(TEXT("Legacy saved active count is bounded to the physical slot"),
+		SpawnPoint->SavedActiveGuardCount, 1);
+	TestEqual(TEXT("Only one replacement can be pending for one active slot"),
+		SpawnPoint->PendingReserveSpawns, 1);
+	TestEqual(TEXT("Finite reserve inventory remains durable across migration"),
+		SpawnPoint->CurrentReserveCount, 5);
 	return true;
 }
 

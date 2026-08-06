@@ -100,14 +100,15 @@ struct FTerritoryPatrolNode
 
 /**
  * Dedicated spawn point for territory guards. Place these inside a territory volume
- * to define where guards spawn, what patrol they walk, and how many reserves are held.
+ * to define the exact guard staging marker, patrol route, and reserve pool.
  *
  * Key design points:
  *   - Each spawn point owns its own PatrolRoute (TArray<FTerritoryPatrolNode>).
  *   - Guards spawned from this point access the route via ATerritoryGuardCharacter
  *     helpers (GetTerritoryPatrolRoute, HasTerritoryPatrolRoute, GetPatrolNodeCount).
- *   - Authored spawn points are authoritative. When their slots run out, no
- *     random overflow guards are created.
+ *   - Every unique spawn point contributes exactly one active combat slot.
+ *   - Authored spawn points are authoritative. No random active-guard fallback or
+ *     collision-driven relocation is allowed.
  *
  * Quick Blueprint Example:
  *   for spawn point in territory->GetGuardSpawnPoints():
@@ -118,6 +119,7 @@ UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="Territory Guard Spawn Po
 class TERRITORYFRAMEWORK_API ATerritoryGuardSpawnPoint : public AActor, public INarrativeSavableActor
 {
 	GENERATED_BODY()
+	friend class FTFBehavior_GuardSlotSaveMigration;
 
 public:
 	ATerritoryGuardSpawnPoint();
@@ -144,13 +146,12 @@ public:
 		meta=(Categories="Territory", DisplayName="Owner Territory"))
 	FGameplayTag OwnerTerritoryTag;
 
-	/**
-	 * Maximum guards this spawn point can emit concurrently.
-	 * Typical value: 2-5 per spawn point.
-	 */
+	/** Legacy serialized value. Active capacity is always one guard per spawn point. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
-		meta=(ClampMin="1", UIMin="1", UIMax="20", DisplayName="Max Guards"))
-	int32 MaxGuards = 3;
+		meta=(DeprecatedProperty,
+			DeprecationMessage="Ignored. Each spawn point is one active guard slot; add more spawn point actors to increase capacity.",
+			ClampMin="1", UIMin="1", UIMax="1", DisplayName="Legacy Max Guards (Ignored)"))
+	int32 MaxGuards = 1;
 
 	/**
 	 * Number of reserve guards that spawn on demand when active guards die.
@@ -226,7 +227,7 @@ public:
 
 	/**
 	 * Optional data-driven guard post configuration. When assigned, provides NPC definition,
-	 * activity config, trigger sets, patrol route, capacity, and reserve settings from a
+	 * activity config, trigger sets, patrol route, and reserve settings from a
 	 * reusable UPrimaryDataAsset. Inline properties below act as overrides when this is set.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
@@ -254,7 +255,7 @@ public:
 
 	/**
 	 * Returns true if this spawn point has at least one free active slot.
-	 * Use before calling SpawnSingleGuard() to avoid exceeding MaxGuards.
+	 * Use before calling SpawnSingleGuard() to confirm this point's one active slot is free.
 	 *
 	 * Example: if spawn point->HasAvailableSlot() -> spawn guard
 	 */
@@ -274,7 +275,7 @@ public:
 
 	/**
 	 * Returns the number of currently-alive guards spawned from this point.
-	 * MaxGuards - GetActiveGuardCount() == available slots.
+	 * 1 - GetActiveGuardCount() == available active slots.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Slot",
 		meta=(DisplayName="Get Active Guard Count"))
@@ -296,6 +297,10 @@ public:
 		meta=(DisplayName="Has Pending Reserve Spawn"))
 	bool HasPendingReserveSpawn() const;
 
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Reserve",
+		meta=(DisplayName="Get Pending Reserve Count"))
+	int32 GetPendingReserveCount() const { return FMath::Max(0, PendingReserveSpawns); }
+
 	/**
 	 * Deploys one reserve into a free active slot. This is the manual path when
 	 * Auto Spawn Reserves is disabled and intentionally does not require camera-frustum avoidance.
@@ -307,12 +312,22 @@ public:
 	// ─── Transform Query ───
 
 	/**
-	 * Returns the spawn transform for the next guard spawned from this point.
-	 * Defaults to the actor's transform; C++ subclasses can override it for per-slot offsets.
+	 * Returns the exact authored marker transform. The marker represents the guard's
+	 * foot position and facing; it is never horizontally projected or randomized.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Get Spawn Transform"))
 	virtual FTransform GetSpawnTransform() const;
+
+	/**
+	 * Resolves the actual character-capsule transform for this marker. X/Y and facing
+	 * remain exact; only Z is aligned to nearby navigation ground and raised by the
+	 * guard capsule half-height.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn",
+		meta=(DisplayName="Resolve Guard Deployment Transform"))
+	bool ResolveGuardDeploymentTransform(TSubclassOf<ATerritoryGuardCharacter> GuardClass,
+		FTransform& OutTransform) const;
 
 	// ─── Guard Registration ───
 
@@ -392,7 +407,8 @@ public:
 	ATerritoryVolume* GetOwningTerritory() const;
 
 	// ─── P1-07: Effective Configuration Getters ───
-	// GuardPostDefinition overrides inline values when assigned.
+	// GuardPostDefinition overrides inline values when assigned, except active capacity:
+	// each spawn point is always exactly one active combat slot.
 
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	int32 GetEffectiveMaxGuards() const;
@@ -492,6 +508,7 @@ private:
 
 	/** Bind from a territory's authored GuardSpawnPoints array, which overrides proximity. */
 	void BindToTerritory(ATerritoryVolume* Territory);
+	void SetResolvedTerritory(ATerritoryVolume* Territory);
 	void ResolveOwningTerritory();
 	void InitializeReserves();
 	void QueueReserveSpawn();

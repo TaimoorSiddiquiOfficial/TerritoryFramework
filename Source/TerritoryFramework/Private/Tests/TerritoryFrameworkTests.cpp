@@ -34,6 +34,7 @@
 #include "Tales/NarrativeCondition.h"
 #include "Navigation/MapMarker.h"
 #include "Navigation/NavigationMarkerComponent.h"
+#include "GameFramework/PlayerController.h"
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -130,6 +131,13 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 	// ─── Replication ───
 	TestTrue(TEXT("OwnershipData is replicated"),
 		TFTestUtils::IsReplicated(Class, TEXT("OwnershipData")));
+	TestTrue(TEXT("Exact garrison snapshot is replicated for clients and late joiners"),
+		TFTestUtils::IsReplicated(Class, TEXT("GarrisonSnapshot")));
+	const UScriptStruct* SnapshotStruct = FTerritoryGarrisonSnapshot::StaticStruct();
+	TestNotNull(TEXT("Garrison snapshot exposes the desired staffing target"),
+		SnapshotStruct ? SnapshotStruct->FindPropertyByName(TEXT("DesiredGuards")) : nullptr);
+	TestNotNull(TEXT("Garrison snapshot exposes authoritative capacity"),
+		SnapshotStruct ? SnapshotStruct->FindPropertyByName(TEXT("MaximumGuards")) : nullptr);
 
 	// ─── Required properties ───
 	TestTrue(TEXT("Has TerritoryTag property"), TFTestUtils::HasProperty(Class, TEXT("TerritoryTag")));
@@ -138,6 +146,18 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Has InitialMaxConcurrentAttackers property"), TFTestUtils::HasProperty(Class, TEXT("InitialMaxConcurrentAttackers")));
 	TestTrue(TEXT("Has InitialPeriodicIncome property"), TFTestUtils::HasProperty(Class, TEXT("InitialPeriodicIncome")));
 	TestTrue(TEXT("Has InitialGuardCost property"), TFTestUtils::HasProperty(Class, TEXT("InitialGuardCost")));
+	TestTrue(TEXT("Has distinct guard recruitment price"),
+		TFTestUtils::HasProperty(Class, TEXT("InitialGuardRecruitmentCost")));
+	TestTrue(TEXT("Has configurable post-capture staffing policy"),
+		TFTestUtils::HasProperty(Class, TEXT("PostCaptureGarrisonPolicy")));
+	const FProperty* RecruitmentField = FTerritoryOwnershipData::StaticStruct()
+		? FTerritoryOwnershipData::StaticStruct()->FindPropertyByName(TEXT("GuardRecruitmentCost")) : nullptr;
+	TestTrue(TEXT("Runtime recruitment price persists through Narrative save/load"),
+		RecruitmentField && RecruitmentField->HasAnyPropertyFlags(CPF_SaveGame));
+	TestTrue(TEXT("Absolute target validator is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("CanSetDesiredGuardCount")));
+	TestTrue(TEXT("Absolute target mutation is server-authority-only"),
+		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("TrySetDesiredGuardCount")));
 	TestTrue(TEXT("Has bStartsLocked property"), TFTestUtils::HasProperty(Class, TEXT("bStartsLocked")));
 	TestTrue(TEXT("Has ParentTerritoryTag property"), TFTestUtils::HasProperty(Class, TEXT("ParentTerritoryTag")));
 	TestTrue(TEXT("Has BoundsShape property"), TFTestUtils::HasProperty(Class, TEXT("BoundsShape")));
@@ -816,6 +836,80 @@ bool FTFFunctional_OwnershipDataDefaults::RunTest(const FString& Parameters)
 	TestEqual(TEXT("ControlProgress set to 0.75"), Data.ControlProgress, 0.75f);
 	TestEqual(TEXT("DefenderCount set to 5"), Data.DefenderCount, 5);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFFunctional_PlayerManagedGarrisonPolicy,
+	"TerritoryFramework.Functional.PlayerManagedGarrisonPolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFFunctional_PlayerManagedGarrisonPolicy::RunTest(const FString& Parameters)
+{
+	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
+	TestNotNull(TEXT("Test territory exists"), Territory);
+	if (!Territory) return false;
+	// Capacity is physical: this policy fixture authors three distinct combat slots
+	// instead of relying on the removed random/no-post fallback.
+	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>());
+	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>());
+	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>());
+	TestEqual(TEXT("Three authored markers provide three active slots"),
+		Territory->GetMaxGuardCount(), 3);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Narrative.Factions.Heroes")), false);
+
+	FTerritoryTransitionContext ScriptContext;
+	TestEqual(TEXT("Script/AI ownership keeps the authored three-guard target"),
+		Territory->GetPostCaptureGuardCount(ScriptContext), 3);
+	FTerritoryTransitionContext PlayerContext;
+	PlayerContext.PlayerController = NewObject<APlayerController>();
+	ATerritoryGuardCharacter* PlayerFactionPawn = NewObject<ATerritoryGuardCharacter>();
+	INarrativeTeamAgentInterface* PlayerTeamAgent =
+		Cast<INarrativeTeamAgentInterface>(PlayerFactionPawn);
+	TestNotNull(TEXT("Player context pawn exposes Narrative faction authority"), PlayerTeamAgent);
+	if (PlayerTeamAgent) PlayerTeamAgent->AddFaction(Heroes);
+	PlayerContext.TargetPawn = PlayerFactionPawn;
+	PlayerContext.RequestingFaction = Heroes;
+	TestEqual(TEXT("Player-driven capture starts unstaffed for explicit P&L control"),
+		Territory->GetPostCaptureGuardCountForOwner(PlayerContext, Heroes), 0);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Narrative.Factions.Bandits")), false);
+	TestEqual(TEXT("A player context cannot suppress an unrelated AI faction garrison"),
+		Territory->GetPostCaptureGuardCountForOwner(PlayerContext, Bandits), 3);
+	FTerritoryTransitionContext SpoofedContext = PlayerContext;
+	SpoofedContext.RequestingFaction = Bandits;
+	TestEqual(TEXT("Normalizing the request tag cannot spoof Narrative faction membership"),
+		Territory->GetPostCaptureGuardCountForOwner(SpoofedContext, Bandits), 3);
+
+	Territory->SetOwningFactionWithContext(Heroes, PlayerContext);
+	TestEqual(TEXT("Explicit player context survives the ownership wrapper and commits zero guards"),
+		Territory->GetDesiredGuardCount(), 0);
+	FTerritoryOwnershipData Claimed = Territory->GetOwnershipData();
+	Claimed.OwningFaction = Heroes;
+	Claimed.State = ETerritoryState::Claimed;
+	Claimed.ControlProgress = 1.f;
+	Claimed.DesiredGuardCount = 3;
+	Claimed.GuardCost = 50;
+	Claimed.GuardRecruitmentCost = 50;
+	TestTrue(TEXT("Claimed test state commits atomically"), Territory->CommitOwnershipData(Claimed));
+
+	ATerritoryGuardCharacter* Requester = NewObject<ATerritoryGuardCharacter>();
+	INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Requester);
+	TestNotNull(TEXT("Requester exposes Narrative faction authority"), TeamAgent);
+	if (TeamAgent) TeamAgent->AddFaction(Heroes);
+	FText FailureReason;
+	TestTrue(TEXT("Desired target can be reduced even when every assigned guard is dead"),
+		Territory->CanRemoveGuards(Requester, 1, FailureReason));
+	FText ResultMessage;
+	TestTrue(TEXT("Reduction commits without requiring a live pawn to withdraw"),
+		Territory->TryRemoveGuards(Requester, 1, ResultMessage));
+	TestEqual(TEXT("Persistent desired target is reduced exactly once"),
+		Territory->GetDesiredGuardCount(), 2);
+	TestEqual(TEXT("No phantom live guards are created by a reduction"),
+		Territory->GetSpawnedGuardCount(), 0);
+
+	const FTerritoryGarrisonMutationResult Invalid = Territory->TrySetDesiredGuardCount(nullptr, 1);
+	TestFalse(TEXT("Server mutation rejects a missing exact requester"), Invalid.bSuccess);
 	return true;
 }
 
@@ -2381,6 +2475,8 @@ bool FTFContract_GuardSpawnPointPure::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetReserveCount")));
 	TestTrue(TEXT("GetSpawnTransform is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetSpawnTransform")));
+	TestTrue(TEXT("ResolveGuardDeploymentTransform is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("ResolveGuardDeploymentTransform")));
 	TestTrue(TEXT("GetPatrolRoute is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPatrolRoute")));
 	TestTrue(TEXT("HasPatrolRoute is BlueprintPure"),
@@ -3053,8 +3149,13 @@ bool FTFContract_AtomicMutation::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Request has DesiredState"), RequestStruct->FindPropertyByName(FName(TEXT("DesiredState"))) != nullptr);
 		TestTrue(TEXT("Request has bClearCaptureState"), RequestStruct->FindPropertyByName(FName(TEXT("bClearCaptureState"))) != nullptr);
 		TestTrue(TEXT("Request has bBypassConditions"), RequestStruct->FindPropertyByName(FName(TEXT("bBypassConditions"))) != nullptr);
+		TestTrue(TEXT("Request has explicit lock bypass"), RequestStruct->FindPropertyByName(FName(TEXT("bBypassLock"))) != nullptr);
 		TestTrue(TEXT("Request has TransitionContext"), RequestStruct->FindPropertyByName(FName(TEXT("TransitionContext"))) != nullptr);
 	}
+	const FTerritoryMutationRequest SafeDefaults;
+	TestFalse(TEXT("Ordinary mutations do not bypass locks"), SafeDefaults.bBypassLock);
+	TestFalse(TEXT("Ordinary mutations do not bypass diplomacy"), SafeDefaults.bBypassDiplomacy);
+	TestFalse(TEXT("Ordinary mutations do not bypass Narrative conditions"), SafeDefaults.bBypassConditions);
 
 	// Verify response struct fields
 	UScriptStruct* ResponseStruct = FTerritoryMutationResponse::StaticStruct();

@@ -24,14 +24,16 @@ ATerritoryVolume (base — placed in level for any territory)
 | InitialOwningFaction | GameplayTag | — | Who owns at game start |
 | InitialMaxConcurrentAttackers | int32 | 3 | NPC attack slot limit |
 | InitialPeriodicIncome | int32 | 100 | Gold per economy tick |
-| InitialGuardCost | int32 | 50 | Upkeep cost per tick |
+| InitialGuardCost | int32 | 50 | Recurring upkeep per assigned guard per economy cycle |
+| InitialGuardRecruitmentCost | int32 | 50 | One-time Narrative inventory price per target increase |
+| PostCaptureGarrisonPolicy | enum | PlayerChooses | Resolves the new owner's initial desired garrison |
 | bStartsLocked | bool | false | If true, territory can't be captured until unlocked |
 | ParentTerritoryTag | GameplayTag | — | Parent territory for hierarchy |
 | GuardNPCDefinition | NPCDefinition* | — | NPC template for guards |
 | FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> | — | Per-faction NPC definition overrides |
-| GuardSpawnCount | int32 | 3 | How many guards to spawn |
-| GuardSpawnPoints | Array<Actor> | — | Optional spawn point actors (use GetGuardSpawnPoints() for typed access) |
-| GuardSpawnRadius | float | 500 | Random spawn radius when no spawn points available |
+| GuardSpawnCount | int32 | 3 | Authored initial target for existing ownership and non-player capture |
+| GuardSpawnPoints | Array<ATerritoryGuardSpawnPoint*> | — | Explicit posts; their unique union with tag/proximity posts is the exact active capacity, one guard per point |
+| GuardSpawnRadius | float | 500 | Deprecated and ignored; active guards require authored points |
 
 ### Key Events (BlueprintNativeEvent)
 
@@ -39,7 +41,7 @@ ATerritoryVolume (base — placed in level for any territory)
 |---|---|---|---|
 | OnOwnershipChanged(Old, New) | After faction changes + guard lifecycle | No | Custom capture effects, sounds |
 | OnStateChanged(OldState, NewState) | After state transition + guard lifecycle | No | Custom state reactions |
-| OnAllGuardsDefeated() | All RegisteredDefenders dead | **YES** | Custom defeat reactions (Super clears owner + sets Unclaimed) |
+| OnAllGuardsDefeated() | All RegisteredDefenders dead | **YES** | Custom zero-defence reactions; Super never changes ownership |
 | OnTerritoryInitialized() | BeginPlay completes | No | Custom initialization logic |
 
 See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-call requirements.
@@ -231,7 +233,7 @@ BP_TerritoryProperty "Blacksmith"
 | Property | Type | Default | Purpose |
 |---|---|---|---|
 | OwnerTerritoryTag | GameplayTag | — | Optional explicit owner; authored territory references take precedence, then tag, then proximity |
-| MaxGuards | int32 | 3 | Active guard slots |
+| MaxGuards | int32 | 1 | Deprecated/ignored legacy value; every actor is one active slot |
 | ReserveSlots | int32 | 1 | Replacement guards |
 | PatrolRoute | Array<PatrolNode> | — | Ordered waypoints |
 | bLoopPatrol | bool | true | Loop back to start |
@@ -267,9 +269,9 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 
 | Property | Type | Purpose |
 |---|---|---|
-| TerritoryHomeTransform | Transform | Resolved, NavMesh-projected home transform |
+| TerritoryHomeTransform | Transform | Exact authored X/Y/facing with vertical ground/capsule alignment |
 | OwningTerritory | TerritoryVolume* | Territory back-reference |
-| OwningTerritorySpawnPoint | GuardSpawnPoint* | Spawn point back-reference; null for random fallback spawns |
+| OwningTerritorySpawnPoint | GuardSpawnPoint* | Required active-slot back-reference |
 
 ## ATerritoryWorldState
 

@@ -62,6 +62,10 @@ struct FTerritoryMutationRequest
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
 	bool bBypassDiplomacy = false;
 
+	/** Whether to bypass a locked Territory. Default = false. Set true only for explicit force capture. */
+	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
+	bool bBypassLock = false;
+
 	/** Optional transition context for Narrative conditions/events. */
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
 	FTerritoryTransitionContext TransitionContext;

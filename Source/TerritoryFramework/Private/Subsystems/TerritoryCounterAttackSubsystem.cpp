@@ -5,6 +5,7 @@
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
@@ -81,6 +82,7 @@ void UTerritoryCounterAttackSubsystem::Deinitialize()
 	LiveParticipants.Empty();
 	WarnedControllers.Empty();
 	Assaults.Empty();
+	EvaluationCycleHighWater.Empty();
 	bRestoringState = false;
 	Super::Deinitialize();
 }
@@ -124,14 +126,145 @@ FTerritoryAssaultEvaluationResult UTerritoryCounterAttackSubsystem::CalculateEva
 		+ 0.20f * ShortfallRatio
 		+ 0.05f * Momentum
 		- Profile->DefenceDeterrenceWeight * (0.60f * ActiveRatio + 0.40f * NormalizedDefence);
-	Result.LaunchProbability = FMath::Clamp(RawProbability,
-		Profile->MinimumLaunchProbability, Profile->MaximumLaunchProbability);
+	Result.LaunchProbability = Active <= 0.f
+		? FMath::Clamp(Profile->UnguardedLaunchProbability, 0.f, 1.f)
+		: FMath::Clamp(RawProbability,
+			Profile->MinimumLaunchProbability, Profile->MaximumLaunchProbability);
 	Result.EstimatedSuccessProbability = AttackPower
 		/ FMath::Max(1.f, AttackPower + Result.DistrictDefencePower);
 	Result.AttackPriority = FMath::Max(0.f,
 		100.f * (Result.LaunchProbability + 0.25f * NormalizedStrategicValue
 			+ 0.15f * Result.EstimatedSuccessProbability));
 	return Result;
+}
+
+bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
+	const ATerritoryVolume* Territory, const FGameplayTag& PreferredFaction,
+	FGameplayTag& OutAttackingFaction, FTerritoryAssaultEvaluationInput& OutInput,
+	FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const
+{
+	OutAttackingFaction = FGameplayTag();
+	OutInput = FTerritoryAssaultEvaluationInput();
+	OutResult = FTerritoryAssaultEvaluationResult();
+	OutReason = FText::GetEmpty();
+	if (!Territory || Territory->GetTerritoryState() != ETerritoryState::Claimed
+		|| !Territory->GetOwningFaction().IsValid())
+	{
+		OutReason = NSLOCTEXT("TerritoryCounterAttack", "PreviewInvalidTerritory",
+			"Counterattack evaluation requires a securely claimed territory.");
+		return false;
+	}
+
+	const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
+	if (!Profile || Profile->FactionForces.IsEmpty())
+	{
+		OutReason = NSLOCTEXT("TerritoryCounterAttack", "PreviewNoProfile",
+			"No counterattack force profile is assigned to this territory.");
+		return false;
+	}
+
+	int32 ConfiguredCandidateCount = 0;
+	int32 DiplomacyBlockedCount = 0;
+	float BestMilitaryPower = -1.f;
+	for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
+	{
+		if (!Force.Faction.IsValid() || Force.Faction == Territory->GetOwningFaction()
+			|| !Force.AttackerDefinition || Force.PlannedForce <= 0 || Force.WaveSize <= 0
+			|| Force.MilitaryPower <= 0.f)
+		{
+			continue;
+		}
+		++ConfiguredCandidateCount;
+
+		FTerritoryAssaultRecord AdmissionRecord;
+		AdmissionRecord.AttackingFaction = Force.Faction;
+		AdmissionRecord.DefendingFaction = Territory->GetOwningFaction();
+		if (IsDiplomacyBlocked(AdmissionRecord, Territory))
+		{
+			++DiplomacyBlockedCount;
+			continue;
+		}
+
+		const FTerritoryAssaultEvaluationInput CandidateInput =
+			BuildEvaluationInput(Territory, Force);
+		const FTerritoryAssaultEvaluationResult CandidateResult =
+			CalculateEvaluation(CandidateInput, Profile);
+		const bool bHasBest = OutAttackingFaction.IsValid();
+		const bool bHigherPriority = !bHasBest
+			|| CandidateResult.AttackPriority > OutResult.AttackPriority + KINDA_SMALL_NUMBER;
+		const bool bPriorityTie = bHasBest
+			&& FMath::IsNearlyEqual(CandidateResult.AttackPriority, OutResult.AttackPriority);
+		const bool bHigherSuccess = bPriorityTie
+			&& CandidateResult.EstimatedSuccessProbability
+				> OutResult.EstimatedSuccessProbability + KINDA_SMALL_NUMBER;
+		const bool bSuccessTie = bPriorityTie
+			&& FMath::IsNearlyEqual(CandidateResult.EstimatedSuccessProbability,
+				OutResult.EstimatedSuccessProbability);
+		const bool bHigherPower = bSuccessTie
+			&& Force.MilitaryPower > BestMilitaryPower + KINDA_SMALL_NUMBER;
+		const bool bPowerTie = bSuccessTie
+			&& FMath::IsNearlyEqual(Force.MilitaryPower, BestMilitaryPower);
+		const bool bPreferredTieBreak = bPowerTie
+			&& Force.Faction == PreferredFaction && OutAttackingFaction != PreferredFaction;
+		const bool bStableTagTieBreak = bPowerTie
+			&& (Force.Faction == PreferredFaction) == (OutAttackingFaction == PreferredFaction)
+			&& Force.Faction.ToString() < OutAttackingFaction.ToString();
+
+		if (bHigherPriority || bHigherSuccess || bHigherPower
+			|| bPreferredTieBreak || bStableTagTieBreak)
+		{
+			OutAttackingFaction = Force.Faction;
+			OutInput = CandidateInput;
+			OutResult = CandidateResult;
+			BestMilitaryPower = Force.MilitaryPower;
+		}
+	}
+
+	if (!OutAttackingFaction.IsValid())
+	{
+		OutReason = ConfiguredCandidateCount > 0
+			&& DiplomacyBlockedCount == ConfiguredCandidateCount
+			? NSLOCTEXT("TerritoryCounterAttack", "PreviewDiplomacyBlocked",
+				"Every configured opposing faction is blocked by diplomacy or Narrative attitude.")
+			: NSLOCTEXT("TerritoryCounterAttack", "PreviewNoValidForce",
+				"No configured opposing faction has a valid finite force for this territory.");
+		return false;
+	}
+
+	OutReason = OutInput.ActiveGuards <= 0
+		? NSLOCTEXT("TerritoryCounterAttack", "PreviewUnguarded",
+			"Diplomacy permits an assault and the complete local defence cascade has no active guards.")
+		: NSLOCTEXT("TerritoryCounterAttack", "PreviewEligible",
+			"Diplomacy permits an assault; the strongest configured eligible faction is shown.");
+	return true;
+}
+
+bool UTerritoryCounterAttackSubsystem::GetBestEligibleAttackerPreview(
+	const ATerritoryVolume* Territory, FGameplayTag PreferredFaction,
+	FGameplayTag& OutAttackingFaction, FTerritoryAssaultEvaluationInput& OutInput,
+	FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const
+{
+	return FindBestEligibleAttacker(Territory, PreferredFaction,
+		OutAttackingFaction, OutInput, OutResult, OutReason);
+}
+
+bool UTerritoryCounterAttackSubsystem::ScheduleBestCounterAttack(
+	ATerritoryVolume* Territory, FGameplayTag PreferredFaction)
+{
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || !Territory
+		|| Territory->GetWorld() != World || !Territory->HasAuthority())
+	{
+		return false;
+	}
+
+	FGameplayTag AttackingFaction;
+	FTerritoryAssaultEvaluationInput Input;
+	FTerritoryAssaultEvaluationResult Result;
+	FText Reason;
+	return FindBestEligibleAttacker(Territory, PreferredFaction,
+		AttackingFaction, Input, Result, Reason)
+		&& ScheduleCounterAttack(Territory, AttackingFaction);
 }
 
 bool UTerritoryCounterAttackSubsystem::ScheduleCounterAttack(
@@ -151,7 +284,20 @@ bool UTerritoryCounterAttackSubsystem::ScheduleCounterAttack(
 	}
 
 	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
-	if (!Profile || !Profile->FindFactionForce(AttackingFaction)) return false;
+	const FTerritoryFactionAssaultConfig* ForceConfig = Profile
+		? Profile->FindFactionForce(AttackingFaction) : nullptr;
+	UClass* ConfiguredNPCClass = ForceConfig && ForceConfig->AttackerDefinition
+		? ForceConfig->AttackerDefinition->NPCClassPath.LoadSynchronous() : nullptr;
+	if (!Profile || !ForceConfig || ForceConfig->PlannedForce <= 0 || ForceConfig->WaveSize <= 0
+		|| ForceConfig->MilitaryPower <= 0.f || !ConfiguredNPCClass
+		|| !ConfiguredNPCClass->IsChildOf(ATerritoryAssaultCharacter::StaticClass()))
+	{
+		return false;
+	}
+	FTerritoryAssaultRecord AdmissionRecord;
+	AdmissionRecord.AttackingFaction = AttackingFaction;
+	AdmissionRecord.DefendingFaction = Territory->GetOwningFaction();
+	if (IsDiplomacyBlocked(AdmissionRecord, Territory)) return false;
 
 	for (const auto& Pair : Assaults)
 	{
@@ -168,15 +314,9 @@ bool UTerritoryCounterAttackSubsystem::ScheduleCounterAttack(
 		return false;
 	}
 
-	int32 EvaluationCycle = 1;
-	for (const auto& Pair : Assaults)
-	{
-		if (Pair.Value.TargetTerritoryGUID == Territory->GetTerritoryGUID()
-			&& Pair.Value.AttackingFaction == AttackingFaction)
-		{
-			EvaluationCycle = FMath::Max(EvaluationCycle, Pair.Value.EvaluationCycle + 1);
-		}
-	}
+	const int32 EvaluationCycle = ReserveNextEvaluationCycle(
+		Territory->GetTerritoryGUID(), AttackingFaction);
+	if (EvaluationCycle <= 0) return false;
 
 	FTerritoryAssaultRecord Record;
 	Record.AssaultID = FGuid::NewGuid();
@@ -245,6 +385,12 @@ TArray<FTerritoryAssaultRecord> UTerritoryCounterAttackSubsystem::GetAssaultsFor
 bool UTerritoryCounterAttackSubsystem::IsAssaultActive(FGuid AssaultID) const
 {
 	const FTerritoryAssaultRecord* Assault = Assaults.Find(AssaultID);
+	return Assault && Assault->State == ETerritoryAssaultState::Active;
+}
+
+bool UTerritoryCounterAttackSubsystem::IsAssaultPendingOrActive(FGuid AssaultID) const
+{
+	const FTerritoryAssaultRecord* Assault = Assaults.Find(AssaultID);
 	return Assault && !Assault->IsTerminal();
 }
 
@@ -254,17 +400,24 @@ FString UTerritoryCounterAttackSubsystem::GetAssaultDebugString(FGuid AssaultID)
 	if (!Assault) return TEXT("Assault not found");
 	const FTerritoryAssaultEvaluationInput& Input = Assault->EvaluationInput;
 	const FTerritoryAssaultEvaluationResult& Result = Assault->EvaluationResult;
+	const ATerritoryVolume* Territory = ResolveTerritory(*Assault);
+	const UTerritoryCounterAttackProfile* Profile = Territory
+		? Territory->GetCounterAttackProfile() : nullptr;
+	const bool bRelevantPlayerNearby = Territory && Profile
+		&& HasRelevantPlayerNearby(*Assault, Territory, Profile->ActivationRadius);
 	return FString::Printf(
-		TEXT("Target=%s Attack=%s Defend=%s Guards=%d/%d/%d Reserve=%d AttackPower=%.2f DefencePower=%.2f PowerRatio=%.3f Strategic=%.2f Priority=%.3f LaunchP=%.3f SuccessP=%.3f Force=%d/%d/%d/%d Approaches=%s State=%d Notification=%s GraceEnd=%.2f Roll=%.4f Reason=%d"),
+		TEXT("Target=%s Attack=%s Defend=%s Guards=%d/%d/%d Reserve=%d AttackPower=%.2f DefencePower=%.2f PowerRatio=%.3f Strategic=%.2f Priority=%.3f LaunchP=%.3f SuccessP=%.3f Force=%d/%d/%d/%d SpawnFailures=%d Approaches=%s State=%d Notification=%s Proximity=%s GraceEnd=%.2f Roll=%.4f Reason=%d"),
 		*Assault->TargetTerritory.ToString(), *Assault->AttackingFaction.ToString(),
 		*Assault->DefendingFaction.ToString(), Input.ActiveGuards, Input.DesiredGuards,
 		Input.MaximumGuards, Input.ReserveGuards, Input.AttackingMilitaryPower,
 		Result.DistrictDefencePower, Result.PowerRatio, Input.StrategicValue,
 		Result.AttackPriority, Result.LaunchProbability, Result.EstimatedSuccessProbability,
 		Assault->PlannedForce, Assault->AliveForce, Assault->PendingReserveForce,
-		Assault->KilledForce, *FString::JoinBy(Assault->SelectedApproaches, TEXT(","),
+		Assault->KilledForce, Assault->ConsecutiveSpawnFailures,
+		*FString::JoinBy(Assault->SelectedApproaches, TEXT(","),
 			[](FName Name) { return Name.ToString(); }), static_cast<int32>(Assault->State),
-		Assault->bNotificationSent ? TEXT("sent") : TEXT("pending"), Assault->GraceEndsGameTime,
+		Assault->bNotificationSent ? TEXT("sent") : TEXT("pending"),
+		bRelevantPlayerNearby ? TEXT("inside") : TEXT("outside"), Assault->GraceEndsGameTime,
 		Assault->DecisionRoll, static_cast<int32>(Assault->Resolution));
 }
 
@@ -273,8 +426,45 @@ TArray<FTerritoryAssaultRecord> UTerritoryCounterAttackSubsystem::GetPersistentS
 	return GetAllAssaults();
 }
 
+TArray<FTerritoryAssaultCycleRecord> UTerritoryCounterAttackSubsystem::GetPersistentCycleState() const
+{
+	TArray<FTerritoryAssaultCycleRecord> Result;
+	for (const auto& TerritoryPair : EvaluationCycleHighWater)
+	{
+		for (const auto& FactionPair : TerritoryPair.Value)
+		{
+			if (!TerritoryPair.Key.IsValid() || !FactionPair.Key.IsValid() || FactionPair.Value <= 0)
+			{
+				continue;
+			}
+			FTerritoryAssaultCycleRecord Record;
+			Record.TargetTerritoryGUID = TerritoryPair.Key;
+			Record.AttackingFaction = FactionPair.Key;
+			Record.HighestEvaluationCycle = FactionPair.Value;
+			Result.Add(Record);
+		}
+	}
+	Result.Sort([](const FTerritoryAssaultCycleRecord& A,
+		const FTerritoryAssaultCycleRecord& B)
+	{
+		const FString AGuid = A.TargetTerritoryGUID.ToString(EGuidFormats::Digits);
+		const FString BGuid = B.TargetTerritoryGUID.ToString(EGuidFormats::Digits);
+		return AGuid == BGuid
+			? A.AttackingFaction.ToString() < B.AttackingFaction.ToString()
+			: AGuid < BGuid;
+	});
+	return Result;
+}
+
 void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 	const TArray<FTerritoryAssaultRecord>& Records)
+{
+	RestorePersistentState(Records, {});
+}
+
+void UTerritoryCounterAttackSubsystem::RestorePersistentState(
+	const TArray<FTerritoryAssaultRecord>& Records,
+	const TArray<FTerritoryAssaultCycleRecord>& CycleRecords)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -291,11 +481,13 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 	LiveParticipants.Empty();
 	WarnedControllers.Empty();
 	Assaults.Empty();
+	EvaluationCycleHighWater.Empty();
 
 	for (FTerritoryAssaultRecord Record : Records)
 	{
 		if (!Record.AssaultID.IsValid() || !Record.TargetTerritory.IsValid()) continue;
 		Record.PlannedForce = FMath::Max(0, Record.PlannedForce);
+		Record.ConsecutiveSpawnFailures = FMath::Max(0, Record.ConsecutiveSpawnFailures);
 		Record.KilledForce = FMath::Clamp(Record.KilledForce, 0, Record.PlannedForce);
 		Record.WithdrawnForce = FMath::Clamp(
 			Record.WithdrawnForce, 0, Record.PlannedForce - Record.KilledForce);
@@ -316,6 +508,24 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 				Record.PendingReserveForce, 0, MaximumRemaining - Record.AliveForce);
 		}
 		Assaults.Add(Record.AssaultID, Record);
+		if (Record.TargetTerritoryGUID.IsValid() && Record.AttackingFaction.IsValid()
+			&& Record.EvaluationCycle > 0)
+		{
+			int32& HighWater = EvaluationCycleHighWater.FindOrAdd(
+				Record.TargetTerritoryGUID).FindOrAdd(Record.AttackingFaction);
+			HighWater = FMath::Max(HighWater, Record.EvaluationCycle);
+		}
+	}
+	for (const FTerritoryAssaultCycleRecord& Cycle : CycleRecords)
+	{
+		if (!Cycle.TargetTerritoryGUID.IsValid() || !Cycle.AttackingFaction.IsValid()
+			|| Cycle.HighestEvaluationCycle <= 0)
+		{
+			continue;
+		}
+		int32& HighWater = EvaluationCycleHighWater.FindOrAdd(
+			Cycle.TargetTerritoryGUID).FindOrAdd(Cycle.AttackingFaction);
+		HighWater = FMath::Max(HighWater, Cycle.HighestEvaluationCycle);
 	}
 	bRestoringState = false;
 }
@@ -343,6 +553,25 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	if (Assault.IsTerminal()) return;
 	ATerritoryVolume* Territory = ResolveTerritory(Assault);
 	if (!Territory) return; // World Partition: wait for authoritative actor registration.
+	if (Territory->GetTerritoryState() != ETerritoryState::Claimed)
+	{
+		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
+			ETerritoryAssaultResolution::InvalidTerritory);
+		return;
+	}
+
+	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
+	const FTerritoryFactionAssaultConfig* ForceConfig = Profile
+		? Profile->FindFactionForce(Assault.AttackingFaction) : nullptr;
+	UClass* ConfiguredNPCClass = ForceConfig && ForceConfig->AttackerDefinition
+		? ForceConfig->AttackerDefinition->NPCClassPath.LoadSynchronous() : nullptr;
+	if (!Profile || !ForceConfig || !ConfiguredNPCClass
+		|| !ConfiguredNPCClass->IsChildOf(ATerritoryAssaultCharacter::StaticClass()))
+	{
+		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
+			ETerritoryAssaultResolution::ConfigurationInvalid);
+		return;
+	}
 
 	if (Territory->GetOwningFaction() != Assault.DefendingFaction)
 	{
@@ -382,7 +611,7 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		break;
 	case ETerritoryAssaultState::WaitingForPlayerProximity:
 		NotifyRelevantPlayers(Assault, Territory);
-		if (UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile())
+		if (Profile)
 		{
 			if (Territory->GetTerritoryState() == ETerritoryState::Claimed
 				&& HasRelevantPlayerNearby(Assault, Territory, Profile->ActivationRadius))
@@ -392,19 +621,13 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		}
 		break;
 	case ETerritoryAssaultState::Active:
-		if (Territory->GetTerritoryState() == ETerritoryState::Locked)
-		{
-			ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
-				ETerritoryAssaultResolution::InvalidTerritory);
-			return;
-		}
 		if (Assault.AliveForce + Assault.PendingReserveForce <= 0)
 		{
 			ResolveAssault(Assault, ETerritoryAssaultState::Defeated,
 				ETerritoryAssaultResolution::AllAttackersRemoved);
 			return;
 		}
-		if (UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile())
+		if (Profile)
 		{
 			if (Assault.PendingReserveForce > 0
 				&& Assault.AliveForce < FMath::Max(1, Assault.WaveSize)
@@ -544,7 +767,21 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			++Assault.AliveForce;
 		}
 	}
-	if (Spawned > 0) BroadcastChanged(Assault);
+	if (Spawned > 0)
+	{
+		Assault.ConsecutiveSpawnFailures = 0;
+		BroadcastChanged(Assault);
+	}
+	else
+	{
+		++Assault.ConsecutiveSpawnFailures;
+		BroadcastChanged(Assault);
+		if (Assault.ConsecutiveSpawnFailures >= FMath::Max(1, Profile->MaxConsecutiveSpawnFailures))
+		{
+			ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
+				ETerritoryAssaultResolution::SpawnFailed);
+		}
+	}
 }
 
 ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
@@ -737,8 +974,10 @@ bool UTerritoryCounterAttackSubsystem::IsRelevantPlayer(
 	if (!Controller || !Profile) return false;
 	AActor* PlayerPawn = Controller->GetPawn().Get();
 	return !Profile->bNotifyDefendingFactionOnly
-		|| UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
-			this, PlayerPawn) == Assault.DefendingFaction;
+		|| UTerritoryBlueprintLibrary::IsActorInFaction(
+			this, PlayerPawn, Assault.DefendingFaction)
+		|| UTerritoryBlueprintLibrary::IsActorInFaction(
+			this, const_cast<APlayerController*>(Controller), Assault.DefendingFaction);
 }
 
 bool UTerritoryCounterAttackSubsystem::IsDiplomacyBlocked(
@@ -767,7 +1006,7 @@ TArray<FName> UTerritoryCounterAttackSubsystem::SelectValidApproaches(
 		const FTransform WorldTransform = Approach.RelativeSpawnTransform * Territory->GetActorTransform();
 		if (HasNavigationRoute(WorldTransform.GetLocation(), Territory->GetTerritoryBounds().GetCenter()))
 		{
-			Valid.Add(Approach.ApproachID);
+			Valid.AddUnique(Approach.ApproachID);
 		}
 	}
 	const int32 DesiredApproaches = FMath::Clamp(
@@ -817,20 +1056,68 @@ FTerritoryAssaultEvaluationInput UTerritoryCounterAttackSubsystem::BuildEvaluati
 {
 	FTerritoryAssaultEvaluationInput Input;
 	if (!Territory) return Input;
-	Input.ActiveGuards = Territory->GetSpawnedGuardCount();
-	Input.DesiredGuards = Territory->GetDesiredGuardCount();
-	Input.MaximumGuards = Territory->GetMaxGuardCount();
-	for (const ATerritoryGuardSpawnPoint* SpawnPoint : Territory->GetGuardSpawnPoints())
+
+	// A physical assault still targets exactly one existing capture authority. Strategic
+	// defence, however, cascades through its loaded District front: the target, its District,
+	// and same-owner sibling Properties. This lets nearby guards/support deter a strike without
+	// inventing a second capture system or letting another faction's garrison defend the owner.
+	TArray<const ATerritoryVolume*> DefenceTerritories;
+	DefenceTerritories.Add(Territory);
+	if (const ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory))
 	{
-		if (SpawnPoint) Input.ReserveGuards += SpawnPoint->GetReserveCount();
+		for (const ATerritoryVolume* Property : District->GetProperties())
+		{
+			DefenceTerritories.AddUnique(Property);
+		}
 	}
-	Input.GuardQuality = Territory->GetGuardQuality();
-	Input.Fortification = Territory->GetFortificationStrength();
-	Input.NearbyAlliedSupport = Territory->GetNearbyAlliedSupport();
+	else if (const ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
+	{
+		if (const ATerritoryDistrict* OwningDistrict = Property->GetOwningDistrict())
+		{
+			DefenceTerritories.AddUnique(OwningDistrict);
+			for (const ATerritoryVolume* Sibling : OwningDistrict->GetProperties())
+			{
+				DefenceTerritories.AddUnique(Sibling);
+			}
+		}
+	}
+
+	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
+	float WeightedQuality = 0.f;
+	float QualityWeight = 0.f;
+	for (const ATerritoryVolume* Defence : DefenceTerritories)
+	{
+		if (!Defence || (Defence != Territory
+			&& Defence->GetOwningFaction() != DefendingFaction))
+		{
+			continue;
+		}
+		const int32 Active = Defence->GetSpawnedGuardCount();
+		int32 Reserve = 0;
+		for (const ATerritoryGuardSpawnPoint* SpawnPoint : Defence->GetGuardSpawnPoints())
+		{
+			if (SpawnPoint) Reserve += FMath::Max(0, SpawnPoint->GetReserveCount());
+		}
+		Input.ActiveGuards += FMath::Max(0, Active);
+		Input.DesiredGuards += FMath::Max(0, Defence->GetDesiredGuardCount());
+		Input.MaximumGuards += FMath::Max(0, Defence->GetMaxGuardCount());
+		Input.ReserveGuards += Reserve;
+		const float Weight = static_cast<float>(FMath::Max(0, Active))
+			+ 0.5f * static_cast<float>(Reserve);
+		WeightedQuality += FMath::Max(0.f, Defence->GetGuardQuality()) * Weight;
+		QualityWeight += Weight;
+		Input.Fortification += FMath::Max(0.f, Defence->GetFortificationStrength());
+		Input.NearbyAlliedSupport += FMath::Max(0.f, Defence->GetNearbyAlliedSupport());
+		Input.StrategicValue += FMath::Max(0.f, Defence->GetStrategicValue());
+	}
+	Input.GuardQuality = QualityWeight > KINDA_SMALL_NUMBER
+		? WeightedQuality / QualityWeight : FMath::Max(0.f, Territory->GetGuardQuality());
 	Input.AttackingMilitaryPower = ForceConfig.MilitaryPower;
 	Input.EconomyReadiness = ForceConfig.EconomyReadiness;
 	Input.SupplyReadiness = ForceConfig.SupplyReadiness;
-	Input.StrategicValue = Territory->GetStrategicValue();
+	// The default struct value is one; remove it after accumulating authored values so
+	// one target with StrategicValue=1 remains one instead of being silently doubled.
+	Input.StrategicValue = FMath::Max(0.f, Input.StrategicValue - 1.f);
 	Input.RecentMomentum = ForceConfig.RecentMomentum;
 	return Input;
 }
@@ -860,6 +1147,17 @@ int32 UTerritoryCounterAttackSubsystem::MakeDecisionSeed(
 	Seed = HashCombineFast(Seed, FCrc::StrCrc32(*AttackingFaction.ToString()));
 	Seed = HashCombineFast(Seed, GetTypeHash(EvaluationCycle));
 	return static_cast<int32>(Seed);
+}
+
+int32 UTerritoryCounterAttackSubsystem::ReserveNextEvaluationCycle(
+	const FGuid& TerritoryGUID, const FGameplayTag& AttackingFaction)
+{
+	if (!TerritoryGUID.IsValid() || !AttackingFaction.IsValid()) return 0;
+	int32& HighWater = EvaluationCycleHighWater.FindOrAdd(
+		TerritoryGUID).FindOrAdd(AttackingFaction);
+	if (HighWater >= MAX_int32) return 0;
+	HighWater = FMath::Max(0, HighWater) + 1;
+	return HighWater;
 }
 
 int32 UTerritoryCounterAttackSubsystem::CountNonTerminalAssaults(
@@ -947,7 +1245,7 @@ void UTerritoryCounterAttackSubsystem::HandleTerritoryControlChanged(
 
 	if (OldOwner.IsValid() && NewOwner.IsValid() && OldOwner != NewOwner)
 	{
-		ScheduleCounterAttack(Territory, OldOwner);
+		ScheduleBestCounterAttack(Territory, OldOwner);
 	}
 }
 

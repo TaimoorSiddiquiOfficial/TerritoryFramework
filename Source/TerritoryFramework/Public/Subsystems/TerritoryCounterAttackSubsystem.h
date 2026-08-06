@@ -29,6 +29,22 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Counter Attack")
 	bool ScheduleCounterAttack(ATerritoryVolume* Territory, FGameplayTag AttackingFaction);
 
+	/**
+	 * Diplomacy-first automatic admission. Evaluates every configured, valid faction and
+	 * schedules the strongest eligible candidate. PreferredFaction is only a stable tie-break,
+	 * so a stronger hostile faction can supersede the former owner.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Counter Attack")
+	bool ScheduleBestCounterAttack(ATerritoryVolume* Territory,
+		FGameplayTag PreferredFaction = FGameplayTag());
+
+	/** Read-only strategic preview used by District command UI. Does not reserve a cycle or roll. */
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
+	bool GetBestEligibleAttackerPreview(const ATerritoryVolume* Territory,
+		FGameplayTag PreferredFaction, FGameplayTag& OutAttackingFaction,
+		FTerritoryAssaultEvaluationInput& OutInput,
+		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const;
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Counter Attack")
 	bool CancelAssault(FGuid AssaultID,
 		ETerritoryAssaultResolution Reason = ETerritoryAssaultResolution::ManuallyCancelled);
@@ -45,6 +61,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	bool IsAssaultActive(FGuid AssaultID) const;
 
+	/** True for grace, warning, proximity-waiting, or physically active records. */
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
+	bool IsAssaultPendingOrActive(FGuid AssaultID) const;
+
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	FString GetAssaultDebugString(FGuid AssaultID) const;
 
@@ -55,7 +75,10 @@ public:
 
 	/** Global persistence/replication bridge owned by ATerritoryWorldState. */
 	TArray<FTerritoryAssaultRecord> GetPersistentState() const;
+	TArray<FTerritoryAssaultCycleRecord> GetPersistentCycleState() const;
 	void RestorePersistentState(const TArray<FTerritoryAssaultRecord>& Records);
+	void RestorePersistentState(const TArray<FTerritoryAssaultRecord>& Records,
+		const TArray<FTerritoryAssaultCycleRecord>& CycleRecords);
 
 	/** Participant lifecycle callbacks. Each physical NPC may report removal once. */
 	void NotifyParticipantRemoved(FGuid AssaultID, ATerritoryAssaultCharacter* Participant, bool bKilled);
@@ -68,6 +91,7 @@ public:
 
 private:
 	TMap<FGuid, FTerritoryAssaultRecord> Assaults;
+	TMap<FGuid, TMap<FGameplayTag, int32>> EvaluationCycleHighWater;
 	TMap<FGuid, TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>>> LiveParticipants;
 	TMap<FGuid, TSet<TWeakObjectPtr<APlayerController>>> WarnedControllers;
 	FTimerHandle UpdateTimer;
@@ -111,10 +135,18 @@ private:
 	bool HasNavigationRoute(const FVector& Start, const FVector& End) const;
 	FTerritoryAssaultEvaluationInput BuildEvaluationInput(const ATerritoryVolume* Territory,
 		const FTerritoryFactionAssaultConfig& ForceConfig) const;
+	bool FindBestEligibleAttacker(const ATerritoryVolume* Territory,
+		const FGameplayTag& PreferredFaction, FGameplayTag& OutAttackingFaction,
+		FTerritoryAssaultEvaluationInput& OutInput,
+		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const;
 	double GetCampaignGameTime() const;
 	int32 MakeDecisionSeed(const ATerritoryVolume* Territory,
 		const FGameplayTag& AttackingFaction, int32 EvaluationCycle) const;
+	int32 ReserveNextEvaluationCycle(const FGuid& TerritoryGUID,
+		const FGameplayTag& AttackingFaction);
 	int32 CountNonTerminalAssaults(const FGameplayTag* OptionalFaction = nullptr) const;
 	int32 CountLiveParticipants() const;
 	void TrimTerminalHistory();
+
+	friend class FTFCounterAttackCycleHighWater;
 };

@@ -85,16 +85,18 @@ Base territory actor. Place in level to define a capturable zone.
 | InitialOwningFaction | FGameplayTag | Territory | — | — | Set at design time, applied in BeginPlay |
 | InitialMaxConcurrentAttackers | int32 | Territory\|Capture | — | — | Design-time default |
 | InitialPeriodicIncome | int32 | Territory\|Economy | — | — | Design-time default |
-| InitialGuardCost | int32 | Territory\|Economy | — | — | Design-time default |
+| InitialGuardCost | int32 | Territory\|Economy | — | — | Recurring upkeep per assigned guard per cycle |
+| InitialGuardRecruitmentCost | int32 | Territory\|Economy | — | — | One-time Narrative inventory debit per target increase |
 | bStartsLocked | bool | Territory | — | — | If true, can't be captured |
 | ParentTerritoryTag | FGameplayTag | Territory | — | — | Parent city tag (for districts) |
 | TerritoryGUID | FGuid | Territory | ✅ | — | Editor-stable unique ID |
 | BoundsShape | UShapeComponent* | Territory\|Bounds | — | — | Collision shape for bounds |
 | GuardNPCDefinition | UNarrativeNPCDefinition* | Territory\|Guards | — | — | Default NPC definition for guards |
 | FactionGuardDefinitions | TArray<FTerritoryFactionGuardDefinition> | Territory\|Guards | — | — | Per-faction NPC definition overrides |
-| GuardSpawnCount | int32 | Territory\|Guards | — | — | Number to spawn |
-| GuardSpawnRadius | float | Territory\|Guards | — | — | Radius around spawn point |
-| GuardSpawnPoints | TArray<AActor*> | Territory\|Guards | — | — | Spawn point actors |
+| GuardSpawnCount | int32 | Territory\|Guards | — | — | Authored initial target for non-player captures |
+| PostCaptureGarrisonPolicy | ETerritoryPostCaptureGarrisonPolicy | Territory\|Guards | — | — | Default `PlayerChooses` starts captures by a resolved matching live Narrative player faction at zero |
+| GuardSpawnRadius | float | Territory\|Guards | — | — | Deprecated/ignored; no random active-guard fallback |
+| GuardSpawnPoints | TArray<ATerritoryGuardSpawnPoint*> | Territory\|Guards | — | — | Explicit post references; the unique resolved union is active capacity, one guard per point |
 | ControlMode | ETerritoryControlMode | Territory\|Hierarchy | — | — | Independent (default), AggregateOnly, or Cascading |
 | StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Territory\|State | — | — | Per-state entry conditions and entry/exit events; designer-configured |
 
@@ -110,6 +112,8 @@ Base territory actor. Place in level to define a capturable zone.
 | MaxConcurrentAttackers | int32 | Budget limit |
 | PeriodicIncome | int32 | Current income value |
 | GuardCost | int32 | Current upkeep cost |
+| GuardRecruitmentCost | int32 | Current one-time recruitment price |
+| DesiredGuardCount | int32 | Persistent staffing target |
 
 ### BlueprintPure Functions
 
@@ -132,9 +136,12 @@ Base territory actor. Place in level to define a capturable zone.
 | GetInitialOwningFaction | GameplayTag | Territory |
 | GetSpawnedGuardCount | int32 | Territory\|Guards |
 | HasGuardsAlive | bool | Territory\|Guards |
-| GetGuardSpawnPoints | Array<Actor*> | Territory\|Guards |
+| GetGuardSpawnPoints | Array<TerritoryGuardSpawnPoint*> | Territory\|Guards |
 | GetDesiredGuardCount | int32 | Territory\|Guards |
-| GetMaxGuardCount | int32 | Territory\|Guards |
+| GetMaxGuardCount | int32 | Territory\|Guards (unique loaded spawn-point count) |
+| GetPostCaptureGuardCount | int32 | Territory\|Guards |
+| GetGarrisonSnapshot | FTerritoryGarrisonSnapshot | Territory\|Guards |
+| GetGuardRecruitmentCost | int32 | Territory\|Guards |
 | GetEffectiveIncome | int32 | Territory\|Economy |
 | IsFullyCaptured | bool | Territory |
 | GetCapturingFaction | GameplayTag | Territory |
@@ -158,8 +165,9 @@ Base territory actor. Place in level to define a capturable zone.
 | UnregisterDefender | Defender (Actor*) | Remove from defender list |
 | SpawnGuards | — | Spawn all guards per config |
 | DespawnGuards | — | Despawn all guards |
-| TryPurchaseGuards | RequestingPawn, Count | Purchase additional guards (debits treasury) |
-| TryRemoveGuards | Count | Remove guards from territory |
+| TryPurchaseGuards | RequestingPawn, Count | Compatibility delta wrapper over absolute staffing target |
+| TryRemoveGuards | RequestingPawn, Count | Compatibility delta wrapper; does not require missing/dead guards to be live |
+| TrySetDesiredGuardCount | Requester, NewDesiredGuardCount | Atomically debit recruitment, deploy/withdraw, update upkeep, or fully roll back |
 | SetUpgradeLevel | Level (int32) | Force-set property upgrade level |
 | CommitOwnershipData | NewData (FTerritoryOwnershipData), TransitionContext (FTerritoryTransitionContext) | bool | Atomically commits new ownership data — single struct write, one ordered event bundle (guards → state events → ownership delegates → state delegates). Returns false if no-op. |
 | LockTerritory | Reason (FText) | void | Lock the territory with optional reason |
@@ -176,6 +184,7 @@ Base territory actor. Place in level to define a capturable zone.
 | CanPurchaseGuards | Requester (AActor*), Count (int32), OutFailureReason (FText&) | bool | Check if guard purchase is allowed |
 | CanRemoveGuards | Requester (AActor*), Count (int32), OutFailureReason (FText&) | bool | Check if guard removal is allowed |
 | GetGuardPurchaseCost | Count (int32) | int32 | Calculate cost for N guards |
+| CanSetDesiredGuardCount | Requester, NewDesiredGuardCount, OutFailureReason, OutRecruitmentCost | bool | Validate one absolute staffing target |
 
 ### BlueprintNativeEvent
 
@@ -296,7 +305,7 @@ This returns the save-system-assigned GUID when valid. Otherwise it generates an
 |---|---|---|
 | TerritoryHomeTransform | FTransform | Resolved home transform used by return activities |
 | OwningTerritory | ATerritoryVolume* | Owning territory back-reference |
-| OwningTerritorySpawnPoint | ATerritoryGuardSpawnPoint* | Spawn point back-reference; null for random fallback guards |
+| OwningTerritorySpawnPoint | ATerritoryGuardSpawnPoint* | Required authoritative active-slot back-reference |
 
 ### Blueprint API
 
@@ -329,7 +338,7 @@ Actor placed in level to define guard spawn locations and patrol routes.
 | Property | Type | Default | Notes |
 |---|---|---|---|
 | OwnerTerritoryTag | FGameplayTag | — | Optional explicit owner; territory `GuardSpawnPoints` references take precedence, then this tag, then proximity |
-| MaxGuards | int32 | 3 | Maximum guards that can spawn at this point |
+| MaxGuards | int32 | 1 | Deprecated/ignored legacy value; each point is one active slot |
 | ReserveSlots | int32 | 1 | Guards that only spawn when active guards die |
 | PatrolRoute | TArray<FTerritoryPatrolNode> | empty | Ordered waypoints for patrol. Empty = guard stays at spawn point |
 | bLoopPatrol | bool | true | Whether patrol route loops back to start |
@@ -359,7 +368,7 @@ Actor placed in level to define guard spawn locations and patrol routes.
 
 | Function | Returns | Description |
 |---|---|---|
-| HasAvailableSlot | bool | Whether active guard count < MaxGuards |
+| HasAvailableSlot | bool | Whether this point's single active slot is empty |
 | HasReserveAvailable | bool | Whether reserve guards remain |
 | GetActiveGuardCount | int32 | Currently alive spawned guards |
 | GetReserveCount | int32 | Remaining reserve guards |
@@ -369,7 +378,8 @@ Actor placed in level to define guard spawn locations and patrol routes.
 | GetPatrolRouteAsTransforms | TArray<FTransform> | Patrol route as transforms (for behavior trees) |
 | GetPatrolWaitTimes | TArray<float> | Wait times parallel to GetPatrolRouteAsTransforms |
 | HasPatrolRoute | bool | Whether PatrolRoute contains at least two nodes |
-| GetSpawnTransform | FTransform | Actor transform with its location projected to NavMesh when possible |
+| GetSpawnTransform | FTransform | Exact authored foot-marker transform |
+| ResolveGuardDeploymentTransform | bool + FTransform | Preserves exact X/Y/facing and aligns Z for the guard capsule |
 | HasPendingReserveSpawn | bool | Whether a reserve guard spawn is pending |
 | SpawnReserveGuard | bool | Manually trigger a reserve guard spawn. Returns true if a reserve was consumed and spawn initiated |
 | GetLoopPatrol | bool | Whether patrol route loops back to start |
@@ -402,7 +412,7 @@ Reusable guard configuration asset. Assign to `ATerritoryGuardSpawnPoint::GuardP
 | TriggerSetOverrides | TArray<TSoftObjectPtr<UTriggerSet>> | empty | Trigger set overrides |
 | PatrolRoute | TArray<FTerritoryPatrolNode> | empty | Patrol waypoints |
 | bLoopPatrol | bool | true | Loop patrol route |
-| MaxGuards | int32 | 3 | Maximum concurrent guards |
+| MaxGuards | int32 | 1 | Deprecated/ignored; capacity comes from placed spawn-point count |
 | ReserveSlots | int32 | 1 | Reserve guard count |
 | ReserveSpawnDelay | float | 3.0 | Delay before reserve deployment |
 | ReserveSpawnRetryInterval | float | 2.0 | Retry interval for blocked spawns |
@@ -430,6 +440,8 @@ Global persistence and late-join projection for economy, diplomacy, capture summ
 | ReplicatedDiplomacyHistory | FDiplomacyEvent | Diplomacy event history |
 | ReplicatedAssaults | FTerritoryAssaultRecord | Deterministic decisions, lifecycle, and finite force counts |
 
+`SavedAssaultCycles` is a server-only `SaveGame` array of `FTerritoryAssaultCycleRecord`; it is deliberately not replicated because clients do not schedule assaults.
+
 ### Functions
 
 | Function | Type | Description |
@@ -437,7 +449,7 @@ Global persistence and late-join projection for economy, diplomacy, capture summ
 | ExportPersistentState | AuthorityOnly | Copy subsystem state → replicated arrays |
 | ImportPersistentState | AuthorityOnly | Copy replicated arrays → subsystems |
 
-`ExportPersistentState` rebuilds economy, transaction, treaty, reputation, capture projections, and assault records. Import restores the economy ledger, rich treaty metadata, and finite assault state. TerritoryVolume owns durable ownership; participant actor identities are not persisted.
+`ExportPersistentState` rebuilds economy, transaction, treaty, reputation, capture projections, assault records, and the counterattack cycle ledger. Import restores the economy ledger, rich treaty metadata, finite assault state, and deterministic high-water marks. TerritoryVolume owns durable ownership; participant actor identities are not persisted.
 
 ### Delegates
 
@@ -496,7 +508,8 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | Function | Parameters | Returns |
 |---|---|---|
 | AttemptCapture | Territory, Faction | ECaptureResult |
-| ForceCapture | Territory, Faction | bool; validates authority/inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed. Returns true if territory actually changed to requested state |
+| ForceCapture | Territory, Faction | bool; backward-compatible force path that resolves a matching live Narrative player context for `PlayerChooses` |
+| ForceCaptureWithContext | Territory, Faction, FTerritoryTransitionContext | bool; preferred exact-instigator force path; normalizes RequestingFaction and applies the same explicit bypasses |
 | ResetCapture | Territory | void |
 | AddCaptureProgress | Territory, Faction, Delta | void |
 | RegisterAttacker | Territory, Actor, Faction | void; invalid, duplicate, blocked, or over-budget registrations are ignored |
@@ -759,6 +772,8 @@ Shared read-model and Narrative CommonUI bridge. It owns no gameplay state.
 |---|---|---|
 | OpenTerritoryMenu | UTerritoryActivatableWidget* | Push a Territory screen into a registered Narrative HUD layer |
 | BuildDistrictOperationsView | bool + OutView | Build one viewer-relative district projection |
+| BuildGarrisonOperationsView | bool + OutView | Build one independently managed District/Property garrison and local P&L |
+| GetDistrictGarrisonOperationsViews | Array<GarrisonView> | District garrison plus loaded registered child Properties |
 | GetDistrictOperationsViews | Array<View> | List districts matching an operational filter |
 | DoesDistrictMatchFilter | bool | Evaluate one projection against a filter |
 | GetDistrictOperationsRevision | int32 | Hash all displayed state used for list invalidation |
@@ -780,7 +795,7 @@ Narrative-activatable operations dashboard.
 | SetOperationsFilter | void | Apply the viewer-relative operational filter |
 | GetSelectedDistrictOperationsView | View | Current detail/security/finance/threat projection |
 
-The supplied widget populates unlocked/active, captured/owned, earnings, and loss/threat lists. Guard controls route through `UTerritoryPlayerManagementComponent`.
+The supplied widget populates unlocked/active, captured/owned, earnings, loss/threat, and transaction-audit lists. Its selector/target/Apply/0/Max controls and delta shortcuts route through `UTerritoryPlayerManagementComponent` and can manage child Property garrisons.
 
 ---
 
@@ -913,8 +928,9 @@ Extends `UNarrativeEvent`. Fires when territory is captured.
 
 ### Behavior
 
-- If `bForceCapture` → calls `ForceCapture` (still requires server authority, a resolved territory, and a valid owner tag; bypasses lock, defenders, diplomacy, and AttemptCapture)
-- If not → calls `AttemptCapture` (respects diplomacy, lock, defender checks)
+- Both modes submit one contextual `FTerritoryMutationRequest`.
+- If `bForceCapture` → enables explicit condition, diplomacy, and lock bypass flags while preserving the Tales/player context.
+- If not → uses the same atomic mutation without bypass flags; Narrative state conditions and diplomacy remain authoritative.
 
 ---
 
@@ -987,18 +1003,25 @@ Server-authoritative scheduler for deterministic, finite physical assaults. It n
 | Function | Type | Returns |
 |---|---|---|
 | ScheduleCounterAttack(Territory, AttackingFaction) | AuthorityOnly | bool |
+| ScheduleBestCounterAttack(Territory, PreferredFaction) | AuthorityOnly | bool; evaluates every configured diplomacy-eligible force and schedules the strongest |
 | CancelAssault(AssaultID, Reason) | AuthorityOnly | bool |
 | GetAssault(AssaultID, OutAssault) | Pure | bool |
 | GetAllAssaults() | Pure | Array<AssaultRecord> |
 | GetAssaultsForTerritory(Tag) | Pure | Array<AssaultRecord> |
 | IsAssaultActive(AssaultID) | Pure | bool |
+| IsAssaultPendingOrActive(AssaultID) | Pure | bool |
 | GetAssaultDebugString(AssaultID) | Pure | string |
+| GetBestEligibleAttackerPreview(Territory, PreferredFaction, OutFaction, OutInput, OutResult, OutReason) | Pure | bool; planning only, no cycle reservation or decision roll |
 
-Native persistence functions are `GetPersistentState` and `RestorePersistentState`. `CalculateEvaluation` is a deterministic pure native calculator.
+Native persistence functions are `GetPersistentState`, `GetPersistentCycleState`, and the `RestorePersistentState` overload accepting both arrays. The record-only restore overload remains for client read-model hydration and compatibility. `CalculateEvaluation` is a deterministic pure native calculator.
 
 ## UTerritoryCounterAttackProfile
 
-`UPrimaryDataAsset` containing grace/proximity/notification policy, launch probability weights, maximum approaches, and per-faction `FTerritoryFactionAssaultConfig` values.
+`UPrimaryDataAsset` containing grace/proximity/notification policy, launch probability
+weights, maximum approaches, and per-faction `FTerritoryFactionAssaultConfig` values.
+`UnguardedLaunchProbability` defaults to `1.0` and applies only when the complete local
+same-owner District/Property defence cascade has zero active guards after hard
+diplomacy/admission gates.
 
 ## ATerritoryAssaultCharacter and Narrative activity
 
@@ -1098,7 +1121,8 @@ See [17_Counterattack_System.md](17_Counterattack_System.md) for lifecycle and c
 | MaxConcurrentAttackers | int32 | ✅ | ✅ | Budget limit |
 | PeriodicIncome | int32 | ✅ | ✅ | Current income value |
 | GuardCost | int32 | ✅ | ✅ | Current upkeep cost |
-| DesiredGuardCount | int32 | ✅ | ✅ | Target garrison size (INDEX_NONE = unset) |
+| GuardRecruitmentCost | int32 | ✅ | ✅ | One-time price per newly assigned guard |
+| DesiredGuardCount | int32 | ✅ | ✅ | Absolute target garrison size |
 | LockReason | FText | ✅ | ✅ | Reason text when territory is locked; empty when not locked |
 
 ### FTerritoryStateConfig
@@ -1119,7 +1143,7 @@ Explicit context for territory state transitions. Replaces `GetFirstPlayerContro
 |-------|------|-------------|
 | Instigator | AActor* | The actor that initiated the transition |
 | TargetPawn | APawn* | The pawn involved in condition/event evaluation |
-| PlayerController | APlayerController* | The player controller (null on dedicated servers) |
+| PlayerController | APlayerController* | The exact controller for a player-driven transition; null for deliberate world/AI context |
 | TalesComponent | UTalesComponent* | Tales component for quest/dialogue event context |
 | RequestingFaction | FGameplayTag | The faction requesting or causing the transition |
 
@@ -1133,7 +1157,9 @@ Request struct for `ApplyTerritoryMutation`.
 | NewOwner | FGameplayTag | Invalid | Faction that should own the territory |
 | DesiredState | ETerritoryState | Claimed | Target state after mutation |
 | bClearCaptureState | bool | true | Clear contesting faction and progress |
-| bReconcileGuards | bool | true | Despawn/respawn guards after commit |
+| bBypassConditions | bool | false | Explicitly bypass Narrative state-entry conditions |
+| bBypassDiplomacy | bool | false | Explicitly bypass treaty/capture policy |
+| bBypassLock | bool | false | Explicitly bypass a locked Territory; force capture only |
 | TransitionContext | FTerritoryTransitionContext | Default | Context for Narrative conditions/events |
 
 ### FTerritoryMutationResponse

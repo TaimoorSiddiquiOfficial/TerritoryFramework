@@ -37,6 +37,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float MaximumLaunchProbability = 0.95f;
 
+	/**
+	 * Launch probability when the complete local defence cascade has no active guards.
+	 * Diplomacy, territory validity, cooldown/budget admission, and route validation remain
+	 * hard gates. A value of 1 makes a genuinely empty District/property front certain to
+	 * launch after grace without directly changing ownership.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0", ClampMax="1.0"))
+	float UnguardedLaunchProbability = 1.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0"))
 	float DefenceDeterrenceWeight = 0.45f;
 
@@ -51,6 +60,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force")
 	TArray<FTerritoryFactionAssaultConfig> FactionForces;
+
+	/** Cancel an activated assault after this many consecutive zero-spawn wave attempts. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force", meta=(ClampMin="1", ClampMax="100"))
+	int32 MaxConsecutiveSpawnFailures = 5;
 
 	const FTerritoryFactionAssaultConfig* FindFactionForce(const FGameplayTag& Faction) const;
 };

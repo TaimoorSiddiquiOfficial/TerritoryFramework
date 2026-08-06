@@ -30,7 +30,7 @@
 |---|---|---|
 | TerritoryHomeTransform | ✅ | Resolved home transform used by return activities |
 | OwningTerritory | ✅ | Territory back-reference |
-| OwningTerritorySpawnPoint | ✅ | Spawn point back-reference; null for random fallback guards |
+| OwningTerritorySpawnPoint | ✅ | Authoritative one-slot spawn-point back-reference |
 
 ### ATerritoryWorldState
 | Property | Replicated? |

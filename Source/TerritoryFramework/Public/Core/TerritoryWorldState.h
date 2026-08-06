@@ -289,6 +289,10 @@ protected:
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryAssaultRecord> SavedAssaults;
 
+	/** Server-only deterministic cycle ledger; clients need assault read models, not scheduler history. */
+	UPROPERTY(SaveGame)
+	TArray<FTerritoryAssaultCycleRecord> SavedAssaultCycles;
+
 	// P0-03: SavedCaptureSummaries removed — TerritoryVolume is sole authority
 	// for its own ownership persistence via SaveGame on OwnershipData.
 	// ReplicatedCaptureSummaries remains for runtime client visibility only.

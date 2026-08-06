@@ -126,6 +126,7 @@ void ATerritoryWorldState::SetFactionTreasury(const FGameplayTag& Faction, const
 			Entry.IncomePerTick = Treasury.IncomePerTick;
 			Entry.CostsPerTick = Treasury.CostsPerTick;
 			Entry.TerritoryCount = Treasury.TerritoryCount;
+			ForceNetUpdate();
 			return;
 		}
 	}
@@ -136,6 +137,7 @@ void ATerritoryWorldState::SetFactionTreasury(const FGameplayTag& Faction, const
 	NewEntry.CostsPerTick = Treasury.CostsPerTick;
 	NewEntry.TerritoryCount = Treasury.TerritoryCount;
 	ReplicatedTreasuries.Add(NewEntry);
+	ForceNetUpdate();
 }
 
 FTerritoryTreasury ATerritoryWorldState::GetFactionTreasury(const FGameplayTag& Faction) const
@@ -407,6 +409,7 @@ void ATerritoryWorldState::ExportPersistentState()
 			World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
 		{
 			ReplicatedAssaults = Counterattacks->GetPersistentState();
+			SavedAssaultCycles = Counterattacks->GetPersistentCycleState();
 		}
 	}
 
@@ -537,7 +540,14 @@ void ATerritoryWorldState::SyncCounterAttackSubsystemFromReplicatedState()
 		if (UTerritoryCounterAttackSubsystem* Counterattacks =
 			World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
 		{
-			Counterattacks->RestorePersistentState(ReplicatedAssaults);
+			if (HasAuthority())
+			{
+				Counterattacks->RestorePersistentState(ReplicatedAssaults, SavedAssaultCycles);
+			}
+			else
+			{
+				Counterattacks->RestorePersistentState(ReplicatedAssaults);
+			}
 		}
 	}
 }
@@ -651,6 +661,7 @@ void ATerritoryWorldState::OnEconomyTickLive(FGameplayTag Faction, FTerritoryEco
 			Entry.IncomePerTick = Snapshot.TotalIncome;
 			Entry.CostsPerTick = Snapshot.TotalCosts;
 			Entry.TerritoryCount = Snapshot.TerritoryCount;
+			ForceNetUpdate();
 			return;
 		}
 	}
@@ -662,6 +673,7 @@ void ATerritoryWorldState::OnEconomyTickLive(FGameplayTag Faction, FTerritoryEco
 	NewEntry.CostsPerTick = Snapshot.TotalCosts;
 	NewEntry.TerritoryCount = Snapshot.TerritoryCount;
 	ReplicatedTreasuries.Add(NewEntry);
+	ForceNetUpdate();
 }
 
 void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction& Transaction)
@@ -687,6 +699,7 @@ void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction
 	{
 		ReplicatedTransactions.RemoveAt(0, Excess);
 	}
+	ForceNetUpdate();
 }
 
 void ATerritoryWorldState::OnDiplomacyChangedLive(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)

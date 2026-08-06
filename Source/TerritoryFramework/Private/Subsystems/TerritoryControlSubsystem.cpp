@@ -8,11 +8,14 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "UnrealFramework/NarrativeGameState.h"
+#include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Tales/NarrativeFunctionLibrary.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "TimerManager.h"
@@ -257,6 +260,43 @@ FTerritoryTransitionContext UTerritoryControlSubsystem::ResolveCaptureContext(
 	return ValidAttackers.IsEmpty()
 		? FTerritoryTransitionContext()
 		: BuildTransitionContext(ValidAttackers[0], Faction);
+}
+
+FTerritoryTransitionContext UTerritoryControlSubsystem::ResolveFactionPlayerContext(
+	const FGameplayTag& Faction) const
+{
+	FTerritoryTransitionContext EmptyContext;
+	EmptyContext.RequestingFaction = Faction;
+	if (!Faction.IsValid() || !GetWorld()) return EmptyContext;
+
+	auto HasExactFaction = [&Faction](const AActor* Actor)
+	{
+		const INarrativeTeamAgentInterface* TeamAgent =
+			Cast<INarrativeTeamAgentInterface>(Actor);
+		return TeamAgent && TeamAgent->GetFactions().HasTagExact(Faction);
+	};
+
+	TArray<APlayerController*> MatchingControllers;
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PlayerController = It->Get();
+		if (!PlayerController) continue;
+		if (HasExactFaction(PlayerController)
+			|| HasExactFaction(PlayerController->GetPawn())
+			|| HasExactFaction(PlayerController->GetPlayerState<APlayerState>()))
+		{
+			MatchingControllers.Add(PlayerController);
+		}
+	}
+
+	// Stable selection matters when several players share the same Narrative faction.
+	MatchingControllers.Sort([](const APlayerController& A, const APlayerController& B)
+	{
+		return A.GetPathName() < B.GetPathName();
+	});
+	return MatchingControllers.IsEmpty()
+		? EmptyContext
+		: BuildTransitionContext(MatchingControllers[0], Faction);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -556,6 +596,14 @@ void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory,
 
 bool UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner)
 {
+	// Preserve the legacy Blueprint node while recovering explicit player context from
+	// Narrative's faction authority. This is deterministic and never relies on a first PC.
+	return ForceCaptureWithContext(Territory, NewOwner, ResolveFactionPlayerContext(NewOwner));
+}
+
+bool UTerritoryControlSubsystem::ForceCaptureWithContext(ATerritoryVolume* Territory,
+	const FGameplayTag& NewOwner, const FTerritoryTransitionContext& TransitionContext)
+{
 	// P1-06: Route through ApplyTerritoryMutation with all bypass flags set.
 	// This ensures single authoritative path, proper event ordering, and structured response.
 	FTerritoryMutationRequest Request;
@@ -564,6 +612,9 @@ bool UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const
 	Request.DesiredState = ETerritoryState::Claimed;
 	Request.bBypassConditions = true;
 	Request.bBypassDiplomacy = true;
+	Request.bBypassLock = true;
+	Request.TransitionContext = TransitionContext;
+	Request.TransitionContext.RequestingFaction = NewOwner;
 
 	const FTerritoryMutationResponse Response = ApplyTerritoryMutation(Request);
 
@@ -577,7 +628,7 @@ bool UTerritoryControlSubsystem::ForceCapture(ATerritoryVolume* Territory, const
 
 	// P1-06: Log structured failure instead of silently returning false
 	UE_LOG(LogTerritory, Warning, TEXT("[ForceCapture] %s rejected: %s (result=%d)"),
-		*Territory->GetTerritoryTag().ToString(),
+		Territory ? *Territory->GetTerritoryTag().ToString() : TEXT("<null>"),
 		*Response.Explanation.ToString(),
 		static_cast<int32>(Response.Result));
 	return false;
@@ -617,7 +668,8 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Step 2: Validate locks
 	// ═══════════════════════════════════════════════════════════════════════════
-	if (Territory->IsLocked() && Request.DesiredState != ETerritoryState::Locked)
+	if (Territory->IsLocked() && Request.DesiredState != ETerritoryState::Locked
+		&& !Request.bBypassLock)
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_Locked;
 		Response.Explanation = FText::FromString(TEXT("Territory is locked"));
@@ -716,7 +768,8 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	const bool bOwnerChanged = (Response.OldOwner != Request.NewOwner);
 	if (bOwnerChanged && Request.NewOwner.IsValid() && Request.DesiredState == ETerritoryState::Claimed)
 	{
-		Candidate.DesiredGuardCount = FMath::Clamp(Territory->GetConfiguredGuardCount(), 0, Territory->GetMaxGuardCount());
+		Candidate.DesiredGuardCount = Territory->GetPostCaptureGuardCountForOwner(
+			Request.TransitionContext, Request.NewOwner);
 	}
 	else if (bOwnerChanged && !Request.NewOwner.IsValid())
 	{

@@ -2,6 +2,44 @@
 
 ## Unreleased — 2026-07-30 (TerritoryFramework lifecycle and integration re-audit)
 
+### District garrison command center — 2026-08-06
+
+- Guard placement now uses one active combat slot per unique spawn-point actor. Normal
+  recruitment preserves exact authored X/Y/facing, aligns only capsule height, and fails
+  blocked slots instead of using broad NavMesh projection, random fallback, or collision
+  relocation. Legacy per-post `MaxGuards` values are bounded during save migration.
+- Hardened `PlayerChooses` again for context-loss paths: exact membership is recovered
+  from every live Narrative player controller/pawn/player-state for the committed owner,
+  so a Property → District → City reduction cannot fall back to paid automatic staffing.
+- Automatic retaliation now uses diplomacy-first `ScheduleBestCounterAttack`, evaluates
+  every configured finite force, and selects the strongest eligible faction; the former
+  owner is only a stable tie-break.
+- Added `UnguardedLaunchProbability` (default 100%) plus same-owner local District
+  defence cascading. Zero active guards guarantees the post-grace launch decision, never
+  ownership or offscreen capture.
+- Cascaded child Property contests/assaults and strongest-attacker planning into the
+  District Journal, including exact leaf target, Property alignment, defence power,
+  power ratio, priority, garrison counts, and projected risk.
+- Registered locked Districts now remain visible and selectable in the primary intel
+  queue with exact lock/management reasons; server mutations remain owner/claimed gated.
+- Closed the Editor, archived the prior plugin build products, and completed a clean
+  unsuffixed UE 5.7 project-directory Runtime/Editor build with UHT and linking; all 84
+  TerritoryFramework automation tests pass with zero failures or skipped tests.
+- Player-driven captures now start with zero assigned friendlies by default; explicit transition context is preserved through City/District/Property cascades so child Properties cannot silently respawn the authored three guards.
+- Fixed the project Blueprint's direct `ForceCapture` path: the control subsystem now resolves a deterministic matching Narrative player controller by faction, and exposes `ForceCaptureWithContext` for exact quest/script instigators.
+- Hardened `PlayerChooses` against spoofed transition context: zero guards now requires the supplied controller, pawn, or player state to have exact Narrative membership in the new owner faction.
+- Tag/proximity-bound guard posts now register into the Territory's unique post union, contribute capacity/defence, reconcile after World Partition load-order changes, and never generate unstable save GUIDs at runtime.
+- Counterattack Approach IDs have clear editor metadata and blank entries receive editor-only stable defaults; the Blacksmith uses `Blacksmith_WestRoad` on a verified full navmesh route.
+- Migrated the Territory data validator to UE 5.7's current `FAssetData`/`FDataValidationContext` API. The previous deprecated overrides registered but never executed; errors and warnings now retain their proper severities.
+- Added a saved per-territory/faction counterattack evaluation-cycle high-water ledger so bounded terminal-history trimming cannot reuse a prior deterministic seed. Older saves migrate from their retained assault records.
+- Added the dedicated `/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault` definition backed by native `ATerritoryAssaultCharacter`; the counterattack profile no longer points at the rejected guard-only class.
+- Counterattacks now distinguish physical `IsAssaultActive` from queued `IsAssaultPendingOrActive`, reject diplomacy at scheduling, cancel non-claimed or invalidated configurations in every phase, match any defending Narrative faction membership, deduplicate approach IDs defensively, and bound zero-spawn retries with a saved failure counter.
+- Forced Tales capture now preserves its player/Tales transition context, and the explicit force request genuinely bypasses locks as well as conditions and diplomacy.
+- Separated one-time `GuardRecruitmentCost` from recurring `GuardCost` upkeep and added an atomic absolute staffing mutation with full deployment rollback/refund.
+- Replicated exact active/reserve/pending garrison snapshots and prevented delayed reserves from exceeding a lowered desired target.
+- Expanded the journal and in-world District management screens with child-Property selection, integer target, Apply/0/Max controls, aggregate District profit/loss, local garrison previews, authoritative replicated economy rates, and transaction reasons.
+- Added Blueprint/save/replication contracts and regressions for player capture target zero, unrelated AI target preservation, tag-bound capacity, dead-guard target reduction, pending-reserve UI invalidation, explicit force context, and absolute management APIs.
+
 ### Correctness and architecture
 
 - Added the complete deterministic counterattack lifecycle: grace, evaluation, warning, relevant-player proximity activation, finite physical Narrative NPC force, capture participation, casualty accounting, resolution, persistence, replication, and bounded history.
@@ -18,7 +56,7 @@
 ### Documentation and tests
 
 - Added `17_Counterattack_System.md`, `18_Operations_UI.md`, and `DEEP_REAUDIT_2026-07-30.md`; corrected API, economy, diplomacy, guard, multiplayer, save/load, AI, Blueprint, UI, and setup documentation against current symbols.
-- Added deterministic/monotonic counterattack tests, notification-without-force regression coverage, active-force reconstruction coverage, authority/replication/Narrative contract checks, and fresh-vs-saved garrison-count regression coverage.
+- Added deterministic/monotonic counterattack tests, notification-without-force regression coverage, active-force reconstruction and trimmed-history cycle-ledger coverage, authority/replication/Narrative contract checks, and fresh-vs-saved garrison-count regression coverage.
 - Narrative Pro vendor source remains unchanged.
 
 ### Narrative CommonUI operations

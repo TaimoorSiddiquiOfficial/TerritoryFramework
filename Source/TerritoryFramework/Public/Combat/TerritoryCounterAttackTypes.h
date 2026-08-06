@@ -46,7 +46,8 @@ enum class ETerritoryAssaultResolution : uint8
 	OwnershipChanged,
 	AllAttackersRemoved,
 	CaptureCompleted,
-	ManuallyCancelled
+	ManuallyCancelled,
+	SpawnFailed
 };
 
 /** Editor-authored, typed ingress point stored relative to its Territory actor. */
@@ -55,7 +56,9 @@ struct FTerritoryAssaultApproach
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack")
+	/** Stable per-territory route identity. Example: Blacksmith_WestRoad. Never localize or rename after release. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack",
+		meta=(DisplayName="Approach ID", ToolTip="Stable unique ID on this Territory, for example Blacksmith_WestRoad. Blank IDs are auto-filled in the editor."))
 	FName ApproachID;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack")
@@ -141,6 +144,23 @@ struct FTerritoryAssaultEvaluationResult
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack") float EstimatedSuccessProbability = 0.f;
 };
 
+/** Durable high-water mark preventing a trimmed assault history from reusing a deterministic decision cycle. */
+USTRUCT(BlueprintType)
+struct FTerritoryAssaultCycleRecord
+{
+	GENERATED_BODY()
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack")
+	FGuid TargetTerritoryGUID;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack",
+		meta=(Categories="Narrative.Factions"))
+	FGameplayTag AttackingFaction;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="1"))
+	int32 HighestEvaluationCycle = 0;
+};
+
 /** Durable decision/casualty record. Contains no live UObject pointers. */
 USTRUCT(BlueprintType)
 struct FTerritoryAssaultRecord
@@ -167,6 +187,8 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 KilledForce = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WithdrawnForce = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WaveSize = 1;
+	/** Bounded physical deployment failure count; reset after any successful spawn. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 ConsecutiveSpawnFailures = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") TArray<FName> SelectedApproaches;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") FTerritoryAssaultEvaluationInput EvaluationInput;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") FTerritoryAssaultEvaluationResult EvaluationResult;

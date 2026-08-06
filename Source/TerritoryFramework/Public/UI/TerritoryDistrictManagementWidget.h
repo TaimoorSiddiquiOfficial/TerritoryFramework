@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Widgets/NarrativeComboBoxString.h"
 #include "UI/TerritoryActivatableWidget.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "TerritoryDistrictManagementWidget.generated.h"
@@ -12,6 +13,7 @@ class ATerritoryVolume;
 class UNarrativeCommonButtonBase;
 class UTerritoryPlayerManagementComponent;
 class UTextBlock;
+class USpinBox;
 
 /** Native-backed District management panel. Layout is supplied by a project Widget Blueprint. */
 UCLASS(Abstract, BlueprintType, Blueprintable)
@@ -107,7 +109,21 @@ protected:
 
 	private:
 	TWeakObjectPtr<ATerritoryDistrictManagementPoint> ManagementPoint;
+	TWeakObjectPtr<ATerritoryVolume> SelectedGarrisonTarget;
 	TWeakObjectPtr<UTerritoryPlayerManagementComponent> ManagementComponent;
+	TMap<FString, TWeakObjectPtr<ATerritoryVolume>> GarrisonTargetOptions;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeComboBoxString> GarrisonTargetSelector;
+	UPROPERTY(Transient)
+	TObjectPtr<USpinBox> GuardTargetSpinBox;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> GarrisonTargetPreview;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> ApplyGuardTargetButton;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> ZeroGuardTargetButton;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> MaxGuardTargetButton;
 	FGameplayTag ManagedFaction;
 	FTerritoryDistrictOperationsView OperationsView;
 	FTimerHandle RefreshTimerHandle;
@@ -119,10 +135,29 @@ protected:
 	void HandleRemoveGuardClicked();
 
 	UFUNCTION()
+	void HandleGarrisonTargetChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void HandleGuardTargetSpinChanged(float NewValue);
+
+	UFUNCTION()
+	void HandleApplyGuardTargetClicked();
+
+	UFUNCTION()
+	void HandleZeroGuardTargetClicked();
+
+	UFUNCTION()
+	void HandleMaxGuardTargetClicked();
+
+	UFUNCTION()
 	void HandleCloseClicked();
 
 	UFUNCTION()
 	void HandleGuardPurchaseResult(ATerritoryVolume* Territory, bool bSuccess, FText Message, int32 RequestId);
 
 	void BindManagementComponent();
+	void BuildGarrisonControls();
+	void RefreshGarrisonControls();
+	void UpdateGarrisonPreview();
+	void SubmitGuardTarget(int32 NewDesiredGuardCount);
 };

@@ -14,6 +14,8 @@
 | MaxConcurrentAttackers | ✅ | SaveGame on OwnershipData |
 | PeriodicIncome | ✅ | SaveGame on OwnershipData |
 | GuardCost | ✅ | SaveGame on OwnershipData |
+| GuardRecruitmentCost | ✅ | SaveGame on OwnershipData; old saves migrate to authored initial value |
+| DesiredGuardCount | ✅ | SaveGame on OwnershipData; absolute player staffing target |
 | TerritoryGUID | ✅ | SaveGame (editor-stable) |
 
 ### ATerritoryGuardSpawnPoint
@@ -96,7 +98,7 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
         - Replay treaty states and reputation to DiplomacySubsystem
         - Diplomacy syncs to Narrative GameState attitudes
         - Hydrate client-side economy/diplomacy query models from RepNotify
-        - Restore counterattack decisions and reconstruct saved active survivors as finite pending force
+        - Restore counterattack decisions, the per-territory/faction evaluation-cycle high-water ledger, and reconstruct saved active survivors as finite pending force
 
 **Important:** `ATerritorySavableData` is **deprecated** — use `ATerritoryWorldState` instead.
 `ATerritoryWorldState` handles both single-player and multiplayer. `ATerritorySavableData` will be removed in a future version; do not use it for new projects.
@@ -106,7 +108,8 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 - A contested TerritoryVolume restores its leading faction/progress into ControlSubsystem via `RestoreCaptureState` so capture decay resumes correctly.
 - Claimed territories restore their owning faction and only the saved finite active guard count.
 - Guard posts restore reserve and pending deployment counts.
-- WorldState restores economy rate parameters, transaction history, treaties, reputation, and counterattack records.
+- `FTerritoryGarrisonSnapshot` is reconstructed from live/restored guard posts and replicated; it does not save pawn pointers.
+- WorldState restores economy rate parameters, transaction history, treaties, reputation, counterattack records, and the server-only decision-cycle ledger. Older saves without the ledger rebuild the best available high-water marks from retained assault records.
 - A saved active assault preserves its decision/casualties and moves surviving live count into pending reconstruction.
 
 ### State Not Reconstructed
@@ -114,6 +117,10 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 - Attacker actor identities and non-leading faction progress from a multi-faction contest are not persisted.
 - Individual pawn identities, health, controllers, ASC pointers, and activity UObject instances are not persisted.
 - Recreated guards and assault participants receive new runtime spawn GUIDs while durable Territory/guard-post/assault IDs remain stable.
+
+### Garrison migration
+
+Saves created before `GuardRecruitmentCost` use the Territory Blueprint's `InitialGuardRecruitmentCost` on load. Existing `DesiredGuardCount` values remain authoritative, including the legacy value 3; players can set those owned garrisons to zero in the District Command Center. New physical player captures use the default `PlayerChooses` policy and therefore begin at zero without rewriting old campaign state.
 
 ### PIE Safety
 
