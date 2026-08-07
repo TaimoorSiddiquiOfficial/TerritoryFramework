@@ -122,6 +122,7 @@ Success is reported only after the final desired/live invariant is verified. A p
 | `RequestSetGuardTargetForTerritory(Territory, Target)` | Remote journal command for an owned target |
 | `OnGuardPurchaseResult` | Owning-client result for both add/remove operations |
 | `OnAssaultNotification` | Owning-client strategic assault notification |
+| `OnCounterHappened` | Reliable owning-client event for each committed counterattack state transition |
 
 ## POI behavior
 

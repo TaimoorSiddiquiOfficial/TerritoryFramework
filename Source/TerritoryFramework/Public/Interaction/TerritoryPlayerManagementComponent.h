@@ -34,8 +34,13 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryAssaultNotification OnAssaultNotification;
 
+	/** Owning-client copy of each relevant authoritative assault-state transition. */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
+	FOnTerritoryCounterHappened OnCounterHappened;
+
 	/** Server-side targeted notification route for this owning controller only. */
 	void SendAssaultNotification(const FTerritoryAssaultRecord& Assault);
+	void SendCounterHappened(const FTerritoryCounterAttackStateEvent& Event);
 
 	UPROPERTY(EditDefaultsOnly, Category="Territory|Management", meta=(ClampMin="0"))
 	float PurchaseCooldown = 0.5f;
@@ -107,6 +112,9 @@ private:
 
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveAssaultNotification(const FTerritoryAssaultRecord& Assault);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveCounterHappened(const FTerritoryCounterAttackStateEvent& Event);
 
 	void PerformPurchase(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	void PerformPurchaseForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);

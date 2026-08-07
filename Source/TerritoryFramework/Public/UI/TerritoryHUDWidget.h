@@ -41,6 +41,13 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|UI")
 	void OnCounterAttackAlert(const FText& AlertText, float Duration);
 
+	/**
+	 * Owning-client state event. Switch on Event.NewState and call Narrative's
+	 * Show Narrative HUD Notification (or project presentation) from Blueprint.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, Category="Territory|Counter Attack")
+	void OnCounterHappened(const FTerritoryCounterAttackStateEvent& Event);
+
 private:
 	TWeakObjectPtr<class UTerritoryPlayerManagementComponent> ManagementComponent;
 	bool bHasObservedState = false;
@@ -51,5 +58,7 @@ private:
 
 	UFUNCTION()
 	void HandleAssaultNotification(const FTerritoryAssaultRecord& Assault);
+	UFUNCTION()
+	void HandleCounterHappened(const FTerritoryCounterAttackStateEvent& Event);
 	void PresentCounterAttackAlert(const FText& AlertText, float Duration);
 };

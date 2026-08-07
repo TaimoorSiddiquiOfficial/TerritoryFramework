@@ -207,7 +207,35 @@ struct FTerritoryAssaultRecord
 	}
 };
 
+/**
+ * Ephemeral, post-commit notification for one authoritative assault-state transition.
+ * The embedded record is a complete value snapshot and contains no live UObject pointers,
+ * so the same payload can be delivered reliably to an owning client.
+ */
+USTRUCT(BlueprintType)
+struct FTerritoryCounterAttackStateEvent
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
+	FTerritoryAssaultRecord Assault;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
+	ETerritoryAssaultState PreviousState = ETerritoryAssaultState::Grace;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
+	ETerritoryAssaultState NewState = ETerritoryAssaultState::Grace;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
+	ETerritoryAssaultResolution Resolution = ETerritoryAssaultResolution::None;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
+	double EventGameTime = 0.0;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryAssaultChanged,
 	const FTerritoryAssaultRecord&, Assault);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTerritoryAssaultWarning,
 	APlayerController*, PlayerController, const FTerritoryAssaultRecord&, Assault);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryCounterHappened,
+	const FTerritoryCounterAttackStateEvent&, Event);

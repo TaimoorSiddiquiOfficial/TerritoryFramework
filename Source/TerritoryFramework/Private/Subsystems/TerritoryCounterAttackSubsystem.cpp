@@ -159,6 +159,26 @@ bool UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
 		&& ContestingFaction == AttackingFaction;
 }
 
+bool UTerritoryCounterAttackSubsystem::ShouldEmitCounterHappened(
+	ETerritoryAssaultState PreviousState, ETerritoryAssaultState NewState,
+	bool bIsRestoringState)
+{
+	return !bIsRestoringState && PreviousState != NewState;
+}
+
+FTerritoryCounterAttackStateEvent UTerritoryCounterAttackSubsystem::MakeCounterHappenedEvent(
+	const FTerritoryAssaultRecord& Assault, ETerritoryAssaultState PreviousState,
+	double EventGameTime)
+{
+	FTerritoryCounterAttackStateEvent Event;
+	Event.Assault = Assault;
+	Event.PreviousState = PreviousState;
+	Event.NewState = Assault.State;
+	Event.Resolution = Assault.Resolution;
+	Event.EventGameTime = EventGameTime;
+	return Event;
+}
+
 bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 	const ATerritoryVolume* Territory, const FGameplayTag& PreferredFaction,
 	FGameplayTag& OutAttackingFaction, FTerritoryAssaultEvaluationInput& OutInput,
@@ -642,15 +662,19 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	case ETerritoryAssaultState::Grace:
 		if (GetCampaignGameTime() >= Assault.GraceEndsGameTime)
 		{
+			const ETerritoryAssaultState PreviousState = Assault.State;
 			Assault.State = ETerritoryAssaultState::Evaluating;
-			BroadcastChanged(Assault);
+			BroadcastStateTransition(Assault, PreviousState);
 			EvaluateAssault(Assault, Territory);
 		}
 		break;
 	case ETerritoryAssaultState::ScheduledWarning:
 		NotifyRelevantPlayers(Assault, Territory);
-		Assault.State = ETerritoryAssaultState::WaitingForPlayerProximity;
-		BroadcastChanged(Assault);
+		{
+			const ETerritoryAssaultState PreviousState = Assault.State;
+			Assault.State = ETerritoryAssaultState::WaitingForPlayerProximity;
+			BroadcastStateTransition(Assault, PreviousState);
+		}
 		break;
 	case ETerritoryAssaultState::WaitingForPlayerProximity:
 		NotifyRelevantPlayers(Assault, Territory);
@@ -733,9 +757,10 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 	Assault.WithdrawnForce = 0;
 	Assault.WaveSize = FMath::Clamp(ForceConfig->WaveSize, 1, Assault.PlannedForce);
 	Assault.ScheduledGameTime = GetCampaignGameTime();
+	const ETerritoryAssaultState PreviousState = Assault.State;
 	Assault.State = ETerritoryAssaultState::ScheduledWarning;
 	Assault.Resolution = ETerritoryAssaultResolution::None;
-	BroadcastChanged(Assault);
+	BroadcastStateTransition(Assault, PreviousState);
 }
 
 bool UTerritoryCounterAttackSubsystem::ActivateAssault(
@@ -761,9 +786,10 @@ bool UTerritoryCounterAttackSubsystem::ActivateAssault(
 
 	// Commit activation before spawning. Multiple players entering during this frame
 	// cannot activate or duplicate the force a second time.
+	const ETerritoryAssaultState PreviousState = Assault.State;
 	Assault.State = ETerritoryAssaultState::Active;
 	Assault.ActivatedGameTime = GetCampaignGameTime();
-	BroadcastChanged(Assault);
+	BroadcastStateTransition(Assault, PreviousState);
 	SpawnNextWave(Assault, Territory);
 	return true;
 }
@@ -904,6 +930,7 @@ void UTerritoryCounterAttackSubsystem::ResolveAssault(
 	ETerritoryAssaultResolution Reason)
 {
 	if (Assault.IsTerminal()) return;
+	const ETerritoryAssaultState PreviousState = Assault.State;
 	const bool bWasRestoring = bRestoringState;
 	bRestoringState = true;
 	Assault.State = FinalState;
@@ -916,7 +943,7 @@ void UTerritoryCounterAttackSubsystem::ResolveAssault(
 	Assault.AliveForce = 0;
 	Assault.PendingReserveForce = 0;
 	bRestoringState = bWasRestoring;
-	BroadcastChanged(Assault);
+	BroadcastStateTransition(Assault, PreviousState);
 }
 
 void UTerritoryCounterAttackSubsystem::RetireLiveParticipants(
@@ -941,6 +968,18 @@ void UTerritoryCounterAttackSubsystem::RetireLiveParticipants(
 void UTerritoryCounterAttackSubsystem::BroadcastChanged(const FTerritoryAssaultRecord& Assault)
 {
 	if (!bRestoringState) OnAssaultChanged.Broadcast(Assault);
+}
+
+void UTerritoryCounterAttackSubsystem::BroadcastStateTransition(
+	const FTerritoryAssaultRecord& Assault, ETerritoryAssaultState PreviousState)
+{
+	BroadcastChanged(Assault);
+	if (!ShouldEmitCounterHappened(PreviousState, Assault.State, bRestoringState)) return;
+
+	const FTerritoryCounterAttackStateEvent Event = MakeCounterHappenedEvent(
+		Assault, PreviousState, GetCampaignGameTime());
+	OnCounterHappened.Broadcast(Event);
+	NotifyRelevantPlayersOfState(Event, ResolveTerritory(Assault));
 }
 
 void UTerritoryCounterAttackSubsystem::NotifyRelevantPlayers(
@@ -976,6 +1015,32 @@ void UTerritoryCounterAttackSubsystem::NotifyRelevantPlayers(
 	{
 		Assault.bNotificationSent = true;
 		BroadcastChanged(Assault);
+	}
+}
+
+void UTerritoryCounterAttackSubsystem::NotifyRelevantPlayersOfState(
+	const FTerritoryCounterAttackStateEvent& Event, ATerritoryVolume* Territory)
+{
+	UWorld* World = GetWorld();
+	UTerritoryCounterAttackProfile* Profile = Territory
+		? Territory->GetCounterAttackProfile() : nullptr;
+	if (!World || !Profile) return;
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* Controller = It->Get();
+		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+		if (!Controller || !Pawn || !IsRelevantPlayer(Controller, Event.Assault, Profile)
+			|| FVector::DistSquared(Pawn->GetActorLocation(), Territory->GetActorLocation())
+				> FMath::Square(Profile->NotificationRadius))
+		{
+			continue;
+		}
+		if (UTerritoryPlayerManagementComponent* Management =
+			UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(Controller))
+		{
+			Management->SendCounterHappened(Event);
+		}
 	}
 }
 

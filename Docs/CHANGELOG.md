@@ -2,7 +2,18 @@
 
 ## Unreleased — 2026-07-30 (TerritoryFramework lifecycle and integration re-audit)
 
-### Counterattack death and economy account routing — 2026-08-07
+### Counterattack state events, death, and economy account routing — 2026-08-07
+
+- Added state-wise `OnCounterHappened` delivery after every committed counterattack transition.
+  The server subsystem exposes the global event; relevant owning clients receive the complete
+  value payload reliably through `UTerritoryPlayerManagementComponent`; and
+  `UTerritoryHUDWidget` forwards it as a Blueprint event for Narrative HUD notifications.
+  Same-state record updates and save/load hydration do not duplicate or replay the event.
+- Clean Build22 completed with UHT, Runtime, Editor, and linking under warnings-as-errors;
+  all 88 TerritoryFramework automation tests and all 45 plugin-content asset validations
+  passed with zero errored Blueprints. Live PIE/MCP verified one committed `Grace -> Cancelled`
+  transition delivered one matching server event and one reliable owning-player event, while
+  initial Grace record creation delivered neither.
 
 - Deferred Territory casualty-delegate binding until the Narrative NPC definition,
   controller, activity, appearance, and native death handlers are ready. Narrative's

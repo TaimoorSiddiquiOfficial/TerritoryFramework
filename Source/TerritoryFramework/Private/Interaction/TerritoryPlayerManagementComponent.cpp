@@ -647,6 +647,21 @@ void UTerritoryPlayerManagementComponent::ClientReceiveAssaultNotification_Imple
 	OnAssaultNotification.Broadcast(Assault);
 }
 
+void UTerritoryPlayerManagementComponent::SendCounterHappened(
+	const FTerritoryCounterAttackStateEvent& Event)
+{
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		ClientReceiveCounterHappened(Event);
+	}
+}
+
+void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implementation(
+	const FTerritoryCounterAttackStateEvent& Event)
+{
+	OnCounterHappened.Broadcast(Event);
+}
+
 APawn* UTerritoryPlayerManagementComponent::GetManagingPawn() const
 {
 	if (const APlayerController* Controller = Cast<APlayerController>(GetOwner()))

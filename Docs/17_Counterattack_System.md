@@ -17,6 +17,13 @@ Captured
 
 A decision roll can schedule an assault; it cannot capture a territory. `LaunchProbability` is scheduling policy. `EstimatedSuccessProbability` is planning information derived from finite attacker power versus defence.
 
+Every arrow after the initial record creation emits one post-commit
+`FTerritoryCounterAttackStateEvent`. Its embedded record is already in `NewState` and includes
+the durable ID, target/factions, force counts, selected approaches, and resolution. It also
+provides `PreviousState` and `EventGameTime`. Same-state casualty/data updates continue to use
+`OnAssaultChanged` and do not duplicate `OnCounterHappened`; save/load hydration never replays
+gameplay notifications.
+
 ## Required setup
 
 1. Create a `UTerritoryCounterAttackProfile` data asset.
@@ -229,10 +236,27 @@ Queries:
   checks definition, appearance, controller, and activity readiness without treating an
   optional weapon visual as a movement prerequisite)
 
-Bind `UTerritoryPlayerManagementComponent::OnAssaultNotification` for targeted UI warnings.
-The supplied Territory HUD renders this as a timed inline alert and exposes
-`OnCounterAttackAlert` for non-modal Blueprint animation. It deliberately does not invoke the
-project's Narrative notification widgets because both pause this world's active assault.
+Bind `UTerritoryPlayerManagementComponent::OnAssaultNotification` for the one-time strategic
+warning. Bind its `OnCounterHappened` delegate for state-wise owning-client delivery, or
+implement the identically named Blueprint event on `UTerritoryHUDWidget`. Delivery follows the
+same relevant-faction and `NotificationRadius` policy as warnings and uses a reliable client RPC.
+
+Blueprint notification flow:
+
+```text
+Event OnCounterHappened
+  -> Switch on NewState
+     ScheduledWarning -> Show Narrative HUD Notification("Counterattack incoming")
+     Active           -> Show Narrative HUD Notification("The attack has begun")
+     Succeeded        -> Show Narrative HUD Notification("District lost")
+     Defeated         -> Show Narrative HUD Notification("Counterattack defeated")
+     Cancelled        -> optional reason-specific notification
+```
+
+Use Narrative Pro's **Show Narrative HUD Notification** (`UArsenalStatics::PushHUDNotification`)
+or your project presentation. TerritoryFramework does not automatically open a major/modal
+notification, so combat is never paused by the framework event. The supplied HUD still renders
+the older warning as a timed inline alert and exposes `OnCounterAttackAlert` for animation.
 `GetAssaultDebugString`
 reports target/attacking/defending factions, guard counts, reserve, attacker and defence power,
 ratio, strategic value, priority, launch/success probability, finite force counts, approaches,

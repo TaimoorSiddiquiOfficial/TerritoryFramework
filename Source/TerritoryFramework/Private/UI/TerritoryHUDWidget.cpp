@@ -20,6 +20,8 @@ void UTerritoryHUDWidget::NativeConstruct()
 		{
 			ManagementComponent->OnAssaultNotification.AddUniqueDynamic(
 				this, &UTerritoryHUDWidget::HandleAssaultNotification);
+			ManagementComponent->OnCounterHappened.AddUniqueDynamic(
+				this, &UTerritoryHUDWidget::HandleCounterHappened);
 		}
 	}
 	BindToTerritoryAtPlayer();
@@ -31,6 +33,8 @@ void UTerritoryHUDWidget::NativeDestruct()
 	{
 		ManagementComponent->OnAssaultNotification.RemoveDynamic(
 			this, &UTerritoryHUDWidget::HandleAssaultNotification);
+		ManagementComponent->OnCounterHappened.RemoveDynamic(
+			this, &UTerritoryHUDWidget::HandleCounterHappened);
 	}
 	Super::NativeDestruct();
 }
@@ -143,6 +147,13 @@ void UTerritoryHUDWidget::HandleAssaultNotification(const FTerritoryAssaultRecor
 		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.AttackingFaction),
 		FText::AsNumber(Assault.PlannedForce),
 		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.TargetTerritory)), 8.f);
+	RefreshTerritoryDisplay();
+}
+
+void UTerritoryHUDWidget::HandleCounterHappened(
+	const FTerritoryCounterAttackStateEvent& Event)
+{
+	OnCounterHappened(Event);
 	RefreshTerritoryDisplay();
 }
 

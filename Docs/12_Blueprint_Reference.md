@@ -425,6 +425,7 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | GetBestEligibleAttackerPreview(Territory, PreferredFaction, ...) | Pure → bool + attacker/input/result/reason; no schedule or roll |
 | OnAssaultChanged | BlueprintAssignable |
 | OnAssaultWarning | BlueprintAssignable |
+| OnCounterHappened | BlueprintAssignable; post-commit state transition payload (`Assault`, `PreviousState`, `NewState`, `Resolution`, `EventGameTime`) |
 
 The warning state is notification-only: it creates no physical NPCs and no capture pressure. Physical activation occurs once, on the server, when a relevant player enters the configured radius.
 
@@ -439,7 +440,7 @@ Counterattack setup queries on `ATerritoryVolume` are `GetCounterAttackProfile`,
 
 ### Player management notifications
 
-The server-owned `UTerritoryPlayerManagementComponent` exposes `OnAssaultNotification` to the owning client. Bind UI there for targeted warnings; do not query server-only subsystem maps from a client widget.
+The server-owned `UTerritoryPlayerManagementComponent` exposes `OnAssaultNotification` for the one-time strategic warning and `OnCounterHappened` for every relevant live state transition. The latter is delivered by reliable owning-client RPC and carries a complete value snapshot, so client UI must use the payload instead of querying server-only subsystem maps. `UTerritoryHUDWidget` also exposes a Blueprint event named `OnCounterHappened`; switch on `NewState` and call Narrative Pro's **Show Narrative HUD Notification** node for the states your project wants to present.
 
 ## ITerritoryOwnershipInterface (Extended)
 

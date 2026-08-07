@@ -68,6 +68,15 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Counterattack styling hook is a Blueprint event"),
 			CounterAttackAlert->HasAnyFunctionFlags(FUNC_BlueprintEvent));
 	}
+	const UFunction* CounterHappened = UTerritoryHUDWidget::StaticClass()->
+		FindFunctionByName(TEXT("OnCounterHappened"));
+	TestNotNull(TEXT("Territory HUD exposes the targeted state-wise counterattack event"),
+		CounterHappened);
+	if (CounterHappened)
+	{
+		TestTrue(TEXT("Counterattack state hook is a Blueprint event"),
+			CounterHappened->HasAnyFunctionFlags(FUNC_BlueprintEvent));
+	}
 
 	const UScriptStruct* ViewStruct = FTerritoryDistrictOperationsView::StaticStruct();
 	TestNotNull(TEXT("District operations view is reflected"), ViewStruct);
@@ -108,6 +117,13 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			GarrisonStruct->FindPropertyByName(TEXT("NetIncome")));
 	}
 	const UClass* ManagementClass = UTerritoryPlayerManagementComponent::StaticClass();
+	const FProperty* CounterEvent = ManagementClass->FindPropertyByName(TEXT("OnCounterHappened"));
+	TestNotNull(TEXT("Owned bridge exposes the state-wise counterattack delegate"), CounterEvent);
+	if (CounterEvent)
+	{
+		TestTrue(TEXT("Owning-client counterattack delegate is Blueprint assignable"),
+			CounterEvent->HasAnyPropertyFlags(CPF_BlueprintAssignable));
+	}
 	TestTrue(TEXT("Owned bridge exposes remote absolute target RPC request"),
 		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTargetForTerritory")));
 	TestTrue(TEXT("Owned bridge exposes management-point absolute target request"),

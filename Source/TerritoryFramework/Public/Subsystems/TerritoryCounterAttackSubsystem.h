@@ -85,6 +85,15 @@ public:
 		ETerritoryAssaultState AssaultState, ETerritoryState TerritoryState,
 		const FGameplayTag& ContestingFaction, const FGameplayTag& AttackingFaction);
 
+	/** State events are live transition notifications, never save/load replays or same-state updates. */
+	static bool ShouldEmitCounterHappened(ETerritoryAssaultState PreviousState,
+		ETerritoryAssaultState NewState, bool bIsRestoringState);
+
+	/** Build the exact value payload emitted by OnCounterHappened. */
+	static FTerritoryCounterAttackStateEvent MakeCounterHappenedEvent(
+		const FTerritoryAssaultRecord& Assault, ETerritoryAssaultState PreviousState,
+		double EventGameTime);
+
 	/** Global persistence/replication bridge owned by ATerritoryWorldState. */
 	TArray<FTerritoryAssaultRecord> GetPersistentState() const;
 	TArray<FTerritoryAssaultCycleRecord> GetPersistentCycleState() const;
@@ -100,6 +109,14 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryAssaultWarning OnAssaultWarning;
+
+	/**
+	 * Server-side global event fired once after each verified assault-state transition.
+	 * Bind Tales/server orchestration here; owning-client UI uses the identically named
+	 * event on UTerritoryPlayerManagementComponent or UTerritoryHUDWidget.
+	 */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
+	FOnTerritoryCounterHappened OnCounterHappened;
 
 private:
 	TMap<FGuid, FTerritoryAssaultRecord> Assaults;
@@ -132,7 +149,11 @@ private:
 		ETerritoryAssaultResolution Reason);
 	void RetireLiveParticipants(FTerritoryAssaultRecord& Assault, bool bDestroyActors);
 	void BroadcastChanged(const FTerritoryAssaultRecord& Assault);
+	void BroadcastStateTransition(const FTerritoryAssaultRecord& Assault,
+		ETerritoryAssaultState PreviousState);
 	void NotifyRelevantPlayers(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
+	void NotifyRelevantPlayersOfState(const FTerritoryCounterAttackStateEvent& Event,
+		ATerritoryVolume* Territory);
 
 	ATerritoryVolume* ResolveTerritory(const FTerritoryAssaultRecord& Assault) const;
 	bool HasRelevantPlayerNearby(const FTerritoryAssaultRecord& Assault,

@@ -15,6 +15,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
+#include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "AI/NarrativeNPCController.h"
@@ -162,6 +163,50 @@ bool FTFCounterAttackUnguardedGuarantee::RunTest(const FString& Parameters)
 		UTerritoryCounterAttackSubsystem::CalculateEvaluation(Defended, Profile);
 	TestTrue(TEXT("Adding the first valid guard cannot increase launch probability"),
 		DefendedResult.LaunchProbability <= EmptyResult.LaunchProbability);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackStateEventPayload,
+	"TerritoryFramework.CounterAttack.Behavior.StateEventPayload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackStateEventPayload::RunTest(const FString& Parameters)
+{
+	FTerritoryAssaultRecord Assault;
+	Assault.AssaultID = FGuid::NewGuid();
+	Assault.TargetTerritory = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare"), false);
+	Assault.State = ETerritoryAssaultState::Active;
+	Assault.Resolution = ETerritoryAssaultResolution::None;
+	Assault.PlannedForce = 6;
+	Assault.AliveForce = 3;
+
+	TestTrue(TEXT("A real state transition emits a live event"),
+		UTerritoryCounterAttackSubsystem::ShouldEmitCounterHappened(
+			ETerritoryAssaultState::WaitingForPlayerProximity,
+			ETerritoryAssaultState::Active, false));
+	TestFalse(TEXT("A data-only update does not duplicate the state event"),
+		UTerritoryCounterAttackSubsystem::ShouldEmitCounterHappened(
+			ETerritoryAssaultState::Active, ETerritoryAssaultState::Active, false));
+	TestFalse(TEXT("Save/load hydration never replays gameplay notifications"),
+		UTerritoryCounterAttackSubsystem::ShouldEmitCounterHappened(
+			ETerritoryAssaultState::WaitingForPlayerProximity,
+			ETerritoryAssaultState::Active, true));
+
+	const FTerritoryCounterAttackStateEvent Event =
+		UTerritoryCounterAttackSubsystem::MakeCounterHappenedEvent(
+			Assault, ETerritoryAssaultState::WaitingForPlayerProximity, 314.25);
+	TestEqual(TEXT("Event keeps the durable assault identity"),
+		Event.Assault.AssaultID, Assault.AssaultID);
+	TestEqual(TEXT("Event reports the previous state"), Event.PreviousState,
+		ETerritoryAssaultState::WaitingForPlayerProximity);
+	TestEqual(TEXT("Event reports the committed new state"), Event.NewState,
+		ETerritoryAssaultState::Active);
+	TestEqual(TEXT("Embedded record and event state cannot diverge"),
+		Event.Assault.State, Event.NewState);
+	TestEqual(TEXT("Event carries the committed finite-force snapshot"),
+		Event.Assault.AliveForce, 3);
+	TestEqual(TEXT("Event carries campaign time"), Event.EventGameTime, 314.25);
 	return true;
 }
 
@@ -522,6 +567,15 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 		HasFunctionFlag(CounterClass, TEXT("GetBestEligibleAttackerPreview"), FUNC_BlueprintPure));
 	TestTrue(TEXT("Cancellation is Blueprint authority-only"),
 		HasFunctionFlag(CounterClass, TEXT("CancelAssault"), FUNC_BlueprintAuthorityOnly));
+	TestTrue(TEXT("Global state event is Blueprint assignable"),
+		HasPropertyFlag(CounterClass, TEXT("OnCounterHappened"), CPF_BlueprintAssignable));
+	const UClass* ManagementClass = UTerritoryPlayerManagementComponent::StaticClass();
+	TestTrue(TEXT("Owning-client state event is Blueprint assignable"),
+		HasPropertyFlag(ManagementClass, TEXT("OnCounterHappened"), CPF_BlueprintAssignable));
+	TestTrue(TEXT("State event delivery is an owning-client RPC"),
+		HasFunctionFlag(ManagementClass, TEXT("ClientReceiveCounterHappened"), FUNC_NetClient));
+	TestTrue(TEXT("State event delivery is reliable"),
+		HasFunctionFlag(ManagementClass, TEXT("ClientReceiveCounterHappened"), FUNC_NetReliable));
 	TestTrue(TEXT("Capture registration is Blueprint authority-only"),
 		HasFunctionFlag(UTerritoryControlSubsystem::StaticClass(), TEXT("TryRegisterAttacker"),
 			FUNC_BlueprintAuthorityOnly));
@@ -556,6 +610,12 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 	{
 		TestTrue(FString::Printf(TEXT("%s is SaveGame"), *Field.ToString()),
 			HasPropertyFlag(FTerritoryAssaultRecord::StaticStruct(), Field, CPF_SaveGame));
+	}
+	for (const FName Field : {TEXT("Assault"), TEXT("PreviousState"), TEXT("NewState"),
+		TEXT("Resolution"), TEXT("EventGameTime")})
+	{
+		TestNotNull(FString::Printf(TEXT("State event exposes %s"), *Field.ToString()),
+			FTerritoryCounterAttackStateEvent::StaticStruct()->FindPropertyByName(Field));
 	}
 
 	const UClass* ParticipantClass = UTerritoryAssaultParticipantComponent::StaticClass();

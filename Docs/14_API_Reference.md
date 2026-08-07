@@ -1019,6 +1019,14 @@ Server-authoritative scheduler for deterministic, finite physical assaults. It n
 | GetAssaultDebugString(AssaultID) | Pure | string |
 | GetBestEligibleAttackerPreview(Territory, PreferredFaction, OutFaction, OutInput, OutResult, OutReason) | Pure | bool; planning only, no cycle reservation or decision roll |
 
+| Delegate | Delivery | Payload |
+|---|---|---|
+| `OnAssaultChanged` | Server subsystem; every record/casualty update | `FTerritoryAssaultRecord` |
+| `OnAssaultWarning` | Server subsystem; targeted warning admission | Controller + record |
+| `OnCounterHappened` | Server subsystem; once after each committed state transition | `FTerritoryCounterAttackStateEvent` |
+
+`UTerritoryPlayerManagementComponent::OnCounterHappened` receives the same state-event payload on the relevant owning client through a reliable RPC. `UTerritoryHUDWidget::OnCounterHappened` forwards it as a Blueprint event suitable for Narrative HUD notification nodes. Save/load hydration never replays the event; late join reads the replicated WorldState snapshot.
+
 Native persistence functions are `GetPersistentState`, `GetPersistentCycleState`, and the `RestorePersistentState` overload accepting both arrays. The record-only restore overload remains for client read-model hydration and compatibility. `CalculateEvaluation` is a deterministic pure native calculator.
 
 ## UTerritoryCounterAttackProfile
