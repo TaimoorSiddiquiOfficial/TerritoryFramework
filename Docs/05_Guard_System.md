@@ -12,13 +12,14 @@ ATerritoryVolume::SpawnGuards()
   ├─ For each unique authored spawn point (one active slot each):
   │   ├─ preserve the marker's exact X/Y and facing
   │   ├─ align only Z to local navigation ground + capsule half-height
-  │   ├─ BeginDeferredActorSpawnFromClass with DontSpawnIfColliding
-  │   ├─ Guard->ConfigureTerritorySpawn(Definition, Faction, GUIDs)
-  │   │    └─ Sets FNPCSpawnParams BEFORE SetNPCDefinition:
+  │   ├─ reject the slot when the resolved capsule is blocked
+  │   ├─ Guard->SpawnThroughNarrative(Definition, Faction, GUIDs)
+  │   │    ├─ calls UNarrativeCharacterSubsystem::SpawnNPC
+  │   │    └─ applies the scoped Territory context BEFORE SetNPCDefinition:
   │   │       - bOverride_DefaultFactions = true (exact territory owner)
   │   │       - Optional ActivityConfiguration override
   │   │       - Optional TriggerSet overrides
-  │   ├─ FinishSpawningActor
+  │   ├─ verify Narrative controller/activity and exact authored transform
   │   └─ RegisterDefender + RegisterSpawnedGuard
   └─ Narrative handles all AI from here
 ```
@@ -31,6 +32,20 @@ Guard faction is determined by precedence:
 2. `TerritoryVolume->OwnershipData.OwningFaction`
 
 Faction is set via `FNPCSpawnParams.bOverride_DefaultFactions` before `SetNPCDefinition`, so Narrative's initialization reads the correct faction. The NPCDefinition's default factions are overridden — the guard belongs ONLY to the territory owner.
+
+Narrative's character subsystem owns physical creation, duplicate admission,
+`CharacterMap`, `NPCMap`, controller creation, and teardown. A multi-slot garrison must use
+a definition with **Allow Multiple Instances** enabled. Runtime and editor validation reject
+an incompatible class, controller, auto-possession policy, or instance policy instead of
+silently falling back to a different pawn class.
+
+Definition appearance and equipment can finish asynchronously. Automatic main-hand wielding
+waits until Narrative reports the character load complete and the requested equipment slot has
+a spawned weapon visual, preventing an early wield state from losing its animation overlay.
+An unarmed NPC definition is valid: after a bounded inventory admission window the guard stops
+polling and continues its Territory activity without a weapon or a misleading warning.
+Capsule and mesh initialization starts from valid named Unreal profiles before the exact
+Narrative trace-channel overrides are applied at runtime.
 
 ## Patrol System
 
@@ -57,6 +72,9 @@ No custom Territory BT needed — thin adapter into Narrative's infrastructure.
 - normal recruitment never uses a random fallback or collision-driven relocation. A
   blocked authored point fails that slot and reports the transaction failure
 - `ReserveSlots` = replacement entitlements for when active guards die
+- Strategic counterattack defence counts no more reserve entitlements than the
+  Territory's current `DesiredGuardCount`; target zero therefore has zero reserve
+  defence even if posts retain saved replacement stock
 - Initial population uses `HasAvailableSlot()` only — reserves not consumed
 - When a guard dies: `UnregisterGuard()` queues one finite replacement only when active guards are below `DesiredGuardCount`
 - Lowering the desired target cancels pending reserve deployments; a delayed reserve can never raise the live garrison above the new target

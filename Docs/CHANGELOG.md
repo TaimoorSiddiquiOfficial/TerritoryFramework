@@ -4,6 +4,42 @@
 
 ### District garrison command center — 2026-08-06
 
+- Physical counterattack creation now goes through Narrative Pro's
+  `UNarrativeCharacterSubsystem::SpawnNPC`, keeping `CharacterMap`, `NPCMap`, duplicate
+  policy, controller creation, and teardown authoritative. The complete Territory spawn
+  context is applied before `SetNPCDefinition`, and multi-pawn forces now reject Narrative
+  definitions that do not allow multiple instances.
+- Physical guard creation now uses that same Narrative character-subsystem authority.
+  Complete guard SpawnInfo and Territory/spawn-point context are present before definition
+  assignment; invalid class/controller/auto-possession/multiple-instance contracts fail
+  closed, and any unexpected spawn adjustment is rejected to preserve authored staging.
+- Guard and assault pawns initialize collision from valid `Pawn`/`CharacterMesh` profiles
+  and reapply Narrative trace-channel responses after registration, eliminating invalid
+  `Custom` profile lookups. Goal startup waits for Narrative definition/appearance readiness;
+  optional weapon visuals never block movement, and valid unarmed guards stop wield polling
+  without producing a false runtime warning.
+- Counterattack warnings now use the Territory HUD's inline description alert and a non-modal
+  Blueprint animation hook. Both Narrative notification presentations in this project's HUD
+  pause the world, which previously froze the newly activated physical force until dismissed.
+- Capture contest read models now commit state, contesting faction, and progress together
+  through `ATerritoryVolume::CommitOwnershipData`; typed gameplay reads use that authority
+  directly, so Blueprint interface overrides cannot expose a stale contesting faction during
+  physical assault evaluation.
+- Fixed the native physical assault pawn contract: dynamically spawned attackers now
+  use `ANarrativeNPCController` with spawned auto-possession. Scheduling, preview,
+  lifecycle revalidation, physical spawn, and editor validation reject custom classes
+  that cannot supply Narrative activities. This closes the live six-attacker withdrawal
+  regression where every finite participant failed goal initialization.
+- Fixed the first successful participant registration cancelling its own assault:
+  `Active` now accepts the matching attacker's legitimate `Contested` Territory state,
+  while pre-activation pressure, third-faction contests, and locked/unclaimed targets
+  still cancel fail-closed.
+- Counterattack defence now bounds raw post reserves by the player's authorized desired
+  staffing target. A `PlayerChooses` target of zero keeps its saved replacement stock
+  visible but contributes zero hidden reserve defence; target one contributes at most one.
+- Tagged streamed guard posts now log their pre-registration wait as expected verbose
+  state, and guard weapon loading reports a warning only if no supported equipped weapon
+  exists after the bounded Narrative-definition retry window.
 - Guard placement now uses one active combat slot per unique spawn-point actor. Normal
   recruitment preserves exact authored X/Y/facing, aligns only capsule height, and fails
   blocked slots instead of using broad NavMesh projection, random fallback, or collision

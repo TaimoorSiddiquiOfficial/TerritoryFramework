@@ -8,8 +8,7 @@
 #include "Core/TerritoryVolume.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
-#include "UnrealFramework/NarrativePlayerController.h"
-#include "Widgets/NarrativeGameplayHUD.h"
+#include "Engine/World.h"
 
 void UTerritoryHUDWidget::NativeConstruct()
 {
@@ -105,23 +104,30 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	}
 
 	const FGameplayTag ContestingFaction =
-		ITerritoryOwnershipInterface::Execute_GetContestingFaction(Territory);
+		Territory->GetOwnershipData().ContestingFaction;
 	if (bHasObservedState
 		&& State == ETerritoryState::Contested
 		&& (LastObservedState != ETerritoryState::Contested
 			|| LastObservedContestingFaction != ContestingFaction))
 	{
-		if (ANarrativePlayerController* PlayerController = Cast<ANarrativePlayerController>(GetOwningPlayer()))
+		const FText DistrictName = Territory->GetTerritoryDisplayName();
+		PresentCounterAttackAlert(FText::Format(
+			NSLOCTEXT("TerritoryHUD", "AttackAlert", "ATTACK ALERT: {0} is under attack by {1}."),
+			DistrictName,
+			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(ContestingFaction)), 6.f);
+	}
+
+	if (DistrictDescriptionText && !ActiveCounterAttackAlert.IsEmpty())
+	{
+		const UWorld* World = GetWorld();
+		if (World && World->GetRealTimeSeconds() < CounterAttackAlertExpiresAtRealTime)
 		{
-			if (UNarrativeGameplayHUD* HUD = PlayerController->GetNarrativeGameplayHUD())
-			{
-				const FText DistrictName = Territory->GetTerritoryDisplayName();
-				HUD->ShowMajorNotification(
-					FText::Format(NSLOCTEXT("TerritoryHUD", "AttackAlertTitle", "Attack alert: {0}"), DistrictName),
-					FText::Format(NSLOCTEXT("TerritoryHUD", "AttackAlertBody", "{0} is under attack."), DistrictName),
-					6.f,
-					true);
-			}
+			DistrictDescriptionText->SetText(ActiveCounterAttackAlert);
+		}
+		else
+		{
+			ActiveCounterAttackAlert = FText::GetEmpty();
+			CounterAttackAlertExpiresAtRealTime = 0.0;
 		}
 	}
 
@@ -132,21 +138,19 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 
 void UTerritoryHUDWidget::HandleAssaultNotification(const FTerritoryAssaultRecord& Assault)
 {
-	if (ANarrativePlayerController* PlayerController = Cast<ANarrativePlayerController>(GetOwningPlayer()))
-	{
-		if (UNarrativeGameplayHUD* HUD = PlayerController->GetNarrativeGameplayHUD())
-		{
-			HUD->ShowMajorNotification(
-				FText::Format(
-					NSLOCTEXT("TerritoryHUD", "CounterAttackWarningTitle", "Counterattack warning: {0}"),
-					UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.TargetTerritory)),
-				FText::Format(
-					NSLOCTEXT("TerritoryHUD", "CounterAttackWarningBody", "{0} is mobilizing {1} attackers. Reinforce the district before they arrive."),
-					UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.AttackingFaction),
-					FText::AsNumber(Assault.PlannedForce)),
-				8.f,
-				true);
-		}
-	}
+	PresentCounterAttackAlert(FText::Format(
+		NSLOCTEXT("TerritoryHUD", "CounterAttackWarning", "COUNTERATTACK: {0} is sending {1} attackers to {2}. Reinforce immediately."),
+		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.AttackingFaction),
+		FText::AsNumber(Assault.PlannedForce),
+		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.TargetTerritory)), 8.f);
 	RefreshTerritoryDisplay();
+}
+
+void UTerritoryHUDWidget::PresentCounterAttackAlert(const FText& AlertText, float Duration)
+{
+	ActiveCounterAttackAlert = AlertText;
+	const UWorld* World = GetWorld();
+	CounterAttackAlertExpiresAtRealTime = World
+		? World->GetRealTimeSeconds() + FMath::Max(0.f, Duration) : 0.0;
+	OnCounterAttackAlert(AlertText, Duration);
 }

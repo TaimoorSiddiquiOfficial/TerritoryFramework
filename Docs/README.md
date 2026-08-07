@@ -13,7 +13,7 @@
 - Saved contests restore the leading faction/progress for decay, but attacker identities and non-leading faction progress are not persisted.
 - Guard-post reserve counts and finite active counts persist. Individual pawn health/activity and live UObject pointers do not; surviving counts are reconstructed as new Narrative NPCs.
 - Narrative attitudes collapse multiple friendly treaty types to the same attitude when treaty metadata is rebuilt from GameState alone; WorldState/SavableData restore the richer saved metadata directly.
-- Counterattacks require a `UTerritoryCounterAttackProfile`, at least one typed approach with a valid navigation route, and Narrative NPC definitions whose class derives from `ATerritoryAssaultCharacter`. Offscreen capture simulation is intentionally disabled.
+- Counterattacks require a `UTerritoryCounterAttackProfile`, at least one typed approach with a valid navigation route, and Narrative NPC definitions whose class derives from `ATerritoryAssaultCharacter`, uses a Narrative NPC controller, and auto-possesses spawned actors. Offscreen capture simulation is intentionally disabled.
 
 ## Table of Contents
 

@@ -37,12 +37,19 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UProgressBar> ProgressBar_Capture;
 
+	/** Non-modal styling hook. Implement animations only; never open a pausing menu. */
+	UFUNCTION(BlueprintImplementableEvent, Category="Territory|UI")
+	void OnCounterAttackAlert(const FText& AlertText, float Duration);
+
 private:
 	TWeakObjectPtr<class UTerritoryPlayerManagementComponent> ManagementComponent;
 	bool bHasObservedState = false;
 	ETerritoryState LastObservedState = ETerritoryState::Unclaimed;
 	FGameplayTag LastObservedContestingFaction;
+	FText ActiveCounterAttackAlert;
+	double CounterAttackAlertExpiresAtRealTime = 0.0;
 
 	UFUNCTION()
 	void HandleAssaultNotification(const FTerritoryAssaultRecord& Assault);
+	void PresentCounterAttackAlert(const FText& AlertText, float Duration);
 };

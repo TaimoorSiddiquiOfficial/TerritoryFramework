@@ -397,8 +397,7 @@ void ATerritoryWorldState::ExportPersistentState()
 				Summary.TerritoryTag = Territory->GetTerritoryTag();
 				Summary.TerritoryGUID = Territory->GetActorGUID_Implementation();
 				Summary.CurrentOwner = Territory->GetOwningFaction();
-				Summary.ContestingFaction =
-					ITerritoryOwnershipInterface::Execute_GetContestingFaction(Territory);
+				Summary.ContestingFaction = Territory->GetOwnershipData().ContestingFaction;
 				Summary.ControlProgress = Territory->GetControlProgress();
 				Summary.State = Territory->GetTerritoryState();
 				ReplicatedCaptureSummaries.Add(Summary);

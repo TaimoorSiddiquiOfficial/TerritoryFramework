@@ -37,7 +37,7 @@ NPCDefinition (NPC_TerritoryBandit)
 
 ### Counterattack Activity Path
 
-Counterattack NPCs use `ATerritoryAssaultCharacter`, which still derives through Narrative's character stack. `UTerritoryAssaultGoal` carries the durable assault/territory/faction intent, while `UTerritoryAssaultActivity` consumes that goal and routes the NPC toward the selected typed approach and target Territory. The profile's NPC definition must resolve to an `ATerritoryAssaultCharacter` subclass. The participant adds the native assault activity when the assigned Narrative activity configuration does not already contain it; the configuration can therefore continue to own shared combat/rescoring activities. Invalid NPC classes are rejected by runtime evaluation and TerritoryFramework data validation; no generic fallback pawn is spawned.
+Counterattack NPCs use `ATerritoryAssaultCharacter`, which still derives through Narrative's character stack. `UTerritoryAssaultGoal` carries the durable assault/territory/faction intent, while `UTerritoryAssaultActivity` consumes that goal and routes the NPC toward the selected typed approach and target Territory. Physical creation goes through `UNarrativeCharacterSubsystem::SpawnNPC`, so Narrative's character/NPC maps and duplicate policy remain authoritative. The native pawn selects `ANarrativeNPCController` and auto-possession for placed or spawned actors. A profile NPC definition may resolve to a Blueprint subclass, but that subclass must preserve an `ANarrativeNPCController`-derived controller and spawned auto-possession; forces larger than one also require the definition to allow multiple instances. The participant waits for Narrative's asynchronous character load to finish, then adds the native assault activity when the assigned Narrative activity configuration does not already contain it. Invalid definition/controller/auto-possession contracts are rejected by planning preview, runtime scheduling/lifecycle checks, and TerritoryFramework data validation; no generic fallback pawn is spawned and no finite force is consumed.
 
 Combat may interrupt the assault activity through Narrative's normal activity scoring. The durable goal remains until death, withdrawal, cancellation, or resolution, so the activity can resume without inventing a parallel Behavior Tree authority.
 
@@ -64,6 +64,11 @@ Combat may interrupt the assault activity through Narrative's normal activity sc
 |---|---|---|---|
 | **NPC_TerritoryBandit** | `/Game/TerritoryFramework/AI/NPC_TerritoryBandit` | NPCDefinition | Territory guard definition; its class derives from `ATerritoryGuardCharacter` |
 | **NPC_TerritoryBanditAssault** | `/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault` | NPCDefinition | Physical counterattack definition; class path is `ATerritoryAssaultCharacter` and shared Narrative combat/activity data may be reused |
+
+Both Territory guard and assault native classes initialize their capsule and mesh from
+valid `Pawn`/`CharacterMesh` profiles, then apply Narrative's weapon, projectile, cover,
+traversal, climb, and interaction channel overrides after component registration. This
+avoids treating Unreal's reserved `Custom` marker as a named collision profile.
 
 ### Character Blueprints
 
@@ -136,23 +141,23 @@ ATerritoryVolume::SpawnGuards()                          [C++]
   │    └─ Falls back to GuardNPCDefinition property
   ├─ GetGuardSpawnPoints()                               → sorted by Priority
   ├─ For each free unique spawn point, up to DesiredGuardCount:
-  │    ├─ BeginDeferredActorSpawnFromClass(NPCClass)
-  │    ├─ Guard->ConfigureTerritorySpawn(                [C++ — single entrypoint]
+  │    ├─ validate exact slot collision and Narrative definition contract
+  │    ├─ Guard->SpawnThroughNarrative(                  [C++ — single authority adapter]
   │    │      Definition,                                → UNPCDefinition
   │    │      OwnerFaction,                              → exact faction (bOverride_DefaultFactions)
   │    │      TerritoryGUID,                             → territory identity
   │    │      GuardSaveGUID,                             → unique save GUID per guard
   │    │      SpawnTransform,                            → CRITICAL for BPA_ReturnToSpawn
   │    │      SpawnPointName)                            → optional spawn point name
-  │    ├─ Guard->OwningTerritory = this                 → territory back-reference
-  │    ├─ Guard->OwningTerritorySpawnPoint = SP          → spawn point back-reference
-  │    ├─ FinishSpawningActor()                          → triggers BeginPlay
+  │    ├─ UNarrativeCharacterSubsystem::SpawnNPC()       → Narrative registry/controller owner
+  │    ├─ scoped SetNPCDefinition override applies home/territory/spawn point context
+  │    ├─ verify exact transform + Narrative controller/activity
   │    ├─ RegisterDefender(Guard)                        → adds to defender list
   │    └─ SP->RegisterSpawnedGuard(Guard)                → spawn point tracking
   └─ Narrative handles all AI from here
 ```
 
-**Key:** each unique spawn-point actor is exactly one active combat slot. Its authored X/Y and facing are preserved; only Z is aligned to navigation ground and raised by the NPC capsule half-height. The same resolved transform is passed to deferred spawn, `ConfigureTerritorySpawn`, and `FinishSpawningActor`, then stored in `SpawnInfo.SpawnTransform` and replicated `TerritoryHomeTransform`. Normal deployment uses `DontSpawnIfColliding`, so a blocked slot fails instead of moving the guard away from the staged marker.
+**Key:** each unique spawn-point actor is exactly one active combat slot. Its authored X/Y and facing are preserved; only Z is aligned to navigation ground and raised by the NPC capsule half-height. The resolved transform is collision-validated before Narrative spawning, stored in `SpawnInfo.SpawnTransform` and replicated `TerritoryHomeTransform`. Narrative's public spawn function may adjust a colliding actor, so TerritoryFramework verifies the finished transform and destroys any unexpectedly relocated guard. A blocked slot therefore fails instead of moving the guard away from the staged marker.
 
 ### 2. Territory Home Transform (BP_TerritoryGuard)
 
@@ -472,7 +477,8 @@ The territory will spawn merchant guards when owned by the Merchants faction.
 
 | Function | Class | Purpose |
 |---|---|---|
-| `ConfigureTerritorySpawn()` | `ATerritoryGuardCharacter` | Single entrypoint for guard config. Sets SpawnInfo, faction, transforms |
+| `SpawnThroughNarrative()` | `ATerritoryGuardCharacter` | Native Territory adapter into Narrative's registered NPC spawn path |
+| `ConfigureTerritorySpawn()` | `ATerritoryGuardCharacter` | Advanced Blueprint deferred-spawn compatibility entrypoint; core garrisons use `SpawnThroughNarrative` |
 | `SpawnGuards()` | `ATerritoryVolume` | Spawns all guards for current owner |
 | `SpawnSingleGuard()` | `ATerritoryVolume` | Reserve replacement (one-for-one) |
 | `ResolveGuardDefinition()` | `ATerritoryVolume` | Picks NPCDefinition per faction (FactionGuardDefinitions first, then default) |
@@ -517,4 +523,4 @@ The territory will spawn merchant guards when owned by the Merchants faction.
 | `AC_TerritoryGuard` | `NPCActivityConfiguration` | Lists available activities |
 | `Triggers_Bandit` | `TriggerSet` | Time-based goal injection |
 | `BT_TerritoryPatrol` | `BehaviorTree` | Uses NarrativePro BT tasks |
-| Guard spawn points | `UNPCSpawnComponent` | Alternative path — territory uses its own spawn system |
+| Guard spawn points | `UNarrativeCharacterSubsystem::SpawnNPC` | Territory owns staged slot selection; Narrative owns NPC creation and registries |

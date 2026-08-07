@@ -323,8 +323,14 @@ This returns the save-system-assigned GUID when valid. Otherwise it generates an
 
 ### Behavior
 
-- `ConfigureTerritorySpawn` sets Narrative `SpawnInfo` before `SetNPCDefinition`
+- Core garrisons call the native `SpawnThroughNarrative` adapter, which uses
+  `UNarrativeCharacterSubsystem::SpawnNPC` and supplies complete `SpawnInfo` plus Territory
+  context before `SetNPCDefinition`
+- `ConfigureTerritorySpawn` remains the advanced Blueprint compatibility entrypoint for an
+  externally managed deferred spawn
 - Exact faction overrides come from the selected spawn point or owning territory
+- Multi-slot definitions must allow multiple Narrative instances; class, Narrative
+  controller, spawned auto-possession, and instance policy are runtime/editor validated
 - `ShouldRespawn_Implementation()` returns false so Narrative does not restore stale individual guard actors
 
 ---

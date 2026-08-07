@@ -73,6 +73,18 @@ public:
 		const FTerritoryAssaultEvaluationInput& Input,
 		const UTerritoryCounterAttackProfile* Profile);
 
+	/** Raw post reserves only defend staffing slots the owner has authorized. */
+	static int32 CalculateEffectiveReserveGuards(int32 RawReserveGuards,
+		int32 DesiredGuardCount);
+
+	/**
+	 * Claimed is required before activation. Once physical attackers register through
+	 * the capture authority, their own matching Contested state remains valid.
+	 */
+	static bool IsTerritoryControlStateValidForAssault(
+		ETerritoryAssaultState AssaultState, ETerritoryState TerritoryState,
+		const FGameplayTag& ContestingFaction, const FGameplayTag& AttackingFaction);
+
 	/** Global persistence/replication bridge owned by ATerritoryWorldState. */
 	TArray<FTerritoryAssaultRecord> GetPersistentState() const;
 	TArray<FTerritoryAssaultCycleRecord> GetPersistentCycleState() const;

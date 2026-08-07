@@ -7,6 +7,7 @@
 #include "UI/TerritoryActivatableWidget.h"
 #include "UI/TerritoryDistrictManagementWidget.h"
 #include "UI/TerritoryDistrictRowWidget.h"
+#include "UI/TerritoryHUDWidget.h"
 #include "UI/TerritoryJournalWidget.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 
@@ -58,6 +59,15 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Capture eligibility planning query is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(
 			UTerritoryControlSubsystem::StaticClass(), TEXT("GetCaptureEligibility")));
+	const UFunction* CounterAttackAlert = UTerritoryHUDWidget::StaticClass()->
+		FindFunctionByName(TEXT("OnCounterAttackAlert"));
+	TestNotNull(TEXT("Territory HUD exposes a non-modal counterattack styling hook"),
+		CounterAttackAlert);
+	if (CounterAttackAlert)
+	{
+		TestTrue(TEXT("Counterattack styling hook is a Blueprint event"),
+			CounterAttackAlert->HasAnyFunctionFlags(FUNC_BlueprintEvent));
+	}
 
 	const UScriptStruct* ViewStruct = FTerritoryDistrictOperationsView::StaticStruct();
 	TestNotNull(TEXT("District operations view is reflected"), ViewStruct);

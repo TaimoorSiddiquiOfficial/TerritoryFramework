@@ -5,6 +5,7 @@
 #include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardPostDefinition.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "AI/NPCDefinition.h"
@@ -147,11 +148,13 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 				TEXT("Counterattack force %s has no Narrative NPC definition"), *Force.Faction.ToString()));
 			else
 			{
-				UClass* NPCClass = Force.AttackerDefinition->NPCClassPath.LoadSynchronous();
-				if (!NPCClass || !NPCClass->IsChildOf(ATerritoryAssaultCharacter::StaticClass()))
+				FText SpawnClassFailure;
+				if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+					Force.AttackerDefinition, Force.PlannedForce, SpawnClassFailure))
 				{
-					Errors.Add(FString::Printf(TEXT("Counterattack force %s NPC class must derive from ATerritoryAssaultCharacter"),
-						*Force.Faction.ToString()));
+					Errors.Add(FString::Printf(
+						TEXT("Counterattack force %s NPC class is not physically spawn-ready: %s"),
+						*Force.Faction.ToString(), *SpawnClassFailure.ToString()));
 				}
 			}
 			if (Force.PlannedForce <= 0 || Force.WaveSize <= 0 || Force.WaveSize > Force.PlannedForce)
@@ -553,14 +556,18 @@ void UTerritoryDataValidator::CheckGuardConfig(
 		OutWarnings.Add(FString::Printf(TEXT("%s: GuardSpawnCount=%d but no default or per-faction NPC definition — SpawnGuards will no-op"), *Label, Territory->GuardSpawnCount));
 	}
 
-	auto ValidateDefinition = [&OutErrors, &Label](UNPCDefinition* Definition, const FString& Context)
+	const int32 RequiredInstances = FMath::Max(
+		1, FMath::Max(Territory->GuardSpawnCount, Territory->GuardSpawnPoints.Num()));
+	auto ValidateDefinition = [&OutErrors, &Label, RequiredInstances](
+		UNPCDefinition* Definition, const FString& Context)
 	{
 		if (!Definition) return;
-		UClass* NPCClass = Definition->NPCClassPath.LoadSynchronous();
-		if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
+		FText FailureReason;
+		if (!ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
+			Definition, RequiredInstances, FailureReason))
 		{
-			OutErrors.Add(FString::Printf(TEXT("%s: %s NPC class must derive from ATerritoryGuardCharacter"),
-				*Label, *Context));
+			OutErrors.Add(FString::Printf(TEXT("%s: %s is not physically spawn-ready: %s"),
+				*Label, *Context, *FailureReason.ToString()));
 		}
 	};
 	ValidateDefinition(Territory->GuardNPCDefinition, TEXT("default guard definition"));
@@ -590,10 +597,19 @@ void UTerritoryDataValidator::CheckGuardConfig(
 	// Typed references can still contain deleted/null actors.
 	for (int32 i = 0; i < Territory->GuardSpawnPoints.Num(); ++i)
 	{
-		if (!Territory->GuardSpawnPoints[i])
+		ATerritoryGuardSpawnPoint* SpawnPoint = Territory->GuardSpawnPoints[i];
+		if (!SpawnPoint)
 		{
 			OutWarnings.Add(FString::Printf(TEXT("%s: GuardSpawnPoints[%d] is null"), *Label, i));
+			continue;
 		}
+		UNPCDefinition* OverrideDefinition = SpawnPoint->NPCDefinitionOverride;
+		if (!OverrideDefinition && SpawnPoint->GuardPostDefinition)
+		{
+			OverrideDefinition = SpawnPoint->GuardPostDefinition->NPCDefinition;
+		}
+		ValidateDefinition(OverrideDefinition, FString::Printf(
+			TEXT("guard spawn point %s definition"), *SpawnPoint->GetActorLabel()));
 	}
 }
 
@@ -659,11 +675,13 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 		}
 		else
 		{
-			UClass* NPCClass = Force.AttackerDefinition->NPCClassPath.LoadSynchronous();
-			if (!NPCClass || !NPCClass->IsChildOf(ATerritoryAssaultCharacter::StaticClass()))
+			FText SpawnClassFailure;
+			if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+				Force.AttackerDefinition, Force.PlannedForce, SpawnClassFailure))
 			{
-				OutErrors.Add(FString::Printf(TEXT("%s: counterattack force %s NPC class must derive from ATerritoryAssaultCharacter"),
-					*Label, *Force.Faction.ToString()));
+				OutErrors.Add(FString::Printf(
+					TEXT("%s: counterattack force %s NPC class is not physically spawn-ready: %s"),
+					*Label, *Force.Faction.ToString(), *SpawnClassFailure.ToString()));
 			}
 		}
 		if (Force.PlannedForce <= 0 || Force.WaveSize <= 0 || Force.WaveSize > Force.PlannedForce)

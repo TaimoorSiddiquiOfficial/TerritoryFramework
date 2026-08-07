@@ -344,15 +344,7 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 			ATerritoryVolume* Territory = Cmd.Territory.Get();
 			if (Territory)
 			{
-				ReleaseTerritoryAttackers(Territory);
-				Territory->SetContestingFaction(FGameplayTag());
-				Territory->SetControlProgress(0.f);
-				if (Territory->GetTerritoryState() == ETerritoryState::Contested)
-				{
-					Territory->SetTerritoryState(Territory->GetOwningFaction().IsValid()
-						? ETerritoryState::Claimed
-						: ETerritoryState::Unclaimed);
-				}
+				ResetCapture(Territory);
 			}
 		}
 	}
@@ -484,18 +476,18 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 	{
 		// P1-06: Only mutate territory state and create capture entries when committing
 		// Initiate capture only after all admission checks pass.
-		if (CurrentState != ETerritoryState::Contested)
+		const FGameplayTag CurrentContestingFaction =
+			Territory->GetOwnershipData().ContestingFaction;
+		if (CurrentState != ETerritoryState::Contested || !CurrentContestingFaction.IsValid())
 		{
-			Territory->SetTerritoryState(ETerritoryState::Contested);
-			if (Territory->GetTerritoryState() != ETerritoryState::Contested)
+			const FGameplayTag CommittedFaction = CurrentContestingFaction.IsValid()
+				? CurrentContestingFaction : AttackingFaction;
+			if (!CommitCaptureReadModel(Territory, ETerritoryState::Contested,
+				CommittedFaction, Territory->GetControlProgress(),
+				ResolveCaptureContext(Territory, AttackingFaction)))
 			{
 				return FinishValidation(ECaptureResult::InvalidTerritory);
 			}
-			Territory->SetContestingFaction(AttackingFaction);
-		}
-		else if (!ITerritoryOwnershipInterface::Execute_GetContestingFaction(Territory).IsValid())
-		{
-			Territory->SetContestingFaction(AttackingFaction);
 		}
 
 		FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
@@ -550,18 +542,52 @@ bool UTerritoryControlSubsystem::CanFactionCaptureTerritory(
 	return true;
 }
 
+bool UTerritoryControlSubsystem::CommitCaptureReadModel(
+	ATerritoryVolume* Territory, ETerritoryState NewState,
+	const FGameplayTag& ContestingFaction, float ControlProgress,
+	const FTerritoryTransitionContext& TransitionContext) const
+{
+	if (!Territory || !Territory->HasAuthority()) return false;
+
+	if (Territory->GetTerritoryState() != NewState)
+	{
+		FText ConditionFailure;
+		if (!Territory->CheckStateConditions(NewState, ConditionFailure, TransitionContext))
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("[Capture] %s atomic state transition to %d rejected: %s"),
+				*Territory->GetTerritoryTag().ToString(), static_cast<int32>(NewState),
+				*ConditionFailure.ToString());
+			return false;
+		}
+	}
+
+	FTerritoryOwnershipData Candidate = Territory->GetOwnershipData();
+	Candidate.State = NewState;
+	Candidate.ContestingFaction = ContestingFaction;
+	Candidate.ControlProgress = FMath::Clamp(ControlProgress, 0.f, 1.f);
+
+	const FTerritoryOwnershipData BeforeCommit = Territory->GetOwnershipData();
+	const bool bAlreadyCommitted = BeforeCommit.State == Candidate.State
+		&& BeforeCommit.ContestingFaction == Candidate.ContestingFaction
+		&& FMath::IsNearlyEqual(BeforeCommit.ControlProgress, Candidate.ControlProgress);
+	if (bAlreadyCommitted) return true;
+
+	if (!Territory->CommitOwnershipData(Candidate, TransitionContext)) return false;
+	const FTerritoryOwnershipData Committed = Territory->GetOwnershipData();
+	return Committed.State == Candidate.State
+		&& Committed.ContestingFaction == Candidate.ContestingFaction
+		&& FMath::IsNearlyEqual(Committed.ControlProgress, Candidate.ControlProgress);
+}
+
 void UTerritoryControlSubsystem::ResetCapture(ATerritoryVolume* Territory)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory) return;
 	ReleaseTerritoryAttackers(Territory);
-	Territory->SetContestingFaction(FGameplayTag());
-	if (Territory->GetTerritoryState() == ETerritoryState::Contested)
-	{
-		Territory->SetTerritoryState(Territory->GetOwningFaction().IsValid()
-			? ETerritoryState::Claimed
-			: ETerritoryState::Unclaimed);
-	}
-	Territory->SetControlProgress(0.f);
+	const ETerritoryState RecoveredState = Territory->GetOwningFaction().IsValid()
+		? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+	// Capture decay/reset is a deliberate world-level transition with no player context.
+	CommitCaptureReadModel(Territory, RecoveredState, FGameplayTag(), 0.f);
 }
 
 void UTerritoryControlSubsystem::ClearCaptureTrackingOnly(ATerritoryVolume* Territory)
@@ -586,7 +612,9 @@ void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory,
 	float& Progress = State.CaptureProgressByFaction.FindOrAdd(AttackingFaction);
 	Progress = FMath::Clamp(Progress + ProgressDelta, 0.f, 1.f);
 
-	Territory->SetControlProgress(Progress);
+	CommitCaptureReadModel(Territory, ETerritoryState::Contested,
+		Territory->GetOwnershipData().ContestingFaction, Progress,
+		ResolveCaptureContext(Territory, AttackingFaction));
 
 	if (Progress >= 1.f)
 	{
@@ -900,20 +928,22 @@ bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory
 		State.CaptureProgressByFaction.Add(Faction, 0.f);
 	}
 
-	// Commit contested state only after the attacker has been admitted. If the
-	// state transition is rejected, roll back the reservation completely.
-	if (Territory->GetTerritoryState() != ETerritoryState::Contested)
+	// Commit the complete contested read model only after the attacker has been
+	// admitted. State-change listeners must never observe Contested with an empty
+	// contesting faction. If the transition is rejected, roll back completely.
+	const FGameplayTag ExistingContestingFaction =
+		Territory->GetOwnershipData().ContestingFaction;
+	const FGameplayTag CommittedFaction = ExistingContestingFaction.IsValid()
+		? ExistingContestingFaction : Faction;
+	if (!CommitCaptureReadModel(Territory, ETerritoryState::Contested,
+		CommittedFaction, Territory->GetControlProgress(),
+		BuildTransitionContext(Attacker, Faction)))
 	{
-		Territory->SetTerritoryState(ETerritoryState::Contested);
-		if (Territory->GetTerritoryState() != ETerritoryState::Contested)
-		{
-			ActorSet.Remove(Attacker);
-			ReleaseAttackerRegistration(Attacker);
-			State.CaptureProgressByFaction.Remove(Faction);
-			return false;
-		}
+		ActorSet.Remove(Attacker);
+		ReleaseAttackerRegistration(Attacker);
+		State.CaptureProgressByFaction.Remove(Faction);
+		return false;
 	}
-	Territory->SetContestingFaction(Faction);
 	return ActorSet.Contains(Attacker);
 }
 
@@ -1021,11 +1051,10 @@ void UTerritoryControlSubsystem::RestoreCaptureState(
 	if (Territory->GetTerritoryState() != ETerritoryState::Contested) return;
 	if (!ContestingFaction.IsValid())
 	{
-		Territory->SetContestingFaction(FGameplayTag());
-		Territory->SetControlProgress(0.f);
-		Territory->SetTerritoryState(Territory->GetOwningFaction().IsValid()
-			? ETerritoryState::Claimed
-			: ETerritoryState::Unclaimed);
+		CommitCaptureReadModel(Territory,
+			Territory->GetOwningFaction().IsValid()
+				? ETerritoryState::Claimed : ETerritoryState::Unclaimed,
+			FGameplayTag(), 0.f);
 		return;
 	}
 
@@ -1035,19 +1064,18 @@ void UTerritoryControlSubsystem::RestoreCaptureState(
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("[RestoreCaptureState] %s: diplomacy blocks %s — skipping restore"),
 			*Territory->GetTerritoryTag().ToString(), *ContestingFaction.ToString());
-		Territory->SetContestingFaction(FGameplayTag());
-		Territory->SetControlProgress(0.f);
-		Territory->SetTerritoryState(Territory->GetOwningFaction().IsValid()
-			? ETerritoryState::Claimed
-			: ETerritoryState::Unclaimed);
+		CommitCaptureReadModel(Territory,
+			Territory->GetOwningFaction().IsValid()
+				? ETerritoryState::Claimed : ETerritoryState::Unclaimed,
+			FGameplayTag(), 0.f);
 		return;
 	}
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
 	const float ClampedProgress = FMath::Clamp(ControlProgress, 0.f, 1.f);
 	State.CaptureProgressByFaction.Add(ContestingFaction, ClampedProgress);
-	Territory->SetContestingFaction(ContestingFaction);
-	Territory->SetControlProgress(ClampedProgress);
+	CommitCaptureReadModel(Territory, ETerritoryState::Contested,
+		ContestingFaction, ClampedProgress);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1129,11 +1157,10 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 		}
 	}
 
-	Territory->SetControlProgress(BestProgress);
-
-	// Update ContestingFaction to the leading faction (highest progress, most attackers)
-	// so UI/events always show the faction most likely to capture.
-	Territory->SetContestingFaction(BestFaction);
+	// Progress and its leading faction form one replicated read model. Commit them
+	// together so UI, assault scheduling, and save listeners never see a mixed frame.
+	CommitCaptureReadModel(Territory, ETerritoryState::Contested,
+		BestFaction, BestProgress);
 
 	// DEFER completion — don't mutate map during iteration (P0-01)
 	if (BestProgress >= 1.f && BestFaction.IsValid())
@@ -1195,7 +1222,7 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		? CaptureState->CaptureProgressByFaction.Find(NewOwner)
 		: nullptr;
 	if (Territory->GetTerritoryState() != ETerritoryState::Contested
-		|| ITerritoryOwnershipInterface::Execute_GetContestingFaction(Territory) != NewOwner
+		|| Territory->GetOwnershipData().ContestingFaction != NewOwner
 		|| ActiveAttackers <= 0
 		|| !Progress || *Progress < 1.f
 		|| Territory->GetDefenderCount() > 0

@@ -270,8 +270,21 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 	}
 	else
 	{
-		UE_LOG(LogTerritory, Warning, TEXT("GuardSpawnPoint %s could not find owning territory"),
-			*GetName());
+		// A tagged World Partition post can begin play before its Territory actor has
+		// registered. It remains subscribed to OnTerritoryRegistered, so this is an
+		// expected wait state rather than a broken ownership binding.
+		if (OwnerTerritoryTag.IsValid())
+		{
+			UE_LOG(LogTerritory, Verbose,
+				TEXT("GuardSpawnPoint %s is waiting for owning territory %s to register"),
+				*GetName(), *OwnerTerritoryTag.ToString());
+		}
+		else
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("GuardSpawnPoint %s has no owner tag and no containing registered territory"),
+				*GetName());
+		}
 	}
 }
 

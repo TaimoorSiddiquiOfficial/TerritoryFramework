@@ -5,17 +5,184 @@
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "AI/Activities/NPCActivityComponent.h"
+#include "AI/NarrativeCharacterSubsystem.h"
+#include "AI/NarrativeNPCController.h"
+#include "AI/NPCDefinition.h"
+#include "Character/NarrativeCharacterVisual.h"
 #include "Components/EquipmentComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/CollisionProfile.h"
 #include "Items/WeaponItem.h"
+#include "NarrativeArsenal.h"
 #include "Tales/TriggerSet.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "GameFramework/DamageType.h"
 
+namespace
+{
+	struct FPendingTerritoryGuardSpawn
+	{
+		UNPCDefinition* Definition = nullptr;
+		FGameplayTag ExactFaction;
+		FGuid TerritoryGuid;
+		FGuid SaveGuid;
+		FTransform SpawnTransform;
+		FName SpawnPointName;
+		ATerritoryVolume* OwningTerritory = nullptr;
+		ATerritoryGuardSpawnPoint* OwningSpawnPoint = nullptr;
+		bool bApplied = false;
+	};
+
+	FPendingTerritoryGuardSpawn* GPendingTerritoryGuardSpawn = nullptr;
+
+	void ApplyNarrativeCollisionOverrides(ATerritoryGuardCharacter& Character)
+	{
+		if (USkeletalMeshComponent* Mesh = Character.GetMesh())
+		{
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeProjectile, ECR_Block);
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeCover, ECR_Ignore);
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeTraversable, ECR_Ignore);
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeClimbable, ECR_Ignore);
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeInteraction, ECR_Ignore);
+		}
+		if (UCapsuleComponent* Capsule = Character.GetCapsuleComponent())
+		{
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeWeapon, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeProjectile, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeCover, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeTraversable, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeClimbable, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeInteraction, ECR_Ignore);
+		}
+	}
+}
+
 ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	PatrolGoalClass = UTerritoryPatrolGoal::StaticClass();
+	AIControllerClass = ANarrativeNPCController::StaticClass();
+	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+	GetCapsuleComponent()->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
+	GetMesh()->SetCollisionProfileName(FName(TEXT("CharacterMesh")));
+}
+
+bool ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
+	const UNPCDefinition* Definition, int32 RequiredInstances, FText& OutFailureReason)
+{
+	OutFailureReason = FText();
+	if (!Definition)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryGuardCharacter", "MissingGuardDefinition",
+			"A Narrative NPC definition is required for Territory guards.");
+		return false;
+	}
+
+	UClass* CandidateClass = Definition->NPCClassPath.LoadSynchronous();
+	if (!CandidateClass || !CandidateClass->IsChildOf(StaticClass()))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryGuardCharacter", "WrongGuardPawnClass",
+			"Guard NPC class must derive from ATerritoryGuardCharacter.");
+		return false;
+	}
+	const ATerritoryGuardCharacter* CDO =
+		CandidateClass->GetDefaultObject<ATerritoryGuardCharacter>();
+	if (!CDO || !CDO->AIControllerClass
+		|| !CDO->AIControllerClass->IsChildOf(ANarrativeNPCController::StaticClass()))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryGuardCharacter", "MissingGuardNarrativeController",
+			"Guard NPC class must use an ANarrativeNPCController-derived AI Controller Class.");
+		return false;
+	}
+	if (CDO->AutoPossessAI != EAutoPossessAI::Spawned
+		&& CDO->AutoPossessAI != EAutoPossessAI::PlacedInWorldOrSpawned)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryGuardCharacter", "GuardSpawnedAutoPossessRequired",
+			"Guard NPC class Auto Possess AI must include Spawned actors.");
+		return false;
+	}
+	if (RequiredInstances > 1 && !Definition->bAllowMultipleInstances)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryGuardCharacter", "MultipleGuardInstancesRequired",
+			"Narrative guard definition must allow multiple instances when more than one guard can be deployed.");
+		return false;
+	}
+	return true;
+}
+
+ATerritoryGuardCharacter* ATerritoryGuardCharacter::SpawnThroughNarrative(
+	UNarrativeCharacterSubsystem* CharacterSubsystem, UNPCDefinition* Definition,
+	const FGameplayTag& ExactFaction, const FGuid& TerritoryGuid,
+	const FGuid& SaveGuid, const FTransform& InSpawnTransform, FName SpawnPointName,
+	UNPCActivityConfiguration* OptionalActivityOverride,
+	const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
+	ATerritoryVolume* InOwningTerritory, ATerritoryGuardSpawnPoint* InOwningSpawnPoint)
+{
+	if (!IsInGameThread() || !CharacterSubsystem || !Definition || !ExactFaction.IsValid()
+		|| !TerritoryGuid.IsValid() || !SaveGuid.IsValid() || !InOwningTerritory
+		|| !InOwningSpawnPoint || GPendingTerritoryGuardSpawn)
+	{
+		return nullptr;
+	}
+
+	FNPCSpawnParams SpawnParams;
+	SpawnParams.bOverride_DefaultFactions = true;
+	SpawnParams.DefaultFactions.AddTag(ExactFaction);
+	if (OptionalActivityOverride)
+	{
+		SpawnParams.bOverride_ActivityConfiguration = true;
+		SpawnParams.ActivityConfiguration = FSoftObjectPath(OptionalActivityOverride);
+	}
+	if (!OptionalTriggerOverrides.IsEmpty())
+	{
+		SpawnParams.bOverride_TriggerSets = true;
+		SpawnParams.TriggerSets = OptionalTriggerOverrides;
+	}
+
+	FPendingTerritoryGuardSpawn Context;
+	Context.Definition = Definition;
+	Context.ExactFaction = ExactFaction;
+	Context.TerritoryGuid = TerritoryGuid;
+	Context.SaveGuid = SaveGuid;
+	Context.SpawnTransform = InSpawnTransform;
+	Context.SpawnPointName = SpawnPointName;
+	Context.OwningTerritory = InOwningTerritory;
+	Context.OwningSpawnPoint = InOwningSpawnPoint;
+	TGuardValue<FPendingTerritoryGuardSpawn*> PendingGuard(
+		GPendingTerritoryGuardSpawn, &Context);
+
+	ANarrativeNPCCharacter* Spawned = CharacterSubsystem->SpawnNPC(
+		Definition, InSpawnTransform, SpawnParams);
+	ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(Spawned);
+	if (!Context.bApplied || !Guard)
+	{
+		if (Spawned)
+		{
+			CharacterSubsystem->DestroyNPC(Spawned);
+		}
+		return nullptr;
+	}
+	return Guard;
+}
+
+void ATerritoryGuardCharacter::SetNPCDefinition(UNPCDefinition* Definition)
+{
+	if (GPendingTerritoryGuardSpawn
+		&& GPendingTerritoryGuardSpawn->Definition == Definition
+		&& !GPendingTerritoryGuardSpawn->bApplied)
+	{
+		SpawnInfo.SpawnAssignedSaveGUID = GPendingTerritoryGuardSpawn->SaveGuid;
+		SpawnInfo.SpawnTransform = GPendingTerritoryGuardSpawn->SpawnTransform;
+		SpawnInfo.SpawnName = GPendingTerritoryGuardSpawn->SpawnPointName;
+		SpawnInfo.OwningSpawnerGUID = GPendingTerritoryGuardSpawn->TerritoryGuid;
+		TerritoryHomeTransform = GPendingTerritoryGuardSpawn->SpawnTransform;
+		OwningTerritory = GPendingTerritoryGuardSpawn->OwningTerritory;
+		OwningTerritorySpawnPoint = GPendingTerritoryGuardSpawn->OwningSpawnPoint;
+		GPendingTerritoryGuardSpawn->bApplied = true;
+	}
+	Super::SetNPCDefinition(Definition);
 }
 
 bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
@@ -47,6 +214,7 @@ float ATerritoryGuardCharacter::TakeDamage(float Damage, FDamageEvent const& Dam
 void ATerritoryGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	ApplyNarrativeCollisionOverrides(*this);
 
 	if (HasAuthority())
 	{
@@ -69,9 +237,17 @@ void ATerritoryGuardCharacter::BeginPlay()
 
 void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 {
-	if (++DefaultWeaponWieldAttempts > 40)
+	++DefaultWeaponWieldAttempts;
+	ANarrativeCharacterVisual* CharacterVisual = GetCharacterVisual();
+	if (!GetNPCDefinition() || !CharacterVisual || CharacterVisual->HasLoadHandles())
 	{
-		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+		if (DefaultWeaponWieldAttempts >= 40)
+		{
+			GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+			UE_LOG(LogTerritory, Warning,
+				TEXT("GuardCharacter %s did not finish Narrative definition/appearance loading before the wield timeout"),
+				*GetName());
+		}
 		return;
 	}
 
@@ -83,6 +259,12 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 	UEquipmentComponent* Equipment = GetEquipmentComponent();
 	if (!Equipment)
 	{
+		if (DefaultWeaponWieldAttempts >= 40)
+		{
+			GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+			UE_LOG(LogTerritory, Warning,
+				TEXT("GuardCharacter %s has no Narrative equipment component"), *GetName());
+		}
 		return;
 	}
 
@@ -98,6 +280,7 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 		FGameplayTag::RequestGameplayTag(FName(TEXT("Narrative.Equipment.Slot.Weapon.Hip")), false)
 	};
 
+	bool bHasEquippedWeapon = false;
 	for (const FGameplayTag& EquipSlot : WeaponSlots)
 	{
 		UWeaponItem* Weapon = Equipment->GetEquippedWeaponAtSlot(EquipSlot);
@@ -106,6 +289,14 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 			Weapon = Cast<UWeaponItem>(Equipment->GetEquippedItemAtSlot(EquipSlot));
 		}
 		if (!Weapon)
+		{
+			continue;
+		}
+		bHasEquippedWeapon = true;
+		// SetWieldState immediately asks the Narrative character visual to attach the
+		// weapon. Wait until that asynchronously created visual actually contains the
+		// slot, otherwise Narrative emits a warning and never applies the overlay.
+		if (!GetWeaponVisual(EquipSlot))
 		{
 			continue;
 		}
@@ -118,10 +309,31 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 		return;
 	}
 
-	// P2-N16: Warn if no valid weapon slots found on first attempt
+	// An unarmed Narrative definition is a supported combatant. Give its asynchronous
+	// inventory a short admission window, then stop polling without presenting a valid
+	// data choice as a runtime failure.
+	if (!bHasEquippedWeapon && DefaultWeaponWieldAttempts >= 12)
+	{
+		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+		UE_LOG(LogTerritory, Verbose,
+			TEXT("GuardCharacter %s has no equipped weapon; keeping the valid unarmed Narrative loadout"),
+			*GetName());
+		return;
+	}
+	if (bHasEquippedWeapon && DefaultWeaponWieldAttempts >= 40)
+	{
+		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+		UE_LOG(LogTerritory, Warning,
+			TEXT("GuardCharacter %s has an equipped weapon but Narrative did not create its weapon visual before the wield timeout"),
+			*GetName());
+		return;
+	}
+
+	// Definition inventory is populated asynchronously. Report the actual transient
+	// condition; the GameplayTags above may all be valid even when no item exists yet.
 	if (DefaultWeaponWieldAttempts == 1)
 	{
-		UE_LOG(LogTerritory, Warning, TEXT("GuardCharacter %s: no valid weapon slot tags found — guard will retry wielding 40 times"),
+		UE_LOG(LogTerritory, Verbose, TEXT("GuardCharacter %s has no equipped weapon in a supported slot yet; retrying while the Narrative definition loads"),
 			*GetName());
 	}
 }

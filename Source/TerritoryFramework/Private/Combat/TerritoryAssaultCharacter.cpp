@@ -1,50 +1,241 @@
 #include "Combat/TerritoryAssaultCharacter.h"
 
 #include "Combat/TerritoryAssaultParticipantComponent.h"
+#include "AI/NarrativeCharacterSubsystem.h"
+#include "AI/NarrativeNPCController.h"
 #include "AI/NPCDefinition.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
+#include "Character/NarrativeCharacterVisual.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/CollisionProfile.h"
+#include "NarrativeArsenal.h"
 #include "Tales/TriggerSet.h"
+
+namespace
+{
+	struct FPendingTerritoryAssaultSpawn
+	{
+		UNPCDefinition* Definition = nullptr;
+		FGameplayTag ExactFaction;
+		FGuid TerritoryGuid;
+		FGuid SpawnGuid;
+		FTransform SpawnTransform;
+		FName SpawnName;
+		FGuid AssaultID;
+		FGameplayTag TargetTerritory;
+		bool bApplied = false;
+	};
+
+	// Narrative's SpawnNPC call is synchronous and server/game-thread only. Keeping
+	// this context scoped avoids a second spawning authority while allowing the
+	// complete Territory SpawnInfo to exist before Narrative applies the definition.
+	FPendingTerritoryAssaultSpawn* GPendingTerritoryAssaultSpawn = nullptr;
+
+	void ApplyNarrativeCollisionOverrides(ATerritoryAssaultCharacter& Character)
+	{
+		if (USkeletalMeshComponent* Mesh = Character.GetMesh())
+		{
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeProjectile, ECR_Block);
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeCover, ECR_Ignore);
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeTraversable, ECR_Ignore);
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeClimbable, ECR_Ignore);
+			Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeInteraction, ECR_Ignore);
+		}
+		if (UCapsuleComponent* Capsule = Character.GetCapsuleComponent())
+		{
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeWeapon, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeProjectile, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeCover, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeTraversable, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeClimbable, ECR_Ignore);
+			Capsule->SetCollisionResponseToChannel(TraceChannel_NarrativeInteraction, ECR_Ignore);
+		}
+	}
+}
 
 ATerritoryAssaultCharacter::ATerritoryAssaultCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	AssaultParticipant = CreateDefaultSubobject<UTerritoryAssaultParticipantComponent>(TEXT("TerritoryAssaultParticipant"));
+
+	// Counterattack pawns are always created dynamically. Narrative activities and
+	// attack tokens live on ANarrativeNPCController, so the native class must be a
+	// complete usable default rather than relying on every project to create a BP child.
+	AIControllerClass = ANarrativeNPCController::StaticClass();
+	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+
+	// Narrative customizes individual channel responses in its base constructor,
+	// which leaves the serialized profile name as the non-existent profile "Custom".
+	// Restore valid named profiles for component initialization; BeginPlay reapplies
+	// the exact Narrative channel overrides after registration without a bad lookup.
+	GetCapsuleComponent()->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
+	GetMesh()->SetCollisionProfileName(FName(TEXT("CharacterMesh")));
 }
 
-void ATerritoryAssaultCharacter::ConfigureAssaultSpawn(
-	UNPCDefinition* Definition, const FGameplayTag& ExactFaction,
-	const FGuid& TerritoryGuid, const FGuid& SpawnGuid, const FTransform& InSpawnTransform,
-	FName InSpawnName, UNPCActivityConfiguration* OptionalActivityOverride,
+bool ATerritoryAssaultCharacter::ValidateNarrativeSpawnClass(
+	const UClass* CandidateClass, FText& OutFailureReason)
+{
+	OutFailureReason = FText();
+	if (!CandidateClass || !CandidateClass->IsChildOf(StaticClass()))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryAssaultCharacter", "WrongAssaultPawnClass",
+			"NPC class must derive from ATerritoryAssaultCharacter.");
+		return false;
+	}
+
+	const ATerritoryAssaultCharacter* CDO =
+		CandidateClass->GetDefaultObject<ATerritoryAssaultCharacter>();
+	if (!CDO || !CDO->AIControllerClass
+		|| !CDO->AIControllerClass->IsChildOf(ANarrativeNPCController::StaticClass()))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryAssaultCharacter", "MissingNarrativeController",
+			"NPC class must use an ANarrativeNPCController-derived AI Controller Class.");
+		return false;
+	}
+
+	if (CDO->AutoPossessAI != EAutoPossessAI::Spawned
+		&& CDO->AutoPossessAI != EAutoPossessAI::PlacedInWorldOrSpawned)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryAssaultCharacter", "SpawnedAutoPossessRequired",
+			"NPC class Auto Possess AI must include Spawned actors.");
+		return false;
+	}
+
+	return true;
+}
+
+bool ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+	const UNPCDefinition* Definition, int32 PlannedForce, FText& OutFailureReason)
+{
+	OutFailureReason = FText();
+	if (!Definition)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryAssaultCharacter", "MissingAssaultDefinition",
+			"A Narrative NPC definition is required for physical assaults.");
+		return false;
+	}
+
+	UClass* CandidateClass = Definition->NPCClassPath.LoadSynchronous();
+	if (!ValidateNarrativeSpawnClass(CandidateClass, OutFailureReason))
+	{
+		return false;
+	}
+	if (PlannedForce > 1 && !Definition->bAllowMultipleInstances)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryAssaultCharacter", "MultipleAssaultInstancesRequired",
+			"Narrative NPC definition must allow multiple instances when Planned Force is greater than one.");
+		return false;
+	}
+	return true;
+}
+
+ATerritoryAssaultCharacter* ATerritoryAssaultCharacter::SpawnThroughNarrative(
+	UNarrativeCharacterSubsystem* CharacterSubsystem, UNPCDefinition* Definition,
+	const FGameplayTag& ExactFaction, const FGuid& TerritoryGuid,
+	const FGuid& SpawnGuid, const FTransform& SpawnTransform, FName SpawnName,
+	UNPCActivityConfiguration* OptionalActivityOverride,
 	const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
 	const FGuid& AssaultID, const FGameplayTag& TargetTerritory)
 {
-	SpawnInfo.OwningSpawnerGUID = TerritoryGuid;
-	SpawnInfo.SpawnAssignedSaveGUID = SpawnGuid;
-	SpawnInfo.SpawnTransform = InSpawnTransform;
-	SpawnInfo.SpawnName = InSpawnName;
-	SpawnInfo.SpawnParams.bOverride_DefaultFactions = true;
-	SpawnInfo.SpawnParams.DefaultFactions.Reset();
-	SpawnInfo.SpawnParams.DefaultFactions.AddTag(ExactFaction);
+	if (!IsInGameThread() || !CharacterSubsystem || !Definition || !ExactFaction.IsValid()
+		|| !TerritoryGuid.IsValid() || !SpawnGuid.IsValid() || !AssaultID.IsValid()
+		|| !TargetTerritory.IsValid() || GPendingTerritoryAssaultSpawn)
+	{
+		return nullptr;
+	}
 
+	FNPCSpawnParams SpawnParams;
+	SpawnParams.bOverride_DefaultFactions = true;
+	SpawnParams.DefaultFactions.AddTag(ExactFaction);
 	if (OptionalActivityOverride)
 	{
-		SpawnInfo.SpawnParams.bOverride_ActivityConfiguration = true;
-		SpawnInfo.SpawnParams.ActivityConfiguration = FSoftObjectPath(OptionalActivityOverride);
+		SpawnParams.bOverride_ActivityConfiguration = true;
+		SpawnParams.ActivityConfiguration = FSoftObjectPath(OptionalActivityOverride);
 	}
 	if (!OptionalTriggerOverrides.IsEmpty())
 	{
-		SpawnInfo.SpawnParams.bOverride_TriggerSets = true;
-		SpawnInfo.SpawnParams.TriggerSets = OptionalTriggerOverrides;
+		SpawnParams.bOverride_TriggerSets = true;
+		SpawnParams.TriggerSets = OptionalTriggerOverrides;
 	}
 
-	if (AssaultParticipant)
+	FPendingTerritoryAssaultSpawn Context;
+	Context.Definition = Definition;
+	Context.ExactFaction = ExactFaction;
+	Context.TerritoryGuid = TerritoryGuid;
+	Context.SpawnGuid = SpawnGuid;
+	Context.SpawnTransform = SpawnTransform;
+	Context.SpawnName = SpawnName;
+	Context.AssaultID = AssaultID;
+	Context.TargetTerritory = TargetTerritory;
+	TGuardValue<FPendingTerritoryAssaultSpawn*> PendingGuard(
+		GPendingTerritoryAssaultSpawn, &Context);
+
+	ANarrativeNPCCharacter* Spawned = CharacterSubsystem->SpawnNPC(
+		Definition, SpawnTransform, SpawnParams);
+	ATerritoryAssaultCharacter* AssaultCharacter =
+		Cast<ATerritoryAssaultCharacter>(Spawned);
+	if (!Context.bApplied || !AssaultCharacter)
 	{
-		AssaultParticipant->Configure(AssaultID, TargetTerritory, ExactFaction);
+		if (Spawned)
+		{
+			CharacterSubsystem->DestroyNPC(Spawned);
+		}
+		return nullptr;
 	}
-	if (Definition)
+	return AssaultCharacter;
+}
+
+bool ATerritoryAssaultCharacter::EnsureNarrativeControllerReady()
+{
+	if (!GetNPCController())
 	{
-		SetNPCDefinition(Definition);
+		SpawnDefaultController();
 	}
+	return GetNPCController() && GetActivityComponent();
+}
+
+bool ATerritoryAssaultCharacter::IsNarrativeSpawnReady() const
+{
+	if (!GetNPCDefinition() || !GetCharacterDefinition()
+		|| !GetNPCController() || !GetActivityComponent())
+	{
+		return false;
+	}
+	ANarrativeCharacterVisual* Visual = GetCharacterVisual();
+	if (!Visual || Visual->HasLoadHandles())
+	{
+		return false;
+	}
+	return true;
+}
+
+void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
+{
+	if (GPendingTerritoryAssaultSpawn
+		&& GPendingTerritoryAssaultSpawn->Definition == Definition
+		&& !GPendingTerritoryAssaultSpawn->bApplied)
+	{
+		SpawnInfo.OwningSpawnerGUID = GPendingTerritoryAssaultSpawn->TerritoryGuid;
+		SpawnInfo.SpawnAssignedSaveGUID = GPendingTerritoryAssaultSpawn->SpawnGuid;
+		SpawnInfo.SpawnTransform = GPendingTerritoryAssaultSpawn->SpawnTransform;
+		SpawnInfo.SpawnName = GPendingTerritoryAssaultSpawn->SpawnName;
+		if (AssaultParticipant)
+		{
+			AssaultParticipant->Configure(
+				GPendingTerritoryAssaultSpawn->AssaultID,
+				GPendingTerritoryAssaultSpawn->TargetTerritory,
+				GPendingTerritoryAssaultSpawn->ExactFaction);
+		}
+		GPendingTerritoryAssaultSpawn->bApplied = true;
+	}
+	Super::SetNPCDefinition(Definition);
+}
+
+void ATerritoryAssaultCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+	ApplyNarrativeCollisionOverrides(*this);
 }
 
 FGuid ATerritoryAssaultCharacter::GetActorGUID_Implementation() const

@@ -85,7 +85,15 @@ void UTerritoryAssaultParticipantComponent::GetLifetimeReplicatedProps(
 bool UTerritoryAssaultParticipantComponent::EnsureNarrativeActivityAndGoal()
 {
 	if (AssaultGoal) return true;
-	ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(GetOwner());
+	ATerritoryAssaultCharacter* NPC = Cast<ATerritoryAssaultCharacter>(GetOwner());
+	// Narrative applies the definition and appearance asynchronously. Do not start
+	// goal selection while that authoritative initialization is incomplete. Equipment
+	// visuals are intentionally not a movement prerequisite: unarmed NPC definitions
+	// are valid, and a missing optional weapon visual must not deadlock the assault.
+	if (!NPC || !NPC->IsNarrativeSpawnReady())
+	{
+		return false;
+	}
 	UNPCActivityComponent* ActivityComponent = NPC ? NPC->GetActivityComponent() : nullptr;
 	ANarrativeNPCController* Controller = NPC ? NPC->GetNPCController() : nullptr;
 	if (!ActivityComponent || !Controller)

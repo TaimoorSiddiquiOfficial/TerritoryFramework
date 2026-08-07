@@ -21,7 +21,11 @@ A decision roll can schedule an assault; it cannot capture a territory. `LaunchP
 
 1. Create a `UTerritoryCounterAttackProfile` data asset.
 2. Add one `FTerritoryFactionAssaultConfig` for each possible attacking Narrative faction.
-3. Assign a `UNPCDefinition`. Its `NPCClassPath` must derive from `ATerritoryAssaultCharacter`.
+3. Assign a `UNPCDefinition`. Its `NPCClassPath` must derive from
+   `ATerritoryAssaultCharacter`, use an `ANarrativeNPCController`-derived controller,
+   and set Auto Possess AI to include dynamically spawned actors. When `PlannedForce`
+   is greater than one, enable the definition's **Allow Multiple Instances** option;
+   Narrative otherwise rejects every pawn after the first.
 4. Set finite `PlannedForce` and `WaveSize` values.
 5. Assign the profile to the capturable `ATerritoryVolume`.
 6. Add one or more enabled `CounterAttackApproaches` with unique `ApproachID` values and transforms relative to the territory.
@@ -35,6 +39,13 @@ the remaining candidates the highest attack priority wins, followed by estimated
 success, military power, the former owner as a tie-break only, and stable faction-tag
 order. Add every faction that may retaliate to `FactionForces`; the scheduler never
 invents a faction or NPC definition outside that data asset.
+
+The native `ATerritoryAssaultCharacter` is spawn-ready by default: it selects
+`ANarrativeNPCController` and `PlacedInWorldOrSpawned`. A project Blueprint subclass may
+select Narrative Pro's Blueprint controller, but it must preserve those two contracts.
+Runtime admission, read-only UI preview, every non-terminal lifecycle phase, and editor
+data validation share the same definition/class check; an invalid pawn or incompatible
+single-instance definition cannot reserve or consume force.
 
 Do not point the force at a normal guard definition whose class derives only from
 `ATerritoryGuardCharacter`; runtime evaluation cancels that record as
@@ -71,7 +82,8 @@ route, and global budgets.
 
 ## Narrative Pro reuse
 
-Physical attackers are `ANarrativeNPCCharacter` instances configured through the public Narrative APIs:
+Physical attackers are `ANarrativeNPCCharacter` instances spawned and registered through
+`UNarrativeCharacterSubsystem::SpawnNPC`, then configured through the public Narrative APIs:
 
 - `UNPCDefinition` and `FNPCSpawnInfo`
 - optional `UNPCActivityConfiguration` (combat/patrol configuration may be reused)
@@ -81,7 +93,14 @@ Physical attackers are `ANarrativeNPCCharacter` instances configured through the
 - `UTerritoryAssaultActivity`, derived from `UNPCActivity`
 - Narrative factions, ASC death delegate, navigation, and save clock
 
-Spawn information, exact faction, activity configuration, and TriggerSets are filled before `SetNPCDefinition`. The assault activity is interruptible, so Narrative combat can take priority and the movement goal can resume afterward. TerritoryFramework does not add a competing AI controller or custom assault Behavior Tree.
+Narrative remains authoritative for `CharacterMap`, `NPCMap`, duplicate policy, controller
+creation, and definition loading. A scoped Territory spawn context supplies stable spawn
+identity, exact faction, activity configuration, TriggerSets, assault ID, and target before
+`SetNPCDefinition`; no live pawn pointer is persisted. Goal/activity startup waits until
+Narrative reports the character definition, appearance, equipment, and visual load complete.
+The assault activity is interruptible, so Narrative combat can take priority and the movement
+goal can resume afterward. TerritoryFramework does not add a competing spawn registry, AI
+controller, or custom assault Behavior Tree.
 
 `UTerritoryAssaultParticipantComponent` adds the native `UTerritoryAssaultActivity` to
 the spawned Narrative activity component when it is missing, then adds one finite
@@ -105,6 +124,12 @@ Counts, weighted guard quality, fortification, allied support, and strategic val
 accumulated once. The physical force still attacks one `ATerritoryVolume` and must
 complete that volume's existing capture flow.
 
+Spawn-point reserves are replacement entitlements, not hidden active defenders. For
+each Territory in the cascade, strategic evaluation counts at most
+`min(raw post reserves, DesiredGuardCount)`. Therefore a player-owned target of zero
+contributes zero reserve defence even when its posts retain finite replacement stock;
+raising the target to one can expose at most one of those reserves to defence planning.
+
 After diplomacy and admission gates, `UnguardedLaunchProbability` owns the launch
 policy when the complete local cascade has zero active guards. Its default is `1.0`, so
 an empty front certainly launches after grace. This is not an ownership roll:
@@ -126,6 +151,11 @@ Defence invariants are enforced by tests:
 `ScheduledWarning` and `WaitingForPlayerProximity` contain zero live attackers and produce zero capture pressure. Notifications are sent only to relevant controllers inside `NotificationRadius`; `bNotifyDefendingFactionOnly` restricts them to the defending Narrative faction.
 
 The first relevant player entering `ActivationRadius` commits the record to `Active` before spawning. That state transition prevents two nearby players from duplicating the assault. Additional players do not create another force or wave.
+
+Physical registration legitimately transitions the target from `Claimed` to
+`Contested`. The lifecycle accepts that state only while the assault is `Active` and the
+Territory's contesting faction exactly matches the assault attacker. Warning/grace
+records, locked/unclaimed targets, and third-faction contests remain invalid and cancel.
 
 ## Finite force and casualties
 
@@ -195,5 +225,15 @@ Queries:
 - `IsAssaultActive`
 - `GetAssaultDebugString`
 - `GetBestEligibleAttackerPreview` (planning only; reserves no cycle and makes no roll)
+- `ATerritoryAssaultCharacter::IsNarrativeSpawnReady` (live Blueprint/MCP diagnostic;
+  checks definition, appearance, controller, and activity readiness without treating an
+  optional weapon visual as a movement prerequisite)
 
-Bind `UTerritoryPlayerManagementComponent::OnAssaultNotification` for targeted UI warnings. `GetAssaultDebugString` reports target/attacking/defending factions, guard counts, reserve, attacker and defence power, ratio, strategic value, priority, launch/success probability, finite force counts, approaches, notification state, grace time, roll, state, and reason.
+Bind `UTerritoryPlayerManagementComponent::OnAssaultNotification` for targeted UI warnings.
+The supplied Territory HUD renders this as a timed inline alert and exposes
+`OnCounterAttackAlert` for non-modal Blueprint animation. It deliberately does not invoke the
+project's Narrative notification widgets because both pause this world's active assault.
+`GetAssaultDebugString`
+reports target/attacking/defending factions, guard counts, reserve, attacker and defence power,
+ratio, strategic value, priority, launch/success probability, finite force counts, approaches,
+notification state, grace time, roll, state, and reason.

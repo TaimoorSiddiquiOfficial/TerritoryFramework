@@ -7,6 +7,7 @@
 
 class UNPCDefinition;
 class UNPCActivityConfiguration;
+class UNarrativeCharacterSubsystem;
 class UTriggerSet;
 class ATerritoryVolume;
 class UTerritoryPatrolGoal;
@@ -35,6 +36,25 @@ public:
 	virtual FGuid GetActorGUID_Implementation() const override;
 	virtual void SetActorGUID_Implementation(const FGuid& NewGUID) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** Validates the Narrative controller, spawned-possession, class, and instance policy. */
+	static bool ValidateNarrativeSpawnDefinition(const UNPCDefinition* Definition,
+		int32 RequiredInstances, FText& OutFailureReason);
+
+	/**
+	 * Territory-owned adapter into Narrative's authoritative SpawnNPC registry.
+	 * All SpawnInfo and Territory context exists before SetNPCDefinition is applied.
+	 */
+	static ATerritoryGuardCharacter* SpawnThroughNarrative(
+		UNarrativeCharacterSubsystem* CharacterSubsystem, UNPCDefinition* Definition,
+		const FGameplayTag& ExactFaction, const FGuid& TerritoryGuid,
+		const FGuid& SaveGuid, const FTransform& InSpawnTransform, FName SpawnPointName,
+		UNPCActivityConfiguration* OptionalActivityOverride,
+		const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
+		ATerritoryVolume* OwningTerritory,
+		ATerritoryGuardSpawnPoint* OwningSpawnPoint);
+
+	virtual void SetNPCDefinition(UNPCDefinition* Definition) override;
 
 	/**
 	 * Single entrypoint for deterministic territory guard configuration.

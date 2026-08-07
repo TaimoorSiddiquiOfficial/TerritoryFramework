@@ -13,10 +13,10 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
+#include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NPCDefinition.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "Kismet/GameplayStatics.h"
 #include "Misc/Crc.h"
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
@@ -138,6 +138,27 @@ FTerritoryAssaultEvaluationResult UTerritoryCounterAttackSubsystem::CalculateEva
 	return Result;
 }
 
+int32 UTerritoryCounterAttackSubsystem::CalculateEffectiveReserveGuards(
+	int32 RawReserveGuards, int32 DesiredGuardCount)
+{
+	return FMath::Min(FMath::Max(0, RawReserveGuards),
+		FMath::Max(0, DesiredGuardCount));
+}
+
+bool UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
+	ETerritoryAssaultState AssaultState, ETerritoryState TerritoryState,
+	const FGameplayTag& ContestingFaction, const FGameplayTag& AttackingFaction)
+{
+	if (TerritoryState == ETerritoryState::Claimed)
+	{
+		return true;
+	}
+	return AssaultState == ETerritoryAssaultState::Active
+		&& TerritoryState == ETerritoryState::Contested
+		&& AttackingFaction.IsValid()
+		&& ContestingFaction == AttackingFaction;
+}
+
 bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 	const ATerritoryVolume* Territory, const FGameplayTag& PreferredFaction,
 	FGameplayTag& OutAttackingFaction, FTerritoryAssaultEvaluationInput& OutInput,
@@ -165,6 +186,7 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 
 	int32 ConfiguredCandidateCount = 0;
 	int32 DiplomacyBlockedCount = 0;
+	int32 InvalidSpawnClassCount = 0;
 	float BestMilitaryPower = -1.f;
 	for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
 	{
@@ -175,6 +197,13 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 			continue;
 		}
 		++ConfiguredCandidateCount;
+		FText SpawnClassFailure;
+		if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+			Force.AttackerDefinition, Force.PlannedForce, SpawnClassFailure))
+		{
+			++InvalidSpawnClassCount;
+			continue;
+		}
 
 		FTerritoryAssaultRecord AdmissionRecord;
 		AdmissionRecord.AttackingFaction = Force.Faction;
@@ -226,8 +255,12 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 			&& DiplomacyBlockedCount == ConfiguredCandidateCount
 			? NSLOCTEXT("TerritoryCounterAttack", "PreviewDiplomacyBlocked",
 				"Every configured opposing faction is blocked by diplomacy or Narrative attitude.")
-			: NSLOCTEXT("TerritoryCounterAttack", "PreviewNoValidForce",
-				"No configured opposing faction has a valid finite force for this territory.");
+			: ConfiguredCandidateCount > 0
+				&& InvalidSpawnClassCount == ConfiguredCandidateCount
+				? NSLOCTEXT("TerritoryCounterAttack", "PreviewInvalidSpawnClass",
+					"Every configured opposing force has an invalid Narrative assault pawn/controller contract.")
+				: NSLOCTEXT("TerritoryCounterAttack", "PreviewNoValidForce",
+					"No configured opposing faction has a valid finite force for this territory.");
 		return false;
 	}
 
@@ -286,12 +319,18 @@ bool UTerritoryCounterAttackSubsystem::ScheduleCounterAttack(
 	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
 	const FTerritoryFactionAssaultConfig* ForceConfig = Profile
 		? Profile->FindFactionForce(AttackingFaction) : nullptr;
-	UClass* ConfiguredNPCClass = ForceConfig && ForceConfig->AttackerDefinition
-		? ForceConfig->AttackerDefinition->NPCClassPath.LoadSynchronous() : nullptr;
 	if (!Profile || !ForceConfig || ForceConfig->PlannedForce <= 0 || ForceConfig->WaveSize <= 0
-		|| ForceConfig->MilitaryPower <= 0.f || !ConfiguredNPCClass
-		|| !ConfiguredNPCClass->IsChildOf(ATerritoryAssaultCharacter::StaticClass()))
+		|| ForceConfig->MilitaryPower <= 0.f)
 	{
+		return false;
+	}
+	FText SpawnClassFailure;
+	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+		ForceConfig->AttackerDefinition, ForceConfig->PlannedForce, SpawnClassFailure))
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Counterattack definition %s is not physically spawn-ready: %s"),
+			*GetNameSafe(ForceConfig->AttackerDefinition), *SpawnClassFailure.ToString());
 		return false;
 	}
 	FTerritoryAssaultRecord AdmissionRecord;
@@ -553,7 +592,11 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	if (Assault.IsTerminal()) return;
 	ATerritoryVolume* Territory = ResolveTerritory(Assault);
 	if (!Territory) return; // World Partition: wait for authoritative actor registration.
-	if (Territory->GetTerritoryState() != ETerritoryState::Claimed)
+	const FGameplayTag ContestingFaction =
+		Territory->GetOwnershipData().ContestingFaction;
+	if (!IsTerritoryControlStateValidForAssault(
+		Assault.State, Territory->GetTerritoryState(), ContestingFaction,
+		Assault.AttackingFaction))
 	{
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
 			ETerritoryAssaultResolution::InvalidTerritory);
@@ -563,10 +606,10 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
 	const FTerritoryFactionAssaultConfig* ForceConfig = Profile
 		? Profile->FindFactionForce(Assault.AttackingFaction) : nullptr;
-	UClass* ConfiguredNPCClass = ForceConfig && ForceConfig->AttackerDefinition
-		? ForceConfig->AttackerDefinition->NPCClassPath.LoadSynchronous() : nullptr;
-	if (!Profile || !ForceConfig || !ConfiguredNPCClass
-		|| !ConfiguredNPCClass->IsChildOf(ATerritoryAssaultCharacter::StaticClass()))
+	FText SpawnClassFailure;
+	if (!Profile || !ForceConfig
+		|| !ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+			ForceConfig->AttackerDefinition, ForceConfig->PlannedForce, SpawnClassFailure))
 	{
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
 			ETerritoryAssaultResolution::ConfigurationInvalid);
@@ -654,8 +697,9 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 			ETerritoryAssaultResolution::ConfigurationInvalid);
 		return;
 	}
-	UClass* ConfiguredNPCClass = ForceConfig->AttackerDefinition->NPCClassPath.LoadSynchronous();
-	if (!ConfiguredNPCClass || !ConfiguredNPCClass->IsChildOf(ATerritoryAssaultCharacter::StaticClass()))
+	FText SpawnClassFailure;
+	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+		ForceConfig->AttackerDefinition, ForceConfig->PlannedForce, SpawnClassFailure))
 	{
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
 			ETerritoryAssaultResolution::ConfigurationInvalid);
@@ -789,27 +833,32 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 	const FTerritoryFactionAssaultConfig& ForceConfig,
 	const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform)
 {
-	UClass* NPCClass = ForceConfig.AttackerDefinition
-		? ForceConfig.AttackerDefinition->NPCClassPath.LoadSynchronous() : nullptr;
-	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryAssaultCharacter::StaticClass()))
+	FText SpawnClassFailure;
+	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+		ForceConfig.AttackerDefinition, ForceConfig.PlannedForce, SpawnClassFailure))
 	{
 		UE_LOG(LogTerritory, Error,
-			TEXT("Counterattack definition %s must use TerritoryAssaultCharacter; participant was not spawned"),
-			*GetNameSafe(ForceConfig.AttackerDefinition));
+			TEXT("Counterattack definition %s is not physically spawn-ready: %s"),
+			*GetNameSafe(ForceConfig.AttackerDefinition), *SpawnClassFailure.ToString());
 		return nullptr;
 	}
 
-	ATerritoryAssaultCharacter* Participant = Cast<ATerritoryAssaultCharacter>(
-		UGameplayStatics::BeginDeferredActorSpawnFromClass(this, NPCClass, SpawnTransform,
-			ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding, Territory));
-	if (!Participant) return nullptr;
-
-	Participant->ConfigureAssaultSpawn(ForceConfig.AttackerDefinition, Assault.AttackingFaction,
+	UNarrativeCharacterSubsystem* CharacterSubsystem =
+		GetWorld() ? GetWorld()->GetSubsystem<UNarrativeCharacterSubsystem>() : nullptr;
+	ATerritoryAssaultCharacter* Participant = ATerritoryAssaultCharacter::SpawnThroughNarrative(
+		CharacterSubsystem, ForceConfig.AttackerDefinition, Assault.AttackingFaction,
 		Territory->GetTerritoryGUID(), FGuid::NewGuid(), SpawnTransform, Approach.ApproachID,
 		ForceConfig.ActivityConfigurationOverride, ForceConfig.TriggerSetOverrides,
 		Assault.AssaultID, Assault.TargetTerritory);
-	AActor* Finished = UGameplayStatics::FinishSpawningActor(Participant, SpawnTransform);
-	if (!IsValid(Finished) || Participant->IsActorBeingDestroyed()) return nullptr;
+	if (!IsValid(Participant) || Participant->IsActorBeingDestroyed()) return nullptr;
+	if (!Participant->EnsureNarrativeControllerReady())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Counterattack participant %s failed the verified Narrative controller/activity contract"),
+			*GetNameSafe(Participant));
+		Participant->Destroy();
+		return nullptr;
+	}
 
 	LiveParticipants.FindOrAdd(Assault.AssaultID).Add(Participant);
 	return Participant;
@@ -1092,18 +1141,24 @@ FTerritoryAssaultEvaluationInput UTerritoryCounterAttackSubsystem::BuildEvaluati
 		{
 			continue;
 		}
-		const int32 Active = Defence->GetSpawnedGuardCount();
-		int32 Reserve = 0;
+		const int32 Active = FMath::Max(0, Defence->GetSpawnedGuardCount());
+		const int32 Desired = FMath::Max(0, Defence->GetDesiredGuardCount());
+		int32 RawReserve = 0;
 		for (const ATerritoryGuardSpawnPoint* SpawnPoint : Defence->GetGuardSpawnPoints())
 		{
-			if (SpawnPoint) Reserve += FMath::Max(0, SpawnPoint->GetReserveCount());
+			if (SpawnPoint) RawReserve += FMath::Max(0, SpawnPoint->GetReserveCount());
 		}
-		Input.ActiveGuards += FMath::Max(0, Active);
-		Input.DesiredGuards += FMath::Max(0, Defence->GetDesiredGuardCount());
+		// A reserve is a finite replacement entitlement for an authorized staffing
+		// target, not a hidden defender. Posts outside DesiredGuardCount cannot create
+		// capture pressure, so they must not inflate an empty/player-unstaffed District.
+		const int32 EffectiveReserve = CalculateEffectiveReserveGuards(
+			RawReserve, Desired);
+		Input.ActiveGuards += Active;
+		Input.DesiredGuards += Desired;
 		Input.MaximumGuards += FMath::Max(0, Defence->GetMaxGuardCount());
-		Input.ReserveGuards += Reserve;
-		const float Weight = static_cast<float>(FMath::Max(0, Active))
-			+ 0.5f * static_cast<float>(Reserve);
+		Input.ReserveGuards += EffectiveReserve;
+		const float Weight = static_cast<float>(Active)
+			+ 0.5f * static_cast<float>(EffectiveReserve);
 		WeightedQuality += FMath::Max(0.f, Defence->GetGuardQuality()) * Weight;
 		QualityWeight += Weight;
 		Input.Fortification += FMath::Max(0.f, Defence->GetFortificationStrength());

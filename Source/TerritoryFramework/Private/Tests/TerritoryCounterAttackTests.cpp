@@ -11,9 +11,14 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryWorldState.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "AI/NarrativeNPCController.h"
+#include "AI/NPCDefinition.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 
 namespace TerritoryCounterAttackTests
@@ -157,6 +162,131 @@ bool FTFCounterAttackUnguardedGuarantee::RunTest(const FString& Parameters)
 		UTerritoryCounterAttackSubsystem::CalculateEvaluation(Defended, Profile);
 	TestTrue(TEXT("Adding the first valid guard cannot increase launch probability"),
 		DefendedResult.LaunchProbability <= EmptyResult.LaunchProbability);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackPhysicalSpawnContract,
+	"TerritoryFramework.CounterAttack.Regression.PhysicalSpawnUsesNarrativeController",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackPhysicalSpawnContract::RunTest(const FString& Parameters)
+{
+	const ATerritoryAssaultCharacter* CDO =
+		GetDefault<ATerritoryAssaultCharacter>();
+	TestNotNull(TEXT("Native physical assault pawn has a CDO"), CDO);
+	if (!CDO) return false;
+
+	TestTrue(TEXT("Physical assault pawn selects a Narrative NPC controller"),
+		CDO->AIControllerClass
+		&& CDO->AIControllerClass->IsChildOf(ANarrativeNPCController::StaticClass()));
+	TestTrue(TEXT("Physical assault pawn auto-possesses dynamically spawned instances"),
+		CDO->AutoPossessAI == EAutoPossessAI::Spawned
+		|| CDO->AutoPossessAI == EAutoPossessAI::PlacedInWorldOrSpawned);
+	TestEqual(TEXT("Assault capsule initializes from a valid named collision profile"),
+		CDO->GetCapsuleComponent()->GetCollisionProfileName(),
+		UCollisionProfile::Pawn_ProfileName);
+	TestEqual(TEXT("Assault mesh initializes from the engine CharacterMesh profile"),
+		CDO->GetMesh()->GetCollisionProfileName(), FName(TEXT("CharacterMesh")));
+	const UFunction* ReadinessFunction = ATerritoryAssaultCharacter::StaticClass()->
+		FindFunctionByName(GET_FUNCTION_NAME_CHECKED(ATerritoryAssaultCharacter, IsNarrativeSpawnReady));
+	TestNotNull(TEXT("Narrative readiness is exposed as a Blueprint/MCP diagnostic"),
+		ReadinessFunction);
+	if (ReadinessFunction)
+	{
+		TestTrue(TEXT("Narrative readiness diagnostic is side-effect free"),
+			ReadinessFunction->HasAnyFunctionFlags(FUNC_BlueprintPure));
+	}
+
+	const ATerritoryGuardCharacter* GuardCDO = GetDefault<ATerritoryGuardCharacter>();
+	TestNotNull(TEXT("Native Territory guard has a CDO"), GuardCDO);
+	if (GuardCDO)
+	{
+		TestTrue(TEXT("Native Territory guard selects a Narrative NPC controller"),
+			GuardCDO->AIControllerClass
+			&& GuardCDO->AIControllerClass->IsChildOf(ANarrativeNPCController::StaticClass()));
+		TestTrue(TEXT("Native Territory guard auto-possesses dynamically spawned instances"),
+			GuardCDO->AutoPossessAI == EAutoPossessAI::Spawned
+			|| GuardCDO->AutoPossessAI == EAutoPossessAI::PlacedInWorldOrSpawned);
+		TestEqual(TEXT("Guard capsule initializes from a valid named collision profile"),
+			GuardCDO->GetCapsuleComponent()->GetCollisionProfileName(),
+			UCollisionProfile::Pawn_ProfileName);
+		TestEqual(TEXT("Guard mesh initializes from the engine CharacterMesh profile"),
+			GuardCDO->GetMesh()->GetCollisionProfileName(), FName(TEXT("CharacterMesh")));
+	}
+
+	FText FailureReason;
+	TestTrue(TEXT("The native assault class satisfies runtime/editor admission"),
+		ATerritoryAssaultCharacter::ValidateNarrativeSpawnClass(
+			ATerritoryAssaultCharacter::StaticClass(), FailureReason));
+	TestTrue(TEXT("Successful admission has no failure reason"),
+		FailureReason.IsEmpty());
+	TestFalse(TEXT("A plain Narrative NPC cannot bypass the Territory assault contract"),
+		ATerritoryAssaultCharacter::ValidateNarrativeSpawnClass(
+			ANarrativeNPCCharacter::StaticClass(), FailureReason));
+	TestFalse(TEXT("Rejected admission returns an actionable reason"),
+		FailureReason.IsEmpty());
+
+	UNPCDefinition* Definition = NewObject<UNPCDefinition>();
+	Definition->NPCClassPath = ATerritoryAssaultCharacter::StaticClass();
+	Definition->bAllowMultipleInstances = false;
+	TestTrue(TEXT("A single finite attacker may use a unique Narrative definition"),
+		ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+			Definition, 1, FailureReason));
+	TestFalse(TEXT("A multi-pawn force cannot use a single-instance Narrative definition"),
+		ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+			Definition, 2, FailureReason));
+	TestFalse(TEXT("Multiple-instance rejection returns an actionable reason"),
+		FailureReason.IsEmpty());
+	Definition->bAllowMultipleInstances = true;
+	TestTrue(TEXT("A reusable Narrative definition admits a finite multi-pawn force"),
+		ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+			Definition, 6, FailureReason));
+
+	UNPCDefinition* GuardDefinition = NewObject<UNPCDefinition>();
+	GuardDefinition->NPCClassPath = ATerritoryGuardCharacter::StaticClass();
+	GuardDefinition->bAllowMultipleInstances = false;
+	TestTrue(TEXT("A one-slot garrison may use a unique Narrative definition"),
+		ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
+			GuardDefinition, 1, FailureReason));
+	TestFalse(TEXT("A multi-slot garrison rejects a single-instance Narrative definition"),
+		ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
+			GuardDefinition, 2, FailureReason));
+	GuardDefinition->bAllowMultipleInstances = true;
+	TestTrue(TEXT("A reusable Narrative guard definition admits a multi-slot garrison"),
+		ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
+			GuardDefinition, 7, FailureReason));
+
+	TestEqual(TEXT("Unstaffed target receives no hidden defensive reserves"),
+		UTerritoryCounterAttackSubsystem::CalculateEffectiveReserveGuards(7, 0), 0);
+	TestEqual(TEXT("One authorized slot can use at most one reserve entitlement"),
+		UTerritoryCounterAttackSubsystem::CalculateEffectiveReserveGuards(7, 1), 1);
+	TestEqual(TEXT("Negative saved/config values are bounded"),
+		UTerritoryCounterAttackSubsystem::CalculateEffectiveReserveGuards(-2, -4), 0);
+
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	TestTrue(TEXT("Pre-activation assault phases accept a securely claimed target"),
+		UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
+			ETerritoryAssaultState::WaitingForPlayerProximity,
+			ETerritoryState::Claimed, FGameplayTag(), Bandits));
+	TestTrue(TEXT("An active physical assault keeps its own matching contested target"),
+		UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
+			ETerritoryAssaultState::Active,
+			ETerritoryState::Contested, Bandits, Bandits));
+	TestFalse(TEXT("A warning cannot generate or inherit capture pressure"),
+		UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
+			ETerritoryAssaultState::ScheduledWarning,
+			ETerritoryState::Contested, Bandits, Bandits));
+	TestFalse(TEXT("A third faction contest invalidates the active assault"),
+		UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
+			ETerritoryAssaultState::Active,
+			ETerritoryState::Contested, Heroes, Bandits));
+	TestFalse(TEXT("Locked targets remain invalid during physical activation"),
+		UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
+			ETerritoryAssaultState::Active,
+			ETerritoryState::Locked, FGameplayTag(), Bandits));
 	return true;
 }
 
@@ -320,6 +450,49 @@ bool FTFCounterAttackWarningInvariant::RunTest(const FString& Parameters)
 	TestEqual(TEXT("A warning has zero spawned attackers"), Warning.AliveForce, 0);
 	TestEqual(TEXT("A warning preserves finite pending force"), Warning.PendingReserveForce, 6);
 	TestEqual(TEXT("A warning alone accounts for no casualties"), Warning.KilledForce, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCaptureAtomicContestTransition,
+	"TerritoryFramework.CounterAttack.Regression.CaptureContestReadModelIsAtomic",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCaptureAtomicContestTransition::RunTest(const FString& Parameters)
+{
+	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
+	UTerritoryControlSubsystem* Control = NewObject<UTerritoryControlSubsystem>();
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	TestNotNull(TEXT("Territory exists"), Territory);
+	TestNotNull(TEXT("Control subsystem exists"), Control);
+	TestTrue(TEXT("Bandit faction exists"), Bandits.IsValid());
+	if (!Territory || !Control || !Bandits.IsValid()) return false;
+	// NewObject actors are ROLE_None; assign the authority role this native
+	// mutation contract requires without constructing an entire PIE world.
+	Territory->SetRole(ROLE_Authority);
+
+	TestTrue(TEXT("Contest state and faction commit through one ownership write"),
+		Control->CommitCaptureReadModel(Territory, ETerritoryState::Contested,
+			Bandits, 0.f));
+	const FTerritoryOwnershipData Contested = Territory->GetOwnershipData();
+	TestEqual(TEXT("Atomic write exposes Contested state"),
+		Contested.State, ETerritoryState::Contested);
+	TestEqual(TEXT("The same write exposes the attacking faction"),
+		Contested.ContestingFaction, Bandits);
+	TestTrue(TEXT("An active assault accepts the committed snapshot"),
+		UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
+			ETerritoryAssaultState::Active, Contested.State,
+			Contested.ContestingFaction, Bandits));
+
+	TestTrue(TEXT("Recovery clears state, faction, and progress through one ownership write"),
+		Control->CommitCaptureReadModel(Territory, ETerritoryState::Unclaimed,
+			FGameplayTag(), 0.f));
+	const FTerritoryOwnershipData Recovered = Territory->GetOwnershipData();
+	TestEqual(TEXT("Recovery state is unclaimed"),
+		Recovered.State, ETerritoryState::Unclaimed);
+	TestFalse(TEXT("Recovery clears contesting faction"),
+		Recovered.ContestingFaction.IsValid());
+	TestEqual(TEXT("Recovery clears capture progress"), Recovered.ControlProgress, 0.f);
 	return true;
 }
 

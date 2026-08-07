@@ -129,7 +129,7 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 
 | Function | Notes |
 |---|---|
-| ConfigureTerritorySpawn(...) | Deferred-spawn configuration entrypoint; call before `FinishSpawningActor` |
+| ConfigureTerritorySpawn(...) | Advanced external deferred-spawn configuration entrypoint; core Territory garrisons already spawn through Narrative's subsystem |
 
 ### BlueprintReadOnly Replicated Properties
 

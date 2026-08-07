@@ -255,7 +255,7 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 ### Additional Functions
 | Function | Returns | Purpose |
 |---|---|---|
-| ConfigureTerritorySpawn(...) | void | Configure Narrative definition, exact faction, stable IDs, home transform, and optional activity/trigger overrides during deferred spawn |
+| ConfigureTerritorySpawn(...) | void | Advanced Blueprint compatibility API for externally managed deferred spawns; core garrisons use the Narrative subsystem adapter |
 | GetTerritoryPatrolRoute() | Array<PatrolNode> | Copy the assigned spawn point's route |
 | HasTerritoryPatrolRoute() | bool | True when an assigned route has at least two nodes |
 | GetPatrolNodeCount() | int32 | Number of assigned patrol nodes |

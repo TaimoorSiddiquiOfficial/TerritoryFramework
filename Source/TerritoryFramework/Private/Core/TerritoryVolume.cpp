@@ -20,7 +20,6 @@
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Character/CharacterDefinition.h"
-#include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
@@ -1589,29 +1588,28 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	if (!EffectiveDef) return false;
 
 	const TArray<TSoftObjectPtr<UTriggerSet>> DefaultSingleTriggerSets;
-	UClass* NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
-	if (!NPCClass || !NPCClass->IsChildOf(ATerritoryGuardCharacter::StaticClass()))
-	{
-		NPCClass = ATerritoryGuardCharacter::StaticClass();
-	}
+	UClass* NPCClass = nullptr;
 
 	UNPCActivityConfiguration* SingleActivityConfig = nullptr;
 	const TArray<TSoftObjectPtr<UTriggerSet>>* SingleTriggerSetsPtr = &DefaultSingleTriggerSets;
 	ResolveSpawnPointNarrativeOverrides(SpawnPoint, EffectiveDef, NPCClass, SingleActivityConfig, SingleTriggerSetsPtr, DefaultSingleTriggerSets);
+	FText SpawnDefinitionFailure;
+	if (!ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
+		EffectiveDef, GetMaxGuardCount(), SpawnDefinitionFailure))
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Guard definition %s is not physically spawn-ready for %s: %s"),
+			*GetNameSafe(EffectiveDef), *GetTerritoryTag().ToString(),
+			*SpawnDefinitionFailure.ToString());
+		return false;
+	}
+	NPCClass = EffectiveDef->NPCClassPath.LoadSynchronous();
 
 	FTransform SpawnTransform;
 	if (!FindGuardSpawnTransform(SpawnPoint, NPCClass, bRequireConcealment, SpawnTransform))
 	{
 		return false;
 	}
-
-	ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(
-		UGameplayStatics::BeginDeferredActorSpawnFromClass(
-			this, NPCClass, SpawnTransform,
-			ESpawnActorCollisionHandlingMethod::DontSpawnIfColliding,
-			this));
-
-	if (!Guard) return false;
 
 	FGuid GuardSaveGUID = FGuid::NewGuid();
 
@@ -1622,26 +1620,38 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		EffectiveFaction = SpawnPoint->GetEffectiveFactionOverride();
 	}
 
-	// P0-07: Narrative overrides already resolved by unified cascade above
-
-	// Single deterministic entrypoint — fills ALL SpawnInfo fields
-	Guard->ConfigureTerritorySpawn(
-		EffectiveDef,
-		EffectiveFaction,
-		TerritoryGUID,
-		GuardSaveGUID,
-		SpawnTransform,
-		SpawnPoint ? SpawnPoint->GetFName() : NAME_None,
-		SingleActivityConfig,
-		*SingleTriggerSetsPtr);
-
-	// Set territory AI context before FinishSpawningActor
-	Guard->OwningTerritory = this;
-	Guard->OwningTerritorySpawnPoint = SpawnPoint;
-
-	AActor* FinishedGuard = UGameplayStatics::FinishSpawningActor(Guard, SpawnTransform);
-	if (!IsValid(FinishedGuard) || Guard->IsActorBeingDestroyed())
+	UNarrativeCharacterSubsystem* CharacterSubsystem =
+		World->GetSubsystem<UNarrativeCharacterSubsystem>();
+	ATerritoryGuardCharacter* Guard = ATerritoryGuardCharacter::SpawnThroughNarrative(
+		CharacterSubsystem, EffectiveDef, EffectiveFaction, TerritoryGUID,
+		GuardSaveGUID, SpawnTransform, SpawnPoint->GetFName(), SingleActivityConfig,
+		*SingleTriggerSetsPtr, this, SpawnPoint);
+	if (!IsValid(Guard) || Guard->IsActorBeingDestroyed())
 	{
+		return false;
+	}
+	// Narrative's public subsystem uses AdjustIfPossibleButAlwaysSpawn. The authored
+	// slot was already collision-validated above; reject any unexpected adjustment so
+	// staged combat placement remains exact instead of silently drifting.
+	const bool bExactStagedPlacement = Guard->GetActorLocation().Equals(
+		SpawnTransform.GetLocation(), 1.f)
+		&& Guard->GetActorQuat().Equals(SpawnTransform.GetRotation(), 0.001f);
+	const bool bNarrativeControllerReady = Guard->GetNPCController()
+		&& Guard->GetActivityComponent();
+	if (!bExactStagedPlacement || !bNarrativeControllerReady)
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Guard %s failed post-spawn verification for %s (placement=%s expected=%s actual=%s controller=%s activity=%s)"),
+			*GetNameSafe(Guard), *GetTerritoryTag().ToString(),
+			bExactStagedPlacement ? TEXT("ready") : TEXT("adjusted"),
+			*SpawnTransform.ToHumanReadableString(),
+			*Guard->GetActorTransform().ToHumanReadableString(),
+			*GetNameSafe(Guard->GetNPCController()),
+			*GetNameSafe(Guard->GetActivityComponent()));
+		if (CharacterSubsystem)
+		{
+			CharacterSubsystem->DestroyNPC(Guard);
+		}
 		return false;
 	}
 

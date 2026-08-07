@@ -112,6 +112,8 @@ public:
 	FOnCaptureAttempted OnCaptureAttempted;
 
 private:
+	friend class FTFCaptureAtomicContestTransition;
+
 	/** Per-faction capture state — attacker tracking is actor-based, not count-based */
 	struct FPerTerritoryState
 	{
@@ -156,6 +158,9 @@ private:
 	void ReleaseTerritoryAttackers(ATerritoryVolume* Territory);
 	void RemoveAttackerFromAllCaptures(AActor* Attacker);
 	UNarrativeAbilitySystemComponent* ResolveAttackerASC(AActor* Attacker) const;
+	bool CommitCaptureReadModel(ATerritoryVolume* Territory, ETerritoryState NewState,
+		const FGameplayTag& ContestingFaction, float ControlProgress,
+		const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 	UFUNCTION()
 	void OnRegisteredAttackerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
