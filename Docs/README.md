@@ -9,7 +9,7 @@
 ## Current Implementation Limits
 
 - `ATerritoryWorldState` is the persistence/late-join projection. Server subsystem delegates keep its economy, diplomacy, capture, and assault arrays current; RepNotify handlers hydrate client query subsystems.
-- Narrative inventories remain the only currency authority. Loaded player/NPC faction members participate automatically; shared/leader policies may register an explicit live Narrative account. TerritoryFramework never saves a second balance.
+- Narrative inventories remain the only currency authority. Matching online Narrative player characters are the automatic settlement cohort; NPC wallets never participate unless server gameplay registers one as the exact shared/leader account. TerritoryFramework never saves a second balance.
 - Saved contests restore the leading faction/progress for decay, but attacker identities and non-leading faction progress are not persisted.
 - Guard-post reserve counts and finite active counts persist. Individual pawn health/activity and live UObject pointers do not; surviving counts are reconstructed as new Narrative NPCs.
 - Narrative attitudes collapse multiple friendly treaty types to the same attitude when treaty metadata is rebuilt from GameState alone; WorldState/SavableData restore the richer saved metadata directly.

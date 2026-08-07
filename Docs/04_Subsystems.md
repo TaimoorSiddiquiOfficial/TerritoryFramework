@@ -218,7 +218,7 @@ Economy mutations now use a native server backstop in addition to Blueprint auth
 if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
 ```
 
-Loaded Narrative NPC inventories participate with player inventories. Shared-account and faction-leader payout policies route through explicitly registered live Narrative accounts and fall back to deterministic member distribution. Every currency mutation validates exact Narrative faction membership and `int64` intermediates prevent overflow.
+`EqualSplitOnlineMembers` settles only against matching online `ANarrativePlayerCharacter` inventories. Guards, attackers, companions, vendors, and other NPC wallets are excluded from automatic income and upkeep. `SharedNarrativeAccount` and `FactionLeader` route only through their exact registered live Narrative account and fail closed if that actor streams out, changes world/faction, or a different preferred beneficiary is supplied. Every currency mutation validates exact Narrative faction membership and `int64` intermediates prevent overflow.
 
 ---
 

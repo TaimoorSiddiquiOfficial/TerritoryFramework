@@ -44,6 +44,7 @@ private:
 	bool bRemovalReported = false;
 
 	void UpdateParticipation();
+	bool BindNarrativeDeathAfterSpawnReady();
 	bool EnsureNarrativeActivityAndGoal();
 	void UnregisterCapturePressure();
 

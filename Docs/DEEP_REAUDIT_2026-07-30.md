@@ -46,8 +46,8 @@ No second capture, faction, wallet, save, navigation, map, HUD stack, AI control
 
 ### Economy and diplomacy
 
-- Loaded Narrative NPC inventories were excluded from faction payouts/upkeep. Loaded player and NPC members now participate in deterministic order.
-- `FactionLeader` and `SharedNarrativeAccount` lacked real routing. Server-only registration maps now route to explicit live Narrative inventory accounts and fall back to deterministic member distribution; pointers are runtime-only and never saved.
+- Superseded 2026-08-07: the earlier automatic player/NPC member routing was unsafe because guards and attackers became wallets. Automatic settlement now includes only matching online Narrative player characters; NPC-backed accounts require explicit shared/leader registration.
+- `FactionLeader` and `SharedNarrativeAccount` use server-only registration maps. Superseded 2026-08-07: they now fail closed instead of falling back, revalidate world/faction membership at use time, and reject a different preferred-beneficiary override; pointers are runtime-only and never saved.
 - Client/fake faction data could label a debit/credit for the wrong faction. Currency mutations and account registration now require the Narrative team identity to contain the exact faction and require the same world.
 - Currency/rate arithmetic could overflow `int32`. Rate totals and affordability totals use `int64`; credits reject balance overflow and member distribution respects each account's remaining capacity.
 - Direct access to Narrative `FactionAllianceMap` was spread through diplomacy code. It is isolated behind `FTerritoryNarrativeProAdapter` for monthly upgrade review.

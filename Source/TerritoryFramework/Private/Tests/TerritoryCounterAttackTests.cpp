@@ -196,6 +196,16 @@ bool FTFCounterAttackPhysicalSpawnContract::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Narrative readiness diagnostic is side-effect free"),
 			ReadinessFunction->HasAnyFunctionFlags(FUNC_BlueprintPure));
 	}
+	const UFunction* RagdollFunction = ATerritoryAssaultCharacter::StaticClass()->
+		FindFunctionByName(GET_FUNCTION_NAME_CHECKED(
+			ATerritoryAssaultCharacter, HasValidDeathRagdollSetup));
+	TestNotNull(TEXT("Death ragdoll readiness is exposed as a Blueprint/MCP diagnostic"),
+		RagdollFunction);
+	if (RagdollFunction)
+	{
+		TestTrue(TEXT("Death ragdoll diagnostic is side-effect free"),
+			RagdollFunction->HasAnyFunctionFlags(FUNC_BlueprintPure));
+	}
 
 	const ATerritoryGuardCharacter* GuardCDO = GetDefault<ATerritoryGuardCharacter>();
 	TestNotNull(TEXT("Native Territory guard has a CDO"), GuardCDO);

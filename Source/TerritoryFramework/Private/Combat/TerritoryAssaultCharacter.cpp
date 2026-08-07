@@ -6,6 +6,7 @@
 #include "AI/NPCDefinition.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "Character/NarrativeCharacterVisual.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -210,6 +211,13 @@ bool ATerritoryAssaultCharacter::IsNarrativeSpawnReady() const
 	return true;
 }
 
+bool ATerritoryAssaultCharacter::HasValidDeathRagdollSetup() const
+{
+	const USkeletalMeshComponent* MeshComponent = GetMesh();
+	return MeshComponent && MeshComponent->GetSkeletalMeshAsset()
+		&& MeshComponent->GetPhysicsAsset();
+}
+
 void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 {
 	if (GPendingTerritoryAssaultSpawn
@@ -236,6 +244,25 @@ void ATerritoryAssaultCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyNarrativeCollisionOverrides(*this);
+}
+
+void ATerritoryAssaultCharacter::HandleDeath_Implementation(
+	AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledActorASC)
+{
+	// Narrative remains the death/ragdoll authority. The explicit override makes
+	// the assault contract non-optional and gives invalid runtime appearances an
+	// actionable diagnostic instead of silently leaving a standing corpse.
+	Super::HandleDeath_Implementation(KilledActor, KilledActorASC);
+	if (!IsRagdoll(false))
+	{
+		SetRagdoll(true);
+	}
+	if (!HasValidDeathRagdollSetup())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Counterattack participant %s died without a valid Narrative ragdoll mesh/physics asset"),
+			*GetNameSafe(this));
+	}
 }
 
 FGuid ATerritoryAssaultCharacter::GetActorGUID_Implementation() const

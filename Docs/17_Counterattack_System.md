@@ -165,7 +165,7 @@ Every physical attacker belongs to one durable `AssaultID`. The invariant is:
 PlannedForce = AliveForce + PendingReserveForce + KilledForce + WithdrawnForce
 ```
 
-Waves consume `PendingReserveForce`; no death can replenish it. Each participant reports death or withdrawal exactly once. Death immediately unregisters capture pressure and releases the CombatDirector slot. When alive plus pending force reaches zero, the assault resolves `Defeated` and the existing capture subsystem performs its normal progress decay/reset.
+Waves consume `PendingReserveForce`; no death can replenish it. Each participant reports death or withdrawal exactly once. Territory binds casualty accounting only after Narrative has completed its definition/controller/appearance death contract, so Narrative's replicated `HandleDeath` ragdoll presentation runs before the durable assault record can resolve. The participant callback also idempotently requests Narrative ragdoll as an ordering safeguard. Death then immediately unregisters capture pressure and releases the CombatDirector slot. When alive plus pending force reaches zero, the assault resolves `Defeated` and the existing capture subsystem performs its normal progress decay/reset. `HasValidDeathRagdollSetup` is the live Blueprint/MCP diagnostic for the spawned base skeletal mesh and physics asset.
 
 If an activated wave has a valid budget but spawns zero physical NPCs (for example,
 every approach is collision-blocked), the durable `ConsecutiveSpawnFailures` count

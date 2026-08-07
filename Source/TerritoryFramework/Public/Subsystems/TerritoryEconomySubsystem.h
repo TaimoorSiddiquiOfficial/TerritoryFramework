@@ -7,6 +7,7 @@
 #include "TerritoryEconomySubsystem.generated.h"
 
 class ATerritoryVolume;
+class ANarrativePlayerCharacter;
 
 USTRUCT(BlueprintType)
 struct FTerritoryTreasury
@@ -64,6 +65,25 @@ public:
 		ETerritoryIncomePayoutPolicy Policy, const FString& Reason = TEXT(""),
 		ETerritoryTransactionType Type = ETerritoryTransactionType::Income,
 		AActor* PreferredBeneficiary = nullptr);
+
+	/**
+	 * Return the online Narrative player characters that automatically receive
+	 * territory income and pay upkeep for the faction. Guards and other NPCs are
+	 * never included; NPC-backed faction accounts must be registered explicitly.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
+	TArray<ANarrativePlayerCharacter*> GetOnlineFactionPlayers(
+		const FGameplayTag& Faction) const;
+
+	/** Native regression predicate shared by routing and behavioural tests. */
+	static bool IsAutomaticPlayerCurrencyAccount(const AActor* AccountActor);
+
+	/**
+	 * Explicit-account policies accept no beneficiary override unless it is the
+	 * exact currently registered account. Kept pure for native regression tests.
+	 */
+	static bool IsExplicitAccountSelectionValid(const AActor* RegisteredAccount,
+		const AActor* PreferredBeneficiary);
 
 	/**
 	 * Register a live Narrative inventory account for a policy that requires one
@@ -172,8 +192,9 @@ public:
 	UFUNCTION()
 	void OnTerritoryUnregistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 
-	/** Get all loaded faction member characters with valid Narrative inventory accounts. */
-	TArray<class ANarrativeCharacter*> GetFactionMembers(const FGameplayTag& Faction) const;
+	/** Resolve the exact accounts used for one periodic settlement policy. */
+	TArray<AActor*> ResolvePeriodicSettlementAccounts(const FGameplayTag& Faction,
+		ETerritoryIncomePayoutPolicy Policy) const;
 	class UNarrativeInventoryComponent* ResolveCurrencyAccount(const AActor* RequestingActor) const;
 	bool DoesAccountBelongToFaction(const AActor* AccountActor, const FGameplayTag& Faction) const;
 	AActor* ResolveRegisteredCurrencyAccount(const FGameplayTag& Faction,
@@ -181,6 +202,7 @@ public:
 	void RecordCurrencyTransaction(const FGameplayTag& Faction, int32 Amount,
 		int32 BalanceAfter, const FString& Reason, ETerritoryTransactionType Type,
 		const AActor* AccountActor);
-	bool TryDebitFactionMembers(const FGameplayTag& Faction, int32 PositiveAmount,
-		const FString& Reason, ETerritoryTransactionType Type);
+	bool TryDebitSettlementAccounts(const FGameplayTag& Faction, int32 PositiveAmount,
+		ETerritoryIncomePayoutPolicy Policy, const FString& Reason,
+		ETerritoryTransactionType Type);
 };

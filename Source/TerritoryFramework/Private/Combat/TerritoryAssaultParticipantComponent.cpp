@@ -37,16 +37,6 @@ void UTerritoryAssaultParticipantComponent::BeginPlay()
 	AActor* Owner = GetOwner();
 	if (!Owner || !Owner->HasAuthority()) return;
 
-	if (IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Owner))
-	{
-		if (UNarrativeAbilitySystemComponent* ASC = Cast<UNarrativeAbilitySystemComponent>(
-			AbilityOwner->GetAbilitySystemComponent()))
-		{
-			BoundASC = ASC;
-			ASC->OnDied.AddUniqueDynamic(this, &UTerritoryAssaultParticipantComponent::HandleOwnerDied);
-		}
-	}
-
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(ParticipationTimer, this,
@@ -84,7 +74,6 @@ void UTerritoryAssaultParticipantComponent::GetLifetimeReplicatedProps(
 
 bool UTerritoryAssaultParticipantComponent::EnsureNarrativeActivityAndGoal()
 {
-	if (AssaultGoal) return true;
 	ATerritoryAssaultCharacter* NPC = Cast<ATerritoryAssaultCharacter>(GetOwner());
 	// Narrative applies the definition and appearance asynchronously. Do not start
 	// goal selection while that authoritative initialization is incomplete. Equipment
@@ -94,6 +83,14 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeActivityAndGoal()
 	{
 		return false;
 	}
+	// Narrative binds the character/controller death handlers while applying the
+	// definition. Bind Territory casualty accounting only after that contract is
+	// ready so ragdoll/death presentation runs before assault resolution.
+	if (!BindNarrativeDeathAfterSpawnReady())
+	{
+		return false;
+	}
+	if (AssaultGoal) return true;
 	UNPCActivityComponent* ActivityComponent = NPC ? NPC->GetActivityComponent() : nullptr;
 	ANarrativeNPCController* Controller = NPC ? NPC->GetNPCController() : nullptr;
 	if (!ActivityComponent || !Controller)
@@ -128,6 +125,34 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeActivityAndGoal()
 	NewGoal->bRemoveOnSucceeded = false;
 	AssaultGoal = Cast<UTerritoryAssaultGoal>(ActivityComponent->AddGoal(NewGoal, true));
 	return AssaultGoal != nullptr;
+}
+
+bool UTerritoryAssaultParticipantComponent::BindNarrativeDeathAfterSpawnReady()
+{
+	IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(GetOwner());
+	UNarrativeAbilitySystemComponent* ASC = AbilityOwner
+		? Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent())
+		: nullptr;
+	if (!ASC) return false;
+
+	if (BoundASC.Get() != ASC)
+	{
+		if (UNarrativeAbilitySystemComponent* Previous = BoundASC.Get())
+		{
+			Previous->OnDied.RemoveDynamic(
+				this, &UTerritoryAssaultParticipantComponent::HandleOwnerDied);
+		}
+		BoundASC = ASC;
+		ASC->OnDied.AddUniqueDynamic(
+			this, &UTerritoryAssaultParticipantComponent::HandleOwnerDied);
+	}
+
+	if (ASC->IsDead())
+	{
+		HandleOwnerDied(GetOwner(), ASC);
+		return false;
+	}
+	return true;
 }
 
 void UTerritoryAssaultParticipantComponent::UpdateParticipation()
@@ -257,5 +282,16 @@ void UTerritoryAssaultParticipantComponent::HandleOwnerDied(
 {
 	(void)KilledActor;
 	(void)KilledASC;
+	// Preserve Narrative's physical death presentation even if a project or test
+	// changes delegate registration order. This call is idempotent and still uses
+	// Narrative's replicated ragdoll authority.
+	if (ATerritoryAssaultCharacter* NPC =
+		Cast<ATerritoryAssaultCharacter>(GetOwner()))
+	{
+		if (!NPC->IsRagdoll(false))
+		{
+			NPC->SetRagdoll(true);
+		}
+	}
 	Retire(true);
 }

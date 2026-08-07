@@ -2,6 +2,30 @@
 
 ## Unreleased — 2026-07-30 (TerritoryFramework lifecycle and integration re-audit)
 
+### Counterattack death and economy account routing — 2026-08-07
+
+- Deferred Territory casualty-delegate binding until the Narrative NPC definition,
+  controller, activity, appearance, and native death handlers are ready. Narrative's
+  replicated ragdoll now precedes finite-force retirement, with an idempotent participant
+  safeguard and `HasValidDeathRagdollSetup` live diagnostic.
+- Corrected `EqualSplitOnlineMembers` to mean online Narrative player characters only.
+  Same-faction guards, counterattackers, companions, vendors, and other NPC inventories
+  can no longer receive automatic Territory income or subsidize guard upkeep.
+- Periodic income and upkeep now resolve against the same policy-specific account cohort.
+  Shared/leader policies require their explicit registered Narrative account and fail
+  closed instead of silently falling back to an arbitrary loaded faction actor.
+- Added a behavioural regression proving player accounts remain eligible while Territory
+  guard and counterattack NPC wallets are excluded, and updated the economy policy docs
+  to the actual `SharedNarrativeAccount` symbol.
+- Closed two explicit-account bypasses: a `PreferredBeneficiary` can no longer replace the
+  registered Shared/Leader actor, and streamed or faction-changed registrations are
+  revalidated before every settlement.
+- Clean Build21 completed with UHT, Runtime, Editor, and linking under warnings-as-errors;
+  all 87 TerritoryFramework automation tests passed. Live PIE verified six naturally killed
+  Bandits ragdolled with mesh physics, left capture pressure, and resolved the finite assault;
+  periodic `+600` income and `-150` upkeep both used the player account while all guard and
+  attacker balances remained zero.
+
 ### District garrison command center — 2026-08-06
 
 - Physical counterattack creation now goes through Narrative Pro's
@@ -84,7 +108,9 @@
 - Guard defeat no longer directly unclaims a territory. Fresh and saved garrison restoration are distinguished, referenced streamed spawn points are loaded during restore, and manual multi-guard removal selects the full mutation set before committing.
 - Added explicit transition context APIs for lock/unlock and removed implicit first-player-controller selection from gameplay transitions.
 - Added server-owned per-player management components and targeted assault notification RPCs; clients no longer construct an unauthorized local management bridge.
-- Economy now validates world/faction ownership of Narrative accounts, supports explicit shared/leader account registration, includes loaded Narrative NPC members, uses `int64` intermediates, and refuses currency overflow.
+- Economy validates world/faction ownership of Narrative accounts, settles automatically
+  against online Narrative players only, supports fail-closed explicit shared/leader account
+  registration, uses `int64` intermediates, and refuses currency overflow.
 - Centralized Narrative attitude access in `UTerritoryNarrativeProAdapter`; external Friendly attitudes import as Alliance without the previous Friendly→Neutral round-trip loss.
 - WorldState now hydrates replicated economy, diplomacy, capture, and assault read models and retains only the configured number of terminal assault records.
 - Editor validation now covers stable GUIDs, hierarchy cycles, streamed World Partition actors, guard Narrative definitions/configuration, and counterattack profiles/approaches.

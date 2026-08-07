@@ -1199,7 +1199,7 @@ Response struct from `ApplyTerritoryMutation`.
 
 | Field | Type | Notes |
 |---|---|---|
-| Treasury | int32 | Current aggregate faction wealth (sum of online members' Currency) |
+| Treasury | int32 | Deprecated compatibility field; always `0` because Narrative inventories own every balance |
 | TotalIncome | int32 | Per-tick income |
 | TotalCosts | int32 | Per-tick costs |
 | TerritoryCount | int32 | Owned territories |

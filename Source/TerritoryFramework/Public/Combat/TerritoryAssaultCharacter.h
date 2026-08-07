@@ -55,6 +55,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Assault")
 	bool IsNarrativeSpawnReady() const;
 
+	/** Live diagnostic: the Narrative base mesh has a skeletal mesh and physics asset. */
+	UFUNCTION(BlueprintPure, Category="Territory|Assault")
+	bool HasValidDeathRagdollSetup() const;
+
 	virtual FGuid GetActorGUID_Implementation() const override;
 	virtual void SetActorGUID_Implementation(const FGuid& NewGUID) override;
 	virtual void SetNPCDefinition(UNPCDefinition* Definition) override;
@@ -64,5 +68,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void HandleDeath_Implementation(AActor* KilledActor,
+		UNarrativeAbilitySystemComponent* KilledActorASC) override;
 	virtual bool ShouldRespawn_Implementation() const override;
 };

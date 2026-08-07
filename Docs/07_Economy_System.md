@@ -9,7 +9,7 @@ The subsystem tracks per faction:
 - **CostsPerTick**: guard upkeep from owned territories
 - **TerritoryCount**: number of owned territories
 
-Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. The configured `IncomePayoutPolicy` determines the recipients. Faction-member discovery includes loaded Narrative player and NPC characters, sorts them deterministically, and mutates only Narrative inventory accounts whose Narrative faction matches the requested faction.
+Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. The configured `IncomePayoutPolicy` determines the settlement accounts. `EqualSplitOnlineMembers` discovers only online `ANarrativePlayerCharacter` accounts with exact Narrative faction membership and sorts them deterministically. Guards, counterattackers, vendors, companions, and other NPC inventories are never automatic income recipients or upkeep payers. An NPC-backed faction account is eligible only when server gameplay explicitly registers it as `SharedNarrativeAccount` or `FactionLeader`.
 
 ## Wealth API
 
@@ -25,10 +25,12 @@ Economy->CreditCurrencyToFaction(Faction, 1000,
     ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers,
     TEXT("Territory reward"), ETerritoryTransactionType::Reward);
 
-// SharedAccount and FactionLeader policies require an explicit live account.
+// SharedNarrativeAccount and FactionLeader require an explicit live account.
 Economy->RegisterFactionCurrencyAccount(Faction,
-    ETerritoryIncomePayoutPolicy::SharedAccount, FactionAccountActor);
+    ETerritoryIncomePayoutPolicy::SharedNarrativeAccount, FactionAccountActor);
 ```
+
+`GetOnlineFactionPlayers(Faction)` exposes the automatic player settlement cohort for diagnostics and UI. Explicit-account policies fail closed when their registered account is unavailable, changes world/faction, or a supplied preferred beneficiary is not that exact registered actor; they do not silently redirect a faction payout into arbitrary member or guard inventories. `PreferredBeneficiary` is an override only for `CapturingPlayer` routing.
 
 ### Spending Currency
 
@@ -163,10 +165,14 @@ Every EconomyTickIntervalSeconds (server only):
      Clear DirtyFactions
 
    2. For each faction with tracked rates:
-      a. Apply IncomePayoutPolicy to distribute IncomePerTick
-      b. Debit affordable upkeep from loaded faction-member Narrative inventories
-      c. Record the actual (possibly partial) upkeep and resulting balance
-      d. Broadcast OnEconomyTickFired(Faction, Snapshot)
+      a. Resolve one policy-specific settlement cohort
+      b. Apply IncomePayoutPolicy to distribute IncomePerTick
+      c. Debit affordable upkeep from the same settlement cohort
+         - EqualSplitOnlineMembers: matching online player characters only
+         - SharedNarrativeAccount/FactionLeader: the exact registered account only
+         - Guards and other NPCs: never automatic accounts
+      d. Record the actual (possibly partial) upkeep and resulting balance
+      e. Broadcast OnEconomyTickFired(Faction, Snapshot)
 
   3. Trim TransactionLedger to MaxTransactionHistory (once, not per-faction)
 ```
@@ -187,4 +193,12 @@ Economy state is saved through:
 
 On load, `SetFactionTreasury` restores only `IncomePerTick`, `CostsPerTick`, and `TerritoryCount`. Currency belongs to Narrative inventory accounts and is not restored by TerritoryFramework. Explicit shared/leader registrations are live references only and must be registered again after their account actors stream or respawn.
 
-Credits reject overflow rather than wrapping. Equal distribution pays only what loaded Narrative accounts can store and logs any remainder; no transaction is recorded for currency that was not actually delivered.
+Credits reject overflow rather than wrapping. Equal distribution pays only what online Narrative player accounts can store and logs any remainder; no transaction is recorded for currency that was not actually delivered. Runtime account registrations are deliberately not saved as UObject pointers and must be restored by the owning game system after load/streaming.
+
+## Closed Account-Routing Loopholes
+
+- Spawning extra same-faction guards cannot dilute or steal a player's territory income.
+- A wealthy guard or counterattacker cannot subsidize upkeep or conceal a player deficit.
+- A missing explicit shared/leader account cannot fall back to whichever faction NPC loaded first.
+- Income and upkeep resolve against the same periodic policy cohort, avoiding a recipient/payer mismatch.
+- Multiple online players split deterministically; one player cannot be paid twice through both pawn enumeration and NPC enumeration.

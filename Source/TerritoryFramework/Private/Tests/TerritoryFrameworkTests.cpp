@@ -10,6 +10,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Combat/TerritoryAssaultCharacter.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "Core/TerritoryWorldState.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
@@ -35,6 +36,7 @@
 #include "Navigation/MapMarker.h"
 #include "Navigation/NavigationMarkerComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "UnrealFramework/NarrativePlayerCharacter.h"
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -2064,6 +2066,38 @@ bool FTFFunctional_EconomyEdgeCases::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Default TotalCosts is 0"), Snap.TotalCosts, 0);
 	TestEqual(TEXT("Default TerritoryCount is 0"), Snap.TerritoryCount, 0);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFEconomyAutomaticAccountsExcludeNPCs,
+	"TerritoryFramework.Economy.Regression.AutomaticSettlementExcludesNPCWallets",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFEconomyAutomaticAccountsExcludeNPCs::RunTest(const FString& Parameters)
+{
+	const ANarrativePlayerCharacter* Player = GetDefault<ANarrativePlayerCharacter>();
+	const ATerritoryGuardCharacter* Guard = GetDefault<ATerritoryGuardCharacter>();
+	const ATerritoryAssaultCharacter* Assault = GetDefault<ATerritoryAssaultCharacter>();
+
+	TestNotNull(TEXT("Narrative player account fixture exists"), Player);
+	TestNotNull(TEXT("Territory guard account fixture exists"), Guard);
+	TestNotNull(TEXT("Territory assault account fixture exists"), Assault);
+	TestTrue(TEXT("A Narrative player inventory is eligible for automatic settlement"),
+		UTerritoryEconomySubsystem::IsAutomaticPlayerCurrencyAccount(Player));
+	TestFalse(TEXT("A Territory guard inventory can never receive automatic income"),
+		UTerritoryEconomySubsystem::IsAutomaticPlayerCurrencyAccount(Guard));
+	TestFalse(TEXT("A counterattack NPC inventory can never receive automatic income"),
+		UTerritoryEconomySubsystem::IsAutomaticPlayerCurrencyAccount(Assault));
+	TestFalse(TEXT("A null actor can never become an automatic wallet"),
+		UTerritoryEconomySubsystem::IsAutomaticPlayerCurrencyAccount(nullptr));
+	TestFalse(TEXT("A preferred actor cannot replace a missing explicit account"),
+		UTerritoryEconomySubsystem::IsExplicitAccountSelectionValid(nullptr, Guard));
+	TestFalse(TEXT("A guard cannot override a different registered player account"),
+		UTerritoryEconomySubsystem::IsExplicitAccountSelectionValid(Player, Guard));
+	TestTrue(TEXT("An omitted preference uses the exact registered account"),
+		UTerritoryEconomySubsystem::IsExplicitAccountSelectionValid(Player, nullptr));
+	TestTrue(TEXT("The exact registered account may be repeated explicitly"),
+		UTerritoryEconomySubsystem::IsExplicitAccountSelectionValid(Player, Player));
 	return true;
 }
 
