@@ -286,7 +286,7 @@ Extends `ATerritoryVolume`. An upgradeable property within a district.
 
 | Function | Returns | Description |
 |---|---|---|
-| TryUpgrade | bool | Debits treasury, increments level |
+| TryUpgrade | bool | Debits requester's Narrative inventory, increments level |
 | SetUpgradeLevel | void | Force-set level |
 
 ### BlueprintImplementableEvent
@@ -571,7 +571,9 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 |---|---|---|
 | CreditCurrency | Beneficiary, Amount, Faction, Reason, Type | bool |
 | TryDebitCurrency | Requester, Amount, Faction, Reason, Type | bool |
-| CreditCurrencyToFaction | Faction, Amount, Policy, Reason, Type | int32 paid |
+| CreditCurrencyToFaction | Faction, Amount, Policy, Reason, Type, PreferredBeneficiary (optional) | int32 paid |
+| RegisterFactionCurrencyAccount | Faction, Policy, AccountActor | void |
+| UnregisterFactionCurrencyAccount | Faction, Policy | void |
 | SetFactionTreasury | Faction, Treasury | void |
 | RecalculateIncome | Faction | void |
 
@@ -583,8 +585,9 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | GetIncome(Faction) | int32 |
 | GetCosts(Faction) | int32 |
 | CanActorAfford(Requester, Cost) | bool |
+| GetOnlineFactionPlayers(Faction) | TArray\<ANarrativeCharacter*\> |
 | GetFactionEconomy(Faction) | FTerritoryTreasury |
-| GetAllFactionsWithTreasury | TArray<FGameplayTag> |
+| GetAllFactionsWithTreasury | TArray\<FGameplayTag\> |
 
 ### Other
 

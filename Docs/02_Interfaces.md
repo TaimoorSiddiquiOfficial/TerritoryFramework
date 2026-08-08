@@ -129,6 +129,8 @@ bool AMyGuardTower::IsTerritoryContested_Implementation() const
 
 **Purpose:** Any system that needs to query or expose faction economy state.
 
+> **Note:** This interface is an extension point for **project actors** (shops, vehicles, custom economies). `UTerritoryEconomySubsystem` provides identical methods but does not implement this interface — use the subsystem directly for framework queries.
+
 ### Contract
 
 ```cpp
@@ -336,7 +338,7 @@ void AMyActor::BeginPlay()
 
     if (UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
     {
-        Control->OnTerritoryOwnershipChanged.AddDynamic(this, &AMyActor::HandleTerritoryChange);
+        Control->OnTerritoryControlChanged.AddDynamic(this, &AMyActor::HandleTerritoryChange);
     }
 }
 
@@ -353,7 +355,7 @@ void AMyActor::BeginPlay()
 ### Blueprint Method
 
 1. Get the `TerritoryControl` subsystem (via `GetTerritoryControl` from BlueprintLibrary)
-2. Bind event to `OnTerritoryOwnershipChanged` delegate
+2. Bind event to `OnTerritoryControlChanged` delegate (subsystem-level)
 3. Or get a specific territory actor and bind to its `OnTerritoryOwnershipChanged`
 
 ---

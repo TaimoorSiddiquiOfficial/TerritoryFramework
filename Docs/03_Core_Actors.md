@@ -27,6 +27,14 @@ ATerritoryVolume (base — placed in level for any territory)
 | InitialGuardCost | int32 | 50 | Recurring upkeep per assigned guard per economy cycle |
 | InitialGuardRecruitmentCost | int32 | 50 | One-time Narrative inventory price per target increase |
 | PostCaptureGarrisonPolicy | enum | PlayerChooses | Resolves the new owner's initial desired garrison |
+| ControlMode | ETerritoryControlMode | Independent | How ownership is resolved: Independent (direct capture), AggregateOnly (derived from children), Cascading (direct + child cascade) |
+| StateConfigs | TMap\<ETerritoryState, FTerritoryStateConfig\> | — | Per-state Narrative entry conditions and entry/exit events |
+| CounterAttackProfile | UTerritoryCounterAttackProfile* | — | Counterattack data asset (see [Counterattack System](17_Counterattack_System.md)) |
+| CounterAttackApproaches | TArray\<FTerritoryAssaultApproach\> | — | Typed attack approaches for this territory |
+| GuardQuality | float | 0 | Guard quality rating for counterattack evaluation |
+| FortificationStrength | float | 0 | Fortification rating |
+| NearbyAlliedSupport | float | 0 | Nearby allied support rating |
+| StrategicValue | float | 0 | District strategic value for attack prioritization |
 | bStartsLocked | bool | false | If true, territory can't be captured until unlocked |
 | ParentTerritoryTag | GameplayTag | — | Parent territory for hierarchy |
 | GuardNPCDefinition | NPCDefinition* | — | NPC template for guards |

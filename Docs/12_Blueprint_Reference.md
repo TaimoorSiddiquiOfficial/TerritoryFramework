@@ -150,13 +150,27 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | HasReserveAvailable() | bool |
 | GetActiveGuardCount() | int32 |
 | GetReserveCount() | int32 |
+| HasPendingReserveSpawn() | bool |
+| GetPendingReserveCount() | int32 |
 | GetSpawnTransform() | Transform |
+| ResolveGuardDeploymentTransform(GuardClass) | Transform (out) |
 | GetPatrolRoute() | Array<TerritoryPatrolNode> |
 | HasPatrolRoute() | bool (requires at least two nodes) |
 | GetLoopPatrol() | bool |
 | GetPatrolRouteAsTransforms() | Array<Transform> |
 | GetPatrolWaitTimes() | Array<float> |
 | GetOwningTerritory() | TerritoryVolume* |
+| **Effective Config** (resolves inline vs GuardPostDefinition precedence) | |
+| GetEffectiveMaxGuards() | int32 |
+| GetEffectiveReserveSlots() | int32 |
+| GetEffectiveReserveSpawnDelay() | float |
+| GetEffectiveReserveRetryInterval() | float |
+| GetEffectiveReserveRadius() | float |
+| GetEffectiveMinimumPlayerDistance() | float |
+| GetEffectiveCandidateCount() | int32 |
+| GetEffectiveFactionOverride() | GameplayTag |
+| GetEffectivePatrolRoute() | Array<TerritoryPatrolNode> |
+| GetEffectiveLoopPatrol() | bool |
 
 ### BlueprintCallable Functions
 

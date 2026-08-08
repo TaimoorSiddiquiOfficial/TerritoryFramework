@@ -24,7 +24,7 @@
 |---|---|---|---|
 | `OnOwnershipChanged` | `ATerritoryVolume` | **No** | Nothing — invariants run before this event |
 | `OnStateChanged` | `ATerritoryVolume` | **No** | Nothing — invariants run before this event |
-| `OnAllGuardsDefeated` | `ATerritoryVolume` | **YES — CRITICAL** | Territory stays Claimed with dead guards; capture stuck |
+| `OnAllGuardsDefeated` | `ATerritoryVolume` | **Recommended** | Super only calls ForceNetUpdate; DefenderCount is already 0 by the time this fires. Skipping Super does NOT cause capture to be stuck. |
 | `OnTerritoryInitialized` | `ATerritoryVolume` | **No** | Nothing — extension hook only |
 | `OnPropertyCaptured` | `ATerritoryProperty` | **YES — HIGH** | Upgrade level retained by new owner; income not recalculated |
 | `OnCityFullyCaptured` | `ATerritoryCity` | **YES — HIGH** | Income not recalculated; capital bonus (1000g) lost |
@@ -509,3 +509,19 @@ ATerritoryGuardSpawnPoint placed in level:
   → When a guard dies, a reserve guard spawns (up to ReserveSlots times)
   → Patrol route data available via GetPatrolRouteAsTransforms() for Narrative activities
 ```
+
+---
+
+## Known Limitations
+
+### Guard Death Detection (Single-Bind, No Retry)
+
+Guard death is detected via a single ASC `OnDied` bind during `RegisterDefender`. If Narrative has not initialized the ASC at that instant, the bind silently no-ops — no retry. In practice, Narrative creates the ASC early enough that this is latent. If a custom guard subclass delays ASC initialization, death events may not fire.
+
+### Guard EndPlay Cleanup
+
+`ATerritoryGuardCharacter` has no `EndPlay` override. Guards destroyed by paths other than ASC-death (World Partition stream-out, `DespawnGuards`, editor close) do not self-notify their spawn point. The spawn point's `ActiveGuards` array retains stale weak pointers until cleaned by the next ownership transition or save recompute. This is transient drift only — save/load recomputes from `SavedActiveGuardCount`.
+
+### SetControlProgress BP Node
+
+`SetControlProgress` is `BlueprintCallable` but now routes through `CommitOwnershipData` internally. This means calling it will fire the full ownership-changed event bundle. It should not be called in tight loops — use the capture subsystem's `AddCaptureProgress` for incremental updates.
