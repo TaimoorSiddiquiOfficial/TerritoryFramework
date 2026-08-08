@@ -900,7 +900,9 @@ bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory
 	// Re-check attack budget right before insertion — ValidateAndBeginCapture may
 	// have triggered reentrant delegate broadcasts that registered other attackers,
 	// consuming the available budget (TOCTOU prevention).
-	if (ActorSet.Num() >= Territory->GetMaxConcurrentAttackers())
+	// Use GetActiveAttackers for consistency with HasAttackBudget — dead-ASC
+	// actors in the set should not consume budget.
+	if (GetActiveAttackers(Territory, Faction) >= Territory->GetMaxConcurrentAttackers())
 	{
 		return false;
 	}
@@ -923,7 +925,8 @@ bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory
 	}
 
 	// Seed progress if not already present
-	if (!State.CaptureProgressByFaction.Contains(Faction))
+	const bool bSeededProgress = !State.CaptureProgressByFaction.Contains(Faction);
+	if (bSeededProgress)
 	{
 		State.CaptureProgressByFaction.Add(Faction, 0.f);
 	}
@@ -941,7 +944,13 @@ bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory
 	{
 		ActorSet.Remove(Attacker);
 		ReleaseAttackerRegistration(Attacker);
-		State.CaptureProgressByFaction.Remove(Faction);
+		// Only remove the progress entry if we seeded it — pre-existing progress
+		// (from AddCaptureProgress or a prior attacker) must survive a failed
+		// registration so the capture can continue with remaining attackers.
+		if (bSeededProgress)
+		{
+			State.CaptureProgressByFaction.Remove(Faction);
+		}
 		return false;
 	}
 	return ActorSet.Contains(Attacker);
