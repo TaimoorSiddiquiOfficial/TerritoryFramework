@@ -930,7 +930,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 
 void ATerritoryVolume::SetControlProgress(float Progress)
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || bTransitionInProgress) return;
 	const float ClampedProgress = FMath::Clamp(Progress, 0.f, 1.f);
 	// P0-03: No-op detection — skip write if value unchanged (avoids unnecessary replication)
 	if (FMath::IsNearlyEqual(OwnershipData.ControlProgress, ClampedProgress)) return;
