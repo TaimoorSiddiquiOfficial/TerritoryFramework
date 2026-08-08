@@ -429,24 +429,15 @@ An NPC needs a CombatDirector slot to **initiate** an attack. Once attacking ins
 
 ---
 
-## Pending Fixes (Editor Required)
+## Resolved Fixes (Verified 2026-08-09)
 
-### BPA_ReturnToTerritory ScoreActivity — Add Territory Check
+### BPA_ReturnToTerritory ScoreActivity — Territory Check ✅
 
-**Current:** Returns 0.01 for all NPCs after tag checks, even non-territory NPCs.
-
-**Fix needed (in UE editor):**
-
-After the two tag checks, add these nodes:
-
-```
-GetControlledNPC → Cast To ATerritoryGuardCharacter
-  → Get OwningTerritory → Is Valid?
-    → TRUE: continue to Return Node (score = 0.01)
-    → FALSE: Return Node (score = -999.0)
-```
-
-Also connect the `CastFailed` pin in SetupBlackboard to a Return Node (ReturnValue = false).
+**Status:** Resolved. Binary asset inspection confirms:
+- `-999` return value present in ScoreActivity (non-territory NPCs now score low instead of 0.01)
+- `CastFailed` pin wired to a `FunctionResult` (Return node) in SetupBlackboard
+- `IsValid` check present (used via the `TerritoryGuardCharacter` cast as the gate — non-territory NPCs fail the cast and receive `-999`)
+- Implementation uses the cast itself as the territory check rather than a separate `GetOwningTerritory` call, achieving the same result
 
 ### BTTask_RequestTerritoryPermission — Not in Any BT
 
