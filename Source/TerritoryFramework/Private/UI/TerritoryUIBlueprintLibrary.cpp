@@ -571,6 +571,62 @@ bool UTerritoryUIBlueprintLibrary::DoesDistrictMatchFilter(
 	}
 }
 
+bool UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(
+	const FTerritoryDistrictOperationsView& View, const FString& SearchText)
+{
+	FString Query = SearchText;
+	Query.TrimStartAndEndInline();
+	if (Query.IsEmpty())
+	{
+		return true;
+	}
+
+	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
+	const FString StateName = StateEnum
+		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(View.TerritoryState)).ToString()
+		: FString();
+	TArray<FString> SearchFields = {
+		View.DisplayName.ToString(),
+		View.DistrictTag.ToString(),
+		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.OwnerFaction).ToString(),
+		View.OwnerFaction.ToString(),
+		StateName,
+		View.AvailabilityReason.ToString(),
+		View.ManagementFailureReason.ToString(),
+		View.LockReason.ToString(),
+		View.ThreatSummary.ToString(),
+		View.ThreatEvaluationReason.ToString(),
+		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.AttackingFaction).ToString(),
+		View.AttackingFaction.ToString(),
+		View.ThreatTargetTerritory.ToString()
+	};
+	for (const FTerritoryGarrisonOperationsView& Garrison : View.GarrisonTargets)
+	{
+		SearchFields.Add(Garrison.DisplayName.ToString());
+		SearchFields.Add(Garrison.TerritoryTag.ToString());
+	}
+
+	TArray<FString> Tokens;
+	Query.ParseIntoArrayWS(Tokens);
+	for (const FString& Token : Tokens)
+	{
+		bool bTokenMatched = false;
+		for (const FString& Field : SearchFields)
+		{
+			if (Field.Contains(Token, ESearchCase::IgnoreCase))
+			{
+				bTokenMatched = true;
+				break;
+			}
+		}
+		if (!bTokenMatched)
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
 bool UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(
 	const FTerritoryDistrictOperationsView& View)
 {

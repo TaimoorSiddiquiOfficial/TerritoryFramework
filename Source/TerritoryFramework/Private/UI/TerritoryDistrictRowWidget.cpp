@@ -1,7 +1,10 @@
 #include "UI/TerritoryDistrictRowWidget.h"
 
+#include "Components/Border.h"
 #include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/Overlay.h"
+#include "Components/SizeBox.h"
 #include "Components/VerticalBox.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
@@ -23,11 +26,15 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 	{
 		AddGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleAddGuard);
 		AddGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "AddGuard", "+ GUARD"));
+		AddGuardButton->SetVisibility(bShowInlineGuardActions
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (RemoveGuardButton)
 	{
 		RemoveGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleRemoveGuard);
 		RemoveGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "RemoveGuard", "- GUARD"));
+		RemoveGuardButton->SetVisibility(bShowInlineGuardActions
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	RefreshRow();
 }
@@ -47,8 +54,18 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 		return;
 	}
 
-	UHorizontalBox* Root = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("DistrictRowRoot"));
-	WidgetTree->RootWidget = Root;
+	USizeBox* RootSize = WidgetTree->ConstructWidget<USizeBox>(
+		USizeBox::StaticClass(), TEXT("DistrictRowSize"));
+	RootSize->SetMinDesiredHeight(86.f);
+	WidgetTree->RootWidget = RootSize;
+	UBorder* Surface = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("DistrictRowSurface"));
+	Surface->SetPadding(FMargin(10.f, 7.f));
+	Surface->SetBrushColor(FLinearColor(0.035f, 0.075f, 0.12f, 0.96f));
+	RootSize->SetContent(Surface);
+	UHorizontalBox* Root = WidgetTree->ConstructWidget<UHorizontalBox>(
+		UHorizontalBox::StaticClass(), TEXT("DistrictRowRoot"));
+	Surface->SetContent(Root);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const TSubclassOf<UNarrativeCommonButtonBase> NarrativeButtonClass = Settings
@@ -74,7 +91,11 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 		SelectOverlay->AddChild(SelectDistrictButton);
 	}
 	SelectOverlay->AddChild(Details);
-	Root->AddChild(SelectOverlay);
+	if (UHorizontalBoxSlot* SelectSlot = Root->AddChildToHorizontalBox(SelectOverlay))
+	{
+		SelectSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		SelectSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+	}
 
 	if (NarrativeButtonClass)
 	{
@@ -101,13 +122,30 @@ void UTerritoryDistrictRowWidget::InitializeOperationsView(
 	District = InView.District;
 	bCanAddGuard = InView.bCanAddGuard;
 	bCanRemoveGuard = InView.bCanRemoveGuard;
-	ActionStatus = InView.bUnderAttack || InView.bAttackScheduled || InView.bThreatPreviewAvailable
-		? InView.ThreatSummary
-		: (!InView.bCanAddGuard && !InView.bCanRemoveGuard
-			? (!InView.AddGuardFailureReason.IsEmpty()
-				? InView.AddGuardFailureReason
-				: InView.RemoveGuardFailureReason)
-			: FText::GetEmpty());
+	if (InView.bUnderAttack || InView.bAttackScheduled || InView.bThreatPreviewAvailable)
+	{
+		ActionStatus = InView.ThreatSummary;
+	}
+	else if (!InView.bUnlocked)
+	{
+		ActionStatus = InView.LockReason.IsEmpty()
+			? NSLOCTEXT("TerritoryDistrictRow", "LockedStatus", "LOCKED — select to inspect requirements")
+			: InView.LockReason;
+	}
+	else if (InView.bAvailableForCapture)
+	{
+		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "AvailableStatus", "AVAILABLE FOR CAPTURE");
+	}
+	else if (InView.bOwnedByViewer)
+	{
+		ActionStatus = InView.bManageable
+			? NSLOCTEXT("TerritoryDistrictRow", "ManageableStatus", "COMMAND AVAILABLE")
+			: InView.ManagementFailureReason;
+	}
+	else
+	{
+		ActionStatus = InView.AvailabilityReason;
+	}
 	RefreshRow();
 }
 
@@ -162,7 +200,7 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			: CurrentDistrict->GetEffectiveIncome()
 				- (static_cast<int64>(CurrentDistrict->GetGuardCost()) * CurrentDistrict->GetDesiredGuardCount());
 		DistrictSummary->SetText(FText::Format(
-			NSLOCTEXT("TerritoryDistrictRow", "Summary", "{0}  |  {1}  |  Properties {2}/{3}  |  Guards {4}/{5}/{6}  |  Net {7}  |  {8}"),
+			NSLOCTEXT("TerritoryDistrictRow", "Summary", "{0}  |  {1}\nProperties {2}/{3}  |  Guards {4}/{5}/{6}  |  Net {7}"),
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(CurrentDistrict->GetOwningFaction()),
 			StateText,
 			FText::AsNumber(OperationsView.OwnedProperties),
@@ -170,8 +208,7 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			FText::AsNumber(Active),
 			FText::AsNumber(Desired),
 			FText::AsNumber(Maximum),
-			FText::AsNumber(Net),
-			UTerritoryUIBlueprintLibrary::GetThreatLevelText(OperationsView.ThreatLevel)));
+			FText::AsNumber(Net)));
 	}
 	if (AddGuardButton)
 	{

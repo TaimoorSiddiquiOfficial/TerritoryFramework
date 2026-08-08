@@ -211,12 +211,25 @@ private:
 	TWeakObjectPtr<ATerritoryVolume> SelectedGarrisonTarget;
 	TWeakObjectPtr<UTerritoryPlayerManagementComponent> ManagementComponent;
 	TMap<FString, TWeakObjectPtr<ATerritoryVolume>> GarrisonTargetOptions;
+	TArray<TWeakObjectPtr<ATerritoryVolume>> GarrisonTargetOrder;
 	UPROPERTY(Transient)
 	TObjectPtr<UNarrativeComboBoxString> GarrisonTargetSelector;
 	UPROPERTY(Transient)
 	TObjectPtr<USpinBox> GuardTargetSpinBox;
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> Text_GarrisonTargetPreview;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Text_GarrisonTargetName;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Text_GarrisonStaffing;
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Text_GarrisonFinance;
+	UPROPERTY(Transient)
+	TObjectPtr<UProgressBar> GarrisonStaffingProgressBar;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_PreviousGarrisonTarget;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_NextGarrisonTarget;
 	UPROPERTY(Transient)
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_ApplyGuardTarget;
 	UPROPERTY(Transient)
@@ -239,6 +252,7 @@ private:
 	void BuildGarrisonManagementControls();
 	void RefreshGarrisonManagementControls(const FTerritoryDistrictOperationsView& View);
 	void UpdateGarrisonTargetPreview();
+	void SelectRelativeGarrisonTarget(int32 Direction);
 	void SubmitSelectedGuardTarget(int32 NewDesiredGuardCount);
 	void UpdateSelectedDistrict(ATerritoryDistrict* District);
 	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
@@ -268,6 +282,12 @@ private:
 
 	UFUNCTION()
 	void HandleGarrisonTargetChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void HandlePreviousGarrisonTargetClicked();
+
+	UFUNCTION()
+	void HandleNextGarrisonTargetClicked();
 
 	UFUNCTION()
 	void HandleGuardTargetSpinChanged(float NewValue);

@@ -4,6 +4,13 @@
 
 ### Counterattack state events, death, and economy account routing — 2026-08-07
 
+- Repaired the District Command Center lists and presentation: the left queue now uses the
+  exact Available/Unlocked predicate, Captured/Owned rows and directory rows use a responsive
+  selection-only card instead of losing their width to hidden guard buttons, and the search
+  bar now token-matches names, tags, owners, states, availability, threats, attackers, and
+  child garrisons. The cramped garrison dropdown/raw text block was replaced by post navigation,
+  staffing progress, structured finance readouts, and Apply/Empty/Full planning actions.
+
 - Added state-wise `OnCounterHappened` delivery after every committed counterattack transition.
   The server subsystem exposes the global event; relevant owning clients receive the complete
   value payload reliably through `UTerritoryPlayerManagementComponent`; and

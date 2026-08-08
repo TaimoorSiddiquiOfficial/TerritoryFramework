@@ -40,6 +40,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryGuardActionRequested OnGuardActionRequested;
 
+	/** Inline guard buttons are disabled by default; the command panel owns staffing mutations. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|UI")
+	bool bShowInlineGuardActions = false;
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;

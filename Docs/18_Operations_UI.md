@@ -70,13 +70,14 @@ The struct is a read-only projection. Pointer fields are transient UI references
 
 `GetDistrictOperationsRevision` hashes every displayed authority used by the supplied list. The journal rebuilds when guards, capture, finance, lock state, or assault state changes, fixing the former stale-row bug where only item count and filter text invalidated the list.
 
+`DoesDistrictMatchSearch` applies case-insensitive AND-token matching across the complete player-facing projection: display name, stable Territory tag, owner, state, availability and lock reasons, threat/attacker data, and child garrison names/tags. The search field therefore filters the same rows that the directory actually renders rather than a separate count-only model.
+
 ## District Command Center
 
 `WBP_HopTerritoryJournalWidget` is supplied as a three-column command surface:
 
-1. **Operations queues** show every registered unowned District as selectable intel
-   (including locked/aggregate-only entries), and separately show Districts controlled
-   by the viewer. The intel header states how many entries are currently actionable.
+1. **Operations queues** show currently actionable Available/Unlocked Districts and,
+   separately, captured Districts controlled by the viewer.
 2. **District directory** exposes name, owner, state, and operations filters over every registered district projection.
 3. **District command** shows owner/state, availability and lock reason, Property
    alignment, every local garrison, child-Property capture pressure, income/upkeep/net,
@@ -90,20 +91,20 @@ The action and ownership predicates remain strict, while visibility is broader:
 ```text
 Available / Unlocked = registered AND unlocked AND currently available AND not owned by viewer
 Captured / Owned     = registered AND owned by viewer AND state is not Unclaimed
-District Intel       = registered AND not owned by viewer (locked entries remain selectable)
+Complete Directory   = every registered District (locked entries remain selectable)
 ```
 
 An unlocked District that is diplomatically blocked, defended, or otherwise unavailable
-is not counted as actionable, but a registered locked District is no longer hidden from
-the intel queue or complete directory. Selecting it is read-only: server management
+is not counted as actionable. A registered locked District remains visible in the complete
+directory, where selecting it is read-only: server management
 remains disabled until exact ownership/claimed/capacity rules pass. An owned District
-cannot duplicate into the intel queue. Counts derive from the same row predicates.
+cannot duplicate into the Available queue. Counts derive from the same row predicates.
 
 Threat and capture details cascade from loaded same-owner child Properties. A Blacksmith
 assault therefore appears in Market Square even though the durable assault correctly
 targets the capturable Property rather than the aggregate-only District.
 
-Clicking a row selects that district and opens its command details. The garrison planner selects the first manageable target with capacity (normally a child Property when the District is a zero-capacity container), exposes an integer target with Apply/0/Max, and retains atomic `+1`, `-1`, `+5`, and `-5` shortcuts for the selected target.
+Clicking a responsive selection-only row selects that district and opens its command details. The garrison planner selects the first manageable target with capacity (normally a child Property when the District is a zero-capacity container), navigates District/Property posts with Previous/Next controls, and exposes an integer target, capacity progress, projected recruitment/upkeep/net, and Apply/Empty/Full actions. List rows do not mutate guards; all staffing changes remain in this contextual command surface.
 
 ## Supplied widgets
 
@@ -112,7 +113,7 @@ Clicking a row selects that district and opens its command details. The garrison
 | `W_TerritoryPlayerMenu` | Existing Narrative player menu with the Territory journal tab and a valid activation focus target |
 | `WBP_MainHopTerritoryJornal` | Narrative menu wrapper around the Territory journal; forwards activation focus to the inner widget |
 | `WBP_HopTerritoryJournalWidget` | Three-column District Command Center with actionable/owned queues, searchable directory, selected-district controls, finance ledger, and exposure report |
-| `WBP_TerritoryCommandRow` | Project-styled Narrative CommonUI row used by all journal lists; selects a district and exposes guarded add/remove actions |
+| `WBP_TerritoryCommandRow` | Responsive project-styled Narrative CommonUI selection row used by all journal lists |
 | `WBP_TerritoryDistrictManagement` | In-world district command panel for add/remove guards, funds, income, reserve visibility, availability, and threat status |
 | `WBP_TerritoryEconomyWidget` | Faction economy health, net, deficit, and recent activity |
 | `WBP_TerritoryInfoWidget` | Passive current-territory status card with availability, threat, and net income |

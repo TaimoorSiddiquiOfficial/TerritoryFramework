@@ -4,7 +4,7 @@
 
 District management provides an in-world Narrative POI and a Narrative CommonUI command screen for an owned district. Players inspect aggregate security/finance, select the District or any loaded child Property garrison, set an absolute staffing target, and see capture/counterattack risk without giving the widget gameplay authority.
 
-The journal's District Command Center exposes a garrison selector, integer target, Apply/0/Max commands, and compatibility `+1`, `-1`, `+5`, and `-5` controls. Market Square can therefore manage the Blacksmith Property garrison even when the District container itself has zero guard capacity.
+The journal's District Command Center exposes previous/next garrison navigation, an integer target, staffing/capacity progress, projected recruitment/upkeep/net, and Apply/Empty/Full commands. Market Square can therefore manage the Blacksmith Property garrison even when the District container itself has zero guard capacity. Directory rows are selection-only; staffing mutations remain in the detailed command surface where their complete cost and failure context is visible.
 
 ## Architecture
 
@@ -52,6 +52,8 @@ The district must be registered by `UTerritoryRegistrySubsystem`. World Partitio
 | Threat and finite assault force | `UTerritoryCounterAttackSubsystem` / WorldState projection |
 
 The screen refreshes its operations view and reacts to management results. Active, reserve, and pending counts are exact replicated read models on clients; live pawn pointers remain server-only.
+
+The left `Available / Unlocked` queue contains only registered, unlocked, actionable, non-owned Districts. `Captured / Owned` contains only viewer-owned claimed Districts. Locked and aggregate-only Districts remain selectable in the complete center directory so their requirements and hierarchy cascade are visible, but they never inflate the actionable queue. Directory search is case-insensitive and tokenized across display name, Territory tag, owner, state, availability, lock reason, threat, attacker, and child garrison names/tags.
 
 ## Access control
 

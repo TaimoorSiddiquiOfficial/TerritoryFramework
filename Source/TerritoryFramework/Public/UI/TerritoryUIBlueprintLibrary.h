@@ -218,6 +218,16 @@ public:
 		const FTerritoryDistrictOperationsView& View,
 		ETerritoryOperationsFilter Filter);
 
+	/**
+	 * Tokenized, case-insensitive search over the player-facing District read model.
+	 * Every non-empty token must match at least one indexed field, including the
+	 * display name, stable tag, owner, state, availability, threat, or child garrison.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
+	static bool DoesDistrictMatchSearch(
+		const FTerritoryDistrictOperationsView& View,
+		const FString& SearchText);
+
 	/** True only for a registered, unlocked, currently actionable district not already owned by the viewer. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static bool IsDistrictAvailableUnlocked(const FTerritoryDistrictOperationsView& View);

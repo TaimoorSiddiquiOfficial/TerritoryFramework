@@ -40,6 +40,8 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		UTerritoryDistrictManagementWidget::StaticClass()->IsChildOf(UTerritoryActivatableWidget::StaticClass()));
 	TestTrue(TEXT("Journal uses the Territory Narrative menu base"),
 		UTerritoryJournalWidget::StaticClass()->IsChildOf(UTerritoryActivatableWidget::StaticClass()));
+	TestFalse(TEXT("District rows reserve their width for selection details by default"),
+		GetDefault<UTerritoryDistrictRowWidget>()->bShowInlineGuardActions);
 	TestTrue(TEXT("Embedded Territory activatables accept focus"),
 		GetDefault<UTerritoryActivatableWidget>()->IsFocusable());
 
@@ -50,6 +52,8 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildDistrictOperationsView")));
 	TestTrue(TEXT("District operations list is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetDistrictOperationsViews")));
+	TestTrue(TEXT("District directory search is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("DoesDistrictMatchSearch")));
 	TestTrue(TEXT("Per-garrison operations builder is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildGarrisonOperationsView")));
 	TestTrue(TEXT("District garrison list is Blueprint pure"),
@@ -128,6 +132,44 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTargetForTerritory")));
 	TestTrue(TEXT("Owned bridge exposes management-point absolute target request"),
 		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTarget")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIDistrictSearchTest,
+	"TerritoryFramework.UI.DistrictSearch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIDistrictSearchTest::RunTest(const FString& Parameters)
+{
+	FTerritoryDistrictOperationsView View;
+	View.DisplayName = FText::FromString(TEXT("Castle Hill"));
+	View.DistrictTag = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Territory.HavenReach.CastleHill")), false);
+	View.OwnerFaction = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Narrative.Factions.Heroes")), false);
+	View.TerritoryState = ETerritoryState::Claimed;
+	View.AvailabilityReason = FText::FromString(TEXT("Owned by your faction"));
+	View.ThreatSummary = FText::FromString(TEXT("Bandit assault warning"));
+	FTerritoryGarrisonOperationsView Garrison;
+	Garrison.DisplayName = FText::FromString(TEXT("North Gate"));
+	Garrison.TerritoryTag = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Territory.HavenReach.CastleHill.NorthGate")), false);
+	View.GarrisonTargets.Add(Garrison);
+
+	TestTrue(TEXT("Empty search preserves every district"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(View, TEXT("   ")));
+	TestTrue(TEXT("Display-name search is case insensitive"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(View, TEXT("castle")));
+	TestTrue(TEXT("Stable Territory tag is searchable"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(View, TEXT("HavenReach")));
+	TestTrue(TEXT("Owner and state tokens can be combined"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(View, TEXT("Heroes Claimed")));
+	TestTrue(TEXT("Threat text is searchable"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(View, TEXT("bandit warning")));
+	TestTrue(TEXT("Child garrison names are searchable"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(View, TEXT("north gate")));
+	TestFalse(TEXT("Every token must match some indexed field"),
+		UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(View, TEXT("castle neutral")));
 	return true;
 }
 

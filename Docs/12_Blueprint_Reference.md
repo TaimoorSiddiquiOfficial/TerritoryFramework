@@ -10,6 +10,7 @@
 | `BuildDistrictOperationsView(Context, District, Viewer, OutView)` | bool | Viewer-relative district/security/finance/threat projection |
 | `GetDistrictOperationsViews(Context, Viewer, Filter)` | Array | Sorted district list for one operational filter |
 | `DoesDistrictMatchFilter(View, Filter)` | bool | Pure filter predicate |
+| `DoesDistrictMatchSearch(View, SearchText)` | bool | Case-insensitive tokenized District/read-model search |
 | `GetDistrictOperationsRevision(View)` | int32 | UI invalidation key covering displayed authorities |
 | `BuildEconomyOperationsView(Context, Viewer, Faction, MaxRecent)` | struct | Narrative funds plus Territory economy projection |
 | `GetThreatLevelText(Level)` | Text | Localizable threat label |
