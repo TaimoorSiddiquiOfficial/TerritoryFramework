@@ -142,6 +142,7 @@ void ATerritoryVolume::BeginPlay()
 
 		PreviousOwningFaction = OwnershipData.OwningFaction;
 		PreviousState = OwnershipData.State;
+		bReplicationInitialized = true;
 
 		{
 			const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
@@ -301,6 +302,18 @@ void ATerritoryVolume::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 void ATerritoryVolume::OnRep_OwnershipData()
 {
+	// On initial replication (late join), sync cached values without firing
+	// synthetic ownership/state change events. PreviousOwningFaction defaults to
+	// empty and PreviousState defaults to Unclaimed, so without this guard every
+	// late-join client sees a full transition for every owned territory.
+	if (!bReplicationInitialized)
+	{
+		bReplicationInitialized = true;
+		PreviousOwningFaction = OwnershipData.OwningFaction;
+		PreviousState = OwnershipData.State;
+		return;
+	}
+
 	// Diff against cached values — only fire events for fields that actually changed
 	if (PreviousOwningFaction != OwnershipData.OwningFaction)
 	{
@@ -788,6 +801,11 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 {
 	if (!HasAuthority()) return false;
 
+	// Prevent reentrant commits during the synchronous event bundle.
+	// A delegate listener that calls back into CommitOwnershipData mid-broadcast
+	// would overwrite OwnershipData while the outer call is still firing events.
+	if (bTransitionInProgress) return false;
+
 	const FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	const ETerritoryState OldState = OwnershipData.State;
 	const FGameplayTag NewOwner = NewData.OwningFaction;
@@ -916,7 +934,13 @@ void ATerritoryVolume::SetControlProgress(float Progress)
 	const float ClampedProgress = FMath::Clamp(Progress, 0.f, 1.f);
 	// P0-03: No-op detection — skip write if value unchanged (avoids unnecessary replication)
 	if (FMath::IsNearlyEqual(OwnershipData.ControlProgress, ClampedProgress)) return;
-	OwnershipData.ControlProgress = ClampedProgress;
+
+	// Route through CommitOwnershipData so replication, ForceNetUpdate, and any
+	// registered delegates fire consistently. Direct struct mutation without
+	// CommitOwnershipData creates client-side stale state.
+	FTerritoryOwnershipData NewData = OwnershipData;
+	NewData.ControlProgress = ClampedProgress;
+	CommitOwnershipData(NewData);
 }
 
 void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)

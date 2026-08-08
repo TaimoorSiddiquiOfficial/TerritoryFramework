@@ -211,7 +211,7 @@ void ATerritoryCity::OnCityFullyCaptured_Implementation(FGameplayTag CapturingFa
 		if (Economy)
 		{
 			Economy->CreditCurrencyToFaction(CapturingFaction, 1000,
-				ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers, TEXT("Capital city captured"),
+				Economy->IncomePayoutPolicy, TEXT("Capital city captured"),
 				ETerritoryTransactionType::Reward);
 			UE_LOG(LogTerritory, Log, TEXT("[CityCapture] Capital bonus: 1000 gold to %s"),
 				*CapturingFaction.ToString());
@@ -551,7 +551,7 @@ void ATerritoryDistrict::OnDistrictFullyCaptured_Implementation(FGameplayTag Cap
 		if (Economy)
 		{
 			Economy->CreditCurrencyToFaction(CapturingFaction, 500,
-				ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers, TEXT("Capital district captured"),
+				Economy->IncomePayoutPolicy, TEXT("Capital district captured"),
 				ETerritoryTransactionType::Reward);
 		}
 	}

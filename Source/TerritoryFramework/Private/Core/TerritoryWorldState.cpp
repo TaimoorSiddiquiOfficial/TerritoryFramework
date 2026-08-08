@@ -712,6 +712,7 @@ void ATerritoryWorldState::OnDiplomacyChangedLive(FGameplayTag FactionA, FGamepl
 			|| (Treaty.FactionA == FactionB && Treaty.FactionB == FactionA))
 		{
 			Treaty.State = NewState;
+			ForceNetUpdate();
 			return;
 		}
 	}
@@ -723,6 +724,7 @@ void ATerritoryWorldState::OnDiplomacyChangedLive(FGameplayTag FactionA, FGamepl
 	NewTreaty.FactionB = FactionB;
 	NewTreaty.State = NewState;
 	ReplicatedTreaties.Add(NewTreaty);
+	ForceNetUpdate();
 }
 
 void ATerritoryWorldState::OnReputationChangedLive(FGameplayTag Faction, int32 NewReputation)
@@ -735,6 +737,7 @@ void ATerritoryWorldState::OnReputationChangedLive(FGameplayTag Faction, int32 N
 		if (Entry.Faction == Faction)
 		{
 			Entry.Reputation = NewReputation;
+			ForceNetUpdate();
 			return;
 		}
 	}
@@ -744,6 +747,7 @@ void ATerritoryWorldState::OnReputationChangedLive(FGameplayTag Faction, int32 N
 	NewEntry.Faction = Faction;
 	NewEntry.Reputation = NewReputation;
 	ReplicatedReputation.Add(NewEntry);
+	ForceNetUpdate();
 }
 
 void ATerritoryWorldState::OnTerritoryControlChangedLive(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
@@ -761,6 +765,7 @@ void ATerritoryWorldState::OnTerritoryControlChangedLive(ATerritoryVolume* Terri
 			Summary.ContestingFaction = Territory->IsContested() ? OldOwner : FGameplayTag();
 			Summary.State = Territory->GetTerritoryState();
 			Summary.ControlProgress = Territory->GetControlProgress();
+			ForceNetUpdate();
 			return;
 		}
 	}
@@ -774,4 +779,5 @@ void ATerritoryWorldState::OnTerritoryControlChangedLive(ATerritoryVolume* Terri
 	NewSummary.State = Territory->GetTerritoryState();
 	NewSummary.ControlProgress = Territory->GetControlProgress();
 	ReplicatedCaptureSummaries.Add(NewSummary);
+	ForceNetUpdate();
 }

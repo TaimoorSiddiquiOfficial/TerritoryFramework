@@ -675,6 +675,9 @@ private:
 	bool bLoadedFromSave = false;
 	bool bGuardsReconciled = false;
 	bool bTransitionInProgress = false;
+	/** True after OnRep_OwnershipData has fired at least once. Suppresses synthetic
+	 *  ownership/state change events on initial replication (late join). */
+	bool bReplicationInitialized = false;
 	UPROPERTY(Transient)
 	FTerritoryTransitionContext ActiveTransitionContext;
 	bool bApplyingDerivedOwnership = false;
