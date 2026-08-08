@@ -201,7 +201,7 @@ public:
 		ETerritoryIncomePayoutPolicy AccountRole) const;
 	void RecordCurrencyTransaction(const FGameplayTag& Faction, int32 Amount,
 		int32 BalanceAfter, const FString& Reason, ETerritoryTransactionType Type,
-		const AActor* AccountActor);
+		const AActor* AccountActor, const FGameplayTag& SourceTerritory = FGameplayTag());
 	bool TryDebitSettlementAccounts(const FGameplayTag& Faction, int32 PositiveAmount,
 		ETerritoryIncomePayoutPolicy Policy, const FString& Reason,
 		ETerritoryTransactionType Type);

@@ -50,8 +50,9 @@ struct FTerritoryMutationRequest
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
 	ETerritoryState DesiredState = ETerritoryState::Claimed;
 
-	/** Whether to reset capture progress and clear contesting faction. */
-	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
+	/** @deprecated Has no effect — ApplyTerritoryMutation always clears capture state on success. */
+	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation",
+		meta = (DeprecatedProperty, DeprecationMessage = "Has no effect. Capture state is always cleared on successful mutation."))
 	bool bClearCaptureState = true;
 
 	/** Whether to bypass Narrative state entry conditions. Default = false (conditions checked). */

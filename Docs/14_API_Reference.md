@@ -52,23 +52,44 @@ Static Blueprint-callable helpers. Use these as the primary entry point from Blu
 | GetTerritoryControl | WorldContextObject | UTerritoryControlSubsystem* | Get control subsystem |
 | GetTerritoryEconomy | WorldContextObject | UTerritoryEconomySubsystem* | Get economy subsystem |
 | GetTerritoryCombatDirector | WorldContextObject | UTerritoryCombatDirector* | Get combat director |
+| GetTerritoryDiplomacy | WorldContextObject | UTerritoryDiplomacySubsystem* | Get diplomacy subsystem |
 | GetAllFactions | WorldContextObject | TArray<FGameplayTag> | All factions known to subsystems |
 | GetTerritoryAtLocation | WorldContextObject, Location (FVector) | ATerritoryVolume* | Find territory at point |
 | GetTerritoryByTag | WorldContextObject, Tag (GameplayTag) | ATerritoryVolume* | Find territory by tag |
-| GetDistrictsForCity | WorldContextObject, City (ATerritoryCity*) | TArray<ATerritoryDistrict*> | All districts belonging to a city |
-| GetPropertiesForDistrict | WorldContextObject, District (ATerritoryDistrict*) | TArray<ATerritoryProperty*> | All properties within a district |
-| GetOwningDistrict | WorldContextObject, Property (ATerritoryProperty*) | ATerritoryDistrict* | Parent district for a property |
-| GetOwningCity | WorldContextObject, Territory (ATerritoryVolume*) | ATerritoryCity* | Parent city for a territory |
+| GetAllTerritories | WorldContextObject | TArray<ATerritoryVolume*> | All registered territories |
+| GetTerritoriesByFaction | WorldContextObject, Faction (GameplayTag) | TArray<ATerritoryVolume*> | Territories owned by faction |
+| GetChildTerritories | WorldContextObject, ParentTag (GameplayTag) | TArray<ATerritoryVolume*> | Child territories (districts of city, properties of district) |
+| GetTerritoryCount | WorldContextObject | int32 | Total registered territory count |
+| GetFactionTerritoryCount | WorldContextObject, Faction (GameplayTag) | int32 | Count owned by faction |
+| IsTerritoryAtLocation | WorldContextObject, Location (FVector) | bool | True if any territory contains point |
+| GetFactionGold | WorldContextObject, Faction (GameplayTag) | int32 | **Deprecated** — always returns 0. Use GetActorCurrency instead |
+| GetFactionIncome | WorldContextObject, Faction (GameplayTag) | int32 | Sum of periodic income for faction |
+| GetTerritoryState | WorldContextObject, TerritoryTag (GameplayTag) | ETerritoryState | Query state by tag |
+| GetCaptureProgress | WorldContextObject, TerritoryTag (GameplayTag) | float | Query progress by tag |
+| GetTreatyState | WorldContextObject, FactionA, FactionB | EDiplomacyState | Diplomacy state between factions |
+| IsAllied | WorldContextObject, FactionA, FactionB | bool | True if alliance or higher |
+| IsAtWar | WorldContextObject, FactionA, FactionB | bool | True if at war |
+| IsSameFaction | A (GameplayTag), B (GameplayTag) | bool | Check if two factions are the same |
+| GetFriendlyTagDisplayName | Tag (GameplayTag) | FText | UI-friendly tag text |
+| GetActorFactions | WorldContextObject, Actor | FGameplayTagContainer | All factions via Narrative team interface |
+| IsActorInFaction | WorldContextObject, Actor, Faction | bool | True if actor belongs to faction |
+| GetActorPrimaryFaction | WorldContextObject, Actor | GameplayTag | Actor's primary faction |
+| AreActorsAllied | A (Actor), B (Actor) | bool | Narrative IsSameTeam check |
 | GetAllCities | WorldContextObject | TArray<ATerritoryCity*> | All registered cities |
 | GetAllDistricts | WorldContextObject | TArray<ATerritoryDistrict*> | All registered districts |
-| GetDistrictByTag | WorldContextObject, Tag (GameplayTag) | ATerritoryDistrict* | Find district by tag |
-| IsSameFaction | A (GameplayTag), B (GameplayTag) | bool | Check if two factions are the same |
+| GetCityForDistrict | WorldContextObject, District | ATerritoryCity* | Parent city for district |
+| DoesFactionControlCity | WorldContextObject, City, Faction | bool | True if faction owns all districts |
+| GetFactionCityCount | WorldContextObject, Faction | int32 | Cities fully controlled by faction |
+| GetFactionDistrictCount | WorldContextObject, Faction | int32 | Districts owned by faction |
+| GetCapitalDistricts | WorldContextObject | TArray<ATerritoryDistrict*> | Districts marked as capital |
 
 ### Functions (BlueprintCallable)
 
 | Function | Parameters | Authority | Description |
 |---|---|---|---|
-| ForceCaptureTerritory | WorldContextObject, TerritoryTag, NewOwner | BlueprintAuthorityOnly | Resolve the territory and invoke ControlSubsystem `ForceCapture` |
+| ForceCaptureTerritory | WorldContextObject, TerritoryTag, NewOwner | BlueprintAuthorityOnly, DevelopmentOnly | Resolve the territory and invoke ControlSubsystem `ForceCapture` |
+| PrintTerritoryDebug | WorldContextObject, Territory, Duration | DevelopmentOnly | Print debug info for one territory |
+| PrintAllTerritoryDebug | WorldContextObject, Duration | DevelopmentOnly | Print debug info for all territories |
 
 ---
 

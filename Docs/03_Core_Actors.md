@@ -41,12 +41,12 @@ ATerritoryVolume (base — placed in level for any territory)
 |---|---|---|---|
 | OnOwnershipChanged(Old, New) | After faction changes + guard lifecycle | No | Custom capture effects, sounds |
 | OnStateChanged(OldState, NewState) | After state transition + guard lifecycle | No | Custom state reactions |
-| OnAllGuardsDefeated() | All RegisteredDefenders dead | **YES** | Custom zero-defence reactions; Super never changes ownership |
+| OnAllGuardsDefeated() | All RegisteredDefenders dead | Recommended | Custom zero-defence reactions (plays VFX/sound). Super only calls ForceNetUpdate; DefenderCount is already 0 by the time this fires. Super never changes ownership. |
 | OnTerritoryInitialized() | BeginPlay completes | No | Custom initialization logic |
 
 See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-call requirements.
 
-> **Startup GUID Fallback:** If `TerritoryGUID` is not baked (missed editor save), a deterministic GUID is derived from `TerritoryTag` via `FCrc::StrCrc32`. This GUID only varies in the first `uint32` component, so two territories sharing the same hash would collide. Always save the level after placement to bake a proper GUID.
+> **Missing GUID:** If `TerritoryGUID` is not baked (missed editor save), the territory logs an error and skips save/load. Always save the level after placement to bake a proper GUID.
 >
 > **Actor Tick:** `bStartWithTickEnabled` is `false` on all territory volumes. All periodic logic (capture, economy, diplomacy, bounds tracking) runs through subsystem timers. The volume's native `Tick` is unused and only logs a deprecation warning.
 
@@ -66,7 +66,7 @@ Guard lifecycle runs in the **non-virtual** SetTerritoryState/SetOwningFaction, 
 - **Contested → Claimed**: Restores active ownership for the incumbent or captured owner and respawns guards
 - **Locked → Claimed**: Respawns guards for owner (territory was locked, now defended again)
 - **Any → Locked**: Despawns all guards
-- **Contested → Unclaimed** (all defenders dead): Cleared by OnAllGuardsDefeated Super call
+- **Contested → Unclaimed**: Not reached by guard defeat alone. Guard defeat leaves the owner intact and vulnerable (DefenderCount=0); ownership changes only through the capture flow (RegisterAttacker → progress → CompleteCapture)
 
 `GetOwningFaction()` therefore returns the incumbent defender while contested. `IsOwnedByFaction()` requires `State == Claimed`, so it returns false while the territory is Contested, Locked, or Unclaimed.
 
@@ -200,11 +200,11 @@ BP_TerritoryDistrict "Market Square"
 | SetUpgradeLevel(Level) | void | Authority-only direct set |
 | GetOwningDistrict() | District* | Parent district via ParentTerritoryTag |
 
-### Events (BlueprintNativeEvent)
-| Event | When |
-|---|---|
-| OnUpgradeLevelChanged(NewLevel) | Client receives replicated upgrade change |
-| OnPropertyCaptured(NewOwner) | Property captured by new faction (resets upgrade level) |
+### Events
+| Event | Type | When |
+|---|---|---|
+| OnUpgradeLevelChanged(NewLevel) | BlueprintImplementableEvent | Client receives replicated upgrade change (no C++ implementation — BP provides entire body, no Super call) |
+| OnPropertyCaptured(NewOwner) | BlueprintNativeEvent | Property captured by new faction (resets upgrade level) |
 
 ### Delegates (BlueprintAssignable)
 | Delegate | Signature |

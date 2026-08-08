@@ -231,7 +231,8 @@ bool UTerritoryEconomySubsystem::CanActorAfford(const AActor* RequestingActor, i
 
 void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 	const FGameplayTag& Faction, int32 Amount, int32 BalanceAfter,
-	const FString& Reason, ETerritoryTransactionType Type, const AActor* AccountActor)
+	const FString& Reason, ETerritoryTransactionType Type, const AActor* AccountActor,
+	const FGameplayTag& SourceTerritory)
 {
 	FTerritoryTransaction Tx;
 	Tx.TransactionID = FGuid::NewGuid();
@@ -239,6 +240,7 @@ void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 	Tx.Type = Type;
 	Tx.Amount = Amount;
 	Tx.BalanceAfter = BalanceAfter;
+	Tx.SourceTerritory = SourceTerritory;
 	Tx.Reason = AccountActor
 		? FString::Printf(TEXT("%s [Account=%s]"), *Reason, *AccountActor->GetName())
 		: Reason;
