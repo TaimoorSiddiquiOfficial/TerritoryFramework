@@ -16,6 +16,7 @@ class USpinBox;
 class UTextBlock;
 class UVerticalBox;
 class UWidgetSwitcher;
+class UWidgetAnimation;
 class UTerritoryPlayerManagementComponent;
 class UTerritoryDistrictRowWidget;
 
@@ -45,6 +46,10 @@ protected:
 	/** Max-width desktop column that expands to the available width on compact viewports. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<USizeBox> CommandCenterResponsiveWidth;
+
+	/** Optional authored reveal; automatically played by the framework on open. */
+	UPROPERTY(Transient, meta=(BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> TerritoryReveal;
 
 	/** Optional project-styled row Blueprint. Falls back to the native Narrative CommonUI row. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|UI")

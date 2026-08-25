@@ -1,6 +1,9 @@
 #include "UI/TerritoryHUDWidget.h"
 
+#include "Animation/WidgetAnimation.h"
 #include "Components/ProgressBar.h"
+#include "Components/Border.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Components/TextBlock.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
@@ -25,6 +28,10 @@ void UTerritoryHUDWidget::NativeConstruct()
 		}
 	}
 	BindToTerritoryAtPlayer();
+	if (CaptureSignalIn)
+	{
+		PlayAnimation(CaptureSignalIn);
+	}
 }
 
 void UTerritoryHUDWidget::NativeDestruct()
@@ -65,6 +72,13 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	const FText StateText = StateEnum
 		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(State))
 		: FText::GetEmpty();
+	const FLinearColor StateAccent = State == ETerritoryState::Contested
+		? FLinearColor(1.f, 0.25f, 0.16f, 1.f)
+		: State == ETerritoryState::Claimed
+			? FLinearColor(0.08f, 0.88f, 0.62f, 1.f)
+			: State == ETerritoryState::Locked
+				? FLinearColor(0.42f, 0.47f, 0.52f, 1.f)
+				: FLinearColor(1.f, 0.66f, 0.18f, 1.f);
 
 	if (Text_DistrictName)
 	{
@@ -77,11 +91,15 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	if (Text_CaptureState)
 	{
 		Text_CaptureState->SetText(StateText);
+		Text_CaptureState->SetColorAndOpacity(FSlateColor(StateAccent));
 	}
 	if (ProgressBar_Capture)
 	{
 		ProgressBar_Capture->SetPercent(Territory->GetControlProgress());
+		ProgressBar_Capture->SetFillColorAndOpacity(StateAccent);
 	}
+	if (CaptureAccentRail) CaptureAccentRail->SetBrushColor(StateAccent);
+	if (CaptureDivider) CaptureDivider->SetBrushColor(StateAccent);
 	if (DistrictDescriptionText)
 	{
 		FTerritoryDistrictOperationsView View;
@@ -121,17 +139,36 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(ContestingFaction)), 6.f);
 	}
 
+	bool bAlertVisible = false;
 	if (DistrictDescriptionText && !ActiveCounterAttackAlert.IsEmpty())
 	{
 		const UWorld* World = GetWorld();
 		if (World && World->GetRealTimeSeconds() < CounterAttackAlertExpiresAtRealTime)
 		{
 			DistrictDescriptionText->SetText(ActiveCounterAttackAlert);
+			DistrictDescriptionText->SetColorAndOpacity(FSlateColor(
+				FLinearColor(1.f, 0.58f, 0.32f, 1.f)));
+			bAlertVisible = true;
 		}
 		else
 		{
 			ActiveCounterAttackAlert = FText::GetEmpty();
 			CounterAttackAlertExpiresAtRealTime = 0.0;
+		}
+	}
+	if (DistrictDescriptionText)
+	{
+		DistrictDescriptionText->SetVisibility(bAlertVisible
+			? ESlateVisibility::SelfHitTestInvisible
+			: ESlateVisibility::Collapsed);
+	}
+	if (CaptureSurface)
+	{
+		if (UCanvasPanelSlot* CardSlot = Cast<UCanvasPanelSlot>(CaptureSurface->Slot))
+		{
+			// The passive card stays compact, but temporarily grows enough to show
+			// the counterattack sentence without clipping or covering the screen.
+			CardSlot->SetSize(FVector2D(420.f, bAlertVisible ? 188.f : 132.f));
 		}
 	}
 
@@ -163,5 +200,10 @@ void UTerritoryHUDWidget::PresentCounterAttackAlert(const FText& AlertText, floa
 	const UWorld* World = GetWorld();
 	CounterAttackAlertExpiresAtRealTime = World
 		? World->GetRealTimeSeconds() + FMath::Max(0.f, Duration) : 0.0;
+	if (CaptureSignalIn)
+	{
+		PlayAnimation(CaptureSignalIn, 0.f, 1,
+			EUMGSequencePlayMode::Forward, 1.35f, false);
+	}
 	OnCounterAttackAlert(AlertText, Duration);
 }

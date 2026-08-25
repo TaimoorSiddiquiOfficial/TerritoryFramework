@@ -7,6 +7,8 @@
 
 class UProgressBar;
 class UTextBlock;
+class UBorder;
+class UWidgetAnimation;
 
 /** Live territory card for the Narrative gameplay HUD. */
 UCLASS(BlueprintType, Blueprintable)
@@ -36,6 +38,19 @@ protected:
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UProgressBar> ProgressBar_Capture;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UBorder> CaptureSurface;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UBorder> CaptureAccentRail;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UBorder> CaptureDivider;
+
+	/** Optional authored stinger. The base class plays it without requiring Event Graph glue. */
+	UPROPERTY(Transient, meta=(BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> CaptureSignalIn;
 
 	/** Non-modal styling hook. Implement animations only; never open a pausing menu. */
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|UI")

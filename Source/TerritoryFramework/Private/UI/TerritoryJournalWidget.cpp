@@ -1,5 +1,6 @@
 #include "UI/TerritoryJournalWidget.h"
 
+#include "Animation/WidgetAnimation.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
@@ -26,6 +27,7 @@
 #include "Widgets/NarrativeCommonTextBlock.h"
 #include "Widgets/NarrativeSpinBox.h"
 #include "CommonTextBlock.h"
+#include "Styling/SlateBrush.h"
 #include "TimerManager.h"
 
 namespace
@@ -71,6 +73,8 @@ namespace
 			{
 				CommonText->SetStyle(Style);
 				CommonText->SetAutoWrapText(true);
+				// The style owns typography; the call site still owns semantic state colour.
+				CommonText->SetColorAndOpacity(FSlateColor(Color));
 				return;
 			}
 		}
@@ -79,6 +83,18 @@ namespace
 		Text->SetFont(Font);
 		Text->SetColorAndOpacity(FSlateColor(Color));
 		Text->SetAutoWrapText(true);
+	}
+
+	void StyleGeneratedTerritorySurface(UBorder* Border, const FLinearColor& Fill,
+		const FLinearColor& Outline, float Radius = 10.f)
+	{
+		if (!Border) return;
+		FSlateBrush Brush;
+		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+		Brush.TintColor = FSlateColor(Fill);
+		Brush.OutlineSettings = FSlateBrushOutlineSettings(
+			Radius, FSlateColor(Outline), 1.f);
+		Border->SetBrush(Brush);
 	}
 
 	const FString AllOwnersOption = TEXT("All owners");
@@ -247,6 +263,10 @@ void UTerritoryJournalWidget::NativeConstruct()
 	RefreshFilterOptions();
 	SetSelectedDetailTab(SelectedDetailTab);
 	RefreshDistrictList();
+	if (TerritoryReveal)
+	{
+		PlayAnimation(TerritoryReveal);
+	}
 
 	if (UWorld* World = GetWorld())
 	{
@@ -334,6 +354,10 @@ void UTerritoryJournalWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 	RefreshDistrictList();
+	if (TerritoryReveal)
+	{
+		PlayAnimation(TerritoryReveal);
+	}
 }
 
 void UTerritoryJournalWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -426,7 +450,9 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	UBorder* PlannerCard = WidgetTree->ConstructWidget<UBorder>(
 		UBorder::StaticClass(), TEXT("GarrisonPlannerCard"));
 	PlannerCard->SetPadding(FMargin(12.f, 10.f));
-	PlannerCard->SetBrushColor(FLinearColor(0.025f, 0.08f, 0.12f, 0.98f));
+	StyleGeneratedTerritorySurface(PlannerCard,
+		FLinearColor(0.014f, 0.062f, 0.055f, 0.94f),
+		FLinearColor(0.08f, 0.88f, 0.62f, 0.62f));
 	PlannerHost->AddChild(PlannerCard);
 	UVerticalBox* PlannerStack = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("GarrisonPlannerStack"));
@@ -1185,7 +1211,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	}
 	if (Text_SelectedEyebrow)
 	{
-		Text_SelectedEyebrow->SetText(NSLOCTEXT("TerritoryJournal", "SelectedEyebrow", "TERRITORY CONTROL"));
+		Text_SelectedEyebrow->SetText(NSLOCTEXT("TerritoryJournal", "SelectedEyebrow", "LIVE TERRITORY INTELLIGENCE"));
 	}
 	if (QuestTitle)
 	{
@@ -1196,6 +1222,14 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	const FText StateText = StateEnum
 		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(View.TerritoryState))
 		: FText::GetEmpty();
+	const FLinearColor SelectedAccent =
+		(View.bUnderAttack || View.bAttackScheduled || View.bThreatPreviewAvailable)
+			? FLinearColor(1.f, 0.25f, 0.16f, 1.f)
+			: View.bOwnedByViewer
+				? FLinearColor(0.08f, 0.88f, 0.62f, 1.f)
+				: View.bAvailableForCapture
+					? FLinearColor(1.f, 0.66f, 0.18f, 1.f)
+					: FLinearColor(0.18f, 0.66f, 0.82f, 1.f);
 	const FText ReserveText = View.bReserveCountKnown
 		? FText::AsNumber(View.ReserveGuards)
 		: NSLOCTEXT("TerritoryJournal", "ReserveUnknown", "server snapshot required");
@@ -1272,7 +1306,12 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	}
 	if (Text_AssaultSummary) Text_AssaultSummary->SetText(View.ThreatSummary);
 
-	if (Text_CommandDistrictName) Text_CommandDistrictName->SetText(View.DisplayName);
+	if (Text_CommandDistrictName)
+	{
+		Text_CommandDistrictName->SetText(View.DisplayName);
+		Text_CommandDistrictName->SetColorAndOpacity(FSlateColor(
+			FLinearColor(0.95f, 0.98f, 0.97f, 1.f)));
+	}
 	if (Text_CommandOwnerState)
 	{
 		Text_CommandOwnerState->SetText(FText::Format(
@@ -1280,6 +1319,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.OwnerFaction),
 			StateText,
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.ViewerFaction)));
+		Text_CommandOwnerState->SetColorAndOpacity(FSlateColor(SelectedAccent));
 	}
 	if (Text_CommandAvailability)
 	{
@@ -1390,8 +1430,13 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 		Text_CommandCaptureProgress->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "CommandCaptureProgress", "CONTROL PRESSURE  {0}%"),
 			FText::AsNumber(FMath::RoundToInt(View.CaptureProgress * 100.f))));
+		Text_CommandCaptureProgress->SetColorAndOpacity(FSlateColor(SelectedAccent));
 	}
-	if (CommandCaptureProgressBar) CommandCaptureProgressBar->SetPercent(View.CaptureProgress);
+	if (CommandCaptureProgressBar)
+	{
+		CommandCaptureProgressBar->SetPercent(View.CaptureProgress);
+		CommandCaptureProgressBar->SetFillColorAndOpacity(SelectedAccent);
+	}
 
 	FTerritoryGarrisonOperationsView SelectedGarrison;
 	const bool bHasSelectedGarrison = UTerritoryUIBlueprintLibrary::BuildGarrisonOperationsView(
@@ -1601,45 +1646,37 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	{
 		Text_ActiveQuestCount->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "ActiveDistrictCount",
-				"AVAILABLE / UNLOCKED  {0}"),
+				"FRONTLINE TARGETS  //  {0}"),
 			FText::AsNumber(AvailableQueueCount)));
 	}
 	if (Text_FinishedQuestCount)
 	{
 		Text_FinishedQuestCount->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "CapturedDistrictCount", "CAPTURED / OWNED  {0}"),
+			NSLOCTEXT("TerritoryJournal", "CapturedDistrictCount", "CONTROLLED ZONES  //  {0}"),
 			FText::AsNumber(OwnedCount)));
 	}
 	if (Text_HeaderStatus)
 	{
 		Text_HeaderStatus->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "HeaderStatus", "{0} available  |  {1} owned  |  {2} threatened  |  {3} funds"),
+			NSLOCTEXT("TerritoryJournal", "HeaderStatus", "LIVE MAP  //  {0} OPEN  •  {1} HELD  •  {2} THREATS  •  {3} FUNDS"),
 			FText::AsNumber(AvailableUnlockedCount), FText::AsNumber(OwnedCount), FText::AsNumber(ThreatCount),
 			FText::AsNumber(Economy.AvailableFunds)));
 	}
 	if (Text_AvailableUnlockedCount)
 	{
-		Text_AvailableUnlockedCount->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "AvailableKPI", "{0}\nAVAILABLE"),
-			FText::AsNumber(AvailableUnlockedCount)));
+		Text_AvailableUnlockedCount->SetText(FText::AsNumber(AvailableUnlockedCount));
 	}
 	if (Text_OwnedDistrictCount)
 	{
-		Text_OwnedDistrictCount->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "OwnedKPI", "{0}\nOWNED"),
-			FText::AsNumber(OwnedCount)));
+		Text_OwnedDistrictCount->SetText(FText::AsNumber(OwnedCount));
 	}
 	if (Text_ThreatenedDistrictCount)
 	{
-		Text_ThreatenedDistrictCount->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "ThreatenedKPI", "{0}\nTHREATENED"),
-			FText::AsNumber(ThreatCount)));
+		Text_ThreatenedDistrictCount->SetText(FText::AsNumber(ThreatCount));
 	}
 	if (Text_RiskDistrictCount)
 	{
-		Text_RiskDistrictCount->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "RiskKPI", "{0}\nAT RISK"),
-			FText::AsNumber(RiskCount)));
+		Text_RiskDistrictCount->SetText(FText::AsNumber(RiskCount));
 	}
 	if (Text_TotalWeeklyEarnings)
 	{

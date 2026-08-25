@@ -6,6 +6,7 @@
 #include "TerritoryDistrictRowWidget.generated.h"
 
 class ATerritoryDistrict;
+class UBorder;
 class UNarrativeCommonButtonBase;
 class UNarrativeCommonTextBlock;
 
@@ -65,6 +66,16 @@ protected:
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonTextBlock> DistrictStatus;
+
+	/** Native fallbacks use these surfaces to communicate ownership and danger at a glance. */
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> DistrictRowSurface;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> DistrictAccentRail;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> DistrictStatusSurface;
 
 	private:
 	TWeakObjectPtr<ATerritoryDistrict> District;
