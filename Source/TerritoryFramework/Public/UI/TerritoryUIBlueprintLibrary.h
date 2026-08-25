@@ -196,8 +196,18 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float AlliedSupport = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float StrategicValue = 1.f;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bUnguarded = false;
+	/** Total loaded, registered child Places, including story-locked Places. Only this aggregate count may reveal locked content. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 TotalProperties = 0;
+	/** Places whose identity is visible to the player after City, District, and Place lock checks. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 KnownProperties = 0;
+	/** Aggregate-only count. Names, tags, owners, and objectives of these Places are deliberately not exposed. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 HiddenProperties = 0;
+	/** Child Places controlled by the viewing player's faction, used for the District completion display. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 OwnedProperties = 0;
+	/** Known child Places the viewer can currently contest under authoritative capture rules. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 ContestableProperties = 0;
+	/** True only when every configured loaded Place is visible; hidden Places keep full District control unavailable. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bAllPlacesDiscovered = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 ManageableGarrisonTargets = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 UnguardedGarrisonTargets = 0;
 	/** City, selected District, and loaded unlocked Places in deterministic hierarchy order. */
@@ -376,7 +386,7 @@ public:
 		const FTerritoryDistrictOperationsView& View,
 		const FString& SearchText);
 
-	/** True only for a registered, unlocked, currently actionable district not already owned by the viewer. */
+	/** True for a registered, hierarchy-visible, unlocked district not already owned by the viewer. Capture gates remain visible as contextual reasons. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static bool IsDistrictAvailableUnlocked(const FTerritoryDistrictOperationsView& View);
 

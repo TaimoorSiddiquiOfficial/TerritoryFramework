@@ -7,6 +7,9 @@
 
 class ATerritoryDistrict;
 class UBorder;
+class UHorizontalBox;
+class UTextBlock;
+class UVerticalBox;
 class UNarrativeCommonButtonBase;
 class UNarrativeCommonTextBlock;
 
@@ -34,6 +37,13 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	FTerritoryDistrictOperationsView GetOperationsView() const { return OperationsView; }
+
+	/** Opens or closes the compact known-Place list without exposing locked Place identities. */
+	UFUNCTION(BlueprintCallable, Category="Territory|UI")
+	void SetExpanded(bool bInExpanded);
+
+	UFUNCTION(BlueprintPure, Category="Territory|UI")
+	bool IsExpanded() const { return bExpanded; }
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryDistrictRowSelected OnDistrictSelected;
@@ -77,15 +87,39 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UBorder> DistrictStatusSurface;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UVerticalBox> PlaceList;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UHorizontalBox> PlaceProgressTrack;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> OwnedProgressSegment;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> KnownProgressSegment;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UBorder> HiddenProgressSegment;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> PlaceProgressText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ExpandHintText;
+
 	private:
 	TWeakObjectPtr<ATerritoryDistrict> District;
 	FTerritoryDistrictOperationsView OperationsView;
 	bool bCanAddGuard = false;
 	bool bCanRemoveGuard = false;
+	bool bExpanded = false;
 	FText ActionStatus;
 
 	void BuildNativeLayout();
 	void RefreshRow();
+	void RefreshPlaceProgress();
+	void RebuildPlaceList();
 
 	UFUNCTION()
 	void HandleSelected();

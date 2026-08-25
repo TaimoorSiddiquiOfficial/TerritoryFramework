@@ -67,6 +67,13 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UWidgetSwitcher> TabSwitcher;
 
+	/** Contextual District control view. It stays collapsed until the player selects a District. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<USizeBox> CommandDrawer;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_CloseCommandDrawer;
+
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UEditableTextBox> DistrictSearchBox;
 
@@ -295,6 +302,7 @@ private:
 	bool bFiltersInitialized = false;
 	bool bResponsiveLayoutApplied = false;
 	bool bCompactResponsiveLayout = false;
+	bool bCommandDrawerRequested = false;
 	int32 SelectedDetailTab = 0;
 	int32 LastOperationsRevision = INDEX_NONE;
 	FTimerHandle RefreshTimerHandle;
@@ -311,6 +319,7 @@ private:
 	void UpdateSelectedDistrict(ATerritoryDistrict* District);
 	void RefreshSelectedHierarchyPanels(const FTerritoryDistrictOperationsView& View);
 	void SetSelectedDetailTab(int32 TabIndex);
+	void SetCommandDrawerOpen(bool bOpen);
 	UTextBlock* CreateHierarchyTextRow(const FText& Text, FName WidgetName, bool bHeading = false);
 	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
 	UTerritoryDistrictRowWidget* CreateOperationsRow(const FTerritoryDistrictOperationsView& View);
@@ -324,6 +333,9 @@ private:
 
 	UFUNCTION()
 	void HandleLossTabClicked();
+
+	UFUNCTION()
+	void HandleCloseCommandDrawerClicked();
 
 	UFUNCTION()
 	void HandleOverviewDetailTabClicked();

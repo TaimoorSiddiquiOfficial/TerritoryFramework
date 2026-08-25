@@ -560,14 +560,34 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	OutView.bUnlocked = OutView.TerritoryState != ETerritoryState::Locked;
 	OutView.bHierarchyVisible = IsTerritoryVisibleToPlayer(WorldContextObject, District);
 	OutView.bOwnedByViewer = OutView.ViewerFaction.IsValid() && OutView.OwnerFaction == OutView.ViewerFaction;
+	TArray<ATerritoryVolume*> AllProperties = District->GetProperties();
+	AllProperties.RemoveAll([](const ATerritoryVolume* Property)
+	{
+		return !IsValid(Property);
+	});
 	OutView.Hierarchy = GetDistrictHierarchyOperationsViews(WorldContextObject, District, Viewer);
-	TArray<ATerritoryVolume*> Properties;
+	TArray<ATerritoryVolume*> VisibleProperties;
 	for (const FTerritoryHierarchyOperationsView& Item : OutView.Hierarchy)
 	{
 		if (Item.HierarchyLevel == ETerritoryHierarchyLevel::Place && Item.Territory)
 		{
 			OutView.VisiblePlaces.Add(Item);
-			Properties.Add(Item.Territory);
+			VisibleProperties.Add(Item.Territory);
+			OutView.ContestableProperties += Item.bAvailableForCapture ? 1 : 0;
+		}
+	}
+	OutView.TotalProperties = AllProperties.Num();
+	OutView.KnownProperties = OutView.VisiblePlaces.Num();
+	OutView.HiddenProperties = FMath::Max(0,
+		OutView.TotalProperties - OutView.KnownProperties);
+	OutView.bAllPlacesDiscovered = OutView.TotalProperties > 0
+		&& OutView.HiddenProperties == 0;
+	if (OutView.ViewerFaction.IsValid())
+	{
+		for (const ATerritoryVolume* Property : VisibleProperties)
+		{
+			OutView.OwnedProperties += Property
+				&& Property->GetOwningFaction() == OutView.ViewerFaction ? 1 : 0;
 		}
 	}
 
@@ -587,7 +607,7 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		// District is an aggregate authority, so surface child Property pressure instead of
 		// making an active leaf assault disappear from the command center.
 		float HighestChildProgress = OutView.CaptureProgress;
-		for (ATerritoryVolume* Property : Properties)
+		for (ATerritoryVolume* Property : VisibleProperties)
 		{
 			if (!Property || !Control->IsCaptureInProgress(Property)
 				&& Property->GetTerritoryState() != ETerritoryState::Contested)
@@ -638,20 +658,12 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		&& (OutView.bManageable || OutView.bAvailableForCapture || OutView.TerritoryState == ETerritoryState::Unclaimed);
 
 	OutView.GarrisonTargets = GetDistrictGarrisonOperationsViews(WorldContextObject, District, Viewer);
-	OutView.GarrisonTargets.RemoveAll([&Properties, District](
+	OutView.GarrisonTargets.RemoveAll([&VisibleProperties, District](
 		const FTerritoryGarrisonOperationsView& Garrison)
 	{
 		return Garrison.Territory && Garrison.Territory != District
-			&& !Properties.Contains(Garrison.Territory);
+			&& !VisibleProperties.Contains(Garrison.Territory);
 	});
-	OutView.TotalProperties = Properties.Num();
-	for (const ATerritoryVolume* Property : Properties)
-	{
-		if (Property && Property->GetOwningFaction() == OutView.OwnerFaction)
-		{
-			++OutView.OwnedProperties;
-		}
-	}
 	OutView.ActiveGuards = 0;
 	OutView.DesiredGuards = 0;
 	OutView.MaximumGuards = 0;
@@ -726,7 +738,7 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	for (const FTerritoryProductionSiteRecord& Record : ProductionRecords)
 	{
 		if (Record.ParentTerritoryTag != OutView.DistrictTag) continue;
-		const bool bVisiblePlace = Properties.ContainsByPredicate(
+		const bool bVisiblePlace = VisibleProperties.ContainsByPredicate(
 			[&Record](const ATerritoryVolume* Property)
 			{
 				return Property && Property->GetTerritoryTag() == Record.TerritoryTag;
@@ -750,7 +762,7 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	{
 		TArray<FTerritoryAssaultRecord> Assaults =
 			Counterattacks->GetAssaultsForTerritoryActor(District);
-		for (const ATerritoryVolume* Property : Properties)
+		for (const ATerritoryVolume* Property : VisibleProperties)
 		{
 			if (Property && Property->GetOwningFaction() == OutView.OwnerFaction)
 			{
@@ -803,7 +815,7 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 			// calculation used by automatic scheduling. This is planning data only.
 			TArray<const ATerritoryVolume*> PreviewTargets;
 			PreviewTargets.Add(District);
-			for (const ATerritoryVolume* Property : Properties)
+			for (const ATerritoryVolume* Property : VisibleProperties)
 			{
 				if (Property && Property->GetOwningFaction() == OutView.OwnerFaction)
 				{
@@ -1086,7 +1098,7 @@ bool UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(
 {
 	return View.bRegistered
 		&& View.bHierarchyVisible
-		&& View.bAvailable
+		&& View.bUnlocked
 		&& !View.bOwnedByViewer;
 }
 
@@ -1140,7 +1152,11 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(View.EstimatedSuccessProbability * 1000.f)));
 	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(View.AttackPriority * 10.f)));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.TotalProperties));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.KnownProperties));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.HiddenProperties));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.OwnedProperties));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.ContestableProperties));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bAllPlacesDiscovered));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ManageableGarrisonTargets));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.UnguardedGarrisonTargets));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanAddGuard));

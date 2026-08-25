@@ -42,6 +42,9 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		UTerritoryJournalWidget::StaticClass()->IsChildOf(UTerritoryActivatableWidget::StaticClass()));
 	TestFalse(TEXT("District rows reserve their width for selection details by default"),
 		GetDefault<UTerritoryDistrictRowWidget>()->bShowInlineGuardActions);
+	TestTrue(TEXT("District rows expose compact accordion control"),
+		TerritoryUITest::IsBlueprintCallable(
+			UTerritoryDistrictRowWidget::StaticClass(), TEXT("SetExpanded")));
 	TestTrue(TEXT("Embedded Territory activatables accept focus"),
 		GetDefault<UTerritoryActivatableWidget>()->IsFocusable());
 
@@ -108,6 +111,14 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			ViewStruct->FindPropertyByName(TEXT("GarrisonTargets")));
 		TestNotNull(TEXT("District view exposes Property hierarchy completion"),
 			ViewStruct->FindPropertyByName(TEXT("OwnedProperties")));
+		TestNotNull(TEXT("District view exposes anonymous locked Place count"),
+			ViewStruct->FindPropertyByName(TEXT("HiddenProperties")));
+		TestNotNull(TEXT("District view separates discovered Place count"),
+			ViewStruct->FindPropertyByName(TEXT("KnownProperties")));
+		TestNotNull(TEXT("District view exposes known contestable Place count"),
+			ViewStruct->FindPropertyByName(TEXT("ContestableProperties")));
+		TestNotNull(TEXT("District view reports when every Place is discovered"),
+			ViewStruct->FindPropertyByName(TEXT("bAllPlacesDiscovered")));
 		TestNotNull(TEXT("District view exposes its parent City"),
 			ViewStruct->FindPropertyByName(TEXT("CityTag")));
 		TestNotNull(TEXT("District view exposes effective hierarchy visibility"),
@@ -248,10 +259,10 @@ bool FTerritoryUIOperationsFilterTest::RunTest(const FString& Parameters)
 	View.bRegistered = true;
 	View.bUnlocked = true;
 	View.bHierarchyVisible = true;
-	TestFalse(TEXT("Unlocked alone is not enough for the available/unlocked command list"),
+	TestTrue(TEXT("Unlocked visible districts stay listed when a quest or diplomacy gate temporarily blocks capture"),
 		UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(View));
 	View.bAvailable = true;
-	TestTrue(TEXT("A registered unlocked actionable district appears in the available list"),
+	TestTrue(TEXT("An actionable unlocked district remains in the operations list"),
 		UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(View));
 	View.bOwnedByViewer = true;
 	TestFalse(TEXT("Owned districts never duplicate into the available list"),
