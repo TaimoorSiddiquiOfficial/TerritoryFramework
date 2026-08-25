@@ -15,6 +15,7 @@ class UNarrativeCommonTextBlock;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryDistrictRowSelected, ATerritoryDistrict*, District);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTerritoryGuardActionRequested, ATerritoryDistrict*, District, int32, Delta);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryWaypointRequested, ATerritoryDistrict*, District);
 
 /** Runtime-built row used by the district journal list. */
 UCLASS(BlueprintType, Blueprintable)
@@ -51,6 +52,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryGuardActionRequested OnGuardActionRequested;
 
+	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
+	FOnTerritoryWaypointRequested OnWaypointRequested;
+
 	/** Inline guard buttons are disabled by default; the command panel owns staffing mutations. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|UI")
 	bool bShowInlineGuardActions = false;
@@ -67,6 +71,9 @@ protected:
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> RemoveGuardButton;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> SetWaypointButton;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonTextBlock> DistrictName;
@@ -129,4 +136,7 @@ protected:
 
 	UFUNCTION()
 	void HandleRemoveGuard();
+
+	UFUNCTION()
+	void HandleSetWaypoint();
 };

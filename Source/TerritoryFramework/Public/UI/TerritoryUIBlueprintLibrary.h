@@ -298,13 +298,25 @@ class TERRITORYFRAMEWORK_API UTerritoryUIBlueprintLibrary : public UBlueprintFun
 	GENERATED_BODY()
 
 public:
-	/** Push a Territory Narrative-activatable screen onto a registered Narrative HUD layer. */
+	/** Push a Territory Narrative-activatable screen onto a Narrative HUD layer. Leave Layer Tag empty to use Narrative's standard Menu layer. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI|CommonUI",
-		meta=(DeterminesOutputType="WidgetClass"))
+		meta=(DeterminesOutputType="WidgetClass", AdvancedDisplay="LayerTag"))
 	static UTerritoryActivatableWidget* OpenTerritoryMenu(
 		APlayerController* PlayerController,
 		TSubclassOf<UTerritoryActivatableWidget> WidgetClass,
 		UPARAM(meta=(Categories="UI.Layer")) FGameplayTag LayerTag);
+
+	/** Track exactly one visible, unlocked Territory using Narrative Navigation. */
+	UFUNCTION(BlueprintCallable, Category="Territory|UI|Navigation")
+	static bool SetTerritoryWaypoint(
+		APlayerController* PlayerController, ATerritoryVolume* Territory);
+
+	UFUNCTION(BlueprintCallable, Category="Territory|UI|Navigation")
+	static void ClearTerritoryWaypoint(APlayerController* PlayerController);
+
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Navigation")
+	static ATerritoryVolume* GetTrackedTerritory(
+		APlayerController* PlayerController);
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
 		meta=(WorldContext="WorldContextObject"))

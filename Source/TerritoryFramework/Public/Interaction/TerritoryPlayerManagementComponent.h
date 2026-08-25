@@ -3,7 +3,9 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
+#include "Core/TerritoryTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
+#include "UI/TerritoryLiveEventTypes.h"
 #include "TerritoryPlayerManagementComponent.generated.h"
 
 class ATerritoryDistrictManagementPoint;
@@ -24,6 +26,8 @@ class TERRITORYFRAMEWORK_API UTerritoryPlayerManagementComponent : public UActor
 
 public:
 	UTerritoryPlayerManagementComponent();
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** Ensures the owned bridge exists on a player controller for framework-only projects. */
 	static UTerritoryPlayerManagementComponent* FindOrCreateForPlayerController(APlayerController* PlayerController);
@@ -37,6 +41,32 @@ public:
 	/** Owning-client copy of each relevant authoritative assault-state transition. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryCounterHappened OnCounterHappened;
+
+	/** Fired after an authoritative replicated transition is added to this local player's feed. */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Live Events")
+	FOnTerritoryLiveEventAdded OnLiveEventAdded;
+
+	UPROPERTY(BlueprintAssignable, Category="Territory|Live Events")
+	FOnTerritoryLiveEventsChanged OnLiveEventsChanged;
+
+	/** Newest-first session history. Expired entries are muted, then retired after the retention window. */
+	UFUNCTION(BlueprintPure, Category="Territory|Live Events")
+	TArray<FTerritoryLiveEvent> GetLiveEvents(bool bIncludeExpired = true) const;
+
+	UFUNCTION(BlueprintCallable, Category="Territory|Live Events")
+	void ClearExpiredLiveEvents();
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Live Events",
+		meta=(ClampMin="1", ClampMax="200"))
+	int32 MaxLiveEventHistory = 40;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Live Events",
+		meta=(ClampMin="1.0"))
+	float LiveEventActiveDuration = 30.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Live Events",
+		meta=(ClampMin="30.0"))
+	float ExpiredEventRetentionDuration = 300.f;
 
 	/** Server-side targeted notification route for this owning controller only. */
 	void SendAssaultNotification(const FTerritoryAssaultRecord& Assault);
@@ -79,6 +109,34 @@ public:
 	FGameplayTag GetManagedFaction() const;
 
 private:
+	UPROPERTY(Transient)
+	TArray<FTerritoryLiveEvent> LiveEvents;
+
+	TMap<TWeakObjectPtr<ATerritoryVolume>, ETerritoryState> ObservedTerritoryStates;
+
+	void BindLiveEventSources();
+	void UnbindLiveEventSources();
+	void BindTerritoryLiveEvents(ATerritoryVolume* Territory);
+	void UnbindTerritoryLiveEvents(ATerritoryVolume* Territory);
+	void AddLiveEvent(ETerritoryLiveEventType Type, const FGameplayTag& TerritoryTag,
+		const FText& Headline, const FText& Detail, bool bCanSetWaypoint,
+		float ActiveDuration = -1.f);
+	FText ResolveTerritoryName(const FGameplayTag& TerritoryTag) const;
+	FGameplayTag ResolveViewerFaction() const;
+
+	UFUNCTION()
+	void HandleTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	UFUNCTION()
+	void HandleTerritoryUnregistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	UFUNCTION()
+	void HandleTerritoryOwnershipChanged(ATerritoryVolume* Territory,
+		FGameplayTag OldOwner, FGameplayTag NewOwner);
+
+	UFUNCTION()
+	void HandleTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
+
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRequestSetGuardTarget(ATerritoryDistrictManagementPoint* ManagementPoint,
 		ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);

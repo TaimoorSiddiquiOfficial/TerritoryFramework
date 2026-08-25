@@ -4,11 +4,14 @@
 #include "NarrativeActivatableWidget.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Navigation/TerritoryMapMarker.h"
 #include "UI/TerritoryActivatableWidget.h"
 #include "UI/TerritoryDistrictManagementWidget.h"
 #include "UI/TerritoryDistrictRowWidget.h"
 #include "UI/TerritoryHUDWidget.h"
 #include "UI/TerritoryJournalWidget.h"
+#include "UI/TerritoryLiveEventRowWidget.h"
+#include "UI/TerritoryLiveEventTypes.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 
 namespace TerritoryUITest
@@ -51,6 +54,12 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	const UClass* LibraryClass = UTerritoryUIBlueprintLibrary::StaticClass();
 	TestTrue(TEXT("OpenTerritoryMenu is Blueprint callable"),
 		TerritoryUITest::IsBlueprintCallable(LibraryClass, TEXT("OpenTerritoryMenu")));
+	TestTrue(TEXT("Set Territory waypoint is Blueprint callable"),
+		TerritoryUITest::IsBlueprintCallable(LibraryClass, TEXT("SetTerritoryWaypoint")));
+	TestTrue(TEXT("Clear Territory waypoint is Blueprint callable"),
+		TerritoryUITest::IsBlueprintCallable(LibraryClass, TEXT("ClearTerritoryWaypoint")));
+	TestTrue(TEXT("Tracked Territory query is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetTrackedTerritory")));
 	TestTrue(TEXT("District operations builder is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildDistrictOperationsView")));
 	TestTrue(TEXT("District operations list is Blueprint pure"),
@@ -168,6 +177,40 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTargetForTerritory")));
 	TestTrue(TEXT("Owned bridge exposes management-point absolute target request"),
 		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTarget")));
+	TestTrue(TEXT("Owned bridge exposes the live event feed"),
+		TerritoryUITest::IsBlueprintPure(ManagementClass, TEXT("GetLiveEvents")));
+	TestNotNull(TEXT("Live event row exists for authored Reports presentation"),
+		UTerritoryLiveEventRowWidget::StaticClass());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUILiveEventExpiryTest,
+	"TerritoryFramework.UI.LiveEventExpiry",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUILiveEventExpiryTest::RunTest(const FString& Parameters)
+{
+	FTerritoryLiveEvent Event;
+	Event.CreatedRealTime = 100.0;
+	Event.ActiveDuration = 30.f;
+	TestFalse(TEXT("Live event remains active before its exact deadline"),
+		Event.IsExpiredAt(129.999));
+	TestTrue(TEXT("Live event expires at its exact deadline"),
+		Event.IsExpiredAt(130.0));
+	Event.ActiveDuration = -1.f;
+	TestFalse(TEXT("Negative duration creates a non-expiring authored entry"),
+		Event.IsExpiredAt(10000.0));
+
+	UTerritoryMapMarker* Marker = NewObject<UTerritoryMapMarker>();
+	TestNotNull(TEXT("Territory marker can be created without a world"), Marker);
+	if (Marker)
+	{
+		TestFalse(TEXT("Territory marker is not tracked by default"), Marker->IsTracked());
+		Marker->SetTracked(true);
+		TestTrue(TEXT("Tracking promotes exactly the selected marker"), Marker->IsTracked());
+		Marker->SetTracked(false);
+		TestFalse(TEXT("Clearing tracking demotes the marker"), Marker->IsTracked());
+	}
 	return true;
 }
 

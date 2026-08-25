@@ -2,10 +2,26 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryBlueprintLibrary.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Navigation/NarrativeNavigationComponent.h"
+#include "Navigation/NavigatorGameplayTags.h"
 #include "Components/BoxComponent.h"
 #include "Rendering/DrawElements.h"
 #include "Blueprint/UserWidget.h"
+
+UTerritoryMapMarker::UTerritoryMapMarker(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// Territory intel remains available on map surfaces. Compass and screen-space
+	// are opt-in waypoint domains so overlapping Districts never flood the HUD.
+	FGameplayTagContainer MapDomains;
+	MapDomains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Minimap);
+	MapDomains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Worldmap);
+	SetDefaultDomains(MapDomains);
+	DefaultMarkerActionText = NSLOCTEXT(
+		"TerritoryMapMarker", "TrackTerritoryAction", "Set Territory Waypoint");
+}
 
 void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
 {
@@ -15,6 +31,7 @@ void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
 	if (!IsValid(InTerritory)) return;
 
 	TerritoryVolume = InTerritory;
+	ActorOwner = InTerritory;
 
 	// Subscribe to ownership and state changes for auto-refresh
 	InTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
@@ -31,6 +48,7 @@ void UTerritoryMapMarker::ClearTerritoryBinding()
 		TerritoryVolume->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
 	}
 	TerritoryVolume = nullptr;
+	ActorOwner = nullptr;
 }
 
 void UTerritoryMapMarker::OnTerritoryChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
@@ -72,6 +90,23 @@ void UTerritoryMapMarker::ClearFactionColors()
 	RefreshMarker();
 }
 
+void UTerritoryMapMarker::SetTracked(bool bInTracked)
+{
+	if (bTracked == bInTracked) return;
+	bTracked = bInTracked;
+	FGameplayTagContainer Domains;
+	Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Minimap);
+	Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Worldmap);
+	if (bTracked)
+	{
+		Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Compass);
+		Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Screenspace);
+	}
+	SetDomains(Domains);
+	SetDrawMarkerPathEnabled(bTracked);
+	RefreshMarker();
+}
+
 FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType) const
 {
 	if (!TerritoryVolume.IsValid())
@@ -92,6 +127,17 @@ FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNaviga
 		return ContestedColor;
 	}
 
+	if (bTracked && State == ETerritoryState::Claimed && Selector)
+	{
+		const FGameplayTag ViewerFaction =
+			UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Selector->GetOwner());
+		if (ViewerFaction.IsValid()
+			&& TerritoryVolume->GetOwningFaction() == ViewerFaction)
+		{
+			return TrackedCapturedColor;
+		}
+	}
+
 	FGameplayTag Owner = TerritoryVolume->GetOwningFaction();
 	if (Owner.IsValid())
 	{
@@ -105,6 +151,31 @@ FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNaviga
 
 	// No owner → unclaimed → red
 	return UnclaimedColor;
+}
+
+FText UTerritoryMapMarker::GetMarkerActionText_Implementation(
+	UNarrativeNavigationComponent* Selector) const
+{
+	return bTracked
+		? NSLOCTEXT("TerritoryMapMarker", "ClearWaypointAction", "Clear Territory Waypoint")
+		: NSLOCTEXT("TerritoryMapMarker", "SetWaypointAction", "Set Territory Waypoint");
+}
+
+void UTerritoryMapMarker::OnSelect_Implementation(
+	UNarrativeNavigationComponent* Selector)
+{
+	APlayerController* PlayerController = Selector
+		? Cast<APlayerController>(Selector->GetOwner()) : nullptr;
+	if (!PlayerController || !TerritoryVolume.IsValid()) return;
+	if (bTracked)
+	{
+		UTerritoryUIBlueprintLibrary::ClearTerritoryWaypoint(PlayerController);
+	}
+	else
+	{
+		UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
+			PlayerController, TerritoryVolume.Get());
+	}
 }
 
 FText UTerritoryMapMarker::GetMarkerDisplayText_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType, FText& OutSubtitleText) const
@@ -173,7 +244,6 @@ void UTerritoryMapMarker::MarkerOnPaint_Implementation(FPaintContext& Context, F
 	// zoom, pan, and tile offsets. The world-space offset from BoxCenter to each corner
 	// is then applied in paint-local space, which is correct because the base class
 	// positions the marker center correctly in the map's coordinate system.
-	FVector2D MarkerMapLocal = GetMarkerMapLocalPosition(OnPaintData.MapOrigin, OnPaintData.MapPan);
 	FVector2D MarkerPaintLocal = GetMarkerTopLeftLocalPosition(OnPaintData);
 
 	TArray<FVector2f> LinePoints;
@@ -188,7 +258,10 @@ void UTerritoryMapMarker::MarkerOnPaint_Implementation(FPaintContext& Context, F
 
 		LinePoints.Add(FVector2f(CornerPaintLocal));
 	}
-	LinePoints.Add(LinePoints[0]); // Close the loop
+	// Copy before Add: passing LinePoints[0] by reference can be invalidated when
+	// Add reallocates the same array (UE's debug allocator correctly asserts).
+	const FVector2f FirstPoint = LinePoints[0];
+	LinePoints.Add(FirstPoint); // Close the loop
 
 	// Draw the outline with current territory color
 	FLinearColor DrawColor = GetMarkerColor(nullptr, FGameplayTag());

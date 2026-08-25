@@ -74,13 +74,13 @@ namespace
 		}
 		if (View.bAvailableForCapture)
 		{
-			return FLinearColor(1.f, 0.66f, 0.18f, 1.f);
+			return FLinearColor(1.f, 0.84f, 0.f, 1.f);
 		}
 		if (!View.bUnlocked)
 		{
 			return FLinearColor(0.42f, 0.47f, 0.52f, 1.f);
 		}
-		return FLinearColor(0.18f, 0.66f, 0.82f, 1.f);
+		return FLinearColor(0.88f, 0.74f, 0.08f, 1.f);
 	}
 }
 
@@ -106,6 +106,11 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 		RemoveGuardButton->SetVisibility(bShowInlineGuardActions
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	if (SetWaypointButton)
+	{
+		SetWaypointButton->OnClicked().AddUObject(
+			this, &UTerritoryDistrictRowWidget::HandleSetWaypoint);
+	}
 	RefreshRow();
 }
 
@@ -114,6 +119,7 @@ void UTerritoryDistrictRowWidget::NativeDestruct()
 	if (SelectDistrictButton) SelectDistrictButton->OnClicked().RemoveAll(this);
 	if (AddGuardButton) AddGuardButton->OnClicked().RemoveAll(this);
 	if (RemoveGuardButton) RemoveGuardButton->OnClicked().RemoveAll(this);
+	if (SetWaypointButton) SetWaypointButton->OnClicked().RemoveAll(this);
 	Super::NativeDestruct();
 }
 
@@ -132,8 +138,8 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 		UBorder::StaticClass(), TEXT("DistrictRowSurface"));
 	DistrictRowSurface->SetPadding(FMargin(0.f));
 	SetRoundedSurface(DistrictRowSurface,
-		FLinearColor(0.025f, 0.065f, 0.075f, 0.98f),
-		FLinearColor(0.12f, 0.24f, 0.27f, 0.82f), 10.f, 1.f);
+		FLinearColor(0.014f, 0.014f, 0.014f, 0.98f),
+		FLinearColor(0.42f, 0.35f, 0.f, 0.62f), 3.f, 1.f);
 	RootSize->SetContent(DistrictRowSurface);
 	UVerticalBox* Root = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("DistrictRowRoot"));
@@ -152,7 +158,7 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	DistrictAccentRail = WidgetTree->ConstructWidget<UBorder>(
 		UBorder::StaticClass(), TEXT("DistrictAccentRail"));
 	SetRoundedSurface(DistrictAccentRail,
-		FLinearColor(0.18f, 0.66f, 0.82f, 1.f), FLinearColor::Transparent, 10.f, 0.f);
+		FLinearColor(0.88f, 0.74f, 0.08f, 1.f), FLinearColor::Transparent, 2.f, 0.f);
 	AccentSize->SetContent(DistrictAccentRail);
 	if (UHorizontalBoxSlot* AccentSlot = Header->AddChildToHorizontalBox(AccentSize))
 	{
@@ -187,11 +193,11 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("PlaceProgressText"));
 	ExpandHintText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("ExpandHintText"));
-	StyleDistrictRowText(DistrictName, 17, FLinearColor(0.95f, 0.96f, 0.94f, 1.f));
-	StyleDistrictRowText(DistrictSummary, 12, FLinearColor(0.62f, 0.69f, 0.67f, 1.f));
+	StyleDistrictRowText(DistrictName, 17, FLinearColor(0.96f, 0.95f, 0.91f, 1.f));
+	StyleDistrictRowText(DistrictSummary, 12, FLinearColor(0.68f, 0.67f, 0.63f, 1.f));
 	StyleDistrictRowText(DistrictStatus, 11, FLinearColor(0.31f, 0.82f, 0.63f, 1.f));
-	StyleDistrictRowText(PlaceProgressText, 13, FLinearColor(0.92f, 0.93f, 0.9f, 1.f));
-	StyleDistrictRowText(ExpandHintText, 11, FLinearColor(0.69f, 0.72f, 0.7f, 1.f));
+	StyleDistrictRowText(PlaceProgressText, 13, FLinearColor(0.96f, 0.84f, 0.18f, 1.f));
+	StyleDistrictRowText(ExpandHintText, 11, FLinearColor(0.72f, 0.70f, 0.64f, 1.f));
 
 	UHorizontalBox* NameRow = WidgetTree->ConstructWidget<UHorizontalBox>(
 		UHorizontalBox::StaticClass(), TEXT("DistrictNameRow"));
@@ -234,9 +240,9 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	AddProgressSegment(TEXT("OwnedProgressSegment"),
 		FLinearColor(0.16f, 0.72f, 0.55f, 1.f), OwnedProgressSegment);
 	AddProgressSegment(TEXT("KnownProgressSegment"),
-		FLinearColor(0.93f, 0.35f, 0.28f, 1.f), KnownProgressSegment);
+		FLinearColor(1.f, 0.84f, 0.f, 1.f), KnownProgressSegment);
 	AddProgressSegment(TEXT("HiddenProgressSegment"),
-		FLinearColor(0.35f, 0.42f, 0.41f, 0.72f), HiddenProgressSegment);
+		FLinearColor(0.27f, 0.27f, 0.26f, 0.78f), HiddenProgressSegment);
 	if (UVerticalBoxSlot* ProgressSlot = Details->AddChildToVerticalBox(ProgressHeight))
 	{
 		ProgressSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
@@ -248,8 +254,8 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 		UBorder::StaticClass(), TEXT("DistrictStatusSurface"));
 	DistrictStatusSurface->SetPadding(FMargin(7.f, 2.f));
 	SetRoundedSurface(DistrictStatusSurface,
-		FLinearColor(0.04f, 0.12f, 0.14f, 0.9f),
-		FLinearColor(0.18f, 0.66f, 0.82f, 0.65f), 12.f, 1.f);
+		FLinearColor(0.035f, 0.032f, 0.01f, 0.94f),
+		FLinearColor(0.88f, 0.74f, 0.08f, 0.62f), 3.f, 1.f);
 	DistrictStatusSurface->SetContent(DistrictStatus);
 	StatusRow->AddChildToHorizontalBox(DistrictStatusSurface);
 	if (UHorizontalBoxSlot* HintSlot = StatusRow->AddChildToHorizontalBox(ExpandHintText))
@@ -277,6 +283,20 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 
 	if (NarrativeButtonClass)
 	{
+		USizeBox* WaypointSize = WidgetTree->ConstructWidget<USizeBox>(
+			USizeBox::StaticClass(), TEXT("WaypointButtonSize"));
+		WaypointSize->SetMinDesiredWidth(112.f);
+		SetWaypointButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+			NarrativeButtonClass, TEXT("SetWaypointButton"));
+		ApplyTerritoryStyle(SetWaypointButton);
+		WaypointSize->SetContent(SetWaypointButton);
+		if (UHorizontalBoxSlot* WaypointSlot =
+			Header->AddChildToHorizontalBox(WaypointSize))
+		{
+			WaypointSlot->SetPadding(FMargin(0.f, 8.f, 10.f, 8.f));
+			WaypointSlot->SetVerticalAlignment(VAlign_Center);
+		}
+
 		AddGuardButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("AddGuardButton"));
 		ApplyTerritoryStyle(AddGuardButton);
 		Header->AddChild(AddGuardButton);
@@ -406,20 +426,34 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 	{
 		RemoveGuardButton->SetIsEnabled(bCanRemoveGuard);
 	}
+	if (SetWaypointButton)
+	{
+		const bool bTracked = UTerritoryUIBlueprintLibrary::GetTrackedTerritory(
+			GetOwningPlayer()) == CurrentDistrict;
+		SetWaypointButton->SetButtonText(bTracked
+			? NSLOCTEXT("TerritoryDistrictRow", "WaypointTracked", "TRACKED  ✓")
+			: NSLOCTEXT("TerritoryDistrictRow", "SetWaypoint", "SET WAYPOINT"));
+		SetWaypointButton->SetIsSelected(bTracked);
+		SetWaypointButton->SetIsEnabled(OperationsView.bUnlocked
+			&& OperationsView.bHierarchyVisible);
+		SetWaypointButton->SetVisibility(OperationsView.bUnlocked
+			&& OperationsView.bHierarchyVisible
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
 	if (DistrictStatus)
 	{
 		DistrictStatus->SetText(ActionStatus);
 		const FLinearColor Accent = GetDistrictAccent(OperationsView);
 		DistrictStatus->SetColorAndOpacity(FSlateColor(Accent));
 		SetRoundedSurface(DistrictStatusSurface,
-			FLinearColor(Accent.R * 0.08f, Accent.G * 0.08f, Accent.B * 0.08f, 0.92f),
-			FLinearColor(Accent.R, Accent.G, Accent.B, 0.7f), 12.f, 1.f);
-		SetRoundedSurface(DistrictAccentRail, Accent, FLinearColor::Transparent, 10.f, 0.f);
+			FLinearColor(Accent.R * 0.045f, Accent.G * 0.045f, Accent.B * 0.045f, 0.94f),
+			FLinearColor(Accent.R, Accent.G, Accent.B, 0.7f), 3.f, 1.f);
+		SetRoundedSurface(DistrictAccentRail, Accent, FLinearColor::Transparent, 2.f, 0.f);
 		SetRoundedSurface(DistrictRowSurface,
 			bExpanded
-				? FLinearColor(0.035f, 0.085f, 0.095f, 0.99f)
-				: FLinearColor(0.025f, 0.065f, 0.075f, 0.98f),
-			FLinearColor(Accent.R, Accent.G, Accent.B, bExpanded ? 0.58f : 0.28f), 10.f, 1.f);
+				? FLinearColor(0.035f, 0.032f, 0.012f, 0.99f)
+				: FLinearColor(0.014f, 0.014f, 0.014f, 0.98f),
+			FLinearColor(Accent.R, Accent.G, Accent.B, bExpanded ? 0.72f : 0.30f), 3.f, 1.f);
 	}
 	RefreshPlaceProgress();
 	RebuildPlaceList();
@@ -510,15 +544,15 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 		const FLinearColor Accent = Place.bOwnedByViewer
 			? FLinearColor(0.16f, 0.72f, 0.55f, 1.f)
 			: Place.bAvailableForCapture
-				? FLinearColor(0.93f, 0.35f, 0.28f, 1.f)
-				: FLinearColor(0.56f, 0.64f, 0.62f, 1.f);
+				? FLinearColor(1.f, 0.84f, 0.f, 1.f)
+				: FLinearColor(0.68f, 0.67f, 0.63f, 1.f);
 		UBorder* PlaceSurface = WidgetTree->ConstructWidget<UBorder>(
 			UBorder::StaticClass(), FName(*FString::Printf(
 				TEXT("KnownPlaceSurface_%u"), GetTypeHash(Place.TerritoryTag))));
 		PlaceSurface->SetPadding(FMargin(10.f, 7.f));
 		SetRoundedSurface(PlaceSurface,
-			FLinearColor(0.045f, 0.105f, 0.115f, 0.98f),
-			FLinearColor(Accent.R, Accent.G, Accent.B, 0.18f), 8.f, 1.f);
+			FLinearColor(0.025f, 0.025f, 0.025f, 0.98f),
+			FLinearColor(Accent.R, Accent.G, Accent.B, 0.28f), 2.f, 1.f);
 		UNarrativeCommonTextBlock* PlaceText =
 			WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 				UNarrativeCommonTextBlock::StaticClass(),
@@ -543,8 +577,8 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 			UBorder::StaticClass(), TEXT("HiddenPlaceSummarySurface"));
 		HiddenSurface->SetPadding(FMargin(10.f, 7.f));
 		SetRoundedSurface(HiddenSurface,
-			FLinearColor(0.055f, 0.075f, 0.078f, 0.98f),
-			FLinearColor(0.32f, 0.38f, 0.37f, 0.24f), 8.f, 1.f);
+			FLinearColor(0.025f, 0.025f, 0.025f, 0.86f),
+			FLinearColor(0.32f, 0.32f, 0.31f, 0.28f), 2.f, 1.f);
 		UNarrativeCommonTextBlock* HiddenText =
 			WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 				UNarrativeCommonTextBlock::StaticClass(), TEXT("HiddenPlaceSummaryText"));
@@ -552,7 +586,7 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 			NSLOCTEXT("TerritoryDistrictRow", "HiddenPlaceSummary",
 				"{0} LOCATIONS REMAIN HIDDEN\nNames and objectives stay hidden until the story unlocks them."),
 			FText::AsNumber(OperationsView.HiddenProperties)));
-		StyleDistrictRowText(HiddenText, 11, FLinearColor(0.65f, 0.7f, 0.68f, 1.f));
+		StyleDistrictRowText(HiddenText, 11, FLinearColor(0.58f, 0.57f, 0.54f, 1.f));
 		HiddenSurface->SetContent(HiddenText);
 		if (UVerticalBoxSlot* HiddenSlot = PlaceList->AddChildToVerticalBox(HiddenSurface))
 		{
@@ -583,5 +617,14 @@ void UTerritoryDistrictRowWidget::HandleRemoveGuard()
 	if (District.IsValid())
 	{
 		OnGuardActionRequested.Broadcast(District.Get(), -1);
+	}
+}
+
+void UTerritoryDistrictRowWidget::HandleSetWaypoint()
+{
+	if (District.IsValid() && OperationsView.bUnlocked
+		&& OperationsView.bHierarchyVisible)
+	{
+		OnWaypointRequested.Broadcast(District.Get());
 	}
 }

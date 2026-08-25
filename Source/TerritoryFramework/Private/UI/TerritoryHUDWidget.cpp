@@ -12,6 +12,10 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Engine/World.h"
+#include "NarrativeGameplayTags.h"
+#include "UnrealFramework/NarrativePlayerController.h"
+#include "Widgets/CommonActivatableWidgetContainer.h"
+#include "Widgets/NarrativeGameplayHUD.h"
 
 void UTerritoryHUDWidget::NativeConstruct()
 {
@@ -48,6 +52,14 @@ void UTerritoryHUDWidget::NativeDestruct()
 
 void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 {
+	// The capture card is passive gameplay information. Narrative Menu and Modal
+	// layers own full-screen interaction, so they always suppress it.
+	if (IsNarrativeMenuBlockingHUD())
+	{
+		SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
 	// Always re-query territory at player location — handles player moving between territories
 	BindToTerritoryAtPlayer();
 
@@ -78,7 +90,7 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 			? FLinearColor(0.08f, 0.88f, 0.62f, 1.f)
 			: State == ETerritoryState::Locked
 				? FLinearColor(0.42f, 0.47f, 0.52f, 1.f)
-				: FLinearColor(1.f, 0.66f, 0.18f, 1.f);
+				: FLinearColor(1.f, 0.84f, 0.f, 1.f);
 
 	if (Text_DistrictName)
 	{
@@ -168,13 +180,30 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 		{
 			// The passive card stays compact, but temporarily grows enough to show
 			// the counterattack sentence without clipping or covering the screen.
-			CardSlot->SetSize(FVector2D(420.f, bAlertVisible ? 188.f : 132.f));
+			CardSlot->SetSize(FVector2D(400.f, bAlertVisible ? 190.f : 156.f));
 		}
 	}
 
 	bHasObservedState = true;
 	LastObservedState = State;
 	LastObservedContestingFaction = ContestingFaction;
+}
+
+bool UTerritoryHUDWidget::IsNarrativeMenuBlockingHUD() const
+{
+	const ANarrativePlayerController* NarrativeController =
+		Cast<ANarrativePlayerController>(GetOwningPlayer());
+	UNarrativeGameplayHUD* HUD = NarrativeController
+		? NarrativeController->GetNarrativeGameplayHUD() : nullptr;
+	if (!HUD) return false;
+	const FNarrativeGameplayTags& Tags = FNarrativeGameplayTags::Get();
+	for (const FGameplayTag LayerTag : { Tags.UI_Layer_Menu, Tags.UI_Layer_Modal })
+	{
+		const UCommonActivatableWidgetContainerBase* Layer =
+			HUD->GetLayerContainer(LayerTag);
+		if (Layer && IsValid(Layer->GetActiveWidget())) return true;
+	}
+	return false;
 }
 
 void UTerritoryHUDWidget::HandleAssaultNotification(const FTerritoryAssaultRecord& Assault)

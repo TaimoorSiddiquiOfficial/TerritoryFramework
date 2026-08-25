@@ -2,13 +2,262 @@
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryVolume.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
+#include "UnrealFramework/NarrativePlayerController.h"
+#include "Widgets/NarrativeGameplayHUD.h"
 
 UTerritoryPlayerManagementComponent::UTerritoryPlayerManagementComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
+}
+
+void UTerritoryPlayerManagementComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	BindLiveEventSources();
+}
+
+void UTerritoryPlayerManagementComponent::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	UnbindLiveEventSources();
+	Super::EndPlay(EndPlayReason);
+}
+
+void UTerritoryPlayerManagementComponent::BindLiveEventSources()
+{
+	APlayerController* PlayerController = Cast<APlayerController>(GetOwner());
+	if (!PlayerController || !PlayerController->IsLocalController()) return;
+	UWorld* World = GetWorld();
+	UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!Registry) return;
+
+	Registry->OnTerritoryRegistered.AddUniqueDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryRegistered);
+	Registry->OnTerritoryUnregistered.AddUniqueDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryUnregistered);
+	for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
+	{
+		BindTerritoryLiveEvents(Territory);
+	}
+}
+
+void UTerritoryPlayerManagementComponent::UnbindLiveEventSources()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry =
+			World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(
+				this, &UTerritoryPlayerManagementComponent::HandleTerritoryRegistered);
+			Registry->OnTerritoryUnregistered.RemoveDynamic(
+				this, &UTerritoryPlayerManagementComponent::HandleTerritoryUnregistered);
+			for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
+			{
+				UnbindTerritoryLiveEvents(Territory);
+			}
+		}
+	}
+	ObservedTerritoryStates.Empty();
+}
+
+void UTerritoryPlayerManagementComponent::BindTerritoryLiveEvents(
+	ATerritoryVolume* Territory)
+{
+	if (!IsValid(Territory)) return;
+	Territory->OnTerritoryOwnershipChanged.RemoveDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged);
+	Territory->OnTerritoryStateChangedDelegate.RemoveDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged);
+	Territory->OnTerritoryOwnershipChanged.AddDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged);
+	Territory->OnTerritoryStateChangedDelegate.AddDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged);
+	ObservedTerritoryStates.Add(Territory, Territory->GetTerritoryState());
+}
+
+void UTerritoryPlayerManagementComponent::UnbindTerritoryLiveEvents(
+	ATerritoryVolume* Territory)
+{
+	if (!IsValid(Territory)) return;
+	Territory->OnTerritoryOwnershipChanged.RemoveDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged);
+	Territory->OnTerritoryStateChangedDelegate.RemoveDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged);
+	ObservedTerritoryStates.Remove(Territory);
+}
+
+void UTerritoryPlayerManagementComponent::HandleTerritoryRegistered(
+	ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	BindTerritoryLiveEvents(Territory);
+}
+
+void UTerritoryPlayerManagementComponent::HandleTerritoryUnregistered(
+	ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	UnbindTerritoryLiveEvents(Territory);
+}
+
+FGameplayTag UTerritoryPlayerManagementComponent::ResolveViewerFaction() const
+{
+	return UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+		this, Cast<APlayerController>(GetOwner()));
+}
+
+FText UTerritoryPlayerManagementComponent::ResolveTerritoryName(
+	const FGameplayTag& TerritoryTag) const
+{
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UTerritoryRegistrySubsystem* Registry =
+			World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			if (const ATerritoryVolume* Territory =
+				Registry->GetTerritoryByTag(TerritoryTag))
+			{
+				const FText Name = Territory->GetTerritoryDisplayName();
+				if (!Name.IsEmpty()) return Name;
+			}
+		}
+	}
+	return UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(TerritoryTag);
+}
+
+void UTerritoryPlayerManagementComponent::AddLiveEvent(
+	ETerritoryLiveEventType Type, const FGameplayTag& TerritoryTag,
+	const FText& Headline, const FText& Detail, bool bCanSetWaypoint,
+	float ActiveDuration)
+{
+	UWorld* World = GetWorld();
+	if (!World || !Cast<APlayerController>(GetOwner())
+		|| !Cast<APlayerController>(GetOwner())->IsLocalController())
+	{
+		return;
+	}
+	const double Now = World->GetRealTimeSeconds();
+	for (const FTerritoryLiveEvent& Existing : LiveEvents)
+	{
+		if (Existing.Type == Type && Existing.TerritoryTag == TerritoryTag
+			&& Existing.Headline.EqualTo(Headline)
+			&& Now - Existing.CreatedRealTime < 0.75)
+		{
+			return;
+		}
+	}
+
+	FTerritoryLiveEvent Event;
+	Event.EventID = FGuid::NewGuid();
+	Event.Type = Type;
+	Event.TerritoryTag = TerritoryTag;
+	Event.TerritoryName = ResolveTerritoryName(TerritoryTag);
+	Event.Headline = Headline;
+	Event.Detail = Detail;
+	Event.CreatedRealTime = Now;
+	Event.ActiveDuration = ActiveDuration >= 0.f
+		? ActiveDuration : LiveEventActiveDuration;
+	Event.bCanSetWaypoint = bCanSetWaypoint && TerritoryTag.IsValid();
+	LiveEvents.Insert(Event, 0);
+	if (LiveEvents.Num() > FMath::Max(1, MaxLiveEventHistory))
+	{
+		LiveEvents.SetNum(FMath::Max(1, MaxLiveEventHistory));
+	}
+
+	OnLiveEventAdded.Broadcast(Event);
+	OnLiveEventsChanged.Broadcast();
+	if (const ANarrativePlayerController* NarrativeController =
+		Cast<ANarrativePlayerController>(GetOwner()))
+	{
+		if (UNarrativeGameplayHUD* HUD =
+			NarrativeController->GetNarrativeGameplayHUD())
+		{
+			HUD->ShowNotification(Headline, FMath::Min(Event.ActiveDuration, 6.f));
+		}
+	}
+}
+
+TArray<FTerritoryLiveEvent>
+UTerritoryPlayerManagementComponent::GetLiveEvents(bool bIncludeExpired) const
+{
+	TArray<FTerritoryLiveEvent> Result;
+	const UWorld* World = GetWorld();
+	const double Now = World ? World->GetRealTimeSeconds() : 0.0;
+	for (FTerritoryLiveEvent Event : LiveEvents)
+	{
+		Event.bExpired = Event.IsExpiredAt(Now);
+		if (Now - Event.CreatedRealTime > ExpiredEventRetentionDuration) continue;
+		if (!bIncludeExpired && Event.bExpired) continue;
+		Result.Add(MoveTemp(Event));
+	}
+	return Result;
+}
+
+void UTerritoryPlayerManagementComponent::ClearExpiredLiveEvents()
+{
+	const UWorld* World = GetWorld();
+	const double Now = World ? World->GetRealTimeSeconds() : 0.0;
+	const int32 Removed = LiveEvents.RemoveAll(
+		[Now](const FTerritoryLiveEvent& Event)
+		{
+			return Event.IsExpiredAt(Now);
+		});
+	if (Removed > 0) OnLiveEventsChanged.Broadcast();
+}
+
+void UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged(
+	ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	if (!Territory || Territory->GetTerritoryState() == ETerritoryState::Locked) return;
+	const FGameplayTag ViewerFaction = ResolveViewerFaction();
+	const FText Name = Territory->GetTerritoryDisplayName();
+	if (ViewerFaction.IsValid() && NewOwner == ViewerFaction)
+	{
+		AddLiveEvent(ETerritoryLiveEventType::Captured, Territory->GetTerritoryTag(),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CapturedHeadline", "{0} captured"), Name),
+			NSLOCTEXT("TerritoryLiveEvents", "CapturedDetail", "Your faction now controls this territory. Track it to navigate, reinforce, or review its Places."),
+			true);
+	}
+	else if (ViewerFaction.IsValid() && OldOwner == ViewerFaction)
+	{
+		AddLiveEvent(ETerritoryLiveEventType::Lost, Territory->GetTerritoryTag(),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "LostHeadline", "{0} was lost"), Name),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "LostDetail", "Control changed to {0}. Set a waypoint to plan a response."),
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(NewOwner)), true);
+	}
+}
+
+void UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged(
+	ATerritoryVolume* Territory, ETerritoryState NewState)
+{
+	if (!Territory) return;
+	const ETerritoryState PreviousState = ObservedTerritoryStates.FindRef(Territory);
+	ObservedTerritoryStates.Add(Territory, NewState);
+	const FText Name = Territory->GetTerritoryDisplayName();
+	if (PreviousState == ETerritoryState::Locked && NewState != ETerritoryState::Locked)
+	{
+		AddLiveEvent(ETerritoryLiveEventType::Unlocked, Territory->GetTerritoryTag(),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "UnlockedHeadline", "{0} unlocked"), Name),
+			NSLOCTEXT("TerritoryLiveEvents", "UnlockedDetail", "New Territory intel is available. Open Operations or set a waypoint."), true);
+	}
+	else if (NewState == ETerritoryState::Contested)
+	{
+		AddLiveEvent(ETerritoryLiveEventType::Contested, Territory->GetTerritoryTag(),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "ContestedHeadline", "{0} is contested"), Name),
+			NSLOCTEXT("TerritoryLiveEvents", "ContestedDetail", "Physical attackers are applying capture pressure. Track the Territory to respond."), true);
+	}
+	else if (PreviousState == ETerritoryState::Contested
+		&& NewState == ETerritoryState::Claimed)
+	{
+		AddLiveEvent(ETerritoryLiveEventType::Secured, Territory->GetTerritoryTag(),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "SecuredHeadline", "{0} secured"), Name),
+			NSLOCTEXT("TerritoryLiveEvents", "SecuredDetail", "The contest ended and control is stable."), true);
+	}
 }
 
 UTerritoryPlayerManagementComponent* UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(
@@ -645,6 +894,14 @@ void UTerritoryPlayerManagementComponent::ClientReceiveAssaultNotification_Imple
 	const FTerritoryAssaultRecord& Assault)
 {
 	OnAssaultNotification.Broadcast(Assault);
+	AddLiveEvent(ETerritoryLiveEventType::CounterAttackWarning,
+		Assault.TargetTerritory,
+		FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterWarningHeadline",
+			"Counterattack forming near {0}"), ResolveTerritoryName(Assault.TargetTerritory)),
+		FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterWarningDetail",
+			"{0} is preparing {1} finite attackers. The assault waits for the configured activation rules."),
+			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.AttackingFaction),
+			FText::AsNumber(Assault.PlannedForce)), true, 45.f);
 }
 
 void UTerritoryPlayerManagementComponent::SendCounterHappened(
@@ -660,6 +917,54 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 	const FTerritoryCounterAttackStateEvent& Event)
 {
 	OnCounterHappened.Broadcast(Event);
+	const FGameplayTag Target = Event.Assault.TargetTerritory;
+	const FText Name = ResolveTerritoryName(Target);
+	switch (Event.NewState)
+	{
+	case ETerritoryAssaultState::ScheduledWarning:
+	case ETerritoryAssaultState::WaitingForPlayerProximity:
+		AddLiveEvent(ETerritoryLiveEventType::CounterAttackWarning, Target,
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterScheduledHeadline",
+				"Attack warning: {0}"), Name),
+			NSLOCTEXT("TerritoryLiveEvents", "CounterScheduledDetail",
+				"A hostile response is scheduled. Track the District to inspect its route and defence."), true, 45.f);
+		break;
+	case ETerritoryAssaultState::Active:
+		AddLiveEvent(ETerritoryLiveEventType::CounterAttackActive, Target,
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterActiveHeadline",
+				"Counterattack active at {0}"), Name),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterActiveDetail",
+				"{0} attackers remain alive and {1} remain in reserve."),
+				FText::AsNumber(Event.Assault.AliveForce),
+				FText::AsNumber(Event.Assault.PendingReserveForce)), true, 60.f);
+		break;
+	case ETerritoryAssaultState::Defeated:
+		AddLiveEvent(ETerritoryLiveEventType::CounterAttackDefeated, Target,
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterDefeatedHeadline",
+				"Counterattack defeated at {0}"), Name),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterDefeatedDetail",
+				"The finite force was removed after {0} casualties and {1} withdrawals."),
+				FText::AsNumber(Event.Assault.KilledForce),
+				FText::AsNumber(Event.Assault.WithdrawnForce)), true);
+		break;
+	case ETerritoryAssaultState::Succeeded:
+		AddLiveEvent(ETerritoryLiveEventType::CounterAttackSucceeded, Target,
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterSucceededHeadline",
+				"Enemy force took {0}"), Name),
+			NSLOCTEXT("TerritoryLiveEvents", "CounterSucceededDetail",
+				"The physical capture completed. Track the Territory to organize a counter-offensive."), true, 60.f);
+		break;
+	case ETerritoryAssaultState::Cancelled:
+		AddLiveEvent(ETerritoryLiveEventType::CounterAttackCancelled, Target,
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterCancelledHeadline",
+				"Attack on {0} cancelled"), Name),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterCancelledDetail",
+				"The response ended before capture. Resolution: {0}."),
+				FText::FromString(UEnum::GetValueAsString(Event.Resolution))), true);
+		break;
+	default:
+		break;
+	}
 }
 
 APawn* UTerritoryPlayerManagementComponent::GetManagingPawn() const

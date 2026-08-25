@@ -14,6 +14,8 @@ class TERRITORYFRAMEWORK_API UTerritoryMapMarker : public UMapMarker
 	GENERATED_BODY()
 
 public:
+	UTerritoryMapMarker(const FObjectInitializer& ObjectInitializer);
+
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	void SetTerritoryVolume(ATerritoryVolume* InTerritory);
 
@@ -29,9 +31,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	void ClearFactionColors();
 
+	/** Promote this one Territory to Narrative compass/screen-space guidance. */
+	UFUNCTION(BlueprintCallable, Category = "Territory Marker|Waypoint")
+	void SetTracked(bool bInTracked);
+
+	UFUNCTION(BlueprintPure, Category = "Territory Marker|Waypoint")
+	bool IsTracked() const { return bTracked; }
+
 protected:
 	virtual FLinearColor GetMarkerColor_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType) const override;
 	virtual FText GetMarkerDisplayText_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType, FText& OutSubtitleText) const override;
+	virtual FText GetMarkerActionText_Implementation(UNarrativeNavigationComponent* Selector) const override;
+	virtual void OnSelect_Implementation(UNarrativeNavigationComponent* Selector) override;
 	virtual void MarkerOnPaint_Implementation(FPaintContext& Context, FMarkerOnPaintData& OnPaintData) const override;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
@@ -63,9 +74,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
 	float OutlineThickness = 2.f;
 
+	/** Selected captured Territory accent. Unselected Territories never enter the compass domain. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Waypoint")
+	FLinearColor TrackedCapturedColor = FLinearColor(0.08f, 0.95f, 0.46f, 1.f);
+
 private:
 	UPROPERTY()
 	TWeakObjectPtr<ATerritoryVolume> TerritoryVolume;
+
+	bool bTracked = false;
 
 	UFUNCTION()
 	void OnTerritoryChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);

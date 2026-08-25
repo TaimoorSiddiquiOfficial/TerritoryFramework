@@ -21,6 +21,7 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UI/TerritoryDistrictRowWidget.h"
+#include "UI/TerritoryLiveEventRowWidget.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
@@ -182,7 +183,7 @@ void UTerritoryJournalWidget::NativeConstruct()
 	if (Btn_LossTab)
 	{
 		Btn_LossTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleLossTabClicked);
-		Btn_LossTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "LossTab", "REPORTS"));
+		Btn_LossTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "LossTab", "ACTIVITY"));
 	}
 	if (Btn_CloseCommandDrawer)
 	{
@@ -267,6 +268,7 @@ void UTerritoryJournalWidget::NativeConstruct()
 
 	BindTerritoryDelegates();
 	BindManagementComponent();
+	BuildLiveEventPanel();
 	RefreshFilterOptions();
 	SetSelectedDetailTab(SelectedDetailTab);
 	RefreshDistrictList();
@@ -357,6 +359,8 @@ void UTerritoryJournalWidget::NativeDestruct()
 	{
 		ManagementComponent->OnGuardPurchaseResult.RemoveDynamic(
 			this, &UTerritoryJournalWidget::HandleGuardManagementResult);
+		ManagementComponent->OnLiveEventsChanged.RemoveDynamic(
+			this, &UTerritoryJournalWidget::HandleLiveEventsChanged);
 	}
 	if (UWorld* World = GetWorld())
 	{
@@ -442,12 +446,101 @@ void UTerritoryJournalWidget::BindManagementComponent()
 	{
 		ManagementComponent->OnGuardPurchaseResult.RemoveDynamic(
 			this, &UTerritoryJournalWidget::HandleGuardManagementResult);
+		ManagementComponent->OnLiveEventsChanged.RemoveDynamic(
+			this, &UTerritoryJournalWidget::HandleLiveEventsChanged);
 	}
 	ManagementComponent = Component;
 	if (ManagementComponent.IsValid())
 	{
 		ManagementComponent->OnGuardPurchaseResult.AddUniqueDynamic(
 			this, &UTerritoryJournalWidget::HandleGuardManagementResult);
+		ManagementComponent->OnLiveEventsChanged.AddUniqueDynamic(
+			this, &UTerritoryJournalWidget::HandleLiveEventsChanged);
+	}
+}
+
+void UTerritoryJournalWidget::BuildLiveEventPanel()
+{
+	if (LiveEventsBox || !WidgetTree) return;
+	UVerticalBox* ReportsStack = Cast<UVerticalBox>(
+		WidgetTree->FindWidget(TEXT("ReportsStack")));
+	if (!ReportsStack) return;
+
+	UBorder* FeedSurface = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), TEXT("LiveEventFeedSurface"));
+	FeedSurface->SetPadding(FMargin(12.f, 10.f));
+	StyleGeneratedTerritorySurface(FeedSurface,
+		FLinearColor(0.012f, 0.012f, 0.012f, 0.97f),
+		FLinearColor(0.82f, 0.68f, 0.f, 0.48f), 2.f);
+	if (UVerticalBoxSlot* FeedSlot = ReportsStack->AddChildToVerticalBox(FeedSurface))
+	{
+		FeedSlot->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
+	}
+	UVerticalBox* FeedStack = WidgetTree->ConstructWidget<UVerticalBox>(
+		UVerticalBox::StaticClass(), TEXT("LiveEventFeedStack"));
+	FeedSurface->SetContent(FeedStack);
+	Text_LiveEventCount = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LiveEventCount"));
+	StyleGeneratedTerritoryText(Text_LiveEventCount, 15,
+		FLinearColor(1.f, 0.84f, 0.f, 1.f),
+		ETerritoryGeneratedTextRole::Heading);
+	FeedStack->AddChildToVerticalBox(Text_LiveEventCount);
+	UTextBlock* Caption = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LiveEventCaption"));
+	Caption->SetText(NSLOCTEXT("TerritoryJournal", "LiveEventCaption",
+		"Live Territory changes stay bright. Expired reports remain muted for context; active locations can be tracked immediately."));
+	StyleGeneratedTerritoryText(Caption, 11,
+		FLinearColor(0.66f, 0.65f, 0.61f, 1.f),
+		ETerritoryGeneratedTextRole::Muted);
+	if (UVerticalBoxSlot* CaptionSlot = FeedStack->AddChildToVerticalBox(Caption))
+	{
+		CaptionSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 8.f));
+	}
+	LiveEventsBox = WidgetTree->ConstructWidget<UVerticalBox>(
+		UVerticalBox::StaticClass(), TEXT("LiveEventsBox"));
+	FeedStack->AddChildToVerticalBox(LiveEventsBox);
+	RefreshLiveEvents();
+}
+
+void UTerritoryJournalWidget::RefreshLiveEvents()
+{
+	if (!LiveEventsBox) return;
+	LiveEventsBox->ClearChildren();
+	const TArray<FTerritoryLiveEvent> Events = ManagementComponent.IsValid()
+		? ManagementComponent->GetLiveEvents(true)
+		: TArray<FTerritoryLiveEvent>();
+	int32 ActiveCount = 0;
+	for (const FTerritoryLiveEvent& Event : Events)
+	{
+		ActiveCount += Event.bExpired ? 0 : 1;
+		UTerritoryLiveEventRowWidget* Row =
+			CreateWidget<UTerritoryLiveEventRowWidget>(
+				this, UTerritoryLiveEventRowWidget::StaticClass());
+		if (!Row) continue;
+		Row->InitializeLiveEvent(Event);
+		Row->OnWaypointRequested.AddUniqueDynamic(
+			this, &UTerritoryJournalWidget::HandleLiveEventWaypointRequested);
+		if (UVerticalBoxSlot* RowSlot = LiveEventsBox->AddChildToVerticalBox(Row))
+		{
+			RowSlot->SetPadding(FMargin(0.f, 2.f));
+		}
+	}
+	if (Text_LiveEventCount)
+	{
+		Text_LiveEventCount->SetText(FText::Format(
+			NSLOCTEXT("TerritoryJournal", "LiveEventCount", "LIVE INTELLIGENCE  •  {0} ACTIVE  •  {1} TOTAL"),
+			FText::AsNumber(ActiveCount), FText::AsNumber(Events.Num())));
+	}
+	if (Events.IsEmpty())
+	{
+		UTextBlock* Empty = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+			UNarrativeCommonTextBlock::StaticClass(), TEXT("NoLiveTerritoryEvents"));
+		Empty->SetText(NSLOCTEXT("TerritoryJournal", "NoLiveEvents",
+			"No Territory changes recorded this session."));
+		StyleGeneratedTerritoryText(Empty, 12,
+			FLinearColor(0.48f, 0.54f, 0.53f, 1.f),
+			ETerritoryGeneratedTextRole::Muted);
+		LiveEventsBox->AddChild(Empty);
 	}
 }
 
@@ -466,8 +559,8 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		UBorder::StaticClass(), TEXT("GarrisonPlannerCard"));
 	PlannerCard->SetPadding(FMargin(12.f, 10.f));
 	StyleGeneratedTerritorySurface(PlannerCard,
-		FLinearColor(0.014f, 0.062f, 0.055f, 0.94f),
-		FLinearColor(0.08f, 0.88f, 0.62f, 0.62f));
+		FLinearColor(0.014f, 0.014f, 0.014f, 0.97f),
+		FLinearColor(0.82f, 0.68f, 0.f, 0.62f), 2.f);
 	PlannerHost->AddChild(PlannerCard);
 	UVerticalBox* PlannerStack = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("GarrisonPlannerStack"));
@@ -484,7 +577,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonTargetName"));
 	Text_GarrisonTargetName->SetText(NSLOCTEXT(
 		"TerritoryJournal", "NoPlannerTargetName", "SELECT A GARRISON TARGET"));
-	StyleGeneratedTerritoryText(Text_GarrisonTargetName, 18, FLinearColor(0.31f, 0.82f, 0.63f, 1.f));
+	StyleGeneratedTerritoryText(Text_GarrisonTargetName, 18, FLinearColor(1.f, 0.84f, 0.f, 1.f));
 	PlannerStack->AddChild(Text_GarrisonTargetName);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -925,6 +1018,7 @@ bool UTerritoryJournalWidget::PassesFilters(const FTerritoryDistrictOperationsVi
 
 void UTerritoryJournalWidget::RefreshDistrictList()
 {
+	RefreshLiveEvents();
 	if (!bFiltersInitialized)
 	{
 		RefreshFilterOptions();
@@ -1042,8 +1136,42 @@ UTerritoryDistrictRowWidget* UTerritoryJournalWidget::CreateOperationsRow(
 			&& SelectedDistrict.Get() == View.District);
 		Row->OnDistrictSelected.AddUniqueDynamic(this, &UTerritoryJournalWidget::HandleDistrictSelected);
 		Row->OnGuardActionRequested.AddUniqueDynamic(this, &UTerritoryJournalWidget::HandleGuardActionRequested);
+		Row->OnWaypointRequested.AddUniqueDynamic(
+			this, &UTerritoryJournalWidget::HandleWaypointRequested);
 	}
 	return Row;
+}
+
+void UTerritoryJournalWidget::HandleWaypointRequested(ATerritoryDistrict* District)
+{
+	if (!District) return;
+	if (UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
+		GetOwningPlayer(), District))
+	{
+		LastOperationsRevision = INDEX_NONE;
+		RefreshDistrictList();
+	}
+}
+
+void UTerritoryJournalWidget::HandleLiveEventWaypointRequested(
+	FGameplayTag TerritoryTag)
+{
+	UWorld* World = GetWorld();
+	UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	ATerritoryVolume* Territory = Registry
+		? Registry->GetTerritoryByTag(TerritoryTag) : nullptr;
+	if (Territory && UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
+		GetOwningPlayer(), Territory))
+	{
+		LastOperationsRevision = INDEX_NONE;
+		RefreshDistrictList();
+	}
+}
+
+void UTerritoryJournalWidget::HandleLiveEventsChanged()
+{
+	RefreshLiveEvents();
 }
 
 UTextBlock* UTerritoryJournalWidget::CreateHierarchyTextRow(
@@ -1261,8 +1389,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 			: View.bOwnedByViewer
 				? FLinearColor(0.08f, 0.88f, 0.62f, 1.f)
 				: View.bAvailableForCapture
-					? FLinearColor(1.f, 0.66f, 0.18f, 1.f)
-					: FLinearColor(0.18f, 0.66f, 0.82f, 1.f);
+					? FLinearColor(1.f, 0.84f, 0.f, 1.f)
+					: FLinearColor(0.88f, 0.74f, 0.08f, 1.f);
 	const FText ReserveText = View.bReserveCountKnown
 		? FText::AsNumber(View.ReserveGuards)
 		: NSLOCTEXT("TerritoryJournal", "ReserveUnknown", "server snapshot required");

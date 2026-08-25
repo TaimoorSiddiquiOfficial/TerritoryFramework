@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "Core/TerritoryTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "TerritoryCounterAttackSubsystem.generated.h"
 

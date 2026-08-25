@@ -11,12 +11,15 @@
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "Widgets/CommonActivatableWidgetContainer.h"
 #include "Widgets/NarrativeGameplayHUD.h"
+#include "Navigation/TerritoryMapMarker.h"
+#include "Navigation/TerritoryNavigationMarkerComponent.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Items/NarrativeItem.h"
+#include "NarrativeGameplayTags.h"
 
 namespace
 {
@@ -250,9 +253,16 @@ UTerritoryActivatableWidget* UTerritoryUIBlueprintLibrary::OpenTerritoryMenu(
 	TSubclassOf<UTerritoryActivatableWidget> WidgetClass,
 	FGameplayTag LayerTag)
 {
-	if (!PlayerController || !PlayerController->IsLocalController() || !WidgetClass || !LayerTag.IsValid())
+	if (!PlayerController || !PlayerController->IsLocalController() || !WidgetClass)
 	{
 		return nullptr;
+	}
+	// "Open Territory Menu" should work out of the box for community users.
+	// An explicit tag still supports custom layers; an empty tag uses Narrative's
+	// standard Menu layer and therefore participates in normal HUD suppression.
+	if (!LayerTag.IsValid())
+	{
+		LayerTag = FNarrativeGameplayTags::Get().UI_Layer_Menu;
 	}
 	const ANarrativePlayerController* NarrativeController = Cast<ANarrativePlayerController>(PlayerController);
 	UNarrativeGameplayHUD* HUD = NarrativeController
@@ -271,6 +281,59 @@ UTerritoryActivatableWidget* UTerritoryUIBlueprintLibrary::OpenTerritoryMenu(
 		}
 	}
 	return Layer->AddWidget<UTerritoryActivatableWidget>(WidgetClass);
+}
+
+bool UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
+	APlayerController* PlayerController, ATerritoryVolume* Territory)
+{
+	if (!PlayerController || !PlayerController->IsLocalController() || !Territory
+		|| Territory->GetTerritoryState() == ETerritoryState::Locked
+		|| !IsTerritoryVisibleToPlayer(PlayerController, Territory))
+	{
+		return false;
+	}
+	ClearTerritoryWaypoint(PlayerController);
+	UTerritoryNavigationMarkerComponent* Component = Territory->GetMapMarkerComponent();
+	UTerritoryMapMarker* Marker = Component ? Component->GetTerritoryMapMarker() : nullptr;
+	if (!Marker) return false;
+	Marker->SetTracked(true);
+	return true;
+}
+
+void UTerritoryUIBlueprintLibrary::ClearTerritoryWaypoint(
+	APlayerController* PlayerController)
+{
+	if (!PlayerController || !PlayerController->IsLocalController()) return;
+	for (ATerritoryVolume* Territory :
+		UTerritoryBlueprintLibrary::GetAllTerritories(PlayerController))
+	{
+		if (!Territory) continue;
+		if (UTerritoryNavigationMarkerComponent* Component =
+			Territory->GetMapMarkerComponent())
+		{
+			if (UTerritoryMapMarker* Marker = Component->GetTerritoryMapMarker())
+			{
+				Marker->SetTracked(false);
+			}
+		}
+	}
+}
+
+ATerritoryVolume* UTerritoryUIBlueprintLibrary::GetTrackedTerritory(
+	APlayerController* PlayerController)
+{
+	if (!PlayerController || !PlayerController->IsLocalController()) return nullptr;
+	for (ATerritoryVolume* Territory :
+		UTerritoryBlueprintLibrary::GetAllTerritories(PlayerController))
+	{
+		if (!Territory) continue;
+		const UTerritoryNavigationMarkerComponent* Component =
+			Territory->GetMapMarkerComponent();
+		const UTerritoryMapMarker* Marker = Component
+			? Component->GetTerritoryMapMarker() : nullptr;
+		if (Marker && Marker->IsTracked()) return Territory;
+	}
+	return nullptr;
 }
 
 bool UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(

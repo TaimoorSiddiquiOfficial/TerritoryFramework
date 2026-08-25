@@ -76,4 +76,5 @@ private:
 	UFUNCTION()
 	void HandleCounterHappened(const FTerritoryCounterAttackStateEvent& Event);
 	void PresentCounterAttackAlert(const FText& AlertText, float Duration);
+	bool IsNarrativeMenuBlockingHUD() const;
 };

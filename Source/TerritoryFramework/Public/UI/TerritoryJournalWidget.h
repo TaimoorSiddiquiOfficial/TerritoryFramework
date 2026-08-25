@@ -19,6 +19,7 @@ class UWidgetSwitcher;
 class UWidgetAnimation;
 class UTerritoryPlayerManagementComponent;
 class UTerritoryDistrictRowWidget;
+class UTerritoryLiveEventRowWidget;
 
 /** Narrative activatable Territory tab with live district, economy, and guard management flow. */
 UCLASS(BlueprintType, Blueprintable)
@@ -101,6 +102,13 @@ protected:
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> LossReportList;
+
+	/** Runtime-built activity feed hosted by the Reports page. */
+	UPROPERTY(Transient)
+	TObjectPtr<UVerticalBox> LiveEventsBox;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Text_LiveEventCount;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_FilterSummary;
@@ -322,6 +330,8 @@ private:
 	void SetCommandDrawerOpen(bool bOpen);
 	UTextBlock* CreateHierarchyTextRow(const FText& Text, FName WidgetName, bool bHeading = false);
 	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
+	void BuildLiveEventPanel();
+	void RefreshLiveEvents();
 	UTerritoryDistrictRowWidget* CreateOperationsRow(const FTerritoryDistrictOperationsView& View);
 	bool PassesFilters(const FTerritoryDistrictOperationsView& View) const;
 
@@ -396,6 +406,15 @@ private:
 
 	UFUNCTION()
 	void HandleTerritoryUnregistered(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	UFUNCTION()
+	void HandleWaypointRequested(ATerritoryDistrict* District);
+
+	UFUNCTION()
+	void HandleLiveEventWaypointRequested(FGameplayTag TerritoryTag);
+
+	UFUNCTION()
+	void HandleLiveEventsChanged();
 
 	UFUNCTION()
 	void HandleDistrictSelected(ATerritoryDistrict* District);
