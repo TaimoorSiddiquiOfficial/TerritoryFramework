@@ -356,6 +356,40 @@ void UTerritoryPlayerManagementComponent::RequestSetGuardTargetForTerritory(
 	}
 }
 
+void UTerritoryPlayerManagementComponent::RequestSendReinforcements(
+	ATerritoryVolume* Territory, int32 Count)
+{
+	const int32 RequestId = ++NextRequestId;
+	if (!Territory || Count <= 0 || Count > MaxGuardPurchaseCount)
+	{
+		OnGuardPurchaseResult.Broadcast(Territory, false,
+			NSLOCTEXT("TerritoryManagement", "InvalidReinforcementOrder",
+				"Reinforcement order is invalid."), RequestId);
+		return;
+	}
+	if (UWorld* World = GetWorld())
+	{
+		const float Now = World->GetTimeSeconds();
+		if (Now - LastPurchaseRequestTime < PurchaseCooldown)
+		{
+			OnGuardPurchaseResult.Broadcast(Territory, false,
+				NSLOCTEXT("TerritoryManagement", "ReinforcementCooldown",
+					"Please wait before sending another command."), RequestId);
+			return;
+		}
+		LastPurchaseRequestTime = Now;
+	}
+
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		PerformSendReinforcements(Territory, Count, RequestId);
+	}
+	else
+	{
+		ServerRequestSendReinforcements(Territory, Count, RequestId);
+	}
+}
+
 void UTerritoryPlayerManagementComponent::RequestPurchaseGuards(
 	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count)
 {
@@ -534,6 +568,33 @@ void UTerritoryPlayerManagementComponent::ServerRequestSetGuardTargetForTerritor
 	}
 	LastPurchaseRequestTime = Now;
 	PerformSetGuardTarget(Territory, NewDesiredGuardCount, RequestId);
+}
+
+bool UTerritoryPlayerManagementComponent::ServerRequestSendReinforcements_Validate(
+	ATerritoryVolume* Territory, int32 Count, int32 RequestId)
+{
+	return Territory && Count > 0 && Count <= MaxGuardPurchaseCount
+		&& RequestId > LastServerRequestId;
+}
+
+void UTerritoryPlayerManagementComponent::ServerRequestSendReinforcements_Implementation(
+	ATerritoryVolume* Territory, int32 Count, int32 RequestId)
+{
+	if (!GetWorld() || RequestId <= LastServerRequestId)
+	{
+		return;
+	}
+	LastServerRequestId = RequestId;
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now - LastPurchaseRequestTime < PurchaseCooldown)
+	{
+		ClientReceiveGuardPurchaseResult(Territory, false,
+			NSLOCTEXT("TerritoryManagement", "ServerReinforcementCooldown",
+				"Please wait before sending another command."), RequestId);
+		return;
+	}
+	LastPurchaseRequestTime = Now;
+	PerformSendReinforcements(Territory, Count, RequestId);
 }
 
 bool UTerritoryPlayerManagementComponent::ServerRequestPurchaseGuards_Validate(
@@ -742,6 +803,29 @@ void UTerritoryPlayerManagementComponent::PerformSetGuardTarget(
 
 	const FTerritoryGarrisonMutationResult Result =
 		Territory->TrySetDesiredGuardCount(Pawn, NewDesiredGuardCount);
+	ClientReceiveGuardPurchaseResult(Territory, Result.bSuccess, Result.Message, RequestId);
+}
+
+void UTerritoryPlayerManagementComponent::PerformSendReinforcements(
+	ATerritoryVolume* Territory, int32 Count, int32 RequestId)
+{
+	APawn* Pawn = GetManagingPawn();
+	if (!Territory || !Pawn)
+	{
+		ClientReceiveGuardPurchaseResult(Territory, false,
+			NSLOCTEXT("TerritoryManagement", "MissingReinforcementContext",
+				"Garrison reinforcement context is unavailable."), RequestId);
+		return;
+	}
+	if (Count <= 0 || Count > MaxGuardPurchaseCount)
+	{
+		ClientReceiveGuardPurchaseResult(Territory, false,
+			NSLOCTEXT("TerritoryManagement", "ServerInvalidReinforcementOrder",
+				"Reinforcement order is invalid."), RequestId);
+		return;
+	}
+	const FTerritoryGarrisonMutationResult Result =
+		Territory->TrySendReinforcements(Pawn, Count);
 	ClientReceiveGuardPurchaseResult(Territory, Result.bSuccess, Result.Message, RequestId);
 }
 

@@ -355,6 +355,17 @@ struct FTerritoryStateConfig
 {
 	GENERATED_BODY()
 
+	/**
+	 * Strategic controls supplied to the current owning faction while this state
+	 * is active. The grant is derived from live ownership, so it needs no separate
+	 * save data and is removed as soon as the Territory is lost or leaves this state.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Command Capabilities",
+		meta=(DisplayName="Granted Command Capabilities",
+			Categories="Territory.Capability",
+			ToolTip="Controls this Territory gives its current owner while this state is active. Easy example: in a District's Claimed row add Territory.Capability.GuardStaffing. The player's faction can add guards while it holds that District; losing the District removes the control immediately. Leave this empty when the state gives no strategic perk."))
+	FGameplayTagContainer GrantedCommandCapabilities;
+
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
 		meta=(DisplayName="Entry Conditions",
 			ToolTip="Every condition must pass before the enum state can begin. Example: entering Locked may require a story event to be active. A direct Claimed owner swap does not enter Claimed again; normal physical capture passes through Contested first."))

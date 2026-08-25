@@ -70,6 +70,98 @@ TArray<ATerritoryVolume*> UTerritoryBlueprintLibrary::GetChildTerritories(const 
 	return Registry ? Registry->GetChildTerritories(ParentTag) : TArray<ATerritoryVolume*>();
 }
 
+FGameplayTagContainer UTerritoryBlueprintLibrary::GetFactionCommandCapabilities(
+	const UObject* WorldContextObject, const FGameplayTag& FactionTag)
+{
+	FGameplayTagContainer Result;
+	if (!FactionTag.IsValid())
+	{
+		return Result;
+	}
+
+	for (const ATerritoryVolume* Territory : GetAllTerritories(WorldContextObject))
+	{
+		if (IsValid(Territory) && Territory->GetOwningFaction() == FactionTag)
+		{
+			Result.AppendTags(Territory->GetActiveCommandCapabilities());
+		}
+	}
+	return Result;
+}
+
+TArray<ATerritoryVolume*> UTerritoryBlueprintLibrary::GetFactionCommandCapabilitySources(
+	const UObject* WorldContextObject, const FGameplayTag& FactionTag,
+	const FGameplayTag& Capability)
+{
+	TArray<ATerritoryVolume*> Result;
+	if (!FactionTag.IsValid() || !Capability.IsValid())
+	{
+		return Result;
+	}
+
+	for (ATerritoryVolume* Territory : GetAllTerritories(WorldContextObject))
+	{
+		if (IsValid(Territory) && Territory->GetOwningFaction() == FactionTag
+			&& Territory->GetActiveCommandCapabilities().HasTagExact(Capability))
+		{
+			Result.Add(Territory);
+		}
+	}
+	Result.Sort([](const ATerritoryVolume& A, const ATerritoryVolume& B)
+	{
+		return A.GetTerritoryDisplayName().ToString() < B.GetTerritoryDisplayName().ToString();
+	});
+	return Result;
+}
+
+bool UTerritoryBlueprintLibrary::IsCommandCapabilityUsed(
+	const UObject* WorldContextObject, const FGameplayTag& Capability)
+{
+	if (!Capability.IsValid())
+	{
+		return false;
+	}
+	for (const ATerritoryVolume* Territory : GetAllTerritories(WorldContextObject))
+	{
+		if (IsValid(Territory) && Territory->IsCommandCapabilityConfigured(Capability))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool UTerritoryBlueprintLibrary::CanFactionUseCommandCapability(
+	const UObject* WorldContextObject, const FGameplayTag& FactionTag,
+	const FGameplayTag& Capability, FText& OutFailureReason)
+{
+	OutFailureReason = FText::GetEmpty();
+	if (!WorldContextObject || !FactionTag.IsValid() || !Capability.IsValid())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryCommand", "InvalidCapabilityContext",
+			"The faction command network is unavailable.");
+		return false;
+	}
+
+	// Capability gates are opt-in. Community projects authored before the command
+	// network keep their existing controls until at least one Territory configures
+	// the relevant capability in a State Config.
+	if (!IsCommandCapabilityUsed(WorldContextObject, Capability))
+	{
+		return true;
+	}
+	if (GetFactionCommandCapabilities(WorldContextObject, FactionTag).HasTagExact(Capability))
+	{
+		return true;
+	}
+
+	OutFailureReason = FText::Format(
+		NSLOCTEXT("TerritoryCommand", "CapabilityNotHeld",
+			"Capture and hold a Territory whose active State Config grants {0}. Losing that Territory removes this control."),
+		GetFriendlyTagDisplayName(Capability));
+	return false;
+}
+
 int32 UTerritoryBlueprintLibrary::GetTerritoryCount(const UObject* WorldContextObject)
 {
 	UTerritoryRegistrySubsystem* Registry = GetTerritoryRegistry(WorldContextObject);

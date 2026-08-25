@@ -91,6 +91,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestSetGuardTargetForTerritory(ATerritoryVolume* Territory, int32 NewDesiredGuardCount);
 
+	/**
+	 * Deploys existing reserves to an owned garrison without increasing its saved
+	 * staffing target. The server rechecks ownership, state, reserve posts, and the
+	 * Reinforcements command capability before executing.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|Management")
+	void RequestSendReinforcements(ATerritoryVolume* Territory, int32 Count = 1);
+
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestPurchaseGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count = 1);
 
@@ -150,6 +158,12 @@ private:
 		int32 NewDesiredGuardCount, int32 RequestId);
 
 	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerRequestSendReinforcements(ATerritoryVolume* Territory,
+		int32 Count, int32 RequestId);
+	bool ServerRequestSendReinforcements_Validate(ATerritoryVolume* Territory,
+		int32 Count, int32 RequestId);
+
+	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRequestPurchaseGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	bool ServerRequestPurchaseGuards_Validate(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 
@@ -179,6 +193,7 @@ private:
 	void PerformRemove(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	void PerformRemoveForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
 	void PerformSetGuardTarget(ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);
+	void PerformSendReinforcements(ATerritoryVolume* Territory, int32 Count, int32 RequestId);
 	void PerformSetGuardTargetAtManagementPoint(ATerritoryDistrictManagementPoint* ManagementPoint,
 		ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);
 	bool CanManageDistrict(ATerritoryDistrict* District, APawn* Pawn, FText& OutFailureReason) const;

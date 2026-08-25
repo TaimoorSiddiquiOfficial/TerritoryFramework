@@ -336,6 +336,7 @@ void UTerritoryJournalWidget::NativeDestruct()
 	if (Btn_ApplyGuardTarget) Btn_ApplyGuardTarget->OnClicked().RemoveAll(this);
 	if (Btn_ZeroGuardTarget) Btn_ZeroGuardTarget->OnClicked().RemoveAll(this);
 	if (Btn_MaxGuardTarget) Btn_MaxGuardTarget->OnClicked().RemoveAll(this);
+	if (Btn_SendReinforcement) Btn_SendReinforcement->OnClicked().RemoveAll(this);
 	if (DistrictSearchBox)
 	{
 		DistrictSearchBox->OnTextChanged.RemoveDynamic(this, &UTerritoryJournalWidget::HandleSearchChanged);
@@ -653,6 +654,11 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonFinance"));
 	StyleGeneratedTerritoryText(Text_GarrisonFinance, 14, FLinearColor(0.96f, 0.72f, 0.38f, 1.f));
 	PlannerStack->AddChild(Text_GarrisonFinance);
+	Text_CommandCapabilities = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_CommandCapabilities"));
+	StyleGeneratedTerritoryText(Text_CommandCapabilities, 12,
+		FLinearColor(0.74f, 0.78f, 0.76f, 1.f), ETerritoryGeneratedTextRole::Muted);
+	PlannerStack->AddChild(Text_CommandCapabilities);
 
 	if (!ButtonClass) return;
 
@@ -683,6 +689,21 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		"Set this garrison to its authored physical capacity."));
 	Btn_MaxGuardTarget->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleMaxGuardTargetClicked);
 	Actions->AddChild(Btn_MaxGuardTarget);
+
+	UHorizontalBox* ReinforcementActions = WidgetTree->ConstructWidget<UHorizontalBox>(
+		UHorizontalBox::StaticClass(), TEXT("ReinforcementActions"));
+	PlannerStack->AddChild(ReinforcementActions);
+	Btn_SendReinforcement = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+		ButtonClass, TEXT("Btn_SendReinforcement"));
+	ApplyTerritoryStyle(Btn_SendReinforcement);
+	Btn_SendReinforcement->SetButtonText(NSLOCTEXT(
+		"TerritoryJournal", "SendReinforcement", "SEND 1 RESERVE"));
+	Btn_SendReinforcement->SetToolTipText(NSLOCTEXT(
+		"TerritoryJournal", "SendReinforcementTip",
+		"Immediately fill one empty assigned post using an existing reserve. This does not recruit a new guard."));
+	Btn_SendReinforcement->OnClicked().AddUObject(
+		this, &UTerritoryJournalWidget::HandleSendReinforcementClicked);
+	ReinforcementActions->AddChild(Btn_SendReinforcement);
 }
 
 void UTerritoryJournalWidget::RefreshGarrisonManagementControls(
@@ -768,6 +789,20 @@ void UTerritoryJournalWidget::RefreshGarrisonManagementControls(
 		GuardTargetSpinBox->SetValue(Target ? Target->GetDesiredGuardCount() : 0.f);
 		GuardTargetSpinBox->SetIsEnabled(Target != nullptr && Maximum > 0.f);
 	}
+	if (Text_CommandCapabilities)
+	{
+		TArray<FString> CapabilityLines;
+		CapabilityLines.Add(TEXT("STRATEGIC CONTROLS"));
+		for (const FTerritoryCommandCapabilityView& Capability : View.CommandCapabilities)
+		{
+			CapabilityLines.Add(FString::Printf(TEXT("[%s] %s — %s"),
+				Capability.bGranted ? TEXT("ONLINE") : TEXT("LOCKED"),
+				*Capability.DisplayName.ToString(),
+				*Capability.AvailabilityReason.ToString()));
+		}
+		Text_CommandCapabilities->SetText(FText::FromString(
+			FString::Join(CapabilityLines, TEXT("\n"))));
+	}
 	UpdateGarrisonTargetPreview();
 }
 
@@ -837,6 +872,15 @@ void UTerritoryJournalWidget::UpdateGarrisonTargetPreview()
 		bHasTarget && View.bManageable && View.DesiredGuards > 0);
 	if (Btn_MaxGuardTarget) Btn_MaxGuardTarget->SetIsEnabled(
 		bHasTarget && View.bManageable && View.DesiredGuards < View.MaximumGuards);
+	if (Btn_SendReinforcement)
+	{
+		Btn_SendReinforcement->SetIsEnabled(
+			bHasTarget && View.bCanSendReinforcements);
+		Btn_SendReinforcement->SetToolTipText(View.bCanSendReinforcements
+			? NSLOCTEXT("TerritoryJournal", "SendReinforcementReady",
+				"Deploy one reserve into an empty assigned post now. The staffing target and recruitment balance do not change.")
+			: View.ReinforcementFailureReason);
+	}
 }
 
 void UTerritoryJournalWidget::SelectRelativeGarrisonTarget(int32 Direction)
@@ -1029,6 +1073,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	const TArray<FTerritoryDistrictOperationsView> AllViews =
 		UTerritoryUIBlueprintLibrary::GetPlayerVisibleDistrictOperationsViews(
 			this, GetOwningPlayer(), ETerritoryOperationsFilter::All);
+	RefreshCommandCenterIdentity(AllViews);
 	uint32 Revision = GetTypeHash(SelectedOwnerFilter);
 	Revision = HashCombineFast(Revision, GetTypeHash(SelectedStateFilter));
 	Revision = HashCombineFast(Revision, GetTypeHash(SearchFilter));
@@ -1118,6 +1163,57 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 			FText::AsNumber(VisibleCount)));
 	}
 	RefreshOperationalSummaries(AllViews);
+}
+
+void UTerritoryJournalWidget::RefreshCommandCenterIdentity(
+	const TArray<FTerritoryDistrictOperationsView>& Views)
+{
+	TMap<FString, FText> Cities;
+	int32 OwnedDistricts = 0;
+	int32 VisiblePlaces = 0;
+	int32 HiddenPlaces = 0;
+	for (const FTerritoryDistrictOperationsView& View : Views)
+	{
+		const FString CityKey = View.CityTag.IsValid()
+			? View.CityTag.ToString()
+			: FString::Printf(TEXT("Independent:%s"), *View.CityDisplayName.ToString());
+		Cities.FindOrAdd(CityKey) = View.CityDisplayName.IsEmpty()
+			? NSLOCTEXT("TerritoryJournal", "IndependentNetwork", "Independent Territories")
+			: View.CityDisplayName;
+		OwnedDistricts += View.bOwnedByViewer ? 1 : 0;
+		VisiblePlaces += View.KnownProperties;
+		HiddenPlaces += View.HiddenProperties;
+	}
+
+	if (Text_JournalEyebrow)
+	{
+		Text_JournalEyebrow->SetText(Cities.Num() > 1
+			? NSLOCTEXT("TerritoryJournal", "RegionalNetworkEyebrow", "REGIONAL TERRITORY NETWORK")
+			: NSLOCTEXT("TerritoryJournal", "CityNetworkEyebrow", "CITY TERRITORY NETWORK"));
+	}
+	if (Text_JournalTitle)
+	{
+		FText Title = NSLOCTEXT("TerritoryJournal", "GenericCommandCenter", "TERRITORY COMMAND CENTER");
+		if (Cities.Num() == 1)
+		{
+			for (const TPair<FString, FText>& Pair : Cities)
+			{
+				Title = FText::Format(NSLOCTEXT("TerritoryJournal", "NamedCommandCenter",
+					"{0} COMMAND CENTER"), Pair.Value);
+				break;
+			}
+		}
+		Text_JournalTitle->SetText(Title);
+	}
+	if (Text_JournalSubtitle)
+	{
+		Text_JournalSubtitle->SetText(FText::Format(
+			NSLOCTEXT("TerritoryJournal", "DynamicNetworkSummary",
+				"{0} cities  •  {1} unlocked districts  •  {2} controlled  •  {3} visible places  •  {4} hidden"),
+			FText::AsNumber(Cities.Num()), FText::AsNumber(Views.Num()),
+			FText::AsNumber(OwnedDistricts), FText::AsNumber(VisiblePlaces),
+			FText::AsNumber(HiddenPlaces)));
+	}
 }
 
 UTerritoryDistrictRowWidget* UTerritoryJournalWidget::CreateOperationsRow(
@@ -2108,6 +2204,29 @@ void UTerritoryJournalWidget::HandleMaxGuardTargetClicked()
 	if (SelectedGarrisonTarget.IsValid())
 	{
 		SubmitSelectedGuardTarget(SelectedGarrisonTarget->GetMaxGuardCount());
+	}
+}
+
+void UTerritoryJournalWidget::HandleSendReinforcementClicked()
+{
+	if (!SelectedGarrisonTarget.IsValid())
+	{
+		if (Text_CommandStatus)
+		{
+			Text_CommandStatus->SetText(NSLOCTEXT("TerritoryJournal", "NoReinforcementTarget",
+				"Select a loaded garrison before sending reinforcements."));
+		}
+		return;
+	}
+	BindManagementComponent();
+	if (ManagementComponent.IsValid())
+	{
+		ManagementComponent->RequestSendReinforcements(SelectedGarrisonTarget.Get(), 1);
+	}
+	else if (Text_CommandStatus)
+	{
+		Text_CommandStatus->SetText(NSLOCTEXT("TerritoryJournal", "NoReinforcementAuthority",
+			"Player command authority is unavailable."));
 	}
 }
 

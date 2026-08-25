@@ -122,6 +122,16 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_HeaderStatus;
 
+	/** Dynamic identity; replaces any example/static City copy authored in the Blueprint. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_JournalEyebrow;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_JournalTitle;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_JournalSubtitle;
+
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_TotalWeeklyEarnings;
 
@@ -291,6 +301,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> Text_GarrisonFinance;
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Text_CommandCapabilities;
+	UPROPERTY(Transient)
 	TObjectPtr<UProgressBar> GarrisonStaffingProgressBar;
 	UPROPERTY(Transient)
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_PreviousGarrisonTarget;
@@ -302,6 +314,8 @@ private:
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_ZeroGuardTarget;
 	UPROPERTY(Transient)
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_MaxGuardTarget;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_SendReinforcement;
 	TMap<FString, FGameplayTag> OwnerFilterTags;
 	FString SelectedOwnerFilter;
 	FString SelectedStateFilter;
@@ -330,6 +344,7 @@ private:
 	void SetCommandDrawerOpen(bool bOpen);
 	UTextBlock* CreateHierarchyTextRow(const FText& Text, FName WidgetName, bool bHeading = false);
 	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
+	void RefreshCommandCenterIdentity(const TArray<FTerritoryDistrictOperationsView>& Views);
 	void BuildLiveEventPanel();
 	void RefreshLiveEvents();
 	UTerritoryDistrictRowWidget* CreateOperationsRow(const FTerritoryDistrictOperationsView& View);
@@ -400,6 +415,9 @@ private:
 
 	UFUNCTION()
 	void HandleMaxGuardTargetClicked();
+
+	UFUNCTION()
+	void HandleSendReinforcementClicked();
 
 	UFUNCTION()
 	void HandleTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);

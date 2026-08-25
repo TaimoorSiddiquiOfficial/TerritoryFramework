@@ -4,6 +4,7 @@
 #include "Core/TerritoryGuardSpawnValidation.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryCommandTags.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -614,6 +615,28 @@ float ATerritoryVolume::GetControlProgress() const { return OwnershipData.Contro
 bool ATerritoryVolume::IsContested() const { return OwnershipData.State == ETerritoryState::Contested; }
 FGameplayTag ATerritoryVolume::GetTerritoryTag() const { return TerritoryTag; }
 FText ATerritoryVolume::GetTerritoryDisplayName() const { return TerritoryDisplayName; }
+
+FGameplayTagContainer ATerritoryVolume::GetActiveCommandCapabilities() const
+{
+	const FTerritoryStateConfig* Config = StateConfigs.Find(OwnershipData.State);
+	return Config ? Config->GrantedCommandCapabilities : FGameplayTagContainer();
+}
+
+bool ATerritoryVolume::IsCommandCapabilityConfigured(const FGameplayTag& Capability) const
+{
+	if (!Capability.IsValid())
+	{
+		return false;
+	}
+	for (const TPair<ETerritoryState, FTerritoryStateConfig>& Pair : StateConfigs)
+	{
+		if (Pair.Value.GrantedCommandCapabilities.HasTagExact(Capability))
+		{
+			return true;
+		}
+	}
+	return false;
+}
 int32 ATerritoryVolume::GetMaxConcurrentAttackers() const { return OwnershipData.MaxConcurrentAttackers; }
 int32 ATerritoryVolume::GetDefenderCount() const { return OwnershipData.DefenderCount; }
 int32 ATerritoryVolume::GetPeriodicIncome() const { return OwnershipData.PeriodicIncome; }
@@ -2193,6 +2216,17 @@ bool ATerritoryVolume::CanSetDesiredGuardCount(const AActor* Requester,
 		OutFailureReason = FText::FromString(TEXT("No guard NPC definition is configured for this faction."));
 		return false;
 	}
+	if (NewDesiredGuardCount > GetDesiredGuardCount())
+	{
+		FText CapabilityFailure;
+		if (!UTerritoryBlueprintLibrary::CanFactionUseCommandCapability(
+			this, OwnershipData.OwningFaction,
+			TerritoryCommandTags::GuardStaffing, CapabilityFailure))
+		{
+			OutFailureReason = CapabilityFailure;
+			return false;
+		}
+	}
 
 	const int32 Increase = FMath::Max(0, NewDesiredGuardCount - GetDesiredGuardCount());
 	OutRecruitmentCost = GetGuardRecruitmentCost(Increase);
@@ -2366,6 +2400,128 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 		FText::AsNumber(Result.NewActiveGuards),
 		FText::AsNumber(Result.RecruitmentCost),
 		FText::AsNumber(static_cast<int64>(FMath::Max(0, OwnershipData.GuardCost)) * NewDesiredGuardCount));
+	return Result;
+}
+
+bool ATerritoryVolume::CanSendReinforcements(const AActor* Requester, int32 Count,
+	FText& OutFailureReason) const
+{
+	OutFailureReason = FText::GetEmpty();
+	if (!Requester || Count <= 0)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryCommand", "InvalidReinforcementRequest",
+			"Choose a valid owned garrison and reinforcement count.");
+		return false;
+	}
+	if (!ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
+		OwnershipData.State, OwnershipData.OwningFaction,
+		OwnershipData.ContestingFaction))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryCommand", "ReinforcementStateBlocked",
+			"Reinforcements require an owned claimed garrison or an owned garrison under enemy contest.");
+		return false;
+	}
+	if (!UTerritoryBlueprintLibrary::IsActorInFaction(
+		this, const_cast<AActor*>(Requester), OwnershipData.OwningFaction))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryCommand", "ReinforcementNotOwner",
+			"Only the owning faction can reinforce this garrison.");
+		return false;
+	}
+
+	FText CapabilityFailure;
+	if (!UTerritoryBlueprintLibrary::CanFactionUseCommandCapability(
+		this, OwnershipData.OwningFaction,
+		TerritoryCommandTags::Reinforcements, CapabilityFailure))
+	{
+		OutFailureReason = CapabilityFailure;
+		return false;
+	}
+
+	const int32 Shortfall = FMath::Max(0, GetDesiredGuardCount() - GetSpawnedGuardCount());
+	if (Shortfall < Count)
+	{
+		OutFailureReason = Shortfall <= 0
+			? NSLOCTEXT("TerritoryCommand", "NoReinforcementShortfall",
+				"This garrison already has every assigned guard active.")
+			: NSLOCTEXT("TerritoryCommand", "ReinforcementExceedsShortfall",
+				"The requested reinforcements exceed the current staffing shortfall.");
+		return false;
+	}
+
+	int32 DeployableReserves = 0;
+	for (const ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+	{
+		if (SpawnPoint && SpawnPoint->HasReserveAvailable() && SpawnPoint->HasAvailableSlot())
+		{
+			++DeployableReserves;
+		}
+	}
+	if (DeployableReserves < Count)
+	{
+		OutFailureReason = DeployableReserves <= 0
+			? NSLOCTEXT("TerritoryCommand", "NoDeployableReserves",
+				"No reserve guard has a free authored post in this garrison.")
+			: NSLOCTEXT("TerritoryCommand", "InsufficientDeployableReserves",
+				"Not enough reserve guards have free authored posts for this order.");
+		return false;
+	}
+	return true;
+}
+
+FTerritoryGarrisonMutationResult ATerritoryVolume::TrySendReinforcements(
+	AActor* Requester, int32 Count)
+{
+	FTerritoryGarrisonMutationResult Result;
+	Result.OldDesiredGuards = GetDesiredGuardCount();
+	Result.NewDesiredGuards = Result.OldDesiredGuards;
+	Result.OldActiveGuards = GetSpawnedGuardCount();
+	Result.NewActiveGuards = Result.OldActiveGuards;
+	if (!HasAuthority())
+	{
+		Result.Message = NSLOCTEXT("TerritoryCommand", "ReinforcementServerOnly",
+			"Reinforcement orders can only be executed by the server.");
+		return Result;
+	}
+
+	FText FailureReason;
+	if (!CanSendReinforcements(Requester, Count, FailureReason))
+	{
+		Result.Message = FailureReason;
+		return Result;
+	}
+
+	TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
+	SpawnPoints.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
+	{
+		if (A.Priority != B.Priority) return A.Priority > B.Priority;
+		if (A.HasPatrolRoute() != B.HasPatrolRoute()) return A.HasPatrolRoute();
+		return A.GetPathName() < B.GetPathName();
+	});
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
+	{
+		if (Result.GuardsDeployed >= Count)
+		{
+			break;
+		}
+		if (SpawnPoint && SpawnPoint->HasReserveAvailable()
+			&& SpawnPoint->HasAvailableSlot() && SpawnPoint->SpawnReserveGuard())
+		{
+			++Result.GuardsDeployed;
+		}
+	}
+
+	RefreshGarrisonSnapshot();
+	ForceNetUpdate();
+	Result.NewActiveGuards = GetSpawnedGuardCount();
+	Result.bSuccess = Result.GuardsDeployed > 0;
+	Result.Message = Result.bSuccess
+		? FText::Format(NSLOCTEXT("TerritoryCommand", "ReinforcementsDeployed",
+			"{0}: {1} reserve reinforcement(s) deployed. Active guards: {2}/{3}."),
+			GetTerritoryDisplayName(), FText::AsNumber(Result.GuardsDeployed),
+			FText::AsNumber(Result.NewActiveGuards), FText::AsNumber(Result.NewDesiredGuards))
+		: NSLOCTEXT("TerritoryCommand", "ReinforcementPlacementFailed",
+			"Reserve deployment could not find a safe free authored post.");
 	return Result;
 }
 

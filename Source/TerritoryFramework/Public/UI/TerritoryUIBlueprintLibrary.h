@@ -147,8 +147,27 @@ struct TERRITORYFRAMEWORK_API FTerritoryGarrisonOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 NetIncome = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bCanIncreaseTarget = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bCanDecreaseTarget = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bCanSendReinforcements = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText IncreaseFailureReason;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText DecreaseFailureReason;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText ReinforcementFailureReason;
+};
+
+/** One player-facing strategic control and the currently held sources that grant it. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryCommandCapabilityView
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Command") FGameplayTag Capability;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Command") FText DisplayName;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Command") FText Description;
+	/** False means no project Territory uses this gate, so legacy action availability is retained. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Command") bool bConfigured = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Command") bool bGranted = false;
+	/** Only active, currently held sources are exposed; locked enemy source names are never leaked. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Command") TArray<FText> ActiveSourceNames;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Command") FText AvailabilityReason;
 };
 
 /** A read-only, viewer-relative projection of existing Territory authorities. */
@@ -223,8 +242,14 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") bool bFinancialRisk = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") bool bCanAddGuard = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") bool bCanRemoveGuard = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bCanSendReinforcements = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") FText AddGuardFailureReason;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") FText RemoveGuardFailureReason;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText ReinforcementFailureReason;
+
+	/** State-driven faction controls. Built-ins include guard staffing and reserve reinforcement. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Command")
+	TArray<FTerritoryCommandCapabilityView> CommandCapabilities;
 
 	/** District garrison plus every loaded, registered child Property garrison. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") TArray<FTerritoryGarrisonOperationsView> GarrisonTargets;

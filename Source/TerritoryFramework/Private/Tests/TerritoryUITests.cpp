@@ -142,6 +142,19 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			ViewStruct->FindPropertyByName(TEXT("ThreatTargetTerritory")));
 		TestNotNull(TEXT("District view exposes deterministic strategic priority"),
 			ViewStruct->FindPropertyByName(TEXT("AttackPriority")));
+		TestNotNull(TEXT("District view exposes state-driven command capabilities"),
+			ViewStruct->FindPropertyByName(TEXT("CommandCapabilities")));
+		TestNotNull(TEXT("District view exposes reinforcement availability"),
+			ViewStruct->FindPropertyByName(TEXT("bCanSendReinforcements")));
+	}
+	const UScriptStruct* CapabilityStruct = FTerritoryCommandCapabilityView::StaticStruct();
+	TestNotNull(TEXT("Command capability view is reflected"), CapabilityStruct);
+	if (CapabilityStruct)
+	{
+		TestNotNull(TEXT("Capability view reports active source names without locked-source disclosure"),
+			CapabilityStruct->FindPropertyByName(TEXT("ActiveSourceNames")));
+		TestNotNull(TEXT("Capability view distinguishes configured gates"),
+			CapabilityStruct->FindPropertyByName(TEXT("bConfigured")));
 	}
 	const UScriptStruct* HierarchyStruct = FTerritoryHierarchyOperationsView::StaticStruct();
 	TestNotNull(TEXT("Hierarchy operations view is reflected"), HierarchyStruct);
@@ -164,6 +177,8 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			GarrisonStruct->FindPropertyByName(TEXT("RecruitmentCostPerGuard")));
 		TestNotNull(TEXT("Garrison view exposes local profit and loss"),
 			GarrisonStruct->FindPropertyByName(TEXT("NetIncome")));
+		TestNotNull(TEXT("Garrison view exposes reserve reinforcement eligibility"),
+			GarrisonStruct->FindPropertyByName(TEXT("bCanSendReinforcements")));
 	}
 	const UClass* ManagementClass = UTerritoryPlayerManagementComponent::StaticClass();
 	const FProperty* CounterEvent = ManagementClass->FindPropertyByName(TEXT("OnCounterHappened"));
@@ -177,6 +192,8 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTargetForTerritory")));
 	TestTrue(TEXT("Owned bridge exposes management-point absolute target request"),
 		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSetGuardTarget")));
+	TestTrue(TEXT("Owned bridge exposes server-validated reinforcement request"),
+		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSendReinforcements")));
 	TestTrue(TEXT("Owned bridge exposes the live event feed"),
 		TerritoryUITest::IsBlueprintPure(ManagementClass, TEXT("GetLiveEvents")));
 	TestNotNull(TEXT("Live event row exists for authored Reports presentation"),

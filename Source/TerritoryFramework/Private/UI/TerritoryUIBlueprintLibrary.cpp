@@ -1,6 +1,7 @@
 #include "UI/TerritoryUIBlueprintLibrary.h"
 
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryCommandTags.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
@@ -26,6 +27,49 @@ namespace
 	AActor* ResolveViewerActor(APlayerController* Viewer)
 	{
 		return Viewer && Viewer->GetPawn() ? static_cast<AActor*>(Viewer->GetPawn()) : Viewer;
+	}
+
+	FTerritoryCommandCapabilityView BuildCommandCapabilityView(
+		const UObject* WorldContextObject, const FGameplayTag& Faction,
+		const FGameplayTag& Capability, const FText& DisplayName,
+		const FText& Description)
+	{
+		FTerritoryCommandCapabilityView View;
+		View.Capability = Capability;
+		View.DisplayName = DisplayName;
+		View.Description = Description;
+		View.bConfigured = UTerritoryBlueprintLibrary::IsCommandCapabilityUsed(
+			WorldContextObject, Capability);
+		FText FailureReason;
+		View.bGranted = UTerritoryBlueprintLibrary::CanFactionUseCommandCapability(
+			WorldContextObject, Faction, Capability, FailureReason);
+		for (const ATerritoryVolume* Source :
+			UTerritoryBlueprintLibrary::GetFactionCommandCapabilitySources(
+				WorldContextObject, Faction, Capability))
+		{
+			if (IsValid(Source))
+			{
+				View.ActiveSourceNames.Add(Source->GetTerritoryDisplayName());
+			}
+		}
+		if (!View.bConfigured)
+		{
+			View.AvailabilityReason = NSLOCTEXT("TerritoryOperations", "LegacyCapabilityAvailable",
+				"Available. No strategic source requirement is configured for this project.");
+		}
+		else if (View.bGranted)
+		{
+			View.AvailabilityReason = FText::Format(
+				NSLOCTEXT("TerritoryOperations", "CapabilityGrantedBy",
+					"Available while your faction holds: {0}"),
+				FText::FromString(FString::JoinBy(View.ActiveSourceNames, TEXT(", "),
+					[](const FText& Name) { return Name.ToString(); })));
+		}
+		else
+		{
+			View.AvailabilityReason = FailureReason;
+		}
+		return View;
 	}
 
 	const ATerritoryWorldState* FindTerritoryWorldState(const UWorld* World)
@@ -257,6 +301,7 @@ UTerritoryActivatableWidget* UTerritoryUIBlueprintLibrary::OpenTerritoryMenu(
 	{
 		return nullptr;
 	}
+
 	// "Open Territory Menu" should work out of the box for community users.
 	// An explicit tag still supports custom layers; an empty tag uses Narrative's
 	// standard Menu layer and therefore participates in normal HUD suppression.
@@ -550,6 +595,11 @@ bool UTerritoryUIBlueprintLibrary::BuildGarrisonOperationsView(
 		OutView.DecreaseFailureReason = NSLOCTEXT("TerritoryOperations", "GarrisonAlreadyEmpty",
 			"Garrison staffing target is already zero.");
 	}
+	if (ViewerActor)
+	{
+		OutView.bCanSendReinforcements = Territory->CanSendReinforcements(
+			ViewerActor, 1, OutView.ReinforcementFailureReason);
+	}
 	return true;
 }
 
@@ -735,6 +785,7 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	OutView.GuardUpkeep = 0;
 	OutView.bCanAddGuard = false;
 	OutView.bCanRemoveGuard = false;
+	OutView.bCanSendReinforcements = false;
 	float WeightedGuardQuality = 0.f;
 	float GuardQualityWeight = 0.f;
 	OutView.GuardQuality = 0.f;
@@ -752,6 +803,13 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		OutView.GuardUpkeep += Garrison.GuardUpkeep;
 		OutView.bCanAddGuard = OutView.bCanAddGuard || Garrison.bCanIncreaseTarget;
 		OutView.bCanRemoveGuard = OutView.bCanRemoveGuard || Garrison.bCanDecreaseTarget;
+		OutView.bCanSendReinforcements = OutView.bCanSendReinforcements
+			|| Garrison.bCanSendReinforcements;
+		if (OutView.ReinforcementFailureReason.IsEmpty()
+			&& !Garrison.ReinforcementFailureReason.IsEmpty())
+		{
+			OutView.ReinforcementFailureReason = Garrison.ReinforcementFailureReason;
+		}
 		OutView.ManageableGarrisonTargets += Garrison.bManageable ? 1 : 0;
 		OutView.UnguardedGarrisonTargets +=
 			Garrison.MaximumGuards > 0 && Garrison.ActiveGuards <= 0 ? 1 : 0;
@@ -780,6 +838,18 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		OutView.AddGuardFailureReason = OutView.ManagementFailureReason;
 		OutView.RemoveGuardFailureReason = OutView.ManagementFailureReason;
 	}
+	OutView.CommandCapabilities.Add(BuildCommandCapabilityView(
+		WorldContextObject, OutView.ViewerFaction,
+		TerritoryCommandTags::GuardStaffing,
+		NSLOCTEXT("TerritoryOperations", "GuardStaffingCapability", "Garrison Staffing"),
+		NSLOCTEXT("TerritoryOperations", "GuardStaffingCapabilityDescription",
+			"Raise persistent guard targets and pay recruitment plus upkeep.")));
+	OutView.CommandCapabilities.Add(BuildCommandCapabilityView(
+		WorldContextObject, OutView.ViewerFaction,
+		TerritoryCommandTags::Reinforcements,
+		NSLOCTEXT("TerritoryOperations", "ReinforcementCapability", "Emergency Reinforcements"),
+		NSLOCTEXT("TerritoryOperations", "ReinforcementCapabilityDescription",
+			"Deploy an existing reserve into an empty assigned guard post without recruiting a new guard.")));
 	OutView.bFinancialRisk = OutView.NetIncome < 0 || OutView.ActiveGuards < OutView.DesiredGuards;
 
 	TArray<FTerritoryProductionSiteRecord> ProductionRecords;
@@ -1224,6 +1294,7 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 	Hash = HashCombineFast(Hash, GetTypeHash(View.UnguardedGarrisonTargets));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanAddGuard));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanRemoveGuard));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanSendReinforcements));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ProducingSiteCount));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.BlockedProductionSiteCount));
 	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.ViewerOwnerDiplomacy)));
@@ -1246,6 +1317,17 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.ReserveGuards));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.PendingDeployments));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.NetIncome));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.bCanSendReinforcements));
+	}
+	for (const FTerritoryCommandCapabilityView& Capability : View.CommandCapabilities)
+	{
+		Hash = HashCombineFast(Hash, GetTypeHash(Capability.Capability));
+		Hash = HashCombineFast(Hash, GetTypeHash(Capability.bConfigured));
+		Hash = HashCombineFast(Hash, GetTypeHash(Capability.bGranted));
+		for (const FText& SourceName : Capability.ActiveSourceNames)
+		{
+			Hash = HashCombineFast(Hash, GetTypeHash(SourceName.ToString()));
+		}
 	}
 	for (const FTerritoryProductionSiteOperationsView& Site : View.ProductionSites)
 	{

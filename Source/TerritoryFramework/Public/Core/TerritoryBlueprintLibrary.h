@@ -111,6 +111,44 @@ public:
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction Territory Count"))
 	static int32 GetFactionTerritoryCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag);
 
+	// ═══════════════════════════════════════════════════════════════════════════════
+	// State-driven Command Capabilities
+	// ═══════════════════════════════════════════════════════════════════════════════
+
+	/**
+	 * Combines capabilities granted by every Territory currently owned by the
+	 * faction. Example: a claimed radio District grants Reinforcements; when the
+	 * faction loses it, this result no longer contains that capability.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Command",
+		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction Command Capabilities"))
+	static FGameplayTagContainer GetFactionCommandCapabilities(
+		const UObject* WorldContextObject, const FGameplayTag& FactionTag);
+
+	/** Returns currently held Territories that supply the exact capability. */
+	UFUNCTION(BlueprintPure, Category="Territory|Command",
+		meta=(WorldContext="WorldContextObject", DisplayName="Get Command Capability Sources"))
+	static TArray<ATerritoryVolume*> GetFactionCommandCapabilitySources(
+		const UObject* WorldContextObject, const FGameplayTag& FactionTag,
+		const FGameplayTag& Capability);
+
+	/** True when at least one loaded Territory authors this capability in any state. */
+	UFUNCTION(BlueprintPure, Category="Territory|Command",
+		meta=(WorldContext="WorldContextObject", DisplayName="Is Command Capability Used"))
+	static bool IsCommandCapabilityUsed(
+		const UObject* WorldContextObject, const FGameplayTag& Capability);
+
+	/**
+	 * Backward-compatible capability gate. If no Territory authors the capability,
+	 * the action keeps its legacy availability. Once a source is authored, the
+	 * faction must currently hold an active grant.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Command",
+		meta=(WorldContext="WorldContextObject", DisplayName="Can Faction Use Command Capability"))
+	static bool CanFactionUseCommandCapability(
+		const UObject* WorldContextObject, const FGameplayTag& FactionTag,
+		const FGameplayTag& Capability, FText& OutFailureReason);
+
 	/** Fast check — true if any territory contains the location. */
 	UFUNCTION(BlueprintPure, Category="Territory|Query",
 		meta=(WorldContext="WorldContextObject", DisplayName="Is Territory At Location"))

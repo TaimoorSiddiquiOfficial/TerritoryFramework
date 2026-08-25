@@ -112,6 +112,19 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Display Name"))
 	FText GetTerritoryDisplayName() const;
 
+	/**
+	 * Command perks granted by this Territory's active State Config to its current
+	 * owner. Example: Claimed -> Guard Staffing grants the control only while held.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Command",
+		meta=(DisplayName="Get Active Command Capabilities"))
+	FGameplayTagContainer GetActiveCommandCapabilities() const;
+
+	/** True when any State Config on this Territory authors the exact capability. */
+	UFUNCTION(BlueprintPure, Category="Territory|Command",
+		meta=(DisplayName="Is Command Capability Configured"))
+	bool IsCommandCapabilityConfigured(const FGameplayTag& Capability) const;
+
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Max Attackers"))
 	int32 GetMaxConcurrentAttackers() const;
 
@@ -437,6 +450,21 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards",
 		meta=(DisplayName="Try Set Desired Guard Count"))
 	FTerritoryGarrisonMutationResult TrySetDesiredGuardCount(AActor* Requester, int32 NewDesiredGuardCount);
+
+	/**
+	 * Checks whether one or more existing reserves can be deployed now. Unlike
+	 * Add Guard, reinforcement does not raise the saved staffing target or charge
+	 * recruitment currency; it fills an existing active-versus-assigned shortfall.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards",
+		meta=(DisplayName="Can Send Reinforcements"))
+	bool CanSendReinforcements(const AActor* Requester, int32 Count,
+		FText& OutFailureReason) const;
+
+	/** Server-authoritative reserve deployment for a player command. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards",
+		meta=(DisplayName="Try Send Reinforcements"))
+	FTerritoryGarrisonMutationResult TrySendReinforcements(AActor* Requester, int32 Count = 1);
 
 	/** Returns true if at least one guard is alive and spawned from this territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Has Guards Alive"))

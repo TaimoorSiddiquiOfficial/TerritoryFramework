@@ -7,6 +7,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryCommandTags.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardLifecyclePolicy.h"
@@ -3515,6 +3516,30 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_StateConfigNarrativeExtensions,
 
 bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Parameters)
 {
+	TestNotNull(TEXT("State Config exposes command capability grants"),
+		FTerritoryStateConfig::StaticStruct()->FindPropertyByName(
+			TEXT("GrantedCommandCapabilities")));
+	TestTrue(TEXT("Built-in Guard Staffing capability is registered"),
+		TerritoryCommandTags::GuardStaffing.GetTag().IsValid());
+	TestTrue(TEXT("Built-in Reinforcements capability is registered"),
+		TerritoryCommandTags::Reinforcements.GetTag().IsValid());
+
+	const UClass* VolumeClass = ATerritoryVolume::StaticClass();
+	TestTrue(TEXT("Territory exposes active state command grants"),
+		TFTestUtils::IsBlueprintPure(VolumeClass, TEXT("GetActiveCommandCapabilities")));
+	TestTrue(TEXT("Reinforcement eligibility is a pure query"),
+		TFTestUtils::IsBlueprintPure(VolumeClass, TEXT("CanSendReinforcements")));
+	TestTrue(TEXT("Reinforcement execution is server authoritative"),
+		TFTestUtils::IsBlueprintAuthorityOnly(VolumeClass, TEXT("TrySendReinforcements")));
+
+	const UClass* LibraryClass = UTerritoryBlueprintLibrary::StaticClass();
+	TestTrue(TEXT("Faction command capability aggregation is Blueprint pure"),
+		TFTestUtils::IsBlueprintPure(LibraryClass, TEXT("GetFactionCommandCapabilities")));
+	TestTrue(TEXT("Command capability source query is Blueprint pure"),
+		TFTestUtils::IsBlueprintPure(LibraryClass, TEXT("GetFactionCommandCapabilitySources")));
+	TestTrue(TEXT("Command capability gate is Blueprint pure"),
+		TFTestUtils::IsBlueprintPure(LibraryClass, TEXT("CanFactionUseCommandCapability")));
+
 	TestTrue(TEXT("Diplomacy condition is a Narrative condition"),
 		UTerritoryDiplomacyCondition::StaticClass()->IsChildOf(UNarrativeCondition::StaticClass()));
 	TestTrue(TEXT("Garrison condition is a Narrative condition"),
