@@ -7,9 +7,17 @@
 #include "Core/TerritoryMutationTypes.h"
 #include "Tales/TalesComponent.h"
 #include "Engine/World.h"
+#include "Tales/TerritoryTalesUtilities.h"
+
+UTerritoryCaptureEvent::UTerritoryCaptureEvent(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+}
 
 void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
+	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	if (!TargetTerritoryTag.IsValid()) return;
 
 	UWorld* World = GetWorld();

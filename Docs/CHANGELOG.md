@@ -1,5 +1,146 @@
 # Changelog
 
+## Unreleased — 2026-08-25 (District staging and shared assault objectives)
+
+- Added modular secure-District staging and recurring cooldown policy. Normal forces require
+  at least one loaded District held in `Claimed` or story-`Locked` state by default. `Contested`
+  and `Unclaimed` Districts do not qualify. Losing the final District prevents new or undeployed
+  strategic counters, while already-active finite forces may finish.
+- Made a saved assault's valid Territory GUID authoritative across streaming and tag renames.
+  Same-tag actors with a different GUID can no longer receive or resolve the old assault; tag
+  lookup remains only as a bounded migration for legacy records that have no GUID.
+- Extended that stable identity through physical participant replication, Narrative assault
+  goals, CombatDirector slots, recurring duplicate admission, loaded command/debug views, and
+  Tales reads. Added `GetAssaultsForTerritoryActor` for exact loaded-actor/GUID queries.
+- Routed the public Blueprint `Set Owning Faction` compatibility node through the atomic
+  Territory Control transaction so counter scheduling and WorldState callbacks cannot be
+  skipped. The structured mutation API remains preferred for explicit story context/results.
+- Republished normalized assault counts immediately after authoritative save restore so a late
+  join cannot observe serialized living NPC counts that were converted to finite reserve.
+- Added explicit `StoryPursuit` launch mode with dual event/profile opt-in for a betrayal boss
+  chase that intentionally continues after a faction loses its domination holdings.
+- Added `UTerritoryFactionDistrictHoldingCondition` so Tales quests, dialogue, event conditions,
+  and Territory state configs can branch on the same strategic holding rule.
+- Unified strategic defence calculation, route objectives, and physical attacker targeting.
+  District attackers now engage registered guards on same-owner child Properties and may use
+  overlapping patrol/post points as physical objectives instead of ignoring the garrison.
+- Untagged guard posts now resolve from actor placement plus world-space patrol-node overlap;
+  editor orphan/capacity validation uses the same rule.
+- Preserved the mandatory first-player activation gate, then allowed explicitly configured
+  finite reserve waves to continue after activation without requiring the player to stay nearby.
+- Persisted assault launch mode and terminal time for deterministic recurring cooldowns and
+  added behavioral, save/load, Blueprint-contract, World Partition fail-closed, and validation tests.
+- Added `UTerritoryEventContextCondition` for player-only/GAS Tales events. The Blacksmith XP
+  reward now skips owner-preserving `Contested -> Claimed` recovery when there is no valid player
+  Ability System context, instead of passing `None` into Narrative's `NE_GiveXP` graph.
+- Territory NPC removal now deactivates Narrative activities and removes goals before controller
+  cleanup. Stale target-death callbacks can no longer score/end Territory activities through a
+  Narrative controller that is pending-kill.
+- Guarded `BPA_ReturnToTerritory`'s activity-start gameplay event with an `OwnerController`
+  validity branch, closing its remaining pending-kill dereference without modifying Narrative Pro.
+- Named `DA_PostGuardDefinition` as “Standard Territory Guard Post”; the Territory content and
+  integration map now pass editor data validation with no errors or warnings.
+- Marked guard-post registration/removal Blueprint nodes authority-only, matching their existing
+  server guards and preventing client graphs from presenting them as valid state mutations.
+- Made TDA-only editor integration fixtures optional for community installations: an entirely
+  absent fixture is reported as skipped, while any partially installed or broken fixture still
+  fails its contract test.
+
+## Unreleased — 2026-08-24 (counterattack combat and audit closure)
+
+- Migrated the supported Narrative Pro baseline from 2.3.3 to 2.4.2 without changing vendor
+  source. Territory death listeners now use `OnDeathStateChanged` and ignore revival events.
+- Added the project-owned `BP_TerritoryPlayerCharacter`, kept Territory ownership semantics off
+  both vendor and project players, and made `BP_TerritoryGameMode` select the project pawn.
+- Removed `BP_Property_Blacksmith`'s guard-death `ForceCapture` shortcut. District recapture now
+  completes only through physical capture participants and the authoritative control subsystem.
+- Added `ATerritoryCapturePoint` and the project `BP_TerritoryCapturePoint` adapter. The Haven
+  Reach test map now captures Blacksmith and Farm Places physically, reduces Market Square and
+  Castle Hill Districts from those children, and reduces the City when both Districts are owned.
+- Migrated `BPA_ReturnToTerritory` to the 2.4.2 multiplayer cinematic API with an explicit empty
+  viewer array and no player-controller-index lookup.
+- Added Narrative NPC `CharacterID`/`NPCID` admission validation and migrated
+  `NPC_TerritoryBandit` from the copied `CubistSoldier` NPCID to `TerritoryBandit`.
+
+- Added server-authoritative, campaign-day Property production using exact Narrative item
+  classes. Profiles support input debit, multiple outputs, upgrade scaling, capture-only
+  Properties, and Properties that independently pay currency and produce resources.
+- Added atomic Narrative inventory recipe settlement reusable by crafting, deterministic
+  per-day catch-up in Priority/RuleTag order, per-rule outcomes, ownership checkpoints,
+  storage/missing-input failure states, and World Partition-safe site records.
+- Added `UTerritoryFactionResourceAccountComponent` for explicit faction inventory routing;
+  resource balances remain owned and saved by Narrative inventory. PlayerController accounts
+  use bounded startup retries until possession makes the Narrative pawn inventory available.
+- Replicated/saved production scheduling and stockpile read models through WorldState, and
+  added modular resource/site widgets plus producing/blocked/missing/full operations filters.
+- Added profile editor validation and native tests for scaling, scheduling gates, authority,
+  save/replication contracts, UI invalidation, and real atomic Narrative inventory debit/output.
+- Added a validated Farm example with Grain input, Meat output, independent money income,
+  modular scrolling Economy panels, and compact production status in management/info views.
+- Rebuilt the Territory journal as a responsive stacked CommonUI command surface and added
+  capture HUD, Territory GameplayHUD, reusable resource/site rows, and a project-owned copy of
+  Narrative's text-button template with shared Territory button/text styles.
+- Replaced the incomplete Territory GameplayHUD reconstruction with
+  `WBP_TerritoryGameplayHUD_Modular`, a project-owned copy of Narrative's complete current HUD
+  template plus the Territory capture overlay. Game, menu, and modal stacks register during
+  initialization again, restoring Quick Use, weapon wheel, inventory/tab, interaction, and
+  CommonUI routing without modifying Narrative Pro.
+- Fixed new placements inheriting a serialized Blueprint CDO Territory GUID. Every newly
+  placed Territory actor now receives a fresh editor identity, while load and PIE retain it.
+- Fixed guard post-spawn verification rejecting Narrative characters after normal capsule
+  floor settling. The authored X/Y position and facing remain strict, while a bounded 10 cm
+  vertical floor snap is accepted instead of destroying valid guards and leaving garrisons at zero.
+- Fixed `Claimed -> Contested` deleting the incumbent garrison and `Contested -> Claimed`
+  granting free replacements. Surviving guard actors now persist across both transitions;
+  owner changes and explicit lock transitions retain their existing retirement policy.
+- Added deterministic counterattack formation slots, bounded placement attempts, and idle
+  movement recovery. Narrative-spawned attackers no longer share one exact approach transform,
+  and a permanently failed movement handoff consumes one finite withdrawal instead of waiting
+  forever.
+- Counterattack data validation now enforces deployment spacing, bounded placement attempts,
+  movement-retry timing/counts, approach limits, and spawn-failure limits through one shared
+  profile-bounds path for direct assets and referencing Territories.
+- Added a package redirect from the legacy `/Game/TerritoryFramework/Blueprints/Triggers_Bandit`
+  path to the existing authoritative `/Game/TerritoryFramework/AI/Triggers_Bandit` TriggerSet.
+  This repairs the stale Narrative `NPC_Felix` reference without duplicating the asset.
+- Added project-owned `AC_TerritoryAssault`, retaining Narrative combat/interaction support
+  without guard patrol or Return-to-Territory activities. The guard return activity now blocks
+  Narrative's dead state and no longer starts during death teardown.
+
+- Lowered the durable Territory assault movement goal below Narrative Pro 2.4.2's
+  attack goal so detected defenders interrupt movement and the same goal resumes afterward.
+- Restricted strategic slots to configured physical assault participants. Defenders use
+  Narrative tactical attack tokens without consuming the counterattack force budget.
+- Added streamed-Territory slot/delegate cleanup and bounded defender ASC binding retries.
+- Required War or Narrative Hostile attitude for physical counterattacks and added
+  monotonic profile validation plus behavioral activation/casualty regression tests.
+- Added typed Blueprint guard-spawn migration, Blueprint reputation enumeration, and a
+  functional Territory Gameplay Debugger category.
+- `NoCurrencyPayout` now disables income and upkeep. Capturing-player rewards receive the
+  transition instigator; registered Narrative accounts support factions without players.
+- Repaired `compile_plugin.bat` with absolute paths and supported UnrealBuildTool syntax.
+- Fixed guard auto-wield initialization so unrelated Narrative cosmetic loads cannot cause a
+  false timeout, and ensured the retry timer stops when a weapon is already wielded or play ends.
+- Fixed migrated Narrative Pro 2.4.2 death events leaving dead Territory guards and attackers
+  in locomotion. Territory reconciles the Blueprint event value with the authoritative Narrative
+  ASC, stops server AI movement, clears locomotion on every role, and reuses Narrative's
+  replicated ragdoll state without adding a competing death flag. The guard Blueprint now
+  forwards `HandleDeath.bIsDead`, null-checks its optional activity component, and prevents
+  simulated proxies from sending unowned Narrative ragdoll RPCs.
+- Completed live MCP validation of all 58 native classes/interfaces/adapters, all 46 plugin
+  Blueprint classes, all 14 CommonUI widgets, and all 62 plugin content assets. Two-client
+  PIE created one dedicated server world plus two client worlds; both clients joined, all
+  worlds used the project pawn/controller integration, and both Territory controller
+  components were present.
+- Win64 Development Editor and Game targets build, and all 103 TerritoryFramework automation
+  tests pass, including the Narrative Pro 2.4.2 player/content migration contract, the new
+  placement-GUID regression, the guard/assault death-ragdoll regression, deterministic assault
+  deployment, garrison contest preservation, and five production behavior/contract/UI tests.
+- A UE 5.7 Windows cook of `/Game/HopDistrictTest` ran to completion but failed the project-wide
+  release gate with 318 errors and 116 warnings. No Territory asset produced a cook error. The
+  blockers are stale project MetaHuman `Face_AnimBP` nodes/imports and Narrative Pro demo assets
+  that reference missing or NeverCook packages, plus Narrative demo vehicle Vulkan shaders.
+
 ## Unreleased — 2026-07-30 (TerritoryFramework lifecycle and integration re-audit)
 
 ### Counterattack state events, death, and economy account routing — 2026-08-07
@@ -175,7 +316,7 @@ Comprehensive deep re-audit with 3 parallel verification agents scanning 34 find
 - **P1-14 — Weapon retry timer keeps running**: `TryWieldDefaultWeapon` now clears `DefaultWeaponWieldTimer` on successful wield instead of letting it fire until attempt cap (`TerritoryGuardCharacter.cpp`)
 - **P1-15 — Generic defenders become immortal**: `RegisterDefender` now logs warning when actor lacks `IAbilitySystemInterface` — non-ASC defenders cannot fire `OnDied` (`TerritoryVolume.cpp`)
 - **P1-16 — ForceCapture has no result**: Now returns `bool` and verifies final state matches requested owner/state before broadcasting. Returns `false` with error log on failure (`TerritoryControlSubsystem.h/.cpp`)
-- **P1-19 — FactionLeader payout placeholder**: Added runtime warning log documenting that `FactionLeader` resolves to first iterated member, not an actual leader (`TerritoryEconomySubsystem.cpp`)
+- **P1-19 — FactionLeader payout placeholder**: Added runtime warning log documenting that `FactionLeader` resolved to the first iterated member, not an actual leader (`TerritoryEconomySubsystem.cpp`). Superseded by the 2026-08-24 explicit registered-account routing.
 - **P1-20 — Unpaid upkeep no consequence**: Economy tick now broadcasts `OnFactionUpkeepDeficit(Faction, Deficit)` when a faction can't pay full guard upkeep, enabling territories to suspend reserves (`TerritoryEconomySubsystem.h/.cpp`)
 
 ### P2 — Minor (8 fixed)

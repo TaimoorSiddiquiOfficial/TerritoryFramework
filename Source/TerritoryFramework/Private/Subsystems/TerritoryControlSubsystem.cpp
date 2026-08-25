@@ -58,7 +58,8 @@ void UTerritoryControlSubsystem::Deinitialize()
 	{
 		if (UNarrativeAbilitySystemComponent* ASC = Pair.Value.Get())
 		{
-			ASC->OnDied.RemoveDynamic(this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
+			ASC->OnDeathStateChanged.RemoveDynamic(
+				this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
 		}
 	}
 	TerritoryCaptureState.Empty();
@@ -94,7 +95,8 @@ void UTerritoryControlSubsystem::AddAttackerRegistration(AActor* Attacker)
 
 	if (UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Attacker))
 	{
-		ASC->OnDied.AddUniqueDynamic(this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
+		ASC->OnDeathStateChanged.AddUniqueDynamic(
+			this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
 		BoundAttackerASCs.Add(WeakAttacker, ASC);
 	}
 }
@@ -110,7 +112,8 @@ void UTerritoryControlSubsystem::ReleaseAttackerRegistration(const TWeakObjectPt
 	{
 		if (UNarrativeAbilitySystemComponent* ASC = FoundASC->Get())
 		{
-			ASC->OnDied.RemoveDynamic(this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
+			ASC->OnDeathStateChanged.RemoveDynamic(
+				this, &UTerritoryControlSubsystem::OnRegisteredAttackerDied);
 		}
 	}
 	BoundAttackerASCs.Remove(Attacker);
@@ -183,8 +186,10 @@ void UTerritoryControlSubsystem::RemoveAttackerFromAllCaptures(AActor* Attacker)
 
 void UTerritoryControlSubsystem::OnRegisteredAttackerDied(
 	AActor* KilledActor,
-	UNarrativeAbilitySystemComponent* KilledASC)
+	UNarrativeAbilitySystemComponent* KilledASC,
+	const bool bIsDead)
 {
+	if (!bIsDead) return;
 	AActor* RegisteredAttacker = KilledActor;
 	if (!AttackerRegistrationCounts.Contains(RegisteredAttacker) && KilledASC)
 	{

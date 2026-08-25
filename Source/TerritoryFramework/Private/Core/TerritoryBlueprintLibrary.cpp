@@ -216,10 +216,9 @@ FGameplayTag UTerritoryBlueprintLibrary::GetActorPrimaryFaction(const UObject* W
 bool UTerritoryBlueprintLibrary::AreActorsAllied(AActor* A, AActor* B)
 {
 	if (!A || !B) return false;
-	INarrativeTeamAgentInterface* TeamA = Cast<INarrativeTeamAgentInterface>(A);
-	INarrativeTeamAgentInterface* TeamB = Cast<INarrativeTeamAgentInterface>(B);
-	if (!TeamA || !TeamB) return false;
-	return TeamA->GetFactions().HasAny(TeamB->GetFactions());
+	const INarrativeTeamAgentInterface* TeamA = Cast<INarrativeTeamAgentInterface>(A);
+	const INarrativeTeamAgentInterface* TeamB = Cast<INarrativeTeamAgentInterface>(B);
+	return TeamA && TeamB && TeamA->GetFactions().HasAny(TeamB->GetFactions());
 }
 
 // ─── City / District Queries ───

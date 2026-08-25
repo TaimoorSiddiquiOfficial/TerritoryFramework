@@ -67,6 +67,7 @@ public:
 	int32 GetReputation(FGameplayTag Faction) const;
 
 	/** Returns all faction reputation entries (used by WorldState save/load). */
+	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	TMap<FGameplayTag, int32> GetAllReputation() const;
 
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")

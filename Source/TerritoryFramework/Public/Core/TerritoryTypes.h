@@ -51,33 +51,41 @@ struct FTerritoryTransitionContext
 UENUM(BlueprintType)
 enum class ETerritoryState : uint8
 {
-	Unclaimed,
-	Claimed,
-	Contested,
-	Locked
+	Unclaimed UMETA(DisplayName="Unclaimed", ToolTip="No faction owns this place. Example: an abandoned farm that any hostile faction may capture."),
+	Claimed UMETA(DisplayName="Claimed", ToolTip="One faction owns this place. Example: Faction.Heroes controls the market."),
+	Contested UMETA(DisplayName="Contested", ToolTip="A physical capture is in progress or child territories disagree. This is runtime state, not a recommended starting state."),
+	Locked UMETA(DisplayName="Locked", ToolTip="Ownership cannot change until this state's Exit Conditions pass. Example: finish the 'Open the City Gates' quest before leaving Locked.")
+};
+
+/**
+ * Designer-facing new-campaign state. Automatic is the migration-safe default.
+ * Contested is deliberately excluded because a real contest needs physical participants
+ * or a hierarchy disagreement at runtime.
+ */
+UENUM(BlueprintType)
+enum class ETerritoryInitialState : uint8
+{
+	Automatic UMETA(DisplayName="Automatic (Recommended)", ToolTip="Start Claimed when Initial Owning Faction is set; otherwise start Unclaimed. Existing Starts Locked assets remain locked until migrated."),
+	Unclaimed UMETA(DisplayName="Unclaimed", ToolTip="Start with no owner, even if Initial Owning Faction is filled."),
+	Claimed UMETA(DisplayName="Claimed", ToolTip="Start owned by Initial Owning Faction. If that faction is empty, the safe result is Unclaimed."),
+	Locked UMETA(DisplayName="Locked", ToolTip="Start locked. The place may still have an Initial Owning Faction, but ownership cannot change until Locked Exit Conditions pass.")
 };
 
 UENUM(BlueprintType)
 enum class ETerritoryControlMode : uint8
 {
-	/** Territory may be captured directly by the capture subsystem. */
-	Independent,
-	/** Ownership is derived from child territories and cannot be directly captured. */
-	AggregateOnly,
-	/** Direct capture is allowed and child ownership may cascade from it. */
-	Cascading
+	Independent UMETA(DisplayName="Independent", ToolTip="Capture this actor directly. Example: a single farm with its own physical capture point."),
+	AggregateOnly UMETA(DisplayName="Aggregate Only", ToolTip="Never capture this actor directly; child ownership decides it. Example: a City becomes owned when its Districts agree."),
+	Cascading UMETA(DisplayName="Cascading", ToolTip="This actor may be captured directly and may also change child ownership. Use only when your game intentionally wants a parent capture to cascade.")
 };
 
 /** Determines the desired garrison assigned when ownership changes. */
 UENUM(BlueprintType)
 enum class ETerritoryPostCaptureGarrisonPolicy : uint8
 {
-	/** Preserve the legacy behaviour and assign GuardSpawnCount to every new owner. */
-	ConfiguredForEveryOwner,
-	/** A live player-faction capture starts unstaffed; AI-only and global scripted captures use GuardSpawnCount. */
-	PlayerChooses,
-	/** Every new owner starts unstaffed. */
-	AlwaysUnstaffed
+	ConfiguredForEveryOwner UMETA(DisplayName="Configured for Every Owner", ToolTip="Every capture assigns Guard Spawn Count. Example: both Bandits and Heroes automatically receive 3 assigned guards."),
+	PlayerChooses UMETA(DisplayName="Player Chooses (Recommended)", ToolTip="A player-faction capture starts with 0 assigned guards; AI and world-script captures use Guard Spawn Count. Example: the player decides whether profit is worth guard upkeep."),
+	AlwaysUnstaffed UMETA(DisplayName="Always Unstaffed", ToolTip="Every new owner starts with 0 assigned guards. Example: all factions must recruit after every capture.")
 };
 
 UENUM(BlueprintType)
@@ -121,11 +129,11 @@ enum class ETerritoryTransactionType : uint8
 UENUM(BlueprintType)
 enum class ETerritoryIncomePayoutPolicy : uint8
 {
-	CapturingPlayer,
-	FactionLeader,
-	EqualSplitOnlineMembers,
-	SharedNarrativeAccount,
-	NoCurrencyPayout
+	CapturingPlayer UMETA(DisplayName="Capturing Player", ToolTip="Pay the Narrative inventory/account of the player who captured the place."),
+	FactionLeader UMETA(DisplayName="Faction Leader", ToolTip="Pay the configured online faction leader's Narrative account."),
+	EqualSplitOnlineMembers UMETA(DisplayName="Split Between Online Members", ToolTip="Split the payout between eligible online members of the owning faction."),
+	SharedNarrativeAccount UMETA(DisplayName="Shared Narrative Account", ToolTip="Pay one Narrative-owned shared faction account. Example: all Heroes fund the same treasury."),
+	NoCurrencyPayout UMETA(DisplayName="Rates Only (No Currency)", ToolTip="Calculate income and upkeep rates for UI/strategy, but move no real currency. Useful when Tales events own rewards.")
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -339,7 +347,8 @@ struct FCaptureAttempt
 
 /**
  * Per-state configuration for Narrative conditions and events.
- * Conditions must pass for the state to be entered; events fire on transition.
+ * Entry conditions must pass before entering. Exit conditions must pass before leaving.
+ * Example: put a quest-complete condition in Locked -> Exit Conditions to unlock a city.
  */
 USTRUCT(BlueprintType)
 struct FTerritoryStateConfig
@@ -347,15 +356,23 @@ struct FTerritoryStateConfig
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
-		meta=(DisplayName="Entry Conditions"))
+		meta=(DisplayName="Entry Conditions",
+			ToolTip="Every condition must pass before the enum state can begin. Example: entering Locked may require a story event to be active. A direct Claimed owner swap does not enter Claimed again; normal physical capture passes through Contested first."))
 	TArray<TObjectPtr<class UNarrativeCondition>> EntryConditions;
 
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
+		meta=(DisplayName="Exit Conditions",
+			ToolTip="Every condition must pass before this state can end. Example: Locked exits only after the player completes the gate quest."))
+	TArray<TObjectPtr<class UNarrativeCondition>> ExitConditions;
+
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",
-		meta=(DisplayName="Entry Events"))
+		meta=(DisplayName="Entry Events",
+			ToolTip="Narrative events fired after the enum state is committed. Each event runs only when all conditions inside that event pass, including Narrative's Not option. Example: when Contested becomes Claimed, schedule an enemy wave only if the two factions are at War. Use the control-changed delegate for trusted direct Claimed-to-Claimed owner swaps."))
 	TArray<TObjectPtr<class UNarrativeEvent>> EntryEvents;
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",
-		meta=(DisplayName="Exit Events"))
+		meta=(DisplayName="Exit Events",
+			ToolTip="Narrative events fired after this state ends. Every inherited condition inside each event must pass. Example: advance the quest when the District unlocks, but only while reputation is at least 50."))
 	TArray<TObjectPtr<class UNarrativeEvent>> ExitEvents;
 };
 

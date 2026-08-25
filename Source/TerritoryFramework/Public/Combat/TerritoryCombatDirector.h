@@ -68,6 +68,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Combat")
 	int32 GetAvailableSlots(const ATerritoryVolume* Territory) const;
 
+	/** True only for a configured physical assault participant targeting this Territory. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Combat")
+	bool IsEligibleAssaultController(const ATerritoryVolume* Territory,
+		const ANarrativeNPCController* Controller) const;
+
+	/** Role predicate shared by the BT adapter and regression tests. */
+	static bool RequiresStrategicAssaultSlot(const APawn* Pawn);
+
 private:
 	struct FPerTerritorySlots
 	{
@@ -81,14 +89,15 @@ private:
 	/** Remove SlotMap entries whose territory weak pointer is no longer valid. */
 	void CleanupStaleTerritoryKeys();
 
-	/** Bind to controller's ASC OnDied so slots are released if NPC dies mid-assault. */
+	/** Bind to Narrative's death-state delegate so slots are released if an NPC dies mid-assault. */
 	void BindControllerDeath(ANarrativeNPCController* Controller);
 
-	/** Unbind from controller's ASC OnDied to prevent delegate leaks. */
+	/** Unbind from Narrative's death-state delegate to prevent delegate leaks. */
 	void UnbindControllerDeath(ANarrativeNPCController* Controller);
 
 	UFUNCTION()
-	void OnAssaultControllerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
+	void OnAssaultControllerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC,
+		const bool bIsDead);
 
 	/** Track which controllers we've already bound to avoid duplicate bindings. */
 	TSet<TWeakObjectPtr<ANarrativeNPCController>> BoundControllers;

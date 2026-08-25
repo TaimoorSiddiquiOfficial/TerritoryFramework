@@ -24,6 +24,7 @@
 - [UTerritoryJournalWidget](#uterritoryjournalwidget)
 - [UTerritoryDistrictManagementWidget](#uterritorydistrictmanagementwidget)
 - [UTerritoryDebugWidget](#uterritorydebugwidget)
+- [UTerritoryDebugger](#uterritorydebugger)
 - [UTerritoryPatrolGoal](#uterritorypatrolgoal)
 - [BTTask_RequestTerritoryPermission](#btask_requestterritorypermission)
 - [BTTask_ReleaseTerritoryPermission](#btask_releaseterritorypermission)
@@ -74,7 +75,7 @@ Static Blueprint-callable helpers. Use these as the primary entry point from Blu
 | GetActorFactions | WorldContextObject, Actor | FGameplayTagContainer | All factions via Narrative team interface |
 | IsActorInFaction | WorldContextObject, Actor, Faction | bool | True if actor belongs to faction |
 | GetActorPrimaryFaction | WorldContextObject, Actor | GameplayTag | Actor's primary faction |
-| AreActorsAllied | A (Actor), B (Actor) | bool | Narrative IsSameTeam check |
+| AreActorsAllied | A (Actor), B (Actor) | bool | Shared Narrative faction-tag check, matching Narrative `IsSameTeam` semantics |
 | GetAllCities | WorldContextObject | TArray<ATerritoryCity*> | All registered cities |
 | GetAllDistricts | WorldContextObject | TArray<ATerritoryDistrict*> | All registered districts |
 | GetCityForDistrict | WorldContextObject, District | ATerritoryCity* | Parent city for district |
@@ -104,11 +105,11 @@ Base territory actor. Place in level to define a capturable zone.
 | TerritoryTag | FGameplayTag | Territory | — | — | Unique identifier tag |
 | TerritoryDisplayName | FText | Territory | — | — | Display name for UI |
 | InitialOwningFaction | FGameplayTag | Territory | — | — | Set at design time, applied in BeginPlay |
+| InitialState | ETerritoryInitialState | Territory | — | — | Automatic, Unclaimed, Claimed, Contested, or Locked new-campaign state |
 | InitialMaxConcurrentAttackers | int32 | Territory\|Capture | — | — | Design-time default |
 | InitialPeriodicIncome | int32 | Territory\|Economy | — | — | Design-time default |
 | InitialGuardCost | int32 | Territory\|Economy | — | — | Recurring upkeep per assigned guard per cycle |
 | InitialGuardRecruitmentCost | int32 | Territory\|Economy | — | — | One-time Narrative inventory debit per target increase |
-| bStartsLocked | bool | Territory | — | — | If true, can't be captured |
 | ParentTerritoryTag | FGameplayTag | Territory | — | — | Parent city tag (for districts) |
 | TerritoryGUID | FGuid | Territory | ✅ | — | Editor-stable unique ID |
 | BoundsShape | UShapeComponent* | Territory\|Bounds | — | — | Collision shape for bounds |
@@ -119,7 +120,10 @@ Base territory actor. Place in level to define a capturable zone.
 | GuardSpawnRadius | float | Territory\|Guards | — | — | Deprecated/ignored; no random active-guard fallback |
 | GuardSpawnPoints | TArray<ATerritoryGuardSpawnPoint*> | Territory\|Guards | — | — | Explicit post references; the unique resolved union is active capacity, one guard per point |
 | ControlMode | ETerritoryControlMode | Territory\|Hierarchy | — | — | Independent (default), AggregateOnly, or Cascading |
-| StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Territory\|State | — | — | Per-state entry conditions and entry/exit events; designer-configured |
+| StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Territory\|State | — | — | Per-state entry/exit conditions and entry/exit events; designer-configured |
+
+Legacy serialized `bStartsLocked` and `LockConditions` remain readable only for bounded
+migration. New assets use `InitialState` and the Locked row's Exit Conditions.
 
 ### OwnershipData (Replicated, RepNotify)
 
@@ -179,7 +183,7 @@ Base territory actor. Place in level to define a capturable zone.
 
 | Function | Parameters | Description |
 |---|---|---|
-| SetOwningFaction | NewFaction (GameplayTag) | Force-set owner |
+| SetOwningFaction | NewFaction (GameplayTag) | Validated compatibility wrapper through `ApplyTerritoryMutation`; use that subsystem API for an explicit context/result |
 | SetControlProgress | Progress (float) | Set capture progress |
 | SetTerritoryState | NewState (ETerritoryState) | Force-set state |
 | RegisterDefender | Defender (Actor*) | Add to defender list |
@@ -272,6 +276,7 @@ Extends `ATerritoryVolume`. An upgradeable property within a district.
 | MaxUpgradeLevel | int32 | — | — | — | Cap (default 3) |
 | UpgradeCostPerLevel | int32 | — | — | — | Base cost per level |
 | IncomeBonusPerLevel | int32 | — | — | — | Income added per level |
+| ProductionProfile | UTerritoryProductionProfile* | — | — | — | Optional item-resource recipe asset; capture does not require one |
 
 ### BlueprintPure
 
@@ -332,7 +337,8 @@ This returns the save-system-assigned GUID when valid. Otherwise it generates an
 
 | Function | Returns | Description |
 |---|---|---|
-| ConfigureTerritorySpawn(Definition, ExactFaction, TerritoryGuid, SaveGuid, InSpawnTransform, SpawnPointName, OptionalActivityOverride, OptionalTriggerOverrides) | void | Configure Narrative definition, exact faction, stable IDs, home transform, and optional activity/trigger overrides during deferred spawn. Full 8-parameter signature: `UNPCDefinition*`, `FGameplayTag`, `FGuid`, `FGuid`, `FTransform`, `FName`, `UNPCActivityConfiguration*`, `TArray<TSoftObjectPtr<UTriggerSet>>` |
+| ConfigureTerritorySpawnWithContext(..., OwningTerritory, OwningSpawnPoint) | bool | Authority-only deferred-spawn configuration. Validates typed ownership and stable identities before applying the Narrative definition. |
+| ConfigureTerritorySpawn(...) | void | Deprecated migration node. Resolves typed ownership by Territory GUID and spawn-point name, then calls `ConfigureTerritorySpawnWithContext`; fails closed when resolution is ambiguous. |
 | GetTerritoryPatrolRoute | TArray<FTerritoryPatrolNode> | Copy assigned patrol route |
 | HasTerritoryPatrolRoute | bool | True when an assigned route has at least two nodes |
 | GetPatrolNodeCount | int32 | Number of assigned nodes |
@@ -347,8 +353,9 @@ This returns the save-system-assigned GUID when valid. Otherwise it generates an
 - Core garrisons call the native `SpawnThroughNarrative` adapter, which uses
   `UNarrativeCharacterSubsystem::SpawnNPC` and supplies complete `SpawnInfo` plus Territory
   context before `SetNPCDefinition`
-- `ConfigureTerritorySpawn` remains the advanced Blueprint compatibility entrypoint for an
-  externally managed deferred spawn
+- New Blueprint deferred-spawn graphs must use `ConfigureTerritorySpawnWithContext` so the
+  complete typed ownership context exists before `SetNPCDefinition`
+- Existing `ConfigureTerritorySpawn` nodes remain as an explicitly deprecated migration path
 - Exact faction overrides come from the selected spawn point or owning territory
 - Multi-slot definitions must allow multiple Narrative instances; class, Narrative
   controller, spawned auto-possession, and instance policy are runtime/editor validated
@@ -461,6 +468,8 @@ Global persistence and late-join projection for economy, diplomacy, capture summ
 |---|---|---|
 | ReplicatedTreasuries | FReplicatedFactionEconomy | Faction treasuries |
 | ReplicatedTransactions | FReplicatedTransaction | Transaction history |
+| ReplicatedProductionSites | FTerritoryProductionSiteRecord | World Partition-safe site and per-rule status projection |
+| ReplicatedResourceSnapshots | FTerritoryFactionResourceSnapshot | Read-only Narrative stockpile projection |
 | ReplicatedTreaties | FReplicatedTreaty | Active treaties |
 | ReplicatedCaptureSummaries | FReplicatedCaptureSummary | Per-territory state at the last export/setter update |
 | ReplicatedReputation | FReplicatedFactionReputation | Faction reputation |
@@ -572,8 +581,12 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | CreditCurrency | Beneficiary, Amount, Faction, Reason, Type | bool |
 | TryDebitCurrency | Requester, Amount, Faction, Reason, Type | bool |
 | CreditCurrencyToFaction | Faction, Amount, Policy, Reason, Type, PreferredBeneficiary (optional) | int32 paid |
-| RegisterFactionCurrencyAccount | Faction, Policy, AccountActor | void |
-| UnregisterFactionCurrencyAccount | Faction, Policy | void |
+| RegisterFactionCurrencyAccount | Faction, Policy, AccountActor | bool |
+| UnregisterFactionCurrencyAccount | Faction, AccountActor | void |
+| RegisterFactionResourceAccount | Faction, AccountActor | bool |
+| UnregisterFactionResourceAccount | Faction, AccountActor | void |
+| ProcessResourceProduction | none | void |
+| ExecuteResourceRecipe | Requester, Faction, Rule, UpgradeLevel, BatchCount, SourceTerritory, OutResult | bool |
 | SetFactionTreasury | Faction, Treasury | void |
 | RecalculateIncome | Faction | void |
 
@@ -588,6 +601,9 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | GetOnlineFactionPlayers(Faction) | TArray\<ANarrativeCharacter*\> |
 | GetFactionEconomy(Faction) | FTerritoryTreasury |
 | GetAllFactionsWithTreasury | TArray\<FGameplayTag\> |
+| GetFactionResourceSnapshot(Faction) | FTerritoryFactionResourceSnapshot |
+| GetProductionSitesForFaction(Faction) | TArray\<FTerritoryProductionSiteRecord\> |
+| GetProductionSite(TerritoryTag) | FTerritoryProductionSiteRecord |
 
 ### Other
 
@@ -600,6 +616,8 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | Property | Type | Default | Notes |
 |---|---|---|---|
 | MaxTransactionHistory | int32 | 500 | Global ledger cap |
+| ProductionCycleLength | float | 2400 | Narrative accumulated-time units per production day |
+| MaxProductionCatchupCycles | int32 | 7 | Maximum ordered missed days processed in one evaluation |
 
 ### Delegates
 
@@ -608,6 +626,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | OnEconomyTickFired | (Faction, FTerritoryEconomySnapshot) |
 | OnTransactionRecorded | (FTerritoryTransaction) |
 | OnFactionUpkeepDeficit | (Faction, Deficit) — fires when a faction can't pay full guard upkeep; Deficit = required − paid |
+| OnProductionSettled | (FTerritoryProductionResult) - success and evaluated failure outcomes |
 
 ---
 
@@ -645,7 +664,7 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 | GetAllTreaties | TArray<FTreatyRecord> |
 | GetTreatiesForFaction(Faction) | TArray<FTreatyRecord> |
 | GetDiplomacyHistory | TArray<FDiplomacyEvent> |
-| GetAllReputation | TMap<FGameplayTag, int32> |
+| GetAllReputation | TMap<FGameplayTag, int32> (BlueprintPure) |
 
 ### Save/Sync (BlueprintCallable)
 
@@ -681,7 +700,7 @@ The native `SetNarrativeAttitude(A, B, Attitude)` API directly applies the reque
 
 | Function | Parameters | Returns |
 |---|---|---|
-| RequestAssaultSlot | Territory, NPCController | bool | Returns false if budget exhausted or locked |
+| RequestAssaultSlot | Territory, NPCController | bool | Returns false unless the pawn has a configured assault participant for this exact Territory, or when the budget is exhausted/locked |
 | ReleaseAssaultSlot | Territory, NPCController | void | Frees one slot |
 | ReleaseAllSlots | NPCController | void | Frees all slots across all territories |
 
@@ -692,6 +711,7 @@ The native `SetNarrativeAttitude(A, B, Attitude)` API directly applies the reque
 | GetGrantedSlots(Territory) | int32 | Active slots (filters dead controllers) |
 | GetAvailableSlots(Territory) | int32 | MaxSlots - GrantedSlots |
 | HasAssaultSlot(Territory, Controller) | bool | Does controller hold a slot? |
+| IsEligibleAssaultController(Territory, Controller) | bool | Configured physical counterattacker targeting this exact Territory |
 
 ### Notes
 
@@ -783,7 +803,7 @@ UMG widget for displaying faction economy.
 | GetTerritoryCount | int32 | Owned territories |
 | GetNetIncome | int64 | Income minus costs |
 | IsOperatingAtDeficit | bool | True when costs exceed income |
-| GetEconomyOperationsView | FTerritoryEconomyOperationsView | Funds, rates, deficit, and bounded recent activity |
+| GetEconomyOperationsView | FTerritoryEconomyOperationsView | Funds, rates, deficit, activity, stockpile, and production-site projections |
 
 ### Blueprint Events
 
@@ -791,6 +811,7 @@ UMG widget for displaying faction economy.
 |---|---|
 | OnEconomyUpdated | (Faction, FTerritoryEconomySnapshot) |
 | OnTransactionRecorded | (FTerritoryTransaction) |
+| OnEconomyOperationsUpdated | (FTerritoryEconomyOperationsView) |
 
 ---
 
@@ -808,10 +829,11 @@ Shared read-model and Narrative CommonUI bridge. It owns no gameplay state.
 | DoesDistrictMatchFilter | bool | Evaluate one projection against a filter |
 | GetDistrictOperationsRevision | int32 | Hash all displayed state used for list invalidation |
 | BuildEconomyOperationsView | EconomyView | Narrative funds plus Territory income/cost/activity projection |
+| GetProductionStatusText | FText | Localizable production-state label |
 | GetThreatLevelText | FText | Localizable threat label |
 | GetAssaultStateText | FText | Localizable assault-state label |
 
-`ETerritoryOperationsFilter` values are All, Unlocked, Available, Owned, Manageable, UnderAttack, Contested, Locked, and FinancialRisk. `ETerritoryThreatLevel` values are None, Watch, Warning, and Critical.
+`ETerritoryOperationsFilter` values are All, Unlocked, Available, Owned, Manageable, UnderAttack, Contested, Locked, FinancialRisk, Producing, ProductionBlocked, MissingInputs, and StorageFull. `ETerritoryThreatLevel` values are None, Watch, Warning, and Critical.
 
 ---
 
@@ -866,6 +888,15 @@ Tick-based debug overlay.
 
 ---
 
+## UTerritoryDebugger
+
+`BuildTerritoryDebugSummary(WorldContextObject, DebugActor)` is BlueprintPure and resolves
+either a selected Territory actor or the Territory containing the selected actor. It reports
+tag, owner, state, progress, garrison counts, capacity, and finite assault records. The runtime
+module registers the same data as the `Territory` Gameplay Debugger category in developer builds.
+
+---
+
 ## UTerritoryPatrolGoal
 
 Extends `UNPCGoalItem` (Narrative Pro). Goal instance populated from a territory guard's assigned spawn point patrol route. Automatically created during `ATerritoryGuardCharacter::InitializeTerritoryPatrolGoal()` when the guard has a valid patrol route.
@@ -887,7 +918,7 @@ Extends `UNPCGoalItem` (Narrative Pro). Goal instance populated from a territory
 
 ## BTTask_RequestTerritoryPermission
 
-Behavior tree task. Requests a strategic assault slot from the CombatDirector before allowing an NPC to attack within a territory.
+Legacy behavior tree task for physical counterattack participants. It requests a strategic assault slot from the CombatDirector before allowing that attacker to enter its attack branch. Ordinary defenders use Narrative attack tokens only and must use the shipped `BTService_TerritoryAssaultPermission`, which grants their branch without consuming a strategic slot.
 
 ### Blackboard Keys
 
@@ -898,13 +929,13 @@ Behavior tree task. Requests a strategic assault slot from the CombatDirector be
 
 ### Behavior
 
-1. Gets NPCController from AI owner
+1. Gets NPCController from AI owner and requires its pawn to have configured assault identity
 2. Reads TerritoryKey from blackboard (or finds territory at NPC location)
 3. Calls `CombatDirector->RequestAssaultSlot(Territory, NPCController)`
 4. Writes result to `bPermissionGrantedKey`
 5. Returns Succeeded (granted) or Failed (denied)
 
-**Note:** Fails immediately if `bPermissionGrantedKey` is not configured (prevents silent success).
+**Note:** Fails immediately if `bPermissionGrantedKey` is not configured or the pawn is not a physical participant for the exact target Territory.
 
 ---
 
@@ -1038,6 +1069,7 @@ Server-authoritative scheduler for deterministic, finite physical assaults. It n
 | GetAssault(AssaultID, OutAssault) | Pure | bool |
 | GetAllAssaults() | Pure | Array<AssaultRecord> |
 | GetAssaultsForTerritory(Tag) | Pure | Array<AssaultRecord> |
+| GetAssaultsForTerritoryActor(Territory) | Pure | Array<AssaultRecord>; exact loaded actor/GUID query |
 | IsAssaultActive(AssaultID) | Pure | bool |
 | IsAssaultPendingOrActive(AssaultID) | Pure | bool |
 | GetAssaultDebugString(AssaultID) | Pure | string |
@@ -1063,7 +1095,7 @@ diplomacy/admission gates.
 
 ## ATerritoryAssaultCharacter and Narrative activity
 
-`ATerritoryAssaultCharacter` derives from `ANarrativeNPCCharacter`. `UTerritoryAssaultParticipantComponent` owns replicated assault identity and exact-once capture/death registration. `UTerritoryAssaultGoal` derives from `UNPCGoalItem`; `UTerritoryAssaultActivity` derives from `UNPCActivity` and is interruptible.
+`ATerritoryAssaultCharacter` derives from `ANarrativeNPCCharacter`. `UTerritoryAssaultParticipantComponent` owns replicated assault identity and exact-once capture/death registration. `UTerritoryAssaultGoal` derives from `UNPCGoalItem` and scores below Narrative's attack goal; `UTerritoryAssaultActivity` derives from `UNPCActivity`. `TerritoryAssaultTargetPolicy` is a transient adapter over Narrative's public goal-key/score contract: while registered hostile defenders remain, it suppresses non-defender attack goals, preserves defender scores, and restores exact original scores afterward. It does not persist or replicate goal pointers/scores and does not replace Narrative perception, activities, behavior trees, GAS, or attack tokens. Combat priority is score-driven rather than dependent on Narrative's unused interrupt flag.
 
 See [17_Counterattack_System.md](17_Counterattack_System.md) for lifecycle and configuration.
 

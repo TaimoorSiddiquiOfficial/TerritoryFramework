@@ -1,0 +1,281 @@
+#include "Interaction/TerritoryCapturePoint.h"
+
+#include "AbilitySystemInterface.h"
+#include "Components/SphereComponent.h"
+#include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryTypes.h"
+#include "Core/TerritoryVolume.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
+#include "GameFramework/Pawn.h"
+#include "Subsystems/TerritoryControlSubsystem.h"
+
+ATerritoryCapturePoint::ATerritoryCapturePoint()
+{
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = 0.25f;
+	bReplicates = false;
+
+	CaptureZone = CreateDefaultSubobject<USphereComponent>(TEXT("CaptureZone"));
+	SetRootComponent(CaptureZone);
+	CaptureZone->InitSphereRadius(CaptureRadius);
+	CaptureZone->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CaptureZone->SetCollisionObjectType(ECC_WorldDynamic);
+	CaptureZone->SetCollisionResponseToAllChannels(ECR_Ignore);
+	CaptureZone->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	CaptureZone->SetGenerateOverlapEvents(true);
+	CaptureZone->ShapeColor = FColor(68, 208, 158);
+}
+
+void ATerritoryCapturePoint::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	if (CaptureZone)
+	{
+		CaptureZone->SetSphereRadius(FMath::Max(100.f, CaptureRadius));
+	}
+}
+
+void ATerritoryCapturePoint::BeginPlay()
+{
+	Super::BeginPlay();
+	if (!CaptureZone) return;
+
+	CaptureZone->OnComponentBeginOverlap.AddUniqueDynamic(
+		this, &ATerritoryCapturePoint::HandleCaptureZoneBeginOverlap);
+	CaptureZone->OnComponentEndOverlap.AddUniqueDynamic(
+		this, &ATerritoryCapturePoint::HandleCaptureZoneEndOverlap);
+
+	if (HasAuthority())
+	{
+		TArray<AActor*> ExistingOverlaps;
+		CaptureZone->GetOverlappingActors(ExistingOverlaps, APawn::StaticClass());
+		for (AActor* Actor : ExistingOverlaps)
+		{
+			OverlappingParticipants.Add(Actor);
+		}
+		ReconcileOverlappingParticipants();
+	}
+}
+
+void ATerritoryCapturePoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	TArray<TWeakObjectPtr<AActor>> Participants;
+	Registrations.GetKeys(Participants);
+	for (const TWeakObjectPtr<AActor>& Participant : Participants)
+	{
+		if (AActor* Actor = Participant.Get())
+		{
+			UnregisterCaptureParticipant(Actor);
+		}
+	}
+	Registrations.Empty();
+	OverlappingParticipants.Empty();
+	Super::EndPlay(EndPlayReason);
+}
+
+void ATerritoryCapturePoint::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (HasAuthority())
+	{
+		ReconcileOverlappingParticipants();
+	}
+}
+
+ATerritoryVolume* ATerritoryCapturePoint::ResolveTargetTerritory() const
+{
+	return TargetTerritoryTag.IsValid()
+		? UTerritoryBlueprintLibrary::GetTerritoryByTag(this, TargetTerritoryTag)
+		: nullptr;
+}
+
+float ATerritoryCapturePoint::GetCaptureProgress() const
+{
+	const ATerritoryVolume* Territory = ResolveTargetTerritory();
+	return Territory ? Territory->GetControlProgress() : 0.f;
+}
+
+FGameplayTag ATerritoryCapturePoint::GetContestingFaction() const
+{
+	const ATerritoryVolume* Territory = ResolveTargetTerritory();
+	return Territory ? Territory->GetOwnershipData().ContestingFaction : FGameplayTag();
+}
+
+bool ATerritoryCapturePoint::TryRegisterCaptureParticipant(AActor* Participant)
+{
+	if (!HasAuthority() || !bCaptureEnabled || !IsEligiblePlayerParticipant(Participant))
+	{
+		UnregisterCaptureParticipant(Participant);
+		return false;
+	}
+
+	ATerritoryVolume* Territory = ResolveTargetTerritory();
+	if (!Territory || Territory->GetControlMode() != ETerritoryControlMode::Independent)
+	{
+		UnregisterCaptureParticipant(Participant);
+		return false;
+	}
+
+	UNarrativeAbilitySystemComponent* AbilitySystem =
+		ResolveParticipantAbilitySystem(Participant);
+	if (AbilitySystem && AbilitySystem->IsDead())
+	{
+		UnregisterCaptureParticipant(Participant);
+		return false;
+	}
+
+	const FGameplayTag Faction =
+		UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Participant);
+	if (!Faction.IsValid() || Territory->IsOwnedByFaction(Faction))
+	{
+		UnregisterCaptureParticipant(Participant);
+		return false;
+	}
+
+	const TWeakObjectPtr<AActor> ParticipantKey(Participant);
+	if (const FParticipantRegistration* Existing = Registrations.Find(ParticipantKey))
+	{
+		if (Existing->Territory.Get() == Territory && Existing->Faction == Faction)
+		{
+			if (UTerritoryControlSubsystem* Control =
+				GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
+			{
+				if (Control->TryRegisterAttacker(Territory, Participant, Faction))
+				{
+					return true;
+				}
+			}
+			UnregisterCaptureParticipant(Participant);
+			return false;
+		}
+		UnregisterCaptureParticipant(Participant);
+	}
+
+	UTerritoryControlSubsystem* Control =
+		GetWorld()->GetSubsystem<UTerritoryControlSubsystem>();
+	if (!Control || !Control->TryRegisterAttacker(Territory, Participant, Faction))
+	{
+		return false;
+	}
+
+	FParticipantRegistration& Registration = Registrations.Add(ParticipantKey);
+	Registration.Territory = Territory;
+	Registration.Faction = Faction;
+	Registration.AbilitySystem = AbilitySystem;
+	if (AbilitySystem)
+	{
+		AbilitySystem->OnDeathStateChanged.AddUniqueDynamic(
+			this, &ATerritoryCapturePoint::HandleParticipantDeathStateChanged);
+	}
+	OnCaptureParticipantChanged.Broadcast(Participant, Territory, true);
+	return true;
+}
+
+void ATerritoryCapturePoint::UnregisterCaptureParticipant(AActor* Participant)
+{
+	if (!Participant) return;
+	const TWeakObjectPtr<AActor> ParticipantKey(Participant);
+	const FParticipantRegistration* Existing = Registrations.Find(ParticipantKey);
+	if (!Existing) return;
+
+	const FParticipantRegistration Registration = *Existing;
+	Registrations.Remove(ParticipantKey);
+	if (UNarrativeAbilitySystemComponent* AbilitySystem = Registration.AbilitySystem.Get())
+	{
+		AbilitySystem->OnDeathStateChanged.RemoveDynamic(
+			this, &ATerritoryCapturePoint::HandleParticipantDeathStateChanged);
+	}
+	if (HasAuthority())
+	{
+		if (ATerritoryVolume* Territory = Registration.Territory.Get())
+		{
+			UWorld* World = GetWorld();
+			if (UTerritoryControlSubsystem* Control = World
+				? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr)
+			{
+				Control->UnregisterAttacker(Territory, Participant, Registration.Faction);
+			}
+		}
+	}
+	OnCaptureParticipantChanged.Broadcast(Participant, Registration.Territory.Get(), false);
+}
+
+bool ATerritoryCapturePoint::IsCaptureParticipantRegistered(const AActor* Participant) const
+{
+	return Participant && Registrations.Contains(
+		TWeakObjectPtr<AActor>(const_cast<AActor*>(Participant)));
+}
+
+void ATerritoryCapturePoint::HandleCaptureZoneBeginOverlap(
+	UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep,
+	const FHitResult& SweepResult)
+{
+	if (!HasAuthority() || !OtherActor) return;
+	OverlappingParticipants.Add(OtherActor);
+	TryRegisterCaptureParticipant(OtherActor);
+}
+
+void ATerritoryCapturePoint::HandleCaptureZoneEndOverlap(
+	UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
+{
+	if (!HasAuthority() || !OtherActor) return;
+	OverlappingParticipants.Remove(OtherActor);
+	UnregisterCaptureParticipant(OtherActor);
+}
+
+void ATerritoryCapturePoint::HandleParticipantDeathStateChanged(
+	AActor* Participant, UNarrativeAbilitySystemComponent* AbilitySystem, bool bIsDead)
+{
+	if (!HasAuthority() || !Participant) return;
+	if (bIsDead)
+	{
+		UnregisterCaptureParticipant(Participant);
+	}
+	else if (OverlappingParticipants.Contains(Participant))
+	{
+		TryRegisterCaptureParticipant(Participant);
+	}
+}
+
+void ATerritoryCapturePoint::ReconcileOverlappingParticipants()
+{
+	if (!bCaptureEnabled)
+	{
+		TArray<TWeakObjectPtr<AActor>> Registered;
+		Registrations.GetKeys(Registered);
+		for (const TWeakObjectPtr<AActor>& Participant : Registered)
+		{
+			if (AActor* Actor = Participant.Get()) UnregisterCaptureParticipant(Actor);
+		}
+		return;
+	}
+
+	for (auto It = OverlappingParticipants.CreateIterator(); It; ++It)
+	{
+		AActor* Participant = It->Get();
+		if (!Participant || !CaptureZone || !CaptureZone->IsOverlappingActor(Participant))
+		{
+			if (Participant) UnregisterCaptureParticipant(Participant);
+			It.RemoveCurrent();
+			continue;
+		}
+		TryRegisterCaptureParticipant(Participant);
+	}
+}
+
+UNarrativeAbilitySystemComponent* ATerritoryCapturePoint::ResolveParticipantAbilitySystem(
+	AActor* Participant) const
+{
+	IAbilitySystemInterface* AbilitySystemOwner = Cast<IAbilitySystemInterface>(Participant);
+	return AbilitySystemOwner
+		? Cast<UNarrativeAbilitySystemComponent>(AbilitySystemOwner->GetAbilitySystemComponent())
+		: nullptr;
+}
+
+bool ATerritoryCapturePoint::IsEligiblePlayerParticipant(AActor* Participant) const
+{
+	const APawn* Pawn = Cast<APawn>(Participant);
+	return Pawn && Pawn->IsPlayerControlled();
+}

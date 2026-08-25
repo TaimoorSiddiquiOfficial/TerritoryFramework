@@ -67,6 +67,9 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> TerritoryNetIncomeText;
 
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TerritoryProductionText;
+
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	virtual void RefreshTerritoryDisplay();
 

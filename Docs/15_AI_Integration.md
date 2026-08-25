@@ -1,7 +1,7 @@
 # Territory AI Integration — Complete Setup Guide
 
-> **Version:** v0.2.5 (re-audited 2026-07-30)
-> **Depends on:** NarrativePro 2.3.3
+> **Version:** v0.2.6 (re-audited 2026-08-24)
+> **Depends on:** Narrative Pro 2.4.2
 > **All assets in `/Game/TerritoryFramework/`** — zero NarrativePro content modified
 
 > **Authority note:** Narrative `UNPCDefinition`, `FNPCSpawnInfo`, `UNPCActivityConfiguration`, `UNPCActivityComponent`, goals, TriggerSets, ASC/death delegates, and navigation remain the AI foundation. Territory patrol and counterattack intent are expressed as Narrative goals/activities. The Territory-named Behavior Tree assets documented below are existing compatibility/tactical content used by selected Narrative activities; they are not a second AI controller, scheduler, or capture system.
@@ -39,7 +39,15 @@ NPCDefinition (NPC_TerritoryBandit)
 
 Counterattack NPCs use `ATerritoryAssaultCharacter`, which still derives through Narrative's character stack. `UTerritoryAssaultGoal` carries the durable assault/territory/faction intent, while `UTerritoryAssaultActivity` consumes that goal and routes the NPC toward the selected typed approach and target Territory. Physical creation goes through `UNarrativeCharacterSubsystem::SpawnNPC`, so Narrative's character/NPC maps and duplicate policy remain authoritative. The native pawn selects `ANarrativeNPCController` and auto-possession for placed or spawned actors. A profile NPC definition may resolve to a Blueprint subclass, but that subclass must preserve an `ANarrativeNPCController`-derived controller and spawned auto-possession; forces larger than one also require the definition to allow multiple instances. The participant waits for Narrative's asynchronous character load to finish, then adds the native assault activity when the assigned Narrative activity configuration does not already contain it. Invalid definition/controller/auto-possession contracts are rejected by planning preview, runtime scheduling/lifecycle checks, and TerritoryFramework data validation; no generic fallback pawn is spawned and no finite force is consumed.
 
-Combat may interrupt the assault activity through Narrative's normal activity scoring. The durable goal remains until death, withdrawal, cancellation, or resolution, so the activity can resume without inventing a parallel Behavior Tree authority.
+Combat interrupts the assault through Narrative's highest-score selection. The Territory
+movement goal scores `2`; Narrative Pro 2.4.2's attack generator scores `3` before optional
+attack scoring. While a live registered hostile defender exists, the participant's target
+policy temporarily suppresses attack goals aimed at non-defenders and leaves defender goals
+at their exact Narrative-authored scores. This prevents a nearer player/EQS result from
+skipping the assigned garrison. When the final defender is removed, the original goal scores
+are restored and Narrative immediately reselects normally. The durable movement goal remains
+until death, withdrawal, cancellation, or resolution. TerritoryFramework does not rely on
+Narrative's currently unused `bIsInterruptable` flag.
 
 ### Decision Flow at Runtime
 
@@ -47,11 +55,14 @@ Combat may interrupt the assault activity through Narrative's normal activity sc
 1. Trigger fires → adds Goal_TerritoryPatrol to NPC
 2. Activity system rescores every 0.5s (rescore_interval)
 3. Each BPA scores against the goal:
-   - Attack goals → BPA_Attack_* scores high (1.0+)
-   - Patrol goals → BPA_Patrol or BPA_ReturnToTerritory scores low (0.01)
+   - Attack goals → Narrative attack activities score from the generated attack goal (`3+`)
+   - Territory assault movement → native durable goal scores `2`
+   - Patrol/return goals → project-authored lower-priority movement scores
    - No goal → BPA_Idle scores lowest
-4. Highest-scoring activity wins → its BT runs
-5. For territory guards: BPA_ReturnToTerritory reads TerritoryHomeTransform
+4. During a physical assault, non-defender attack goals score `0` while a registered hostile
+   defender remains; defender attack goals retain their Narrative scores
+5. Highest-scoring activity wins → its BT runs
+6. For territory guards: BPA_ReturnToTerritory reads TerritoryHomeTransform
 ```
 
 ---
@@ -102,13 +113,13 @@ avoids treating Unreal's reserved `Custom` marker as a named collision profile.
 
 | Asset | Path | Source | Notes |
 |---|---|---|---|
-| **Goal_TerritoryPatrol** | `/Game/TerritoryFramework/Goal_TerritoryPatrol` | Duplicated from Goal_Patrol | Territory patrol goal. Used by Triggers_Bandit |
+| **Goal_TerritoryPatrol** | `/Game/TerritoryFramework/AI/Goal_TerritoryPatrol` | Duplicated from Goal_Patrol | Territory patrol goal. Used by Triggers_Bandit |
 
 ### Trigger Sets
 
 | Asset | Path | Notes |
 |---|---|---|
-| **Triggers_Bandit** | `/Game/TerritoryFramework/Blueprints/Triggers_Bandit` | Time-of-day trigger → adds Goal_TerritoryPatrol |
+| **Triggers_Bandit** | `/Game/TerritoryFramework/AI/Triggers_Bandit` | Time-of-day trigger -> adds Goal_TerritoryPatrol. The project package redirect preserves the legacy `/Blueprints/` reference. |
 
 ### Hierarchy Blueprints
 
@@ -163,7 +174,7 @@ ATerritoryVolume::SpawnGuards()                          [C++]
 
 ```
 ATerritoryGuardCharacter (C++ base class)
-  ├─ TerritoryHomeTransform: FTransform                 → replicated, set by ConfigureTerritorySpawn
+  ├─ TerritoryHomeTransform: FTransform                 → replicated, set before Narrative definition assignment
   ├─ OwningTerritory: TObjectPtr<ATerritoryVolume>      → replicated territory back-reference
   └─ OwningTerritorySpawnPoint: TObjectPtr              → replicated spawn point back-reference
 
@@ -269,9 +280,10 @@ The `UTerritoryCombatDirector` is a `UWorldSubsystem` that limits how many AI ca
 | System | Scope | What It Limits |
 |---|---|---|
 | **Narrative Tokens** | Tactical (per-target) | How many AI gang up on ONE defender |
-| **Assault Slots** | Strategic (per-territory) | How many AI participate in a territory assault |
+| **Assault Slots** | Strategic (per-territory) | How many configured physical counterattack NPCs participate |
 
-AI should use **both**: `RequestAssaultSlot` (strategic gate) → `RequestAttackToken` (tactical).
+Physical assault NPCs use both systems. Defending guards and unrelated NPCs use only
+Narrative tactical tokens and are excluded from strategic assault slots.
 
 ### Slot Budget
 
@@ -289,7 +301,7 @@ UTerritoryCombatDirector (UWorldSubsystem)
   │    └─ FPerTerritorySlots
   │         └─ GrantedControllers: TArray<TWeakObjectPtr<ANarrativeNPCController>>
   └─ BoundControllers: TSet<TWeakObjectPtr<ANarrativeNPCController>>
-       └─ Tracks which controllers have ASC OnDied bound
+       └─ Tracks which controllers have ASC OnDeathStateChanged bound
 ```
 
 ### API Reference
@@ -298,7 +310,7 @@ UTerritoryCombatDirector (UWorldSubsystem)
 
 | Function | Parameters | Returns | Behavior |
 |---|---|---|---|
-| `RequestAssaultSlot` | `Territory, NPCController` | `bool` | Grants slot if budget available and territory not Locked. Binds ASC OnDied for auto-release. Runs stale cleanup. |
+| `RequestAssaultSlot` | `Territory, NPCController` | `bool` | Grants only to a configured participant targeting this Territory when budget is available and the Territory is not Locked. |
 | `ReleaseAssaultSlot` | `Territory, NPCController` | `void` | Releases one slot in a specific territory. |
 | `ReleaseAllSlots` | `NPCController` | `void` | Releases all slots across ALL territories for this controller. |
 
@@ -315,26 +327,27 @@ UTerritoryCombatDirector (UWorldSubsystem)
 ```
 RequestAssaultSlot(Territory, Controller):
   1. Null checks (Territory, Controller) → false if null
-  2. Lock check → false if TerritoryState == Locked
-  3. CleanupStaleTerritoryKeys() → remove destroyed territory entries from SlotMap
-  4. FindOrAdd territory in SlotMap
-  5. CleanupInvalidControllers() → remove dead controller weak pointers
-  6. Budget check → false if GrantedControllers.Num() >= MaxConcurrentAttackers
-  7. Duplicate check → true if controller already has a slot (idempotent)
-  8. Grant slot → add controller to GrantedControllers
-  9. BindControllerDeath(Controller) → bind ASC OnDied for auto-release
+  2. Validate configured participant, assault ID, faction, and matching target tag
+  3. Lock check → false if TerritoryState == Locked
+  4. CleanupStaleTerritoryKeys() → remove destroyed keys and orphaned death bindings
+  5. FindOrAdd territory in SlotMap
+  6. CleanupInvalidControllers() → remove dead controller weak pointers
+  7. Budget check → false if GrantedControllers.Num() >= MaxConcurrentAttackers
+  8. Duplicate check → true if controller already has a slot (idempotent)
+  9. Grant slot and bind ASC death for automatic release
   10. Return true
 ```
 
 ### Automatic Slot Release on NPC Death
 
-When a slot is granted, the CombatDirector binds to the controller's `UNarrativeAbilitySystemComponent::OnDied` delegate:
+When a slot is granted, the CombatDirector binds to the controller's
+`UNarrativeAbilitySystemComponent::OnDeathStateChanged` delegate:
 
 ```
 BindControllerDeath(Controller):
   1. Check if already bound (BoundControllers set) → skip if duplicate
   2. Get ASC via IAbilitySystemInterface
-  3. ASC->OnDied.AddUniqueDynamic(this, OnAssaultControllerDied)
+  3. ASC->OnDeathStateChanged.AddUniqueDynamic(this, OnAssaultControllerDied)
   4. Add to BoundControllers set
 
 OnAssaultControllerDied(KilledActor, KilledASC):
@@ -356,7 +369,10 @@ Two cleanup mechanisms prevent memory/budget leaks:
 
 ### BT Task Integration
 
-Two BT tasks gate attack behavior through the CombatDirector:
+The shipped Narrative attack trees use `BTService_TerritoryAssaultPermission`. It holds a
+slot for the active attack branch when the pawn is a physical assault participant. Ordinary
+guards receive branch permission without allocating a strategic slot. The older request and
+release tasks remain available for custom trees.
 
 #### BTTask_RequestTerritoryPermission
 
@@ -439,9 +455,19 @@ An NPC needs a CombatDirector slot to **initiate** an attack. Once attacking ins
 - `IsValid` check present (used via the `TerritoryGuardCharacter` cast as the gate — non-territory NPCs fail the cast and receive `-999`)
 - Implementation uses the cast itself as the territory check rather than a separate `GetOwningTerritory` call, achieving the same result
 
-### BTTask_RequestTerritoryPermission — Not in Any BT
+### Pending-kill Narrative controller activity cleanup ✅
 
-The C++ BT tasks `BTTask_RequestTerritoryPermission` and `BTTask_ReleaseTerritoryPermission` exist but are not used in any behavior tree. These should be added to guard BTs to enforce the CombatDirector assault slot budget before attack actions.
+Territory guards and finite attackers now deactivate their Narrative activity component, remove
+transient goals, and stop movement before death cleanup or direct removal. This closes the window
+where target-death delegates could ask `BPA_Attack`, `BPA_FollowCharacter`, or
+`BPA_ReturnToTerritory` to score/end after Narrative's cached controller became pending-kill.
+The fix is in the Territory-owned C++ adapter; no Narrative Pro Blueprint or source is modified.
+
+### Territory permission placement
+
+Live Editor inspection confirms `BTService_TerritoryAssaultPermission` is placed in the
+melee, ranged, and grenade attack trees. Do not add the legacy request/release tasks to
+defender trees; defenders must never consume the physical counterattack budget.
 
 ---
 
@@ -469,11 +495,12 @@ The territory will spawn merchant guards when owned by the Merchants faction.
 | Function | Class | Purpose |
 |---|---|---|
 | `SpawnThroughNarrative()` | `ATerritoryGuardCharacter` | Native Territory adapter into Narrative's registered NPC spawn path |
-| `ConfigureTerritorySpawn()` | `ATerritoryGuardCharacter` | Advanced Blueprint deferred-spawn compatibility entrypoint; core garrisons use `SpawnThroughNarrative` |
+| `ConfigureTerritorySpawnWithContext()` | `ATerritoryGuardCharacter` | Authority-only Blueprint adapter that validates typed Territory/spawn-point context before applying the Narrative definition |
+| `ConfigureTerritorySpawn()` | `ATerritoryGuardCharacter` | Deprecated migration node; resolves complete typed context or fails closed |
 | `SpawnGuards()` | `ATerritoryVolume` | Spawns all guards for current owner |
 | `SpawnSingleGuard()` | `ATerritoryVolume` | Reserve replacement (one-for-one) |
 | `ResolveGuardDefinition()` | `ATerritoryVolume` | Picks NPCDefinition per faction (FactionGuardDefinitions first, then default) |
-| `RegisterDefender()` | `ATerritoryVolume` | Adds actor to defender list + binds ASC OnDied |
+| `RegisterDefender()` | `ATerritoryVolume` | Adds actor to defender list + binds ASC OnDeathStateChanged with bounded readiness retry |
 | `UnregisterDefender()` | `ATerritoryVolume` | Removes from defender list + unbinds death delegate |
 | `GetPatrolRouteAsTransforms()` | `ATerritoryGuardSpawnPoint` | Bridge patrol data to Narrative goals |
 | `GetPatrolWaitTimes()` | `ATerritoryGuardSpawnPoint` | Parallel array of wait durations |
@@ -488,7 +515,8 @@ The territory will spawn merchant guards when owned by the Merchants faction.
 | `HasAssaultSlot()` | `UTerritoryCombatDirector` | Query: does controller hold a slot? |
 | `GetGrantedSlots()` | `UTerritoryCombatDirector` | Active slots (filters dead controllers) |
 | `GetAvailableSlots()` | `UTerritoryCombatDirector` | MaxSlots - GrantedSlots |
-| `BindControllerDeath()` | `UTerritoryCombatDirector` | Bind ASC OnDied for auto-release on NPC death |
+| `IsEligibleAssaultController()` | `UTerritoryCombatDirector` | Requires a configured physical assault participant targeting the exact Territory |
+| `BindControllerDeath()` | `UTerritoryCombatDirector` | Bind ASC OnDeathStateChanged for auto-release on NPC death |
 | `OnAssaultControllerDied()` | `UTerritoryCombatDirector` | Death handler: releases all slots, cleans binding |
 | `CleanupInvalidControllers()` | `UTerritoryCombatDirector` | Remove dead weak pointers per territory |
 | `CleanupStaleTerritoryKeys()` | `UTerritoryCombatDirector` | Remove destroyed territory entries from SlotMap |
@@ -507,7 +535,7 @@ The territory will spawn merchant guards when owned by the Merchants faction.
 | TerritoryFramework | NarrativePro | Connection |
 |---|---|---|
 | `ATerritoryGuardCharacter` | `ANarrativeNPCCharacter` | Inherits. `GetActorGUID` override prevents crash |
-| `ConfigureTerritorySpawn` | `FNPCSpawnParams` | Sets `bOverride_DefaultFactions = true` |
+| `ConfigureTerritorySpawnWithContext` | `FNPCSpawnParams` | Sets the complete spawn context and `bOverride_DefaultFactions = true` before definition assignment |
 | `TerritoryHomeTransform` | `SpawnInfo.SpawnTransform` | Same transform — used by BPA_ReturnToSpawn |
 | `BPA_ReturnToTerritory` | `NPCActivity` | Scores goals, sets up blackboard |
 | `Goal_TerritoryPatrol` | `NPCGoalItem` | Patrol goal with score and tags |

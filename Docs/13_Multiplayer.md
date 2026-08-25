@@ -7,6 +7,7 @@
 | Territory ownership | ✅ Server | Receives via RepNotify |
 | Capture progression | ✅ Server (timer) | Read-only via replicated OwnershipData |
 | Economy treasury | ✅ Server (timer) | Read-only (no client timer) |
+| Resource production and crafting recipes | ✅ Server (campaign-day scheduler or authority call) | Reads replicated WorldState site/stockpile projections |
 | Diplomacy | ✅ Server | Read-only via Narrative GameState |
 | Guard spawning | ✅ Server | Guards replicate normally |
 | Combat permissions | ✅ Server | BT tasks run server-side for AI |
@@ -37,6 +38,8 @@
 |---|---|
 | ReplicatedTreasuries | ✅ |
 | ReplicatedTransactions | ✅ |
+| ReplicatedProductionSites | ✅ RepNotify; includes per-rule status and no live actor pointers |
+| ReplicatedResourceSnapshots | ✅ RepNotify; read-only stockpile quantities/storage availability |
 | ReplicatedTreaties | ✅ |
 | ReplicatedReputation | ✅ |
 | ReplicatedDiplomacyHistory | ✅ |
@@ -44,6 +47,8 @@
 | ReplicatedAssaults | ✅ RepNotify |
 
 RepNotify handlers hydrate client-side economy, diplomacy, and counterattack query subsystems. Clients do not mutate those maps.
+
+Resource-account actor pointers are server runtime routing only and never replicate or save. A server-owned `UTerritoryFactionResourceAccountComponent` re-registers the faction's Narrative inventory after spawn/streaming. Client widgets use `ATerritoryWorldState` projections and do not query the server-only routing map.
 
 ## Authority Enforcement
 
@@ -79,7 +84,8 @@ Clients should:
 2. **Capture participants are transient** — a saved contest restores its leading faction/progress for decay, but actor identities and non-leading progress are not saved.
 3. **Assault records are replicated; live pointers are not** — physical attacker actors replicate normally, while campaign save/load reconstructs survivors from finite counts.
 4. **Offscreen assault simulation is disabled** — warning/waiting assaults produce no pawns and no capture pressure until a relevant player enters the activation radius.
-5. **Runtime verification remains required** — dedicated-server/two-client PIE must prove one-time proximity activation, immediate death removal, and late-join state for each project NPC configuration.
+5. **World Partition teardown is explicit** — if a target Territory streams out, its physical participants unregister capture pressure and release all strategic slots; the CombatDirector also prunes invalid controller keys and orphaned death bindings.
+6. **Runtime verification remains required** — dedicated-server/two-client PIE must prove one-time proximity activation, immediate death removal, target stream-out cleanup, and late-join state for each project NPC configuration.
 
 ## Dedicated Server Setup
 

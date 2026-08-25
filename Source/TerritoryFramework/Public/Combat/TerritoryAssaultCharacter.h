@@ -63,12 +63,19 @@ public:
 	virtual void SetActorGUID_Implementation(const FGuid& NewGUID) override;
 	virtual void SetNPCDefinition(UNPCDefinition* Definition) override;
 
+	/** Finalizes physical death from Narrative's authoritative ASC state. */
+	void ReconcileNarrativeDeathState(UNarrativeAbilitySystemComponent* KilledActorASC,
+		bool bReportedIsDead);
+
+	/** NPC ragdoll mutations are authored by the server and projected by Narrative replication. */
+	virtual void SetRagdoll(bool bWantsRagdoll) override;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Assault")
 	TObjectPtr<UTerritoryAssaultParticipantComponent> AssaultParticipant;
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void HandleDeath_Implementation(AActor* KilledActor,
-		UNarrativeAbilitySystemComponent* KilledActorASC) override;
+		UNarrativeAbilitySystemComponent* KilledActorASC, const bool bIsDead) override;
 	virtual bool ShouldRespawn_Implementation() const override;
 };

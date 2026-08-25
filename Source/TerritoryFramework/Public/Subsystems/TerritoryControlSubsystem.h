@@ -163,7 +163,8 @@ private:
 		const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 	UFUNCTION()
-	void OnRegisteredAttackerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
+	void OnRegisteredAttackerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC,
+		const bool bIsDead);
 
 	/**
 	 * P1-08: Pure validation — no side effects. Checks territory validity,

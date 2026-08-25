@@ -13,12 +13,13 @@
 | `DoesDistrictMatchSearch(View, SearchText)` | bool | Case-insensitive tokenized District/read-model search |
 | `GetDistrictOperationsRevision(View)` | int32 | UI invalidation key covering displayed authorities |
 | `BuildEconomyOperationsView(Context, Viewer, Faction, MaxRecent)` | struct | Narrative funds plus Territory economy projection |
+| `BuildProductionSiteOperationsView(Context, TerritoryTag, OutView)` | bool | Server/client read model for one production Property |
 | `GetThreatLevelText(Level)` | Text | Localizable threat label |
 | `GetAssaultStateText(State)` | Text | Localizable assault-state label |
 
 ### UI enums
 
-- `ETerritoryOperationsFilter`: `All`, `Unlocked`, `Available`, `Owned`, `Manageable`, `UnderAttack`, `Contested`, `Locked`, `FinancialRisk`.
+- `ETerritoryOperationsFilter`: `All`, `Unlocked`, `Available`, `Owned`, `Manageable`, `UnderAttack`, `Contested`, `Locked`, `FinancialRisk`, `Producing`, `ProductionBlocked`, `MissingInputs`, `StorageFull`.
 - `ETerritoryThreatLevel`: `None`, `Watch`, `Warning`, `Critical`.
 
 ### Interactive widgets
@@ -53,6 +54,7 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | ContainsPoint(Point) | bool | Territory |
 | GetParentTerritoryTag() | GameplayTag | Territory |
 | GetInitialOwningFaction() | GameplayTag | Territory |
+| GetResolvedInitialState() | ETerritoryState | Territory |
 | GetSpawnedGuardCount() | int32 | Territory\|Guards |
 | HasGuardsAlive() | bool | Territory\|Guards |
 | GetGuardSpawnPoints() | Array<GuardSpawnPoint*> | Territory\|Guards |
@@ -65,7 +67,7 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 
 | Function | Category |
 |---|---|
-| SetOwningFaction(NewFaction) | Territory |
+| SetOwningFaction(NewFaction) | Territory — validated wrapper through ControlSubsystem; use Apply Territory Mutation for a result/context |
 | SetControlProgress(Progress) | Territory |
 | SetTerritoryState(NewState) | Territory |
 | RegisterDefender(Defender) | Territory |
@@ -98,10 +100,10 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | TerritoryTag | GameplayTag |
 | TerritoryDisplayName | Text |
 | InitialOwningFaction | GameplayTag |
+| InitialState | ETerritoryInitialState |
 | InitialMaxConcurrentAttackers | int32 |
 | InitialPeriodicIncome | int32 |
 | InitialGuardCost | int32 |
-| bStartsLocked | bool |
 | ParentTerritoryTag | GameplayTag |
 | TerritoryGUID | FGuid |
 | BoundsShape | ShapeComponent* |
@@ -130,7 +132,8 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 
 | Function | Notes |
 |---|---|
-| ConfigureTerritorySpawn(...) | Advanced external deferred-spawn configuration entrypoint; core Territory garrisons already spawn through Narrative's subsystem |
+| ConfigureTerritorySpawnWithContext(...) | Authority-only external deferred-spawn entrypoint. Supply the exact Territory and guard spawn point and branch on the Boolean result. |
+| ConfigureTerritorySpawn(...) | Deprecated migration node. It resolves typed context from stable identity or fails closed; core garrisons already spawn through Narrative's subsystem. |
 
 ### BlueprintReadOnly Replicated Properties
 
@@ -285,6 +288,7 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | MaxUpgradeLevel | int32 (default 3, no SaveGame, no Replicated) |
 | UpgradeCostPerLevel | int32 |
 | IncomeBonusPerLevel | int32 |
+| ProductionProfile | UTerritoryProductionProfile* (optional; captured Properties may produce no resources) |
 
 ## UTerritoryBlueprintLibrary (Static)
 
@@ -394,6 +398,10 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | CreditCurrencyToFaction(Faction, Amount, Policy, Reason, Type) | AuthorityOnly → int32 |
 | RegisterFactionCurrencyAccount(Faction, Role, AccountActor) | AuthorityOnly → bool |
 | UnregisterFactionCurrencyAccount(Faction, AccountActor) | AuthorityOnly |
+| RegisterFactionResourceAccount(Faction, AccountActor) | AuthorityOnly → bool |
+| UnregisterFactionResourceAccount(Faction, AccountActor) | AuthorityOnly |
+| ProcessResourceProduction() | AuthorityOnly |
+| ExecuteResourceRecipe(Requester, Faction, Rule, UpgradeLevel, BatchCount, SourceTerritory, OutResult) | AuthorityOnly → bool |
 | SetFactionTreasury(Faction, Treasury) | AuthorityOnly |
 | RecalculateIncome(Faction) | AuthorityOnly |
 | GetActorCurrency(Requester) | Pure → int32 |
@@ -403,6 +411,9 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | GetFactionEconomy(Faction) | Pure → TerritoryTreasury |
 | GetAllFactionsWithTreasury() | Pure → Array<GameplayTag> |
 | GetTransactionHistory(Faction, Max) | → Array<Transaction> |
+| GetFactionResourceSnapshot(Faction) | Pure → ResourceSnapshot |
+| GetProductionSitesForFaction(Faction) | Pure → Array<ProductionSiteRecord> |
+| GetProductionSite(TerritoryTag) | Pure → ProductionSiteRecord |
 
 ### UTerritoryDiplomacySubsystem
 
@@ -434,6 +445,7 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | GetAssault(AssaultID, OutAssault) | Pure → bool |
 | GetAllAssaults() | Pure → Array<AssaultRecord> |
 | GetAssaultsForTerritory(TerritoryTag) | Pure → Array<AssaultRecord> |
+| GetAssaultsForTerritoryActor(Territory) | Pure → Array<AssaultRecord>; exact stable GUID for a loaded actor |
 | IsAssaultActive(AssaultID) | Pure → bool |
 | IsAssaultPendingOrActive(AssaultID) | Pure → bool |
 | GetAssaultDebugString(AssaultID) | Pure → String |
@@ -452,6 +464,68 @@ Counterattack setup queries on `ATerritoryVolume` are `GetCounterAttackProfile`,
 `GetCounterAttackApproaches`, `GetGuardQuality`, `GetFortificationStrength`,
 `GetNearbyAlliedSupport`, and `GetStrategicValue`. The profile's
 `UnguardedLaunchProbability` defaults to `1.0` after diplomacy/admission gates.
+
+### Narrative State Config extensions
+
+These `EditInlineNew` Narrative classes can be added directly under a Territory's
+`State Configs -> Entry/Exit Conditions/Events` arrays:
+
+| Class | Important options | Example |
+|---|---|---|
+| `UTerritoryOwnershipCondition` | Territory tag, required owner, optional special states | Blacksmith must be owned by Heroes |
+| `UTerritoryDiplomacyCondition` | Faction A, Faction B, required treaty state | Heroes and Bandits must be at War |
+| `UTerritoryGarrisonCondition` | Territory tag, metric, comparison, number | Living Defenders Equal 0 |
+| `UTerritoryStateCondition` | Territory tag, required state | District must be Contested |
+| `UTerritoryControlProgressCondition` | Territory, comparison, percent, optional tolerance | Control Progress At Least 75% |
+| `UTerritoryReputationCondition` | Faction, comparison, signed value | Regime Reputation Less Than -50 |
+| `UTerritoryAssaultCondition` | Territory, query, state/result or number comparison | Remaining Attackers Equal 0 |
+| `UTerritoryPresenceCondition` | Territory, include child Places | Narrative target is inside Castle Hill |
+| `UTerritoryEventContextCondition` | Required target/player/ASC/controller/Tales context | Give XP only to the player pawn that caused capture |
+| `UTerritoryProductionStatusCondition` | Property, optional rule, required status | Farm production is Missing Input |
+| `UTerritoryResourceCondition` | Faction, Narrative item class, comparison, quantity | Heroes have At Least 10 Medicine |
+| `UTerritorySetDiplomacyEvent` | Faction A/B, new state, optional trade duration | Set Heroes and Regime to War after betrayal |
+| `UTerritoryModifyReputationEvent` | Faction, Add/Set, value | Add -20 to Bandit reputation |
+| `UTerritoryScheduleEnemyWaveEvent` | Target, exact/best attacker | Schedule one finite Bandit assault |
+| `UTerritoryCancelEnemyWavesEvent` | Target, optional attacker, include active | Cancel warnings after a peace treaty |
+| `UTerritorySetGarrisonTargetEvent` | Target and exact desired guards | Assign two guards through the normal currency mutation |
+| `UTerritoryUpgradePropertyEvent` | Property tag | Purchase exactly one normal upgrade |
+| `UTerritoryExecuteResourceRecipeEvent` | Faction, source, atomic recipe, finite batches | Convert supplies into one relief shipment |
+| `UTerritoryLockEvent` / `UTerritoryUnlockEvent` | Territory tag and explicit lock policy | Unlock a District after its gate quest |
+| `UTerritoryCaptureEvent` | Territory, faction, explicit force policy | Award a story outpost through the atomic capture API |
+
+`ETerritoryGarrisonMetric` options are Active Guards, Living Defenders, Desired Guards, Maximum
+Guard Capacity, Remaining Reserve, Pending Reserve Deployments, and Guard Shortfall.
+`ETerritoryIntegerComparison` provides Equal, Not Equal, At Least, At Most, Greater Than, and
+Less Than. `ETerritoryFloatComparison` provides tolerant equality and ordered comparisons.
+
+Every event exposes Narrative's inherited `Conditions` list. All of those conditions must pass,
+and each condition's inherited **Not** option is applied. Example:
+
+```text
+On All Defenders Defeated Events
+  Wave of Enemies
+    Target Territory = Blacksmith
+    Attacking Faction = Bandits
+    Conditions
+      Territory Diplomacy = Heroes and Bandits are War
+```
+
+`On Defender Died Events` runs after each registered defender death. `On All Defenders Defeated
+Events` runs only when living defenders and pending finite replacements are both zero. Death is
+the trigger; diplomacy, reputation, garrison, resource, and assault checks are snapshot conditions.
+Unregistered or repeated callbacks for the same casualty are ignored.
+Enemy-wave scheduling remains finite and uses the existing counterattack profile, Narrative NPC,
+route, warning, proximity activation, casualty, save, and replication flow.
+
+State Config entry/exit arrays react to enum-state transitions, not every owner field change.
+Normal capture passes through Contested and re-enters Claimed. A direct Claimed-to-Claimed
+owner mutation needs `OnTerritoryControlChanged` when an always-run story hook is required.
+
+Do not place a player-only GAS reward in a State Config without an event-level context condition.
+`Contested -> Claimed` can also mean that failed capture pressure decayed and the current owner
+recovered, so the transition context is deliberately empty. For `NE_GiveXP`, add `Territory Event
+Context Condition` and leave Target Pawn, Player Controlled Target, and Ability System Component
+enabled. This avoids `Accessed None` and prevents XP from being awarded for world recovery.
 
 ### Player management notifications
 

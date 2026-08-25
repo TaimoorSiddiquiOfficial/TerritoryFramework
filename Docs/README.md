@@ -1,7 +1,7 @@
 # Territory Framework — Complete Integration Guide
 
-> **Plugin:** TerritoryFramework (v0.2.5 plus unreleased audit fixes)
-> **Depends on:** Narrative Pro public APIs (integration verified against the installed 2.3.3 build)
+> **Plugin:** TerritoryFramework (v0.2.6)
+> **Depends on:** Narrative Pro 2.4.2 public APIs
 > **Engine:** UE 5.7
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
 > **Vendor rule:** Narrative Pro source/assets are read-only; all compatibility code lives in TerritoryFramework.
@@ -23,7 +23,7 @@
 4. [Subsystems](04_Subsystems.md) — Registry, Control, Economy, Diplomacy, Combat
 5. [Guard System](05_Guard_System.md) — Guard spawning, patrol routes, reserves, BT integration
 6. [Narrative Pro Integration](06_Narrative_Integration.md) — Factions, GAS, Tales, Save, Navigation
-7. [Economy System](07_Economy_System.md) — Income, transactions, upgrades, NarrativePro currency bridge
+7. [Economy System](07_Economy_System.md) — Income, transactions, upgrades, and Narrative currency bridge
 8. [Diplomacy System](08_Diplomacy_System.md) — Treaties, wars, reputation
 9. [Map & Navigation](09_Map_Navigation.md) — Markers, territory outline drawing
 10. [Save/Load](10_Save_Load.md) — Savable actors, WorldState, SavableData
@@ -36,10 +36,13 @@
 17. [Counterattack System](17_Counterattack_System.md) — Deterministic scheduling, proximity activation, finite Narrative NPC forces
 18. [Operations UI](18_Operations_UI.md) — Narrative CommonUI district dashboard, filters, guards, finance, and threats
 19. [Garrison Command Flow](19_Garrison_Command_Flow.md) — Complete capture, staffing, economy, replication, save, and UI lifecycle
-20. [Garrison Command Reaudit](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md) — Root causes, implemented fixes, MCP evidence, and remaining release gates
-21. [Earlier Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Broader confirmed fixes and MCP findings
-22. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
-23. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
+20. [Resource Production](20_Resource_Production.md) — Modular daily inputs/outputs, Narrative item storage, crafting bridge, save, replication, and UI
+21. [Current Remediation Report](REMEDIATION_2026-08-24.md) — Resolved findings, migrations, live MCP evidence, and remaining external gates
+22. [Stabilization Re-audit](STABILIZATION_REAUDIT_2026-08-25.md) — Runtime/editor/Narrative integration findings, guard and assault fixes, UI redesign, release gate, and product roadmap
+23. [Garrison Command Reaudit](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md) — Root causes, implemented fixes, MCP evidence, and remaining release gates
+24. [Earlier Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Broader confirmed fixes and MCP findings
+25. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
+26. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
 
 ## Document Index
 
@@ -51,7 +54,7 @@
 | Subsystems | Programmers | Query and mutate territory state from code |
 | Guard System | AI Designers | Spawn points, patrol routes, reserve guards |
 | Narrative Integration | All | How Territory extends Narrative without modifying it |
-| Economy | Game Designers | Faction wealth (NarrativePro Currency), income ticks, property upgrades |
+| Economy | Game Designers | Narrative currency payouts, item-resource recipes, production cycles, and property upgrades |
 | Diplomacy | Game Designers | War/peace/alliance/non-aggression treaties with Narrative attitudes |
 | Map & Navigation | UI Designers | Map markers, ownership colors, outline painting |
 | Save/Load | Programmers | Narrative save adapter, stable GUIDs, WorldState |
@@ -64,6 +67,7 @@
 | District Management | Game/UI Designers | In-world UI, guard purchasing, POI markers |
 | Counterattack System | AI/Game Designers | Configure deterministic physical counterattacks |
 | Operations UI | UI/Game Designers | Build Narrative CommonUI operations, guard, finance, and threat screens |
+| Current Remediation Report | Maintainers | Current defect status, authority impact, migrations, and verification evidence |
 | Deep Reaudit | Maintainers | Findings, ownership, migrations, and verification evidence |
 | Blueprint Extension Guide | C++/BP Devs | Subclassing patterns, Super-call requirements |
 | Blueprint Setup Tutorial | BP Devs | Step-by-step Blueprint configuration |

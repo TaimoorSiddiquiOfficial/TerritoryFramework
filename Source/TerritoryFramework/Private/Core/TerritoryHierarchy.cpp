@@ -210,9 +210,12 @@ void ATerritoryCity::OnCityFullyCaptured_Implementation(FGameplayTag CapturingFa
 	{
 		if (Economy)
 		{
+			AActor* PreferredBeneficiary = Economy->IncomePayoutPolicy ==
+				ETerritoryIncomePayoutPolicy::CapturingPlayer
+				? GetActiveTransitionContext().Instigator.Get() : nullptr;
 			Economy->CreditCurrencyToFaction(CapturingFaction, 1000,
 				Economy->IncomePayoutPolicy, TEXT("Capital city captured"),
-				ETerritoryTransactionType::Reward);
+				ETerritoryTransactionType::Reward, PreferredBeneficiary);
 			UE_LOG(LogTerritory, Log, TEXT("[CityCapture] Capital bonus: 1000 gold to %s"),
 				*CapturingFaction.ToString());
 		}
@@ -550,9 +553,12 @@ void ATerritoryDistrict::OnDistrictFullyCaptured_Implementation(FGameplayTag Cap
 		UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 		if (Economy)
 		{
+			AActor* PreferredBeneficiary = Economy->IncomePayoutPolicy ==
+				ETerritoryIncomePayoutPolicy::CapturingPlayer
+				? GetActiveTransitionContext().Instigator.Get() : nullptr;
 			Economy->CreditCurrencyToFaction(CapturingFaction, 500,
 				Economy->IncomePayoutPolicy, TEXT("Capital district captured"),
-				ETerritoryTransactionType::Reward);
+				ETerritoryTransactionType::Reward, PreferredBeneficiary);
 		}
 	}
 }
@@ -881,6 +887,7 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 
 	// Increment upgrade level (replicated)
 	UpgradeLevel++;
+	Economy->RefreshProductionSite(this);
 
 	// Recalculate income for the owning faction
 	Economy->MarkFactionDirty(OwnerFaction);
@@ -900,10 +907,18 @@ void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 	if (OldLevel != UpgradeLevel)
 	{
 		FGameplayTag OwnerFaction = GetOwningFaction();
+		UTerritoryEconomySubsystem* Economy = GetWorld()
+			? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
 		if (OwnerFaction.IsValid())
 		{
-			UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
-			if (Economy) Economy->MarkFactionDirty(OwnerFaction);
+			if (Economy)
+			{
+				Economy->MarkFactionDirty(OwnerFaction);
+			}
+		}
+		if (Economy)
+		{
+			Economy->RefreshProductionSite(this);
 		}
 
 		UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s set to level %d (was %d)"),

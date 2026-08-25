@@ -15,12 +15,141 @@
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Items/NarrativeItem.h"
 
 namespace
 {
 	AActor* ResolveViewerActor(APlayerController* Viewer)
 	{
 		return Viewer && Viewer->GetPawn() ? static_cast<AActor*>(Viewer->GetPawn()) : Viewer;
+	}
+
+	const ATerritoryWorldState* FindTerritoryWorldState(const UWorld* World)
+	{
+		if (!World) return nullptr;
+		for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
+		{
+			return *It;
+		}
+		return nullptr;
+	}
+
+	int32 GetStoredResourceQuantity(const FTerritoryFactionResourceSnapshot& Snapshot,
+		TSubclassOf<UNarrativeItem> ItemClass)
+	{
+		for (const FTerritoryResourceAmount& Resource : Snapshot.Resources)
+		{
+			if (Resource.ItemClass == ItemClass) return Resource.Quantity;
+		}
+		return 0;
+	}
+
+	FTerritoryResourceOperationsView& FindOrAddResourceView(
+		TArray<FTerritoryResourceOperationsView>& Resources,
+		TSubclassOf<UNarrativeItem> ItemClass,
+		const FTerritoryFactionResourceSnapshot& Snapshot)
+	{
+		for (FTerritoryResourceOperationsView& Resource : Resources)
+		{
+			if (Resource.ItemClass == ItemClass) return Resource;
+		}
+		FTerritoryResourceOperationsView& Resource = Resources.AddDefaulted_GetRef();
+		Resource.ItemClass = ItemClass;
+		Resource.StoredQuantity = GetStoredResourceQuantity(Snapshot, ItemClass);
+		if (const UNarrativeItem* CDO = ItemClass ? GetDefault<UNarrativeItem>(ItemClass) : nullptr)
+		{
+			Resource.DisplayName = CDO->DisplayName;
+			Resource.Thumbnail = CDO->Thumbnail;
+		}
+		return Resource;
+	}
+
+	FTerritoryProductionSiteOperationsView BuildProductionSiteView(
+		const FTerritoryProductionSiteRecord& Record,
+		const FTerritoryFactionResourceSnapshot& Snapshot)
+	{
+		FTerritoryProductionSiteOperationsView View;
+		View.TerritoryTag = Record.TerritoryTag;
+		View.ParentTerritoryTag = Record.ParentTerritoryTag;
+		View.DisplayName = Record.DisplayName;
+		View.OwnerFaction = Record.OwnerFaction;
+		View.ActiveRuleTag = Record.LastRuleTag;
+		View.Status = Record.LastStatus;
+		View.StatusReason = Record.StatusReason;
+		View.LastEvaluatedCycle = Record.LastEvaluatedCycle;
+		View.RuleStates = Record.RuleStates;
+		View.bHasProductionProfile = !Record.ProductionProfile.IsNull();
+		View.bProducing = Record.LastStatus == ETerritoryProductionStatus::Produced
+			|| Record.LastStatus == ETerritoryProductionStatus::Ready
+			|| Record.LastStatus == ETerritoryProductionStatus::AlreadyProcessed;
+		View.bBlocked = Record.LastStatus == ETerritoryProductionStatus::MissingInput
+			|| Record.LastStatus == ETerritoryProductionStatus::StorageUnavailable
+			|| Record.LastStatus == ETerritoryProductionStatus::StorageFull
+			|| Record.LastStatus == ETerritoryProductionStatus::InvalidProfile;
+
+		const UTerritoryProductionProfile* Profile = Record.ProductionProfile.LoadSynchronous();
+		if (Profile)
+		{
+			for (const FTerritoryProductionRule& Rule : Profile->Rules)
+			{
+				if (!Rule.bEnabled) continue;
+				for (const FTerritoryResourceRate& Rate : Rule.Inputs)
+				{
+					int32 Quantity = 0;
+					if (!UTerritoryProductionProfile::CalculateScaledQuantity(
+						Rate, Record.UpgradeLevel, 1, Quantity)) continue;
+					FTerritoryResourceOperationsView& Resource = FindOrAddResourceView(
+						View.Resources, Rate.ItemClass, Snapshot);
+					Resource.InputPerCycle += Quantity;
+				}
+				for (const FTerritoryResourceRate& Rate : Rule.Outputs)
+				{
+					int32 Quantity = 0;
+					if (!UTerritoryProductionProfile::CalculateScaledQuantity(
+						Rate, Record.UpgradeLevel, 1, Quantity)) continue;
+					FTerritoryResourceOperationsView& Resource = FindOrAddResourceView(
+						View.Resources, Rate.ItemClass, Snapshot);
+					Resource.OutputPerCycle += Quantity;
+				}
+			}
+		}
+		for (FTerritoryResourceOperationsView& Resource : View.Resources)
+		{
+			Resource.NetPerCycle = Resource.OutputPerCycle - Resource.InputPerCycle;
+			Resource.bSufficientForNextCycle = Resource.StoredQuantity >= Resource.InputPerCycle;
+		}
+		View.Resources.Sort([](const FTerritoryResourceOperationsView& A,
+			const FTerritoryResourceOperationsView& B)
+		{
+			return A.DisplayName.ToString() < B.DisplayName.ToString();
+		});
+		return View;
+	}
+
+	void MergeResourceFlows(const TArray<FTerritoryProductionSiteOperationsView>& Sites,
+		const FTerritoryFactionResourceSnapshot& Snapshot,
+		TArray<FTerritoryResourceOperationsView>& OutResources)
+	{
+		for (const FTerritoryProductionSiteOperationsView& Site : Sites)
+		{
+			for (const FTerritoryResourceOperationsView& SiteResource : Site.Resources)
+			{
+				FTerritoryResourceOperationsView& Aggregate = FindOrAddResourceView(
+					OutResources, SiteResource.ItemClass, Snapshot);
+				Aggregate.InputPerCycle += SiteResource.InputPerCycle;
+				Aggregate.OutputPerCycle += SiteResource.OutputPerCycle;
+			}
+		}
+		for (FTerritoryResourceOperationsView& Resource : OutResources)
+		{
+			Resource.NetPerCycle = Resource.OutputPerCycle - Resource.InputPerCycle;
+			Resource.bSufficientForNextCycle = Resource.StoredQuantity >= Resource.InputPerCycle;
+		}
+		OutResources.Sort([](const FTerritoryResourceOperationsView& A,
+			const FTerritoryResourceOperationsView& B)
+		{
+			return A.DisplayName.ToString() < B.DisplayName.ToString();
+		});
 	}
 
 	int32 GetAssaultPriority(ETerritoryAssaultState State)
@@ -385,16 +514,48 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	}
 	OutView.bFinancialRisk = OutView.NetIncome < 0 || OutView.ActiveGuards < OutView.DesiredGuards;
 
+	TArray<FTerritoryProductionSiteRecord> ProductionRecords;
+	FTerritoryFactionResourceSnapshot ResourceSnapshot;
+	if (World->GetNetMode() != NM_Client)
+	{
+		if (const UTerritoryEconomySubsystem* Economy =
+			World->GetSubsystem<UTerritoryEconomySubsystem>())
+		{
+			ProductionRecords = Economy->GetAllProductionSites();
+			ResourceSnapshot = Economy->GetFactionResourceSnapshot(OutView.OwnerFaction);
+		}
+	}
+	else if (const ATerritoryWorldState* WorldState = FindTerritoryWorldState(World))
+	{
+		ProductionRecords = WorldState->GetProductionSites();
+		ResourceSnapshot = WorldState->GetFactionResourceSnapshot(OutView.OwnerFaction);
+	}
+	for (const FTerritoryProductionSiteRecord& Record : ProductionRecords)
+	{
+		if (Record.ParentTerritoryTag != OutView.DistrictTag) continue;
+		FTerritoryProductionSiteOperationsView SiteView =
+			BuildProductionSiteView(Record, ResourceSnapshot);
+		OutView.ProducingSiteCount += SiteView.bProducing ? 1 : 0;
+		OutView.BlockedProductionSiteCount += SiteView.bBlocked ? 1 : 0;
+		OutView.ProductionSites.Add(MoveTemp(SiteView));
+	}
+	OutView.ProductionSites.Sort([](const FTerritoryProductionSiteOperationsView& A,
+		const FTerritoryProductionSiteOperationsView& B)
+	{
+		return A.DisplayName.ToString() < B.DisplayName.ToString();
+	});
+	MergeResourceFlows(OutView.ProductionSites, ResourceSnapshot, OutView.ResourceFlows);
+
 	if (const UTerritoryCounterAttackSubsystem* Counterattacks =
 		World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
 	{
 		TArray<FTerritoryAssaultRecord> Assaults =
-			Counterattacks->GetAssaultsForTerritory(OutView.DistrictTag);
+			Counterattacks->GetAssaultsForTerritoryActor(District);
 		for (const ATerritoryVolume* Property : Properties)
 		{
 			if (Property && Property->GetOwningFaction() == OutView.OwnerFaction)
 			{
-				Assaults.Append(Counterattacks->GetAssaultsForTerritory(Property->GetTerritoryTag()));
+				Assaults.Append(Counterattacks->GetAssaultsForTerritoryActor(Property));
 			}
 		}
 		const FTerritoryAssaultRecord* Preferred = nullptr;
@@ -566,6 +727,20 @@ bool UTerritoryUIBlueprintLibrary::DoesDistrictMatchFilter(
 	case ETerritoryOperationsFilter::Contested: return View.bCaptureInProgress;
 	case ETerritoryOperationsFilter::Locked: return !View.bUnlocked;
 	case ETerritoryOperationsFilter::FinancialRisk: return View.bFinancialRisk;
+	case ETerritoryOperationsFilter::Producing: return View.ProducingSiteCount > 0;
+	case ETerritoryOperationsFilter::ProductionBlocked: return View.BlockedProductionSiteCount > 0;
+	case ETerritoryOperationsFilter::MissingInputs:
+		for (const FTerritoryProductionSiteOperationsView& Site : View.ProductionSites)
+		{
+			if (Site.Status == ETerritoryProductionStatus::MissingInput) return true;
+		}
+		return false;
+	case ETerritoryOperationsFilter::StorageFull:
+		for (const FTerritoryProductionSiteOperationsView& Site : View.ProductionSites)
+		{
+			if (Site.Status == ETerritoryProductionStatus::StorageFull) return true;
+		}
+		return false;
 	case ETerritoryOperationsFilter::All:
 	default: return View.bRegistered;
 	}
@@ -604,6 +779,19 @@ bool UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(
 	{
 		SearchFields.Add(Garrison.DisplayName.ToString());
 		SearchFields.Add(Garrison.TerritoryTag.ToString());
+	}
+	for (const FTerritoryProductionSiteOperationsView& Site : View.ProductionSites)
+	{
+		SearchFields.Add(Site.DisplayName.ToString());
+		SearchFields.Add(Site.TerritoryTag.ToString());
+		SearchFields.Add(Site.ActiveRuleTag.ToString());
+		SearchFields.Add(Site.StatusReason.ToString());
+		SearchFields.Add(UTerritoryUIBlueprintLibrary::GetProductionStatusText(Site.Status).ToString());
+		for (const FTerritoryResourceOperationsView& Resource : Site.Resources)
+		{
+			SearchFields.Add(Resource.DisplayName.ToString());
+			if (Resource.ItemClass) SearchFields.Add(Resource.ItemClass->GetPathName());
+		}
 	}
 
 	TArray<FString> Tokens;
@@ -688,6 +876,8 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 	Hash = HashCombineFast(Hash, GetTypeHash(View.UnguardedGarrisonTargets));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanAddGuard));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanRemoveGuard));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.ProducingSiteCount));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.BlockedProductionSiteCount));
 	for (const FTerritoryGarrisonOperationsView& Garrison : View.GarrisonTargets)
 	{
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.TerritoryTag));
@@ -697,6 +887,19 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.ReserveGuards));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.PendingDeployments));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.NetIncome));
+	}
+	for (const FTerritoryProductionSiteOperationsView& Site : View.ProductionSites)
+	{
+		Hash = HashCombineFast(Hash, GetTypeHash(Site.TerritoryTag));
+		Hash = HashCombineFast(Hash, GetTypeHash(Site.ActiveRuleTag));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Site.Status)));
+		Hash = HashCombineFast(Hash, GetTypeHash(Site.LastEvaluatedCycle));
+		for (const FTerritoryResourceOperationsView& Resource : Site.Resources)
+		{
+			Hash = HashCombineFast(Hash, GetTypeHash(Resource.ItemClass));
+			Hash = HashCombineFast(Hash, GetTypeHash(Resource.StoredQuantity));
+			Hash = HashCombineFast(Hash, GetTypeHash(Resource.NetPerCycle));
+		}
 	}
 	Hash = HashCombineFast(Hash, GetTypeHash(View.LockReason.ToString()));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.AvailabilityReason.ToString()));
@@ -781,7 +984,114 @@ FTerritoryEconomyOperationsView UTerritoryUIBlueprintLibrary::BuildEconomyOperat
 			}
 		}
 	}
+
+	TArray<FTerritoryProductionSiteRecord> ProductionRecords;
+	FTerritoryFactionResourceSnapshot ResourceSnapshot;
+	if (World->GetNetMode() != NM_Client && Economy)
+	{
+		ProductionRecords = Economy->GetProductionSitesForFaction(View.Faction);
+		ResourceSnapshot = Economy->GetFactionResourceSnapshot(View.Faction);
+	}
+	else if (const ATerritoryWorldState* WorldState = FindTerritoryWorldState(World))
+	{
+		ProductionRecords = WorldState->GetProductionSitesForFaction(View.Faction);
+		ResourceSnapshot = WorldState->GetFactionResourceSnapshot(View.Faction);
+	}
+	View.bResourceStorageAvailable = ResourceSnapshot.bStorageAvailable;
+	for (const FTerritoryProductionSiteRecord& Record : ProductionRecords)
+	{
+		FTerritoryProductionSiteOperationsView SiteView =
+			BuildProductionSiteView(Record, ResourceSnapshot);
+		View.ProducingSiteCount += SiteView.bProducing ? 1 : 0;
+		View.BlockedProductionSiteCount += SiteView.bBlocked ? 1 : 0;
+		View.ProductionSites.Add(MoveTemp(SiteView));
+	}
+	View.ProductionSites.Sort([](const FTerritoryProductionSiteOperationsView& A,
+		const FTerritoryProductionSiteOperationsView& B)
+	{
+		return A.DisplayName.ToString() < B.DisplayName.ToString();
+	});
+	for (const FTerritoryResourceAmount& Resource : ResourceSnapshot.Resources)
+	{
+		FindOrAddResourceView(View.ResourceStockpile, Resource.ItemClass, ResourceSnapshot);
+	}
+	MergeResourceFlows(View.ProductionSites, ResourceSnapshot, View.ResourceStockpile);
 	return View;
+}
+
+bool UTerritoryUIBlueprintLibrary::BuildProductionSiteOperationsView(
+	const UObject* WorldContextObject,
+	FGameplayTag TerritoryTag,
+	FTerritoryProductionSiteOperationsView& OutView)
+{
+	OutView = FTerritoryProductionSiteOperationsView();
+	if (!WorldContextObject || !TerritoryTag.IsValid()) return false;
+
+	const UWorld* World = WorldContextObject->GetWorld();
+	if (!World) return false;
+
+	FTerritoryProductionSiteRecord Record;
+	FTerritoryFactionResourceSnapshot ResourceSnapshot;
+	bool bFound = false;
+	if (World->GetNetMode() != NM_Client)
+	{
+		if (const UTerritoryEconomySubsystem* Economy =
+			World->GetSubsystem<UTerritoryEconomySubsystem>())
+		{
+			Record = Economy->GetProductionSite(TerritoryTag);
+			bFound = Record.TerritoryTag == TerritoryTag;
+			if (bFound)
+			{
+				ResourceSnapshot = Economy->GetFactionResourceSnapshot(Record.OwnerFaction);
+			}
+		}
+	}
+	else if (const ATerritoryWorldState* WorldState = FindTerritoryWorldState(World))
+	{
+		for (const FTerritoryProductionSiteRecord& Candidate : WorldState->GetProductionSites())
+		{
+			if (Candidate.TerritoryTag == TerritoryTag)
+			{
+				Record = Candidate;
+				ResourceSnapshot = WorldState->GetFactionResourceSnapshot(Record.OwnerFaction);
+				bFound = true;
+				break;
+			}
+		}
+	}
+
+	if (!bFound) return false;
+	OutView = BuildProductionSiteView(Record, ResourceSnapshot);
+	return true;
+}
+
+FText UTerritoryUIBlueprintLibrary::GetProductionStatusText(
+	ETerritoryProductionStatus Status)
+{
+	switch (Status)
+	{
+	case ETerritoryProductionStatus::Ready:
+		return NSLOCTEXT("TerritoryOperations", "ProductionReady", "Ready");
+	case ETerritoryProductionStatus::Produced:
+		return NSLOCTEXT("TerritoryOperations", "ProductionProduced", "Producing");
+	case ETerritoryProductionStatus::MissingInput:
+		return NSLOCTEXT("TerritoryOperations", "ProductionMissingInput", "Missing input");
+	case ETerritoryProductionStatus::StorageUnavailable:
+		return NSLOCTEXT("TerritoryOperations", "ProductionNoStorage", "Storage unavailable");
+	case ETerritoryProductionStatus::StorageFull:
+		return NSLOCTEXT("TerritoryOperations", "ProductionStorageFull", "Storage full");
+	case ETerritoryProductionStatus::Inactive:
+		return NSLOCTEXT("TerritoryOperations", "ProductionInactive", "Inactive");
+	case ETerritoryProductionStatus::InvalidProfile:
+		return NSLOCTEXT("TerritoryOperations", "ProductionInvalid", "Invalid profile");
+	case ETerritoryProductionStatus::AlreadyProcessed:
+		return NSLOCTEXT("TerritoryOperations", "ProductionWaiting", "Next cycle");
+	case ETerritoryProductionStatus::AuthorityRejected:
+		return NSLOCTEXT("TerritoryOperations", "ProductionRejected", "Request rejected");
+	case ETerritoryProductionStatus::NeverEvaluated:
+	default:
+		return NSLOCTEXT("TerritoryOperations", "ProductionNotEvaluated", "Not evaluated");
+	}
 }
 
 FText UTerritoryUIBlueprintLibrary::GetThreatLevelText(ETerritoryThreatLevel ThreatLevel)

@@ -17,6 +17,22 @@
 #include "Widgets/NarrativeCommonTextBlock.h"
 #include "Widgets/NarrativeSpinBox.h"
 
+namespace
+{
+	void StyleGeneratedManagementText(UTextBlock* Text, int32 FontSize, const FLinearColor& Color)
+	{
+		if (!Text)
+		{
+			return;
+		}
+		FSlateFontInfo Font = Text->GetFont();
+		Font.Size = FontSize;
+		Text->SetFont(Font);
+		Text->SetColorAndOpacity(FSlateColor(Color));
+		Text->SetAutoWrapText(true);
+	}
+}
+
 void UTerritoryDistrictManagementWidget::InitializeManagement(
 	ATerritoryDistrictManagementPoint* InManagementPoint)
 {
@@ -133,6 +149,7 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LocalGarrisonHeading"));
 	Heading->SetText(NSLOCTEXT("TerritoryManagement", "LocalGarrisonHeading",
 		"GARRISON TARGET & LOCAL PROFIT / LOSS"));
+	StyleGeneratedManagementText(Heading, 16, FLinearColor(0.95f, 0.96f, 0.95f, 1.f));
 	Host->AddChild(Heading);
 	GarrisonTargetSelector = WidgetTree->ConstructWidget<UNarrativeComboBoxString>(
 		UNarrativeComboBoxString::StaticClass(), TEXT("LocalGarrisonTargetSelector"));
@@ -155,18 +172,28 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	Host->AddChild(GuardTargetSpinBox);
 	GarrisonTargetPreview = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LocalGarrisonPreview"));
-	GarrisonTargetPreview->SetAutoWrapText(true);
+	StyleGeneratedManagementText(GarrisonTargetPreview, 14, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
 	Host->AddChild(GarrisonTargetPreview);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	TSubclassOf<UNarrativeCommonButtonBase> ButtonClass = Settings
 		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
+	const TSubclassOf<UCommonButtonStyle> ButtonStyle = Settings
+		? Settings->DefaultTerritoryButtonStyle.LoadSynchronous() : nullptr;
+	auto ApplyTerritoryStyle = [ButtonStyle](UNarrativeCommonButtonBase* Button)
+	{
+		if (Button && ButtonStyle)
+		{
+			Button->SetStyle(ButtonStyle);
+		}
+	};
 	if (!ButtonClass) return;
 	UHorizontalBox* Actions = WidgetTree->ConstructWidget<UHorizontalBox>(
 		UHorizontalBox::StaticClass(), TEXT("LocalGarrisonTargetActions"));
 	Host->AddChild(Actions);
 	ApplyGuardTargetButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("ApplyLocalGuardTargetButton"));
+	ApplyTerritoryStyle(ApplyGuardTargetButton);
 	ApplyGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "ApplyLocalTarget", "APPLY"));
 	ApplyGuardTargetButton->SetToolTipText(NSLOCTEXT("TerritoryManagement", "ApplyLocalTargetTip",
 		"Submit this exact staffing target to the authoritative server."));
@@ -175,6 +202,7 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	Actions->AddChild(ApplyGuardTargetButton);
 	ZeroGuardTargetButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("ZeroLocalGuardTargetButton"));
+	ApplyTerritoryStyle(ZeroGuardTargetButton);
 	ZeroGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "ZeroLocalTarget", "SET 0"));
 	ZeroGuardTargetButton->SetToolTipText(NSLOCTEXT("TerritoryManagement", "ZeroLocalTargetTip",
 		"Withdraw this garrison and reduce its future upkeep to zero."));
@@ -183,6 +211,7 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	Actions->AddChild(ZeroGuardTargetButton);
 	MaxGuardTargetButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("MaxLocalGuardTargetButton"));
+	ApplyTerritoryStyle(MaxGuardTargetButton);
 	MaxGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "MaxLocalTarget", "SET MAX"));
 	MaxGuardTargetButton->SetToolTipText(NSLOCTEXT("TerritoryManagement", "MaxLocalTargetTip",
 		"Set this garrison to its authored physical capacity."));
@@ -443,6 +472,15 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	}
 	if (ThreatText) ThreatText->SetText(OperationsView.ThreatSummary);
 	if (AvailabilityText) AvailabilityText->SetText(OperationsView.AvailabilityReason);
+	if (ProductionText)
+	{
+		ProductionText->SetText(FText::Format(
+			NSLOCTEXT("TerritoryManagement", "ProductionSummary",
+				"Production: {0} active | {1} blocked | {2} resources"),
+			FText::AsNumber(OperationsView.ProducingSiteCount),
+			FText::AsNumber(OperationsView.BlockedProductionSiteCount),
+			FText::AsNumber(OperationsView.ResourceFlows.Num())));
+	}
 
 	FText FailureReason;
 	const bool bCanPurchase = CanPurchaseGuard(FailureReason);

@@ -7,6 +7,7 @@
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "TimerManager.h"
 
 void UTerritoryInfoWidget::NativeConstruct()
@@ -167,6 +168,7 @@ void UTerritoryInfoWidget::RefreshTerritoryDisplay()
 			FText::AsNumber(Territory->GetMaxGuardCount())));
 	}
 	if (TerritoryCaptureProgress) TerritoryCaptureProgress->SetPercent(Territory->GetControlProgress());
+	bool bProductionTextSet = false;
 
 	if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory))
 	{
@@ -182,6 +184,30 @@ void UTerritoryInfoWidget::RefreshTerritoryDisplay()
 					NSLOCTEXT("TerritoryInfo", "NetIncome", "Net per cycle: {0}"),
 					FText::AsNumber(View.NetIncome)));
 			}
+			if (TerritoryProductionText)
+			{
+				TerritoryProductionText->SetText(FText::Format(
+					NSLOCTEXT("TerritoryInfo", "DistrictProduction",
+						"Production: {0} active | {1} blocked"),
+					FText::AsNumber(View.ProducingSiteCount),
+					FText::AsNumber(View.BlockedProductionSiteCount)));
+				bProductionTextSet = true;
+			}
+		}
+	}
+	if (TerritoryProductionText && !bProductionTextSet)
+	{
+		FTerritoryProductionSiteOperationsView ProductionView;
+		if (UTerritoryUIBlueprintLibrary::BuildProductionSiteOperationsView(
+			this, Territory->GetTerritoryTag(), ProductionView))
+		{
+			TerritoryProductionText->SetText(FText::Format(
+				NSLOCTEXT("TerritoryInfo", "PropertyProduction", "Production: {0}"),
+				UTerritoryUIBlueprintLibrary::GetProductionStatusText(ProductionView.Status)));
+		}
+		else
+		{
+			TerritoryProductionText->SetText(FText::GetEmpty());
 		}
 	}
 }
@@ -196,4 +222,5 @@ void UTerritoryInfoWidget::ClearTerritoryDisplay()
 	if (TerritoryAvailabilityText) TerritoryAvailabilityText->SetText(FText::GetEmpty());
 	if (TerritoryThreatText) TerritoryThreatText->SetText(FText::GetEmpty());
 	if (TerritoryNetIncomeText) TerritoryNetIncomeText->SetText(FText::GetEmpty());
+	if (TerritoryProductionText) TerritoryProductionText->SetText(FText::GetEmpty());
 }

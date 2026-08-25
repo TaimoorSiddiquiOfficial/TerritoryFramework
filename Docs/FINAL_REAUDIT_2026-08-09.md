@@ -1,5 +1,9 @@
 # TerritoryFramework Final Re-Audit Report — 2026-08-09 (Session 2)
 
+> **Historical snapshot, superseded 2026-08-24.** The “plugin is clean” and
+> “counterattack lifecycle complete” conclusions below were invalidated by live combat
+> testing. See `REMEDIATION_2026-08-24.md`, `CHANGELOG.md`, and current system documents for corrected behavior.
+
 ## Overview
 
 | Metric | Value |

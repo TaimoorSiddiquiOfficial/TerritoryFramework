@@ -284,7 +284,9 @@ If GrantedSlots(Territory) >= MaxConcurrentAttackers → deny new slot
 
 ### Death Hook
 
-When an assault slot is granted, the CombatDirector binds to the controller's ASC `OnDied` delegate. If the NPC dies while holding a slot, all slots are automatically released — no BT cleanup needed.
+When an assault slot is granted, the CombatDirector binds to the controller ASC
+`OnDeathStateChanged` delegate. A `bIsDead == true` notification automatically releases every
+slot held by that NPC; a revival notification is ignored. No Behavior Tree cleanup is required.
 
 ### Stale Entry Cleanup
 

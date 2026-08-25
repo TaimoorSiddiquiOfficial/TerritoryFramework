@@ -7,13 +7,17 @@
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Combat/TerritoryAssaultCharacter.h"
+#include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
+#include "Economy/TerritoryProductionProfile.h"
 #include "AI/NPCDefinition.h"
 #include "Components/ShapeComponent.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameplayTagContainer.h"
 #include "Misc/DataValidation.h"
+#include "NavigationSystem.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "WorldPartition/WorldPartitionHandle.h"
@@ -21,6 +25,68 @@
 
 namespace
 {
+	void ValidateCounterAttackProfileBounds(
+		const UTerritoryCounterAttackProfile* Profile,
+		const FString& Context,
+		TArray<FString>& OutErrors)
+	{
+		if (!Profile) return;
+
+		auto AddError = [&Context, &OutErrors](const TCHAR* Message)
+		{
+			OutErrors.Add(Context.IsEmpty()
+				? FString(Message)
+				: FString::Printf(TEXT("%s: %s"), *Context, Message));
+		};
+
+		if (Profile->MinimumLaunchProbability > Profile->MaximumLaunchProbability)
+		{
+			AddError(TEXT("counterattack minimum launch probability exceeds maximum"));
+		}
+		if (!FMath::IsWithinInclusive(Profile->UnguardedLaunchProbability, 0.f, 1.f))
+		{
+			AddError(TEXT("UnguardedLaunchProbability must be between zero and one"));
+		}
+		if (Profile->UnguardedLaunchProbability < Profile->MinimumLaunchProbability)
+		{
+			AddError(TEXT("UnguardedLaunchProbability must be greater than or equal to MinimumLaunchProbability so adding the first guard cannot increase launch probability"));
+		}
+		if (Profile->MaximumApproaches <= 0)
+		{
+			AddError(TEXT("counterattack MaximumApproaches must be at least one"));
+		}
+		if (!FMath::IsFinite(Profile->MinimumInfluenceTimingScale)
+			|| !FMath::IsWithinInclusive(Profile->MinimumInfluenceTimingScale, 0.05f, 1.f))
+		{
+			AddError(TEXT("counterattack MinimumInfluenceTimingScale must be between 0.05 and 1"));
+		}
+		if (!FMath::IsFinite(Profile->InfluenceWeight) || Profile->InfluenceWeight < 0.f)
+		{
+			AddError(TEXT("counterattack InfluenceWeight must be finite and non-negative"));
+		}
+		if (!FMath::IsFinite(Profile->ParticipantSpacing) || Profile->ParticipantSpacing < 100.f)
+		{
+			AddError(TEXT("counterattack ParticipantSpacing must be finite and at least 100 units"));
+		}
+		if (!FMath::IsWithinInclusive(Profile->SpawnPlacementAttemptsPerParticipant, 1, 16))
+		{
+			AddError(TEXT("counterattack SpawnPlacementAttemptsPerParticipant must be between 1 and 16"));
+		}
+		if (!FMath::IsFinite(Profile->StalledMovementRetryInterval) ||
+			!FMath::IsWithinInclusive(Profile->StalledMovementRetryInterval, 0.25f, 10.f))
+		{
+			AddError(TEXT("counterattack StalledMovementRetryInterval must be between 0.25 and 10 seconds"));
+		}
+		if (!FMath::IsWithinInclusive(Profile->MaxStalledMovementRetries, 1, 100))
+		{
+			AddError(TEXT("counterattack MaxStalledMovementRetries must be between 1 and 100"));
+		}
+		if (!FMath::IsWithinInclusive(Profile->MaxConsecutiveSpawnFailures, 1, 100))
+		{
+			AddError(TEXT("counterattack MaxConsecutiveSpawnFailures must be between 1 and 100"));
+		}
+	}
+
 	template<typename TActor>
 	TArray<TActor*> GetActorsForValidation(ULevel* Level)
 	{
@@ -94,7 +160,9 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 	if (InAsset->IsA(ATerritoryVolume::StaticClass()) ||
 		InAsset->IsA(ATerritoryWorldState::StaticClass()) ||
 		InAsset->IsA(ATerritorySavableData::StaticClass()) ||
-		InAsset->IsA(UTerritoryCounterAttackProfile::StaticClass()))
+		InAsset->IsA(UTerritoryGuardPostDefinition::StaticClass()) ||
+		InAsset->IsA(UTerritoryCounterAttackProfile::StaticClass()) ||
+		InAsset->IsA(UTerritoryProductionProfile::StaticClass()))
 	{
 		return true;
 	}
@@ -125,17 +193,10 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 	}
 	else if (UTerritoryCounterAttackProfile* Profile = Cast<UTerritoryCounterAttackProfile>(InAsset))
 	{
+		ValidateCounterAttackProfileBounds(Profile, TEXT("Counterattack profile"), Errors);
 		if (Profile->FactionForces.IsEmpty())
 		{
 			Warnings.Add(TEXT("Counterattack profile has no faction force definitions"));
-		}
-		if (Profile->MaxConsecutiveSpawnFailures <= 0)
-		{
-			Errors.Add(TEXT("Counterattack profile MaxConsecutiveSpawnFailures must be at least one"));
-		}
-		if (!FMath::IsWithinInclusive(Profile->UnguardedLaunchProbability, 0.f, 1.f))
-		{
-			Errors.Add(TEXT("Counterattack profile UnguardedLaunchProbability must be between zero and one"));
 		}
 		TSet<FGameplayTag> SeenFactions;
 		for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
@@ -164,6 +225,60 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 			}
 			if (Force.MilitaryPower <= 0.f) Errors.Add(FString::Printf(
 				TEXT("Counterattack force %s must have positive military power"), *Force.Faction.ToString()));
+			if (!FMath::IsWithinInclusive(Force.TerritorialInfluence, 0.f, 1.f)) Errors.Add(FString::Printf(
+				TEXT("Counterattack force %s TerritorialInfluence must be between zero and one"), *Force.Faction.ToString()));
+			if (!FMath::IsFinite(Force.RecurringCounterCooldownGameTime)
+				|| Force.RecurringCounterCooldownGameTime < 1.f) Errors.Add(FString::Printf(
+				TEXT("Counterattack force %s recurring cooldown must be finite and at least one"), *Force.Faction.ToString()));
+		}
+	}
+	else if (UTerritoryGuardPostDefinition* GuardPost =
+		Cast<UTerritoryGuardPostDefinition>(InAsset))
+	{
+		if (GuardPost->DisplayName.IsEmpty())
+		{
+			Warnings.Add(TEXT("Guard post definition has no display name"));
+		}
+		if (GuardPost->PatrolRoute.Num() == 1)
+		{
+			Errors.Add(TEXT("Guard post patrol route has one node; author at least two nodes or clear the route for an intentional static post"));
+		}
+		for (int32 NodeIndex = 0; NodeIndex < GuardPost->PatrolRoute.Num(); ++NodeIndex)
+		{
+			const FTerritoryPatrolNode& Node = GuardPost->PatrolRoute[NodeIndex];
+			if (Node.Location.ContainsNaN() || Node.Rotation.ContainsNaN()
+				|| !FMath::IsFinite(Node.WaitTime) || Node.WaitTime < 0.f)
+			{
+				Errors.Add(FString::Printf(
+					TEXT("Guard post patrol node %d has an invalid transform or wait time"), NodeIndex));
+			}
+		}
+		if (GuardPost->ReserveSlots < 0 || GuardPost->ReserveSpawnDelay < 0.1f
+			|| GuardPost->ReserveSpawnRetryInterval < 0.1f
+			|| GuardPost->ReserveSpawnRadius < 100.f
+			|| GuardPost->ReserveMinimumPlayerDistance < 0.f
+			|| !FMath::IsWithinInclusive(GuardPost->ReserveSpawnCandidateCount, 1, 64))
+		{
+			Errors.Add(TEXT("Guard post reserve deployment settings are outside their supported bounds"));
+		}
+		if (GuardPost->NPCDefinition)
+		{
+			FText FailureReason;
+			if (!ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
+				GuardPost->NPCDefinition, 1, FailureReason))
+			{
+				Errors.Add(FString::Printf(TEXT("Guard post Narrative NPC definition is not spawn-ready: %s"),
+					*FailureReason.ToString()));
+			}
+		}
+	}
+	else if (UTerritoryProductionProfile* ProductionProfile = Cast<UTerritoryProductionProfile>(InAsset))
+	{
+		FText FailureReason;
+		if (!ProductionProfile->ValidateProfile(FailureReason))
+		{
+			Errors.Add(FString::Printf(TEXT("Invalid production profile: %s"),
+				*FailureReason.ToString()));
 		}
 	}
 	else if (ATerritoryWorldState* WS = Cast<ATerritoryWorldState>(InAsset))
@@ -290,6 +405,17 @@ bool UTerritoryDataValidator::ValidateTerritory(ATerritoryVolume* Territory, TAr
 			OutWarnings.Add(FString::Printf(TEXT("%s: InitialOwningFaction '%s' doesn't start with Narrative.Factions"),
 				*Label, *FactionTag.ToString()));
 		}
+	}
+
+	if (Territory->HasLegacyInitialLockSetting())
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: old Starts Locked data is still active; run 'Migrate Legacy Lock Settings' on this actor"),
+			*Label));
+	}
+	if (Territory->HasLegacyUnlockConditions())
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: old Lock Conditions are still active; run 'Migrate Legacy Lock Settings' to move them to Locked -> Exit Conditions"),
+			*Label));
 	}
 
 	// Check economy configuration
@@ -512,6 +638,19 @@ void UTerritoryDataValidator::CheckEconomyConfig(ATerritoryVolume* Territory, TA
 	{
 		OutWarnings.Add(FString::Printf(TEXT("%s: MaxConcurrentAttackers < 1 — no NPCs can attack"), *Label));
 	}
+
+	if (const ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
+	{
+		if (const UTerritoryProductionProfile* Profile = Property->GetProductionProfile())
+		{
+			FText FailureReason;
+			if (!Profile->ValidateProfile(FailureReason))
+			{
+				OutWarnings.Add(FString::Printf(TEXT("%s: ProductionProfile is invalid: %s"),
+					*Label, *FailureReason.ToString()));
+			}
+		}
+	}
 }
 
 void UTerritoryDataValidator::CheckDuplicateDisplayNames(ULevel* Level, TArray<FString>& OutWarnings)
@@ -638,22 +777,7 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 	{
 		OutErrors.Add(FString::Printf(TEXT("%s: counterattack profile has no faction force definitions"), *Label));
 	}
-	if (Profile->MinimumLaunchProbability > Profile->MaximumLaunchProbability)
-	{
-		OutErrors.Add(FString::Printf(TEXT("%s: counterattack minimum launch probability exceeds maximum"), *Label));
-	}
-	if (!FMath::IsWithinInclusive(Profile->UnguardedLaunchProbability, 0.f, 1.f))
-	{
-		OutErrors.Add(FString::Printf(TEXT("%s: UnguardedLaunchProbability must be between zero and one"), *Label));
-	}
-	if (Profile->MaximumApproaches <= 0)
-	{
-		OutErrors.Add(FString::Printf(TEXT("%s: counterattack MaximumApproaches must be at least one"), *Label));
-	}
-	if (Profile->MaxConsecutiveSpawnFailures <= 0)
-	{
-		OutErrors.Add(FString::Printf(TEXT("%s: counterattack MaxConsecutiveSpawnFailures must be at least one"), *Label));
-	}
+	ValidateCounterAttackProfileBounds(Profile, Label, OutErrors);
 
 	TSet<FGameplayTag> SeenFactions;
 	for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
@@ -694,10 +818,24 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 			OutErrors.Add(FString::Printf(TEXT("%s: counterattack force %s must have positive military power"),
 				*Label, *Force.Faction.ToString()));
 		}
+		if (!FMath::IsWithinInclusive(Force.TerritorialInfluence, 0.f, 1.f))
+		{
+			OutErrors.Add(FString::Printf(TEXT("%s: counterattack force %s TerritorialInfluence must be between zero and one"),
+				*Label, *Force.Faction.ToString()));
+		}
+		if (!FMath::IsFinite(Force.RecurringCounterCooldownGameTime)
+			|| Force.RecurringCounterCooldownGameTime < 1.f)
+		{
+			OutErrors.Add(FString::Printf(TEXT("%s: counterattack force %s recurring cooldown must be finite and at least one"),
+				*Label, *Force.Faction.ToString()));
+		}
 	}
 
 	TSet<FName> SeenApproachIDs;
 	int32 EnabledApproaches = 0;
+	UWorld* ValidationWorld = Territory->GetWorld();
+	UNavigationSystemV1* Navigation = ValidationWorld
+		? FNavigationSystem::GetCurrent<UNavigationSystemV1>(ValidationWorld) : nullptr;
 	for (const FTerritoryAssaultApproach& Approach : Approaches)
 	{
 		if (!Approach.bEnabled) continue;
@@ -716,6 +854,35 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 		{
 			OutErrors.Add(FString::Printf(TEXT("%s: approach '%s' has invalid MaxWaveSize"),
 				*Label, *Approach.ApproachID.ToString()));
+		}
+		if (!Navigation)
+		{
+			OutWarnings.AddUnique(FString::Printf(
+				TEXT("%s: no built navmesh is available, so counterattack routes could not be verified"),
+				*Label));
+			continue;
+		}
+
+		const FTransform WorldTransform =
+			Approach.RelativeSpawnTransform * Territory->GetActorTransform();
+		FString RouteFailure = TEXT("No shared Territory defence objective is reachable");
+		bool bHasRoute = false;
+		for (const FVector& Objective :
+			TerritoryAssaultTargetPolicy::BuildObjectiveLocations(Territory, true))
+		{
+			if (UTerritoryCounterAttackSubsystem::ValidateNavigationRoute(
+				ValidationWorld, WorldTransform.GetLocation(), Objective, &RouteFailure))
+			{
+				bHasRoute = true;
+				break;
+			}
+		}
+		if (!bHasRoute)
+		{
+			OutErrors.Add(FString::Printf(
+				TEXT("%s: counterattack approach '%s' is not a usable physical route at %s: %s"),
+				*Label, *Approach.ApproachID.ToString(),
+				*WorldTransform.GetLocation().ToCompactString(), *RouteFailure));
 		}
 	}
 	if (EnabledApproaches == 0)
@@ -770,8 +937,21 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 		}
 		else
 		{
-			OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — set OwnerTerritoryTag or add it to GuardSpawnPoints"),
-				*SP->GetActorLabel()));
+			TArray<ATerritoryVolume*> PlacementHits;
+			for (ATerritoryVolume* Territory : Territories)
+			{
+				if (!Territory) continue;
+				if (Territory->ContainsPoint(SP->GetActorLocation())) PlacementHits.Add(Territory);
+				for (const FTerritoryPatrolNode& Node : SP->GetEffectivePatrolRoute())
+				{
+					if (Territory->ContainsPoint(Node.Location)) PlacementHits.Add(Territory);
+				}
+			}
+			if (!ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(PlacementHits))
+			{
+				OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — set OwnerTerritoryTag, add it to GuardSpawnPoints, or overlap its placement/patrol route with a Territory"),
+					*SP->GetActorLabel()));
+			}
 		}
 	}
 
@@ -788,9 +968,18 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 		for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
 		{
 			if (!SpawnPoint || bHasPhysicalSlot) continue;
-			bHasPhysicalSlot = SpawnPoint->OwnerTerritoryTag.IsValid()
-				? SpawnPoint->OwnerTerritoryTag == Territory->GetTerritoryTag()
-				: Territory->ContainsPoint(SpawnPoint->GetActorLocation());
+			if (SpawnPoint->OwnerTerritoryTag.IsValid())
+			{
+				bHasPhysicalSlot = SpawnPoint->OwnerTerritoryTag == Territory->GetTerritoryTag();
+			}
+			else
+			{
+				bHasPhysicalSlot = Territory->ContainsPoint(SpawnPoint->GetActorLocation());
+				for (const FTerritoryPatrolNode& Node : SpawnPoint->GetEffectivePatrolRoute())
+				{
+					bHasPhysicalSlot |= Territory->ContainsPoint(Node.Location);
+				}
+			}
 		}
 		if (!bHasPhysicalSlot)
 		{

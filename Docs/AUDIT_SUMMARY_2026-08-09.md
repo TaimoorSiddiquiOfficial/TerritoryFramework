@@ -1,5 +1,7 @@
 # TerritoryFramework Audit Summary — 2026-08-09
 
+> Historical snapshot. The implementation and release status changed in the 2026-08-24 remediation pass; use `REMEDIATION_2026-08-24.md`, `CHANGELOG.md`, and current source/tests for present behavior.
+
 ## Overview
 
 | Metric | Value |

@@ -40,8 +40,9 @@ an incompatible class, controller, auto-possession policy, or instance policy in
 silently falling back to a different pawn class.
 
 Definition appearance and equipment can finish asynchronously. Automatic main-hand wielding
-waits until Narrative reports the character load complete and the requested equipment slot has
-a spawned weapon visual, preventing an early wield state from losing its animation overlay.
+waits for Narrative's visual/loadout initialization callback and the requested equipment slot's
+weapon visual; unrelated cosmetic mesh/groom loads do not block it. This prevents an early wield
+state from losing its animation overlay without treating slow cosmetic streaming as loadout failure.
 An unarmed NPC definition is valid: after a bounded inventory admission window the guard stops
 polling and continues its Territory activity without a weapon or a misleading warning.
 Capsule and mesh initialization starts from valid named Unreal profiles before the exact
@@ -58,6 +59,13 @@ Territory spawn points can define patrol routes. These are consumed by Narrative
 3. Narrative's `BT_Patrol` + `BPA_Patrol` handles all movement
 
 No custom Territory BT needed — thin adapter into Narrative's infrastructure.
+
+The public patrol getters use the inline spawn-point route when it is non-empty, otherwise
+they use the assigned `UTerritoryGuardPostDefinition` route and loop policy. Spawn-point
+selection is deterministic: higher priority fills first, a patrol-capable post wins an
+equal-priority tie over an intentional static post, and actor path is the final stable tie-break.
+The editor validator rejects a misleading one-node data-asset route; use at least two nodes
+or leave the route empty for an intentional static sentry.
 
 ## Reserve System
 
@@ -77,8 +85,13 @@ No custom Territory BT needed — thin adapter into Narrative's infrastructure.
   defence even if posts retain saved replacement stock
 - Initial population uses `HasAvailableSlot()` only — reserves not consumed
 - When a guard dies: `UnregisterGuard()` queues one finite replacement only when active guards are below `DesiredGuardCount`
+- Defender death delegates bind to Narrative's ASC on the server. If asynchronous NPC initialization has not exposed the ASC yet, the Territory retries every 0.25 seconds for up to 10 seconds; unregister/end-play cancels the retry and removes the exact delegate binding.
 - Lowering the desired target cancels pending reserve deployments; a delayed reserve can never raise the live garrison above the new target
 - `FTerritoryGarrisonSnapshot` replicates exact active, reserve, and pending-deployment counts without replicating live pawn pointers
+- During an opposing `Contested` state, the incumbent may deploy only its already-authored
+  finite pending reserves. `TerritorialInfluence` can reduce each deployment delay, including
+  a timer restored from save, but never creates a reserve, permits player recruitment during
+  contest, changes ownership, or bypasses physical Narrative NPC spawning.
 
 ## Player-managed staffing
 
@@ -130,6 +143,16 @@ Per-spawn-point overrides take precedence over the data asset:
 
 If no `GuardPostDefinition` is assigned, the territory's `GuardNPCDefinition` and `FactionGuardDefinitions` are used as fallback.
 
+### Placement and patrol overlap ownership
+
+Guard-post ownership resolves in this order: a Territory's typed `GuardSpawnPoints` reference,
+the post's explicit `OwnerTerritoryTag`, then spatial placement/patrol overlap. For an untagged
+post, both the actor origin and every world-space patrol node are queried. The most specific hit
+wins (`Property > District > City`, then smaller bounds and stable tag order). This means a post
+placed just outside a District can still become one of its physical guard slots when its patrol
+route enters that District. The editor validator uses the same overlap rule and no longer reports
+such a post as orphaned.
+
 ### Staged combat placement
 
 The spawn-point marker represents the guard's foot position and facing. Normal initial,
@@ -143,6 +166,10 @@ deployment with camera avoidance is the sole path allowed to select a nearby con
 1. Kill all defenders → `OnAllGuardsDefeated` → defender count becomes zero; the incumbent owner remains authoritative but the territory is vulnerable
 	- **Note:** checks ALL `RegisteredDefenders` (guards + any non-guard defenders registered via `RegisterDefender`), not just `SpawnedGuards`
 	- A BP override may call Super for the native zero-defence update; it must never clear ownership as a casualty side effect
+	- `Claimed -> Contested` preserves every surviving incumbent defender. Capture pressure
+	  never despawns the garrison, and `Contested -> Claimed` never creates free replacement
+	  guards. Only a verified Narrative death consumes an active guard and may queue a finite
+	  reserve deployment.
 2. Designer triggers capture via:
    - `RegisterAttacker(Territory, Actor, Faction)` — progressive capture (identity-based, TSet per faction)
    - `ForceCapture(Territory, Faction)` → bool — authority-only instant capture; validates inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed. Returns true if territory actually changed.

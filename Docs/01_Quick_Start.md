@@ -17,40 +17,49 @@ Add territory tags to `Config/DefaultGameplayTags.ini`:
 +GameplayTagList=(Tag="Territory.HavenReach")
 +GameplayTagList=(Tag="Territory.HavenReach.MarketSquare")
 +GameplayTagList=(Tag="Territory.HavenReach.CastleHill")
++GameplayTagList=(Tag="Territory.HavenReach.MarketSquare.Blacksmith")
++GameplayTagList=(Tag="Territory.HavenReach.CastleHill.Farm")
 +GameplayTagList=(Tag="Guard.Activity.Patrol")
 +GameplayTagList=(Tag="Guard.Activity.Rest")
 +GameplayTagList=(Tag="Guard.Activity.Inspect")
 ```
 
-## Step 3: Place Territory Actors
+## Step 3: Place the Territory Hierarchy
 
-1. Drag `BP_TerritoryDistrict` from Content Browser into level
-2. In Details panel, set:
-   - **Territory Tag**: `Territory.HavenReach.MarketSquare`
-   - **Territory Display Name**: `Market Square`
-   - **Initial Owning Faction**: `Narrative.Factions.Bandits`
-   - **Initial Periodic Income**: 200
-   - **Initial Guard Cost**: 75
+1. Place one `ATerritoryCity` with tag `Territory.HavenReach` and `AggregateOnly` control.
+2. Place child `ATerritoryDistrict` actors, set `ParentTerritoryTag` to the City tag, and use `AggregateOnly` control.
+3. Place capturable child `ATerritoryProperty` actors, set each `ParentTerritoryTag` to its District, and use `Independent` control.
+4. Give every placed Territory a unique gameplay tag and save the level so its editor-authored stable GUID is baked.
+5. Resize each `BoundsShape` to cover its gameplay area.
 
-3. Resize the **BoundsShape** box to cover your district area
+Do not directly capture an aggregate District or City. Capturing all required Places reduces the District owner; capturing all required Districts reduces the City owner through the existing hierarchy authority.
 
-## Step 4: Place Guard Spawn Points
+## Step 4: Place Physical Capture Points
+
+1. Place `BP_TerritoryCapturePoint` at each capturable Place.
+2. Set `TargetTerritoryTag` to the exact independent Property tag.
+3. Set `CaptureRadius` to the intended physical zone.
+
+On the server, the point resolves the player's faction through Narrative, registers the pawn with `UTerritoryControlSubsystem`, and unregisters it on exit, death, invalid faction, or completed ownership. It never writes ownership or progress itself.
+
+## Step 5: Place Guard Spawn Points
 
 1. Drag `BP_GuardSpawnPoint` into level inside the territory bounds
 2. In Details panel:
    - **Owner Territory Tag**: `Territory.HavenReach.MarketSquare`
-   - **Max Guards**: 3
    - **Reserve Slots**: 1
    - **Patrol Route**: Add 3-4 waypoints around the district
 
-## Step 5: Place Persistence Actor
+Each spawn-point actor is one active guard slot. The legacy `MaxGuards` property is ignored; place multiple authored posts for multiple active guards.
+
+## Step 6: Place Persistence Actor
 
 1. Drag `BP_TerritoryWorldState` into level. **Single-player projects: use only `BP_TerritoryWorldState`** — it handles both single-player and multiplayer.
 2. One instance is enough — it persists economy, diplomacy, and capture state.
 
 > **Note:** `BP_TerritorySavableData` is **deprecated**. Do not use it for new projects. Use `BP_TerritoryWorldState` instead. If both exist in the level, an editor validator will report an error.
 
-## Step 6: Configure Guards (Optional)
+## Step 7: Configure Guards (Optional)
 
 On the territory volume:
 1. Set **Guard NPC Definition** → your NPC data asset (or use **Faction Guard Definitions** for per-faction guards)
@@ -59,7 +68,7 @@ On the territory volume:
 4. Set **Initial Guard Recruitment Cost** for the one-time price and **Initial Guard Cost** for recurring upkeep
 5. Guards inherit combat AI from the NPCDefinition asset (configured in NarrativePro)
 
-## Step 7: Test in PIE
+## Step 8: Test in PIE
 
 1. Press **PIE**
 2. Check Output Log for:
@@ -68,13 +77,12 @@ On the territory volume:
    LogTerritory: Registered territory: ...
    LogTerritory: ... ownership committed ...
    ```
-3. Use the **Territory Control** subsystem to attempt capture:
-   - Blueprint: `GetTerritoryControl → AttemptCapture(Territory, Heroes)`
-4. Check the territory changes ownership
+3. Walk the player into a configured Place capture point and remain until capture completes.
+4. Verify the Place becomes claimed, then verify its aggregate District and City reduce from their children.
 
-With `PlayerChooses`, a capture whose context belongs to the new owner starts at target zero. The legacy `ForceCapture` node also resolves a matching live Narrative player by faction; use `ForceCaptureWithContext` when the exact instigator matters. Select the District or one of its Properties in the District Command Center, preview recruitment/upkeep/net yield, and submit an exact staffing target.
+With `PlayerChooses`, a capture whose context belongs to the new owner starts at target zero. `ForceCaptureWithContext` is for explicit scripted transitions and tests, not physical gameplay. Select the District or one of its Properties in the District Command Center, preview recruitment/upkeep/net yield, and submit an exact staffing target.
 
-## Step 8: Enable Debug (Optional)
+## Step 9: Enable Debug (Optional)
 
 1. Edit → Project Settings → Territory Framework
 2. Enable **"Enable All Debug Output"**
@@ -88,6 +96,6 @@ With `PlayerChooses`, a capture whose context belongs to the new owner starts at
 | Guards don't spawn | Assign GuardNPCDefinition on the territory volume |
 | Guards don't fight | Configure ActivityConfiguration + TriggerSets on the NPCDefinition asset |
 | Territory doesn't save | Place TerritoryWorldState actor in level |
-| Capture doesn't work | Check faction attitudes (Friendly factions can't capture each other) |
+| Capture doesn't work | Confirm the point targets an `Independent` Property, the pawn is player-controlled, its Narrative faction is valid, and diplomacy allows capture |
 | Guards float on hit | Already fixed — BoundsShape has NoCollision |
 | Map marker not showing | MapMarkerComponent is auto-created — check marker color settings |

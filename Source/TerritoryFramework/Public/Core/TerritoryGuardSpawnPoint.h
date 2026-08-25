@@ -11,6 +11,7 @@ class ATerritoryGuardCharacter;
 class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
+enum class ETerritoryState : uint8;
 
 /**
  * P1-09: Policy for what happens to reserves when ownership changes.
@@ -140,7 +141,9 @@ public:
 
 	/**
 	 * Which territory this spawn point belongs to. A territory's authored GuardSpawnPoints
-	 * reference takes precedence, followed by this tag, then proximity at BeginPlay.
+	 * reference takes precedence, followed by this tag, then placement/patrol overlap.
+	 * An untagged post whose actor origin is outside a District can still belong to it
+	 * when at least one world-space patrol node overlaps that District.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
 		meta=(Categories="Territory", DisplayName="Owner Territory"))
@@ -335,14 +338,14 @@ public:
 	 * Registers a guard as spawned from this point. Decrements available slots.
 	 * Called automatically by TerritoryVolume after spawn; you usually don't call this directly.
 	 */
-	UFUNCTION(BlueprintCallable, Category="Territory|GuardSpawn",
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Register Spawned Guard"))
 	void RegisterSpawnedGuard(ATerritoryGuardCharacter* Guard);
 
 	/**
 	 * Unregisters a guard (death or despawn). Frees the active slot and may spawn a reserve.
 	 */
-	UFUNCTION(BlueprintCallable, Category="Territory|GuardSpawn",
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Unregister Guard"))
 	void UnregisterGuard(ATerritoryGuardCharacter* Guard, EGuardRemovalReason Reason = EGuardRemovalReason::Killed);
 
@@ -375,7 +378,7 @@ public:
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
 		meta=(DisplayName="Is Looping Patrol"))
-	bool GetLoopPatrol() const { return bLoopPatrol; }
+	bool GetLoopPatrol() const { return GetEffectiveLoopPatrol(); }
 
 	/**
 	 * Returns the patrol route as an array of FTransforms — convenient for Narrative
@@ -439,6 +442,17 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	bool GetEffectiveLoopPatrol() const;
+
+	/**
+	 * Owner reserves may deploy while securely claimed or while physically defending
+	 * an opposing faction's active contest. Locked/unclaimed/self-contested states reject it.
+	 */
+	static bool IsOwnerReserveDeploymentStateValid(ETerritoryState State,
+		const FGameplayTag& OwningFaction, const FGameplayTag& ContestingFaction);
+
+	/** Deterministically selects the most specific Territory from placement/patrol hits. */
+	static ATerritoryVolume* ChooseMostSpecificTerritory(
+		TConstArrayView<ATerritoryVolume*> Candidates);
 
 protected:
 	virtual void BeginPlay() override;
@@ -509,6 +523,8 @@ private:
 	/** Bind from a territory's authored GuardSpawnPoints array, which overrides proximity. */
 	void BindToTerritory(ATerritoryVolume* Territory);
 	void SetResolvedTerritory(ATerritoryVolume* Territory);
+	ATerritoryVolume* FindPlacementOrPatrolTerritory(
+		class UTerritoryRegistrySubsystem* Registry) const;
 	void ResolveOwningTerritory();
 	void InitializeReserves();
 	void QueueReserveSpawn();

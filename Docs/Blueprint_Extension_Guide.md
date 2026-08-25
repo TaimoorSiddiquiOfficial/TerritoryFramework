@@ -178,7 +178,7 @@ These events have C++ `_Implementation` that is either **empty** or does only co
 | **When it fires** | After the ownership commit finishes guard reconciliation, state, and replicated/save data |
 | **Parameters** | `OldOwner`, `NewOwner` — faction tags before and after |
 
-**C++ `_Implementation`:** Empty. All guard lifecycle, state transitions, and replication are handled in the non-virtual `SetOwningFaction` BEFORE this event fires.
+**C++ `_Implementation`:** Empty. All guard lifecycle, state transitions, and replication are handled by the non-virtual atomic ownership commit before this event fires. The public Blueprint `Set Owning Faction` node reaches that commit through the Control subsystem transaction.
 
 **Super required:** **No.** Safe to override freely.
 
@@ -419,9 +419,10 @@ ATerritoryVolume BP → Event Graph:
 
 ```
 ATerritoryVolume BP:
-  LockConditions: [QuestComplete_Q001]
+  Initial State: Locked
+  State Configs -> Locked -> Exit Conditions: [QuestComplete_Q001]
   → Territory stays Locked until quest Q001 completes
-  → TryUnlock checks all conditions automatically
+  → TryUnlock checks the same modular state-transition conditions automatically
 ```
 
 ### Pattern: Custom guard behavior on defeat
@@ -514,9 +515,12 @@ ATerritoryGuardSpawnPoint placed in level:
 
 ## Known Limitations
 
-### Guard Death Detection (Single-Bind, No Retry)
+### Guard Death Detection
 
-Guard death is detected via a single ASC `OnDied` bind during `RegisterDefender`. If Narrative has not initialized the ASC at that instant, the bind silently no-ops — no retry. In practice, Narrative creates the ASC early enough that this is latent. If a custom guard subclass delays ASC initialization, death events may not fire.
+Guard death is detected through Narrative Pro 2.4.2's ASC `OnDeathStateChanged` delegate.
+`RegisterDefender` performs an immediate bind and a bounded retry while the Narrative ASC is
+initializing. Death (`bIsDead == true`) unregisters the defender exactly once; revival
+notifications are ignored by Territory casualty accounting.
 
 ### Guard EndPlay Cleanup
 

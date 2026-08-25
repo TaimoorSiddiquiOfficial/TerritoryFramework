@@ -65,6 +65,8 @@ void ATerritoryWorldState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTreasuries);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTransactions);
+	DOREPLIFETIME(ATerritoryWorldState, ReplicatedProductionSites);
+	DOREPLIFETIME(ATerritoryWorldState, ReplicatedResourceSnapshots);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTreaties);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedReputation);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedDiplomacyHistory);
@@ -164,6 +166,40 @@ TArray<FGameplayTag> ATerritoryWorldState::GetAllFactionsWithEconomy() const
 		Result.Add(Entry.Faction);
 	}
 	return Result;
+}
+
+void ATerritoryWorldState::SetProductionState(
+	const TArray<FTerritoryProductionCheckpoint>& Checkpoints,
+	const TArray<FTerritoryProductionSiteRecord>& Sites,
+	const TArray<FTerritoryFactionResourceSnapshot>& ResourceSnapshots)
+{
+	if (!HasAuthority()) return;
+	SavedProductionCheckpoints = Checkpoints;
+	ReplicatedProductionSites = Sites;
+	ReplicatedResourceSnapshots = ResourceSnapshots;
+	OnProductionStateChanged.Broadcast();
+	ForceNetUpdate();
+}
+
+TArray<FTerritoryProductionSiteRecord> ATerritoryWorldState::GetProductionSitesForFaction(
+	const FGameplayTag& Faction) const
+{
+	TArray<FTerritoryProductionSiteRecord> Result;
+	for (const FTerritoryProductionSiteRecord& Site : ReplicatedProductionSites)
+	{
+		if (Site.OwnerFaction == Faction) Result.Add(Site);
+	}
+	return Result;
+}
+
+FTerritoryFactionResourceSnapshot ATerritoryWorldState::GetFactionResourceSnapshot(
+	const FGameplayTag& Faction) const
+{
+	for (const FTerritoryFactionResourceSnapshot& Snapshot : ReplicatedResourceSnapshots)
+	{
+		if (Snapshot.Faction == Faction) return Snapshot;
+	}
+	return FTerritoryFactionResourceSnapshot();
 }
 
 // ─── Transaction API ───
@@ -357,6 +393,10 @@ void ATerritoryWorldState::ExportPersistentState()
 				RepTx.SourceTerritory = Tx.SourceTerritory;
 				ReplicatedTransactions.Add(RepTx);
 			}
+
+			SavedProductionCheckpoints = Economy->GetProductionCheckpoints();
+			ReplicatedProductionSites = Economy->GetAllProductionSites();
+			ReplicatedResourceSnapshots = Economy->GetAllResourceSnapshots();
 		}
 
 		if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
@@ -414,6 +454,8 @@ void ATerritoryWorldState::ExportPersistentState()
 
 	SavedTreasuries = ReplicatedTreasuries;
 	SavedTransactions = ReplicatedTransactions;
+	SavedProductionSites = ReplicatedProductionSites;
+	SavedResourceSnapshots = ReplicatedResourceSnapshots;
 	SavedTreaties = ReplicatedTreaties;
 	SavedReputation = ReplicatedReputation;
 	SavedDiplomacyHistory = ReplicatedDiplomacyHistory;
@@ -428,6 +470,8 @@ void ATerritoryWorldState::ImportPersistentState()
 	// Direct assignment — no artificial transactions
 	ReplicatedTreasuries = SavedTreasuries;
 	ReplicatedTransactions = SavedTransactions;
+	ReplicatedProductionSites = SavedProductionSites;
+	ReplicatedResourceSnapshots = SavedResourceSnapshots;
 	ReplicatedTreaties = SavedTreaties;
 	ReplicatedReputation = SavedReputation;
 	ReplicatedDiplomacyHistory = SavedDiplomacyHistory;
@@ -449,6 +493,12 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 void ATerritoryWorldState::OnRep_EconomyState()
 {
 	SyncEconomySubsystemFromReplicatedState();
+}
+
+void ATerritoryWorldState::OnRep_ProductionState()
+{
+	SyncEconomySubsystemFromReplicatedState();
+	OnProductionStateChanged.Broadcast();
 }
 
 void ATerritoryWorldState::OnRep_DiplomacyState()
@@ -498,6 +548,10 @@ void ATerritoryWorldState::SyncEconomySubsystemFromReplicatedState()
 			Transactions.Add(Transaction);
 		}
 		Economy->RestoreTransactionHistory(Transactions);
+		Economy->RestoreProductionState(
+			HasAuthority() ? SavedProductionCheckpoints
+				: TArray<FTerritoryProductionCheckpoint>(),
+			ReplicatedProductionSites, ReplicatedResourceSnapshots);
 	}
 }
 
@@ -542,6 +596,12 @@ void ATerritoryWorldState::SyncCounterAttackSubsystemFromReplicatedState()
 			if (HasAuthority())
 			{
 				Counterattacks->RestorePersistentState(ReplicatedAssaults, SavedAssaultCycles);
+				// Active NPC pointers are never campaign state. RestorePersistentState
+				// normalizes saved live survivors into finite pending reserve; publish that
+				// authoritative read model immediately so a late join never sees phantom
+				// AliveForce counts from the serialized snapshot.
+				ReplicatedAssaults = Counterattacks->GetPersistentState();
+				ForceNetUpdate();
 			}
 			else
 			{
@@ -571,6 +631,7 @@ void ATerritoryWorldState::SubscribeToLiveUpdates()
 	if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
 	{
 		Diplomacy->OnDiplomacyStateChanged.AddDynamic(this, &ATerritoryWorldState::OnDiplomacyChangedLive);
+		Diplomacy->OnDiplomacyEvent.AddDynamic(this, &ATerritoryWorldState::OnDiplomacyEventLive);
 		Diplomacy->OnReputationChanged.AddDynamic(this, &ATerritoryWorldState::OnReputationChangedLive);
 	}
 
@@ -599,6 +660,7 @@ void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
 	if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
 	{
 		Diplomacy->OnDiplomacyStateChanged.RemoveDynamic(this, &ATerritoryWorldState::OnDiplomacyChangedLive);
+		Diplomacy->OnDiplomacyEvent.RemoveDynamic(this, &ATerritoryWorldState::OnDiplomacyEventLive);
 		Diplomacy->OnReputationChanged.RemoveDynamic(this, &ATerritoryWorldState::OnReputationChangedLive);
 	}
 
@@ -703,27 +765,92 @@ void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction
 
 void ATerritoryWorldState::OnDiplomacyChangedLive(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || !FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
 
-	// Update or add treaty entry
-	for (FReplicatedTreaty& Treaty : ReplicatedTreaties)
+	auto MatchesPair = [&FactionA, &FactionB](const FReplicatedTreaty& Treaty)
 	{
-		if ((Treaty.FactionA == FactionA && Treaty.FactionB == FactionB)
-			|| (Treaty.FactionA == FactionB && Treaty.FactionB == FactionA))
+		return (Treaty.FactionA == FactionA && Treaty.FactionB == FactionB)
+			|| (Treaty.FactionA == FactionB && Treaty.FactionB == FactionA);
+	};
+
+	// None is represented by the absence of a Territory treaty. Keeping a row with
+	// State=None makes the client read model disagree with the authoritative subsystem.
+	if (NewState == EDiplomacyState::None)
+	{
+		const int32 Removed = ReplicatedTreaties.RemoveAll(MatchesPair);
+		if (Removed > 0) ForceNetUpdate();
+		return;
+	}
+
+	FReplicatedTreaty Snapshot;
+	bool bHasAuthoritativeSnapshot = false;
+	if (UWorld* World = GetWorld())
+	{
+		if (const UTerritoryDiplomacySubsystem* Diplomacy =
+			World->GetSubsystem<UTerritoryDiplomacySubsystem>())
 		{
-			Treaty.State = NewState;
-			ForceNetUpdate();
-			return;
+			for (const FTreatyRecord& Record : Diplomacy->GetTreatiesForFaction(FactionA))
+			{
+				if ((Record.FactionA == FactionA && Record.FactionB == FactionB)
+					|| (Record.FactionA == FactionB && Record.FactionB == FactionA))
+				{
+					Snapshot.TreatyID = Record.GetCanonicalKey();
+					Snapshot.FactionA = Record.FactionA;
+					Snapshot.FactionB = Record.FactionB;
+					Snapshot.State = Record.State;
+					Snapshot.SignedGameTime = Record.SignedGameTime;
+					Snapshot.ExpiryGameTime = Record.ExpiryGameTime;
+					Snapshot.bPermanent = Record.bPermanent;
+					bHasAuthoritativeSnapshot = true;
+					break;
+				}
+			}
 		}
 	}
 
-	// New treaty
-	FReplicatedTreaty NewTreaty;
-	NewTreaty.TreatyID = FGuid::NewGuid();
-	NewTreaty.FactionA = FactionA;
-	NewTreaty.FactionB = FactionB;
-	NewTreaty.State = NewState;
-	ReplicatedTreaties.Add(NewTreaty);
+	for (FReplicatedTreaty& Existing : ReplicatedTreaties)
+	{
+		if (!MatchesPair(Existing)) continue;
+		if (bHasAuthoritativeSnapshot)
+		{
+			Existing = Snapshot;
+		}
+		else
+		{
+			// Delegate ordering normally makes the rich subsystem record available.
+			// Preserve the last replicated timing metadata if a custom broadcaster fires
+			// before that record is visible instead of silently resetting the treaty.
+			Existing.State = NewState;
+		}
+		ForceNetUpdate();
+		return;
+	}
+
+	if (!bHasAuthoritativeSnapshot)
+	{
+		FTreatyRecord Fallback;
+		Fallback.FactionA = FactionA;
+		Fallback.FactionB = FactionB;
+		Fallback.State = NewState;
+		Snapshot.TreatyID = Fallback.GetCanonicalKey();
+		Snapshot.FactionA = FactionA;
+		Snapshot.FactionB = FactionB;
+		Snapshot.State = NewState;
+	}
+	ReplicatedTreaties.Add(Snapshot);
+	ForceNetUpdate();
+}
+
+void ATerritoryWorldState::OnDiplomacyEventLive(const FDiplomacyEvent& Event)
+{
+	if (!HasAuthority()) return;
+	ReplicatedDiplomacyHistory.Add(Event);
+	constexpr int32 MaxDiplomacyHistory = 500;
+	const int32 Excess = ReplicatedDiplomacyHistory.Num() - MaxDiplomacyHistory;
+	if (Excess > 0)
+	{
+		ReplicatedDiplomacyHistory.RemoveAt(0, Excess);
+	}
 	ForceNetUpdate();
 }
 

@@ -47,6 +47,8 @@ class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrative
 	friend class FTFBehavior_GuardRestoreCount;
 	friend class FTFBehavior_TagBoundSpawnPointRegistration;
 	friend class FTFFunctional_PlayerManagedGarrisonPolicy;
+	friend class FTFPatrolOverlapAndDefenceFrontRegression;
+	friend class FTFCounterAttackWorldPartitionTargetRebind;
 
 public:
 	ATerritoryVolume();
@@ -142,6 +144,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Initial Owning Faction"))
 	FGameplayTag GetInitialOwningFaction() const;
 
+	/** Resolves the new Initial State setting and the hidden legacy Starts Locked value. */
+	UFUNCTION(BlueprintPure, Category="Territory|Ownership",
+		meta=(DisplayName="Get Resolved Initial State",
+			ToolTip="Preview the state used for a new campaign. Saved games keep their saved state."))
+	ETerritoryState ResolveInitialTerritoryState() const;
+
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy", meta=(DisplayName="Get Control Mode"))
 	ETerritoryControlMode GetControlMode() const;
 
@@ -169,7 +177,9 @@ public:
 	// Mutation API (BlueprintAuthorityOnly — server-only)
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership", meta=(DisplayName="Set Owning Faction"))
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership",
+		meta=(DisplayName="Set Owning Faction",
+			ToolTip="Validated server ownership change. Uses the Territory Control Subsystem so locks, diplomacy, state conditions, guards, capture cleanup, counterattacks, save snapshots, and replication stay synchronized. Use Apply Territory Mutation when you need a result or explicit context."))
 	void SetOwningFaction(const FGameplayTag& NewFaction);
 
 	/** Internal explicit-context ownership path used by synchronous hierarchy cascades. */
@@ -325,6 +335,20 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Get Lock Reason"))
 	FText GetLockReason() const { return OwnershipData.LockReason; }
 
+	/**
+	 * Editor migration button. Converts hidden Starts Locked/Lock Conditions data to
+	 * Initial State and State Configs[Locked].Exit Conditions, then clears legacy data.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Migration",
+		meta=(DisplayName="Migrate Legacy Lock Settings",
+			ToolTip="Use once on an old Territory actor. Example: Starts Locked becomes Initial State = Locked, and Lock Conditions move to Locked -> Exit Conditions."))
+	void MigrateLegacyLockSettings();
+
+	/** True only while an old serialized Starts Locked value still needs migration. */
+	bool HasLegacyInitialLockSetting() const { return bStartsLocked; }
+	/** True only while old serialized Lock Conditions still need migration. */
+	bool HasLegacyUnlockConditions() const { return !LockConditions.IsEmpty(); }
+
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Guard Spawning API
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -467,8 +491,12 @@ public:
 	void RefreshGarrisonSnapshot();
 
 public:
-	/** Check if all EntryConditions for the given state pass. Public for atomic mutation validation. */
+	/** Check if all Entry Conditions for the given state pass. Public for atomic mutation validation. */
 	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
+	/** Check if all Exit Conditions for the given state pass. Locked also reads legacy LockConditions when no new exit rules exist. */
+	bool CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
+	/** Validate the complete old-state exit and new-state entry rule set. */
+	bool CheckStateTransitionConditions(ETerritoryState OldState, ETerritoryState NewState, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -502,8 +530,14 @@ protected:
 	FText TerritoryDisplayName;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
-		meta=(Categories="Narrative.Factions", DisplayName="Initial Owning Faction"))
+		meta=(Categories="Narrative.Factions", DisplayName="Initial Owning Faction",
+			ToolTip="Faction that owns this place in a new campaign. Example: Narrative.Factions.Regime. Saved games keep their saved owner."))
 	FGameplayTag InitialOwningFaction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
+		meta=(DisplayName="Initial State",
+			ToolTip="Starting state for a new campaign. Automatic uses Initial Owning Faction and safely migrates old Starts Locked assets."))
+	ETerritoryInitialState InitialState = ETerritoryInitialState::Automatic;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Hierarchy",
 		meta=(DisplayName="Control Mode"))
@@ -525,8 +559,9 @@ protected:
 		meta=(ClampMin="0", DisplayName="Guard Recruitment Cost"))
 	int32 InitialGuardRecruitmentCost = 50;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
-		meta=(DisplayName="Starts Locked"))
+	/** Serialized migration input. Hidden from new authoring; use InitialState instead. */
+	UPROPERTY(meta=(DeprecatedProperty,
+		DeprecationMessage="Use Initial State. Existing serialized values are still migrated at runtime."))
 	bool bStartsLocked = false;
 
 	// ─── Strategic counterattack configuration ───
@@ -554,11 +589,13 @@ protected:
 
 	/**
 	 * State configuration map — assign conditions and events per territory state.
-	 * EntryConditions must all pass to enter that state; EntryEvents fire on entry;
-	 * ExitEvents fire on exit. Evaluated in SetTerritoryState before/after transition.
+	 * Entry Conditions must all pass to enter; Exit Conditions must all pass to leave.
+	 * Events fire only after one atomic state commit. For a quest lock, use the Locked
+	 * row and put the quest-complete check in Exit Conditions.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|States",
-		meta=(DisplayName="State Configs"))
+		meta=(DisplayName="State Configs",
+			ToolTip="One transition rule table for all states. Example: Locked Exit Conditions control unlocking; Claimed Entry Events can reward the capturing faction."))
 	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
 
 	/** Fire EntryEvents (bEntering=true) or ExitEvents (bEntering=false) for the given state. Uses TransitionContext for instigator. */
@@ -566,12 +603,9 @@ protected:
 
 	// ─── Lock System ───
 
-	/**
-	 * Narrative conditions that must ALL pass for TryUnlock() to succeed.
-	 * If empty, territory can always be unlocked. EditCondition: bStartsLocked.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="Territory|Lock",
-		meta=(EditCondition="bStartsLocked", DisplayName="Lock Conditions"))
+	/** Serialized migration input. Hidden from new authoring; use StateConfigs[Locked].ExitConditions. */
+	UPROPERTY(Instanced, meta=(DeprecatedProperty,
+		DeprecationMessage="Use the Locked row in State Configs -> Exit Conditions. Existing serialized conditions remain active until migrated."))
 	TArray<TObjectPtr<class UNarrativeCondition>> LockConditions;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Hierarchy",
@@ -650,11 +684,33 @@ protected:
 
 	// ─── Guard Events ───
 
+	/**
+	 * One-shot Narrative events fired on the server after each registered defender dies.
+	 * The event Target is the killer pawn when available. Every event's inherited
+	 * Conditions array must pass; use this for "on defender died AND diplomacy is War".
+	 */
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Territory|Guards|Narrative",
+		meta=(DisplayName="On Defender Died Events",
+			ToolTip="Runs after each registered defender death. Add conditions inside each event; all must pass. Example: schedule a finite enemy wave only when Heroes and Bandits are at War."))
+	TArray<TObjectPtr<class UNarrativeEvent>> DefenderDiedEvents;
+
+	/**
+	 * One-shot Narrative events fired only when living defenders and pending reserve
+	 * deployments both reach zero. These events are not replayed merely because a save loads.
+	 */
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Territory|Guards|Narrative",
+		meta=(DisplayName="On All Defenders Defeated Events",
+			ToolTip="Runs once when the final living defender dies and no replacement is pending. Example: schedule a finite counterattack wave, gated by a Diplomacy Condition."))
+	TArray<TObjectPtr<class UNarrativeEvent>> AllDefendersDefeatedEvents;
+
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Guard Killed"))
 	FOnGuardKilled OnGuardKilled;
 
 private:
 	friend class ATerritoryGuardSpawnPoint;
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FTFDefenderNarrativeEventConditions;
+#endif
 
 	static int32 CalculateGuardRestoreCount(bool bLoadedFromSave, int32 DesiredGuards,
 		int32 SavedActiveGuards, int32 LegacyDefenderCount);
@@ -685,11 +741,19 @@ private:
 	bool bSpawningGuards = false;
 	bool bGarrisonMutationInProgress = false;
 
-	UFUNCTION()
-	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC);
+	/** Narrative may create its ASC after the pawn is registered as a defender. */
+	TMap<TWeakObjectPtr<AActor>, TWeakObjectPtr<UNarrativeAbilitySystemComponent>> BoundDefenderASCs;
+	TMap<TWeakObjectPtr<AActor>, int32> PendingDefenderDeathBindAttempts;
+	FTimerHandle DefenderDeathBindRetryTimer;
 
-	void BindDefenderDeath(AActor* Defender);
+	UFUNCTION()
+	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC,
+		const bool bIsDead);
+
+	bool BindDefenderDeath(AActor* Defender);
 	void UnbindDefenderDeath(AActor* Defender);
+	void ScheduleDefenderDeathBindingRetry(AActor* Defender);
+	void RetryPendingDefenderDeathBindings();
 	void CleanupInvalidDefenders();
 	bool HasPendingReserveDeployments() const;
 	void CancelPendingReserveDeployments();

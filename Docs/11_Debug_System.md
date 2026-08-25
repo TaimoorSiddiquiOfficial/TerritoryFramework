@@ -76,6 +76,20 @@ A tick-based live overlay widget showing all territory state.
 - **Diplomacy**: Active treaties with state type
 - **Capture**: Contested territories with progress %
 
+## Gameplay Debugger
+
+Developer builds register a `Territory` Gameplay Debugger category. Select an actor and
+enable that category through Unreal's standard Gameplay Debugger controls to inspect:
+
+- Territory tag, owner, state, and capture progress
+- active, desired, and maximum guard counts
+- assault record count and each assault's planned, alive, pending, and killed force
+
+The same text is available to Blueprint tools through the pure
+`UTerritoryDebugger::BuildTerritoryDebugSummary(WorldContextObject, DebugActor)` function.
+When the selected actor is not a Territory, the query uses the Territory registry's spatial
+lookup at the actor location. Shipping builds do not register the Gameplay Debugger module.
+
 ## Console Commands
 
 ```bash

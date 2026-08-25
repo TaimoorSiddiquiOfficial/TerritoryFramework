@@ -32,6 +32,7 @@
 | Property | Saved? |
 |---|---|
 | UpgradeLevel | ✅ SaveGame |
+| ProductionProfile | Authored asset reference; durable soft reference copied into WorldState site records |
 
 ### ATerritoryWorldState (global)
 
@@ -44,6 +45,9 @@
 | Diplomacy history | ✅ |
 | Capture summaries | Replicated projection; ownership persists on each Volume |
 | Counterattack records | ✅ SaveGame + replicated |
+| Resource production checkpoints | ✅ SaveGame; stable Territory GUID + RuleTag + owner + last consumed cycle |
+| Production site records and per-rule outcomes | ✅ SaveGame + replicated read model; supports unloaded World Partition Properties |
+| Resource stockpile snapshots | ✅ SaveGame + replicated read model; actual items remain in Narrative inventory |
 
 Server subsystem delegates keep WorldState projections current between saves. `ExportPersistentState()` rebuilds them at the save boundary. Capture summaries are not a second durable ownership source; `ATerritoryVolume::OwnershipData` remains authoritative.
 
@@ -65,15 +69,17 @@ Territory GUIDs are **editor-stable** — generated once and persisted in the ma
 
 | Event | Action |
 |---|---|
+| PostActorCreated (new editor placement) | Generate a NEW instance GUID even when the Blueprint CDO has a serialized default |
 | PostEditChangeProperty | Auto-generate if invalid |
 | PostDuplicate (Ctrl+D) | Generate NEW GUID (prevents save conflicts) |
-| BeginPlay (fallback) | Generate if still invalid (shouldn't happen) |
+| Load / PIE duplication | Retain the saved editor-authored GUID |
+| BeginPlay with invalid GUID | Log an error and fail closed for persistence; runtime identity is never invented |
 
 ### What This Prevents
 
 Before the fix: each session generated a random GUID → save records couldn't be found on reload.
 
-After the fix: GUID persists in the map → Narrative Save System finds the record → territory state restores correctly.
+After the fix: each placement receives a unique GUID, that GUID persists in the map, and Narrative Save System finds the same record on reload. Existing placed actors keep their saved identities; only newly created editor actors receive a new value.
 
 ## Save Flow
 
@@ -95,6 +101,7 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
    a. Direct assignment (no artificial transactions)
     b. SyncSubsystemsFromReplicatedState:
         - Push income/cost/count parameters to EconomySubsystem via SetFactionTreasury (Narrative inventory currency is separate)
+        - Restore production checkpoints, site records, per-rule outcomes, and resource read models without restoring item balances
         - Replay treaty states and reputation to DiplomacySubsystem
         - Diplomacy syncs to Narrative GameState attitudes
         - Hydrate client-side economy/diplomacy query models from RepNotify
@@ -110,6 +117,8 @@ After the fix: GUID persists in the map → Narrative Save System finds the reco
 - Guard posts restore reserve and pending deployment counts.
 - `FTerritoryGarrisonSnapshot` is reconstructed from live/restored guard posts and replicated; it does not save pawn pointers.
 - WorldState restores economy rate parameters, transaction history, treaties, reputation, counterattack records, and the server-only decision-cycle ledger. Older saves without the ledger rebuild the best available high-water marks from retained assault records.
+- Production checkpoints prevent same-day duplication and ownership-change windfalls. Missing-input days are consumed; storage-unavailable/full outcomes remain pending inside the bounded catch-up window.
+- Actual Meat, Grain, tools, or other resources restore through the registered `UNarrativeInventoryComponent`, never from the WorldState snapshot.
 - A saved active assault preserves its decision/casualties and moves surviving live count into pending reconstruction.
 
 ### State Not Reconstructed

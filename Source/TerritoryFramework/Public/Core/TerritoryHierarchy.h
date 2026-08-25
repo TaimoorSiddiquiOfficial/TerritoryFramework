@@ -6,6 +6,7 @@
 
 class UTerritoryEconomySubsystem;
 class UTerritoryNavigationMarkerComponent;
+class UTerritoryProductionProfile;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ATerritoryCity
@@ -193,6 +194,13 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Property")
 	int32 IncomeBonusPerLevel = 25;
+
+	/** Optional item production definition. Null is a valid capturable, non-producing Property. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Property|Production")
+	TObjectPtr<UTerritoryProductionProfile> ProductionProfile = nullptr;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Property|Production")
+	UTerritoryProductionProfile* GetProductionProfile() const { return ProductionProfile; }
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	bool CanUpgrade() const;

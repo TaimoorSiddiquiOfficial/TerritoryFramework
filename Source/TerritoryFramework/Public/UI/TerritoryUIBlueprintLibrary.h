@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
+#include "Economy/TerritoryProductionProfile.h"
 #include "TerritoryUIBlueprintLibrary.generated.h"
 
 class APlayerController;
@@ -16,25 +17,66 @@ class UTerritoryActivatableWidget;
 UENUM(BlueprintType)
 enum class ETerritoryOperationsFilter : uint8
 {
-	All,
-	Unlocked,
-	Available,
-	Owned,
-	Manageable,
-	UnderAttack,
-	Contested,
-	Locked,
-	FinancialRisk
+	All UMETA(ToolTip="Show every loaded registered District, including locked and enemy Districts."),
+	Unlocked UMETA(ToolTip="Show Districts that are not Locked."),
+	Available UMETA(ToolTip="Show Districts the viewer may currently capture or interact with under Territory rules."),
+	Owned UMETA(ToolTip="Show Districts owned by the viewer's exact Narrative faction."),
+	Manageable UMETA(ToolTip="Show owned Districts where the viewer may change guards or operations."),
+	UnderAttack UMETA(ToolTip="Show Districts with an active or waiting physical counterattack."),
+	Contested UMETA(ToolTip="Show Districts whose capture state is Contested."),
+	Locked UMETA(ToolTip="Show story-locked Districts. They remain visible but read-only."),
+	FinancialRisk UMETA(ToolTip="Show Districts whose upkeep is greater than income."),
+	Producing UMETA(ToolTip="Show Districts with at least one production site currently producing."),
+	ProductionBlocked UMETA(ToolTip="Show Districts with production stopped by any rule."),
+	MissingInputs UMETA(ToolTip="Show production sites waiting for Narrative inventory items."),
+	StorageFull UMETA(ToolTip="Show production sites that cannot store more output.")
 };
 
 /** Escalation level derived from replicated capture and assault state. */
 UENUM(BlueprintType)
 enum class ETerritoryThreatLevel : uint8
 {
-	None,
-	Watch,
-	Warning,
-	Critical
+	None UMETA(ToolTip="No current capture or assault threat."),
+	Watch UMETA(ToolTip="Early strategic risk. Example: a scheduled warning outside activation range."),
+	Warning UMETA(ToolTip="A nearby or waiting assault needs attention."),
+	Critical UMETA(ToolTip="Physical attackers are active or capture pressure is dangerous.")
+};
+
+/** One resource row shared by compact Territory, District, Journal, and Economy widgets. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryResourceOperationsView
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") TSubclassOf<class UNarrativeItem> ItemClass;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") FText DisplayName;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") TSoftObjectPtr<class UTexture2D> Thumbnail;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") int32 StoredQuantity = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") int32 InputPerCycle = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") int32 OutputPerCycle = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") int32 NetPerCycle = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") bool bSufficientForNextCycle = true;
+};
+
+/** One modular production-site row. It owns no gameplay state. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryProductionSiteOperationsView
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") FGameplayTag TerritoryTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") FGameplayTag ParentTerritoryTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") FText DisplayName;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") FGameplayTag OwnerFaction;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") FGameplayTag ActiveRuleTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") ETerritoryProductionStatus Status = ETerritoryProductionStatus::NeverEvaluated;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") FText StatusReason;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") int64 LastEvaluatedCycle = INDEX_NONE;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") bool bHasProductionProfile = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") bool bProducing = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") bool bBlocked = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") TArray<FTerritoryProductionRuleState> RuleStates;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") TArray<FTerritoryResourceOperationsView> Resources;
 };
 
 /** One independently managed district/property garrison and its local P&L. */
@@ -124,6 +166,12 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	/** District garrison plus every loaded, registered child Property garrison. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") TArray<FTerritoryGarrisonOperationsView> GarrisonTargets;
 
+	/** Production works for loaded and World Partition-unloaded child Properties. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") TArray<FTerritoryProductionSiteOperationsView> ProductionSites;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") TArray<FTerritoryResourceOperationsView> ResourceFlows;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") int32 ProducingSiteCount = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Production") int32 BlockedProductionSiteCount = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") ETerritoryThreatLevel ThreatLevel = ETerritoryThreatLevel::None;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") bool bUnderAttack = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") bool bAttackScheduled = false;
@@ -166,6 +214,11 @@ struct TERRITORYFRAMEWORK_API FTerritoryEconomyOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 RecentCredits = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 RecentDebits = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") TArray<FTerritoryTransaction> RecentTransactions;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") bool bResourceStorageAvailable = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") TArray<FTerritoryResourceOperationsView> ResourceStockpile;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") TArray<FTerritoryProductionSiteOperationsView> ProductionSites;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") int32 ProducingSiteCount = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") int32 BlockedProductionSiteCount = 0;
 };
 
 /** Shared read-model builder for all Territory CommonUI widgets. It owns no gameplay state. */
@@ -247,6 +300,17 @@ public:
 		APlayerController* Viewer,
 		FGameplayTag Faction,
 		int32 MaxRecentTransactions = 10);
+
+	/** Build one production-site read model from the server subsystem or client WorldState projection. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Production",
+		meta=(WorldContext="WorldContextObject"))
+	static bool BuildProductionSiteOperationsView(
+		const UObject* WorldContextObject,
+		FGameplayTag TerritoryTag,
+		FTerritoryProductionSiteOperationsView& OutView);
+
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Production")
+	static FText GetProductionStatusText(ETerritoryProductionStatus Status);
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static FText GetThreatLevelText(ETerritoryThreatLevel ThreatLevel);

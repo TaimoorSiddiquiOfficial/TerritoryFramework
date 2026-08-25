@@ -25,6 +25,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling")
 	bool bNotifyDefendingFactionOnly = true;
 
+	/**
+	 * After the first relevant player has physically activated an assault, deploy its
+	 * remaining finite reserve waves even if that player leaves the radius. This lets
+	 * already-launched NPCs finish attacking the District and guards without requiring
+	 * the player to remain present. It never bypasses the initial proximity gate.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling",
+		meta=(ToolTip="Recommended. Player proximity is required once to activate the physical assault; after activation, finite reserve waves continue without the player. Disable to pause reserve deployment until a relevant player returns."))
+	bool bContinueFiniteWavesAfterActivation = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling", meta=(ClampMin="1", ClampMax="8"))
 	int32 MaximumApproaches = 3;
 
@@ -58,8 +68,40 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0"))
 	float ReadinessWeight = 0.10f;
 
+	/** Contribution of the attacking faction's authored local influence to launch pressure. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0"))
+	float InfluenceWeight = 0.20f;
+
+	/**
+	 * Smallest time scale reached at influence 1.0 for grace and contested reserve timing.
+	 * Example: 0.25 turns a 300-unit grace period into 75 units at maximum influence.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling",
+		meta=(ClampMin="0.05", ClampMax="1.0"))
+	float MinimumInfluenceTimingScale = 0.25f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force")
 	TArray<FTerritoryFactionAssaultConfig> FactionForces;
+
+	/** Center-to-center spacing between deterministic formation slots at an approach. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment",
+		meta=(ClampMin="100.0", UIMin="100.0"))
+	float ParticipantSpacing = 220.f;
+
+	/** Bounded formation slots tested for each participant before a wave is deferred. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment",
+		meta=(ClampMin="1", ClampMax="16"))
+	int32 SpawnPlacementAttemptsPerParticipant = 4;
+
+	/** Delay before retrying an idle assault move that stopped outside the target. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement",
+		meta=(ClampMin="0.25", ClampMax="10.0"))
+	float StalledMovementRetryInterval = 1.5f;
+
+	/** A participant withdraws after this many consecutive failed movement restarts. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement",
+		meta=(ClampMin="1", ClampMax="100"))
+	int32 MaxStalledMovementRetries = 8;
 
 	/** Cancel an activated assault after this many consecutive zero-spawn wave attempts. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force", meta=(ClampMin="1", ClampMax="100"))

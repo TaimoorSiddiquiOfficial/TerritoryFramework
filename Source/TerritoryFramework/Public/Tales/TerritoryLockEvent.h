@@ -15,6 +15,8 @@ class TERRITORYFRAMEWORK_API UTerritoryLockEvent : public UNarrativeEvent
 	GENERATED_BODY()
 
 public:
+	UTerritoryLockEvent(const FObjectInitializer& ObjectInitializer);
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event",
 		meta = (Categories = "Territory"))
 	FGameplayTag TargetTerritoryTag;
@@ -38,6 +40,8 @@ class TERRITORYFRAMEWORK_API UTerritoryUnlockEvent : public UNarrativeEvent
 	GENERATED_BODY()
 
 public:
+	UTerritoryUnlockEvent(const FObjectInitializer& ObjectInitializer);
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event",
 		meta = (Categories = "Territory"))
 	FGameplayTag TargetTerritoryTag;

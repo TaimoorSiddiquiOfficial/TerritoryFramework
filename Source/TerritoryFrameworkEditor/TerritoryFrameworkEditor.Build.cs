@@ -19,8 +19,10 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"UnrealEd",
 			"Slate",
 			"SlateCore",
+			"BlueprintGraph",
 			"DataValidation",
 			"GameplayTags",
+			"NavigationSystem",
 			"NarrativeArsenal"
 		});
 	}

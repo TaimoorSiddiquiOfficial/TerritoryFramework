@@ -6,9 +6,62 @@
 #include "AI/NPCDefinition.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Core/TerritoryGuardPostDefinition.h"
 #include "DataValidation/TerritoryDataValidator.h"
+#include "Economy/TerritoryProductionProfile.h"
+#include "Economy/TerritoryProductionTags.h"
+#include "Items/NarrativeItem.h"
 #include "Misc/DataValidation.h"
+#include "Misc/PackageName.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectNPCDefinitionIdentityRegression,
+	"TerritoryFramework.Editor.Identity.ProjectNPCDefinitionsUseDistinctGuids",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFProjectNPCDefinitionIdentityRegression::RunTest(const FString& Parameters)
+{
+	static const TCHAR* ProjectFixturePackages[] = {
+		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBandit"),
+		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryHero"),
+		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault")
+	};
+	bool bAnyProjectFixtureExists = false;
+	for (const TCHAR* PackageName : ProjectFixturePackages)
+	{
+		bAnyProjectFixtureExists |= FPackageName::DoesPackageExist(PackageName);
+	}
+	if (!bAnyProjectFixtureExists)
+	{
+		AddInfo(TEXT("Skipped optional TDA NPC-definition fixture; no project NPC definitions are installed."));
+		return true;
+	}
+
+	const UNPCDefinition* BanditGuard = LoadObject<UNPCDefinition>(nullptr,
+		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBandit.NPC_TerritoryBandit"));
+	const UNPCDefinition* HeroGuard = LoadObject<UNPCDefinition>(nullptr,
+		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryHero.NPC_TerritoryHero"));
+	const UNPCDefinition* BanditAssault = LoadObject<UNPCDefinition>(nullptr,
+		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault.NPC_TerritoryBanditAssault"));
+	TestNotNull(TEXT("Bandit guard definition is available"), BanditGuard);
+	TestNotNull(TEXT("Hero guard definition is available"), HeroGuard);
+	TestNotNull(TEXT("Bandit assault definition is available"), BanditAssault);
+	if (!BanditGuard || !HeroGuard || !BanditAssault) return false;
+
+	TestTrue(TEXT("Bandit guard owns a valid Narrative definition GUID"),
+		BanditGuard->UniqueNPCGUID.IsValid());
+	TestTrue(TEXT("Hero guard owns a valid Narrative definition GUID"),
+		HeroGuard->UniqueNPCGUID.IsValid());
+	TestTrue(TEXT("Bandit assault owns a valid Narrative definition GUID"),
+		BanditAssault->UniqueNPCGUID.IsValid());
+	TestNotEqual(TEXT("Bandit and Hero guard definitions have distinct GUIDs"),
+		BanditGuard->UniqueNPCGUID, HeroGuard->UniqueNPCGUID);
+	TestNotEqual(TEXT("Bandit guard and assault definitions have distinct GUIDs"),
+		BanditGuard->UniqueNPCGUID, BanditAssault->UniqueNPCGUID);
+	TestNotEqual(TEXT("Hero guard and assault definitions have distinct GUIDs"),
+		HeroGuard->UniqueNPCGUID, BanditAssault->UniqueNPCGUID);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryDataValidatorModernApi,
 	"TerritoryFramework.Editor.DataValidation.ModernApiExecution",
@@ -47,6 +100,40 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		InvalidContext.GetNumErrors() > 0u);
 
 	Profile->MaxConsecutiveSpawnFailures = 5;
+	Profile->ParticipantSpacing = 0.f;
+	Profile->SpawnPlacementAttemptsPerParticipant = 0;
+	Profile->StalledMovementRetryInterval = 0.f;
+	Profile->MaxStalledMovementRetries = 0;
+	FDataValidationContext InvalidDeploymentContext(
+		false,
+		EDataValidationUsecase::Script,
+		NoAssociatedAssets);
+	TestEqual(TEXT("Invalid deployment and movement recovery settings are rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, InvalidDeploymentContext),
+		EDataValidationResult::Invalid);
+	TestEqual(TEXT("Every invalid deployment and movement recovery setting emits an error"),
+		InvalidDeploymentContext.GetNumErrors(), 4u);
+	Profile->ParticipantSpacing = 220.f;
+	Profile->SpawnPlacementAttemptsPerParticipant = 4;
+	Profile->StalledMovementRetryInterval = 1.5f;
+	Profile->MaxStalledMovementRetries = 8;
+
+	Profile->MinimumLaunchProbability = 0.5f;
+	Profile->UnguardedLaunchProbability = 0.25f;
+	FDataValidationContext NonMonotonicContext(
+		false,
+		EDataValidationUsecase::Script,
+		NoAssociatedAssets);
+	TestEqual(TEXT("A profile that makes the first guard increase launch probability is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, NonMonotonicContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Non-monotonic launch configuration emits an error"),
+		NonMonotonicContext.GetNumErrors() > 0u);
+	Profile->MinimumLaunchProbability = 0.01f;
+	Profile->UnguardedLaunchProbability = 1.f;
+
 	UNPCDefinition* Definition = NewObject<UNPCDefinition>(Profile);
 	Definition->NPCClassPath = ATerritoryAssaultCharacter::StaticClass();
 	Definition->bAllowMultipleInstances = true;
@@ -66,6 +153,21 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Spawn-ready class emits no validation error"),
 		SpawnReadyContext.GetNumErrors(), 0u);
 
+	Force.RecurringCounterCooldownGameTime = 0.f;
+	Profile->FactionForces = {Force};
+	FDataValidationContext InvalidRecurringContext(
+		false,
+		EDataValidationUsecase::Script,
+		NoAssociatedAssets);
+	TestEqual(TEXT("A zero recurring cooldown is rejected instead of rerolling every update"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, InvalidRecurringContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Invalid recurring cooldown emits a validation error"),
+		InvalidRecurringContext.GetNumErrors() > 0u);
+	Force.RecurringCounterCooldownGameTime = 900.f;
+	Profile->FactionForces = {Force};
+
 	Definition->bAllowMultipleInstances = false;
 	FDataValidationContext SingleInstanceContext(
 		false,
@@ -79,6 +181,32 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		SingleInstanceContext.GetNumErrors() > 0u);
 	Definition->bAllowMultipleInstances = true;
 
+	Definition->CharacterID = NAME_None;
+	FDataValidationContext MissingCharacterIDContext(
+		false,
+		EDataValidationUsecase::Script,
+		NoAssociatedAssets);
+	TestEqual(TEXT("A Narrative assault definition without CharacterID is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, MissingCharacterIDContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Missing CharacterID emits a validation error"),
+		MissingCharacterIDContext.GetNumErrors() > 0u);
+	Definition->CharacterID = TEXT("TestTerritoryAssault");
+
+	Definition->NPCID = NAME_None;
+	FDataValidationContext MissingNPCIDContext(
+		false,
+		EDataValidationUsecase::Script,
+		NoAssociatedAssets);
+	TestEqual(TEXT("A Narrative assault definition without NPCID is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, MissingNPCIDContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Missing NPCID emits a validation error"),
+		MissingNPCIDContext.GetNumErrors() > 0u);
+	Definition->NPCID = TEXT("TestTerritoryAssault");
+
 	Definition->NPCClassPath = ANarrativeNPCCharacter::StaticClass();
 	FDataValidationContext WrongPawnContext(
 		false,
@@ -90,6 +218,64 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		EDataValidationResult::Invalid);
 	TestTrue(TEXT("Invalid physical pawn emits a validation error"),
 		WrongPawnContext.GetNumErrors() > 0u);
+
+	UTerritoryGuardPostDefinition* GuardPost =
+		NewObject<UTerritoryGuardPostDefinition>();
+	const FAssetData GuardPostAssetData(GuardPost);
+	FDataValidationContext EmptyGuardPostContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestTrue(TEXT("Modern validator accepts reusable guard post definitions"),
+		Validator->CanValidateAsset_Implementation(
+			GuardPostAssetData, GuardPost, EmptyGuardPostContext));
+	TestEqual(TEXT("An intentionally static guard post is valid"),
+		Validator->ValidateLoadedAsset_Implementation(
+			GuardPostAssetData, GuardPost, EmptyGuardPostContext),
+		EDataValidationResult::Valid);
+
+	GuardPost->PatrolRoute.SetNum(1);
+	FDataValidationContext SingleNodePatrolContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A misleading one-node patrol route is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			GuardPostAssetData, GuardPost, SingleNodePatrolContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("One-node patrol route emits a validation error"),
+		SingleNodePatrolContext.GetNumErrors() > 0u);
+
+	GuardPost->PatrolRoute.SetNum(2);
+	FDataValidationContext PatrolReadyContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A two-node reusable patrol route is valid"),
+		Validator->ValidateLoadedAsset_Implementation(
+			GuardPostAssetData, GuardPost, PatrolReadyContext),
+		EDataValidationResult::Valid);
+
+	UTerritoryProductionProfile* ProductionProfile =
+		NewObject<UTerritoryProductionProfile>();
+	const FAssetData ProductionAssetData(ProductionProfile);
+	FDataValidationContext EmptyProductionContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestTrue(TEXT("Modern validator accepts production profiles"),
+		Validator->CanValidateAsset_Implementation(
+			ProductionAssetData, ProductionProfile, EmptyProductionContext));
+	TestEqual(TEXT("A production profile without rules is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			ProductionAssetData, ProductionProfile, EmptyProductionContext),
+		EDataValidationResult::Invalid);
+
+	FTerritoryProductionRule ProductionRule;
+	ProductionRule.RuleTag = TerritoryProductionTags::FarmLivestock;
+	FTerritoryResourceRate ProductionOutput;
+	ProductionOutput.ItemClass = UNarrativeItem::StaticClass();
+	ProductionOutput.QuantityPerCycle = 1;
+	ProductionRule.Outputs.Add(ProductionOutput);
+	ProductionProfile->Rules.Add(ProductionRule);
+	FDataValidationContext ValidProductionContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A complete production profile passes editor validation"),
+		Validator->ValidateLoadedAsset_Implementation(
+			ProductionAssetData, ProductionProfile, ValidProductionContext),
+		EDataValidationResult::Valid);
 
 	return true;
 }

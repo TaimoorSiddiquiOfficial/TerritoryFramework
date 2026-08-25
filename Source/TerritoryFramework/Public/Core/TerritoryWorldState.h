@@ -11,6 +11,8 @@
 
 class ATerritoryVolume;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTerritoryProductionStateChanged);
+
 /** Replicated snapshot of a faction's economy parameters. */
 USTRUCT(BlueprintType)
 struct FReplicatedFactionEconomy
@@ -142,8 +144,9 @@ struct FReplicatedFactionReputation
 
 /**
  * Replicated, Narrative-savable snapshot of multiplayer-visible territory state.
- * ExportPersistentState pulls current subsystem data at save/sync boundaries;
- * subsystem mutations do not continuously update this actor.
+ * ExportPersistentState pulls current subsystem data at save boundaries. Live
+ * subsystem delegates and explicit production publication keep replicated read
+ * models current between saves.
  *
  * Place at most one instance in the level (or auto-spawn from GameMode).
  */
@@ -172,6 +175,22 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	TArray<FGameplayTag> GetAllFactionsWithEconomy() const;
+
+	/** Replace scheduler checkpoints and replicated resource read models atomically. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy|Resources")
+	void SetProductionState(
+		const TArray<FTerritoryProductionCheckpoint>& Checkpoints,
+		const TArray<FTerritoryProductionSiteRecord>& Sites,
+		const TArray<FTerritoryFactionResourceSnapshot>& ResourceSnapshots);
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
+	TArray<FTerritoryProductionSiteRecord> GetProductionSites() const { return ReplicatedProductionSites; }
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
+	TArray<FTerritoryProductionSiteRecord> GetProductionSitesForFaction(const FGameplayTag& Faction) const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
+	FTerritoryFactionResourceSnapshot GetFactionResourceSnapshot(const FGameplayTag& Faction) const;
 
 	// ─── Transaction API (server-authoritative) ───
 
@@ -228,6 +247,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Transaction")
 	FOnTransactionRecorded OnTransactionRecorded;
 
+	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy|Resources")
+	FOnTerritoryProductionStateChanged OnProductionStateChanged;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -254,6 +276,12 @@ protected:
 	UPROPERTY(ReplicatedUsing=OnRep_EconomyState)
 	TArray<FReplicatedTransaction> ReplicatedTransactions;
 
+	UPROPERTY(ReplicatedUsing=OnRep_ProductionState)
+	TArray<FTerritoryProductionSiteRecord> ReplicatedProductionSites;
+
+	UPROPERTY(ReplicatedUsing=OnRep_ProductionState)
+	TArray<FTerritoryFactionResourceSnapshot> ReplicatedResourceSnapshots;
+
 	UPROPERTY(ReplicatedUsing=OnRep_DiplomacyState)
 	TArray<FReplicatedTreaty> ReplicatedTreaties;
 
@@ -276,6 +304,17 @@ protected:
 
 	UPROPERTY(SaveGame)
 	TArray<FReplicatedTransaction> SavedTransactions;
+
+	/** Server-only deterministic production scheduler state. */
+	UPROPERTY(SaveGame)
+	TArray<FTerritoryProductionCheckpoint> SavedProductionCheckpoints;
+
+	UPROPERTY(SaveGame)
+	TArray<FTerritoryProductionSiteRecord> SavedProductionSites;
+
+	/** Read-only cache; Narrative inventories remain the saved quantity authority. */
+	UPROPERTY(SaveGame)
+	TArray<FTerritoryFactionResourceSnapshot> SavedResourceSnapshots;
 
 	UPROPERTY(SaveGame)
 	TArray<FReplicatedTreaty> SavedTreaties;
@@ -302,6 +341,10 @@ protected:
 	FGuid WorldStateGUID;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FTFDiplomacyWorldStateLiveBridge;
+	friend class FTFWorldStateAssaultPersistenceRoundTrip;
+#endif
 	void SyncSubsystemsFromReplicatedState();
 	void SyncEconomySubsystemFromReplicatedState();
 	void SyncDiplomacySubsystemFromReplicatedState();
@@ -310,6 +353,9 @@ private:
 	/** Hydrate the client-side economy query model after authoritative snapshots replicate. */
 	UFUNCTION()
 	void OnRep_EconomyState();
+
+	UFUNCTION()
+	void OnRep_ProductionState();
 
 	/** Hydrate the client-side diplomacy query model after authoritative snapshots replicate. */
 	UFUNCTION()
@@ -331,6 +377,9 @@ private:
 
 	UFUNCTION()
 	void OnDiplomacyChangedLive(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState);
+
+	UFUNCTION()
+	void OnDiplomacyEventLive(const FDiplomacyEvent& Event);
 
 	UFUNCTION()
 	void OnReputationChangedLive(FGameplayTag Faction, int32 NewReputation);

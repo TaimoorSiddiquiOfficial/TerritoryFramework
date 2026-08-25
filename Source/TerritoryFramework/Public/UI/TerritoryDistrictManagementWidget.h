@@ -93,6 +93,9 @@ protected:
 	TObjectPtr<UTextBlock> AvailabilityText;
 
 	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> ProductionText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> StatusText;
 
 	UPROPERTY(meta=(BindWidgetOptional))

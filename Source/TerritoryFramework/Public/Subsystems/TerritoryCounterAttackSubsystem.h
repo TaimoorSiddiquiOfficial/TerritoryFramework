@@ -30,6 +30,13 @@ public:
 	bool ScheduleCounterAttack(ATerritoryVolume* Territory, FGameplayTag AttackingFaction);
 
 	/**
+	 * Explicit Tales path for a boss chase or betrayal pursuit. It may bypass the normal
+	 * District staging rule only when the selected force config separately opts in.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Counter Attack|Story")
+	bool ScheduleStoryPursuit(ATerritoryVolume* Territory, FGameplayTag AttackingFaction);
+
+	/**
 	 * Diplomacy-first automatic admission. Evaluates every configured, valid faction and
 	 * schedules the strongest eligible candidate. PreferredFaction is only a stable tie-break,
 	 * so a stronger hostile faction can supersede the former owner.
@@ -58,6 +65,16 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	TArray<FTerritoryAssaultRecord> GetAssaultsForTerritory(FGameplayTag TerritoryTag) const;
 
+	/**
+	 * Exact loaded-actor query. Stable GUID is authoritative; tag is used only for a
+	 * legacy record that has not yet been rebound. Prefer this for UI and gameplay
+	 * that already has a Territory actor.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack",
+		meta=(DisplayName="Get Assaults for Territory Actor"))
+	TArray<FTerritoryAssaultRecord> GetAssaultsForTerritoryActor(
+		const ATerritoryVolume* Territory) const;
+
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	bool IsAssaultActive(FGuid AssaultID) const;
 
@@ -68,6 +85,13 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	FString GetAssaultDebugString(FGuid AssaultID) const;
 
+	/** Loaded, authoritative Districts securely held in Claimed or story-Locked state. */
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack|Staging")
+	int32 GetSecureDistrictCountForFaction(FGameplayTag Faction) const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack|Staging")
+	bool CanFactionStageStrategicCounterAttack(FGameplayTag Faction) const;
+
 	/** Pure deterministic calculator used by runtime evaluation and monotonicity tests. */
 	static FTerritoryAssaultEvaluationResult CalculateEvaluation(
 		const FTerritoryAssaultEvaluationInput& Input,
@@ -76,6 +100,10 @@ public:
 	/** Raw post reserves only defend staffing slots the owner has authorized. */
 	static int32 CalculateEffectiveReserveGuards(int32 RawReserveGuards,
 		int32 DesiredGuardCount);
+
+	/** Higher local influence shortens a delay without ever making it zero or negative. */
+	static float CalculateInfluenceAdjustedDelay(float BaseDelay, float FactionInfluence,
+		float MinimumTimingScale);
 
 	/**
 	 * Claimed is required before activation. Once physical attackers register through
@@ -93,6 +121,35 @@ public:
 	static FTerritoryCounterAttackStateEvent MakeCounterHappenedEvent(
 		const FTerritoryAssaultRecord& Assault, ETerritoryAssaultState PreviousState,
 		double EventGameTime);
+
+	/** Atomically commit proximity activation; a second nearby player returns false. */
+	static bool TryCommitProximityActivation(FTerritoryAssaultRecord& Assault,
+		double ActivatedGameTime);
+
+	/** Apply one already-deduplicated finite participant removal to durable counts. */
+	static bool ApplyParticipantRemoval(FTerritoryAssaultRecord& Assault,
+		bool bKilled, bool& bOutForceExhausted);
+
+	/** Pure policy used by runtime and regression tests for post-activation reserve waves. */
+	static bool ShouldDeployActiveReserveWave(const FTerritoryAssaultRecord& Assault,
+		bool bRelevantPlayerNearby, bool bContinueAfterActivation);
+
+	/** Pure, save-stable recurring cooldown rule. */
+	static bool IsRecurringCooldownComplete(const FTerritoryAssaultRecord& PreviousAssault,
+		double CurrentGameTime, float CooldownGameTime);
+
+	/** Deterministic three-column deployment formation facing the target Territory. */
+	static FTransform CalculateParticipantDeploymentTransform(
+		const FTransform& ApproachTransform, const FVector& TargetLocation,
+		int32 FormationSlot, float ParticipantSpacing);
+
+	/**
+	 * Uses the exact runtime nav projection and complete-path rules used by physical assaults.
+	 * Editor validation calls this same function so a route cannot pass validation and then
+	 * fail only after the grace period. OutFailureReason is intended for logs and validation.
+	 */
+	static bool ValidateNavigationRoute(UWorld* World, const FVector& Start,
+		const FVector& End, FString* OutFailureReason = nullptr);
 
 	/** Global persistence/replication bridge owned by ATerritoryWorldState. */
 	TArray<FTerritoryAssaultRecord> GetPersistentState() const;
@@ -138,6 +195,7 @@ private:
 	void HandleTerritoryRegistered(ATerritoryVolume* Territory, bool bIsNew);
 
 	void UpdateAssaults();
+	void TryScheduleRecurringStrategicAssaults();
 	void AdvanceAssault(FTerritoryAssaultRecord& Assault);
 	void EvaluateAssault(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
 	bool ActivateAssault(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
@@ -155,6 +213,13 @@ private:
 	void NotifyRelevantPlayersOfState(const FTerritoryCounterAttackStateEvent& Event,
 		ATerritoryVolume* Territory);
 
+	/** Stable GUID is authoritative; the tag is only a bounded fallback for legacy saves. */
+	static bool DoesAssaultTargetTerritory(const FTerritoryAssaultRecord& Assault,
+		const ATerritoryVolume* Territory);
+	/** Repairs a legacy missing GUID or an old tag after a GUID-preserving rename. */
+	static bool ReconcileAssaultTargetIdentity(FTerritoryAssaultRecord& Assault,
+		const ATerritoryVolume* Territory);
+	bool HasNonTerminalAssaultForTerritory(const ATerritoryVolume* Territory) const;
 	ATerritoryVolume* ResolveTerritory(const FTerritoryAssaultRecord& Assault) const;
 	bool HasRelevantPlayerNearby(const FTerritoryAssaultRecord& Assault,
 		const ATerritoryVolume* Territory, float Radius) const;
@@ -165,13 +230,21 @@ private:
 		const UTerritoryCounterAttackProfile* Profile, float PowerRatio) const;
 	bool ResolveApproach(const ATerritoryVolume* Territory, FName ApproachID,
 		FTerritoryAssaultApproach& OutApproach, FTransform& OutWorldTransform) const;
+	bool IsDeploymentLocationSeparated(const FVector& Location, float MinimumSpacing) const;
 	bool HasNavigationRoute(const FVector& Start, const FVector& End) const;
 	FTerritoryAssaultEvaluationInput BuildEvaluationInput(const ATerritoryVolume* Territory,
 		const FTerritoryFactionAssaultConfig& ForceConfig) const;
 	bool FindBestEligibleAttacker(const ATerritoryVolume* Territory,
 		const FGameplayTag& PreferredFaction, FGameplayTag& OutAttackingFaction,
 		FTerritoryAssaultEvaluationInput& OutInput,
-		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const;
+		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason,
+		bool bRequireRecurringEligibility = false) const;
+	bool ScheduleAssault(ATerritoryVolume* Territory, FGameplayTag AttackingFaction,
+		ETerritoryAssaultLaunchMode LaunchMode);
+	bool DoesForceMeetStagingRequirement(const FTerritoryFactionAssaultConfig& ForceConfig,
+		ETerritoryAssaultLaunchMode LaunchMode) const;
+	bool FindReachableObjective(const ATerritoryVolume* Territory, const FVector& Start,
+		FVector& OutObjective, FString* OutFailureReason = nullptr) const;
 	double GetCampaignGameTime() const;
 	int32 MakeDecisionSeed(const ATerritoryVolume* Territory,
 		const FGameplayTag& AttackingFaction, int32 EvaluationCycle) const;
@@ -182,4 +255,6 @@ private:
 	void TrimTerminalHistory();
 
 	friend class FTFCounterAttackCycleHighWater;
+	friend class FTFWorldStateAssaultPersistenceRoundTrip;
+	friend class FTFCounterAttackWorldPartitionTargetRebind;
 };

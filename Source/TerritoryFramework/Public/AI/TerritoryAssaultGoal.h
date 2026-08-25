@@ -19,6 +19,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Assault")
 	FGuid AssaultID;
 
+	/** Stable physical target identity; gameplay tag remains the readable semantic label. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Assault")
+	FGuid TargetTerritoryGUID;
+
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Assault", meta=(Categories="Territory"))
 	FGameplayTag TargetTerritoryTag;
 

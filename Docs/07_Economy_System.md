@@ -11,6 +11,17 @@ The subsystem tracks per faction:
 
 Economy ticks fire every `EconomyTickIntervalSeconds` (default 300s = 5 min) on the server. The configured `IncomePayoutPolicy` determines the settlement accounts. `EqualSplitOnlineMembers` discovers only online `ANarrativePlayerCharacter` accounts with exact Narrative faction membership and sorts them deterministically. Guards, counterattackers, vendors, companions, and other NPC inventories are never automatic income recipients or upkeep payers. An NPC-backed faction account is eligible only when server gameplay explicitly registers it as `SharedNarrativeAccount` or `FactionLeader`.
 
+`NoCurrency` is a real disable policy: rates and territory counts are still calculated and replicated for UI/debugging, but the economy tick performs no credit, upkeep debit, debt, or deficit mutation. When an online-player policy has no matching live player, it may use a deliberately registered `SharedNarrativeAccount`, then `FactionLeader`; it never selects an arbitrary NPC inventory.
+
+Currency income and item-resource production are independent. A captured Property may:
+
+- pay currency only through `InitialPeriodicIncome`;
+- produce items only through `ProductionProfile`;
+- do both, such as a Farm paying currency and producing Meat;
+- do neither while remaining fully capturable.
+
+TerritoryFramework never stores a second item balance. `UNarrativeInventoryComponent` owns resource quantities and Narrative save data. `UTerritoryEconomySubsystem` owns production rates, cycle scheduling, deterministic ordering, and atomic settlement. See [Resource Production](20_Resource_Production.md).
+
 ## Wealth API
 
 ### Credit and Debit API
@@ -166,15 +177,22 @@ Every EconomyTickIntervalSeconds (server only):
 
    2. For each faction with tracked rates:
       a. Resolve one policy-specific settlement cohort
-      b. Apply IncomePayoutPolicy to distribute IncomePerTick
-      c. Debit affordable upkeep from the same settlement cohort
+      b. If policy is NoCurrency, publish the rate snapshot and skip settlement
+      c. Apply IncomePayoutPolicy to distribute IncomePerTick
+      d. Debit affordable upkeep from the same settlement cohort
          - EqualSplitOnlineMembers: matching online player characters only
          - SharedNarrativeAccount/FactionLeader: the exact registered account only
          - Guards and other NPCs: never automatic accounts
-      d. Record the actual (possibly partial) upkeep and resulting balance
-      e. Broadcast OnEconomyTickFired(Faction, Snapshot)
+      e. Record the actual (possibly partial) upkeep and resulting balance
+      f. Broadcast OnEconomyTickFired(Faction, Snapshot)
 
   3. Trim TransactionLedger to MaxTransactionHistory (once, not per-faction)
+
+  4. Process Property resource production against the current Narrative campaign day
+     - loaded Properties refresh durable site records
+     - World Partition-unloaded records remain schedulable
+     - missed days replay one day at a time in Priority/RuleTag order
+     - input debit and output credit commit as one preflighted Narrative inventory transaction
 ```
 
 ## Developer Settings
@@ -195,6 +213,8 @@ On load, `SetFactionTreasury` restores only `IncomePerTick`, `CostsPerTick`, and
 
 Credits reject overflow rather than wrapping. Equal distribution pays only what online Narrative player accounts can store and logs any remainder; no transaction is recorded for currency that was not actually delivered. Runtime account registrations are deliberately not saved as UObject pointers and must be restored by the owning game system after load/streaming.
 
+Production checkpoints, durable Property site records, per-rule outcomes, and replicated stockpile read models are exported by `ATerritoryWorldState`. Actual resource items remain solely in the registered Narrative inventory and are restored by Narrative's inventory save path.
+
 ## Closed Account-Routing Loopholes
 
 - Spawning extra same-faction guards cannot dilute or steal a player's territory income.
@@ -202,3 +222,4 @@ Credits reject overflow rather than wrapping. Equal distribution pays only what 
 - A missing explicit shared/leader account cannot fall back to whichever faction NPC loaded first.
 - Income and upkeep resolve against the same periodic policy cohort, avoiding a recipient/payer mismatch.
 - Multiple online players split deterministically; one player cannot be paid twice through both pawn enumeration and NPC enumeration.
+- Capture bonuses under `CapturingPlayer` use the committed transition context's instigator. Other policies resolve their own registered or online cohort and do not treat a hierarchy actor as a beneficiary.

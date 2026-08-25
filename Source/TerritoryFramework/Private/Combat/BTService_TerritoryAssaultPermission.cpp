@@ -115,8 +115,15 @@ void UBTService_TerritoryAssaultPermission::UpdatePermission(UBehaviorTreeCompon
 	{
 		if (UTerritoryCombatDirector* Director = Controller->GetWorld()->GetSubsystem<UTerritoryCombatDirector>())
 		{
-			bGranted = Director->RequestAssaultSlot(Territory, Controller);
-			if (bGranted)
+			const APawn* Pawn = Controller->GetPawn();
+			const bool bPhysicalAssaultParticipant =
+				UTerritoryCombatDirector::RequiresStrategicAssaultSlot(Pawn);
+			// Ordinary guards still use Narrative attack tokens and must not consume
+			// the strategic force budget. A pawn carrying the participant component
+			// must pass the director's complete assault identity validation.
+			bGranted = !bPhysicalAssaultParticipant
+				|| Director->RequestAssaultSlot(Territory, Controller);
+			if (bGranted && bPhysicalAssaultParticipant)
 			{
 				GrantedTerritory = Territory;
 				GrantedController = Controller;

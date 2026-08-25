@@ -1,5 +1,9 @@
 # Release Gate Results — 2026-08-09
 
+> **Historical snapshot, superseded 2026-08-24.** NPC definitions and Territory attack
+> permission services now exist in the live project. Two-client dedicated PIE has since
+> passed; see `REMEDIATION_2026-08-24.md` for current evidence and remaining external gates.
+
 ## Summary
 
 | Gate | Status | Blocker |

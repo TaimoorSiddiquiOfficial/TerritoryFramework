@@ -1,6 +1,7 @@
 #include "Combat/TerritoryAssaultCharacter.h"
 
 #include "Combat/TerritoryAssaultParticipantComponent.h"
+#include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NarrativeNPCController.h"
 #include "AI/NPCDefinition.h"
@@ -116,6 +117,18 @@ bool ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
 			"A Narrative NPC definition is required for physical assaults.");
 		return false;
 	}
+	if (Definition->CharacterID.IsNone())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryAssaultCharacter", "MissingAssaultCharacterID",
+			"Narrative assault definition must have a stable CharacterID.");
+		return false;
+	}
+	if (Definition->NPCID.IsNone())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryAssaultCharacter", "MissingAssaultNPCID",
+			"Narrative assault definition must have a stable NPCID while Narrative uses it for NPC lookup and duplicate admission.");
+		return false;
+	}
 
 	UClass* CandidateClass = Definition->NPCClassPath.LoadSynchronous();
 	if (!ValidateNarrativeSpawnClass(CandidateClass, OutFailureReason))
@@ -180,6 +193,7 @@ ATerritoryAssaultCharacter* ATerritoryAssaultCharacter::SpawnThroughNarrative(
 	{
 		if (Spawned)
 		{
+			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Spawned);
 			CharacterSubsystem->DestroyNPC(Spawned);
 		}
 		return nullptr;
@@ -232,6 +246,7 @@ void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 		{
 			AssaultParticipant->Configure(
 				GPendingTerritoryAssaultSpawn->AssaultID,
+				GPendingTerritoryAssaultSpawn->TerritoryGuid,
 				GPendingTerritoryAssaultSpawn->TargetTerritory,
 				GPendingTerritoryAssaultSpawn->ExactFaction);
 		}
@@ -247,22 +262,48 @@ void ATerritoryAssaultCharacter::BeginPlay()
 }
 
 void ATerritoryAssaultCharacter::HandleDeath_Implementation(
-	AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledActorASC)
+	AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledActorASC, const bool bIsDead)
 {
 	// Narrative remains the death/ragdoll authority. The explicit override makes
 	// the assault contract non-optional and gives invalid runtime appearances an
 	// actionable diagnostic instead of silently leaving a standing corpse.
-	Super::HandleDeath_Implementation(KilledActor, KilledActorASC);
-	if (!IsRagdoll(false))
+	const bool bResolvedIsDead = TerritoryNarrativeDeathSupport::ResolveDeathState(
+		KilledActorASC, bIsDead);
+	if (bResolvedIsDead)
 	{
-		SetRagdoll(true);
+		TerritoryNarrativeDeathSupport::PrepareForRemoval(*this);
 	}
+	Super::HandleDeath_Implementation(KilledActor, KilledActorASC, bResolvedIsDead);
+	if (!bResolvedIsDead)
+	{
+		return;
+	}
+	TerritoryNarrativeDeathSupport::FinalizePhysicalDeath(*this);
 	if (!HasValidDeathRagdollSetup())
 	{
 		UE_LOG(LogTerritory, Error,
 			TEXT("Counterattack participant %s died without a valid Narrative ragdoll mesh/physics asset"),
 			*GetNameSafe(this));
 	}
+}
+
+void ATerritoryAssaultCharacter::ReconcileNarrativeDeathState(
+	UNarrativeAbilitySystemComponent* KilledActorASC, const bool bReportedIsDead)
+{
+	if (TerritoryNarrativeDeathSupport::ResolveDeathState(
+		KilledActorASC, bReportedIsDead))
+	{
+		TerritoryNarrativeDeathSupport::FinalizePhysicalDeath(*this);
+	}
+}
+
+void ATerritoryAssaultCharacter::SetRagdoll(const bool bWantsRagdoll)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	Super::SetRagdoll(bWantsRagdoll);
 }
 
 FGuid ATerritoryAssaultCharacter::GetActorGUID_Implementation() const

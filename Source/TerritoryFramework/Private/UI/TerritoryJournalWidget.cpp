@@ -2,10 +2,12 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/BorderSlot.h"
 #include "Components/Button.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/ProgressBar.h"
+#include "Components/SizeBox.h"
 #include "Components/RichTextBlock.h"
 #include "Components/SpinBox.h"
 #include "Components/TextBlock.h"
@@ -27,6 +29,19 @@
 
 namespace
 {
+	void StyleGeneratedTerritoryText(UTextBlock* Text, int32 FontSize, const FLinearColor& Color)
+	{
+		if (!Text)
+		{
+			return;
+		}
+		FSlateFontInfo Font = Text->GetFont();
+		Font.Size = FontSize;
+		Text->SetFont(Font);
+		Text->SetColorAndOpacity(FSlateColor(Color));
+		Text->SetAutoWrapText(true);
+	}
+
 	const FString AllOwnersOption = TEXT("All owners");
 	const FString AllStatesOption = TEXT("All states");
 	const FString AllOperationsOption = TEXT("All districts");
@@ -38,6 +53,10 @@ namespace
 	const FString ContestedOption = TEXT("Contested");
 	const FString LockedOption = TEXT("Locked");
 	const FString FinancialRiskOption = TEXT("Financial risk");
+	const FString ProducingOption = TEXT("Producing");
+	const FString ProductionBlockedOption = TEXT("Production blocked");
+	const FString MissingInputsOption = TEXT("Missing production inputs");
+	const FString StorageFullOption = TEXT("Resource storage full");
 
 	ETerritoryOperationsFilter GetOperationsFilter(const FString& Option)
 	{
@@ -49,6 +68,10 @@ namespace
 		if (Option == ContestedOption) return ETerritoryOperationsFilter::Contested;
 		if (Option == LockedOption) return ETerritoryOperationsFilter::Locked;
 		if (Option == FinancialRiskOption) return ETerritoryOperationsFilter::FinancialRisk;
+		if (Option == ProducingOption) return ETerritoryOperationsFilter::Producing;
+		if (Option == ProductionBlockedOption) return ETerritoryOperationsFilter::ProductionBlocked;
+		if (Option == MissingInputsOption) return ETerritoryOperationsFilter::MissingInputs;
+		if (Option == StorageFullOption) return ETerritoryOperationsFilter::StorageFull;
 		return ETerritoryOperationsFilter::All;
 	}
 
@@ -64,6 +87,10 @@ namespace
 		case ETerritoryOperationsFilter::Contested: return ContestedOption;
 		case ETerritoryOperationsFilter::Locked: return LockedOption;
 		case ETerritoryOperationsFilter::FinancialRisk: return FinancialRiskOption;
+		case ETerritoryOperationsFilter::Producing: return ProducingOption;
+		case ETerritoryOperationsFilter::ProductionBlocked: return ProductionBlockedOption;
+		case ETerritoryOperationsFilter::MissingInputs: return MissingInputsOption;
+		case ETerritoryOperationsFilter::StorageFull: return StorageFullOption;
 		case ETerritoryOperationsFilter::All:
 		default: return AllOperationsOption;
 		}
@@ -227,6 +254,34 @@ void UTerritoryJournalWidget::NativeOnActivated()
 	RefreshDistrictList();
 }
 
+void UTerritoryJournalWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (!CommandCenterResponsiveWidth)
+	{
+		return;
+	}
+
+	const float AvailableWidth = MyGeometry.GetLocalSize().X;
+	if (AvailableWidth <= 0.f)
+	{
+		return;
+	}
+	const bool bCompact = AvailableWidth < 800.f;
+	if (bResponsiveLayoutApplied && bCompactResponsiveLayout == bCompact)
+	{
+		return;
+	}
+
+	if (UBorderSlot* ResponsiveSlot = Cast<UBorderSlot>(CommandCenterResponsiveWidth->Slot))
+	{
+		ResponsiveSlot->SetHorizontalAlignment(bCompact ? HAlign_Fill : HAlign_Center);
+		ResponsiveSlot->SetVerticalAlignment(VAlign_Fill);
+		bCompactResponsiveLayout = bCompact;
+		bResponsiveLayoutApplied = true;
+	}
+}
+
 void UTerritoryJournalWidget::BindTerritoryDelegates()
 {
 	if (UWorld* World = GetWorld())
@@ -299,17 +354,28 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonPlannerHeading"));
 	Heading->SetText(NSLOCTEXT("TerritoryJournal", "GarrisonPlannerHeading",
 		"GARRISON STAFFING PLAN"));
+	StyleGeneratedTerritoryText(Heading, 16, FLinearColor(0.95f, 0.96f, 0.95f, 1.f));
 	PlannerStack->AddChild(Heading);
 
 	Text_GarrisonTargetName = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonTargetName"));
 	Text_GarrisonTargetName->SetText(NSLOCTEXT(
 		"TerritoryJournal", "NoPlannerTargetName", "SELECT A GARRISON TARGET"));
+	StyleGeneratedTerritoryText(Text_GarrisonTargetName, 18, FLinearColor(0.31f, 0.82f, 0.63f, 1.f));
 	PlannerStack->AddChild(Text_GarrisonTargetName);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	TSubclassOf<UNarrativeCommonButtonBase> ButtonClass = Settings
 		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
+	const TSubclassOf<UCommonButtonStyle> ButtonStyle = Settings
+		? Settings->DefaultTerritoryButtonStyle.LoadSynchronous() : nullptr;
+	auto ApplyTerritoryStyle = [ButtonStyle](UNarrativeCommonButtonBase* Button)
+	{
+		if (Button && ButtonStyle)
+		{
+			Button->SetStyle(ButtonStyle);
+		}
+	};
 	if (ButtonClass)
 	{
 		UHorizontalBox* TargetNavigation = WidgetTree->ConstructWidget<UHorizontalBox>(
@@ -317,6 +383,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		PlannerStack->AddChild(TargetNavigation);
 		Btn_PreviousGarrisonTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 			ButtonClass, TEXT("Btn_PreviousGarrisonTarget"));
+		ApplyTerritoryStyle(Btn_PreviousGarrisonTarget);
 		Btn_PreviousGarrisonTarget->SetButtonText(NSLOCTEXT(
 			"TerritoryJournal", "PreviousGarrisonTarget", "PREVIOUS POST"));
 		Btn_PreviousGarrisonTarget->SetToolTipText(NSLOCTEXT(
@@ -326,6 +393,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		TargetNavigation->AddChild(Btn_PreviousGarrisonTarget);
 		Btn_NextGarrisonTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 			ButtonClass, TEXT("Btn_NextGarrisonTarget"));
+		ApplyTerritoryStyle(Btn_NextGarrisonTarget);
 		Btn_NextGarrisonTarget->SetButtonText(NSLOCTEXT(
 			"TerritoryJournal", "NextGarrisonTarget", "NEXT POST"));
 		Btn_NextGarrisonTarget->SetToolTipText(NSLOCTEXT(
@@ -339,6 +407,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_AssignedGuardTargetHeading"));
 	TargetHeading->SetText(NSLOCTEXT(
 		"TerritoryJournal", "AssignedGuardTargetHeading", "PROPOSED ASSIGNED GUARDS"));
+	StyleGeneratedTerritoryText(TargetHeading, 12, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
 	PlannerStack->AddChild(TargetHeading);
 
 	GuardTargetSpinBox = WidgetTree->ConstructWidget<UNarrativeSpinBox>(
@@ -362,11 +431,11 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 
 	Text_GarrisonStaffing = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonStaffing"));
-	Text_GarrisonStaffing->SetAutoWrapText(true);
+	StyleGeneratedTerritoryText(Text_GarrisonStaffing, 14, FLinearColor(0.95f, 0.96f, 0.95f, 1.f));
 	PlannerStack->AddChild(Text_GarrisonStaffing);
 	Text_GarrisonFinance = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonFinance"));
-	Text_GarrisonFinance->SetAutoWrapText(true);
+	StyleGeneratedTerritoryText(Text_GarrisonFinance, 14, FLinearColor(0.96f, 0.72f, 0.38f, 1.f));
 	PlannerStack->AddChild(Text_GarrisonFinance);
 
 	if (!ButtonClass) return;
@@ -376,6 +445,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	PlannerStack->AddChild(Actions);
 	Btn_ApplyGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("Btn_ApplyGuardTarget"));
+	ApplyTerritoryStyle(Btn_ApplyGuardTarget);
 	Btn_ApplyGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "ApplyGuardTarget", "APPLY PLAN"));
 	Btn_ApplyGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "ApplyGuardTargetTip",
 		"Submit the exact target to the authoritative server."));
@@ -383,6 +453,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	Actions->AddChild(Btn_ApplyGuardTarget);
 	Btn_ZeroGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("Btn_ZeroGuardTarget"));
+	ApplyTerritoryStyle(Btn_ZeroGuardTarget);
 	Btn_ZeroGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "ZeroGuardTarget", "EMPTY POST"));
 	Btn_ZeroGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "ZeroGuardTargetTip",
 		"Withdraw this garrison and reduce its future upkeep to zero."));
@@ -390,6 +461,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	Actions->AddChild(Btn_ZeroGuardTarget);
 	Btn_MaxGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("Btn_MaxGuardTarget"));
+	ApplyTerritoryStyle(Btn_MaxGuardTarget);
 	Btn_MaxGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "MaxGuardTarget", "FULL CAPACITY"));
 	Btn_MaxGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "MaxGuardTargetTip",
 		"Set this garrison to its authored physical capacity."));
@@ -637,6 +709,10 @@ void UTerritoryJournalWidget::RefreshFilterOptions()
 		DistrictOperationalFilter->AddOption(ContestedOption);
 		DistrictOperationalFilter->AddOption(LockedOption);
 		DistrictOperationalFilter->AddOption(FinancialRiskOption);
+		DistrictOperationalFilter->AddOption(ProducingOption);
+		DistrictOperationalFilter->AddOption(ProductionBlockedOption);
+		DistrictOperationalFilter->AddOption(MissingInputsOption);
+		DistrictOperationalFilter->AddOption(StorageFullOption);
 	}
 
 	TSet<FString> OwnerNames;
@@ -782,6 +858,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	{
 		UTextBlock* EmptyText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("NoDistrictsMessage"));
 		EmptyText->SetText(NSLOCTEXT("TerritoryJournal", "NoDistricts", "No districts match the current filters."));
+		StyleGeneratedTerritoryText(EmptyText, 14, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
 		DistrictList->AddChild(EmptyText);
 	}
 	if (VisibleCount <= 0)
@@ -1205,6 +1282,7 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		}
 		UTextBlock* EmptyText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), WidgetName);
 		EmptyText->SetText(Message);
+		StyleGeneratedTerritoryText(EmptyText, 14, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
 		Box->AddChild(EmptyText);
 	};
 	if (AvailableQueueCount == 0)

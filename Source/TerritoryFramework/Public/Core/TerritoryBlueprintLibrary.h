@@ -212,7 +212,8 @@ public:
 	static FGameplayTag GetActorPrimaryFaction(const UObject* WorldContextObject, AActor* Actor);
 
 	/**
-	 * Tests if two actors are allied via Narrative Pro's UArsenalStatics::IsSameTeam().
+	 * Tests whether two Narrative team agents share at least one faction tag, matching
+	 * Narrative Pro's UArsenalStatics::IsSameTeam semantics.
 	 * No WorldContext needed — uses actor's world internally.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Factions", meta=(DisplayName="Are Actors Allied"))

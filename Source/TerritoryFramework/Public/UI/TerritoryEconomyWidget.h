@@ -8,7 +8,10 @@
 #include "TerritoryEconomyWidget.generated.h"
 
 class UTerritoryEconomySubsystem;
+class UTerritoryProductionSiteRowWidget;
+class UTerritoryResourceRowWidget;
 class UTextBlock;
+class UVerticalBox;
 
 /**
  * Base widget for displaying faction economy information.
@@ -54,6 +57,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
 	FTerritoryEconomyOperationsView GetEconomyOperationsView(int32 MaxRecentTransactions = 10) const;
 
+	/** Optional modular row classes used when the matching BindWidget containers exist. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy|UI|Resources")
+	TSubclassOf<UTerritoryResourceRowWidget> ResourceRowClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy|UI|Resources")
+	TSubclassOf<UTerritoryProductionSiteRowWidget> ProductionSiteRowClass;
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
@@ -82,6 +92,18 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> EconomyRecentActivityText;
 
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyProductionSummaryText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EconomyStorageStatusText;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UVerticalBox> ResourceStockpileRows;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UVerticalBox> ProductionSiteRows;
+
 	UFUNCTION(BlueprintCallable, Category="Territory|Economy|UI")
 	void RefreshEconomyDisplay();
 
@@ -92,6 +114,10 @@ protected:
 	/** Called when a transaction is recorded for the display faction */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|Economy|UI")
 	void OnTransactionRecorded(const FTerritoryTransaction& Transaction);
+
+	/** Shared read model for Blueprint layouts that compose their own resource modules. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|Economy|UI|Resources")
+	void OnEconomyOperationsUpdated(const FTerritoryEconomyOperationsView& View);
 
 private:
 	FGameplayTag DisplayFaction;
@@ -108,11 +134,15 @@ private:
 	UFUNCTION()
 	void HandleTransactionRecorded(const FTerritoryTransaction& Transaction);
 
+	UFUNCTION()
+	void HandleProductionSettled(const FTerritoryProductionResult& Result);
+
 	void BindDelegates();
 	void UnbindDelegates();
 
 	/** Client polling fallback — queries current data and fires OnEconomyUpdated. */
 	void ClientPollRefresh();
+	void RefreshResourcePanels(const FTerritoryEconomyOperationsView& View);
 
 	UTerritoryEconomySubsystem* GetEconomySubsystem() const;
 };

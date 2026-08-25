@@ -57,6 +57,16 @@ public:
 	virtual void SetNPCDefinition(UNPCDefinition* Definition) override;
 
 	/**
+	 * Reconciles Narrative Pro's reported event value with its authoritative ASC state,
+	 * then stops AI movement and enters Narrative's replicated ragdoll state when dead.
+	 */
+	void ReconcileNarrativeDeathState(UNarrativeAbilitySystemComponent* KilledActorASC,
+		bool bReportedIsDead);
+
+	/** NPC ragdoll mutations are authored by the server and projected by Narrative replication. */
+	virtual void SetRagdoll(bool bWantsRagdoll) override;
+
+	/**
 	 * Single entrypoint for deterministic territory guard configuration.
 	 * Fills ALL SpawnInfo fields that Narrative activities need, including
 	 * SpawnTransform (critical for BPA_ReturnToSpawn) and faction overrides.
@@ -64,7 +74,9 @@ public:
 	 * Call this during deferred spawn (between BeginDeferredActorSpawnFromClass
 	 * and FinishSpawningActor), NOT after FinishSpawningActor.
 	 */
-	UFUNCTION(BlueprintCallable, Category="Territory|Guard", meta=(DisplayName="Configure Territory Spawn"))
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guard",
+		meta=(DisplayName="Configure Territory Spawn (Legacy)", DeprecatedFunction,
+			DeprecationMessage="Use Configure Territory Spawn With Context so ownership is valid before Narrative applies the definition."))
 	void ConfigureTerritorySpawn(
 		UNPCDefinition* Definition,
 		const FGameplayTag& ExactFaction,
@@ -74,6 +86,25 @@ public:
 		FName SpawnPointName,
 		UNPCActivityConfiguration* OptionalActivityOverride,
 		const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides);
+
+	/**
+	 * Blueprint deferred-spawn adapter with the complete typed Territory context.
+	 * Returns false without applying the Narrative definition when any identity or
+	 * ownership invariant is invalid.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guard",
+		meta=(DisplayName="Configure Territory Spawn With Context"))
+	bool ConfigureTerritorySpawnWithContext(
+		UNPCDefinition* Definition,
+		const FGameplayTag& ExactFaction,
+		const FGuid& TerritoryGuid,
+		const FGuid& SaveGuid,
+		const FTransform& InSpawnTransform,
+		FName SpawnPointName,
+		UNPCActivityConfiguration* OptionalActivityOverride,
+		const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
+		ATerritoryVolume* InOwningTerritory,
+		ATerritoryGuardSpawnPoint* InOwningSpawnPoint);
 
 	// ─── Territory AI context ───
 
@@ -187,7 +218,11 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void OnCharacterVisualInitialized() override;
 	virtual void ApplyActivityConfig_Implementation(UNPCActivityConfiguration* NPCActivityConfig) override;
+	virtual void HandleDeath_Implementation(AActor* KilledActor,
+		UNarrativeAbilitySystemComponent* KilledActorASC, const bool bIsDead) override;
 
 	// Prevent Narrative save system from restoring stale guards on load.
 	virtual bool ShouldRespawn_Implementation() const override;
@@ -204,6 +239,8 @@ private:
 
 	FTimerHandle DefaultWeaponWieldTimer;
 	int32 DefaultWeaponWieldAttempts = 0;
+	int32 DefaultWeaponPostInitializationAttempts = 0;
+	bool bNarrativeInitializationCompleted = false;
 
 	FGuid CachedFallbackGUID;
 };

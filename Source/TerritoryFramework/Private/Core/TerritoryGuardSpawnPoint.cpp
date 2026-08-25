@@ -1,8 +1,11 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryGuardPostDefinition.h"
+#include "Combat/TerritoryCounterAttackProfile.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Engine/World.h"
 #include "Components/BillboardComponent.h"
@@ -204,7 +207,7 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{
-		ATerritoryVolume* ResolvedTerritory = Registry->GetTerritoryAtLocation(GetActorLocation());
+		ATerritoryVolume* ResolvedTerritory = FindPlacementOrPatrolTerritory(Registry);
 		if (ResolvedTerritory && CachedTerritory.Get() != ResolvedTerritory)
 		{
 			SetResolvedTerritory(ResolvedTerritory);
@@ -212,6 +215,51 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 				*GetName(), *ResolvedTerritory->GetTerritoryTag().ToString());
 		}
 	}
+}
+
+ATerritoryVolume* ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(
+	TConstArrayView<ATerritoryVolume*> Candidates)
+{
+	ATerritoryVolume* Best = nullptr;
+	int32 BestPriority = -1;
+	double BestBoundsVolume = TNumericLimits<double>::Max();
+	FString BestTag;
+	for (ATerritoryVolume* Candidate : Candidates)
+	{
+		if (!IsValid(Candidate)) continue;
+		int32 Priority = 0;
+		if (Candidate->IsA<ATerritoryProperty>()) Priority = 3;
+		else if (Candidate->IsA<ATerritoryDistrict>()) Priority = 2;
+		else if (Candidate->IsA<ATerritoryCity>()) Priority = 1;
+		const FVector Size = Candidate->GetTerritoryBounds().GetSize();
+		const double BoundsVolume = FMath::Abs(
+			static_cast<double>(Size.X) * Size.Y * Size.Z);
+		const FString Tag = Candidate->GetTerritoryTag().ToString();
+		if (!Best || Priority > BestPriority
+			|| (Priority == BestPriority && BoundsVolume < BestBoundsVolume)
+			|| (Priority == BestPriority && FMath::IsNearlyEqual(BoundsVolume, BestBoundsVolume)
+				&& Tag < BestTag))
+		{
+			Best = Candidate;
+			BestPriority = Priority;
+			BestBoundsVolume = BoundsVolume;
+			BestTag = Tag;
+		}
+	}
+	return Best;
+}
+
+ATerritoryVolume* ATerritoryGuardSpawnPoint::FindPlacementOrPatrolTerritory(
+	UTerritoryRegistrySubsystem* Registry) const
+{
+	if (!Registry) return nullptr;
+	TArray<ATerritoryVolume*> Candidates;
+	Candidates.Add(Registry->GetTerritoryAtLocation(GetActorLocation()));
+	for (const FTerritoryPatrolNode& Node : GetEffectivePatrolRoute())
+	{
+		Candidates.Add(Registry->GetTerritoryAtLocation(Node.Location));
+	}
+	return ChooseMostSpecificTerritory(Candidates);
 }
 
 #if WITH_EDITOR
@@ -260,7 +308,7 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 	}
 	else
 	{
-		SetResolvedTerritory(Registry->GetTerritoryAtLocation(GetActorLocation()));
+		SetResolvedTerritory(FindPlacementOrPatrolTerritory(Registry));
 	}
 
 	if (CachedTerritory.IsValid())
@@ -282,7 +330,7 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 		else
 		{
 			UE_LOG(LogTerritory, Warning,
-				TEXT("GuardSpawnPoint %s has no owner tag and no containing registered territory"),
+				TEXT("GuardSpawnPoint %s has no owner tag and no registered territory overlapping its placement or patrol route"),
 				*GetName());
 		}
 	}
@@ -303,9 +351,7 @@ void ATerritoryGuardSpawnPoint::InitializeReserves()
 		// P1-08: Resume pending reserve deployment timer if reserves were pending at save time
 		if (bAutoSpawnReserves && PendingReserveSpawns > 0 && CurrentReserveCount > 0)
 		{
-			const float EffectiveDelay = (GuardPostDefinition && GuardPostDefinition->ReserveSpawnDelay > 0.f)
-				? GuardPostDefinition->ReserveSpawnDelay : ReserveSpawnDelay;
-			ScheduleAutomaticReserveSpawn(EffectiveDelay);
+			ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
 		}
 	}
 	else if (CurrentReserveCount <= 0 && SavedActiveGuardCount <= 0)
@@ -468,11 +514,10 @@ void ATerritoryGuardSpawnPoint::QueueReserveSpawn()
 	UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: queued reserve deployment (%d pending, %d available)"),
 		*GetName(), PendingReserveSpawns, CurrentReserveCount);
 
+	ATerritoryVolume* Territory = GetOwningTerritory();
 	if (bAutoSpawnReserves)
 	{
-		// P2-N15: GuardPostDefinition override for ReserveSpawnDelay
-		const float EffectiveDelay = GetEffectiveReserveSpawnDelay();
-		ScheduleAutomaticReserveSpawn(EffectiveDelay);
+		ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
 	}
 }
 
@@ -501,19 +546,17 @@ void ATerritoryGuardSpawnPoint::TryAutomaticReserveSpawn()
 	}
 
 	ATerritoryVolume* Territory = GetOwningTerritory();
-	if (!Territory || Territory->GetTerritoryState() != ETerritoryState::Claimed)
+	if (!Territory || !IsOwnerReserveDeploymentStateValid(
+		Territory->GetTerritoryState(), Territory->GetOwningFaction(),
+		Territory->GetOwnershipData().ContestingFaction))
 	{
 		CancelPendingReserveSpawns();
 		return;
 	}
 
-	if (TrySpawnReserveGuard(true))
+	if (!TrySpawnReserveGuard(true))
 	{
-		ScheduleAutomaticReserveSpawn(ReserveSpawnDelay);
-	}
-	else
-	{
-		ScheduleAutomaticReserveSpawn(ReserveSpawnRetryInterval);
+		ScheduleAutomaticReserveSpawn(GetEffectiveReserveRetryInterval());
 	}
 }
 
@@ -536,7 +579,9 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 		Territory->RefreshGarrisonSnapshot();
 		return false;
 	}
-	if (!Territory || Territory->GetTerritoryState() != ETerritoryState::Claimed
+	if (!Territory || !IsOwnerReserveDeploymentStateValid(
+			Territory->GetTerritoryState(), Territory->GetOwningFaction(),
+			Territory->GetOwnershipData().ContestingFaction)
 		|| !Territory->TrySpawnSingleGuard(this, bRequireCameraAvoidance))
 	{
 		return false;
@@ -553,7 +598,7 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 
 	if (bAutoSpawnReserves && HasPendingReserveSpawn())
 	{
-		ScheduleAutomaticReserveSpawn(ReserveSpawnDelay);
+		ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
 	}
 	return true;
 }
@@ -604,7 +649,7 @@ void ATerritoryGuardSpawnPoint::ResetReserveState()
 
 TArray<FTerritoryPatrolNode> ATerritoryGuardSpawnPoint::GetPatrolRoute() const
 {
-	return PatrolRoute;
+	return GetEffectivePatrolRoute();
 }
 
 ATerritoryVolume* ATerritoryGuardSpawnPoint::GetOwningTerritory() const
@@ -614,14 +659,15 @@ ATerritoryVolume* ATerritoryGuardSpawnPoint::GetOwningTerritory() const
 
 bool ATerritoryGuardSpawnPoint::HasPatrolRoute() const
 {
-	return PatrolRoute.Num() >= 2;
+	return GetEffectivePatrolRoute().Num() >= 2;
 }
 
 TArray<FTransform> ATerritoryGuardSpawnPoint::GetPatrolRouteAsTransforms() const
 {
 	TArray<FTransform> Transforms;
-	Transforms.Reserve(PatrolRoute.Num());
-	for (const FTerritoryPatrolNode& Node : PatrolRoute)
+	const TArray<FTerritoryPatrolNode>& EffectiveRoute = GetEffectivePatrolRoute();
+	Transforms.Reserve(EffectiveRoute.Num());
+	for (const FTerritoryPatrolNode& Node : EffectiveRoute)
 	{
 		Transforms.Add(FTransform(Node.Rotation, Node.Location));
 	}
@@ -631,8 +677,9 @@ TArray<FTransform> ATerritoryGuardSpawnPoint::GetPatrolRouteAsTransforms() const
 TArray<float> ATerritoryGuardSpawnPoint::GetPatrolWaitTimes() const
 {
 	TArray<float> Times;
-	Times.Reserve(PatrolRoute.Num());
-	for (const FTerritoryPatrolNode& Node : PatrolRoute)
+	const TArray<FTerritoryPatrolNode>& EffectiveRoute = GetEffectivePatrolRoute();
+	Times.Reserve(EffectiveRoute.Num());
+	for (const FTerritoryPatrolNode& Node : EffectiveRoute)
 	{
 		Times.Add(Node.WaitTime);
 	}
@@ -657,8 +704,27 @@ int32 ATerritoryGuardSpawnPoint::GetEffectiveReserveSlots() const
 
 float ATerritoryGuardSpawnPoint::GetEffectiveReserveSpawnDelay() const
 {
-	return (GuardPostDefinition && GuardPostDefinition->ReserveSpawnDelay > 0.f)
+	const float AuthoredDelay = (GuardPostDefinition && GuardPostDefinition->ReserveSpawnDelay > 0.f)
 		? GuardPostDefinition->ReserveSpawnDelay : ReserveSpawnDelay;
+	const ATerritoryVolume* Territory = GetOwningTerritory();
+	if (!Territory || Territory->GetTerritoryState() != ETerritoryState::Contested)
+	{
+		return AuthoredDelay;
+	}
+
+	// A faction with deep local influence can mobilize its already-authored finite
+	// reserve faster during a live contest. Timing changes, never ownership or force.
+	if (const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile())
+	{
+		if (const FTerritoryFactionAssaultConfig* Force =
+			Profile->FindFactionForce(Territory->GetOwningFaction()))
+		{
+			return UTerritoryCounterAttackSubsystem::CalculateInfluenceAdjustedDelay(
+				AuthoredDelay, Force->TerritorialInfluence,
+				Profile->MinimumInfluenceTimingScale);
+		}
+	}
+	return AuthoredDelay;
 }
 
 float ATerritoryGuardSpawnPoint::GetEffectiveReserveRetryInterval() const
@@ -704,9 +770,21 @@ const TArray<FTerritoryPatrolNode>& ATerritoryGuardSpawnPoint::GetEffectivePatro
 
 bool ATerritoryGuardSpawnPoint::GetEffectiveLoopPatrol() const
 {
-	// Inline value takes precedence if explicitly set (always true by default).
-	// GuardPostDefinition provides fallback only when inline is false.
-	if (bLoopPatrol) return true;
-	if (GuardPostDefinition) return GuardPostDefinition->bLoopPatrol;
-	return false;
+	// The loop policy follows the route authority. An inline route owns its inline
+	// loop flag; a route inherited from a GuardPostDefinition owns the asset flag.
+	if (!PatrolRoute.IsEmpty()) return bLoopPatrol;
+	if (GuardPostDefinition && !GuardPostDefinition->PatrolRoute.IsEmpty())
+		return GuardPostDefinition->bLoopPatrol;
+	return bLoopPatrol;
+}
+
+bool ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
+	ETerritoryState State, const FGameplayTag& OwningFaction,
+	const FGameplayTag& ContestingFaction)
+{
+	if (!OwningFaction.IsValid()) return false;
+	if (State == ETerritoryState::Claimed) return true;
+	return State == ETerritoryState::Contested
+		&& ContestingFaction.IsValid()
+		&& ContestingFaction != OwningFaction;
 }

@@ -1,6 +1,8 @@
 # Interfaces — Multi-Domain Integration Guide
 
-TerritoryFramework provides three interfaces that can be implemented by **any actor** — not just territory volumes. This makes the territory system extensible to players, animals, vehicles, buildings, projectiles, and any other game entity.
+TerritoryFramework provides three interfaces for actors that actually own the corresponding
+domain state. An interface may be implemented outside the built-in Territory actors, but its
+semantics must remain exact; it is not a general-purpose faction or location-query contract.
 
 ---
 
@@ -29,41 +31,16 @@ FGameplayTag GetContestingFaction() const;     // Who is attacking (invalid if n
 
 ### Real-World Examples
 
-#### Example A: Player Character (Player Faction Display)
+#### Player characters: do not use this interface for allegiance
 
-```cpp
-// BP_PlayerCharacter implements ITerritoryOwnershipInterface
-// The player reports which faction they belong to based on their current allegiance
+A player faction is Narrative identity and must come from
+`INarrativeTeamAgentInterface`. To show the Territory under a player, query
+`UTerritoryRegistrySubsystem::GetTerritoryAtLocation` and call the ownership interface on the
+returned `ATerritoryVolume`. Do not implement `ITerritoryOwnershipInterface` on a player merely
+to return the player's faction; that makes `GetTerritoryOwner` and `GetContestingFaction`
+semantically false and breaks multiplayer context.
 
-FGameplayTag AMyPlayerCharacter::GetTerritoryOwner_Implementation() const
-{
-    // Return the player's faction — useful for territory UI
-    return PlayerFactionTag;  // e.g., "Narrative.Factions.Heroes"
-}
-
-float AMyPlayerCharacter::GetTerritoryControlProgress_Implementation() const
-{
-    // Players don't have capture progress — return 1.0 (fully "owned")
-    return 1.0f;
-}
-
-bool AMyPlayerCharacter::IsTerritoryContested_Implementation() const
-{
-    // Check if player is inside a contested territory
-    if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
-    {
-        if (ATerritoryVolume* Terr = Registry->GetTerritoryAtLocation(GetActorLocation()))
-        {
-            return Terr->IsContested();
-        }
-    }
-    return false;
-}
-```
-
-**Blueprint equivalent:** Add `ITerritoryOwnership` interface to your player Blueprint. Override the three functions.
-
-#### Example B: Vehicle (Mobile Territory Outpost)
+#### Example A: Vehicle (Mobile Territory Outpost)
 
 ```cpp
 // A vehicle that acts as a mobile faction outpost
@@ -83,7 +60,7 @@ bool AMyFactionVehicle::IsTerritoryContested_Implementation() const
 }
 ```
 
-#### Example C: Animal/Wildlife (Neutral Territory)
+#### Example B: Animal/Wildlife (Neutral Territory)
 
 ```cpp
 // A pack animal that creates a neutral "wildlife zone"
@@ -364,7 +341,7 @@ void AMyActor::BeginPlay()
 
 | Domain | OwnershipInterface | EconomyInterface | EventReceiverInterface |
 |---|---|---|---|
-| **Player Character** | Report player faction | Check if player can afford | Update HUD on capture |
+| **Player Character** | — (use Narrative team identity) | — (use Narrative inventory) | Optional capture/HUD reactions |
 | **NPC/Enemy** | Report NPC faction | — | Despawn on territory loss |
 | **Vehicle** | Report driver faction | Vehicle repair costs | Change spawn on capture |
 | **Animal/Wildlife** | Wildlife faction | — | Flee when contested |

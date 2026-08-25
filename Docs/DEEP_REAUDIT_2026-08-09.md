@@ -1,5 +1,7 @@
 # TerritoryFramework Deep Re-Audit — 2026-08-09
 
+> Historical snapshot. The implementation and release status changed in the 2026-08-24 remediation pass; use `REMEDIATION_2026-08-24.md`, `CHANGELOG.md`, and current source/tests for present behavior.
+
 ## Scope
 
 Full audit of TerritoryFramework plugin: 51 headers, 50 implementations, 3 test files (89 automation tests), all 25 docs. Blueprint override points, interface docs, and doc-vs-code accuracy verified. Compared against AGENTS.md authority map and NarrativePro foundation.

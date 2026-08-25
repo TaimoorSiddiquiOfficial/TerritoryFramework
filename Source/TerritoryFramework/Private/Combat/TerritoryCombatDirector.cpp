@@ -1,4 +1,5 @@
 #include "Combat/TerritoryCombatDirector.h"
+#include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "AI/NarrativeNPCController.h"
@@ -28,6 +29,7 @@ void UTerritoryCombatDirector::Deinitialize()
 bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
 {
 	if (!Territory || !Controller || !GetWorld() || GetWorld()->GetNetMode() == NM_Client) return false;
+	if (!IsEligibleAssaultController(Territory, Controller)) return false;
 
 	if (Territory->GetTerritoryState() == ETerritoryState::Locked) return false;
 
@@ -136,6 +138,22 @@ int32 UTerritoryCombatDirector::GetAvailableSlots(const ATerritoryVolume* Territ
 	return FMath::Max(0, MaxSlots - Granted);
 }
 
+bool UTerritoryCombatDirector::IsEligibleAssaultController(
+	const ATerritoryVolume* Territory, const ANarrativeNPCController* Controller) const
+{
+	if (!Territory || !Controller) return false;
+	const APawn* Pawn = Controller->GetPawn();
+	const UTerritoryAssaultParticipantComponent* Participant = Pawn
+		? Pawn->FindComponentByClass<UTerritoryAssaultParticipantComponent>() : nullptr;
+	return Participant && Participant->IsConfigured()
+		&& Participant->MatchesTargetTerritory(Territory);
+}
+
+bool UTerritoryCombatDirector::RequiresStrategicAssaultSlot(const APawn* Pawn)
+{
+	return Pawn && Pawn->FindComponentByClass<UTerritoryAssaultParticipantComponent>() != nullptr;
+}
+
 void UTerritoryCombatDirector::CleanupInvalidControllers(FPerTerritorySlots& Slots)
 {
 	Slots.GrantedControllers.RemoveAll([](const TWeakObjectPtr<ANarrativeNPCController>& Ptr) { return !Ptr.IsValid(); });
@@ -155,6 +173,22 @@ void UTerritoryCombatDirector::CleanupStaleTerritoryKeys()
 	{
 		SlotMap.Remove(Key);
 	}
+
+	// A streamed-out Territory invalidates its weak slot key. Release death
+	// delegates for controllers that no longer hold a slot anywhere.
+	const TArray<TWeakObjectPtr<ANarrativeNPCController>> Controllers = BoundControllers.Array();
+	for (const TWeakObjectPtr<ANarrativeNPCController>& Controller : Controllers)
+	{
+		if (!Controller.IsValid())
+		{
+			BoundControllerASCs.Remove(Controller);
+			BoundControllers.Remove(Controller);
+		}
+		else if (!ControllerHasAnySlot(Controller.Get()))
+		{
+			UnbindControllerDeath(Controller.Get());
+		}
+	}
 }
 
 void UTerritoryCombatDirector::BindControllerDeath(ANarrativeNPCController* Controller)
@@ -163,7 +197,8 @@ void UTerritoryCombatDirector::BindControllerDeath(ANarrativeNPCController* Cont
 
 	if (UNarrativeAbilitySystemComponent* ASC = ResolveControllerASC(Controller))
 	{
-		ASC->OnDied.AddUniqueDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
+		ASC->OnDeathStateChanged.AddUniqueDynamic(
+			this, &UTerritoryCombatDirector::OnAssaultControllerDied);
 		BoundControllers.Add(Controller);
 		BoundControllerASCs.Add(Controller, ASC);
 	}
@@ -177,7 +212,8 @@ void UTerritoryCombatDirector::UnbindControllerDeath(ANarrativeNPCController* Co
 	{
 		if (UNarrativeAbilitySystemComponent* ASC = FoundASC->Get())
 		{
-			ASC->OnDied.RemoveDynamic(this, &UTerritoryCombatDirector::OnAssaultControllerDied);
+			ASC->OnDeathStateChanged.RemoveDynamic(
+				this, &UTerritoryCombatDirector::OnAssaultControllerDied);
 		}
 		else
 		{
@@ -189,8 +225,10 @@ void UTerritoryCombatDirector::UnbindControllerDeath(ANarrativeNPCController* Co
 	BoundControllers.Remove(Controller);
 }
 
-void UTerritoryCombatDirector::OnAssaultControllerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC)
+void UTerritoryCombatDirector::OnAssaultControllerDied(AActor* KilledActor,
+	UNarrativeAbilitySystemComponent* KilledASC, const bool bIsDead)
 {
+	if (!bIsDead) return;
 	if (!KilledActor) return;
 
 	// Find the controller that owns this ASC — it could be the pawn's controller

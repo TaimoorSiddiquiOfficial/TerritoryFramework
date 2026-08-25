@@ -12,6 +12,8 @@ class TERRITORYFRAMEWORK_API UTerritoryCaptureEvent : public UNarrativeEvent
 	GENERATED_BODY()
 
 public:
+	UTerritoryCaptureEvent(const FObjectInitializer& ObjectInitializer);
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event",
 		meta = (Categories = "Territory"))
 	FGameplayTag TargetTerritoryTag;

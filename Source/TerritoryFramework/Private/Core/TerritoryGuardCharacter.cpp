@@ -2,7 +2,9 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
+#include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "AI/NarrativeCharacterSubsystem.h"
@@ -77,6 +79,18 @@ bool ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
 	{
 		OutFailureReason = NSLOCTEXT("TerritoryGuardCharacter", "MissingGuardDefinition",
 			"A Narrative NPC definition is required for Territory guards.");
+		return false;
+	}
+	if (Definition->CharacterID.IsNone())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryGuardCharacter", "MissingGuardCharacterID",
+			"Narrative guard definition must have a stable CharacterID.");
+		return false;
+	}
+	if (Definition->NPCID.IsNone())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryGuardCharacter", "MissingGuardNPCID",
+			"Narrative guard definition must have a stable NPCID while Narrative uses it for NPC lookup and duplicate admission.");
 		return false;
 	}
 
@@ -160,6 +174,7 @@ ATerritoryGuardCharacter* ATerritoryGuardCharacter::SpawnThroughNarrative(
 	{
 		if (Spawned)
 		{
+			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Spawned);
 			CharacterSubsystem->DestroyNPC(Spawned);
 		}
 		return nullptr;
@@ -235,31 +250,86 @@ void ATerritoryGuardCharacter::BeginPlay()
 	}
 }
 
+void ATerritoryGuardCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+	Super::EndPlay(EndPlayReason);
+}
+
+void ATerritoryGuardCharacter::HandleDeath_Implementation(
+	AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledActorASC,
+	const bool bIsDead)
+{
+	const bool bResolvedIsDead = TerritoryNarrativeDeathSupport::ResolveDeathState(
+		KilledActorASC, bIsDead);
+	if (bResolvedIsDead)
+	{
+		TerritoryNarrativeDeathSupport::PrepareForRemoval(*this);
+	}
+	Super::HandleDeath_Implementation(KilledActor, KilledActorASC, bResolvedIsDead);
+	if (bResolvedIsDead)
+	{
+		TerritoryNarrativeDeathSupport::FinalizePhysicalDeath(*this);
+	}
+}
+
+void ATerritoryGuardCharacter::ReconcileNarrativeDeathState(
+	UNarrativeAbilitySystemComponent* KilledActorASC, const bool bReportedIsDead)
+{
+	if (TerritoryNarrativeDeathSupport::ResolveDeathState(
+		KilledActorASC, bReportedIsDead))
+	{
+		TerritoryNarrativeDeathSupport::FinalizePhysicalDeath(*this);
+	}
+}
+
+void ATerritoryGuardCharacter::SetRagdoll(const bool bWantsRagdoll)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	Super::SetRagdoll(bWantsRagdoll);
+}
+
+void ATerritoryGuardCharacter::OnCharacterVisualInitialized()
+{
+	// Narrative grants a new NPC's definition loadout inside this call. Mark the
+	// admission complete only afterwards, then wait for the specific weapon visual.
+	Super::OnCharacterVisualInitialized();
+	bNarrativeInitializationCompleted = true;
+	DefaultWeaponPostInitializationAttempts = 0;
+	TryWieldDefaultWeapon();
+}
+
 void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 {
 	++DefaultWeaponWieldAttempts;
 	ANarrativeCharacterVisual* CharacterVisual = GetCharacterVisual();
-	if (!GetNPCDefinition() || !CharacterVisual || CharacterVisual->HasLoadHandles())
+	if (!GetNPCDefinition() || !CharacterVisual || !bNarrativeInitializationCompleted)
 	{
-		if (DefaultWeaponWieldAttempts >= 40)
+		constexpr int32 MaxNarrativeInitializationAttempts = 240;
+		if (DefaultWeaponWieldAttempts >= MaxNarrativeInitializationAttempts)
 		{
 			GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 			UE_LOG(LogTerritory, Warning,
-				TEXT("GuardCharacter %s did not finish Narrative definition/appearance loading before the wield timeout"),
+				TEXT("GuardCharacter %s did not finish Narrative visual/loadout initialization before the wield timeout"),
 				*GetName());
 		}
 		return;
 	}
+	++DefaultWeaponPostInitializationAttempts;
 
 	if (GetWeapon(true))
 	{
+		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 		return;
 	}
 
 	UEquipmentComponent* Equipment = GetEquipmentComponent();
 	if (!Equipment)
 	{
-		if (DefaultWeaponWieldAttempts >= 40)
+		if (DefaultWeaponPostInitializationAttempts >= 40)
 		{
 			GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 			UE_LOG(LogTerritory, Warning,
@@ -312,7 +382,7 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 	// An unarmed Narrative definition is a supported combatant. Give its asynchronous
 	// inventory a short admission window, then stop polling without presenting a valid
 	// data choice as a runtime failure.
-	if (!bHasEquippedWeapon && DefaultWeaponWieldAttempts >= 12)
+	if (!bHasEquippedWeapon && DefaultWeaponPostInitializationAttempts >= 12)
 	{
 		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 		UE_LOG(LogTerritory, Verbose,
@@ -320,7 +390,7 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 			*GetName());
 		return;
 	}
-	if (bHasEquippedWeapon && DefaultWeaponWieldAttempts >= 40)
+	if (bHasEquippedWeapon && DefaultWeaponPostInitializationAttempts >= 120)
 	{
 		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 		UE_LOG(LogTerritory, Warning,
@@ -363,6 +433,57 @@ void ATerritoryGuardCharacter::ConfigureTerritorySpawn(
 	UNPCActivityConfiguration* OptionalActivityOverride,
 	const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides)
 {
+	ATerritoryVolume* ResolvedTerritory = nullptr;
+	ATerritoryGuardSpawnPoint* ResolvedSpawnPoint = nullptr;
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry =
+			World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			ResolvedTerritory = Registry->GetTerritoryByGUID(TerritoryGuid);
+		}
+	}
+	if (ResolvedTerritory)
+	{
+		for (ATerritoryGuardSpawnPoint* Candidate : ResolvedTerritory->GetGuardSpawnPoints())
+		{
+			if (Candidate && Candidate->GetFName() == SpawnPointName)
+			{
+				ResolvedSpawnPoint = Candidate;
+				break;
+			}
+		}
+	}
+	if (!ConfigureTerritorySpawnWithContext(Definition, ExactFaction, TerritoryGuid,
+		SaveGuid, InSpawnTransform, SpawnPointName, OptionalActivityOverride,
+		OptionalTriggerOverrides, ResolvedTerritory, ResolvedSpawnPoint))
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("ConfigureTerritorySpawn legacy migration failed for %s; use ConfigureTerritorySpawnWithContext with typed ownership"),
+			*GetName());
+	}
+}
+
+bool ATerritoryGuardCharacter::ConfigureTerritorySpawnWithContext(
+	UNPCDefinition* Definition,
+	const FGameplayTag& ExactFaction,
+	const FGuid& TerritoryGuid,
+	const FGuid& SaveGuid,
+	const FTransform& InSpawnTransform,
+	FName SpawnPointName,
+	UNPCActivityConfiguration* OptionalActivityOverride,
+	const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
+	ATerritoryVolume* InOwningTerritory,
+	ATerritoryGuardSpawnPoint* InOwningSpawnPoint)
+{
+	if (!Definition || !ExactFaction.IsValid() || !TerritoryGuid.IsValid()
+		|| !SaveGuid.IsValid() || !InOwningTerritory || !InOwningSpawnPoint
+		|| InOwningTerritory->GetTerritoryGUID() != TerritoryGuid
+		|| !InOwningTerritory->GetGuardSpawnPoints().Contains(InOwningSpawnPoint))
+	{
+		return false;
+	}
+
 	// Fill ALL SpawnInfo fields that Narrative activities need.
 	// BPA_ReturnToSpawn reads SpawnTransform — without it, SetupBlackboard fails.
 
@@ -377,6 +498,8 @@ void ATerritoryGuardCharacter::ConfigureTerritorySpawn(
 
 	// Store territory context for BP-accessible ReturnToTerritory activity
 	TerritoryHomeTransform = InSpawnTransform;
+	OwningTerritory = InOwningTerritory;
+	OwningTerritorySpawnPoint = InOwningSpawnPoint;
 
 	// Override factions to exactly the territory owner
 	if (ExactFaction.IsValid())
@@ -400,14 +523,9 @@ void ATerritoryGuardCharacter::ConfigureTerritorySpawn(
 		SpawnInfo.SpawnParams.TriggerSets = OptionalTriggerOverrides;
 	}
 
-	// P1-N13: SetNPCDefinition must be called here, but OwningTerritory and
-	// OwningTerritorySpawnPoint are NOT set in this function — they must be
-	// assigned by the caller after ConfigureTerritorySpawn returns. This is
-	// by design: the caller owns the territory↔spawn-point binding lifecycle.
-	if (Definition)
-	{
-		SetNPCDefinition(Definition);
-	}
+	// Context is complete before Narrative applies activities and TriggerSets.
+	SetNPCDefinition(Definition);
+	return true;
 }
 
 FGuid ATerritoryGuardCharacter::GetActorGUID_Implementation() const

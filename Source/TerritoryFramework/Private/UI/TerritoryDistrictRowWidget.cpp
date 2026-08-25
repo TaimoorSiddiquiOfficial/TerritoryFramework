@@ -14,6 +14,22 @@
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 
+namespace
+{
+	void StyleDistrictRowText(UTextBlock* Text, int32 FontSize, const FLinearColor& Color)
+	{
+		if (!Text)
+		{
+			return;
+		}
+		FSlateFontInfo Font = Text->GetFont();
+		Font.Size = FontSize;
+		Text->SetFont(Font);
+		Text->SetColorAndOpacity(FSlateColor(Color));
+		Text->SetAutoWrapText(true);
+	}
+}
+
 void UTerritoryDistrictRowWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -56,7 +72,7 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 
 	USizeBox* RootSize = WidgetTree->ConstructWidget<USizeBox>(
 		USizeBox::StaticClass(), TEXT("DistrictRowSize"));
-	RootSize->SetMinDesiredHeight(86.f);
+	RootSize->SetMinDesiredHeight(104.f);
 	WidgetTree->RootWidget = RootSize;
 	UBorder* Surface = WidgetTree->ConstructWidget<UBorder>(
 		UBorder::StaticClass(), TEXT("DistrictRowSurface"));
@@ -70,6 +86,15 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const TSubclassOf<UNarrativeCommonButtonBase> NarrativeButtonClass = Settings
 		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
+	const TSubclassOf<UCommonButtonStyle> TerritoryButtonStyle = Settings
+		? Settings->DefaultTerritoryButtonStyle.LoadSynchronous() : nullptr;
+	auto ApplyTerritoryStyle = [TerritoryButtonStyle](UNarrativeCommonButtonBase* Button)
+	{
+		if (Button && TerritoryButtonStyle)
+		{
+			Button->SetStyle(TerritoryButtonStyle);
+		}
+	};
 	if (!NarrativeButtonClass)
 	{
 		UE_LOG(LogTerritory, Warning,
@@ -81,6 +106,9 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	DistrictName = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictName"));
 	DistrictSummary = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictSummary"));
 	DistrictStatus = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(UNarrativeCommonTextBlock::StaticClass(), TEXT("DistrictStatus"));
+	StyleDistrictRowText(DistrictName, 18, FLinearColor(0.95f, 0.96f, 0.95f, 1.f));
+	StyleDistrictRowText(DistrictSummary, 13, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
+	StyleDistrictRowText(DistrictStatus, 13, FLinearColor(0.31f, 0.82f, 0.63f, 1.f));
 	Details->AddChild(DistrictName);
 	Details->AddChild(DistrictSummary);
 	Details->AddChild(DistrictStatus);
@@ -88,6 +116,7 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	if (NarrativeButtonClass)
 	{
 		SelectDistrictButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("SelectDistrictButton"));
+		ApplyTerritoryStyle(SelectDistrictButton);
 		SelectOverlay->AddChild(SelectDistrictButton);
 	}
 	SelectOverlay->AddChild(Details);
@@ -100,9 +129,11 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	if (NarrativeButtonClass)
 	{
 		AddGuardButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("AddGuardButton"));
+		ApplyTerritoryStyle(AddGuardButton);
 		Root->AddChild(AddGuardButton);
 
 		RemoveGuardButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(NarrativeButtonClass, TEXT("RemoveGuardButton"));
+		ApplyTerritoryStyle(RemoveGuardButton);
 		Root->AddChild(RemoveGuardButton);
 	}
 }
@@ -200,7 +231,7 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			: CurrentDistrict->GetEffectiveIncome()
 				- (static_cast<int64>(CurrentDistrict->GetGuardCost()) * CurrentDistrict->GetDesiredGuardCount());
 		DistrictSummary->SetText(FText::Format(
-			NSLOCTEXT("TerritoryDistrictRow", "Summary", "{0}  |  {1}\nProperties {2}/{3}  |  Guards {4}/{5}/{6}  |  Net {7}"),
+			NSLOCTEXT("TerritoryDistrictRow", "Summary", "{0}  |  {1}\nProperties {2}/{3}  |  Guards {4}/{5}/{6}  |  Net {7}\nProduction {8} active  |  {9} blocked"),
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(CurrentDistrict->GetOwningFaction()),
 			StateText,
 			FText::AsNumber(OperationsView.OwnedProperties),
@@ -208,7 +239,9 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			FText::AsNumber(Active),
 			FText::AsNumber(Desired),
 			FText::AsNumber(Maximum),
-			FText::AsNumber(Net)));
+			FText::AsNumber(Net),
+			FText::AsNumber(OperationsView.ProducingSiteCount),
+			FText::AsNumber(OperationsView.BlockedProductionSiteCount)));
 	}
 	if (AddGuardButton)
 	{

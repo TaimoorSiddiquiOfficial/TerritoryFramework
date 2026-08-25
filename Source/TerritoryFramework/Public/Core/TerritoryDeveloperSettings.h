@@ -6,6 +6,7 @@
 #include "TerritoryDeveloperSettings.generated.h"
 
 class UNarrativeCommonButtonBase;
+class UCommonButtonStyle;
 
 UCLASS(BlueprintType, config = Engine, defaultconfig, meta = (DisplayName = "Territory Framework"))
 class TERRITORYFRAMEWORK_API UTerritoryDeveloperSettings : public UDeveloperSettings
@@ -136,6 +137,10 @@ public:
 	/** Configurable Narrative CommonUI button used by native fallback Territory rows. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI")
 	TSoftClassPtr<UNarrativeCommonButtonBase> DefaultNarrativeButtonClass;
+
+	/** Territory-owned visual style applied to Narrative buttons created by native fallback layouts. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI")
+	TSoftClassPtr<UCommonButtonStyle> DefaultTerritoryButtonStyle;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Debug — Toggle individual debug categories

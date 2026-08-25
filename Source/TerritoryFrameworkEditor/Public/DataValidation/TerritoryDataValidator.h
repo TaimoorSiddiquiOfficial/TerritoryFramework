@@ -8,6 +8,7 @@ class ATerritoryVolume;
 class ULevel;
 class UWorld;
 class UTerritoryCounterAttackProfile;
+class UTerritoryProductionProfile;
 
 /**
  * Editor data validator for TerritoryFramework assets.
@@ -24,6 +25,7 @@ class UTerritoryCounterAttackProfile;
  * - Invalid faction prefixes
  * - Multiple TerritoryWorldState/SavableData actors
  * - Negative economy configuration
+ * - Invalid production recipes, item classes, quantities, or duplicate rules
  * - Missing bounds shape
  * - Guard config mismatch (BT without NPC definition, etc.)
  * - Duplicate territory display names

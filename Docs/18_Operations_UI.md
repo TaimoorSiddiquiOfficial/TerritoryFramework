@@ -21,7 +21,9 @@ UTerritoryUIBlueprintLibrary::OpenTerritoryMenu(
 
 Do not call `AddToViewport`, manually change input mode, or create a second activatable stack. `OpenTerritoryMenu` resolves the player's `UNarrativeGameplayHUD` and pushes the Territory widget into the requested registered Narrative layer.
 
-Narrative Pro's current `UNarrativeMenu` constructor is private, so it cannot be used as a native C++ parent without modifying vendor source. Territory native screens therefore use `UNarrativeActivatableWidget`. Existing Blueprint wrapper menus may still inherit `WBP_NarrativeMenu`, as `WBP_MainHopTerritoryJornal` does. This keeps the monthly vendor plugin read-only.
+The project controller selects `WBP_TerritoryGameplayHUD_Modular`. This asset is a project-owned duplicate of Narrative Pro's current `WBP_DefaultGameplayHUD`, with `WBP_TerritoryCaptureHUD` composed as a passive overlay. Its inherited template graph must retain the initialized registrations for `UI.Layer.Game -> GameStack`, `UI.Layer.Menu -> MenuStack`, and `UI.Layer.Modal -> ModalStack`. Rebuilding only the widget tree is invalid: `OpenMenu` then returns null, radial-menu close paths can dereference an unset menu, and CommonUI input routing no longer has a destination.
+
+Narrative Pro's current `UNarrativeMenu` constructor is private, so it cannot be used as a native C++ parent without modifying vendor source. Territory native screens therefore use `UNarrativeActivatableWidget`. Project Blueprint menus reuse `WBP_TerritoryMenuBase`, the project-owned Narrative menu behavior template; both `W_TerritoryPlayerMenu` and `WBP_MainHopTerritoryJornal` inherit it. This keeps the monthly vendor plugin read-only.
 
 ## Read models
 
@@ -38,6 +40,7 @@ Narrative Pro's current `UNarrativeMenu` constructor is private, so it cannot be
 - Narrative account funds, district income, guard upkeep, net income, guard purchase cost, and financial-risk state;
 - guard add/remove eligibility and exact failure reasons;
 - a `GarrisonTargets` array with each District/Property's exact staffing, recruitment, upkeep, income, and net projection;
+- `ProductionSites` and aggregated `ResourceFlows`, including active/blocked counts, exact item classes, stored quantities, per-cycle input/output/net, and per-rule failure reasons;
 - District and child-Property assault state, exact leaf target, attacker faction,
   finite-force counts, selected approaches, launch probability, estimated success,
   attack priority, defence power, power ratio, and threat summary;
@@ -48,7 +51,7 @@ The struct is a read-only projection. Pointer fields are transient UI references
 
 ### `FTerritoryEconomyOperationsView`
 
-`BuildEconomyOperationsView` returns the viewer's available Narrative inventory funds plus the Territory economy projection: income, costs, net, deficit state, territory count, recent credits/debits, and bounded transaction history.
+`BuildEconomyOperationsView` returns the viewer's available Narrative inventory funds plus the Territory economy projection: income, costs, net, deficit state, territory count, recent credits/debits, bounded transaction history, resource-storage availability, stockpile quantities, and modular production-site rows.
 
 “Available funds” is not a Territory treasury. The Narrative inventory/account remains currency authority.
 
@@ -67,6 +70,10 @@ The struct is a read-only projection. Pointer fields are transient UI references
 | `Contested` | Existing capture subsystem reports an active contest |
 | `Locked` | Territory is locked |
 | `FinancialRisk` | Guard upkeep exceeds district income |
+| `Producing` | At least one production site is active or settled |
+| `ProductionBlocked` | At least one site has missing input, unavailable/full storage, or an invalid profile |
+| `MissingInputs` | At least one exact production rule lacks required Narrative items |
+| `StorageFull` | At least one output cannot fit by slots or weight |
 
 `GetDistrictOperationsRevision` hashes every displayed authority used by the supplied list. The journal rebuilds when guards, capture, finance, lock state, or assault state changes, fixing the former stale-row bug where only item count and filter text invalidated the list.
 
@@ -74,7 +81,7 @@ The struct is a read-only projection. Pointer fields are transient UI references
 
 ## District Command Center
 
-`WBP_HopTerritoryJournalWidget` is supplied as a three-column command surface:
+`WBP_HopTerritoryJournalWidget` is supplied as a responsive single-column command surface:
 
 1. **Operations queues** show currently actionable Available/Unlocked Districts and,
    separately, captured Districts controlled by the viewer.
@@ -84,7 +91,7 @@ The struct is a read-only projection. Pointer fields are transient UI references
    strongest diplomacy-eligible attacker, exact target, defence/power ratio,
    grace/cooldown, finite force, probabilities, and approaches.
 
-The command surface is authored on a 1920×1080 design canvas inside a `ScaleBox` using `ScaleToFit`, so the complete journal remains inside smaller or differently shaped viewports. The selected-district column has its own clipped vertical `ScrollBox`; mouse-wheel and focus navigation scroll lower guard controls into view instead of increasing the screen's desired size. Long operational readouts use automatic wrapping.
+The command surface uses a fill-width shell with a 760-pixel desktop maximum. Below 800 pixels it fills the available width; at larger widths it remains centered. Operations queues, directory, and District command are stacked in the page scroll, while bounded list regions keep their own minimum heights. Long operational readouts use automatic wrapping, so the layout does not depend on a fixed 1920x1080 canvas or viewport scaling.
 
 The action and ownership predicates remain strict, while visibility is broader:
 
@@ -112,14 +119,28 @@ Clicking a responsive selection-only row selects that district and opens its com
 |---|---|
 | `W_TerritoryPlayerMenu` | Existing Narrative player menu with the Territory journal tab and a valid activation focus target |
 | `WBP_MainHopTerritoryJornal` | Narrative menu wrapper around the Territory journal; forwards activation focus to the inner widget |
-| `WBP_HopTerritoryJournalWidget` | Three-column District Command Center with actionable/owned queues, searchable directory, selected-district controls, finance ledger, and exposure report |
+| `WBP_HopTerritoryJournalWidget` | Responsive stacked District Command Center with actionable/owned queues, searchable directory, selected-district controls, finance ledger, and exposure report |
 | `WBP_TerritoryCommandRow` | Responsive project-styled Narrative CommonUI selection row used by all journal lists |
-| `WBP_TerritoryDistrictManagement` | In-world district command panel for add/remove guards, funds, income, reserve visibility, availability, and threat status |
-| `WBP_TerritoryEconomyWidget` | Faction economy health, net, deficit, and recent activity |
-| `WBP_TerritoryInfoWidget` | Passive current-territory status card with availability, threat, and net income |
+| `WBP_TerritoryDistrictManagement` | In-world district command panel for guards, funds, income, production summary, availability, and threat status |
+| `WBP_TerritoryEconomyWidget` | Faction economy health plus bounded scrolling stockpile and production-site modules |
+| `WBP_TerritoryInfoWidget` | Passive current-territory status card with availability, threat, net income, and production status |
+| `WBP_TerritoryCaptureHUD` | Compact capture progress and contesting-faction projection; it never creates capture progress |
+| `WBP_TerritoryGameplayHUD_Modular` | Project-owned copy of Narrative's complete GameplayHUD template graph and tree, with the Territory capture HUD composed as a passive overlay |
+| `WBP_TerritoryResourceRow` | Reusable stockpile/input/output/net resource row |
+| `WBP_TerritoryProductionSiteRow` | Reusable production-site module that composes resource rows |
 | `BP_TerritoryDebugWidget` | Scrollable live territory/counterattack diagnostic output |
 
 Project styling can replace `DistrictRowWidgetClass`; the native fallback uses Narrative CommonUI controls and the same delegates.
+
+`UTerritoryResourceRowWidget` and `UTerritoryProductionSiteRowWidget` are reusable, read-only modules. The economy base can populate optional `ResourceStockpileRows` and `ProductionSiteRows` containers, while any project Blueprint can consume the same structs through `OnEconomyOperationsUpdated`. Production rows compose resource rows; they never call settlement functions or own resource quantities.
+
+The supplied Economy widget constrains both dynamic row collections in scrolling viewports. The journal operational selector presents all four production filters shown above.
+
+## Project templates and styles
+
+`WBP_TerritoryButton_Text` is a project-owned duplicate of Narrative Pro's `WBP_NarrativeButton_Text`. It keeps `UNarrativeCommonButtonBase` behavior while removing the unused input-action block and vendor click animation. `ButtonStyle_TerritoryPrimary` and its Territory text styles provide the shared normal, hovered, pressed, selected, and disabled presentation.
+
+`UTerritoryDeveloperSettings::DefaultNarrativeButtonClass` and `DefaultTerritoryButtonStyle` are the runtime defaults for C++-generated controls. Static buttons in the journal, management panel, and command rows use the same project template. This keeps styling modular without duplicating CommonUI navigation or button behavior.
 
 ## Guard commands and authority
 
@@ -142,6 +163,7 @@ Only the server mutates desired guards, spawns/removes physical guards, or debit
 - Active, reserve, and pending garrison counts come from the replicated `FTerritoryGarrisonSnapshot`.
 - Active attacker counts are labelled known only when the local capture projection supports that detail.
 - Widgets must never query a server-only map and assume an empty result means zero.
+- Production widgets read `ReplicatedProductionSites` and `ReplicatedResourceSnapshots` on clients; `bResourceStorageAvailable` distinguishes a known empty stockpile from unavailable routing.
 
 ## Focus and accessibility
 

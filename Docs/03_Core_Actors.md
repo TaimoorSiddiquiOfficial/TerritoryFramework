@@ -10,38 +10,44 @@ ATerritoryVolume (base — placed in level for any territory)
 │   └── (more districts...)
 ├── ATerritoryGuardSpawnPoint — placed inside a volume (guard staging)
 ├── ATerritoryGuardCharacter  — spawned at runtime by territory volumes
+├── ATerritoryCapturePoint    — physical player-to-capture adapter for an independent Place
 └── ATerritoryWorldState      — global persistence actor (1 per level)
 ```
 
 ## ATerritoryVolume — Base Class
 
-### Key Properties (all BlueprintReadWrite)
+### Key editor properties
 
 | Property | Type | Default | Purpose |
 |---|---|---|---|
 | TerritoryTag | GameplayTag | — | Unique identity (e.g., `Territory.HavenReach.MarketSquare`) |
 | TerritoryDisplayName | Text | — | Player-facing name |
 | InitialOwningFaction | GameplayTag | — | Who owns at game start |
+| InitialState | ETerritoryInitialState | Automatic | New-campaign state. Automatic derives Claimed/Unclaimed from InitialOwningFaction |
 | InitialMaxConcurrentAttackers | int32 | 3 | NPC attack slot limit |
 | InitialPeriodicIncome | int32 | 100 | Gold per economy tick |
 | InitialGuardCost | int32 | 50 | Recurring upkeep per assigned guard per economy cycle |
 | InitialGuardRecruitmentCost | int32 | 50 | One-time Narrative inventory price per target increase |
 | PostCaptureGarrisonPolicy | enum | PlayerChooses | Resolves the new owner's initial desired garrison |
 | ControlMode | ETerritoryControlMode | Independent | How ownership is resolved: Independent (direct capture), AggregateOnly (derived from children), Cascading (direct + child cascade) |
-| StateConfigs | TMap\<ETerritoryState, FTerritoryStateConfig\> | — | Per-state Narrative entry conditions and entry/exit events |
+| StateConfigs | TMap\<ETerritoryState, FTerritoryStateConfig\> | — | Modular Narrative entry/exit conditions and entry/exit events for every state |
 | CounterAttackProfile | UTerritoryCounterAttackProfile* | — | Counterattack data asset (see [Counterattack System](17_Counterattack_System.md)) |
 | CounterAttackApproaches | TArray\<FTerritoryAssaultApproach\> | — | Typed attack approaches for this territory |
 | GuardQuality | float | 0 | Guard quality rating for counterattack evaluation |
 | FortificationStrength | float | 0 | Fortification rating |
 | NearbyAlliedSupport | float | 0 | Nearby allied support rating |
 | StrategicValue | float | 0 | District strategic value for attack prioritization |
-| bStartsLocked | bool | false | If true, territory can't be captured until unlocked |
 | ParentTerritoryTag | GameplayTag | — | Parent territory for hierarchy |
 | GuardNPCDefinition | NPCDefinition* | — | NPC template for guards |
 | FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> | — | Per-faction NPC definition overrides |
 | GuardSpawnCount | int32 | 3 | Authored initial target for existing ownership and non-player capture |
 | GuardSpawnPoints | Array<ATerritoryGuardSpawnPoint*> | — | Explicit posts; their unique union with tag/proximity posts is the exact active capacity, one guard per point |
 | GuardSpawnRadius | float | 500 | Deprecated and ignored; active guards require authored points |
+
+`bStartsLocked` and `LockConditions` are hidden serialized migration inputs, not new
+authoring options. Set **Initial State = Locked**, then put quest/diplomacy requirements in
+`State Configs -> Locked -> Exit Conditions`. The **Migrate Legacy Lock Settings** editor
+button converts old actors once without changing saved campaign state.
 
 ### Key Events (BlueprintNativeEvent)
 
@@ -62,21 +68,41 @@ See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-
 
 | Delegate | Signature | Fires After |
 |---|---|---|
-| OnTerritoryOwnershipChanged | (Volume*, OldOwner, NewOwner) | SetOwningFaction + OnOwnershipChanged BP event |
-| OnTerritoryStateChangedDelegate | (Volume*, NewState) | SetTerritoryState + OnStateChanged BP event |
+| OnTerritoryOwnershipChanged | (Volume*, OldOwner, NewOwner) | Verified atomic ownership commit + OnOwnershipChanged BP event |
+| OnTerritoryStateChangedDelegate | (Volume*, NewState) | Verified atomic state commit + OnStateChanged BP event |
 | OnGuardKilled | (Volume*, Guard, Killer, RemainingDefenders) | Per defender death, before all-defeated check |
 | OnAllGuardsDefeatedDelegate | (Volume*) | OnAllGuardsDefeated BP event |
 
 ### State Transition Logic (C++)
 
-Guard lifecycle runs in the **non-virtual** SetTerritoryState/SetOwningFaction, BEFORE the BP virtual fires:
-- **Claimed → Contested**: Preserves the incumbent `OwningFaction`, but suspends active ownership and despawns guards
-- **Contested → Claimed**: Restores active ownership for the incumbent or captured owner and respawns guards
+Guard lifecycle runs in the **non-virtual** atomic commit path before the BP virtual fires.
+The Blueprint **Set Owning Faction** node now routes through
+`UTerritoryControlSubsystem::ApplyTerritoryMutation`; use **Apply Territory Mutation** when
+you need explicit context and a structured result.
+
+- **Claimed → Contested**: Preserves the incumbent `OwningFaction` and surviving registered guards while active ownership is suspended
+- **Contested → Claimed**: Keeps surviving guards and does not grant free replacements; an actual owner change applies the selected post-capture garrison policy
 - **Locked → Claimed**: Respawns guards for owner (territory was locked, now defended again)
 - **Any → Locked**: Despawns all guards
 - **Contested → Unclaimed**: Not reached by guard defeat alone. Guard defeat leaves the owner intact and vulnerable (DefenderCount=0); ownership changes only through the capture flow (RegisterAttacker → progress → CompleteCapture)
 
 `GetOwningFaction()` therefore returns the incumbent defender while contested. `IsOwnedByFaction()` requires `State == Claimed`, so it returns false while the territory is Contested, Locked, or Unclaimed.
+
+## ATerritoryCapturePoint
+
+`ATerritoryCapturePoint` is a server-authoritative physical interaction adapter. Set `TargetTerritoryTag` to one `Independent` Territory and author `CaptureRadius` on the placed point. Only a player-controlled pawn with a valid Narrative faction can register.
+
+The point calls `UTerritoryControlSubsystem::TryRegisterAttacker`; it never owns or writes capture progress, Territory owner, save state, or replicated snapshots. It unregisters the pawn on overlap exit, faction/ownership invalidation, Narrative ASC death, disable, or EndPlay. Aggregate-only Districts and Cities are invalid direct targets.
+
+### Haven Reach Example Flow
+
+```text
+Blacksmith Place captured -> Market Square District reduced
+Farm Place captured       -> Castle Hill District reduced
+both Districts owned      -> Haven Reach City reduced
+```
+
+`/Game/HopDistrictTest` places `CapturePoint_Blsmith` for `Territory.HavenReach.MarketSquare.Blacksmith` and `CapturePoint_Farm` for `Territory.HavenReach.CastleHill.Farm`. The Farm retains its independent currency and item-production configuration after capture.
 
 ### Map Marker Component
 
@@ -117,7 +143,7 @@ None beyond base.
 
 ```
 District captured by Faction X
-  → District.SetOwningFaction(X)
+  → capture subsystem atomically commits District ownership
   → District.OnTerritoryControlChanged broadcast
   → City.OnDistrictControlChanged handler:
       1. Fires OnDistrictCapturedInCity BP event
@@ -125,7 +151,7 @@ District captured by Faction X
          → All child properties auto-reassigned to X
          → Each property fires OnPropertyCaptured + OnPropertyCapturedDelegate
       3. If AllDistrictsOwnedBy(X):
-         → City.SetOwningFaction(X)
+         → hierarchy reducer sets derived City ownership
          → City.OnCityFullyCaptured(X) — economy bonus, capital reward
          → City.OnCityCapturedDelegate.Broadcast(this, X)
       4. If city owner no longer controls all districts:
@@ -172,7 +198,7 @@ When a city with capital districts is fully captured:
 
 When a district changes owner:
 1. City's `CascadeCaptureToProperties` iterates all child properties
-2. Each property's `SetOwningFaction` is called with the new district owner
+2. Each property receives the same explicit transition context through the hierarchy's forced derived-ownership path
 3. Each property fires `OnPropertyCaptured` + `OnPropertyCapturedDelegate`
 4. Property upgrade level resets to 0 on capture by a new faction
 5. Economy income recalculated for both old and new owners
@@ -263,7 +289,8 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 ### Additional Functions
 | Function | Returns | Purpose |
 |---|---|---|
-| ConfigureTerritorySpawn(...) | void | Advanced Blueprint compatibility API for externally managed deferred spawns; core garrisons use the Narrative subsystem adapter |
+| ConfigureTerritorySpawnWithContext(...) | bool | Authority-only external deferred-spawn adapter. Validates typed Territory/spawn-point ownership and stable identities before applying the Narrative definition. |
+| ConfigureTerritorySpawn(...) | void | Deprecated migration node. Resolves typed context by Territory GUID and spawn-point name or fails closed; core garrisons use the Narrative subsystem adapter. |
 | GetTerritoryPatrolRoute() | Array<PatrolNode> | Copy the assigned spawn point's route |
 | HasTerritoryPatrolRoute() | bool | True when an assigned route has at least two nodes |
 | GetPatrolNodeCount() | int32 | Number of assigned patrol nodes |

@@ -3,9 +3,17 @@
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Engine/World.h"
+#include "Tales/TerritoryTalesUtilities.h"
+
+UTerritoryLockEvent::UTerritoryLockEvent(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+}
 
 void UTerritoryLockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
+	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = GetWorld();
 	if (!World || !TargetTerritoryTag.IsValid()) return;
 
@@ -38,8 +46,15 @@ FString UTerritoryLockEvent::GetGraphDisplayText_Implementation()
 
 // ─── Unlock Event ───
 
+UTerritoryUnlockEvent::UTerritoryUnlockEvent(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+}
+
 void UTerritoryUnlockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
+	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = GetWorld();
 	if (!World || !TargetTerritoryTag.IsValid()) return;
 

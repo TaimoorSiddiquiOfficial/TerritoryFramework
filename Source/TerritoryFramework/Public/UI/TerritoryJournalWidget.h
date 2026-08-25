@@ -11,6 +11,7 @@ class ATerritoryVolume;
 class UNarrativeCommonButtonBase;
 class UEditableTextBox;
 class UProgressBar;
+class USizeBox;
 class USpinBox;
 class UTextBlock;
 class UVerticalBox;
@@ -38,7 +39,12 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	virtual void NativeOnActivated() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual UWidget* NativeGetDesiredFocusTarget() const override;
+
+	/** Max-width desktop column that expands to the available width on compact viewports. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<USizeBox> CommandCenterResponsiveWidth;
 
 	/** Optional project-styled row Blueprint. Falls back to the native Narrative CommonUI row. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|UI")
@@ -242,6 +248,8 @@ private:
 	FString SearchFilter;
 	ETerritoryOperationsFilter SelectedOperationsFilter = ETerritoryOperationsFilter::All;
 	bool bFiltersInitialized = false;
+	bool bResponsiveLayoutApplied = false;
+	bool bCompactResponsiveLayout = false;
 	int32 LastOperationsRevision = INDEX_NONE;
 	FTimerHandle RefreshTimerHandle;
 

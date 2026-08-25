@@ -2,9 +2,12 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
+#include "UI/TerritoryProductionWidgets.h"
 
 void UTerritoryEconomyWidget::NativeConstruct()
 {
@@ -109,6 +112,7 @@ void UTerritoryEconomyWidget::BindDelegates()
 	{
 		Economy->OnEconomyTickFired.AddDynamic(this, &UTerritoryEconomyWidget::HandleEconomyTick);
 		Economy->OnTransactionRecorded.AddDynamic(this, &UTerritoryEconomyWidget::HandleTransactionRecorded);
+		Economy->OnProductionSettled.AddDynamic(this, &UTerritoryEconomyWidget::HandleProductionSettled);
 	}
 
 	// Client polling fallback — if delegates are missed (late join, network desync),
@@ -131,6 +135,7 @@ void UTerritoryEconomyWidget::UnbindDelegates()
 	{
 		Economy->OnEconomyTickFired.RemoveDynamic(this, &UTerritoryEconomyWidget::HandleEconomyTick);
 		Economy->OnTransactionRecorded.RemoveDynamic(this, &UTerritoryEconomyWidget::HandleTransactionRecorded);
+		Economy->OnProductionSettled.RemoveDynamic(this, &UTerritoryEconomyWidget::HandleProductionSettled);
 	}
 
 	if (UWorld* World = GetWorld())
@@ -176,6 +181,15 @@ void UTerritoryEconomyWidget::HandleTransactionRecorded(const FTerritoryTransact
 	}
 }
 
+void UTerritoryEconomyWidget::HandleProductionSettled(
+	const FTerritoryProductionResult& Result)
+{
+	if (Result.Faction == DisplayFaction)
+	{
+		RefreshEconomyDisplay();
+	}
+}
+
 void UTerritoryEconomyWidget::RefreshEconomyDisplay()
 {
 	const FTerritoryEconomyOperationsView View = GetEconomyOperationsView(10);
@@ -201,6 +215,57 @@ void UTerritoryEconomyWidget::RefreshEconomyDisplay()
 		EconomyRecentActivityText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryEconomy", "RecentActivity", "Recent credits {0}  |  Recent debits {1}"),
 			FText::AsNumber(View.RecentCredits), FText::AsNumber(View.RecentDebits)));
+	}
+	if (EconomyProductionSummaryText)
+	{
+		EconomyProductionSummaryText->SetText(FText::Format(
+			NSLOCTEXT("TerritoryEconomy", "ProductionSummary", "Production {0} active  |  {1} blocked"),
+			FText::AsNumber(View.ProducingSiteCount),
+			FText::AsNumber(View.BlockedProductionSiteCount)));
+	}
+	if (EconomyStorageStatusText)
+	{
+		EconomyStorageStatusText->SetText(View.bResourceStorageAvailable
+			? NSLOCTEXT("TerritoryEconomy", "StorageAvailable", "RESOURCE STORAGE ONLINE")
+			: NSLOCTEXT("TerritoryEconomy", "StorageUnavailable", "RESOURCE STORAGE UNAVAILABLE"));
+	}
+	RefreshResourcePanels(View);
+	OnEconomyOperationsUpdated(View);
+}
+
+void UTerritoryEconomyWidget::RefreshResourcePanels(
+	const FTerritoryEconomyOperationsView& View)
+{
+	if (ResourceStockpileRows)
+	{
+		ResourceStockpileRows->ClearChildren();
+		TSubclassOf<UTerritoryResourceRowWidget> RowClass = ResourceRowClass;
+		if (!RowClass) RowClass = UTerritoryResourceRowWidget::StaticClass();
+		for (const FTerritoryResourceOperationsView& Resource : View.ResourceStockpile)
+		{
+			if (UTerritoryResourceRowWidget* Row =
+				CreateWidget<UTerritoryResourceRowWidget>(GetOwningPlayer(), RowClass))
+			{
+				Row->InitializeResourceView(Resource);
+				ResourceStockpileRows->AddChild(Row);
+			}
+		}
+	}
+
+	if (ProductionSiteRows)
+	{
+		ProductionSiteRows->ClearChildren();
+		TSubclassOf<UTerritoryProductionSiteRowWidget> RowClass = ProductionSiteRowClass;
+		if (!RowClass) RowClass = UTerritoryProductionSiteRowWidget::StaticClass();
+		for (const FTerritoryProductionSiteOperationsView& Site : View.ProductionSites)
+		{
+			if (UTerritoryProductionSiteRowWidget* Row =
+				CreateWidget<UTerritoryProductionSiteRowWidget>(GetOwningPlayer(), RowClass))
+			{
+				Row->InitializeProductionSiteView(Site);
+				ProductionSiteRows->AddChild(Row);
+			}
+		}
 	}
 }
 
