@@ -7,6 +7,7 @@
 
 class UNarrativeCommonButtonBase;
 class UCommonButtonStyle;
+class UCommonTextStyle;
 
 UCLASS(BlueprintType, config = Engine, defaultconfig, meta = (DisplayName = "Territory Framework"))
 class TERRITORYFRAMEWORK_API UTerritoryDeveloperSettings : public UDeveloperSettings
@@ -141,6 +142,22 @@ public:
 	/** Territory-owned visual style applied to Narrative buttons created by native fallback layouts. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI")
 	TSoftClassPtr<UCommonButtonStyle> DefaultTerritoryButtonStyle;
+
+	/** Body style for runtime-created Narrative CommonText rows. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
+	TSoftClassPtr<UCommonTextStyle> DefaultTerritoryTextStyle;
+
+	/** Large title style used by City/District command headings. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
+	TSoftClassPtr<UCommonTextStyle> TerritoryTitleTextStyle;
+
+	/** Section/header style used for City grouping and selected-control tabs. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
+	TSoftClassPtr<UCommonTextStyle> TerritoryHeadingTextStyle;
+
+	/** Quiet explanatory/empty-state style. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
+	TSoftClassPtr<UCommonTextStyle> TerritoryMutedTextStyle;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Debug — Toggle individual debug categories

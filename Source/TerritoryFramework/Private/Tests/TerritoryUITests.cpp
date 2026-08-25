@@ -52,6 +52,14 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildDistrictOperationsView")));
 	TestTrue(TEXT("District operations list is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetDistrictOperationsViews")));
+	TestTrue(TEXT("Player-visible District list is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetPlayerVisibleDistrictOperationsViews")));
+	TestTrue(TEXT("Hierarchy operations builder is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildHierarchyOperationsView")));
+	TestTrue(TEXT("Hierarchy visibility rule is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("IsTerritoryVisibleToPlayer")));
+	TestTrue(TEXT("Selected District hierarchy list is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetDistrictHierarchyOperationsViews")));
 	TestTrue(TEXT("District directory search is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("DoesDistrictMatchSearch")));
 	TestTrue(TEXT("Per-garrison operations builder is Blueprint pure"),
@@ -100,12 +108,29 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			ViewStruct->FindPropertyByName(TEXT("GarrisonTargets")));
 		TestNotNull(TEXT("District view exposes Property hierarchy completion"),
 			ViewStruct->FindPropertyByName(TEXT("OwnedProperties")));
+		TestNotNull(TEXT("District view exposes its parent City"),
+			ViewStruct->FindPropertyByName(TEXT("CityTag")));
+		TestNotNull(TEXT("District view exposes effective hierarchy visibility"),
+			ViewStruct->FindPropertyByName(TEXT("bHierarchyVisible")));
+		TestNotNull(TEXT("District view exposes only player-visible Places"),
+			ViewStruct->FindPropertyByName(TEXT("VisiblePlaces")));
+		TestNotNull(TEXT("District view exposes diplomacy context"),
+			ViewStruct->FindPropertyByName(TEXT("DiplomacySummary")));
 		TestNotNull(TEXT("District view distinguishes a projected threat from a scheduled assault"),
 			ViewStruct->FindPropertyByName(TEXT("bThreatPreviewAvailable")));
 		TestNotNull(TEXT("District view exposes the leaf Territory targeted by a cascaded assault"),
 			ViewStruct->FindPropertyByName(TEXT("ThreatTargetTerritory")));
 		TestNotNull(TEXT("District view exposes deterministic strategic priority"),
 			ViewStruct->FindPropertyByName(TEXT("AttackPriority")));
+	}
+	const UScriptStruct* HierarchyStruct = FTerritoryHierarchyOperationsView::StaticStruct();
+	TestNotNull(TEXT("Hierarchy operations view is reflected"), HierarchyStruct);
+	if (HierarchyStruct)
+	{
+		TestNotNull(TEXT("Hierarchy row exposes City/District/Place level"),
+			HierarchyStruct->FindPropertyByName(TEXT("HierarchyLevel")));
+		TestNotNull(TEXT("Hierarchy row exposes effective player visibility"),
+			HierarchyStruct->FindPropertyByName(TEXT("bVisibleToPlayer")));
 	}
 	const UScriptStruct* GarrisonStruct = FTerritoryGarrisonOperationsView::StaticStruct();
 	TestNotNull(TEXT("Garrison operations view is reflected"), GarrisonStruct);
@@ -222,6 +247,7 @@ bool FTerritoryUIOperationsFilterTest::RunTest(const FString& Parameters)
 	View = FTerritoryDistrictOperationsView();
 	View.bRegistered = true;
 	View.bUnlocked = true;
+	View.bHierarchyVisible = true;
 	TestFalse(TEXT("Unlocked alone is not enough for the available/unlocked command list"),
 		UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(View));
 	View.bAvailable = true;

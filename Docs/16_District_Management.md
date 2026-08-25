@@ -53,7 +53,17 @@ The district must be registered by `UTerritoryRegistrySubsystem`. World Partitio
 
 The screen refreshes its operations view and reacts to management results. Active, reserve, and pending counts are exact replicated read models on clients; live pawn pointers remain server-only.
 
-The left `Available / Unlocked` queue contains only registered, unlocked, actionable, non-owned Districts. `Captured / Owned` contains only viewer-owned claimed Districts. Locked and aggregate-only Districts remain selectable in the complete center directory so their requirements and hierarchy cascade are visible, but they never inflate the actionable queue. Directory search is case-insensitive and tokenized across display name, Territory tag, owner, state, availability, lock reason, threat, attacker, and child garrison names/tags.
+The left `Available / Unlocked` queue contains only registered, hierarchy-visible, actionable,
+non-owned Districts. `Captured / Owned` contains only hierarchy-visible viewer-owned claimed
+Districts. The center directory groups the same visible Districts by City. Locked Districts
+and children of a locked or unloaded parent do not appear in the player journal. Locked Places
+are also removed from child garrison, production, finance, and threat rows. Directory search is
+case-insensitive and tokenized across City, District, visible Place, Territory tag, owner, state,
+availability, diplomacy, threat, attacker, and visible child-garrison names/tags.
+
+This is presentation privacy, not gameplay authority. Developer/debug tools may still call the
+complete operations API and use the `Locked` filter. Capture and management calls always repeat
+their full server validation even when a row was visible to the player.
 
 ## Access control
 

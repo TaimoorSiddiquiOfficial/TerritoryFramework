@@ -144,21 +144,22 @@ It was attached to the existing Narrative gameplay HUD, which is the correct sta
 
 Resolution:
 
-- Capture widget reduced to 392 x 176.
-- Surface changed to translucent teal-gray `#10252BC2`.
+- Capture widget reduced again to 328 x 108.
+- Surface changed to a lighter translucent teal-gray; the long description moved to the menu.
 - Padding and vertical spacing reduced.
-- Modular Narrative HUD slot changed to 392 x 176 at (32, 32).
+- The HUD keeps its compact top-left Narrative gameplay-layer placement.
 - Both widgets compile, save, and pass CommonUI/focus audits.
 
-The card still shows place, owner, pressure, guards, income, and upkeep. A later usability
-test may choose to collapse stable places to a one-line chip, but that should be based on
-playtest evidence rather than removing information blindly.
+The combat card shows place, owner, state, pressure, and progress. Garrison, finance,
+production, threat, and diplomacy detail live in the Territory menu instead of covering play.
 
 ### D. Command center looked limited
 
-Current C++ and widgets already provide search, operational filters, available/unlocked,
-owned/managed, garrison, economy, and production views. Locked Districts remain visible
-and read-only. CommonUI audits found no broken buttons, dead ends, or dangling focus links.
+Current C++ and widgets provide search, operational filters, available/unlocked, owned/managed,
+garrison, economy, production, threats, and diplomacy. The journal follows Narrative's
+active/completed quest-list pattern and groups visible Districts by City. Locked Districts and
+Places do not appear in the player list; a locked or unverifiable unloaded parent hides its
+descendants. Developer/debug read models can still request the complete registered projection.
 
 Real remaining limit: the directory is built from loaded registered District actors.
 World Partition can therefore hide an unloaded District from strategic UI. The correct

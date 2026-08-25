@@ -13,6 +13,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
+#include "CommonTextBlock.h"
 
 namespace
 {
@@ -21,6 +22,22 @@ namespace
 		if (!Text)
 		{
 			return;
+		}
+		if (UNarrativeCommonTextBlock* CommonText = Cast<UNarrativeCommonTextBlock>(Text))
+		{
+			const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			const TSubclassOf<UCommonTextStyle> Style = Settings
+				? (FontSize >= 17
+					? Settings->TerritoryHeadingTextStyle.LoadSynchronous()
+					: Settings->DefaultTerritoryTextStyle.LoadSynchronous())
+				: nullptr;
+			if (Style)
+			{
+				CommonText->SetStyle(Style);
+				CommonText->SetAutoWrapText(true);
+				return;
+			}
 		}
 		FSlateFontInfo Font = Text->GetFont();
 		Font.Size = FontSize;
@@ -218,9 +235,13 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 		: FText::GetEmpty();
 	if (DistrictName)
 	{
-		DistrictName->SetText(OperationsView.DisplayName.IsEmpty()
+		const FText DistrictDisplayName = OperationsView.DisplayName.IsEmpty()
 			? CurrentDistrict->GetTerritoryDisplayName()
-			: OperationsView.DisplayName);
+			: OperationsView.DisplayName;
+		DistrictName->SetText(OperationsView.CityDisplayName.IsEmpty()
+			? DistrictDisplayName
+			: FText::Format(NSLOCTEXT("TerritoryDistrictRow", "CityDistrictName", "{0}  >  {1}"),
+				OperationsView.CityDisplayName, DistrictDisplayName));
 	}
 	if (DistrictSummary)
 	{

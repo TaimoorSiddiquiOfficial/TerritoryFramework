@@ -9,6 +9,10 @@
 | `OpenTerritoryMenu(PlayerController, WidgetClass, LayerTag)` | `UTerritoryActivatableWidget*` | Pushes into a registered Narrative HUD CommonUI layer |
 | `BuildDistrictOperationsView(Context, District, Viewer, OutView)` | bool | Viewer-relative district/security/finance/threat projection |
 | `GetDistrictOperationsViews(Context, Viewer, Filter)` | Array | Sorted district list for one operational filter |
+| `GetPlayerVisibleDistrictOperationsViews(Context, Viewer, Filter)` | Array | Player list with locked/unloaded parent branches removed and City grouping order applied |
+| `BuildHierarchyOperationsView(Context, Territory, Viewer, OutView)` | bool | One City, District, or Place read model |
+| `GetDistrictHierarchyOperationsViews(Context, District, Viewer)` | Array | Visible City -> District -> Place branch for a selected District |
+| `IsTerritoryVisibleToPlayer(Context, Territory)` | bool | True only when the Territory and every required loaded parent are registered and unlocked |
 | `DoesDistrictMatchFilter(View, Filter)` | bool | Pure filter predicate |
 | `DoesDistrictMatchSearch(View, SearchText)` | bool | Case-insensitive tokenized District/read-model search |
 | `GetDistrictOperationsRevision(View)` | int32 | UI invalidation key covering displayed authorities |
@@ -16,6 +20,7 @@
 | `BuildProductionSiteOperationsView(Context, TerritoryTag, OutView)` | bool | Server/client read model for one production Property |
 | `GetThreatLevelText(Level)` | Text | Localizable threat label |
 | `GetAssaultStateText(State)` | Text | Localizable assault-state label |
+| `GetDiplomacyStateText(State)` | Text | Localizable Territory diplomacy label |
 
 ### UI enums
 

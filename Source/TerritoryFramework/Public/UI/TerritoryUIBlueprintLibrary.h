@@ -4,11 +4,13 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDiplomacyTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "TerritoryUIBlueprintLibrary.generated.h"
 
 class APlayerController;
+class ATerritoryCity;
 class ATerritoryDistrict;
 class ATerritoryVolume;
 class UTerritoryActivatableWidget;
@@ -40,6 +42,48 @@ enum class ETerritoryThreatLevel : uint8
 	Watch UMETA(ToolTip="Early strategic risk. Example: a scheduled warning outside activation range."),
 	Warning UMETA(ToolTip="A nearby or waiting assault needs attention."),
 	Critical UMETA(ToolTip="Physical attackers are active or capture pressure is dangerous.")
+};
+
+/** Player-facing City -> District -> Place level used by hierarchy lists. */
+UENUM(BlueprintType)
+enum class ETerritoryHierarchyLevel : uint8
+{
+	City UMETA(ToolTip="A City groups Districts."),
+	District UMETA(ToolTip="A District belongs to a City and groups Places."),
+	Place UMETA(ToolTip="A capturable Property/Place inside a District.")
+};
+
+/**
+ * One read-only hierarchy row. "Place" is the player-facing name for
+ * ATerritoryProperty; gameplay authority remains on the original Territory actor.
+ */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryHierarchyOperationsView
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") TObjectPtr<ATerritoryVolume> Territory = nullptr;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FGameplayTag TerritoryTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FGameplayTag ParentTerritoryTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FText DisplayName;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") ETerritoryHierarchyLevel HierarchyLevel = ETerritoryHierarchyLevel::Place;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") ETerritoryState TerritoryState = ETerritoryState::Unclaimed;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FGameplayTag OwnerFaction;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FGameplayTag ViewerFaction;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bRegistered = false;
+	/** True only when this actor and every required City/District ancestor are loaded, registered, and unlocked. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bVisibleToPlayer = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bOwnedByViewer = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bAvailableForCapture = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") ECaptureResult CaptureEligibility = ECaptureResult::InvalidTerritory;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FText AvailabilityReason;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 ActiveGuards = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 DesiredGuards = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 MaximumGuards = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int64 PeriodicIncome = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int64 GuardUpkeep = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int64 NetIncome = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bHasProductionProfile = false;
 };
 
 /** One resource row shared by compact Territory, District, Journal, and Economy widgets. */
@@ -116,6 +160,9 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") TObjectPtr<ATerritoryDistrict> District = nullptr;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") FGameplayTag DistrictTag;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") FText DisplayName;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") TObjectPtr<ATerritoryCity> City = nullptr;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FGameplayTag CityTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FText CityDisplayName;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") FGameplayTag OwnerFaction;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") FGameplayTag ViewerFaction;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") FGameplayTag ContestingFaction;
@@ -123,6 +170,8 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bRegistered = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bUnlocked = false;
+	/** Locked City/District ancestors also hide this District from player-facing lists. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bHierarchyVisible = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bAvailable = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bOwnedByViewer = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bManageable = false;
@@ -151,6 +200,10 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 OwnedProperties = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 ManageableGarrisonTargets = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 UnguardedGarrisonTargets = 0;
+	/** City, selected District, and loaded unlocked Places in deterministic hierarchy order. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") TArray<FTerritoryHierarchyOperationsView> Hierarchy;
+	/** Loaded Places visible under the selected District. Locked Places are deliberately absent. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") TArray<FTerritoryHierarchyOperationsView> VisiblePlaces;
 
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 AvailableFunds = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 PeriodicIncome = 0;
@@ -196,6 +249,13 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") TArray<FName> SelectedApproaches;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") FText ThreatEvaluationReason;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Threat") FText ThreatSummary;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Diplomacy") EDiplomacyState ViewerOwnerDiplomacy = EDiplomacyState::None;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Diplomacy") int32 OwnerReputation = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Diplomacy") bool bViewerAtWarWithOwner = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Diplomacy") bool bViewerAlliedWithOwner = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Diplomacy") bool bViewerTradesWithOwner = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Diplomacy") FText DiplomacySummary;
 };
 
 /** Faction-level finance read model. Narrative inventory remains the balance authority. */
@@ -244,6 +304,33 @@ public:
 		APlayerController* Viewer,
 		FTerritoryDistrictOperationsView& OutView);
 
+	/** Build a City, District, or Place row without creating gameplay state. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Hierarchy",
+		meta=(WorldContext="WorldContextObject"))
+	static bool BuildHierarchyOperationsView(
+		const UObject* WorldContextObject,
+		ATerritoryVolume* Territory,
+		APlayerController* Viewer,
+		FTerritoryHierarchyOperationsView& OutView);
+
+	/**
+	 * True when the actor and every required hierarchy ancestor are loaded,
+	 * registered, and unlocked. Player menus use this instead of revealing story gates.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Hierarchy",
+		meta=(WorldContext="WorldContextObject"))
+	static bool IsTerritoryVisibleToPlayer(
+		const UObject* WorldContextObject,
+		ATerritoryVolume* Territory);
+
+	/** City -> District -> loaded visible Places for a selected District. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Hierarchy",
+		meta=(WorldContext="WorldContextObject"))
+	static TArray<FTerritoryHierarchyOperationsView> GetDistrictHierarchyOperationsViews(
+		const UObject* WorldContextObject,
+		ATerritoryDistrict* District,
+		APlayerController* Viewer);
+
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
 		meta=(WorldContext="WorldContextObject"))
 	static bool BuildGarrisonOperationsView(
@@ -262,6 +349,14 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
 		meta=(WorldContext="WorldContextObject"))
 	static TArray<FTerritoryDistrictOperationsView> GetDistrictOperationsViews(
+		const UObject* WorldContextObject,
+		APlayerController* Viewer,
+		ETerritoryOperationsFilter Filter = ETerritoryOperationsFilter::All);
+
+	/** Player journal list. Locked Districts and descendants of locked Cities are absent. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
+		meta=(WorldContext="WorldContextObject"))
+	static TArray<FTerritoryDistrictOperationsView> GetPlayerVisibleDistrictOperationsViews(
 		const UObject* WorldContextObject,
 		APlayerController* Viewer,
 		ETerritoryOperationsFilter Filter = ETerritoryOperationsFilter::All);
@@ -317,4 +412,7 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static FText GetAssaultStateText(ETerritoryAssaultState AssaultState);
+
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Diplomacy")
+	static FText GetDiplomacyStateText(EDiplomacyState DiplomacyState);
 };

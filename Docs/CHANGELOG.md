@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — 2026-08-25 (Narrative journal hierarchy and detail tabs)
+
+- Aligned the Territory journal with Narrative Pro's quest-journal pattern: Available/Unlocked
+  and Captured/Owned queues on the left, a City-grouped visible District directory, and selected
+  Territory details on the right.
+- Added Overview, Places, Garrison, Economy, Production, Threats, and Diplomacy detail tabs so
+  the command screen exposes richer information without rendering every control at once.
+- Added player-safe `City -> District -> Place` read models. Locked Territories and descendants
+  of a locked or unloaded parent are absent from player lists; developer/debug filters retain
+  access to the complete registered projection.
+- Added viewer/owner diplomacy, reputation, war, alliance, and trade information to District
+  operations views and search/revision tracking.
+- Added configurable Narrative CommonUI text styles for generated Territory controls and applied
+  the project's Narrative RPG master button/text styles to the journal and compact capture HUD.
+- Reduced the journal's opaque background and changed the capture HUD into a 328x108 translucent
+  combat card; detailed capture explanations remain available in the Territory menu.
+
 ## Unreleased — 2026-08-25 (District staging and shared assault objectives)
 
 - Added modular secure-District staging and recurring cooldown policy. Normal forces require

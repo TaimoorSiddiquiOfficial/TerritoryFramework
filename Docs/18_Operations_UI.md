@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The operations UI is the player-facing projection of the Territory authorities. It lists districts that are unlocked, available, owned, manageable, contested, threatened, or operating at a loss, and exposes guarded absolute staffing commands for District and child Property garrisons.
+The operations UI is the player-facing projection of the Territory authorities. It lists visible Districts that are unlocked, available, owned, manageable, contested, threatened, or operating at a loss, and exposes guarded absolute staffing commands for District and child Place garrisons. In C++, a player-facing Place is represented by `ATerritoryProperty`.
 
 It does not own territory, capture, guard, economy, diplomacy, assault, or save state. Every displayed value is derived from the existing authority and every mutation still passes through the authoritative gameplay API.
 
@@ -31,6 +31,7 @@ Narrative Pro's current `UNarrativeMenu` constructor is private, so it cannot be
 
 `BuildDistrictOperationsView` returns a viewer-relative snapshot containing:
 
+- City identity plus a visible `City -> District -> Place` hierarchy;
 - identity, owner, viewer faction, contesting faction, and territory state;
 - registration, lock, unlock, availability, capture eligibility, management eligibility, and exact failure reasons;
 - capture progress and known active attacker count;
@@ -46,6 +47,7 @@ Narrative Pro's current `UNarrativeMenu` constructor is private, so it cannot be
   attack priority, defence power, power ratio, and threat summary;
 - a separately labelled strongest-eligible projected threat when no assault is scheduled.
   Projection is planning data and never claims physical attackers exist.
+- the viewer/owner diplomacy state, reputation, war, alliance, and trade flags.
 
 The struct is a read-only projection. Pointer fields are transient UI references and are never campaign save data.
 
@@ -61,14 +63,14 @@ The struct is a read-only projection. Pointer fields are transient UI references
 
 | Filter | Meaning |
 |---|---|
-| `All` | Every registered district |
+| `All` | Every registered District in the developer/read-model API; the player journal adds hierarchy visibility rules |
 | `Unlocked` | District is not locked |
 | `Available` | Viewer can currently participate in capture |
 | `Owned` | Viewer faction owns the claimed district |
 | `Manageable` | Viewer owns it and satisfies management policy |
 | `UnderAttack` | Physical contest, non-terminal scheduled assault, or eligible projected threat |
 | `Contested` | Existing capture subsystem reports an active contest |
-| `Locked` | Territory is locked |
+| `Locked` | Territory is locked; intended for tools/debug screens, not the player journal |
 | `FinancialRisk` | Guard upkeep exceeds district income |
 | `Producing` | At least one production site is active or settled |
 | `ProductionBlocked` | At least one site has missing input, unavailable/full storage, or an invalid profile |
@@ -77,35 +79,40 @@ The struct is a read-only projection. Pointer fields are transient UI references
 
 `GetDistrictOperationsRevision` hashes every displayed authority used by the supplied list. The journal rebuilds when guards, capture, finance, lock state, or assault state changes, fixing the former stale-row bug where only item count and filter text invalidated the list.
 
-`DoesDistrictMatchSearch` applies case-insensitive AND-token matching across the complete player-facing projection: display name, stable Territory tag, owner, state, availability and lock reasons, threat/attacker data, and child garrison names/tags. The search field therefore filters the same rows that the directory actually renders rather than a separate count-only model.
+`DoesDistrictMatchSearch` applies case-insensitive AND-token matching across the complete player-facing projection: City, District, visible Place, stable Territory tags, owner, state, availability, diplomacy, threat/attacker data, and visible child-garrison names/tags. The search field therefore filters the same rows that the directory actually renders rather than a separate count-only model.
 
 ## District Command Center
 
-`WBP_HopTerritoryJournalWidget` is supplied as a responsive single-column command surface:
+`WBP_HopTerritoryJournalWidget` follows Narrative Pro's quest-journal information pattern in a three-column command surface:
 
-1. **Operations queues** show currently actionable Available/Unlocked Districts and,
-   separately, captured Districts controlled by the viewer.
-2. **District directory** exposes name, owner, state, and operations filters over every registered district projection.
-3. **District command** shows owner/state, availability and lock reason, Property
-   alignment, every local garrison, child-Property capture pressure, income/upkeep/net,
-   strongest diplomacy-eligible attacker, exact target, defence/power ratio,
-   grace/cooldown, finite force, probabilities, and approaches.
+1. **Operations queues** mirror Active/Completed quest lists: Available/Unlocked contains
+   actionable non-owned Districts; Captured/Owned contains Districts controlled by the viewer.
+2. **Territory directory** groups searchable visible Districts by City.
+3. **Selected Territory** keeps the important owner/state/capture header visible and divides
+   the rest into Overview, Places, Garrison, Economy, Production, Threats, and Diplomacy tabs.
 
-The command surface uses a fill-width shell with a 760-pixel desktop maximum. Below 800 pixels it fills the available width; at larger widths it remains centered. Operations queues, directory, and District command are stacked in the page scroll, while bounded list regions keep their own minimum heights. Long operational readouts use automatic wrapping, so the layout does not depend on a fixed 1920x1080 canvas or viewport scaling.
+The command surface uses a fill-width shell and bounded lists. Long operational readouts use automatic wrapping. Tabs keep security, finance, production, threat, and diplomacy information available without displaying every control at once. The root surface is translucent so the menu remains visually aligned with the project Narrative theme instead of creating an opaque black wall.
 
 The action and ownership predicates remain strict, while visibility is broader:
 
 ```text
 Available / Unlocked = registered AND unlocked AND currently available AND not owned by viewer
 Captured / Owned     = registered AND owned by viewer AND state is not Unclaimed
-Complete Directory   = every registered District (locked entries remain selectable)
+Player Directory     = registered AND this District and every parent are loaded and unlocked
 ```
 
 An unlocked District that is diplomatically blocked, defended, or otherwise unavailable
-is not counted as actionable. A registered locked District remains visible in the complete
-directory, where selecting it is read-only: server management
-remains disabled until exact ownership/claimed/capacity rules pass. An owned District
-cannot duplicate into the Available queue. Counts derive from the same row predicates.
+is not counted as actionable. A locked District does not appear in the player journal. A
+locked City hides its Districts and Places. A locked Place is omitted from the selected
+District's Places, garrison, production, finance, and threat projections. If a required parent
+is streamed out, the hierarchy fails closed and stays hidden until the parent is loaded and
+can be verified. An owned District cannot duplicate into the Available queue. Counts derive
+from the same row predicates.
+
+Easy example: `Old City -> Market District -> Blacksmith`. If Old City or Market District is
+locked by a quest condition, the player sees none of that branch. When the quest unlocks the
+District, Market District appears. If only Blacksmith remains locked, the District appears but
+Blacksmith does not appear in its Places or production list.
 
 Threat and capture details cascade from loaded same-owner child Properties. A Blacksmith
 assault therefore appears in Market Square even though the durable assault correctly
@@ -119,12 +126,12 @@ Clicking a responsive selection-only row selects that district and opens its com
 |---|---|
 | `W_TerritoryPlayerMenu` | Existing Narrative player menu with the Territory journal tab and a valid activation focus target |
 | `WBP_MainHopTerritoryJornal` | Narrative menu wrapper around the Territory journal; forwards activation focus to the inner widget |
-| `WBP_HopTerritoryJournalWidget` | Responsive stacked District Command Center with actionable/owned queues, searchable directory, selected-district controls, finance ledger, and exposure report |
+| `WBP_HopTerritoryJournalWidget` | Narrative-themed three-column command center with City-grouped available/owned queues, searchable visible directory, and seven selected-Territory detail tabs |
 | `WBP_TerritoryCommandRow` | Responsive project-styled Narrative CommonUI selection row used by all journal lists |
 | `WBP_TerritoryDistrictManagement` | In-world district command panel for guards, funds, income, production summary, availability, and threat status |
 | `WBP_TerritoryEconomyWidget` | Faction economy health plus bounded scrolling stockpile and production-site modules |
 | `WBP_TerritoryInfoWidget` | Passive current-territory status card with availability, threat, net income, and production status |
-| `WBP_TerritoryCaptureHUD` | Compact capture progress and contesting-faction projection; it never creates capture progress |
+| `WBP_TerritoryCaptureHUD` | Compact translucent capture card with name, state, owner, pressure, and progress; detailed descriptions stay in the Territory menu |
 | `WBP_TerritoryGameplayHUD_Modular` | Project-owned copy of Narrative's complete GameplayHUD template graph and tree, with the Territory capture HUD composed as a passive overlay |
 | `WBP_TerritoryResourceRow` | Reusable stockpile/input/output/net resource row |
 | `WBP_TerritoryProductionSiteRow` | Reusable production-site module that composes resource rows |
@@ -140,7 +147,13 @@ The supplied Economy widget constrains both dynamic row collections in scrolling
 
 `WBP_TerritoryButton_Text` is a project-owned duplicate of Narrative Pro's `WBP_NarrativeButton_Text`. It keeps `UNarrativeCommonButtonBase` behavior while removing the unused input-action block and vendor click animation. `ButtonStyle_TerritoryPrimary` and its Territory text styles provide the shared normal, hovered, pressed, selected, and disabled presentation.
 
-`UTerritoryDeveloperSettings::DefaultNarrativeButtonClass` and `DefaultTerritoryButtonStyle` are the runtime defaults for C++-generated controls. Static buttons in the journal, management panel, and command rows use the same project template. This keeps styling modular without duplicating CommonUI navigation or button behavior.
+`UTerritoryDeveloperSettings::DefaultNarrativeButtonClass`, `DefaultTerritoryButtonStyle`,
+`DefaultTerritoryTextStyle`, `TerritoryTitleTextStyle`, `TerritoryHeadingTextStyle`, and
+`TerritoryMutedTextStyle` are soft runtime defaults for C++-generated controls. Community
+projects work with Narrative Pro's base styles; a game can override them in Project Settings
+without changing Territory Framework source. Static buttons in the journal, management panel,
+and command rows use the same project template. This keeps styling modular without duplicating
+CommonUI navigation or button behavior.
 
 ## Guard commands and authority
 

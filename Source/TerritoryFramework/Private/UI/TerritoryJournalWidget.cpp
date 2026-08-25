@@ -25,15 +25,54 @@
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 #include "Widgets/NarrativeSpinBox.h"
+#include "CommonTextBlock.h"
 #include "TimerManager.h"
 
 namespace
 {
-	void StyleGeneratedTerritoryText(UTextBlock* Text, int32 FontSize, const FLinearColor& Color)
+	enum class ETerritoryGeneratedTextRole : uint8
+	{
+		Body,
+		Heading,
+		Muted
+	};
+
+	void StyleGeneratedTerritoryText(UTextBlock* Text, int32 FontSize,
+		const FLinearColor& Color,
+		ETerritoryGeneratedTextRole Role = ETerritoryGeneratedTextRole::Body)
 	{
 		if (!Text)
 		{
 			return;
+		}
+		if (UNarrativeCommonTextBlock* CommonText =
+			Cast<UNarrativeCommonTextBlock>(Text))
+		{
+			const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			TSubclassOf<UCommonTextStyle> Style;
+			if (Settings)
+			{
+				switch (Role)
+				{
+				case ETerritoryGeneratedTextRole::Heading:
+					Style = Settings->TerritoryHeadingTextStyle.LoadSynchronous();
+					break;
+				case ETerritoryGeneratedTextRole::Muted:
+					Style = Settings->TerritoryMutedTextStyle.LoadSynchronous();
+					break;
+				case ETerritoryGeneratedTextRole::Body:
+				default:
+					Style = Settings->DefaultTerritoryTextStyle.LoadSynchronous();
+					break;
+				}
+			}
+			if (Style)
+			{
+				CommonText->SetStyle(Style);
+				CommonText->SetAutoWrapText(true);
+				return;
+			}
 		}
 		FSlateFontInfo Font = Text->GetFont();
 		Font.Size = FontSize;
@@ -129,6 +168,41 @@ void UTerritoryJournalWidget::NativeConstruct()
 		Btn_LossTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleLossTabClicked);
 		Btn_LossTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "LossTab", "LOSSES"));
 	}
+	if (Btn_OverviewDetailTab)
+	{
+		Btn_OverviewDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleOverviewDetailTabClicked);
+		Btn_OverviewDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "OverviewDetailTab", "OVERVIEW"));
+	}
+	if (Btn_PlacesDetailTab)
+	{
+		Btn_PlacesDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandlePlacesDetailTabClicked);
+		Btn_PlacesDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "PlacesDetailTab", "PLACES"));
+	}
+	if (Btn_GarrisonDetailTab)
+	{
+		Btn_GarrisonDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleGarrisonDetailTabClicked);
+		Btn_GarrisonDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "GarrisonDetailTab", "GARRISON"));
+	}
+	if (Btn_EconomyDetailTab)
+	{
+		Btn_EconomyDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleEconomyDetailTabClicked);
+		Btn_EconomyDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "EconomyDetailTab", "ECONOMY"));
+	}
+	if (Btn_ProductionDetailTab)
+	{
+		Btn_ProductionDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleProductionDetailTabClicked);
+		Btn_ProductionDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "ProductionDetailTab", "PRODUCTION"));
+	}
+	if (Btn_ThreatsDetailTab)
+	{
+		Btn_ThreatsDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleThreatsDetailTabClicked);
+		Btn_ThreatsDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "ThreatsDetailTab", "THREATS"));
+	}
+	if (Btn_DiplomacyDetailTab)
+	{
+		Btn_DiplomacyDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleDiplomacyDetailTabClicked);
+		Btn_DiplomacyDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "DiplomacyDetailTab", "DIPLOMACY"));
+	}
 	if (Btn_CommandAddGuard)
 	{
 		Btn_CommandAddGuard->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleCommandAddGuardClicked);
@@ -171,6 +245,7 @@ void UTerritoryJournalWidget::NativeConstruct()
 	BindTerritoryDelegates();
 	BindManagementComponent();
 	RefreshFilterOptions();
+	SetSelectedDetailTab(SelectedDetailTab);
 	RefreshDistrictList();
 
 	if (UWorld* World = GetWorld())
@@ -198,6 +273,13 @@ void UTerritoryJournalWidget::NativeDestruct()
 	{
 		Btn_LossTab->OnClicked().RemoveAll(this);
 	}
+	if (Btn_OverviewDetailTab) Btn_OverviewDetailTab->OnClicked().RemoveAll(this);
+	if (Btn_PlacesDetailTab) Btn_PlacesDetailTab->OnClicked().RemoveAll(this);
+	if (Btn_GarrisonDetailTab) Btn_GarrisonDetailTab->OnClicked().RemoveAll(this);
+	if (Btn_EconomyDetailTab) Btn_EconomyDetailTab->OnClicked().RemoveAll(this);
+	if (Btn_ProductionDetailTab) Btn_ProductionDetailTab->OnClicked().RemoveAll(this);
+	if (Btn_ThreatsDetailTab) Btn_ThreatsDetailTab->OnClicked().RemoveAll(this);
+	if (Btn_DiplomacyDetailTab) Btn_DiplomacyDetailTab->OnClicked().RemoveAll(this);
 	if (Btn_CommandAddGuard) Btn_CommandAddGuard->OnClicked().RemoveAll(this);
 	if (Btn_CommandRemoveGuard) Btn_CommandRemoveGuard->OnClicked().RemoveAll(this);
 	if (Btn_CommandAddFiveGuards) Btn_CommandAddFiveGuards->OnClicked().RemoveAll(this);
@@ -678,7 +760,9 @@ void UTerritoryJournalWidget::SubmitSelectedGuardTarget(int32 NewDesiredGuardCou
 
 void UTerritoryJournalWidget::RefreshFilterOptions()
 {
-	TArray<ATerritoryDistrict*> Districts = UTerritoryBlueprintLibrary::GetAllDistricts(this);
+	const TArray<FTerritoryDistrictOperationsView> VisibleViews =
+		UTerritoryUIBlueprintLibrary::GetPlayerVisibleDistrictOperationsViews(
+			this, GetOwningPlayer(), ETerritoryOperationsFilter::All);
 
 	if (!bFiltersInitialized)
 	{
@@ -707,7 +791,6 @@ void UTerritoryJournalWidget::RefreshFilterOptions()
 		DistrictOperationalFilter->AddOption(ManageableOption);
 		DistrictOperationalFilter->AddOption(UnderAttackOption);
 		DistrictOperationalFilter->AddOption(ContestedOption);
-		DistrictOperationalFilter->AddOption(LockedOption);
 		DistrictOperationalFilter->AddOption(FinancialRiskOption);
 		DistrictOperationalFilter->AddOption(ProducingOption);
 		DistrictOperationalFilter->AddOption(ProductionBlockedOption);
@@ -717,8 +800,9 @@ void UTerritoryJournalWidget::RefreshFilterOptions()
 
 	TSet<FString> OwnerNames;
 	TSet<FString> StateNames;
-	for (ATerritoryDistrict* District : Districts)
+	for (const FTerritoryDistrictOperationsView& View : VisibleViews)
 	{
+		ATerritoryDistrict* District = View.District;
 		if (!District)
 		{
 			continue;
@@ -745,6 +829,10 @@ void UTerritoryJournalWidget::RefreshFilterOptions()
 				DistrictStateFilter->AddOption(StateName);
 			}
 		}
+	}
+	if (SelectedOperationsFilter == ETerritoryOperationsFilter::Locked)
+	{
+		SelectedOperationsFilter = ETerritoryOperationsFilter::All;
 	}
 
 	// CommonUI-backed controls may synchronously broadcast selection changes.
@@ -804,7 +892,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	// Include every displayed authority in the revision. Count+filter caching left guard,
 	// economy, capture, and assault rows stale whenever the number of districts was stable.
 	const TArray<FTerritoryDistrictOperationsView> AllViews =
-		UTerritoryUIBlueprintLibrary::GetDistrictOperationsViews(
+		UTerritoryUIBlueprintLibrary::GetPlayerVisibleDistrictOperationsViews(
 			this, GetOwningPlayer(), ETerritoryOperationsFilter::All);
 	uint32 Revision = GetTypeHash(SelectedOwnerFilter);
 	Revision = HashCombineFast(Revision, GetTypeHash(SelectedStateFilter));
@@ -827,9 +915,10 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	}
 
 	int32 VisibleCount = 0;
-	int32 LockedVisibleCount = 0;
 	ATerritoryDistrict* FirstVisibleDistrict = nullptr;
 	bool bSelectedStillVisible = false;
+	FGameplayTag LastDirectoryCity;
+	bool bHasDirectoryHeading = false;
 	for (const FTerritoryDistrictOperationsView& View : AllViews)
 	{
 		if (!PassesFilters(View))
@@ -843,10 +932,23 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 		}
 		bSelectedStillVisible |= SelectedDistrict.Get() == View.District;
 		++VisibleCount;
-		LockedVisibleCount += View.bUnlocked ? 0 : 1;
 
 		if (DistrictList)
 		{
+			if (!bHasDirectoryHeading || View.CityTag != LastDirectoryCity)
+			{
+				const FText CityName = View.CityDisplayName.IsEmpty()
+					? NSLOCTEXT("TerritoryJournal", "IndependentDistricts", "INDEPENDENT DISTRICTS")
+					: View.CityDisplayName;
+				if (UTextBlock* Heading = CreateHierarchyTextRow(
+					FText::Format(NSLOCTEXT("TerritoryJournal", "CityDirectoryHeading", "CITY  /  {0}"), CityName),
+					FName(*FString::Printf(TEXT("DirectoryCity_%u"), GetTypeHash(View.CityTag))), true))
+				{
+					DistrictList->AddChild(Heading);
+				}
+				LastDirectoryCity = View.CityTag;
+				bHasDirectoryHeading = true;
+			}
 			if (UTerritoryDistrictRowWidget* Row = CreateOperationsRow(View))
 			{
 				DistrictList->AddChild(Row);
@@ -877,8 +979,8 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	if (Text_FilterSummary)
 	{
 		Text_FilterSummary->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "FilterSummary", "{0} districts  |  {1} locked but selectable"),
-			FText::AsNumber(VisibleCount), FText::AsNumber(LockedVisibleCount)));
+			NSLOCTEXT("TerritoryJournal", "FilterSummary", "{0} visible districts  |  City > District > Place"),
+			FText::AsNumber(VisibleCount)));
 	}
 	RefreshOperationalSummaries(AllViews);
 }
@@ -901,6 +1003,142 @@ UTerritoryDistrictRowWidget* UTerritoryJournalWidget::CreateOperationsRow(
 	return Row;
 }
 
+UTextBlock* UTerritoryJournalWidget::CreateHierarchyTextRow(
+	const FText& Text, FName WidgetName, bool bHeading)
+{
+	if (!WidgetTree)
+	{
+		return nullptr;
+	}
+	UNarrativeCommonTextBlock* Row = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), WidgetName);
+	Row->SetText(Text);
+	StyleGeneratedTerritoryText(Row, bHeading ? 15 : 13,
+		bHeading ? FLinearColor(0.96f, 0.72f, 0.38f, 1.f)
+			: FLinearColor(0.88f, 0.9f, 0.88f, 1.f),
+		bHeading ? ETerritoryGeneratedTextRole::Heading
+			: ETerritoryGeneratedTextRole::Body);
+	return Row;
+}
+
+void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
+	const FTerritoryDistrictOperationsView& View)
+{
+	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
+	auto GetStateText = [StateEnum](ETerritoryState State)
+	{
+		return StateEnum
+			? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(State))
+			: FText::GetEmpty();
+	};
+
+	const FText CityName = View.CityDisplayName.IsEmpty()
+		? NSLOCTEXT("TerritoryJournal", "IndependentCity", "Independent")
+		: View.CityDisplayName;
+	if (Text_CommandHierarchy)
+	{
+		Text_CommandHierarchy->SetText(FText::Format(
+			NSLOCTEXT("TerritoryJournal", "SelectedHierarchy", "CITY  {0}   >   DISTRICT  {1}"),
+			CityName, View.DisplayName));
+	}
+	if (Text_CommandOverview)
+	{
+		Text_CommandOverview->SetText(FText::Format(
+			NSLOCTEXT("TerritoryJournal", "SelectedOverview",
+				"Owner: {0}\nState: {1}\nVisible Places: {2}\nControl pressure: {3}%\n{4}"),
+			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.OwnerFaction),
+			GetStateText(View.TerritoryState),
+			FText::AsNumber(View.VisiblePlaces.Num()),
+			FText::AsNumber(FMath::RoundToInt(View.CaptureProgress * 100.f)),
+			View.AvailabilityReason));
+	}
+	if (Text_CommandDiplomacy)
+	{
+		Text_CommandDiplomacy->SetText(FText::Format(
+			NSLOCTEXT("TerritoryJournal", "SelectedDiplomacy",
+				"{0}\nWar: {1}  |  Allied: {2}  |  Trade: {3}"),
+			View.DiplomacySummary,
+			View.bViewerAtWarWithOwner
+				? NSLOCTEXT("TerritoryJournal", "Yes", "Yes")
+				: NSLOCTEXT("TerritoryJournal", "No", "No"),
+			View.bViewerAlliedWithOwner
+				? NSLOCTEXT("TerritoryJournal", "YesAllied", "Yes")
+				: NSLOCTEXT("TerritoryJournal", "NoAllied", "No"),
+			View.bViewerTradesWithOwner
+				? NSLOCTEXT("TerritoryJournal", "YesTrade", "Yes")
+				: NSLOCTEXT("TerritoryJournal", "NoTrade", "No")));
+	}
+
+	if (PlaceHierarchyList)
+	{
+		PlaceHierarchyList->ClearChildren();
+		if (View.VisiblePlaces.IsEmpty())
+		{
+			if (UTextBlock* Empty = CreateHierarchyTextRow(
+				NSLOCTEXT("TerritoryJournal", "NoVisiblePlaces",
+					"No unlocked loaded Places are visible in this District."),
+				TEXT("NoVisiblePlaces")))
+			{
+				PlaceHierarchyList->AddChild(Empty);
+			}
+		}
+		for (const FTerritoryHierarchyOperationsView& Place : View.VisiblePlaces)
+		{
+			const FText PlaceText = FText::Format(
+				NSLOCTEXT("TerritoryJournal", "PlaceHierarchyRow",
+					"PLACE  /  {0}\nOwner {1}  |  {2}\nGuards {3}/{4}/{5}  |  Net {6}"),
+				Place.DisplayName,
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Place.OwnerFaction),
+				GetStateText(Place.TerritoryState),
+				FText::AsNumber(Place.ActiveGuards), FText::AsNumber(Place.DesiredGuards),
+				FText::AsNumber(Place.MaximumGuards), FText::AsNumber(Place.NetIncome));
+			if (UTextBlock* Row = CreateHierarchyTextRow(PlaceText,
+				FName(*FString::Printf(TEXT("Place_%u"), GetTypeHash(Place.TerritoryTag)))))
+			{
+				PlaceHierarchyList->AddChild(Row);
+			}
+		}
+	}
+
+	if (ProductionHierarchyList)
+	{
+		ProductionHierarchyList->ClearChildren();
+		if (View.ProductionSites.IsEmpty())
+		{
+			if (UTextBlock* Empty = CreateHierarchyTextRow(
+				NSLOCTEXT("TerritoryJournal", "NoVisibleProduction",
+					"No visible Place has an active production profile."),
+				TEXT("NoVisibleProduction")))
+			{
+				ProductionHierarchyList->AddChild(Empty);
+			}
+		}
+		for (const FTerritoryProductionSiteOperationsView& Site : View.ProductionSites)
+		{
+			TArray<FString> ResourceLines;
+			for (const FTerritoryResourceOperationsView& Resource : Site.Resources)
+			{
+				ResourceLines.Add(FString::Printf(TEXT("%s %+d/cycle"),
+					*Resource.DisplayName.ToString(), Resource.NetPerCycle));
+			}
+			const FText SiteText = FText::Format(
+				NSLOCTEXT("TerritoryJournal", "ProductionHierarchyRow",
+					"{0}\n{1}  |  {2}\n{3}"),
+				Site.DisplayName,
+				UTerritoryUIBlueprintLibrary::GetProductionStatusText(Site.Status),
+				Site.StatusReason,
+				FText::FromString(ResourceLines.IsEmpty()
+					? FString(TEXT("No resource flow."))
+					: FString::Join(ResourceLines, TEXT("  |  "))));
+			if (UTextBlock* Row = CreateHierarchyTextRow(SiteText,
+				FName(*FString::Printf(TEXT("Production_%u"), GetTypeHash(Site.TerritoryTag)))))
+			{
+				ProductionHierarchyList->AddChild(Row);
+			}
+		}
+	}
+}
+
 void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* District)
 {
 	SelectedDistrict = District;
@@ -911,6 +1149,11 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 		GarrisonTargetOrder.Empty();
 		if (GarrisonTargetSelector) GarrisonTargetSelector->ClearOptions();
 		if (GuardTargetSpinBox) GuardTargetSpinBox->SetIsEnabled(false);
+		if (PlaceHierarchyList) PlaceHierarchyList->ClearChildren();
+		if (ProductionHierarchyList) ProductionHierarchyList->ClearChildren();
+		if (Text_CommandHierarchy) Text_CommandHierarchy->SetText(FText::GetEmpty());
+		if (Text_CommandOverview) Text_CommandOverview->SetText(FText::GetEmpty());
+		if (Text_CommandDiplomacy) Text_CommandDiplomacy->SetText(FText::GetEmpty());
 		UpdateGarrisonTargetPreview();
 		if (Text_EmptySelection)
 		{
@@ -934,6 +1177,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 		return;
 	}
 	RefreshGarrisonManagementControls(View);
+	RefreshSelectedHierarchyPanels(View);
 
 	if (Text_EmptySelection)
 	{
@@ -941,7 +1185,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	}
 	if (Text_SelectedEyebrow)
 	{
-		Text_SelectedEyebrow->SetText(NSLOCTEXT("TerritoryJournal", "SelectedEyebrow", "DISTRICT COMMAND"));
+		Text_SelectedEyebrow->SetText(NSLOCTEXT("TerritoryJournal", "SelectedEyebrow", "TERRITORY CONTROL"));
 	}
 	if (QuestTitle)
 	{
@@ -1217,6 +1461,10 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	int32 RiskCount = 0;
 	int32 GuardShortfall = 0;
 	FGameplayTag ViewerFaction;
+	FGameplayTag LastAvailableCity;
+	FGameplayTag LastOwnedCity;
+	bool bHasAvailableCityHeading = false;
+	bool bHasOwnedCityHeading = false;
 	for (const FTerritoryDistrictOperationsView& View : Views)
 	{
 		if (!ViewerFaction.IsValid()) ViewerFaction = View.ViewerFaction;
@@ -1235,6 +1483,20 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 			++AvailableQueueCount;
 			if (ActiveQuestsBox)
 			{
+				if (!bHasAvailableCityHeading || View.CityTag != LastAvailableCity)
+				{
+					const FText CityName = View.CityDisplayName.IsEmpty()
+						? NSLOCTEXT("TerritoryJournal", "AvailableIndependentDistricts", "INDEPENDENT DISTRICTS")
+						: View.CityDisplayName;
+					if (UTextBlock* Heading = CreateHierarchyTextRow(
+						CityName,
+						FName(*FString::Printf(TEXT("AvailableCity_%u"), GetTypeHash(View.CityTag))), true))
+					{
+						ActiveQuestsBox->AddChild(Heading);
+					}
+					LastAvailableCity = View.CityTag;
+					bHasAvailableCityHeading = true;
+				}
 				if (UTerritoryDistrictRowWidget* Row = CreateOperationsRow(View))
 				{
 					ActiveQuestsBox->AddChild(Row);
@@ -1247,6 +1509,20 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 			GuardShortfall += FMath::Max(0, View.DesiredGuards - View.ActiveGuards);
 			if (FinishedQuestsBox)
 			{
+				if (!bHasOwnedCityHeading || View.CityTag != LastOwnedCity)
+				{
+					const FText CityName = View.CityDisplayName.IsEmpty()
+						? NSLOCTEXT("TerritoryJournal", "OwnedIndependentDistricts", "INDEPENDENT DISTRICTS")
+						: View.CityDisplayName;
+					if (UTextBlock* Heading = CreateHierarchyTextRow(
+						CityName,
+						FName(*FString::Printf(TEXT("OwnedCity_%u"), GetTypeHash(View.CityTag))), true))
+					{
+						FinishedQuestsBox->AddChild(Heading);
+					}
+					LastOwnedCity = View.CityTag;
+					bHasOwnedCityHeading = true;
+				}
 				if (UTerritoryDistrictRowWidget* Row = CreateOperationsRow(View))
 				{
 					FinishedQuestsBox->AddChild(Row);
@@ -1407,6 +1683,66 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 			FText::AsNumber(Economy.NetPerTick), FText::AsNumber(GuardShortfall),
 			FText::AsNumber(ThreatCount), FText::AsNumber(AvailableCount), TransactionAudit));
 	}
+}
+
+void UTerritoryJournalWidget::SetSelectedDetailTab(int32 TabIndex)
+{
+	SelectedDetailTab = FMath::Clamp(TabIndex, 0, 6);
+	if (CommandDetailSwitcher)
+	{
+		CommandDetailSwitcher->SetActiveWidgetIndex(SelectedDetailTab);
+	}
+	const TArray<UNarrativeCommonButtonBase*> Buttons = {
+		Btn_OverviewDetailTab,
+		Btn_PlacesDetailTab,
+		Btn_GarrisonDetailTab,
+		Btn_EconomyDetailTab,
+		Btn_ProductionDetailTab,
+		Btn_ThreatsDetailTab,
+		Btn_DiplomacyDetailTab
+	};
+	for (int32 Index = 0; Index < Buttons.Num(); ++Index)
+	{
+		if (Buttons[Index])
+		{
+			Buttons[Index]->SetIsSelected(Index == SelectedDetailTab);
+		}
+	}
+}
+
+void UTerritoryJournalWidget::HandleOverviewDetailTabClicked()
+{
+	SetSelectedDetailTab(0);
+}
+
+void UTerritoryJournalWidget::HandlePlacesDetailTabClicked()
+{
+	SetSelectedDetailTab(1);
+}
+
+void UTerritoryJournalWidget::HandleGarrisonDetailTabClicked()
+{
+	SetSelectedDetailTab(2);
+}
+
+void UTerritoryJournalWidget::HandleEconomyDetailTabClicked()
+{
+	SetSelectedDetailTab(3);
+}
+
+void UTerritoryJournalWidget::HandleProductionDetailTabClicked()
+{
+	SetSelectedDetailTab(4);
+}
+
+void UTerritoryJournalWidget::HandleThreatsDetailTabClicked()
+{
+	SetSelectedDetailTab(5);
+}
+
+void UTerritoryJournalWidget::HandleDiplomacyDetailTabClicked()
+{
+	SetSelectedDetailTab(6);
 }
 
 void UTerritoryJournalWidget::HandleTerritoryTabClicked()

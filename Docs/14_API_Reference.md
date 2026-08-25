@@ -823,15 +823,20 @@ Shared read-model and Narrative CommonUI bridge. It owns no gameplay state.
 |---|---|---|
 | OpenTerritoryMenu | UTerritoryActivatableWidget* | Push a Territory screen into a registered Narrative HUD layer |
 | BuildDistrictOperationsView | bool + OutView | Build one viewer-relative district projection |
+| BuildHierarchyOperationsView | bool + OutView | Build one City, District, or Place projection |
+| IsTerritoryVisibleToPlayer | bool | Require the Territory and every loaded parent to be registered and unlocked |
+| GetDistrictHierarchyOperationsViews | Array<HierarchyView> | Visible City -> District -> Place branch |
 | BuildGarrisonOperationsView | bool + OutView | Build one independently managed District/Property garrison and local P&L |
 | GetDistrictGarrisonOperationsViews | Array<GarrisonView> | District garrison plus loaded registered child Properties |
 | GetDistrictOperationsViews | Array<View> | List districts matching an operational filter |
+| GetPlayerVisibleDistrictOperationsViews | Array<View> | Player-safe City-grouped District list with locked/unloaded parent branches removed |
 | DoesDistrictMatchFilter | bool | Evaluate one projection against a filter |
 | GetDistrictOperationsRevision | int32 | Hash all displayed state used for list invalidation |
 | BuildEconomyOperationsView | EconomyView | Narrative funds plus Territory income/cost/activity projection |
 | GetProductionStatusText | FText | Localizable production-state label |
 | GetThreatLevelText | FText | Localizable threat label |
 | GetAssaultStateText | FText | Localizable assault-state label |
+| GetDiplomacyStateText | FText | Localizable diplomacy-state label |
 
 `ETerritoryOperationsFilter` values are All, Unlocked, Available, Owned, Manageable, UnderAttack, Contested, Locked, FinancialRisk, Producing, ProductionBlocked, MissingInputs, and StorageFull. `ETerritoryThreatLevel` values are None, Watch, Warning, and Critical.
 
@@ -847,7 +852,11 @@ Narrative-activatable operations dashboard.
 | SetOperationsFilter | void | Apply the viewer-relative operational filter |
 | GetSelectedDistrictOperationsView | View | Current detail/security/finance/threat projection |
 
-The supplied widget populates unlocked/active, captured/owned, earnings, loss/threat, and transaction-audit lists. Its selector/target/Apply/0/Max controls and delta shortcuts route through `UTerritoryPlayerManagementComponent` and can manage child Property garrisons.
+The supplied widget populates visible unlocked/active and captured/owned lists, groups the
+directory by City, and provides Overview, Places, Garrison, Economy, Production, Threats, and
+Diplomacy selected-detail tabs. Locked hierarchy branches never enter the player lists. Its
+selector/target/Apply/0/Max controls and delta shortcuts route through
+`UTerritoryPlayerManagementComponent` and can manage visible child Property garrisons.
 
 ---
 

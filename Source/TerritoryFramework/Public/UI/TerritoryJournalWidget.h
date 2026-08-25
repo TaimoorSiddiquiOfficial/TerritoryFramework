@@ -117,6 +117,46 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_CommandStatus;
 
+	/** Selected District controls, organized like Narrative's selected Quest details. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UWidgetSwitcher> CommandDetailSwitcher;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_OverviewDetailTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_PlacesDetailTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_GarrisonDetailTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_EconomyDetailTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_ProductionDetailTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_ThreatsDetailTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_DiplomacyDetailTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_CommandHierarchy;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_CommandOverview;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UVerticalBox> PlaceHierarchyList;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UVerticalBox> ProductionHierarchyList;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_CommandDiplomacy;
+
 	/** Command-center KPI cards. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_AvailableUnlockedCount;
@@ -250,6 +290,7 @@ private:
 	bool bFiltersInitialized = false;
 	bool bResponsiveLayoutApplied = false;
 	bool bCompactResponsiveLayout = false;
+	int32 SelectedDetailTab = 0;
 	int32 LastOperationsRevision = INDEX_NONE;
 	FTimerHandle RefreshTimerHandle;
 
@@ -263,6 +304,9 @@ private:
 	void SelectRelativeGarrisonTarget(int32 Direction);
 	void SubmitSelectedGuardTarget(int32 NewDesiredGuardCount);
 	void UpdateSelectedDistrict(ATerritoryDistrict* District);
+	void RefreshSelectedHierarchyPanels(const FTerritoryDistrictOperationsView& View);
+	void SetSelectedDetailTab(int32 TabIndex);
+	UTextBlock* CreateHierarchyTextRow(const FText& Text, FName WidgetName, bool bHeading = false);
 	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
 	UTerritoryDistrictRowWidget* CreateOperationsRow(const FTerritoryDistrictOperationsView& View);
 	bool PassesFilters(const FTerritoryDistrictOperationsView& View) const;
@@ -275,6 +319,27 @@ private:
 
 	UFUNCTION()
 	void HandleLossTabClicked();
+
+	UFUNCTION()
+	void HandleOverviewDetailTabClicked();
+
+	UFUNCTION()
+	void HandlePlacesDetailTabClicked();
+
+	UFUNCTION()
+	void HandleGarrisonDetailTabClicked();
+
+	UFUNCTION()
+	void HandleEconomyDetailTabClicked();
+
+	UFUNCTION()
+	void HandleProductionDetailTabClicked();
+
+	UFUNCTION()
+	void HandleThreatsDetailTabClicked();
+
+	UFUNCTION()
+	void HandleDiplomacyDetailTabClicked();
 
 	UFUNCTION()
 	void HandleSearchChanged(const FText& Text);
