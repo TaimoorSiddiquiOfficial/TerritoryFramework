@@ -100,12 +100,18 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 
 	UVerticalBox* Copy = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("LiveEventCopy"));
+	ReportMetaText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventReportMeta"));
 	HeadlineText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventHeadline"));
 	DetailText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventDetail"));
+	ImpactText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventImpact"));
+	Copy->AddChildToVerticalBox(ReportMetaText);
 	Copy->AddChildToVerticalBox(HeadlineText);
 	Copy->AddChildToVerticalBox(DetailText);
+	Copy->AddChildToVerticalBox(ImpactText);
 	if (UHorizontalBoxSlot* CopySlot = Row->AddChildToHorizontalBox(Copy))
 	{
 		CopySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -141,7 +147,21 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 
 void UTerritoryLiveEventRowWidget::RefreshEvent()
 {
-	const FLinearColor Active = FLinearColor(0.08f, 0.88f, 0.62f, 1.f);
+	FLinearColor Active = FLinearColor(0.20f, 0.72f, 0.95f, 1.f);
+	switch (LiveEvent.Severity)
+	{
+	case ETerritoryIntelligenceSeverity::Positive:
+		Active = FLinearColor(0.08f, 0.88f, 0.62f, 1.f);
+		break;
+	case ETerritoryIntelligenceSeverity::Warning:
+		Active = FLinearColor(1.f, 0.72f, 0.16f, 1.f);
+		break;
+	case ETerritoryIntelligenceSeverity::Critical:
+		Active = FLinearColor(0.96f, 0.22f, 0.18f, 1.f);
+		break;
+	default:
+		break;
+	}
 	const FLinearColor Muted = FLinearColor(0.38f, 0.43f, 0.42f, 0.72f);
 	const FLinearColor Accent = LiveEvent.bExpired ? Muted : Active;
 	SetLiveEventSurface(EventSurface,
@@ -161,16 +181,64 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 		SetLiveEventText(HeadlineText, 14,
 			LiveEvent.bExpired ? Muted : FLinearColor(0.96f, 0.95f, 0.91f, 1.f));
 	}
+	if (ReportMetaText)
+	{
+		const UEnum* CategoryEnum = StaticEnum<ETerritoryIntelligenceCategory>();
+		const UEnum* SeverityEnum = StaticEnum<ETerritoryIntelligenceSeverity>();
+		const FText CategoryDisplayText = CategoryEnum
+			? CategoryEnum->GetDisplayNameTextByValue(
+				static_cast<int64>(LiveEvent.Category)) : FText::GetEmpty();
+		const FText SeverityName = SeverityEnum
+			? SeverityEnum->GetDisplayNameTextByValue(
+				static_cast<int64>(LiveEvent.Severity)) : FText::GetEmpty();
+		ReportMetaText->SetText(LiveEvent.Sequence > 0
+			? FText::Format(NSLOCTEXT("TerritoryIntelligence", "ReportMeta",
+				"{0}  •  {1}  •  REPORT {2}"), CategoryDisplayText,
+				SeverityName, FText::AsNumber(LiveEvent.Sequence))
+			: FText::Format(NSLOCTEXT("TerritoryIntelligence", "ArchiveMeta",
+				"{0}  •  {1}  •  DURABLE ARCHIVE"),
+				CategoryDisplayText, SeverityName));
+		SetLiveEventText(ReportMetaText, 9, LiveEvent.bExpired ? Muted : Active);
+	}
 	if (DetailText)
 	{
 		DetailText->SetText(LiveEvent.Detail);
 		SetLiveEventText(DetailText, 11,
 			LiveEvent.bExpired ? Muted : FLinearColor(0.66f, 0.65f, 0.61f, 1.f));
 	}
+	if (ImpactText)
+	{
+		TArray<FString> Impacts;
+		if (LiveEvent.IncomeDelta != 0)
+		{
+			Impacts.Add(FString::Printf(TEXT("INCOME %+lld / CYCLE"),
+				static_cast<long long>(LiveEvent.IncomeDelta)));
+		}
+		if (LiveEvent.UpkeepDelta != 0)
+		{
+			Impacts.Add(FString::Printf(TEXT("UPKEEP %+lld / CYCLE"),
+				static_cast<long long>(LiveEvent.UpkeepDelta)));
+		}
+		if (LiveEvent.CurrencyDelta != 0)
+		{
+			Impacts.Add(FString::Printf(TEXT("FUNDS %+lld"),
+				static_cast<long long>(LiveEvent.CurrencyDelta)));
+		}
+		TArray<FGameplayTag> CapabilityTags;
+		LiveEvent.CommandCapabilities.GetGameplayTagArray(CapabilityTags);
+		for (const FGameplayTag& Capability : CapabilityTags)
+		{
+			Impacts.Add(Capability.ToString());
+		}
+		ImpactText->SetText(FText::FromString(FString::Join(Impacts, TEXT("  •  "))));
+		ImpactText->SetVisibility(Impacts.IsEmpty()
+			? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+		SetLiveEventText(ImpactText, 9, LiveEvent.bExpired ? Muted : Active);
+	}
 	if (WaypointButton)
 	{
 		const bool bEnabled = LiveEvent.bCanSetWaypoint
-			&& LiveEvent.TerritoryTag.IsValid() && !LiveEvent.bExpired;
+			&& LiveEvent.TerritoryTag.IsValid();
 		WaypointButton->SetIsEnabled(bEnabled);
 		WaypointButton->SetVisibility(LiveEvent.bCanSetWaypoint
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -179,8 +247,7 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 
 void UTerritoryLiveEventRowWidget::HandleWaypointClicked()
 {
-	if (LiveEvent.bCanSetWaypoint && !LiveEvent.bExpired
-		&& LiveEvent.TerritoryTag.IsValid())
+	if (LiveEvent.bCanSetWaypoint && LiveEvent.TerritoryTag.IsValid())
 	{
 		OnWaypointRequested.Broadcast(LiveEvent.TerritoryTag);
 	}

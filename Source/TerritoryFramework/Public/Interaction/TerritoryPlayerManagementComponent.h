@@ -3,8 +3,11 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
+#include "NarrativeSavableComponent.h"
+#include "Core/TerritoryDiplomacyTypes.h"
 #include "Core/TerritoryTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
+#include "Economy/TerritoryProductionProfile.h"
 #include "UI/TerritoryLiveEventTypes.h"
 #include "TerritoryPlayerManagementComponent.generated.h"
 
@@ -20,7 +23,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryAssaultNotification,
 
 /** Owned client-to-server bridge for district management actions. */
 UCLASS(ClassGroup=(Territory), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
-class TERRITORYFRAMEWORK_API UTerritoryPlayerManagementComponent : public UActorComponent
+class TERRITORYFRAMEWORK_API UTerritoryPlayerManagementComponent : public UActorComponent,
+	public INarrativeSavableComponent
 {
 	GENERATED_BODY()
 
@@ -28,6 +32,8 @@ public:
 	UTerritoryPlayerManagementComponent();
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void PrepareForSave_Implementation() override;
+	virtual void Load_Implementation() override;
 
 	/** Ensures the owned bridge exists on a player controller for framework-only projects. */
 	static UTerritoryPlayerManagementComponent* FindOrCreateForPlayerController(APlayerController* PlayerController);
@@ -49,24 +55,32 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Live Events")
 	FOnTerritoryLiveEventsChanged OnLiveEventsChanged;
 
-	/** Newest-first session history. Expired entries are muted, then retired after the retention window. */
+	/** Newest-first Territory intelligence archive for this player's campaign. */
 	UFUNCTION(BlueprintPure, Category="Territory|Live Events")
 	TArray<FTerritoryLiveEvent> GetLiveEvents(bool bIncludeExpired = true) const;
+
+	/** Filtered Command Center databank query. Expired means archived, not invalid. */
+	UFUNCTION(BlueprintPure, Category="Territory|Live Events")
+	TArray<FTerritoryLiveEvent> GetTerritoryIntelligence(
+		ETerritoryIntelligenceFilter Filter = ETerritoryIntelligenceFilter::All,
+		bool bIncludeArchived = true) const;
 
 	UFUNCTION(BlueprintCallable, Category="Territory|Live Events")
 	void ClearExpiredLiveEvents();
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Live Events",
-		meta=(ClampMin="1", ClampMax="200"))
-	int32 MaxLiveEventHistory = 40;
+		meta=(ClampMin="1", ClampMax="500",
+			ToolTip="Maximum Territory intelligence reports retained for this player during the current campaign session."))
+	int32 MaxLiveEventHistory = 200;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Live Events",
 		meta=(ClampMin="1.0"))
 	float LiveEventActiveDuration = 30.f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Live Events",
-		meta=(ClampMin="30.0"))
-	float ExpiredEventRetentionDuration = 300.f;
+		meta=(ClampMin="-1.0",
+			ToolTip="Seconds to keep archived reports. -1 keeps them until the history limit is reached; 0 retires them immediately."))
+	float ExpiredEventRetentionDuration = -1.f;
 
 	/** Server-side targeted notification route for this owning controller only. */
 	void SendAssaultNotification(const FTerritoryAssaultRecord& Assault);
@@ -117,10 +131,13 @@ public:
 	FGameplayTag GetManagedFaction() const;
 
 private:
-	UPROPERTY(Transient)
+	/** Narrative Save System persists the bounded campaign archive on a savable player controller. */
+	UPROPERTY(SaveGame)
 	TArray<FTerritoryLiveEvent> LiveEvents;
 
 	TMap<TWeakObjectPtr<ATerritoryVolume>, ETerritoryState> ObservedTerritoryStates;
+	TMap<TWeakObjectPtr<ATerritoryVolume>, FGameplayTagContainer> ObservedTerritoryCapabilities;
+	int32 NextIntelligenceSequence = 0;
 
 	void BindLiveEventSources();
 	void UnbindLiveEventSources();
@@ -128,9 +145,22 @@ private:
 	void UnbindTerritoryLiveEvents(ATerritoryVolume* Territory);
 	void AddLiveEvent(ETerritoryLiveEventType Type, const FGameplayTag& TerritoryTag,
 		const FText& Headline, const FText& Detail, bool bCanSetWaypoint,
-		float ActiveDuration = -1.f);
+		float ActiveDuration = -1.f,
+		ETerritoryIntelligenceCategory Category = ETerritoryIntelligenceCategory::Control,
+		ETerritoryIntelligenceSeverity Severity = ETerritoryIntelligenceSeverity::Information,
+		FGameplayTag SourceFaction = FGameplayTag(),
+		FGameplayTag TargetFaction = FGameplayTag(),
+		FGameplayTagContainer CommandCapabilities = FGameplayTagContainer(),
+		int64 IncomeDelta = 0, int64 UpkeepDelta = 0, int64 CurrencyDelta = 0,
+		bool bShowHUDNotification = true, FGuid SourceRecordID = FGuid());
 	FText ResolveTerritoryName(const FGameplayTag& TerritoryTag) const;
 	FGameplayTag ResolveViewerFaction() const;
+	void AddCommandCapabilityChanges(ATerritoryVolume* Territory,
+		const FGameplayTagContainer& PreviousCapabilities,
+		const FGameplayTagContainer& CurrentCapabilities,
+		bool bViewerGainedOwnership, bool bViewerLostOwnership);
+	void GetTerritoryEconomicImpact(ATerritoryVolume* Territory,
+		int64& OutIncome, int64& OutUpkeep) const;
 
 	UFUNCTION()
 	void HandleTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
@@ -144,6 +174,18 @@ private:
 
 	UFUNCTION()
 	void HandleTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
+
+	UFUNCTION()
+	void HandleTransactionRecorded(const FTerritoryTransaction& Transaction);
+
+	UFUNCTION()
+	void HandleFactionUpkeepDeficit(FGameplayTag Faction, int32 Deficit);
+
+	UFUNCTION()
+	void HandleProductionSettled(const FTerritoryProductionResult& Result);
+
+	UFUNCTION()
+	void HandleDiplomacyEvent(const FDiplomacyEvent& Event);
 
 	UFUNCTION(Server, Reliable, WithValidation)
 	void ServerRequestSetGuardTarget(ATerritoryDistrictManagementPoint* ManagementPoint,
@@ -187,6 +229,10 @@ private:
 
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveCounterHappened(const FTerritoryCounterAttackStateEvent& Event);
+
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveManagementIntelligence(ATerritoryVolume* Territory,
+		ETerritoryLiveEventType Type, const FText& Headline, const FText& Detail);
 
 	void PerformPurchase(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	void PerformPurchaseForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);

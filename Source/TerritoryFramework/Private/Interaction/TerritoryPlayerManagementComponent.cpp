@@ -3,11 +3,25 @@
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
+#include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "Widgets/NarrativeGameplayHUD.h"
+
+namespace
+{
+	FGuid MakeDiplomacyRecordID(const FDiplomacyEvent& Event)
+	{
+		return FGuid(GetTypeHash(Event.FactionA), GetTypeHash(Event.FactionB),
+			GetTypeHash(static_cast<uint8>(Event.EventType)),
+			GetTypeHash(Event.GameTime));
+	}
+}
 
 UTerritoryPlayerManagementComponent::UTerritoryPlayerManagementComponent()
 {
@@ -28,11 +42,59 @@ void UTerritoryPlayerManagementComponent::EndPlay(
 	Super::EndPlay(EndPlayReason);
 }
 
+void UTerritoryPlayerManagementComponent::PrepareForSave_Implementation()
+{
+	const int32 HistoryLimit = FMath::Max(1, MaxLiveEventHistory);
+	if (LiveEvents.Num() > HistoryLimit)
+	{
+		LiveEvents.SetNum(HistoryLimit);
+	}
+}
+
+void UTerritoryPlayerManagementComponent::Load_Implementation()
+{
+	const UWorld* World = GetWorld();
+	const double Now = World ? World->GetRealTimeSeconds() : 0.0;
+	NextIntelligenceSequence = 0;
+	for (FTerritoryLiveEvent& Event : LiveEvents)
+	{
+		if (!Event.EventID.IsValid())
+		{
+			Event.EventID = FGuid::NewGuid();
+		}
+		NextIntelligenceSequence = FMath::Max(NextIntelligenceSequence, Event.Sequence);
+		// Loaded history belongs in the databank. It must never replay a stale HUD alert.
+		Event.CreatedRealTime = Now;
+		Event.ActiveDuration = 0.f;
+		Event.bExpired = true;
+		Event.bWasHUDNotification = false;
+	}
+	PrepareForSave_Implementation();
+	OnLiveEventsChanged.Broadcast();
+}
+
 void UTerritoryPlayerManagementComponent::BindLiveEventSources()
 {
 	APlayerController* PlayerController = Cast<APlayerController>(GetOwner());
 	if (!PlayerController || !PlayerController->IsLocalController()) return;
 	UWorld* World = GetWorld();
+	if (!World) return;
+	if (UTerritoryEconomySubsystem* Economy =
+		World->GetSubsystem<UTerritoryEconomySubsystem>())
+	{
+		Economy->OnTransactionRecorded.AddUniqueDynamic(
+			this, &UTerritoryPlayerManagementComponent::HandleTransactionRecorded);
+		Economy->OnFactionUpkeepDeficit.AddUniqueDynamic(
+			this, &UTerritoryPlayerManagementComponent::HandleFactionUpkeepDeficit);
+		Economy->OnProductionSettled.AddUniqueDynamic(
+			this, &UTerritoryPlayerManagementComponent::HandleProductionSettled);
+	}
+	if (UTerritoryDiplomacySubsystem* Diplomacy =
+		World->GetSubsystem<UTerritoryDiplomacySubsystem>())
+	{
+		Diplomacy->OnDiplomacyEvent.AddUniqueDynamic(
+			this, &UTerritoryPlayerManagementComponent::HandleDiplomacyEvent);
+	}
 	UTerritoryRegistrySubsystem* Registry = World
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	if (!Registry) return;
@@ -51,6 +113,22 @@ void UTerritoryPlayerManagementComponent::UnbindLiveEventSources()
 {
 	if (UWorld* World = GetWorld())
 	{
+		if (UTerritoryEconomySubsystem* Economy =
+			World->GetSubsystem<UTerritoryEconomySubsystem>())
+		{
+			Economy->OnTransactionRecorded.RemoveDynamic(
+				this, &UTerritoryPlayerManagementComponent::HandleTransactionRecorded);
+			Economy->OnFactionUpkeepDeficit.RemoveDynamic(
+				this, &UTerritoryPlayerManagementComponent::HandleFactionUpkeepDeficit);
+			Economy->OnProductionSettled.RemoveDynamic(
+				this, &UTerritoryPlayerManagementComponent::HandleProductionSettled);
+		}
+		if (UTerritoryDiplomacySubsystem* Diplomacy =
+			World->GetSubsystem<UTerritoryDiplomacySubsystem>())
+		{
+			Diplomacy->OnDiplomacyEvent.RemoveDynamic(
+				this, &UTerritoryPlayerManagementComponent::HandleDiplomacyEvent);
+		}
 		if (UTerritoryRegistrySubsystem* Registry =
 			World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
@@ -65,6 +143,7 @@ void UTerritoryPlayerManagementComponent::UnbindLiveEventSources()
 		}
 	}
 	ObservedTerritoryStates.Empty();
+	ObservedTerritoryCapabilities.Empty();
 }
 
 void UTerritoryPlayerManagementComponent::BindTerritoryLiveEvents(
@@ -80,6 +159,8 @@ void UTerritoryPlayerManagementComponent::BindTerritoryLiveEvents(
 	Territory->OnTerritoryStateChangedDelegate.AddDynamic(
 		this, &UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged);
 	ObservedTerritoryStates.Add(Territory, Territory->GetTerritoryState());
+	ObservedTerritoryCapabilities.Add(Territory,
+		Territory->GetActiveCommandCapabilities());
 }
 
 void UTerritoryPlayerManagementComponent::UnbindTerritoryLiveEvents(
@@ -91,6 +172,7 @@ void UTerritoryPlayerManagementComponent::UnbindTerritoryLiveEvents(
 	Territory->OnTerritoryStateChangedDelegate.RemoveDynamic(
 		this, &UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged);
 	ObservedTerritoryStates.Remove(Territory);
+	ObservedTerritoryCapabilities.Remove(Territory);
 }
 
 void UTerritoryPlayerManagementComponent::HandleTerritoryRegistered(
@@ -133,7 +215,11 @@ FText UTerritoryPlayerManagementComponent::ResolveTerritoryName(
 void UTerritoryPlayerManagementComponent::AddLiveEvent(
 	ETerritoryLiveEventType Type, const FGameplayTag& TerritoryTag,
 	const FText& Headline, const FText& Detail, bool bCanSetWaypoint,
-	float ActiveDuration)
+	float ActiveDuration, ETerritoryIntelligenceCategory Category,
+	ETerritoryIntelligenceSeverity Severity, FGameplayTag SourceFaction,
+	FGameplayTag TargetFaction, FGameplayTagContainer CommandCapabilities,
+	int64 IncomeDelta, int64 UpkeepDelta, int64 CurrencyDelta,
+	bool bShowHUDNotification, FGuid SourceRecordID)
 {
 	UWorld* World = GetWorld();
 	if (!World || !Cast<APlayerController>(GetOwner())
@@ -154,15 +240,26 @@ void UTerritoryPlayerManagementComponent::AddLiveEvent(
 
 	FTerritoryLiveEvent Event;
 	Event.EventID = FGuid::NewGuid();
+	Event.SourceRecordID = SourceRecordID;
 	Event.Type = Type;
+	Event.Category = Category;
+	Event.Severity = Severity;
 	Event.TerritoryTag = TerritoryTag;
 	Event.TerritoryName = ResolveTerritoryName(TerritoryTag);
 	Event.Headline = Headline;
 	Event.Detail = Detail;
+	Event.SourceFaction = SourceFaction;
+	Event.TargetFaction = TargetFaction;
+	Event.CommandCapabilities = MoveTemp(CommandCapabilities);
+	Event.IncomeDelta = IncomeDelta;
+	Event.UpkeepDelta = UpkeepDelta;
+	Event.CurrencyDelta = CurrencyDelta;
+	Event.Sequence = ++NextIntelligenceSequence;
 	Event.CreatedRealTime = Now;
 	Event.ActiveDuration = ActiveDuration >= 0.f
 		? ActiveDuration : LiveEventActiveDuration;
 	Event.bCanSetWaypoint = bCanSetWaypoint && TerritoryTag.IsValid();
+	Event.bWasHUDNotification = bShowHUDNotification;
 	LiveEvents.Insert(Event, 0);
 	if (LiveEvents.Num() > FMath::Max(1, MaxLiveEventHistory))
 	{
@@ -171,13 +268,18 @@ void UTerritoryPlayerManagementComponent::AddLiveEvent(
 
 	OnLiveEventAdded.Broadcast(Event);
 	OnLiveEventsChanged.Broadcast();
-	if (const ANarrativePlayerController* NarrativeController =
-		Cast<ANarrativePlayerController>(GetOwner()))
+	if (bShowHUDNotification && (Severity == ETerritoryIntelligenceSeverity::Warning
+		|| Severity == ETerritoryIntelligenceSeverity::Critical
+		|| Severity == ETerritoryIntelligenceSeverity::Positive))
 	{
-		if (UNarrativeGameplayHUD* HUD =
-			NarrativeController->GetNarrativeGameplayHUD())
+		if (const ANarrativePlayerController* NarrativeController =
+			Cast<ANarrativePlayerController>(GetOwner()))
 		{
-			HUD->ShowNotification(Headline, FMath::Min(Event.ActiveDuration, 6.f));
+			if (UNarrativeGameplayHUD* HUD =
+				NarrativeController->GetNarrativeGameplayHUD())
+			{
+				HUD->ShowNotification(Headline, FMath::Min(Event.ActiveDuration, 6.f));
+			}
 		}
 	}
 }
@@ -191,11 +293,238 @@ UTerritoryPlayerManagementComponent::GetLiveEvents(bool bIncludeExpired) const
 	for (FTerritoryLiveEvent Event : LiveEvents)
 	{
 		Event.bExpired = Event.IsExpiredAt(Now);
-		if (Now - Event.CreatedRealTime > ExpiredEventRetentionDuration) continue;
+		if (Event.bExpired && ExpiredEventRetentionDuration >= 0.f
+			&& Now - (Event.CreatedRealTime + FMath::Max(0.f, Event.ActiveDuration))
+				> ExpiredEventRetentionDuration) continue;
 		if (!bIncludeExpired && Event.bExpired) continue;
 		Result.Add(MoveTemp(Event));
 	}
 	return Result;
+}
+
+TArray<FTerritoryLiveEvent>
+UTerritoryPlayerManagementComponent::GetTerritoryIntelligence(
+	ETerritoryIntelligenceFilter Filter, bool bIncludeArchived) const
+{
+	TArray<FTerritoryLiveEvent> Events = GetLiveEvents(bIncludeArchived);
+	if (Filter == ETerritoryIntelligenceFilter::All
+		|| Filter == ETerritoryIntelligenceFilter::Economy)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			if (const UTerritoryEconomySubsystem* Economy =
+				World->GetSubsystem<UTerritoryEconomySubsystem>())
+			{
+				TSet<FGuid> IncludedRecords;
+				for (const FTerritoryLiveEvent& Event : Events)
+				{
+					if (Event.SourceRecordID.IsValid())
+					{
+						IncludedRecords.Add(Event.SourceRecordID);
+					}
+				}
+				const FGameplayTag ViewerFaction = ResolveViewerFaction();
+				for (const FTerritoryTransaction& Transaction :
+					Economy->GetTransactionHistory(ViewerFaction, MaxLiveEventHistory))
+				{
+					if (!Transaction.TransactionID.IsValid()
+						|| IncludedRecords.Contains(Transaction.TransactionID)) continue;
+					FTerritoryLiveEvent Event;
+					Event.EventID = FGuid::NewGuid();
+					Event.SourceRecordID = Transaction.TransactionID;
+					Event.Type = Transaction.Amount > 0
+						? ETerritoryLiveEventType::IncomeRecorded
+						: ETerritoryLiveEventType::ExpenseRecorded;
+					Event.Category = ETerritoryIntelligenceCategory::Economy;
+					Event.Severity = Transaction.Amount > 0
+						? ETerritoryIntelligenceSeverity::Positive
+						: ETerritoryIntelligenceSeverity::Information;
+					Event.TerritoryTag = Transaction.SourceTerritory;
+					Event.TerritoryName = ResolveTerritoryName(Transaction.SourceTerritory);
+					Event.SourceFaction = Transaction.Faction;
+					Event.CurrencyDelta = Transaction.Amount;
+					Event.Headline = FText::Format(Transaction.Amount > 0
+						? NSLOCTEXT("TerritoryIntelligence", "ArchivedIncomeHeadline",
+							"Income ledger: +{0}")
+						: NSLOCTEXT("TerritoryIntelligence", "ArchivedExpenseHeadline",
+							"Expense ledger: {0}"), FText::AsNumber(Transaction.Amount));
+					Event.Detail = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+						"ArchivedTransactionDetail", "{0} Balance after transaction: {1}."),
+						Transaction.Reason.IsEmpty()
+							? NSLOCTEXT("TerritoryIntelligence", "ArchivedNoReason",
+								"No additional reason supplied.")
+							: FText::FromString(Transaction.Reason),
+						FText::AsNumber(Transaction.BalanceAfter));
+					Event.ActiveDuration = 0.f;
+					Event.bExpired = true;
+					Event.bCanSetWaypoint = Transaction.SourceTerritory.IsValid();
+					Events.Add(MoveTemp(Event));
+				}
+			}
+		}
+	}
+	if (Filter == ETerritoryIntelligenceFilter::All
+		|| Filter == ETerritoryIntelligenceFilter::Conflict)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			if (const UTerritoryCounterAttackSubsystem* Counterattacks =
+				World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
+			{
+				TSet<FGuid> IncludedRecords;
+				for (const FTerritoryLiveEvent& Event : Events)
+				{
+					if (Event.SourceRecordID.IsValid())
+					{
+						IncludedRecords.Add(Event.SourceRecordID);
+					}
+				}
+				const FGameplayTag ViewerFaction = ResolveViewerFaction();
+				for (const FTerritoryAssaultRecord& Assault :
+					Counterattacks->GetPersistentState())
+				{
+					if (!Assault.AssaultID.IsValid()
+						|| IncludedRecords.Contains(Assault.AssaultID)
+						|| (Assault.AttackingFaction != ViewerFaction
+							&& Assault.DefendingFaction != ViewerFaction)
+						|| (!bIncludeArchived && Assault.IsTerminal())) continue;
+
+					FTerritoryLiveEvent Event;
+					Event.EventID = FGuid::NewGuid();
+					Event.SourceRecordID = Assault.AssaultID;
+					Event.Category = ETerritoryIntelligenceCategory::Conflict;
+					Event.TerritoryTag = Assault.TargetTerritory;
+					Event.TerritoryName = ResolveTerritoryName(Assault.TargetTerritory);
+					Event.SourceFaction = Assault.AttackingFaction;
+					Event.TargetFaction = Assault.DefendingFaction;
+					Event.bCanSetWaypoint = Assault.TargetTerritory.IsValid();
+					Event.bExpired = Assault.IsTerminal();
+					Event.ActiveDuration = Assault.IsTerminal() ? 0.f : -1.f;
+					switch (Assault.State)
+					{
+					case ETerritoryAssaultState::Active:
+						Event.Type = ETerritoryLiveEventType::CounterAttackActive;
+						Event.Severity = ETerritoryIntelligenceSeverity::Critical;
+						Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+							"ArchivedCounterActive", "Active counterattack: {0}"),
+							Event.TerritoryName);
+						break;
+					case ETerritoryAssaultState::Defeated:
+						Event.Type = ETerritoryLiveEventType::CounterAttackDefeated;
+						Event.Severity = ETerritoryIntelligenceSeverity::Positive;
+						Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+							"ArchivedCounterDefeated", "Counterattack defeated: {0}"),
+							Event.TerritoryName);
+						break;
+					case ETerritoryAssaultState::Succeeded:
+						Event.Type = ETerritoryLiveEventType::CounterAttackSucceeded;
+						Event.Severity = ETerritoryIntelligenceSeverity::Critical;
+						Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+							"ArchivedCounterSucceeded", "Counterattack captured: {0}"),
+							Event.TerritoryName);
+						break;
+					case ETerritoryAssaultState::Cancelled:
+						Event.Type = ETerritoryLiveEventType::CounterAttackCancelled;
+						Event.Severity = ETerritoryIntelligenceSeverity::Information;
+						Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+							"ArchivedCounterCancelled", "Counterattack cancelled: {0}"),
+							Event.TerritoryName);
+						break;
+					default:
+						Event.Type = ETerritoryLiveEventType::CounterAttackWarning;
+						Event.Severity = ETerritoryIntelligenceSeverity::Warning;
+						Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+							"ArchivedCounterPlanned", "Counterattack report: {0}"),
+							Event.TerritoryName);
+						break;
+					}
+					Event.Detail = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+						"ArchivedCounterDetail",
+						"State: {0}. Planned: {1}; alive: {2}; reserve: {3}; killed: {4}; withdrawn: {5}. Resolution: {6}."),
+						FText::FromString(UEnum::GetValueAsString(Assault.State)),
+						FText::AsNumber(Assault.PlannedForce),
+						FText::AsNumber(Assault.AliveForce),
+						FText::AsNumber(Assault.PendingReserveForce),
+						FText::AsNumber(Assault.KilledForce),
+						FText::AsNumber(Assault.WithdrawnForce),
+						FText::FromString(UEnum::GetValueAsString(Assault.Resolution)));
+					Events.Add(MoveTemp(Event));
+				}
+			}
+		}
+	}
+	if (Filter == ETerritoryIntelligenceFilter::All
+		|| Filter == ETerritoryIntelligenceFilter::Diplomacy)
+	{
+		if (const UWorld* World = GetWorld())
+		{
+			if (const UTerritoryDiplomacySubsystem* Diplomacy =
+				World->GetSubsystem<UTerritoryDiplomacySubsystem>())
+			{
+				TSet<FGuid> IncludedRecords;
+				for (const FTerritoryLiveEvent& Event : Events)
+				{
+					if (Event.SourceRecordID.IsValid())
+					{
+						IncludedRecords.Add(Event.SourceRecordID);
+					}
+				}
+				const FGameplayTag ViewerFaction = ResolveViewerFaction();
+				for (const FDiplomacyEvent& DiplomacyEvent : Diplomacy->GetDiplomacyHistory())
+				{
+					const FGuid RecordID = MakeDiplomacyRecordID(DiplomacyEvent);
+					if (IncludedRecords.Contains(RecordID)
+						|| (DiplomacyEvent.FactionA != ViewerFaction
+							&& DiplomacyEvent.FactionB != ViewerFaction)) continue;
+					FTerritoryLiveEvent Event;
+					Event.EventID = FGuid::NewGuid();
+					Event.SourceRecordID = RecordID;
+					Event.Type = ETerritoryLiveEventType::DiplomacyChanged;
+					Event.Category = ETerritoryIntelligenceCategory::Diplomacy;
+					Event.SourceFaction = DiplomacyEvent.FactionA;
+					Event.TargetFaction = DiplomacyEvent.FactionB;
+					Event.ActiveDuration = 0.f;
+					Event.bExpired = true;
+					Event.Severity = DiplomacyEvent.EventType == EDiplomacyEventType::DeclaredWar
+						|| DiplomacyEvent.EventType == EDiplomacyEventType::BrokeCeasefire
+						? ETerritoryIntelligenceSeverity::Critical
+						: DiplomacyEvent.EventType == EDiplomacyEventType::BrokeAlliance
+							|| DiplomacyEvent.EventType == EDiplomacyEventType::ExpiredTreaty
+						? ETerritoryIntelligenceSeverity::Warning
+						: ETerritoryIntelligenceSeverity::Positive;
+					Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+						"ArchivedDiplomacyHeadline", "Diplomacy archive: {0}"),
+						FText::FromString(UEnum::GetValueAsString(DiplomacyEvent.EventType)));
+					Event.Detail = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+						"ArchivedDiplomacyDetail", "{0} / {1}. Territory hostility, capture, and counterattack rules use this relationship."),
+						UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(DiplomacyEvent.FactionA),
+						UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(DiplomacyEvent.FactionB));
+					Events.Add(MoveTemp(Event));
+				}
+			}
+		}
+	}
+	if (Filter == ETerritoryIntelligenceFilter::All)
+	{
+		return Events;
+	}
+
+	const ETerritoryIntelligenceCategory Category =
+		Filter == ETerritoryIntelligenceFilter::Conflict ? ETerritoryIntelligenceCategory::Conflict
+		: Filter == ETerritoryIntelligenceFilter::Economy ? ETerritoryIntelligenceCategory::Economy
+		: Filter == ETerritoryIntelligenceFilter::Command ? ETerritoryIntelligenceCategory::Command
+		: Filter == ETerritoryIntelligenceFilter::Production ? ETerritoryIntelligenceCategory::Production
+		: Filter == ETerritoryIntelligenceFilter::Diplomacy ? ETerritoryIntelligenceCategory::Diplomacy
+		: ETerritoryIntelligenceCategory::Control;
+	TArray<FTerritoryLiveEvent> Filtered;
+	for (const FTerritoryLiveEvent& Event : Events)
+	{
+		if (Event.Category == Category)
+		{
+			Filtered.Add(Event);
+		}
+	}
+	return Filtered;
 }
 
 void UTerritoryPlayerManagementComponent::ClearExpiredLiveEvents()
@@ -210,26 +539,148 @@ void UTerritoryPlayerManagementComponent::ClearExpiredLiveEvents()
 	if (Removed > 0) OnLiveEventsChanged.Broadcast();
 }
 
+void UTerritoryPlayerManagementComponent::GetTerritoryEconomicImpact(
+	ATerritoryVolume* Territory, int64& OutIncome, int64& OutUpkeep) const
+{
+	OutIncome = 0;
+	OutUpkeep = 0;
+	if (!Territory) return;
+
+	if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory))
+	{
+		FTerritoryDistrictOperationsView View;
+		if (UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
+			this, District, Cast<APlayerController>(GetOwner()), View))
+		{
+			OutIncome = View.PeriodicIncome;
+			OutUpkeep = View.GuardUpkeep;
+			return;
+		}
+	}
+	OutIncome = Territory->GetPeriodicIncome();
+	OutUpkeep = static_cast<int64>(Territory->GetGuardCost())
+		* Territory->GetDesiredGuardCount();
+}
+
+void UTerritoryPlayerManagementComponent::AddCommandCapabilityChanges(
+	ATerritoryVolume* Territory,
+	const FGameplayTagContainer& PreviousCapabilities,
+	const FGameplayTagContainer& CurrentCapabilities,
+	bool bViewerGainedOwnership, bool bViewerLostOwnership)
+{
+	if (!Territory) return;
+	const FGameplayTag ViewerFaction = ResolveViewerFaction();
+	if (!ViewerFaction.IsValid()) return;
+
+	FGameplayTagContainer Gained;
+	FGameplayTagContainer Lost;
+	TArray<FGameplayTag> Tags;
+	CurrentCapabilities.GetGameplayTagArray(Tags);
+	for (const FGameplayTag& Capability : Tags)
+	{
+		if ((bViewerGainedOwnership || !PreviousCapabilities.HasTagExact(Capability))
+			&& UTerritoryBlueprintLibrary::GetFactionCommandCapabilitySources(
+				this, ViewerFaction, Capability).Num() == 1)
+		{
+			Gained.AddTag(Capability);
+		}
+	}
+	Tags.Reset();
+	PreviousCapabilities.GetGameplayTagArray(Tags);
+	for (const FGameplayTag& Capability : Tags)
+	{
+		if ((bViewerLostOwnership || !CurrentCapabilities.HasTagExact(Capability))
+			&& UTerritoryBlueprintLibrary::GetFactionCommandCapabilitySources(
+				this, ViewerFaction, Capability).IsEmpty())
+		{
+			Lost.AddTag(Capability);
+		}
+	}
+
+	auto FormatCapabilities = [](const FGameplayTagContainer& Capabilities)
+	{
+		TArray<FGameplayTag> CapabilityTags;
+		Capabilities.GetGameplayTagArray(CapabilityTags);
+		TArray<FString> Names;
+		for (const FGameplayTag& Capability : CapabilityTags)
+		{
+			Names.Add(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
+				Capability).ToString());
+		}
+		return FText::FromString(FString::Join(Names, TEXT(", ")));
+	};
+
+	if (!Gained.IsEmpty())
+	{
+		AddLiveEvent(ETerritoryLiveEventType::CommandCapabilityGained,
+			Territory->GetTerritoryTag(),
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "PerkGainedHeadline",
+				"Strategic control unlocked: {0}"), FormatCapabilities(Gained)),
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "PerkGainedDetail",
+				"Holding {0} now supplies this faction-wide command. If the Territory is lost or leaves its granting state, the command is removed immediately."),
+				Territory->GetTerritoryDisplayName()), true, 45.f,
+			ETerritoryIntelligenceCategory::Command,
+			ETerritoryIntelligenceSeverity::Positive,
+			ViewerFaction, FGameplayTag(), Gained);
+	}
+	if (!Lost.IsEmpty())
+	{
+		AddLiveEvent(ETerritoryLiveEventType::CommandCapabilityLost,
+			Territory->GetTerritoryTag(),
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "PerkLostHeadline",
+				"Strategic control lost: {0}"), FormatCapabilities(Lost)),
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "PerkLostDetail",
+				"{0} no longer supplies this command and no other held Territory provides it. Recapture or secure another configured source to restore access."),
+				Territory->GetTerritoryDisplayName()), true, 60.f,
+			ETerritoryIntelligenceCategory::Command,
+			ETerritoryIntelligenceSeverity::Critical,
+			FGameplayTag(), ViewerFaction, Lost);
+	}
+}
+
 void UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged(
 	ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
 	if (!Territory || Territory->GetTerritoryState() == ETerritoryState::Locked) return;
 	const FGameplayTag ViewerFaction = ResolveViewerFaction();
 	const FText Name = Territory->GetTerritoryDisplayName();
+	const FGameplayTagContainer PreviousCapabilities =
+		ObservedTerritoryCapabilities.FindRef(Territory);
+	const FGameplayTagContainer CurrentCapabilities =
+		Territory->GetActiveCommandCapabilities();
+	int64 Income = 0;
+	int64 Upkeep = 0;
+	GetTerritoryEconomicImpact(Territory, Income, Upkeep);
 	if (ViewerFaction.IsValid() && NewOwner == ViewerFaction)
 	{
 		AddLiveEvent(ETerritoryLiveEventType::Captured, Territory->GetTerritoryTag(),
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CapturedHeadline", "{0} captured"), Name),
-			NSLOCTEXT("TerritoryLiveEvents", "CapturedDetail", "Your faction now controls this territory. Track it to navigate, reinforce, or review its Places."),
-			true);
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "CapturedImpactDetail",
+				"Your faction now controls this Territory. Recurring impact: +{0} income and +{1} guard upkeep per cycle; net change {2}."),
+				FText::AsNumber(Income), FText::AsNumber(Upkeep),
+				FText::AsNumber(Income - Upkeep)), true, 45.f,
+			ETerritoryIntelligenceCategory::Control,
+			ETerritoryIntelligenceSeverity::Positive,
+			NewOwner, OldOwner, FGameplayTagContainer(), Income, Upkeep);
+		AddCommandCapabilityChanges(Territory, FGameplayTagContainer(),
+			CurrentCapabilities, true, false);
 	}
 	else if (ViewerFaction.IsValid() && OldOwner == ViewerFaction)
 	{
 		AddLiveEvent(ETerritoryLiveEventType::Lost, Territory->GetTerritoryTag(),
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "LostHeadline", "{0} was lost"), Name),
-			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "LostDetail", "Control changed to {0}. Set a waypoint to plan a response."),
-				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(NewOwner)), true);
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "LostImpactDetail",
+				"Control changed to {0}. Recurring impact: -{1} income and -{2} guard upkeep per cycle; net change {3}. Any unique command perks supplied here are revoked."),
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(NewOwner),
+				FText::AsNumber(Income), FText::AsNumber(Upkeep),
+				FText::AsNumber(-Income + Upkeep)), true, 60.f,
+			ETerritoryIntelligenceCategory::Control,
+			ETerritoryIntelligenceSeverity::Critical,
+			NewOwner, OldOwner, FGameplayTagContainer(), -Income, -Upkeep);
+		AddCommandCapabilityChanges(Territory, PreviousCapabilities,
+			FGameplayTagContainer(), false, true);
 	}
+	ObservedTerritoryCapabilities.Add(Territory, CurrentCapabilities);
 }
 
 void UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged(
@@ -237,27 +688,195 @@ void UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged(
 {
 	if (!Territory) return;
 	const ETerritoryState PreviousState = ObservedTerritoryStates.FindRef(Territory);
+	const FGameplayTagContainer PreviousCapabilities =
+		ObservedTerritoryCapabilities.FindRef(Territory);
+	const FGameplayTagContainer CurrentCapabilities =
+		Territory->GetActiveCommandCapabilities();
 	ObservedTerritoryStates.Add(Territory, NewState);
+	ObservedTerritoryCapabilities.Add(Territory, CurrentCapabilities);
 	const FText Name = Territory->GetTerritoryDisplayName();
 	if (PreviousState == ETerritoryState::Locked && NewState != ETerritoryState::Locked)
 	{
 		AddLiveEvent(ETerritoryLiveEventType::Unlocked, Territory->GetTerritoryTag(),
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "UnlockedHeadline", "{0} unlocked"), Name),
-			NSLOCTEXT("TerritoryLiveEvents", "UnlockedDetail", "New Territory intel is available. Open Operations or set a waypoint."), true);
+			NSLOCTEXT("TerritoryLiveEvents", "UnlockedDetail", "New Territory intel is available. Open Operations or set a waypoint."), true, 30.f,
+			ETerritoryIntelligenceCategory::Control,
+			ETerritoryIntelligenceSeverity::Information);
 	}
 	else if (NewState == ETerritoryState::Contested)
 	{
 		AddLiveEvent(ETerritoryLiveEventType::Contested, Territory->GetTerritoryTag(),
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "ContestedHeadline", "{0} is contested"), Name),
-			NSLOCTEXT("TerritoryLiveEvents", "ContestedDetail", "Physical attackers are applying capture pressure. Track the Territory to respond."), true);
+			NSLOCTEXT("TerritoryLiveEvents", "ContestedDetail", "Physical attackers are applying capture pressure. Track the Territory to respond."), true, 45.f,
+			ETerritoryIntelligenceCategory::Conflict,
+			ETerritoryIntelligenceSeverity::Critical);
 	}
 	else if (PreviousState == ETerritoryState::Contested
 		&& NewState == ETerritoryState::Claimed)
 	{
 		AddLiveEvent(ETerritoryLiveEventType::Secured, Territory->GetTerritoryTag(),
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "SecuredHeadline", "{0} secured"), Name),
-			NSLOCTEXT("TerritoryLiveEvents", "SecuredDetail", "The contest ended and control is stable."), true);
+			NSLOCTEXT("TerritoryLiveEvents", "SecuredDetail", "The contest ended and control is stable."), true, 30.f,
+			ETerritoryIntelligenceCategory::Conflict,
+			ETerritoryIntelligenceSeverity::Positive);
 	}
+	if (Territory->GetOwningFaction() == ResolveViewerFaction())
+	{
+		AddCommandCapabilityChanges(Territory, PreviousCapabilities,
+			CurrentCapabilities, false, false);
+	}
+}
+
+void UTerritoryPlayerManagementComponent::HandleTransactionRecorded(
+	const FTerritoryTransaction& Transaction)
+{
+	const FGameplayTag ViewerFaction = ResolveViewerFaction();
+	if (!ViewerFaction.IsValid() || Transaction.Faction != ViewerFaction) return;
+
+	const bool bIncome = Transaction.Amount > 0;
+	const FText TerritoryName = Transaction.SourceTerritory.IsValid()
+		? ResolveTerritoryName(Transaction.SourceTerritory)
+		: NSLOCTEXT("TerritoryIntelligence", "FactionAccount", "Faction account");
+	const FText Reason = Transaction.Reason.IsEmpty()
+		? NSLOCTEXT("TerritoryIntelligence", "NoTransactionReason", "No additional reason supplied.")
+		: FText::FromString(Transaction.Reason);
+	AddLiveEvent(
+		bIncome ? ETerritoryLiveEventType::IncomeRecorded
+			: ETerritoryLiveEventType::ExpenseRecorded,
+		Transaction.SourceTerritory,
+		FText::Format(bIncome
+			? NSLOCTEXT("TerritoryIntelligence", "IncomeHeadline", "Income recorded: +{0}")
+			: NSLOCTEXT("TerritoryIntelligence", "ExpenseHeadline", "Expense recorded: {0}"),
+			FText::AsNumber(Transaction.Amount)),
+		FText::Format(NSLOCTEXT("TerritoryIntelligence", "TransactionDetail",
+			"{0} • {1} Current balance: {2}."),
+			TerritoryName, Reason, FText::AsNumber(Transaction.BalanceAfter)),
+		Transaction.SourceTerritory.IsValid(), 12.f,
+		ETerritoryIntelligenceCategory::Economy,
+		bIncome ? ETerritoryIntelligenceSeverity::Positive
+			: ETerritoryIntelligenceSeverity::Information,
+		ViewerFaction, FGameplayTag(), FGameplayTagContainer(), 0, 0,
+		Transaction.Amount, false, Transaction.TransactionID);
+}
+
+void UTerritoryPlayerManagementComponent::HandleFactionUpkeepDeficit(
+	FGameplayTag Faction, int32 Deficit)
+{
+	const FGameplayTag ViewerFaction = ResolveViewerFaction();
+	if (!ViewerFaction.IsValid() || Faction != ViewerFaction || Deficit <= 0) return;
+	AddLiveEvent(ETerritoryLiveEventType::UpkeepDeficit, FGameplayTag(),
+		NSLOCTEXT("TerritoryIntelligence", "UpkeepDeficitHeadline",
+			"Guard upkeep could not be paid"),
+		FText::Format(NSLOCTEXT("TerritoryIntelligence", "UpkeepDeficitDetail",
+			"The faction account is short by {0}. Review unprofitable Districts, reduce staffing, or secure new income before the next cycle."),
+			FText::AsNumber(Deficit)), false, 60.f,
+		ETerritoryIntelligenceCategory::Economy,
+		ETerritoryIntelligenceSeverity::Critical,
+		ViewerFaction, FGameplayTag(), FGameplayTagContainer(), 0, 0,
+		-Deficit, true);
+}
+
+void UTerritoryPlayerManagementComponent::HandleProductionSettled(
+	const FTerritoryProductionResult& Result)
+{
+	const FGameplayTag ViewerFaction = ResolveViewerFaction();
+	if (!ViewerFaction.IsValid() || Result.Faction != ViewerFaction) return;
+	int32 InputCount = 0;
+	int32 OutputCount = 0;
+	for (const FTerritoryResourceAmount& Input : Result.InputsConsumed)
+	{
+		InputCount += FMath::Max(0, Input.Quantity);
+	}
+	for (const FTerritoryResourceAmount& Output : Result.OutputsProduced)
+	{
+		OutputCount += FMath::Max(0, Output.Quantity);
+	}
+	const FText RuleName = UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
+		Result.RuleTag);
+	AddLiveEvent(
+		Result.bSuccess ? ETerritoryLiveEventType::ProductionCompleted
+			: ETerritoryLiveEventType::ProductionBlocked,
+		Result.TerritoryTag,
+		FText::Format(Result.bSuccess
+			? NSLOCTEXT("TerritoryIntelligence", "ProductionCompleteHeadline",
+				"Production completed: {0}")
+			: NSLOCTEXT("TerritoryIntelligence", "ProductionBlockedHeadline",
+				"Production blocked: {0}"), RuleName),
+		Result.bSuccess
+			? FText::Format(NSLOCTEXT("TerritoryIntelligence", "ProductionCompleteDetail",
+				"Cycle {0} consumed {1} item units and produced {2}. The Narrative inventory remains the resource authority."),
+				FText::AsNumber(Result.CycleIndex), FText::AsNumber(InputCount),
+				FText::AsNumber(OutputCount))
+			: FText::Format(NSLOCTEXT("TerritoryIntelligence", "ProductionBlockedDetail",
+				"Cycle {0} produced nothing. Reason: {1}"),
+				FText::AsNumber(Result.CycleIndex), Result.FailureReason),
+		Result.TerritoryTag.IsValid(), Result.bSuccess ? 15.f : 45.f,
+		ETerritoryIntelligenceCategory::Production,
+		Result.bSuccess ? ETerritoryIntelligenceSeverity::Positive
+			: ETerritoryIntelligenceSeverity::Warning,
+		ViewerFaction, FGameplayTag(), FGameplayTagContainer(), 0, 0, 0,
+		!Result.bSuccess);
+}
+
+void UTerritoryPlayerManagementComponent::HandleDiplomacyEvent(
+	const FDiplomacyEvent& Event)
+{
+	const FGameplayTag ViewerFaction = ResolveViewerFaction();
+	if (!ViewerFaction.IsValid()
+		|| (Event.FactionA != ViewerFaction && Event.FactionB != ViewerFaction)) return;
+
+	FText Action;
+	ETerritoryIntelligenceSeverity Severity = ETerritoryIntelligenceSeverity::Information;
+	switch (Event.EventType)
+	{
+	case EDiplomacyEventType::DeclaredWar:
+		Action = NSLOCTEXT("TerritoryIntelligence", "DeclaredWar", "War declared");
+		Severity = ETerritoryIntelligenceSeverity::Critical;
+		break;
+	case EDiplomacyEventType::DeclaredPeace:
+		Action = NSLOCTEXT("TerritoryIntelligence", "DeclaredPeace", "Peace declared");
+		Severity = ETerritoryIntelligenceSeverity::Positive;
+		break;
+	case EDiplomacyEventType::FormedAlliance:
+		Action = NSLOCTEXT("TerritoryIntelligence", "FormedAlliance", "Alliance formed");
+		Severity = ETerritoryIntelligenceSeverity::Positive;
+		break;
+	case EDiplomacyEventType::BrokeAlliance:
+		Action = NSLOCTEXT("TerritoryIntelligence", "BrokeAlliance", "Alliance broken");
+		Severity = ETerritoryIntelligenceSeverity::Warning;
+		break;
+	case EDiplomacyEventType::SignedTradeAgreement:
+		Action = NSLOCTEXT("TerritoryIntelligence", "SignedTrade", "Trade agreement signed");
+		Severity = ETerritoryIntelligenceSeverity::Positive;
+		break;
+	case EDiplomacyEventType::ExpiredTreaty:
+		Action = NSLOCTEXT("TerritoryIntelligence", "TreatyExpired", "Treaty expired");
+		Severity = ETerritoryIntelligenceSeverity::Warning;
+		break;
+	case EDiplomacyEventType::BrokeCeasefire:
+		Action = NSLOCTEXT("TerritoryIntelligence", "CeasefireBroken", "Ceasefire broken");
+		Severity = ETerritoryIntelligenceSeverity::Critical;
+		break;
+	case EDiplomacyEventType::SignedNonAggression:
+		Action = NSLOCTEXT("TerritoryIntelligence", "NonAggressionSigned",
+			"Non-aggression pact signed");
+		Severity = ETerritoryIntelligenceSeverity::Positive;
+		break;
+	default:
+		Action = NSLOCTEXT("TerritoryIntelligence", "DiplomacyUpdated", "Diplomacy updated");
+		break;
+	}
+	AddLiveEvent(ETerritoryLiveEventType::DiplomacyChanged, FGameplayTag(),
+		FText::Format(NSLOCTEXT("TerritoryIntelligence", "DiplomacyHeadline",
+			"{0}: {1} / {2}"), Action,
+			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Event.FactionA),
+			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Event.FactionB)),
+		NSLOCTEXT("TerritoryIntelligence", "DiplomacyDetail",
+			"Narrative faction attitude changed. Capture eligibility, guard hostility, and future counterattack admission now use the new relationship."),
+		false, 45.f, ETerritoryIntelligenceCategory::Diplomacy, Severity,
+		Event.FactionA, Event.FactionB, FGameplayTagContainer(), 0, 0, 0,
+		Severity != ETerritoryIntelligenceSeverity::Information,
+		MakeDiplomacyRecordID(Event));
 }
 
 UTerritoryPlayerManagementComponent* UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(
@@ -804,6 +1423,14 @@ void UTerritoryPlayerManagementComponent::PerformSetGuardTarget(
 	const FTerritoryGarrisonMutationResult Result =
 		Territory->TrySetDesiredGuardCount(Pawn, NewDesiredGuardCount);
 	ClientReceiveGuardPurchaseResult(Territory, Result.bSuccess, Result.Message, RequestId);
+	if (Result.bSuccess)
+	{
+		ClientReceiveManagementIntelligence(Territory,
+			ETerritoryLiveEventType::GarrisonChanged,
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "GarrisonPlanHeadline",
+				"Garrison plan updated: {0}"), Territory->GetTerritoryDisplayName()),
+			Result.Message);
+	}
 }
 
 void UTerritoryPlayerManagementComponent::PerformSendReinforcements(
@@ -827,6 +1454,14 @@ void UTerritoryPlayerManagementComponent::PerformSendReinforcements(
 	const FTerritoryGarrisonMutationResult Result =
 		Territory->TrySendReinforcements(Pawn, Count);
 	ClientReceiveGuardPurchaseResult(Territory, Result.bSuccess, Result.Message, RequestId);
+	if (Result.bSuccess)
+	{
+		ClientReceiveManagementIntelligence(Territory,
+			ETerritoryLiveEventType::ReinforcementDeployed,
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "ReinforcementHeadline",
+				"Reserve deployed: {0}"), Territory->GetTerritoryDisplayName()),
+			Result.Message);
+	}
 }
 
 void UTerritoryPlayerManagementComponent::PerformPurchaseForDistrict(
@@ -852,6 +1487,13 @@ void UTerritoryPlayerManagementComponent::PerformPurchaseForDistrict(
 		bSuccess = District->TryPurchaseGuards(Pawn, Count, Result);
 	}
 	ClientReceiveGuardPurchaseResult(District, bSuccess, Result, RequestId);
+	if (bSuccess && District)
+	{
+		ClientReceiveManagementIntelligence(District,
+			ETerritoryLiveEventType::GarrisonChanged,
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "GuardsAddedHeadline",
+				"Guards assigned: {0}"), District->GetTerritoryDisplayName()), Result);
+	}
 }
 
 void UTerritoryPlayerManagementComponent::PerformRemove(
@@ -903,6 +1545,13 @@ void UTerritoryPlayerManagementComponent::PerformRemoveForDistrict(
 		bSuccess = District->TryRemoveGuards(Pawn, Count, Result);
 	}
 	ClientReceiveGuardPurchaseResult(District, bSuccess, Result, RequestId);
+	if (bSuccess && District)
+	{
+		ClientReceiveManagementIntelligence(District,
+			ETerritoryLiveEventType::GarrisonChanged,
+			FText::Format(NSLOCTEXT("TerritoryIntelligence", "GuardsRemovedHeadline",
+				"Guards withdrawn: {0}"), District->GetTerritoryDisplayName()), Result);
+	}
 }
 
 bool UTerritoryPlayerManagementComponent::CanManageDistrict(
@@ -965,6 +1614,18 @@ void UTerritoryPlayerManagementComponent::ClientReceiveGuardPurchaseResult_Imple
 	OnGuardPurchaseResult.Broadcast(Territory, bSuccess, Message, RequestId);
 }
 
+void UTerritoryPlayerManagementComponent::ClientReceiveManagementIntelligence_Implementation(
+	ATerritoryVolume* Territory, ETerritoryLiveEventType Type,
+	const FText& Headline, const FText& Detail)
+{
+	AddLiveEvent(Type, Territory ? Territory->GetTerritoryTag() : FGameplayTag(),
+		Headline, Detail, Territory != nullptr, 20.f,
+		ETerritoryIntelligenceCategory::Command,
+		ETerritoryIntelligenceSeverity::Positive,
+		ResolveViewerFaction(), FGameplayTag(), FGameplayTagContainer(),
+		0, 0, 0, false);
+}
+
 void UTerritoryPlayerManagementComponent::SendAssaultNotification(
 	const FTerritoryAssaultRecord& Assault)
 {
@@ -985,7 +1646,11 @@ void UTerritoryPlayerManagementComponent::ClientReceiveAssaultNotification_Imple
 		FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterWarningDetail",
 			"{0} is preparing {1} finite attackers. The assault waits for the configured activation rules."),
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.AttackingFaction),
-			FText::AsNumber(Assault.PlannedForce)), true, 45.f);
+			FText::AsNumber(Assault.PlannedForce)), true, 45.f,
+		ETerritoryIntelligenceCategory::Conflict,
+		ETerritoryIntelligenceSeverity::Warning,
+		Assault.AttackingFaction, Assault.DefendingFaction,
+		FGameplayTagContainer(), 0, 0, 0, true, Assault.AssaultID);
 }
 
 void UTerritoryPlayerManagementComponent::SendCounterHappened(
@@ -1011,7 +1676,11 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterScheduledHeadline",
 				"Attack warning: {0}"), Name),
 			NSLOCTEXT("TerritoryLiveEvents", "CounterScheduledDetail",
-				"A hostile response is scheduled. Track the District to inspect its route and defence."), true, 45.f);
+				"A hostile response is scheduled. Track the District to inspect its route and defence."), true, 45.f,
+			ETerritoryIntelligenceCategory::Conflict,
+			ETerritoryIntelligenceSeverity::Warning,
+			Event.Assault.AttackingFaction, Event.Assault.DefendingFaction,
+			FGameplayTagContainer(), 0, 0, 0, true, Event.Assault.AssaultID);
 		break;
 	case ETerritoryAssaultState::Active:
 		AddLiveEvent(ETerritoryLiveEventType::CounterAttackActive, Target,
@@ -1020,7 +1689,11 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterActiveDetail",
 				"{0} attackers remain alive and {1} remain in reserve."),
 				FText::AsNumber(Event.Assault.AliveForce),
-				FText::AsNumber(Event.Assault.PendingReserveForce)), true, 60.f);
+				FText::AsNumber(Event.Assault.PendingReserveForce)), true, 60.f,
+			ETerritoryIntelligenceCategory::Conflict,
+			ETerritoryIntelligenceSeverity::Critical,
+			Event.Assault.AttackingFaction, Event.Assault.DefendingFaction,
+			FGameplayTagContainer(), 0, 0, 0, true, Event.Assault.AssaultID);
 		break;
 	case ETerritoryAssaultState::Defeated:
 		AddLiveEvent(ETerritoryLiveEventType::CounterAttackDefeated, Target,
@@ -1029,14 +1702,22 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterDefeatedDetail",
 				"The finite force was removed after {0} casualties and {1} withdrawals."),
 				FText::AsNumber(Event.Assault.KilledForce),
-				FText::AsNumber(Event.Assault.WithdrawnForce)), true);
+				FText::AsNumber(Event.Assault.WithdrawnForce)), true, 30.f,
+			ETerritoryIntelligenceCategory::Conflict,
+			ETerritoryIntelligenceSeverity::Positive,
+			Event.Assault.DefendingFaction, Event.Assault.AttackingFaction,
+			FGameplayTagContainer(), 0, 0, 0, true, Event.Assault.AssaultID);
 		break;
 	case ETerritoryAssaultState::Succeeded:
 		AddLiveEvent(ETerritoryLiveEventType::CounterAttackSucceeded, Target,
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterSucceededHeadline",
 				"Enemy force took {0}"), Name),
 			NSLOCTEXT("TerritoryLiveEvents", "CounterSucceededDetail",
-				"The physical capture completed. Track the Territory to organize a counter-offensive."), true, 60.f);
+				"The physical capture completed. Track the Territory to organize a counter-offensive."), true, 60.f,
+			ETerritoryIntelligenceCategory::Conflict,
+			ETerritoryIntelligenceSeverity::Critical,
+			Event.Assault.AttackingFaction, Event.Assault.DefendingFaction,
+			FGameplayTagContainer(), 0, 0, 0, true, Event.Assault.AssaultID);
 		break;
 	case ETerritoryAssaultState::Cancelled:
 		AddLiveEvent(ETerritoryLiveEventType::CounterAttackCancelled, Target,
@@ -1044,7 +1725,11 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 				"Attack on {0} cancelled"), Name),
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterCancelledDetail",
 				"The response ended before capture. Resolution: {0}."),
-				FText::FromString(UEnum::GetValueAsString(Event.Resolution))), true);
+				FText::FromString(UEnum::GetValueAsString(Event.Resolution))), true, 20.f,
+			ETerritoryIntelligenceCategory::Conflict,
+			ETerritoryIntelligenceSeverity::Information,
+			Event.Assault.AttackingFaction, Event.Assault.DefendingFaction,
+			FGameplayTagContainer(), 0, 0, 0, false, Event.Assault.AssaultID);
 		break;
 	default:
 		break;

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Widgets/NarrativeComboBoxString.h"
 #include "UI/TerritoryActivatableWidget.h"
+#include "UI/TerritoryLiveEventTypes.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "TerritoryJournalWidget.generated.h"
 
@@ -109,6 +110,30 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> Text_LiveEventCount;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> Text_IntelligenceSummary;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceAll;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceConflict;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceControl;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceEconomy;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceCommand;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceProduction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceDiplomacy;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_FilterSummary;
@@ -317,6 +342,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_SendReinforcement;
 	TMap<FString, FGameplayTag> OwnerFilterTags;
+	ETerritoryIntelligenceFilter SelectedIntelligenceFilter =
+		ETerritoryIntelligenceFilter::All;
 	FString SelectedOwnerFilter;
 	FString SelectedStateFilter;
 	FString SearchFilter;
@@ -347,6 +374,7 @@ private:
 	void RefreshCommandCenterIdentity(const TArray<FTerritoryDistrictOperationsView>& Views);
 	void BuildLiveEventPanel();
 	void RefreshLiveEvents();
+	void SetIntelligenceFilter(ETerritoryIntelligenceFilter Filter);
 	UTerritoryDistrictRowWidget* CreateOperationsRow(const FTerritoryDistrictOperationsView& View);
 	bool PassesFilters(const FTerritoryDistrictOperationsView& View) const;
 
@@ -433,6 +461,27 @@ private:
 
 	UFUNCTION()
 	void HandleLiveEventsChanged();
+
+	UFUNCTION()
+	void HandleIntelligenceAllClicked();
+
+	UFUNCTION()
+	void HandleIntelligenceConflictClicked();
+
+	UFUNCTION()
+	void HandleIntelligenceControlClicked();
+
+	UFUNCTION()
+	void HandleIntelligenceEconomyClicked();
+
+	UFUNCTION()
+	void HandleIntelligenceCommandClicked();
+
+	UFUNCTION()
+	void HandleIntelligenceProductionClicked();
+
+	UFUNCTION()
+	void HandleIntelligenceDiplomacyClicked();
 
 	UFUNCTION()
 	void HandleDistrictSelected(ATerritoryDistrict* District);

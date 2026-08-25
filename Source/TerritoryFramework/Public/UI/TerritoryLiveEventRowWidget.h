@@ -42,7 +42,13 @@ private:
 	TObjectPtr<UTextBlock> HeadlineText;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ReportMetaText;
+
+	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> DetailText;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTextBlock> ImpactText;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UNarrativeCommonButtonBase> WaypointButton;

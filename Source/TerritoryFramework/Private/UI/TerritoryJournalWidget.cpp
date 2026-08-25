@@ -14,6 +14,8 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/WidgetSwitcher.h"
+#include "Components/WrapBox.h"
+#include "Components/WrapBoxSlot.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
@@ -337,6 +339,13 @@ void UTerritoryJournalWidget::NativeDestruct()
 	if (Btn_ZeroGuardTarget) Btn_ZeroGuardTarget->OnClicked().RemoveAll(this);
 	if (Btn_MaxGuardTarget) Btn_MaxGuardTarget->OnClicked().RemoveAll(this);
 	if (Btn_SendReinforcement) Btn_SendReinforcement->OnClicked().RemoveAll(this);
+	if (Btn_IntelligenceAll) Btn_IntelligenceAll->OnClicked().RemoveAll(this);
+	if (Btn_IntelligenceConflict) Btn_IntelligenceConflict->OnClicked().RemoveAll(this);
+	if (Btn_IntelligenceControl) Btn_IntelligenceControl->OnClicked().RemoveAll(this);
+	if (Btn_IntelligenceEconomy) Btn_IntelligenceEconomy->OnClicked().RemoveAll(this);
+	if (Btn_IntelligenceCommand) Btn_IntelligenceCommand->OnClicked().RemoveAll(this);
+	if (Btn_IntelligenceProduction) Btn_IntelligenceProduction->OnClicked().RemoveAll(this);
+	if (Btn_IntelligenceDiplomacy) Btn_IntelligenceDiplomacy->OnClicked().RemoveAll(this);
 	if (DistrictSearchBox)
 	{
 		DistrictSearchBox->OnTextChanged.RemoveDynamic(this, &UTerritoryJournalWidget::HandleSearchChanged);
@@ -486,16 +495,79 @@ void UTerritoryJournalWidget::BuildLiveEventPanel()
 		FLinearColor(1.f, 0.84f, 0.f, 1.f),
 		ETerritoryGeneratedTextRole::Heading);
 	FeedStack->AddChildToVerticalBox(Text_LiveEventCount);
+	Text_IntelligenceSummary = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_IntelligenceSummary"));
+	StyleGeneratedTerritoryText(Text_IntelligenceSummary, 11,
+		FLinearColor(0.88f, 0.89f, 0.86f, 1.f));
+	if (UVerticalBoxSlot* SummarySlot = FeedStack->AddChildToVerticalBox(
+		Text_IntelligenceSummary))
+	{
+		SummarySlot->SetPadding(FMargin(0.f, 3.f, 0.f, 2.f));
+	}
 	UTextBlock* Caption = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LiveEventCaption"));
 	Caption->SetText(NSLOCTEXT("TerritoryJournal", "LiveEventCaption",
-		"Live Territory changes stay bright. Expired reports remain muted for context; active locations can be tracked immediately."));
+		"Intelligence records control, conflict, economy, command, production, and diplomacy changes. Live reports stay bright; campaign archives remain readable and can still track a loaded location."));
 	StyleGeneratedTerritoryText(Caption, 11,
 		FLinearColor(0.66f, 0.65f, 0.61f, 1.f),
 		ETerritoryGeneratedTextRole::Muted);
 	if (UVerticalBoxSlot* CaptionSlot = FeedStack->AddChildToVerticalBox(Caption))
 	{
 		CaptionSlot->SetPadding(FMargin(0.f, 2.f, 0.f, 8.f));
+	}
+
+	const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+	const TSubclassOf<UNarrativeCommonButtonBase> ButtonClass = Settings
+		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
+	if (ButtonClass)
+	{
+		UWrapBox* FilterRow = WidgetTree->ConstructWidget<UWrapBox>(
+			UWrapBox::StaticClass(), TEXT("IntelligenceFilterRow"));
+		FilterRow->SetInnerSlotPadding(FVector2D(5.f, 5.f));
+		if (UVerticalBoxSlot* FilterSlot = FeedStack->AddChildToVerticalBox(FilterRow))
+		{
+			FilterSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+		}
+		auto AddFilterButton = [this, FilterRow, ButtonClass, Settings](
+			TObjectPtr<UNarrativeCommonButtonBase>& Button, FName Name,
+			const FText& Label, void (UTerritoryJournalWidget::*Handler)())
+		{
+			Button = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+				ButtonClass, Name);
+			if (const TSubclassOf<UCommonButtonStyle> Style =
+				Settings->DefaultTerritoryButtonStyle.LoadSynchronous())
+			{
+				Button->SetStyle(Style);
+			}
+			Button->SetButtonText(Label);
+			Button->OnClicked().AddUObject(this, Handler);
+			if (UWrapBoxSlot* Slot = FilterRow->AddChildToWrapBox(Button))
+			{
+				Slot->SetPadding(FMargin(0.f));
+			}
+		};
+		AddFilterButton(Btn_IntelligenceAll, TEXT("Btn_IntelligenceAll"),
+			NSLOCTEXT("TerritoryJournal", "IntelAll", "ALL"),
+			&UTerritoryJournalWidget::HandleIntelligenceAllClicked);
+		AddFilterButton(Btn_IntelligenceConflict, TEXT("Btn_IntelligenceConflict"),
+			NSLOCTEXT("TerritoryJournal", "IntelConflict", "CONFLICT"),
+			&UTerritoryJournalWidget::HandleIntelligenceConflictClicked);
+		AddFilterButton(Btn_IntelligenceControl, TEXT("Btn_IntelligenceControl"),
+			NSLOCTEXT("TerritoryJournal", "IntelControl", "CONTROL"),
+			&UTerritoryJournalWidget::HandleIntelligenceControlClicked);
+		AddFilterButton(Btn_IntelligenceEconomy, TEXT("Btn_IntelligenceEconomy"),
+			NSLOCTEXT("TerritoryJournal", "IntelEconomy", "ECONOMY"),
+			&UTerritoryJournalWidget::HandleIntelligenceEconomyClicked);
+		AddFilterButton(Btn_IntelligenceCommand, TEXT("Btn_IntelligenceCommand"),
+			NSLOCTEXT("TerritoryJournal", "IntelCommand", "COMMAND"),
+			&UTerritoryJournalWidget::HandleIntelligenceCommandClicked);
+		AddFilterButton(Btn_IntelligenceProduction, TEXT("Btn_IntelligenceProduction"),
+			NSLOCTEXT("TerritoryJournal", "IntelProduction", "PRODUCTION"),
+			&UTerritoryJournalWidget::HandleIntelligenceProductionClicked);
+		AddFilterButton(Btn_IntelligenceDiplomacy, TEXT("Btn_IntelligenceDiplomacy"),
+			NSLOCTEXT("TerritoryJournal", "IntelDiplomacy", "DIPLOMACY"),
+			&UTerritoryJournalWidget::HandleIntelligenceDiplomacyClicked);
 	}
 	LiveEventsBox = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("LiveEventsBox"));
@@ -507,13 +579,23 @@ void UTerritoryJournalWidget::RefreshLiveEvents()
 {
 	if (!LiveEventsBox) return;
 	LiveEventsBox->ClearChildren();
+	const TArray<FTerritoryLiveEvent> AllEvents = ManagementComponent.IsValid()
+		? ManagementComponent->GetTerritoryIntelligence(
+			ETerritoryIntelligenceFilter::All, true)
+		: TArray<FTerritoryLiveEvent>();
 	const TArray<FTerritoryLiveEvent> Events = ManagementComponent.IsValid()
-		? ManagementComponent->GetLiveEvents(true)
+		? ManagementComponent->GetTerritoryIntelligence(
+			SelectedIntelligenceFilter, true)
 		: TArray<FTerritoryLiveEvent>();
 	int32 ActiveCount = 0;
-	for (const FTerritoryLiveEvent& Event : Events)
+	int32 ArchivedCount = 0;
+	for (const FTerritoryLiveEvent& Event : AllEvents)
 	{
 		ActiveCount += Event.bExpired ? 0 : 1;
+		ArchivedCount += Event.bExpired ? 1 : 0;
+	}
+	for (const FTerritoryLiveEvent& Event : Events)
+	{
 		UTerritoryLiveEventRowWidget* Row =
 			CreateWidget<UTerritoryLiveEventRowWidget>(
 				this, UTerritoryLiveEventRowWidget::StaticClass());
@@ -529,20 +611,62 @@ void UTerritoryJournalWidget::RefreshLiveEvents()
 	if (Text_LiveEventCount)
 	{
 		Text_LiveEventCount->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "LiveEventCount", "LIVE INTELLIGENCE  •  {0} ACTIVE  •  {1} TOTAL"),
-			FText::AsNumber(ActiveCount), FText::AsNumber(Events.Num())));
+			NSLOCTEXT("TerritoryJournal", "LiveEventCount",
+				"TERRITORY INTELLIGENCE DATABANK  •  {0} LIVE  •  {1} SHOWN  •  {2} ARCHIVED"),
+			FText::AsNumber(ActiveCount), FText::AsNumber(Events.Num()),
+			FText::AsNumber(ArchivedCount)));
+	}
+	if (Text_IntelligenceSummary)
+	{
+		int32 ActiveThreats = 0;
+		int32 TerritoryLosses = 0;
+		int32 PerksLost = 0;
+		int64 FundsDelta = 0;
+		for (const FTerritoryLiveEvent& Event : AllEvents)
+		{
+			ActiveThreats += !Event.bExpired
+				&& Event.Category == ETerritoryIntelligenceCategory::Conflict
+				&& (Event.Severity == ETerritoryIntelligenceSeverity::Warning
+					|| Event.Severity == ETerritoryIntelligenceSeverity::Critical) ? 1 : 0;
+			TerritoryLosses += Event.Type == ETerritoryLiveEventType::Lost ? 1 : 0;
+			PerksLost += Event.Type == ETerritoryLiveEventType::CommandCapabilityLost
+				? Event.CommandCapabilities.Num() : 0;
+			FundsDelta += Event.CurrencyDelta;
+		}
+		Text_IntelligenceSummary->SetText(FText::Format(NSLOCTEXT(
+			"TerritoryJournal", "IntelligenceSummary",
+			"ACTIVE THREATS  {0}    •    TERRITORIES LOST  {1}    •    PERKS LOST  {2}    •    RECORDED FUNDS  {3}"),
+			FText::AsNumber(ActiveThreats), FText::AsNumber(TerritoryLosses),
+			FText::AsNumber(PerksLost), FText::AsNumber(FundsDelta)));
 	}
 	if (Events.IsEmpty())
 	{
 		UTextBlock* Empty = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 			UNarrativeCommonTextBlock::StaticClass(), TEXT("NoLiveTerritoryEvents"));
-		Empty->SetText(NSLOCTEXT("TerritoryJournal", "NoLiveEvents",
-			"No Territory changes recorded this session."));
+		Empty->SetText(AllEvents.IsEmpty()
+			? NSLOCTEXT("TerritoryJournal", "NoLiveEvents",
+				"No Territory intelligence has been recorded in this campaign.")
+			: NSLOCTEXT("TerritoryJournal", "NoFilteredIntelligence",
+				"No reports match this intelligence category."));
 		StyleGeneratedTerritoryText(Empty, 12,
 			FLinearColor(0.48f, 0.54f, 0.53f, 1.f),
 			ETerritoryGeneratedTextRole::Muted);
 		LiveEventsBox->AddChild(Empty);
 	}
+	if (Btn_IntelligenceAll) Btn_IntelligenceAll->SetIsSelected(
+		SelectedIntelligenceFilter == ETerritoryIntelligenceFilter::All);
+	if (Btn_IntelligenceConflict) Btn_IntelligenceConflict->SetIsSelected(
+		SelectedIntelligenceFilter == ETerritoryIntelligenceFilter::Conflict);
+	if (Btn_IntelligenceControl) Btn_IntelligenceControl->SetIsSelected(
+		SelectedIntelligenceFilter == ETerritoryIntelligenceFilter::Control);
+	if (Btn_IntelligenceEconomy) Btn_IntelligenceEconomy->SetIsSelected(
+		SelectedIntelligenceFilter == ETerritoryIntelligenceFilter::Economy);
+	if (Btn_IntelligenceCommand) Btn_IntelligenceCommand->SetIsSelected(
+		SelectedIntelligenceFilter == ETerritoryIntelligenceFilter::Command);
+	if (Btn_IntelligenceProduction) Btn_IntelligenceProduction->SetIsSelected(
+		SelectedIntelligenceFilter == ETerritoryIntelligenceFilter::Production);
+	if (Btn_IntelligenceDiplomacy) Btn_IntelligenceDiplomacy->SetIsSelected(
+		SelectedIntelligenceFilter == ETerritoryIntelligenceFilter::Diplomacy);
 }
 
 void UTerritoryJournalWidget::BuildGarrisonManagementControls()
@@ -1268,6 +1392,48 @@ void UTerritoryJournalWidget::HandleLiveEventWaypointRequested(
 void UTerritoryJournalWidget::HandleLiveEventsChanged()
 {
 	RefreshLiveEvents();
+}
+
+void UTerritoryJournalWidget::SetIntelligenceFilter(
+	ETerritoryIntelligenceFilter Filter)
+{
+	SelectedIntelligenceFilter = Filter;
+	RefreshLiveEvents();
+}
+
+void UTerritoryJournalWidget::HandleIntelligenceAllClicked()
+{
+	SetIntelligenceFilter(ETerritoryIntelligenceFilter::All);
+}
+
+void UTerritoryJournalWidget::HandleIntelligenceConflictClicked()
+{
+	SetIntelligenceFilter(ETerritoryIntelligenceFilter::Conflict);
+}
+
+void UTerritoryJournalWidget::HandleIntelligenceControlClicked()
+{
+	SetIntelligenceFilter(ETerritoryIntelligenceFilter::Control);
+}
+
+void UTerritoryJournalWidget::HandleIntelligenceEconomyClicked()
+{
+	SetIntelligenceFilter(ETerritoryIntelligenceFilter::Economy);
+}
+
+void UTerritoryJournalWidget::HandleIntelligenceCommandClicked()
+{
+	SetIntelligenceFilter(ETerritoryIntelligenceFilter::Command);
+}
+
+void UTerritoryJournalWidget::HandleIntelligenceProductionClicked()
+{
+	SetIntelligenceFilter(ETerritoryIntelligenceFilter::Production);
+}
+
+void UTerritoryJournalWidget::HandleIntelligenceDiplomacyClicked()
+{
+	SetIntelligenceFilter(ETerritoryIntelligenceFilter::Diplomacy);
 }
 
 UTextBlock* UTerritoryJournalWidget::CreateHierarchyTextRow(

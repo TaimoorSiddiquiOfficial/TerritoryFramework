@@ -196,6 +196,37 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestSendReinforcements")));
 	TestTrue(TEXT("Owned bridge exposes the live event feed"),
 		TerritoryUITest::IsBlueprintPure(ManagementClass, TEXT("GetLiveEvents")));
+	TestTrue(TEXT("Owned bridge exposes the filterable intelligence databank"),
+		TerritoryUITest::IsBlueprintPure(ManagementClass, TEXT("GetTerritoryIntelligence")));
+	TestTrue(TEXT("Territory intelligence participates in Narrative Pro component saving"),
+		ManagementClass->ImplementsInterface(UNarrativeSavableComponent::StaticClass()));
+	const UScriptStruct* IntelligenceStruct = FTerritoryLiveEvent::StaticStruct();
+	TestNotNull(TEXT("Intelligence record exposes a category"),
+		IntelligenceStruct->FindPropertyByName(TEXT("Category")));
+	TestNotNull(TEXT("Intelligence record exposes severity"),
+		IntelligenceStruct->FindPropertyByName(TEXT("Severity")));
+	TestNotNull(TEXT("Intelligence record exposes command perk impact"),
+		IntelligenceStruct->FindPropertyByName(TEXT("CommandCapabilities")));
+	TestNotNull(TEXT("Intelligence record exposes recurring income impact"),
+		IntelligenceStruct->FindPropertyByName(TEXT("IncomeDelta")));
+	TestNotNull(TEXT("Intelligence record exposes recurring upkeep impact"),
+		IntelligenceStruct->FindPropertyByName(TEXT("UpkeepDelta")));
+	TestNotNull(TEXT("Intelligence record exposes actual currency impact"),
+		IntelligenceStruct->FindPropertyByName(TEXT("CurrencyDelta")));
+	TestNotNull(TEXT("Intelligence record can link a durable economy or assault record"),
+		IntelligenceStruct->FindPropertyByName(TEXT("SourceRecordID")));
+	const FProperty* HeadlineProperty = IntelligenceStruct->FindPropertyByName(TEXT("Headline"));
+	const FProperty* SequenceProperty = IntelligenceStruct->FindPropertyByName(TEXT("Sequence"));
+	TestTrue(TEXT("Intelligence report content is marked for Narrative save serialization"),
+		HeadlineProperty && HeadlineProperty->HasAnyPropertyFlags(CPF_SaveGame));
+	TestTrue(TEXT("Intelligence report ordering is marked for Narrative save serialization"),
+		SequenceProperty && SequenceProperty->HasAnyPropertyFlags(CPF_SaveGame));
+	const UTerritoryPlayerManagementComponent* ManagementDefaults =
+		GetDefault<UTerritoryPlayerManagementComponent>();
+	TestEqual(TEXT("Databank retains a useful 200-report default"),
+		ManagementDefaults->MaxLiveEventHistory, 200);
+	TestTrue(TEXT("Archived reports persist until the bounded history fills by default"),
+		ManagementDefaults->ExpiredEventRetentionDuration < 0.f);
 	TestNotNull(TEXT("Live event row exists for authored Reports presentation"),
 		UTerritoryLiveEventRowWidget::StaticClass());
 	return true;
