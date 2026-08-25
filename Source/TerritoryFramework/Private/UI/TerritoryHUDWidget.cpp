@@ -180,7 +180,7 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 		{
 			// The passive card stays compact, but temporarily grows enough to show
 			// the counterattack sentence without clipping or covering the screen.
-			CardSlot->SetSize(FVector2D(400.f, bAlertVisible ? 190.f : 156.f));
+			CardSlot->SetSize(FVector2D(400.f, bAlertVisible ? 230.f : 190.f));
 		}
 	}
 
