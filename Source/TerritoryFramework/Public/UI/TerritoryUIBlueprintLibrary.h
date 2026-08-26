@@ -343,6 +343,19 @@ public:
 	static ATerritoryVolume* GetTrackedTerritory(
 		APlayerController* PlayerController);
 
+	/**
+	 * Return the District containing the player's pawn.
+	 *
+	 * A Place is resolved through its owning District, so a player standing in
+	 * Castle Hill Farm receives Castle Hill just as a player in the Blacksmith
+	 * receives Market Square. Returns null outside a loaded District hierarchy.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Hierarchy",
+		meta=(WorldContext="WorldContextObject"))
+	static ATerritoryDistrict* GetDistrictAtPlayerLocation(
+		const UObject* WorldContextObject,
+		APlayerController* PlayerController);
+
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
 		meta=(WorldContext="WorldContextObject"))
 	static bool BuildDistrictOperationsView(

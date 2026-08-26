@@ -2,7 +2,11 @@
 
 #include "Misc/AutomationTest.h"
 #include "Components/ScrollBox.h"
+#include "Core/TerritoryHierarchy.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "NarrativeActivatableWidget.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Navigation/TerritoryMapMarker.h"
@@ -86,6 +90,8 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintCallable(LibraryClass, TEXT("ClearTerritoryWaypoint")));
 	TestTrue(TEXT("Tracked Territory query is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetTrackedTerritory")));
+	TestTrue(TEXT("Player location District query is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetDistrictAtPlayerLocation")));
 	TestTrue(TEXT("District operations builder is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildDistrictOperationsView")));
 	TestTrue(TEXT("District operations list is Blueprint pure"),
@@ -340,6 +346,65 @@ bool FTerritoryUILiveEventExpiryTest::RunTest(const FString& Parameters)
 		Marker->SetTracked(false);
 		TestFalse(TEXT("Clearing tracking demotes the marker"), Marker->IsTracked());
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIPlayerLocationDistrictTest,
+	"TerritoryFramework.UI.Regression.PlaceResolvesPlayerLocationDistrict",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIPlayerLocationDistrictTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Location query world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryDistrict* District = World->SpawnActor<ATerritoryDistrict>(
+		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* Property = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	APlayerController* PlayerController = World->SpawnActor<APlayerController>(
+		APlayerController::StaticClass(), FTransform::Identity, SpawnParams);
+	APawn* Pawn = World->SpawnActor<APawn>(
+		APawn::StaticClass(), FTransform::Identity, SpawnParams);
+	TestNotNull(TEXT("District created"), District);
+	TestNotNull(TEXT("Place created"), Property);
+	TestNotNull(TEXT("Player controller created"), PlayerController);
+	TestNotNull(TEXT("Player pawn created"), Pawn);
+	if (!District || !Property || !PlayerController || !Pawn)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill"), false);
+	const FGameplayTag PropertyTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	District->TerritoryTag = DistrictTag;
+	District->TerritoryGUID = FGuid::NewGuid();
+	Property->TerritoryTag = PropertyTag;
+	Property->ParentTerritoryTag = DistrictTag;
+	Property->TerritoryGUID = FGuid::NewGuid();
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	TestNotNull(TEXT("Registry created"), Registry);
+	if (Registry)
+	{
+		TestEqual(TEXT("District registers"), Registry->RegisterTerritory(District),
+			ETerritoryRegistrationResult::Success);
+		TestEqual(TEXT("Place registers"), Registry->RegisterTerritory(Property),
+			ETerritoryRegistrationResult::Success);
+		Pawn->SetActorLocation(Property->GetTerritoryBounds().GetCenter());
+		PlayerController->Possess(Pawn);
+		TestTrue(TEXT("A player inside a Place resolves its owning District"),
+			UTerritoryUIBlueprintLibrary::GetDistrictAtPlayerLocation(
+				World, PlayerController) == District);
+	}
+
+	World->DestroyWorld(false);
 	return true;
 }
 

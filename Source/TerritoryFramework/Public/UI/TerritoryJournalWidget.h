@@ -409,7 +409,6 @@ private:
 	ETerritoryOperationsFilter SelectedOperationsFilter = ETerritoryOperationsFilter::All;
 	bool bFiltersInitialized = false;
 	bool bResponsiveLayoutApplied = false;
-	bool bCompactResponsiveLayout = false;
 	bool bSelectedTerritoryInfoRequested = false;
 	int32 SelectedDetailTab = 0;
 	int32 LastOperationsRevision = INDEX_NONE;

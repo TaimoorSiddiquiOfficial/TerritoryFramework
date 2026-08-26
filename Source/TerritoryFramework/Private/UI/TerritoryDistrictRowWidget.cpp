@@ -831,9 +831,9 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 		SetRoundedSurface(PlaceSurface,
 			FLinearColor(0.025f, 0.025f, 0.025f, 0.98f),
 			FLinearColor(Accent.R, Accent.G, Accent.B, 0.28f), 2.f, 1.f);
-		UNarrativeCommonTextBlock* PlaceText =
-			WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
-				UNarrativeCommonTextBlock::StaticClass(),
+		UTextBlock* PlaceText =
+			WidgetTree->ConstructWidget<UTextBlock>(
+				UTextBlock::StaticClass(),
 				FName(*FString::Printf(TEXT("KnownPlaceText_%u"),
 					GetTypeHash(Place.TerritoryTag))));
 		PlaceText->SetText(OperationsView.bOwnedByViewer
@@ -858,9 +858,9 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 		SetRoundedSurface(HiddenSurface,
 			FLinearColor(0.025f, 0.025f, 0.025f, 0.86f),
 			FLinearColor(0.32f, 0.32f, 0.31f, 0.28f), 2.f, 1.f);
-		UNarrativeCommonTextBlock* HiddenText =
-			WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
-				UNarrativeCommonTextBlock::StaticClass(), TEXT("HiddenPlaceSummaryText"));
+		UTextBlock* HiddenText =
+			WidgetTree->ConstructWidget<UTextBlock>(
+				UTextBlock::StaticClass(), TEXT("HiddenPlaceSummaryText"));
 		HiddenText->SetText(FText::Format(
 			OperationsView.bOwnedByViewer
 				? NSLOCTEXT("TerritoryDistrictRow", "HiddenPlaceSummary",

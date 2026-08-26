@@ -7,6 +7,7 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryWorldState.h"
 #include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "UI/TerritoryActivatableWidget.h"
 #include "UnrealFramework/NarrativePlayerController.h"
@@ -377,6 +378,31 @@ ATerritoryVolume* UTerritoryUIBlueprintLibrary::GetTrackedTerritory(
 		const UTerritoryMapMarker* Marker = Component
 			? Component->GetTerritoryMapMarker() : nullptr;
 		if (Marker && Marker->IsTracked()) return Territory;
+	}
+	return nullptr;
+}
+
+ATerritoryDistrict* UTerritoryUIBlueprintLibrary::GetDistrictAtPlayerLocation(
+	const UObject* WorldContextObject, APlayerController* PlayerController)
+{
+	const APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+	const UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+	const UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!Pawn || !Registry)
+	{
+		return nullptr;
+	}
+
+	ATerritoryVolume* Territory = Registry->GetTerritoryAtLocation(
+		Pawn->GetActorLocation());
+	if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory))
+	{
+		return District;
+	}
+	if (const ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
+	{
+		return Property->GetOwningDistrict();
 	}
 	return nullptr;
 }

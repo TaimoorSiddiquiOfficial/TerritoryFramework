@@ -7,6 +7,7 @@
 #include "Components/Button.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/ScrollBox.h"
@@ -388,6 +389,15 @@ void UTerritoryJournalWidget::NativeConstruct()
 			SelectedTerritoryInfoBox = WidgetTree->FindWidget(
 				TEXT("SelectedTerritoryInfoBox"));
 		}
+		if (UWidget* RightColumn = WidgetTree->FindWidget(
+			TEXT("TerritoryJournalRightColumn")))
+		{
+			if (UHorizontalBoxSlot* RightColumnSlot =
+				Cast<UHorizontalBoxSlot>(RightColumn->Slot))
+			{
+				RightColumnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			}
+		}
 	}
 	if (!GetActiveTerritoriesPanel() || !GetCapturedTerritoriesPanel())
 	{
@@ -627,22 +637,17 @@ void UTerritoryJournalWidget::NativeTick(const FGeometry& MyGeometry, float InDe
 		return;
 	}
 
-	const float AvailableWidth = MyGeometry.GetLocalSize().X;
-	if (AvailableWidth <= 0.f)
-	{
-		return;
-	}
-	const bool bCompact = AvailableWidth < 800.f;
-	if (bResponsiveLayoutApplied && bCompactResponsiveLayout == bCompact)
+	if (MyGeometry.GetLocalSize().X <= 0.f || bResponsiveLayoutApplied)
 	{
 		return;
 	}
 
 	if (UBorderSlot* ResponsiveSlot = Cast<UBorderSlot>(CommandCenterResponsiveWidth->Slot))
 	{
-		ResponsiveSlot->SetHorizontalAlignment(bCompact ? HAlign_Fill : HAlign_Center);
+		// Territory screens use the available Narrative menu surface. Centering the
+		// desired width created large dead margins on ordinary 16:9 viewports.
+		ResponsiveSlot->SetHorizontalAlignment(HAlign_Fill);
 		ResponsiveSlot->SetVerticalAlignment(VAlign_Fill);
-		bCompactResponsiveLayout = bCompact;
 		bResponsiveLayoutApplied = true;
 	}
 }
@@ -1314,11 +1319,16 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	const TArray<FTerritoryDistrictOperationsView> AllViews =
 		UTerritoryUIBlueprintLibrary::GetPlayerVisibleDistrictOperationsViews(
 			this, GetOwningPlayer(), ETerritoryOperationsFilter::All);
+	ATerritoryDistrict* PlayerDistrict =
+		UTerritoryUIBlueprintLibrary::GetDistrictAtPlayerLocation(
+			this, GetOwningPlayer());
 	RefreshCommandCenterIdentity(AllViews);
 	uint32 Revision = GetTypeHash(SelectedOwnerFilter);
 	Revision = HashCombineFast(Revision, GetTypeHash(SelectedStateFilter));
 	Revision = HashCombineFast(Revision, GetTypeHash(SearchFilter));
 	Revision = HashCombineFast(Revision, GetTypeHash(static_cast<uint8>(SelectedOperationsFilter)));
+	Revision = HashCombineFast(Revision, GetTypeHash(IsValid(PlayerDistrict)
+		? PlayerDistrict->GetTerritoryTag() : FGameplayTag()));
 	for (const FTerritoryDistrictOperationsView& View : AllViews)
 	{
 		Revision = HashCombineFast(Revision,
@@ -2096,6 +2106,9 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	int32 CapturedRowsAdded = 0;
 	int32 RiskCount = 0;
 	int32 GuardShortfall = 0;
+	ATerritoryDistrict* PlayerDistrict =
+		UTerritoryUIBlueprintLibrary::GetDistrictAtPlayerLocation(
+			this, GetOwningPlayer());
 	FGameplayTag ViewerFaction;
 	for (const FTerritoryDistrictOperationsView& View : Views)
 	{
@@ -2107,10 +2120,11 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		{
 			++AvailableUnlockedCount;
 		}
-		// Operations lists every unlocked non-owned District. A failed quest,
-		// diplomacy, or capture condition remains visible as status information;
-		// locked District identities never enter this player-facing list.
-		if (UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(View))
+		// Active mirrors the Quest Journal's focused list: it contains the one
+		// unlocked, non-owned District around the player. A Place resolves through
+		// its parent District, so Farm Hill and Blacksmith behave consistently.
+		if (View.District == PlayerDistrict
+			&& UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(View))
 		{
 			++AvailableQueueCount;
 			if (ActivePanel)
@@ -2170,9 +2184,11 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	if (ActiveRowsAdded == 0)
 	{
 		AddEmptyMessage(ActivePanel,
-			AvailableQueueCount == 0
-				? NSLOCTEXT("TerritoryJournal", "NoDistrictIntel", "No unlocked District operations are currently visible.")
-				: NSLOCTEXT("TerritoryJournal", "DistrictEntriesUnavailable", "District data is available, but its entry widget could not be created."),
+			!IsValid(PlayerDistrict)
+				? NSLOCTEXT("TerritoryJournal", "OutsideActiveDistrict", "Enter an unlocked District to make it your active operation.")
+				: AvailableQueueCount == 0
+					? NSLOCTEXT("TerritoryJournal", "CurrentDistrictNotAvailable", "Your current District is already held or is still locked by the story.")
+					: NSLOCTEXT("TerritoryJournal", "DistrictEntriesUnavailable", "District data is available, but its entry widget could not be created."),
 			TEXT("NoAvailableUnlockedDistricts"));
 	}
 	if (CapturedRowsAdded == 0)
@@ -2217,7 +2233,7 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		ActiveCountText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "ActiveDistrictCount",
 				"ACTIVE TERRITORIES  //  {0}"),
-			FText::AsNumber(AvailableQueueCount)));
+			FText::AsNumber(ActiveRowsAdded)));
 	}
 	UTextBlock* CapturedCountText = Text_CapturedTerritoryCount
 		? Text_CapturedTerritoryCount.Get() : Text_FinishedQuestCount.Get();

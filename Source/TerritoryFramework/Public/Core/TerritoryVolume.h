@@ -49,6 +49,7 @@ class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrative
 	friend class FTFFunctional_PlayerManagedGarrisonPolicy;
 	friend class FTFPatrolOverlapAndDefenceFrontRegression;
 	friend class FTFCounterAttackWorldPartitionTargetRebind;
+	friend class FTerritoryUIPlayerLocationDistrictTest;
 
 public:
 	ATerritoryVolume();
