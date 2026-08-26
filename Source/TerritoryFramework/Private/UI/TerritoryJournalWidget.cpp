@@ -7,7 +7,9 @@
 #include "Components/Button.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
+#include "Components/PanelWidget.h"
 #include "Components/ProgressBar.h"
+#include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/RichTextBlock.h"
 #include "Components/SpinBox.h"
@@ -222,6 +224,48 @@ namespace
 	}
 }
 
+UPanelWidget* UTerritoryJournalWidget::GetActiveTerritoriesPanel() const
+{
+	return ActiveTerritoriesBox ? Cast<UPanelWidget>(ActiveTerritoriesBox.Get())
+		: Cast<UPanelWidget>(ActiveQuestsBox.Get());
+}
+
+UPanelWidget* UTerritoryJournalWidget::GetCapturedTerritoriesPanel() const
+{
+	return CapturedTerritoriesBox ? Cast<UPanelWidget>(CapturedTerritoriesBox.Get())
+		: Cast<UPanelWidget>(FinishedQuestsBox.Get());
+}
+
+UWidget* UTerritoryJournalWidget::GetSelectedTerritoryInfoWidget() const
+{
+	return SelectedTerritoryInfoBox ? SelectedTerritoryInfoBox.Get()
+		: CommandDrawer.Get();
+}
+
+void UTerritoryJournalWidget::RefreshEntrySelection()
+{
+	for (UTerritoryDistrictRowWidget* Entry : TerritoryEntryWidgets)
+	{
+		if (!Entry)
+		{
+			continue;
+		}
+		const bool bIsSelected = Entry->GetDistrict() == SelectedDistrict.Get();
+		Entry->SetSelected(bIsSelected);
+		if (!bIsSelected)
+		{
+			Entry->SetExpanded(false);
+		}
+	}
+}
+
+void UTerritoryJournalWidget::SelectDistrict(ATerritoryDistrict* District)
+{
+	bSelectedTerritoryInfoRequested = District != nullptr;
+	UpdateSelectedDistrict(District);
+	RefreshEntrySelection();
+}
+
 void UTerritoryJournalWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -241,12 +285,14 @@ void UTerritoryJournalWidget::NativeConstruct()
 		Btn_LossTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleLossTabClicked);
 		Btn_LossTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "LossTab", "ACTIVITY"));
 	}
-	if (Btn_CloseCommandDrawer)
+	UNarrativeCommonButtonBase* CloseSelectedButton = Btn_CloseSelectedTerritory
+		? Btn_CloseSelectedTerritory : Btn_CloseCommandDrawer;
+	if (CloseSelectedButton)
 	{
-		Btn_CloseCommandDrawer->OnClicked().AddUObject(
-			this, &UTerritoryJournalWidget::HandleCloseCommandDrawerClicked);
-		Btn_CloseCommandDrawer->SetButtonText(NSLOCTEXT(
-			"TerritoryJournal", "CloseCommandDrawer", "CLOSE"));
+		CloseSelectedButton->OnClicked().AddUObject(
+			this, &UTerritoryJournalWidget::HandleCloseSelectedTerritoryClicked);
+		CloseSelectedButton->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "CloseSelectedTerritory", "CLOSE"));
 	}
 	if (Btn_OverviewDetailTab)
 	{
@@ -328,7 +374,8 @@ void UTerritoryJournalWidget::NativeConstruct()
 	RefreshFilterOptions();
 	SetSelectedDetailTab(SelectedDetailTab);
 	RefreshDistrictList();
-	SetCommandDrawerOpen(false);
+	bSelectedTerritoryInfoRequested = SelectedDistrict.IsValid();
+	SetSelectedTerritoryInfoOpen(bSelectedTerritoryInfoRequested);
 	if (Btn_TerritoryTab) Btn_TerritoryTab->SetIsSelected(true);
 	if (Btn_EarningsTab) Btn_EarningsTab->SetIsSelected(false);
 	if (Btn_LossTab) Btn_LossTab->SetIsSelected(false);
@@ -361,6 +408,10 @@ void UTerritoryJournalWidget::NativeDestruct()
 	if (Btn_LossTab)
 	{
 		Btn_LossTab->OnClicked().RemoveAll(this);
+	}
+	if (Btn_CloseSelectedTerritory)
+	{
+		Btn_CloseSelectedTerritory->OnClicked().RemoveAll(this);
 	}
 	if (Btn_CloseCommandDrawer)
 	{
@@ -1268,6 +1319,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 		return;
 	}
 	LastOperationsRevision = static_cast<int32>(Revision);
+	TerritoryEntryWidgets.Reset();
 
 	if (DistrictList)
 	{
@@ -1329,6 +1381,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	}
 	else if (!SelectedDistrict.IsValid() || !bSelectedStillVisible)
 	{
+		bSelectedTerritoryInfoRequested = FirstVisibleDistrict != nullptr;
 		UpdateSelectedDistrict(FirstVisibleDistrict);
 	}
 	else if (SelectedDistrict.IsValid())
@@ -1343,6 +1396,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 			FText::AsNumber(VisibleCount)));
 	}
 	RefreshOperationalSummaries(AllViews);
+	RefreshEntrySelection();
 }
 
 void UTerritoryJournalWidget::RefreshCommandCenterIdentity(
@@ -1399,7 +1453,11 @@ void UTerritoryJournalWidget::RefreshCommandCenterIdentity(
 UTerritoryDistrictRowWidget* UTerritoryJournalWidget::CreateOperationsRow(
 	const FTerritoryDistrictOperationsView& View)
 {
-	TSubclassOf<UTerritoryDistrictRowWidget> RowClass = DistrictRowWidgetClass;
+	TSubclassOf<UTerritoryDistrictRowWidget> RowClass = TerritoryEntryWidgetClass;
+	if (!RowClass)
+	{
+		RowClass = DistrictRowWidgetClass;
+	}
 	if (!RowClass)
 	{
 		RowClass = UTerritoryDistrictRowWidget::StaticClass();
@@ -1408,12 +1466,14 @@ UTerritoryDistrictRowWidget* UTerritoryJournalWidget::CreateOperationsRow(
 	if (Row)
 	{
 		Row->InitializeOperationsView(View);
-		Row->SetExpanded(bCommandDrawerRequested
-			&& SelectedDistrict.Get() == View.District);
+		const bool bIsSelected = SelectedDistrict.Get() == View.District;
+		Row->SetSelected(bIsSelected);
+		Row->SetExpanded(bSelectedTerritoryInfoRequested && bIsSelected);
 		Row->OnDistrictSelected.AddUniqueDynamic(this, &UTerritoryJournalWidget::HandleDistrictSelected);
 		Row->OnGuardActionRequested.AddUniqueDynamic(this, &UTerritoryJournalWidget::HandleGuardActionRequested);
 		Row->OnWaypointRequested.AddUniqueDynamic(
 			this, &UTerritoryJournalWidget::HandleWaypointRequested);
+		TerritoryEntryWidgets.Add(Row);
 	}
 	return Row;
 }
@@ -1647,8 +1707,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	SelectedDistrict = District;
 	if (!District)
 	{
-		bCommandDrawerRequested = false;
-		SetCommandDrawerOpen(false);
+		bSelectedTerritoryInfoRequested = false;
+		SetSelectedTerritoryInfoOpen(false);
 		SelectedGarrisonTarget.Reset();
 		GarrisonTargetOptions.Empty();
 		GarrisonTargetOrder.Empty();
@@ -1692,9 +1752,11 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 	{
 		Text_SelectedEyebrow->SetText(NSLOCTEXT("TerritoryJournal", "SelectedEyebrow", "LIVE TERRITORY INTELLIGENCE"));
 	}
-	if (QuestTitle)
+	UTextBlock* SelectedTitle = Text_SelectedTerritoryTitle
+		? Text_SelectedTerritoryTitle.Get() : QuestTitle.Get();
+	if (SelectedTitle)
 	{
-		QuestTitle->SetText(View.DisplayName);
+		SelectedTitle->SetText(View.DisplayName);
 	}
 
 	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
@@ -1744,9 +1806,11 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 		FText::AsNumber(View.StrategicValue),
 		View.ThreatSummary,
 		CascadeText);
-	if (RichText_QuestDescription)
+	URichTextBlock* TerritoryDescription = RichText_TerritoryDescription
+		? RichText_TerritoryDescription.Get() : RichText_QuestDescription.Get();
+	if (TerritoryDescription)
 	{
-		RichText_QuestDescription->SetText(DetailText);
+		TerritoryDescription->SetText(DetailText);
 	}
 	if (Text_CaptureLabel)
 	{
@@ -1785,7 +1849,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 			FText::AsNumber(View.NetIncome)));
 	}
 	if (Text_AssaultSummary) Text_AssaultSummary->SetText(View.ThreatSummary);
-	SetCommandDrawerOpen(bCommandDrawerRequested);
+	SetSelectedTerritoryInfoOpen(bSelectedTerritoryInfoRequested);
 
 	if (Text_CommandDistrictName)
 	{
@@ -1978,8 +2042,10 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	const TArray<FTerritoryDistrictOperationsView>& Views)
 {
-	if (ActiveQuestsBox) ActiveQuestsBox->ClearChildren();
-	if (FinishedQuestsBox) FinishedQuestsBox->ClearChildren();
+	UPanelWidget* ActivePanel = GetActiveTerritoriesPanel();
+	UPanelWidget* CapturedPanel = GetCapturedTerritoriesPanel();
+	if (ActivePanel) ActivePanel->ClearChildren();
+	if (CapturedPanel) CapturedPanel->ClearChildren();
 	if (EarningsList) EarningsList->ClearChildren();
 	if (LossReportList) LossReportList->ClearChildren();
 
@@ -1991,10 +2057,6 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	int32 RiskCount = 0;
 	int32 GuardShortfall = 0;
 	FGameplayTag ViewerFaction;
-	FGameplayTag LastAvailableCity;
-	FGameplayTag LastOwnedCity;
-	bool bHasAvailableCityHeading = false;
-	bool bHasOwnedCityHeading = false;
 	for (const FTerritoryDistrictOperationsView& View : Views)
 	{
 		if (!ViewerFaction.IsValid()) ViewerFaction = View.ViewerFaction;
@@ -2011,25 +2073,11 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		if (UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(View))
 		{
 			++AvailableQueueCount;
-			if (ActiveQuestsBox)
+			if (ActivePanel)
 			{
-				if (!bHasAvailableCityHeading || View.CityTag != LastAvailableCity)
-				{
-					const FText CityName = View.CityDisplayName.IsEmpty()
-						? NSLOCTEXT("TerritoryJournal", "AvailableIndependentDistricts", "INDEPENDENT DISTRICTS")
-						: View.CityDisplayName;
-					if (UTextBlock* Heading = CreateHierarchyTextRow(
-						CityName,
-						FName(*FString::Printf(TEXT("AvailableCity_%u"), GetTypeHash(View.CityTag))), true))
-					{
-						ActiveQuestsBox->AddChild(Heading);
-					}
-					LastAvailableCity = View.CityTag;
-					bHasAvailableCityHeading = true;
-				}
 				if (UTerritoryDistrictRowWidget* Row = CreateOperationsRow(View))
 				{
-					ActiveQuestsBox->AddChild(Row);
+					ActivePanel->AddChild(Row);
 				}
 			}
 		}
@@ -2037,25 +2085,11 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		{
 			++OwnedCount;
 			GuardShortfall += FMath::Max(0, View.DesiredGuards - View.ActiveGuards);
-			if (FinishedQuestsBox)
+			if (CapturedPanel)
 			{
-				if (!bHasOwnedCityHeading || View.CityTag != LastOwnedCity)
-				{
-					const FText CityName = View.CityDisplayName.IsEmpty()
-						? NSLOCTEXT("TerritoryJournal", "OwnedIndependentDistricts", "INDEPENDENT DISTRICTS")
-						: View.CityDisplayName;
-					if (UTextBlock* Heading = CreateHierarchyTextRow(
-						CityName,
-						FName(*FString::Printf(TEXT("OwnedCity_%u"), GetTypeHash(View.CityTag))), true))
-					{
-						FinishedQuestsBox->AddChild(Heading);
-					}
-					LastOwnedCity = View.CityTag;
-					bHasOwnedCityHeading = true;
-				}
 				if (UTerritoryDistrictRowWidget* Row = CreateOperationsRow(View))
 				{
-					FinishedQuestsBox->AddChild(Row);
+					CapturedPanel->AddChild(Row);
 				}
 			}
 			if (EarningsList)
@@ -2080,7 +2114,7 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		}
 	}
 
-	auto AddEmptyMessage = [this](UVerticalBox* Box, const FText& Message, FName WidgetName)
+	auto AddEmptyMessage = [this](UPanelWidget* Box, const FText& Message, FName WidgetName)
 	{
 		if (!Box || !WidgetTree)
 		{
@@ -2093,13 +2127,13 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	};
 	if (AvailableQueueCount == 0)
 	{
-		AddEmptyMessage(ActiveQuestsBox,
+		AddEmptyMessage(ActivePanel,
 			NSLOCTEXT("TerritoryJournal", "NoDistrictIntel", "No unlocked District operations are currently visible."),
 			TEXT("NoAvailableUnlockedDistricts"));
 	}
 	if (OwnedCount == 0)
 	{
-		AddEmptyMessage(FinishedQuestsBox,
+		AddEmptyMessage(CapturedPanel,
 			NSLOCTEXT("TerritoryJournal", "NoCapturedOwned", "Your faction controls no loaded districts."),
 			TEXT("NoCapturedOwnedDistricts"));
 		AddEmptyMessage(EarningsList,
@@ -2127,17 +2161,21 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	const FText TransactionAudit = FText::FromString(TransactionLines.IsEmpty()
 		? FString(TEXT("No recent transactions."))
 		: FString::Join(TransactionLines, TEXT("\n")));
-	if (Text_ActiveQuestCount)
+	UTextBlock* ActiveCountText = Text_ActiveTerritoryCount
+		? Text_ActiveTerritoryCount.Get() : Text_ActiveQuestCount.Get();
+	if (ActiveCountText)
 	{
-		Text_ActiveQuestCount->SetText(FText::Format(
+		ActiveCountText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "ActiveDistrictCount",
-				"UNLOCKED DISTRICTS  //  {0}"),
+				"ACTIVE TERRITORIES  //  {0}"),
 			FText::AsNumber(AvailableQueueCount)));
 	}
-	if (Text_FinishedQuestCount)
+	UTextBlock* CapturedCountText = Text_CapturedTerritoryCount
+		? Text_CapturedTerritoryCount.Get() : Text_FinishedQuestCount.Get();
+	if (CapturedCountText)
 	{
-		Text_FinishedQuestCount->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "CapturedDistrictCount", "CONTROLLED ZONES  //  {0}"),
+		CapturedCountText->SetText(FText::Format(
+			NSLOCTEXT("TerritoryJournal", "CapturedDistrictCount", "CAPTURED TERRITORIES  //  {0}"),
 			FText::AsNumber(OwnedCount)));
 	}
 	if (Text_HeaderStatus)
@@ -2232,13 +2270,14 @@ void UTerritoryJournalWidget::SetSelectedDetailTab(int32 TabIndex)
 	}
 }
 
-void UTerritoryJournalWidget::SetCommandDrawerOpen(bool bOpen)
+void UTerritoryJournalWidget::SetSelectedTerritoryInfoOpen(bool bOpen)
 {
-	const bool bWasOpen = CommandDrawer
-		&& CommandDrawer->GetVisibility() != ESlateVisibility::Collapsed;
-	if (CommandDrawer)
+	UWidget* InfoWidget = GetSelectedTerritoryInfoWidget();
+	const bool bWasOpen = InfoWidget
+		&& InfoWidget->GetVisibility() != ESlateVisibility::Collapsed;
+	if (InfoWidget)
 	{
-		CommandDrawer->SetVisibility(bOpen
+		InfoWidget->SetVisibility(bOpen
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (bOpen && !bWasOpen && Btn_OverviewDetailTab)
@@ -2287,8 +2326,8 @@ void UTerritoryJournalWidget::HandleDiplomacyDetailTabClicked()
 
 void UTerritoryJournalWidget::HandleTerritoryTabClicked()
 {
-	bCommandDrawerRequested = false;
-	SetCommandDrawerOpen(false);
+	bSelectedTerritoryInfoRequested = SelectedDistrict.IsValid();
+	SetSelectedTerritoryInfoOpen(bSelectedTerritoryInfoRequested);
 	if (TabSwitcher)
 	{
 		TabSwitcher->SetActiveWidgetIndex(0);
@@ -2300,8 +2339,8 @@ void UTerritoryJournalWidget::HandleTerritoryTabClicked()
 
 void UTerritoryJournalWidget::HandleEarningsTabClicked()
 {
-	bCommandDrawerRequested = false;
-	SetCommandDrawerOpen(false);
+	bSelectedTerritoryInfoRequested = false;
+	SetSelectedTerritoryInfoOpen(false);
 	if (TabSwitcher)
 	{
 		TabSwitcher->SetActiveWidgetIndex(1);
@@ -2313,8 +2352,8 @@ void UTerritoryJournalWidget::HandleEarningsTabClicked()
 
 void UTerritoryJournalWidget::HandleLossTabClicked()
 {
-	bCommandDrawerRequested = false;
-	SetCommandDrawerOpen(false);
+	bSelectedTerritoryInfoRequested = false;
+	SetSelectedTerritoryInfoOpen(false);
 	if (TabSwitcher)
 	{
 		TabSwitcher->SetActiveWidgetIndex(2);
@@ -2324,10 +2363,10 @@ void UTerritoryJournalWidget::HandleLossTabClicked()
 	if (Btn_LossTab) Btn_LossTab->SetIsSelected(true);
 }
 
-void UTerritoryJournalWidget::HandleCloseCommandDrawerClicked()
+void UTerritoryJournalWidget::HandleCloseSelectedTerritoryClicked()
 {
-	bCommandDrawerRequested = false;
-	SetCommandDrawerOpen(false);
+	bSelectedTerritoryInfoRequested = false;
+	SetSelectedTerritoryInfoOpen(false);
 	UNarrativeCommonButtonBase* ActivePrimaryTab = Btn_TerritoryTab;
 	if (TabSwitcher)
 	{
@@ -2472,8 +2511,7 @@ void UTerritoryJournalWidget::HandleTerritoryUnregistered(ATerritoryVolume* Terr
 
 void UTerritoryJournalWidget::HandleDistrictSelected(ATerritoryDistrict* District)
 {
-	bCommandDrawerRequested = District != nullptr;
-	UpdateSelectedDistrict(District);
+	SelectDistrict(District);
 }
 
 void UTerritoryJournalWidget::HandleGuardActionRequested(ATerritoryDistrict* District, int32 Delta)
@@ -2557,6 +2595,13 @@ void UTerritoryJournalWidget::SetOperationsFilter(ETerritoryOperationsFilter Fil
 
 UWidget* UTerritoryJournalWidget::NativeGetDesiredFocusTarget() const
 {
+	for (UTerritoryDistrictRowWidget* Entry : TerritoryEntryWidgets)
+	{
+		if (Entry && Entry->IsVisible())
+		{
+			return Entry->GetEntryFocusTarget();
+		}
+	}
 	if (Btn_TerritoryTab && Btn_TerritoryTab->GetIsEnabled() && Btn_TerritoryTab->IsVisible())
 	{
 		return Btn_TerritoryTab;

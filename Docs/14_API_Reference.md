@@ -849,11 +849,13 @@ Narrative-activatable operations dashboard.
 | Function | Returns | Description |
 |---|---|---|
 | RefreshDistrictList | void | Rebuild when the complete operations revision changes |
+| SelectDistrict | void | Select one visible District, synchronize entry highlighting, reveal known Places, and update the detail pane |
 | SetOperationsFilter | void | Apply the viewer-relative operational filter |
 | GetSelectedDistrictOperationsView | View | Current detail/security/finance/threat projection |
 
-The supplied widget populates visible unlocked/active and captured/owned lists, groups the
-directory by City, and provides Overview, Places, Garrison, Economy, Production, Threats, and
+The supplied widget follows Narrative Pro's Quest Journal contract: Active and Captured
+Territory `ScrollBox` lists, one reusable entry class, one selected District, and one persistent
+detail pane. It provides Overview, Places, Garrison, Economy, Production, Threats, and
 Diplomacy selected-detail tabs. Locked hierarchy branches never enter the player lists. Its
 selector/target/Apply/0/Max controls and delta shortcuts route through
 `UTerritoryPlayerManagementComponent` and can manage visible child Property garrisons.

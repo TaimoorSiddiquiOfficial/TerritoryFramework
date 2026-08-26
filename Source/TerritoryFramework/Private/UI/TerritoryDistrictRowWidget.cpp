@@ -154,7 +154,7 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 
 	USizeBox* RootSize = WidgetTree->ConstructWidget<USizeBox>(
 		USizeBox::StaticClass(), TEXT("DistrictRowSize"));
-	RootSize->SetMinDesiredHeight(76.f);
+	RootSize->SetMinDesiredHeight(54.f);
 	WidgetTree->RootWidget = RootSize;
 	DistrictRowSurface = WidgetTree->ConstructWidget<UBorder>(
 		UBorder::StaticClass(), TEXT("DistrictRowSurface"));
@@ -406,6 +406,25 @@ void UTerritoryDistrictRowWidget::SetExpanded(bool bInExpanded)
 	RefreshRow();
 }
 
+void UTerritoryDistrictRowWidget::SetSelected(bool bInSelected)
+{
+	bSelected = bInSelected;
+	if (SelectDistrictButton)
+	{
+		SelectDistrictButton->SetIsSelected(bSelected);
+	}
+	RefreshRow();
+}
+
+UWidget* UTerritoryDistrictRowWidget::GetEntryFocusTarget() const
+{
+	if (SelectDistrictButton)
+	{
+		return SelectDistrictButton.Get();
+	}
+	return const_cast<UTerritoryDistrictRowWidget*>(this);
+}
+
 ATerritoryDistrict* UTerritoryDistrictRowWidget::GetDistrict() const
 {
 	return District.Get();
@@ -448,6 +467,10 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 	{
 		RemoveGuardButton->SetIsEnabled(bCanRemoveGuard);
 	}
+	if (SelectDistrictButton)
+	{
+		SelectDistrictButton->SetIsSelected(bSelected);
+	}
 	if (SetWaypointButton)
 	{
 		const bool bTracked = UTerritoryUIBlueprintLibrary::GetTrackedTerritory(
@@ -472,10 +495,10 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			FLinearColor(Accent.R, Accent.G, Accent.B, 0.7f), 3.f, 1.f);
 		SetRoundedSurface(DistrictAccentRail, Accent, FLinearColor::Transparent, 2.f, 0.f);
 		SetRoundedSurface(DistrictRowSurface,
-			bExpanded
+			bSelected
 				? FLinearColor(0.035f, 0.032f, 0.012f, 0.99f)
 				: FLinearColor(0.014f, 0.014f, 0.014f, 0.98f),
-			FLinearColor(Accent.R, Accent.G, Accent.B, bExpanded ? 0.72f : 0.30f),
+			FLinearColor(Accent.R, Accent.G, Accent.B, bSelected ? 0.72f : 0.30f),
 			3.f, 1.f, true);
 	}
 	RefreshPlaceProgress();

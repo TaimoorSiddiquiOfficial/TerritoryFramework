@@ -46,6 +46,17 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	bool IsExpanded() const { return bExpanded; }
 
+	/** Selected-state hook used by the journal exactly like a Quest Journal entry button. */
+	UFUNCTION(BlueprintCallable, Category="Territory|UI")
+	void SetSelected(bool bInSelected);
+
+	UFUNCTION(BlueprintPure, Category="Territory|UI")
+	bool IsSelected() const { return bSelected; }
+
+	/** CommonUI focus target for controller and keyboard navigation. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI")
+	UWidget* GetEntryFocusTarget() const;
+
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryDistrictRowSelected OnDistrictSelected;
 
@@ -85,34 +96,34 @@ protected:
 	TObjectPtr<UNarrativeCommonTextBlock> DistrictStatus;
 
 	/** Native fallbacks use these surfaces to communicate ownership and danger at a glance. */
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> DistrictRowSurface;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> DistrictAccentRail;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> DistrictStatusSurface;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> PlaceList;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UHorizontalBox> PlaceProgressTrack;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> OwnedProgressSegment;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> KnownProgressSegment;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UBorder> HiddenProgressSegment;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> PlaceProgressText;
 
-	UPROPERTY(Transient)
+	UPROPERTY(Transient, meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> ExpandHintText;
 
 	private:
@@ -121,6 +132,7 @@ protected:
 	bool bCanAddGuard = false;
 	bool bCanRemoveGuard = false;
 	bool bExpanded = false;
+	bool bSelected = false;
 	FText ActionStatus;
 
 	void BuildNativeLayout();

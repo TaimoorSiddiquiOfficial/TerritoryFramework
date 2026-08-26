@@ -11,11 +11,14 @@ class ATerritoryDistrict;
 class ATerritoryVolume;
 class UNarrativeCommonButtonBase;
 class UEditableTextBox;
+class UPanelWidget;
 class UProgressBar;
+class UScrollBox;
 class USizeBox;
 class USpinBox;
 class UTextBlock;
 class UVerticalBox;
+class UWidget;
 class UWidgetSwitcher;
 class UWidgetAnimation;
 class UTerritoryPlayerManagementComponent;
@@ -31,6 +34,15 @@ class TERRITORYFRAMEWORK_API UTerritoryJournalWidget : public UTerritoryActivata
 public:
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void RefreshDistrictList();
+
+	/**
+	 * Select one visible District, highlight its journal entry, expand its known
+	 * Places, and show its detail page. This mirrors Narrative Pro's Show Quest
+	 * interaction without making Territory data pretend to be Quest data.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|UI",
+		meta=(DisplayName="Show District In Territory Journal"))
+	void SelectDistrict(ATerritoryDistrict* District);
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	FTerritoryDistrictOperationsView GetSelectedDistrictOperationsView() const;
@@ -53,8 +65,18 @@ protected:
 	UPROPERTY(Transient, meta=(BindWidgetAnimOptional))
 	TObjectPtr<UWidgetAnimation> TerritoryReveal;
 
-	/** Optional project-styled row Blueprint. Falls back to the native Narrative CommonUI row. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|UI")
+	/**
+	 * Reusable entry template for both journal lists. Use a compact child of
+	 * UTerritoryDistrictRowWidget, in the same role BP_QuestJournalQuest has in
+	 * Narrative Pro's Quest Journal.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|UI",
+		meta=(DisplayName="Territory Entry Widget Class"))
+	TSubclassOf<UTerritoryDistrictRowWidget> TerritoryEntryWidgetClass;
+
+	/** Legacy name kept so existing project widgets migrate without losing their entry class. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|UI",
+		meta=(DeprecatedProperty, DeprecationMessage="Use TerritoryEntryWidgetClass."))
 	TSubclassOf<UTerritoryDistrictRowWidget> DistrictRowWidgetClass;
 
 	UPROPERTY(meta=(BindWidgetOptional))
@@ -69,7 +91,14 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UWidgetSwitcher> TabSwitcher;
 
-	/** Contextual District control view. It stays collapsed until the player selects a District. */
+	/** Persistent selected-item pane, equivalent to the Quest Journal information pane. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UWidget> SelectedTerritoryInfoBox;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_CloseSelectedTerritory;
+
+	/** Legacy bindings supported for authored widgets created before the Quest-template refactor. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<USizeBox> CommandDrawer;
 
@@ -91,7 +120,17 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> DistrictList;
 
-	/** Existing journal left-rail lists: unlocked/active and captured/owned districts. */
+	/**
+	 * Narrative Quest Journal pattern: one bounded ScrollBox for unlocked,
+	 * non-owned Districts and one for captured Districts owned by the viewer.
+	 */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UScrollBox> ActiveTerritoriesBox;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UScrollBox> CapturedTerritoriesBox;
+
+	/** Legacy list names supported during Blueprint migration. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> ActiveQuestsBox;
 
@@ -143,6 +182,12 @@ protected:
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_FinishedQuestCount;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_ActiveTerritoryCount;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_CapturedTerritoryCount;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_HeaderStatus;
@@ -293,7 +338,13 @@ protected:
 	TObjectPtr<UTextBlock> QuestTitle;
 
 	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> Text_SelectedTerritoryTitle;
+
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<class URichTextBlock> RichText_QuestDescription;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<class URichTextBlock> RichText_TerritoryDescription;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_CaptureLabel;
@@ -351,10 +402,12 @@ private:
 	bool bFiltersInitialized = false;
 	bool bResponsiveLayoutApplied = false;
 	bool bCompactResponsiveLayout = false;
-	bool bCommandDrawerRequested = false;
+	bool bSelectedTerritoryInfoRequested = false;
 	int32 SelectedDetailTab = 0;
 	int32 LastOperationsRevision = INDEX_NONE;
 	FTimerHandle RefreshTimerHandle;
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTerritoryDistrictRowWidget>> TerritoryEntryWidgets;
 
 	void BindTerritoryDelegates();
 	void UnbindTerritoryDelegates();
@@ -368,7 +421,11 @@ private:
 	void UpdateSelectedDistrict(ATerritoryDistrict* District);
 	void RefreshSelectedHierarchyPanels(const FTerritoryDistrictOperationsView& View);
 	void SetSelectedDetailTab(int32 TabIndex);
-	void SetCommandDrawerOpen(bool bOpen);
+	void SetSelectedTerritoryInfoOpen(bool bOpen);
+	UPanelWidget* GetActiveTerritoriesPanel() const;
+	UPanelWidget* GetCapturedTerritoriesPanel() const;
+	UWidget* GetSelectedTerritoryInfoWidget() const;
+	void RefreshEntrySelection();
 	UTextBlock* CreateHierarchyTextRow(const FText& Text, FName WidgetName, bool bHeading = false);
 	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
 	void RefreshCommandCenterIdentity(const TArray<FTerritoryDistrictOperationsView>& Views);
@@ -388,7 +445,7 @@ private:
 	void HandleLossTabClicked();
 
 	UFUNCTION()
-	void HandleCloseCommandDrawerClicked();
+	void HandleCloseSelectedTerritoryClicked();
 
 	UFUNCTION()
 	void HandleOverviewDetailTabClicked();

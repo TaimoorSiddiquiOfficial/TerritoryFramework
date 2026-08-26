@@ -83,15 +83,23 @@ The struct is a read-only projection. Pointer fields are transient UI references
 
 ## District Command Center
 
-`WBP_HopTerritoryJournalWidget` follows Narrative Pro's quest-journal information pattern in a three-column command surface:
+`WBP_HopTerritoryJournalWidget` now uses Narrative Pro's real Quest Journal template pattern,
+not a dashboard that only borrows Quest names:
 
-1. **Operations queues** mirror Active/Completed quest lists: Available/Unlocked contains
-   actionable non-owned Districts; Captured/Owned contains Districts controlled by the viewer.
-2. **Territory directory** groups searchable visible Districts by City.
-3. **Selected Territory** keeps the important owner/state/capture header visible and divides
-   the rest into Overview, Places, Garrison, Economy, Production, Threats, and Diplomacy tabs.
+1. **Active Territories** is a bounded `ScrollBox`, in the same role as
+   `ActiveQuestsBox`. It contains unlocked, non-owned District entry widgets.
+2. **Captured Territories** is the second bounded `ScrollBox`, in the same role as
+   `FinishedQuestsBox`. It contains Districts currently owned by the viewer's faction.
+3. **Selected Territory** is the persistent right-side information pane. Selecting one entry
+   unselects the others, updates this pane, and keeps Overview, Places, Garrison, Economy,
+   Production, Threats, and Diplomacy controls in compact tabs.
+4. **Territory Intelligence** remains visible under the selected information pane. Reports are
+   not hidden inside the retired three-page dashboard.
 
-The command surface uses a fill-width shell and bounded lists. Long operational readouts use automatic wrapping. Tabs keep security, finance, production, threat, and diplomacy information available without displaying every control at once. The root surface is translucent so the menu remains visually aligned with the project Narrative theme instead of creating an opaque black wall.
+The Territory classes do not inherit from Quest data classes. They reuse the Quest Journal's
+presentation contract: two lists, one reusable entry template, one selected-item controller,
+and one detail pane. Territory ownership still comes from `ATerritoryVolume`; the UI only reads
+the viewer-relative projection.
 
 The action and ownership predicates remain strict, while visibility is broader:
 
@@ -118,7 +126,17 @@ Threat and capture details cascade from loaded same-owner child Properties. A Bl
 assault therefore appears in Market Square even though the durable assault correctly
 targets the capturable Property rather than the aggregate-only District.
 
-Clicking a responsive selection-only row selects that district and opens its command details. The garrison planner selects the first manageable target with capacity (normally a child Property when the District is a zero-capacity container), navigates District/Property posts with Previous/Next controls, and exposes an integer target, capacity progress, projected recruitment/upkeep/net, and Apply/Empty/Full actions. List rows do not mutate guards; all staffing changes remain in this contextual command surface.
+Clicking a compact entry selects that District and opens its known-Place accordion. The header
+always shows the complete Place count, such as `1 / 5 PLACES`, but only unlocked Place names are
+created. Easy example: selecting `Market Square` may reveal `Blacksmith`; three story-locked
+Places still contribute to the `1 / 5` count without leaking their names. Clicking the selected
+entry again can close the accordion without clearing the right-side details.
+
+The garrison planner selects the first manageable target with capacity (normally a child
+Property when the District is a zero-capacity container), navigates District/Property posts
+with Previous/Next controls, and exposes an integer target, capacity progress, projected
+recruitment/upkeep/net, and Apply/Empty/Full actions. Entry rows do not mutate guards; all
+staffing changes remain in the selected information pane.
 
 ## Supplied widgets
 
@@ -126,8 +144,8 @@ Clicking a responsive selection-only row selects that district and opens its com
 |---|---|
 | `W_TerritoryPlayerMenu` | Existing Narrative player menu with the Territory journal tab and a valid activation focus target |
 | `WBP_MainHopTerritoryJornal` | Narrative menu wrapper around the Territory journal; forwards activation focus to the inner widget |
-| `WBP_HopTerritoryJournalWidget` | Narrative-themed three-column command center with City-grouped available/owned queues, searchable visible directory, and seven selected-Territory detail tabs |
-| `WBP_TerritoryCommandRow` | Responsive project-styled Narrative CommonUI selection row used by all journal lists |
+| `WBP_HopTerritoryJournalWidget` | Narrative Quest Journal-style Command Center with Active/Captured Territory ScrollBoxes, a selected-item detail pane, seven control tabs, and visible intelligence |
+| `WBP_TerritoryCommandRow` | Compact reusable Narrative CommonUI entry with selected styling, Place count, known-Place accordion, and waypoint action |
 | `WBP_TerritoryDistrictManagement` | In-world district command panel for guards, funds, income, production summary, availability, and threat status |
 | `WBP_TerritoryEconomyWidget` | Faction economy health plus bounded scrolling stockpile and production-site modules |
 | `WBP_TerritoryInfoWidget` | Passive current-territory status card with availability, threat, net income, and production status |
@@ -137,7 +155,9 @@ Clicking a responsive selection-only row selects that district and opens its com
 | `WBP_TerritoryProductionSiteRow` | Reusable production-site module that composes resource rows |
 | `BP_TerritoryDebugWidget` | Scrollable live territory/counterattack diagnostic output |
 
-Project styling can replace `DistrictRowWidgetClass`; the native fallback uses Narrative CommonUI controls and the same delegates.
+Project styling should replace `TerritoryEntryWidgetClass`; `DistrictRowWidgetClass` remains a
+migration fallback for widgets authored before this refactor. The native fallback uses
+Narrative CommonUI controls and the same delegates.
 
 `UTerritoryResourceRowWidget` and `UTerritoryProductionSiteRowWidget` are reusable, read-only modules. The economy base can populate optional `ResourceStockpileRows` and `ProductionSiteRows` containers, while any project Blueprint can consume the same structs through `OnEconomyOperationsUpdated`. Production rows compose resource rows; they never call settlement functions or own resource quantities.
 

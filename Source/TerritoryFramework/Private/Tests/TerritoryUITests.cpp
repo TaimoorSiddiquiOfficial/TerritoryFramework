@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Components/ScrollBox.h"
 #include "NarrativeActivatableWidget.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
@@ -48,6 +49,25 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("District rows expose compact accordion control"),
 		TerritoryUITest::IsBlueprintCallable(
 			UTerritoryDistrictRowWidget::StaticClass(), TEXT("SetExpanded")));
+	TestTrue(TEXT("District journal entries expose selected-state control like Quest entries"),
+		TerritoryUITest::IsBlueprintCallable(
+			UTerritoryDistrictRowWidget::StaticClass(), TEXT("SetSelected")));
+	TestTrue(TEXT("Journal exposes one selected-District entry point like Show Quest"),
+		TerritoryUITest::IsBlueprintCallable(
+			UTerritoryJournalWidget::StaticClass(), TEXT("SelectDistrict")));
+	const FObjectPropertyBase* ActiveTerritoriesProperty = CastField<FObjectPropertyBase>(
+		UTerritoryJournalWidget::StaticClass()->FindPropertyByName(TEXT("ActiveTerritoriesBox")));
+	TestTrue(TEXT("Active Territories uses the Quest Journal ScrollBox template"),
+		ActiveTerritoriesProperty
+			&& ActiveTerritoriesProperty->PropertyClass->IsChildOf(UScrollBox::StaticClass()));
+	const FObjectPropertyBase* CapturedTerritoriesProperty = CastField<FObjectPropertyBase>(
+		UTerritoryJournalWidget::StaticClass()->FindPropertyByName(TEXT("CapturedTerritoriesBox")));
+	TestTrue(TEXT("Captured Territories uses the Quest Journal ScrollBox template"),
+		CapturedTerritoriesProperty
+			&& CapturedTerritoriesProperty->PropertyClass->IsChildOf(UScrollBox::StaticClass()));
+	TestNotNull(TEXT("Journal exposes the persistent selected Territory information pane"),
+		UTerritoryJournalWidget::StaticClass()->FindPropertyByName(
+			TEXT("SelectedTerritoryInfoBox")));
 	TestTrue(TEXT("Embedded Territory activatables accept focus"),
 		GetDefault<UTerritoryActivatableWidget>()->IsFocusable());
 

@@ -32,7 +32,7 @@
 | Class | Blueprint API |
 |---|---|
 | `UTerritoryActivatableWidget` | `CloseTerritoryWidget`, `GetTerritoryPlayerController`, `DesiredFocusTargetName` |
-| `UTerritoryJournalWidget` | `RefreshDistrictList`, `SetOperationsFilter`, `GetSelectedDistrictOperationsView` |
+| `UTerritoryJournalWidget` | `RefreshDistrictList`, `SelectDistrict`, `SetOperationsFilter`, `GetSelectedDistrictOperationsView` |
 | `UTerritoryDistrictManagementWidget` | `GetOperationsView`, `CanPurchaseGuard`, `CanRemoveGuard`, `RequestAddGuards`, `RequestRemoveGuards` |
 | `UTerritoryEconomyWidget` | `GetNetIncome`, `IsOperatingAtDeficit`, `GetEconomyOperationsView` |
 

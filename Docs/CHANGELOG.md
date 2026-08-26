@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased — 2026-08-26 (Quest Journal template contract)
+
+- Replaced the congested three-page Command Center with Narrative Pro's actual Quest Journal
+  interaction pattern: `ActiveTerritoriesBox`, `CapturedTerritoriesBox`, one reusable entry
+  class, and one synchronized selected-Territory information pane.
+- Rebuilt `WBP_TerritoryCommandRow` as a compact selected entry with Place completion, a
+  known-Place accordion, hidden-Place privacy, and waypoint control.
+- Kept the full intelligence databank visible below selected Territory details and retained the
+  seven compact command tabs for Places, garrison, economy, production, threats, and diplomacy.
+- Added migration fallbacks for old Quest-named list bindings and `DistrictRowWidgetClass`;
+  new project widgets should use `TerritoryEntryWidgetClass`.
+- Added CommonUI focus navigation and Blueprint contract tests for the two Territory
+  `ScrollBox` bindings, selection entry point, selected state, and information pane.
+
 ## Unreleased — 2026-08-25 (Narrative journal hierarchy and detail tabs)
 
 - Aligned the Territory journal with Narrative Pro's quest-journal pattern: Available/Unlocked
