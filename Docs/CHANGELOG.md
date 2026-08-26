@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — 2026-08-27 (Place waypoint and silent-lock navigation contract)
+
+- District and City waypoint requests now resolve to a loaded, hierarchy-visible child Place;
+  aggregate Territory centers are no longer promoted to compass/screen-space guidance.
+- Waypoint selection prioritizes a contested Place, then a Place not held by the viewer, then
+  the nearest friendly Place. The stable Territory tag breaks equal-distance ties.
+- Locked Territories and descendants of locked or unloaded ancestors now leave Narrative
+  navigation registration and every marker domain instead of remaining transparent/interactable.
+- Untracked Territory markers remain world-map/minimap intel. Only the resolved Place enters
+  Narrative compass and screen-space domains, and the journal/live-report buttons now toggle it.
+- District Management Point markers remain map/minimap-only and register only for a visible,
+  claimed District. Registry callbacks repair World Partition load-order changes without saving
+  actor pointers or creating a second POI/map system.
+- Territory marker adapters now suppress Narrative registration, removal, and widget refresh
+  callbacks while a world is tearing down, after the owning player and HUD can already be gone.
+
 ## Unreleased — 2026-08-26 (Quest Journal template contract)
 
 - Fixed Active and Captured Territory queues remaining visually empty when UISpec-authored

@@ -8,6 +8,9 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryVolume.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "UI/TerritoryUITheme.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
@@ -200,10 +203,22 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 	}
 	if (WaypointButton)
 	{
-		const bool bEnabled = LiveEvent.bCanSetWaypoint
-			&& LiveEvent.TerritoryTag.IsValid();
+		const UTerritoryRegistrySubsystem* Registry = GetWorld()
+			? GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+		ATerritoryVolume* Territory = Registry && LiveEvent.TerritoryTag.IsValid()
+			? Registry->GetTerritoryByTag(LiveEvent.TerritoryTag) : nullptr;
+		const bool bEnabled = LiveEvent.bCanSetWaypoint && Territory
+			&& UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+				GetOwningPlayer(), Territory) != nullptr;
+		const bool bTracked = bEnabled
+			&& UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+				GetOwningPlayer(), Territory);
+		WaypointButton->SetButtonText(bTracked
+			? NSLOCTEXT("TerritoryLiveEvents", "WaypointTracked", "TRACKED  ✓")
+			: NSLOCTEXT("TerritoryLiveEvents", "SetWaypoint", "TRACK"));
+		WaypointButton->SetIsSelected(bTracked);
 		WaypointButton->SetIsEnabled(bEnabled);
-		WaypointButton->SetVisibility(LiveEvent.bCanSetWaypoint
+		WaypointButton->SetVisibility(bEnabled
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 }

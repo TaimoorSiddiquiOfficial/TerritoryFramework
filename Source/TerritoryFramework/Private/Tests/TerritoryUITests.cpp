@@ -12,6 +12,7 @@
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Navigation/TerritoryMapMarker.h"
+#include "Navigation/NavigatorGameplayTags.h"
 #include "UI/TerritoryActivatableWidget.h"
 #include "UI/TerritoryDistrictManagementWidget.h"
 #include "UI/TerritoryDistrictRowWidget.h"
@@ -96,10 +97,16 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintCallable(LibraryClass, TEXT("OpenTerritoryMenu")));
 	TestTrue(TEXT("Set Territory waypoint is Blueprint callable"),
 		TerritoryUITest::IsBlueprintCallable(LibraryClass, TEXT("SetTerritoryWaypoint")));
+	TestTrue(TEXT("Aggregate waypoint target resolver is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(
+			LibraryClass, TEXT("ResolveTerritoryWaypointTarget")));
 	TestTrue(TEXT("Clear Territory waypoint is Blueprint callable"),
 		TerritoryUITest::IsBlueprintCallable(LibraryClass, TEXT("ClearTerritoryWaypoint")));
 	TestTrue(TEXT("Tracked Territory query is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetTrackedTerritory")));
+	TestTrue(TEXT("Aggregate tracked-state query is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(
+			LibraryClass, TEXT("IsTerritoryWaypointTracked")));
 	TestTrue(TEXT("Player location District query is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetDistrictAtPlayerLocation")));
 	TestTrue(TEXT("District operations builder is Blueprint pure"),
@@ -374,7 +381,8 @@ bool FTerritoryUILiveEventExpiryTest::RunTest(const FString& Parameters)
 	{
 		TestFalse(TEXT("Territory marker is not tracked by default"), Marker->IsTracked());
 		Marker->SetTracked(true);
-		TestTrue(TEXT("Tracking promotes exactly the selected marker"), Marker->IsTracked());
+		TestFalse(TEXT("An unbound marker cannot leak into Narrative navigation"),
+			Marker->IsTracked());
 		Marker->SetTracked(false);
 		TestFalse(TEXT("Clearing tracking demotes the marker"), Marker->IsTracked());
 	}
@@ -436,6 +444,160 @@ bool FTerritoryUIPlayerLocationDistrictTest::RunTest(const FString& Parameters)
 				World, PlayerController) == District);
 	}
 
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIDistrictWaypointResolutionTest,
+	"TerritoryFramework.UI.Regression.DistrictWaypointResolvesVisiblePlace",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIDistrictWaypointResolutionTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Waypoint resolver world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryDistrict* District = World->SpawnActor<ATerritoryDistrict>(
+		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* Farm = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform(FVector(100.f, 0.f, 0.f)), SpawnParams);
+	ATerritoryProperty* Blacksmith = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform(FVector(1000.f, 0.f, 0.f)), SpawnParams);
+	APlayerController* PlayerController = World->SpawnActor<APlayerController>(
+		APlayerController::StaticClass(), FTransform::Identity, SpawnParams);
+	APawn* Pawn = World->SpawnActor<APawn>(
+		APawn::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!District || !Farm || !Blacksmith || !PlayerController || !Pawn)
+	{
+		AddError(TEXT("Waypoint resolver fixture actors could not be created"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill"), false);
+	District->TerritoryTag = DistrictTag;
+	District->TerritoryGUID = FGuid::NewGuid();
+	Farm->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	Farm->ParentTerritoryTag = DistrictTag;
+	Farm->TerritoryGUID = FGuid::NewGuid();
+	Blacksmith->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Blacksmith->ParentTerritoryTag = DistrictTag;
+	Blacksmith->TerritoryGUID = FGuid::NewGuid();
+	PlayerController->Possess(Pawn);
+
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	TestNotNull(TEXT("Waypoint resolver registry created"), Registry);
+	if (Registry)
+	{
+		TestEqual(TEXT("Waypoint District registers"),
+			Registry->RegisterTerritory(District), ETerritoryRegistrationResult::Success);
+		TestEqual(TEXT("Near Place registers"),
+			Registry->RegisterTerritory(Farm), ETerritoryRegistrationResult::Success);
+		TestEqual(TEXT("Far Place registers"),
+			Registry->RegisterTerritory(Blacksmith), ETerritoryRegistrationResult::Success);
+
+		Farm->ForceSetTerritoryState(ETerritoryState::Locked);
+		TestTrue(TEXT("A District command skips a locked Place and resolves another visible Place"),
+			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+				PlayerController, District) == Blacksmith);
+
+		Farm->ForceSetTerritoryState(ETerritoryState::Unclaimed);
+		TestTrue(TEXT("A District command chooses the nearest visible Place"),
+			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+				PlayerController, District) == Farm);
+		TestTrue(TEXT("A direct Place command retains its physical POI"),
+			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+				PlayerController, Farm) == Farm);
+
+		District->ForceSetTerritoryState(ETerritoryState::Locked);
+		TestNull(TEXT("A locked District hierarchy has no waypoint target"),
+			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+				PlayerController, District));
+		TestNull(TEXT("A Place below a locked District is also silent"),
+			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+				PlayerController, Farm));
+	}
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUILockedMarkerSilenceTest,
+	"TerritoryFramework.UI.Regression.LockedMarkerLeavesNarrativeDomains",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUILockedMarkerSilenceTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Marker policy world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryProperty* Place = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!Place)
+	{
+		AddError(TEXT("Marker policy Place could not be created"));
+		World->DestroyWorld(false);
+		return false;
+	}
+	Place->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	Place->TerritoryGUID = FGuid::NewGuid();
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	TestNotNull(TEXT("Marker policy registry created"), Registry);
+	if (!Registry
+		|| Registry->RegisterTerritory(Place) != ETerritoryRegistrationResult::Success)
+	{
+		AddError(TEXT("Marker policy Place could not be registered"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	UTerritoryMapMarker* Marker = NewObject<UTerritoryMapMarker>(World);
+	Marker->SetTerritoryVolume(Place);
+	const FStructProperty* DomainProperty = FindFProperty<FStructProperty>(
+		UMapMarker::StaticClass(), TEXT("MarkerDomain"));
+	TestNotNull(TEXT("Narrative marker domain remains inspectable"), DomainProperty);
+	auto GetDomains = [DomainProperty, Marker]() -> const FGameplayTagContainer*
+	{
+		return DomainProperty
+			? DomainProperty->ContainerPtrToValuePtr<FGameplayTagContainer>(Marker)
+			: nullptr;
+	};
+	const FGameplayTagContainer* Domains = GetDomains();
+	TestTrue(TEXT("An unlocked Place is available on Narrative map surfaces"),
+		Domains && Domains->HasTagExact(
+			FNavigatorGameplayTags::Get().NavigatorTypes_Worldmap));
+	TestFalse(TEXT("An untracked Place stays off the compass"),
+		Domains && Domains->HasTagExact(
+			FNavigatorGameplayTags::Get().NavigatorTypes_Compass));
+
+	Marker->SetTracked(true);
+	Domains = GetDomains();
+	TestTrue(TEXT("Tracking promotes only the Place to the compass"),
+		Domains && Domains->HasTagExact(
+			FNavigatorGameplayTags::Get().NavigatorTypes_Compass));
+	TestTrue(TEXT("Tracking promotes the Place to screen-space guidance"),
+		Domains && Domains->HasTagExact(
+			FNavigatorGameplayTags::Get().NavigatorTypes_Screenspace));
+
+	Place->ForceSetTerritoryState(ETerritoryState::Locked);
+	Domains = GetDomains();
+	TestFalse(TEXT("Locking automatically clears tracked state"), Marker->IsTracked());
+	TestTrue(TEXT("A locked Place has no Narrative navigation domain"),
+		Domains && Domains->IsEmpty());
+
+	Marker->ClearTerritoryBinding();
 	World->DestroyWorld(false);
 	return true;
 }

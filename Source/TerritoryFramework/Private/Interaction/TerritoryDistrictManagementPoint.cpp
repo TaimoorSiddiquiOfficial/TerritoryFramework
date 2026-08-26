@@ -5,6 +5,7 @@
 #include "Core/TerritoryTypes.h"
 #include "UI/TerritoryDistrictManagementWidget.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Components/SphereComponent.h"
 #include "Navigation/NarrativeNavigationComponent.h"
 #include "Navigation/NavigatorGameplayTags.h"
@@ -14,6 +15,8 @@
 #include "Widgets/CommonActivatableWidgetContainer.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
+#include "Engine/World.h"
 
 UTerritoryDistrictPOIMarker::UTerritoryDistrictPOIMarker(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -22,7 +25,6 @@ UTerritoryDistrictPOIMarker::UTerritoryDistrictPOIMarker(const FObjectInitialize
 	bDrawBreadcrumbs = false;
 	SetZOrder(20);
 	FGameplayTagContainer Domains;
-	Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Compass);
 	Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Minimap);
 	Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Worldmap);
 	SetDefaultDomains(Domains);
@@ -33,12 +35,60 @@ void UTerritoryDistrictPOIMarker::SetManagementPoint(ATerritoryDistrictManagemen
 	ManagementPoint = Point;
 	ActorOwner = Point;
 	MarkerTransform = Point ? Point->GetActorTransform() : FTransform::Identity;
+	RefreshPresentationPolicy();
 }
 
 void UTerritoryDistrictPOIMarker::ClearManagementPoint()
 {
+	if (bRegisteredWithNavigation)
+	{
+		bRegisteredWithNavigation = false;
+		if (!GetWorld() || !GetWorld()->bIsTearingDown)
+		{
+			RemoveMarker();
+		}
+	}
+	SetDomains(FGameplayTagContainer());
 	ManagementPoint = nullptr;
 	ActorOwner = nullptr;
+}
+
+void UTerritoryDistrictPOIMarker::RefreshPresentationPolicy()
+{
+	ATerritoryDistrict* District = ManagementPoint.IsValid()
+		? ManagementPoint->ResolveDistrict() : nullptr;
+	const bool bVisible = District
+		&& District->GetTerritoryState() == ETerritoryState::Claimed
+		&& UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(this, District);
+	const bool bWorldTearingDown = GetWorld() && GetWorld()->bIsTearingDown;
+
+	FGameplayTagContainer Domains;
+	if (bVisible)
+	{
+		// This marker identifies the physical command post. It remains map/minimap
+		// intel and never floods the compass; the tracked child Place owns guidance.
+		Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Minimap);
+		Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Worldmap);
+	}
+	SetDomains(Domains);
+
+	if (bVisible && !bRegisteredWithNavigation && !bWorldTearingDown)
+	{
+		bRegisteredWithNavigation = true;
+		RegisterMarker();
+	}
+	else if (!bVisible && bRegisteredWithNavigation)
+	{
+		bRegisteredWithNavigation = false;
+		if (!bWorldTearingDown)
+		{
+			RemoveMarker();
+		}
+	}
+	if (!bWorldTearingDown)
+	{
+		RefreshMarker();
+	}
 }
 
 FText UTerritoryDistrictPOIMarker::GetMarkerActionText_Implementation(UNarrativeNavigationComponent* Selector) const
@@ -52,7 +102,8 @@ FText UTerritoryDistrictPOIMarker::GetMarkerDisplayText_Implementation(UNarrativ
 	if (ATerritoryDistrict* District = ManagementPoint.IsValid() ? ManagementPoint->ResolveDistrict() : nullptr)
 	{
 		// Hide text for non-claimed territories — marker is invisible anyway
-		if (District->GetTerritoryState() != ETerritoryState::Claimed)
+		if (District->GetTerritoryState() != ETerritoryState::Claimed
+			|| !UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(this, District))
 		{
 			OutSubtitleText = FText::GetEmpty();
 			return FText::GetEmpty();
@@ -68,7 +119,11 @@ FLinearColor UTerritoryDistrictPOIMarker::GetMarkerColor_Implementation(UNarrati
 	const FGameplayTag& NavigatorType) const
 {
 	const ATerritoryDistrict* District = ManagementPoint.IsValid() ? ManagementPoint->ResolveDistrict() : nullptr;
-	if (!District) return FLinearColor::Gray;
+	if (!District || !UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
+		this, const_cast<ATerritoryDistrict*>(District)))
+	{
+		return FLinearColor(0.f, 0.f, 0.f, 0.f);
+	}
 
 	const ETerritoryState State = District->GetTerritoryState();
 
@@ -90,8 +145,12 @@ bool UTerritoryDistrictPOIMarker::CanInteract_Implementation(UNarrativeNavigatio
 {
 	if (!ManagementPoint.IsValid() || !Selector) return false;
 	const APlayerController* PlayerController = Cast<APlayerController>(Selector->GetOwner());
+	ATerritoryDistrict* District = ManagementPoint->ResolveDistrict();
 	FText FailureReason;
 	return PlayerController
+		&& District
+		&& UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
+			this, District)
 		&& ManagementPoint->CanManage(PlayerController->GetPawn(), FailureReason)
 		&& ManagementPoint->IsInteractorInRange(PlayerController->GetPawn());
 }
@@ -118,38 +177,103 @@ void UTerritoryDistrictNavigationMarkerComponent::BeginPlay()
 	if (ATerritoryDistrictManagementPoint* Point = Cast<ATerritoryDistrictManagementPoint>(GetOwner()))
 	{
 		DistrictMarker = NewObject<UTerritoryDistrictPOIMarker>(this);
-		DistrictMarker->SetManagementPoint(Point);
 		MarkerObject = DistrictMarker;
-		RegisterMarker();
-
-		// Subscribe to territory state changes for dynamic marker refresh.
-		// Without this, the POI marker color/text stays stale after a capture.
-		if (ATerritoryDistrict* District = Point->ResolveDistrict())
+		DistrictMarker->SetManagementPoint(Point);
+		if (UTerritoryRegistrySubsystem* Registry =
+			GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
-			District->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged);
-			District->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged);
+			Registry->OnTerritoryRegistered.AddUniqueDynamic(
+				this, &UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged);
+			Registry->OnTerritoryUnregistered.AddUniqueDynamic(
+				this, &UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged);
 		}
+		BindToDistrictIfAvailable();
+		RefreshMarkerPolicy();
+		GetWorld()->GetTimerManager().SetTimerForNextTick(
+			FTimerDelegate::CreateUObject(
+				this, &UTerritoryDistrictNavigationMarkerComponent::RefreshMarkerPolicy));
 	}
 }
 
 void UTerritoryDistrictNavigationMarkerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry =
+			World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(
+				this, &UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged);
+			Registry->OnTerritoryUnregistered.RemoveDynamic(
+				this, &UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged);
+		}
+	}
+	UnbindFromDistrict();
 	if (DistrictMarker)
 	{
 		DistrictMarker->ClearManagementPoint();
 	}
-	// Unsubscribe from territory delegates
-	if (ATerritoryDistrictManagementPoint* Point = Cast<ATerritoryDistrictManagementPoint>(GetOwner()))
-	{
-		if (ATerritoryDistrict* District = Point->ResolveDistrict())
-		{
-			District->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged);
-			District->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged);
-		}
-	}
-	RemoveMarker();
+	MarkerObject = nullptr;
 	Super::EndPlay(EndPlayReason);
 	DistrictMarker = nullptr;
+}
+
+void UTerritoryDistrictNavigationMarkerComponent::BindToDistrictIfAvailable()
+{
+	ATerritoryDistrictManagementPoint* Point =
+		Cast<ATerritoryDistrictManagementPoint>(GetOwner());
+	ATerritoryDistrict* District = Point ? Point->ResolveDistrict() : nullptr;
+	if (BoundDistrict.Get() == District) return;
+	UnbindFromDistrict();
+	if (!District) return;
+	BoundDistrict = District;
+	District->OnTerritoryStateChangedDelegate.AddUniqueDynamic(
+		this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged);
+	District->OnTerritoryOwnershipChanged.AddUniqueDynamic(
+		this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged);
+}
+
+void UTerritoryDistrictNavigationMarkerComponent::UnbindFromDistrict()
+{
+	if (BoundDistrict.IsValid())
+	{
+		BoundDistrict->OnTerritoryStateChangedDelegate.RemoveDynamic(
+			this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged);
+		BoundDistrict->OnTerritoryOwnershipChanged.RemoveDynamic(
+			this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged);
+	}
+	BoundDistrict = nullptr;
+}
+
+void UTerritoryDistrictNavigationMarkerComponent::RefreshMarkerPolicy()
+{
+	BindToDistrictIfAvailable();
+	if (DistrictMarker) DistrictMarker->RefreshPresentationPolicy();
+}
+
+void UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged(
+	ATerritoryVolume* Territory, ETerritoryState NewState)
+{
+	RefreshMarkerPolicy();
+}
+
+void UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged(
+	ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	RefreshMarkerPolicy();
+}
+
+void UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged(
+	ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	const ATerritoryDistrictManagementPoint* Point =
+		Cast<ATerritoryDistrictManagementPoint>(GetOwner());
+	if (!Point || !Territory || Territory->GetTerritoryTag() != Point->DistrictTag) return;
+	if (bWasUnregistered && BoundDistrict.Get() == Territory)
+	{
+		UnbindFromDistrict();
+	}
+	RefreshMarkerPolicy();
 }
 
 FText UTerritoryDistrictInteractableComponent::GetInteractableNameText_Implementation(

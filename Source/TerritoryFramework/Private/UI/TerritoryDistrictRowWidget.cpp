@@ -630,16 +630,19 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 	}
 	if (SetWaypointButton)
 	{
-		const bool bTracked = UTerritoryUIBlueprintLibrary::GetTrackedTerritory(
-			GetOwningPlayer()) == CurrentDistrict;
+		ATerritoryVolume* WaypointTarget =
+			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+				GetOwningPlayer(), CurrentDistrict);
+		const bool bCanTrack = OperationsView.bUnlocked
+			&& OperationsView.bHierarchyVisible && WaypointTarget;
+		const bool bTracked = UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+			GetOwningPlayer(), CurrentDistrict);
 		SetWaypointButton->SetButtonText(bTracked
 			? NSLOCTEXT("TerritoryDistrictRow", "WaypointTracked", "TRACKED  ✓")
 			: NSLOCTEXT("TerritoryDistrictRow", "SetWaypoint", "WAYPOINT"));
 		SetWaypointButton->SetIsSelected(bTracked);
-		SetWaypointButton->SetIsEnabled(OperationsView.bUnlocked
-			&& OperationsView.bHierarchyVisible);
-		SetWaypointButton->SetVisibility(OperationsView.bUnlocked
-			&& OperationsView.bHierarchyVisible
+		SetWaypointButton->SetIsEnabled(bCanTrack);
+		SetWaypointButton->SetVisibility(bCanTrack
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (EspionageButton)

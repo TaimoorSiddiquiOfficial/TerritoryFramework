@@ -178,6 +178,14 @@ void ATerritoryVolume::BeginPlay()
 		RefreshGarrisonSnapshot();
 	}
 
+	// Components begin play before the actor registers and before fresh/save state
+	// is reconciled. Re-apply the final navigation policy so locked territories are
+	// absent and visible territories are registered with Narrative Navigation.
+	if (MapMarkerComponent)
+	{
+		MapMarkerComponent->RefreshTerritoryMarker();
+	}
+
 	// Fire BP-exposed initialization event (only reached if registration succeeded)
 	OnTerritoryInitialized();
 

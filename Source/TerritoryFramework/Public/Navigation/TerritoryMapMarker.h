@@ -38,10 +38,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory Marker|Waypoint")
 	bool IsTracked() const { return bTracked; }
 
+	/** Reconcile lock/hierarchy visibility with Narrative marker registration and domains. */
+	void RefreshTerritoryPresentation();
+
 protected:
 	virtual FLinearColor GetMarkerColor_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType) const override;
 	virtual FText GetMarkerDisplayText_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType, FText& OutSubtitleText) const override;
 	virtual FText GetMarkerActionText_Implementation(UNarrativeNavigationComponent* Selector) const override;
+	virtual bool CanInteract_Implementation(UNarrativeNavigationComponent* Selector) const override;
 	virtual void OnSelect_Implementation(UNarrativeNavigationComponent* Selector) override;
 	virtual void MarkerOnPaint_Implementation(FPaintContext& Context, FMarkerOnPaintData& OnPaintData) const override;
 
@@ -83,6 +87,7 @@ private:
 	TWeakObjectPtr<ATerritoryVolume> TerritoryVolume;
 
 	bool bTracked = false;
+	bool bRegisteredWithNavigation = false;
 
 	UFUNCTION()
 	void OnTerritoryChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);

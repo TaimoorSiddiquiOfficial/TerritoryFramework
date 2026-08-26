@@ -759,11 +759,23 @@ void UTerritoryJournalWidget::RefreshLiveEvents()
 	LiveEventsBox->ClearChildren();
 	for (const FTerritoryLiveEvent& Event : Events)
 	{
+		FTerritoryLiveEvent DisplayEvent = Event;
+		if (DisplayEvent.bCanSetWaypoint && DisplayEvent.TerritoryTag.IsValid())
+		{
+			UWorld* World = GetWorld();
+			const UTerritoryRegistrySubsystem* Registry = World
+				? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+			ATerritoryVolume* EventTerritory = Registry
+				? Registry->GetTerritoryByTag(DisplayEvent.TerritoryTag) : nullptr;
+			DisplayEvent.bCanSetWaypoint = EventTerritory
+				&& UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+					GetOwningPlayer(), EventTerritory) != nullptr;
+		}
 		UTerritoryLiveEventRowWidget* Row =
 			CreateWidget<UTerritoryLiveEventRowWidget>(
 				this, UTerritoryLiveEventRowWidget::StaticClass());
 		if (!Row) continue;
-		Row->InitializeLiveEvent(Event);
+		Row->InitializeLiveEvent(DisplayEvent);
 		Row->OnWaypointRequested.AddUniqueDynamic(
 			this, &UTerritoryJournalWidget::HandleLiveEventWaypointRequested);
 		if (UVerticalBoxSlot* RowSlot = LiveEventsBox->AddChildToVerticalBox(Row))
@@ -1517,11 +1529,25 @@ UTerritoryDistrictRowWidget* UTerritoryJournalWidget::CreateOperationsRow(
 void UTerritoryJournalWidget::HandleWaypointRequested(ATerritoryDistrict* District)
 {
 	if (!District) return;
-	if (UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
-		GetOwningPlayer(), District))
+	APlayerController* PlayerController = GetOwningPlayer();
+	bool bChanged = false;
+	if (UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+		PlayerController, District))
+	{
+		UTerritoryUIBlueprintLibrary::ClearTerritoryWaypoint(PlayerController);
+		bChanged = true;
+	}
+	else
+	{
+		bChanged = UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
+			PlayerController, District);
+	}
+	if (bChanged)
 	{
 		LastOperationsRevision = INDEX_NONE;
+		LastLiveEventRevision = INDEX_NONE;
 		RefreshDistrictList();
+		RefreshLiveEvents();
 	}
 }
 
@@ -1544,11 +1570,25 @@ void UTerritoryJournalWidget::HandleLiveEventWaypointRequested(
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	ATerritoryVolume* Territory = Registry
 		? Registry->GetTerritoryByTag(TerritoryTag) : nullptr;
-	if (Territory && UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
-		GetOwningPlayer(), Territory))
+	APlayerController* PlayerController = GetOwningPlayer();
+	bool bChanged = false;
+	if (Territory && UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+		PlayerController, Territory))
+	{
+		UTerritoryUIBlueprintLibrary::ClearTerritoryWaypoint(PlayerController);
+		bChanged = true;
+	}
+	else if (Territory)
+	{
+		bChanged = UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
+			PlayerController, Territory);
+	}
+	if (bChanged)
 	{
 		LastOperationsRevision = INDEX_NONE;
+		LastLiveEventRevision = INDEX_NONE;
 		RefreshDistrictList();
+		RefreshLiveEvents();
 	}
 }
 

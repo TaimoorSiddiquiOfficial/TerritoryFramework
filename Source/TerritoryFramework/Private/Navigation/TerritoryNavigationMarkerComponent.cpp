@@ -2,6 +2,7 @@
 #include "Navigation/TerritoryMapMarker.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 
 UTerritoryNavigationMarkerComponent::UTerritoryNavigationMarkerComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -20,6 +21,14 @@ void UTerritoryNavigationMarkerComponent::BeginPlay()
 			*GetOwner()->GetName());
 		return;
 	}
+	if (UTerritoryRegistrySubsystem* Registry =
+		GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+	{
+		Registry->OnTerritoryRegistered.AddUniqueDynamic(
+			this, &UTerritoryNavigationMarkerComponent::OnRegistryTerritoryChanged);
+		Registry->OnTerritoryUnregistered.AddUniqueDynamic(
+			this, &UTerritoryNavigationMarkerComponent::OnRegistryTerritoryChanged);
+	}
 	{
 		// Don't bind component-level delegates — the TerritoryMapMarker already binds
 		// to these same delegates in SetTerritoryVolume and handles RefreshMarker directly.
@@ -29,39 +38,38 @@ void UTerritoryNavigationMarkerComponent::BeginPlay()
 		TerritoryMapMarker = NewObject<UTerritoryMapMarker>(this);
 		if (TerritoryMapMarker)
 		{
-			TerritoryMapMarker->SetTerritoryVolume(CachedTerritory.Get());
-
 			// Assign to parent's MarkerObject so NavigationMarkerComponent manages it
 			MarkerObject = TerritoryMapMarker;
-
-			// Register with navigation subsystem
-			RegisterMarker();
+			TerritoryMapMarker->SetTerritoryVolume(CachedTerritory.Get());
 		}
 	}
 }
 
 void UTerritoryNavigationMarkerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// CRITICAL FIX: Cleanup order matters.
-	// 1. Unbind territory delegates first
-	// 2. Clear territory binding on the marker
-	// 3. Remove marker from navigation subsystem
-	// 4. Call Super::EndPlay (parent uses MarkerObject to remove marker)
-	// 5. Null references LAST (parent needs MarkerObject during its EndPlay)
-
-	// Component no longer binds delegates (marker handles it) — nothing to unbind here.
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryRegistrySubsystem* Registry =
+			World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			Registry->OnTerritoryRegistered.RemoveDynamic(
+				this, &UTerritoryNavigationMarkerComponent::OnRegistryTerritoryChanged);
+			Registry->OnTerritoryUnregistered.RemoveDynamic(
+				this, &UTerritoryNavigationMarkerComponent::OnRegistryTerritoryChanged);
+		}
+	}
 	if (TerritoryMapMarker)
 	{
 		TerritoryMapMarker->ClearTerritoryBinding();
 	}
 
-	// RemoveMarker while MarkerObject is still valid
-	RemoveMarker();
-
-	// Call Super BEFORE nulling MarkerObject — parent EndPlay uses MarkerObject
+	// ClearTerritoryBinding performs the one normal runtime unregister. During
+	// world teardown it deliberately emits no Narrative UI callbacks because the
+	// owning player/HUD may already be gone. Nulling prevents the base component
+	// from issuing a duplicate removal in either path.
+	MarkerObject = nullptr;
 	Super::EndPlay(EndPlayReason);
 
-	// Null references AFTER Super::EndPlay
 	TerritoryMapMarker = nullptr;
 	CachedTerritory = nullptr;
 }
@@ -80,7 +88,7 @@ void UTerritoryNavigationMarkerComponent::RefreshTerritoryMarker()
 {
 	if (TerritoryMapMarker)
 	{
-		TerritoryMapMarker->RefreshMarker();
+		TerritoryMapMarker->RefreshTerritoryPresentation();
 	}
 }
 
@@ -94,4 +102,34 @@ void UTerritoryNavigationMarkerComponent::OnTerritoryStateChanged(
 	ATerritoryVolume* Territory, ETerritoryState NewState)
 {
 	RefreshTerritoryMarker();
+}
+
+void UTerritoryNavigationMarkerComponent::OnRegistryTerritoryChanged(
+	ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	if (!CachedTerritory.IsValid() || !Territory) return;
+	const FGameplayTag ChangedTag = Territory->GetTerritoryTag();
+	if (Territory == CachedTerritory.Get())
+	{
+		RefreshTerritoryMarker();
+		return;
+	}
+
+	TSet<FGameplayTag> Visited;
+	FGameplayTag ParentTag = CachedTerritory->GetParentTerritoryTag();
+	while (ParentTag.IsValid() && !Visited.Contains(ParentTag))
+	{
+		if (ParentTag == ChangedTag)
+		{
+			RefreshTerritoryMarker();
+			return;
+		}
+		Visited.Add(ParentTag);
+		const UTerritoryRegistrySubsystem* Registry =
+			GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+		const ATerritoryVolume* Parent = Registry
+			? Registry->GetTerritoryByTag(ParentTag) : nullptr;
+		if (!Parent) return;
+		ParentTag = Parent->GetParentTerritoryTag();
+	}
 }

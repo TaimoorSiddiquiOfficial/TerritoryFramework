@@ -30,6 +30,60 @@ namespace
 		return Viewer && Viewer->GetPawn() ? static_cast<AActor*>(Viewer->GetPawn()) : Viewer;
 	}
 
+	void GatherVisibleWaypointLeaves(
+		APlayerController* Viewer, ATerritoryVolume* Territory,
+		UTerritoryRegistrySubsystem* Registry, TSet<FGameplayTag>& Visited,
+		TArray<ATerritoryVolume*>& OutLeaves)
+	{
+		if (!Territory || !Registry
+			|| !UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(Viewer, Territory))
+		{
+			return;
+		}
+
+		const FGameplayTag TerritoryTag = Territory->GetTerritoryTag();
+		if (!TerritoryTag.IsValid() || Visited.Contains(TerritoryTag))
+		{
+			return;
+		}
+		Visited.Add(TerritoryTag);
+
+		if (Territory->IsA<ATerritoryProperty>())
+		{
+			OutLeaves.Add(Territory);
+			return;
+		}
+
+		if (Territory->IsA<ATerritoryDistrict>() || Territory->IsA<ATerritoryCity>())
+		{
+			TArray<ATerritoryVolume*> Children = Registry->GetChildTerritories(TerritoryTag);
+			Children.Sort([](const ATerritoryVolume& A, const ATerritoryVolume& B)
+			{
+				const FString ATag = A.GetTerritoryTag().ToString();
+				const FString BTag = B.GetTerritoryTag().ToString();
+				return ATag == BTag ? A.GetPathName() < B.GetPathName() : ATag < BTag;
+			});
+			for (ATerritoryVolume* Child : Children)
+			{
+				GatherVisibleWaypointLeaves(Viewer, Child, Registry, Visited, OutLeaves);
+			}
+			return;
+		}
+
+		// Backward-compatible support for projects using a standalone TerritoryVolume.
+		OutLeaves.Add(Territory);
+	}
+
+	int32 GetWaypointPriority(const ATerritoryVolume* Territory,
+		const FGameplayTag& ViewerFaction)
+	{
+		if (!Territory) return MAX_int32;
+		if (Territory->GetTerritoryState() == ETerritoryState::Contested) return 0;
+		if (!ViewerFaction.IsValid()
+			|| Territory->GetOwningFaction() != ViewerFaction) return 1;
+		return 2;
+	}
+
 	FTerritoryCommandCapabilityView BuildCommandCapabilityView(
 		const UObject* WorldContextObject, const FGameplayTag& Faction,
 		const FGameplayTag& Capability, const FText& DisplayName,
@@ -329,21 +383,58 @@ UTerritoryActivatableWidget* UTerritoryUIBlueprintLibrary::OpenTerritoryMenu(
 	return Layer->AddWidget<UTerritoryActivatableWidget>(WidgetClass);
 }
 
+ATerritoryVolume* UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+	APlayerController* PlayerController, ATerritoryVolume* Territory)
+{
+	UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+	UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!PlayerController || !Territory || !Registry
+		|| !IsTerritoryVisibleToPlayer(PlayerController, Territory))
+	{
+		return nullptr;
+	}
+
+	TSet<FGameplayTag> Visited;
+	TArray<ATerritoryVolume*> Candidates;
+	GatherVisibleWaypointLeaves(
+		PlayerController, Territory, Registry, Visited, Candidates);
+	if (Candidates.IsEmpty()) return nullptr;
+
+	const AActor* ViewerActor = ResolveViewerActor(PlayerController);
+	const FVector ViewerLocation = ViewerActor
+		? ViewerActor->GetActorLocation() : FVector::ZeroVector;
+	const FGameplayTag ViewerFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+		PlayerController, const_cast<AActor*>(ViewerActor));
+	Candidates.Sort([ViewerFaction, ViewerLocation](
+		const ATerritoryVolume& A, const ATerritoryVolume& B)
+	{
+		const int32 APriority = GetWaypointPriority(&A, ViewerFaction);
+		const int32 BPriority = GetWaypointPriority(&B, ViewerFaction);
+		if (APriority != BPriority) return APriority < BPriority;
+		const double ADistance = FVector::DistSquared(A.GetActorLocation(), ViewerLocation);
+		const double BDistance = FVector::DistSquared(B.GetActorLocation(), ViewerLocation);
+		if (!FMath::IsNearlyEqual(ADistance, BDistance)) return ADistance < BDistance;
+		const FString ATag = A.GetTerritoryTag().ToString();
+		const FString BTag = B.GetTerritoryTag().ToString();
+		return ATag == BTag ? A.GetPathName() < B.GetPathName() : ATag < BTag;
+	});
+	return Candidates[0];
+}
+
 bool UTerritoryUIBlueprintLibrary::SetTerritoryWaypoint(
 	APlayerController* PlayerController, ATerritoryVolume* Territory)
 {
-	if (!PlayerController || !PlayerController->IsLocalController() || !Territory
-		|| Territory->GetTerritoryState() == ETerritoryState::Locked
-		|| !IsTerritoryVisibleToPlayer(PlayerController, Territory))
-	{
-		return false;
-	}
-	ClearTerritoryWaypoint(PlayerController);
-	UTerritoryNavigationMarkerComponent* Component = Territory->GetMapMarkerComponent();
+	if (!PlayerController || !PlayerController->IsLocalController()) return false;
+	ATerritoryVolume* WaypointTarget = ResolveTerritoryWaypointTarget(
+		PlayerController, Territory);
+	if (!WaypointTarget) return false;
+	UTerritoryNavigationMarkerComponent* Component = WaypointTarget->GetMapMarkerComponent();
 	UTerritoryMapMarker* Marker = Component ? Component->GetTerritoryMapMarker() : nullptr;
 	if (!Marker) return false;
+	ClearTerritoryWaypoint(PlayerController);
 	Marker->SetTracked(true);
-	return true;
+	return Marker->IsTracked();
 }
 
 void UTerritoryUIBlueprintLibrary::ClearTerritoryWaypoint(
@@ -380,6 +471,36 @@ ATerritoryVolume* UTerritoryUIBlueprintLibrary::GetTrackedTerritory(
 		if (Marker && Marker->IsTracked()) return Territory;
 	}
 	return nullptr;
+}
+
+bool UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+	APlayerController* PlayerController, ATerritoryVolume* Territory)
+{
+	ATerritoryVolume* Tracked = GetTrackedTerritory(PlayerController);
+	if (!Territory || !Tracked
+		|| !IsTerritoryVisibleToPlayer(PlayerController, Territory))
+	{
+		return false;
+	}
+	if (Tracked == Territory) return true;
+
+	UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+	const UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!Registry) return false;
+
+	const FGameplayTag RequestedTag = Territory->GetTerritoryTag();
+	TSet<FGameplayTag> Visited;
+	FGameplayTag ParentTag = Tracked->GetParentTerritoryTag();
+	while (ParentTag.IsValid() && !Visited.Contains(ParentTag))
+	{
+		if (ParentTag == RequestedTag) return true;
+		Visited.Add(ParentTag);
+		const ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
+		if (!Parent) return false;
+		ParentTag = Parent->GetParentTerritoryTag();
+	}
+	return false;
 }
 
 ATerritoryDistrict* UTerritoryUIBlueprintLibrary::GetDistrictAtPlayerLocation(

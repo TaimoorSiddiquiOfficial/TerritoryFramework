@@ -9,6 +9,7 @@
 #include "Components/BoxComponent.h"
 #include "Rendering/DrawElements.h"
 #include "Blueprint/UserWidget.h"
+#include "Engine/World.h"
 
 UTerritoryMapMarker::UTerritoryMapMarker(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -37,11 +38,22 @@ void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
 	InTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
 	InTerritory->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
 
-	RefreshMarker();
+	RefreshTerritoryPresentation();
 }
 
 void UTerritoryMapMarker::ClearTerritoryBinding()
 {
+	if (bRegisteredWithNavigation)
+	{
+		bRegisteredWithNavigation = false;
+		if (!GetWorld() || !GetWorld()->bIsTearingDown)
+		{
+			RemoveMarker();
+		}
+	}
+	bTracked = false;
+	SetDrawMarkerPathEnabled(false);
+	SetDomains(FGameplayTagContainer());
 	if (TerritoryVolume.IsValid())
 	{
 		TerritoryVolume->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
@@ -59,7 +71,7 @@ void UTerritoryMapMarker::OnTerritoryChanged(ATerritoryVolume* Territory, FGamep
 		UE_LOG(LogTerritory, Log, TEXT("[Marker] Refresh: %s owner changed %s → %s"),
 			*Territory->GetTerritoryTag().ToString(), *OldOwner.ToString(), *NewOwner.ToString());
 	}
-	RefreshMarker();
+	RefreshTerritoryPresentation();
 }
 
 void UTerritoryMapMarker::OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState)
@@ -70,7 +82,7 @@ void UTerritoryMapMarker::OnTerritoryStateChanged(ATerritoryVolume* Territory, E
 		UE_LOG(LogTerritory, Log, TEXT("[Marker] Refresh: %s state → %d"),
 			*Territory->GetTerritoryTag().ToString(), static_cast<int32>(NewState));
 	}
-	RefreshMarker();
+	RefreshTerritoryPresentation();
 }
 
 ATerritoryVolume* UTerritoryMapMarker::GetTerritoryVolume() const
@@ -81,30 +93,72 @@ ATerritoryVolume* UTerritoryMapMarker::GetTerritoryVolume() const
 void UTerritoryMapMarker::SetFactionColor(FGameplayTag Faction, FLinearColor Color)
 {
 	FactionColorMap.Add(Faction, Color);
-	RefreshMarker();
+	RefreshTerritoryPresentation();
 }
 
 void UTerritoryMapMarker::ClearFactionColors()
 {
 	FactionColorMap.Empty();
-	RefreshMarker();
+	RefreshTerritoryPresentation();
 }
 
 void UTerritoryMapMarker::SetTracked(bool bInTracked)
 {
+	if (bInTracked && (!TerritoryVolume.IsValid()
+		|| !UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
+			this, TerritoryVolume.Get())))
+	{
+		bInTracked = false;
+	}
 	if (bTracked == bInTracked) return;
 	bTracked = bInTracked;
-	FGameplayTagContainer Domains;
-	Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Minimap);
-	Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Worldmap);
-	if (bTracked)
+	RefreshTerritoryPresentation();
+}
+
+void UTerritoryMapMarker::RefreshTerritoryPresentation()
+{
+	const bool bVisible = TerritoryVolume.IsValid()
+		&& UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
+			this, TerritoryVolume.Get());
+	if (!bVisible)
 	{
-		Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Compass);
-		Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Screenspace);
+		bTracked = false;
+	}
+	const bool bWorldTearingDown = GetWorld() && GetWorld()->bIsTearingDown;
+
+	FGameplayTagContainer Domains;
+	if (bVisible)
+	{
+		Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Minimap);
+		Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Worldmap);
+		if (bTracked)
+		{
+			Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Compass);
+			Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Screenspace);
+		}
 	}
 	SetDomains(Domains);
-	SetDrawMarkerPathEnabled(bTracked);
-	RefreshMarker();
+	SetDrawMarkerPathEnabled(bVisible && bTracked);
+
+	// A locked or structurally hidden Territory is removed from Narrative's
+	// navigation collection instead of remaining as a transparent interactive icon.
+	if (bVisible && !bRegisteredWithNavigation && !bWorldTearingDown)
+	{
+		bRegisteredWithNavigation = true;
+		RegisterMarker();
+	}
+	else if (!bVisible && bRegisteredWithNavigation)
+	{
+		bRegisteredWithNavigation = false;
+		if (!bWorldTearingDown)
+		{
+			RemoveMarker();
+		}
+	}
+	if (!bWorldTearingDown)
+	{
+		RefreshMarker();
+	}
 }
 
 FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType) const
@@ -116,8 +170,9 @@ FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNaviga
 
 	ETerritoryState State = TerritoryVolume->GetTerritoryState();
 
-	// Locked = invisible. No marker shown at all.
-	if (State == ETerritoryState::Locked)
+	// Fail closed for a locked/unloaded hierarchy, including a locked ancestor.
+	if (!UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
+		this, TerritoryVolume.Get()))
 	{
 		return FLinearColor(0.f, 0.f, 0.f, 0.f);
 	}
@@ -127,7 +182,12 @@ FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNaviga
 		return ContestedColor;
 	}
 
-	if (bTracked && State == ETerritoryState::Claimed && Selector)
+	const APlayerController* PlayerController = Selector
+		? Cast<APlayerController>(Selector->GetOwner()) : nullptr;
+	const bool bSelectedRoute = bTracked || (PlayerController
+		&& UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+			const_cast<APlayerController*>(PlayerController), TerritoryVolume.Get()));
+	if (bSelectedRoute && State == ETerritoryState::Claimed && Selector)
 	{
 		const FGameplayTag ViewerFaction =
 			UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Selector->GetOwner());
@@ -156,9 +216,22 @@ FLinearColor UTerritoryMapMarker::GetMarkerColor_Implementation(UNarrativeNaviga
 FText UTerritoryMapMarker::GetMarkerActionText_Implementation(
 	UNarrativeNavigationComponent* Selector) const
 {
-	return bTracked
+	APlayerController* PlayerController = Selector
+		? Cast<APlayerController>(Selector->GetOwner()) : nullptr;
+	return PlayerController && UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+		PlayerController, TerritoryVolume.Get())
 		? NSLOCTEXT("TerritoryMapMarker", "ClearWaypointAction", "Clear Territory Waypoint")
 		: NSLOCTEXT("TerritoryMapMarker", "SetWaypointAction", "Set Territory Waypoint");
+}
+
+bool UTerritoryMapMarker::CanInteract_Implementation(
+	UNarrativeNavigationComponent* Selector) const
+{
+	APlayerController* PlayerController = Selector
+		? Cast<APlayerController>(Selector->GetOwner()) : nullptr;
+	return PlayerController && TerritoryVolume.IsValid()
+		&& UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+			PlayerController, TerritoryVolume.Get()) != nullptr;
 }
 
 void UTerritoryMapMarker::OnSelect_Implementation(
@@ -167,7 +240,8 @@ void UTerritoryMapMarker::OnSelect_Implementation(
 	APlayerController* PlayerController = Selector
 		? Cast<APlayerController>(Selector->GetOwner()) : nullptr;
 	if (!PlayerController || !TerritoryVolume.IsValid()) return;
-	if (bTracked)
+	if (UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+		PlayerController, TerritoryVolume.Get()))
 	{
 		UTerritoryUIBlueprintLibrary::ClearTerritoryWaypoint(PlayerController);
 	}
@@ -185,8 +259,9 @@ FText UTerritoryMapMarker::GetMarkerDisplayText_Implementation(UNarrativeNavigat
 		return FText::GetEmpty();
 	}
 
-	// Locked = no text shown
-	if (TerritoryVolume->GetTerritoryState() == ETerritoryState::Locked)
+	// Locked, unloaded, or hidden ancestors reveal no text.
+	if (!UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
+		this, TerritoryVolume.Get()))
 	{
 		return FText::GetEmpty();
 	}

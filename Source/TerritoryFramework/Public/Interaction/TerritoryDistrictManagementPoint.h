@@ -21,6 +21,7 @@ public:
 	UTerritoryDistrictPOIMarker(const FObjectInitializer& ObjectInitializer);
 	void SetManagementPoint(class ATerritoryDistrictManagementPoint* Point);
 	void ClearManagementPoint();
+	void RefreshPresentationPolicy();
 
 	virtual FText GetMarkerActionText_Implementation(UNarrativeNavigationComponent* Selector) const override;
 	virtual FText GetMarkerDisplayText_Implementation(UNarrativeNavigationComponent* Selector,
@@ -32,6 +33,7 @@ public:
 
 private:
 	TWeakObjectPtr<class ATerritoryDistrictManagementPoint> ManagementPoint;
+	bool bRegisteredWithNavigation = false;
 };
 
 UCLASS(ClassGroup=(Territory), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))
@@ -47,20 +49,24 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION()
-	void OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState)
-	{
-		if (DistrictMarker) DistrictMarker->RefreshMarker();
-	}
+	void OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
 
 	UFUNCTION()
-	void OnTerritoryOwnershipChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
-	{
-		if (DistrictMarker) DistrictMarker->RefreshMarker();
-	}
+	void OnTerritoryOwnershipChanged(ATerritoryVolume* Territory,
+		FGameplayTag OldOwner, FGameplayTag NewOwner);
+
+	UFUNCTION()
+	void OnRegistryTerritoryChanged(ATerritoryVolume* Territory, bool bWasUnregistered);
 
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTerritoryDistrictPOIMarker> DistrictMarker;
+
+	TWeakObjectPtr<ATerritoryDistrict> BoundDistrict;
+
+	void BindToDistrictIfAvailable();
+	void UnbindFromDistrict();
+	void RefreshMarkerPolicy();
 };
 
 UCLASS(ClassGroup=(Territory), BlueprintType, Blueprintable, meta=(BlueprintSpawnableComponent))

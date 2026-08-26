@@ -138,7 +138,36 @@ Success is reported only after the final desired/live invariant is verified. A p
 
 ## POI behavior
 
-The management marker reuses Narrative POI/navigation presentation. It refreshes with ownership/state and is visible according to district policy. No duplicate map, minimap, compass, or marker stack is created.
+The management marker reuses Narrative Navigation's marker registration and domain API. It is
+present on the world map/minimap only while its District is loaded, hierarchy-visible, and
+claimed. It never appears on the compass merely because the command post exists. Locked,
+unclaimed, contested, unloaded, or structurally hidden Districts remove the marker from
+Narrative Navigation completely; zero-alpha icons are not used as a privacy policy.
+
+The Command Center's **Waypoint** button represents the selected District operation, but the
+physical route always resolves to a child Place POI. For example, selecting Market Square tracks
+Blacksmith, and selecting Castle Hill tracks Farm. With several visible Places, a contested Place
+wins first, then a Place not held by the viewer, then the nearest friendly Place; the Territory
+tag gives deterministic tie-breaking. Only that Place enters Narrative compass and screen-space
+domains. Clicking the selected row/report again clears it.
+
+This route is local presentation state. It is neither replicated nor saved and it never changes
+Territory ownership. `ATerritoryVolume` remains the owner/state authority, the hierarchy reducer
+captures a District when all Places agree, and Narrative Navigation remains the POI/map/compass
+authority. World Partition registration events refresh child visibility and late-loaded management
+points without retaining durable actor pointers.
+
+### Waypoint Blueprint API
+
+| Function | Purpose |
+|---|---|
+| `ResolveTerritoryWaypointTarget(Controller, Territory)` | Return the visible Place that owns the physical route, or null when the hierarchy is silent |
+| `SetTerritoryWaypoint(Controller, Territory)` | Promote the resolved Place into Narrative compass/screen-space domains |
+| `GetTrackedTerritory(Controller)` | Return the actual tracked Place, not its aggregate District |
+| `IsTerritoryWaypointTracked(Controller, Territory)` | Return true for the tracked Place and its City/District ancestors |
+| `ClearTerritoryWaypoint(Controller)` | Remove all Territory route promotion for the local player |
+
+No duplicate map, minimap, compass, POI discovery, or waypoint stack is created.
 
 ## Known limits
 

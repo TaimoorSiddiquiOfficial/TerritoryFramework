@@ -331,7 +331,18 @@ public:
 		TSubclassOf<UTerritoryActivatableWidget> WidgetClass,
 		UPARAM(meta=(Categories="UI.Layer")) FGameplayTag LayerTag);
 
-	/** Track exactly one visible, unlocked Territory using Narrative Navigation. */
+	/**
+	 * Resolve the physical Narrative Navigation destination for a Territory command.
+	 *
+	 * A District or City is an aggregate control area, not a point of interest, so
+	 * it resolves to a visible child Place. A legacy flat Territory resolves to
+	 * itself. Locked or structurally hidden hierarchies return null.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Navigation")
+	static ATerritoryVolume* ResolveTerritoryWaypointTarget(
+		APlayerController* PlayerController, ATerritoryVolume* Territory);
+
+	/** Track exactly one visible Place (or legacy flat Territory) using Narrative Navigation. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI|Navigation")
 	static bool SetTerritoryWaypoint(
 		APlayerController* PlayerController, ATerritoryVolume* Territory);
@@ -342,6 +353,11 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Navigation")
 	static ATerritoryVolume* GetTrackedTerritory(
 		APlayerController* PlayerController);
+
+	/** True when Territory is the tracked Place or an aggregate ancestor of it. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Navigation")
+	static bool IsTerritoryWaypointTracked(
+		APlayerController* PlayerController, ATerritoryVolume* Territory);
 
 	/**
 	 * Return the District containing the player's pawn.

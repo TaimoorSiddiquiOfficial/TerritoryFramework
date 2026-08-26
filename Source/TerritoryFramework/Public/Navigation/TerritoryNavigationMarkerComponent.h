@@ -48,4 +48,7 @@ private:
 
 	UFUNCTION()
 	void OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
+
+	UFUNCTION()
+	void OnRegistryTerritoryChanged(ATerritoryVolume* Territory, bool bWasUnregistered);
 };
