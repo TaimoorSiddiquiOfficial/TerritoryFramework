@@ -30,6 +30,7 @@
 #include "Widgets/NarrativeCommonTextBlock.h"
 #include "Widgets/NarrativeSpinBox.h"
 #include "CommonTextBlock.h"
+#include "Engine/Texture2D.h"
 #include "Styling/SlateBrush.h"
 #include "TimerManager.h"
 
@@ -93,11 +94,64 @@ namespace
 	{
 		if (!Border) return;
 		FSlateBrush Brush;
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		if (UTexture2D* PanelTexture = Settings
+			? Settings->TerritoryPanelTexture.LoadSynchronous() : nullptr)
+		{
+			Brush.DrawAs = ESlateBrushDrawType::Box;
+			Brush.SetResourceObject(PanelTexture);
+			Brush.ImageSize = FVector2D(PanelTexture->GetSizeX(), PanelTexture->GetSizeY());
+			Brush.Margin = FMargin(0.035f, 0.22f);
+			Brush.TintColor = FSlateColor(FLinearColor(
+				0.72f + Outline.R * 0.28f,
+				0.72f + Outline.G * 0.28f,
+				0.72f + Outline.B * 0.28f, Fill.A));
+			Border->SetBrush(Brush);
+			return;
+		}
 		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
 		Brush.TintColor = FSlateColor(Fill);
 		Brush.OutlineSettings = FSlateBrushOutlineSettings(
 			Radius, FSlateColor(Outline), 1.f);
 		Border->SetBrush(Brush);
+	}
+
+	bool StyleGeneratedTerritoryProgress(UProgressBar* ProgressBar,
+		bool bUseAuthoredFill)
+	{
+		if (!ProgressBar) return false;
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		UTexture2D* FrameTexture = Settings
+			? Settings->TerritoryProgressFrameTexture.LoadSynchronous() : nullptr;
+		UTexture2D* FillTexture = bUseAuthoredFill && Settings
+			? Settings->TerritoryProgressFillTexture.LoadSynchronous() : nullptr;
+		if (!FrameTexture && !FillTexture) return false;
+
+		FProgressBarStyle Style = ProgressBar->GetWidgetStyle();
+		if (FrameTexture)
+		{
+			FSlateBrush Frame;
+			Frame.DrawAs = ESlateBrushDrawType::Box;
+			Frame.SetResourceObject(FrameTexture);
+			Frame.ImageSize = FVector2D(FrameTexture->GetSizeX(), FrameTexture->GetSizeY());
+			Frame.Margin = FMargin(0.04f, 0.28f);
+			Frame.TintColor = FSlateColor(FLinearColor::White);
+			Style.BackgroundImage = Frame;
+		}
+		if (FillTexture)
+		{
+			FSlateBrush Fill;
+			Fill.DrawAs = ESlateBrushDrawType::Box;
+			Fill.SetResourceObject(FillTexture);
+			Fill.ImageSize = FVector2D(FillTexture->GetSizeX(), FillTexture->GetSizeY());
+			Fill.Margin = FMargin(0.02f, 0.24f);
+			Fill.TintColor = FSlateColor(FLinearColor::White);
+			Style.FillImage = Fill;
+		}
+		ProgressBar->SetWidgetStyle(Style);
+		return FillTexture != nullptr;
 	}
 
 	const FString AllOwnersOption = TEXT("All owners");
@@ -766,8 +820,10 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 
 	GarrisonStaffingProgressBar = WidgetTree->ConstructWidget<UProgressBar>(
 		UProgressBar::StaticClass(), TEXT("GarrisonStaffingProgressBar"));
-	GarrisonStaffingProgressBar->SetFillColorAndOpacity(
-		FLinearColor(0.08f, 0.88f, 0.62f, 1.f));
+	const bool bUsesAuthoredProgressFill = StyleGeneratedTerritoryProgress(
+		GarrisonStaffingProgressBar, true);
+	GarrisonStaffingProgressBar->SetFillColorAndOpacity(bUsesAuthoredProgressFill
+		? FLinearColor::White : FLinearColor(0.08f, 0.88f, 0.62f, 1.f));
 	PlannerStack->AddChild(GarrisonStaffingProgressBar);
 
 	Text_GarrisonStaffing = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(

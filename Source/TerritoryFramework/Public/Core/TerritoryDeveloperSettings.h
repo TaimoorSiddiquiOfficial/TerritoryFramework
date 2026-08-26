@@ -8,6 +8,7 @@
 class UNarrativeCommonButtonBase;
 class UCommonButtonStyle;
 class UCommonTextStyle;
+class UTexture2D;
 
 UCLASS(BlueprintType, config = Engine, defaultconfig, meta = (DisplayName = "Territory Framework"))
 class TERRITORYFRAMEWORK_API UTerritoryDeveloperSettings : public UDeveloperSettings
@@ -158,6 +159,18 @@ public:
 	/** Quiet explanatory/empty-state style. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
 	TSoftClassPtr<UCommonTextStyle> TerritoryMutedTextStyle;
+
+	/** Optional nine-slice texture for Command Center, District, intelligence, and compact HUD cards. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
+	TSoftObjectPtr<UTexture2D> TerritoryPanelTexture;
+
+	/** Optional frame texture applied behind capture and garrison progress bars. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
+	TSoftObjectPtr<UTexture2D> TerritoryProgressFrameTexture;
+
+	/** Optional positive fill texture used by the garrison staffing planner. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
+	TSoftObjectPtr<UTexture2D> TerritoryProgressFillTexture;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Debug — Toggle individual debug categories

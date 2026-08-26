@@ -9,6 +9,7 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Engine/Texture2D.h"
 #include "Styling/SlateBrush.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
@@ -20,6 +21,22 @@ namespace
 	{
 		if (!Border) return;
 		FSlateBrush Brush;
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		if (UTexture2D* PanelTexture = Settings
+			? Settings->TerritoryPanelTexture.LoadSynchronous() : nullptr)
+		{
+			Brush.DrawAs = ESlateBrushDrawType::Box;
+			Brush.SetResourceObject(PanelTexture);
+			Brush.ImageSize = FVector2D(PanelTexture->GetSizeX(), PanelTexture->GetSizeY());
+			Brush.Margin = FMargin(0.035f, 0.22f);
+			Brush.TintColor = FSlateColor(FLinearColor(
+				0.72f + Outline.R * 0.28f,
+				0.72f + Outline.G * 0.28f,
+				0.72f + Outline.B * 0.28f, Fill.A));
+			Border->SetBrush(Brush);
+			return;
+		}
 		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
 		Brush.TintColor = FSlateColor(Fill);
 		Brush.OutlineSettings = FSlateBrushOutlineSettings(

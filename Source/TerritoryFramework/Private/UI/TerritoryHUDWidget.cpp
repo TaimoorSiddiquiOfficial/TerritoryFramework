@@ -6,20 +6,66 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/TextBlock.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryVolume.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
+#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "NarrativeGameplayTags.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "Widgets/CommonActivatableWidgetContainer.h"
 #include "Widgets/NarrativeGameplayHUD.h"
+#include "Styling/SlateBrush.h"
+
+namespace
+{
+	void ApplyTerritoryHUDTextures(UBorder* Surface, UProgressBar* ProgressBar)
+	{
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		if (!Settings) return;
+		if (Surface)
+		{
+			if (UTexture2D* PanelTexture =
+				Settings->TerritoryPanelTexture.LoadSynchronous())
+			{
+				FSlateBrush Panel;
+				Panel.DrawAs = ESlateBrushDrawType::Box;
+				Panel.SetResourceObject(PanelTexture);
+				Panel.ImageSize = FVector2D(
+					PanelTexture->GetSizeX(), PanelTexture->GetSizeY());
+				Panel.Margin = FMargin(0.035f, 0.22f);
+				Panel.TintColor = FSlateColor(FLinearColor::White);
+				Surface->SetBrush(Panel);
+			}
+		}
+		if (ProgressBar)
+		{
+			if (UTexture2D* FrameTexture =
+				Settings->TerritoryProgressFrameTexture.LoadSynchronous())
+			{
+				FProgressBarStyle Style = ProgressBar->GetWidgetStyle();
+				FSlateBrush Frame;
+				Frame.DrawAs = ESlateBrushDrawType::Box;
+				Frame.SetResourceObject(FrameTexture);
+				Frame.ImageSize = FVector2D(
+					FrameTexture->GetSizeX(), FrameTexture->GetSizeY());
+				Frame.Margin = FMargin(0.04f, 0.28f);
+				Frame.TintColor = FSlateColor(FLinearColor::White);
+				Style.BackgroundImage = Frame;
+				ProgressBar->SetWidgetStyle(Style);
+			}
+		}
+	}
+}
 
 void UTerritoryHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	ApplyTerritoryHUDTextures(CaptureSurface, ProgressBar_Capture);
 	if (APlayerController* PlayerController = GetOwningPlayer())
 	{
 		ManagementComponent = UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);

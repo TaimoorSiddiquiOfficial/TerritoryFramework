@@ -16,6 +16,7 @@
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 #include "CommonTextBlock.h"
+#include "Engine/Texture2D.h"
 #include "Styling/SlateBrush.h"
 
 namespace
@@ -51,10 +52,31 @@ namespace
 	}
 
 	void SetRoundedSurface(UBorder* Border, const FLinearColor& Fill,
-		const FLinearColor& Outline, float Radius = 10.f, float OutlineWidth = 1.f)
+		const FLinearColor& Outline, float Radius = 10.f, float OutlineWidth = 1.f,
+		bool bUseThemePanel = false)
 	{
 		if (!Border) return;
 		FSlateBrush Brush;
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		if (bUseThemePanel)
+		{
+			if (UTexture2D* PanelTexture = Settings
+				? Settings->TerritoryPanelTexture.LoadSynchronous() : nullptr)
+			{
+				Brush.DrawAs = ESlateBrushDrawType::Box;
+				Brush.SetResourceObject(PanelTexture);
+				Brush.ImageSize = FVector2D(
+					PanelTexture->GetSizeX(), PanelTexture->GetSizeY());
+				Brush.Margin = FMargin(0.035f, 0.22f);
+				Brush.TintColor = FSlateColor(FLinearColor(
+					0.72f + Outline.R * 0.28f,
+					0.72f + Outline.G * 0.28f,
+					0.72f + Outline.B * 0.28f, Fill.A));
+				Border->SetBrush(Brush);
+				return;
+			}
+		}
 		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
 		Brush.TintColor = FSlateColor(Fill);
 		Brush.OutlineSettings = FSlateBrushOutlineSettings(
@@ -139,7 +161,7 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	DistrictRowSurface->SetPadding(FMargin(0.f));
 	SetRoundedSurface(DistrictRowSurface,
 		FLinearColor(0.014f, 0.014f, 0.014f, 0.98f),
-		FLinearColor(0.42f, 0.35f, 0.f, 0.62f), 3.f, 1.f);
+		FLinearColor(0.42f, 0.35f, 0.f, 0.62f), 3.f, 1.f, true);
 	RootSize->SetContent(DistrictRowSurface);
 	UVerticalBox* Root = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("DistrictRowRoot"));
@@ -453,7 +475,8 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			bExpanded
 				? FLinearColor(0.035f, 0.032f, 0.012f, 0.99f)
 				: FLinearColor(0.014f, 0.014f, 0.014f, 0.98f),
-			FLinearColor(Accent.R, Accent.G, Accent.B, bExpanded ? 0.72f : 0.30f), 3.f, 1.f);
+			FLinearColor(Accent.R, Accent.G, Accent.B, bExpanded ? 0.72f : 0.30f),
+			3.f, 1.f, true);
 	}
 	RefreshPlaceProgress();
 	RebuildPlaceList();
