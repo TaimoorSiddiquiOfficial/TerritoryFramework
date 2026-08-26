@@ -413,6 +413,7 @@ private:
 	bool bSelectedTerritoryInfoRequested = false;
 	int32 SelectedDetailTab = 0;
 	int32 LastOperationsRevision = INDEX_NONE;
+	int32 LastLiveEventRevision = INDEX_NONE;
 	FTimerHandle RefreshTimerHandle;
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTerritoryDistrictRowWidget>> TerritoryEntryWidgets;

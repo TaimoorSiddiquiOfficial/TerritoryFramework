@@ -157,6 +157,37 @@ struct TERRITORYFRAMEWORK_API FTerritoryLiveEvent
 	{
 		return ActiveDuration >= 0.f && NowRealTime >= CreatedRealTime + ActiveDuration;
 	}
+
+	/**
+	 * Stable hash of fields that change how this report is drawn. EventID and
+	 * CreatedRealTime are intentionally excluded because archive adapters may
+	 * create a fresh presentation copy every time the Command Center queries them.
+	 */
+	uint32 GetPresentationRevision() const
+	{
+		uint32 Hash = GetTypeHash(SourceRecordID);
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Type)));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Category)));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Severity)));
+		Hash = HashCombineFast(Hash, GetTypeHash(TerritoryTag));
+		Hash = HashCombineFast(Hash, GetTypeHash(SourceFaction));
+		Hash = HashCombineFast(Hash, GetTypeHash(TargetFaction));
+		Hash = HashCombineFast(Hash, GetTypeHash(Headline.ToString()));
+		Hash = HashCombineFast(Hash, GetTypeHash(Detail.ToString()));
+		Hash = HashCombineFast(Hash, GetTypeHash(IncomeDelta));
+		Hash = HashCombineFast(Hash, GetTypeHash(UpkeepDelta));
+		Hash = HashCombineFast(Hash, GetTypeHash(CurrencyDelta));
+		Hash = HashCombineFast(Hash, GetTypeHash(Sequence));
+		Hash = HashCombineFast(Hash, GetTypeHash(bCanSetWaypoint));
+		Hash = HashCombineFast(Hash, GetTypeHash(bExpired));
+		TArray<FGameplayTag> Capabilities;
+		CommandCapabilities.GetGameplayTagArray(Capabilities);
+		for (const FGameplayTag& Capability : Capabilities)
+		{
+			Hash = HashCombineFast(Hash, GetTypeHash(Capability));
+		}
+		return Hash;
+	}
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(

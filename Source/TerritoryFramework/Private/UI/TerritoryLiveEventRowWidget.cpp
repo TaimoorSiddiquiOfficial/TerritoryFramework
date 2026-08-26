@@ -67,6 +67,15 @@ namespace
 	}
 }
 
+void UTerritoryLiveEventRowWidget::NativeOnInitialized()
+{
+	Super::NativeOnInitialized();
+	// A pure native UUserWidget must have its WidgetTree before RebuildWidget().
+	// Constructing the root later in NativeConstruct leaves the Slate wrapper
+	// bound to SNullWidget, which produces a valid event count but a 0 x 0 row.
+	BuildNativeLayout();
+}
+
 void UTerritoryLiveEventRowWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -140,7 +149,8 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 	{
 		USizeBox* ButtonSize = WidgetTree->ConstructWidget<USizeBox>(
 			USizeBox::StaticClass(), TEXT("LiveEventWaypointSize"));
-		ButtonSize->SetMinDesiredWidth(92.f);
+		ButtonSize->SetWidthOverride(132.f);
+		ButtonSize->SetHeightOverride(42.f);
 		WaypointButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 			ButtonClass, TEXT("LiveEventWaypointButton"));
 		if (const TSubclassOf<UCommonButtonStyle> Style =
@@ -148,6 +158,7 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 		{
 			WaypointButton->SetStyle(Style);
 		}
+		WaypointButton->SetMinDimensions(0, 0);
 		WaypointButton->SetButtonText(NSLOCTEXT(
 			"TerritoryLiveEvents", "SetWaypoint", "TRACK"));
 		ButtonSize->SetContent(WaypointButton);

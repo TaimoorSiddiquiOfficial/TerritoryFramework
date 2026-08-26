@@ -222,6 +222,16 @@ namespace
 			? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(District->GetTerritoryState())).ToString()
 			: FString();
 	}
+
+	int32 GetLiveEventListRevision(const TArray<FTerritoryLiveEvent>& Events)
+	{
+		uint32 Hash = GetTypeHash(Events.Num());
+		for (const FTerritoryLiveEvent& Event : Events)
+		{
+			Hash = HashCombineFast(Hash, Event.GetPresentationRevision());
+		}
+		return static_cast<int32>(Hash);
+	}
 }
 
 UPanelWidget* UTerritoryJournalWidget::GetActiveTerritoriesPanel() const
@@ -680,6 +690,7 @@ void UTerritoryJournalWidget::BindManagementComponent()
 			this, &UTerritoryJournalWidget::HandleLiveEventsChanged);
 	}
 	ManagementComponent = Component;
+	LastLiveEventRevision = INDEX_NONE;
 	if (ManagementComponent.IsValid())
 	{
 		ManagementComponent->OnGuardPurchaseResult.AddUniqueDynamic(
@@ -725,12 +736,18 @@ void UTerritoryJournalWidget::BuildLiveEventPanel()
 void UTerritoryJournalWidget::RefreshLiveEvents()
 {
 	if (!LiveEventsBox) return;
-	LiveEventsBox->ClearChildren();
 	const TArray<FTerritoryLiveEvent> AllEvents = ManagementComponent.IsValid()
 		? ManagementComponent->GetTerritoryIntelligence(
 			ETerritoryIntelligenceFilter::All, true)
 		: TArray<FTerritoryLiveEvent>();
 	const TArray<FTerritoryLiveEvent>& Events = AllEvents;
+	const int32 Revision = GetLiveEventListRevision(Events);
+	if (LastLiveEventRevision == Revision)
+	{
+		return;
+	}
+	LastLiveEventRevision = Revision;
+	LiveEventsBox->ClearChildren();
 	for (const FTerritoryLiveEvent& Event : Events)
 	{
 		UTerritoryLiveEventRowWidget* Row =

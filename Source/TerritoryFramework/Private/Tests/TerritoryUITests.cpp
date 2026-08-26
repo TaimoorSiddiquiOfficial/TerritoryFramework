@@ -313,6 +313,23 @@ bool FTerritoryUILiveEventExpiryTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Negative duration creates a non-expiring authored entry"),
 		Event.IsExpiredAt(10000.0));
 
+	Event.SourceRecordID = FGuid::NewGuid();
+	Event.Headline = FText::FromString(TEXT("District attacked"));
+	Event.Detail = FText::FromString(TEXT("Three attackers remain"));
+	Event.Sequence = 7;
+	const uint32 StableRevision = Event.GetPresentationRevision();
+	Event.EventID = FGuid::NewGuid();
+	Event.CreatedRealTime = 500.0;
+	TestEqual(TEXT("Transient event identity and query time do not rebuild the notification list"),
+		Event.GetPresentationRevision(), StableRevision);
+	Event.Headline = FText::FromString(TEXT("District secured"));
+	TestNotEqual(TEXT("Visible report text invalidates the notification row"),
+		Event.GetPresentationRevision(), StableRevision);
+	const uint32 UpdatedTextRevision = Event.GetPresentationRevision();
+	Event.bExpired = true;
+	TestNotEqual(TEXT("Active-to-archived presentation changes invalidate the notification row"),
+		Event.GetPresentationRevision(), UpdatedTextRevision);
+
 	UTerritoryMapMarker* Marker = NewObject<UTerritoryMapMarker>();
 	TestNotNull(TEXT("Territory marker can be created without a world"), Marker);
 	if (Marker)
