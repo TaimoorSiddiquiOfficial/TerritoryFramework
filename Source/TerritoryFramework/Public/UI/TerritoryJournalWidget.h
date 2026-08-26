@@ -522,6 +522,9 @@ private:
 	void HandleWaypointRequested(ATerritoryDistrict* District);
 
 	UFUNCTION()
+	void HandleEspionageRequested(ATerritoryDistrict* District);
+
+	UFUNCTION()
 	void HandleLiveEventWaypointRequested(FGameplayTag TerritoryTag);
 
 	UFUNCTION()

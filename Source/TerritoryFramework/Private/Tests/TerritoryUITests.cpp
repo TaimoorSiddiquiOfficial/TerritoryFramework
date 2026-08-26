@@ -224,6 +224,13 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintPure(ManagementClass, TEXT("GetLiveEvents")));
 	TestTrue(TEXT("Owned bridge exposes the filterable intelligence databank"),
 		TerritoryUITest::IsBlueprintPure(ManagementClass, TEXT("GetTerritoryIntelligence")));
+	TestTrue(TEXT("Owned bridge exposes the server-authoritative espionage request"),
+		TerritoryUITest::IsBlueprintCallable(ManagementClass, TEXT("RequestEspionage")));
+	TestTrue(TEXT("Owned bridge exposes the player-hold espionage chance"),
+		TerritoryUITest::IsBlueprintPure(ManagementClass, TEXT("GetEspionageSuccessChance")));
+	TestTrue(TEXT("Community Blueprints can explain and preview the espionage formula"),
+		TerritoryUITest::IsBlueprintPure(ManagementClass,
+			TEXT("CalculateEspionageSuccessChance")));
 	TestTrue(TEXT("Territory intelligence participates in Narrative Pro component saving"),
 		ManagementClass->ImplementsInterface(UNarrativeSavableComponent::StaticClass()));
 	const UScriptStruct* IntelligenceStruct = FTerritoryLiveEvent::StaticStruct();
@@ -253,8 +260,39 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		ManagementDefaults->MaxLiveEventHistory, 200);
 	TestTrue(TEXT("Archived reports persist until the bounded history fills by default"),
 		ManagementDefaults->ExpiredEventRetentionDuration < 0.f);
+	TestEqual(TEXT("Espionage has a safe anti-spam cooldown by default"),
+		ManagementDefaults->EspionageCooldown, 30.f);
 	TestNotNull(TEXT("Live event row exists for authored Reports presentation"),
 		UTerritoryLiveEventRowWidget::StaticClass());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIEspionageStrengthTest,
+	"TerritoryFramework.UI.EspionageStrength",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIEspionageStrengthTest::RunTest(const FString& Parameters)
+{
+	using Component = UTerritoryPlayerManagementComponent;
+	const float NoHold = Component::CalculateEspionageSuccessChance(0, 4, 0, 0);
+	const float HalfHold = Component::CalculateEspionageSuccessChance(2, 4, 0, 4);
+	const float HalfHoldStaffed =
+		Component::CalculateEspionageSuccessChance(2, 4, 4, 4);
+	const float FullHoldStaffed =
+		Component::CalculateEspionageSuccessChance(4, 4, 4, 4);
+
+	TestEqual(TEXT("A faction without a territorial hold keeps the 15 percent base chance"),
+		NoHold, 0.15f);
+	TestTrue(TEXT("Controlling more Districts never reduces espionage success"),
+		HalfHold >= NoHold);
+	TestTrue(TEXT("Staffing more assigned friendly guards never reduces espionage success"),
+		HalfHoldStaffed >= HalfHold);
+	TestEqual(TEXT("Half control plus fully staffed garrisons gives the documented 65 percent example"),
+		HalfHoldStaffed, 0.65f);
+	TestEqual(TEXT("Even an overwhelming hold respects the 90 percent uncertainty cap"),
+		FullHoldStaffed, 0.90f);
+	TestEqual(TEXT("Invalid negative inputs are safely clamped"),
+		Component::CalculateEspionageSuccessChance(-3, 4, -8, 6), 0.15f);
 	return true;
 }
 

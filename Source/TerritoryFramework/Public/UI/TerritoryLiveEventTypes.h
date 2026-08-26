@@ -27,7 +27,9 @@ enum class ETerritoryLiveEventType : uint8
 	ProductionBlocked UMETA(DisplayName="Production Blocked"),
 	GarrisonChanged UMETA(DisplayName="Garrison Changed"),
 	ReinforcementDeployed UMETA(DisplayName="Reinforcement Deployed"),
-	DiplomacyChanged UMETA(DisplayName="Diplomacy Changed")
+	DiplomacyChanged UMETA(DisplayName="Diplomacy Changed"),
+	EspionageSucceeded UMETA(DisplayName="Espionage Succeeded"),
+	EspionageFailed UMETA(DisplayName="Espionage Failed")
 };
 
 /** High-level drawer used to filter the Command Center intelligence databank. */

@@ -908,6 +908,91 @@ UTerritoryPlayerManagementComponent* UTerritoryPlayerManagementComponent::FindOr
 	return Component;
 }
 
+float UTerritoryPlayerManagementComponent::CalculateEspionageSuccessChance(
+	int32 ControlledDistricts, int32 TotalUnlockedDistricts,
+	int32 ActiveFriendlyGuards, int32 AssignedFriendlyGuards)
+{
+	const float ControlRatio = TotalUnlockedDistricts > 0
+		? FMath::Clamp(static_cast<float>(FMath::Max(0, ControlledDistricts))
+			/ static_cast<float>(TotalUnlockedDistricts), 0.f, 1.f)
+		: 0.f;
+	const float GarrisonReadiness = AssignedFriendlyGuards > 0
+		? FMath::Clamp(static_cast<float>(FMath::Max(0, ActiveFriendlyGuards))
+			/ static_cast<float>(AssignedFriendlyGuards), 0.f, 1.f)
+		: 0.f;
+	return FMath::Clamp(0.15f + 0.50f * ControlRatio
+		+ 0.25f * GarrisonReadiness, 0.15f, 0.90f);
+}
+
+void UTerritoryPlayerManagementComponent::GetEspionageStrengthInputs(
+	int32& OutControlledDistricts, int32& OutTotalUnlockedDistricts,
+	int32& OutActiveFriendlyGuards, int32& OutAssignedFriendlyGuards) const
+{
+	OutControlledDistricts = 0;
+	OutTotalUnlockedDistricts = 0;
+	OutActiveFriendlyGuards = 0;
+	OutAssignedFriendlyGuards = 0;
+	const UWorld* World = GetWorld();
+	const UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	const FGameplayTag ViewerFaction = GetManagedFaction();
+	if (!Registry || !ViewerFaction.IsValid()) return;
+
+	for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
+	{
+		if (!IsValid(Territory)) continue;
+		if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory))
+		{
+			if (UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(this, District))
+			{
+				++OutTotalUnlockedDistricts;
+				OutControlledDistricts += District->GetTerritoryState()
+					== ETerritoryState::Claimed
+					&& District->GetOwningFaction() == ViewerFaction ? 1 : 0;
+			}
+		}
+		if (Territory->GetTerritoryState() == ETerritoryState::Claimed
+			&& Territory->GetOwningFaction() == ViewerFaction)
+		{
+			OutActiveFriendlyGuards += FMath::Max(0, Territory->GetDefenderCount());
+			OutAssignedFriendlyGuards += FMath::Max(0, Territory->GetDesiredGuardCount());
+		}
+	}
+}
+
+float UTerritoryPlayerManagementComponent::GetEspionageSuccessChance() const
+{
+	int32 ControlledDistricts = 0;
+	int32 TotalUnlockedDistricts = 0;
+	int32 ActiveFriendlyGuards = 0;
+	int32 AssignedFriendlyGuards = 0;
+	GetEspionageStrengthInputs(ControlledDistricts, TotalUnlockedDistricts,
+		ActiveFriendlyGuards, AssignedFriendlyGuards);
+	return CalculateEspionageSuccessChance(ControlledDistricts,
+		TotalUnlockedDistricts, ActiveFriendlyGuards, AssignedFriendlyGuards);
+}
+
+void UTerritoryPlayerManagementComponent::RequestEspionage(
+	ATerritoryDistrict* District)
+{
+	if (!IsValid(District)) return;
+	const int32 RequestId = ++NextEspionageRequestId;
+	if (UWorld* World = GetWorld())
+	{
+		const float Now = World->GetTimeSeconds();
+		if (Now - LastEspionageRequestTime < EspionageCooldown) return;
+		LastEspionageRequestTime = Now;
+	}
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		PerformEspionage(District, RequestId);
+	}
+	else
+	{
+		ServerRequestEspionage(District, RequestId);
+	}
+}
+
 void UTerritoryPlayerManagementComponent::RequestSetGuardTarget(
 	ATerritoryDistrictManagementPoint* ManagementPoint, ATerritoryVolume* Territory,
 	int32 NewDesiredGuardCount)
@@ -1342,6 +1427,97 @@ void UTerritoryPlayerManagementComponent::ServerRequestRemoveGuardsForDistrict_I
 	PerformRemoveForDistrict(District, Count, RequestId);
 }
 
+bool UTerritoryPlayerManagementComponent::ServerRequestEspionage_Validate(
+	ATerritoryDistrict* District, int32 RequestId)
+{
+	return District != nullptr && RequestId > LastServerEspionageRequestId;
+}
+
+void UTerritoryPlayerManagementComponent::ServerRequestEspionage_Implementation(
+	ATerritoryDistrict* District, int32 RequestId)
+{
+	UWorld* World = GetWorld();
+	if (!World || RequestId <= LastServerEspionageRequestId) return;
+	LastServerEspionageRequestId = RequestId;
+	const float Now = World->GetTimeSeconds();
+	if (Now - LastEspionageRequestTime < EspionageCooldown) return;
+	LastEspionageRequestTime = Now;
+	PerformEspionage(District, RequestId);
+}
+
+bool UTerritoryPlayerManagementComponent::CanEspionageDistrict(
+	ATerritoryDistrict* District, FText& OutFailureReason) const
+{
+	OutFailureReason = FText::GetEmpty();
+	const UWorld* World = GetWorld();
+	const UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!IsValid(District) || !Registry
+		|| Registry->GetTerritoryByTag(District->GetTerritoryTag()) != District)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEspionage", "TargetUnavailable",
+			"That District is not currently available for reconnaissance.");
+		return false;
+	}
+	if (District->GetTerritoryState() == ETerritoryState::Locked
+		|| !UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(this, District))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEspionage", "TargetLocked",
+			"The story has not unlocked reconnaissance for that District.");
+		return false;
+	}
+	const FGameplayTag ViewerFaction = GetManagedFaction();
+	if (!ViewerFaction.IsValid())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEspionage", "NoFaction",
+			"The player has no Narrative faction for this operation.");
+		return false;
+	}
+	if (District->GetTerritoryState() == ETerritoryState::Claimed
+		&& District->GetOwningFaction() == ViewerFaction)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEspionage", "AlreadyOwned",
+			"Your faction already controls that District.");
+		return false;
+	}
+	return true;
+}
+
+void UTerritoryPlayerManagementComponent::PerformEspionage(
+	ATerritoryDistrict* District, int32 RequestId)
+{
+	(void)RequestId;
+	FText FailureReason;
+	if (!CanEspionageDistrict(District, FailureReason))
+	{
+		if (IsValid(District))
+		{
+			ClientReceiveEspionageResult(District->GetTerritoryTag(), false,
+				FGameplayTag(), 0);
+		}
+		return;
+	}
+
+	const float SuccessChance = GetEspionageSuccessChance();
+	const bool bSuccess = FMath::FRand() <= SuccessChance;
+	const FGameplayTag DefendingFaction = bSuccess
+		? District->GetOwningFaction() : FGameplayTag();
+	int32 ActiveDefenders = 0;
+	if (bSuccess)
+	{
+		ActiveDefenders += FMath::Max(0, District->GetDefenderCount());
+		for (ATerritoryVolume* Place : District->GetProperties())
+		{
+			if (IsValid(Place) && Place->GetOwningFaction() == DefendingFaction)
+			{
+				ActiveDefenders += FMath::Max(0, Place->GetDefenderCount());
+			}
+		}
+	}
+	ClientReceiveEspionageResult(District->GetTerritoryTag(), bSuccess,
+		DefendingFaction, ActiveDefenders);
+}
+
 void UTerritoryPlayerManagementComponent::PerformPurchase(
 	ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId)
 {
@@ -1623,6 +1799,42 @@ void UTerritoryPlayerManagementComponent::ClientReceiveManagementIntelligence_Im
 		ETerritoryIntelligenceCategory::Command,
 		ETerritoryIntelligenceSeverity::Positive,
 		ResolveViewerFaction(), FGameplayTag(), FGameplayTagContainer(),
+		0, 0, 0, false);
+}
+
+void UTerritoryPlayerManagementComponent::ClientReceiveEspionageResult_Implementation(
+	FGameplayTag TerritoryTag, bool bSuccess, FGameplayTag DefendingFaction,
+	int32 ActiveDefenders)
+{
+	const FText TerritoryName = ResolveTerritoryName(TerritoryTag);
+	FText Detail;
+	if (bSuccess)
+	{
+		const FText DefenderName = DefendingFaction.IsValid()
+			? UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(DefendingFaction)
+			: NSLOCTEXT("TerritoryEspionage", "NoDefendingFaction", "No faction");
+		Detail = FText::Format(NSLOCTEXT("TerritoryEspionage", "SuccessDetail",
+			"Defending faction: {0}. Active guards across the District: {1}."),
+			DefenderName, FText::AsNumber(FMath::Max(0, ActiveDefenders)));
+	}
+	else
+	{
+		Detail = NSLOCTEXT("TerritoryEspionage", "FailureDetail",
+			"Scouts returned without reliable intelligence. Control more Districts and keep your own assigned garrisons staffed before trying again.");
+	}
+	AddLiveEvent(bSuccess ? ETerritoryLiveEventType::EspionageSucceeded
+			: ETerritoryLiveEventType::EspionageFailed,
+		TerritoryTag,
+		FText::Format(bSuccess
+			? NSLOCTEXT("TerritoryEspionage", "SuccessHeadline",
+				"Espionage report: {0}")
+			: NSLOCTEXT("TerritoryEspionage", "FailureHeadline",
+				"Espionage failed: {0}"), TerritoryName),
+		Detail, true, LiveEventActiveDuration,
+		ETerritoryIntelligenceCategory::Conflict,
+		bSuccess ? ETerritoryIntelligenceSeverity::Positive
+			: ETerritoryIntelligenceSeverity::Warning,
+		GetManagedFaction(), DefendingFaction, FGameplayTagContainer(),
 		0, 0, 0, false);
 }
 

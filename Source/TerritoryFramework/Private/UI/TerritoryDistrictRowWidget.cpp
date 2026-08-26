@@ -4,6 +4,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Overlay.h"
+#include "Components/PanelWidget.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -41,7 +42,6 @@ namespace
 				CommonText->SetStyle(Style);
 				CommonText->SetAutoWrapText(true);
 				CommonText->SetColorAndOpacity(FSlateColor(Color));
-				return;
 			}
 		}
 		FSlateFontInfo Font = Text->GetFont();
@@ -86,6 +86,14 @@ namespace
 
 	FLinearColor GetDistrictAccent(const FTerritoryDistrictOperationsView& View)
 	{
+		// Unowned rows deliberately stay neutral. Threat and ownership intelligence
+		// belongs to a successful espionage report, not the unlocked directory row.
+		if (!View.bOwnedByViewer)
+		{
+			return View.bUnlocked
+				? FLinearColor(1.f, 0.84f, 0.f, 1.f)
+				: FLinearColor(0.42f, 0.47f, 0.52f, 1.f);
+		}
 		if (View.bUnderAttack || View.bAttackScheduled || View.bThreatPreviewAvailable)
 		{
 			return FLinearColor(1.f, 0.25f, 0.16f, 1.f);
@@ -134,6 +142,11 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 		{
 			SetWaypointButton = Cast<UNarrativeCommonButtonBase>(
 				WidgetTree->FindWidget(TEXT("SetWaypointButton")));
+		}
+		if (!EspionageButton)
+		{
+			EspionageButton = Cast<UNarrativeCommonButtonBase>(
+				WidgetTree->FindWidget(TEXT("EspionageButton")));
 		}
 		if (!DistrictName)
 		{
@@ -201,6 +214,54 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 				WidgetTree->FindWidget(TEXT("ExpandHintText")));
 		}
 	}
+	if (!EspionageButton && WidgetTree)
+	{
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		const TSubclassOf<UNarrativeCommonButtonBase> ButtonClass = Settings
+			? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
+		UHorizontalBox* Header = Cast<UHorizontalBox>(
+			WidgetTree->FindWidget(TEXT("TerritoryEntryHeader")));
+		if (!Header)
+		{
+			Header = Cast<UHorizontalBox>(WidgetTree->FindWidget(TEXT("DistrictHeader")));
+		}
+		if (ButtonClass && Header)
+		{
+			UVerticalBox* ActionStack = WidgetTree->ConstructWidget<UVerticalBox>(
+				UVerticalBox::StaticClass(), TEXT("TerritoryEntryActionStack"));
+			if (UWidget* WaypointSize = WidgetTree->FindWidget(TEXT("WaypointButtonSize")))
+			{
+				if (UPanelWidget* Parent = WaypointSize->GetParent())
+				{
+					Parent->RemoveChild(WaypointSize);
+				}
+				if (UVerticalBoxSlot* WaypointStackSlot =
+					ActionStack->AddChildToVerticalBox(WaypointSize))
+				{
+					WaypointStackSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+				}
+			}
+			USizeBox* EspionageSize = WidgetTree->ConstructWidget<USizeBox>(
+				USizeBox::StaticClass(), TEXT("EspionageButtonSize"));
+			EspionageSize->SetMinDesiredWidth(112.f);
+			EspionageButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+				ButtonClass, TEXT("EspionageButton"));
+			if (const TSubclassOf<UCommonButtonStyle> Style =
+				Settings->DefaultTerritoryButtonStyle.LoadSynchronous())
+			{
+				EspionageButton->SetStyle(Style);
+			}
+			EspionageSize->SetContent(EspionageButton);
+			ActionStack->AddChildToVerticalBox(EspionageSize);
+			if (UHorizontalBoxSlot* ActionStackSlot =
+				Header->AddChildToHorizontalBox(ActionStack))
+			{
+				ActionStackSlot->SetPadding(FMargin(0.f, 5.f, 8.f, 5.f));
+				ActionStackSlot->SetVerticalAlignment(VAlign_Center);
+			}
+		}
+	}
 	if (SelectDistrictButton)
 	{
 		SelectDistrictButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleSelected);
@@ -219,10 +280,27 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 		RemoveGuardButton->SetVisibility(bShowInlineGuardActions
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	StyleDistrictRowText(DistrictName, 15,
+		FLinearColor(0.96f, 0.95f, 0.91f, 1.f));
+	StyleDistrictRowText(DistrictSummary, 10,
+		FLinearColor(0.68f, 0.67f, 0.63f, 1.f));
+	StyleDistrictRowText(DistrictStatus, 9,
+		FLinearColor(0.31f, 0.82f, 0.63f, 1.f));
+	StyleDistrictRowText(PlaceProgressText, 10,
+		FLinearColor(0.96f, 0.84f, 0.18f, 1.f));
+	StyleDistrictRowText(ExpandHintText, 9,
+		FLinearColor(0.72f, 0.70f, 0.64f, 1.f));
 	if (SetWaypointButton)
 	{
 		SetWaypointButton->OnClicked().AddUObject(
 			this, &UTerritoryDistrictRowWidget::HandleSetWaypoint);
+	}
+	if (EspionageButton)
+	{
+		EspionageButton->SetButtonText(NSLOCTEXT(
+			"TerritoryDistrictRow", "Espionage", "ESPIONAGE"));
+		EspionageButton->OnClicked().AddUObject(
+			this, &UTerritoryDistrictRowWidget::HandleEspionage);
 	}
 	RefreshRow();
 }
@@ -233,6 +311,7 @@ void UTerritoryDistrictRowWidget::NativeDestruct()
 	if (AddGuardButton) AddGuardButton->OnClicked().RemoveAll(this);
 	if (RemoveGuardButton) RemoveGuardButton->OnClicked().RemoveAll(this);
 	if (SetWaypointButton) SetWaypointButton->OnClicked().RemoveAll(this);
+	if (EspionageButton) EspionageButton->OnClicked().RemoveAll(this);
 	Super::NativeDestruct();
 }
 
@@ -443,7 +522,12 @@ void UTerritoryDistrictRowWidget::InitializeOperationsView(
 	District = InView.District;
 	bCanAddGuard = InView.bCanAddGuard;
 	bCanRemoveGuard = InView.bCanRemoveGuard;
-	if (InView.bUnderAttack || InView.bAttackScheduled || InView.bThreatPreviewAvailable)
+	if (!InView.bOwnedByViewer && InView.bUnlocked && InView.bHierarchyVisible)
+	{
+		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "ReconAvailable",
+			"RECONNAISSANCE AVAILABLE");
+	}
+	else if (InView.bUnderAttack || InView.bAttackScheduled || InView.bThreatPreviewAvailable)
 	{
 		ActionStatus = InView.ThreatSummary;
 	}
@@ -542,13 +626,16 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 	}
 	if (DistrictSummary)
 	{
-		DistrictSummary->SetText(FText::Format(
-			NSLOCTEXT("TerritoryDistrictRow", "CompactSummary", "{0}  •  {1}  •  {2}"),
-			OperationsView.CityDisplayName.IsEmpty()
-				? NSLOCTEXT("TerritoryDistrictRow", "IndependentCity", "Independent")
-				: OperationsView.CityDisplayName,
-			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(CurrentDistrict->GetOwningFaction()),
-			StateText));
+		const FText CityName = OperationsView.CityDisplayName.IsEmpty()
+			? NSLOCTEXT("TerritoryDistrictRow", "IndependentCity", "Independent")
+			: OperationsView.CityDisplayName;
+		DistrictSummary->SetText(OperationsView.bOwnedByViewer
+			? FText::Format(NSLOCTEXT("TerritoryDistrictRow", "OwnedCompactSummary",
+				"{0}  •  {1}  •  {2}"), CityName,
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
+					OperationsView.OwnerFaction), StateText)
+			: FText::Format(NSLOCTEXT("TerritoryDistrictRow", "UnlockedCompactSummary",
+				"{0}  •  UNLOCKED"), CityName));
 	}
 	if (AddGuardButton)
 	{
@@ -574,6 +661,14 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			&& OperationsView.bHierarchyVisible);
 		SetWaypointButton->SetVisibility(OperationsView.bUnlocked
 			&& OperationsView.bHierarchyVisible
+			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (EspionageButton)
+	{
+		const bool bCanEspionage = !OperationsView.bOwnedByViewer
+			&& OperationsView.bUnlocked && OperationsView.bHierarchyVisible;
+		EspionageButton->SetIsEnabled(bCanEspionage);
+		EspionageButton->SetVisibility(bCanEspionage
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (DistrictStatus)
@@ -607,8 +702,12 @@ void UTerritoryDistrictRowWidget::RefreshPlaceProgress()
 	if (PlaceProgressText)
 	{
 		PlaceProgressText->SetText(Total > 0
-			? FText::Format(NSLOCTEXT("TerritoryDistrictRow", "PlaceControlProgress",
-				"{0} / {1} PLACES"), FText::AsNumber(Owned), FText::AsNumber(Total))
+			? OperationsView.bOwnedByViewer
+				? FText::Format(NSLOCTEXT("TerritoryDistrictRow", "PlaceControlProgress",
+					"{0} / {1} PLACES"), FText::AsNumber(Owned), FText::AsNumber(Total))
+				: FText::Format(NSLOCTEXT("TerritoryDistrictRow", "PlaceDirectoryProgress",
+					"{0} KNOWN  •  {1} LOCKED"), FText::AsNumber(Known),
+					FText::AsNumber(Hidden))
 			: NSLOCTEXT("TerritoryDistrictRow", "NoConfiguredPlaces", "NO PLACES"));
 	}
 	if (ExpandHintText)
@@ -653,7 +752,7 @@ void UTerritoryDistrictRowWidget::RefreshPlaceProgress()
 	SetSegmentWeight(HiddenProgressSegment, Hidden);
 	if (PlaceProgressTrack)
 	{
-		PlaceProgressTrack->SetVisibility(Total > 0
+		PlaceProgressTrack->SetVisibility(Total > 0 && OperationsView.bOwnedByViewer
 			? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
 }
@@ -695,11 +794,12 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 				UNarrativeCommonTextBlock::StaticClass(),
 				FName(*FString::Printf(TEXT("KnownPlaceText_%u"),
 					GetTypeHash(Place.TerritoryTag))));
-		PlaceText->SetText(FText::Format(
-			NSLOCTEXT("TerritoryDistrictRow", "KnownPlaceRow", "{0}\n{1}  •  {2}"),
-			Place.DisplayName,
-			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Place.OwnerFaction),
-			StateText));
+		PlaceText->SetText(OperationsView.bOwnedByViewer
+			? FText::Format(NSLOCTEXT("TerritoryDistrictRow", "KnownPlaceRow",
+				"{0}\n{1}  •  {2}"), Place.DisplayName,
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Place.OwnerFaction),
+				StateText)
+			: Place.DisplayName);
 		StyleDistrictRowText(PlaceText, 12, Accent);
 		PlaceSurface->SetContent(PlaceText);
 		if (UVerticalBoxSlot* PlaceSlot = PlaceList->AddChildToVerticalBox(PlaceSurface))
@@ -720,8 +820,11 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 			WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 				UNarrativeCommonTextBlock::StaticClass(), TEXT("HiddenPlaceSummaryText"));
 		HiddenText->SetText(FText::Format(
-			NSLOCTEXT("TerritoryDistrictRow", "HiddenPlaceSummary",
-				"{0} LOCATIONS REMAIN HIDDEN\nNames and objectives stay hidden until the story unlocks them."),
+			OperationsView.bOwnedByViewer
+				? NSLOCTEXT("TerritoryDistrictRow", "HiddenPlaceSummary",
+					"{0} LOCATIONS REMAIN HIDDEN\nNames and objectives stay hidden until the story unlocks them.")
+				: NSLOCTEXT("TerritoryDistrictRow", "LockedPlaceCount",
+					"{0} PLACES LOCKED BY STORY"),
 			FText::AsNumber(OperationsView.HiddenProperties)));
 		StyleDistrictRowText(HiddenText, 11, FLinearColor(0.58f, 0.57f, 0.54f, 1.f));
 		HiddenSurface->SetContent(HiddenText);
@@ -763,5 +866,14 @@ void UTerritoryDistrictRowWidget::HandleSetWaypoint()
 		&& OperationsView.bHierarchyVisible)
 	{
 		OnWaypointRequested.Broadcast(District.Get());
+	}
+}
+
+void UTerritoryDistrictRowWidget::HandleEspionage()
+{
+	if (District.IsValid() && !OperationsView.bOwnedByViewer
+		&& OperationsView.bUnlocked && OperationsView.bHierarchyVisible)
+	{
+		OnEspionageRequested.Broadcast(District.Get());
 	}
 }

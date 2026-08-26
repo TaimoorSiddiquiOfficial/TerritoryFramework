@@ -98,7 +98,7 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 
 	EventSurface = WidgetTree->ConstructWidget<UBorder>(
 		UBorder::StaticClass(), TEXT("LiveEventSurface"));
-	EventSurface->SetPadding(FMargin(10.f, 8.f));
+	EventSurface->SetPadding(FMargin(7.f, 5.f));
 	WidgetTree->RootWidget = EventSurface;
 
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(
@@ -117,15 +117,12 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 
 	UVerticalBox* Copy = WidgetTree->ConstructWidget<UVerticalBox>(
 		UVerticalBox::StaticClass(), TEXT("LiveEventCopy"));
-	ReportMetaText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
-		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventReportMeta"));
 	HeadlineText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventHeadline"));
 	DetailText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventDetail"));
 	ImpactText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventImpact"));
-	Copy->AddChildToVerticalBox(ReportMetaText);
 	Copy->AddChildToVerticalBox(HeadlineText);
 	Copy->AddChildToVerticalBox(DetailText);
 	Copy->AddChildToVerticalBox(ImpactText);
@@ -143,7 +140,7 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 	{
 		USizeBox* ButtonSize = WidgetTree->ConstructWidget<USizeBox>(
 			USizeBox::StaticClass(), TEXT("LiveEventWaypointSize"));
-		ButtonSize->SetMinDesiredWidth(126.f);
+		ButtonSize->SetMinDesiredWidth(92.f);
 		WaypointButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 			ButtonClass, TEXT("LiveEventWaypointButton"));
 		if (const TSubclassOf<UCommonButtonStyle> Style =
@@ -152,7 +149,7 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 			WaypointButton->SetStyle(Style);
 		}
 		WaypointButton->SetButtonText(NSLOCTEXT(
-			"TerritoryLiveEvents", "SetWaypoint", "SET WAYPOINT"));
+			"TerritoryLiveEvents", "SetWaypoint", "TRACK"));
 		ButtonSize->SetContent(WaypointButton);
 		if (UHorizontalBoxSlot* ButtonSlot = Row->AddChildToHorizontalBox(ButtonSize))
 		{
@@ -195,32 +192,15 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 	if (HeadlineText)
 	{
 		HeadlineText->SetText(LiveEvent.Headline);
-		SetLiveEventText(HeadlineText, 14,
+		SetLiveEventText(HeadlineText, 13,
 			LiveEvent.bExpired ? Muted : FLinearColor(0.96f, 0.95f, 0.91f, 1.f));
-	}
-	if (ReportMetaText)
-	{
-		const UEnum* CategoryEnum = StaticEnum<ETerritoryIntelligenceCategory>();
-		const UEnum* SeverityEnum = StaticEnum<ETerritoryIntelligenceSeverity>();
-		const FText CategoryDisplayText = CategoryEnum
-			? CategoryEnum->GetDisplayNameTextByValue(
-				static_cast<int64>(LiveEvent.Category)) : FText::GetEmpty();
-		const FText SeverityName = SeverityEnum
-			? SeverityEnum->GetDisplayNameTextByValue(
-				static_cast<int64>(LiveEvent.Severity)) : FText::GetEmpty();
-		ReportMetaText->SetText(LiveEvent.Sequence > 0
-			? FText::Format(NSLOCTEXT("TerritoryIntelligence", "ReportMeta",
-				"{0}  •  {1}  •  REPORT {2}"), CategoryDisplayText,
-				SeverityName, FText::AsNumber(LiveEvent.Sequence))
-			: FText::Format(NSLOCTEXT("TerritoryIntelligence", "ArchiveMeta",
-				"{0}  •  {1}  •  DURABLE ARCHIVE"),
-				CategoryDisplayText, SeverityName));
-		SetLiveEventText(ReportMetaText, 9, LiveEvent.bExpired ? Muted : Active);
 	}
 	if (DetailText)
 	{
 		DetailText->SetText(LiveEvent.Detail);
-		SetLiveEventText(DetailText, 11,
+		DetailText->SetVisibility(LiveEvent.Detail.IsEmpty()
+			? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+		SetLiveEventText(DetailText, 10,
 			LiveEvent.bExpired ? Muted : FLinearColor(0.66f, 0.65f, 0.61f, 1.f));
 	}
 	if (ImpactText)

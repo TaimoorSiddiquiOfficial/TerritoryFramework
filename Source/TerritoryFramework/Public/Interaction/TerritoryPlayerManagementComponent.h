@@ -130,6 +130,35 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	FGameplayTag GetManagedFaction() const;
 
+	/**
+	 * Asks the server to scout one visible non-owned District. A successful report
+	 * reveals the defending faction and current active guard count in the Command
+	 * Center feed. A failed report reveals no enemy information.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|Intelligence",
+		meta=(ToolTip="Scout one unlocked enemy District. Success depends on how many unlocked Districts your faction controls and how well its own garrisons are staffed."))
+	void RequestEspionage(ATerritoryDistrict* District);
+
+	/** Current scouting chance from the player's territorial hold. The target never changes this value. */
+	UFUNCTION(BlueprintPure, Category="Territory|Intelligence",
+		meta=(ToolTip="Returns a value from 0 to 1. More controlled Districts and better staffed friendly garrisons increase the chance."))
+	float GetEspionageSuccessChance() const;
+
+	/**
+	 * Easy balancing rule used by espionage. Example: 1 of 2 unlocked Districts
+	 * controlled and all assigned guards active gives a 65 percent chance.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Intelligence",
+		meta=(DisplayName="Calculate Espionage Success Chance",
+			ToolTip="Base 15%, plus up to 50% from District control and up to 25% from friendly garrison readiness. Result is clamped from 15% to 90%."))
+	static float CalculateEspionageSuccessChance(int32 ControlledDistricts,
+		int32 TotalUnlockedDistricts, int32 ActiveFriendlyGuards,
+		int32 AssignedFriendlyGuards);
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Intelligence",
+		meta=(ClampMin="0.0", ToolTip="Minimum seconds between espionage requests from this player."))
+	float EspionageCooldown = 30.f;
+
 private:
 	/** Narrative Save System persists the bounded campaign archive on a savable player controller. */
 	UPROPERTY(SaveGame)
@@ -221,6 +250,10 @@ private:
 	void ServerRequestRemoveGuardsForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
 	bool ServerRequestRemoveGuardsForDistrict_Validate(ATerritoryDistrict* District, int32 Count, int32 RequestId);
 
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerRequestEspionage(ATerritoryDistrict* District, int32 RequestId);
+	bool ServerRequestEspionage_Validate(ATerritoryDistrict* District, int32 RequestId);
+
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveGuardPurchaseResult(ATerritoryVolume* Territory, bool bSuccess, const FText& Message, int32 RequestId);
 
@@ -234,6 +267,10 @@ private:
 	void ClientReceiveManagementIntelligence(ATerritoryVolume* Territory,
 		ETerritoryLiveEventType Type, const FText& Headline, const FText& Detail);
 
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveEspionageResult(FGameplayTag TerritoryTag, bool bSuccess,
+		FGameplayTag DefendingFaction, int32 ActiveDefenders);
+
 	void PerformPurchase(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	void PerformPurchaseForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
 	void PerformRemove(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
@@ -245,9 +282,17 @@ private:
 	bool CanManageDistrict(ATerritoryDistrict* District, APawn* Pawn, FText& OutFailureReason) const;
 	bool CanManageTerritory(ATerritoryVolume* Territory, APawn* Pawn, FText& OutFailureReason) const;
 	bool IsTerritoryManagedByDistrict(ATerritoryDistrict* District, ATerritoryVolume* Territory) const;
+	bool CanEspionageDistrict(ATerritoryDistrict* District, FText& OutFailureReason) const;
+	void GetEspionageStrengthInputs(int32& OutControlledDistricts,
+		int32& OutTotalUnlockedDistricts, int32& OutActiveFriendlyGuards,
+		int32& OutAssignedFriendlyGuards) const;
+	void PerformEspionage(ATerritoryDistrict* District, int32 RequestId);
 	APawn* GetManagingPawn() const;
 
 	float LastPurchaseRequestTime = -BIG_NUMBER;
+	float LastEspionageRequestTime = -BIG_NUMBER;
 	int32 NextRequestId = 0;
 	int32 LastServerRequestId = 0;
+	int32 NextEspionageRequestId = 0;
+	int32 LastServerEspionageRequestId = 0;
 };

@@ -7,11 +7,9 @@
 #include "Components/TextBlock.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDeveloperSettings.h"
-#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryVolume.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
-#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "NarrativeGameplayTags.h"
@@ -158,31 +156,6 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	}
 	if (CaptureAccentRail) CaptureAccentRail->SetBrushColor(StateAccent);
 	if (CaptureDivider) CaptureDivider->SetBrushColor(StateAccent);
-	if (DistrictDescriptionText)
-	{
-		FTerritoryDistrictOperationsView View;
-		if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory);
-			District && UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
-				this, District, GetOwningPlayer(), View))
-		{
-			DistrictDescriptionText->SetText(FText::Format(
-				NSLOCTEXT("TerritoryHUD", "DistrictOperationsSummary", "Active {0} / Assigned {1} / Max {2}   Net {3}   {4}"),
-				FText::AsNumber(View.ActiveGuards), FText::AsNumber(View.DesiredGuards),
-				FText::AsNumber(View.MaximumGuards), FText::AsNumber(View.NetIncome),
-				View.ThreatSummary));
-		}
-		else
-		{
-			const int64 GuardUpkeep = static_cast<int64>(Territory->GetGuardCost()) * Territory->GetDesiredGuardCount();
-			DistrictDescriptionText->SetText(FText::Format(
-				NSLOCTEXT("TerritoryHUD", "TerritorySummary", "Guards {0}/{1}   Income {2}   Upkeep {3}"),
-				FText::AsNumber(Territory->GetDesiredGuardCount()),
-				FText::AsNumber(Territory->GetMaxGuardCount()),
-				FText::AsNumber(Territory->GetPeriodicIncome()),
-				FText::AsNumber(GuardUpkeep)));
-		}
-	}
-
 	const FGameplayTag ContestingFaction =
 		Territory->GetOwnershipData().ContestingFaction;
 	if (bHasObservedState
@@ -224,9 +197,9 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	{
 		if (UCanvasPanelSlot* CardSlot = Cast<UCanvasPanelSlot>(CaptureSurface->Slot))
 		{
-			// The passive card stays compact, but temporarily grows enough to show
-			// the counterattack sentence without clipping or covering the screen.
-			CardSlot->SetSize(FVector2D(400.f, bAlertVisible ? 230.f : 190.f));
+			// HUD owns immediate location/capture feedback only. Strategic guard,
+			// finance, and intelligence details stay in the Command Center.
+			CardSlot->SetSize(FVector2D(360.f, bAlertVisible ? 162.f : 124.f));
 		}
 	}
 
@@ -255,9 +228,8 @@ bool UTerritoryHUDWidget::IsNarrativeMenuBlockingHUD() const
 void UTerritoryHUDWidget::HandleAssaultNotification(const FTerritoryAssaultRecord& Assault)
 {
 	PresentCounterAttackAlert(FText::Format(
-		NSLOCTEXT("TerritoryHUD", "CounterAttackWarning", "COUNTERATTACK: {0} is sending {1} attackers to {2}. Reinforce immediately."),
+		NSLOCTEXT("TerritoryHUD", "CounterAttackWarning", "COUNTERATTACK: {0} is moving on {1}."),
 		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.AttackingFaction),
-		FText::AsNumber(Assault.PlannedForce),
 		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.TargetTerritory)), 8.f);
 	RefreshTerritoryDisplay();
 }
