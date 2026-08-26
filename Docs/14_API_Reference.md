@@ -852,6 +852,8 @@ Narrative-activatable operations dashboard.
 | SelectDistrict | void | Select one visible District, synchronize entry highlighting, reveal known Places, and update the detail pane |
 | SetOperationsFilter | void | Apply the viewer-relative operational filter |
 | GetSelectedDistrictOperationsView | View | Current detail/security/finance/threat projection |
+| GetActiveTerritoryEntryCount | int32 | Count real District rows under Active Territories; empty-state text is not counted |
+| GetCapturedTerritoryEntryCount | int32 | Count real District rows under Captured Territories; empty-state text is not counted |
 
 The supplied widget follows Narrative Pro's Quest Journal contract: Active and Captured
 Territory `ScrollBox` lists, one reusable entry class, one selected District, and one persistent
@@ -859,6 +861,10 @@ detail pane. It provides Overview, Places, Garrison, Economy, Production, Threat
 Diplomacy selected-detail tabs. Locked hierarchy branches never enter the player lists. Its
 selector/target/Apply/0/Max controls and delta shortcuts route through
 `UTerritoryPlayerManagementComponent` and can manage visible child Property garrisons.
+
+Easy diagnostic example: Market Square can report `Active = 1, Captured = 0` before capture and
+`Active = 0, Captured = 1` after ownership moves to the viewer faction. Both values count entry
+widgets, not the explanatory text displayed when a queue is empty.
 
 ---
 

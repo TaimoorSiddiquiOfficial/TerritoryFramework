@@ -90,16 +90,25 @@ not a dashboard that only borrows Quest names:
    `ActiveQuestsBox`. It contains unlocked, non-owned District entry widgets.
 2. **Captured Territories** is the second bounded `ScrollBox`, in the same role as
    `FinishedQuestsBox`. It contains Districts currently owned by the viewer's faction.
-3. **Selected Territory** is the persistent right-side information pane. Selecting one entry
-   unselects the others, updates this pane, and keeps Overview, Places, Garrison, Economy,
-   Production, Threats, and Diplomacy controls in compact tabs.
-4. **Territory Intelligence** remains visible under the selected information pane. Reports are
-   not hidden inside the retired three-page dashboard.
+3. **Territory Intelligence** is the full-width top strip. Current reports use the live accent;
+   expired reports stay readable in a disabled colour, and actionable reports expose waypoint
+   control without opening a second screen.
+4. **Selected Territory** is the persistent right-side information pane. Selecting one entry
+   unselects the others, updates this pane, and immediately exposes Overview, Places, Garrison,
+   Economy, Production, Threats, and Diplomacy tabs. Longer ownership and capture explanations
+   live inside the scrollable Overview page so they cannot push the controls off-screen.
 
 The Territory classes do not inherit from Quest data classes. They reuse the Quest Journal's
 presentation contract: two lists, one reusable entry template, one selected-item controller,
 and one detail pane. Territory ownership still comes from `ATerritoryVolume`; the UI only reads
 the viewer-relative projection.
+
+The supplied UISpec keeps most visual children private (`bIsVariable = false`). The native
+widgets therefore use `BindWidgetOptional` when a project exposes a child and also resolve the
+documented stable child names at runtime. This prevents a valid Territory projection from
+producing an empty list merely because an authored `ScrollBox`, label, or row child is private.
+If a custom `TerritoryEntryWidgetClass` cannot be created, the journal uses the native row and
+shows a clear data-versus-widget failure message instead of silently showing an empty queue.
 
 The action and ownership predicates remain strict, while visibility is broader:
 
@@ -131,6 +140,12 @@ always shows the complete Place count, such as `1 / 5 PLACES`, but only unlocked
 created. Easy example: selecting `Market Square` may reveal `Blacksmith`; three story-locked
 Places still contribute to the `1 / 5` count without leaking their names. Clicking the selected
 entry again can close the accordion without clearing the right-side details.
+
+For a simple runtime check, call `GetActiveTerritoryEntryCount` and
+`GetCapturedTerritoryEntryCount` on the journal. These functions count real District entry
+widgets and ignore empty-state text. Example: before taking Market Square the expected result
+can be `Active = 1, Captured = 0`; after the player's faction owns it, the expected result is
+`Active = 0, Captured = 1`.
 
 The garrison planner selects the first manageable target with capacity (normally a child
 Property when the District is a zero-capacity container), navigates District/Property posts

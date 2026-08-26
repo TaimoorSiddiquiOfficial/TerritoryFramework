@@ -226,20 +226,88 @@ namespace
 
 UPanelWidget* UTerritoryJournalWidget::GetActiveTerritoriesPanel() const
 {
-	return ActiveTerritoriesBox ? Cast<UPanelWidget>(ActiveTerritoriesBox.Get())
-		: Cast<UPanelWidget>(ActiveQuestsBox.Get());
+	if (ActiveTerritoriesBox)
+	{
+		return ActiveTerritoriesBox.Get();
+	}
+	if (WidgetTree)
+	{
+		if (UPanelWidget* AuthoredPanel = Cast<UPanelWidget>(
+			WidgetTree->FindWidget(TEXT("ActiveTerritoriesBox"))))
+		{
+			return AuthoredPanel;
+		}
+	}
+	return ActiveQuestsBox ? Cast<UPanelWidget>(ActiveQuestsBox.Get())
+		: WidgetTree
+			? Cast<UPanelWidget>(WidgetTree->FindWidget(TEXT("ActiveQuestsBox")))
+			: nullptr;
 }
 
 UPanelWidget* UTerritoryJournalWidget::GetCapturedTerritoriesPanel() const
 {
-	return CapturedTerritoriesBox ? Cast<UPanelWidget>(CapturedTerritoriesBox.Get())
-		: Cast<UPanelWidget>(FinishedQuestsBox.Get());
+	if (CapturedTerritoriesBox)
+	{
+		return CapturedTerritoriesBox.Get();
+	}
+	if (WidgetTree)
+	{
+		if (UPanelWidget* AuthoredPanel = Cast<UPanelWidget>(
+			WidgetTree->FindWidget(TEXT("CapturedTerritoriesBox"))))
+		{
+			return AuthoredPanel;
+		}
+	}
+	return FinishedQuestsBox ? Cast<UPanelWidget>(FinishedQuestsBox.Get())
+		: WidgetTree
+			? Cast<UPanelWidget>(WidgetTree->FindWidget(TEXT("FinishedQuestsBox")))
+			: nullptr;
 }
 
 UWidget* UTerritoryJournalWidget::GetSelectedTerritoryInfoWidget() const
 {
-	return SelectedTerritoryInfoBox ? SelectedTerritoryInfoBox.Get()
-		: CommandDrawer.Get();
+	if (SelectedTerritoryInfoBox)
+	{
+		return SelectedTerritoryInfoBox.Get();
+	}
+	if (WidgetTree)
+	{
+		if (UWidget* AuthoredInfo = WidgetTree->FindWidget(
+			TEXT("SelectedTerritoryInfoBox")))
+		{
+			return AuthoredInfo;
+		}
+	}
+	return CommandDrawer ? CommandDrawer.Get()
+		: WidgetTree ? WidgetTree->FindWidget(TEXT("CommandDrawer")) : nullptr;
+}
+
+int32 UTerritoryJournalWidget::GetActiveTerritoryEntryCount() const
+{
+	int32 Count = 0;
+	if (const UPanelWidget* Panel = GetActiveTerritoriesPanel())
+	{
+		for (int32 Index = 0; Index < Panel->GetChildrenCount(); ++Index)
+		{
+			const UWidget* Child = Panel->GetChildAt(Index);
+			Count += Child && Child->IsA<UTerritoryDistrictRowWidget>() ? 1 : 0;
+		}
+	}
+	return Count;
+}
+
+int32 UTerritoryJournalWidget::GetCapturedTerritoryEntryCount() const
+{
+	int32 Count = 0;
+	if (const UPanelWidget* Panel = GetCapturedTerritoriesPanel())
+	{
+		for (int32 Index = 0; Index < Panel->GetChildrenCount(); ++Index)
+		{
+			const UWidget* Child = Panel->GetChildAt(Index);
+			Count += Child && Child->IsA<UTerritoryDistrictRowWidget>() ? 1 : 0;
+		}
+	}
+	return Count;
 }
 
 void UTerritoryJournalWidget::RefreshEntrySelection()
@@ -269,6 +337,44 @@ void UTerritoryJournalWidget::SelectDistrict(ATerritoryDistrict* District)
 void UTerritoryJournalWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+
+	// UISpec-authored widgets do not have to expose every child as a Blueprint
+	// variable. BindWidgetOptional therefore remains a migration convenience,
+	// while name lookup is the reliable runtime contract for the two primary
+	// Quest-Journal-style lists and their labels.
+	if (WidgetTree)
+	{
+		if (!ActiveTerritoriesBox)
+		{
+			ActiveTerritoriesBox = Cast<UScrollBox>(
+				WidgetTree->FindWidget(TEXT("ActiveTerritoriesBox")));
+		}
+		if (!CapturedTerritoriesBox)
+		{
+			CapturedTerritoriesBox = Cast<UScrollBox>(
+				WidgetTree->FindWidget(TEXT("CapturedTerritoriesBox")));
+		}
+		if (!Text_ActiveTerritoryCount)
+		{
+			Text_ActiveTerritoryCount = Cast<UTextBlock>(
+				WidgetTree->FindWidget(TEXT("Text_ActiveTerritoryCount")));
+		}
+		if (!Text_CapturedTerritoryCount)
+		{
+			Text_CapturedTerritoryCount = Cast<UTextBlock>(
+				WidgetTree->FindWidget(TEXT("Text_CapturedTerritoryCount")));
+		}
+		if (!SelectedTerritoryInfoBox)
+		{
+			SelectedTerritoryInfoBox = WidgetTree->FindWidget(
+				TEXT("SelectedTerritoryInfoBox"));
+		}
+	}
+	if (!GetActiveTerritoriesPanel() || !GetCapturedTerritoriesPanel())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Territory Journal cannot populate Active/Captured lists: authored panel bindings are missing."));
+	}
 
 	if (Btn_TerritoryTab)
 	{
@@ -1462,7 +1568,20 @@ UTerritoryDistrictRowWidget* UTerritoryJournalWidget::CreateOperationsRow(
 	{
 		RowClass = UTerritoryDistrictRowWidget::StaticClass();
 	}
-	UTerritoryDistrictRowWidget* Row = CreateWidget<UTerritoryDistrictRowWidget>(this, RowClass);
+	UTerritoryDistrictRowWidget* Row = GetOwningPlayer()
+		? CreateWidget<UTerritoryDistrictRowWidget>(GetOwningPlayer(), RowClass)
+		: CreateWidget<UTerritoryDistrictRowWidget>(this, RowClass);
+	if (!Row && RowClass != UTerritoryDistrictRowWidget::StaticClass())
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("Territory Journal could not create entry class %s; using the native District row."),
+			*GetNameSafe(RowClass.Get()));
+		Row = GetOwningPlayer()
+			? CreateWidget<UTerritoryDistrictRowWidget>(
+				GetOwningPlayer(), UTerritoryDistrictRowWidget::StaticClass())
+			: CreateWidget<UTerritoryDistrictRowWidget>(
+				this, UTerritoryDistrictRowWidget::StaticClass());
+	}
 	if (Row)
 	{
 		Row->InitializeOperationsView(View);
@@ -2054,6 +2173,8 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	int32 ThreatCount = 0;
 	int32 AvailableUnlockedCount = 0;
 	int32 AvailableQueueCount = 0;
+	int32 ActiveRowsAdded = 0;
+	int32 CapturedRowsAdded = 0;
 	int32 RiskCount = 0;
 	int32 GuardShortfall = 0;
 	FGameplayTag ViewerFaction;
@@ -2078,6 +2199,7 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 				if (UTerritoryDistrictRowWidget* Row = CreateOperationsRow(View))
 				{
 					ActivePanel->AddChild(Row);
+					++ActiveRowsAdded;
 				}
 			}
 		}
@@ -2090,6 +2212,7 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 				if (UTerritoryDistrictRowWidget* Row = CreateOperationsRow(View))
 				{
 					CapturedPanel->AddChild(Row);
+					++CapturedRowsAdded;
 				}
 			}
 			if (EarningsList)
@@ -2125,17 +2248,24 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		StyleGeneratedTerritoryText(EmptyText, 14, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
 		Box->AddChild(EmptyText);
 	};
-	if (AvailableQueueCount == 0)
+	if (ActiveRowsAdded == 0)
 	{
 		AddEmptyMessage(ActivePanel,
-			NSLOCTEXT("TerritoryJournal", "NoDistrictIntel", "No unlocked District operations are currently visible."),
+			AvailableQueueCount == 0
+				? NSLOCTEXT("TerritoryJournal", "NoDistrictIntel", "No unlocked District operations are currently visible.")
+				: NSLOCTEXT("TerritoryJournal", "DistrictEntriesUnavailable", "District data is available, but its entry widget could not be created."),
 			TEXT("NoAvailableUnlockedDistricts"));
+	}
+	if (CapturedRowsAdded == 0)
+	{
+		AddEmptyMessage(CapturedPanel,
+			OwnedCount == 0
+				? NSLOCTEXT("TerritoryJournal", "NoCapturedOwned", "Your faction controls no loaded districts.")
+				: NSLOCTEXT("TerritoryJournal", "CapturedEntriesUnavailable", "Captured District data is available, but its entry widget could not be created."),
+			TEXT("NoCapturedOwnedDistricts"));
 	}
 	if (OwnedCount == 0)
 	{
-		AddEmptyMessage(CapturedPanel,
-			NSLOCTEXT("TerritoryJournal", "NoCapturedOwned", "Your faction controls no loaded districts."),
-			TEXT("NoCapturedOwnedDistricts"));
 		AddEmptyMessage(EarningsList,
 			NSLOCTEXT("TerritoryJournal", "NoOwnedEarnings", "Capture a district to establish recurring income."),
 			TEXT("NoOwnedEarningsDistricts"));

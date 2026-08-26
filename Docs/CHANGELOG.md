@@ -2,6 +2,13 @@
 
 ## Unreleased — 2026-08-26 (Quest Journal template contract)
 
+- Fixed Active and Captured Territory queues remaining visually empty when UISpec-authored
+  `ScrollBox` and entry children are private Blueprint widgets. Stable-name runtime resolution,
+  native row fallback, explicit failure text, and BlueprintPure row-count diagnostics now make
+  list population both reliable and testable.
+- Matched the Command Center wireframe more closely: Live Events is the full-width top strip,
+  Active/Captured Territory lists form the left rail, and selected-Territory control tabs stay
+  immediately visible while long ownership/capture text scrolls inside Overview.
 - Replaced the congested three-page Command Center with Narrative Pro's actual Quest Journal
   interaction pattern: `ActiveTerritoriesBox`, `CapturedTerritoriesBox`, one reusable entry
   class, and one synchronized selected-Territory information pane.

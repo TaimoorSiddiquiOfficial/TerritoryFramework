@@ -55,6 +55,12 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Journal exposes one selected-District entry point like Show Quest"),
 		TerritoryUITest::IsBlueprintCallable(
 			UTerritoryJournalWidget::StaticClass(), TEXT("SelectDistrict")));
+	TestTrue(TEXT("Journal exposes Active Territory population diagnostics"),
+		TerritoryUITest::IsBlueprintPure(
+			UTerritoryJournalWidget::StaticClass(), TEXT("GetActiveTerritoryEntryCount")));
+	TestTrue(TEXT("Journal exposes Captured Territory population diagnostics"),
+		TerritoryUITest::IsBlueprintPure(
+			UTerritoryJournalWidget::StaticClass(), TEXT("GetCapturedTerritoryEntryCount")));
 	const FObjectPropertyBase* ActiveTerritoriesProperty = CastField<FObjectPropertyBase>(
 		UTerritoryJournalWidget::StaticClass()->FindPropertyByName(TEXT("ActiveTerritoriesBox")));
 	TestTrue(TEXT("Active Territories uses the Quest Journal ScrollBox template"),

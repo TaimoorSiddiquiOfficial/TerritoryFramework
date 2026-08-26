@@ -50,6 +50,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void SetOperationsFilter(ETerritoryOperationsFilter Filter);
 
+	/** Number of real District rows currently shown under Active Territories (empty-state text is excluded). */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Diagnostics")
+	int32 GetActiveTerritoryEntryCount() const;
+
+	/** Number of real District rows currently shown under Captured Territories (empty-state text is excluded). */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Diagnostics")
+	int32 GetCapturedTerritoryEntryCount() const;
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;

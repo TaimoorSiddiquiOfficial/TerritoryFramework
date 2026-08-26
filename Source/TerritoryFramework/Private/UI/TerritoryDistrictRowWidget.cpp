@@ -110,6 +110,97 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	BuildNativeLayout();
+	// Authored entry widgets may intentionally keep their children private in
+	// Blueprint. Resolve the stable widget names as a runtime fallback so the
+	// District row never becomes a blank shell when bIsVariable is disabled.
+	if (WidgetTree)
+	{
+		if (!SelectDistrictButton)
+		{
+			SelectDistrictButton = Cast<UNarrativeCommonButtonBase>(
+				WidgetTree->FindWidget(TEXT("SelectDistrictButton")));
+		}
+		if (!AddGuardButton)
+		{
+			AddGuardButton = Cast<UNarrativeCommonButtonBase>(
+				WidgetTree->FindWidget(TEXT("AddGuardButton")));
+		}
+		if (!RemoveGuardButton)
+		{
+			RemoveGuardButton = Cast<UNarrativeCommonButtonBase>(
+				WidgetTree->FindWidget(TEXT("RemoveGuardButton")));
+		}
+		if (!SetWaypointButton)
+		{
+			SetWaypointButton = Cast<UNarrativeCommonButtonBase>(
+				WidgetTree->FindWidget(TEXT("SetWaypointButton")));
+		}
+		if (!DistrictName)
+		{
+			DistrictName = Cast<UNarrativeCommonTextBlock>(
+				WidgetTree->FindWidget(TEXT("DistrictName")));
+		}
+		if (!DistrictSummary)
+		{
+			DistrictSummary = Cast<UNarrativeCommonTextBlock>(
+				WidgetTree->FindWidget(TEXT("DistrictSummary")));
+		}
+		if (!DistrictStatus)
+		{
+			DistrictStatus = Cast<UNarrativeCommonTextBlock>(
+				WidgetTree->FindWidget(TEXT("DistrictStatus")));
+		}
+		if (!DistrictRowSurface)
+		{
+			DistrictRowSurface = Cast<UBorder>(
+				WidgetTree->FindWidget(TEXT("DistrictRowSurface")));
+		}
+		if (!DistrictAccentRail)
+		{
+			DistrictAccentRail = Cast<UBorder>(
+				WidgetTree->FindWidget(TEXT("DistrictAccentRail")));
+		}
+		if (!DistrictStatusSurface)
+		{
+			DistrictStatusSurface = Cast<UBorder>(
+				WidgetTree->FindWidget(TEXT("DistrictStatusSurface")));
+		}
+		if (!PlaceList)
+		{
+			PlaceList = Cast<UVerticalBox>(
+				WidgetTree->FindWidget(TEXT("PlaceList")));
+		}
+		if (!PlaceProgressTrack)
+		{
+			PlaceProgressTrack = Cast<UHorizontalBox>(
+				WidgetTree->FindWidget(TEXT("PlaceProgressTrack")));
+		}
+		if (!OwnedProgressSegment)
+		{
+			OwnedProgressSegment = Cast<UBorder>(
+				WidgetTree->FindWidget(TEXT("OwnedProgressSegment")));
+		}
+		if (!KnownProgressSegment)
+		{
+			KnownProgressSegment = Cast<UBorder>(
+				WidgetTree->FindWidget(TEXT("KnownProgressSegment")));
+		}
+		if (!HiddenProgressSegment)
+		{
+			HiddenProgressSegment = Cast<UBorder>(
+				WidgetTree->FindWidget(TEXT("HiddenProgressSegment")));
+		}
+		if (!PlaceProgressText)
+		{
+			PlaceProgressText = Cast<UTextBlock>(
+				WidgetTree->FindWidget(TEXT("PlaceProgressText")));
+		}
+		if (!ExpandHintText)
+		{
+			ExpandHintText = Cast<UTextBlock>(
+				WidgetTree->FindWidget(TEXT("ExpandHintText")));
+		}
+	}
 	if (SelectDistrictButton)
 	{
 		SelectDistrictButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleSelected);
