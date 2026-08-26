@@ -10,12 +10,22 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Engine/Texture2D.h"
+#include "UI/TerritoryUITheme.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 
 void UTerritoryResourceRowWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	BuildNativeLayout();
+	TerritoryUITheme::ApplyText(ResourceName, 12,
+		FLinearColor(0.94f, 0.93f, 0.89f, 1.f),
+		ETerritoryTextRole::Heading, false);
+	TerritoryUITheme::ApplyText(StoredQuantityText, 10,
+		FLinearColor(0.64f, 0.68f, 0.67f, 1.f),
+		ETerritoryTextRole::Muted, false);
+	TerritoryUITheme::ApplyText(ResourceFlowText, 10,
+		FLinearColor(0.70f, 0.86f, 0.74f, 1.f),
+		ETerritoryTextRole::Body, false);
 	RefreshResourceDisplay();
 }
 
@@ -95,6 +105,20 @@ void UTerritoryProductionSiteRowWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 	BuildNativeLayout();
+	TerritoryUITheme::ApplySurface(
+		Cast<UBorder>(WidgetTree
+			? WidgetTree->FindWidget(TEXT("ProductionSiteSurface")) : nullptr),
+		FLinearColor(0.035f, 0.065f, 0.075f, 0.94f),
+		FLinearColor(0.18f, 0.52f, 0.48f, 0.35f), 4.f);
+	TerritoryUITheme::ApplyText(ProductionSiteName, 13,
+		FLinearColor(0.94f, 0.93f, 0.89f, 1.f),
+		ETerritoryTextRole::Heading, false);
+	TerritoryUITheme::ApplyText(ProductionStatusText, 10,
+		FLinearColor(0.70f, 0.86f, 0.74f, 1.f),
+		ETerritoryTextRole::Heading, false);
+	TerritoryUITheme::ApplyText(ProductionReasonText, 10,
+		FLinearColor(0.64f, 0.68f, 0.67f, 1.f),
+		ETerritoryTextRole::Muted);
 	RefreshProductionDisplay();
 }
 

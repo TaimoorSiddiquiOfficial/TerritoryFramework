@@ -27,14 +27,12 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UI/TerritoryDistrictRowWidget.h"
 #include "UI/TerritoryLiveEventRowWidget.h"
+#include "UI/TerritoryUITheme.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 #include "Widgets/NarrativeSpinBox.h"
-#include "CommonTextBlock.h"
-#include "Engine/Texture2D.h"
-#include "Styling/SlateBrush.h"
 #include "TimerManager.h"
 
 namespace
@@ -50,111 +48,32 @@ namespace
 		const FLinearColor& Color,
 		ETerritoryGeneratedTextRole Role = ETerritoryGeneratedTextRole::Body)
 	{
-		if (!Text)
+		ETerritoryTextRole ThemeRole = ETerritoryTextRole::Body;
+		switch (Role)
 		{
-			return;
+		case ETerritoryGeneratedTextRole::Heading:
+			ThemeRole = ETerritoryTextRole::Heading;
+			break;
+		case ETerritoryGeneratedTextRole::Muted:
+			ThemeRole = ETerritoryTextRole::Muted;
+			break;
+		case ETerritoryGeneratedTextRole::Body:
+		default:
+			break;
 		}
-		if (UNarrativeCommonTextBlock* CommonText =
-			Cast<UNarrativeCommonTextBlock>(Text))
-		{
-			const UTerritoryDeveloperSettings* Settings =
-				GetDefault<UTerritoryDeveloperSettings>();
-			TSubclassOf<UCommonTextStyle> Style;
-			if (Settings)
-			{
-				switch (Role)
-				{
-				case ETerritoryGeneratedTextRole::Heading:
-					Style = Settings->TerritoryHeadingTextStyle.LoadSynchronous();
-					break;
-				case ETerritoryGeneratedTextRole::Muted:
-					Style = Settings->TerritoryMutedTextStyle.LoadSynchronous();
-					break;
-				case ETerritoryGeneratedTextRole::Body:
-				default:
-					Style = Settings->DefaultTerritoryTextStyle.LoadSynchronous();
-					break;
-				}
-			}
-			if (Style)
-			{
-				CommonText->SetStyle(Style);
-				CommonText->SetAutoWrapText(true);
-				// The style owns typography; the call site still owns semantic state colour.
-				CommonText->SetColorAndOpacity(FSlateColor(Color));
-				return;
-			}
-		}
-		FSlateFontInfo Font = Text->GetFont();
-		Font.Size = FontSize;
-		Text->SetFont(Font);
-		Text->SetColorAndOpacity(FSlateColor(Color));
-		Text->SetAutoWrapText(true);
+		TerritoryUITheme::ApplyText(Text, FontSize, Color, ThemeRole);
 	}
 
 	void StyleGeneratedTerritorySurface(UBorder* Border, const FLinearColor& Fill,
 		const FLinearColor& Outline, float Radius = 10.f)
 	{
-		if (!Border) return;
-		FSlateBrush Brush;
-		const UTerritoryDeveloperSettings* Settings =
-			GetDefault<UTerritoryDeveloperSettings>();
-		if (UTexture2D* PanelTexture = Settings
-			? Settings->TerritoryPanelTexture.LoadSynchronous() : nullptr)
-		{
-			Brush.DrawAs = ESlateBrushDrawType::Box;
-			Brush.SetResourceObject(PanelTexture);
-			Brush.ImageSize = FVector2D(PanelTexture->GetSizeX(), PanelTexture->GetSizeY());
-			Brush.Margin = FMargin(0.035f, 0.22f);
-			Brush.TintColor = FSlateColor(FLinearColor(
-				0.72f + Outline.R * 0.28f,
-				0.72f + Outline.G * 0.28f,
-				0.72f + Outline.B * 0.28f, Fill.A));
-			Border->SetBrush(Brush);
-			return;
-		}
-		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-		Brush.TintColor = FSlateColor(Fill);
-		Brush.OutlineSettings = FSlateBrushOutlineSettings(
-			Radius, FSlateColor(Outline), 1.f);
-		Border->SetBrush(Brush);
+		TerritoryUITheme::ApplySurface(Border, Fill, Outline, Radius);
 	}
 
 	bool StyleGeneratedTerritoryProgress(UProgressBar* ProgressBar,
 		bool bUseAuthoredFill)
 	{
-		if (!ProgressBar) return false;
-		const UTerritoryDeveloperSettings* Settings =
-			GetDefault<UTerritoryDeveloperSettings>();
-		UTexture2D* FrameTexture = Settings
-			? Settings->TerritoryProgressFrameTexture.LoadSynchronous() : nullptr;
-		UTexture2D* FillTexture = bUseAuthoredFill && Settings
-			? Settings->TerritoryProgressFillTexture.LoadSynchronous() : nullptr;
-		if (!FrameTexture && !FillTexture) return false;
-
-		FProgressBarStyle Style = ProgressBar->GetWidgetStyle();
-		if (FrameTexture)
-		{
-			FSlateBrush Frame;
-			Frame.DrawAs = ESlateBrushDrawType::Box;
-			Frame.SetResourceObject(FrameTexture);
-			Frame.ImageSize = FVector2D(FrameTexture->GetSizeX(), FrameTexture->GetSizeY());
-			Frame.Margin = FMargin(0.04f, 0.28f);
-			Frame.TintColor = FSlateColor(FLinearColor::White);
-			Style.BackgroundImage = Frame;
-		}
-		if (FillTexture)
-		{
-			FSlateBrush Fill;
-			Fill.DrawAs = ESlateBrushDrawType::Box;
-			Fill.SetResourceObject(FillTexture);
-			Fill.ImageSize = FVector2D(FillTexture->GetSizeX(), FillTexture->GetSizeY());
-			Fill.Margin = FMargin(0.02f, 0.24f);
-			Fill.TintColor = FSlateColor(FLinearColor::White);
-			Style.FillImage = Fill;
-		}
-		ProgressBar->SetWidgetStyle(Style);
-		return FillTexture != nullptr;
+		return TerritoryUITheme::ApplyProgress(ProgressBar, bUseAuthoredFill);
 	}
 
 	const FString AllOwnersOption = TEXT("All owners");
@@ -398,6 +317,68 @@ void UTerritoryJournalWidget::NativeConstruct()
 				RightColumnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 			}
 		}
+
+		// The owning Narrative menu still owns input, layering, blur, and the outer
+		// CommonBorder. Territory only themes its content surface and cards.
+		TerritoryUITheme::ApplySurface(
+			Cast<UBorder>(WidgetTree->FindWidget(TEXT("TerritoryCommandRoot"))),
+			FLinearColor(1.f, 1.f, 1.f, 0.84f), FLinearColor::Transparent,
+			0.f, 0.f, true, ETerritorySurfaceRole::Screen);
+		for (const FName PanelName : {
+			FName(TEXT("IntelligencePanel")),
+			FName(TEXT("TerritoryJournalRailSurface")),
+			FName(TEXT("SelectedTerritoryInfoBox")) })
+		{
+			TerritoryUITheme::ApplySurface(
+				Cast<UBorder>(WidgetTree->FindWidget(PanelName)),
+				FLinearColor(0.04f, 0.06f, 0.08f, 0.92f),
+				FLinearColor(0.18f, 0.52f, 0.48f, 0.42f), 5.f);
+		}
+
+		auto ThemeTextByName = [this](const TCHAR* Name, int32 Size,
+			const FLinearColor& Color, ETerritoryTextRole Role,
+			bool bAutoWrap = true)
+		{
+			TerritoryUITheme::ApplyText(
+				Cast<UTextBlock>(WidgetTree->FindWidget(FName(Name))),
+				Size, Color, Role, bAutoWrap);
+		};
+		const FLinearColor PrimaryText(0.94f, 0.93f, 0.89f, 1.f);
+		const FLinearColor MutedText(0.62f, 0.66f, 0.65f, 1.f);
+		const FLinearColor AccentText(0.92f, 0.70f, 0.24f, 1.f);
+		ThemeTextByName(TEXT("Text_JournalEyebrow"), 9, AccentText,
+			ETerritoryTextRole::Heading, false);
+		ThemeTextByName(TEXT("Text_JournalTitle"), 30, PrimaryText,
+			ETerritoryTextRole::Title, false);
+		ThemeTextByName(TEXT("Text_JournalSubtitle"), 10, MutedText,
+			ETerritoryTextRole::Muted, false);
+		ThemeTextByName(TEXT("Text_HeaderStatus"), 9,
+			FLinearColor(0.42f, 0.86f, 0.68f, 1.f),
+			ETerritoryTextRole::Heading, false);
+		ThemeTextByName(TEXT("Text_ActiveTerritoryCount"), 13, AccentText,
+			ETerritoryTextRole::Heading, false);
+		ThemeTextByName(TEXT("Text_CapturedTerritoryCount"), 13,
+			FLinearColor(0.42f, 0.86f, 0.68f, 1.f),
+			ETerritoryTextRole::Heading, false);
+		ThemeTextByName(TEXT("Text_SelectedEyebrow"), 9, AccentText,
+			ETerritoryTextRole::Heading, false);
+		ThemeTextByName(TEXT("Text_SelectedTerritoryTitle"), 20, PrimaryText,
+			ETerritoryTextRole::Title, false);
+		for (const TCHAR* BodyName : {
+			TEXT("Text_IntelligenceSummary"), TEXT("Text_FilterSummary"),
+			TEXT("Text_CommandHierarchy"), TEXT("Text_CommandOverview"),
+			TEXT("Text_CommandOwnerState"), TEXT("Text_CommandAvailability"),
+			TEXT("Text_CommandSecurity"), TEXT("Text_CommandFinance"),
+			TEXT("Text_CommandThreat"), TEXT("Text_CommandAssault"),
+			TEXT("Text_CommandApproaches"), TEXT("Text_CommandCaptureProgress"),
+			TEXT("Text_CommandDiplomacy"), TEXT("Text_CommandStatus"),
+			TEXT("Text_OperationalSummary"), TEXT("Text_SecuritySummary"),
+			TEXT("Text_FinanceSummary"), TEXT("Text_AssaultSummary") })
+		{
+			ThemeTextByName(BodyName, 11, PrimaryText, ETerritoryTextRole::Body);
+		}
+		ThemeTextByName(TEXT("Text_EmptySelection"), 11, MutedText,
+			ETerritoryTextRole::Muted);
 	}
 	if (!GetActiveTerritoriesPanel() || !GetCapturedTerritoriesPanel())
 	{
@@ -828,14 +809,9 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	TSubclassOf<UNarrativeCommonButtonBase> ButtonClass = Settings
 		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
-	const TSubclassOf<UCommonButtonStyle> ButtonStyle = Settings
-		? Settings->DefaultTerritoryButtonStyle.LoadSynchronous() : nullptr;
-	auto ApplyTerritoryStyle = [ButtonStyle](UNarrativeCommonButtonBase* Button)
+	auto ApplyTerritoryStyle = [](UNarrativeCommonButtonBase* Button)
 	{
-		if (Button && ButtonStyle)
-		{
-			Button->SetStyle(ButtonStyle);
-		}
+		TerritoryUITheme::ApplyButton(Button);
 	};
 	if (ButtonClass)
 	{

@@ -13,6 +13,7 @@
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
+#include "UI/TerritoryUITheme.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 #include "Widgets/NarrativeSpinBox.h"
@@ -21,15 +22,8 @@ namespace
 {
 	void StyleGeneratedManagementText(UTextBlock* Text, int32 FontSize, const FLinearColor& Color)
 	{
-		if (!Text)
-		{
-			return;
-		}
-		FSlateFontInfo Font = Text->GetFont();
-		Font.Size = FontSize;
-		Text->SetFont(Font);
-		Text->SetColorAndOpacity(FSlateColor(Color));
-		Text->SetAutoWrapText(true);
+		TerritoryUITheme::ApplyText(Text, FontSize, Color,
+			FontSize >= 16 ? ETerritoryTextRole::Heading : ETerritoryTextRole::Muted);
 	}
 }
 
@@ -178,14 +172,9 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	TSubclassOf<UNarrativeCommonButtonBase> ButtonClass = Settings
 		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
-	const TSubclassOf<UCommonButtonStyle> ButtonStyle = Settings
-		? Settings->DefaultTerritoryButtonStyle.LoadSynchronous() : nullptr;
-	auto ApplyTerritoryStyle = [ButtonStyle](UNarrativeCommonButtonBase* Button)
+	auto ApplyTerritoryStyle = [](UNarrativeCommonButtonBase* Button)
 	{
-		if (Button && ButtonStyle)
-		{
-			Button->SetStyle(ButtonStyle);
-		}
+		TerritoryUITheme::ApplyButton(Button);
 	};
 	if (!ButtonClass) return;
 	UHorizontalBox* Actions = WidgetTree->ConstructWidget<UHorizontalBox>(

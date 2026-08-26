@@ -13,75 +13,25 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "UI/TerritoryUITheme.h"
 #include "Blueprint/WidgetTree.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
-#include "CommonTextBlock.h"
-#include "Engine/Texture2D.h"
-#include "Styling/SlateBrush.h"
 
 namespace
 {
 	void StyleDistrictRowText(UTextBlock* Text, int32 FontSize, const FLinearColor& Color)
 	{
-		if (!Text)
-		{
-			return;
-		}
-		if (UNarrativeCommonTextBlock* CommonText = Cast<UNarrativeCommonTextBlock>(Text))
-		{
-			const UTerritoryDeveloperSettings* Settings =
-				GetDefault<UTerritoryDeveloperSettings>();
-			const TSubclassOf<UCommonTextStyle> Style = Settings
-				? (FontSize >= 17
-					? Settings->TerritoryHeadingTextStyle.LoadSynchronous()
-					: Settings->DefaultTerritoryTextStyle.LoadSynchronous())
-				: nullptr;
-			if (Style)
-			{
-				CommonText->SetStyle(Style);
-				CommonText->SetAutoWrapText(true);
-				CommonText->SetColorAndOpacity(FSlateColor(Color));
-			}
-		}
-		FSlateFontInfo Font = Text->GetFont();
-		Font.Size = FontSize;
-		Text->SetFont(Font);
-		Text->SetColorAndOpacity(FSlateColor(Color));
-		Text->SetAutoWrapText(true);
+		TerritoryUITheme::ApplyText(Text, FontSize, Color,
+			FontSize >= 17 ? ETerritoryTextRole::Heading : ETerritoryTextRole::Body);
 	}
 
 	void SetRoundedSurface(UBorder* Border, const FLinearColor& Fill,
 		const FLinearColor& Outline, float Radius = 10.f, float OutlineWidth = 1.f,
 		bool bUseThemePanel = false)
 	{
-		if (!Border) return;
-		FSlateBrush Brush;
-		const UTerritoryDeveloperSettings* Settings =
-			GetDefault<UTerritoryDeveloperSettings>();
-		if (bUseThemePanel)
-		{
-			if (UTexture2D* PanelTexture = Settings
-				? Settings->TerritoryPanelTexture.LoadSynchronous() : nullptr)
-			{
-				Brush.DrawAs = ESlateBrushDrawType::Box;
-				Brush.SetResourceObject(PanelTexture);
-				Brush.ImageSize = FVector2D(
-					PanelTexture->GetSizeX(), PanelTexture->GetSizeY());
-				Brush.Margin = FMargin(0.035f, 0.22f);
-				Brush.TintColor = FSlateColor(FLinearColor(
-					0.72f + Outline.R * 0.28f,
-					0.72f + Outline.G * 0.28f,
-					0.72f + Outline.B * 0.28f, Fill.A));
-				Border->SetBrush(Brush);
-				return;
-			}
-		}
-		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-		Brush.TintColor = FSlateColor(Fill);
-		Brush.OutlineSettings = FSlateBrushOutlineSettings(
-			Radius, FSlateColor(Outline), OutlineWidth);
-		Border->SetBrush(Brush);
+		TerritoryUITheme::ApplySurface(Border, Fill, Outline, Radius,
+			OutlineWidth, bUseThemePanel);
 	}
 
 	FLinearColor GetDistrictAccent(const FTerritoryDistrictOperationsView& View)
@@ -254,18 +204,13 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 			EspionageSize->SetHeightOverride(48.f);
 			EspionageButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 				ButtonClass, TEXT("EspionageButton"));
-			TSubclassOf<UCommonButtonStyle> ActionStyle;
 			if (SetWaypointButton && SetWaypointButton->GetStyle())
 			{
-				ActionStyle = SetWaypointButton->GetStyle()->GetClass();
+				EspionageButton->SetStyle(SetWaypointButton->GetStyle()->GetClass());
 			}
 			else
 			{
-				ActionStyle = Settings->DefaultTerritoryButtonStyle.LoadSynchronous();
-			}
-			if (ActionStyle)
-			{
-				EspionageButton->SetStyle(ActionStyle);
+				TerritoryUITheme::ApplyButton(EspionageButton);
 			}
 			// The shared Narrative button template is designed for full-width menu
 			// actions and carries a 300 px minimum. This row intentionally supplies
@@ -387,14 +332,9 @@ void UTerritoryDistrictRowWidget::BuildNativeLayout()
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const TSubclassOf<UNarrativeCommonButtonBase> NarrativeButtonClass = Settings
 		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
-	const TSubclassOf<UCommonButtonStyle> TerritoryButtonStyle = Settings
-		? Settings->DefaultTerritoryButtonStyle.LoadSynchronous() : nullptr;
-	auto ApplyTerritoryStyle = [TerritoryButtonStyle](UNarrativeCommonButtonBase* Button)
+	auto ApplyTerritoryStyle = [](UNarrativeCommonButtonBase* Button)
 	{
-		if (Button && TerritoryButtonStyle)
-		{
-			Button->SetStyle(TerritoryButtonStyle);
-		}
+		TerritoryUITheme::ApplyButton(Button);
 	};
 	if (!NarrativeButtonClass)
 	{

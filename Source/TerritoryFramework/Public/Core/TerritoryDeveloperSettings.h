@@ -160,9 +160,28 @@ public:
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
 	TSoftClassPtr<UCommonTextStyle> TerritoryMutedTextStyle;
 
+	/**
+	 * Multiplies Territory text sizes after the Narrative CommonUI style is applied.
+	 * Easy example: keep 1.0 for the compact Command Center, or use 1.25 when the
+	 * game is played from a television and the same text needs to be easier to read.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(ClampMin="0.75", ClampMax="2.0", UIMin="0.75", UIMax="2.0",
+			DisplayName="Territory Text Scale"))
+	float TerritoryTextScale = 1.f;
+
 	/** Optional nine-slice texture for Command Center, District, intelligence, and compact HUD cards. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
 	TSoftObjectPtr<UTexture2D> TerritoryPanelTexture;
+
+	/**
+	 * Optional full-screen image behind the Command Center content.
+	 * Easy example: import a 1920 x 1080 dark menu background. Leave this empty to
+	 * keep the owning Narrative Pro menu background fully visible.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Command Center Background Texture"))
+	TSoftObjectPtr<UTexture2D> TerritoryScreenBackgroundTexture;
 
 	/** Optional frame texture applied behind capture and garrison progress bars. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")

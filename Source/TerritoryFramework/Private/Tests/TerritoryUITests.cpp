@@ -2,6 +2,8 @@
 
 #include "Misc/AutomationTest.h"
 #include "Components/ScrollBox.h"
+#include "Components/TextBlock.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -18,6 +20,8 @@
 #include "UI/TerritoryLiveEventRowWidget.h"
 #include "UI/TerritoryLiveEventTypes.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
+#include "UI/TerritoryUITheme.h"
+#include "Widgets/NarrativeCommonTextBlock.h"
 
 namespace TerritoryUITest
 {
@@ -80,6 +84,12 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			TEXT("SelectedTerritoryInfoBox")));
 	TestTrue(TEXT("Embedded Territory activatables accept focus"),
 		GetDefault<UTerritoryActivatableWidget>()->IsFocusable());
+	TestNotNull(TEXT("Community projects can replace the Command Center background"),
+		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
+			TEXT("TerritoryScreenBackgroundTexture")));
+	TestNotNull(TEXT("Community projects can scale compact Territory typography"),
+		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
+			TEXT("TerritoryTextScale")));
 
 	const UClass* LibraryClass = UTerritoryUIBlueprintLibrary::StaticClass();
 	TestTrue(TEXT("OpenTerritoryMenu is Blueprint callable"),
@@ -270,6 +280,28 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		ManagementDefaults->EspionageCooldown, 30.f);
 	TestNotNull(TEXT("Live event row exists for authored Reports presentation"),
 		UTerritoryLiveEventRowWidget::StaticClass());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIThemeTypographyTest,
+	"TerritoryFramework.UI.Theme.CompactNarrativeTypography",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIThemeTypographyTest::RunTest(const FString& Parameters)
+{
+	UNarrativeCommonTextBlock* Text = NewObject<UNarrativeCommonTextBlock>();
+	TestNotNull(TEXT("Narrative CommonUI text can be created"), Text);
+	if (!Text)
+	{
+		return false;
+	}
+
+	TerritoryUITheme::ApplyText(Text, 11,
+		FLinearColor(0.9f, 0.8f, 0.7f, 1.f), ETerritoryTextRole::Body);
+	TestEqual(TEXT("Territory responsive size overrides the large Narrative theme default"),
+		Text->GetFont().Size, 11.f);
+	TestTrue(TEXT("Territory body copy remains readable when a row is narrow"),
+		Text->GetAutoWrapText());
 	return true;
 }
 

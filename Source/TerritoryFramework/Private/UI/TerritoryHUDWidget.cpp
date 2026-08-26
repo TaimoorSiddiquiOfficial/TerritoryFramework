@@ -10,60 +10,31 @@
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryVolume.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
-#include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "NarrativeGameplayTags.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "Widgets/CommonActivatableWidgetContainer.h"
 #include "Widgets/NarrativeGameplayHUD.h"
-#include "Styling/SlateBrush.h"
-
-namespace
-{
-	void ApplyTerritoryHUDTextures(UBorder* Surface, UProgressBar* ProgressBar)
-	{
-		const UTerritoryDeveloperSettings* Settings =
-			GetDefault<UTerritoryDeveloperSettings>();
-		if (!Settings) return;
-		if (Surface)
-		{
-			if (UTexture2D* PanelTexture =
-				Settings->TerritoryPanelTexture.LoadSynchronous())
-			{
-				FSlateBrush Panel;
-				Panel.DrawAs = ESlateBrushDrawType::Box;
-				Panel.SetResourceObject(PanelTexture);
-				Panel.ImageSize = FVector2D(
-					PanelTexture->GetSizeX(), PanelTexture->GetSizeY());
-				Panel.Margin = FMargin(0.035f, 0.22f);
-				Panel.TintColor = FSlateColor(FLinearColor::White);
-				Surface->SetBrush(Panel);
-			}
-		}
-		if (ProgressBar)
-		{
-			if (UTexture2D* FrameTexture =
-				Settings->TerritoryProgressFrameTexture.LoadSynchronous())
-			{
-				FProgressBarStyle Style = ProgressBar->GetWidgetStyle();
-				FSlateBrush Frame;
-				Frame.DrawAs = ESlateBrushDrawType::Box;
-				Frame.SetResourceObject(FrameTexture);
-				Frame.ImageSize = FVector2D(
-					FrameTexture->GetSizeX(), FrameTexture->GetSizeY());
-				Frame.Margin = FMargin(0.04f, 0.28f);
-				Frame.TintColor = FSlateColor(FLinearColor::White);
-				Style.BackgroundImage = Frame;
-				ProgressBar->SetWidgetStyle(Style);
-			}
-		}
-	}
-}
+#include "UI/TerritoryUITheme.h"
 
 void UTerritoryHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-	ApplyTerritoryHUDTextures(CaptureSurface, ProgressBar_Capture);
+	TerritoryUITheme::ApplySurface(CaptureSurface,
+		FLinearColor(0.025f, 0.04f, 0.055f, 0.94f),
+		FLinearColor(0.18f, 0.52f, 0.48f, 0.5f), 5.f);
+	TerritoryUITheme::ApplyProgress(ProgressBar_Capture, false);
+	TerritoryUITheme::ApplyText(Text_DistrictName, 16,
+		FLinearColor(0.94f, 0.93f, 0.89f, 1.f),
+		ETerritoryTextRole::Heading, false);
+	TerritoryUITheme::ApplyText(DistrictOwnerText, 11,
+		FLinearColor(0.64f, 0.68f, 0.67f, 1.f),
+		ETerritoryTextRole::Muted, false);
+	TerritoryUITheme::ApplyText(Text_CaptureState, 10,
+		FLinearColor(0.92f, 0.70f, 0.24f, 1.f),
+		ETerritoryTextRole::Heading, false);
+	TerritoryUITheme::ApplyText(DistrictDescriptionText, 10,
+		FLinearColor(0.94f, 0.93f, 0.89f, 1.f));
 	if (APlayerController* PlayerController = GetOwningPlayer())
 	{
 		ManagementComponent = UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);

@@ -1,7 +1,6 @@
 #include "UI/TerritoryLiveEventRowWidget.h"
 
 #include "Blueprint/WidgetTree.h"
-#include "CommonTextBlock.h"
 #include "Components/Border.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
@@ -9,8 +8,7 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Core/TerritoryDeveloperSettings.h"
-#include "Engine/Texture2D.h"
-#include "Styling/SlateBrush.h"
+#include "UI/TerritoryUITheme.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 
@@ -19,51 +17,12 @@ namespace
 	void SetLiveEventSurface(UBorder* Border, const FLinearColor& Fill,
 		const FLinearColor& Outline)
 	{
-		if (!Border) return;
-		FSlateBrush Brush;
-		const UTerritoryDeveloperSettings* Settings =
-			GetDefault<UTerritoryDeveloperSettings>();
-		if (UTexture2D* PanelTexture = Settings
-			? Settings->TerritoryPanelTexture.LoadSynchronous() : nullptr)
-		{
-			Brush.DrawAs = ESlateBrushDrawType::Box;
-			Brush.SetResourceObject(PanelTexture);
-			Brush.ImageSize = FVector2D(PanelTexture->GetSizeX(), PanelTexture->GetSizeY());
-			Brush.Margin = FMargin(0.035f, 0.22f);
-			Brush.TintColor = FSlateColor(FLinearColor(
-				0.72f + Outline.R * 0.28f,
-				0.72f + Outline.G * 0.28f,
-				0.72f + Outline.B * 0.28f, Fill.A));
-			Border->SetBrush(Brush);
-			return;
-		}
-		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-		Brush.TintColor = FSlateColor(Fill);
-		Brush.OutlineSettings = FSlateBrushOutlineSettings(
-			2.f, FSlateColor(Outline), 1.f);
-		Border->SetBrush(Brush);
+		TerritoryUITheme::ApplySurface(Border, Fill, Outline, 2.f);
 	}
 
 	void SetLiveEventText(UTextBlock* Text, int32 Size, const FLinearColor& Color)
 	{
-		if (!Text) return;
-		if (UNarrativeCommonTextBlock* NarrativeText =
-			Cast<UNarrativeCommonTextBlock>(Text))
-		{
-			const UTerritoryDeveloperSettings* Settings =
-				GetDefault<UTerritoryDeveloperSettings>();
-			const TSubclassOf<UCommonTextStyle> Style = Settings
-				? Settings->DefaultTerritoryTextStyle.LoadSynchronous() : nullptr;
-			if (Style)
-			{
-				NarrativeText->SetStyle(Style);
-			}
-		}
-		FSlateFontInfo Font = Text->GetFont();
-		Font.Size = Size;
-		Text->SetFont(Font);
-		Text->SetColorAndOpacity(FSlateColor(Color));
-		Text->SetAutoWrapText(true);
+		TerritoryUITheme::ApplyText(Text, Size, Color);
 	}
 }
 
@@ -153,11 +112,7 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 		ButtonSize->SetHeightOverride(42.f);
 		WaypointButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 			ButtonClass, TEXT("LiveEventWaypointButton"));
-		if (const TSubclassOf<UCommonButtonStyle> Style =
-			Settings->DefaultTerritoryButtonStyle.LoadSynchronous())
-		{
-			WaypointButton->SetStyle(Style);
-		}
+		TerritoryUITheme::ApplyButton(WaypointButton);
 		WaypointButton->SetMinDimensions(0, 0);
 		WaypointButton->SetButtonText(NSLOCTEXT(
 			"TerritoryLiveEvents", "SetWaypoint", "TRACK"));
