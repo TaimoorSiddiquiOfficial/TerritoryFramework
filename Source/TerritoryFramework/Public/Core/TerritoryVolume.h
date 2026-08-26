@@ -52,6 +52,8 @@ class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrative
 	friend class FTerritoryUIPlayerLocationDistrictTest;
 	friend class FTerritoryUIDistrictWaypointResolutionTest;
 	friend class FTerritoryUILockedMarkerSilenceTest;
+	friend class FTerritoryUIPlaceNarrativePOIBridgeTest;
+	friend class FTerritoryUIPlaceFirstDiscoveryTest;
 
 public:
 	ATerritoryVolume();

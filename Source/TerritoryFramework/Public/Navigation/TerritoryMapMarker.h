@@ -42,6 +42,10 @@ public:
 	void RefreshTerritoryPresentation();
 
 protected:
+	virtual void OnMarkerAdded_Implementation(
+		UNarrativeNavigationComponent* OwnerNavComp) override;
+	virtual void OnMarkerRemoved_Implementation(
+		UNarrativeNavigationComponent* OwnerNavComp) override;
 	virtual FLinearColor GetMarkerColor_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType) const override;
 	virtual FText GetMarkerDisplayText_Implementation(UNarrativeNavigationComponent* Selector, const FGameplayTag& NavigatorType, FText& OutSubtitleText) const override;
 	virtual FText GetMarkerActionText_Implementation(UNarrativeNavigationComponent* Selector) const override;
@@ -88,6 +92,14 @@ private:
 
 	bool bTracked = false;
 	bool bRegisteredWithNavigation = false;
+	TSet<TWeakObjectPtr<UNarrativeNavigationComponent>> BoundPOINavigationComponents;
+	TSet<TWeakObjectPtr<UNarrativeNavigationComponent>> OwnedDynamicPOIData;
+
+	void RegisterPlacePOIData(UNarrativeNavigationComponent* NavigationComponent);
+	void UnregisterPlacePOIData(UNarrativeNavigationComponent* NavigationComponent);
+
+	UFUNCTION()
+	void OnNarrativePOIDiscovered(const FGameplayTag& POITag);
 
 	UFUNCTION()
 	void OnTerritoryChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);

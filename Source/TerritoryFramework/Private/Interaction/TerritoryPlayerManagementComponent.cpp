@@ -9,9 +9,12 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Net/UnrealNetwork.h"
 #include "UnrealFramework/NarrativePlayerController.h"
+#include "Navigation/NarrativeNavigationComponent.h"
 #include "Widgets/NarrativeGameplayHUD.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -33,13 +36,69 @@ void UTerritoryPlayerManagementComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	BindLiveEventSources();
+
+	APlayerController* PlayerController = Cast<APlayerController>(GetOwner());
+	if (bDiscoverPlacesOnEnter && PlayerController
+		&& (PlayerController->HasAuthority() || PlayerController->IsLocalController())
+		&& GetWorld())
+	{
+		PollTerritoryPOIDiscovery();
+		GetWorld()->GetTimerManager().SetTimer(
+			PlaceDiscoveryTimer, this,
+			&UTerritoryPlayerManagementComponent::PollTerritoryPOIDiscovery,
+			FMath::Max(0.10f, PlaceDiscoveryInterval), true);
+	}
 }
 
 void UTerritoryPlayerManagementComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(PlaceDiscoveryTimer);
+	}
+	LastPlayerPlace = nullptr;
 	UnbindLiveEventSources();
 	Super::EndPlay(EndPlayReason);
+}
+
+void UTerritoryPlayerManagementComponent::PollTerritoryPOIDiscovery()
+{
+	RefreshTerritoryPOIDiscovery();
+}
+
+bool UTerritoryPlayerManagementComponent::RefreshTerritoryPOIDiscovery()
+{
+	APlayerController* PlayerController = Cast<APlayerController>(GetOwner());
+	APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+	UWorld* World = GetWorld();
+	UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	UNarrativeNavigationComponent* NavigationComponent = PlayerController
+		? PlayerController->FindComponentByClass<UNarrativeNavigationComponent>() : nullptr;
+	if (!bDiscoverPlacesOnEnter || !PlayerController || !Pawn || !Registry
+		|| !NavigationComponent
+		|| (!PlayerController->HasAuthority() && !PlayerController->IsLocalController()))
+	{
+		LastPlayerPlace = nullptr;
+		return false;
+	}
+
+	ATerritoryProperty* Place = Cast<ATerritoryProperty>(
+		Registry->GetTerritoryAtLocation(Pawn->GetActorLocation()));
+	if (!Place || !UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
+		PlayerController, Place) || !Place->GetTerritoryTag().IsValid())
+	{
+		LastPlayerPlace = nullptr;
+		return false;
+	}
+
+	LastPlayerPlace = Place;
+	const FGameplayTag POITag = Place->GetTerritoryTag();
+	if (NavigationComponent->HasDiscoveredPOI(POITag)) return false;
+
+	NavigationComponent->DiscoverPOI(POITag);
+	return NavigationComponent->HasDiscoveredPOI(POITag);
 }
 
 void UTerritoryPlayerManagementComponent::PrepareForSave_Implementation()

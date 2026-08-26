@@ -135,6 +135,7 @@ Success is reported only after the final desired/live invariant is verified. A p
 | `OnGuardPurchaseResult` | Owning-client result for both add/remove operations |
 | `OnAssaultNotification` | Owning-client strategic assault notification |
 | `OnCounterHappened` | Reliable owning-client event for each committed counterattack state transition |
+| `DiscoverCurrentTerritoryPlace()` | Check the player's current Place and record its first Narrative POI discovery |
 
 ## POI behavior
 
@@ -150,6 +151,20 @@ Blacksmith, and selecting Castle Hill tracks Farm. With several visible Places, 
 wins first, then a Place not held by the viewer, then the nearest friendly Place; the Territory
 tag gives deterministic tie-breaking. Only that Place enters Narrative compass and screen-space
 domains. Clicking the selected row/report again clears it.
+
+Changing a marker's domain container does not create widgets in a newly added Narrative domain by
+itself. The Waypoint operation therefore performs one bounded remove/add registration: tracking
+re-registers the Place with map, minimap, compass, and screen-space domains; clearing it
+re-registers the same Place as map/minimap intel only. There is still exactly one Territory marker.
+
+Every loaded, hierarchy-visible Place also contributes a runtime Narrative `FPOIData` record keyed
+by its Territory tag. The record sets `Needs Map Marker` to false because the Territory marker is
+already the visual map icon. When the player first enters that Place,
+`DiscoverCurrentTerritoryPlace()` calls Narrative's `DiscoverPOI`; Narrative stores the discovery
+tag and broadcasts `OnPOIDiscovered` once. A locked Place, or a Place below a locked/unloaded
+District or City, is neither registered nor discovered. The player-management component enables
+this check with **Discover Places On Enter** and uses **Place Discovery Interval** (0.25 seconds by
+default), so projects do not need a separate overlap Blueprint.
 
 This route is local presentation state. It is neither replicated nor saved and it never changes
 Territory ownership. `ATerritoryVolume` remains the owner/state authority, the hierarchy reducer
@@ -175,4 +190,7 @@ No duplicate map, minimap, compass, POI discovery, or waypoint stack is created.
 - A tracked Place still appears on Narrative's compass and screen-space layer without navmesh data.
   Narrative's optional ground breadcrumb line additionally requires valid RecastNavMesh coverage
   between the player and that Place; otherwise Narrative reports that no breadcrumb path exists.
+- If a project already bakes the same Territory tag into `MapTileBounds.POIs`, keep that authored
+  POI's **Needs Map Marker** setting disabled to avoid a second visual icon. The authored record may
+  still supply linked POI, fast-travel, and project-specific discovery data.
 - Dedicated-server/two-client input, focus, and interaction remain required runtime release tests.

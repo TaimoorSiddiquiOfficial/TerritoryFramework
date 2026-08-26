@@ -13,6 +13,7 @@
 
 class ATerritoryDistrictManagementPoint;
 class ATerritoryDistrict;
+class ATerritoryProperty;
 class ATerritoryVolume;
 class APlayerController;
 
@@ -81,6 +82,30 @@ public:
 		meta=(ClampMin="-1.0",
 			ToolTip="Seconds to keep archived reports. -1 keeps them until the history limit is reached; 0 retires them immediately."))
 	float ExpiredEventRetentionDuration = -1.f;
+
+	/**
+	 * Use Narrative Navigation's first-discovery state when this player enters an
+	 * unlocked Place. The Territory tag is reused as the stable POI identity.
+	 * Example: entering Blacksmith calls Discover POI once; later visits stay quiet.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Navigation",
+		meta=(DisplayName="Discover Places On Enter",
+			ToolTip="When enabled, entering an unlocked Territory Place calls Narrative Navigation Discover POI exactly once for that Place."))
+	bool bDiscoverPlacesOnEnter = true;
+
+	/** How often the local/authoritative player location is checked without enabling actor tick. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Navigation",
+		meta=(ClampMin="0.10", UIMin="0.10", Units="s",
+			ToolTip="Seconds between Place-entry checks. Example: 0.25 discovers a Place within one quarter second."))
+	float PlaceDiscoveryInterval = 0.25f;
+
+	/**
+	 * Immediately checks the player's current Place and forwards first discovery
+	 * to Narrative Navigation. Returns true only when a new POI was discovered.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|Navigation",
+		meta=(DisplayName="Discover Current Territory Place"))
+	bool RefreshTerritoryPOIDiscovery();
 
 	/** Server-side targeted notification route for this owning controller only. */
 	void SendAssaultNotification(const FTerritoryAssaultRecord& Assault);
@@ -166,7 +191,11 @@ private:
 
 	TMap<TWeakObjectPtr<ATerritoryVolume>, ETerritoryState> ObservedTerritoryStates;
 	TMap<TWeakObjectPtr<ATerritoryVolume>, FGameplayTagContainer> ObservedTerritoryCapabilities;
+	TWeakObjectPtr<ATerritoryProperty> LastPlayerPlace;
+	FTimerHandle PlaceDiscoveryTimer;
 	int32 NextIntelligenceSequence = 0;
+
+	void PollTerritoryPOIDiscovery();
 
 	void BindLiveEventSources();
 	void UnbindLiveEventSources();

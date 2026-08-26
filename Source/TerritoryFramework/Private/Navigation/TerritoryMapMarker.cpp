@@ -1,4 +1,5 @@
 #include "Navigation/TerritoryMapMarker.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -6,6 +7,7 @@
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Navigation/NarrativeNavigationComponent.h"
 #include "Navigation/NavigatorGameplayTags.h"
+#include "Navigation/MapTileBounds.h"
 #include "Components/BoxComponent.h"
 #include "Rendering/DrawElements.h"
 #include "Blueprint/UserWidget.h"
@@ -22,6 +24,78 @@ UTerritoryMapMarker::UTerritoryMapMarker(const FObjectInitializer& ObjectInitial
 	SetDefaultDomains(MapDomains);
 	DefaultMarkerActionText = NSLOCTEXT(
 		"TerritoryMapMarker", "TrackTerritoryAction", "Set Territory Waypoint");
+}
+
+void UTerritoryMapMarker::OnMarkerAdded_Implementation(
+	UNarrativeNavigationComponent* OwnerNavComp)
+{
+	Super::OnMarkerAdded_Implementation(OwnerNavComp);
+	RegisterPlacePOIData(OwnerNavComp);
+}
+
+void UTerritoryMapMarker::OnMarkerRemoved_Implementation(
+	UNarrativeNavigationComponent* OwnerNavComp)
+{
+	UnregisterPlacePOIData(OwnerNavComp);
+	Super::OnMarkerRemoved_Implementation(OwnerNavComp);
+}
+
+void UTerritoryMapMarker::RegisterPlacePOIData(
+	UNarrativeNavigationComponent* NavigationComponent)
+{
+	ATerritoryProperty* Place = Cast<ATerritoryProperty>(TerritoryVolume.Get());
+	if (!NavigationComponent || !Place || !Place->GetTerritoryTag().IsValid()) return;
+
+	const FGameplayTag POITag = Place->GetTerritoryTag();
+	NavigationComponent->OnPOIDiscovered.AddUniqueDynamic(
+		this, &UTerritoryMapMarker::OnNarrativePOIDiscovered);
+	BoundPOINavigationComponents.Add(NavigationComponent);
+
+	// Narrative normally fills this lookup from MapTileBounds. Territory Places are
+	// streamed gameplay actors, so contribute data at runtime while retaining the
+	// Territory marker as the single visual marker (bNeedsMapMarker=false).
+	if (!NavigationComponent->POILookupMap.Contains(POITag))
+	{
+		FPOIData POIData;
+		POIData.POITag = POITag;
+		POIData.POILocation = Place->GetActorLocation();
+		POIData.POIFastTravelSpot = Place->GetActorTransform();
+		POIData.POIDisplayName = Place->GetTerritoryDisplayName();
+		POIData.POISubtitle = NSLOCTEXT(
+			"TerritoryMapMarker", "TerritoryPlacePOISubtitle", "Territory Place");
+		POIData.MapMarkerIcon = DefaultMarkerSettings.LocationIcon;
+		POIData.bNeedsMapMarker = false;
+		POIData.bSupportsFastTravel = false;
+		POIData.bIsDiscoverable = true;
+		NavigationComponent->POILookupMap.Add(POITag, MoveTemp(POIData));
+		OwnedDynamicPOIData.Add(NavigationComponent);
+	}
+}
+
+void UTerritoryMapMarker::UnregisterPlacePOIData(
+	UNarrativeNavigationComponent* NavigationComponent)
+{
+	if (!NavigationComponent) return;
+	NavigationComponent->OnPOIDiscovered.RemoveDynamic(
+		this, &UTerritoryMapMarker::OnNarrativePOIDiscovered);
+	BoundPOINavigationComponents.Remove(NavigationComponent);
+
+	if (OwnedDynamicPOIData.Remove(NavigationComponent) > 0
+		&& TerritoryVolume.IsValid())
+	{
+		NavigationComponent->POILookupMap.Remove(
+			TerritoryVolume->GetTerritoryTag());
+	}
+}
+
+void UTerritoryMapMarker::OnNarrativePOIDiscovered(const FGameplayTag& POITag)
+{
+	if (TerritoryVolume.IsValid()
+		&& POITag == TerritoryVolume->GetTerritoryTag()
+		&& (!GetWorld() || !GetWorld()->bIsTearingDown))
+	{
+		RefreshMarker();
+	}
 }
 
 void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
@@ -136,6 +210,18 @@ void UTerritoryMapMarker::RefreshTerritoryPresentation()
 			Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Compass);
 			Domains.AddTag(FNavigatorGameplayTags::Get().NavigatorTypes_Screenspace);
 		}
+	}
+	const bool bDomainsChanged = MarkerDomain != Domains;
+
+	// Narrative navigator widgets select a marker when it is added. A refresh can
+	// update an existing icon, but it does not add that marker to a newly introduced
+	// domain. Re-register only when domain membership changes so tracking creates
+	// the compass/screen-space widgets and clearing removes them again.
+	if (!bWorldTearingDown && bRegisteredWithNavigation
+		&& (!bVisible || bDomainsChanged))
+	{
+		bRegisteredWithNavigation = false;
+		RemoveMarker();
 	}
 	SetDomains(Domains);
 	SetDrawMarkerPathEnabled(bVisible && bTracked);

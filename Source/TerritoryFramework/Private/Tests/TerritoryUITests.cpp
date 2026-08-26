@@ -11,6 +11,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Navigation/NarrativeNavigationComponent.h"
 #include "Navigation/TerritoryMapMarker.h"
 #include "Navigation/NavigatorGameplayTags.h"
 #include "UI/TerritoryActivatableWidget.h"
@@ -91,6 +92,14 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Community projects can scale compact Territory typography"),
 		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
 			TEXT("TerritoryTextScale")));
+	const UClass* PlayerManagementClass = UTerritoryPlayerManagementComponent::StaticClass();
+	TestTrue(TEXT("Place discovery can be requested from Blueprint"),
+		TerritoryUITest::IsBlueprintCallable(
+			PlayerManagementClass, TEXT("RefreshTerritoryPOIDiscovery")));
+	TestNotNull(TEXT("Place entry discovery is configurable"),
+		PlayerManagementClass->FindPropertyByName(TEXT("bDiscoverPlacesOnEnter")));
+	TestNotNull(TEXT("Place discovery interval is configurable"),
+		PlayerManagementClass->FindPropertyByName(TEXT("PlaceDiscoveryInterval")));
 
 	const UClass* LibraryClass = UTerritoryUIBlueprintLibrary::StaticClass();
 	TestTrue(TEXT("OpenTerritoryMenu is Blueprint callable"),
@@ -598,6 +607,141 @@ bool FTerritoryUILockedMarkerSilenceTest::RunTest(const FString& Parameters)
 		Domains && Domains->IsEmpty());
 
 	Marker->ClearTerritoryBinding();
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIPlaceNarrativePOIBridgeTest,
+	"TerritoryFramework.UI.Regression.PlaceRegistersNarrativePOIData",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIPlaceNarrativePOIBridgeTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Narrative POI bridge world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	APlayerController* PlayerController = World->SpawnActor<APlayerController>(
+		APlayerController::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* Place = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	UNarrativeNavigationComponent* NavigationComponent = PlayerController
+		? NewObject<UNarrativeNavigationComponent>(PlayerController) : nullptr;
+	if (!PlayerController || !Place || !NavigationComponent)
+	{
+		AddError(TEXT("Narrative POI bridge fixture could not be created"));
+		World->DestroyWorld(false);
+		return false;
+	}
+	PlayerController->AddInstanceComponent(NavigationComponent);
+	NavigationComponent->RegisterComponent();
+
+	const FGameplayTag PlaceTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Place->TerritoryTag = PlaceTag;
+	Place->TerritoryGUID = FGuid::NewGuid();
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	TestNotNull(TEXT("Narrative POI bridge registry created"), Registry);
+	if (!Registry
+		|| Registry->RegisterTerritory(Place) != ETerritoryRegistrationResult::Success)
+	{
+		AddError(TEXT("Narrative POI bridge Place could not be registered"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	UTerritoryMapMarker* Marker = NewObject<UTerritoryMapMarker>(World);
+	Marker->SetTerritoryVolume(Place);
+	// The isolated automation world has no ULocalPlayer, so drive the same callback
+	// Narrative invokes after adding a marker to a local navigation component.
+	Marker->OnMarkerAdded(NavigationComponent);
+	TestTrue(TEXT("A streamed Territory Place contributes Narrative POI lookup data"),
+		NavigationComponent->POILookupMap.Contains(PlaceTag));
+
+	Marker->SetTracked(true);
+	TestTrue(TEXT("Domain re-registration preserves the Narrative POI lookup"),
+		NavigationComponent->POILookupMap.Contains(PlaceTag));
+
+	Marker->OnMarkerRemoved(NavigationComponent);
+	Marker->ClearTerritoryBinding();
+	TestFalse(TEXT("A streamed-out dynamic Place removes only its contributed POI data"),
+		NavigationComponent->POILookupMap.Contains(PlaceTag));
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIPlaceFirstDiscoveryTest,
+	"TerritoryFramework.UI.Regression.PlaceEntryUsesNarrativeFirstDiscovery",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIPlaceFirstDiscoveryTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Place discovery world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	APlayerController* PlayerController = World->SpawnActor<APlayerController>(
+		APlayerController::StaticClass(), FTransform::Identity, SpawnParams);
+	APawn* Pawn = World->SpawnActor<APawn>(
+		APawn::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* VisiblePlace = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* LockedPlace = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform(FVector(2000.f, 0.f, 0.f)), SpawnParams);
+	UNarrativeNavigationComponent* NavigationComponent = PlayerController
+		? NewObject<UNarrativeNavigationComponent>(PlayerController) : nullptr;
+	UTerritoryPlayerManagementComponent* ManagementComponent = PlayerController
+		? NewObject<UTerritoryPlayerManagementComponent>(PlayerController) : nullptr;
+	if (!PlayerController || !Pawn || !VisiblePlace || !LockedPlace
+		|| !NavigationComponent || !ManagementComponent)
+	{
+		AddError(TEXT("Place discovery fixture could not be created"));
+		World->DestroyWorld(false);
+		return false;
+	}
+	PlayerController->Possess(Pawn);
+	PlayerController->AddInstanceComponent(NavigationComponent);
+	NavigationComponent->RegisterComponent();
+
+	const FGameplayTag VisibleTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	const FGameplayTag LockedTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	VisiblePlace->TerritoryTag = VisibleTag;
+	VisiblePlace->TerritoryGUID = FGuid::NewGuid();
+	LockedPlace->TerritoryTag = LockedTag;
+	LockedPlace->TerritoryGUID = FGuid::NewGuid();
+	LockedPlace->ForceSetTerritoryState(ETerritoryState::Locked);
+
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry
+		|| Registry->RegisterTerritory(VisiblePlace) != ETerritoryRegistrationResult::Success
+		|| Registry->RegisterTerritory(LockedPlace) != ETerritoryRegistrationResult::Success)
+	{
+		AddError(TEXT("Place discovery Territories could not be registered"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	TestTrue(TEXT("Entering a visible Place forwards first discovery to Narrative"),
+		ManagementComponent->RefreshTerritoryPOIDiscovery());
+	TestTrue(TEXT("Narrative remembers the discovered Place"),
+		NavigationComponent->HasDiscoveredPOI(VisibleTag));
+	TestFalse(TEXT("A repeated check does not rediscover the same Place"),
+		ManagementComponent->RefreshTerritoryPOIDiscovery());
+
+	Pawn->SetActorLocation(LockedPlace->GetActorLocation());
+	TestFalse(TEXT("A story-locked Place remains silent on entry"),
+		ManagementComponent->RefreshTerritoryPOIDiscovery());
+	TestFalse(TEXT("A locked Place is not added to Narrative discovery state"),
+		NavigationComponent->HasDiscoveredPOI(LockedTag));
+
 	World->DestroyWorld(false);
 	return true;
 }

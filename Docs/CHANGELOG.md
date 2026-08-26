@@ -15,6 +15,12 @@
   actor pointers or creating a second POI/map system.
 - Territory marker adapters now suppress Narrative registration, removal, and widget refresh
   callbacks while a world is tearing down, after the owning player and HUD can already be gone.
+- Fixed tracked Place icons failing to appear when Waypoint added compass/screen-space domains.
+  Territory markers now perform one bounded Narrative remove/add when domain membership changes,
+  allowing each navigator widget to create or remove its matching icon without duplicate markers.
+- Loaded, hierarchy-visible Places now contribute Narrative POI data through their Territory tag
+  without creating a second visual marker. Entering a Place records its first discovery once;
+  locked Places and Places below locked or unloaded ancestors remain completely silent.
 
 ## Unreleased — 2026-08-26 (Quest Journal template contract)
 
