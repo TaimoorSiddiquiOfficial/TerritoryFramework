@@ -144,6 +144,25 @@ public:
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI")
 	TSoftClassPtr<UCommonButtonStyle> DefaultTerritoryButtonStyle;
 
+	/**
+	 * Compact selector style for Territory navigation tabs.
+	 * Easy example: Overview, Places, Garrison, Economy, and Diplomacy use this
+	 * style so the selected page is easy to see without looking like a command.
+	 * When empty, Default Territory Button Style is used.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Territory Tab Button Style"))
+	TSoftClassPtr<UCommonButtonStyle> TerritoryTabButtonStyle;
+
+	/**
+	 * Strong action style for buttons that perform a Territory command.
+	 * Easy example: Set Waypoint, Espionage, Add Guard, Reinforce, and Close use
+	 * this style. When empty, Default Territory Button Style is used.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Territory Action Button Style"))
+	TSoftClassPtr<UCommonButtonStyle> TerritoryActionButtonStyle;
+
 	/** Body style for runtime-created Narrative CommonText rows. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
 	TSoftClassPtr<UCommonTextStyle> DefaultTerritoryTextStyle;

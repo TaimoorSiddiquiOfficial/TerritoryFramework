@@ -21,6 +21,14 @@ enum class ETerritorySurfaceRole : uint8
 	Screen
 };
 
+/** Navigation selectors and gameplay commands intentionally use different emphasis. */
+enum class ETerritoryButtonRole : uint8
+{
+	Action,
+	ToggleAction,
+	Tab
+};
+
 /** Shared Territory presentation adapter over Narrative CommonUI styles. */
 namespace TerritoryUITheme
 {
@@ -35,5 +43,6 @@ namespace TerritoryUITheme
 
 	bool ApplyProgress(UProgressBar* ProgressBar, bool bUseAuthoredFill);
 
-	void ApplyButton(UNarrativeCommonButtonBase* Button);
+	void ApplyButton(UNarrativeCommonButtonBase* Button,
+		ETerritoryButtonRole Role = ETerritoryButtonRole::Action);
 }

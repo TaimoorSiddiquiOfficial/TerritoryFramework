@@ -386,6 +386,29 @@ void UTerritoryJournalWidget::NativeConstruct()
 			TEXT("Territory Journal cannot populate Active/Captured lists: authored panel bindings are missing."));
 	}
 
+	// Narrative's Skills screen gives page selectors and command buttons different
+	// visual weight. Keep that same readable contract in every authored Territory
+	// widget, while generated command buttons receive the action role by default.
+	for (UNarrativeCommonButtonBase* Button : {
+		Btn_TerritoryTab.Get(), Btn_EarningsTab.Get(), Btn_LossTab.Get(),
+		Btn_OverviewDetailTab.Get(), Btn_PlacesDetailTab.Get(),
+		Btn_GarrisonDetailTab.Get(), Btn_EconomyDetailTab.Get(),
+		Btn_ProductionDetailTab.Get(), Btn_ThreatsDetailTab.Get(),
+		Btn_DiplomacyDetailTab.Get(), Btn_IntelligenceAll.Get(),
+		Btn_IntelligenceConflict.Get(), Btn_IntelligenceControl.Get(),
+		Btn_IntelligenceEconomy.Get(), Btn_IntelligenceCommand.Get(),
+		Btn_IntelligenceProduction.Get(), Btn_IntelligenceDiplomacy.Get() })
+	{
+		TerritoryUITheme::ApplyButton(Button, ETerritoryButtonRole::Tab);
+	}
+	for (UNarrativeCommonButtonBase* Button : {
+		Btn_CloseSelectedTerritory.Get(), Btn_CloseCommandDrawer.Get(),
+		Btn_CommandAddGuard.Get(), Btn_CommandRemoveGuard.Get(),
+		Btn_CommandAddFiveGuards.Get(), Btn_CommandRemoveFiveGuards.Get() })
+	{
+		TerritoryUITheme::ApplyButton(Button, ETerritoryButtonRole::Action);
+	}
+
 	if (Btn_TerritoryTab)
 	{
 		Btn_TerritoryTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleTerritoryTabClicked);

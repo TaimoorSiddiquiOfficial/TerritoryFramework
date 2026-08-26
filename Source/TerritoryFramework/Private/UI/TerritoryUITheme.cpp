@@ -157,15 +157,33 @@ namespace TerritoryUITheme
 		return FillTexture != nullptr;
 	}
 
-	void ApplyButton(UNarrativeCommonButtonBase* Button)
+	void ApplyButton(UNarrativeCommonButtonBase* Button,
+		ETerritoryButtonRole Role)
 	{
 		const UTerritoryDeveloperSettings* Settings =
 			GetDefault<UTerritoryDeveloperSettings>();
-		const TSubclassOf<UCommonButtonStyle> Style = Settings
-			? Settings->DefaultTerritoryButtonStyle.LoadSynchronous() : nullptr;
+		TSubclassOf<UCommonButtonStyle> Style;
+		if (Settings)
+		{
+			Style = Role == ETerritoryButtonRole::Tab
+				? Settings->TerritoryTabButtonStyle.LoadSynchronous()
+				: Settings->TerritoryActionButtonStyle.LoadSynchronous();
+			if (!Style)
+			{
+				Style = Settings->DefaultTerritoryButtonStyle.LoadSynchronous();
+			}
+		}
 		if (Button && Style)
 		{
 			Button->SetStyle(Style);
+			if (Role == ETerritoryButtonRole::Tab
+				|| Role == ETerritoryButtonRole::ToggleAction)
+			{
+				// CommonButton ignores SetIsSelected while selection is disabled.
+				// Tabs and stateful commands (for example a tracked Waypoint)
+				// therefore opt into selection without making every action a toggle.
+				Button->SetIsSelectable(true);
+			}
 		}
 	}
 }

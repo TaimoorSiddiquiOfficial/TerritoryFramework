@@ -2484,6 +2484,8 @@ bool FTFContract_DeveloperSettingsExtended::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Has MaxPatrolRouteNodes"), TFTestUtils::HasProperty(Class, TEXT("MaxPatrolRouteNodes")));
 	TestTrue(TEXT("Has DefaultNarrativeButtonClass"), TFTestUtils::HasProperty(Class, TEXT("DefaultNarrativeButtonClass")));
 	TestTrue(TEXT("Has DefaultTerritoryButtonStyle"), TFTestUtils::HasProperty(Class, TEXT("DefaultTerritoryButtonStyle")));
+	TestTrue(TEXT("Has TerritoryTabButtonStyle"), TFTestUtils::HasProperty(Class, TEXT("TerritoryTabButtonStyle")));
+	TestTrue(TEXT("Has TerritoryActionButtonStyle"), TFTestUtils::HasProperty(Class, TEXT("TerritoryActionButtonStyle")));
 	TestTrue(TEXT("Has EconomyStartingGold"), TFTestUtils::HasProperty(Class, TEXT("EconomyStartingGold")));
 	TestTrue(TEXT("Has MaxCaptureHistory"), TFTestUtils::HasProperty(Class, TEXT("MaxCaptureHistory")));
 

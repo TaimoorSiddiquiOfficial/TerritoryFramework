@@ -164,6 +164,11 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 				WidgetTree->FindWidget(TEXT("ExpandHintText")));
 		}
 	}
+	TerritoryUITheme::ApplyButton(AddGuardButton, ETerritoryButtonRole::Action);
+	TerritoryUITheme::ApplyButton(RemoveGuardButton, ETerritoryButtonRole::Action);
+	TerritoryUITheme::ApplyButton(SetWaypointButton,
+		ETerritoryButtonRole::ToggleAction);
+	TerritoryUITheme::ApplyButton(EspionageButton, ETerritoryButtonRole::Action);
 	if (!EspionageButton && WidgetTree)
 	{
 		const UTerritoryDeveloperSettings* Settings =
@@ -204,14 +209,8 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 			EspionageSize->SetHeightOverride(48.f);
 			EspionageButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 				ButtonClass, TEXT("EspionageButton"));
-			if (SetWaypointButton && SetWaypointButton->GetStyle())
-			{
-				EspionageButton->SetStyle(SetWaypointButton->GetStyle()->GetClass());
-			}
-			else
-			{
-				TerritoryUITheme::ApplyButton(EspionageButton);
-			}
+			TerritoryUITheme::ApplyButton(
+				EspionageButton, ETerritoryButtonRole::Action);
 			// The shared Narrative button template is designed for full-width menu
 			// actions and carries a 300 px minimum. This row intentionally supplies
 			// its own compact SizeBox, so retaining that minimum makes the label and
