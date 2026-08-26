@@ -172,4 +172,7 @@ No duplicate map, minimap, compass, POI discovery, or waypoint stack is created.
 ## Known limits
 
 - The screen does not directly schedule/cancel assaults or alter diplomacy; those actions require their authoritative systems and project policy.
+- A tracked Place still appears on Narrative's compass and screen-space layer without navmesh data.
+  Narrative's optional ground breadcrumb line additionally requires valid RecastNavMesh coverage
+  between the player and that Place; otherwise Narrative reports that no breadcrumb path exists.
 - Dedicated-server/two-client input, focus, and interaction remain required runtime release tests.
