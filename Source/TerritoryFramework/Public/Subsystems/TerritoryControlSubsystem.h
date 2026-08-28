@@ -65,6 +65,19 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	bool TryRegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
 
+	/**
+	 * Register a physical contester without granting automatic capture progress.
+	 *
+	 * This is the story-confrontation path: entering the Place changes it to
+	 * Contested so its guards can react, but defeating those guards still requires
+	 * the authored owner dialogue/quest event to transfer ownership. Multiplayer
+	 * capture points should continue to use Try Register Attacker.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture",
+		meta = (DisplayName = "Try Register Contester (No Capture Progress)"))
+	bool TryRegisterContester(ATerritoryVolume* Territory, AActor* Attacker,
+		const FGameplayTag& Faction);
+
 	/** Unregister an actor. Removes identity, decrements count only if actor was registered. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
@@ -96,6 +109,16 @@ public:
 		const ATerritoryVolume* Territory,
 		const FGameplayTag& AttackingFaction) const;
 
+	/**
+	 * Side-effect-free admission for beginning a conflict. Unlike capture
+	 * eligibility, living defenders are allowed: they are the fight that must be
+	 * resolved before ownership can change.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
+	ECaptureResult GetContestEligibility(
+		const ATerritoryVolume* Territory,
+		const FGameplayTag& AttackingFaction) const;
+
 	/** Native persistence bridge for resuming a saved contested territory. */
 	void RestoreCaptureState(
 		ATerritoryVolume* Territory,
@@ -119,6 +142,8 @@ private:
 	{
 		/** Actor sets per faction — prevents count inflation from duplicate registrations */
 		TMap<FGameplayTag, TSet<TWeakObjectPtr<AActor>>> AttackersByFaction;
+		/** Subset of AttackersByFaction which holds Contested state but adds no pressure. */
+		TMap<FGameplayTag, TSet<TWeakObjectPtr<AActor>>> NonCapturingAttackersByFaction;
 		TMap<FGameplayTag, float> CaptureProgressByFaction;
 	};
 
@@ -155,6 +180,8 @@ private:
 	void AddAttackerRegistration(AActor* Attacker);
 	void ReleaseAttackerRegistration(const TWeakObjectPtr<AActor>& Attacker);
 	int32 PruneInvalidAttackers(TSet<TWeakObjectPtr<AActor>>& Attackers);
+	int32 GetActiveCapturePressure(const ATerritoryVolume* Territory,
+		const FGameplayTag& Faction) const;
 	void ReleaseTerritoryAttackers(ATerritoryVolume* Territory);
 	void RemoveAttackerFromAllCaptures(AActor* Attacker);
 	UNarrativeAbilitySystemComponent* ResolveAttackerASC(AActor* Attacker) const;
@@ -175,6 +202,14 @@ private:
 	ECaptureResult ValidateCaptureAttempt(
 		const ATerritoryVolume* Territory,
 		const FGameplayTag& AttackingFaction) const;
+
+	/** Conflict admission is deliberately separate from capture completion. */
+	ECaptureResult ValidateContestAttempt(
+		const ATerritoryVolume* Territory,
+		const FGameplayTag& AttackingFaction) const;
+
+	bool TryRegisterAttackerInternal(ATerritoryVolume* Territory, AActor* Attacker,
+		const FGameplayTag& Faction, bool bContributesCaptureProgress);
 
 	/**
 	 * Validate + optionally commit contested state and broadcast.

@@ -42,6 +42,46 @@ Rebels, the same dialogue asset captures for Rebels without a hard-coded Heroes 
 the eligibility condition then applies the same defender, lock, hierarchy, and diplomacy
 rules as physical capture.
 
+#### Ready-to-use owner handover
+
+Place `ATerritoryStoryOwnerSpawner` beside the property instead of placing a second,
+always-active NPC. Assign its `Owner Spawn > NPC To Spawn` to a normal Narrative Pro
+`NPCDefinition` whose `Dialogue` is the surrender dialogue. The spawner derives from
+Narrative Pro's `ANPCSpawner`, remains inactive before handover, and saves and replicates
+`Handover Activated`.
+
+Add `UTerritoryOwnerHandoverEvent` to the correct modular State Config event list:
+
+- A defended, already-unlocked Place normally uses `On All Defenders Defeated Events`.
+- A story-locked Place uses the Locked State Config's `Exit Events`, so its owner stays
+  silent until the authored quest, ownership, or diplomacy conditions unlock it.
+
+The event accepts a direct owner-spawner reference and a Territory tag fallback. The
+fallback keeps the event usable when World Partition or actor-reference serialization
+cannot retain the direct reference. On the server, it spawns exactly one owner and can
+start that NPC's Narrative dialogue immediately. It does not create a client duplicate.
+
+For a story-only Place, keep `Capture Enabled` on but turn off
+`Contributes Automatic Capture Progress`. Entering the authored zone can then begin
+`Contested` while defenders are alive, which lets the normal `Contested + War` guard
+rule start the fight. Living defenders block capture completion, and the zone holds at
+`0%` after they die; only the owner dialogue or quest event transfers ownership.
+
+For multiplayer/domination, leave `Contributes Automatic Capture Progress` on. The same
+zone then fills the normal pressure meter after defenders are gone.
+
+Current example in `/Game/HopDistrictTest`:
+
+- Blacksmith has three guards. Their final defeat fires the owner handover event, which
+  activates `StoryOwner_Blacksmith` and opens `DBP_BlacksmithHandover`.
+- Farm Hill keeps its existing Locked State Config conditions. Exiting Locked activates
+  `StoryOwner_Farm` and opens `DBP_FarmHandover`.
+- Both dialogue choices use `TerritoryCaptureEligibilityCondition` followed by
+  `TerritoryCaptureEvent`, with `Narrative Target Faction`. The exact player faction at
+  the time of the choice becomes the new owner; Heroes is not hard-coded.
+- Both physical capture points are enabled in story-confrontation mode. They begin and
+  hold `Contested` but do not fill the automatic capture meter.
+
 ## Unlock for a reason
 
 Locked Places should remain silent: they do not appear as capture choices and the

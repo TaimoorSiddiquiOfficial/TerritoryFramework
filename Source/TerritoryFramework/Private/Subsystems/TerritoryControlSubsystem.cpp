@@ -138,6 +138,31 @@ int32 UTerritoryControlSubsystem::PruneInvalidAttackers(TSet<TWeakObjectPtr<AAct
 	return Attackers.Num();
 }
 
+int32 UTerritoryControlSubsystem::GetActiveCapturePressure(
+	const ATerritoryVolume* Territory, const FGameplayTag& Faction) const
+{
+	if (!Territory) return 0;
+	const FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
+	const TSet<TWeakObjectPtr<AActor>>* Attackers = State
+		? State->AttackersByFaction.Find(Faction) : nullptr;
+	if (!Attackers) return 0;
+	const TSet<TWeakObjectPtr<AActor>>* NonCapturing =
+		State->NonCapturingAttackersByFaction.Find(Faction);
+
+	int32 Count = 0;
+	for (const TWeakObjectPtr<AActor>& Attacker : *Attackers)
+	{
+		AActor* Actor = Attacker.Get();
+		if (!Actor || (NonCapturing && NonCapturing->Contains(Attacker))) continue;
+		if (const UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Actor))
+		{
+			if (ASC->IsDead()) continue;
+		}
+		++Count;
+	}
+	return Count;
+}
+
 void UTerritoryControlSubsystem::ReleaseTerritoryAttackers(ATerritoryVolume* Territory)
 {
 	if (!Territory) return;
@@ -175,6 +200,11 @@ void UTerritoryControlSubsystem::RemoveAttackerFromAllCaptures(AActor* Attacker)
 		for (const FGameplayTag& Faction : EmptyFactions)
 		{
 			TerritoryPair.Value.AttackersByFaction.Remove(Faction);
+			TerritoryPair.Value.NonCapturingAttackersByFaction.Remove(Faction);
+		}
+		for (auto& NonCapturingPair : TerritoryPair.Value.NonCapturingAttackersByFaction)
+		{
+			NonCapturingPair.Value.Remove(WeakAttacker);
 		}
 	}
 
@@ -389,6 +419,41 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 	{
 		return ECaptureResult::InvalidTerritory;
 	}
+	if (Territory->GetTerritoryState() == ETerritoryState::Locked)
+	{
+		return ECaptureResult::Locked;
+	}
+
+	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
+	if (DefendingFaction.IsValid() && DefendingFaction == AttackingFaction)
+	{
+		return ECaptureResult::AlreadyOwned;
+	}
+
+	// Capture completion is stricter than beginning a contest. Living defenders
+	// block ownership/progress, but must not block the conflict which makes those
+	// defenders react to the intruding faction.
+	if (Territory->GetDefenderCount() > 0 && Territory->GetOwningFaction().IsValid())
+	{
+		return ECaptureResult::DefendersRemain;
+	}
+	if (DefendingFaction.IsValid() && !CanFactionCaptureTerritory(Territory, AttackingFaction))
+	{
+		return ECaptureResult::DiplomaticallyBlocked;
+	}
+
+	return ECaptureResult::Success;
+}
+
+ECaptureResult UTerritoryControlSubsystem::ValidateContestAttempt(
+	const ATerritoryVolume* Territory,
+	const FGameplayTag& AttackingFaction) const
+{
+	if (!Territory || !AttackingFaction.IsValid()) return ECaptureResult::InvalidTerritory;
+	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
+	{
+		return ECaptureResult::InvalidTerritory;
+	}
 
 	const ETerritoryState CurrentState = Territory->GetTerritoryState();
 	if (CurrentState == ETerritoryState::Locked)
@@ -400,13 +465,6 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 	if (DefendingFaction.IsValid() && DefendingFaction == AttackingFaction)
 	{
 		return ECaptureResult::AlreadyOwned;
-	}
-
-	// DefendersRemain must be checked BEFORE diplomacy so a faction with active defenders
-	// inside the territory gets the correct result code instead of DiplomaticallyBlocked.
-	if (Territory->GetDefenderCount() > 0 && DefendingFaction.IsValid())
-	{
-		return ECaptureResult::DefendersRemain;
 	}
 
 	if (DefendingFaction.IsValid() && !CanFactionCaptureTerritory(Territory, AttackingFaction))
@@ -422,6 +480,13 @@ ECaptureResult UTerritoryControlSubsystem::GetCaptureEligibility(
 	const FGameplayTag& AttackingFaction) const
 {
 	return ValidateCaptureAttempt(Territory, AttackingFaction);
+}
+
+ECaptureResult UTerritoryControlSubsystem::GetContestEligibility(
+	const ATerritoryVolume* Territory,
+	const FGameplayTag& AttackingFaction) const
+{
+	return ValidateContestAttempt(Territory, AttackingFaction);
 }
 
 ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction)
@@ -487,8 +552,14 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 		{
 			const FGameplayTag CommittedFaction = CurrentContestingFaction.IsValid()
 				? CurrentContestingFaction : AttackingFaction;
+			const FPerTerritoryState* ExistingCaptureState =
+				TerritoryCaptureState.Find(Territory);
+			const float* ExistingProgress = ExistingCaptureState
+				? ExistingCaptureState->CaptureProgressByFaction.Find(CommittedFaction)
+				: nullptr;
+			const float ContestProgress = ExistingProgress ? *ExistingProgress : 0.f;
 			if (!CommitCaptureReadModel(Territory, ETerritoryState::Contested,
-				CommittedFaction, Territory->GetControlProgress(),
+				CommittedFaction, ContestProgress,
 				ResolveCaptureContext(Territory, AttackingFaction)))
 			{
 				return FinishValidation(ECaptureResult::InvalidTerritory);
@@ -874,6 +945,19 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 
 bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
 {
+	return TryRegisterAttackerInternal(Territory, Attacker, Faction, true);
+}
+
+bool UTerritoryControlSubsystem::TryRegisterContester(ATerritoryVolume* Territory,
+	AActor* Attacker, const FGameplayTag& Faction)
+{
+	return TryRegisterAttackerInternal(Territory, Attacker, Faction, false);
+}
+
+bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
+	ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction,
+	const bool bContributesCaptureProgress)
+{
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Attacker || !Faction.IsValid()) return false;
 	if (const UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Attacker))
 	{
@@ -888,12 +972,32 @@ bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory
 			PruneInvalidAttackers(*ExistingActors);
 			for (const TWeakObjectPtr<AActor>& Existing : *ExistingActors)
 			{
-				if (Existing.Get() == Attacker) return true;
+				if (Existing.Get() == Attacker)
+				{
+					// A real capture-pressure registration promotes a prior story-only
+					// contest. A contest-only request never demotes an existing attacker.
+					if (bContributesCaptureProgress)
+					{
+						if (TSet<TWeakObjectPtr<AActor>>* NonCapturing =
+							ExistingState->NonCapturingAttackersByFaction.Find(Faction))
+						{
+							NonCapturing->Remove(Attacker);
+							if (NonCapturing->IsEmpty())
+							{
+								ExistingState->NonCapturingAttackersByFaction.Remove(Faction);
+							}
+						}
+					}
+					return true;
+				}
 			}
 		}
 	}
 
-	if (ValidateAndBeginCapture(Territory, Faction, false, false) != ECaptureResult::Success) return false;
+	// Conflict and completion use separate criteria. A living garrison is allowed
+	// to be contested (that is what wakes its guards), while Locked/owned/allied
+	// Places still reject the participant.
+	if (ValidateContestAttempt(Territory, Faction) != ECaptureResult::Success) return false;
 
 	FPerTerritoryState& State = TerritoryCaptureState.FindOrAdd(Territory);
 	TSet<TWeakObjectPtr<AActor>>& ActorSet = State.AttackersByFaction.FindOrAdd(Faction);
@@ -919,6 +1023,10 @@ bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory
 	if (AfterCount > BeforeCount)
 	{
 		AddAttackerRegistration(Attacker);
+		if (!bContributesCaptureProgress)
+		{
+			State.NonCapturingAttackersByFaction.FindOrAdd(Faction).Add(Attacker);
+		}
 	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -943,11 +1051,21 @@ bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory
 		Territory->GetOwnershipData().ContestingFaction;
 	const FGameplayTag CommittedFaction = ExistingContestingFaction.IsValid()
 		? ExistingContestingFaction : Faction;
+	const float ContestProgress = State.CaptureProgressByFaction.FindRef(CommittedFaction);
 	if (!CommitCaptureReadModel(Territory, ETerritoryState::Contested,
-		CommittedFaction, Territory->GetControlProgress(),
+		CommittedFaction, ContestProgress,
 		BuildTransitionContext(Attacker, Faction)))
 	{
 		ActorSet.Remove(Attacker);
+		if (TSet<TWeakObjectPtr<AActor>>* NonCapturing =
+			State.NonCapturingAttackersByFaction.Find(Faction))
+		{
+			NonCapturing->Remove(Attacker);
+			if (NonCapturing->IsEmpty())
+			{
+				State.NonCapturingAttackersByFaction.Remove(Faction);
+			}
+		}
 		ReleaseAttackerRegistration(Attacker);
 		// Only remove the progress entry if we seeded it — pre-existing progress
 		// (from AddCaptureProgress or a prior attacker) must survive a failed
@@ -973,6 +1091,15 @@ void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory,
 		if (ActorSet->Remove(Attacker) > 0)
 		{
 			ReleaseAttackerRegistration(Attacker);
+		}
+		if (TSet<TWeakObjectPtr<AActor>>* NonCapturing =
+			State->NonCapturingAttackersByFaction.Find(Faction))
+		{
+			NonCapturing->Remove(Attacker);
+			if (NonCapturing->IsEmpty())
+			{
+				State->NonCapturingAttackersByFaction.Remove(Faction);
+			}
 		}
 		if (PruneInvalidAttackers(*ActorSet) == 0)
 		{
@@ -1009,6 +1136,13 @@ float UTerritoryControlSubsystem::GetCaptureProgress(const ATerritoryVolume* Ter
 FGameplayTag UTerritoryControlSubsystem::GetContestingFaction(const ATerritoryVolume* Territory) const
 {
 	if (!Territory) return FGameplayTag();
+	// Zero-progress story confrontations still have a real contesting faction.
+	// The replicated Territory read model is the authority for that state.
+	if (Territory->GetTerritoryState() == ETerritoryState::Contested
+		&& Territory->GetOwnershipData().ContestingFaction.IsValid())
+	{
+		return Territory->GetOwnershipData().ContestingFaction;
+	}
 	const FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
 	if (!State) return FGameplayTag();
 
@@ -1121,6 +1255,19 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	{
 		TSet<TWeakObjectPtr<AActor>>* ActorSet = State->AttackersByFaction.Find(Pair.Key);
 		int32 AttackerCount = ActorSet ? PruneInvalidAttackers(*ActorSet) : 0;
+		TSet<TWeakObjectPtr<AActor>>* NonCapturingSet =
+			State->NonCapturingAttackersByFaction.Find(Pair.Key);
+		if (NonCapturingSet)
+		{
+			for (auto It = NonCapturingSet->CreateIterator(); It; ++It)
+			{
+				if (!It->IsValid() || !ActorSet || !ActorSet->Contains(*It))
+				{
+					It.RemoveCurrent();
+				}
+			}
+		}
+		const int32 CapturePressureCount = GetActiveCapturePressure(Territory, Pair.Key);
 
 		// Re-validate diplomacy: if a peace treaty was signed mid-capture, this faction
 		// should not advance. Decay instead, same as if defenders were present.
@@ -1129,8 +1276,9 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 
 		if (AttackerCount > 0)
 		{
-			// Diplomatically blocked or defenders present → halt progress (decay instead of advance)
-			if (bDefendersPresent || bDiplomaticallyBlocked)
+			// Diplomatically blocked, defenders present, or a story-only contester:
+			// keep the Place Contested but do not grant automatic ownership pressure.
+			if (bDefendersPresent || bDiplomaticallyBlocked || CapturePressureCount <= 0)
 			{
 				Pair.Value = FMath::Max(0.f, Pair.Value - DeltaTime * DecayRate);
 			}
@@ -1146,11 +1294,16 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 
 		// Deterministic winner selection: highest progress → most attackers → tag name tie-break
 		bool bWins = false;
-		if (Pair.Value > BestProgress)
+		if (!BestFaction.IsValid() && AttackerCount > 0)
+		{
+			// A zero-progress story confrontation still has a real contesting faction.
+			bWins = true;
+		}
+		else if (Pair.Value > BestProgress)
 		{
 			bWins = true;
 		}
-		else if (Pair.Value == BestProgress && Pair.Value > 0.f)
+		else if (Pair.Value == BestProgress && AttackerCount > 0)
 		{
 			// Tie-break: more attackers wins, then lexicographic tag for determinism
 			if (AttackerCount > BestAttackerCount)
@@ -1199,6 +1352,7 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	{
 		State->CaptureProgressByFaction.Remove(Tag);
 		State->AttackersByFaction.Remove(Tag);
+		State->NonCapturingAttackersByFaction.Remove(Tag);
 	}
 
 	// Re-fetch State pointer in case deferred commands or delegate listeners
@@ -1232,12 +1386,14 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		? CaptureState->AttackersByFaction.Find(NewOwner)
 		: nullptr;
 	const int32 ActiveAttackers = Attackers ? GetActiveAttackers(Territory, NewOwner) : 0;
+	const int32 ActiveCapturePressure = GetActiveCapturePressure(Territory, NewOwner);
 	const float* Progress = CaptureState
 		? CaptureState->CaptureProgressByFaction.Find(NewOwner)
 		: nullptr;
 	if (Territory->GetTerritoryState() != ETerritoryState::Contested
 		|| Territory->GetOwnershipData().ContestingFaction != NewOwner
 		|| ActiveAttackers <= 0
+		|| ActiveCapturePressure <= 0
 		|| !Progress || *Progress < 1.f
 		|| Territory->GetDefenderCount() > 0
 		|| !CanFactionCaptureTerritory(Territory, NewOwner))

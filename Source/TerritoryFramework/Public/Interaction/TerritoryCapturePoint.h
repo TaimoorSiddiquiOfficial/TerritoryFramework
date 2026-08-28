@@ -45,6 +45,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture")
 	bool bCaptureEnabled = true;
 
+	/**
+	 * True is the normal multiplayer/domination rule: after defenders are gone,
+	 * overlap pressure fills the capture meter and transfers ownership.
+	 * False is the story rule: overlap begins/holds Contested so guards can fight,
+	 * but only a dialogue, quest, or Territory Capture Event can transfer ownership.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture",
+		meta=(DisplayName="Contributes Automatic Capture Progress",
+			ToolTip="Disable for story owner handovers. The zone still begins Contested and activates war-hostile guards, but it cannot automatically capture the Place."))
+	bool bContributesCaptureProgress = true;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Capture")
 	TObjectPtr<USphereComponent> CaptureZone;
 

@@ -150,7 +150,10 @@ bool ATerritoryCapturePoint::TryRegisterCaptureParticipant(AActor* Participant)
 			if (UTerritoryControlSubsystem* Control =
 				GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
 			{
-				if (Control->TryRegisterAttacker(Territory, Participant, Faction))
+				const bool bRegistered = bContributesCaptureProgress
+					? Control->TryRegisterAttacker(Territory, Participant, Faction)
+					: Control->TryRegisterContester(Territory, Participant, Faction);
+				if (bRegistered)
 				{
 					return true;
 				}
@@ -163,7 +166,10 @@ bool ATerritoryCapturePoint::TryRegisterCaptureParticipant(AActor* Participant)
 
 	UTerritoryControlSubsystem* Control =
 		GetWorld()->GetSubsystem<UTerritoryControlSubsystem>();
-	if (!Control || !Control->TryRegisterAttacker(Territory, Participant, Faction))
+	const bool bRegistered = Control && (bContributesCaptureProgress
+		? Control->TryRegisterAttacker(Territory, Participant, Faction)
+		: Control->TryRegisterContester(Territory, Participant, Faction));
+	if (!bRegistered)
 	{
 		return false;
 	}

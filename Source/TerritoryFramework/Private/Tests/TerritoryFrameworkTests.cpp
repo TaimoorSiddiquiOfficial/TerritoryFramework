@@ -31,6 +31,8 @@
 #include "Tales/TerritoryCaptureTask.h"
 #include "Tales/TerritoryCaptureEvent.h"
 #include "Tales/TerritoryCaptureEligibilityCondition.h"
+#include "Tales/TerritoryOwnerHandoverEvent.h"
+#include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "Tales/TerritoryLockEvent.h"
 #include "Tales/TerritoryOwnershipCondition.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
@@ -658,6 +660,12 @@ bool FTFContract_ControlSubsystem::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("HasAttackBudget")));
 	TestTrue(TEXT("RegisterAttacker is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("RegisterAttacker")));
+	TestTrue(TEXT("Story confrontation registration is BlueprintCallable"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("TryRegisterContester")));
+	TestTrue(TEXT("Story confrontation registration is authority-only"),
+		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("TryRegisterContester")));
+	TestTrue(TEXT("Contest eligibility is exposed separately from capture completion"),
+		TFTestUtils::IsBlueprintCallable(Class, TEXT("GetContestEligibility")));
 	TestTrue(TEXT("UnregisterAttacker is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("UnregisterAttacker")));
 	TestTrue(TEXT("ForceCapture is BlueprintCallable"),
@@ -863,6 +871,24 @@ bool FTFContract_CaptureEvent::RunTest(const FString& Parameters)
 		EligibilityClass->IsChildOf(UNarrativeCondition::StaticClass()));
 	TestTrue(TEXT("Dialogue capture eligibility can require all defenders defeated"),
 		TFTestUtils::HasProperty(EligibilityClass, TEXT("bRequireNoLivingDefenders")));
+
+	const UClass* HandoverEventClass = UTerritoryOwnerHandoverEvent::StaticClass();
+	TestTrue(TEXT("Owner handover derives from Narrative Event"),
+		HandoverEventClass->IsChildOf(UNarrativeEvent::StaticClass()));
+	TestTrue(TEXT("Owner handover has a direct Narrative spawner reference"),
+		TFTestUtils::HasProperty(HandoverEventClass, TEXT("OwnerSpawner")));
+	TestTrue(TEXT("Owner handover has a stable Territory tag fallback"),
+		TFTestUtils::HasProperty(HandoverEventClass, TEXT("OwnerTerritoryTag")));
+
+	const UClass* OwnerSpawnerClass = ATerritoryStoryOwnerSpawner::StaticClass();
+	TestTrue(TEXT("Story owner spawner derives from Narrative NPC spawner"),
+		OwnerSpawnerClass->IsChildOf(ANPCSpawner::StaticClass()));
+	TestTrue(TEXT("Story owner activation is saved"),
+		TFTestUtils::IsSaveGame(OwnerSpawnerClass, TEXT("bHandoverActivated")));
+	TestTrue(TEXT("Story owner activation is replicated"),
+		TFTestUtils::IsReplicated(OwnerSpawnerClass, TEXT("bHandoverActivated")));
+	TestTrue(TEXT("Story owner activation is server callable"),
+		TFTestUtils::HasFunction(OwnerSpawnerClass, TEXT("ActivateHandover")));
 
 	return true;
 }
@@ -3965,6 +3991,8 @@ bool FTFCapturePointContract::RunTest(const FString& Parameters)
 		TFTestUtils::HasProperty(Class, TEXT("CaptureMarkerMesh")));
 	TestTrue(TEXT("Capture marker can remain silent while capture is unavailable"),
 		TFTestUtils::HasProperty(Class, TEXT("bHideMarkerWhileCaptureUnavailable")));
+	TestTrue(TEXT("Capture point separates story contesting from automatic capture pressure"),
+		TFTestUtils::HasProperty(Class, TEXT("bContributesCaptureProgress")));
 	TestFalse(TEXT("Capture target configuration is not duplicate save authority"),
 		TFTestUtils::IsSaveGame(Class, TEXT("TargetTerritoryTag")));
 	TestFalse(TEXT("Capture enabled configuration is not replicated gameplay state"),
@@ -3988,6 +4016,53 @@ bool FTFCapturePointContract::RunTest(const FString& Parameters)
 		TestFalse(TEXT("Capture adapter actor does not replicate duplicate state"),
 			CapturePoint->GetIsReplicated());
 	}
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContestCriteriaSeparated,
+	"TerritoryFramework.Capture.ContestCriteriaSeparatedFromCompletion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContestCriteriaSeparated::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::EditorPreview, false);
+	TestNotNull(TEXT("Contest criteria preview world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryVolume* Territory = World->SpawnActor<ATerritoryVolume>(
+		ATerritoryVolume::StaticClass(), FTransform::Identity, SpawnParams);
+	AActor* Defender = World->SpawnActor<ATerritoryGuardCharacter>(
+		ATerritoryGuardCharacter::StaticClass(), FTransform::Identity, SpawnParams);
+	// EditorPreview worlds do not auto-initialize UWorldSubsystems. These policy
+	// queries are read-only, so an explicitly world-owned instance is sufficient.
+	UTerritoryControlSubsystem* Control =
+		NewObject<UTerritoryControlSubsystem>(World);
+	TestNotNull(TEXT("Territory exists for contest criteria"), Territory);
+	TestNotNull(TEXT("Control subsystem exists for contest criteria"), Control);
+	if (!Territory || !Defender || !Control)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	TestTrue(TEXT("Contest test factions exist"), Bandits.IsValid() && Heroes.IsValid());
+	Territory->ForceSetOwningFaction(Bandits);
+	Territory->ForceSetTerritoryState(ETerritoryState::Claimed);
+	Territory->RegisterDefender(Defender);
+
+	TestEqual(TEXT("A living garrison may be challenged so its guards can react"),
+		Control->GetContestEligibility(Territory, Heroes), ECaptureResult::Success);
+	TestEqual(TEXT("The same living garrison still blocks ownership completion"),
+		Control->GetCaptureEligibility(Territory, Heroes),
+		ECaptureResult::DefendersRemain);
 
 	World->DestroyWorld(false);
 	return true;
