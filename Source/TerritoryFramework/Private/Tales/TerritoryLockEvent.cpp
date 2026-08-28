@@ -4,6 +4,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Engine/World.h"
 #include "Tales/TerritoryTalesUtilities.h"
+#include "Tales/TalesComponent.h"
 
 UTerritoryLockEvent::UTerritoryLockEvent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -14,7 +15,8 @@ UTerritoryLockEvent::UTerritoryLockEvent(const FObjectInitializer& ObjectInitial
 void UTerritoryLockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || !TargetTerritoryTag.IsValid()) return;
 
 	// Lock/unlock mutations are server-authoritative
@@ -55,7 +57,8 @@ UTerritoryUnlockEvent::UTerritoryUnlockEvent(const FObjectInitializer& ObjectIni
 void UTerritoryUnlockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || !TargetTerritoryTag.IsValid()) return;
 
 	// Lock/unlock mutations are server-authoritative
@@ -77,7 +80,27 @@ void UTerritoryUnlockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerCo
 	Context.TargetPawn = Target;
 	Context.PlayerController = Controller;
 	Context.TalesComponent = NarrativeComponent;
-	Territory->TryUnlockWithContext(Context, bForceUnlock);
+	const ETerritoryState StateBefore = Territory->GetTerritoryState();
+	if (!Territory->TryUnlockWithContext(Context, bForceUnlock))
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[UnlockEvent] %s remained %d. Check its Locked Exit Conditions or enable Force Unlock."),
+			*TargetTerritoryTag.ToString(), static_cast<int32>(StateBefore));
+		return;
+	}
+
+	if (StateBefore != ETerritoryState::Locked)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[UnlockEvent] %s was already unlocked (state %d). Verify that the event targets the exact locked Place rather than its parent District."),
+			*TargetTerritoryTag.ToString(), static_cast<int32>(StateBefore));
+		return;
+	}
+
+	UE_LOG(LogTerritory, Log,
+		TEXT("[UnlockEvent] %s runtime state changed from Locked to %d"),
+		*TargetTerritoryTag.ToString(),
+		static_cast<int32>(Territory->GetTerritoryState()));
 }
 
 FString UTerritoryUnlockEvent::GetGraphDisplayText_Implementation()

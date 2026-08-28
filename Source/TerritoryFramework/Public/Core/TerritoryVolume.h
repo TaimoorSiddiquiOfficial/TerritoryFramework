@@ -598,8 +598,8 @@ protected:
 	FGameplayTag InitialOwningFaction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
-		meta=(DisplayName="Initial State",
-			ToolTip="Starting state for a new campaign. Automatic uses Initial Owning Faction and safely migrates old Starts Locked assets."))
+		meta=(DisplayName="New Campaign Initial State (Authoring Only)",
+			ToolTip="Seed used only when no saved runtime state exists. Easy example: Locked makes every new campaign start locked. A Territory Unlock Event changes the replicated Runtime Territory State, not this authoring seed, so future new campaigns still begin locked."))
 	ETerritoryInitialState InitialState = ETerritoryInitialState::Automatic;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Hierarchy",

@@ -2,6 +2,21 @@
 
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/TalesComponent.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+
+UWorld* TerritoryTales::ResolveWorld(const UObject* ContextObject, APawn* Target,
+	APlayerController* Controller, const UTalesComponent* NarrativeComponent)
+{
+	if (Target && Target->GetWorld()) return Target->GetWorld();
+	if (Controller && Controller->GetWorld()) return Controller->GetWorld();
+	if (NarrativeComponent && NarrativeComponent->GetWorld())
+	{
+		return NarrativeComponent->GetWorld();
+	}
+	return ContextObject ? ContextObject->GetWorld() : nullptr;
+}
 
 bool TerritoryTales::DoesConditionPass(UNarrativeCondition* Condition, APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)

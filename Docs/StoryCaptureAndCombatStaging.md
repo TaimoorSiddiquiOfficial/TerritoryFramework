@@ -142,6 +142,15 @@ Easy examples:
 
 Do not use a second "start locked" Boolean. The State Config is the one source of truth.
 
+Use `Territory Unlock Event` for an explicit quest or dialogue unlock. Its target must
+be the complete tag of the locked actor. For example, if `OldTown.Farm` is Locked,
+target `Territory.MyCity.OldTown.Farm`; targeting `Territory.MyCity.OldTown` only asks
+the parent District to unlock.
+
+The event changes the saved and replicated runtime state from Locked to Claimed or
+Unclaimed. It does not rewrite **New Campaign Initial State (Authoring Only)**. That
+property remains Locked so a brand-new campaign still begins behind the intended gate.
+
 ## Reserve waves that feel staged
 
 Author real `Counter Attack Approaches` on the Territory. The runtime never invents a

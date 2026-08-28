@@ -18,7 +18,8 @@ public:
 	UTerritoryLockEvent(const FObjectInitializer& ObjectInitializer);
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event",
-		meta = (Categories = "Territory"))
+		meta = (Categories = "Territory",
+			ToolTip = "Exact City, District, or Place to lock. Easy example: to lock a Farm Place, choose its complete Place tag, not only its parent District tag."))
 	FGameplayTag TargetTerritoryTag;
 
 	/** Reason shown to UI/debug. */
@@ -31,8 +32,10 @@ protected:
 };
 
 /**
- * Unlocks a territory so it can be captured.
+ * Unlocks a territory's replicated runtime state so it can be captured.
  * Use in quests/dialogues when story permits territory capture (e.g., after quest completion).
+ * The New Campaign Initial State property is an authoring seed and intentionally
+ * remains Locked so a future new campaign still begins with the same story gate.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew)
 class TERRITORYFRAMEWORK_API UTerritoryUnlockEvent : public UNarrativeEvent
@@ -43,10 +46,11 @@ public:
 	UTerritoryUnlockEvent(const FObjectInitializer& ObjectInitializer);
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event",
-		meta = (Categories = "Territory"))
+		meta = (Categories = "Territory",
+			ToolTip = "Exact locked City, District, or Place to unlock at runtime. Easy example: choose Territory.MyCity.OldTown.Farm to unlock the Farm Place; choosing Territory.MyCity.OldTown only targets its parent District."))
 	FGameplayTag TargetTerritoryTag;
 
-	/** If true, bypasses LockConditions check (force unlock). */
+	/** If true, bypasses Locked Exit Conditions. Use for an explicit trusted story command. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event")
 	bool bForceUnlock = true;
 

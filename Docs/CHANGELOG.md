@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — 2026-08-29 (Exact-target Narrative unlock and generic faction defaults)
+
+- Fixed the sample story chain so Blacksmith's Claimed event unlocks the exact Farm Place
+  instead of no-op targeting its already-unlocked parent District.
+- Territory lock/unlock events now resolve the gameplay world from their Narrative execution
+  context and report a clear warning for a wrong already-unlocked target.
+- Clarified that New Campaign Initial State is an authoring seed; unlock events mutate saved,
+  replicated runtime state without changing how a future new campaign begins.
+- Removed the framework's implicit Heroes default. The optional player-faction fallback is now
+  empty, works only for a player with no Narrative factions, never applies to NPCs, and never
+  overrides a live story-driven Narrative faction.
+- Audited Haven Reach, Market Square, Castle Hill, Blacksmith, Farm, Heroes, and Bandits
+  occurrences: remaining C++ references are metadata examples or automation fixtures, while
+  project tags and map actors remain explicit sample content rather than runtime rules.
+
 ## Unreleased — 2026-08-28 (Attack-goal teardown safety and Place resource ownership)
 
 - Added a project-owned lifecycle guard around Narrative's inherited

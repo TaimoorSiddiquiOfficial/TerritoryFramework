@@ -12,7 +12,9 @@
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
+#include "Tales/TerritoryLockEvent.h"
 #include "Tales/TerritoryOwnerHandoverEvent.h"
+#include "Tales/TerritoryOwnershipCondition.h"
 #include "Tales/TerritoryStoryConditions.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
@@ -402,6 +404,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	const UTerritorySetDiplomacyEvent* ClaimedDiplomacyEvent = nullptr;
 	const UTerritorySetDiplomacyEvent* ContestedDiplomacyEvent = nullptr;
 	const UTerritoryScheduleEnemyWaveEvent* WaveEvent = nullptr;
+	const UTerritoryUnlockEvent* UnlockEvent = nullptr;
 	const UNarrativeEvent* GiveXPEvent = nullptr;
 	if (ClaimedConfig)
 	{
@@ -420,6 +423,11 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 				Cast<UTerritoryScheduleEnemyWaveEvent>(Event))
 			{
 				WaveEvent = Typed;
+			}
+			if (const UTerritoryUnlockEvent* Typed =
+				Cast<UTerritoryUnlockEvent>(Event))
+			{
+				UnlockEvent = Typed;
 			}
 		}
 	}
@@ -519,28 +527,43 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			&& Cast<UTerritoryOwnershipTransitionCondition>(
 				WaveEvent->Conditions[0]) != nullptr);
 	}
+	TestNotNull(TEXT("Blacksmith capture owns the Farm unlock Narrative event"),
+		UnlockEvent);
+	if (UnlockEvent)
+	{
+		TestEqual(TEXT("Unlock event targets the exact locked Farm Place, not Castle Hill"),
+			UnlockEvent->TargetTerritoryTag.ToString(),
+			FString(TEXT("Territory.HavenReach.CastleHill.Farm")));
+		TestFalse(TEXT("Story capture respects the Farm's reusable Locked exit gate"),
+			UnlockEvent->bForceUnlock);
+	}
+	TestEqual(TEXT("Farm remains authored to start Locked in every new campaign"),
+		Farm->ResolveInitialTerritoryState(), ETerritoryState::Locked);
 
 	const FTerritoryStateConfig* LockedConfig =
 		GetStateConfigs(Farm)->Find(ETerritoryState::Locked);
-	const UTerritoryDiplomacyCondition* WarCondition = nullptr;
+	const UTerritoryOwnershipCondition* CapturedPlaceCondition = nullptr;
 	if (LockedConfig)
 	{
 		for (const TObjectPtr<UNarrativeCondition>& Condition : LockedConfig->ExitConditions)
 		{
-			if (const UTerritoryDiplomacyCondition* Typed =
-				Cast<UTerritoryDiplomacyCondition>(Condition))
+			if (const UTerritoryOwnershipCondition* Typed =
+				Cast<UTerritoryOwnershipCondition>(Condition))
 			{
-				WarCondition = Typed;
+				CapturedPlaceCondition = Typed;
 				break;
 			}
 		}
 	}
-	TestNotNull(TEXT("Farm Locked exit uses the reusable diplomacy Narrative condition"),
-		WarCondition);
-	if (WarCondition)
+	TestNotNull(TEXT("Farm Locked exit checks the prerequisite Place through a reusable Narrative condition"),
+		CapturedPlaceCondition);
+	if (CapturedPlaceCondition)
 	{
-		TestEqual(TEXT("Farm unlock requires the rich War state"),
-			WarCondition->RequiredState, EDiplomacyState::War);
+		TestEqual(TEXT("Farm unlock checks the exact Blacksmith prerequisite"),
+			CapturedPlaceCondition->TerritoryToCheck.ToString(),
+			FString(TEXT("Territory.HavenReach.MarketSquare.Blacksmith")));
+		TestFalse(TEXT("Farm unlock accepts Blacksmith ownership by the live capturing faction without a Heroes hardcode"),
+			CapturedPlaceCondition->RequiredOwner.IsValid());
 	}
 
 	const FArrayProperty* DefeatedEventsProperty = FindFProperty<FArrayProperty>(

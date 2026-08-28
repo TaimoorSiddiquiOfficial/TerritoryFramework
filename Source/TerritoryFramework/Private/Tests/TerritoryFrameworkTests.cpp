@@ -431,6 +431,81 @@ bool FTFTerritoryEventContextConditionRegression::RunTest(const FString& Paramet
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryUnlockNarrativeEventRegression,
+	"TerritoryFramework.Tales.Regression.UnlockEventChangesRuntimeState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryUnlockNarrativeEventRegression::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Unlock-event test world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryVolume* Territory = World->SpawnActor<ATerritoryVolume>(
+		ATerritoryVolume::StaticClass(), FTransform::Identity, SpawnParams);
+	APawn* EventTarget = World->SpawnActor<APawn>(
+		APawn::StaticClass(), FTransform::Identity, SpawnParams);
+	TestNotNull(TEXT("Locked Territory created"), Territory);
+	TestNotNull(TEXT("Narrative event context pawn created"), EventTarget);
+	if (!Territory || !EventTarget)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGameplayTag TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	const FGameplayTag OwnerFaction = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	TestTrue(TEXT("Unlock-event fixture tags exist"),
+		TerritoryTag.IsValid() && OwnerFaction.IsValid());
+	FStructProperty* TagProperty = FindFProperty<FStructProperty>(
+		Territory->GetClass(), TEXT("TerritoryTag"));
+	FStructProperty* GuidProperty = FindFProperty<FStructProperty>(
+		Territory->GetClass(), TEXT("TerritoryGUID"));
+	TestNotNull(TEXT("Territory tag property is reflected"), TagProperty);
+	TestNotNull(TEXT("Territory GUID property is reflected"), GuidProperty);
+	if (!TagProperty || !GuidProperty)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	*TagProperty->ContainerPtrToValuePtr<FGameplayTag>(Territory) = TerritoryTag;
+	*GuidProperty->ContainerPtrToValuePtr<FGuid>(Territory) = FGuid::NewGuid();
+	Territory->ForceSetOwningFaction(OwnerFaction);
+	Territory->ForceSetTerritoryState(ETerritoryState::Locked);
+
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	TestNotNull(TEXT("Unlock-event registry exists"), Registry);
+	if (!Registry)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	TestEqual(TEXT("Locked Territory registers for exact-tag event lookup"),
+		Registry->RegisterTerritory(Territory), ETerritoryRegistrationResult::Success);
+
+	// Keep the event outside the actor/world outer chain. The Narrative execution
+	// context must still resolve the correct world instead of silently doing nothing.
+	UTerritoryUnlockEvent* UnlockEvent = NewObject<UTerritoryUnlockEvent>();
+	UnlockEvent->TargetTerritoryTag = TerritoryTag;
+	UnlockEvent->bForceUnlock = true;
+	UnlockEvent->OnActivate(EventTarget, nullptr, nullptr);
+
+	TestEqual(TEXT("Narrative Unlock Event leaves the exact Place Claimed by its owner"),
+		Territory->GetTerritoryState(), ETerritoryState::Claimed);
+	TestEqual(TEXT("Unlocking does not replace the authored/current owner"),
+		Territory->GetOwningFaction(), OwnerFaction);
+	TestEqual(TEXT("Unlocking restores full control for an owned Place"),
+		Territory->GetControlProgress(), 1.f);
+
+	World->DestroyWorld(false);
+	return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONTRACT TESTS — Enum values
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3566,6 +3641,52 @@ bool FTFContract_AtomicMutation::RunTest(const FString& Parameters)
 	TestTrue(TEXT("OwnershipData is SaveGame+Replicated"),
 		TFTestUtils::IsSaveGame(VolumeClass, TEXT("OwnershipData")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFPlayerFactionFallbackBehavior,
+	"TerritoryFramework.Factions.ConfigurablePlayerFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFPlayerFactionFallbackBehavior::RunTest(const FString& Parameters)
+{
+	UTerritoryDeveloperSettings* Settings =
+		GetMutableDefault<UTerritoryDeveloperSettings>();
+	TestNotNull(TEXT("Mutable Territory settings exist"), Settings);
+	if (!Settings) return false;
+
+	const FGameplayTag OriginalFallback = Settings->DefaultPlayerFaction;
+	const FGameplayTag ConfiguredFallback = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag LiveFaction = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	TestTrue(TEXT("Faction fallback fixture tags exist"),
+		ConfiguredFallback.IsValid() && LiveFaction.IsValid());
+	Settings->DefaultPlayerFaction = ConfiguredFallback;
+
+	APlayerController* PlayerController = NewObject<APlayerController>();
+	AActor* NeutralActor = NewObject<AActor>();
+	ATerritoryGuardCharacter* NarrativeAgent = NewObject<ATerritoryGuardCharacter>();
+	TestNotNull(TEXT("Fallback player controller created"), PlayerController);
+	TestNotNull(TEXT("Neutral non-player actor created"), NeutralActor);
+	TestNotNull(TEXT("Narrative faction actor created"), NarrativeAgent);
+
+	if (INarrativeTeamAgentInterface* TeamAgent =
+		Cast<INarrativeTeamAgentInterface>(NarrativeAgent))
+	{
+		TeamAgent->AddFaction(LiveFaction);
+	}
+
+	TestEqual(TEXT("Configured fallback applies to a player with no Narrative faction"),
+		UTerritoryBlueprintLibrary::GetActorPrimaryFaction(nullptr, PlayerController),
+		ConfiguredFallback);
+	TestFalse(TEXT("Player fallback is never assigned to a neutral NPC/actor"),
+		UTerritoryBlueprintLibrary::GetActorPrimaryFaction(nullptr, NeutralActor).IsValid());
+	TestEqual(TEXT("A live Narrative faction always overrides the fallback"),
+		UTerritoryBlueprintLibrary::GetActorPrimaryFaction(nullptr, NarrativeAgent),
+		LiveFaction);
+
+	Settings->DefaultPlayerFaction = OriginalFallback;
 	return true;
 }
 

@@ -6,12 +6,41 @@
 #include "Combat/TerritoryCombatDirector.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "AIController.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+
+namespace
+{
+	bool IsPlayerFactionFallbackCandidate(const AActor* Actor)
+	{
+		if (const APawn* Pawn = Cast<APawn>(Actor))
+		{
+			return Pawn->IsPlayerControlled();
+		}
+		return Cast<APlayerController>(Actor) != nullptr;
+	}
+
+	FGameplayTagContainer GetConfiguredPlayerFactionFallback(const AActor* Actor)
+	{
+		FGameplayTagContainer Result;
+		if (!IsPlayerFactionFallbackCandidate(Actor)) return Result;
+
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		if (Settings && Settings->DefaultPlayerFaction.IsValid())
+		{
+			Result.AddTag(Settings->DefaultPlayerFaction);
+		}
+		return Result;
+	}
+}
 
 UTerritoryRegistrySubsystem* UTerritoryBlueprintLibrary::GetTerritoryRegistry(const UObject* WorldContextObject)
 {
@@ -325,31 +354,25 @@ FGameplayTagContainer UTerritoryBlueprintLibrary::GetActorFactions(const UObject
 	if (!Actor) return FGameplayTagContainer();
 	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Actor))
 	{
-		return TeamAgent->GetFactions();
+		FGameplayTagContainer Factions = TeamAgent->GetFactions();
+		if (!Factions.IsEmpty()) return Factions;
 	}
-	return FGameplayTagContainer();
+	return GetConfiguredPlayerFactionFallback(Actor);
 }
 
 bool UTerritoryBlueprintLibrary::IsActorInFaction(const UObject* WorldContextObject, AActor* Actor, const FGameplayTag& FactionTag)
 {
 	if (!Actor || !FactionTag.IsValid()) return false;
-	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Actor))
-	{
-		return TeamAgent->GetFactions().HasTag(FactionTag);
-	}
-	return false;
+	return GetActorFactions(WorldContextObject, Actor).HasTag(FactionTag);
 }
 
 FGameplayTag UTerritoryBlueprintLibrary::GetActorPrimaryFaction(const UObject* WorldContextObject, AActor* Actor)
 {
 	if (!Actor) return FGameplayTag();
-	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Actor))
+	const FGameplayTagContainer Factions = GetActorFactions(WorldContextObject, Actor);
+	if (!Factions.IsEmpty())
 	{
-		FGameplayTagContainer Factions = TeamAgent->GetFactions();
-		if (Factions.Num() > 0)
-		{
-			return Factions.GetByIndex(0);
-		}
+		return Factions.GetByIndex(0);
 	}
 	return FGameplayTag();
 }
@@ -357,9 +380,9 @@ FGameplayTag UTerritoryBlueprintLibrary::GetActorPrimaryFaction(const UObject* W
 bool UTerritoryBlueprintLibrary::AreActorsAllied(AActor* A, AActor* B)
 {
 	if (!A || !B) return false;
-	const INarrativeTeamAgentInterface* TeamA = Cast<INarrativeTeamAgentInterface>(A);
-	const INarrativeTeamAgentInterface* TeamB = Cast<INarrativeTeamAgentInterface>(B);
-	return TeamA && TeamB && TeamA->GetFactions().HasAny(TeamB->GetFactions());
+	const FGameplayTagContainer FactionsA = GetActorFactions(A, A);
+	const FGameplayTagContainer FactionsB = GetActorFactions(B, B);
+	return !FactionsA.IsEmpty() && FactionsA.HasAny(FactionsB);
 }
 
 // ─── City / District Queries ───

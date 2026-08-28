@@ -24,6 +24,10 @@ Add territory tags to `Config/DefaultGameplayTags.ini`:
 +GameplayTagList=(Tag="Guard.Activity.Inspect")
 ```
 
+These are sample names, not framework requirements. Replace `HavenReach`,
+`MarketSquare`, `Blacksmith`, and `Farm` with your own project hierarchy. Runtime
+code never searches for these names.
+
 ## Step 3: Place the Territory Hierarchy
 
 1. Place one `ATerritoryCity` with tag `Territory.HavenReach` and `AggregateOnly` control.
@@ -114,5 +118,7 @@ With `PlayerChooses`, a capture whose context belongs to the new owner starts at
 | Guards don't fight | Configure ActivityConfiguration + TriggerSets on the NPCDefinition asset |
 | Territory doesn't save | Place TerritoryWorldState actor in level |
 | Capture doesn't work | Confirm the point targets an `Independent` Property, the pawn is player-controlled, its Narrative faction is valid, and diplomacy allows capture |
+| Territory Unlock Event changes nothing | Select the complete tag of the locked actor. A locked Place needs its Place tag, not its parent District tag. Check **Get Territory State** during PIE; **New Campaign Initial State** is an authoring seed and intentionally stays unchanged. |
+| Player is treated as the wrong test faction | Assign the live faction through Narrative Pro. The optional Territory Framework player fallback is empty by default and never overrides Narrative. |
 | Guards float on hit | Already fixed — BoundsShape has NoCollision |
 | Map marker not showing | MapMarkerComponent is auto-created — check marker color settings |

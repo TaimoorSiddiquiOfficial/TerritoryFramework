@@ -3,6 +3,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TalesComponent.h"
+#include "Tales/TerritoryTalesUtilities.h"
 #include "Engine/World.h"
 
 bool UTerritoryOwnershipCondition::CheckCondition_Implementation(APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
@@ -13,7 +14,8 @@ bool UTerritoryOwnershipCondition::CheckCondition_Implementation(APawn* Target, 
 		return false;
 	}
 
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World) return false;
 
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();

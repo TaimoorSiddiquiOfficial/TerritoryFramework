@@ -144,8 +144,17 @@ public:
 	// Tags
 	// ═══════════════════════════════════════════════════════════════════════════
 
+	/**
+	 * Optional fallback used only when a player pawn/controller has no faction from
+	 * Narrative Pro's team interface. Leave empty when the game always assigns the
+	 * player's faction through Narrative. A real Narrative faction always wins, so
+	 * a betrayal or allegiance choice can change the player without this setting
+	 * forcing them back to an old test faction.
+	 */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Tags",
-		meta = (Categories = "Narrative.Factions"))
+		meta = (Categories = "Narrative.Factions",
+			DisplayName = "Player Faction Fallback (Optional)",
+			ToolTip = "Optional fallback for a player with no Narrative faction. Easy example: choose your project's Player faction while prototyping, then leave this empty once Narrative assigns factions. This is never used for NPCs and never overrides a player's live Narrative faction."))
 	FGameplayTag DefaultPlayerFaction;
 
 	/** Configurable Narrative CommonUI button used by native fallback Territory rows. */

@@ -260,7 +260,10 @@ public:
 	// Narrative Pro Faction Bridge
 	// ═══════════════════════════════════════════════════════════════════════════════
 
-	/** Returns all factions the actor belongs to via Narrative Pro's INarrativeTeamAgentInterface. */
+	/**
+	 * Returns the actor's live Narrative factions. A configured player-faction
+	 * fallback is used only for a player pawn/controller whose Narrative list is empty.
+	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Factions",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Actor Factions"))
 	static FGameplayTagContainer GetActorFactions(const UObject* WorldContextObject, AActor* Actor);
@@ -270,7 +273,7 @@ public:
 		meta=(WorldContext="WorldContextObject", DisplayName="Is Actor In Faction"))
 	static bool IsActorInFaction(const UObject* WorldContextObject, AActor* Actor, const FGameplayTag& FactionTag);
 
-	/** Returns actor's primary faction tag (first from INarrativeTeamAgentInterface). Empty if none. */
+	/** Returns the first live Narrative faction, or the optional player-only fallback. */
 	UFUNCTION(BlueprintPure, Category="Territory|Factions",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Actor Primary Faction"))
 	static FGameplayTag GetActorPrimaryFaction(const UObject* WorldContextObject, AActor* Actor);
