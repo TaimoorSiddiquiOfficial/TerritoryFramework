@@ -42,7 +42,9 @@ public:
 		meta=(ClampMin="100.0", UIMin="100.0", UIMax="2000.0"))
 	float CaptureRadius = 350.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture",
+		meta=(DisplayName="Automatic Multiplayer Capture Flow",
+			ToolTip="When enabled, players inside this point fill capture progress after defenders are defeated. A target Territory using Story Capture From Territory Bounds automatically disables this point."))
 	bool bCaptureEnabled = true;
 
 	/**
@@ -51,9 +53,8 @@ public:
 	 * False is the story rule: overlap begins/holds Contested so guards can fight,
 	 * but only a dialogue, quest, or Territory Capture Event can transfer ownership.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture",
-		meta=(DisplayName="Contributes Automatic Capture Progress",
-			ToolTip="Disable for story owner handovers. The zone still begins Contested and activates war-hostile guards, but it cannot automatically capture the Place."))
+	UPROPERTY(meta=(DeprecatedProperty,
+		DeprecationMessage="Story handovers now use Story Capture From Territory Bounds on the Territory. Capture Points are multiplayer automatic-progress actors."))
 	bool bContributesCaptureProgress = true;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Capture")
@@ -92,6 +93,11 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|Capture")
 	bool IsCaptureParticipantRegistered(const AActor* Participant) const;
+
+	/** True only when this point has a valid non-story Territory target. */
+	UFUNCTION(BlueprintPure, Category="Territory|Capture",
+		meta=(DisplayName="Is Automatic Capture Flow Active"))
+	bool IsAutomaticCaptureFlowActive() const;
 
 protected:
 	virtual void BeginPlay() override;

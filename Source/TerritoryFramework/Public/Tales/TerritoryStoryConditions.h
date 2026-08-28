@@ -77,6 +77,29 @@ protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
+/**
+ * Passes only while the containing Territory is changing to a different owner.
+ * Add it to Claimed-state rewards or waves that must not run when an abandoned
+ * contest simply returns to the same owner. Use Narrative's inherited Not option
+ * when an event should run only for a state-only recovery.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Territory Ownership Changed During Transition"))
+class TERRITORYFRAMEWORK_API UTerritoryOwnershipTransitionCondition
+	: public UNarrativeCondition
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryOwnershipTransitionCondition();
+
+protected:
+	virtual bool CheckCondition_Implementation(APawn* Target,
+		APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent) override;
+	virtual FString GetGraphDisplayText_Implementation() override;
+};
+
 UENUM(BlueprintType)
 enum class ETerritoryFloatComparison : uint8
 {

@@ -510,6 +510,10 @@ void ATerritoryGuardSpawnPoint::QueueReserveSpawn()
 		return;
 	}
 
+	if (PendingReserveSpawns == 0)
+	{
+		AutomaticReserveSpawnFailures = 0;
+	}
 	++PendingReserveSpawns;
 	UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: queued reserve deployment (%d pending, %d available)"),
 		*GetName(), PendingReserveSpawns, CurrentReserveCount);
@@ -554,7 +558,25 @@ void ATerritoryGuardSpawnPoint::TryAutomaticReserveSpawn()
 		return;
 	}
 
-	if (!TrySpawnReserveGuard(true))
+	const bool bRequireCameraAvoidance = AutomaticReserveSpawnFailures
+		< FMath::Max(0, ReserveCameraAvoidanceRetryLimit);
+	if (TrySpawnReserveGuard(bRequireCameraAvoidance))
+	{
+		AutomaticReserveSpawnFailures = 0;
+		return;
+	}
+
+	++AutomaticReserveSpawnFailures;
+	if (AutomaticReserveSpawnFailures >= FMath::Max(1, ReserveTotalRetryLimit))
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("GuardSpawnPoint %s abandoned %d queued reserve deployment(s) after %d failures; reserves were not consumed."),
+			*GetName(), PendingReserveSpawns, AutomaticReserveSpawnFailures);
+		CancelPendingReserveSpawns();
+		Territory->RefreshGarrisonSnapshot();
+		Territory->TryCompleteDefenderDefeat(FTerritoryTransitionContext());
+	}
+	else
 	{
 		ScheduleAutomaticReserveSpawn(GetEffectiveReserveRetryInterval());
 	}
@@ -600,12 +622,14 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 	{
 		ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
 	}
+	AutomaticReserveSpawnFailures = 0;
 	return true;
 }
 
 void ATerritoryGuardSpawnPoint::CancelPendingReserveSpawns()
 {
 	PendingReserveSpawns = 0;
+	AutomaticReserveSpawnFailures = 0;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(ReserveSpawnTimer);

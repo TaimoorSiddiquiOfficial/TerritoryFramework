@@ -237,7 +237,9 @@ void UTerritoryCancelEnemyWavesEvent::ExecuteEvent_Implementation(APawn* Target,
 	{
 		if (Assault.IsTerminal()) continue;
 		if (AttackingFaction.IsValid() && Assault.AttackingFaction != AttackingFaction) continue;
-		if (!bIncludePhysicallyActiveAssaults && Assault.State == ETerritoryAssaultState::Active) continue;
+		if (!bIncludePhysicallyActiveAssaults
+			&& (Assault.State == ETerritoryAssaultState::Active
+				|| Assault.State == ETerritoryAssaultState::RecaptureCountdown)) continue;
 		if (Counter->CancelAssault(Assault.AssaultID, ETerritoryAssaultResolution::ManuallyCancelled))
 		{
 			++CancelledCount;

@@ -34,13 +34,28 @@ Add territory tags to `Config/DefaultGameplayTags.ini`:
 
 Do not directly capture an aggregate District or City. Capturing all required Places reduces the District owner; capturing all required Districts reduces the City owner through the existing hierarchy authority.
 
-## Step 4: Place Physical Capture Points
+## Step 4: Choose Story or Multiplayer Capture
+
+For multiplayer/domination:
 
 1. Place `BP_TerritoryCapturePoint` at each capturable Place.
 2. Set `TargetTerritoryTag` to the exact independent Property tag.
 3. Set `CaptureRadius` to the intended physical zone.
 
-On the server, the point resolves the player's faction through Narrative, registers the pawn with `UTerritoryControlSubsystem`, and unregisters it on exit, death, invalid faction, or completed ownership. It never writes ownership or progress itself.
+For story capture:
+
+1. Enable `Story Capture From Territory Bounds` on the Place.
+2. Resize its `Bounds Shape` to cover every playable floor of the location.
+3. Configure `On All Defenders Defeated Events` to activate a Blueprint child of
+   `ATerritoryStoryOwnerSpawner`, then let the owner's Narrative dialogue perform capture.
+
+Story-bounds mode starts `Contested` anywhere inside the Place but never fills capture
+progress. It automatically disables and hides any Capture Point targeting that Place, so
+you do not need to delete a multiplayer point from a shared map.
+
+On the server, both presentations resolve the player's exact current Narrative faction
+and use `UTerritoryControlSubsystem`. Neither the point nor the full-volume adapter writes
+ownership directly.
 
 ## Step 5: Place Guard Spawn Points
 
@@ -77,7 +92,9 @@ On the territory volume:
    LogTerritory: Registered territory: ...
    LogTerritory: ... ownership committed ...
    ```
-3. Walk the player into a configured Place capture point and remain until capture completes.
+3. Multiplayer: remain in a configured Capture Point until capture completes. Story:
+   enter anywhere inside the Place bounds, defeat its defenders, and accept the owner
+   handover dialogue.
 4. Verify the Place becomes claimed, then verify its aggregate District and City reduce from their children.
 
 With `PlayerChooses`, a capture whose context belongs to the new owner starts at target zero. `ForceCaptureWithContext` is for explicit scripted transitions and tests, not physical gameplay. Select the District or one of its Properties in the District Command Center, preview recruitment/upkeep/net yield, and submit an exact staffing target.

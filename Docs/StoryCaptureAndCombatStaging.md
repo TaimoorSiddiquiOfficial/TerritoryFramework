@@ -61,14 +61,33 @@ fallback keeps the event usable when World Partition or actor-reference serializ
 cannot retain the direct reference. On the server, it spawns exactly one owner and can
 start that NPC's Narrative dialogue immediately. It does not create a client duplicate.
 
-For a story-only Place, keep `Capture Enabled` on but turn off
-`Contributes Automatic Capture Progress`. Entering the authored zone can then begin
-`Contested` while defenders are alive, which lets the normal `Contested + War` guard
-rule start the fight. Living defenders block capture completion, and the zone holds at
-`0%` after they die; only the owner dialogue or quest event transfers ownership.
+For a story-only Place, enable `Story Capture From Territory Bounds` on the Place. The
+complete `Bounds Shape` becomes the combat area, including every floor covered by that
+volume. An eligible hostile player anywhere inside starts and holds `Contested`, so the
+normal `Contested + War` State Config starts the fight. It never adds capture progress.
+Living defenders block the handover; after they die, only the owner dialogue, quest, or
+explicit Territory event can transfer ownership.
 
-For multiplayer/domination, leave `Contributes Automatic Capture Progress` on. The same
-zone then fills the normal pressure meter after defenders are gone.
+Any Capture Point targeting that Place is automatically inactive and its marker is
+hidden while story-bounds mode is enabled. You may keep the actor in the level: turning
+story-bounds mode off later makes the same point available for multiplayer/domination,
+where it fills the normal pressure meter after defenders are gone. The deprecated
+`Contributes Automatic Capture Progress` Boolean is no longer a mode switch.
+
+Multi-floor example: Blacksmith has guards on the ground and second floors. Scale the
+Place `Bounds Shape` to cover both floors. The player may enter either floor and start
+the contest; no Capture Point is required on the stairs or ground floor.
+
+For the Contested row, set diplomacy from `Current Owning Faction` to `Contesting
+Faction` as War. For the Claimed row, return `Current Owning Faction` and `Opposing
+Faction From Transition` to the desired peace/neutral state. The opposing source means
+the old owner after capture, or the departing attacker after an abandoned fight. It does
+not assume the player is Heroes.
+
+Add `Territory Ownership Changed During Transition` to Claimed-state rewards or enemy
+wave events that should run only after a real capture. Without it, leaving a contest can
+re-enter Claimed for the same owner and incorrectly replay that event. Narrative's
+inherited `Not` option gives the inverse rule when needed.
 
 Current example in `/Game/HopDistrictTest`:
 
@@ -79,8 +98,34 @@ Current example in `/Game/HopDistrictTest`:
 - Both dialogue choices use `TerritoryCaptureEligibilityCondition` followed by
   `TerritoryCaptureEvent`, with `Narrative Target Faction`. The exact player faction at
   the time of the choice becomes the new owner; Heroes is not hard-coded.
-- Both physical capture points are enabled in story-confrontation mode. They begin and
-  hold `Contested` but do not fill the automatic capture meter.
+- Both Places use full-bounds story capture. Their existing physical points keep valid
+  target tags for future multiplayer use but automatically remain inactive in story mode.
+
+Set `Owner Interaction Distance` on the owner spawner, not on a native actor placed in
+the level. Start with 300 cm. The owner Blueprint applies it to Narrative's interactable
+component after spawning; Narrative's player interaction trace must also reach at least
+that far.
+
+## Counterattack and recapture outcome
+
+A counterattack activates and attacks registered territory guards even when no player is
+nearby. After the attackers defeat the complete defence front:
+
+- A living defending player inside the Place or its parent District means the fight must
+  continue. Ownership cannot change through the unattended timer.
+- If no defending player is there, `Allow Unattended Recapture Countdown` starts a saved
+  countdown. The default is 30 game-time seconds. Returning alive cancels that countdown
+  and resumes the fight.
+- If `Concede When Defending Player Dies` is enabled and the defending player dies inside
+  the battle area, the recapturing faction receives the Place immediately, before respawn.
+- If the player stays away until the countdown ends, the recapturing faction receives the
+  Place. Territory emits its normal ownership event and the Command Center receives the
+  loss report.
+
+Easy example: Heroes own Blacksmith and assign one guard. Bandits attack while the player
+is at Farm Hill. When the guard dies, a 30-second recapture warning begins. If the player
+returns to Market Square, the timer stops and Bandits must defeat the player. If the player
+does not return, Blacksmith is handed back to Bandits when the timer ends.
 
 ## Unlock for a reason
 
@@ -120,6 +165,11 @@ Set `Reserve Wave Alert Dialogue Tag` on the faction force to let the first succ
 spawned attacker warn the player. Example line: "More of them on the stairs!" The normal
 Territory notification still provides the strategic warning. The plugin includes the
 example tag `Territory.Dialogue.ReservesArriving`; the dialogue asset supplies the line.
+
+Guard-post reserves also use bounded retries. `Camera Safe Retry Limit` first relaxes only
+the camera-avoidance preference. `Total Reserve Retry Limit` then abandons an impossible
+deployment without consuming the reserve, allowing the owner handover instead of leaving
+the Place permanently stuck because of missing NavMesh or collision.
 
 ## Concurrent attackers and target priority
 

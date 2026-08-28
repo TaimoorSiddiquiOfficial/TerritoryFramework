@@ -56,6 +56,25 @@ namespace
 					Result = Territory->GetActiveTransitionContext().RequestingFaction;
 				}
 				break;
+			case ETerritoryDiplomacyFactionSource::TransitionOpposingFaction:
+				if (Territory->IsOwnershipTransitionActive())
+				{
+					const FGameplayTag CurrentOwner = Territory->GetOwningFaction();
+					const FGameplayTag PreviousOwner =
+						Territory->GetTransitionPreviousOwningFaction();
+					const FGameplayTag RequestingFaction =
+						Territory->GetActiveTransitionContext().RequestingFaction;
+					if (PreviousOwner.IsValid() && PreviousOwner != CurrentOwner)
+					{
+						Result = PreviousOwner;
+					}
+					else if (RequestingFaction.IsValid()
+						&& RequestingFaction != CurrentOwner)
+					{
+						Result = RequestingFaction;
+					}
+				}
+				break;
 			case ETerritoryDiplomacyFactionSource::ExplicitTag:
 			default:
 				break;

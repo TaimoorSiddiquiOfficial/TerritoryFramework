@@ -15,8 +15,10 @@ enum class EDiplomacyState : uint8;
 
 /**
  * Server-authoritative strategic scheduler for finite, physical counterattacks.
- * It never changes ownership directly; spawned Narrative NPCs enter the existing
- * UTerritoryControlSubsystem capture flow.
+ * A probability roll never changes ownership. Spawned Narrative NPCs must enter the
+ * target and defeat its defence front. The subsystem then uses the shared Territory
+ * mutation authority only for the configured unattended countdown or defending-player
+ * death handover; player capture remains UTerritoryControlSubsystem's responsibility.
  */
 UCLASS()
 class TERRITORYFRAMEWORK_API UTerritoryCounterAttackSubsystem : public UWorldSubsystem
@@ -136,6 +138,20 @@ public:
 	static bool ShouldDeployActiveReserveWave(const FTerritoryAssaultRecord& Assault,
 		bool bRelevantPlayerNearby, bool bContinueAfterActivation);
 
+	/** Pure recapture decision shared by runtime and regression tests. */
+	enum class ERecaptureDecision : uint8
+	{
+		ContinueFight,
+		StartCountdown,
+		CompleteHandover,
+		NoAction
+	};
+	static ERecaptureDecision EvaluateRecaptureDecision(bool bDefendersRemain,
+		bool bPhysicalAttackerInside, bool bAliveDefendingPlayerInside,
+		bool bDeadDefendingPlayerInside, bool bCountdownActive,
+		bool bCountdownExpired, bool bAllowUnattendedCountdown,
+		bool bConcedeOnPlayerDeath);
+
 	/** Pure, save-stable recurring cooldown rule. */
 	static bool IsRecurringCooldownComplete(const FTerritoryAssaultRecord& PreviousAssault,
 		double CurrentGameTime, float CooldownGameTime);
@@ -233,6 +249,13 @@ private:
 	ATerritoryVolume* ResolveTerritory(const FTerritoryAssaultRecord& Assault) const;
 	bool HasRelevantPlayerNearby(const FTerritoryAssaultRecord& Assault,
 		const ATerritoryVolume* Territory, float Radius) const;
+	void GetDefendingPlayerPresence(const FTerritoryAssaultRecord& Assault,
+		const ATerritoryVolume* Territory, bool& bOutAliveInside,
+		bool& bOutDeadInside) const;
+	bool HasPhysicalAttackerInside(const FTerritoryAssaultRecord& Assault,
+		const ATerritoryVolume* Territory) const;
+	bool CompleteRecapture(FTerritoryAssaultRecord& Assault,
+		ATerritoryVolume* Territory);
 	APawn* FindNearestRelevantPlayer(const FTerritoryAssaultRecord& Assault,
 		const ATerritoryVolume* Territory, float Radius) const;
 	int32 ResolveScaledEnemyLevel(const FTerritoryAssaultRecord& Assault,

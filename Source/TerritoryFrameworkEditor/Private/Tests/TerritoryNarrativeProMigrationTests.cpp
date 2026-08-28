@@ -6,10 +6,13 @@
 #include "Core/TerritoryVolume.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Economy/TerritoryFactionResourceAccountComponent.h"
+#include "Interaction/TerritoryCapturePoint.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
+#include "Tales/TerritoryOwnerHandoverEvent.h"
 #include "Tales/TerritoryStoryConditions.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
@@ -398,6 +401,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		GetStateConfigs(Blacksmith)->Find(ETerritoryState::Contested);
 	const UTerritorySetDiplomacyEvent* ClaimedDiplomacyEvent = nullptr;
 	const UTerritorySetDiplomacyEvent* ContestedDiplomacyEvent = nullptr;
+	const UTerritoryScheduleEnemyWaveEvent* WaveEvent = nullptr;
 	const UNarrativeEvent* GiveXPEvent = nullptr;
 	if (ClaimedConfig)
 	{
@@ -411,6 +415,11 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 				Cast<UTerritorySetDiplomacyEvent>(Event))
 			{
 				ClaimedDiplomacyEvent = Typed;
+			}
+			if (const UTerritoryScheduleEnemyWaveEvent* Typed =
+				Cast<UTerritoryScheduleEnemyWaveEvent>(Event))
+			{
+				WaveEvent = Typed;
 			}
 		}
 	}
@@ -460,9 +469,9 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		TestEqual(TEXT("Claimed diplomacy first party follows the current owner"),
 			ClaimedDiplomacyEvent->FactionASource,
 			ETerritoryDiplomacyFactionSource::CurrentOwningFaction);
-		TestEqual(TEXT("Claimed diplomacy second party follows the previous owner"),
+		TestEqual(TEXT("Claimed diplomacy second party follows the opposing transition faction"),
 			ClaimedDiplomacyEvent->FactionBSource,
-			ETerritoryDiplomacyFactionSource::PreviousOwningFaction);
+			ETerritoryDiplomacyFactionSource::TransitionOpposingFaction);
 		TestEqual(TEXT("Claimed initial-state fallback first party is Bandits"),
 			ClaimedDiplomacyEvent->FactionA.ToString(),
 			FString(TEXT("Narrative.Factions.Bandits")));
@@ -494,6 +503,21 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			FString(TEXT("Narrative.Factions.Heroes")));
 		TestTrue(TEXT("Contested diplomacy rejects stale unrelated pairs"),
 			ContestedDiplomacyEvent->bRequireContainingTerritoryOwner);
+	}
+	TestNotNull(TEXT("Blacksmith Claimed state schedules its finite enemy wave"), WaveEvent);
+	if (WaveEvent)
+	{
+		TestEqual(TEXT("Claimed wave targets Blacksmith"), WaveEvent->TargetTerritory.ToString(),
+			FString(TEXT("Territory.HavenReach.MarketSquare.Blacksmith")));
+		TestEqual(TEXT("Claimed wave uses Bandits as the exact attacker"),
+			WaveEvent->AttackingFaction.ToString(),
+			FString(TEXT("Narrative.Factions.Bandits")));
+		TestEqual(TEXT("Claimed wave has one inherited ownership-change condition"),
+			WaveEvent->Conditions.Num(), 1);
+		TestTrue(TEXT("Claimed wave cannot run after a same-owner contest reset"),
+			WaveEvent->Conditions.Num() == 1
+			&& Cast<UTerritoryOwnershipTransitionCondition>(
+				WaveEvent->Conditions[0]) != nullptr);
 	}
 
 	const FTerritoryStateConfig* LockedConfig =
@@ -528,41 +552,81 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		const TArray<TObjectPtr<UNarrativeEvent>>* Events =
 			DefeatedEventsProperty->ContainerPtrToValuePtr<
 				TArray<TObjectPtr<UNarrativeEvent>>>(Blacksmith);
-		const UTerritoryScheduleEnemyWaveEvent* WaveEvent = nullptr;
+		const UTerritoryOwnerHandoverEvent* HandoverEvent = nullptr;
 		if (Events)
 		{
 			for (const TObjectPtr<UNarrativeEvent>& Event : *Events)
 			{
-				if (const UTerritoryScheduleEnemyWaveEvent* Typed =
-					Cast<UTerritoryScheduleEnemyWaveEvent>(Event))
+				if (const UTerritoryOwnerHandoverEvent* Typed =
+					Cast<UTerritoryOwnerHandoverEvent>(Event))
 				{
-					WaveEvent = Typed;
+					HandoverEvent = Typed;
 					break;
 				}
 			}
 		}
-		TestNotNull(TEXT("Blacksmith schedules a finite wave after all defenders are defeated"),
-			WaveEvent);
-		if (WaveEvent)
+		TestNotNull(TEXT("Blacksmith reveals its owner after all defenders are defeated"),
+			HandoverEvent);
+		if (HandoverEvent)
 		{
-			TestEqual(TEXT("Defeat wave targets Blacksmith"), WaveEvent->TargetTerritory.ToString(),
+			TestEqual(TEXT("Owner handover keeps a stable Blacksmith fallback"),
+				HandoverEvent->OwnerTerritoryTag.ToString(),
 				FString(TEXT("Territory.HavenReach.MarketSquare.Blacksmith")));
-			TestEqual(TEXT("Defeat wave uses Bandits as the exact attacker"),
-				WaveEvent->AttackingFaction.ToString(),
-				FString(TEXT("Narrative.Factions.Bandits")));
-			TestEqual(TEXT("Defeat wave has one inherited Narrative condition"),
-				WaveEvent->Conditions.Num(), 1);
-			const UTerritoryDiplomacyCondition* WaveDiplomacy = WaveEvent->Conditions.Num() == 1
-				? Cast<UTerritoryDiplomacyCondition>(WaveEvent->Conditions[0]) : nullptr;
-			TestNotNull(TEXT("Defeat wave is gated by the reusable diplomacy condition"),
-				WaveDiplomacy);
-			if (WaveDiplomacy)
-			{
-				TestEqual(TEXT("Defeat wave requires War"), WaveDiplomacy->RequiredState,
-					EDiplomacyState::War);
-			}
 		}
 	}
+
+	TestTrue(TEXT("Blacksmith uses full-volume story contesting"),
+		Blacksmith->UsesStoryCaptureFromBounds());
+	TestTrue(TEXT("Farm uses full-volume story contesting after it unlocks"),
+		Farm->UsesStoryCaptureFromBounds());
+
+	TMap<FGameplayTag, ATerritoryStoryOwnerSpawner*> OwnerSpawners;
+	TMap<FGameplayTag, ATerritoryCapturePoint*> CapturePoints;
+	for (AActor* Actor : World->PersistentLevel->Actors)
+	{
+		if (ATerritoryStoryOwnerSpawner* Owner =
+			Cast<ATerritoryStoryOwnerSpawner>(Actor))
+		{
+			OwnerSpawners.Add(Owner->TerritoryTag, Owner);
+		}
+		if (ATerritoryCapturePoint* Point = Cast<ATerritoryCapturePoint>(Actor))
+		{
+			CapturePoints.Add(Point->TargetTerritoryTag, Point);
+		}
+	}
+
+	auto VerifyOwner = [this, &OwnerSpawners](const TCHAR* TerritoryTag)
+	{
+		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(TerritoryTag));
+		ATerritoryStoryOwnerSpawner* const* Found = OwnerSpawners.Find(Tag);
+		TestNotNull(FString::Printf(TEXT("%s has a story owner Blueprint"), TerritoryTag),
+			Found ? *Found : nullptr);
+		if (Found && *Found)
+		{
+			TestTrue(FString::Printf(TEXT("%s owner is a project Blueprint child"), TerritoryTag),
+				(*Found)->GetClass() != ATerritoryStoryOwnerSpawner::StaticClass()
+				&& (*Found)->GetClass()->IsChildOf(ATerritoryStoryOwnerSpawner::StaticClass()));
+			TestEqual(FString::Printf(TEXT("%s owner interaction distance is usable"), TerritoryTag),
+				(*Found)->OwnerInteractionDistance, 300.f);
+		}
+	};
+	VerifyOwner(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	VerifyOwner(TEXT("Territory.HavenReach.CastleHill.Farm"));
+
+	auto VerifyStoryCapturePoint = [this, &CapturePoints](const TCHAR* TerritoryTag)
+	{
+		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(TerritoryTag));
+		ATerritoryCapturePoint* const* Found = CapturePoints.Find(Tag);
+		TestNotNull(FString::Printf(TEXT("%s keeps an optional multiplayer capture point"),
+			TerritoryTag), Found ? *Found : nullptr);
+		if (Found && *Found)
+		{
+			TestTrue(FString::Printf(TEXT("%s point remains enabled for multiplayer reuse"),
+				TerritoryTag), (*Found)->bCaptureEnabled);
+		}
+	};
+	VerifyStoryCapturePoint(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	VerifyStoryCapturePoint(TEXT("Territory.HavenReach.CastleHill.Farm"));
 
 	return true;
 }

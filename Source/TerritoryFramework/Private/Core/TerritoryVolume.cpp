@@ -46,6 +46,7 @@ ATerritoryVolume::ATerritoryVolume()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+	PrimaryActorTick.TickInterval = 0.25f;
 	bReplicates = true;
 
 	BoundsShape = CreateDefaultSubobject<UBoxComponent>(TEXT("BoundsShape"));
@@ -204,6 +205,24 @@ void ATerritoryVolume::BeginPlay()
 	// Fire BP-exposed initialization event (only reached if registration succeeded)
 	OnTerritoryInitialized();
 
+	// Story capture is driven by the complete bounds and therefore needs a small,
+	// server-only reconciliation tick. Normal territories remain tickless unless a
+	// debug overlay below also needs the actor tick.
+	if (HasAuthority() && bStoryCaptureFromBounds)
+	{
+		if (ControlMode != ETerritoryControlMode::Independent)
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("%s enables story capture from bounds but is not independently capturable; the story flow is disabled."),
+				*GetPathName());
+		}
+		else
+		{
+			SetActorTickEnabled(true);
+			ReconcileStoryBoundsContesters();
+		}
+	}
+
 	// Enable ticking only when debug visual draw is enabled (PIE only)
 #if ENABLE_DRAW_DEBUG
 	const UTerritoryDeveloperSettings* DebugSettings = GetDefault<UTerritoryDeveloperSettings>();
@@ -265,6 +284,7 @@ void ATerritoryVolume::PublishCaptureSummary()
 void ATerritoryVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(DefenderDeathBindRetryTimer);
+	ReleaseStoryBoundsContesters();
 	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{
 		Registry->UnregisterTerritory(this);
@@ -298,6 +318,18 @@ void ATerritoryVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void ATerritoryVolume::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	if (HasAuthority())
+	{
+		if (bStoryCaptureFromBounds && ControlMode == ETerritoryControlMode::Independent)
+		{
+			ReconcileStoryBoundsContesters();
+		}
+		else if (!StoryBoundsContesters.IsEmpty())
+		{
+			ReleaseStoryBoundsContesters();
+		}
+	}
 
 #if ENABLE_DRAW_DEBUG
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -840,6 +872,99 @@ FGameplayTag ATerritoryVolume::GetInitialOwningFaction() const
 ETerritoryControlMode ATerritoryVolume::GetControlMode() const
 {
 	return ControlMode;
+}
+
+void ATerritoryVolume::ReconcileStoryBoundsContesters()
+{
+	UWorld* World = GetWorld();
+	UTerritoryControlSubsystem* Control = World
+		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
+	if (!HasAuthority() || !World || !Control || !bStoryCaptureFromBounds
+		|| ControlMode != ETerritoryControlMode::Independent)
+	{
+		ReleaseStoryBoundsContesters();
+		return;
+	}
+
+	TSet<TWeakObjectPtr<AActor>> SeenInside;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* Controller = It->Get();
+		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+		if (!Pawn || !ContainsPoint(Pawn->GetActorLocation()))
+		{
+			continue;
+		}
+
+		if (const IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Pawn))
+		{
+			if (const UNarrativeAbilitySystemComponent* ASC =
+				Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent());
+				ASC && ASC->IsDead())
+			{
+				continue;
+			}
+		}
+
+		const FGameplayTag Faction =
+			UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Pawn);
+		if (!Faction.IsValid() || IsOwnedByFaction(Faction))
+		{
+			continue;
+		}
+
+		SeenInside.Add(Pawn);
+		const TWeakObjectPtr<AActor> PawnKey(Pawn);
+		if (const FGameplayTag* PreviousFaction = StoryBoundsContesters.Find(PawnKey);
+			PreviousFaction && *PreviousFaction != Faction)
+		{
+			Control->UnregisterAttacker(this, Pawn, *PreviousFaction);
+			StoryBoundsContesters.Remove(PawnKey);
+		}
+
+		if (Control->TryRegisterContester(this, Pawn, Faction))
+		{
+			StoryBoundsContesters.Add(PawnKey, Faction);
+		}
+	}
+
+	TArray<TWeakObjectPtr<AActor>> ToRelease;
+	for (const TPair<TWeakObjectPtr<AActor>, FGameplayTag>& Pair : StoryBoundsContesters)
+	{
+		if (!Pair.Key.IsValid() || !SeenInside.Contains(Pair.Key))
+		{
+			ToRelease.Add(Pair.Key);
+		}
+	}
+	for (const TWeakObjectPtr<AActor>& Participant : ToRelease)
+	{
+		if (AActor* Actor = Participant.Get())
+		{
+			if (const FGameplayTag* Faction = StoryBoundsContesters.Find(Participant))
+			{
+				Control->UnregisterAttacker(this, Actor, *Faction);
+			}
+		}
+		StoryBoundsContesters.Remove(Participant);
+	}
+}
+
+void ATerritoryVolume::ReleaseStoryBoundsContesters()
+{
+	UWorld* World = GetWorld();
+	UTerritoryControlSubsystem* Control = World
+		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
+	if (Control)
+	{
+		for (const TPair<TWeakObjectPtr<AActor>, FGameplayTag>& Pair : StoryBoundsContesters)
+		{
+			if (AActor* Participant = Pair.Key.Get())
+			{
+				Control->UnregisterAttacker(this, Participant, Pair.Value);
+			}
+		}
+	}
+	StoryBoundsContesters.Empty();
 }
 
 ETerritoryState ATerritoryVolume::ResolveInitialTerritoryState() const
@@ -1578,17 +1703,37 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	};
 	FireDefenderEvents(DefenderDiedEvents, TEXT("DefenderDiedEvent"));
 
+	TryCompleteDefenderDefeat(DefenderEventContext);
+}
+
+void ATerritoryVolume::TryCompleteDefenderDefeat(
+	const FTerritoryTransitionContext& EventContext)
+{
 	// Check ALL registered defenders (includes non-guard defenders registered via
-	// RegisterDefender Blueprint API), not just SpawnedGuards — otherwise territory
-	// flips to Unclaimed while player/pawn defenders are still alive.
+	// RegisterDefender Blueprint API), not just SpawnedGuards. Pending reserves remain
+	// part of the fight unless their bounded deployment retries were exhausted.
 	CleanupInvalidDefenders();
-	if (RegisteredDefenders.Num() == 0 && !HasPendingReserveDeployments())
+	if (RegisteredDefenders.Num() != 0 || HasPendingReserveDeployments()) return;
+
+	UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All defenders defeated in %s"),
+		*GetTerritoryTag().ToString());
+	OnAllGuardsDefeated();
+	OnAllGuardsDefeatedDelegate.Broadcast(this);
+	for (UNarrativeEvent* Event : AllDefendersDefeatedEvents)
 	{
-		UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All defenders defeated in %s"),
-			*GetTerritoryTag().ToString());
-		OnAllGuardsDefeated();
-		OnAllGuardsDefeatedDelegate.Broadcast(this);
-		FireDefenderEvents(AllDefendersDefeatedEvents, TEXT("AllDefendersDefeatedEvent"));
+		if (!Event) continue;
+		FString FailedCondition;
+		if (!TerritoryTales::DoEventConditionsPass(Event,
+			EventContext.TargetPawn, EventContext.PlayerController,
+			EventContext.TalesComponent, &FailedCondition))
+		{
+			UE_LOG(LogTerritory, Verbose,
+				TEXT("[AllDefendersDefeatedEvent] %s skipped on %s because condition '%s' failed"),
+				*Event->GetGraphDisplayText(), *TerritoryTag.ToString(), *FailedCondition);
+			continue;
+		}
+		Event->OnActivate(EventContext.TargetPawn,
+			EventContext.PlayerController, EventContext.TalesComponent);
 	}
 }
 

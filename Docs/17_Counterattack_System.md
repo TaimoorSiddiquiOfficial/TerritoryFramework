@@ -2,15 +2,20 @@
 
 ## Authority and lifecycle
 
-`UTerritoryCounterAttackSubsystem` is the server-only strategic scheduler. It never writes territory ownership. Ownership changes only after physical Narrative NPCs enter the target, register with `UTerritoryControlSubsystem`, survive defender validation, and complete the normal capture flow.
+`UTerritoryCounterAttackSubsystem` is the server-only strategic scheduler and physical
+recapture coordinator. It cannot win from a probability roll: Narrative attackers must
+enter the target and every registered defender must be defeated. It commits ownership only
+for the explicit unattended/dead-player recapture outcomes described below; ordinary player
+capture still belongs to `UTerritoryControlSubsystem`.
 
 ```text
 Captured
   -> Grace
   -> Evaluating
   -> ScheduledWarning
-  -> WaitingForPlayerProximity
+  -> WaitingForPlayerProximity (only when the profile requires it)
   -> Active physical assault
+  -> optional RecaptureCountdown when defenders are gone and the player is absent
   -> Succeeded / Defeated / Cancelled
   -> optional recurring cooldown (strategic records only)
   -> saved and replicated by ATerritoryWorldState
@@ -24,6 +29,27 @@ the durable ID, target/factions, force counts, selected approaches, and resoluti
 provides `PreviousState` and `EventGameTime`. Same-state casualty/data updates continue to use
 `OnAssaultChanged` and do not duplicate `OnCounterHappened`; save/load hydration never replays
 gameplay notifications.
+
+## Player presence and recapture
+
+`Require Player Proximity For Activation` defaults off. This lets a faction attack a
+district and its registered guards without waiting for the player to arrive.
+
+After the complete defence front has no living registered guard and an attacker is
+physically inside the target:
+
+- A living defending-faction player in the Place or parent District keeps the assault
+  Active. The attackers must defeat that player.
+- With `Allow Unattended Recapture Countdown`, an absent player starts the saved
+  `Unattended Recapture Time`. Returning alive cancels the countdown.
+- With `Concede When Defending Player Dies`, a defending player death inside that battle
+  area immediately hands the Place to the attacker before respawn.
+- An expired unattended countdown hands the Place to the attacker and publishes the normal
+  ownership/UI intelligence events.
+
+Example: Bandits reach a Heroes-owned Blacksmith while the player is elsewhere. They defeat
+its final guard, and a 30-second report appears. If the player returns, combat is required.
+If the player stays away—or dies defending it—the Place is recaptured by Bandits.
 
 ## Required setup
 

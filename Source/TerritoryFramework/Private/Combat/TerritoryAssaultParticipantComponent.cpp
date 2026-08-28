@@ -242,7 +242,10 @@ void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 		return;
 	}
 
-	bCaptureRegistered = Control->TryRegisterAttacker(Territory, Owner, AttackingFaction);
+	// A counterattack must physically enter, fight, and hold the Territory, but the
+	// ordinary capture-meter tick must not decide strategic recapture. The counter
+	// subsystem owns the explicit player-present/death/countdown handover policy.
+	bCaptureRegistered = Control->TryRegisterContester(Territory, Owner, AttackingFaction);
 	if (!bCaptureRegistered)
 	{
 		Director->ReleaseAssaultSlot(Territory, Controller);

@@ -48,6 +48,19 @@ void ATerritoryCapturePoint::BeginPlay()
 	Super::BeginPlay();
 	if (!CaptureZone) return;
 	RefreshCaptureMarkerVisibility();
+	if (!TargetTerritoryTag.IsValid())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Capture Point %s has no Target Territory Tag and cannot capture anything."),
+			*GetPathName());
+	}
+	else if (const ATerritoryVolume* Territory = ResolveTargetTerritory();
+		Territory && Territory->UsesStoryCaptureFromBounds())
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("Capture Point %s is disabled because %s uses story capture from its full bounds."),
+			*GetName(), *Territory->GetTerritoryTag().ToString());
+	}
 
 	CaptureZone->OnComponentBeginOverlap.AddUniqueDynamic(
 		this, &ATerritoryCapturePoint::HandleCaptureZoneBeginOverlap);
@@ -113,7 +126,8 @@ FGameplayTag ATerritoryCapturePoint::GetContestingFaction() const
 
 bool ATerritoryCapturePoint::TryRegisterCaptureParticipant(AActor* Participant)
 {
-	if (!HasAuthority() || !bCaptureEnabled || !IsEligiblePlayerParticipant(Participant))
+	if (!HasAuthority() || !IsAutomaticCaptureFlowActive()
+		|| !IsEligiblePlayerParticipant(Participant))
 	{
 		UnregisterCaptureParticipant(Participant);
 		return false;
@@ -150,9 +164,8 @@ bool ATerritoryCapturePoint::TryRegisterCaptureParticipant(AActor* Participant)
 			if (UTerritoryControlSubsystem* Control =
 				GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
 			{
-				const bool bRegistered = bContributesCaptureProgress
-					? Control->TryRegisterAttacker(Territory, Participant, Faction)
-					: Control->TryRegisterContester(Territory, Participant, Faction);
+				const bool bRegistered =
+					Control->TryRegisterAttacker(Territory, Participant, Faction);
 				if (bRegistered)
 				{
 					return true;
@@ -166,9 +179,8 @@ bool ATerritoryCapturePoint::TryRegisterCaptureParticipant(AActor* Participant)
 
 	UTerritoryControlSubsystem* Control =
 		GetWorld()->GetSubsystem<UTerritoryControlSubsystem>();
-	const bool bRegistered = Control && (bContributesCaptureProgress
-		? Control->TryRegisterAttacker(Territory, Participant, Faction)
-		: Control->TryRegisterContester(Territory, Participant, Faction));
+	const bool bRegistered = Control
+		&& Control->TryRegisterAttacker(Territory, Participant, Faction);
 	if (!bRegistered)
 	{
 		return false;
@@ -222,6 +234,14 @@ bool ATerritoryCapturePoint::IsCaptureParticipantRegistered(const AActor* Partic
 		TWeakObjectPtr<AActor>(const_cast<AActor*>(Participant)));
 }
 
+bool ATerritoryCapturePoint::IsAutomaticCaptureFlowActive() const
+{
+	const ATerritoryVolume* Territory = ResolveTargetTerritory();
+	return bCaptureEnabled && Territory
+		&& Territory->GetControlMode() == ETerritoryControlMode::Independent
+		&& !Territory->UsesStoryCaptureFromBounds();
+}
+
 void ATerritoryCapturePoint::HandleCaptureZoneBeginOverlap(
 	UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep,
@@ -257,7 +277,7 @@ void ATerritoryCapturePoint::HandleParticipantDeathStateChanged(
 
 void ATerritoryCapturePoint::ReconcileOverlappingParticipants()
 {
-	if (!bCaptureEnabled)
+	if (!IsAutomaticCaptureFlowActive())
 	{
 		TArray<TWeakObjectPtr<AActor>> Registered;
 		Registrations.GetKeys(Registered);
@@ -299,7 +319,7 @@ bool ATerritoryCapturePoint::IsEligiblePlayerParticipant(AActor* Participant) co
 void ATerritoryCapturePoint::RefreshCaptureMarkerVisibility()
 {
 	if (!CaptureMarkerMesh) return;
-	bool bVisible = bCaptureEnabled;
+	bool bVisible = IsAutomaticCaptureFlowActive();
 	if (bVisible && bHideMarkerWhileCaptureUnavailable)
 	{
 		const ATerritoryVolume* Territory = ResolveTargetTerritory();

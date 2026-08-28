@@ -659,11 +659,19 @@ bool UTerritoryControlSubsystem::CommitCaptureReadModel(
 void UTerritoryControlSubsystem::ResetCapture(ATerritoryVolume* Territory)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory) return;
+	const FGameplayTag DepartingFaction =
+		Territory->GetOwnershipData().ContestingFaction;
+	FTerritoryTransitionContext TransitionContext =
+		ResolveCaptureContext(Territory, DepartingFaction);
+	// Preserve the exact faction that caused this conflict even when its pawn died
+	// or streamed before the reset. Claimed-state diplomacy can then end the same
+	// War pair instead of falling back to a serialized Heroes/Bandits assumption.
+	TransitionContext.RequestingFaction = DepartingFaction;
 	ReleaseTerritoryAttackers(Territory);
 	const ETerritoryState RecoveredState = Territory->GetOwningFaction().IsValid()
 		? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
-	// Capture decay/reset is a deliberate world-level transition with no player context.
-	CommitCaptureReadModel(Territory, RecoveredState, FGameplayTag(), 0.f);
+	CommitCaptureReadModel(Territory, RecoveredState, FGameplayTag(), 0.f,
+		TransitionContext);
 }
 
 void UTerritoryControlSubsystem::ClearCaptureTrackingOnly(ATerritoryVolume* Territory)

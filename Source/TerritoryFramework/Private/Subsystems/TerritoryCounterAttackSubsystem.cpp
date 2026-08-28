@@ -23,6 +23,7 @@
 #include "Tales/TerritoryQuestRules.h"
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "GameplayEffect.h"
 #include "GameFramework/Pawn.h"
@@ -175,7 +176,8 @@ bool UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
 	{
 		return true;
 	}
-	return AssaultState == ETerritoryAssaultState::Active
+	return (AssaultState == ETerritoryAssaultState::Active
+			|| AssaultState == ETerritoryAssaultState::RecaptureCountdown)
 		&& TerritoryState == ETerritoryState::Contested
 		&& AttackingFaction.IsValid()
 		&& ContestingFaction == AttackingFaction;
@@ -562,7 +564,8 @@ TArray<FTerritoryAssaultRecord> UTerritoryCounterAttackSubsystem::GetAssaultsFor
 bool UTerritoryCounterAttackSubsystem::IsAssaultActive(FGuid AssaultID) const
 {
 	const FTerritoryAssaultRecord* Assault = Assaults.Find(AssaultID);
-	return Assault && Assault->State == ETerritoryAssaultState::Active;
+	return Assault && (Assault->State == ETerritoryAssaultState::Active
+		|| Assault->State == ETerritoryAssaultState::RecaptureCountdown);
 }
 
 bool UTerritoryCounterAttackSubsystem::IsAssaultPendingOrActive(FGuid AssaultID) const
@@ -804,7 +807,8 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 		Record.KilledForce = FMath::Clamp(Record.KilledForce, 0, Record.PlannedForce);
 		Record.WithdrawnForce = FMath::Clamp(
 			Record.WithdrawnForce, 0, Record.PlannedForce - Record.KilledForce);
-		if (bAuthority && Record.State == ETerritoryAssaultState::Active)
+		if (bAuthority && (Record.State == ETerritoryAssaultState::Active
+			|| Record.State == ETerritoryAssaultState::RecaptureCountdown))
 		{
 			// Live assault pawns are intentionally not campaign state. Reconstruct only
 			// saved survivors; casualties remain consumed and the decision is not rerolled.
@@ -931,8 +935,10 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 			ETerritoryAssaultResolution::ConfigurationInvalid);
 		return;
 	}
+	const bool bPhysicalAssault = Assault.State == ETerritoryAssaultState::Active
+		|| Assault.State == ETerritoryAssaultState::RecaptureCountdown;
 	if (Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
-		&& Assault.State != ETerritoryAssaultState::Active
+		&& !bPhysicalAssault
 		&& !DoesForceMeetStagingRequirement(*ForceConfig, Assault.LaunchMode))
 	{
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
@@ -940,7 +946,7 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		return;
 	}
 	if (Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
-		&& Assault.State != ETerritoryAssaultState::Active
+		&& !bPhysicalAssault
 		&& !DoStrategicQuestRulesPass(Profile, Assault.AttackingFaction,
 			Assault.DefendingFaction))
 	{
@@ -994,20 +1000,22 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		if (Profile)
 		{
 			if (Territory->GetTerritoryState() == ETerritoryState::Claimed
-				&& HasRelevantPlayerNearby(Assault, Territory, Profile->ActivationRadius))
+				&& (!Profile->bRequirePlayerProximityForActivation
+					|| HasRelevantPlayerNearby(Assault, Territory, Profile->ActivationRadius)))
 			{
 				ActivateAssault(Assault, Territory);
 			}
 		}
 		break;
 	case ETerritoryAssaultState::Active:
+	case ETerritoryAssaultState::RecaptureCountdown:
 		if (Assault.AliveForce + Assault.PendingReserveForce <= 0)
 		{
 			ResolveAssault(Assault, ETerritoryAssaultState::Defeated,
 				ETerritoryAssaultResolution::AllAttackersRemoved);
 			return;
 		}
-		if (Profile)
+		if (Profile && Assault.State == ETerritoryAssaultState::Active)
 		{
 			const bool bRelevantPlayerNearby = HasRelevantPlayerNearby(
 				Assault, Territory, Profile->ActivationRadius);
@@ -1015,6 +1023,74 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 				Profile->bContinueFiniteWavesAfterActivation))
 			{
 				SpawnNextWave(Assault, Territory);
+			}
+		}
+
+		if (Profile)
+		{
+			bool bDefendersRemain = !TerritoryAssaultTargetPolicy::
+				CollectRegisteredDefenders(Territory).IsEmpty();
+			if (!bDefendersRemain)
+			{
+				for (ATerritoryVolume* Defence :
+					TerritoryAssaultTargetPolicy::BuildDefenceFront(Territory))
+				{
+					if (!Defence || (Defence != Territory
+						&& Defence->GetOwningFaction() != Assault.DefendingFaction))
+					{
+						continue;
+					}
+					for (const ATerritoryGuardSpawnPoint* Post : Defence->GetGuardSpawnPoints())
+					{
+						if (Post && Post->HasPendingReserveSpawn())
+						{
+							bDefendersRemain = true;
+							break;
+						}
+					}
+					if (bDefendersRemain) break;
+				}
+			}
+
+			bool bAliveDefendingPlayerInside = false;
+			bool bDeadDefendingPlayerInside = false;
+			GetDefendingPlayerPresence(Assault, Territory,
+				bAliveDefendingPlayerInside, bDeadDefendingPlayerInside);
+			const double Now = GetCampaignGameTime();
+			const ERecaptureDecision Decision = EvaluateRecaptureDecision(
+				bDefendersRemain, HasPhysicalAttackerInside(Assault, Territory),
+				bAliveDefendingPlayerInside, bDeadDefendingPlayerInside,
+				Assault.State == ETerritoryAssaultState::RecaptureCountdown,
+				Assault.RecaptureEndsGameTime > 0.0 && Now >= Assault.RecaptureEndsGameTime,
+				Profile->bUseUnattendedRecaptureHandover,
+				Profile->bConcedeWhenDefendingPlayerDies);
+
+			switch (Decision)
+			{
+			case ERecaptureDecision::StartCountdown:
+			{
+				const ETerritoryAssaultState PreviousState = Assault.State;
+				Assault.State = ETerritoryAssaultState::RecaptureCountdown;
+				Assault.RecaptureEndsGameTime = Now
+					+ FMath::Max(1.f, Profile->UnattendedRecaptureDelayGameTime);
+				BroadcastStateTransition(Assault, PreviousState);
+				break;
+			}
+			case ERecaptureDecision::CompleteHandover:
+				CompleteRecapture(Assault, Territory);
+				return;
+			case ERecaptureDecision::ContinueFight:
+			case ERecaptureDecision::NoAction:
+				if (Assault.State == ETerritoryAssaultState::RecaptureCountdown
+					&& (bDefendersRemain || bAliveDefendingPlayerInside
+						|| !HasPhysicalAttackerInside(Assault, Territory)))
+				{
+					const ETerritoryAssaultState PreviousState = Assault.State;
+					Assault.State = ETerritoryAssaultState::Active;
+					Assault.RecaptureEndsGameTime = 0.0;
+					BroadcastStateTransition(Assault, PreviousState);
+				}
+				break;
 			}
 		}
 		break;
@@ -1438,7 +1514,8 @@ bool UTerritoryCounterAttackSubsystem::ApplyParticipantRemoval(
 	--Assault.AliveForce;
 	if (bKilled) ++Assault.KilledForce;
 	else ++Assault.WithdrawnForce;
-	bOutForceExhausted = Assault.State == ETerritoryAssaultState::Active
+	bOutForceExhausted = (Assault.State == ETerritoryAssaultState::Active
+			|| Assault.State == ETerritoryAssaultState::RecaptureCountdown)
 		&& Assault.AliveForce + Assault.PendingReserveForce <= 0;
 	return true;
 }
@@ -1451,6 +1528,36 @@ bool UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(
 		&& Assault.PendingReserveForce > 0
 		&& Assault.AliveForce < FMath::Max(1, Assault.WaveSize)
 		&& (bContinueAfterActivation || bRelevantPlayerNearby);
+}
+
+UTerritoryCounterAttackSubsystem::ERecaptureDecision
+UTerritoryCounterAttackSubsystem::EvaluateRecaptureDecision(
+	bool bDefendersRemain, bool bPhysicalAttackerInside,
+	bool bAliveDefendingPlayerInside, bool bDeadDefendingPlayerInside,
+	bool bCountdownActive, bool bCountdownExpired,
+	bool bAllowUnattendedCountdown, bool bConcedeOnPlayerDeath)
+{
+	if (bDefendersRemain || bAliveDefendingPlayerInside)
+	{
+		return ERecaptureDecision::ContinueFight;
+	}
+	if (!bPhysicalAttackerInside)
+	{
+		return ERecaptureDecision::NoAction;
+	}
+	if (bDeadDefendingPlayerInside && bConcedeOnPlayerDeath)
+	{
+		return ERecaptureDecision::CompleteHandover;
+	}
+	if (bCountdownActive)
+	{
+		return bCountdownExpired
+			? ERecaptureDecision::CompleteHandover
+			: ERecaptureDecision::NoAction;
+	}
+	return bAllowUnattendedCountdown
+		? ERecaptureDecision::StartCountdown
+		: ERecaptureDecision::ContinueFight;
 }
 
 bool UTerritoryCounterAttackSubsystem::IsRecurringCooldownComplete(
@@ -1475,6 +1582,7 @@ void UTerritoryCounterAttackSubsystem::ResolveAssault(
 	Assault.State = FinalState;
 	Assault.Resolution = Reason;
 	Assault.ResolvedGameTime = GetCampaignGameTime();
+	Assault.RecaptureEndsGameTime = 0.0;
 	RetireLiveParticipants(Assault, true);
 	const int32 UnaccountedForce = FMath::Max(0,
 		Assault.PlannedForce - Assault.KilledForce - Assault.WithdrawnForce);
@@ -1668,6 +1776,101 @@ bool UTerritoryCounterAttackSubsystem::HasRelevantPlayerNearby(
 		}
 	}
 	return false;
+}
+
+void UTerritoryCounterAttackSubsystem::GetDefendingPlayerPresence(
+	const FTerritoryAssaultRecord& Assault, const ATerritoryVolume* Territory,
+	bool& bOutAliveInside, bool& bOutDeadInside) const
+{
+	bOutAliveInside = false;
+	bOutDeadInside = false;
+	UWorld* World = GetWorld();
+	if (!World || !Territory || !Assault.DefendingFaction.IsValid()) return;
+
+	const TArray<ATerritoryVolume*> DefenceFront =
+		TerritoryAssaultTargetPolicy::BuildDefenceFront(
+			const_cast<ATerritoryVolume*>(Territory));
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* Controller = It->Get();
+		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+		if (!Pawn) continue;
+		const bool bDefendingFaction =
+			UTerritoryBlueprintLibrary::IsActorInFaction(this, Pawn, Assault.DefendingFaction)
+			|| UTerritoryBlueprintLibrary::IsActorInFaction(
+				this, Controller, Assault.DefendingFaction);
+		if (!bDefendingFaction) continue;
+
+		bool bInside = false;
+		for (const ATerritoryVolume* Defence : DefenceFront)
+		{
+			if (Defence && Defence->ContainsPoint(Pawn->GetActorLocation()))
+			{
+				bInside = true;
+				break;
+			}
+		}
+		if (!bInside) continue;
+
+		bool bDead = false;
+		if (const IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Pawn))
+		{
+			if (const UNarrativeAbilitySystemComponent* ASC =
+				Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent()))
+			{
+				bDead = ASC->IsDead();
+			}
+		}
+		bOutDeadInside |= bDead;
+		bOutAliveInside |= !bDead;
+	}
+}
+
+bool UTerritoryCounterAttackSubsystem::HasPhysicalAttackerInside(
+	const FTerritoryAssaultRecord& Assault, const ATerritoryVolume* Territory) const
+{
+	if (!Territory) return false;
+	const TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>>* Participants =
+		LiveParticipants.Find(Assault.AssaultID);
+	if (!Participants) return false;
+	for (const TWeakObjectPtr<ATerritoryAssaultCharacter>& WeakParticipant : *Participants)
+	{
+		const ATerritoryAssaultCharacter* Participant = WeakParticipant.Get();
+		if (IsValid(Participant) && !Participant->IsActorBeingDestroyed()
+			&& Territory->ContainsPoint(Participant->GetActorLocation()))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool UTerritoryCounterAttackSubsystem::CompleteRecapture(
+	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory)
+{
+	UWorld* World = GetWorld();
+	UTerritoryControlSubsystem* Control = World
+		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
+	if (!Control || !Territory || !Assault.AttackingFaction.IsValid()) return false;
+
+	FTerritoryTransitionContext Context;
+	Context.RequestingFaction = Assault.AttackingFaction;
+	if (const TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>>* Participants =
+		LiveParticipants.Find(Assault.AssaultID))
+	{
+		for (const TWeakObjectPtr<ATerritoryAssaultCharacter>& WeakParticipant : *Participants)
+		{
+			if (ATerritoryAssaultCharacter* Participant = WeakParticipant.Get())
+			{
+				if (!Territory->ContainsPoint(Participant->GetActorLocation())) continue;
+				Context.Instigator = Participant;
+				Context.TargetPawn = Participant;
+				break;
+			}
+		}
+	}
+	return Control->ForceCaptureWithContext(
+		Territory, Assault.AttackingFaction, Context);
 }
 
 APawn* UTerritoryCounterAttackSubsystem::FindNearestRelevantPlayer(

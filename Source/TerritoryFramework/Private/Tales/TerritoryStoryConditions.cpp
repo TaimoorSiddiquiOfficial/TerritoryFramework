@@ -97,6 +97,25 @@ FString UTerritoryEventContextCondition::GetGraphDisplayText_Implementation()
 			*FString::Join(Requirements, TEXT(", ")));
 }
 
+UTerritoryOwnershipTransitionCondition::UTerritoryOwnershipTransitionCondition()
+{
+	ConditionFilter = EConditionFilter::CF_DontTarget;
+}
+
+bool UTerritoryOwnershipTransitionCondition::CheckCondition_Implementation(
+	APawn*, APlayerController*, UTalesComponent*)
+{
+	const ATerritoryVolume* Territory = GetTypedOuter<ATerritoryVolume>();
+	return Territory && Territory->IsOwnershipTransitionActive()
+		&& Territory->GetTransitionPreviousOwningFaction()
+			!= Territory->GetOwningFaction();
+}
+
+FString UTerritoryOwnershipTransitionCondition::GetGraphDisplayText_Implementation()
+{
+	return TEXT("Territory owner changed during this transition");
+}
+
 UTerritoryStateCondition::UTerritoryStateCondition()
 {
 	ConditionFilter = EConditionFilter::CF_DontTarget;
@@ -250,7 +269,8 @@ bool UTerritoryAssaultCondition::CheckCondition_Implementation(APawn*, APlayerCo
 	{
 		return Records.ContainsByPredicate([](const FTerritoryAssaultRecord& Record)
 		{
-			return Record.State == ETerritoryAssaultState::Active;
+			return Record.State == ETerritoryAssaultState::Active
+				|| Record.State == ETerritoryAssaultState::RecaptureCountdown;
 		});
 	}
 

@@ -156,6 +156,16 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Bounds", meta=(DisplayName="Contains Point"))
 	bool ContainsPoint(const FVector& WorldPoint) const;
 
+	/**
+	 * True when this independently capturable Place uses the complete Territory bounds
+	 * for its story confrontation. A living player anywhere inside the bounds can hold
+	 * the Place Contested, including upper floors, but never fills automatic capture
+	 * progress. The owner dialogue, quest, or Territory Capture Event completes ownership.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Capture|Story",
+		meta=(DisplayName="Uses Story Capture From Bounds"))
+	bool UsesStoryCaptureFromBounds() const { return bStoryCaptureFromBounds; }
+
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy", meta=(DisplayName="Get Parent Territory Tag"))
 	FGameplayTag GetParentTerritoryTag() const;
 
@@ -681,6 +691,23 @@ protected:
 		meta=(DisplayName="Bounds Shape"))
 	TObjectPtr<UShapeComponent> BoundsShape;
 
+	/**
+	 * Story capture mode for multi-floor Places. When enabled, the server checks the
+	 * player's position against the complete Bounds Shape instead of requiring a flag
+	 * or Capture Point. Entering with an eligible faction starts/holds Contested but
+	 * adds no automatic progress. Any Capture Point targeting this Territory is
+	 * automatically disabled and hidden, so story and multiplayer capture cannot run
+	 * together.
+	 *
+	 * Easy example: make the Bounds Shape tall enough to include a shop's ground floor,
+	 * stairs, and second floor. The player can clear every defender on any floor, then
+	 * speak to the protected owner to accept the handover.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture|Story",
+		meta=(DisplayName="Story Capture From Territory Bounds",
+			ToolTip="Use the full Territory Bounds Shape for a story handover. This holds Contested without automatic progress and automatically disables Capture Points targeting this Territory."))
+	bool bStoryCaptureFromBounds = false;
+
 	/** Navigation marker component — manages map marker, auto-refreshes on state changes. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Visual",
 		meta=(DisplayName="Map Marker Component"))
@@ -799,6 +826,9 @@ private:
 	TMap<TWeakObjectPtr<AActor>, int32> PendingDefenderDeathBindAttempts;
 	FTimerHandle DefenderDeathBindRetryTimer;
 
+	/** Server-only players currently registered from the full story Territory bounds. */
+	TMap<TWeakObjectPtr<AActor>, FGameplayTag> StoryBoundsContesters;
+
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC,
 		const bool bIsDead);
@@ -808,6 +838,9 @@ private:
 	void ScheduleDefenderDeathBindingRetry(AActor* Defender);
 	void RetryPendingDefenderDeathBindings();
 	void CleanupInvalidDefenders();
+	void TryCompleteDefenderDefeat(const FTerritoryTransitionContext& EventContext);
+	void ReconcileStoryBoundsContesters();
+	void ReleaseStoryBoundsContesters();
 	void ApplyInitialStateDiplomacyPolicies();
 	void PublishCaptureSummary();
 	bool HasPendingReserveDeployments() const;

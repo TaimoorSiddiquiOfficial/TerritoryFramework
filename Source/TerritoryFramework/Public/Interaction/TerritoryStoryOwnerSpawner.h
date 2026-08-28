@@ -48,6 +48,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Capture")
 	FName DialogueStartFromID;
 
+	/**
+	 * Maximum distance for manually speaking to the owner after they appear.
+	 * Narrative's player trace is 1000 cm by default, so values above that still
+	 * require the project's Narrative Player Interaction setting to be increased.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Capture",
+		meta=(ClampMin="100.0", ClampMax="1000.0", Units="cm",
+			DisplayName="Owner Interaction Distance",
+			ToolTip="How close the player must be to speak to the protected owner. 300 cm is a forgiving conversation distance."))
+	float OwnerInteractionDistance = 300.f;
+
 	/** Saved and replicated so a completed defeat does not recreate a silent owner state. */
 	UPROPERTY(SaveGame, ReplicatedUsing=OnRep_HandoverActivated, BlueprintReadOnly,
 		Category="Territory|Story Capture")
@@ -73,6 +84,7 @@ protected:
 
 private:
 	bool EnsureOwnerSpawned();
+	void ApplyOwnerInteractionDistance();
 	bool BeginOwnerDialogue(APawn* NarrativeTarget, APlayerController* Controller,
 		UTalesComponent* NarrativeComponent);
 };

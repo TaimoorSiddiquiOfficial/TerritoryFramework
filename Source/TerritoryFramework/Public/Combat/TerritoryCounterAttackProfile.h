@@ -69,6 +69,35 @@ public:
 	bool bNotifyDefendingFactionOnly = true;
 
 	/**
+	 * When false (recommended for domination), the warned physical force deploys and
+	 * attacks the Territory/guards even when no player is nearby. When true, the old
+	 * first-player proximity gate is retained for story encounters that must wait.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling|Recapture",
+		meta=(DisplayName="Require Player Proximity To Activate",
+			ToolTip="Disable for autonomous counterattacks. Attackers will deploy after the warning and fight Territory guards without waiting for the player."))
+	bool bRequirePlayerProximityForActivation = false;
+
+	/** Begin a visible, save-safe handover countdown after attackers clear all defenders and the player is absent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling|Recapture",
+		meta=(DisplayName="Allow Unattended Recapture Countdown",
+			ToolTip="Recommended. If the defence is cleared while no living defending player is inside the Place or its District, start a countdown instead of capturing instantly."))
+	bool bUseUnattendedRecaptureHandover = true;
+
+	/** Campaign-time duration before an unattended cleared Place is handed to the attacking faction. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling|Recapture",
+		meta=(EditCondition="bUseUnattendedRecaptureHandover", ClampMin="1.0",
+			DisplayName="Unattended Recapture Time",
+			ToolTip="Time available for a defending player to return. Entering the Place or parent District stops the countdown and requires a fight."))
+	float UnattendedRecaptureDelayGameTime = 30.f;
+
+	/** Immediately hand over a cleared Place when the defending player dies before respawning. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling|Recapture",
+		meta=(DisplayName="Concede Cleared Place On Defending Player Death",
+			ToolTip="If attackers have cleared the defenders and a defending player inside the Place or District dies, ownership immediately transfers before respawn."))
+	bool bConcedeWhenDefendingPlayerDies = true;
+
+	/**
 	 * Narrative quest gates for automatic strategic counterattacks. Every rule must
 	 * pass. Explicit Story Pursuit events use their inherited Narrative Conditions
 	 * instead, so a boss chase can deliberately start during a quest.
@@ -81,10 +110,11 @@ public:
 	 * After the first relevant player has physically activated an assault, deploy its
 	 * remaining finite reserve waves even if that player leaves the radius. This lets
 	 * already-launched NPCs finish attacking the District and guards without requiring
-	 * the player to remain present. It never bypasses the initial proximity gate.
+	 * the player to remain present. The separate activation option decides whether an
+	 * initial proximity gate exists.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling",
-		meta=(ToolTip="Recommended. Player proximity is required once to activate the physical assault; after activation, finite reserve waves continue without the player. Disable to pause reserve deployment until a relevant player returns."))
+		meta=(ToolTip="Recommended. After activation, finite reserve waves continue without the player. Disable to pause reserve deployment until a relevant player returns."))
 	bool bContinueFiniteWavesAfterActivation = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling", meta=(ClampMin="1", ClampMax="8"))

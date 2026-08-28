@@ -31,7 +31,13 @@ enum class ETerritoryAssaultState : uint8
 	Active,
 	Succeeded,
 	Defeated,
-	Cancelled
+	Cancelled,
+	/**
+	 * Physical attackers hold the cleared Place while no living defending player is
+	 * present. Ownership changes only when the saved deadline expires. Appended to
+	 * preserve the serialized values of all existing states.
+	 */
+	RecaptureCountdown UMETA(DisplayName="Recapture Countdown")
 };
 
 UENUM(BlueprintType)
@@ -305,6 +311,8 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double GraceEndsGameTime = 0.0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ScheduledGameTime = 0.0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ActivatedGameTime = 0.0;
+	/** Absolute campaign-time deadline for an unattended physical recapture. Zero means inactive. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double RecaptureEndsGameTime = 0.0;
 	/** Durable terminal timestamp used by recurring strategic cooldowns. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ResolvedGameTime = 0.0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 PlannedForce = 0;

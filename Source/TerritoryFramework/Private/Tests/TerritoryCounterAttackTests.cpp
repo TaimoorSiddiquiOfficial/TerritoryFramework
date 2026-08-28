@@ -731,6 +731,66 @@ bool FTFCounterAttackPowerMonotonicity::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackRecapturePolicy,
+	"TerritoryFramework.CounterAttack.Behavior.AttendedAndUnattendedRecapture",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackRecapturePolicy::RunTest(const FString& Parameters)
+{
+	using EDecision = UTerritoryCounterAttackSubsystem::ERecaptureDecision;
+	auto Decide = [](bool bDefenders, bool bAttackerInside, bool bAlivePlayer,
+		bool bDeadPlayer, bool bCountdown, bool bExpired,
+		bool bAllowCountdown = true, bool bConcedeDeath = true)
+	{
+		return UTerritoryCounterAttackSubsystem::EvaluateRecaptureDecision(
+			bDefenders, bAttackerInside, bAlivePlayer, bDeadPlayer,
+			bCountdown, bExpired, bAllowCountdown, bConcedeDeath);
+	};
+
+	TestEqual(TEXT("Living guards always require the physical fight"),
+		Decide(true, true, false, false, false, false), EDecision::ContinueFight);
+	TestEqual(TEXT("A living defending player inside the Place requires a fight"),
+		Decide(false, true, true, false, false, false), EDecision::ContinueFight);
+	TestEqual(TEXT("No physical attacker can never recapture"),
+		Decide(false, false, false, false, false, false), EDecision::NoAction);
+	TestEqual(TEXT("An absent player starts the configured grace countdown"),
+		Decide(false, true, false, false, false, false), EDecision::StartCountdown);
+	TestEqual(TEXT("An unexpired countdown does not transfer ownership"),
+		Decide(false, true, false, false, true, false), EDecision::NoAction);
+	TestEqual(TEXT("An expired physically-held countdown completes handover"),
+		Decide(false, true, false, false, true, true), EDecision::CompleteHandover);
+	TestEqual(TEXT("Player death before respawn immediately concedes a cleared Place"),
+		Decide(false, true, false, true, false, false), EDecision::CompleteHandover);
+	TestEqual(TEXT("Death concession can be disabled for a story rule"),
+		Decide(false, true, false, true, false, false, true, false),
+		EDecision::StartCountdown);
+	TestEqual(TEXT("An authored no-unattended-capture rule keeps the assault physical"),
+		Decide(false, true, false, false, false, false, false),
+		EDecision::ContinueFight);
+
+	const UTerritoryCounterAttackProfile* Profile =
+		NewObject<UTerritoryCounterAttackProfile>();
+	TestFalse(TEXT("Autonomous counterattacks do not wait for player proximity by default"),
+		Profile->bRequirePlayerProximityForActivation);
+	TestTrue(TEXT("Unattended recapture uses a time limit by default"),
+		Profile->bUseUnattendedRecaptureHandover);
+	TestTrue(TEXT("Defending-player death concession is enabled by default"),
+		Profile->bConcedeWhenDefendingPlayerDies);
+
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	TestTrue(TEXT("Recapture countdown remains a valid physical contested state"),
+		UTerritoryCounterAttackSubsystem::IsTerritoryControlStateValidForAssault(
+			ETerritoryAssaultState::RecaptureCountdown, ETerritoryState::Contested,
+			Bandits, Bandits));
+	const FProperty* DeadlineProperty = FTerritoryAssaultRecord::StaticStruct()->
+		FindPropertyByName(GET_MEMBER_NAME_CHECKED(
+			FTerritoryAssaultRecord, RecaptureEndsGameTime));
+	TestTrue(TEXT("Recapture deadline is durable SaveGame state"), DeadlineProperty
+		&& DeadlineProperty->HasAnyPropertyFlags(CPF_SaveGame));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackInfluenceCascade,
 	"TerritoryFramework.CounterAttack.Behavior.InfluenceAcceleratesFiniteResponse",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

@@ -194,6 +194,18 @@ public:
 		meta=(ClampMin="1", ClampMax="64", UIMin="1", UIMax="32", DisplayName="Reserve Spawn Attempts"))
 	int32 ReserveSpawnCandidateCount = 12;
 
+	/** Camera-safe attempts made before using the same authored post without camera avoidance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+		meta=(ClampMin="0", ClampMax="20", DisplayName="Camera Safe Retry Limit",
+			ToolTip="After this many failed camera-hidden attempts, the reserve retries at a normal valid spawn so story handover cannot wait forever."))
+	int32 ReserveCameraAvoidanceRetryLimit = 3;
+
+	/** Total failures before abandoning this queued deployment without consuming its reserve. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+		meta=(ClampMin="1", ClampMax="100", DisplayName="Total Reserve Retry Limit",
+			ToolTip="Prevents an invalid NavMesh, collision, or NPC setup from permanently blocking All Defenders Defeated. The unspawned reserve is not consumed."))
+	int32 ReserveTotalRetryLimit = 10;
+
 	/**
 	 * The patrol route this spawn point's guards walk through.
 	 * Empty = guard stands idle at spawn. Minimum useful route: 2 nodes.
@@ -485,6 +497,7 @@ protected:
 	int32 SavedActiveGuardCount = 0;
 
 	FTimerHandle ReserveSpawnTimer;
+	int32 AutomaticReserveSpawnFailures = 0;
 
 	// ─── Editor Visualization ───
 

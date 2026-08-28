@@ -30,7 +30,9 @@ enum class ETerritoryDiplomacyFactionSource : uint8
 	ContestingFaction UMETA(DisplayName="Contesting Faction",
 		ToolTip="Use the faction currently contesting the containing Territory."),
 	TransitionRequestingFaction UMETA(DisplayName="Transition Requesting Faction",
-		ToolTip="Use the faction carried by the explicit capture, quest, or mutation context.")
+		ToolTip="Use the faction carried by the explicit capture, quest, or mutation context."),
+	TransitionOpposingFaction UMETA(DisplayName="Opposing Faction From Transition",
+		ToolTip="Use the old owner after a successful capture, or the departing contesting faction when a fight ends without capture. Easy example: return the exact defender/attacker pair from War to Neutral without hard-coding Heroes.")
 };
 
 /**

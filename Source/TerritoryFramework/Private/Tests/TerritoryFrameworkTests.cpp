@@ -889,6 +889,12 @@ bool FTFContract_CaptureEvent::RunTest(const FString& Parameters)
 		TFTestUtils::IsReplicated(OwnerSpawnerClass, TEXT("bHandoverActivated")));
 	TestTrue(TEXT("Story owner activation is server callable"),
 		TFTestUtils::HasFunction(OwnerSpawnerClass, TEXT("ActivateHandover")));
+	TestTrue(TEXT("Story owner exposes a bounded Narrative interaction distance"),
+		TFTestUtils::HasProperty(OwnerSpawnerClass, TEXT("OwnerInteractionDistance")));
+	const ATerritoryStoryOwnerSpawner* OwnerSpawnerCDO =
+		GetDefault<ATerritoryStoryOwnerSpawner>();
+	TestEqual(TEXT("Protected-owner interaction is reliable at three metres by default"),
+		OwnerSpawnerCDO->OwnerInteractionDistance, 300.f);
 
 	return true;
 }
@@ -2851,11 +2857,20 @@ bool FTFContract_GuardSpawnPointPure::RunTest(const FString& Parameters)
 		TFTestUtils::HasProperty(Class, TEXT("ReserveSpawnRadius")));
 	TestTrue(TEXT("Has reserve player clearance"),
 		TFTestUtils::HasProperty(Class, TEXT("ReserveMinimumPlayerDistance")));
+	TestTrue(TEXT("Has bounded camera-safe retry policy"),
+		TFTestUtils::HasProperty(Class, TEXT("ReserveCameraAvoidanceRetryLimit")));
+	TestTrue(TEXT("Has bounded total reserve retry policy"),
+		TFTestUtils::HasProperty(Class, TEXT("ReserveTotalRetryLimit")));
 
 	const ATerritoryGuardSpawnPoint* DefaultSpawnPoint = Class->GetDefaultObject<ATerritoryGuardSpawnPoint>();
 	TestTrue(TEXT("Automatic reserve spawning defaults enabled"), DefaultSpawnPoint->bAutoSpawnReserves);
 	TestTrue(TEXT("Automatic reserves are delayed"), DefaultSpawnPoint->ReserveSpawnDelay > 0.f);
 	TestTrue(TEXT("Automatic reserves sample multiple candidates"), DefaultSpawnPoint->ReserveSpawnCandidateCount > 1);
+	TestTrue(TEXT("Camera avoidance relaxes before a queued reserve is abandoned"),
+		DefaultSpawnPoint->ReserveCameraAvoidanceRetryLimit
+		< DefaultSpawnPoint->ReserveTotalRetryLimit);
+	TestTrue(TEXT("Queued reserves always have a finite failure limit"),
+		DefaultSpawnPoint->ReserveTotalRetryLimit > 0);
 
 	return true;
 }
@@ -3692,6 +3707,13 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 	TestTrue(TEXT("Faction holdings condition exposes the secure District threshold"),
 		TFTestUtils::HasProperty(UTerritoryFactionDistrictHoldingCondition::StaticClass(),
 			TEXT("DistrictCount")));
+	TestTrue(TEXT("Ownership-transition condition reuses Narrative's condition pipeline"),
+		UTerritoryOwnershipTransitionCondition::StaticClass()->IsChildOf(
+			UNarrativeCondition::StaticClass()));
+	TestTrue(TEXT("Diplomacy exposes a dynamic opposing-transition faction source"),
+		StaticEnum<ETerritoryDiplomacyFactionSource>()->GetIndexByValue(
+			static_cast<int64>(
+				ETerritoryDiplomacyFactionSource::TransitionOpposingFaction)) != INDEX_NONE);
 
 	const UClass* TerritoryClass = ATerritoryVolume::StaticClass();
 	TestTrue(TEXT("Territories expose the registered-defender death event hook"),
@@ -3993,6 +4015,11 @@ bool FTFCapturePointContract::RunTest(const FString& Parameters)
 		TFTestUtils::HasProperty(Class, TEXT("bHideMarkerWhileCaptureUnavailable")));
 	TestTrue(TEXT("Capture point separates story contesting from automatic capture pressure"),
 		TFTestUtils::HasProperty(Class, TEXT("bContributesCaptureProgress")));
+	TestTrue(TEXT("Capture point exposes its effective automatic-flow query"),
+		TFTestUtils::HasFunction(Class, TEXT("IsAutomaticCaptureFlowActive")));
+	TestTrue(TEXT("Territory exposes full-bounds story capture mode"),
+		TFTestUtils::HasProperty(ATerritoryVolume::StaticClass(),
+			TEXT("bStoryCaptureFromBounds")));
 	TestFalse(TEXT("Capture target configuration is not duplicate save authority"),
 		TFTestUtils::IsSaveGame(Class, TEXT("TargetTerritoryTag")));
 	TestFalse(TEXT("Capture enabled configuration is not replicated gameplay state"),
@@ -4011,6 +4038,8 @@ bool FTFCapturePointContract::RunTest(const FString& Parameters)
 	{
 		TestFalse(TEXT("A capture point without a configured Place resolves no authority"),
 			CapturePoint->ResolveTargetTerritory() != nullptr);
+		TestFalse(TEXT("A targetless point cannot report automatic capture active"),
+			CapturePoint->IsAutomaticCaptureFlowActive());
 		TestFalse(TEXT("Null participants are rejected"),
 			CapturePoint->TryRegisterCaptureParticipant(nullptr));
 		TestFalse(TEXT("Capture adapter actor does not replicate duplicate state"),

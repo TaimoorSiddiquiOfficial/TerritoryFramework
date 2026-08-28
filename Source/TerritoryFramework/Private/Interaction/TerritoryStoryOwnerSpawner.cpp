@@ -3,6 +3,7 @@
 #include "AI/NPCDefinition.h"
 #include "Net/UnrealNetwork.h"
 #include "Spawners/NPCSpawnComponent.h"
+#include "Interaction/InteractableComponent.h"
 #include "Tales/Dialogue.h"
 #include "Tales/NarrativeFunctionLibrary.h"
 #include "Tales/TalesComponent.h"
@@ -82,6 +83,7 @@ bool ATerritoryStoryOwnerSpawner::EnsureOwnerSpawned()
 {
 	if (IsValid(GetStoryOwner()))
 	{
+		ApplyOwnerInteractionDistance();
 		return true;
 	}
 
@@ -94,7 +96,24 @@ bool ATerritoryStoryOwnerSpawner::EnsureOwnerSpawned()
 	}
 
 	SpawnActors();
-	return IsValid(GetStoryOwner());
+	const bool bSpawned = IsValid(GetStoryOwner());
+	if (bSpawned)
+	{
+		ApplyOwnerInteractionDistance();
+	}
+	return bSpawned;
+}
+
+void ATerritoryStoryOwnerSpawner::ApplyOwnerInteractionDistance()
+{
+	ANarrativeNPCCharacter* StoryOwner = GetStoryOwner();
+	UNarrativeInteractableComponent* Interactable = StoryOwner
+		? StoryOwner->FindComponentByClass<UNarrativeInteractableComponent>() : nullptr;
+	if (Interactable)
+	{
+		Interactable->InteractionDistance = FMath::Clamp(
+			OwnerInteractionDistance, 100.f, 1000.f);
+	}
 }
 
 bool ATerritoryStoryOwnerSpawner::BeginOwnerDialogue(APawn* NarrativeTarget,

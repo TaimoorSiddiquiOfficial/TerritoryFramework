@@ -462,6 +462,7 @@ UTerritoryPlayerManagementComponent::GetTerritoryIntelligence(
 					switch (Assault.State)
 					{
 					case ETerritoryAssaultState::Active:
+					case ETerritoryAssaultState::RecaptureCountdown:
 						Event.Type = ETerritoryLiveEventType::CounterAttackActive;
 						Event.Severity = ETerritoryIntelligenceSeverity::Critical;
 						Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
@@ -1962,6 +1963,17 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 				FText::AsNumber(Event.Assault.AliveForce),
 				FText::AsNumber(Event.Assault.PendingReserveForce)), true, 60.f,
 			ETerritoryIntelligenceCategory::Conflict,
+			ETerritoryIntelligenceSeverity::Critical,
+			Event.Assault.AttackingFaction, Event.Assault.DefendingFaction,
+			FGameplayTagContainer(), 0, 0, 0, true, Event.Assault.AssaultID);
+		break;
+	case ETerritoryAssaultState::RecaptureCountdown:
+		AddLiveEvent(ETerritoryLiveEventType::CounterAttackActive, Target,
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "RecaptureCountdownHeadline",
+				"Recapture imminent at {0}"), Name),
+			NSLOCTEXT("TerritoryLiveEvents", "RecaptureCountdownDetail",
+				"The garrison has fallen while no living defender is present. Return and fight before the handover completes."),
+			true, 60.f, ETerritoryIntelligenceCategory::Conflict,
 			ETerritoryIntelligenceSeverity::Critical,
 			Event.Assault.AttackingFaction, Event.Assault.DefendingFaction,
 			FGameplayTagContainer(), 0, 0, 0, true, Event.Assault.AssaultID);

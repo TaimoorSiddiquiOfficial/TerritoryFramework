@@ -259,6 +259,7 @@ namespace
 	{
 		switch (State)
 		{
+		case ETerritoryAssaultState::RecaptureCountdown: return 600;
 		case ETerritoryAssaultState::Active: return 500;
 		case ETerritoryAssaultState::WaitingForPlayerProximity: return 400;
 		case ETerritoryAssaultState::ScheduledWarning: return 300;
@@ -1081,7 +1082,8 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 			OutView.DistrictDefencePower = Preferred->EvaluationResult.DistrictDefencePower;
 			OutView.PowerRatio = Preferred->EvaluationResult.PowerRatio;
 			OutView.SelectedApproaches = Preferred->SelectedApproaches;
-			OutView.bUnderAttack = Preferred->State == ETerritoryAssaultState::Active;
+			OutView.bUnderAttack = Preferred->State == ETerritoryAssaultState::Active
+				|| Preferred->State == ETerritoryAssaultState::RecaptureCountdown;
 			OutView.bAttackScheduled = !OutView.bUnderAttack;
 			if (!OutView.bAttackerCountKnown && OutView.bUnderAttack)
 			{
