@@ -57,6 +57,23 @@ public:
 	virtual void SetNPCDefinition(UNPCDefinition* Definition) override;
 
 	/**
+	 * Contextual Narrative attitude for a stationary Territory defender.
+	 * A target is Hostile only while this guard's Territory is Contested AND
+	 * at least one exact faction pair is explicitly at War. Seeing a neutral
+	 * player walking through a Claimed Place therefore never starts combat.
+	 */
+	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
+
+	/**
+	 * Readable version of the Territory guard combat gate for Blueprint/debug UI.
+	 * Easy example: Claimed + War = false; Contested + Neutral = false;
+	 * Contested + War = true.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guard|Combat",
+		meta=(DisplayName="Can Engage Territory Target"))
+	bool CanEngageTerritoryTarget(const AActor* Target) const;
+
+	/**
 	 * Reconciles Narrative Pro's reported event value with its authoritative ASC state,
 	 * then stops AI movement and enters Narrative's replicated ragdoll state when dead.
 	 */

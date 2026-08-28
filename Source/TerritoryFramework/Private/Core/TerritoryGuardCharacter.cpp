@@ -3,6 +3,7 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
@@ -10,6 +11,7 @@
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NarrativeNPCController.h"
 #include "AI/NPCDefinition.h"
+#include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Character/NarrativeCharacterVisual.h"
 #include "Components/EquipmentComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -198,6 +200,38 @@ void ATerritoryGuardCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 		GPendingTerritoryGuardSpawn->bApplied = true;
 	}
 	Super::SetNPCDefinition(Definition);
+}
+
+ETeamAttitude::Type ATerritoryGuardCharacter::GetTeamAttitudeTowards(
+	const AActor& Other) const
+{
+	if (CanEngageTerritoryTarget(&Other))
+	{
+		return ETeamAttitude::Hostile;
+	}
+
+	// Preserve a genuine friendly result for same/allied actors, but deliberately
+	// downgrade stale Narrative hostility and the pawn Hostiles override to Neutral.
+	const ETeamAttitude::Type NarrativeAttitude = Super::GetTeamAttitudeTowards(Other);
+	return NarrativeAttitude == ETeamAttitude::Friendly
+		? ETeamAttitude::Friendly : ETeamAttitude::Neutral;
+}
+
+bool ATerritoryGuardCharacter::CanEngageTerritoryTarget(const AActor* Target) const
+{
+	if (!IsValid(Target) || Target == this || !IsValid(OwningTerritory)
+		|| OwningTerritory->GetTerritoryState() != ETerritoryState::Contested)
+	{
+		return false;
+	}
+
+	const INarrativeTeamAgentInterface* TargetTeam =
+		Cast<INarrativeTeamAgentInterface>(Target);
+	const UWorld* World = GetWorld();
+	const UTerritoryDiplomacySubsystem* Diplomacy = World
+		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
+	return TargetTeam && Diplomacy
+		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetTeam->GetFactions());
 }
 
 bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const

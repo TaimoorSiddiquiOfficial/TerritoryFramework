@@ -394,7 +394,10 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 
 	const FTerritoryStateConfig* ClaimedConfig =
 		GetStateConfigs(Blacksmith)->Find(ETerritoryState::Claimed);
-	const UTerritorySetDiplomacyEvent* WarEvent = nullptr;
+	const FTerritoryStateConfig* ContestedConfig =
+		GetStateConfigs(Blacksmith)->Find(ETerritoryState::Contested);
+	const UTerritorySetDiplomacyEvent* ClaimedDiplomacyEvent = nullptr;
+	const UTerritorySetDiplomacyEvent* ContestedDiplomacyEvent = nullptr;
 	const UNarrativeEvent* GiveXPEvent = nullptr;
 	if (ClaimedConfig)
 	{
@@ -407,7 +410,19 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			if (const UTerritorySetDiplomacyEvent* Typed =
 				Cast<UTerritorySetDiplomacyEvent>(Event))
 			{
-				WarEvent = Typed;
+				ClaimedDiplomacyEvent = Typed;
+			}
+		}
+	}
+	if (ContestedConfig)
+	{
+		for (const TObjectPtr<UNarrativeEvent>& Event : ContestedConfig->EntryEvents)
+		{
+			if (const UTerritorySetDiplomacyEvent* Typed =
+				Cast<UTerritorySetDiplomacyEvent>(Event))
+			{
+				ContestedDiplomacyEvent = Typed;
+				break;
 			}
 		}
 	}
@@ -434,15 +449,33 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		TestTrue(TEXT("XP requires a valid target ability system"),
 			RewardContext->bRequireAbilitySystemComponent);
 	}
-	TestNotNull(TEXT("Claimed entry uses the reusable diplomacy Narrative event"), WarEvent);
-	if (WarEvent)
+	TestNotNull(TEXT("Claimed entry uses the reusable diplomacy Narrative event"),
+		ClaimedDiplomacyEvent);
+	if (ClaimedDiplomacyEvent)
 	{
-		TestEqual(TEXT("Claimed entry changes Heroes and Bandits to War"),
-			WarEvent->NewState, EDiplomacyState::War);
-		TestEqual(TEXT("Diplomacy event first party is Heroes"),
-			WarEvent->FactionA.ToString(), FString(TEXT("Narrative.Factions.Heroes")));
-		TestEqual(TEXT("Diplomacy event second party is Bandits"),
-			WarEvent->FactionB.ToString(), FString(TEXT("Narrative.Factions.Bandits")));
+		TestEqual(TEXT("Claimed entry keeps Heroes and Bandits Neutral"),
+			ClaimedDiplomacyEvent->NewState, EDiplomacyState::None);
+		TestTrue(TEXT("Claimed diplomacy policy applies on a fresh already-active state"),
+			ClaimedDiplomacyEvent->bApplyWhenStateStartsActive);
+		TestEqual(TEXT("Claimed diplomacy first party is Heroes"),
+			ClaimedDiplomacyEvent->FactionA.ToString(),
+			FString(TEXT("Narrative.Factions.Heroes")));
+		TestEqual(TEXT("Claimed diplomacy second party is Bandits"),
+			ClaimedDiplomacyEvent->FactionB.ToString(),
+			FString(TEXT("Narrative.Factions.Bandits")));
+	}
+	TestNotNull(TEXT("Contested entry explicitly declares the Territory War"),
+		ContestedDiplomacyEvent);
+	if (ContestedDiplomacyEvent)
+	{
+		TestEqual(TEXT("Contested entry changes Heroes and Bandits to War"),
+			ContestedDiplomacyEvent->NewState, EDiplomacyState::War);
+		TestEqual(TEXT("Contested diplomacy first party is Heroes"),
+			ContestedDiplomacyEvent->FactionA.ToString(),
+			FString(TEXT("Narrative.Factions.Heroes")));
+		TestEqual(TEXT("Contested diplomacy second party is Bandits"),
+			ContestedDiplomacyEvent->FactionB.ToString(),
+			FString(TEXT("Narrative.Factions.Bandits")));
 	}
 
 	const FTerritoryStateConfig* LockedConfig =

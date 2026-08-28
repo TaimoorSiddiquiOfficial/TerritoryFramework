@@ -267,21 +267,18 @@ bool UTerritoryAssaultParticipantComponent::MaintainAssaultMovement(
 		Profile ? Profile->StalledMovementRetryInterval : 1.5f, 0.25f, 10.f);
 	const int32 MaximumFailures = FMath::Clamp(
 		Profile ? Profile->MaxStalledMovementRetries : 8, 1, 100);
+	const bool bUseNavigation = !Profile || Profile->bUseNavigationAwareObjectives;
+	const bool bDistribute = !Profile || Profile->bDistributeParticipantsAcrossObjectives;
+	const int32 StableObjectiveSlot = static_cast<int32>(
+		GetTypeHash(NPC->GetActorGUID_Implementation()));
 	FVector DesiredTarget = Territory->GetTerritoryBounds().GetCenter();
-	float BestDistanceSquared = TNumericLimits<float>::Max();
-	for (const FVector& Objective :
-		TerritoryAssaultTargetPolicy::BuildObjectiveLocations(Territory, false))
-	{
-		const float DistanceSquared = FVector::DistSquared2D(
-			NPC->GetActorLocation(), Objective);
-		if (DistanceSquared < BestDistanceSquared)
-		{
-			BestDistanceSquared = DistanceSquared;
-			DesiredTarget = Objective;
-		}
-	}
+	const TArray<FVector> StaticObjectives =
+		TerritoryAssaultTargetPolicy::BuildObjectiveLocations(Territory, false);
+	TerritoryAssaultTargetPolicy::SelectObjectiveLocation(
+		NPC, StaticObjectives, StableObjectiveSlot, bUseNavigation, bDistribute,
+		DesiredTarget);
 	TArray<AActor*> LiveHostileDefenders;
-	float BestDefenderDistanceSquared = TNumericLimits<float>::Max();
+	TArray<FVector> LiveDefenderLocations;
 	for (AActor* Defender :
 		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Territory))
 	{
@@ -302,14 +299,13 @@ bool UTerritoryAssaultParticipantComponent::MaintainAssaultMovement(
 			continue;
 		}
 		LiveHostileDefenders.Add(Defender);
-
-		const float DistanceSquared = FVector::DistSquared2D(
-			NPC->GetActorLocation(), Defender->GetActorLocation());
-		if (DistanceSquared < BestDefenderDistanceSquared)
-		{
-			BestDefenderDistanceSquared = DistanceSquared;
-			DesiredTarget = Defender->GetActorLocation();
-		}
+		LiveDefenderLocations.Add(Defender->GetActorLocation());
+	}
+	if (!LiveDefenderLocations.IsEmpty())
+	{
+		TerritoryAssaultTargetPolicy::SelectObjectiveLocation(
+			NPC, LiveDefenderLocations, StableObjectiveSlot, bUseNavigation,
+			bDistribute, DesiredTarget);
 	}
 	ReconcileNarrativeDefenderTargeting(ActivityComponent, LiveHostileDefenders);
 	const bool bMovementTargetChanged = !AssaultGoal->TargetLocation.Equals(DesiredTarget, 200.f);

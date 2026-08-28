@@ -3,7 +3,7 @@
 ## Architecture
 
 ```
-Narrative GameState (SOLE AUTHORITY for AI attitudes)
+Narrative GameState (BASE faction-to-faction attitude)
 ├── Friendly (Alliance, Trade, NonAggression map here)
 ├── Neutral (Ceasefire, None map here)
 └── Hostile (War maps here)
@@ -22,7 +22,16 @@ Bridge: UTerritoryNarrativeProAdapter is the sole TerritoryFramework access poin
           - External Neutral → removes the treaty record, including Ceasefire
           - Externally authored attitudes are imported as permanent records
         Reentrancy guard (bSuppressSync) prevents recursive mutation from delegate listeners
+
+Territory combat context (FINAL gate for Territory combat characters)
+├── Territory guard: local Territory must be Contested AND treaty must be War
+└── Assault guard: assigned assault must be Active AND treaty must be War
 ```
+
+Changing the AI Controller does not change this faction relationship. Narrative asks the
+character for its team attitude, so `ATerritoryGuardCharacter` and
+`ATerritoryAssaultCharacter` apply the Territory context at the character layer. This keeps
+the integration upgrade-safe and requires no edits to Narrative Pro Blueprints.
 
 ## Treaty Types
 
@@ -34,6 +43,41 @@ Bridge: UTerritoryNarrativeProAdapter is the sole TerritoryFramework access poin
 | Ceasefire | Neutral | Yes | Peace after war; permanent until explicitly changed or broken |
 | War | Hostile | Yes | Full hostility |
 | None | Neutral | Yes | Default state |
+
+`None` means **Neutral / No Treaty**. It never means "use an old Hostile value." Calling
+`SetDiplomacyState` with the same value still repairs Narrative's attitude map, so a Claimed
+state policy can clear stale hostility left by an earlier War.
+
+## Territory Combat Authorization
+
+Ordinary Territory guards use both the active state and the treaty. This is intentionally
+stricter than a general Narrative NPC:
+
+| Territory State | Diplomacy | Guard Attacks on Sight? | Easy meaning |
+|---|---|---:|---|
+| Claimed | Neutral / No Treaty | No | The player may walk through the Place. |
+| Claimed | War | No | War exists, but this Place is not currently a fight. |
+| Contested | Neutral / No Treaty | No | A script cannot accidentally start a neutral-faction battle. |
+| Contested | War | Yes | This is an authorized Territory battle. |
+
+Counterattack characters use a related rule: **Active Assault + War = attack**. They do not
+require the Place to be Contested before arrival because their valid arrival creates the
+contest. Use `Can Engage Territory Target` and `Can Engage Assault Target` in Blueprint or MCP
+debugging to see the final answer without reading AI perception state.
+
+### Easy Blacksmith setup
+
+For a Blacksmith initially owned by Bandits:
+
+1. In the `Claimed` state config, add `Set Territory Diplomacy: Bandits, Heroes, None`.
+2. Leave `Apply When State Starts Active` enabled. A fresh world applies only this safe
+   diplomacy policy; it does not replay XP, quests, waves, or other state entry events.
+3. In the `Contested` state config, add `Set Territory Diplomacy: Bandits, Heroes, War`.
+4. When the fight resolves, the next state's diplomacy event decides whether peace or War
+   continues.
+
+This state-first authoring is modular: story conditions may prevent either event, while the
+same guard class remains reusable in every Place.
 
 ## API
 

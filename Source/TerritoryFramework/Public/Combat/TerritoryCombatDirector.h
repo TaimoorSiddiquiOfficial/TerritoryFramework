@@ -68,6 +68,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Combat")
 	int32 GetAvailableSlots(const ATerritoryVolume* Territory) const;
 
+	/**
+	 * Authored Territory limit after the optional Narrative difficulty cap.
+	 * This is a strategic wave limit; Narrative attack tokens remain the tactical
+	 * per-defender permission used by Narrative's attack behavior.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Combat",
+		meta=(DisplayName="Get Effective Concurrent Attacker Limit"))
+	int32 GetEffectiveMaxConcurrentAttackers(const ATerritoryVolume* Territory) const;
+
 	/** True only for a configured physical assault participant targeting this Territory. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Combat")
 	bool IsEligibleAssaultController(const ATerritoryVolume* Territory,

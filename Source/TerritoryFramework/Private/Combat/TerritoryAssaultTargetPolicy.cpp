@@ -5,6 +5,8 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "GameFramework/Actor.h"
+#include "NavigationPath.h"
+#include "NavigationSystem.h"
 
 namespace
 {
@@ -137,6 +139,67 @@ TArray<FVector> TerritoryAssaultTargetPolicy::BuildObjectiveLocations(
 
 	Result.AddUnique(TargetTerritory->GetTerritoryBounds().GetCenter());
 	return Result;
+}
+
+bool TerritoryAssaultTargetPolicy::SelectObjectiveLocation(
+	AActor* Participant, TConstArrayView<FVector> Objectives,
+	int32 StableSlot, bool bUseNavigation, bool bDistribute,
+	FVector& OutObjective)
+{
+	if (!IsValid(Participant) || Objectives.IsEmpty()) return false;
+	const FVector Start = Participant->GetActorLocation();
+	const int32 Count = Objectives.Num();
+	const int32 FirstIndex = bDistribute
+		? static_cast<int32>(static_cast<uint32>(StableSlot) % static_cast<uint32>(Count))
+		: 0;
+	float BestPathLength = TNumericLimits<float>::Max();
+	bool bFoundCompletePath = false;
+
+	if (bUseNavigation)
+	{
+		for (int32 Offset = 0; Offset < Count; ++Offset)
+		{
+			const int32 Index = (FirstIndex + Offset) % Count;
+			UNavigationPath* Path = UNavigationSystemV1::FindPathToLocationSynchronously(
+				Participant, Start, Objectives[Index], Participant);
+			if (!Path || !Path->IsValid() || Path->IsPartial()) continue;
+
+			float PathLength = 0.f;
+			for (int32 PointIndex = 1; PointIndex < Path->PathPoints.Num(); ++PointIndex)
+			{
+				PathLength += FVector::Distance(
+					Path->PathPoints[PointIndex - 1], Path->PathPoints[PointIndex]);
+			}
+			if (bDistribute)
+			{
+				OutObjective = Objectives[Index];
+				return true;
+			}
+			if (!bFoundCompletePath || PathLength < BestPathLength)
+			{
+				bFoundCompletePath = true;
+				BestPathLength = PathLength;
+				OutObjective = Objectives[Index];
+			}
+		}
+		if (bFoundCompletePath) return true;
+	}
+
+	// A missing NavMesh should remain diagnosable by the participant's bounded
+	// movement retries. Choose by 3D distance so an objective directly overhead
+	// is not treated as equivalent to one on the participant's current floor.
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	for (int32 Offset = 0; Offset < Count; ++Offset)
+	{
+		const int32 Index = (FirstIndex + Offset) % Count;
+		const float DistanceSquared = FVector::DistSquared(Start, Objectives[Index]);
+		if (DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			OutObjective = Objectives[Index];
+		}
+	}
+	return true;
 }
 
 bool TerritoryAssaultTargetPolicy::IsGoalTargetingRegisteredDefender(

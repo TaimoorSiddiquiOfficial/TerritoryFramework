@@ -37,6 +37,7 @@
 #include "Tales/NarrativeEvent.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryTalesUtilities.h"
+#include "Tales/TerritoryDiplomacyEvent.h"
 
 ATerritoryVolume::ATerritoryVolume()
 {
@@ -103,6 +104,7 @@ void ATerritoryVolume::BeginPlay()
 
 	if (HasAuthority())
 	{
+		bool bInitializedFromLevelDefaults = false;
 		// GUID must be baked at editor placement time.
 		// If missing here, it means the level wasn't saved after GUID baking.
 		if (!TerritoryGUID.IsValid())
@@ -118,6 +120,7 @@ void ATerritoryVolume::BeginPlay()
 
 		if (!bSuccessfullyLoaded && !bLoadedFromSave)
 		{
+			bInitializedFromLevelDefaults = true;
 			// Fresh territory — initialize from level defaults
 			OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
 			OwnershipData.PeriodicIncome = InitialPeriodicIncome;
@@ -170,6 +173,14 @@ void ATerritoryVolume::BeginPlay()
 			}
 		}
 
+		// Only diplomacy events opt into initial-state policy. Broadly firing the
+		// EntryEvents array here would also execute rewards such as NE_GiveXP with
+		// no player/ASC transition context and would replay story side effects.
+		if (bInitializedFromLevelDefaults)
+		{
+			ApplyInitialStateDiplomacyPolicies();
+		}
+
 		if (!bGuardsReconciled)
 		{
 			ReconcileGuardsAfterLoad();
@@ -200,6 +211,32 @@ void ATerritoryVolume::BeginPlay()
 		SetActorTickEnabled(true);
 	}
 #endif
+}
+
+void ATerritoryVolume::ApplyInitialStateDiplomacyPolicies()
+{
+	if (!HasAuthority()) return;
+	const FTerritoryStateConfig* Config = StateConfigs.Find(OwnershipData.State);
+	if (!Config) return;
+
+	for (const TObjectPtr<UNarrativeEvent>& EntryEvent : Config->EntryEvents)
+	{
+		UTerritorySetDiplomacyEvent* DiplomacyEvent =
+			Cast<UTerritorySetDiplomacyEvent>(EntryEvent);
+		if (!DiplomacyEvent || !DiplomacyEvent->bApplyWhenStateStartsActive) continue;
+
+		FString FailedCondition;
+		if (!TerritoryTales::DoEventConditionsPass(DiplomacyEvent, nullptr, nullptr,
+			nullptr, &FailedCondition))
+		{
+			UE_LOG(LogTerritory, Verbose,
+				TEXT("[InitialStateDiplomacy] %s skipped on %s because condition '%s' failed"),
+				*DiplomacyEvent->GetGraphDisplayText(), *TerritoryTag.ToString(),
+				*FailedCondition);
+			continue;
+		}
+		DiplomacyEvent->OnActivate(nullptr, nullptr, nullptr);
+	}
 }
 
 void ATerritoryVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)

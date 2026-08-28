@@ -93,6 +93,26 @@ public:
 		meta=(ClampMin="1", ClampMax="16"))
 	int32 SpawnPlacementAttemptsPerParticipant = 4;
 
+	/**
+	 * Cap Territory strategic assault slots with Narrative Pro's attack-token count
+	 * for the current difficulty. Example with Territory Max=6: Easy=1, Medium=2,
+	 * Hard=4, Insane=6 using Narrative's default Combat Settings.
+	 * Narrative still grants the real per-defender tactical tokens during combat.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Difficulty",
+		meta=(ToolTip="Recommended. Effective concurrent participants are min(Territory Max Concurrent Attackers, Narrative attack tokens for the current difficulty)."))
+	bool bCapConcurrentAttackersToNarrativeDifficulty = true;
+
+	/** Use complete NavMesh paths instead of flat XY distance when selecting objectives. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement",
+		meta=(ToolTip="Recommended for multi-floor Places. Attackers choose only complete reachable NavMesh paths when one exists; stairs or Nav Links must connect floors."))
+	bool bUseNavigationAwareObjectives = true;
+
+	/** Spread participants across reachable guards, posts, and patrol nodes. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement",
+		meta=(ToolTip="Uses each participant's stable save GUID to distribute a wave across reachable defence objectives instead of making every attacker crowd the same point."))
+	bool bDistributeParticipantsAcrossObjectives = true;
+
 	/** Delay before retrying an idle assault move that stopped outside the target. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement",
 		meta=(ClampMin="0.25", ClampMax="10.0"))

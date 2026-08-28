@@ -47,6 +47,18 @@ public:
 			Units="s", ToolTip="Narrative game-time duration for a Trade Agreement. Zero or a negative value means permanent."))
 	float TradeDurationGameTime = -1.f;
 
+	/**
+	 * Reconcile this idempotent diplomacy rule when a fresh world starts with the
+	 * containing Territory already in this state. This does not run after loading a
+	 * save and does not cause neighboring XP, wave, or reward events to execute.
+	 *
+	 * Easy example: a Place starts Claimed by Bandits and its Claimed row sets
+	 * Bandits-Heroes to Neutral. Narrative AI is neutral before guards perceive Heroes.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ToolTip="Recommended for state policy. On a fresh world only, apply this diplomacy event when the Territory starts already in the configured state. Other entry events are not fired."))
+	bool bApplyWhenStateStartsActive = true;
+
 protected:
 	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
 		class UTalesComponent* NarrativeComponent) override;

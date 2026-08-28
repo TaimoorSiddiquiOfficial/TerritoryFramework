@@ -747,6 +747,8 @@ bool FTFContract_CombatDirector::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetGrantedSlots")));
 	TestTrue(TEXT("GetAvailableSlots is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetAvailableSlots")));
+	TestTrue(TEXT("Effective difficulty-scaled limit is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetEffectiveMaxConcurrentAttackers")));
 	TestTrue(TEXT("IsEligibleAssaultController is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("IsEligibleAssaultController")));
 
@@ -1426,6 +1428,8 @@ bool FTFContract_DiplomacySubsystem::RunTest(const FString& Parameters)
 	// ─── Query API ───
 	TestTrue(TEXT("GetDiplomacyState is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("GetDiplomacyState")));
 	TestTrue(TEXT("IsAtWar is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("IsAtWar")));
+	TestTrue(TEXT("Faction-container War query is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("AreAnyFactionsAtWar")));
 	TestTrue(TEXT("IsAllied is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("IsAllied")));
 	TestTrue(TEXT("HasTradeAgreement is BlueprintPure"), TFTestUtils::IsBlueprintPure(Class, TEXT("HasTradeAgreement")));
 
@@ -3548,6 +3552,9 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 		UTerritoryGarrisonCondition::StaticClass()->IsChildOf(UNarrativeCondition::StaticClass()));
 	TestTrue(TEXT("Diplomacy event is a Narrative event"),
 		UTerritorySetDiplomacyEvent::StaticClass()->IsChildOf(UNarrativeEvent::StaticClass()));
+	TestNotNull(TEXT("Diplomacy event exposes safe fresh-state initialization policy"),
+		UTerritorySetDiplomacyEvent::StaticClass()->FindPropertyByName(
+			TEXT("bApplyWhenStateStartsActive")));
 	TestTrue(TEXT("Reputation event is a Narrative event"),
 		UTerritoryModifyReputationEvent::StaticClass()->IsChildOf(UNarrativeEvent::StaticClass()));
 

@@ -273,6 +273,27 @@ City/District/Property cascades preserve the same explicit transition context. A
 
 ---
 
+## Territory Guard Combat Gate
+
+Narrative perception may see a player without authorizing combat. The final attitude is
+resolved by the Territory character, not by a duplicated AI Controller.
+
+| Character | Becomes Hostile only when |
+|---|---|
+| `ATerritoryGuardCharacter` | Its exact owning Territory is `Contested` and one guard/target faction pair has an explicit `War` treaty. |
+| `ATerritoryAssaultCharacter` | Its configured assault is physically `Active` and one attacker/target faction pair has an explicit `War` treaty. |
+
+Friendly Narrative results remain Friendly. Neutral results, stale Hostile results, and a
+character's old `Hostiles` entry are downgraded to Neutral when the contextual gate is closed.
+This means a Bandit guard does not chase a neutral Hero merely walking through a Claimed
+Blacksmith. Use `Can Engage Territory Target` or `Can Engage Assault Target` while debugging.
+
+Do not solve Territory diplomacy by duplicating Narrative's controller. Controller/activity
+Blueprints still own movement and combat selection, but the character and the rich Territory
+diplomacy subsystem own this authorization.
+
+---
+
 ## Combat Director — Strategic Assault Budget
 
 The `UTerritoryCombatDirector` is a `UWorldSubsystem` that limits how many AI can simultaneously attack within a single territory. This is **separate** from NarrativePro's per-target attack tokens (`UNarrativeAbilitySystemComponent::TryClaimToken`).
@@ -285,13 +306,24 @@ The `UTerritoryCombatDirector` is a `UWorldSubsystem` that limits how many AI ca
 Physical assault NPCs use both systems. Defending guards and unrelated NPCs use only
 Narrative tactical tokens and are excluded from strategic assault slots.
 
-### Slot Budget
+### Slot Budget and Narrative Difficulty
 
-Each `ATerritoryVolume` has `MaxConcurrentAttackers` (default 3). The CombatDirector enforces:
+Each `ATerritoryVolume` has `MaxConcurrentAttackers` (default 3). With
+`bCapConcurrentAttackersToNarrativeDifficulty` enabled on the counterattack profile, the
+CombatDirector enforces:
 
 ```
-If GrantedSlots(Territory) >= MaxConcurrentAttackers → deny new slot
+Effective limit = min(Territory MaxConcurrentAttackers,
+                      Narrative attack tokens for current difficulty)
+
+If GrantedSlots(Territory) >= Effective limit → deny new slot
 ```
+
+With Narrative's default Combat Settings, Easy/Medium/Hard/Insane allow 1/2/4/6 tactical
+attack tokens. Example: a Place limit of 3 becomes 1 on Easy, 2 on Medium, and 3 on Hard or
+Insane. Narrative still grants the real per-defender token at attack time; Territory does not
+claim or duplicate that token. Disable the profile option only when a game deliberately wants
+its strategic wave size to ignore Narrative difficulty.
 
 ### Internal Data Structure
 
@@ -320,7 +352,8 @@ UTerritoryCombatDirector (UWorldSubsystem)
 |---|---|---|
 | `HasAssaultSlot(Territory, Controller)` | `bool` | Does this controller hold a slot in this territory? |
 | `GetGrantedSlots(Territory)` | `int32` | Active slots — filters dead controllers (weak ptr check) |
-| `GetAvailableSlots(Territory)` | `int32` | `MaxConcurrentAttackers - GetGrantedSlots` |
+| `GetAvailableSlots(Territory)` | `int32` | Effective limit minus granted slots. |
+| `GetEffectiveMaxConcurrentAttackers(Territory)` | `int32` | Final strategic limit after the optional Narrative difficulty cap. |
 
 ### RequestAssaultSlot — Full Flow
 
@@ -332,11 +365,35 @@ RequestAssaultSlot(Territory, Controller):
   4. CleanupStaleTerritoryKeys() → remove destroyed keys and orphaned death bindings
   5. FindOrAdd territory in SlotMap
   6. CleanupInvalidControllers() → remove dead controller weak pointers
-  7. Budget check → false if GrantedControllers.Num() >= MaxConcurrentAttackers
-  8. Duplicate check → true if controller already has a slot (idempotent)
-  9. Grant slot and bind ASC death for automatic release
-  10. Return true
+  7. Resolve the effective Territory/Narrative-difficulty limit
+  8. Budget check → false if GrantedControllers.Num() >= effective limit
+  9. Duplicate check → true if controller already has a slot (idempotent)
+  10. Grant slot and bind ASC death for automatic release
+  11. Return true
 ```
+
+### Multi-floor Place staging
+
+Counterattack movement is navigation-aware when `bUseNavigationAwareObjectives` is enabled.
+It considers live defenders, overlapping defence posts, patrol points, and the Territory
+center, then accepts complete NavMesh paths. It never treats two actors on different floors as
+near merely because their X/Y positions overlap.
+
+`bDistributeParticipantsAcrossObjectives` uses each participant's stable save GUID to spread a
+wave across reachable objectives. This makes a multi-floor fight look staged instead of making
+every attacker crowd one guard.
+
+Level-authoring requirements:
+
+1. Connect floors with NavMesh-covered stairs or explicit Nav Links.
+2. Put patrol/post points on every floor where defenders should stage.
+3. Keep those points overlapping the intended Place; an overlapping patrol point is both a
+   spawn/staging source and a counterattack objective.
+4. Test paths in PIE with the player absent. Counterattackers must advance on the Territory and
+   its guards; player presence is not an activation requirement for an active assault.
+
+If no complete path is available, selection falls back to true 3D distance and the normal
+bounded stalled-movement withdrawal policy prevents an assault from remaining active forever.
 
 ### Automatic Slot Release on NPC Death
 

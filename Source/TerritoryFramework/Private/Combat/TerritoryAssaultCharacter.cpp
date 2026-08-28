@@ -8,6 +8,9 @@
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "Character/NarrativeCharacterVisual.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
+#include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -253,6 +256,38 @@ void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 		GPendingTerritoryAssaultSpawn->bApplied = true;
 	}
 	Super::SetNPCDefinition(Definition);
+}
+
+ETeamAttitude::Type ATerritoryAssaultCharacter::GetTeamAttitudeTowards(
+	const AActor& Other) const
+{
+	if (CanEngageAssaultTarget(&Other))
+	{
+		return ETeamAttitude::Hostile;
+	}
+	const ETeamAttitude::Type NarrativeAttitude = Super::GetTeamAttitudeTowards(Other);
+	return NarrativeAttitude == ETeamAttitude::Friendly
+		? ETeamAttitude::Friendly : ETeamAttitude::Neutral;
+}
+
+bool ATerritoryAssaultCharacter::CanEngageAssaultTarget(const AActor* Target) const
+{
+	if (!IsValid(Target) || Target == this || !AssaultParticipant
+		|| !AssaultParticipant->IsConfigured())
+	{
+		return false;
+	}
+
+	const UWorld* World = GetWorld();
+	const UTerritoryCounterAttackSubsystem* Counterattacks = World
+		? World->GetSubsystem<UTerritoryCounterAttackSubsystem>() : nullptr;
+	const UTerritoryDiplomacySubsystem* Diplomacy = World
+		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
+	const INarrativeTeamAgentInterface* TargetTeam =
+		Cast<INarrativeTeamAgentInterface>(Target);
+	return Counterattacks && Diplomacy && TargetTeam
+		&& Counterattacks->IsAssaultActive(AssaultParticipant->GetAssaultID())
+		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetTeam->GetFactions());
 }
 
 void ATerritoryAssaultCharacter::BeginPlay()

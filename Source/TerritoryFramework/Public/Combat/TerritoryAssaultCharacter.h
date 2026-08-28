@@ -63,6 +63,18 @@ public:
 	virtual void SetActorGUID_Implementation(const FGuid& NewGUID) override;
 	virtual void SetNPCDefinition(UNPCDefinition* Definition) override;
 
+	/**
+	 * Counterattack participants may become Hostile only during their configured
+	 * active assault and only toward a faction explicitly at War. They do not need
+	 * the Place to be Contested first because entering it creates that state.
+	 */
+	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
+
+	/** Neutral / No Treaty is always false; an active assault plus War is true. */
+	UFUNCTION(BlueprintPure, Category="Territory|Assault|Combat",
+		meta=(DisplayName="Can Engage Assault Target"))
+	bool CanEngageAssaultTarget(const AActor* Target) const;
+
 	/** Finalizes physical death from Narrative's authoritative ASC state. */
 	void ReconcileNarrativeDeathState(UNarrativeAbilitySystemComponent* KilledActorASC,
 		bool bReportedIsDead);

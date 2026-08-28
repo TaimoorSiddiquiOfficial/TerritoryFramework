@@ -196,7 +196,15 @@ void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGam
 	FTreatyRecord* Existing = FindTreaty(FactionA, FactionB);
 	EDiplomacyState OldState = Existing ? Existing->State : EDiplomacyState::None;
 
-	if (OldState == NewState) return;
+	if (OldState == NewState)
+	{
+		// A matching rich Territory state does not prove Narrative's directional
+		// attitude map is still correct. A level, save migration, or external
+		// Narrative listener may have left it stale. Reconcile even the apparent
+		// no-op -- especially None, which intentionally has no treaty row.
+		SyncNarrativeAttitudeForTreaty(FactionA, FactionB);
+		return;
+	}
 
 	if (bDebug)
 	{
@@ -254,6 +262,24 @@ EDiplomacyState UTerritoryDiplomacySubsystem::GetDiplomacyState(FGameplayTag Fac
 {
 	const FTreatyRecord* Treaty = FindTreaty(FactionA, FactionB);
 	return Treaty ? Treaty->State : EDiplomacyState::None;
+}
+
+bool UTerritoryDiplomacySubsystem::AreAnyFactionsAtWar(
+	const FGameplayTagContainer& FactionsA,
+	const FGameplayTagContainer& FactionsB) const
+{
+	for (const FGameplayTag& FactionA : FactionsA)
+	{
+		for (const FGameplayTag& FactionB : FactionsB)
+		{
+			if (FactionA.IsValid() && FactionB.IsValid() && FactionA != FactionB
+				&& IsAtWar(FactionA, FactionB))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 bool UTerritoryDiplomacySubsystem::IsAtWar(FGameplayTag FactionA, FGameplayTag FactionB) const

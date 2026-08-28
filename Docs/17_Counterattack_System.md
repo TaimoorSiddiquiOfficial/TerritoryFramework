@@ -241,9 +241,12 @@ increments. Any successful spawn resets it. At the profile's bounded
 does not count as a deployment failure.
 
 `UTerritoryAssaultParticipantComponent` maintains its low-priority movement goal both outside
-and inside the target. It selects the nearest live registered defender on the complete defence
-front that Narrative attitude marks Hostile, then falls back to an overlapping patrol/post
-objective inside the exact target and finally its center. If the defender is not perceived yet,
+and inside the target. It selects a reachable live registered defender on the complete defence
+front that the active-assault/War gate marks Hostile, then falls back to an overlapping
+patrol/post objective inside the exact target and finally its center. Complete NavMesh paths
+are preferred, and stable participant GUIDs distribute a wave across reachable objectives.
+The fallback uses true 3D distance, so vertically stacked floors are never treated as the same
+location. If the defender is not perceived yet,
 non-defender attack goals are suppressed so movement continues closing the distance. Once a
 defender attack goal exists, Narrative combat interrupts movement normally. After all
 registered defenders are gone, exact non-defender scores are restored so the player or other
@@ -272,13 +275,24 @@ physical activation. Use the latter for strategic queue UI.
 
 Alliance, trade agreement, non-aggression, ceasefire, Narrative Friendly, and Narrative
 Neutral policy block physical scheduling or cancel an existing assault. Only an explicit
-War treaty or Narrative Hostile attitude admits combat NPCs. Ownership change to the
+Territory `War` treaty admits combat NPCs. A stale Narrative Hostile value is repaired or
+ignored; it cannot bypass the rich diplomacy state. Ownership change to the
 attacking faction resolves success; ownership change to a third faction cancels it. A
 locked/unclaimed target or removed/incompatible profile cancels every non-terminal phase.
 
 The diplomacy gate runs before strongest-faction scoring and is rechecked in every
 non-terminal phase. Military power cannot override a treaty or Friendly Narrative
 attitude.
+
+Ordinary defenders use an even stricter local gate: their exact Territory must be
+`Contested` and the faction pair must be at `War`. A Claimed Place therefore stays peaceful on
+sight even if an old NPC `Hostiles` entry exists. Physical assault characters instead require
+an `Active` configured assault plus `War`; arrival is allowed to create the Contested state.
+
+Concurrent physical attackers use the smaller of the Territory limit and Narrative's current
+difficulty attack-token count when `bCapConcurrentAttackersToNarrativeDifficulty` is enabled.
+This is only the strategic participation cap. Narrative remains responsible for granting its
+real tactical per-defender attack token during combat.
 
 No counterattack code calls `SetOwningFaction` or produces offscreen capture progress.
 

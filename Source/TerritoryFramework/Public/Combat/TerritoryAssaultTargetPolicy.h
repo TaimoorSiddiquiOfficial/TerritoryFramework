@@ -49,6 +49,16 @@ namespace TerritoryAssaultTargetPolicy
 	TERRITORYFRAMEWORK_API TArray<FVector> BuildObjectiveLocations(
 		ATerritoryVolume* TargetTerritory, bool bIncludeRegisteredDefenders = true);
 
+	/**
+	 * Select a complete NavMesh-reachable objective. A stable slot can distribute
+	 * participants across floors/posts. If no complete path exists, falls back to
+	 * full 3D distance (never flat XY distance).
+	 */
+	TERRITORYFRAMEWORK_API bool SelectObjectiveLocation(
+		AActor* Participant, TConstArrayView<FVector> Objectives,
+		int32 StableSlot, bool bUseNavigation, bool bDistribute,
+		FVector& OutObjective);
+
 	TERRITORYFRAMEWORK_API bool IsGoalTargetingRegisteredDefender(
 		const UNPCGoalItem* Goal, TConstArrayView<AActor*> RegisteredDefenders);
 

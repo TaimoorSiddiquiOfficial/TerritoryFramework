@@ -1,11 +1,15 @@
 #include "Combat/TerritoryCombatDirector.h"
 #include "Combat/TerritoryAssaultParticipantComponent.h"
+#include "Combat/TerritoryCounterAttackProfile.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "AI/NarrativeNPCController.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 #include "Engine/World.h"
+#include "Settings/NarrativeCombatDeveloperSettings.h"
+#include "UnrealFramework/NarrativeGameUserSettings.h"
+#include "GameFramework/GameUserSettings.h"
 
 void UTerritoryCombatDirector::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -46,7 +50,8 @@ bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, A
 		if (Existing.Get() == Controller) return true;
 	}
 
-	int32 MaxSlots = Territory->GetMaxConcurrentAttackers();
+	const int32 MaxSlots = GetEffectiveMaxConcurrentAttackers(Territory);
+	if (MaxSlots <= 0) return false;
 	if (Slots.GrantedControllers.Num() >= MaxSlots)
 	{
 		return false;
@@ -133,9 +138,35 @@ int32 UTerritoryCombatDirector::GetGrantedSlots(const ATerritoryVolume* Territor
 int32 UTerritoryCombatDirector::GetAvailableSlots(const ATerritoryVolume* Territory) const
 {
 	if (!Territory) return 0;
-	int32 MaxSlots = Territory->GetMaxConcurrentAttackers();
+	const int32 MaxSlots = GetEffectiveMaxConcurrentAttackers(Territory);
 	int32 Granted = GetGrantedSlots(Territory);
 	return FMath::Max(0, MaxSlots - Granted);
+}
+
+int32 UTerritoryCombatDirector::GetEffectiveMaxConcurrentAttackers(
+	const ATerritoryVolume* Territory) const
+{
+	if (!Territory) return 0;
+	int32 EffectiveLimit = FMath::Max(0, Territory->GetMaxConcurrentAttackers());
+	const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
+	if (!Profile || !Profile->bCapConcurrentAttackersToNarrativeDifficulty)
+	{
+		return EffectiveLimit;
+	}
+
+	const UNarrativeCombatDeveloperSettings* CombatSettings =
+		GetDefault<UNarrativeCombatDeveloperSettings>();
+	if (!CombatSettings) return EffectiveLimit;
+	ENarrativeGameplayDifficulty Difficulty = ENarrativeGameplayDifficulty::Easy;
+	if (UNarrativeGameUserSettings* UserSettings = Cast<UNarrativeGameUserSettings>(
+		UGameUserSettings::GetGameUserSettings()))
+	{
+		Difficulty = UserSettings->GetGameplayDifficulty();
+	}
+	const int32 NarrativeLimit =
+		CombatSettings->GetAttackTokensForDifficulty(Difficulty);
+	return NarrativeLimit == TNumericLimits<int32>::Max()
+		? EffectiveLimit : FMath::Min(EffectiveLimit, FMath::Max(0, NarrativeLimit));
 }
 
 bool UTerritoryCombatDirector::IsEligibleAssaultController(

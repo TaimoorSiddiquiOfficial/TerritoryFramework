@@ -1483,23 +1483,19 @@ bool UTerritoryCounterAttackSubsystem::IsDiplomacyBlocked(
 		return true;
 	}
 
-	// Physical counterattack NPCs need an actual hostile combat relationship.
-	// A neutral no-treaty policy may permit designer-driven capture, but it cannot
-	// launch an assault whose Narrative perception will refuse to fight defenders.
+	// Physical counterattack NPCs need an explicit rich War relationship.
+	// None means Neutral / No Treaty and must never inherit a stale hostile entry
+	// from Narrative's map. Territory diplomacy is the campaign authority and its
+	// bridge repairs Narrative's ETeamAttitude projection separately.
 	if (!Territory || !World) return true;
 	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
 	if (!DefendingFaction.IsValid()) return true;
 	if (const UTerritoryDiplomacySubsystem* Diplomacy =
 		World->GetSubsystem<UTerritoryDiplomacySubsystem>())
 	{
-		const EDiplomacyState State = Diplomacy->GetDiplomacyState(
-			Assault.AttackingFaction, DefendingFaction);
-		if (State == EDiplomacyState::War) return false;
-		if (State != EDiplomacyState::None) return true;
+		return !Diplomacy->IsAtWar(Assault.AttackingFaction, DefendingFaction);
 	}
-	ANarrativeGameState* NarrativeGS = Cast<ANarrativeGameState>(World->GetGameState());
-	return !NarrativeGS || NarrativeGS->GetFactionAttitudeTowardsFaction(
-		Assault.AttackingFaction, DefendingFaction) != ETeamAttitude::Hostile;
+	return true;
 }
 
 TArray<FName> UTerritoryCounterAttackSubsystem::SelectValidApproaches(

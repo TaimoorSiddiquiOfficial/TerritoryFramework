@@ -51,6 +51,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	bool IsAtWar(FGameplayTag FactionA, FGameplayTag FactionB) const;
 
+	/**
+	 * True when any exact faction pair is explicitly in the rich War state.
+	 * Neutral / No Treaty never counts as hostile, even if a stale Narrative
+	 * Hostiles list or faction map previously marked the actors as enemies.
+	 *
+	 * Easy example: a Bandit guard with {Bandits} and a player with {Heroes}
+	 * returns true only after Bandits-Heroes has been set to War.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy",
+		meta=(DisplayName="Are Any Factions At War"))
+	bool AreAnyFactionsAtWar(const FGameplayTagContainer& FactionsA,
+		const FGameplayTagContainer& FactionsB) const;
+
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	bool IsAllied(FGameplayTag FactionA, FGameplayTag FactionB) const;
 

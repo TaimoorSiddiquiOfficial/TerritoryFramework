@@ -296,6 +296,52 @@ bool FTFCounterAttackStrategicSlotRoles::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Physical assault pawns require a strategic Territory slot"),
 		UTerritoryCombatDirector::RequiresStrategicAssaultSlot(
 			GetDefault<ATerritoryAssaultCharacter>()));
+	TestNotNull(TEXT("Territory guard exposes its contextual combat gate"),
+		ATerritoryGuardCharacter::StaticClass()->FindFunctionByName(
+			TEXT("CanEngageTerritoryTarget")));
+	TestNotNull(TEXT("Assault guard exposes its War combat gate"),
+		ATerritoryAssaultCharacter::StaticClass()->FindFunctionByName(
+			TEXT("CanEngageAssaultTarget")));
+
+	const UTerritoryCounterAttackProfile* Profile =
+		GetDefault<UTerritoryCounterAttackProfile>();
+	TestTrue(TEXT("Counterattacks use Narrative difficulty tokens by default"),
+		Profile->bCapConcurrentAttackersToNarrativeDifficulty);
+	TestTrue(TEXT("Multi-floor objectives use navigation by default"),
+		Profile->bUseNavigationAwareObjectives);
+	TestTrue(TEXT("Participants distribute across defence objectives by default"),
+		Profile->bDistributeParticipantsAcrossObjectives);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackMultiFloorFallback,
+	"TerritoryFramework.CounterAttack.Regression.MultiFloorFallbackUses3DDistance",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackMultiFloorFallback::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::EditorPreview, false);
+	TestNotNull(TEXT("Multi-floor policy world created"), World);
+	if (!World) return false;
+	AActor* Participant = World->SpawnActor<AActor>();
+	TestNotNull(TEXT("Participant fixture created"), Participant);
+	if (!Participant)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	Participant->SetActorLocation(FVector::ZeroVector);
+	const TArray<FVector> Objectives = {
+		FVector(0.f, 0.f, 1000.f),
+		FVector(100.f, 0.f, 0.f)
+	};
+	FVector Selected = FVector::ZeroVector;
+	TestTrue(TEXT("A fallback objective is selected"),
+		TerritoryAssaultTargetPolicy::SelectObjectiveLocation(
+			Participant, Objectives, 0, false, false, Selected));
+	TestTrue(TEXT("Same-floor objective wins over an actor directly overhead"),
+		Selected.Equals(Objectives[1]));
+	World->DestroyWorld(false);
 	return true;
 }
 

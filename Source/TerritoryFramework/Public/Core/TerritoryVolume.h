@@ -788,6 +788,7 @@ private:
 	void ScheduleDefenderDeathBindingRetry(AActor* Defender);
 	void RetryPendingDefenderDeathBindings();
 	void CleanupInvalidDefenders();
+	void ApplyInitialStateDiplomacyPolicies();
 	bool HasPendingReserveDeployments() const;
 	void CancelPendingReserveDeployments();
 	void RemoveGuardWithoutReplacement(ATerritoryGuardCharacter* Guard);

@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased — 2026-08-28 (Contextual diplomacy combat and multi-floor staging)
+
+- Made Territory diplomacy the fail-closed combat policy: an ordinary guard is Hostile only
+  for `Contested + War`, while a configured counterattack guard is Hostile only for
+  `Active Assault + War`. Neutral players can move through Claimed Places without being chased.
+- Kept the fix entirely inside TerritoryFramework character classes; no Narrative Pro source,
+  controller, activity, or Blueprint asset was modified.
+- Repaired no-op diplomacy writes so `None / No Treaty` actively clears stale Narrative
+  Hostile attitudes instead of silently preserving an old War projection.
+- Added fresh-world initial-state diplomacy policy without replaying reward, quest, XP, wave,
+  or other state entry events. State events can opt out with `Apply When State Starts Active`.
+- Changed the Blacksmith example/map policy to Claimed Neutral and Contested War, with an editor
+  regression that verifies both state configurations and their exact Heroes/Bandits tags.
+- Capped strategic counterattack participation to the smaller of the Territory limit and
+  Narrative's current difficulty attack-token setting. Narrative remains the tactical token
+  authority for each defender.
+- Replaced flat XY objective selection with complete NavMesh paths, stable wave distribution,
+  and true 3D fallback distance for multi-floor Places.
+- Added BlueprintPure combat/difficulty diagnostics, community-facing authoring examples, and
+  regression coverage. Clean Editor build and all 128 TerritoryFramework tests pass.
+
 ## Unreleased — 2026-08-27 (Place waypoint and silent-lock navigation contract)
 
 - District and City waypoint requests now resolve to a loaded, hierarchy-visible child Place;
