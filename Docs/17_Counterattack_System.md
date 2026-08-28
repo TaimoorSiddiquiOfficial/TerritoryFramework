@@ -75,6 +75,31 @@ and may finish; losing a District does not erase living NPCs. After a terminal s
 record, `RecurringCounterCooldownGameTime` must elapse before the same still-hostile front is
 eligible again. Story-pursuit records never repeat automatically.
 
+## Narrative quest rules
+
+`Quest Rules` on the counterattack profile gate automatic strategic counters without copying
+quest state into Territory. Every configured rule must pass, and each rule reads the selected
+Narrative Quest from the scoped online players' real `UTalesComponent`.
+
+| Setting | Meaning | Easy example |
+|---|---|---|
+| Block Counter When Matched | No strategic counter while any scoped player matches the selected quest state | Block while the defending player's Stealth Investigation quest is In Progress |
+| Require Match Before Counter | No strategic counter until at least one scoped player matches | Require Betrayal Revealed to be Succeeded before the Regime retaliates |
+| Any Online Player | Any connected Narrative player may satisfy or block the rule | Pause a shared-world event while anyone is in the tutorial |
+| Defending Faction Players | Only players with the exact current defender faction tag count | Protect Heroes players during their story mission |
+| Attacking Faction Players | Only players with the exact selected attacker faction tag count | Allow a faction-led assault only after that faction's quest succeeds |
+
+Available quest states are Not Started, In Progress, Succeeded, Failed, Finished, and Started
+or Finished. A missing Quest asset fails closed. Pending Grace, Warning, or Waiting records
+recheck the rules and cancel as `QuestRuleBlocked` when the story state changes. Already Active
+physical attackers remain in the world and may finish the fight.
+
+These profile rules deliberately apply only to normal strategic and recurring counters. An
+explicit `Wave of Enemies` event in Story Pursuit / Boss Chase mode uses the Narrative Event's
+inherited `Conditions` array instead. Add `Narrative Quest State Condition` there when a pursuit
+must happen only during one quest; use its inherited **Not** option when the pursuit must not
+happen during that quest.
+
 The native `ATerritoryAssaultCharacter` is spawn-ready by default: it selects
 `ANarrativeNPCController` and `PlacedInWorldOrSpawned`. A project Blueprint subclass may
 select Narrative Pro's Blueprint controller, but it must preserve those two contracts.

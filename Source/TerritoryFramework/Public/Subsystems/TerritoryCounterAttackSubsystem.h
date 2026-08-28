@@ -244,6 +244,9 @@ private:
 		ETerritoryAssaultLaunchMode LaunchMode);
 	bool DoesForceMeetStagingRequirement(const FTerritoryFactionAssaultConfig& ForceConfig,
 		ETerritoryAssaultLaunchMode LaunchMode) const;
+	bool DoStrategicQuestRulesPass(const UTerritoryCounterAttackProfile* Profile,
+		const FGameplayTag& AttackingFaction, const FGameplayTag& DefendingFaction,
+		FText* OutFailureReason = nullptr) const;
 	bool FindReachableObjective(const ATerritoryVolume* Territory, const FVector& Start,
 		FVector& OutObjective, FString* OutFailureReason = nullptr) const;
 	double GetCampaignGameTime() const;

@@ -97,9 +97,9 @@ The point calls `UTerritoryControlSubsystem::TryRegisterAttacker`; it never owns
 ### Haven Reach Example Flow
 
 ```text
-Blacksmith Place captured -> Market Square District reduced
-Farm Place captured       -> Castle Hill District reduced
-both Districts owned      -> Haven Reach City reduced
+capture every independent Place in Market Square -> Market Square District derives that owner
+capture every independent Place in Castle Hill   -> Castle Hill District derives that owner
+all Districts derive the same owner               -> Haven Reach City derives that owner
 ```
 
 `/Game/HopDistrictTest` places `CapturePoint_Blsmith` for `Territory.HavenReach.MarketSquare.Blacksmith` and `CapturePoint_Farm` for `Territory.HavenReach.CastleHill.Farm`. The Farm retains its independent currency and item-production configuration after capture.
@@ -130,7 +130,7 @@ None beyond base.
 | Event | When | Override For |
 |---|---|---|
 | OnCityFullyCaptured(Faction) | All districts owned by one faction | Economy bonus, cascade, rewards |
-| OnCityLost(PreviousFaction) | City owner loses majority | Clear ownership, economy recalc |
+| OnCityLost(PreviousFaction) | City owner no longer owns every District | Enter partial-control state, economy recalc |
 | OnDistrictCapturedInCity(District, Old, New) | Any district in this city changes owner | Per-district capture effects |
 
 ### Delegates (BlueprintAssignable)
@@ -142,22 +142,31 @@ None beyond base.
 ### City Capture Flow (Complete)
 
 ```
-District captured by Faction X
-  → capture subsystem atomically commits District ownership
-  → District.OnTerritoryControlChanged broadcast
+Final Place in a District is captured by Faction X
+  → District unanimity reducer derives District ownership
+  → District.OnTerritoryOwnershipChanged broadcast
   → City.OnDistrictControlChanged handler:
       1. Fires OnDistrictCapturedInCity BP event
-      2. CascadeCaptureToProperties(district, X)
-         → All child properties auto-reassigned to X
-         → Each property fires OnPropertyCaptured + OnPropertyCapturedDelegate
-      3. If AllDistrictsOwnedBy(X):
+      2. If AllDistrictsOwnedBy(X):
          → hierarchy reducer sets derived City ownership
          → City.OnCityFullyCaptured(X) — economy bonus, capital reward
          → City.OnCityCapturedDelegate.Broadcast(this, X)
-      4. If city owner no longer controls all districts:
-         → City.OnCityLost(oldOwner) — clears city ownership
+      3. If the previous city owner no longer controls every District:
+         → City becomes Contested until one faction owns every District
+         → City.OnCityLost(oldOwner)
          → City.OnCityLostDelegate.Broadcast(this, oldOwner)
 ```
+
+Districts and Cities default to `AggregateOnly`. Capture points and normal mutation requests
+cannot target them directly. Their owner is a summary derived from children, never a shortcut
+that grants uncaptured Places.
+
+`GetMajorityOwner` and `GetMajorityPropertyOwner` report influence only when one faction has a
+strict majority of securely Claimed children: more than 50 percent. Contested, Locked, and
+Unclaimed children do not count as owned. The helpers do not capture the parent. In a 45% Heroes / 55%
+Bandits split, Bandits are the dominant faction and Heroes do not dominate or own the parent. A
+50/50 split has no majority. Full District or City capture always requires 100% of its immediate
+children to share one owner.
 
 ### Capital City Bonus
 
@@ -194,14 +203,16 @@ When a city with capital districts is fully captured:
 |---|---|
 | OnDistrictCapturedDelegate | (District*, OldOwner, NewOwner) |
 
-### Hierarchy Collapse
+### Bottom-up hierarchy reduction
 
-When a district changes owner:
-1. City's `CascadeCaptureToProperties` iterates all child properties
-2. Each property receives the same explicit transition context through the hierarchy's forced derived-ownership path
-3. Each property fires `OnPropertyCaptured` + `OnPropertyCapturedDelegate`
-4. Property upgrade level resets to 0 on capture by a new faction
-5. Economy income recalculated for both old and new owners
+When a Place changes owner:
+
+1. The Place commits through the authoritative capture/mutation path and fires its normal events.
+2. Its District checks all currently registered child Places.
+3. Only unanimous child ownership derives a Claimed District; a partial split is Contested.
+4. The City performs the same unanimity check across its Districts.
+5. Majority helpers remain read-only domination information and never mutate ownership.
+6. Economy is marked dirty for the old and new factions after the committed leaf change.
 
 ### Setup Example
 ```

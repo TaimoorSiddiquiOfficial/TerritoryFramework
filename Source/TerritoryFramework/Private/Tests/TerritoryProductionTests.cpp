@@ -61,6 +61,17 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryProductionCycleBehaviorTest,
 
 bool FTerritoryProductionCycleBehaviorTest::RunTest(const FString& Parameters)
 {
+	TestFalse(TEXT("A missing Narrative clock is never processed"),
+		UTerritoryEconomySubsystem::HasProductionCycleAdvanced(INDEX_NONE, INDEX_NONE));
+	TestTrue(TEXT("The first valid Narrative cycle initializes production safely"),
+		UTerritoryEconomySubsystem::HasProductionCycleAdvanced(INDEX_NONE, 50));
+	TestFalse(TEXT("The same Narrative cycle cannot trigger another settlement"),
+		UTerritoryEconomySubsystem::HasProductionCycleAdvanced(50, 50));
+	TestTrue(TEXT("A sleep or time skip triggers production on the next observed cycle"),
+		UTerritoryEconomySubsystem::HasProductionCycleAdvanced(50, 51));
+	TestFalse(TEXT("Loading an earlier campaign cycle does not award future production"),
+		UTerritoryEconomySubsystem::HasProductionCycleAdvanced(51, 50));
+
 	TestEqual(TEXT("New sites do not receive retroactive production"),
 		UTerritoryProductionProfile::CalculatePendingCycleCount(INDEX_NONE, 50, 7), 0);
 	TestEqual(TEXT("Same cycle cannot settle twice"),

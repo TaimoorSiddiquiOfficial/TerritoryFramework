@@ -7,9 +7,36 @@
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeCondition.h"
 #include "Tales/TerritoryGarrisonCondition.h"
+#include "Tales/TerritoryQuestRules.h"
 #include "TerritoryStoryConditions.generated.h"
 
 class UNarrativeItem;
+class UQuest;
+
+/** Uses the explicit Narrative event's Tales component; no second quest state is stored. */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Narrative Quest State Condition"))
+class TERRITORYFRAMEWORK_API UTerritoryQuestStateCondition : public UNarrativeCondition
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryQuestStateCondition();
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(ToolTip="Narrative Quest to inspect. Easy example: select Stealth Investigation, then choose In Progress to allow an event only during that quest."))
+	TSubclassOf<UQuest> QuestClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(ToolTip="Required Narrative quest state. Use the inherited Not checkbox to invert it; for example Not + In Progress means do not run during this quest."))
+	ETerritoryQuestStateRequirement RequiredState =
+		ETerritoryQuestStateRequirement::InProgress;
+
+protected:
+	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent) override;
+	virtual FString GetGraphDisplayText_Implementation() override;
+};
 
 /**
  * Validates the explicit pawn/controller/Tales context before a Narrative event runs.

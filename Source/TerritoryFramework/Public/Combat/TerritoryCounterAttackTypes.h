@@ -48,6 +48,8 @@ enum class ETerritoryAssaultResolution : uint8
 	CaptureCompleted,
 	ManuallyCancelled,
 	SpawnFailed,
+	QuestRuleBlocked UMETA(DisplayName="Narrative Quest Rule Blocked",
+		ToolTip="A pending strategic counterattack was cancelled because its Narrative quest rules no longer passed."),
 	StagingDistrictUnavailable UMETA(DisplayName="No Secure Staging District",
 		ToolTip="The attacking faction no longer owns a loaded District in Claimed or story-Locked state, so an undeployed strategic counterattack cannot continue.")
 };

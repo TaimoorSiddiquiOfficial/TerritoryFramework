@@ -26,6 +26,18 @@ public:
 		meta = (ClampMin = "10.0", UIMin = "10.0", UIMax = "3600.0"))
 	float EconomyTickIntervalSeconds = 300.f;
 
+	/**
+	 * How often the server checks Narrative Pro's campaign clock for a new
+	 * production cycle. This does not change the production cycle length.
+	 * Easy example: when sleeping advances the story by one day, a value of 1
+	 * delivers Farm or Blacksmith items within about one real second instead of
+	 * waiting for the five-minute currency/upkeep tick.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy|Resources",
+		meta = (ClampMin = "0.1", UIMin = "0.1", UIMax = "10.0",
+			DisplayName = "Campaign Production Check Interval (Seconds)"))
+	float ProductionCycleObservationIntervalSeconds = 1.f;
+
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy",
 		meta = (ClampMin = "0"))
 	int32 DefaultTerritoryIncome = 100;

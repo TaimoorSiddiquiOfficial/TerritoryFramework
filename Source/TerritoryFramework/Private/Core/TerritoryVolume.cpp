@@ -37,6 +37,7 @@
 #include "Navigation/TerritoryNavigationMarkerComponent.h"
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/NarrativeFunctionLibrary.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryTalesUtilities.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
@@ -1547,8 +1548,11 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	{
 		DefenderEventContext.PlayerController = Cast<APlayerController>(
 			DefenderEventContext.TargetPawn->GetController());
+		AActor* TalesTarget = DefenderEventContext.PlayerController
+			? static_cast<AActor*>(DefenderEventContext.PlayerController.Get())
+			: static_cast<AActor*>(DefenderEventContext.TargetPawn.Get());
 		DefenderEventContext.TalesComponent =
-			DefenderEventContext.TargetPawn->FindComponentByClass<UTalesComponent>();
+			UNarrativeFunctionLibrary::GetTalesComponentFromTarget(TalesTarget);
 	}
 
 	auto FireDefenderEvents = [this, &DefenderEventContext](

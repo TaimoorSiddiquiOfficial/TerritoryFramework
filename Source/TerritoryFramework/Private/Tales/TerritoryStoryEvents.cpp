@@ -3,7 +3,9 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryMutationTypes.h"
 #include "Engine/World.h"
+#include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -39,6 +41,130 @@ namespace
 			*GetNameSafe(Event), *FailedCondition);
 		return false;
 	}
+
+	void CollectLoadedHierarchy(UTerritoryRegistrySubsystem* Registry,
+		ATerritoryVolume* Root, TArray<ATerritoryVolume*>& OutTerritories)
+	{
+		if (!Registry || !Root || OutTerritories.Contains(Root)) return;
+		OutTerritories.Add(Root);
+		TArray<ATerritoryVolume*> Children =
+			Registry->GetChildTerritories(Root->GetTerritoryTag());
+		Children.Sort([](const ATerritoryVolume& A, const ATerritoryVolume& B)
+		{
+			return A.GetTerritoryTag().ToString() < B.GetTerritoryTag().ToString();
+		});
+		for (ATerritoryVolume* Child : Children)
+		{
+			CollectLoadedHierarchy(Registry, Child, OutTerritories);
+		}
+	}
+}
+
+UTerritoryHierarchyStoryOverrideEvent::UTerritoryHierarchyStoryOverrideEvent(
+	const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+}
+
+void UTerritoryHierarchyStoryOverrideEvent::ExecuteEvent_Implementation(
+	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || !RootTerritory.IsValid()) return;
+
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	UTerritoryControlSubsystem* Control =
+		World->GetSubsystem<UTerritoryControlSubsystem>();
+	ATerritoryVolume* Root = Registry
+		? Registry->GetTerritoryByTag(RootTerritory) : nullptr;
+	if (!Registry || !Control || !Root)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[HierarchyStoryOverride] Root %s is not loaded and registered"),
+			*RootTerritory.ToString());
+		return;
+	}
+	if (Operation == ETerritoryHierarchyStoryOperation::ClaimForFaction
+		&& !ClaimingFaction.IsValid())
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[HierarchyStoryOverride] Claim operation for %s requires an exact Narrative faction"),
+			*RootTerritory.ToString());
+		return;
+	}
+
+	FTerritoryTransitionContext Context;
+	Context.Instigator = Target;
+	Context.TargetPawn = Target;
+	Context.PlayerController = Controller;
+	Context.TalesComponent = NarrativeComponent;
+	Context.RequestingFaction = ClaimingFaction;
+
+	TArray<ATerritoryVolume*> Hierarchy;
+	CollectLoadedHierarchy(Registry, Root, Hierarchy);
+	int32 ChangedCount = 0;
+	int32 RejectedCount = 0;
+	for (ATerritoryVolume* Territory : Hierarchy)
+	{
+		if (!Territory) continue;
+		if (Operation == ETerritoryHierarchyStoryOperation::Lock)
+		{
+			ChangedCount += Territory->LockTerritoryWithContext(LockReason, Context) ? 1 : 0;
+			continue;
+		}
+		if (Operation == ETerritoryHierarchyStoryOperation::Unlock)
+		{
+			ChangedCount += Territory->TryUnlockWithContext(
+				Context, bForceStoryOverride) ? 1 : 0;
+			continue;
+		}
+
+		// Aggregate parents are intentionally never directly assigned. Their existing
+		// child unanimity reducer will commit them when the final leaf changes.
+		if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly) continue;
+
+		FTerritoryMutationRequest Request;
+		Request.Territory = Territory;
+		Request.NewOwner = Operation == ETerritoryHierarchyStoryOperation::ClaimForFaction
+			? ClaimingFaction : FGameplayTag();
+		Request.DesiredState = Operation == ETerritoryHierarchyStoryOperation::ClaimForFaction
+			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+		Request.TransitionContext = Context;
+		Request.bBypassConditions = bForceStoryOverride;
+		Request.bBypassDiplomacy = bForceStoryOverride;
+		Request.bBypassLock = bForceStoryOverride;
+		const FTerritoryMutationResponse Response = Control->ApplyTerritoryMutation(Request);
+		if (Response.Result == ETerritoryMutationResult::Success
+			|| (Territory->GetOwningFaction() == Request.NewOwner
+				&& Territory->GetTerritoryState() == Request.DesiredState))
+		{
+			++ChangedCount;
+		}
+		else
+		{
+			++RejectedCount;
+			UE_LOG(LogTerritory, Warning,
+				TEXT("[HierarchyStoryOverride] %s rejected: %s"),
+				*Territory->GetTerritoryTag().ToString(),
+				*Response.Explanation.ToString());
+		}
+	}
+
+	UE_LOG(LogTerritory, Log,
+		TEXT("[HierarchyStoryOverride] %s applied to %d loaded hierarchy actors (%d rejected). World Partition descendants must be loaded when this one-shot event runs."),
+		*RootTerritory.ToString(), ChangedCount, RejectedCount);
+}
+
+FString UTerritoryHierarchyStoryOverrideEvent::GetGraphDisplayText_Implementation()
+{
+	const UEnum* OperationEnum = StaticEnum<ETerritoryHierarchyStoryOperation>();
+	const FString OperationText = OperationEnum
+		? OperationEnum->GetDisplayNameTextByValue(static_cast<int64>(Operation)).ToString()
+		: TEXT("Hierarchy Story Override");
+	return FString::Printf(TEXT("%s: %s"), *OperationText, *RootTerritory.ToString());
 }
 
 UTerritoryScheduleEnemyWaveEvent::UTerritoryScheduleEnemyWaveEvent(

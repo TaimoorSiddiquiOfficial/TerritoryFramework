@@ -124,6 +124,13 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy|Resources")
 	void ProcessResourceProduction();
 
+	/** Native regression predicate used by the campaign-clock observer. */
+	static bool HasProductionCycleAdvanced(int64 LastObservedCycle, int64 CurrentCycle)
+	{
+		return CurrentCycle != INDEX_NONE
+			&& (LastObservedCycle == INDEX_NONE || CurrentCycle > LastObservedCycle);
+	}
+
 	/**
 	 * Execute a production-shaped recipe against one exact Narrative inventory.
 	 * Used by daily production and reusable by server-authoritative crafting features.
@@ -265,6 +272,8 @@ private:
 	TArray<FTerritoryTransaction> TransactionLedger;
 
 	FTimerHandle EconomyTickTimerHandle;
+	FTimerHandle ProductionCycleObservationTimerHandle;
+	int64 LastObservedProductionCycle = INDEX_NONE;
 
 	/** Factions whose income needs recalculation — processed once per economy tick. */
 	TSet<FGameplayTag> DirtyFactions;
@@ -281,6 +290,10 @@ private:
 
 	UFUNCTION()
 	void OnEconomyTick();
+
+	/** Settle resource recipes promptly when Narrative accumulated time enters a new cycle. */
+	UFUNCTION()
+	void ObserveNarrativeProductionCycle();
 
 	UFUNCTION()
 	void OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);

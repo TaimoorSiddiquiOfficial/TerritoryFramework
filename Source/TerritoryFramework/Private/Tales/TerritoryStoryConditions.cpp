@@ -28,6 +28,25 @@ namespace
 	}
 }
 
+UTerritoryQuestStateCondition::UTerritoryQuestStateCondition()
+{
+	ConditionFilter = EConditionFilter::CF_DontTarget;
+}
+
+bool UTerritoryQuestStateCondition::CheckCondition_Implementation(
+	APawn*, APlayerController*, UTalesComponent* NarrativeComponent)
+{
+	return UTerritoryQuestRulesLibrary::DoesQuestStateMatch(
+		NarrativeComponent, QuestClass, RequiredState);
+}
+
+FString UTerritoryQuestStateCondition::GetGraphDisplayText_Implementation()
+{
+	return FString::Printf(TEXT("Narrative quest %s is %s"), *GetNameSafe(QuestClass.Get()),
+		*EnumDisplayName(StaticEnum<ETerritoryQuestStateRequirement>(),
+			static_cast<int64>(RequiredState), TEXT("Unknown")));
+}
+
 UTerritoryEventContextCondition::UTerritoryEventContextCondition()
 {
 	ConditionFilter = EConditionFilter::CF_AnyCharacter;

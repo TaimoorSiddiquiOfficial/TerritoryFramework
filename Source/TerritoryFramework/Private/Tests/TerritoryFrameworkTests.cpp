@@ -3562,6 +3562,7 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 		UTerritoryModifyReputationEvent::StaticClass()->IsChildOf(UNarrativeEvent::StaticClass()));
 
 	const TArray<UClass*> NewConditionClasses = {
+		UTerritoryQuestStateCondition::StaticClass(),
 		UTerritoryStateCondition::StaticClass(),
 		UTerritoryControlProgressCondition::StaticClass(),
 		UTerritoryReputationCondition::StaticClass(),
@@ -3578,6 +3579,7 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 	}
 
 	const TArray<UClass*> NewEventClasses = {
+		UTerritoryHierarchyStoryOverrideEvent::StaticClass(),
 		UTerritoryScheduleEnemyWaveEvent::StaticClass(),
 		UTerritoryCancelEnemyWavesEvent::StaticClass(),
 		UTerritorySetGarrisonTargetEvent::StaticClass(),

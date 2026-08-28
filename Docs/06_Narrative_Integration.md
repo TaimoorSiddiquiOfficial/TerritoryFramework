@@ -125,7 +125,8 @@ indirectly through the C++ adapters above.
 ## Tales, save, economy, navigation, and UI
 
 - `UTerritoryCaptureTask`, `UTerritoryCaptureEvent`, `UTerritoryLockEvent`,
-  `UTerritoryOwnershipCondition`, `UTerritoryDiplomacyCondition`,
+  `UTerritoryHierarchyStoryOverrideEvent`, `UTerritoryOwnershipCondition`,
+  `UTerritoryQuestStateCondition`, `UTerritoryDiplomacyCondition`,
   `UTerritoryGarrisonCondition`, `UTerritorySetDiplomacyEvent`, and
   `UTerritoryModifyReputationEvent` extend Narrative Tales classes. Player-dependent
   transitions use the explicit pawn/controller/`UTalesComponent` context.
@@ -144,6 +145,26 @@ indirectly through the C++ adapters above.
 `IdleSequenceViewers` array means all relevant players may receive the sequence; it does not use
 `GetPlayerController(0)`.
 
+## Diplomacy-aware guard dialogue
+
+Territory guards and assault characters keep Narrative's interaction and dialogue authority.
+Their native `UTerritoryDiplomacyInteractable` asks the attached
+`UTerritoryDiplomacyDialogueComponent` for the current relationship before Narrative opens a
+dialogue. Author one `UTerritoryDiplomacyDialogueProfile` with optional Same Faction, Neutral,
+Ceasefire, Non-Aggression, Trade, Alliance, and War dialogue classes, then assign that profile to
+the character Blueprint's **Territory Diplomacy Dialogue** component.
+
+`Faction Dialogue Profiles` can select a different profile from the guard's exact current
+Narrative faction. This matters when one shared guard class may represent Heroes, Bandits, or a
+story faction after ownership changes. An empty relationship slot falls back to Default Dialogue;
+it never invents text or modifies Narrative's `NPCDefinition` asset.
+
+The reference `/Game/TerritoryFramework/AI/BP_TerritoryGuard` is wired to
+`DA_TerritoryBanditDiplomacyDialogue`: neutral relationships resolve the normal greeting and War
+resolves the Bandit hostile dialogue. Dialogue choice and attack permission are related but
+separate checks. Claimed Territory guards still do not attack merely because they see a player;
+normal territorial combat requires the Territory to be Contested and diplomacy to be War.
+
 ## State Config conditions and events
 
 `ATerritoryVolume::StateConfigs` is the one editor-facing place for state entry/exit rules.
@@ -152,6 +173,7 @@ faction, guard, or ownership database.
 
 | Inline Narrative object | Plain-English use | Easy example |
 |---|---|---|
+| `UTerritoryQuestStateCondition` | Read one Narrative Quest from the explicit player's Tales component | Run a boss pursuit only while Betrayal is In Progress; use inherited Not to block it during that quest |
 | `UTerritoryOwnershipCondition` | Check who owns a loaded place | Farm unlocks after Blacksmith is Claimed by Heroes |
 | `UTerritoryDiplomacyCondition` | Check the exact rich treaty between two Narrative factions | Locked exit requires Heroes and Bandits to be at War |
 | `UTerritoryGarrisonCondition` | Compare guards, every registered defender, reserve, pending replacements, or staffing shortfall | Living Defenders equals 0 means the Place is genuinely undefended |
@@ -173,11 +195,25 @@ faction, guard, or ownership database.
 | `UTerritoryExecuteResourceRecipeEvent` | Atomically consume/produce resources in the explicit Narrative inventory | Consume medicine and food to make one relief shipment |
 | `UTerritoryLockEvent` / `UTerritoryUnlockEvent` | Change one Territory's Locked state through its existing authority | A gate quest unlocks a District |
 | `UTerritoryCaptureEvent` | Request the existing atomic capture mutation | A trusted quest awards an undefended outpost |
+| `UTerritoryHierarchyStoryOverrideEvent` | Claim, clear, lock, or unlock one loaded Place/District/City tree while preserving the normal hierarchy authority | After a regime betrayal, give every loaded independent Place under Haven Reach to the Regime; District and City ownership derive from the leaves |
 
 All State Config conditions must pass. Every Narrative Event also has its own inherited
 `Conditions` array; all conditions inside that event must pass before the event mutates anything.
 Narrative's inherited **Not** option is honored in both places. Territory mutation events set
 `Refire On Load` false so quest restoration cannot purchase, spawn, or reward twice.
+
+Quest conditions require a real Narrative event context. Capture and player-triggered events
+carry the explicit Tales component. Defender-death hooks resolve it through the killer's
+Narrative player controller, so `On Defender Died + Quest In Progress` works when a player caused
+the death. If AI or world damage caused the death, there is deliberately no guessed first player;
+use profile Quest Rules for a world-level counter gate instead.
+
+`Apply Territory Hierarchy Story Override` is a one-shot event over actors currently loaded and
+registered under its root. Ownership operations mutate only independent leaf Places; the normal
+unanimity reducer derives District and City ownership. Its Force option may bypass Place lock,
+diplomacy, and conditions for a deliberate story decision, but cannot bypass server authority or
+the hierarchy. Load the intended World Partition cells before firing it; unloaded descendants
+are not silently changed in a second database.
 
 Player rewards need `Territory Event Context Condition` in the reward event's own Conditions
 list. A Territory can legitimately re-enter Claimed when contested progress decays back to its

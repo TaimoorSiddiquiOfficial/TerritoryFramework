@@ -15,8 +15,12 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
+#include "UnrealFramework/NarrativePlayerController.h"
+#include "UnrealFramework/NarrativePlayerState.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NPCDefinition.h"
+#include "Tales/TalesComponent.h"
+#include "Tales/TerritoryQuestRules.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Misc/Crc.h"
@@ -223,6 +227,7 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 	int32 InvalidSpawnClassCount = 0;
 	int32 StagingBlockedCount = 0;
 	int32 RecurringBlockedCount = 0;
+	int32 QuestBlockedCount = 0;
 	float BestMilitaryPower = -1.f;
 	for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
 	{
@@ -237,6 +242,13 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 			Force, ETerritoryAssaultLaunchMode::StrategicCounterattack))
 		{
 			++StagingBlockedCount;
+			continue;
+		}
+		FText QuestFailureReason;
+		if (!DoStrategicQuestRulesPass(Profile, Force.Faction,
+			Territory->GetOwningFaction(), &QuestFailureReason))
+		{
+			++QuestBlockedCount;
 			continue;
 		}
 		if (bRequireRecurringEligibility)
@@ -329,6 +341,11 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 				? NSLOCTEXT("TerritoryCounterAttack", "PreviewRecurringBlocked",
 					"No configured opposing faction has an eligible resolved counterattack whose recurring cooldown is complete.")
 			: ConfiguredCandidateCount > 0
+				&& QuestBlockedCount + StagingBlockedCount + RecurringBlockedCount
+					== ConfiguredCandidateCount
+				? NSLOCTEXT("TerritoryCounterAttack", "PreviewQuestBlocked",
+					"Narrative quest rules currently block every otherwise configured strategic counterattack.")
+			: ConfiguredCandidateCount > 0
 			&& DiplomacyBlockedCount == ConfiguredCandidateCount
 			? NSLOCTEXT("TerritoryCounterAttack", "PreviewDiplomacyBlocked",
 				"Every configured opposing faction is blocked by diplomacy or Narrative attitude.")
@@ -418,6 +435,12 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		return false;
 	}
 	if (!DoesForceMeetStagingRequirement(*ForceConfig, LaunchMode)) return false;
+	if (LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
+		&& !DoStrategicQuestRulesPass(Profile, AttackingFaction,
+			Territory->GetOwningFaction()))
+	{
+		return false;
+	}
 	FText SpawnClassFailure;
 	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
 		ForceConfig->AttackerDefinition, ForceConfig->PlannedForce, SpawnClassFailure))
@@ -624,6 +647,76 @@ bool UTerritoryCounterAttackSubsystem::DoesForceMeetStagingRequirement(
 	}
 	return LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
 		&& ForceConfig.bAllowStoryPursuitWithoutStagingDistrict;
+}
+
+bool UTerritoryCounterAttackSubsystem::DoStrategicQuestRulesPass(
+	const UTerritoryCounterAttackProfile* Profile,
+	const FGameplayTag& AttackingFaction, const FGameplayTag& DefendingFaction,
+	FText* OutFailureReason) const
+{
+	if (OutFailureReason) *OutFailureReason = FText::GetEmpty();
+	if (!Profile) return false;
+	if (Profile->QuestRules.IsEmpty()) return true;
+
+	UWorld* World = GetWorld();
+	if (!World) return false;
+	for (const FTerritoryCounterAttackQuestRule& Rule : Profile->QuestRules)
+	{
+		if (!Rule.QuestClass)
+		{
+			if (OutFailureReason)
+			{
+				*OutFailureReason = NSLOCTEXT("TerritoryCounterAttack", "QuestRuleMissingQuest",
+					"A counterattack quest rule has no Narrative Quest selected.");
+			}
+			return false;
+		}
+
+		bool bAnyScopedPlayerMatches = false;
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			const ANarrativePlayerController* PC =
+				Cast<ANarrativePlayerController>(It->Get());
+			if (!PC) continue;
+
+			bool bInScope = Rule.PlayerScope
+				== ETerritoryCounterQuestPlayerScope::AnyOnlinePlayer;
+			if (!bInScope)
+			{
+				const ANarrativePlayerState* PS =
+					PC->GetPlayerState<ANarrativePlayerState>();
+				const FGameplayTag ScopedFaction = Rule.PlayerScope
+					== ETerritoryCounterQuestPlayerScope::AttackingFactionPlayers
+					? AttackingFaction : DefendingFaction;
+				bInScope = PS && ScopedFaction.IsValid()
+					&& PS->GetFactions().HasTagExact(ScopedFaction);
+			}
+			if (!bInScope) continue;
+
+			if (UTerritoryQuestRulesLibrary::DoesQuestStateMatch(
+				PC->GetTalesComponent(), Rule.QuestClass, Rule.QuestState))
+			{
+				bAnyScopedPlayerMatches = true;
+				break;
+			}
+		}
+
+		if (!UTerritoryCounterAttackProfile::DoesQuestRulePass(
+			Rule.Action, bAnyScopedPlayerMatches))
+		{
+			if (OutFailureReason)
+			{
+				*OutFailureReason = Rule.Action
+					== ETerritoryCounterQuestRuleAction::BlockWhenMatched
+					? NSLOCTEXT("TerritoryCounterAttack", "QuestRuleMatchedBlock",
+						"An online player's Narrative quest state blocks this strategic counterattack.")
+					: NSLOCTEXT("TerritoryCounterAttack", "QuestRuleRequiredMissing",
+						"No scoped online player currently matches the required Narrative quest state.");
+			}
+			return false;
+		}
+	}
+	return true;
 }
 
 TArray<FTerritoryAssaultRecord> UTerritoryCounterAttackSubsystem::GetPersistentState() const
@@ -839,6 +932,15 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	{
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
 			ETerritoryAssaultResolution::StagingDistrictUnavailable);
+		return;
+	}
+	if (Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
+		&& Assault.State != ETerritoryAssaultState::Active
+		&& !DoStrategicQuestRulesPass(Profile, Assault.AttackingFaction,
+			Assault.DefendingFaction))
+	{
+		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
+			ETerritoryAssaultResolution::QuestRuleBlocked);
 		return;
 	}
 

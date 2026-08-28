@@ -3,7 +3,50 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
+#include "Tales/TerritoryQuestRules.h"
 #include "TerritoryCounterAttackProfile.generated.h"
+
+class UQuest;
+
+UENUM(BlueprintType)
+enum class ETerritoryCounterQuestPlayerScope : uint8
+{
+	AnyOnlinePlayer UMETA(DisplayName="Any Online Player"),
+	DefendingFactionPlayers UMETA(DisplayName="Defending Faction Players"),
+	AttackingFactionPlayers UMETA(DisplayName="Attacking Faction Players")
+};
+
+UENUM(BlueprintType)
+enum class ETerritoryCounterQuestRuleAction : uint8
+{
+	BlockWhenMatched UMETA(DisplayName="Block Counter When Matched"),
+	RequireMatch UMETA(DisplayName="Require Match Before Counter")
+};
+
+/** One reusable Narrative quest gate for automatic strategic counterattacks. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryCounterAttackQuestRule
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest Rule",
+		meta=(ToolTip="Narrative Quest read from each scoped player's Tales component."))
+	TSubclassOf<UQuest> QuestClass;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest Rule")
+	ETerritoryQuestStateRequirement QuestState =
+		ETerritoryQuestStateRequirement::InProgress;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest Rule",
+		meta=(ToolTip="Which online players may satisfy this rule. Exact Narrative faction tags are used."))
+	ETerritoryCounterQuestPlayerScope PlayerScope =
+		ETerritoryCounterQuestPlayerScope::DefendingFactionPlayers;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest Rule",
+		meta=(ToolTip="Easy example: Block + In Progress prevents normal counters during a stealth quest. Require + Succeeded unlocks counters only after a story consequence."))
+	ETerritoryCounterQuestRuleAction Action =
+		ETerritoryCounterQuestRuleAction::BlockWhenMatched;
+};
 
 /** Reusable balance and Narrative NPC configuration for counterattacks. */
 UCLASS(BlueprintType)
@@ -24,6 +67,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling")
 	bool bNotifyDefendingFactionOnly = true;
+
+	/**
+	 * Narrative quest gates for automatic strategic counterattacks. Every rule must
+	 * pass. Explicit Story Pursuit events use their inherited Narrative Conditions
+	 * instead, so a boss chase can deliberately start during a quest.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling|Quest Rules",
+		meta=(TitleProperty="QuestClass"))
+	TArray<FTerritoryCounterAttackQuestRule> QuestRules;
 
 	/**
 	 * After the first relevant player has physically activated an assault, deploy its
@@ -128,4 +180,12 @@ public:
 	int32 MaxConsecutiveSpawnFailures = 5;
 
 	const FTerritoryFactionAssaultConfig* FindFactionForce(const FGameplayTag& Faction) const;
+
+	/** Pure all-player reduction used by runtime and native regression tests. */
+	static bool DoesQuestRulePass(ETerritoryCounterQuestRuleAction Action,
+		bool bAnyScopedPlayerMatches)
+	{
+		return Action == ETerritoryCounterQuestRuleAction::BlockWhenMatched
+			? !bAnyScopedPlayerMatches : bAnyScopedPlayerMatches;
+	}
 };

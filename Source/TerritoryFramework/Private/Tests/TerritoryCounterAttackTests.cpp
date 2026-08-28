@@ -27,12 +27,46 @@
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Tales/TerritoryQuestRules.h"
 #include "AI/NarrativeNPCController.h"
 #include "AI/NPCDefinition.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "UObject/UnrealType.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackQuestRuleBehavior,
+	"TerritoryFramework.CounterAttack.Behavior.NarrativeQuestRules",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackQuestRuleBehavior::RunTest(const FString& Parameters)
+{
+	TestTrue(TEXT("Not Started matches only when Narrative has never recorded the quest"),
+		UTerritoryQuestRulesLibrary::DoesQuestStateMatchValues(
+			ETerritoryQuestStateRequirement::NotStarted, false, false, false, false, false));
+	TestFalse(TEXT("Not Started fails after a quest was completed"),
+		UTerritoryQuestRulesLibrary::DoesQuestStateMatchValues(
+			ETerritoryQuestStateRequirement::NotStarted, true, false, true, false, true));
+	TestTrue(TEXT("In Progress reads Narrative's active quest truth"),
+		UTerritoryQuestRulesLibrary::DoesQuestStateMatchValues(
+			ETerritoryQuestStateRequirement::InProgress, true, true, false, false, false));
+	TestTrue(TEXT("Finished accepts a failed Narrative quest"),
+		UTerritoryQuestRulesLibrary::DoesQuestStateMatchValues(
+			ETerritoryQuestStateRequirement::Finished, true, false, false, true, true));
+	TestFalse(TEXT("Block rule rejects a matching scoped player"),
+		UTerritoryCounterAttackProfile::DoesQuestRulePass(
+			ETerritoryCounterQuestRuleAction::BlockWhenMatched, true));
+	TestTrue(TEXT("Block rule permits a counter when nobody matches"),
+		UTerritoryCounterAttackProfile::DoesQuestRulePass(
+			ETerritoryCounterQuestRuleAction::BlockWhenMatched, false));
+	TestTrue(TEXT("Require rule permits a counter when one scoped player matches"),
+		UTerritoryCounterAttackProfile::DoesQuestRulePass(
+			ETerritoryCounterQuestRuleAction::RequireMatch, true));
+	TestFalse(TEXT("Require rule fails closed with no matching online player"),
+		UTerritoryCounterAttackProfile::DoesQuestRulePass(
+			ETerritoryCounterQuestRuleAction::RequireMatch, false));
+	return true;
+}
 
 namespace TerritoryCounterAttackTests
 {
@@ -1790,6 +1824,54 @@ bool FTFBehavior_GuardSlotSaveMigration::RunTest(const FString& Parameters)
 		SpawnPoint->PendingReserveSpawns, 1);
 	TestEqual(TEXT("Finite reserve inventory remains durable across migration"),
 		SpawnPoint->CurrentReserveCount, 5);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFHierarchyStrictMajorityRegression,
+	"TerritoryFramework.Hierarchy.Behavior.StrictMajorityAndUnanimousCapture",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFHierarchyStrictMajorityRegression::RunTest(const FString& Parameters)
+{
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	TestTrue(TEXT("Required Narrative faction tags exist"), Heroes.IsValid() && Bandits.IsValid());
+
+	TArray<FGameplayTag> FortyFiveFiftyFive;
+	TArray<FGameplayTag> HeroShare;
+	HeroShare.Init(Heroes, 9);
+	TArray<FGameplayTag> BanditShare;
+	BanditShare.Init(Bandits, 11);
+	FortyFiveFiftyFive.Append(HeroShare);
+	FortyFiveFiftyFive.Append(BanditShare);
+	TestEqual(TEXT("Heroes control exactly forty-five percent"),
+		TerritoryHierarchyPolicy::CalculateControlFraction(FortyFiveFiftyFive, Heroes), 0.45f);
+	TestEqual(TEXT("The fifty-five-percent faction is the only strict majority"),
+		TerritoryHierarchyPolicy::FindStrictMajorityOwner(FortyFiveFiftyFive), Bandits);
+	TestFalse(TEXT("Forty-five percent never completes parent capture"),
+		TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(FortyFiveFiftyFive, Heroes));
+
+	TArray<FGameplayTag> Tie;
+	HeroShare.Init(Heroes, 5);
+	BanditShare.Init(Bandits, 5);
+	Tie.Append(HeroShare);
+	Tie.Append(BanditShare);
+	TestFalse(TEXT("A fifty-fifty split has no dominant faction"),
+		TerritoryHierarchyPolicy::FindStrictMajorityOwner(Tie).IsValid());
+
+	TArray<FGameplayTag> AllHeroes;
+	AllHeroes.Init(Heroes, 5);
+	TestTrue(TEXT("All Places permit the District reducer to capture for Heroes"),
+		TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(AllHeroes, Heroes));
+	TestEqual(TEXT("All Districts produce full City control"),
+		TerritoryHierarchyPolicy::CalculateControlFraction(AllHeroes, Heroes), 1.f);
+	AllHeroes[2] = FGameplayTag();
+	TestFalse(TEXT("A Contested or Unclaimed child breaks secure unanimity"),
+		TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(AllHeroes, Heroes));
+	TestEqual(TEXT("An insecure child reduces the secure control fraction"),
+		TerritoryHierarchyPolicy::CalculateControlFraction(AllHeroes, Heroes), 0.8f);
 	return true;
 }
 

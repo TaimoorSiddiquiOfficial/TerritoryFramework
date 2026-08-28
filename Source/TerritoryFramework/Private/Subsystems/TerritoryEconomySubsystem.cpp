@@ -278,6 +278,16 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 			&UTerritoryEconomySubsystem::OnEconomyTick,
 			TickIntervalSeconds,
 			true);
+
+		const float ObservationInterval = Settings
+			? FMath::Max(0.1f, Settings->ProductionCycleObservationIntervalSeconds)
+			: 1.f;
+		World->GetTimerManager().SetTimer(
+			ProductionCycleObservationTimerHandle,
+			this,
+			&UTerritoryEconomySubsystem::ObserveNarrativeProductionCycle,
+			ObservationInterval,
+			true);
 	}
 
 	UE_LOG(LogTerritory, Log, TEXT("TerritoryEconomySubsystem initialized (tick: %.0fs, server-only: %s)"),
@@ -289,6 +299,7 @@ void UTerritoryEconomySubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(EconomyTickTimerHandle);
+		World->GetTimerManager().ClearTimer(ProductionCycleObservationTimerHandle);
 
 		// Unbind per-territory ownership delegates to prevent dangling references
 		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
@@ -314,6 +325,7 @@ void UTerritoryEconomySubsystem::Deinitialize()
 	ProductionCheckpoints.Empty();
 	ProductionSites.Empty();
 	ResourceSnapshots.Empty();
+	LastObservedProductionCycle = INDEX_NONE;
 	Super::Deinitialize();
 }
 
@@ -612,6 +624,19 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		TransactionLedger.RemoveAt(0, Excess);
 	}
 
+	ProcessResourceProduction();
+}
+
+void UTerritoryEconomySubsystem::ObserveNarrativeProductionCycle()
+{
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client) return;
+
+	const int64 CurrentCycle = GetCurrentProductionCycle();
+	if (!HasProductionCycleAdvanced(LastObservedProductionCycle, CurrentCycle)) return;
+
+	// ProcessResourceProduction records each Territory/rule/cycle checkpoint before
+	// this observer or the slower economy tick can award it again.
 	ProcessResourceProduction();
 }
 
@@ -1321,6 +1346,7 @@ void UTerritoryEconomySubsystem::ProcessResourceProduction()
 	if (!World || World->GetNetMode() == NM_Client) return;
 	const int64 CurrentCycle = GetCurrentProductionCycle();
 	if (CurrentCycle == INDEX_NONE) return;
+	LastObservedProductionCycle = CurrentCycle;
 
 	if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{

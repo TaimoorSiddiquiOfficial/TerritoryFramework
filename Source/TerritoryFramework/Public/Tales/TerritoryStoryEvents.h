@@ -7,6 +7,61 @@
 #include "Tales/NarrativeEvent.h"
 #include "TerritoryStoryEvents.generated.h"
 
+UENUM(BlueprintType)
+enum class ETerritoryHierarchyStoryOperation : uint8
+{
+	ClaimForFaction UMETA(DisplayName="Claim Entire Hierarchy For Faction"),
+	ClearToUnclaimed UMETA(DisplayName="Clear Entire Hierarchy To Unclaimed"),
+	Lock UMETA(DisplayName="Lock Entire Hierarchy"),
+	Unlock UMETA(DisplayName="Unlock Entire Hierarchy")
+};
+
+/**
+ * Applies one story decision to a loaded City, District, or Place hierarchy.
+ * Ownership changes are committed only on independent leaf Places; the existing
+ * unanimity reducer remains the sole authority that derives District and City owner.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Apply Territory Hierarchy Story Override"))
+class TERRITORYFRAMEWORK_API UTerritoryHierarchyStoryOverrideEvent : public UNarrativeEvent
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryHierarchyStoryOverrideEvent(const FObjectInitializer& ObjectInitializer);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(Categories="Territory",
+			ToolTip="Root City, District, or Place. Easy example: choose Haven Reach to change every currently loaded District and Place below it after a betrayal quest."))
+	FGameplayTag RootTerritory;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
+	ETerritoryHierarchyStoryOperation Operation =
+		ETerritoryHierarchyStoryOperation::ClaimForFaction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(Categories="Narrative.Factions",
+			EditCondition="Operation == ETerritoryHierarchyStoryOperation::ClaimForFaction",
+			EditConditionHides,
+			ToolTip="Exact Narrative faction that receives every independent Place. District and City ownership is then derived from their children."))
+	FGameplayTag ClaimingFaction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ToolTip="Recommended for a deliberate story override. Bypasses Place lock, diplomacy, and state conditions, but never bypasses server authority or the hierarchy reducer."))
+	bool bForceStoryOverride = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(EditCondition="Operation == ETerritoryHierarchyStoryOperation::Lock",
+			EditConditionHides,
+			ToolTip="Reason shown by locked Territory UI. Example: Complete The Governor's Trial."))
+	FText LockReason;
+
+protected:
+	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent) override;
+	virtual FString GetGraphDisplayText_Implementation() override;
+};
+
 /**
  * Schedules one finite physical enemy assault through the existing counterattack authority.
  * The inherited Narrative Event -> Conditions array is evaluated before scheduling.

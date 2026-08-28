@@ -8,6 +8,21 @@ class UTerritoryEconomySubsystem;
 class UTerritoryNavigationMarkerComponent;
 class UTerritoryProductionProfile;
 
+/** Shared pure hierarchy rules used by City, District, UI, and native tests. */
+namespace TerritoryHierarchyPolicy
+{
+	/** Returns a faction only when it owns strictly more than half of all children. */
+	TERRITORYFRAMEWORK_API FGameplayTag FindStrictMajorityOwner(
+		const TArray<FGameplayTag>& ChildOwners);
+
+	/** True only when at least one child exists and every child has the exact faction. */
+	TERRITORYFRAMEWORK_API bool AreAllChildrenOwnedBy(
+		const TArray<FGameplayTag>& ChildOwners, const FGameplayTag& Faction);
+
+	TERRITORYFRAMEWORK_API float CalculateControlFraction(
+		const TArray<FGameplayTag>& ChildOwners, const FGameplayTag& Faction);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ATerritoryCity
 //

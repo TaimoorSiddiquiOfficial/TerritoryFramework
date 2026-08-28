@@ -7,6 +7,55 @@
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
 
+namespace
+{
+	FGameplayTag GetSecureClaimedOwner(const ATerritoryVolume* Territory)
+	{
+		return Territory && Territory->GetTerritoryState() == ETerritoryState::Claimed
+			? Territory->GetOwningFaction() : FGameplayTag();
+	}
+}
+
+FGameplayTag TerritoryHierarchyPolicy::FindStrictMajorityOwner(
+	const TArray<FGameplayTag>& ChildOwners)
+{
+	if (ChildOwners.IsEmpty()) return FGameplayTag();
+	TMap<FGameplayTag, int32> Counts;
+	for (const FGameplayTag& Owner : ChildOwners)
+	{
+		if (Owner.IsValid()) ++Counts.FindOrAdd(Owner);
+	}
+
+	for (const TPair<FGameplayTag, int32>& Pair : Counts)
+	{
+		if (Pair.Value * 2 > ChildOwners.Num()) return Pair.Key;
+	}
+	return FGameplayTag();
+}
+
+bool TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(
+	const TArray<FGameplayTag>& ChildOwners, const FGameplayTag& Faction)
+{
+	if (ChildOwners.IsEmpty() || !Faction.IsValid()) return false;
+	for (const FGameplayTag& Owner : ChildOwners)
+	{
+		if (Owner != Faction) return false;
+	}
+	return true;
+}
+
+float TerritoryHierarchyPolicy::CalculateControlFraction(
+	const TArray<FGameplayTag>& ChildOwners, const FGameplayTag& Faction)
+{
+	if (ChildOwners.IsEmpty() || !Faction.IsValid()) return 0.f;
+	int32 OwnedCount = 0;
+	for (const FGameplayTag& Owner : ChildOwners)
+	{
+		if (Owner == Faction) ++OwnedCount;
+	}
+	return static_cast<float>(OwnedCount) / static_cast<float>(ChildOwners.Num());
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ATerritoryCity
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -94,68 +143,32 @@ int32 ATerritoryCity::GetDistrictCount() const
 
 bool ATerritoryCity::AllDistrictsOwnedBy(FGameplayTag Faction) const
 {
-	TArray<ATerritoryVolume*> Districts = GetDistricts();
-	if (Districts.Num() == 0) return false;
-
-	for (const ATerritoryVolume* District : Districts)
+	TArray<FGameplayTag> Owners;
+	for (const ATerritoryVolume* District : GetDistricts())
 	{
-		if (!District->IsOwnedByFaction(Faction))
-		{
-			return false;
-		}
+		Owners.Add(GetSecureClaimedOwner(District));
 	}
-	return true;
+	return TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(Owners, Faction);
 }
 
 float ATerritoryCity::GetCityControlPercentage(FGameplayTag Faction) const
 {
-	TArray<ATerritoryVolume*> Districts = GetDistricts();
-	if (Districts.Num() == 0) return 0.f;
-
-	int32 Owned = 0;
-	for (const ATerritoryVolume* District : Districts)
+	TArray<FGameplayTag> Owners;
+	for (const ATerritoryVolume* District : GetDistricts())
 	{
-		if (District->IsOwnedByFaction(Faction))
-		{
-			++Owned;
-		}
+		Owners.Add(GetSecureClaimedOwner(District));
 	}
-	return static_cast<float>(Owned) / static_cast<float>(Districts.Num());
+	return TerritoryHierarchyPolicy::CalculateControlFraction(Owners, Faction);
 }
 
 FGameplayTag ATerritoryCity::GetMajorityOwner() const
 {
-	TArray<ATerritoryVolume*> Districts = GetDistricts();
-	if (Districts.Num() == 0) return FGameplayTag();
-
-	TMap<FGameplayTag, int32> Counts;
-	for (const ATerritoryVolume* District : Districts)
+	TArray<FGameplayTag> Owners;
+	for (const ATerritoryVolume* District : GetDistricts())
 	{
-		FGameplayTag DistrictOwner = District->GetOwningFaction();
-		if (DistrictOwner.IsValid())
-		{
-			int32& Count = Counts.FindOrAdd(DistrictOwner);
-			++Count;
-		}
+		Owners.Add(GetSecureClaimedOwner(District));
 	}
-
-	FGameplayTag BestFaction;
-	int32 BestCount = 0;
-	for (const auto& Pair : Counts)
-	{
-		if (Pair.Value > BestCount)
-		{
-			BestCount = Pair.Value;
-			BestFaction = Pair.Key;
-		}
-	}
-
-	// Only return majority if > 50%
-	if (BestCount * 2 > Districts.Num())
-	{
-		return BestFaction;
-	}
-	return FGameplayTag();
+	return TerritoryHierarchyPolicy::FindStrictMajorityOwner(Owners);
 }
 
 bool ATerritoryCity::IsFullyCaptured() const
@@ -495,7 +508,8 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 	// ─── Hierarchy Capture Policy: Unanimity ───
 	// A district is captured ONLY when ALL its properties are owned by the same faction.
 	// No majority capture, no partial control — clean and predictable.
-	// Designers can use ForceCapture/SetOwningFaction for scripted overrides.
+	// Story overrides must mutate independent Places; AggregateOnly prevents direct
+	// District ownership shortcuts and the reducer derives the parent afterward.
 	if (NewOwner.IsValid())
 	{
 		FGameplayTag DistrictOwner = GetOwningFaction();
@@ -610,50 +624,22 @@ int32 ATerritoryDistrict::GetPropertyCountForFaction(FGameplayTag Faction) const
 
 bool ATerritoryDistrict::AllPropertiesOwnedBy(FGameplayTag Faction) const
 {
-	TArray<ATerritoryVolume*> Properties = GetProperties();
-	// A district with no properties cannot be "fully captured" by any faction —
-	// returning true would let any attacker trivially capture empty districts.
-	if (Properties.Num() == 0) return false;
-
-	for (const ATerritoryVolume* Prop : Properties)
+	TArray<FGameplayTag> Owners;
+	for (const ATerritoryVolume* Property : GetProperties())
 	{
-		if (!Prop->IsOwnedByFaction(Faction))
-		{
-			return false;
-		}
+		Owners.Add(GetSecureClaimedOwner(Property));
 	}
-	return true;
+	return TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(Owners, Faction);
 }
 
 FGameplayTag ATerritoryDistrict::GetMajorityPropertyOwner() const
 {
-	TArray<ATerritoryVolume*> Properties = GetProperties();
-	if (Properties.Num() == 0) return FGameplayTag();
-
-	TMap<FGameplayTag, int32> Counts;
-	for (const ATerritoryVolume* Prop : Properties)
+	TArray<FGameplayTag> Owners;
+	for (const ATerritoryVolume* Property : GetProperties())
 	{
-		FGameplayTag PropOwner = Prop->GetOwningFaction();
-		if (PropOwner.IsValid())
-		{
-			int32& C = Counts.FindOrAdd(PropOwner);
-			++C;
-		}
+		Owners.Add(GetSecureClaimedOwner(Property));
 	}
-
-	FGameplayTag Best;
-	int32 BestCount = 0;
-	for (const auto& Pair : Counts)
-	{
-		if (Pair.Value > BestCount)
-		{
-			BestCount = Pair.Value;
-			Best = Pair.Key;
-		}
-	}
-	// Only return majority if > 50%
-	if (BestCount * 2 > Properties.Num()) return Best;
-	return FGameplayTag();
+	return TerritoryHierarchyPolicy::FindStrictMajorityOwner(Owners);
 }
 
 int32 ATerritoryDistrict::GetEffectiveIncome() const

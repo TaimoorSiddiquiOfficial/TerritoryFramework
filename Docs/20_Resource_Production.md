@@ -58,6 +58,13 @@ the next cycle; capture never creates a catch-up payment for either faction.
 
 The default cycle length is `2400` Narrative accumulated-time units, matching one Narrative day. A new site, a changed profile, or a changed owner checkpoints at the current cycle and begins on the next cycle; capture never grants retroactive resources.
 
+The subsystem observes Narrative's accumulated campaign clock every
+`ProductionCycleObservationIntervalSeconds` (default: 1 real second). The observer does not
+create its own time or pay partial days; it only notices that one or more complete Narrative
+cycles have passed and asks the existing atomic production authority to settle them. Currency's
+`EconomyTickInterval` is separate. Designers therefore do not need to wait for the default
+five-minute currency tick before a completed item-production cycle reaches inventory.
+
 Ownership loss is an immediate production boundary. The authoritative control transaction
 refreshes and republishes the site record in the same transition, so the old faction cannot earn
 another cycle and clients do not continue showing the old owner until the economy timer runs.
@@ -73,6 +80,15 @@ For each pending day:
 7. Publish WorldState site and stockpile projections.
 
 Missing input consumes that day and produces nothing. Storage unavailable or full remains pending, but only the latest `MaxProductionCatchupCycles` days can be recovered. Disabled, under-level, unclaimed, or contested rules consume the day as inactive. This prevents unlimited stockpiling of missed production.
+
+An output-only rule is valid. For example, a test Blacksmith rule with no inputs and
+`BP_Item_Grain x4` in Outputs adds four Grain to the resolved owner inventory after the next
+complete campaign cycle. If it does not, inspect the published production-site status:
+
+- `StorageUnavailable` means no explicit account and not exactly one online player in the owner faction;
+- `StorageFull` means Narrative inventory slots or weight rejected the atomic output;
+- `Inactive` means owner/state/upgrade/profile policy did not permit that cycle;
+- `Produced` with the expected quantity confirms that Narrative inventory accepted the item.
 
 ## Crafting bridge
 
