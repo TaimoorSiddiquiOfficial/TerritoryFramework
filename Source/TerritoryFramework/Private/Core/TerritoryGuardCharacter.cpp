@@ -9,6 +9,7 @@
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "AI/Activities/NPCActivityComponent.h"
+#include "AI/Activities/NPCGoalItem.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NarrativeNPCController.h"
 #include "AI/NPCDefinition.h"
@@ -287,13 +288,121 @@ void ATerritoryGuardCharacter::BeginPlay()
 			0.25f,
 			true,
 			0.25f);
+		GetWorldTimerManager().SetTimer(
+			CombatPriorityTimer, this,
+			&ATerritoryGuardCharacter::RefreshClosestHostilePlayerPriority,
+			0.5f, true, 0.5f);
 	}
 }
 
 void ATerritoryGuardCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+	GetWorldTimerManager().ClearTimer(CombatPriorityTimer);
+	RestoreClosestHostilePlayerPriority(false);
 	Super::EndPlay(EndPlayReason);
+}
+
+void ATerritoryGuardCharacter::RefreshClosestHostilePlayerPriority()
+{
+	if (!HasAuthority() || !bPrioritizeClosestHostilePlayer || !IsValid(OwningTerritory)
+		|| OwningTerritory->GetTerritoryState() != ETerritoryState::Contested)
+	{
+		RestoreClosestHostilePlayerPriority(true);
+		return;
+	}
+
+	UNPCActivityComponent* ActivityComponent = GetActivityComponent();
+	if (!ActivityComponent)
+	{
+		RestoreClosestHostilePlayerPriority(false);
+		return;
+	}
+
+	UNPCGoalItem* CurrentGoal = ActivityComponent->GetCurrentActivityGoal();
+	if (!NarrativeAttackGoalClass.IsValid() && CurrentGoal)
+	{
+		const AActor* CurrentTarget = Cast<AActor>(CurrentGoal->GetGoalKey());
+		if (CurrentTarget && CanEngageTerritoryTarget(CurrentTarget))
+		{
+			NarrativeAttackGoalClass = CurrentGoal->GetClass();
+		}
+	}
+	UClass* GoalClass = NarrativeAttackGoalClass.Get();
+	if (!GoalClass || !GoalClass->IsChildOf(UNPCGoalItem::StaticClass())) return;
+
+	const FNPCGoalContainer AttackGoals = ActivityComponent->GetGoals(GoalClass);
+	UNPCGoalItem* ClosestPlayerGoal = nullptr;
+	float ClosestDistanceSquared = TNumericLimits<float>::Max();
+	for (UNPCGoalItem* Goal : AttackGoals.Goals)
+	{
+		APawn* TargetPawn = Goal ? Cast<APawn>(Goal->GetGoalKey()) : nullptr;
+		if (!TargetPawn || !TargetPawn->IsPlayerControlled()
+			|| !CanEngageTerritoryTarget(TargetPawn))
+		{
+			continue;
+		}
+		const float DistanceSquared = FVector::DistSquared(
+			GetActorLocation(), TargetPawn->GetActorLocation());
+		if (DistanceSquared < ClosestDistanceSquared)
+		{
+			ClosestDistanceSquared = DistanceSquared;
+			ClosestPlayerGoal = Goal;
+		}
+	}
+
+	bool bScoresChanged = false;
+	for (int32 Index = NarrativeGoalScoreOverrides.Num() - 1; Index >= 0; --Index)
+	{
+		FTerritoryNarrativeGoalScoreOverride& Override = NarrativeGoalScoreOverrides[Index];
+		UNPCGoalItem* Goal = Override.Goal.Get();
+		if (!Goal || Goal != ClosestPlayerGoal)
+		{
+			if (Goal && FMath::IsNearlyEqual(Goal->DefaultScore, Override.AppliedScore))
+			{
+				Goal->DefaultScore = Override.OriginalScore;
+			}
+			NarrativeGoalScoreOverrides.RemoveAtSwap(Index);
+			bScoresChanged = true;
+		}
+	}
+
+	if (ClosestPlayerGoal)
+	{
+		FTerritoryNarrativeGoalScoreOverride* Existing =
+			NarrativeGoalScoreOverrides.FindByPredicate(
+				[ClosestPlayerGoal](const FTerritoryNarrativeGoalScoreOverride& Entry)
+				{
+					return Entry.Goal.Get() == ClosestPlayerGoal;
+				});
+		if (!Existing)
+		{
+			FTerritoryNarrativeGoalScoreOverride& Added =
+				NarrativeGoalScoreOverrides.AddDefaulted_GetRef();
+			Added.Goal = ClosestPlayerGoal;
+			Added.OriginalScore = ClosestPlayerGoal->DefaultScore;
+			Added.AppliedScore = Added.OriginalScore
+				+ FMath::Max(0.f, ClosestHostilePlayerGoalScoreBonus);
+			ClosestPlayerGoal->DefaultScore = Added.AppliedScore;
+			bScoresChanged = true;
+		}
+	}
+
+	if (bScoresChanged) ActivityComponent->PerformActivitySelection(true);
+}
+
+void ATerritoryGuardCharacter::RestoreClosestHostilePlayerPriority(
+	bool bReselectActivity)
+{
+	if (!TerritoryAssaultTargetPolicy::RestoreGoalScores(
+		NarrativeGoalScoreOverrides) || !bReselectActivity)
+	{
+		return;
+	}
+	if (UNPCActivityComponent* ActivityComponent = GetActivityComponent())
+	{
+		ActivityComponent->PerformActivitySelection(true);
+	}
 }
 
 void ATerritoryGuardCharacter::HandleDeath_Implementation(

@@ -145,6 +145,31 @@ public:
 		meta=(ClampMin="1", ClampMax="16"))
 	int32 SpawnPlacementAttemptsPerParticipant = 4;
 
+	/** Reorders only valid authored approaches around a relevant player; it never invents a spawn point. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment|Presentation",
+		meta=(ToolTip="Recommended. Prefer valid authored approaches near the player, on the same floor, and near the left or right edge of the camera. Navigation and route validation still decide whether spawning is legal."))
+	bool bUsePlayerRelativeReserveStaging = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment|Presentation",
+		meta=(EditCondition="bUsePlayerRelativeReserveStaging", ClampMin="100.0", ToolTip="Authored approaches closer than this are strongly discouraged to avoid unfair pop-in."))
+	float ReserveMinimumPlayerDistance = 1200.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment|Presentation",
+		meta=(EditCondition="bUsePlayerRelativeReserveStaging", ClampMin="100.0", ToolTip="Ideal distance for an arriving reserve wave. Example: 2600 cm leaves time for the alert line."))
+	float ReservePreferredPlayerDistance = 2600.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment|Presentation",
+		meta=(EditCondition="bUsePlayerRelativeReserveStaging", ClampMin="100.0", ToolTip="Authored approaches farther than this receive a presentation penalty but may still be used when they are the only valid route."))
+	float ReserveMaximumPlayerDistance = 5500.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment|Presentation",
+		meta=(EditCondition="bUsePlayerRelativeReserveStaging", ClampMin="0.0", ClampMax="1.0", ToolTip="Preferred absolute view dot. Around 0.55 places arrivals near the left or right camera edge instead of directly in front or behind."))
+	float PreferredCameraEdgeDot = 0.55f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment|Presentation",
+		meta=(EditCondition="bUsePlayerRelativeReserveStaging", ClampMin="0.0", ToolTip="Maximum height difference considered the same floor. Use authored Rooftop, Stair, or Custom approaches plus Nav Links for multi-floor Places."))
+	float SameFloorHeightTolerance = 500.f;
+
 	/**
 	 * Cap Territory strategic assault slots with Narrative Pro's attack-token count
 	 * for the current difficulty. Example with Territory Max=6: Easy=1, Medium=2,

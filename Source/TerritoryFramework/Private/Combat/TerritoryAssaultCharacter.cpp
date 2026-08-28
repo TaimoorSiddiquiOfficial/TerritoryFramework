@@ -157,7 +157,8 @@ ATerritoryAssaultCharacter* ATerritoryAssaultCharacter::SpawnThroughNarrative(
 	const FGuid& SpawnGuid, const FTransform& SpawnTransform, FName SpawnName,
 	UNPCActivityConfiguration* OptionalActivityOverride,
 	const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
-	const FGuid& AssaultID, const FGameplayTag& TargetTerritory)
+	const FGuid& AssaultID, const FGameplayTag& TargetTerritory,
+	int32 OverrideNarrativeLevel)
 {
 	if (!IsInGameThread() || !CharacterSubsystem || !Definition || !ExactFaction.IsValid()
 		|| !TerritoryGuid.IsValid() || !SpawnGuid.IsValid() || !AssaultID.IsValid()
@@ -167,6 +168,12 @@ ATerritoryAssaultCharacter* ATerritoryAssaultCharacter::SpawnThroughNarrative(
 	}
 
 	FNPCSpawnParams SpawnParams;
+	if (OverrideNarrativeLevel > 0)
+	{
+		SpawnParams.bOverride_LevelRange = true;
+		SpawnParams.MinLevel = OverrideNarrativeLevel;
+		SpawnParams.MaxLevel = OverrideNarrativeLevel;
+	}
 	SpawnParams.bOverride_DefaultFactions = true;
 	SpawnParams.DefaultFactions.AddTag(ExactFaction);
 	if (OptionalActivityOverride)

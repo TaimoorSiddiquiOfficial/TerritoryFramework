@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "TerritoryGuardSpawnPoint.h"
+#include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "TerritoryGuardCharacter.generated.h"
 
 class UNPCDefinition;
@@ -168,6 +169,19 @@ public:
 			ToolTip="Steering priority for this guard. 0.5 gives equal guards an even right-of-way."))
 	float PatrolAvoidanceWeight = 0.5f;
 
+	/**
+	 * While this Place is Contested and diplomacy is War, give the nearest hostile
+	 * player a small Narrative goal-score advantage. Narrative attack tokens still
+	 * decide how many guards may perform attacks at the same time.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Combat",
+		meta=(ToolTip="Keeps target choice responsive without replacing Narrative perception, activities, or attack tokens."))
+	bool bPrioritizeClosestHostilePlayer = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Combat",
+		meta=(EditCondition="bPrioritizeClosestHostilePlayer", ClampMin="0.0", ClampMax="10.0"))
+	float ClosestHostilePlayerGoalScoreBonus = 0.75f;
+
 	// ─── Patrol Route Helpers ───
 
 	/**
@@ -297,9 +311,15 @@ private:
 	TArray<FTerritoryPatrolNode> BuildStaggeredPatrolRoute() const;
 
 	FTimerHandle DefaultWeaponWieldTimer;
+	FTimerHandle CombatPriorityTimer;
+	TWeakObjectPtr<UClass> NarrativeAttackGoalClass;
+	TArray<FTerritoryNarrativeGoalScoreOverride> NarrativeGoalScoreOverrides;
 	int32 DefaultWeaponWieldAttempts = 0;
 	int32 DefaultWeaponPostInitializationAttempts = 0;
 	bool bNarrativeInitializationCompleted = false;
+
+	void RefreshClosestHostilePlayerPriority();
+	void RestoreClosestHostilePlayerPriority(bool bReselectActivity);
 
 	FGuid CachedFallbackGUID;
 };

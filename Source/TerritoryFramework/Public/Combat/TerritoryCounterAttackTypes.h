@@ -7,6 +7,7 @@
 class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
+class UGameplayEffect;
 
 UENUM(BlueprintType)
 enum class ETerritoryAttackApproachType : uint8
@@ -102,6 +103,23 @@ struct FTerritoryAssaultApproach
 	bool bEnabled = true;
 };
 
+/** Maps one replicated player power tag to a simple campaign power level. */
+USTRUCT(BlueprintType)
+struct FTerritoryPlayerPowerTier
+{
+	GENERATED_BODY()
+
+	/** Exact tag granted by a Narrative perk Gameplay Effect. Example: Territory.Power.Tier.3. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(ToolTip="Exact replicated Gameplay Tag granted to the player by a Narrative perk or story reward. Example: Territory.Power.Tier.3."))
+	FGameplayTag PlayerPowerTag;
+
+	/** Enemy level associated with this tag before the configured enemy offset is added. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(ClampMin="1", ToolTip="Campaign power level represented by the tag. Example: tier 3 can map to player power level 6."))
+	int32 PlayerPowerLevel = 1;
+};
+
 /** Per-attacking-faction physical force configuration. */
 USTRUCT(BlueprintType)
 struct FTerritoryFactionAssaultConfig
@@ -173,6 +191,47 @@ struct FTerritoryFactionAssaultConfig
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Recurring",
 		meta=(ClampMin="1.0", ToolTip="Time between finite counterattack attempts. Example: 900 means a defeated wave cannot immediately reroll every subsystem update."))
 	float RecurringCounterCooldownGameTime = 900.f;
+
+	/** Optional Narrative tagged line played by the first reserve attacker in each successful wave. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Presentation",
+		meta=(ToolTip="Optional Narrative dialogue tag used to alert a nearby player as a reserve wave arrives. Example: Territory.Dialogue.ReservesArriving."))
+	FGameplayTag ReserveWaveAlertDialogueTag;
+
+	/** Enemy level follows the strongest relevant player's Narrative level or mapped power-tier tag. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(ToolTip="Off by default. When enabled, newly spawned attackers use the strongest nearby player's Narrative level or configured power-tier tag, then add Enemy Level Offset. Narrative difficulty and attack-token counts are unchanged."))
+	bool bScaleLevelToRelevantPlayerPower = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(EditCondition="bScaleLevelToRelevantPlayerPower", ClampMin="-20", ClampMax="20", ToolTip="Added after player power is resolved. Use 1 for an enemy one level above the player."))
+	int32 EnemyLevelOffset = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(EditCondition="bScaleLevelToRelevantPlayerPower", ClampMin="1", ToolTip="Smallest Narrative NPC level produced by adaptive scaling."))
+	int32 MinimumScaledEnemyLevel = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(EditCondition="bScaleLevelToRelevantPlayerPower", ClampMin="1", ToolTip="Largest Narrative NPC level produced by adaptive scaling."))
+	int32 MaximumScaledEnemyLevel = 100;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(EditCondition="bScaleLevelToRelevantPlayerPower", TitleProperty="PlayerPowerTag", ToolTip="Optional tag-to-level mappings. Narrative perk Gameplay Effects can grant these replicated tags when skills unlock."))
+	TArray<FTerritoryPlayerPowerTier> PlayerPowerTiers;
+
+	/** Optional scalable effect for NPC configurations whose base attributes are constants. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(EditCondition="bScaleLevelToRelevantPlayerPower", ToolTip="Optional Gameplay Effect whose scalable modifiers use the resolved enemy level. Leave empty when the Narrative NPC configuration already has level curves."))
+	TSubclassOf<UGameplayEffect> PowerScalingEffect;
+
+	/** Optional SetByCaller tag written into Power Scaling Effect from the resolved level. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(EditCondition="bScaleLevelToRelevantPlayerPower && PowerScalingEffect != nullptr", ToolTip="Optional SetByCaller magnitude tag consumed by Power Scaling Effect. Easy example: Territory.SetByCaller.PowerAttackDamage."))
+	FGameplayTag PowerScalingMagnitudeTag;
+
+	/** Magnitude added for every enemy level above level one. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(EditCondition="bScaleLevelToRelevantPlayerPower && PowerScalingEffect != nullptr", ClampMin="0.0", ToolTip="Value sent through the SetByCaller tag for each level above one. Example: 1.5 gives a level 6 enemy +7.5 Attack Damage."))
+	float PowerScalingMagnitudePerEnemyLevel = 0.f;
 };
 
 /** Complete deterministic calculator input, also retained for debugging and saves. */

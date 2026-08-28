@@ -21,8 +21,13 @@
 #include "AI/NPCDefinition.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryQuestRules.h"
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "Engine/World.h"
+#include "GameplayEffect.h"
+#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
+#include "UnrealFramework/NarrativeCharacter.h"
 #include "Misc/Crc.h"
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
@@ -1145,17 +1150,56 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	if (ToSpawn <= 0) return;
 
 	const int32 AlreadyDeployed = Assault.PlannedForce - Assault.PendingReserveForce;
+	APawn* PresentationPlayer = FindNearestRelevantPlayer(Assault, Territory,
+		FMath::Max(Profile->NotificationRadius, Profile->ReserveMaximumPlayerDistance));
+	TArray<FName> WaveApproaches = Assault.SelectedApproaches;
+	if (Profile->bUsePlayerRelativeReserveStaging && PresentationPlayer)
+	{
+		const FVector PlayerLocation = PresentationPlayer->GetActorLocation();
+		const FVector PlayerForward = PresentationPlayer->GetBaseAimRotation().Vector();
+		WaveApproaches.Sort([this, Territory, Profile, PlayerLocation, PlayerForward](
+			const FName& A, const FName& B)
+		{
+			FTerritoryAssaultApproach ApproachA;
+			FTerritoryAssaultApproach ApproachB;
+			FTransform TransformA;
+			FTransform TransformB;
+			const bool bResolvedA = ResolveApproach(Territory, A, ApproachA, TransformA);
+			const bool bResolvedB = ResolveApproach(Territory, B, ApproachB, TransformB);
+			if (bResolvedA != bResolvedB) return bResolvedA;
+			if (!bResolvedA) return A.LexicalLess(B);
+
+			const float ScoreA = CalculatePlayerRelativeApproachScore(
+				TransformA.GetLocation(), PlayerLocation, PlayerForward,
+				Profile->ReserveMinimumPlayerDistance,
+				Profile->ReservePreferredPlayerDistance,
+				Profile->ReserveMaximumPlayerDistance,
+				Profile->PreferredCameraEdgeDot,
+				Profile->SameFloorHeightTolerance);
+			const float ScoreB = CalculatePlayerRelativeApproachScore(
+				TransformB.GetLocation(), PlayerLocation, PlayerForward,
+				Profile->ReserveMinimumPlayerDistance,
+				Profile->ReservePreferredPlayerDistance,
+				Profile->ReserveMaximumPlayerDistance,
+				Profile->PreferredCameraEdgeDot,
+				Profile->SameFloorHeightTolerance);
+			return FMath::IsNearlyEqual(ScoreA, ScoreB)
+				? A.LexicalLess(B) : ScoreA > ScoreB;
+		});
+	}
+	const int32 OverrideNarrativeLevel = ResolveScaledEnemyLevel(
+		Assault, Territory, *ForceConfig);
 	int32 Spawned = 0;
 	TMap<FName, int32> SpawnedPerApproach;
 	const int32 PlacementAttempts = FMath::Clamp(
 		Profile->SpawnPlacementAttemptsPerParticipant, 1, 16);
 	const float ParticipantSpacing = FMath::Max(100.f, Profile->ParticipantSpacing);
-	const int32 ApproachCount = Assault.SelectedApproaches.Num();
+	const int32 ApproachCount = WaveApproaches.Num();
 	const int32 MaximumAttempts = ToSpawn * ApproachCount * PlacementAttempts;
 	for (int32 Attempt = 0; Attempt < MaximumAttempts && Spawned < ToSpawn; ++Attempt)
 	{
 		const int32 DeploymentIndex = AlreadyDeployed + Attempt;
-		const FName ApproachID = Assault.SelectedApproaches[DeploymentIndex % ApproachCount];
+		const FName ApproachID = WaveApproaches[DeploymentIndex % ApproachCount];
 		FTerritoryAssaultApproach Approach;
 		FTransform ApproachTransform;
 		if (!ResolveApproach(Territory, ApproachID, Approach, ApproachTransform)) continue;
@@ -1175,8 +1219,16 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			continue;
 		}
 
-		if (SpawnParticipant(Assault, Territory, *ForceConfig, Approach, SpawnTransform))
+		if (ATerritoryAssaultCharacter* Participant = SpawnParticipant(
+			Assault, Territory, *ForceConfig, Approach, SpawnTransform,
+			OverrideNarrativeLevel))
 		{
+			if (Spawned == 0 && PresentationPlayer
+				&& ForceConfig->ReserveWaveAlertDialogueTag.IsValid())
+			{
+				Participant->PlayTaggedDialogue(
+					ForceConfig->ReserveWaveAlertDialogueTag, PresentationPlayer);
+			}
 			++SpawnedPerApproach.FindOrAdd(ApproachID);
 			++Spawned;
 			--Assault.PendingReserveForce;
@@ -1203,7 +1255,8 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory,
 	const FTerritoryFactionAssaultConfig& ForceConfig,
-	const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform)
+	const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform,
+	int32 OverrideNarrativeLevel)
 {
 	FText SpawnClassFailure;
 	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
@@ -1221,7 +1274,7 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 		CharacterSubsystem, ForceConfig.AttackerDefinition, Assault.AttackingFaction,
 		Territory->GetTerritoryGUID(), FGuid::NewGuid(), SpawnTransform, Approach.ApproachID,
 		ForceConfig.ActivityConfigurationOverride, ForceConfig.TriggerSetOverrides,
-		Assault.AssaultID, Assault.TargetTerritory);
+		Assault.AssaultID, Assault.TargetTerritory, OverrideNarrativeLevel);
 	if (!IsValid(Participant) || Participant->IsActorBeingDestroyed()) return nullptr;
 	const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
 	const float MinimumSpacing = FMath::Max(
@@ -1243,6 +1296,28 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 		TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
 		Participant->Destroy();
 		return nullptr;
+	}
+	if (OverrideNarrativeLevel > 0 && ForceConfig.PowerScalingEffect)
+	{
+		if (UAbilitySystemComponent* ASC = Participant->GetAbilitySystemComponent())
+		{
+			FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
+			Context.AddSourceObject(this);
+			const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(
+				ForceConfig.PowerScalingEffect, OverrideNarrativeLevel, Context);
+			if (Spec.IsValid())
+			{
+				if (ForceConfig.PowerScalingMagnitudeTag.IsValid()
+					&& ForceConfig.PowerScalingMagnitudePerEnemyLevel > 0.f)
+				{
+					Spec.Data->SetSetByCallerMagnitude(
+						ForceConfig.PowerScalingMagnitudeTag,
+						static_cast<float>(FMath::Max(0, OverrideNarrativeLevel - 1))
+							* ForceConfig.PowerScalingMagnitudePerEnemyLevel);
+				}
+				ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+			}
+		}
 	}
 
 	LiveParticipants.FindOrAdd(Assault.AssaultID).Add(Participant);
@@ -1272,6 +1347,40 @@ FTransform UTerritoryCounterAttackSubsystem::CalculateParticipantDeploymentTrans
 		+ Right * LateralMultiplier * Spacing
 		- Forward * static_cast<float>(Row) * Spacing;
 	return FTransform(Forward.Rotation(), Location, ApproachTransform.GetScale3D());
+}
+
+float UTerritoryCounterAttackSubsystem::CalculatePlayerRelativeApproachScore(
+	const FVector& ApproachLocation, const FVector& PlayerLocation,
+	const FVector& PlayerViewForward, float MinimumDistance,
+	float PreferredDistance, float MaximumDistance,
+	float PreferredCameraEdgeDot, float SameFloorHeightTolerance)
+{
+	const float MinDistance = FMath::Max(100.f, MinimumDistance);
+	const float Preferred = FMath::Max(MinDistance, PreferredDistance);
+	const float MaxDistance = FMath::Max(Preferred, MaximumDistance);
+	const FVector Offset = ApproachLocation - PlayerLocation;
+	FVector HorizontalOffset(Offset.X, Offset.Y, 0.f);
+	const float Distance = HorizontalOffset.Size();
+	HorizontalOffset = HorizontalOffset.GetSafeNormal();
+	FVector ViewForward(PlayerViewForward.X, PlayerViewForward.Y, 0.f);
+	ViewForward = ViewForward.GetSafeNormal();
+	const float ViewDot = HorizontalOffset.IsNearlyZero() || ViewForward.IsNearlyZero()
+		? 0.f : FVector::DotProduct(ViewForward, HorizontalOffset);
+	const float EdgeTarget = FMath::Clamp(PreferredCameraEdgeDot, 0.f, 1.f);
+	const float DistanceRange = FMath::Max(1.f, MaxDistance - MinDistance);
+
+	float Score = 4.f - 3.f * FMath::Abs(Distance - Preferred) / DistanceRange;
+	Score += 2.f * (1.f - FMath::Abs(FMath::Abs(ViewDot) - EdgeTarget));
+	if (Distance < MinDistance) Score -= 6.f;
+	if (Distance > MaxDistance) Score -= 2.f;
+	if (ViewDot < -0.1f) Score -= 5.f;       // never prefer a surprise directly behind
+	if (ViewDot > 0.85f) Score -= 2.5f;      // avoid obvious center-screen pop-in
+
+	const float FloorTolerance = FMath::Max(1.f, SameFloorHeightTolerance);
+	const float HeightDifference = FMath::Abs(Offset.Z);
+	Score += HeightDifference <= FloorTolerance
+		? 2.f : -FMath::Min(4.f, HeightDifference / FloorTolerance);
+	return Score;
 }
 
 void UTerritoryCounterAttackSubsystem::NotifyParticipantRemoved(
@@ -1559,6 +1668,83 @@ bool UTerritoryCounterAttackSubsystem::HasRelevantPlayerNearby(
 		}
 	}
 	return false;
+}
+
+APawn* UTerritoryCounterAttackSubsystem::FindNearestRelevantPlayer(
+	const FTerritoryAssaultRecord& Assault, const ATerritoryVolume* Territory,
+	float Radius) const
+{
+	UWorld* World = GetWorld();
+	if (!World || !Territory) return nullptr;
+	const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
+	const float RadiusSquared = FMath::Square(FMath::Max(0.f, Radius));
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	APawn* BestPawn = nullptr;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APlayerController* Controller = It->Get();
+		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+		if (!Pawn || !IsRelevantPlayer(Controller, Assault, Profile)) continue;
+		const float DistanceSquared = FVector::DistSquared(
+			Pawn->GetActorLocation(), Territory->GetActorLocation());
+		if (DistanceSquared <= RadiusSquared && DistanceSquared < BestDistanceSquared)
+		{
+			BestDistanceSquared = DistanceSquared;
+			BestPawn = Pawn;
+		}
+	}
+	return BestPawn;
+}
+
+int32 UTerritoryCounterAttackSubsystem::ResolveScaledEnemyLevel(
+	const FTerritoryAssaultRecord& Assault, const ATerritoryVolume* Territory,
+	const FTerritoryFactionAssaultConfig& ForceConfig) const
+{
+	if (!Territory || !ForceConfig.bScaleLevelToRelevantPlayerPower) return INDEX_NONE;
+	UWorld* World = GetWorld();
+	const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
+	if (!World || !Profile) return INDEX_NONE;
+
+	int32 StrongestPlayerPower = 0;
+	const float RadiusSquared = FMath::Square(FMath::Max(
+		Profile->NotificationRadius, Profile->ReserveMaximumPlayerDistance));
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APlayerController* Controller = It->Get();
+		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+		if (!Pawn || !IsRelevantPlayer(Controller, Assault, Profile)
+			|| FVector::DistSquared(Pawn->GetActorLocation(), Territory->GetActorLocation())
+				> RadiusSquared)
+		{
+			continue;
+		}
+
+		if (const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(Pawn))
+		{
+			StrongestPlayerPower = FMath::Max(
+				StrongestPlayerPower, Character->GetCharacterLevel());
+		}
+		if (const IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Pawn))
+		{
+			if (const UAbilitySystemComponent* ASC = AbilityOwner->GetAbilitySystemComponent())
+			{
+				for (const FTerritoryPlayerPowerTier& Tier : ForceConfig.PlayerPowerTiers)
+				{
+					if (Tier.PlayerPowerTag.IsValid()
+						&& ASC->HasMatchingGameplayTag(Tier.PlayerPowerTag))
+					{
+						StrongestPlayerPower = FMath::Max(
+							StrongestPlayerPower, Tier.PlayerPowerLevel);
+					}
+				}
+			}
+		}
+	}
+	if (StrongestPlayerPower <= 0) return INDEX_NONE;
+	const int32 Minimum = FMath::Max(1, ForceConfig.MinimumScaledEnemyLevel);
+	const int32 Maximum = FMath::Max(Minimum, ForceConfig.MaximumScaledEnemyLevel);
+	return FMath::Clamp(StrongestPlayerPower + ForceConfig.EnemyLevelOffset,
+		Minimum, Maximum);
 }
 
 bool UTerritoryCounterAttackSubsystem::IsRelevantPlayer(

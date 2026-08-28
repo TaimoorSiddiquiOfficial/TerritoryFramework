@@ -47,7 +47,8 @@ public:
 		const FGuid& SpawnGuid, const FTransform& SpawnTransform, FName SpawnName,
 		UNPCActivityConfiguration* OptionalActivityOverride,
 		const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
-		const FGuid& AssaultID, const FGameplayTag& TargetTerritory);
+		const FGuid& AssaultID, const FGameplayTag& TargetTerritory,
+		int32 OverrideNarrativeLevel = INDEX_NONE);
 
 	/** Ensures this finished server spawn has its configured Narrative controller/activity. */
 	bool EnsureNarrativeControllerReady();

@@ -10,6 +10,7 @@
 #include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Combat/TerritoryPowerTags.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
@@ -199,6 +200,52 @@ bool FTFCounterAttackDeterministicDeploymentFormation::RunTest(const FString& Pa
 	TestTrue(TEXT("A negative migrated slot is safely bounded to the first slot"),
 		UTerritoryCounterAttackSubsystem::CalculateParticipantDeploymentTransform(
 			Approach, Target, -4, Spacing).Equals(Slots[0]));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackPlayerRelativeReserveStaging,
+	"TerritoryFramework.CounterAttack.Regression.PlayerRelativeReserveStaging",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackPlayerRelativeReserveStaging::RunTest(const FString& Parameters)
+{
+	const FVector PlayerLocation = FVector::ZeroVector;
+	const FVector ViewForward = FVector::ForwardVector;
+	const float PreferredDot = 0.55f;
+	const float Side = FMath::Sqrt(1.f - PreferredDot * PreferredDot);
+	const FVector EdgeApproach = FVector(PreferredDot, Side, 0.f) * 2600.f;
+	const auto Score = [&](const FVector& Location)
+	{
+		return UTerritoryCounterAttackSubsystem::CalculatePlayerRelativeApproachScore(
+			Location, PlayerLocation, ViewForward, 1200.f, 2600.f, 5500.f,
+			PreferredDot, 500.f);
+	};
+
+	const float EdgeScore = Score(EdgeApproach);
+	TestTrue(TEXT("A same-floor camera-edge route outranks a route behind the player"),
+		EdgeScore > Score(FVector(-2600.f, 0.f, 0.f)));
+	TestTrue(TEXT("A camera-edge route outranks center-screen pop-in"),
+		EdgeScore > Score(FVector(2600.f, 0.f, 0.f)));
+	TestTrue(TEXT("A same-floor route outranks an equivalent route on an unconnected floor"),
+		EdgeScore > Score(EdgeApproach + FVector(0.f, 0.f, 1200.f)));
+	TestTrue(TEXT("A readable arrival route outranks unfair close pop-in"),
+		EdgeScore > Score(EdgeApproach.GetSafeNormal() * 300.f));
+
+	const UScriptStruct* ForceStruct = FTerritoryFactionAssaultConfig::StaticStruct();
+	TestNotNull(TEXT("Faction force exposes a reserve-wave dialogue alert"),
+		ForceStruct->FindPropertyByName(TEXT("ReserveWaveAlertDialogueTag")));
+	TestNotNull(TEXT("Faction force exposes opt-in player power scaling"),
+		ForceStruct->FindPropertyByName(TEXT("bScaleLevelToRelevantPlayerPower")));
+	TestNotNull(TEXT("Faction force exposes an optional scalable Gameplay Effect"),
+		ForceStruct->FindPropertyByName(TEXT("PowerScalingEffect")));
+	TestNotNull(TEXT("Faction force exposes a SetByCaller scaling tag"),
+		ForceStruct->FindPropertyByName(TEXT("PowerScalingMagnitudeTag")));
+	TestNotNull(TEXT("Faction force exposes a per-level scaling magnitude"),
+		ForceStruct->FindPropertyByName(TEXT("PowerScalingMagnitudePerEnemyLevel")));
+	TestTrue(TEXT("The built-in skill power tier tag is registered by the plugin"),
+		TerritoryPowerTags::Tier3.GetTag().IsValid());
+	TestTrue(TEXT("The adaptive Attack Damage SetByCaller tag is registered by the plugin"),
+		TerritoryPowerTags::PowerAttackDamageMagnitude.GetTag().IsValid());
 	return true;
 }
 

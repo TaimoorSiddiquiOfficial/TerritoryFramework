@@ -8,6 +8,7 @@
 
 class ATerritoryAssaultCharacter;
 class ATerritoryVolume;
+class APawn;
 class UTerritoryCounterAttackProfile;
 struct FTerritoryFactionAssaultConfig;
 enum class EDiplomacyState : uint8;
@@ -144,6 +145,13 @@ public:
 		const FTransform& ApproachTransform, const FVector& TargetLocation,
 		int32 FormationSlot, float ParticipantSpacing);
 
+	/** Pure presentation score. Higher means an authored route is safer and more readable to this player. */
+	static float CalculatePlayerRelativeApproachScore(
+		const FVector& ApproachLocation, const FVector& PlayerLocation,
+		const FVector& PlayerViewForward, float MinimumDistance,
+		float PreferredDistance, float MaximumDistance,
+		float PreferredCameraEdgeDot, float SameFloorHeightTolerance);
+
 	/**
 	 * Uses the exact runtime nav projection and complete-path rules used by physical assaults.
 	 * Editor validation calls this same function so a route cannot pass validation and then
@@ -203,7 +211,8 @@ private:
 	void SpawnNextWave(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
 	ATerritoryAssaultCharacter* SpawnParticipant(FTerritoryAssaultRecord& Assault,
 		ATerritoryVolume* Territory, const FTerritoryFactionAssaultConfig& ForceConfig,
-		const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform);
+		const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform,
+		int32 OverrideNarrativeLevel);
 	void ResolveAssault(FTerritoryAssaultRecord& Assault, ETerritoryAssaultState FinalState,
 		ETerritoryAssaultResolution Reason);
 	void RetireLiveParticipants(FTerritoryAssaultRecord& Assault, bool bDestroyActors);
@@ -224,6 +233,11 @@ private:
 	ATerritoryVolume* ResolveTerritory(const FTerritoryAssaultRecord& Assault) const;
 	bool HasRelevantPlayerNearby(const FTerritoryAssaultRecord& Assault,
 		const ATerritoryVolume* Territory, float Radius) const;
+	APawn* FindNearestRelevantPlayer(const FTerritoryAssaultRecord& Assault,
+		const ATerritoryVolume* Territory, float Radius) const;
+	int32 ResolveScaledEnemyLevel(const FTerritoryAssaultRecord& Assault,
+		const ATerritoryVolume* Territory,
+		const FTerritoryFactionAssaultConfig& ForceConfig) const;
 	bool IsRelevantPlayer(const APlayerController* Controller,
 		const FTerritoryAssaultRecord& Assault, const UTerritoryCounterAttackProfile* Profile) const;
 	bool IsDiplomacyBlocked(const FTerritoryAssaultRecord& Assault, const ATerritoryVolume* Territory) const;

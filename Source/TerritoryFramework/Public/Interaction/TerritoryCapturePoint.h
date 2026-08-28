@@ -9,6 +9,7 @@ class ATerritoryVolume;
 class UNarrativeAbilitySystemComponent;
 class UPrimitiveComponent;
 class USphereComponent;
+class UStaticMeshComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	FOnTerritoryCaptureParticipantChanged,
@@ -46,6 +47,18 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Capture")
 	TObjectPtr<USphereComponent> CaptureZone;
+
+	/**
+	 * Optional world flag, beacon, or other mesh showing the physical capture location.
+	 * Assign any project mesh in a Blueprint child. The mesh never owns capture state.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Capture|Presentation")
+	TObjectPtr<UStaticMeshComponent> CaptureMarkerMesh;
+
+	/** Hide the world marker while the target Place is story-Locked or unavailable. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture|Presentation",
+		meta=(ToolTip="Recommended. A story-Locked Place stays silent until its Locked State Config exit conditions unlock it."))
+	bool bHideMarkerWhileCaptureUnavailable = true;
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Capture")
 	FOnTerritoryCaptureParticipantChanged OnCaptureParticipantChanged;
@@ -100,4 +113,5 @@ private:
 	void ReconcileOverlappingParticipants();
 	UNarrativeAbilitySystemComponent* ResolveParticipantAbilitySystem(AActor* Participant) const;
 	bool IsEligiblePlayerParticipant(AActor* Participant) const;
+	void RefreshCaptureMarkerVisibility();
 };

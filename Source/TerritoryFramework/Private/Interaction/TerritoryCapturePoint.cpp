@@ -2,6 +2,7 @@
 
 #include "AbilitySystemInterface.h"
 #include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
@@ -24,6 +25,12 @@ ATerritoryCapturePoint::ATerritoryCapturePoint()
 	CaptureZone->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	CaptureZone->SetGenerateOverlapEvents(true);
 	CaptureZone->ShapeColor = FColor(68, 208, 158);
+
+	CaptureMarkerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CaptureMarkerMesh"));
+	CaptureMarkerMesh->SetupAttachment(CaptureZone);
+	CaptureMarkerMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CaptureMarkerMesh->SetGenerateOverlapEvents(false);
+	CaptureMarkerMesh->SetCanEverAffectNavigation(false);
 }
 
 void ATerritoryCapturePoint::OnConstruction(const FTransform& Transform)
@@ -33,12 +40,14 @@ void ATerritoryCapturePoint::OnConstruction(const FTransform& Transform)
 	{
 		CaptureZone->SetSphereRadius(FMath::Max(100.f, CaptureRadius));
 	}
+	RefreshCaptureMarkerVisibility();
 }
 
 void ATerritoryCapturePoint::BeginPlay()
 {
 	Super::BeginPlay();
 	if (!CaptureZone) return;
+	RefreshCaptureMarkerVisibility();
 
 	CaptureZone->OnComponentBeginOverlap.AddUniqueDynamic(
 		this, &ATerritoryCapturePoint::HandleCaptureZoneBeginOverlap);
@@ -80,6 +89,7 @@ void ATerritoryCapturePoint::Tick(float DeltaSeconds)
 	{
 		ReconcileOverlappingParticipants();
 	}
+	RefreshCaptureMarkerVisibility();
 }
 
 ATerritoryVolume* ATerritoryCapturePoint::ResolveTargetTerritory() const
@@ -278,4 +288,19 @@ bool ATerritoryCapturePoint::IsEligiblePlayerParticipant(AActor* Participant) co
 {
 	const APawn* Pawn = Cast<APawn>(Participant);
 	return Pawn && Pawn->IsPlayerControlled();
+}
+
+void ATerritoryCapturePoint::RefreshCaptureMarkerVisibility()
+{
+	if (!CaptureMarkerMesh) return;
+	bool bVisible = bCaptureEnabled;
+	if (bVisible && bHideMarkerWhileCaptureUnavailable)
+	{
+		const ATerritoryVolume* Territory = ResolveTargetTerritory();
+		bVisible = Territory
+			&& Territory->GetControlMode() == ETerritoryControlMode::Independent
+			&& Territory->GetTerritoryState() != ETerritoryState::Locked;
+	}
+	CaptureMarkerMesh->SetVisibility(bVisible, true);
+	CaptureMarkerMesh->SetHiddenInGame(!bVisible, true);
 }

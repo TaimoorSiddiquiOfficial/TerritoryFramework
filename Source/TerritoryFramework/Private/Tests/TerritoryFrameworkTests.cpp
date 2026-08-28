@@ -30,6 +30,7 @@
 #include "Debug/TerritoryDebugger.h"
 #include "Tales/TerritoryCaptureTask.h"
 #include "Tales/TerritoryCaptureEvent.h"
+#include "Tales/TerritoryCaptureEligibilityCondition.h"
 #include "Tales/TerritoryLockEvent.h"
 #include "Tales/TerritoryOwnershipCondition.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
@@ -848,12 +849,20 @@ bool FTFContract_CaptureEvent::RunTest(const FString& Parameters)
 		TFTestUtils::HasProperty(Class, TEXT("TargetTerritoryTag")));
 	TestTrue(TEXT("Has CapturingFaction"),
 		TFTestUtils::HasProperty(Class, TEXT("CapturingFaction")));
+	TestTrue(TEXT("Can resolve the capturing faction from the dialogue target or player"),
+		TFTestUtils::HasProperty(Class, TEXT("CapturingFactionSource")));
 	TestTrue(TEXT("Has bForceCapture"),
 		TFTestUtils::HasProperty(Class, TEXT("bForceCapture")));
 
 	// ─── Override ───
 	TestTrue(TEXT("Has ExecuteEvent override"),
 		TFTestUtils::HasFunction(Class, TEXT("ExecuteEvent")));
+
+	const UClass* EligibilityClass = UTerritoryCaptureEligibilityCondition::StaticClass();
+	TestTrue(TEXT("Dialogue capture eligibility derives from Narrative Condition"),
+		EligibilityClass->IsChildOf(UNarrativeCondition::StaticClass()));
+	TestTrue(TEXT("Dialogue capture eligibility can require all defenders defeated"),
+		TFTestUtils::HasProperty(EligibilityClass, TEXT("bRequireNoLivingDefenders")));
 
 	return true;
 }
@@ -3952,6 +3961,10 @@ bool FTFCapturePointContract::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("UnregisterCaptureParticipant")));
 	TestTrue(TEXT("Capture point exposes the stable target tag"),
 		TFTestUtils::HasProperty(Class, TEXT("TargetTerritoryTag")));
+	TestTrue(TEXT("Capture point exposes an optional designer mesh flag"),
+		TFTestUtils::HasProperty(Class, TEXT("CaptureMarkerMesh")));
+	TestTrue(TEXT("Capture marker can remain silent while capture is unavailable"),
+		TFTestUtils::HasProperty(Class, TEXT("bHideMarkerWhileCaptureUnavailable")));
 	TestFalse(TEXT("Capture target configuration is not duplicate save authority"),
 		TFTestUtils::IsSaveGame(Class, TEXT("TargetTerritoryTag")));
 	TestFalse(TEXT("Capture enabled configuration is not replicated gameplay state"),

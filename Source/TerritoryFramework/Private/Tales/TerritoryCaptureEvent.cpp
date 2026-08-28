@@ -8,6 +8,7 @@
 #include "Tales/TalesComponent.h"
 #include "Engine/World.h"
 #include "Tales/TerritoryTalesUtilities.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 
 UTerritoryCaptureEvent::UTerritoryCaptureEvent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -39,10 +40,23 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 		return;
 	}
 
-	if (!CapturingFaction.IsValid())
+	FGameplayTag ResolvedCapturingFaction = CapturingFaction;
+	if (CapturingFactionSource == ETerritoryCaptureFactionSource::NarrativeTargetFaction)
 	{
-		UE_LOG(LogTerritory, Warning, TEXT("TerritoryCaptureEvent: CapturingFaction not set for %s"),
-			*TargetTerritoryTag.ToString());
+		ResolvedCapturingFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+			this, Target);
+	}
+	else if (CapturingFactionSource == ETerritoryCaptureFactionSource::ControllerPawnFaction)
+	{
+		ResolvedCapturingFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+			this, Controller ? Controller->GetPawn() : nullptr);
+	}
+
+	if (!ResolvedCapturingFaction.IsValid())
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("TerritoryCaptureEvent: no exact capturing faction resolved for %s (source=%d)"),
+			*TargetTerritoryTag.ToString(), static_cast<int32>(CapturingFactionSource));
 		return;
 	}
 
@@ -61,7 +75,7 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 
 	FTerritoryMutationRequest Request;
 	Request.Territory = Territory;
-	Request.NewOwner = CapturingFaction;
+	Request.NewOwner = ResolvedCapturingFaction;
 	Request.DesiredState = ETerritoryState::Claimed;
 
 	// Build transition context with TalesComponent for Narrative event/condition evaluation
@@ -69,7 +83,7 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	Request.TransitionContext.TargetPawn = Target;
 	Request.TransitionContext.PlayerController = Controller;
 	Request.TransitionContext.TalesComponent = NarrativeComponent;
-	Request.TransitionContext.RequestingFaction = CapturingFaction;
+	Request.TransitionContext.RequestingFaction = ResolvedCapturingFaction;
 
 	if (bForceCapture)
 	{
@@ -95,12 +109,12 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	const bool bDebug = Settings && Settings->ShouldDebugTales();
 
 	UE_LOG(LogTerritory, Log, TEXT("TerritoryCaptureEvent: %s captured by %s via event"),
-		*TargetTerritoryTag.ToString(), *CapturingFaction.ToString());
+		*TargetTerritoryTag.ToString(), *ResolvedCapturingFaction.ToString());
 
 	if (bDebug)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureEvent] ForceCapture %s → %s (force=%s)"),
-			*TargetTerritoryTag.ToString(), *CapturingFaction.ToString(),
+			*TargetTerritoryTag.ToString(), *ResolvedCapturingFaction.ToString(),
 			bForceCapture ? TEXT("true") : TEXT("false"));
 	}
 }
