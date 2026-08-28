@@ -1,6 +1,7 @@
 #include "Combat/TerritoryAssaultCharacter.h"
 
 #include "Combat/TerritoryAssaultParticipantComponent.h"
+#include "AI/TerritoryDiplomacyDialogue.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NarrativeNPCController.h"
@@ -60,9 +61,12 @@ namespace
 }
 
 ATerritoryAssaultCharacter::ATerritoryAssaultCharacter(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UTerritoryDiplomacyInteractable>(
+		TEXT("NPCInteractable")))
 {
 	AssaultParticipant = CreateDefaultSubobject<UTerritoryAssaultParticipantComponent>(TEXT("TerritoryAssaultParticipant"));
+	DiplomacyDialogue = CreateDefaultSubobject<UTerritoryDiplomacyDialogueComponent>(
+		TEXT("TerritoryDiplomacyDialogue"));
 
 	// Counterattack pawns are always created dynamically. Narrative activities and
 	// attack tokens live on ANarrativeNPCController, so the native class must be a

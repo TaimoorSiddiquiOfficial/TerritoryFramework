@@ -9,6 +9,7 @@ class UNPCActivityConfiguration;
 class UNarrativeCharacterSubsystem;
 class UTriggerSet;
 class UTerritoryAssaultParticipantComponent;
+class UTerritoryDiplomacyDialogueComponent;
 
 /** Narrative NPC used for finite physical Territory counterattacks. */
 UCLASS(BlueprintType, Blueprintable)
@@ -84,6 +85,10 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Assault")
 	TObjectPtr<UTerritoryAssaultParticipantComponent> AssaultParticipant;
+
+	/** Relationship-aware dialogue selector for surviving/interactable assault NPCs. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Assault|Dialogue")
+	TObjectPtr<UTerritoryDiplomacyDialogueComponent> DiplomacyDialogue;
 
 protected:
 	virtual void BeginPlay() override;

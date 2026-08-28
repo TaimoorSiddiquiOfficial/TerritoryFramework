@@ -488,7 +488,7 @@ These `EditInlineNew` Narrative classes can be added directly under a Territory'
 | `UTerritoryEventContextCondition` | Required target/player/ASC/controller/Tales context | Give XP only to the player pawn that caused capture |
 | `UTerritoryProductionStatusCondition` | Property, optional rule, required status | Farm production is Missing Input |
 | `UTerritoryResourceCondition` | Faction, Narrative item class, comparison, quantity | Heroes have At Least 10 Medicine |
-| `UTerritorySetDiplomacyEvent` | Faction A/B, new state, optional trade duration | Set Heroes and Regime to War after betrayal |
+| `UTerritorySetDiplomacyEvent` | Faction A/B sources, fallback tags, owner/conflict safety, new state | Contested: Current Owner and Contesting Faction become War |
 | `UTerritoryModifyReputationEvent` | Faction, Add/Set, value | Add -20 to Bandit reputation |
 | `UTerritoryScheduleEnemyWaveEvent` | Target, exact/best attacker | Schedule one finite Bandit assault |
 | `UTerritoryCancelEnemyWavesEvent` | Target, optional attacker, include active | Cancel warnings after a peace treaty |
@@ -525,6 +525,11 @@ route, warning, proximity activation, casualty, save, and replication flow.
 State Config entry/exit arrays react to enum-state transitions, not every owner field change.
 Normal capture passes through Contested and re-enters Claimed. A direct Claimed-to-Claimed
 owner mutation needs `OnTerritoryControlChanged` when an always-run story hook is required.
+
+Diplomacy faction sources are `Explicit Tag`, `Current Owning Faction`, `Previous Owning
+Faction`, `Contesting Faction`, and `Transition Requesting Faction`. Use dynamic sources for a
+Place that can change hands between several story factions. `Resolve Territory Diplomacy Faction
+Pair` shows the pair that the event would use now.
 
 Do not place a player-only GAS reward in a State Config without an event-level context condition.
 `Contested -> Claimed` can also mean that failed capture pressure decayed and the current owner

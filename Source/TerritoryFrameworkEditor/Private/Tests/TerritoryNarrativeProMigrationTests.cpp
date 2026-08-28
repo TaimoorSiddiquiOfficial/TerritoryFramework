@@ -457,12 +457,22 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			ClaimedDiplomacyEvent->NewState, EDiplomacyState::None);
 		TestTrue(TEXT("Claimed diplomacy policy applies on a fresh already-active state"),
 			ClaimedDiplomacyEvent->bApplyWhenStateStartsActive);
-		TestEqual(TEXT("Claimed diplomacy first party is Heroes"),
+		TestEqual(TEXT("Claimed diplomacy first party follows the current owner"),
+			ClaimedDiplomacyEvent->FactionASource,
+			ETerritoryDiplomacyFactionSource::CurrentOwningFaction);
+		TestEqual(TEXT("Claimed diplomacy second party follows the previous owner"),
+			ClaimedDiplomacyEvent->FactionBSource,
+			ETerritoryDiplomacyFactionSource::PreviousOwningFaction);
+		TestEqual(TEXT("Claimed initial-state fallback first party is Bandits"),
 			ClaimedDiplomacyEvent->FactionA.ToString(),
-			FString(TEXT("Narrative.Factions.Heroes")));
-		TestEqual(TEXT("Claimed diplomacy second party is Bandits"),
-			ClaimedDiplomacyEvent->FactionB.ToString(),
 			FString(TEXT("Narrative.Factions.Bandits")));
+		TestEqual(TEXT("Claimed initial-state fallback second party is Heroes"),
+			ClaimedDiplomacyEvent->FactionB.ToString(),
+			FString(TEXT("Narrative.Factions.Heroes")));
+		TestTrue(TEXT("Claimed diplomacy requires the live owner in its pair"),
+			ClaimedDiplomacyEvent->bRequireContainingTerritoryOwner);
+		TestTrue(TEXT("Claimed peace preserves other active Place conflicts"),
+			ClaimedDiplomacyEvent->bPreserveOtherActiveTerritoryWars);
 	}
 	TestNotNull(TEXT("Contested entry explicitly declares the Territory War"),
 		ContestedDiplomacyEvent);
@@ -470,12 +480,20 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	{
 		TestEqual(TEXT("Contested entry changes Heroes and Bandits to War"),
 			ContestedDiplomacyEvent->NewState, EDiplomacyState::War);
-		TestEqual(TEXT("Contested diplomacy first party is Heroes"),
+		TestEqual(TEXT("Contested diplomacy first party follows the defending owner"),
+			ContestedDiplomacyEvent->FactionASource,
+			ETerritoryDiplomacyFactionSource::CurrentOwningFaction);
+		TestEqual(TEXT("Contested diplomacy second party follows the attacker"),
+			ContestedDiplomacyEvent->FactionBSource,
+			ETerritoryDiplomacyFactionSource::ContestingFaction);
+		TestEqual(TEXT("Contested fallback first party is Bandits"),
 			ContestedDiplomacyEvent->FactionA.ToString(),
-			FString(TEXT("Narrative.Factions.Heroes")));
-		TestEqual(TEXT("Contested diplomacy second party is Bandits"),
-			ContestedDiplomacyEvent->FactionB.ToString(),
 			FString(TEXT("Narrative.Factions.Bandits")));
+		TestEqual(TEXT("Contested fallback second party is Heroes"),
+			ContestedDiplomacyEvent->FactionB.ToString(),
+			FString(TEXT("Narrative.Factions.Heroes")));
+		TestTrue(TEXT("Contested diplomacy rejects stale unrelated pairs"),
+			ContestedDiplomacyEvent->bRequireContainingTerritoryOwner);
 	}
 
 	const FTerritoryStateConfig* LockedConfig =

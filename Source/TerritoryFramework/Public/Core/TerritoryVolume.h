@@ -212,6 +212,26 @@ public:
 	/** Valid only while an atomic transition is broadcasting its synchronous event bundle. */
 	const FTerritoryTransitionContext& GetActiveTransitionContext() const { return ActiveTransitionContext; }
 
+	/**
+	 * Returns the owner that existed immediately before the active atomic transition.
+	 * The result is intentionally empty outside the synchronous transition event bundle,
+	 * so a story event cannot accidentally reuse stale ownership from an older capture.
+	 *
+	 * Easy example: Bandits own a Place, Rebels finish capturing it, and the Claimed
+	 * row runs. Current Owner is Rebels while Transition Previous Owner is Bandits.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Ownership|Transition",
+		meta=(DisplayName="Get Transition Previous Owner"))
+	FGameplayTag GetTransitionPreviousOwningFaction() const
+	{
+		return bTransitionInProgress ? PreviousOwningFaction : FGameplayTag();
+	}
+
+	/** True only while state/ownership entry and exit events are executing. */
+	UFUNCTION(BlueprintPure, Category="Territory|Ownership|Transition",
+		meta=(DisplayName="Is Ownership Transition Active"))
+	bool IsOwnershipTransitionActive() const { return bTransitionInProgress; }
+
 	/** Internal authority path for explicit quest/script overrides and save restore. */
 	void ForceSetOwningFaction(const FGameplayTag& NewFaction);
 	void ForceSetOwningFactionWithContext(const FGameplayTag& NewFaction,
@@ -789,6 +809,7 @@ private:
 	void RetryPendingDefenderDeathBindings();
 	void CleanupInvalidDefenders();
 	void ApplyInitialStateDiplomacyPolicies();
+	void PublishCaptureSummary();
 	bool HasPendingReserveDeployments() const;
 	void CancelPendingReserveDeployments();
 	void RemoveGuardWithoutReplacement(ATerritoryGuardCharacter* Guard);

@@ -2,6 +2,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "AI/TerritoryDiplomacyDialogue.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
@@ -23,6 +24,7 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "GameFramework/DamageType.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 namespace
 {
@@ -64,9 +66,12 @@ namespace
 }
 
 ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UTerritoryDiplomacyInteractable>(
+		TEXT("NPCInteractable")))
 {
 	PatrolGoalClass = UTerritoryPatrolGoal::StaticClass();
+	DiplomacyDialogue = CreateDefaultSubobject<UTerritoryDiplomacyDialogueComponent>(
+		TEXT("TerritoryDiplomacyDialogue"));
 	AIControllerClass = ANarrativeNPCController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 	GetCapsuleComponent()->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
@@ -267,6 +272,7 @@ void ATerritoryGuardCharacter::BeginPlay()
 
 	if (HasAuthority())
 	{
+		RefreshPatrolCrowdAvoidance();
 		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
 		{
 			InitializeTerritoryPatrolGoal();
@@ -614,6 +620,54 @@ int32 ATerritoryGuardCharacter::GetPatrolNodeCount() const
 	return 0;
 }
 
+int32 ATerritoryGuardCharacter::GetStaggeredPatrolStartIndex() const
+{
+	const int32 NodeCount = GetPatrolNodeCount();
+	if (NodeCount <= 1)
+	{
+		return 0;
+	}
+	const FGuid StableGuid = GetActorGUID_Implementation();
+	const uint32 StableHash = StableGuid.IsValid()
+		? GetTypeHash(StableGuid) : GetTypeHash(GetFName());
+	return static_cast<int32>(StableHash % static_cast<uint32>(NodeCount));
+}
+
+TArray<FTerritoryPatrolNode> ATerritoryGuardCharacter::BuildStaggeredPatrolRoute() const
+{
+	const TArray<FTerritoryPatrolNode> SourceRoute = GetTerritoryPatrolRoute();
+	if (SourceRoute.Num() <= 1)
+	{
+		return SourceRoute;
+	}
+	const int32 StartIndex = GetStaggeredPatrolStartIndex();
+	TArray<FTerritoryPatrolNode> Result;
+	Result.Reserve(SourceRoute.Num());
+	for (int32 Offset = 0; Offset < SourceRoute.Num(); ++Offset)
+	{
+		Result.Add(SourceRoute[(StartIndex + Offset) % SourceRoute.Num()]);
+	}
+	return Result;
+}
+
+void ATerritoryGuardCharacter::RefreshPatrolCrowdAvoidance()
+{
+	if (!HasAuthority()) return;
+	if (UCharacterMovementComponent* Movement = GetCharacterMovement())
+	{
+		Movement->SetAvoidanceEnabled(bEnablePatrolCrowdAvoidance);
+		Movement->AvoidanceConsiderationRadius = FMath::Max(
+			100.f, PatrolAvoidanceConsiderationRadius);
+		Movement->AvoidanceWeight = FMath::Clamp(PatrolAvoidanceWeight, 0.f, 1.f);
+	}
+}
+
+bool ATerritoryGuardCharacter::IsPatrolCrowdAvoidanceActive() const
+{
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+	return Movement && Movement->bUseRVOAvoidance;
+}
+
 bool ATerritoryGuardCharacter::GetSafePatrolNode(int32 Index, FTerritoryPatrolNode& OutNode) const
 {
 	if (!IsValid(OwningTerritorySpawnPoint))
@@ -673,7 +727,7 @@ bool ATerritoryGuardCharacter::InitializeTerritoryPatrolGoal()
 	if (UTerritoryPatrolGoal* ExistingGoal = Cast<UTerritoryPatrolGoal>(
 		ActivityComponent->GetGoalByKey(PatrolGoalClass, GoalKey, bFoundExisting)))
 	{
-		ExistingGoal->TerritoryPatrol = GetTerritoryPatrolRoute();
+		ExistingGoal->TerritoryPatrol = BuildStaggeredPatrolRoute();
 		TerritoryPatrolGoal = ExistingGoal;
 		return true;
 	}
@@ -685,7 +739,7 @@ bool ATerritoryGuardCharacter::InitializeTerritoryPatrolGoal()
 	}
 
 	NewGoal->GoalKey = GoalKey;
-	NewGoal->TerritoryPatrol = GetTerritoryPatrolRoute();
+	NewGoal->TerritoryPatrol = BuildStaggeredPatrolRoute();
 	NewGoal->bSaveGoal = false;
 	NewGoal->bRemoveOnSucceeded = false;
 	TerritoryPatrolGoal = Cast<UTerritoryPatrolGoal>(ActivityComponent->AddGoal(NewGoal, true));

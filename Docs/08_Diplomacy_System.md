@@ -69,15 +69,58 @@ debugging to see the final answer without reading AI perception state.
 
 For a Blacksmith initially owned by Bandits:
 
-1. In the `Claimed` state config, add `Set Territory Diplomacy: Bandits, Heroes, None`.
+1. In the `Claimed` state config, add `Set Territory Diplomacy`:
+   - Faction A Source = `Current Owning Faction`
+   - Faction B Source = `Previous Owning Faction`
+   - New State = `None`
+   - Explicit fallbacks = `Bandits / Heroes`
 2. Leave `Apply When State Starts Active` enabled. A fresh world applies only this safe
-   diplomacy policy; it does not replay XP, quests, waves, or other state entry events.
-3. In the `Contested` state config, add `Set Territory Diplomacy: Bandits, Heroes, War`.
+   diplomacy policy; the missing previous owner uses the Heroes fallback. It does not replay
+   XP, quests, waves, or other state entry events.
+3. In the `Contested` state config, use `Current Owning Faction / Contesting Faction / War`.
 4. When the fight resolves, the next state's diplomacy event decides whether peace or War
    continues.
 
-This state-first authoring is modular: story conditions may prevent either event, while the
-same guard class remains reusable in every Place.
+Now the same Place supports the complete story chain without reauthoring its row:
+
+```text
+Bandits own it; Heroes attack  -> Bandits / Heroes become War
+Heroes capture it              -> Heroes / Bandits become None
+Police later attack            -> Heroes / Police become War
+Police capture it              -> Police / Heroes become None
+```
+
+Enable `Require Containing Territory Owner` to reject an old unrelated hardcoded pair. Keep
+`Preserve Other Active Territory Wars` enabled on peace-like rows: capturing Blacksmith then
+cannot cancel War while Farm is still contested by the same factions, including when Farm is
+represented only by its World Partition capture summary.
+
+This state-first authoring is modular: Narrative conditions may prevent either event, while the
+same guard class remains reusable in every Place. `Requesting Faction` is also available for a
+quest capture performed on behalf of a story faction.
+
+## Diplomacy-aware NPC dialogue
+
+Narrative NPCDefinition provides one default interaction dialogue. Territory adds an optional
+`Territory Diplomacy Dialogue Profile` without editing Narrative Pro:
+
+| Relationship | Easy dialogue tone |
+|---|---|
+| Same faction / Alliance / Trade | Friendly or respectful |
+| None | Cautious, but not hateful |
+| Ceasefire / Non-Aggression | Reserved |
+| War | Hostile faction dialogue |
+
+Assign the profile through the guard component's `Faction Dialogue Profiles` list. This is
+important when one pawn Blueprint is shared by Bandit and Hero NPCDefinitions: map only Bandits
+to the Bandit profile, and an unmapped Hero keeps the Hero definition's default dialogue. A
+single-faction pawn Blueprint may use the component's fallback `Dialogue Profile` instead.
+At interaction time,
+the plugin resolves the specific player's exact Narrative faction tags and rich treaty, selects
+the profile slot, and then delegates talk, loot, busy, ragdoll, and Tales behavior to Narrative's
+`UNPCInteractable`. Empty profile slots fall back to NPCDefinition Dialogue. The choice is not
+stored as one permanent value, so two multiplayer players with different factions do not overwrite
+each other's conversation selection.
 
 ## API
 

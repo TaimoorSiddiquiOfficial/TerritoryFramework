@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased — 2026-08-28 (Owner-relative state diplomacy, guard crowds, and dialogue)
+
+- Added dynamic state-event faction sources: explicit tag, current owner, previous owner,
+  contesting faction, and transition-requesting faction. Repeated Bandits → Heroes → Police
+  ownership changes now resolve the live parties instead of reusing a Heroes/Bandits constant.
+- Added an owner-participation filter and cross-Place conflict protection. A peace-like Claimed
+  event cannot cancel War while another loaded or World Partition Place remains contested.
+- Kept capture summaries current for every atomic state/progress mutation and repaired the
+  summary contesting-faction projection.
+- Added stable per-guard patrol route staggering and server-side RVO avoidance. PIE verified
+  three guards at distinct start indices (`1, 0, 2`) with RVO active and no runtime errors.
+- Added Territory-owned diplomacy dialogue profiles and an upgrade-safe Narrative interactable
+  adapter. The live Bandit guard and assault guard use civil dialogue for non-War relationships
+  and retain `DBP_Bandit` for War.
+- Migrated the Blacksmith Claimed/Contested rows to owner-relative sources, added community-facing
+  metadata/examples, completed a clean Editor build, and passed all 131 TerritoryFramework tests.
+
 ## Unreleased — 2026-08-28 (Contextual diplomacy combat and multi-floor staging)
 
 - Made Territory diplomacy the fail-closed combat policy: an ordinary guard is Hostile only
@@ -12,14 +29,14 @@
 - Added fresh-world initial-state diplomacy policy without replaying reward, quest, XP, wave,
   or other state entry events. State events can opt out with `Apply When State Starts Active`.
 - Changed the Blacksmith example/map policy to Claimed Neutral and Contested War, with an editor
-  regression that verifies both state configurations and their exact Heroes/Bandits tags.
+  regression that verifies both state configurations and their owner-relative faction sources.
 - Capped strategic counterattack participation to the smaller of the Territory limit and
   Narrative's current difficulty attack-token setting. Narrative remains the tactical token
   authority for each defender.
 - Replaced flat XY objective selection with complete NavMesh paths, stable wave distribution,
   and true 3D fallback distance for multi-floor Places.
 - Added BlueprintPure combat/difficulty diagnostics, community-facing authoring examples, and
-  regression coverage. Clean Editor build and all 128 TerritoryFramework tests pass.
+  regression coverage. Clean Editor build and all tests in that batch passed.
 
 ## Unreleased — 2026-08-27 (Place waypoint and silent-lock navigation contract)
 

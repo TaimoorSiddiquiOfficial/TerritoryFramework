@@ -230,6 +230,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	FReplicatedCaptureSummary GetCaptureSummary(const FGameplayTag& TerritoryTag) const;
 
+	/**
+	 * Checks the replicated capture read model, including summaries left behind by
+	 * World Partition territories that are currently unloaded.
+	 *
+	 * Easy example: Market Place has just been secured, but Farm Place is still
+	 * contested by the same two factions in another streamed cell. A Claimed-state
+	 * peace event can use this query to avoid cancelling the Farm battle.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Capture|Conflict",
+		meta=(DisplayName="Has Contested Territory Between Factions"))
+	bool HasContestedTerritoryBetweenFactions(const FGameplayTag& FactionA,
+		const FGameplayTag& FactionB,
+		const FGameplayTag& ExcludedTerritoryTag = FGameplayTag()) const;
+
 	// ─── State Export/Import for Save System ───
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Save")

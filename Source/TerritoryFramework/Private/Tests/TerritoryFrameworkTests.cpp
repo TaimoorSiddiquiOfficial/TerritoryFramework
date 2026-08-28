@@ -14,6 +14,7 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "AI/TerritoryPatrolGoal.h"
+#include "AI/TerritoryDiplomacyDialogue.h"
 #include "Core/TerritoryWorldState.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryCapturePoint.h"
@@ -44,10 +45,12 @@
 #include "Tales/QuestTask.h"
 #include "Tales/NarrativeEvent.h"
 #include "Tales/NarrativeCondition.h"
+#include "Tales/Dialogue.h"
 #include "Navigation/MapMarker.h"
 #include "Navigation/NavigationMarkerComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
@@ -3659,6 +3662,161 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 	TestTrue(TEXT("Territories expose the all-defenders-defeated event hook"),
 		TFTestUtils::HasProperty(TerritoryClass, TEXT("AllDefendersDefeatedEvents")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDiplomacyStateEventFactionResolution,
+	"TerritoryFramework.Diplomacy.StateEvents.OwnerRelativeFactionResolution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDiplomacyStateEventFactionResolution::RunTest(const FString& Parameters)
+{
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Police = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Police"), false);
+	TestTrue(TEXT("Three story faction fixtures resolve"),
+		Bandits.IsValid() && Heroes.IsValid() && Police.IsValid());
+
+	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
+	TestNotNull(TEXT("Transient Territory created"), Territory);
+	if (!Territory) return false;
+	TestTrue(TEXT("Transient Territory fixture has server authority"), Territory->HasAuthority());
+
+	UTerritorySetDiplomacyEvent* Event =
+		NewObject<UTerritorySetDiplomacyEvent>(Territory);
+	Event->FactionASource = ETerritoryDiplomacyFactionSource::CurrentOwningFaction;
+	Event->FactionBSource = ETerritoryDiplomacyFactionSource::ContestingFaction;
+	Event->bFallbackToExplicitFactionWhenContextMissing = false;
+
+	FTerritoryOwnershipData Data = Territory->GetOwnershipData();
+	Data.OwningFaction = Bandits;
+	Data.State = ETerritoryState::Claimed;
+	Data.ControlProgress = 1.f;
+	TestTrue(TEXT("Bandits can become the first owner"),
+		Territory->CommitOwnershipData(Data));
+
+	Data = Territory->GetOwnershipData();
+	Data.State = ETerritoryState::Contested;
+	Data.ContestingFaction = Heroes;
+	Data.ControlProgress = 0.25f;
+	FTerritoryTransitionContext HeroesContext;
+	HeroesContext.RequestingFaction = Heroes;
+	TestTrue(TEXT("Heroes can contest the Bandit-owned Place"),
+		Territory->CommitOwnershipData(Data, HeroesContext));
+	FGameplayTag ResolvedA;
+	FGameplayTag ResolvedB;
+	TestTrue(TEXT("First dynamic pair resolves"),
+		Event->ResolveFactionPair(ResolvedA, ResolvedB));
+	TestEqual(TEXT("First defender is current owner"), ResolvedA, Bandits);
+	TestEqual(TEXT("First attacker is live contesting faction"), ResolvedB, Heroes);
+
+	Data = Territory->GetOwnershipData();
+	Data.OwningFaction = Heroes;
+	Data.State = ETerritoryState::Claimed;
+	Data.ContestingFaction = FGameplayTag();
+	Data.ControlProgress = 1.f;
+	TestTrue(TEXT("Heroes can finish the first capture"),
+		Territory->CommitOwnershipData(Data, HeroesContext));
+
+	Data = Territory->GetOwnershipData();
+	Data.State = ETerritoryState::Contested;
+	Data.ContestingFaction = Police;
+	Data.ControlProgress = 0.35f;
+	FTerritoryTransitionContext PoliceContext;
+	PoliceContext.RequestingFaction = Police;
+	TestTrue(TEXT("Police can later contest the Heroes-owned Place"),
+		Territory->CommitOwnershipData(Data, PoliceContext));
+	TestTrue(TEXT("Second dynamic pair resolves"),
+		Event->ResolveFactionPair(ResolvedA, ResolvedB));
+	TestEqual(TEXT("Second defender follows changed ownership"), ResolvedA, Heroes);
+	TestEqual(TEXT("Second attacker follows new contest"), ResolvedB, Police);
+	TestNotEqual(TEXT("Old hardcoded Bandit pair is not reused"), ResolvedA, Bandits);
+	TestFalse(TEXT("Previous owner is not left stale outside the event bundle"),
+		Territory->GetTransitionPreviousOwningFaction().IsValid());
+
+	const UClass* EventClass = UTerritorySetDiplomacyEvent::StaticClass();
+	TestNotNull(TEXT("Owner-participation safety filter is exposed"),
+		EventClass->FindPropertyByName(TEXT("bRequireContainingTerritoryOwner")));
+	TestNotNull(TEXT("Cross-Place war protection is exposed"),
+		EventClass->FindPropertyByName(TEXT("bPreserveOtherActiveTerritoryWars")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDiplomacyWorldPartitionConflictReadModel,
+	"TerritoryFramework.Diplomacy.StateEvents.WorldPartitionConflictProtection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDiplomacyWorldPartitionConflictReadModel::RunTest(const FString& Parameters)
+{
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Farm = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	const FGameplayTag Market = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	TestTrue(TEXT("Conflict Territory fixtures resolve"), Farm.IsValid() && Market.IsValid());
+	ATerritoryWorldState* WorldState = NewObject<ATerritoryWorldState>();
+	TestNotNull(TEXT("Transient WorldState created"), WorldState);
+	if (!WorldState) return false;
+
+	FReplicatedCaptureSummary FarmConflict;
+	FarmConflict.TerritoryTag = Farm;
+	FarmConflict.TerritoryGUID = FGuid::NewGuid();
+	FarmConflict.CurrentOwner = Bandits;
+	FarmConflict.ContestingFaction = Heroes;
+	FarmConflict.State = ETerritoryState::Contested;
+	WorldState->SetCaptureSummary(FarmConflict);
+	TestTrue(TEXT("An unloaded-style summary protects the active faction war"),
+		WorldState->HasContestedTerritoryBetweenFactions(Bandits, Heroes, Market));
+	TestFalse(TEXT("The containing Territory can be excluded from its own check"),
+		WorldState->HasContestedTerritoryBetweenFactions(Bandits, Heroes, Farm));
+
+	FarmConflict.State = ETerritoryState::Claimed;
+	FarmConflict.ContestingFaction = FGameplayTag();
+	WorldState->SetCaptureSummary(FarmConflict);
+	TestFalse(TEXT("A terminal claimed summary no longer blocks peace"),
+		WorldState->HasContestedTerritoryBetweenFactions(Bandits, Heroes, Market));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryGuardCrowdAndDialogueContract,
+	"TerritoryFramework.AI.Guards.CrowdAvoidanceAndDiplomacyDialogueContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryGuardCrowdAndDialogueContract::RunTest(const FString& Parameters)
+{
+	const ATerritoryGuardCharacter* GuardCDO = GetDefault<ATerritoryGuardCharacter>();
+	const ATerritoryAssaultCharacter* AssaultCDO = GetDefault<ATerritoryAssaultCharacter>();
+	TestTrue(TEXT("Patrol crowd avoidance is enabled by default"),
+		GuardCDO && GuardCDO->bEnablePatrolCrowdAvoidance);
+	TestTrue(TEXT("Patrol avoidance has a useful consideration radius"),
+		GuardCDO && GuardCDO->PatrolAvoidanceConsiderationRadius >= 100.f);
+	TestNotNull(TEXT("Guard owns a diplomacy dialogue resolver"),
+		GuardCDO ? GuardCDO->FindComponentByClass<UTerritoryDiplomacyDialogueComponent>() : nullptr);
+	TestNotNull(TEXT("Guard replaces Narrative's interactable with the contextual adapter"),
+		GuardCDO ? GuardCDO->FindComponentByClass<UTerritoryDiplomacyInteractable>() : nullptr);
+	TestNotNull(TEXT("Assault NPC owns the same dialogue resolver"),
+		AssaultCDO ? AssaultCDO->FindComponentByClass<UTerritoryDiplomacyDialogueComponent>() : nullptr);
+	TestNotNull(TEXT("Shared guard classes expose exact-faction dialogue mappings"),
+		UTerritoryDiplomacyDialogueComponent::StaticClass()->FindPropertyByName(
+			TEXT("FactionDialogueProfiles")));
+
+	UTerritoryDiplomacyDialogueProfile* Profile =
+		NewObject<UTerritoryDiplomacyDialogueProfile>();
+	Profile->AllianceDialogue = UDialogue::StaticClass();
+	const TSubclassOf<UDialogue> Alliance = Profile->GetDialogueForRelationship(
+		EDiplomacyState::Alliance, false, nullptr);
+	TestEqual(TEXT("Alliance chooses its relationship-specific dialogue"),
+		Alliance.Get(), UDialogue::StaticClass());
+	const TSubclassOf<UDialogue> NeutralFallback = Profile->GetDialogueForRelationship(
+		EDiplomacyState::None, false, UDialogue::StaticClass());
+	TestEqual(TEXT("An empty profile slot falls back to Narrative's NPCDefinition dialogue"),
+		NeutralFallback.Get(), UDialogue::StaticClass());
 	return true;
 }
 

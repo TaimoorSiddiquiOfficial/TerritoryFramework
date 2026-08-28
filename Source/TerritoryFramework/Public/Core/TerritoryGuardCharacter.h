@@ -11,6 +11,7 @@ class UNarrativeCharacterSubsystem;
 class UTriggerSet;
 class ATerritoryVolume;
 class UTerritoryPatrolGoal;
+class UTerritoryDiplomacyDialogueComponent;
 
 /**
  * Territory guard NPC character. Bridges NarrativePro's NPC framework with
@@ -145,6 +146,28 @@ public:
 	UPROPERTY(Transient, BlueprintReadOnly, Category="Territory|AI|Patrol")
 	TObjectPtr<UTerritoryPatrolGoal> TerritoryPatrolGoal;
 
+	/** Relationship-aware dialogue selector used by the Territory NPC interactable. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|AI|Dialogue")
+	TObjectPtr<UTerritoryDiplomacyDialogueComponent> DiplomacyDialogue;
+
+	/**
+	 * Enables Unreal CharacterMovement RVO on the authority that drives Narrative AI.
+	 * Capsules still block, so guards remain physical while steering around each other.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Patrol|Crowd Avoidance",
+		meta=(ToolTip="Recommended for patrol guards. Uses server-side CharacterMovement RVO to prevent guards from pushing into the same corridor position."))
+	bool bEnablePatrolCrowdAvoidance = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Patrol|Crowd Avoidance",
+		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="100.0", ClampMax="2000.0", Units="cm",
+			ToolTip="How far this guard considers nearby moving agents for avoidance."))
+	float PatrolAvoidanceConsiderationRadius = 500.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Patrol|Crowd Avoidance",
+		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="0.0", ClampMax="1.0",
+			ToolTip="Steering priority for this guard. 0.5 gives equal guards an even right-of-way."))
+	float PatrolAvoidanceWeight = 0.5f;
+
 	// ─── Patrol Route Helpers ───
 
 	/**
@@ -182,6 +205,24 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol",
 		meta=(DisplayName="Get Patrol Node Count"))
 	int32 GetPatrolNodeCount() const;
+
+	/**
+	 * Stable per-guard first-node index. Guards sharing an overlapping route begin
+	 * at different nodes instead of all moving toward PatrolIdx zero.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol",
+		meta=(DisplayName="Get Staggered Patrol Start Index"))
+	int32 GetStaggeredPatrolStartIndex() const;
+
+	/** Reapplies the authored RVO settings to CharacterMovement on the server. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category="Territory|Guard|Patrol|Crowd Avoidance",
+		meta=(DisplayName="Refresh Patrol Crowd Avoidance"))
+	void RefreshPatrolCrowdAvoidance();
+
+	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol|Crowd Avoidance",
+		meta=(DisplayName="Is Patrol Crowd Avoidance Active"))
+	bool IsPatrolCrowdAvoidanceActive() const;
 
 	/**
 	 * Safely fetches a single patrol node by index. Returns false if the index is out of range
@@ -253,6 +294,7 @@ public:
 
 private:
 	void TryWieldDefaultWeapon();
+	TArray<FTerritoryPatrolNode> BuildStaggeredPatrolRoute() const;
 
 	FTimerHandle DefaultWeaponWieldTimer;
 	int32 DefaultWeaponWieldAttempts = 0;

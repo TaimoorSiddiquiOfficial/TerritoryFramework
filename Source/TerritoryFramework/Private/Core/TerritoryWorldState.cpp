@@ -40,6 +40,26 @@ void ATerritoryWorldState::BeginPlay()
 		// P0-02: Subscribe to subsystem delegates for live replication
 		// P1-10: Always subscribe regardless of GUID — live replication works without save
 		SubscribeToLiveUpdates();
+
+		// Actor BeginPlay order is not guaranteed. Seed summaries for Territory actors
+		// that registered before this WorldState; territories that start later publish
+		// their own summary from ATerritoryVolume::BeginPlay.
+		if (UTerritoryRegistrySubsystem* Registry =
+			GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
+			{
+				if (!Territory) continue;
+				FReplicatedCaptureSummary Summary;
+				Summary.TerritoryTag = Territory->GetTerritoryTag();
+				Summary.TerritoryGUID = Territory->GetTerritoryGUID();
+				Summary.CurrentOwner = Territory->GetOwningFaction();
+				Summary.ContestingFaction = Territory->GetContestingFaction_Implementation();
+				Summary.ControlProgress = Territory->GetControlProgress();
+				Summary.State = Territory->GetTerritoryState();
+				SetCaptureSummary(Summary);
+			}
+		}
 	}
 	else
 	{
@@ -328,14 +348,18 @@ void ATerritoryWorldState::SetCaptureSummary(const FReplicatedCaptureSummary& Su
 
 	for (FReplicatedCaptureSummary& Entry : ReplicatedCaptureSummaries)
 	{
-		if (Entry.TerritoryTag == Summary.TerritoryTag)
+		if (Entry.TerritoryTag == Summary.TerritoryTag
+			|| (Summary.TerritoryGUID.IsValid()
+				&& Entry.TerritoryGUID == Summary.TerritoryGUID))
 		{
 			Entry = Summary;
+			ForceNetUpdate();
 			return;
 		}
 	}
 
 	ReplicatedCaptureSummaries.Add(Summary);
+	ForceNetUpdate();
 }
 
 FReplicatedCaptureSummary ATerritoryWorldState::GetCaptureSummary(const FGameplayTag& TerritoryTag) const
@@ -348,6 +372,31 @@ FReplicatedCaptureSummary ATerritoryWorldState::GetCaptureSummary(const FGamepla
 		}
 	}
 	return FReplicatedCaptureSummary();
+}
+
+bool ATerritoryWorldState::HasContestedTerritoryBetweenFactions(
+	const FGameplayTag& FactionA, const FGameplayTag& FactionB,
+	const FGameplayTag& ExcludedTerritoryTag) const
+{
+	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB)
+	{
+		return false;
+	}
+	for (const FReplicatedCaptureSummary& Summary : ReplicatedCaptureSummaries)
+	{
+		if (Summary.State != ETerritoryState::Contested
+			|| (ExcludedTerritoryTag.IsValid()
+				&& Summary.TerritoryTag == ExcludedTerritoryTag))
+		{
+			continue;
+		}
+		if ((Summary.CurrentOwner == FactionA && Summary.ContestingFaction == FactionB)
+			|| (Summary.CurrentOwner == FactionB && Summary.ContestingFaction == FactionA))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 // ─── State Export/Import ───
@@ -880,31 +929,14 @@ void ATerritoryWorldState::OnReputationChangedLive(FGameplayTag Faction, int32 N
 void ATerritoryWorldState::OnTerritoryControlChangedLive(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
 	if (!HasAuthority() || !Territory) return;
-
-	const FGameplayTag TerrTag = Territory->GetTerritoryTag();
-
-	// Update or add capture summary
-	for (FReplicatedCaptureSummary& Summary : ReplicatedCaptureSummaries)
-	{
-		if (Summary.TerritoryTag == TerrTag)
-		{
-			Summary.CurrentOwner = NewOwner;
-			Summary.ContestingFaction = Territory->IsContested() ? OldOwner : FGameplayTag();
-			Summary.State = Territory->GetTerritoryState();
-			Summary.ControlProgress = Territory->GetControlProgress();
-			ForceNetUpdate();
-			return;
-		}
-	}
-
-	// New territory
-	FReplicatedCaptureSummary NewSummary;
-	NewSummary.TerritoryTag = TerrTag;
-	NewSummary.TerritoryGUID = Territory->GetActorGUID_Implementation();
-	NewSummary.CurrentOwner = NewOwner;
-	NewSummary.ContestingFaction = Territory->IsContested() ? OldOwner : FGameplayTag();
-	NewSummary.State = Territory->GetTerritoryState();
-	NewSummary.ControlProgress = Territory->GetControlProgress();
-	ReplicatedCaptureSummaries.Add(NewSummary);
-	ForceNetUpdate();
+	(void)OldOwner;
+	(void)NewOwner;
+	FReplicatedCaptureSummary Summary;
+	Summary.TerritoryTag = Territory->GetTerritoryTag();
+	Summary.TerritoryGUID = Territory->GetTerritoryGUID();
+	Summary.CurrentOwner = Territory->GetOwningFaction();
+	Summary.ContestingFaction = Territory->GetContestingFaction_Implementation();
+	Summary.State = Territory->GetTerritoryState();
+	Summary.ControlProgress = Territory->GetControlProgress();
+	SetCaptureSummary(Summary);
 }

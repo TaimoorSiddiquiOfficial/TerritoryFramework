@@ -3,6 +3,7 @@
 #include "Core/TerritoryGuardLifecyclePolicy.h"
 #include "Core/TerritoryGuardSpawnValidation.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryCommandTags.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -28,6 +29,7 @@
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Character/CharacterDefinition.h"
 #include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "DrawDebugHelpers.h"
@@ -160,6 +162,7 @@ void ATerritoryVolume::BeginPlay()
 		PreviousOwningFaction = OwnershipData.OwningFaction;
 		PreviousState = OwnershipData.State;
 		bReplicationInitialized = true;
+		PublishCaptureSummary();
 
 		{
 			const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
@@ -236,6 +239,25 @@ void ATerritoryVolume::ApplyInitialStateDiplomacyPolicies()
 			continue;
 		}
 		DiplomacyEvent->OnActivate(nullptr, nullptr, nullptr);
+	}
+}
+
+void ATerritoryVolume::PublishCaptureSummary()
+{
+	if (!HasAuthority()) return;
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	FReplicatedCaptureSummary Summary;
+	Summary.TerritoryTag = GetTerritoryTag();
+	Summary.TerritoryGUID = GetTerritoryGUID();
+	Summary.CurrentOwner = GetOwningFaction();
+	Summary.ContestingFaction = GetContestingFaction_Implementation();
+	Summary.ControlProgress = GetControlProgress();
+	Summary.State = GetTerritoryState();
+	for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
+	{
+		It->SetCaptureSummary(Summary);
 	}
 }
 
@@ -997,6 +1019,9 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 
 	// ─── Atomic struct write ───
 	OwnershipData = NewData;
+	// Keep the replicated World Partition read model current before state events
+	// evaluate cross-territory conflict protection.
+	PublishCaptureSummary();
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings && Settings->ShouldDebugOwnership())

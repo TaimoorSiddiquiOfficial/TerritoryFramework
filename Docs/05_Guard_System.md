@@ -60,6 +60,14 @@ Territory spawn points can define patrol routes. These are consumed by Narrative
 
 No custom Territory BT needed — thin adapter into Narrative's infrastructure.
 
+Guards using the same or overlapping route no longer all begin at `PatrolIdx 0`. Each guard's
+stable spawn/save GUID rotates its per-instance goal route to a different first node. Territory
+guards also enable server-side CharacterMovement RVO by default (`500 cm` consideration radius,
+`0.5` weight), so their blocking capsules steer around one another instead of forming a stuck
+cluster. Capsules still block players and NPCs; do not change the Pawn channel to overlap as a
+crowd workaround. Use `Get Staggered Patrol Start Index`, `Refresh Patrol Crowd Avoidance`, and
+`Is Patrol Crowd Avoidance Active` for Blueprint debugging.
+
 The public patrol getters use the inline spawn-point route when it is non-empty, otherwise
 they use the assigned `UTerritoryGuardPostDefinition` route and loop policy. Spawn-point
 selection is deterministic: higher priority fills first, a patrol-capable post wins an
@@ -152,6 +160,10 @@ wins (`Property > District > City`, then smaller bounds and stable tag order). T
 placed just outside a District can still become one of its physical guard slots when its patrol
 route enters that District. The editor validator uses the same overlap rule and no longer reports
 such a post as orphaned.
+
+Patrol overlap decides which Territory owns a post; it does not create duplicate guards or a
+second spawn system. Every unique post remains one active combat slot even when its route crosses
+several floors or overlaps another post's route.
 
 ### Staged combat placement
 

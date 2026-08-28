@@ -342,11 +342,18 @@ This returns the save-system-assigned GUID when valid. Otherwise it generates an
 | GetTerritoryPatrolRoute | TArray<FTerritoryPatrolNode> | Copy assigned patrol route |
 | HasTerritoryPatrolRoute | bool | True when an assigned route has at least two nodes |
 | GetPatrolNodeCount | int32 | Number of assigned nodes |
+| GetStaggeredPatrolStartIndex | int32 | Stable per-guard first node used to separate overlapping patrols |
+| RefreshPatrolCrowdAvoidance | void | Authority-only application of authored RVO settings |
+| IsPatrolCrowdAvoidanceActive | bool | Live CharacterMovement RVO diagnostic |
 | GetSafePatrolNode | bool | Bounds-checked node lookup |
 | GetSpawnTransform | FTransform | Stored `TerritoryHomeTransform` |
 | GetOwningTerritory | ATerritoryVolume* | Replicated owning territory |
 | GetGuardFaction | FGameplayTag | Narrative faction, including spawn overrides |
 | IsSpawnPointGuard | bool | Whether a spawn point is assigned |
+
+The native `TerritoryDiplomacyDialogue` component resolves a per-interactor dialogue from exact
+Narrative faction tags and the rich treaty. `UTerritoryDiplomacyInteractable` delegates the final
+talk/loot checks to Narrative's `UNPCInteractable`; no Narrative source modification is required.
 
 ### Behavior
 

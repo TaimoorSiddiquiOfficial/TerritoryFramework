@@ -14,6 +14,26 @@ enum class ETerritoryReputationOperation : uint8
 };
 
 /**
+ * Selects where a state-config diplomacy event gets one side of its faction pair.
+ * Dynamic sources make one reusable Place work after any number of story ownership
+ * changes instead of keeping a serialized Heroes/Bandits assumption forever.
+ */
+UENUM(BlueprintType)
+enum class ETerritoryDiplomacyFactionSource : uint8
+{
+	ExplicitTag UMETA(DisplayName="Explicit Faction Tag",
+		ToolTip="Use the Faction A/B tag below. Best for global quest events."),
+	CurrentOwningFaction UMETA(DisplayName="Current Owning Faction",
+		ToolTip="Use the containing Territory's owner after this transition. Example: the faction that just captured a Place."),
+	PreviousOwningFaction UMETA(DisplayName="Previous Owning Faction",
+		ToolTip="Use the owner immediately before this transition. Only valid while a state event is firing."),
+	ContestingFaction UMETA(DisplayName="Contesting Faction",
+		ToolTip="Use the faction currently contesting the containing Territory."),
+	TransitionRequestingFaction UMETA(DisplayName="Transition Requesting Faction",
+		ToolTip="Use the faction carried by the explicit capture, quest, or mutation context.")
+};
+
+/**
  * Changes the rich Territory treaty and synchronizes Narrative Pro's AI attitude.
  *
  * Easy example: after a betrayal quest, set Heroes and Regime to War. Regime NPCs
@@ -28,15 +48,50 @@ class TERRITORYFRAMEWORK_API UTerritorySetDiplomacyEvent : public UNarrativeEven
 public:
 	UTerritorySetDiplomacyEvent(const FObjectInitializer& ObjectInitializer);
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
-		meta=(Categories="Narrative.Factions",
-			ToolTip="First Narrative faction. Example: Narrative.Factions.Heroes."))
-	FGameplayTag FactionA;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event|Faction Resolution",
+		meta=(ToolTip="Where Faction A comes from. For a Contested state row, Current Owning Faction means the defending faction."))
+	ETerritoryDiplomacyFactionSource FactionASource =
+		ETerritoryDiplomacyFactionSource::ExplicitTag;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(Categories="Narrative.Factions",
-			ToolTip="Second Narrative faction. Example: Narrative.Factions.Bandits."))
+			ToolTip="Explicit first Narrative faction and migration fallback. Example: Narrative.Factions.Heroes."))
+	FGameplayTag FactionA;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event|Faction Resolution",
+		meta=(ToolTip="Where Faction B comes from. For a Contested state row, Contesting Faction means the attacker."))
+	ETerritoryDiplomacyFactionSource FactionBSource =
+		ETerritoryDiplomacyFactionSource::ExplicitTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(Categories="Narrative.Factions",
+			ToolTip="Explicit second Narrative faction and migration fallback. Example: Narrative.Factions.Bandits."))
 	FGameplayTag FactionB;
+
+	/**
+	 * Keeps old assets safe when a dynamic context is unavailable. For example, a
+	 * fresh level can start Claimed without having a previous transition owner.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event|Faction Resolution",
+		meta=(ToolTip="If a selected dynamic source is empty, use its Explicit Faction Tag. Recommended during migration and for initial-state policy."))
+	bool bFallbackToExplicitFactionWhenContextMissing = true;
+
+	/**
+	 * Safety filter requested for owner-based state config. Global quest events are
+	 * unaffected because they are not contained by a Territory actor.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event|Faction Resolution",
+		meta=(ToolTip="When this event is inside a Territory state config, require the post-transition owning faction to be one side of the resolved pair. This prevents an old hardcoded Heroes/Bandits row from changing diplomacy after a third faction owns the Place."))
+	bool bRequireContainingTerritoryOwner = true;
+
+	/**
+	 * A captured Place must not declare global peace while another Place is still
+	 * actively contested by the same factions.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event|Conflict Safety",
+		meta=(EditCondition="NewState != EDiplomacyState::War", EditConditionHides,
+			ToolTip="Before applying a peace-like relationship, check loaded and World Partition territory summaries. Skip the change if another Place is still contested by this pair."))
+	bool bPreserveOtherActiveTerritoryWars = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(ToolTip="New rich relationship. Territory also writes the matching Friendly, Neutral, or Hostile attitude to Narrative GameState."))
@@ -58,6 +113,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(ToolTip="Recommended for state policy. On a fresh world only, apply this diplomacy event when the Territory starts already in the configured state. Other entry events are not fired."))
 	bool bApplyWhenStateStartsActive = true;
+
+	/**
+	 * Resolves the pair that would be applied right now. This is useful in a
+	 * Blueprint debug panel and lets automated tests verify A->B->C ownership stories.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Diplomacy",
+		meta=(DisplayName="Resolve Territory Diplomacy Faction Pair"))
+	bool ResolveFactionPair(FGameplayTag& OutFactionA, FGameplayTag& OutFactionB) const;
 
 protected:
 	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
