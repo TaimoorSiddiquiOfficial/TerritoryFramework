@@ -15,6 +15,7 @@ class UTerritoryCombatDirector;
 class UTerritoryDiplomacySubsystem;
 class ATerritoryCity;
 class ATerritoryDistrict;
+class AAIController;
 
 /**
  * Global Blueprint function library for territory queries.
@@ -229,6 +230,31 @@ public:
 	/** Converts a gameplay tag into UI-friendly text without exposing the full hierarchy. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI", meta=(DisplayName="Get Friendly Tag Display Name"))
 	static FText GetFriendlyTagDisplayName(const FGameplayTag& Tag);
+
+	// ═══════════════════════════════════════════════════════════════════════════════
+	// Narrative AI Lifecycle Safety
+	// ═══════════════════════════════════════════════════════════════════════════════
+
+	/**
+	 * True only while a Narrative goal generator still has a live Activity Component,
+	 * possessed controller, and AI Perception Component. This deliberately becomes
+	 * false during death, unpossession, streaming removal, and PIE teardown.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|AI|Safety",
+		meta=(DisplayName="Can Safely Refresh Perceived Actors"))
+	static bool CanSafelyRefreshPerceivedActors(
+		const UObject* GoalGenerator, const AAIController* OwnerController);
+
+	/**
+	 * Adapter for project-owned children of Narrative's GoalGenerator_Attack.
+	 * Call this from the child's RefreshPerceivedActors override. The inherited
+	 * implementation runs only when its cached controller and perception component
+	 * are safe; otherwise the late callback is ignored without touching Narrative.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|AI|Safety",
+		meta=(DisplayName="Refresh Parent Perceived Actors Safely"))
+	static bool RefreshParentPerceivedActorsSafely(
+		UObject* GoalGenerator, AAIController* OwnerController);
 
 	// ═══════════════════════════════════════════════════════════════════════════════
 	// Narrative Pro Faction Bridge

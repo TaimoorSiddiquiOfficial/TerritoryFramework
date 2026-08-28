@@ -39,9 +39,28 @@ Add `UTerritoryFactionResourceAccountComponent` to a server-owned actor that res
 
 Registration is runtime routing only. It is intentionally not persisted as an actor pointer. The account must register again after respawn or World Partition streaming.
 
+For a normal single-player game, explicit setup is optional. When
+`Use Sole Online Faction Player Inventory` is enabled and exactly one online Narrative player
+belongs to the Property's owning faction, every produced `UNarrativeItem` is added to that
+player's Narrative inventory. An explicitly registered account always wins.
+
+Multiplayer remains deliberate and safe. If two or more online players belong to the owner
+faction, automatic item routing stops instead of choosing a player or duplicating the reward.
+Add `UTerritoryFactionResourceAccountComponent` to the faction's shared depot, leader, or other
+chosen Narrative inventory actor.
+
+Example: the Heroes player captures a Farm that produces Grain. The next completed production
+cycle adds Grain to the player's existing Narrative inventory. If Bandits recapture the Farm,
+Heroes keep Grain already earned but receive no more Grain. The Bandit owner begins earning on
+the next cycle; capture never creates a catch-up payment for either faction.
+
 ## Daily settlement
 
 The default cycle length is `2400` Narrative accumulated-time units, matching one Narrative day. A new site, a changed profile, or a changed owner checkpoints at the current cycle and begins on the next cycle; capture never grants retroactive resources.
+
+Ownership loss is an immediate production boundary. The authoritative control transaction
+refreshes and republishes the site record in the same transition, so the old faction cannot earn
+another cycle and clients do not continue showing the old owner until the economy timer runs.
 
 For each pending day:
 

@@ -12,6 +12,7 @@
 #include "Items/AmmoItem.h"
 #include "Items/InventoryComponent.h"
 #include "Items/NarrativeItem.h"
+#include "UnrealFramework/NarrativePlayerCharacter.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryProductionProfileBehaviorTest,
 	"TerritoryFramework.Production.Behavior.ProfileValidationAndScaling",
@@ -142,6 +143,27 @@ bool FTerritoryProductionInventoryTransactionTest::RunTest(const FString& Parame
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryProductionResourceRoutingTest,
+	"TerritoryFramework.Production.Behavior.SinglePlayerInventoryRouting",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryProductionResourceRoutingTest::RunTest(const FString& Parameters)
+{
+	TArray<ANarrativePlayerCharacter*> Players;
+	TestNull(TEXT("No online player provides no implicit resource account"),
+		UTerritoryEconomySubsystem::SelectSoleOnlineResourceAccount(Players));
+
+	ANarrativePlayerCharacter* First = NewObject<ANarrativePlayerCharacter>();
+	Players.Add(First);
+	TestEqual(TEXT("The sole Narrative player inventory is the deterministic single-player account"),
+		UTerritoryEconomySubsystem::SelectSoleOnlineResourceAccount(Players), First);
+
+	Players.Add(NewObject<ANarrativePlayerCharacter>());
+	TestNull(TEXT("Multiple faction players require an explicit shared resource account"),
+		UTerritoryEconomySubsystem::SelectSoleOnlineResourceAccount(Players));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryProductionReflectionContractTest,
 	"TerritoryFramework.Production.Contract.AuthoritySaveReplicationBlueprint",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -152,9 +174,11 @@ bool FTerritoryProductionReflectionContractTest::RunTest(const FString& Paramete
 	const UFunction* RegisterAccount = EconomyClass->FindFunctionByName(TEXT("RegisterFactionResourceAccount"));
 	const UFunction* ProcessProduction = EconomyClass->FindFunctionByName(TEXT("ProcessResourceProduction"));
 	const UFunction* ExecuteRecipe = EconomyClass->FindFunctionByName(TEXT("ExecuteResourceRecipe"));
+	const UFunction* GetResourceAccount = EconomyClass->FindFunctionByName(TEXT("GetFactionResourceAccount"));
 	TestNotNull(TEXT("Resource account registration is exposed"), RegisterAccount);
 	TestNotNull(TEXT("Production processing is exposed"), ProcessProduction);
 	TestNotNull(TEXT("Crafting-compatible recipe transaction is exposed"), ExecuteRecipe);
+	TestNotNull(TEXT("The effective Narrative item recipient is inspectable"), GetResourceAccount);
 	if (RegisterAccount)
 	{
 		TestTrue(TEXT("Resource account registration is authority-only"),
@@ -183,6 +207,8 @@ bool FTerritoryProductionReflectionContractTest::RunTest(const FString& Paramete
 	TestNotNull(TEXT("Resource routing exposes bounded retry configuration"),
 		UTerritoryFactionResourceAccountComponent::StaticClass()->FindPropertyByName(
 			TEXT("MaxRegistrationAttempts")));
+	TestNotNull(TEXT("Single-player automatic resource routing is an authored policy"),
+		EconomyClass->FindPropertyByName(TEXT("bUseSoleOnlineFactionPlayerInventory")));
 	const UFunction* BuildProductionView =
 		UTerritoryUIBlueprintLibrary::StaticClass()->FindFunctionByName(
 			TEXT("BuildProductionSiteOperationsView"));

@@ -872,10 +872,31 @@ AActor* UTerritoryEconomySubsystem::ResolveRegisteredResourceAccount(
 		? Account : nullptr;
 }
 
+ANarrativePlayerCharacter* UTerritoryEconomySubsystem::SelectSoleOnlineResourceAccount(
+	const TArray<ANarrativePlayerCharacter*>& Players)
+{
+	return Players.Num() == 1 && IsAutomaticPlayerCurrencyAccount(Players[0])
+		? Players[0] : nullptr;
+}
+
+AActor* UTerritoryEconomySubsystem::GetFactionResourceAccount(
+	const FGameplayTag& Faction) const
+{
+	if (AActor* Registered = ResolveRegisteredResourceAccount(Faction))
+	{
+		return Registered;
+	}
+	if (!bUseSoleOnlineFactionPlayerInventory)
+	{
+		return nullptr;
+	}
+	return SelectSoleOnlineResourceAccount(GetOnlineFactionPlayers(Faction));
+}
+
 UNarrativeInventoryComponent* UTerritoryEconomySubsystem::ResolveResourceInventory(
 	const FGameplayTag& Faction) const
 {
-	return ResolveCurrencyAccount(ResolveRegisteredResourceAccount(Faction));
+	return ResolveCurrencyAccount(GetFactionResourceAccount(Faction));
 }
 
 int64 UTerritoryEconomySubsystem::GetCurrentProductionCycle() const
@@ -1671,6 +1692,10 @@ void UTerritoryEconomySubsystem::OnTerritoryControlChanged(ATerritoryVolume* Ter
 	if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
 	{
 		RefreshProductionSite(Property);
+		// Ownership and checkpoint reset must reach the replicated WorldState in the
+		// same atomic transition. Waiting for the next economy timer would let clients
+		// and late joiners display the former faction as still earning this Property.
+		PublishProductionState();
 	}
 }
 
@@ -1688,6 +1713,7 @@ void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territo
 	if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
 	{
 		RefreshProductionSite(Property);
+		PublishProductionState();
 	}
 
 	// Recalculate income for the owning faction
@@ -1704,6 +1730,7 @@ void UTerritoryEconomySubsystem::OnTerritoryUnregistered(ATerritoryVolume* Terri
 	if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
 	{
 		RefreshProductionSite(Property);
+		PublishProductionState();
 	}
 
 	// Unbind the control-changed delegate to prevent dangling references

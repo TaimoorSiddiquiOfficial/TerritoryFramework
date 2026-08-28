@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — 2026-08-28 (Attack-goal teardown safety and Place resource ownership)
+
+- Added a project-owned lifecycle guard around Narrative's inherited
+  `GoalGenerator_Attack.RefreshPerceivedActors`. A late death, faction-update, streaming, or PIE
+  teardown callback now exits before reading a missing/pending-kill controller or AI Perception
+  Component; live callbacks still run Narrative's original graph.
+- Kept the integration upgrade-safe: Territory guard and assault configurations use the
+  project child Blueprint, while Narrative Pro source and content remain unchanged.
+- Routed Place production to the sole online owning-faction player's Narrative inventory in
+  single-player when no explicit faction resource account is registered. Multiplayer remains
+  fail-closed until the developer registers one shared depot/leader account.
+- Republished production ownership immediately on capture, loss, registration, and streaming
+  removal. The previous owner keeps already-earned items but cannot receive future cycles; the
+  new owner starts on the next cycle without a retroactive capture payout.
+- Passed all 133 TerritoryFramework automation tests and a `HopDistrictTest` PIE regression that
+  destroyed a real Narrative guard controller and invoked the attack perception refresh with
+  zero Blueprint Runtime Error, Accessed None, pending-kill, or perception-component failures.
+
 ## Unreleased — 2026-08-28 (Owner-relative state diplomacy, guard crowds, and dialogue)
 
 - Added dynamic state-event faction sources: explicit tag, current owner, previous owner,

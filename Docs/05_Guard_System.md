@@ -190,6 +190,19 @@ deployment with camera avoidance is the sole path allowed to select a nearby con
 
 On save, each guard post records reserves, pending deployments, and its finite active count. Load recreates only the saved survivors (or uses the bounded legacy aggregate defender count for older saves); pawn health/activity and live pointers are intentionally not persisted.
 
+## Narrative attack-goal lifecycle safety
+
+Territory guard and assault activity configurations use the project-owned
+`GoalGenerator_Hop_Attack`, which is a child of Narrative Pro's attack goal generator. Its
+`RefreshPerceivedActors` override first validates the cached controller, possessed pawn,
+Narrative Activity Component, and AI Perception Component. It calls Narrative's inherited
+refresh only while that complete live relationship is valid.
+
+Death, controller cleanup, World Partition removal, and PIE teardown may leave a queued faction
+or perception callback after the Narrative controller is already pending kill. The adapter
+ignores that late callback. It does not replace Narrative perception or attack selection, and no
+Narrative Pro vendor Blueprint or source file is modified.
+
 ## Debug
 
 Enable in Project Settings → Territory Framework:

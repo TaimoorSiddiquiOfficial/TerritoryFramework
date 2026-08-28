@@ -136,6 +136,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	FTerritoryFactionResourceSnapshot GetFactionResourceSnapshot(const FGameplayTag& Faction) const;
 
+	/**
+	 * Return the live actor whose Narrative inventory receives this faction's
+	 * produced items. An explicitly registered resource account wins. In a
+	 * single-player faction, the sole online Narrative player can be used as the
+	 * unambiguous fallback when enabled below.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
+	AActor* GetFactionResourceAccount(const FGameplayTag& Faction) const;
+
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	TArray<FTerritoryProductionSiteRecord> GetProductionSitesForFaction(const FGameplayTag& Faction) const;
 
@@ -226,6 +235,18 @@ public:
 		meta=(ClampMin="1.0"))
 	float ProductionCycleLength = 2400.f;
 
+	/**
+	 * When no Territory Faction Resource Account component is registered and
+	 * exactly one online Narrative player belongs to the owning faction, route
+	 * produced UNarrativeItem instances into that player's inventory. Multiple
+	 * matching players remain fail-closed: register one explicit shared account
+	 * so multiplayer ownership cannot duplicate or arbitrarily award resources.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory|Economy|Resources",
+		meta=(DisplayName="Use Sole Online Faction Player Inventory",
+			ToolTip="Example: In single-player, a Heroes-owned Farm sends Grain directly to the one Heroes player's Narrative inventory. In multiplayer with two Heroes players, add Territory Faction Resource Account to the chosen shared depot or leader."))
+	bool bUseSoleOnlineFactionPlayerInventory = true;
+
 	/** Maximum missed campaign days processed during one evaluation after load or time advance. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory|Economy|Resources",
 		meta=(ClampMin="1", ClampMax="365"))
@@ -234,6 +255,7 @@ public:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTerritoryProductionInventoryTransactionTest;
+	friend class FTerritoryProductionResourceRoutingTest;
 #endif
 
 	UPROPERTY(SaveGame)
@@ -278,6 +300,8 @@ private:
 		ETerritoryIncomePayoutPolicy AccountRole) const;
 	AActor* ResolveFallbackFactionAccount(const FGameplayTag& Faction) const;
 	AActor* ResolveRegisteredResourceAccount(const FGameplayTag& Faction) const;
+	static ANarrativePlayerCharacter* SelectSoleOnlineResourceAccount(
+		const TArray<ANarrativePlayerCharacter*>& Players);
 	UNarrativeInventoryComponent* ResolveResourceInventory(const FGameplayTag& Faction) const;
 	int64 GetCurrentProductionCycle() const;
 	static FString MakeProductionCheckpointKey(const FGuid& TerritoryGUID,

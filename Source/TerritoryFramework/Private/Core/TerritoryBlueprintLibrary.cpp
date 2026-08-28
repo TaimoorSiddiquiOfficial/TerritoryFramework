@@ -6,6 +6,9 @@
 #include "Combat/TerritoryCombatDirector.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
+#include "AIController.h"
+#include "Perception/AIPerceptionComponent.h"
+#include "AI/Activities/NPCActivityComponent.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -267,6 +270,52 @@ FText UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(const FGameplayTag& 
 	}
 
 	return FText::FromString(FriendlyName);
+}
+
+bool UTerritoryBlueprintLibrary::CanSafelyRefreshPerceivedActors(
+	const UObject* GoalGenerator, const AAIController* OwnerController)
+{
+	if (!IsValid(GoalGenerator) || !IsValid(OwnerController)
+		|| OwnerController->IsActorBeingDestroyed())
+	{
+		return false;
+	}
+
+	const APawn* ControlledPawn = OwnerController->GetPawn();
+	const UAIPerceptionComponent* Perception =
+		OwnerController->GetAIPerceptionComponent();
+	const UNPCActivityComponent* ActivityComponent =
+		Cast<UNPCActivityComponent>(GoalGenerator->GetOuter());
+	return IsValid(ControlledPawn)
+		&& IsValid(Perception)
+		&& Perception->GetOwner() == OwnerController
+		&& IsValid(ActivityComponent)
+		&& ActivityComponent->IsActive()
+		&& ActivityComponent->GetOwner() == ControlledPawn;
+}
+
+bool UTerritoryBlueprintLibrary::RefreshParentPerceivedActorsSafely(
+	UObject* GoalGenerator, AAIController* OwnerController)
+{
+	if (!CanSafelyRefreshPerceivedActors(GoalGenerator, OwnerController))
+	{
+		return false;
+	}
+
+	static const FName RefreshFunctionName(TEXT("RefreshPerceivedActors"));
+	UFunction* OverrideFunction = GoalGenerator->FindFunction(RefreshFunctionName);
+	UFunction* ParentFunction = OverrideFunction
+		? OverrideFunction->GetSuperFunction() : nullptr;
+	if (!ParentFunction || ParentFunction == OverrideFunction
+		|| ParentFunction->ParmsSize != 0)
+	{
+		return false;
+	}
+
+	// Invoke the exact inherited Blueprint bytecode rather than ProcessEvent by name,
+	// which would dispatch back into this project-owned override and recurse.
+	GoalGenerator->ProcessEvent(ParentFunction, nullptr);
+	return true;
 }
 
 // ─── Narrative Pro Faction Bridge ───
