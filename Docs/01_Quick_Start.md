@@ -38,7 +38,8 @@ code never searches for these names.
 6. Assign project Blueprint classes and use `Synchronize Territory City In Current Level`.
 7. Resize each placed actor's `BoundsShape` to cover its gameplay area.
 
-See [Territory Definition Assets](21_Definition_Assets.md) for duplication and legacy-map migration.
+See [Territory Definition Assets](21_Definition_Assets.md) for safe hierarchy duplication and
+strict Data Asset authority.
 
 Do not directly capture an aggregate District or City. Capturing all required Places reduces the District owner; capturing all required Districts reduces the City owner through the existing hierarchy authority.
 
@@ -46,16 +47,16 @@ Do not directly capture an aggregate District or City. Capturing all required Pl
 
 For multiplayer/domination:
 
-1. Place `BP_TerritoryCapturePoint` at each capturable Place.
-2. Set `TargetTerritoryTag` to the exact independent Property tag.
-3. Set `CaptureRadius` to the intended physical zone.
+1. Enable `Capture Point` in the Place Definition.
+2. Select the project Capture Point Blueprint and set its relative placement/radius in the asset.
+3. Synchronize the City. The placed point receives its exact Place tag from the asset.
 
 For story capture:
 
-1. Enable `Story Capture From Territory Bounds` on the Place.
+1. Enable `Story Capture From Bounds` on the Place Definition.
 2. Resize its `Bounds Shape` to cover every playable floor of the location.
-3. Configure `On All Defenders Defeated Events` to activate a Blueprint child of
-   `ATerritoryStoryOwnerSpawner`, then let the owner's Narrative dialogue perform capture.
+3. Enable/configure the Story Owner template and add an Owner Handover Event to the Definition's
+   `All Defenders Defeated Events`. The owner's Narrative dialogue performs capture.
 
 Story-bounds mode starts `Contested` anywhere inside the Place but never fills capture
 progress. It automatically disables and hides any Capture Point targeting that Place, so
@@ -67,13 +68,11 @@ ownership directly.
 
 ## Step 5: Place Guard Spawn Points
 
-1. Drag `BP_GuardSpawnPoint` into level inside the territory bounds
-2. In Details panel:
-   - **Owner Territory Tag**: `Territory.HavenReach.MarketSquare`
-   - **Reserve Slots**: 1
-   - **Patrol Route**: Add 3-4 waypoints around the district
+1. Add one Guard Post row per active guard slot to the Territory Definition.
+2. Give every row a stable ID, project Blueprint class, relative placement, reserves, and patrol.
+3. Synchronize the City. The placed post keeps only its Definition link and Guard Post row ID.
 
-Each spawn-point actor is one active guard slot. The legacy `MaxGuards` property is ignored; place multiple authored posts for multiple active guards.
+Each spawned Guard Post actor is one active guard slot. Add more rows for more simultaneous guards.
 
 ## Step 6: Place Persistence Actor
 

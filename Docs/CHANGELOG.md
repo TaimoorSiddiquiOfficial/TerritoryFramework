@@ -8,13 +8,27 @@
   economy, guard posts/patrols/reserves, and counterattack authoring behind one definition reference.
 - Kept placed `ATerritoryVolume` actors as runtime owner/state/progress authority and Narrative Pro
   as faction, NPC, Tales, dialogue, inventory, activity, TriggerSet, and navigation authority.
-- Added bounded legacy migration that preserves save GUIDs, deep-copies instanced Narrative objects,
-  replaces supported direct level-actor event references with stable tags, and flattens effective
-  guard-post profiles into standalone rows.
+- Completed the legacy-to-Definition migration: removed actor-side state/defender-event authoring,
+  old lock fields, copy/migrate APIs, direct Story Owner level references, and project Blueprint
+  interface overrides. Missing Definitions now fail closed instead of reading stale Blueprint data.
+- Definition-owned Narrative conditions/events are immutable templates. Every live Territory now
+  owns private runtime clones, giving diplomacy, owner handover, waves, inventory, and other events
+  the correct World and Territory transition context.
+- Owner handover now resolves its configured Story Owner only through the stable Territory tag,
+  keeping the flow safe across level streaming and World Partition.
 - Added an editor synchronizer that links existing actors and can create missing project Blueprint
   actors from relative templates without placing raw C++ classes or moving existing actors by default.
 - Added validation for hierarchy identity, Blueprint class compatibility, helper settings, patrols,
   finite reserve limits, and story-owner Narrative requirements, plus community-facing setup docs.
+- Removed the sample City, District, and Place EventGraph overrides after verifying they were only
+  disabled defaults, parent-only forwarding, or disconnected legacy capture nodes. Their Blueprint
+  classes now provide bounds/presentation while C++ and the linked Definition assets own gameplay.
+- Fixed server-world diplomacy mutations that previously no-op'd when a valid authoritative world
+  did not yet have an authoritative GameMode, and added live runtime execution coverage.
+- Passed all 144 TerritoryFramework automation tests. A `HopDistrictTest` PIE regression killed all
+  Blacksmith defenders through Narrative Pro's death API and verified the DataAsset handover event
+  spawned the protected owner with no Blueprint Runtime Error, `Accessed None`, legacy fallback, or
+  handover failure.
 
 ## Unreleased — 2026-08-29 (Exact-target Narrative unlock and generic faction defaults)
 

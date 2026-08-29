@@ -27,7 +27,6 @@ void UTerritoryOwnerHandoverEvent::ExecuteEvent_Implementation(APawn* Target,
 	// never make world resolution depend on a player context being present.
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
-	if (!World && IsValid(OwnerSpawner)) World = OwnerSpawner->GetWorld();
 	if (!World || World->GetNetMode() == NM_Client)
 	{
 		return;
@@ -45,11 +44,6 @@ void UTerritoryOwnerHandoverEvent::ExecuteEvent_Implementation(APawn* Target,
 			}
 		}
 	}
-	if (!IsValid(ResolvedSpawner) && IsValid(OwnerSpawner))
-	{
-		ResolvedSpawner = OwnerSpawner;
-	}
-
 	if (!IsValid(ResolvedSpawner))
 	{
 		UE_LOG(LogTemp, Warning,

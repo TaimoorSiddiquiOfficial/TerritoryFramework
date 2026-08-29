@@ -101,6 +101,13 @@ namespace TFTestUtils
 		return Prop && Prop->HasAnyPropertyFlags(CPF_SaveGame);
 	}
 
+	static bool IsEditorReadOnly(const UClass* Class, const FString& PropertyName)
+	{
+		if (!Class) return false;
+		const FProperty* Prop = Class->FindPropertyByName(FName(*PropertyName));
+		return Prop && Prop->HasAnyPropertyFlags(CPF_EditConst);
+	}
+
 	static bool IsBlueprintCallable(const UClass* Class, const FString& FunctionName)
 	{
 		if (!Class) return false;
@@ -182,26 +189,28 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("CanSetDesiredGuardCount")));
 	TestTrue(TEXT("Absolute target mutation is server-authority-only"),
 		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("TrySetDesiredGuardCount")));
-	const FProperty* LegacyStartsLocked = Class->FindPropertyByName(TEXT("bStartsLocked"));
-	TestNotNull(TEXT("Legacy StartsLocked data remains loadable for migration"), LegacyStartsLocked);
-	if (LegacyStartsLocked)
-	{
-		TestFalse(TEXT("Legacy StartsLocked is hidden from new details authoring"),
-			LegacyStartsLocked->HasAnyPropertyFlags(CPF_Edit));
-		TestFalse(TEXT("Legacy StartsLocked is hidden from new Blueprint graphs"),
-			LegacyStartsLocked->HasAnyPropertyFlags(CPF_BlueprintVisible));
-	#if WITH_METADATA
-		TestTrue(TEXT("Legacy StartsLocked is marked deprecated"),
-			LegacyStartsLocked->HasMetaData(TEXT("DeprecatedProperty")));
-	#endif
-	}
-	const FProperty* LegacyLockConditions = Class->FindPropertyByName(TEXT("LockConditions"));
-	TestNotNull(TEXT("Legacy LockConditions data remains loadable for migration"), LegacyLockConditions);
-	if (LegacyLockConditions)
-	{
-		TestFalse(TEXT("Legacy LockConditions is hidden from new details authoring"),
-			LegacyLockConditions->HasAnyPropertyFlags(CPF_Edit));
-	}
+	TestNull(TEXT("Legacy Starts Locked actor property was removed"),
+		Class->FindPropertyByName(TEXT("bStartsLocked")));
+	TestNull(TEXT("Legacy Lock Conditions actor property was removed"),
+		Class->FindPropertyByName(TEXT("LockConditions")));
+	TestNull(TEXT("Inline State Config authoring was removed from Territory actors"),
+		Class->FindPropertyByName(TEXT("StateConfigs")));
+	TestNull(TEXT("Inline defender event authoring was removed from Territory actors"),
+		Class->FindPropertyByName(TEXT("DefenderDiedEvents")));
+	TestNull(TEXT("Inline all-defenders event authoring was removed from Territory actors"),
+		Class->FindPropertyByName(TEXT("AllDefendersDefeatedEvents")));
+	TestNotNull(TEXT("Territory Definition is the single authoring property"),
+		Class->FindPropertyByName(TEXT("TerritoryDefinition")));
+	TestTrue(TEXT("Applied Territory identity cannot be overridden on the actor"),
+		TFTestUtils::IsEditorReadOnly(Class, TEXT("TerritoryTag")));
+	TestTrue(TEXT("Applied Territory state seed cannot be overridden on the actor"),
+		TFTestUtils::IsEditorReadOnly(Class, TEXT("InitialState")));
+	TestTrue(TEXT("Applied guard policy cannot be overridden on the actor"),
+		TFTestUtils::IsEditorReadOnly(Class, TEXT("GuardSpawnCount")));
+	TestNull(TEXT("Ignored legacy maximum guard field was removed"),
+		Class->FindPropertyByName(TEXT("MaxGuardCount")));
+	TestNull(TEXT("Ignored legacy random guard radius was removed"),
+		Class->FindPropertyByName(TEXT("GuardSpawnRadius")));
 	TestNotNull(TEXT("State configs expose one authoritative ExitConditions array"),
 		FTerritoryStateConfig::StaticStruct()->FindPropertyByName(TEXT("ExitConditions")));
 	TestTrue(TEXT("Has ParentTerritoryTag property"), TFTestUtils::HasProperty(Class, TEXT("ParentTerritoryTag")));
@@ -262,24 +271,22 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryInitialStateMigration,
-	"TerritoryFramework.State.InitialStateMigration",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryInitialStateDefinition,
+	"TerritoryFramework.State.DefinitionInitialState",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FTFTerritoryInitialStateMigration::RunTest(const FString& Parameters)
+bool FTFTerritoryInitialStateDefinition::RunTest(const FString& Parameters)
 {
-	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
+	ATerritoryVolume* Territory = NewObject<ATerritoryProperty>();
 	TestNotNull(TEXT("Initial-state test territory created"), Territory);
 	if (!Territory) return false;
 
 	const UClass* Class = Territory->GetClass();
 	FEnumProperty* InitialStateProperty = FindFProperty<FEnumProperty>(Class, TEXT("InitialState"));
 	FStructProperty* InitialOwnerProperty = FindFProperty<FStructProperty>(Class, TEXT("InitialOwningFaction"));
-	FBoolProperty* LegacyLockedProperty = FindFProperty<FBoolProperty>(Class, TEXT("bStartsLocked"));
 	TestNotNull(TEXT("Initial State enum is reflected"), InitialStateProperty);
 	TestNotNull(TEXT("Initial Owning Faction is reflected"), InitialOwnerProperty);
-	TestNotNull(TEXT("Legacy Starts Locked remains readable"), LegacyLockedProperty);
-	if (!InitialStateProperty || !InitialOwnerProperty || !LegacyLockedProperty) return false;
+	if (!InitialStateProperty || !InitialOwnerProperty) return false;
 
 	auto SetInitialState = [Territory, InitialStateProperty](ETerritoryInitialState State)
 	{
@@ -302,17 +309,12 @@ bool FTFTerritoryInitialStateMigration::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Automatic with an owner starts claimed"),
 		Territory->ResolveInitialTerritoryState(), ETerritoryState::Claimed);
 
-	LegacyLockedProperty->SetPropertyValue_InContainer(Territory, true);
-	TestEqual(TEXT("An old Starts Locked asset remains locked after migration"),
-		Territory->ResolveInitialTerritoryState(), ETerritoryState::Locked);
-	Territory->MigrateLegacyLockSettings();
-	TestFalse(TEXT("The editor migration clears the hidden legacy boolean"),
-		LegacyLockedProperty->GetPropertyValue_InContainer(Territory));
-	TestEqual(TEXT("The editor migration writes the visible Locked option"),
+	SetInitialState(ETerritoryInitialState::Locked);
+	TestEqual(TEXT("The Definition's explicit Locked state starts locked"),
 		Territory->ResolveInitialTerritoryState(), ETerritoryState::Locked);
 
 	SetInitialState(ETerritoryInitialState::Unclaimed);
-	TestEqual(TEXT("An explicit new setting overrides legacy Starts Locked"),
+	TestEqual(TEXT("The Definition's explicit Unclaimed state starts unclaimed"),
 		Territory->ResolveInitialTerritoryState(), ETerritoryState::Unclaimed);
 
 	SetInitialState(ETerritoryInitialState::Claimed);
@@ -328,7 +330,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryStateTransitionConditions,
 
 bool FTFTerritoryStateTransitionConditions::RunTest(const FString& Parameters)
 {
-	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
+	ATerritoryVolume* Territory = NewObject<ATerritoryProperty>();
 	TestNotNull(TEXT("State-transition test territory created"), Territory);
 	if (!Territory) return false;
 
@@ -336,38 +338,45 @@ bool FTFTerritoryStateTransitionConditions::RunTest(const FString& Parameters)
 		TEXT("Narrative.Factions.Heroes"), false);
 	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
 		TEXT("Narrative.Factions.Bandits"), false);
+	UTerritoryPlaceDefinition* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Definition->StableTerritoryGUID = FGuid::NewGuid();
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	UTerritoryOwnershipCondition* AlwaysFail =
+		NewObject<UTerritoryOwnershipCondition>(Definition);
+	TestNotNull(TEXT("A Narrative condition was created"), AlwaysFail);
+	if (!Definition || !AlwaysFail) return false;
+	Definition->StateConfigs.FindOrAdd(ETerritoryState::Claimed)
+		.ExitConditions.Add(AlwaysFail);
+	Definition->StateConfigs.FindOrAdd(ETerritoryState::Locked)
+		.ExitConditions.Add(AlwaysFail);
+	TestTrue(TEXT("Definition applies atomic state rules to its runtime actor"),
+		Definition->ApplyToTerritory(Territory));
+
 	Territory->SetOwningFaction(Heroes);
 	TestEqual(TEXT("Test territory begins claimed by Heroes"),
 		Territory->GetTerritoryState(), ETerritoryState::Claimed);
 
-	FMapProperty* ConfigProperty = FindFProperty<FMapProperty>(
-		Territory->GetClass(), TEXT("StateConfigs"));
-	FArrayProperty* LegacyConditionsProperty = FindFProperty<FArrayProperty>(
-		Territory->GetClass(), TEXT("LockConditions"));
-	TestNotNull(TEXT("State configuration map is reflected"), ConfigProperty);
-	TestNotNull(TEXT("Legacy lock conditions remain reflected"), LegacyConditionsProperty);
-	if (!ConfigProperty || !LegacyConditionsProperty) return false;
+	UTerritoryOwnershipCondition* ClaimedGate = Cast<UTerritoryOwnershipCondition>(
+		Territory->GetStateConfigs().FindChecked(ETerritoryState::Claimed)
+			.ExitConditions[0]);
+	UTerritoryOwnershipCondition* LockedGate = Cast<UTerritoryOwnershipCondition>(
+		Territory->GetStateConfigs().FindChecked(ETerritoryState::Locked)
+			.ExitConditions[0]);
+	TestNotNull(TEXT("Claimed gate was cloned into the Territory"), ClaimedGate);
+	TestNotNull(TEXT("Locked gate was cloned into the Territory"), LockedGate);
+	if (!ClaimedGate || !LockedGate) return false;
 
-	TMap<ETerritoryState, FTerritoryStateConfig>* Configs =
-		ConfigProperty->ContainerPtrToValuePtr<TMap<ETerritoryState, FTerritoryStateConfig>>(Territory);
-	TArray<TObjectPtr<UNarrativeCondition>>* LegacyConditions =
-		LegacyConditionsProperty->ContainerPtrToValuePtr<TArray<TObjectPtr<UNarrativeCondition>>>(Territory);
-	UTerritoryOwnershipCondition* AlwaysFail =
-		NewObject<UTerritoryOwnershipCondition>(Territory);
-	TestNotNull(TEXT("A Narrative condition was created"), AlwaysFail);
-	if (!AlwaysFail) return false;
-
-	Configs->FindOrAdd(ETerritoryState::Claimed).ExitConditions.Add(AlwaysFail);
 	Territory->SetTerritoryState(ETerritoryState::Contested);
 	TestEqual(TEXT("A failed exit condition blocks the atomic state change"),
 		Territory->GetTerritoryState(), ETerritoryState::Claimed);
-	AlwaysFail->bNot = true;
+	ClaimedGate->bNot = true;
 	Territory->SetTerritoryState(ETerritoryState::Contested);
 	TestEqual(TEXT("Narrative Not inverts a State Config condition"),
 		Territory->GetTerritoryState(), ETerritoryState::Contested);
-	AlwaysFail->bNot = false;
 
-	Configs->FindOrAdd(ETerritoryState::Locked).ExitConditions.Add(AlwaysFail);
+	LockedGate->bNot = false;
 	Territory->ForceSetTerritoryState(ETerritoryState::Locked);
 	Territory->SetOwningFaction(Bandits);
 	TestEqual(TEXT("Changing owner cannot silently bypass a Locked exit condition"),
@@ -378,21 +387,6 @@ bool FTFTerritoryStateTransitionConditions::RunTest(const FString& Parameters)
 		Territory->TryUnlock(false));
 	TestTrue(TEXT("Explicit forced unlock remains available to trusted quest/save code"),
 		Territory->TryUnlock(true));
-
-	// Migration path: when no new Locked exit rules exist, old LockConditions remain
-	// authoritative until the asset is resaved with the new State Config.
-	Configs->FindChecked(ETerritoryState::Locked).ExitConditions.Empty();
-	LegacyConditions->Add(AlwaysFail);
-	Territory->ForceSetTerritoryState(ETerritoryState::Locked);
-	TestFalse(TEXT("Legacy LockConditions still block unlock after loading an old asset"),
-		Territory->TryUnlock(false));
-	TestTrue(TEXT("Legacy migration path still supports an explicit forced unlock"),
-		Territory->TryUnlock(true));
-	Territory->MigrateLegacyLockSettings();
-	TestTrue(TEXT("The editor migration clears legacy LockConditions"),
-		LegacyConditions->IsEmpty());
-	TestEqual(TEXT("The exact legacy Narrative condition moves to Locked Exit Conditions"),
-		Configs->FindChecked(ETerritoryState::Locked).ExitConditions.Num(), 1);
 	return true;
 }
 
@@ -444,8 +438,8 @@ bool FTFTerritoryUnlockNarrativeEventRegression::RunTest(const FString& Paramete
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.ObjectFlags |= RF_Transient;
-	ATerritoryVolume* Territory = World->SpawnActor<ATerritoryVolume>(
-		ATerritoryVolume::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryVolume* Territory = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
 	APawn* EventTarget = World->SpawnActor<APawn>(
 		APawn::StaticClass(), FTransform::Identity, SpawnParams);
 	TestNotNull(TEXT("Locked Territory created"), Territory);
@@ -951,9 +945,9 @@ bool FTFContract_CaptureEvent::RunTest(const FString& Parameters)
 	const UClass* HandoverEventClass = UTerritoryOwnerHandoverEvent::StaticClass();
 	TestTrue(TEXT("Owner handover derives from Narrative Event"),
 		HandoverEventClass->IsChildOf(UNarrativeEvent::StaticClass()));
-	TestTrue(TEXT("Owner handover has a direct Narrative spawner reference"),
+	TestFalse(TEXT("Reusable owner handovers cannot serialize a level-actor reference"),
 		TFTestUtils::HasProperty(HandoverEventClass, TEXT("OwnerSpawner")));
-	TestTrue(TEXT("Owner handover has a stable Territory tag fallback"),
+	TestTrue(TEXT("Owner handover resolves only through a stable Territory tag"),
 		TFTestUtils::HasProperty(HandoverEventClass, TEXT("OwnerTerritoryTag")));
 
 	const UClass* OwnerSpawnerClass = ATerritoryStoryOwnerSpawner::StaticClass();
@@ -3579,11 +3573,14 @@ bool FTFTerritoryDefinitionHierarchyAndApplication::RunTest(const FString& Param
 		Property->GetConfiguredGuardCount(), 2);
 	const FTerritoryStateConfig* EffectiveClaimed =
 		Property->GetStateConfigs().Find(ETerritoryState::Claimed);
-	TestTrue(TEXT("Actor reads Narrative state rules directly from its asset"),
+	TestTrue(TEXT("Actor executes a private runtime clone of the asset's Narrative rule"),
 		EffectiveClaimed && EffectiveClaimed->EntryEvents.Num() == 1
-			&& EffectiveClaimed->EntryEvents[0] == Claimed.EntryEvents[0]);
+			&& EffectiveClaimed->EntryEvents[0] != Claimed.EntryEvents[0]
+			&& EffectiveClaimed->EntryEvents[0]->GetOuter() == Property);
 
 	ATerritoryDistrict* WrongActor = NewObject<ATerritoryDistrict>();
+	AddExpectedError(TEXT("is not compatible with actor"),
+		EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Place Definition rejects a District actor"),
 		Place->ApplyToTerritory(WrongActor));
 	return true;
@@ -3683,97 +3680,148 @@ bool FTFTerritoryDefinitionAuxiliaryActors::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryDefinitionLegacyMigration,
-	"TerritoryFramework.Definition.LegacyActorMigration",
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryDefinitionRuntimeNarrative,
+	"TerritoryFramework.Definition.RuntimeNarrativeContext",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FTFTerritoryDefinitionLegacyMigration::RunTest(const FString& Parameters)
+bool FTFTerritoryDefinitionRuntimeNarrative::RunTest(const FString& Parameters)
 {
-	UWorld* World = UWorld::CreateWorld(EWorldType::EditorPreview, false);
-	TestNotNull(TEXT("Migration preview world created"), World);
+	UTerritoryPlaceDefinition* Place = NewObject<UTerritoryPlaceDefinition>();
+	ATerritoryProperty* First = NewObject<ATerritoryProperty>();
+	ATerritoryProperty* Second = NewObject<ATerritoryProperty>();
+	TestNotNull(TEXT("Runtime Narrative Definition created"), Place);
+	TestNotNull(TEXT("First runtime Territory created"), First);
+	TestNotNull(TEXT("Second runtime Territory created"), Second);
+	if (!Place || !First || !Second) return false;
+
+	Place->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Place->StableTerritoryGUID = FGuid::NewGuid();
+	Place->TerritoryActorClass = ATerritoryProperty::StaticClass();
+
+	UTerritorySetDiplomacyEvent* DiplomacyTemplate =
+		NewObject<UTerritorySetDiplomacyEvent>(Place);
+	UTerritoryOwnershipTransitionCondition* TransitionTemplate =
+		NewObject<UTerritoryOwnershipTransitionCondition>(DiplomacyTemplate);
+	DiplomacyTemplate->Conditions.Add(TransitionTemplate);
+	Place->StateConfigs.FindOrAdd(ETerritoryState::Contested)
+		.EntryEvents.Add(DiplomacyTemplate);
+
+	UTerritoryOwnerHandoverEvent* HandoverTemplate =
+		NewObject<UTerritoryOwnerHandoverEvent>(Place);
+	HandoverTemplate->OwnerTerritoryTag = Place->TerritoryTag;
+	Place->AllDefendersDefeatedEvents.Add(HandoverTemplate);
+
+	TestTrue(TEXT("Definition applies to the first runtime Territory"),
+		Place->ApplyToTerritory(First));
+	TestTrue(TEXT("Definition applies to the second runtime Territory"),
+		Place->ApplyToTerritory(Second));
+
+	const FTerritoryStateConfig* FirstContested =
+		First->GetStateConfigs().Find(ETerritoryState::Contested);
+	const FTerritoryStateConfig* SecondContested =
+		Second->GetStateConfigs().Find(ETerritoryState::Contested);
+	TestTrue(TEXT("Both actors received one runtime diplomacy event"),
+		FirstContested && SecondContested
+		&& FirstContested->EntryEvents.Num() == 1
+		&& SecondContested->EntryEvents.Num() == 1);
+	if (!FirstContested || !SecondContested
+		|| FirstContested->EntryEvents.IsEmpty()
+		|| SecondContested->EntryEvents.IsEmpty()) return false;
+
+	UNarrativeEvent* FirstDiplomacy = FirstContested->EntryEvents[0];
+	UNarrativeEvent* SecondDiplomacy = SecondContested->EntryEvents[0];
+	TestTrue(TEXT("DataAsset event template is never executed directly"),
+		FirstDiplomacy != DiplomacyTemplate);
+	TestTrue(TEXT("Each Territory owns an isolated diplomacy event instance"),
+		FirstDiplomacy != SecondDiplomacy
+		&& FirstDiplomacy->GetOuter() == First
+		&& SecondDiplomacy->GetOuter() == Second);
+	TestTrue(TEXT("Nested Narrative conditions are also isolated"),
+		FirstDiplomacy->Conditions.Num() == 1
+		&& FirstDiplomacy->Conditions[0] != TransitionTemplate
+		&& FirstDiplomacy->Conditions[0]->GetTypedOuter<ATerritoryVolume>() == First);
+
+	TestTrue(TEXT("All-defenders handover is cloned into the live Territory context"),
+		First->GetAllDefendersDefeatedEvents().Num() == 1
+		&& First->GetAllDefendersDefeatedEvents()[0] != HandoverTemplate
+		&& First->GetAllDefendersDefeatedEvents()[0]->GetOuter() == First);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryDefinitionDiplomacyExecution,
+	"TerritoryFramework.Definition.RuntimeNarrativeExecutesDiplomacy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryDefinitionDiplomacyExecution::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Definition diplomacy test world created"), World);
 	if (!World) return false;
 
-	FActorSpawnParameters Params;
-	Params.ObjectFlags = RF_Transient;
-	ATerritoryProperty* Property = World->SpawnActor<ATerritoryProperty>(
-		ATerritoryProperty::StaticClass(),
-		FTransform(FRotator::ZeroRotator, FVector(100.f, 200.f, 300.f)), Params);
-	ATerritoryCapturePoint* Capture = World->SpawnActor<ATerritoryCapturePoint>(
-		ATerritoryCapturePoint::StaticClass(),
-		FTransform(FRotator::ZeroRotator, FVector(150.f, 200.f, 300.f)), Params);
-	ATerritoryDistrictManagementPoint* Management =
-		World->SpawnActor<ATerritoryDistrictManagementPoint>(
-			ATerritoryDistrictManagementPoint::StaticClass(),
-			FTransform(FRotator::ZeroRotator, FVector(175.f, 200.f, 300.f)), Params);
-	ATerritoryStoryOwnerSpawner* Owner =
-		World->SpawnActor<ATerritoryStoryOwnerSpawner>(
-			ATerritoryStoryOwnerSpawner::StaticClass(),
-			FTransform(FRotator::ZeroRotator, FVector(200.f, 200.f, 300.f)), Params);
-	UTerritoryPlaceDefinition* Place = NewObject<UTerritoryPlaceDefinition>();
-	TestNotNull(TEXT("Legacy Property exists"), Property);
-	TestNotNull(TEXT("Legacy capture point exists"), Capture);
-	TestNotNull(TEXT("Legacy management point exists"), Management);
-	TestNotNull(TEXT("Legacy owner exists"), Owner);
-	TestNotNull(TEXT("Destination Place definition exists"), Place);
-	if (!Property || !Capture || !Management || !Owner || !Place)
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryProperty* Territory = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	TestNotNull(TEXT("Definition diplomacy runtime Territory created"), Territory);
+	if (!Territory)
 	{
 		World->DestroyWorld(false);
 		return false;
 	}
 
-	const FGameplayTag PlaceTag = FGameplayTag::RequestGameplayTag(
+	const FGameplayTag TerritoryTag = FGameplayTag::RequestGameplayTag(
 		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
-	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
-		TEXT("Territory.HavenReach.MarketSquare"), false);
-	Place->TerritoryTag = PlaceTag;
-	Place->StableTerritoryGUID = FGuid::NewGuid();
-	Place->TerritoryActorClass = ATerritoryProperty::StaticClass();
-	TestTrue(TEXT("Definition can be assigned before migration"),
-		Place->ApplyToTerritory(Property));
-	Property->ParentTerritoryTag = DistrictTag;
-	Property->TerritoryDisplayName = FText::FromString(TEXT("Migrated Blacksmith"));
-	Property->TerritoryGUID = FGuid::NewGuid();
-	UTerritoryUnlockEvent* SourceEvent =
-		NewObject<UTerritoryUnlockEvent>(Property);
-	Property->StateConfigs.FindOrAdd(ETerritoryState::Claimed)
-		.EntryEvents.Add(SourceEvent);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	TestTrue(TEXT("Definition diplomacy fixture tags resolve"),
+		TerritoryTag.IsValid() && Bandits.IsValid() && Heroes.IsValid());
 
-	Capture->TargetTerritoryTag = PlaceTag;
-	Capture->CaptureRadius = 510.f;
-	Management->DistrictTag = DistrictTag;
-	Management->ManagementDistance = 735.f;
-	Owner->TerritoryTag = PlaceTag;
-	Owner->OwnerInteractionDistance = 440.f;
+	UTerritoryPlaceDefinition* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = TerritoryTag;
+	Definition->StableTerritoryGUID = FGuid::NewGuid();
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	UTerritorySetDiplomacyEvent* DiplomacyTemplate =
+		NewObject<UTerritorySetDiplomacyEvent>(Definition);
+	DiplomacyTemplate->FactionASource =
+		ETerritoryDiplomacyFactionSource::CurrentOwningFaction;
+	DiplomacyTemplate->FactionBSource =
+		ETerritoryDiplomacyFactionSource::ContestingFaction;
+	DiplomacyTemplate->bFallbackToExplicitFactionWhenContextMissing = false;
+	DiplomacyTemplate->NewState = EDiplomacyState::War;
+	Definition->StateConfigs.FindOrAdd(ETerritoryState::Contested)
+		.EntryEvents.Add(DiplomacyTemplate);
+	TestTrue(TEXT("Definition with diplomacy template applies to live Property"),
+		Definition->ApplyToTerritory(Territory));
 
-	TestTrue(TEXT("One migration call copies the legacy Property and helpers"),
-		Property->CopyLegacySettingsToDefinition());
-	TestEqual(TEXT("Migration preserves the actor save GUID"),
-		Place->StableTerritoryGUID, Property->TerritoryGUID);
-	TestEqual(TEXT("Migration derives the old parent tag"),
-		Place->DerivedParentTerritoryTag, DistrictTag);
-	TestTrue(TEXT("Migration enables all discovered helper templates"),
-		Place->CapturePoint.bEnabled && Place->ManagementPoint.bEnabled
-		&& Place->StoryOwner.bEnabled);
-	TestEqual(TEXT("Capture radius moved into the Place asset"),
-		Place->CapturePoint.CaptureRadius, 510.f);
-	TestEqual(TEXT("Management distance moved into the Place asset"),
-		Place->ManagementPoint.InteractionDistance, 735.f);
-	TestEqual(TEXT("Owner interaction distance moved into the Place asset"),
-		Place->StoryOwner.InteractionDistance, 440.f);
-	TestEqual(TEXT("Existing capture actor is linked back to the asset"),
-		Capture->PlaceDefinition.Get(), Place);
-	TestEqual(TEXT("Existing management actor is linked back to the asset"),
-		Management->TerritoryDefinition.Get(),
-		static_cast<UTerritoryDefinition*>(Place));
-	TestEqual(TEXT("Existing owner actor is linked back to the asset"),
-		Owner->PlaceDefinition.Get(), Place);
+	UTerritoryDiplomacySubsystem* Diplomacy =
+		World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	TestNotNull(TEXT("Diplomacy subsystem exists in the runtime world"), Diplomacy);
+	if (!Diplomacy)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
 
-	const FTerritoryStateConfig* MigratedClaimed =
-		Place->StateConfigs.Find(ETerritoryState::Claimed);
-	TestTrue(TEXT("Narrative state event is deep-copied into the asset"),
-		MigratedClaimed && MigratedClaimed->EntryEvents.Num() == 1
-		&& MigratedClaimed->EntryEvents[0] != SourceEvent
-		&& MigratedClaimed->EntryEvents[0]->GetOuter() == Place);
+	FTerritoryOwnershipData Data = Territory->GetOwnershipData();
+	Data.OwningFaction = Bandits;
+	Data.State = ETerritoryState::Claimed;
+	Data.ControlProgress = 1.f;
+	TestTrue(TEXT("Bandits seed the runtime Place owner"),
+		Territory->CommitOwnershipData(Data));
+
+	Data = Territory->GetOwnershipData();
+	Data.State = ETerritoryState::Contested;
+	Data.ContestingFaction = Heroes;
+	Data.ControlProgress = 0.25f;
+	FTerritoryTransitionContext TransitionContext;
+	TransitionContext.RequestingFaction = Heroes;
+	TestTrue(TEXT("Heroes enter the Definition-authored Contested state"),
+		Territory->CommitOwnershipData(Data, TransitionContext));
+	TestEqual(TEXT("The runtime-cloned Narrative event commits War in the live world"),
+		Diplomacy->GetDiplomacyState(Bandits, Heroes), EDiplomacyState::War);
 
 	World->DestroyWorld(false);
 	return true;
@@ -3803,7 +3851,8 @@ bool FTFContract_GuardPostDefinition::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Has bLoopPatrol"), TFTestUtils::HasProperty(Class, TEXT("bLoopPatrol")));
 
 	// Capacity
-	TestTrue(TEXT("Has MaxGuards"), TFTestUtils::HasProperty(Class, TEXT("MaxGuards")));
+	TestNull(TEXT("Ignored legacy MaxGuards was removed from the Data Asset"),
+		Class->FindPropertyByName(TEXT("MaxGuards")));
 	TestTrue(TEXT("Has ReserveSlots"), TFTestUtils::HasProperty(Class, TEXT("ReserveSlots")));
 	TestTrue(TEXT("Has ReserveSpawnDelay"), TFTestUtils::HasProperty(Class, TEXT("ReserveSpawnDelay")));
 
@@ -3815,6 +3864,10 @@ bool FTFContract_GuardPostDefinition::RunTest(const FString& Parameters)
 	const UClass* SPClass = ATerritoryGuardSpawnPoint::StaticClass();
 	TestTrue(TEXT("GuardSpawnPoint has GuardPostDefinition"),
 		TFTestUtils::HasProperty(SPClass, TEXT("GuardPostDefinition")));
+	TestNull(TEXT("GuardSpawnPoint legacy MaxGuards override was removed"),
+		SPClass->FindPropertyByName(TEXT("MaxGuards")));
+	TestTrue(TEXT("Applied reserve policy cannot be overridden on a placed Guard Post"),
+		TFTestUtils::IsEditorReadOnly(SPClass, TEXT("ReserveSlots")));
 
 	return true;
 }
@@ -4098,11 +4151,11 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 			static_cast<int64>(
 				ETerritoryDiplomacyFactionSource::TransitionOpposingFaction)) != INDEX_NONE);
 
-	const UClass* TerritoryClass = ATerritoryVolume::StaticClass();
-	TestTrue(TEXT("Territories expose the registered-defender death event hook"),
-		TFTestUtils::HasProperty(TerritoryClass, TEXT("DefenderDiedEvents")));
-	TestTrue(TEXT("Territories expose the all-defenders-defeated event hook"),
-		TFTestUtils::HasProperty(TerritoryClass, TEXT("AllDefendersDefeatedEvents")));
+	const UClass* DefinitionClass = UTerritoryDefinition::StaticClass();
+	TestTrue(TEXT("Definitions expose the registered-defender death event hook"),
+		TFTestUtils::HasProperty(DefinitionClass, TEXT("DefenderDiedEvents")));
+	TestTrue(TEXT("Definitions expose the all-defenders-defeated event hook"),
+		TFTestUtils::HasProperty(DefinitionClass, TEXT("AllDefendersDefeatedEvents")));
 
 	return true;
 }
@@ -4274,8 +4327,8 @@ bool FTFDefenderNarrativeEventConditions::RunTest(const FString& Parameters)
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.ObjectFlags |= RF_Transient;
-	ATerritoryVolume* Territory = World->SpawnActor<ATerritoryVolume>(
-		ATerritoryVolume::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryVolume* Territory = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
 	AActor* FirstDefender = World->SpawnActor<AActor>(
 		AActor::StaticClass(), FTransform::Identity, SpawnParams);
 	AActor* SecondDefender = World->SpawnActor<AActor>(
@@ -4292,8 +4345,31 @@ bool FTFDefenderNarrativeEventConditions::RunTest(const FString& Parameters)
 	const FGameplayTag TerritoryTag = FGameplayTag::RequestGameplayTag(
 		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
 	TestTrue(TEXT("Defender event test Territory tag exists"), TerritoryTag.IsValid());
-	Territory->TerritoryTag = TerritoryTag;
-	Territory->TerritoryGUID = FGuid::NewGuid();
+	UTerritoryPlaceDefinition* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = TerritoryTag;
+	Definition->StableTerritoryGUID = FGuid::NewGuid();
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	UTerritoryLockEvent* LockEvent = NewObject<UTerritoryLockEvent>(Definition);
+	LockEvent->TargetTerritoryTag = TerritoryTag;
+	LockEvent->LockReason = FText::FromString(TEXT("Defender event regression"));
+	UTerritoryOwnershipCondition* Gate =
+		NewObject<UTerritoryOwnershipCondition>(LockEvent);
+	LockEvent->Conditions.Add(Gate);
+	Definition->AllDefendersDefeatedEvents.Add(LockEvent);
+	TestTrue(TEXT("Defender-event Definition applies to the Property"),
+		Definition->ApplyToTerritory(Territory));
+	UTerritoryLockEvent* RuntimeLockEvent = Cast<UTerritoryLockEvent>(
+		Territory->GetAllDefendersDefeatedEvents()[0]);
+	UTerritoryOwnershipCondition* RuntimeGate = RuntimeLockEvent
+		&& RuntimeLockEvent->Conditions.Num() == 1
+		? Cast<UTerritoryOwnershipCondition>(RuntimeLockEvent->Conditions[0]) : nullptr;
+	TestNotNull(TEXT("Defender event and condition were cloned into runtime context"),
+		RuntimeGate);
+	if (!RuntimeGate)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
 
 	UTerritoryRegistrySubsystem* Registry =
 		World->GetSubsystem<UTerritoryRegistrySubsystem>();
@@ -4306,14 +4382,6 @@ bool FTFDefenderNarrativeEventConditions::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Defender-event Territory registers with its stable identities"),
 		Registry->RegisterTerritory(Territory), ETerritoryRegistrationResult::Success);
 
-	UTerritoryLockEvent* LockEvent = NewObject<UTerritoryLockEvent>(Territory);
-	LockEvent->TargetTerritoryTag = TerritoryTag;
-	LockEvent->LockReason = FText::FromString(TEXT("Defender event regression"));
-	UTerritoryOwnershipCondition* Gate =
-		NewObject<UTerritoryOwnershipCondition>(LockEvent);
-	LockEvent->Conditions.Add(Gate);
-	Territory->AllDefendersDefeatedEvents.Add(LockEvent);
-
 	// Seed the private registration set directly: the regression exercises the
 	// death callback itself and does not need an ASC binding/timer harness.
 	Territory->RegisteredDefenders.Add(FirstDefender);
@@ -4321,7 +4389,7 @@ bool FTFDefenderNarrativeEventConditions::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Failed inherited condition blocks the all-defenders-defeated event"),
 		Territory->IsLocked());
 
-	Gate->bNot = true;
+	RuntimeGate->bNot = true;
 	Territory->RegisteredDefenders.Add(SecondDefender);
 	Territory->OnDefenderDied(SecondDefender, nullptr, true);
 	TestTrue(TEXT("The same death hook executes after Narrative Not makes its condition pass"),
@@ -4396,8 +4464,10 @@ bool FTFCapturePointContract::RunTest(const FString& Parameters)
 		TFTestUtils::HasProperty(Class, TEXT("CaptureMarkerMesh")));
 	TestTrue(TEXT("Capture marker can remain silent while capture is unavailable"),
 		TFTestUtils::HasProperty(Class, TEXT("bHideMarkerWhileCaptureUnavailable")));
-	TestTrue(TEXT("Capture point separates story contesting from automatic capture pressure"),
-		TFTestUtils::HasProperty(Class, TEXT("bContributesCaptureProgress")));
+	TestNull(TEXT("Capture point legacy progress override was removed"),
+		Class->FindPropertyByName(TEXT("bContributesCaptureProgress")));
+	TestTrue(TEXT("Applied capture policy cannot be overridden on the placed Blueprint"),
+		TFTestUtils::IsEditorReadOnly(Class, TEXT("bCaptureEnabled")));
 	TestTrue(TEXT("Capture point exposes its effective automatic-flow query"),
 		TFTestUtils::HasFunction(Class, TEXT("IsAutomaticCaptureFlowActive")));
 	TestTrue(TEXT("Territory exposes full-bounds story capture mode"),

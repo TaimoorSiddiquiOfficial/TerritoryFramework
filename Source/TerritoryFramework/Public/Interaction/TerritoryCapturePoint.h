@@ -35,35 +35,25 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	/** One Place asset supplies this actor's target and capture policy. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition")
 	TObjectPtr<UTerritoryPlaceDefinition> PlaceDefinition;
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
 	bool ApplyPlaceDefinition();
 
 	/** Stable tag of the independent Place controlled by this physical zone. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture",
 		meta=(Categories="Territory"))
 	FGameplayTag TargetTerritoryTag;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture",
 		meta=(ClampMin="100.0", UIMin="100.0", UIMax="2000.0"))
 	float CaptureRadius = 350.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture",
 		meta=(DisplayName="Automatic Multiplayer Capture Flow",
 			ToolTip="When enabled, players inside this point fill capture progress after defenders are defeated. A target Territory using Story Capture From Territory Bounds automatically disables this point."))
 	bool bCaptureEnabled = true;
-
-	/**
-	 * True is the normal multiplayer/domination rule: after defenders are gone,
-	 * overlap pressure fills the capture meter and transfers ownership.
-	 * False is the story rule: overlap begins/holds Contested so guards can fight,
-	 * but only a dialogue, quest, or Territory Capture Event can transfer ownership.
-	 */
-	UPROPERTY(meta=(DeprecatedProperty,
-		DeprecationMessage="Story handovers now use Story Capture From Territory Bounds on the Territory. Capture Points are multiplayer automatic-progress actors."))
-	bool bContributesCaptureProgress = true;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Capture")
 	TObjectPtr<USphereComponent> CaptureZone;
@@ -76,7 +66,7 @@ public:
 	TObjectPtr<UStaticMeshComponent> CaptureMarkerMesh;
 
 	/** Hide the world marker while the target Place is story-Locked or unavailable. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture|Presentation",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture|Presentation",
 		meta=(ToolTip="Recommended. A story-Locked Place stays silent until its Locked State Config exit conditions unlock it."))
 	bool bHideMarkerWhileCaptureUnavailable = true;
 

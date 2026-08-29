@@ -5,8 +5,6 @@
 #include "Tales/NarrativeEvent.h"
 #include "TerritoryOwnerHandoverEvent.generated.h"
 
-class ATerritoryStoryOwnerSpawner;
-
 /**
  * Reveals a Narrative property owner after a story capture prerequisite succeeds.
  * Add this to a Place's On All Defenders Defeated Events, or to Locked -> Exit Events
@@ -20,11 +18,6 @@ class TERRITORYFRAMEWORK_API UTerritoryOwnerHandoverEvent : public UNarrativeEve
 
 public:
 	UTerritoryOwnerHandoverEvent(const FObjectInitializer& ObjectInitializer);
-
-	/** Legacy level reference. Reusable Definition assets resolve by Owner Territory Tag. */
-	UPROPERTY(meta=(DeprecatedProperty,
-		DeprecationMessage="Use Owner Territory Tag. Direct level actors cannot be safely stored inside reusable DataAssets."))
-	TObjectPtr<ATerritoryStoryOwnerSpawner> OwnerSpawner;
 
 	/** Exact Place tag used to find the streamed owner spawner without a level-actor reference. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",

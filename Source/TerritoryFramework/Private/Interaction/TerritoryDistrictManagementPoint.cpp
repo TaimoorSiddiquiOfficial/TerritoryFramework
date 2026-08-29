@@ -341,7 +341,17 @@ void ATerritoryDistrictManagementPoint::OnConstruction(const FTransform& Transfo
 void ATerritoryDistrictManagementPoint::BeginPlay()
 {
 	Super::BeginPlay();
-	ApplyTerritoryDefinition();
+	if (!ApplyTerritoryDefinition())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Management Point %s has no enabled Territory Definition template. Legacy Blueprint configuration is disabled."),
+			*GetPathName());
+		if (InteractionSphere)
+		{
+			InteractionSphere->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+		return;
+	}
 	if (ATerritoryDistrict* District = ResolveDistrict())
 	{
 		POITag = District->GetTerritoryTag();

@@ -8,6 +8,17 @@
 #include "GameFramework/GameStateBase.h"
 #include "TimerManager.h"
 
+namespace
+{
+	bool CanMutateDiplomacy(const UWorld* World)
+	{
+		// A World Subsystem is authoritative in every non-client world. Requiring an
+		// AuthGameMode made Definition state events silently fail during valid server
+		// startup, streaming, and automation contexts before a GameMode was available.
+		return World && World->GetNetMode() != NM_Client;
+	}
+}
+
 void UTerritoryDiplomacySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
@@ -101,7 +112,7 @@ void UTerritoryDiplomacySubsystem::OnNarrativeLoadFinished()
 
 void UTerritoryDiplomacySubsystem::DeclareWar(FGameplayTag FactionA, FGameplayTag FactionB)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::War);
 	if (OldState != EDiplomacyState::War) RecordEvent(EDiplomacyEventType::DeclaredWar, FactionA, FactionB);
@@ -109,7 +120,7 @@ void UTerritoryDiplomacySubsystem::DeclareWar(FGameplayTag FactionA, FGameplayTa
 
 void UTerritoryDiplomacySubsystem::DeclarePeace(FGameplayTag FactionA, FGameplayTag FactionB)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::Ceasefire);
 	if (OldState != EDiplomacyState::Ceasefire) RecordEvent(EDiplomacyEventType::DeclaredPeace, FactionA, FactionB);
@@ -117,7 +128,7 @@ void UTerritoryDiplomacySubsystem::DeclarePeace(FGameplayTag FactionA, FGameplay
 
 void UTerritoryDiplomacySubsystem::BreakCeasefire(FGameplayTag FactionA, FGameplayTag FactionB)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (GetDiplomacyState(FactionA, FactionB) != EDiplomacyState::Ceasefire) return;
 
 	// Breaking a ceasefire is a hostile act — escalate to War so the action has
@@ -128,7 +139,7 @@ void UTerritoryDiplomacySubsystem::BreakCeasefire(FGameplayTag FactionA, FGamepl
 
 void UTerritoryDiplomacySubsystem::FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::Alliance);
 	if (OldState != EDiplomacyState::Alliance) RecordEvent(EDiplomacyEventType::FormedAlliance, FactionA, FactionB);
@@ -136,7 +147,7 @@ void UTerritoryDiplomacySubsystem::FormAlliance(FGameplayTag FactionA, FGameplay
 
 void UTerritoryDiplomacySubsystem::SignNonAggression(FGameplayTag FactionA, FGameplayTag FactionB)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::NonAggression);
 	if (OldState != EDiplomacyState::NonAggression) RecordEvent(EDiplomacyEventType::SignedNonAggression, FactionA, FactionB);
@@ -144,7 +155,7 @@ void UTerritoryDiplomacySubsystem::SignNonAggression(FGameplayTag FactionA, FGam
 
 void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (GetDiplomacyState(FactionA, FactionB) != EDiplomacyState::Alliance) return;
 
 	// Remove treaty metadata, then reset Narrative attitude to Neutral
@@ -156,7 +167,7 @@ void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGamepla
 
 void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGameplayTag FactionB, float DurationGameTime)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
 	// FIX: Don't call SetDiplomacyState after adding the treaty — it would
 	// see the treaty already exists and early-return without syncing Narrative.
@@ -187,7 +198,7 @@ void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGa
 
 void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -303,7 +314,7 @@ bool UTerritoryDiplomacySubsystem::HasTradeAgreement(FGameplayTag FactionA, FGam
 
 void UTerritoryDiplomacySubsystem::AddReputation(FGameplayTag Faction, int32 Amount)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (!Faction.IsValid()) return;
 	int32& Rep = FactionReputation.FindOrAdd(Faction);
 	Rep += Amount;
@@ -312,7 +323,7 @@ void UTerritoryDiplomacySubsystem::AddReputation(FGameplayTag Faction, int32 Amo
 
 void UTerritoryDiplomacySubsystem::SetReputation(FGameplayTag Faction, int32 Value)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode()) return;
+	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (!Faction.IsValid()) return;
 	FactionReputation.FindOrAdd(Faction) = Value;
 	OnReputationChanged.Broadcast(Faction, Value);

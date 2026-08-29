@@ -30,7 +30,7 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	/** One Place asset supplies the protected owner and handover dialogue settings. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition")
 	TObjectPtr<UTerritoryPlaceDefinition> PlaceDefinition;
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
@@ -41,20 +41,20 @@ public:
 	TObjectPtr<UNPCSpawnComponent> OwnerSpawn;
 
 	/** Place served by this owner. Also provides a stable fallback when actor references stream. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Story Capture",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture",
 		meta=(Categories="Territory"))
 	FGameplayTag TerritoryTag;
 
 	/** Begin the NPC definition's dialogue immediately after the owner appears. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Capture")
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture")
 	bool bBeginDialogueOnActivation = true;
 
 	/** Optional dialogue override. Empty uses Owner Spawn -> NPC To Spawn -> Dialogue. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Capture")
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture")
 	TSubclassOf<UDialogue> OverrideDialogue;
 
 	/** Optional node ID for beginning at a dedicated surrender branch. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Capture")
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture")
 	FName DialogueStartFromID;
 
 	/**
@@ -62,7 +62,7 @@ public:
 	 * Narrative's player trace is 1000 cm by default, so values above that still
 	 * require the project's Narrative Player Interaction setting to be increased.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Capture",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture",
 		meta=(ClampMin="100.0", ClampMax="1000.0", Units="cm",
 			DisplayName="Owner Interaction Distance",
 			ToolTip="How close the player must be to speak to the protected owner. 300 cm is a forgiving conversation distance."))

@@ -167,11 +167,13 @@ normal territorial combat requires the Territory to be Contested and diplomacy t
 
 ## State Config conditions and events
 
-`ATerritoryVolume::StateConfigs` is the one editor-facing place for state entry/exit rules.
-These are Narrative objects stored inline on the Territory actor; they are not another quest,
-faction, guard, or ownership database.
+`UTerritoryDefinition::StateConfigs` is the one editor-facing place for state entry/exit rules.
+These are Narrative templates stored in the City, District, or Place Data Asset; they are not
+another quest, faction, guard, or ownership database. Each loaded Territory receives private
+runtime copies of the templates. The copies are owned by that live actor, so diplomacy, handover,
+waves, inventory, and other events always have valid World and transition context.
 
-| Inline Narrative object | Plain-English use | Easy example |
+| Definition-owned Narrative template | Plain-English use | Easy example |
 |---|---|---|
 | `UTerritoryQuestStateCondition` | Read one Narrative Quest from the explicit player's Tales component | Run a boss pursuit only while Betrayal is In Progress; use inherited Not to block it during that quest |
 | `UTerritoryOwnershipCondition` | Check who owns a loaded place | Farm unlocks after Blacksmith is Claimed by Heroes |

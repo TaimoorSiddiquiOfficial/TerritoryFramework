@@ -115,7 +115,6 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | GuardNPCDefinition | NPCDefinition* |
 | FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> |
 | GuardSpawnCount | int32 |
-| GuardSpawnRadius | float (deprecated/ignored) |
 | GuardSpawnPoints | Array<TerritoryGuardSpawnPoint*> |
 
 ## ATerritoryGuardCharacter
@@ -168,7 +167,7 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | GetPatrolRouteAsTransforms() | Array<Transform> |
 | GetPatrolWaitTimes() | Array<float> |
 | GetOwningTerritory() | TerritoryVolume* |
-| **Effective Config** (resolves inline vs GuardPostDefinition precedence) | |
+| **Effective Config** (resolves Place Definition row and optional nested GuardPostDefinition) | |
 | GetEffectiveMaxGuards() | int32 |
 | GetEffectiveReserveSlots() | int32 |
 | GetEffectiveReserveSpawnDelay() | float |

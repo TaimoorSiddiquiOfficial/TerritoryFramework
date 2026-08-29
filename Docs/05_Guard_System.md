@@ -68,8 +68,8 @@ cluster. Capsules still block players and NPCs; do not change the Pawn channel t
 crowd workaround. Use `Get Staggered Patrol Start Index`, `Refresh Patrol Crowd Avoidance`, and
 `Is Patrol Crowd Avoidance Active` for Blueprint debugging.
 
-The public patrol getters use the inline spawn-point route when it is non-empty, otherwise
-they use the assigned `UTerritoryGuardPostDefinition` route and loop policy. Spawn-point
+The public patrol getters use the Place Definition row's relative patrol route when it is
+present, otherwise they use the row's optional `UTerritoryGuardPostDefinition` route and loop policy. Spawn-point
 selection is deterministic: higher priority fills first, a patrol-capable post wins an
 equal-priority tie over an intentional static post, and actor path is the final stable tie-break.
 The editor validator rejects a misleading one-node data-asset route; use at least two nodes
@@ -83,8 +83,8 @@ or leave the route empty for an intentional static sentry.
 - Authored references support spawn points intentionally placed outside territory bounds
 - each unique spawn point is exactly one active combat slot; the Territory's loaded
   capacity is `GetGuardSpawnPoints().Num()`
-- legacy `MaxGuards`, Territory `MaxGuardCount`, and `GuardSpawnRadius` values are
-  ignored. Add or remove spawn-point actors to change capacity
+- removed legacy `MaxGuards`, Territory `MaxGuardCount`, and `GuardSpawnRadius` authoring;
+  add or remove Guard Post rows to change capacity
 - normal recruitment never uses a random fallback or collision-driven relocation. A
   blocked authored point fails that slot and reports the transaction failure
 - `ReserveSlots` = replacement entitlements for when active guards die

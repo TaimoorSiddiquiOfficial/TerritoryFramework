@@ -66,7 +66,7 @@ public:
 	/**
 	 * The patrol route guards walk through.
 	 * Empty = guard stands idle at spawn. Minimum useful route: 2 nodes.
-	 * Individual spawn points can override this with their own PatrolRoute array.
+	 * A Place Definition Guard Post row can override this with its own relative route.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Patrol")
 	TArray<FTerritoryPatrolNode> PatrolRoute;
@@ -76,13 +76,6 @@ public:
 	bool bLoopPatrol = true;
 
 	// ─── Capacity & Reserves ───
-
-	/** Legacy serialized value. Active capacity is always one guard per spawn-point actor. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Capacity",
-		meta = (DeprecatedProperty,
-			DeprecationMessage = "Ignored. Add more spawn-point actors to increase active capacity.",
-			ClampMin = "1", UIMin = "1", UIMax = "1"))
-	int32 MaxGuards = 1;
 
 	/** Number of reserve guards that spawn on demand when active guards die. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Capacity",

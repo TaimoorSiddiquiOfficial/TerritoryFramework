@@ -129,8 +129,14 @@ void ATerritoryGuardSpawnPoint::BindToTerritory(ATerritoryVolume* Territory)
 
 void ATerritoryGuardSpawnPoint::BeginPlay()
 {
-	ApplyTerritoryDefinition();
 	Super::BeginPlay();
+	if (!ApplyTerritoryDefinition())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Guard Spawn Point %s has no matching Territory Definition row. Legacy Blueprint configuration is disabled."),
+			*GetPathName());
+		return;
+	}
 
 	// Persistent identities must be editor-authored. A runtime-generated GUID would
 	// silently orphan saved reserve records on every campaign load.
@@ -766,7 +772,8 @@ TArray<float> ATerritoryGuardSpawnPoint::GetPatrolWaitTimes() const
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // P1-07: Effective Configuration Getters
-// GuardPostDefinition overrides inline values when assigned.
+// The optional nested GuardPostDefinition supplies reusable defaults behind the
+// owning Place Definition row.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 int32 ATerritoryGuardSpawnPoint::GetEffectiveMaxGuards() const
@@ -848,8 +855,8 @@ const TArray<FTerritoryPatrolNode>& ATerritoryGuardSpawnPoint::GetEffectivePatro
 
 bool ATerritoryGuardSpawnPoint::GetEffectiveLoopPatrol() const
 {
-	// The loop policy follows the route authority. An inline route owns its inline
-	// loop flag; a route inherited from a GuardPostDefinition owns the asset flag.
+	// The loop policy follows the route authority. A Place Definition row route owns
+	// its row loop flag; a nested GuardPostDefinition route owns that asset's flag.
 	if (!PatrolRoute.IsEmpty()) return bLoopPatrol;
 	if (GuardPostDefinition && !GuardPostDefinition->PatrolRoute.IsEmpty())
 		return GuardPostDefinition->bLoopPatrol;

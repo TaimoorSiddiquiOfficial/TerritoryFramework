@@ -49,8 +49,14 @@ void ATerritoryStoryOwnerSpawner::BeginPlay()
 	// Narrative loads the spawner's SaveGame properties in its BeginPlay. Because
 	// bActivateOnBeginPlay is false, no owner is spawned before the saved activation
 	// flag has been restored.
-	ApplyPlaceDefinition();
 	Super::BeginPlay();
+	if (!ApplyPlaceDefinition())
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("Territory Story Owner %s has no enabled Place Definition. Legacy Blueprint configuration is disabled."),
+			*GetPathName());
+		return;
+	}
 
 	if (HasAuthority() && bHandoverActivated)
 	{
@@ -73,7 +79,7 @@ bool ATerritoryStoryOwnerSpawner::ActivateHandover(APawn* NarrativeTarget,
 	{
 		return false;
 	}
-	if (PlaceDefinition && !PlaceDefinition->StoryOwner.bEnabled)
+	if (!PlaceDefinition || !PlaceDefinition->StoryOwner.bEnabled)
 	{
 		return false;
 	}

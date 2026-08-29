@@ -43,6 +43,40 @@
 #include "Tales/TerritoryTalesUtilities.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
 
+namespace
+{
+	template<typename TObjectType>
+	TArray<TObjectPtr<TObjectType>> CloneNarrativeArrayForTerritory(
+		const TArray<TObjectPtr<TObjectType>>& Templates, ATerritoryVolume* Territory)
+	{
+		TArray<TObjectPtr<TObjectType>> Result;
+		Result.Reserve(Templates.Num());
+		for (TObjectType* Template : Templates)
+		{
+			Result.Add(Template
+				? DuplicateObject<TObjectType>(Template, Territory)
+				: nullptr);
+		}
+		return Result;
+	}
+
+	FTerritoryStateConfig CloneStateConfigForTerritory(
+		const FTerritoryStateConfig& Template, ATerritoryVolume* Territory)
+	{
+		FTerritoryStateConfig Result;
+		Result.GrantedCommandCapabilities = Template.GrantedCommandCapabilities;
+		Result.EntryConditions = CloneNarrativeArrayForTerritory(
+			Template.EntryConditions, Territory);
+		Result.ExitConditions = CloneNarrativeArrayForTerritory(
+			Template.ExitConditions, Territory);
+		Result.EntryEvents = CloneNarrativeArrayForTerritory(
+			Template.EntryEvents, Territory);
+		Result.ExitEvents = CloneNarrativeArrayForTerritory(
+			Template.ExitEvents, Territory);
+		return Result;
+	}
+}
+
 ATerritoryVolume::ATerritoryVolume()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -77,7 +111,14 @@ void ATerritoryVolume::OnConstruction(const FTransform& Transform)
 void ATerritoryVolume::BeginPlay()
 {
 	Super::BeginPlay();
-	ApplyTerritoryDefinition();
+	if (!ApplyTerritoryDefinition())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("%s has no valid Territory Definition. Runtime activation is disabled; actor/Blueprint overrides are no longer an authoring source."),
+			*GetPathName());
+		SetActorTickEnabled(false);
+		return;
+	}
 
 	// Force-disable collision on the BoundShape at runtime.
 	// Blueprint CDO may override the constructor's NoCollision setting,
@@ -570,23 +611,30 @@ void ATerritoryVolume::PostEditImport()
 
 bool ATerritoryVolume::ApplyTerritoryDefinition()
 {
-	return TerritoryDefinition && TerritoryDefinition->ApplyToTerritory(this);
+	if (!TerritoryDefinition)
+	{
+		RuntimeStateConfigs.Reset();
+		RuntimeDefenderDiedEvents.Reset();
+		RuntimeAllDefendersDefeatedEvents.Reset();
+		return false;
+	}
+	return TerritoryDefinition->ApplyToTerritory(this);
 }
 
-bool ATerritoryVolume::CopyLegacySettingsToDefinition()
+void ATerritoryVolume::RebuildRuntimeNarrativeConfiguration(
+	const UTerritoryDefinition& Definition)
 {
-#if WITH_EDITOR
-	if (!TerritoryDefinition) return false;
-	const bool bCopied = TerritoryDefinition->CopyFromTerritory(this);
-	if (bCopied)
+	RuntimeStateConfigs.Reset();
+	for (const TPair<ETerritoryState, FTerritoryStateConfig>& Pair :
+		Definition.StateConfigs)
 	{
-		TerritoryDefinition->ApplyToTerritory(this);
-		MarkPackageDirty();
+		RuntimeStateConfigs.Add(Pair.Key,
+			CloneStateConfigForTerritory(Pair.Value, this));
 	}
-	return bCopied;
-#else
-	return false;
-#endif
+	RuntimeDefenderDiedEvents = CloneNarrativeArrayForTerritory(
+		Definition.DefenderDiedEvents, this);
+	RuntimeAllDefendersDefeatedEvents = CloneNarrativeArrayForTerritory(
+		Definition.AllDefendersDefeatedEvents, this);
 }
 
 void ATerritoryVolume::EnsurePersistentTerritoryGUID()
@@ -907,22 +955,19 @@ ETerritoryControlMode ATerritoryVolume::GetControlMode() const
 const TMap<ETerritoryState, FTerritoryStateConfig>&
 ATerritoryVolume::GetStateConfigs() const
 {
-	return TerritoryDefinition ? TerritoryDefinition->StateConfigs : StateConfigs;
+	return RuntimeStateConfigs;
 }
 
 const TArray<TObjectPtr<UNarrativeEvent>>&
 ATerritoryVolume::GetDefenderDiedEvents() const
 {
-	return TerritoryDefinition
-		? TerritoryDefinition->DefenderDiedEvents : DefenderDiedEvents;
+	return RuntimeDefenderDiedEvents;
 }
 
 const TArray<TObjectPtr<UNarrativeEvent>>&
 ATerritoryVolume::GetAllDefendersDefeatedEvents() const
 {
-	return TerritoryDefinition
-		? TerritoryDefinition->AllDefendersDefeatedEvents
-		: AllDefendersDefeatedEvents;
+	return RuntimeAllDefendersDefeatedEvents;
 }
 
 void ATerritoryVolume::ReconcileStoryBoundsContesters()
@@ -1032,9 +1077,6 @@ ETerritoryState ATerritoryVolume::ResolveInitialTerritoryState() const
 		return ETerritoryState::Locked;
 	case ETerritoryInitialState::Automatic:
 	default:
-		// Migration fallback: old Blueprint and level overrides continue to work while
-		// the obsolete property is hidden from new authoring.
-		if (bStartsLocked) return ETerritoryState::Locked;
 		return InitialOwningFaction.IsValid()
 			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
 	}
@@ -1369,14 +1411,6 @@ bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& Ou
 	const TArray<TObjectPtr<UNarrativeCondition>>* Conditions = Config
 		? &Config->ExitConditions : nullptr;
 
-	// Migration fallback. A new Locked Exit Conditions array takes authority as soon
-	// as it is authored, so old and new rules are never evaluated as competing systems.
-	if (State == ETerritoryState::Locked
-		&& (!Conditions || Conditions->IsEmpty()) && !LockConditions.IsEmpty())
-	{
-		Conditions = &LockConditions;
-	}
-
 	if (!Conditions || Conditions->IsEmpty())
 	{
 		OutFailureReason = FText::GetEmpty();
@@ -1472,54 +1506,6 @@ bool ATerritoryVolume::CanUnlockWithContext(const FTerritoryTransitionContext& T
 	FText FailureReason;
 	return CheckStateTransitionConditions(ETerritoryState::Locked, TargetState,
 		FailureReason, TransitionContext);
-}
-
-void ATerritoryVolume::MigrateLegacyLockSettings()
-{
-	if (const UWorld* World = GetWorld(); World && World->IsGameWorld())
-	{
-		UE_LOG(LogTerritory, Warning,
-			TEXT("MigrateLegacyLockSettings is an editor authoring action and cannot run during gameplay."));
-		return;
-	}
-
-	const bool bHadLegacyInitialLock = bStartsLocked;
-	const bool bHadLegacyUnlockConditions = !LockConditions.IsEmpty();
-	if (!bHadLegacyInitialLock && !bHadLegacyUnlockConditions) return;
-
-#if WITH_EDITOR
-	Modify();
-#endif
-	if (bHadLegacyInitialLock)
-	{
-		if (InitialState == ETerritoryInitialState::Automatic)
-		{
-			InitialState = ETerritoryInitialState::Locked;
-		}
-		bStartsLocked = false;
-	}
-
-	if (bHadLegacyUnlockConditions)
-	{
-		FTerritoryStateConfig& LockedConfig = StateConfigs.FindOrAdd(ETerritoryState::Locked);
-		if (LockedConfig.ExitConditions.IsEmpty())
-		{
-			LockedConfig.ExitConditions = MoveTemp(LockConditions);
-		}
-		else
-		{
-			// A newly-authored Exit Conditions list is already authoritative. Do not
-			// silently strengthen it by appending obsolete rules.
-			LockConditions.Reset();
-		}
-	}
-
-#if WITH_EDITOR
-	MarkPackageDirty();
-#endif
-	UE_LOG(LogTerritory, Log,
-		TEXT("Migrated legacy lock settings for %s to Initial State and Locked Exit Conditions."),
-		*GetPathName());
 }
 
 void ATerritoryVolume::LockTerritory(const FText& Reason)

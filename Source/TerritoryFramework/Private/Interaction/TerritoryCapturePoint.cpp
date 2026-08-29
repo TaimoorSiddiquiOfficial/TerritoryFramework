@@ -48,7 +48,16 @@ void ATerritoryCapturePoint::OnConstruction(const FTransform& Transform)
 void ATerritoryCapturePoint::BeginPlay()
 {
 	Super::BeginPlay();
-	ApplyPlaceDefinition();
+	if (!ApplyPlaceDefinition())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("Capture Point %s has no Place Definition. Legacy Blueprint configuration is disabled."),
+			*GetPathName());
+		if (CaptureZone) CaptureZone->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		if (CaptureMarkerMesh) CaptureMarkerMesh->SetVisibility(false, true);
+		SetActorTickEnabled(false);
+		return;
+	}
 	if (!CaptureZone) return;
 	RefreshCaptureMarkerVisibility();
 	if (!TargetTerritoryTag.IsValid())

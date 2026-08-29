@@ -141,10 +141,10 @@ public:
 	// ─── Configuration ───
 
 	/** Territory asset and stable row ID supplying this post's reusable configuration. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition")
 	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition")
 	FName GuardPostID;
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
@@ -156,63 +156,56 @@ public:
 	 * An untagged post whose actor origin is outside a District can still belong to it
 	 * when at least one world-space patrol node overlaps that District.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn",
 		meta=(Categories="Territory", DisplayName="Owner Territory"))
 	FGameplayTag OwnerTerritoryTag;
-
-	/** Legacy serialized value. Active capacity is always one guard per spawn point. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
-		meta=(DeprecatedProperty,
-			DeprecationMessage="Ignored. Each spawn point is one active guard slot; add more spawn point actors to increase capacity.",
-			ClampMin="1", UIMin="1", UIMax="1", DisplayName="Legacy Max Guards (Ignored)"))
-	int32 MaxGuards = 1;
 
 	/**
 	 * Number of reserve guards that spawn on demand when active guards die.
 	 * Set to 0 for no reserves. Typical value: 1-2.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn",
 		meta=(ClampMin="0", UIMin="0", UIMax="10", DisplayName="Reserve Slots"))
 	int32 ReserveSlots = 1;
 
 	/** Automatically deploy queued reserves after a tracked guard dies. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(DisplayName="Auto Spawn Reserves"))
 	bool bAutoSpawnReserves = true;
 
 	/** Delay before the first automatic reserve deployment. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(ClampMin="0.1", UIMin="0.1", UIMax="30.0", Units="s", DisplayName="Reserve Spawn Delay"))
 	float ReserveSpawnDelay = 3.f;
 
 	/** Retry interval while no camera-frustum-avoided, collision-free spawn location is available. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(ClampMin="0.1", UIMin="0.1", UIMax="30.0", Units="s", DisplayName="Reserve Retry Interval"))
 	float ReserveSpawnRetryInterval = 2.f;
 
 	/** Radius around this actor used to randomize automatic reserve placement. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(ClampMin="100.0", UIMin="100.0", UIMax="3000.0", Units="cm", DisplayName="Reserve Spawn Radius"))
 	float ReserveSpawnRadius = 600.f;
 
 	/** Minimum distance automatic reserve spawns keep from every player camera. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(ClampMin="0.0", UIMin="0.0", UIMax="3000.0", Units="cm", DisplayName="Reserve Player Clearance"))
 	float ReserveMinimumPlayerDistance = 500.f;
 
 	/** Number of random navmesh candidates considered per automatic deployment attempt. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(ClampMin="1", ClampMax="64", UIMin="1", UIMax="32", DisplayName="Reserve Spawn Attempts"))
 	int32 ReserveSpawnCandidateCount = 12;
 
 	/** Camera-safe attempts made before using the same authored post without camera avoidance. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(ClampMin="0", ClampMax="20", DisplayName="Camera Safe Retry Limit",
 			ToolTip="After this many failed camera-hidden attempts, the reserve retries at a normal valid spawn so story handover cannot wait forever."))
 	int32 ReserveCameraAvoidanceRetryLimit = 3;
 
 	/** Total failures before abandoning this queued deployment without consuming its reserve. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(ClampMin="1", ClampMax="100", DisplayName="Total Reserve Retry Limit",
 			ToolTip="Prevents an invalid NavMesh, collision, or NPC setup from permanently blocking All Defenders Defeated. The unspawned reserve is not consumed."))
 	int32 ReserveTotalRetryLimit = 10;
@@ -222,12 +215,12 @@ public:
 	 * Empty = guard stands idle at spawn. Minimum useful route: 2 nodes.
 	 * Guarded access via GetPatrolRoute() or HasPatrolRoute().
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Patrol",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Patrol",
 		meta=(DisplayName="Patrol Route"))
 	TArray<FTerritoryPatrolNode> PatrolRoute;
 
 	/** If true, the patrol loop returns to Node0 after the last node. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Patrol",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Patrol",
 		meta=(DisplayName="Loop Patrol"))
 	bool bLoopPatrol = true;
 
@@ -235,45 +228,44 @@ public:
 	 * Faction override. If invalid, the guard uses the territory owner's faction.
 	 * Useful for "neutral" garrisons or captured territories.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn",
 		meta=(Categories="Narrative.Factions", DisplayName="Faction Override"))
 	FGameplayTag FactionOverride;
 
 	/** Higher-priority spawn points fill first when territory guards spawn. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn",
 		meta=(ClampMin="0", UIMin="0", UIMax="100", DisplayName="Priority"))
 	int32 Priority = 50;
 
 	/** P1-09: What happens to reserves when territory ownership changes. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Reserve",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Reserve",
 		meta=(DisplayName="Reserve Ownership Policy"))
 	EReserveOwnershipPolicy ReserveOwnershipPolicy = EReserveOwnershipPolicy::RefillOnOwnerChange;
 
 	// ─── Guard Post Definition (Data Asset) ───
 
 	/**
-	 * Optional data-driven guard post configuration. When assigned, provides NPC definition,
-	 * activity config, trigger sets, patrol route, and reserve settings from a
-	 * reusable UPrimaryDataAsset. Inline properties below act as overrides when this is set.
+	 * Optional nested Guard Post Data Asset selected by the Place Definition row. The
+	 * placed Blueprint cannot override it.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Guard Post Definition"))
 	TObjectPtr<class UTerritoryGuardPostDefinition> GuardPostDefinition;
 
 	// ─── Narrative Overrides ───
 
 	/** Optional NPC definition override for guards spawned from this point. Uses territory default if null. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Narrative",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Narrative",
 		meta=(DisplayName="NPC Definition Override"))
 	TObjectPtr<UNPCDefinition> NPCDefinitionOverride;
 
 	/** Optional activity configuration override. Uses territory default if null. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Narrative",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Narrative",
 		meta=(DisplayName="Activity Configuration Override"))
 	TObjectPtr<UNPCActivityConfiguration> ActivityConfigurationOverride;
 
 	/** Optional trigger set overrides. Uses territory default if empty. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|GuardSpawn|Narrative",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|GuardSpawn|Narrative",
 		meta=(DisplayName="Trigger Set Overrides"))
 	TArray<TSoftObjectPtr<UTriggerSet>> TriggerSetOverrides;
 
@@ -433,8 +425,8 @@ public:
 	ATerritoryVolume* GetOwningTerritory() const;
 
 	// ─── P1-07: Effective Configuration Getters ───
-	// GuardPostDefinition overrides inline values when assigned, except active capacity:
-	// each spawn point is always exactly one active combat slot.
+	// The optional nested GuardPostDefinition supplies reusable defaults behind the
+	// owning Place Definition row. Each post is always one active combat slot.
 
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	int32 GetEffectiveMaxGuards() const;

@@ -16,7 +16,10 @@ ATerritoryVolume (base — placed in level for any territory)
 
 ## ATerritoryVolume — Base Class
 
-### Key editor properties
+### Definition-authored setup
+
+The values in this table are authored in the assigned City, District, or Place Definition. The
+placed actor displays the applied values for inspection, but it is not a second authoring source.
 
 | Property | Type | Default | Purpose |
 |---|---|---|---|
@@ -42,12 +45,11 @@ ATerritoryVolume (base — placed in level for any territory)
 | FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> | — | Per-faction NPC definition overrides |
 | GuardSpawnCount | int32 | 3 | Authored initial target for existing ownership and non-player capture |
 | GuardSpawnPoints | Array<ATerritoryGuardSpawnPoint*> | — | Explicit posts; their unique union with tag/proximity posts is the exact active capacity, one guard per point |
-| GuardSpawnRadius | float | 500 | Deprecated and ignored; active guards require authored points |
 
-`bStartsLocked` and `LockConditions` are hidden serialized migration inputs, not new
-authoring options. Set **Initial State = Locked**, then put quest/diplomacy requirements in
-`State Configs -> Locked -> Exit Conditions`. The **Migrate Legacy Lock Settings** editor
-button converts old actors once without changing saved campaign state.
+To start locked, set **Initial State = Locked** in the Definition, then put quest or diplomacy
+requirements in `State Configs -> Locked -> Exit Conditions`. The former `bStartsLocked`,
+`LockConditions`, and actor-side `StateConfigs` properties have been removed after migration.
+There is one modular state configuration and it belongs to the Definition asset.
 
 ### Key Events (BlueprintNativeEvent)
 
@@ -277,13 +279,14 @@ BP_TerritoryProperty "Blacksmith"
 ### Properties
 | Property | Type | Default | Purpose |
 |---|---|---|---|
-| OwnerTerritoryTag | GameplayTag | — | Optional explicit owner; authored territory references take precedence, then tag, then proximity |
-| MaxGuards | int32 | 1 | Deprecated/ignored legacy value; every actor is one active slot |
-| ReserveSlots | int32 | 1 | Replacement guards |
-| PatrolRoute | Array<PatrolNode> | — | Ordered waypoints |
-| bLoopPatrol | bool | true | Loop back to start |
-| FactionOverride | GameplayTag | — | Override territory owner faction |
-| Priority | int32 | 50 | Higher = fills first |
+| TerritoryDefinition | Data Asset | — | Required source containing the matching Guard Post row |
+| GuardPostID | Name | — | Stable row ID inside that Definition |
+| OwnerTerritoryTag | GameplayTag | — | Read-only value applied from the Definition |
+| ReserveSlots | int32 | 1 | Read-only replacement count applied from the row |
+| PatrolRoute | Array<PatrolNode> | — | Read-only world route built from the row's relative nodes |
+| bLoopPatrol | bool | true | Read-only loop policy applied from the row |
+| FactionOverride | GameplayTag | — | Read-only optional faction applied from the row |
+| Priority | int32 | 50 | Read-only row priority; higher fills first |
 
 ### Patrol Node
 | Field | Type | Purpose |

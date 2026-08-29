@@ -127,11 +127,11 @@ Resolution:
 - Locked Exit Conditions are the normal unlock rules.
 - All state changes pass through `CommitOwnershipData` and validate old-state exit plus
   new-state entry rules before one atomic commit.
-- Old serialized fields are hidden but loaded as a bounded migration fallback.
-- The placed HavenReach, MarketSquare, and CastleHill actors were changed to the visible
-  `Initial State = Locked` setting.
-- `Migrate Legacy Lock Settings` moves remaining old values to the new fields and the data
-  validator warns when an old actor remains.
+- The old serialized lock fields and migration functions were removed after their values were
+  reconciled into the Definition assets.
+- HavenReach, MarketSquare, and CastleHill receive their initial state from their assigned
+  City/District Definitions.
+- Placed actors cannot override the Definition's state rules.
 
 Easy example: put “Quest OpenCityGate is complete” in
 `State Configs -> Locked -> Exit Conditions`. Put “Play gate opening sequence” in

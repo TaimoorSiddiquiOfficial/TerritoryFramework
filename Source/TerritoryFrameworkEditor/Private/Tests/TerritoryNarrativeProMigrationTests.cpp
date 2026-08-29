@@ -61,6 +61,20 @@ namespace TerritoryNarrativeMigrationTests
 		return Calls;
 	}
 
+	int32 CountUbergraphNodes(const UBlueprint* Blueprint)
+	{
+		int32 Count = 0;
+		if (!Blueprint) return Count;
+		for (const UEdGraph* Graph : Blueprint->UbergraphPages)
+		{
+			if (Graph)
+			{
+				Count += Graph->Nodes.Num();
+			}
+		}
+		return Count;
+	}
+
 	bool AnyProjectFixtureExists(const TConstArrayView<const TCHAR*> PackageNames)
 	{
 		for (const TCHAR* PackageName : PackageNames)
@@ -252,6 +266,27 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 			FindCalls(Blacksmith, GET_FUNCTION_NAME_CHECKED(UTerritoryControlSubsystem, ForceCapture)).Num(), 0);
 		TestEqual(TEXT("Guard death never bypasses physical capture through the Blueprint library"),
 			FindCalls(Blacksmith, TEXT("ForceCaptureTerritory")).Num(), 0);
+	}
+
+	static const TCHAR* StrictDefinitionBlueprints[] = {
+		TEXT("/Game/TerritoryFramework/Core/BP_TerritoryVolume.BP_TerritoryVolume"),
+		TEXT("/Game/TerritoryFramework/Blueprints/BP_City_HavenReach.BP_City_HavenReach"),
+		TEXT("/Game/TerritoryFramework/Blueprints/BP_District_MarketSquare.BP_District_MarketSquare"),
+		TEXT("/Game/TerritoryFramework/Blueprints/BP_District_CastleHill.BP_District_CastleHill"),
+		TEXT("/Game/TerritoryFramework/Blueprints/BP_Property_Blacksmith.BP_Property_Blacksmith"),
+		TEXT("/Game/TerritoryFramework/Blueprints/BP_Property_Farm.BP_Property_Farm")
+	};
+	for (const TCHAR* BlueprintPath : StrictDefinitionBlueprints)
+	{
+		UBlueprint* DefinitionBlueprint = LoadBlueprint(BlueprintPath);
+		TestNotNull(FString::Printf(TEXT("Strict Definition Blueprint loads: %s"),
+			BlueprintPath), DefinitionBlueprint);
+		if (DefinitionBlueprint)
+		{
+			TestEqual(FString::Printf(
+				TEXT("%s has no legacy EventGraph gameplay overrides"), BlueprintPath),
+				CountUbergraphNodes(DefinitionBlueprint), 0);
+		}
 	}
 
 	UBlueprint* ReturnActivity = LoadBlueprint(
@@ -489,6 +524,8 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		ClaimedDiplomacyEvent);
 	if (ClaimedDiplomacyEvent)
 	{
+		TestEqual(TEXT("Claimed diplomacy executes from the live Blacksmith actor"),
+			ClaimedDiplomacyEvent->GetOuter(), static_cast<UObject*>(Blacksmith));
 		TestEqual(TEXT("Claimed entry keeps Heroes and Bandits Neutral"),
 			ClaimedDiplomacyEvent->NewState, EDiplomacyState::None);
 		TestTrue(TEXT("Claimed diplomacy policy applies on a fresh already-active state"),
@@ -514,6 +551,8 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		ContestedDiplomacyEvent);
 	if (ContestedDiplomacyEvent)
 	{
+		TestEqual(TEXT("Contested diplomacy executes from the live Blacksmith actor"),
+			ContestedDiplomacyEvent->GetOuter(), static_cast<UObject*>(Blacksmith));
 		TestEqual(TEXT("Contested entry changes Heroes and Bandits to War"),
 			ContestedDiplomacyEvent->NewState, EDiplomacyState::War);
 		TestEqual(TEXT("Contested diplomacy first party follows the defending owner"),
@@ -534,6 +573,8 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	TestNotNull(TEXT("Blacksmith Claimed state schedules its finite enemy wave"), WaveEvent);
 	if (WaveEvent)
 	{
+		TestEqual(TEXT("Claimed wave executes from the live Blacksmith actor"),
+			WaveEvent->GetOuter(), static_cast<UObject*>(Blacksmith));
 		TestEqual(TEXT("Claimed wave targets Blacksmith"), WaveEvent->TargetTerritory.ToString(),
 			FString(TEXT("Territory.HavenReach.MarketSquare.Blacksmith")));
 		TestEqual(TEXT("Claimed wave uses Bandits as the exact attacker"),
@@ -605,6 +646,8 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			HandoverEvent);
 		if (HandoverEvent)
 		{
+			TestEqual(TEXT("Owner handover executes from the live Blacksmith actor"),
+				HandoverEvent->GetOuter(), static_cast<UObject*>(Blacksmith));
 			TestEqual(TEXT("Owner handover keeps a stable Blacksmith fallback"),
 				HandoverEvent->OwnerTerritoryTag.ToString(),
 				FString(TEXT("Territory.HavenReach.MarketSquare.Blacksmith")));

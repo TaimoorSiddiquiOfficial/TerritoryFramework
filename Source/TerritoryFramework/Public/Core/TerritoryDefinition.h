@@ -261,7 +261,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="01 Identity")
 	FText DisplayName;
 
-	/** Persistent identity copied from the old actor during migration so existing saves remain valid. */
+	/** Persistent identity shared with the placed runtime actor and saved campaign records. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="01 Identity")
 	FGuid StableTerritoryGUID;
 
@@ -369,24 +369,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Definition")
 	bool ApplyToTerritory(ATerritoryVolume* Territory) const;
 
-	/** Migration helper: copies one existing capture-point Blueprint into this asset. */
-	UFUNCTION(BlueprintCallable, Category="Territory|Definition|Migration",
-		meta=(DevelopmentOnly))
-	bool CopyCapturePointFromActor(ATerritoryCapturePoint* CaptureActor,
-		const ATerritoryVolume* RelativeToTerritory);
-
-	/** Migration helper: copies one existing management POI Blueprint into this asset. */
-	UFUNCTION(BlueprintCallable, Category="Territory|Definition|Migration",
-		meta=(DevelopmentOnly))
-	bool CopyManagementPointFromActor(ATerritoryDistrictManagementPoint* ManagementActor,
-		const ATerritoryVolume* RelativeToTerritory);
-
-	/** Migration helper: copies one existing protected-owner Blueprint into a Place asset. */
-	UFUNCTION(BlueprintCallable, Category="Territory|Definition|Migration",
-		meta=(DevelopmentOnly))
-	bool CopyStoryOwnerFromActor(ATerritoryStoryOwnerSpawner* OwnerActor,
-		const ATerritoryVolume* RelativeToTerritory);
-
 	const FTerritoryGuardPostTemplate* FindGuardPost(FName GuardPostID) const;
 
 	UFUNCTION(BlueprintPure, Category="Territory|Definition",
@@ -401,8 +383,6 @@ public:
 	virtual bool IsDefinitionCompatible(const ATerritoryVolume* Territory) const;
 
 #if WITH_EDITOR
-	/** Migration path: copy existing actor authoring into this asset, including its save GUID. */
-	bool CopyFromTerritory(const ATerritoryVolume* Territory);
 	virtual void PostInitProperties() override;
 	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;

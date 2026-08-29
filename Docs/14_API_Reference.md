@@ -98,7 +98,10 @@ Static Blueprint-callable helpers. Use these as the primary entry point from Blu
 
 Base territory actor. Place in level to define a capturable zone.
 
-### Properties (BlueprintReadWrite)
+### Applied runtime properties
+
+These values are authored on the assigned `UTerritoryDefinition`. The actor exposes the applied
+values for runtime queries; it is not a supported Blueprint authoring fallback.
 
 | Property | Type | Category | SaveGame | Replicated | Notes |
 |---|---|---|---|---|---|
@@ -117,13 +120,12 @@ Base territory actor. Place in level to define a capturable zone.
 | FactionGuardDefinitions | TArray<FTerritoryFactionGuardDefinition> | Territory\|Guards | — | — | Per-faction NPC definition overrides |
 | GuardSpawnCount | int32 | Territory\|Guards | — | — | Authored initial target for non-player captures |
 | PostCaptureGarrisonPolicy | ETerritoryPostCaptureGarrisonPolicy | Territory\|Guards | — | — | Default `PlayerChooses` starts captures by a resolved matching live Narrative player faction at zero |
-| GuardSpawnRadius | float | Territory\|Guards | — | — | Deprecated/ignored; no random active-guard fallback |
 | GuardSpawnPoints | TArray<ATerritoryGuardSpawnPoint*> | Territory\|Guards | — | — | Explicit post references; the unique resolved union is active capacity, one guard per point |
 | ControlMode | ETerritoryControlMode | Territory\|Hierarchy | — | — | Independent (default), AggregateOnly, or Cascading |
-| StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Territory\|State | — | — | Per-state entry/exit conditions and entry/exit events; designer-configured |
+| StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Definition asset | — | — | Per-state entry/exit conditions/events, cloned privately into each live actor |
 
-Legacy serialized `bStartsLocked` and `LockConditions` remain readable only for bounded
-migration. New assets use `InitialState` and the Locked row's Exit Conditions.
+Legacy `bStartsLocked`, `LockConditions`, actor-side `StateConfigs`, and migration functions are
+removed. Definitions use `InitialState` and the Locked row's Exit Conditions.
 
 ### OwnershipData (Replicated, RepNotify)
 
@@ -378,23 +380,24 @@ Actor placed in level to define guard spawn locations and patrol routes.
 
 | Property | Type | Default | Notes |
 |---|---|---|---|
-| OwnerTerritoryTag | FGameplayTag | — | Optional explicit owner; territory `GuardSpawnPoints` references take precedence, then this tag, then proximity |
-| MaxGuards | int32 | 1 | Deprecated/ignored legacy value; each point is one active slot |
-| ReserveSlots | int32 | 1 | Guards that only spawn when active guards die |
-| PatrolRoute | TArray<FTerritoryPatrolNode> | empty | Ordered waypoints for patrol. Empty = guard stays at spawn point |
-| bLoopPatrol | bool | true | Whether patrol route loops back to start |
-| FactionOverride | FGameplayTag | — | Override territory's faction for this point |
-| Priority | int32 | 50 | Higher priority spawn points fill first |
-| bAutoSpawnReserves | bool | true | Auto-deploy reserves on guard death |
-| ReserveSpawnDelay | float | 3.0 | Delay before reserve deployment |
-| ReserveSpawnRetryInterval | float | 2.0 | Retry interval for blocked spawns |
-| ReserveSpawnRadius | float | 600.0 | Random placement radius (uu) |
-| ReserveMinimumPlayerDistance | float | 500.0 | Minimum distance from players for reserve spawns |
-| ReserveSpawnCandidateCount | int32 | 12 | NavMesh candidate locations per spawn attempt |
-| GuardPostDefinition | UTerritoryGuardPostDefinition* | null | Data asset for reusable guard configuration |
-| NPCDefinitionOverride | UNPCDefinition* | null | Per-point NPC definition override |
-| ActivityConfigurationOverride | UNPCActivityConfiguration* | null | Per-point activity configuration override |
-| TriggerSetOverrides | TArray<TSoftObjectPtr<UTriggerSet>> | empty | Per-point trigger set overrides |
+| TerritoryDefinition | UTerritoryDefinition* | — | Required authoring asset |
+| GuardPostID | FName | — | Stable row ID inside the Definition |
+| OwnerTerritoryTag | FGameplayTag | — | Applied read-only Territory identity |
+| ReserveSlots | int32 | 1 | Applied read-only replacement count |
+| PatrolRoute | TArray<FTerritoryPatrolNode> | empty | Applied world route built from relative asset nodes |
+| bLoopPatrol | bool | true | Applied read-only loop policy |
+| FactionOverride | FGameplayTag | — | Applied optional faction override |
+| Priority | int32 | 50 | Applied row priority |
+| bAutoSpawnReserves | bool | true | Applied reserve automation policy |
+| ReserveSpawnDelay | float | 3.0 | Applied delay before reserve deployment |
+| ReserveSpawnRetryInterval | float | 2.0 | Applied retry interval for blocked spawns |
+| ReserveSpawnRadius | float | 600.0 | Applied reserve candidate radius (uu) |
+| ReserveMinimumPlayerDistance | float | 500.0 | Applied minimum distance from players |
+| ReserveSpawnCandidateCount | int32 | 12 | Applied NavMesh candidate count |
+| GuardPostDefinition | UTerritoryGuardPostDefinition* | null | Optional nested Data Asset selected by the row |
+| NPCDefinitionOverride | UNPCDefinition* | null | Applied per-row Narrative NPC override |
+| ActivityConfigurationOverride | UNPCActivityConfiguration* | null | Applied per-row Narrative activity override |
+| TriggerSetOverrides | TArray<TSoftObjectPtr<UTriggerSet>> | empty | Applied per-row TriggerSets |
 
 ### Struct: FTerritoryPatrolNode
 
@@ -453,7 +456,6 @@ Reusable guard configuration asset. Assign to `ATerritoryGuardSpawnPoint::GuardP
 | TriggerSetOverrides | TArray<TSoftObjectPtr<UTriggerSet>> | empty | Trigger set overrides |
 | PatrolRoute | TArray<FTerritoryPatrolNode> | empty | Patrol waypoints |
 | bLoopPatrol | bool | true | Loop patrol route |
-| MaxGuards | int32 | 1 | Deprecated/ignored; capacity comes from placed spawn-point count |
 | ReserveSlots | int32 | 1 | Reserve guard count |
 | ReserveSpawnDelay | float | 3.0 | Delay before reserve deployment |
 | ReserveSpawnRetryInterval | float | 2.0 | Retry interval for blocked spawns |

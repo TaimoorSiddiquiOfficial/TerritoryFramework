@@ -1418,6 +1418,8 @@ bool FTFPatrolOverlapAndDefenceFrontRegression::RunTest(const FString& Parameter
 	const TArray<ATerritoryVolume*> PlacementCandidates = {City, District};
 	TestTrue(TEXT("A patrol-node District hit outranks an actor-origin City hit"),
 		ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(PlacementCandidates) == District);
+	AddExpectedError(TEXT("has no AbilitySystemComponent"),
+		EAutomationExpectedErrorFlags::Contains, 1);
 	Property->RegisterDefender(ChildGuard);
 	Property->GuardSpawnPoints.Add(PatrolPost);
 	FTerritoryPatrolNode PatrolNode;
@@ -1840,15 +1842,13 @@ bool FTFBehavior_TagBoundSpawnPointRegistration::RunTest(const FString& Paramete
 
 	TestEqual(TEXT("No authored spawn points means zero active garrison capacity"),
 		Territory->GetMaxGuardCount(), 0);
-	First->MaxGuards = 20;
-	Second->MaxGuards = 20;
 	Territory->RegisterResolvedGuardSpawnPoint(First);
 	Territory->RegisterResolvedGuardSpawnPoint(Second);
 	TestEqual(TEXT("Both resolved posts join the existing guard-post read model"),
 		Territory->GetGuardSpawnPoints().Num(), 2);
 	TestEqual(TEXT("Each unique post contributes exactly one active combat slot"),
 		Territory->GetMaxGuardCount(), 2);
-	TestEqual(TEXT("Legacy per-post MaxGuards cannot stack NPCs on one marker"),
+	TestEqual(TEXT("A physical Guard Post contributes exactly one active slot"),
 		First->GetEffectiveMaxGuards(), 1);
 
 	Territory->UnregisterResolvedGuardSpawnPoint(First);

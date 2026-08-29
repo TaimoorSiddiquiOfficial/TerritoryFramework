@@ -385,6 +385,34 @@ bool UTerritoryDataValidator::ValidateTerritory(ATerritoryVolume* Territory, TAr
 	if (!Territory) return false;
 
 	FString Label = Territory->GetActorLabel();
+	UTerritoryDefinition* Definition = Territory->GetTerritoryDefinition();
+	if (!Definition)
+	{
+		OutErrors.Add(FString::Printf(
+			TEXT("%s: Territory Definition is required; Blueprint/actor-side authoring is no longer supported"),
+			*Label));
+	}
+	else
+	{
+		if (!Definition->IsDefinitionCompatible(Territory))
+		{
+			OutErrors.Add(FString::Printf(
+				TEXT("%s: Definition %s is not compatible with actor class %s"),
+				*Label, *Definition->GetName(), *Territory->GetClass()->GetName()));
+		}
+		if (Definition->TerritoryTag != Territory->GetTerritoryTag())
+		{
+			OutErrors.Add(FString::Printf(
+				TEXT("%s: actor tag differs from its Definition; reapply/synchronize the Definition"),
+				*Label));
+		}
+		if (Definition->StableTerritoryGUID.IsValid()
+			&& Definition->StableTerritoryGUID != Territory->GetTerritoryGUID())
+		{
+			OutErrors.Add(FString::Printf(
+				TEXT("%s: actor save GUID differs from its Definition"), *Label));
+		}
+	}
 
 	// Check for empty tag
 	FGameplayTag Tag = Territory->GetTerritoryTag();
@@ -415,17 +443,6 @@ bool UTerritoryDataValidator::ValidateTerritory(ATerritoryVolume* Territory, TAr
 			OutWarnings.Add(FString::Printf(TEXT("%s: InitialOwningFaction '%s' doesn't start with Narrative.Factions"),
 				*Label, *FactionTag.ToString()));
 		}
-	}
-
-	if (Territory->HasLegacyInitialLockSetting())
-	{
-		OutWarnings.Add(FString::Printf(TEXT("%s: old Starts Locked data is still active; run 'Migrate Legacy Lock Settings' on this actor"),
-			*Label));
-	}
-	if (Territory->HasLegacyUnlockConditions())
-	{
-		OutWarnings.Add(FString::Printf(TEXT("%s: old Lock Conditions are still active; run 'Migrate Legacy Lock Settings' to move them to Locked -> Exit Conditions"),
-			*Label));
 	}
 
 	// Check economy configuration

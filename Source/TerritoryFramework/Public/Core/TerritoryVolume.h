@@ -174,7 +174,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Initial Owning Faction"))
 	FGameplayTag GetInitialOwningFaction() const;
 
-	/** Resolves the new Initial State setting and the hidden legacy Starts Locked value. */
+	/** Resolves the Definition-owned Initial State setting for a new campaign. */
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership",
 		meta=(DisplayName="Get Resolved Initial State",
 			ToolTip="Preview the state used for a new campaign. Saved games keep their saved state."))
@@ -188,7 +188,7 @@ public:
 		meta=(DisplayName="Get Territory Definition"))
 	UTerritoryDefinition* GetTerritoryDefinition() const { return TerritoryDefinition; }
 
-	/** Effective asset-owned state rules, or legacy inline rules during migration. */
+	/** Runtime Narrative instances cloned from the assigned Definition asset. */
 	const TMap<ETerritoryState, FTerritoryStateConfig>& GetStateConfigs() const;
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetDefenderDiedEvents() const;
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetAllDefendersDefeatedEvents() const;
@@ -197,14 +197,6 @@ public:
 	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition",
 		meta=(DisplayName="Apply Territory Definition"))
 	bool ApplyTerritoryDefinition();
-
-	/**
-	 * Migration button. Assign an empty matching Definition first, then use this once
-	 * to copy old actor settings and its stable save GUID into the asset.
-	 */
-	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition|Migration",
-		meta=(DisplayName="Copy Legacy Actor Settings To Definition"))
-	bool CopyLegacySettingsToDefinition();
 
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	UTerritoryCounterAttackProfile* GetCounterAttackProfile() const { return CounterAttackProfile; }
@@ -372,7 +364,7 @@ public:
 
 	/**
 	 * Lock this territory. Server-only. Optional reason shown in UI.
-	 * Unlock with TryUnlock() once all LockConditions pass.
+	 * Unlock with TryUnlock() once the Definition's Locked Exit Conditions pass.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Lock", meta=(DisplayName="Lock Territory"))
 	void LockTerritory(const FText& Reason = FText());
@@ -385,7 +377,7 @@ public:
 	 * Attempts to unlock. Returns true if successful.
 	 * Checks:
 	 *   - If bForce=true, unlocks unconditionally.
-	 *   - Otherwise, all LockConditions must pass (each condition's CheckCondition() true).
+	 *   - Otherwise, all Locked-state Exit Conditions in the Definition must pass.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Lock", meta=(DisplayName="Try Unlock"))
 	bool TryUnlock(bool bForce = false);
@@ -396,7 +388,7 @@ public:
 
 	/**
 	 * Read-only check: would TryUnlock() succeed right now?
-	 * True if not locked OR all LockConditions pass.
+	 * True if not locked OR all Definition-owned Locked-state Exit Conditions pass.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Can Unlock"))
 	bool CanUnlock() const;
@@ -407,20 +399,6 @@ public:
 	/** Returns the reason this territory was locked. Empty if not locked. */
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Get Lock Reason"))
 	FText GetLockReason() const { return OwnershipData.LockReason; }
-
-	/**
-	 * Editor migration button. Converts hidden Starts Locked/Lock Conditions data to
-	 * Initial State and State Configs[Locked].Exit Conditions, then clears legacy data.
-	 */
-	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Migration",
-		meta=(DisplayName="Migrate Legacy Lock Settings",
-			ToolTip="Use once on an old Territory actor. Example: Starts Locked becomes Initial State = Locked, and Lock Conditions move to Locked -> Exit Conditions."))
-	void MigrateLegacyLockSettings();
-
-	/** True only while an old serialized Starts Locked value still needs migration. */
-	bool HasLegacyInitialLockSetting() const { return bStartsLocked; }
-	/** True only while old serialized Lock Conditions still need migration. */
-	bool HasLegacyUnlockConditions() const { return !LockConditions.IsEmpty(); }
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Guard Spawning API
@@ -581,7 +559,7 @@ public:
 public:
 	/** Check if all Entry Conditions for the given state pass. Public for atomic mutation validation. */
 	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
-	/** Check if all Exit Conditions for the given state pass. Locked also reads legacy LockConditions when no new exit rules exist. */
+	/** Check if all Definition-owned Exit Conditions for the given state pass. */
 	bool CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 	/** Validate the complete old-state exit and new-state entry rule set. */
 	bool CheckStateTransitionConditions(ETerritoryState OldState, ETerritoryState NewState, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
@@ -611,102 +589,77 @@ protected:
 	// ─── Editable Properties ───
 
 	/**
-	 * Recommended authoring path. When assigned, this asset supplies identity,
-	 * hierarchy, state rules, Narrative events, guards, economy, and assault settings.
-	 * Existing inline properties remain only as a bounded migration fallback.
+	 * Required authoring source. This asset supplies identity, hierarchy, state rules,
+	 * Narrative events, guards, economy, and assault settings. The actor has no
+	 * Blueprint or level-side policy fallback.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition",
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition",
 		meta=(DisplayName="Territory Definition"))
 	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
 		meta=(Categories="Territory", DisplayName="Territory Tag"))
 	FGameplayTag TerritoryTag;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
 		meta=(DisplayName="Display Name"))
 	FText TerritoryDisplayName;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
 		meta=(Categories="Narrative.Factions", DisplayName="Initial Owning Faction",
 			ToolTip="Faction that owns this place in a new campaign. Example: Narrative.Factions.Regime. Saved games keep their saved owner."))
 	FGameplayTag InitialOwningFaction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
 		meta=(DisplayName="New Campaign Initial State (Authoring Only)",
 			ToolTip="Seed used only when no saved runtime state exists. Easy example: Locked makes every new campaign start locked. A Territory Unlock Event changes the replicated Runtime Territory State, not this authoring seed, so future new campaigns still begin locked."))
 	ETerritoryInitialState InitialState = ETerritoryInitialState::Automatic;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Hierarchy",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Hierarchy",
 		meta=(DisplayName="Control Mode"))
 	ETerritoryControlMode ControlMode = ETerritoryControlMode::Independent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
 		meta=(ClampMin="1", UIMin="1", UIMax="20", DisplayName="Max Concurrent Attackers"))
 	int32 InitialMaxConcurrentAttackers = 3;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Economy",
 		meta=(ClampMin="0", DisplayName="Periodic Income"))
 	int32 InitialPeriodicIncome = 100;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Economy",
 		meta=(ClampMin="0", DisplayName="Guard Upkeep Per Cycle"))
 	int32 InitialGuardCost = 50;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Economy",
 		meta=(ClampMin="0", DisplayName="Guard Recruitment Cost"))
 	int32 InitialGuardRecruitmentCost = 50;
 
-	/** Serialized migration input. Hidden from new authoring; use InitialState instead. */
-	UPROPERTY(meta=(DeprecatedProperty,
-		DeprecationMessage="Use Initial State. Existing serialized values are still migrated at runtime."))
-	bool bStartsLocked = false;
-
 	// ─── Strategic counterattack configuration ───
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack")
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack")
 	TObjectPtr<UTerritoryCounterAttackProfile> CounterAttackProfile;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack",
 		meta=(TitleProperty="ApproachID"))
 	TArray<FTerritoryAssaultApproach> CounterAttackApproaches;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
 	float GuardQuality = 1.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
 	float FortificationStrength = 0.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
 	float NearbyAlliedSupport = 0.f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
 	float StrategicValue = 1.f;
-
-	// ─── State Configuration (Conditions & Events) ───
-
-	/**
-	 * State configuration map — assign conditions and events per territory state.
-	 * Entry Conditions must all pass to enter; Exit Conditions must all pass to leave.
-	 * Events fire only after one atomic state commit. For a quest lock, use the Locked
-	 * row and put the quest-complete check in Exit Conditions.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|States",
-		meta=(DisplayName="State Configs",
-			ToolTip="One transition rule table for all states. Example: Locked Exit Conditions control unlocking; Claimed Entry Events can reward the capturing faction."))
-	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
 
 	/** Fire EntryEvents (bEntering=true) or ExitEvents (bEntering=false) for the given state. Uses TransitionContext for instigator. */
 	void FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
 
-	// ─── Lock System ───
-
-	/** Serialized migration input. Hidden from new authoring; use StateConfigs[Locked].ExitConditions. */
-	UPROPERTY(Instanced, meta=(DeprecatedProperty,
-		DeprecationMessage="Use the Locked row in State Configs -> Exit Conditions. Existing serialized conditions remain active until migrated."))
-	TArray<TObjectPtr<class UNarrativeCondition>> LockConditions;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Hierarchy",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Hierarchy",
 		meta=(Categories="Territory", DisplayName="Parent Territory Tag"))
 	FGameplayTag ParentTerritoryTag;
 
@@ -738,7 +691,7 @@ protected:
 	 * stairs, and second floor. The player can clear every defender on any floor, then
 	 * speak to the protected owner to accept the handover.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture|Story",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture|Story",
 		meta=(DisplayName="Story Capture From Territory Bounds",
 			ToolTip="Use the full Territory Bounds Shape for a story handover. This holds Contested without automatic progress and automatically disables Capture Points targeting this Territory."))
 	bool bStoryCaptureFromBounds = false;
@@ -754,7 +707,7 @@ protected:
 	 * Default guard definition — used when no per-faction entry matches.
 	 * Set this if you want all guards (regardless of owner faction) to use the same NPC class.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
 		meta=(AllowedClasses="/Script/NarrativeArsenal.NPCDefinition", DisplayName="Default Guard Definition"))
 	TObjectPtr<UNPCDefinition> GuardNPCDefinition;
 
@@ -763,60 +716,23 @@ protected:
 	 * using the definition for the new owner's faction (first match). Falls back to
 	 * GuardNPCDefinition if no matching entry exists.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
 		meta=(TitleProperty="{Faction}", DisplayName="Per-Faction Guard Definitions"))
 	TArray<FTerritoryFactionGuardDefinition> FactionGuardDefinitions;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
 		meta=(ClampMin="0", DisplayName="Guard Spawn Count"))
 	int32 GuardSpawnCount = 3;
 
 	/** Player captures start unstaffed by default so the player explicitly controls profit and loss. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
 		meta=(DisplayName="Post Capture Garrison Policy"))
 	ETerritoryPostCaptureGarrisonPolicy PostCaptureGarrisonPolicy =
 		ETerritoryPostCaptureGarrisonPolicy::PlayerChooses;
 
-	/**
-	 * Legacy fallback maximum. Ignored: active capacity is the unique spawn-point count.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
-		meta=(DeprecatedProperty,
-			DeprecationMessage="Ignored. Add guard spawn-point actors to increase capacity.",
-			ClampMin="0", DisplayName="Legacy Maximum Guard Count (Ignored)"))
-	int32 MaxGuardCount = 10;
-
-	/** Legacy random-spawn radius. Ignored because active guards require authored spawn points. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
-		meta=(DeprecatedProperty,
-			DeprecationMessage="Ignored. Active guards deploy only at authored spawn points.",
-			ClampMin="0.0", DisplayName="Legacy Guard Spawn Radius (Ignored)"))
-	float GuardSpawnRadius = 500.f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Guards",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
 		meta=(DisplayName="Guard Spawn Points"))
 	TArray<TObjectPtr<ATerritoryGuardSpawnPoint>> GuardSpawnPoints;
-
-	// ─── Guard Events ───
-
-	/**
-	 * One-shot Narrative events fired on the server after each registered defender dies.
-	 * The event Target is the killer pawn when available. Every event's inherited
-	 * Conditions array must pass; use this for "on defender died AND diplomacy is War".
-	 */
-	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Territory|Guards|Narrative",
-		meta=(DisplayName="On Defender Died Events",
-			ToolTip="Runs after each registered defender death. Add conditions inside each event; all must pass. Example: schedule a finite enemy wave only when Heroes and Bandits are at War."))
-	TArray<TObjectPtr<class UNarrativeEvent>> DefenderDiedEvents;
-
-	/**
-	 * One-shot Narrative events fired only when living defenders and pending reserve
-	 * deployments both reach zero. These events are not replayed merely because a save loads.
-	 */
-	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Territory|Guards|Narrative",
-		meta=(DisplayName="On All Defenders Defeated Events",
-			ToolTip="Runs once when the final living defender dies and no replacement is pending. Example: schedule a finite counterattack wave, gated by a Diplomacy Condition."))
-	TArray<TObjectPtr<class UNarrativeEvent>> AllDefendersDefeatedEvents;
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Guard Killed"))
 	FOnGuardKilled OnGuardKilled;
@@ -825,7 +741,7 @@ private:
 	friend class ATerritoryGuardSpawnPoint;
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDefenderNarrativeEventConditions;
-	friend class FTFTerritoryDefinitionLegacyMigration;
+	friend class FTFTerritoryDefinitionRuntimeNarrative;
 #endif
 
 	static int32 CalculateGuardRestoreCount(bool bLoadedFromSave, int32 DesiredGuards,
@@ -840,6 +756,16 @@ private:
 	/** Runtime union members resolved by stable OwnerTerritoryTag or proximity. */
 	UPROPERTY(Transient)
 	TArray<TWeakObjectPtr<ATerritoryGuardSpawnPoint>> ResolvedGuardSpawnPoints;
+
+	/** Per-actor clones. DataAsset Narrative objects are immutable templates and never execute. */
+	UPROPERTY(Transient)
+	TMap<ETerritoryState, FTerritoryStateConfig> RuntimeStateConfigs;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class UNarrativeEvent>> RuntimeDefenderDiedEvents;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class UNarrativeEvent>> RuntimeAllDefendersDefeatedEvents;
 
 	FGameplayTag PreviousOwningFaction;
 	ETerritoryState PreviousState = ETerritoryState::Unclaimed;
@@ -878,6 +804,7 @@ private:
 	void ReconcileStoryBoundsContesters();
 	void ReleaseStoryBoundsContesters();
 	void ApplyInitialStateDiplomacyPolicies();
+	void RebuildRuntimeNarrativeConfiguration(const UTerritoryDefinition& Definition);
 	void PublishCaptureSummary();
 	bool HasPendingReserveDeployments() const;
 	void CancelPendingReserveDeployments();

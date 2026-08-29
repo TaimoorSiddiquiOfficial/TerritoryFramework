@@ -96,37 +96,34 @@ Easy examples:
 - Claimed entry event: give XP, unlock the next Place, or schedule a finite enemy wave.
 - Claimed exit event: remove a perk when the Place is lost.
 
-Events are stored inside the definition asset. Migration replaces direct level-actor references
-with stable Territory tags where supported, so World Partition can unload the target actor.
+Events and conditions are authored as reusable templates inside the definition asset. At runtime,
+the framework creates a private copy for each loaded Territory actor. This is important: a
+Narrative event needs the live actor's World and transition context. Executing the template object
+from the Content Browser would make diplomacy, handover, spawning, and other world actions silently
+fail.
 
-## Convert an existing level
+Direct references from a reusable event to one level actor are not supported. Use stable Territory
+tags instead, so the correct live actor can be found after World Partition loads it.
 
-1. Create a matching empty City, District, or Place definition.
-2. Assign it on the old Territory actor.
-3. Use `Copy Legacy Actor Settings To Definition`.
-4. For existing helper actors, use the definition migration functions for Capture Point,
-   Management Point, and Story Owner, or run the provided project migration tool.
-5. Add child assets to their parent arrays and refresh the City hierarchy.
-6. Synchronize with creation and movement disabled first. This only links and reapplies policy.
-7. Save, run Data Validation, compile Blueprints, and test PIE/save-load before cleanup.
+## Completed migration and strict authority
 
-The migration keeps the old Territory and guard-post GUIDs, deep-copies instanced Narrative
-conditions/events into the asset, and flattens effective guard-post profile values into each row.
+The project migration is complete. There is no actor-side fallback and no copy/migrate button at
+runtime or in the Blueprint API.
 
-## Safe legacy removal
+- Every placed City, District, and Place must have a matching Definition asset.
+- Every Capture Point, Management Point, Story Owner, and Guard Post must link to the appropriate
+  Definition (plus a Guard Post row ID where required).
+- A placed Territory actor stores only its Definition link, physical bounds/presentation, stable
+  identity, and saved/replicated campaign state.
+- State rules, defender events, initial ownership, guards, economy, production, assault policy,
+  and helper-actor settings come from the Definition.
+- Missing or incompatible Definitions fail validation and disable runtime activation instead of
+  falling back to stale Blueprint values.
 
-Legacy inline actor fields remain a bounded fallback during the migration release. Runtime uses
-the assigned definition first and inline data only when no definition is assigned. Remove old
-inline fields in a later breaking release only after:
-
-- every shipped map validates with definition links;
-- old saves load with the preserved GUIDs;
-- World Partition and late-join tests pass;
-- Blueprints no longer read or write the old properties;
-- a versioned redirect or migration exists for serialized content.
-
-Deleting the old fields immediately would make existing community maps unsafe. The staged path
-allows projects to convert one hierarchy at a time.
+Existing projects upgrading from an older plugin version must migrate in the older migration
+release first, save the converted assets/maps, and only then upgrade to this strict version. That
+ordering preserves stable Territory and Guard Post GUIDs and prevents old saved campaigns from
+binding to a different Place.
 
 ## Validation messages
 

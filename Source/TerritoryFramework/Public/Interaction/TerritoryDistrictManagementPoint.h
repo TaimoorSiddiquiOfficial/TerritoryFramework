@@ -100,24 +100,24 @@ public:
 	virtual void BeginPlay() override;
 
 	/** City/District/Place asset that supplies the management Blueprint policy. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition")
 	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
 	bool ApplyTerritoryDefinition();
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management", meta=(Categories="Territory"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Management", meta=(Categories="Territory"))
 	FGameplayTag DistrictTag;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management")
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Management")
 	TSubclassOf<UTerritoryDistrictManagementWidget> ManagementWidgetClass;
 
 	/** Narrative gameplay HUD layer used for the management menu. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management",
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Management",
 		meta=(Categories="UI.Layer"))
 	FGameplayTag ManagementLayerTag;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management", meta=(ClampMin="100"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Management", meta=(ClampMin="100"))
 	float ManagementDistance = 600.f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Management")
