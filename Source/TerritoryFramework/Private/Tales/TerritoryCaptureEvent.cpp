@@ -93,6 +93,7 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 		Request.bBypassConditions = true;
 		Request.bBypassDiplomacy = true;
 		Request.bBypassLock = true;
+		Request.bBypassDefenders = true;
 	}
 
 	const FTerritoryMutationResponse Response = Control->ApplyTerritoryMutation(Request);

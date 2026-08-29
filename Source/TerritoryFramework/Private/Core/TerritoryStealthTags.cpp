@@ -6,6 +6,10 @@ namespace TerritoryStealthTags
 		"Territory.Event.Stealth.Exposed",
 		"Sent to an infiltrator when Territory evidence confirms their identity.");
 
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(StealthAbility,
+		"Territory.Ability.Stealth",
+		"Ability tag for Territory-aware stealth abilities that end when an infiltrator is exposed.");
+
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(DistractionThrowable,
 		"Territory.Distraction.Throwable",
 		"Hearing stimulus produced by a nonlethal Territory distraction throwable.");

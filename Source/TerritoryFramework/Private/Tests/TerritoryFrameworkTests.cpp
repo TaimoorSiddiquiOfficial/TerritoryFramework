@@ -4098,6 +4098,7 @@ bool FTFContract_AtomicMutation::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Rejected_Locked exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_Locked"))) != INDEX_NONE);
 		TestTrue(TEXT("Rejected_StateUnchanged exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_StateUnchanged"))) != INDEX_NONE);
 		TestTrue(TEXT("Failed_FinalStateMismatch exists"), ResultEnum->GetValueByName(FName(TEXT("Failed_FinalStateMismatch"))) != INDEX_NONE);
+		TestTrue(TEXT("Rejected_DefendersRemain exists"), ResultEnum->GetValueByName(FName(TEXT("Rejected_DefendersRemain"))) != INDEX_NONE);
 	}
 
 	// Verify request struct fields
@@ -4111,12 +4112,14 @@ bool FTFContract_AtomicMutation::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Request has bClearCaptureState"), RequestStruct->FindPropertyByName(FName(TEXT("bClearCaptureState"))) != nullptr);
 		TestTrue(TEXT("Request has bBypassConditions"), RequestStruct->FindPropertyByName(FName(TEXT("bBypassConditions"))) != nullptr);
 		TestTrue(TEXT("Request has explicit lock bypass"), RequestStruct->FindPropertyByName(FName(TEXT("bBypassLock"))) != nullptr);
+		TestTrue(TEXT("Request has explicit defender bypass"), RequestStruct->FindPropertyByName(FName(TEXT("bBypassDefenders"))) != nullptr);
 		TestTrue(TEXT("Request has TransitionContext"), RequestStruct->FindPropertyByName(FName(TEXT("TransitionContext"))) != nullptr);
 	}
 	const FTerritoryMutationRequest SafeDefaults;
 	TestFalse(TEXT("Ordinary mutations do not bypass locks"), SafeDefaults.bBypassLock);
 	TestFalse(TEXT("Ordinary mutations do not bypass diplomacy"), SafeDefaults.bBypassDiplomacy);
 	TestFalse(TEXT("Ordinary mutations do not bypass Narrative conditions"), SafeDefaults.bBypassConditions);
+	TestFalse(TEXT("Ordinary mutations require defenders to be defeated"), SafeDefaults.bBypassDefenders);
 
 	// Verify response struct fields
 	UScriptStruct* ResponseStruct = FTerritoryMutationResponse::StaticStruct();

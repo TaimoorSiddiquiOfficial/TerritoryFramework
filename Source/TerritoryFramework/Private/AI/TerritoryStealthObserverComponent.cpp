@@ -128,16 +128,37 @@ bool UTerritoryStealthObserverComponent::IsTargetFiring(AActor* Target) const
 		FNarrativeGameplayTags::Get().State_Weapon_IsFiring);
 }
 
+bool UTerritoryStealthObserverComponent::IsNarrativeInvisible(AActor* Target) const
+{
+	const UTerritoryStealthProfile* Profile = GetActiveProfile();
+	if (!Profile || !Profile->bRespectNarrativeInvisibleTag || !Target)
+	{
+		return false;
+	}
+	const UAbilitySystemComponent* ASC =
+		UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target);
+	return ASC && ASC->HasMatchingGameplayTag(
+		FNarrativeGameplayTags::Get().State_InvisibleToEnemies);
+}
+
+bool UTerritoryStealthObserverComponent::ShouldForcePointBlankExposure(
+	AActor* Target) const
+{
+	const ATerritoryGuardCharacter* Guard = GetTerritoryGuard();
+	const UTerritoryStealthProfile* Profile = GetActiveProfile();
+	return Guard && Target && Profile && Profile->bPointBlankSightAlwaysExposes
+		&& Profile->PointBlankSightExposureDistance > 0.f
+		&& !IsNarrativeInvisible(Target)
+		&& FVector::DistSquared(Guard->GetActorLocation(), Target->GetActorLocation())
+			<= FMath::Square(Profile->PointBlankSightExposureDistance);
+}
+
 float UTerritoryStealthObserverComponent::CalculateEffectiveSightStrength(
 	AActor* Target, float RawSightStrength) const
 {
 	const UTerritoryStealthProfile* Profile = GetActiveProfile();
 	if (!Profile || !Target) return FMath::Clamp(RawSightStrength, 0.f, 1.f);
-	const UAbilitySystemComponent* ASC =
-		UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target);
-	if (Profile->bRespectNarrativeInvisibleTag && ASC
-		&& ASC->HasMatchingGameplayTag(
-			FNarrativeGameplayTags::Get().State_InvisibleToEnemies))
+	if (IsNarrativeInvisible(Target))
 	{
 		return 0.f;
 	}
@@ -194,6 +215,7 @@ void UTerritoryStealthObserverComponent::HandleTargetPerceptionUpdated(
 
 		const float EffectiveStrength = CalculateEffectiveSightStrength(
 			Target, Stimulus.Strength);
+		const bool bPointBlankExposure = ShouldForcePointBlankExposure(Target);
 		FObservedSight& Seen = CurrentlySeenTargets.FindOrAdd(Target);
 		Seen.RawStrength = Stimulus.Strength;
 		Seen.LastLocation = Stimulus.StimulusLocation;
@@ -208,7 +230,8 @@ void UTerritoryStealthObserverComponent::HandleTargetPerceptionUpdated(
 			Control->ReportStealthEvidence(Territory, Target, Guard,
 				ETerritoryStealthEvidence::Sight, EffectiveStrength,
 				Stimulus.StimulusLocation, FVector::ZeroVector,
-				EffectiveStrength >= Profile->ImmediateSightExposureThreshold);
+				bPointBlankExposure
+				|| EffectiveStrength >= Profile->ImmediateSightExposureThreshold);
 		}
 		return;
 	}
@@ -294,6 +317,7 @@ void UTerritoryStealthObserverComponent::RefreshVisibleTargets()
 		}
 		const float EffectiveStrength = CalculateEffectiveSightStrength(
 			Target, It->Value.RawStrength);
+		const bool bPointBlankExposure = ShouldForcePointBlankExposure(Target);
 		if (IsTargetFiring(Target) && Profile->bFireWhileSeenExposes)
 		{
 			Control->ReportStealthEvidence(Territory, Target, Guard,
@@ -305,7 +329,8 @@ void UTerritoryStealthObserverComponent::RefreshVisibleTargets()
 			Control->ReportStealthEvidence(Territory, Target, Guard,
 				ETerritoryStealthEvidence::Sight, EffectiveStrength,
 				Target->GetActorLocation(), FVector::ZeroVector,
-				EffectiveStrength >= Profile->ImmediateSightExposureThreshold);
+				bPointBlankExposure
+				|| EffectiveStrength >= Profile->ImmediateSightExposureThreshold);
 		}
 	}
 

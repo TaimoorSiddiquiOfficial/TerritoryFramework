@@ -17,6 +17,7 @@
 #include "AbilitySystemInterface.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Abilities/GameplayAbilityTypes.h"
+#include "GameplayEffect.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -443,7 +444,7 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 	// Capture completion is stricter than beginning a contest. Living defenders
 	// block ownership/progress, but must not block the conflict which makes those
 	// defenders react to the intruding faction.
-	if (Territory->GetDefenderCount() > 0 && Territory->GetOwningFaction().IsValid())
+	if (Territory->GetDefenderCount() > 0)
 	{
 		return ECaptureResult::DefendersRemain;
 	}
@@ -739,6 +740,37 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 	if (OldState != ETerritoryExposureState::Exposed
 		&& Runtime.Snapshot.ExposureState == ETerritoryExposureState::Exposed)
 	{
+		// Narrative Pro's built-in stealth is supplied by the active Crouch ability
+		// (Abilities.Crouch) plus StealthRating. A Gameplay Event alone only helps an
+		// ability that explicitly listens for it, so also cancel configured stealth
+		// abilities on the authoritative ASC. Dedicated project abilities should use
+		// Territory.Ability.Stealth or add their own tag to the profile.
+		if (UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Target))
+		{
+			if (Profile->bCancelActiveStealthAbilitiesOnExposure
+				&& !Profile->StealthAbilityTagsToCancel.IsEmpty())
+			{
+				ASC->CancelAbilities(&Profile->StealthAbilityTagsToCancel);
+			}
+
+			// Narrative's GA_Crouch is an instant toggle: after activation the ability
+			// is no longer active, but its infinite GE_CrouchStealth remains. Canceling
+			// the ability therefore cannot end stealth. Remove only explicitly authored
+			// temporary effects so permanent skill/equipment bonuses remain intact.
+			if (Profile->bRemoveActiveStealthEffectsOnExposure)
+			{
+				for (const TSubclassOf<UGameplayEffect> EffectClass :
+					Profile->StealthGameplayEffectsToRemove)
+				{
+					if (EffectClass)
+					{
+						ASC->RemoveActiveGameplayEffectBySourceEffect(
+							EffectClass, nullptr, INDEX_NONE);
+					}
+				}
+			}
+		}
+
 		if (Profile->bSendBreakStealthGameplayEvent
 			&& Profile->BreakStealthGameplayEventTag.IsValid())
 		{
@@ -1136,6 +1168,7 @@ bool UTerritoryControlSubsystem::ForceCaptureWithContext(ATerritoryVolume* Terri
 	Request.bBypassConditions = true;
 	Request.bBypassDiplomacy = true;
 	Request.bBypassLock = true;
+	Request.bBypassDefenders = true;
 	Request.TransitionContext = TransitionContext;
 	Request.TransitionContext.RequestingFaction = NewOwner;
 
@@ -1204,6 +1237,24 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	// ═══════════════════════════════════════════════════════════════════════════
 	Response.OldOwner = Territory->GetOwningFaction();
 	Response.OldState = Territory->GetTerritoryState();
+
+	// Every ownership-changing capture route, including Narrative events and the
+	// public Set Owning Faction node, must respect the physical fight. Only an
+	// explicitly forced mutation may bypass living registered defenders.
+	if (Request.DesiredState == ETerritoryState::Claimed
+		&& Request.NewOwner.IsValid()
+		&& Request.NewOwner != Response.OldOwner
+		&& Territory->GetDefenderCount() > 0
+		&& !Request.bBypassDefenders)
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_DefendersRemain;
+		Response.Explanation = FText::Format(
+			NSLOCTEXT("Territory", "DefendersRemain",
+				"{0} still has {1} living defender(s); defeat them before capture"),
+			FText::FromString(Territory->GetTerritoryTag().ToString()),
+			FText::AsNumber(Territory->GetDefenderCount()));
+		return Response;
+	}
 
 	if (Request.NewOwner.IsValid() && Response.OldOwner.IsValid() && Request.NewOwner != Response.OldOwner)
 	{
@@ -1664,7 +1715,7 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	const float DecayRate = Settings ? Settings->CaptureProgressDecayPerSecond : 0.05f;
 
 	// Defender check on every tick — guards that spawn/arrive mid-contest must halt progress
-	const bool bDefendersPresent = Territory->GetDefenderCount() > 0 && Territory->GetOwningFaction().IsValid();
+	const bool bDefendersPresent = Territory->GetDefenderCount() > 0;
 
 	FGameplayTag BestFaction;
 	float BestProgress = 0.f;

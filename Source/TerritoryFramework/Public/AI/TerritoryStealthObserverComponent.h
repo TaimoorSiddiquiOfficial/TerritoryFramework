@@ -58,6 +58,8 @@ private:
 	AActor* ResolvePlayerSource(AActor* SensedActor) const;
 	const UTerritoryStealthProfile* GetActiveProfile() const;
 	bool IsTargetFiring(AActor* Target) const;
+	bool IsNarrativeInvisible(AActor* Target) const;
+	bool ShouldForcePointBlankExposure(AActor* Target) const;
 	bool BindToCurrentPerception();
 	void RetryPerceptionBinding();
 	void UnbindFromPerception();

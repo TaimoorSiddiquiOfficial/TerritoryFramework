@@ -2,11 +2,14 @@
 
 #include "AI/TerritoryInvestigationActivity.h"
 #include "Core/TerritoryStealthTags.h"
+#include "NarrativeGameplayTags.h"
 
 UTerritoryStealthProfile::UTerritoryStealthProfile()
 	: InvestigationActivityClass(UTerritoryInvestigationActivity::StaticClass())
 {
 	BreakStealthGameplayEventTag = TerritoryStealthTags::Exposed;
+	StealthAbilityTagsToCancel.AddTag(TerritoryStealthTags::StealthAbility);
+	StealthAbilityTagsToCancel.AddTag(FNarrativeGameplayTags::Get().Ability_Crouch);
 }
 
 FPrimaryAssetId UTerritoryStealthProfile::GetPrimaryAssetId() const

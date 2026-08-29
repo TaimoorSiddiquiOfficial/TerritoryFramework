@@ -136,6 +136,7 @@ void UTerritoryHierarchyStoryOverrideEvent::ExecuteEvent_Implementation(
 		Request.bBypassConditions = bForceStoryOverride;
 		Request.bBypassDiplomacy = bForceStoryOverride;
 		Request.bBypassLock = bForceStoryOverride;
+		Request.bBypassDefenders = bForceStoryOverride;
 		const FTerritoryMutationResponse Response = Control->ApplyTerritoryMutation(Request);
 		if (Response.Result == ETerritoryMutationResult::Success
 			|| (Territory->GetOwningFaction() == Request.NewOwner

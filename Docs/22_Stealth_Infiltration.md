@@ -87,6 +87,12 @@ The effective sight value uses Narrative's sight stimulus, Narrative character `
 the profile detection multiplier, and Narrative's `InvisibleToEnemies` state tag. It does not
 replace or copy Narrative perception configuration.
 
+`Point Blank Sight Always Exposes` prevents a high Stealth Rating from making the player invisible
+while standing directly in front of a guard. `Point Blank Sight Exposure Distance` defaults to
+300 cm. Narrative AI Perception must still report valid sight, so walls and floors remain respected.
+The explicit Narrative `InvisibleToEnemies` tag is also still respected. At longer distances,
+Stealth Rating continues to reduce effective sight and slow suspicion growth.
+
 ## Multi-floor Places
 
 Use one Territory bounds volume that covers the complete Place, including every floor. Guards use
@@ -149,9 +155,26 @@ or a contest cancellation.
 ## Ability integration
 
 On exposure, the control subsystem sends the profile's `Break Stealth Gameplay Event Tag` to the
-player's Ability System. The default tag is `Territory.Event.Stealth.Exposed`. A temporary Narrative
-stealth ability can listen for this event and cancel its active state. Passive clothing, skills, or
-equipment that contribute Stealth Rating are not removed.
+player's Ability System. The default tag is `Territory.Event.Stealth.Exposed`. It also cancels active
+abilities matching `Stealth Ability Tags To Cancel`. The defaults are `Abilities.Crouch` for
+Narrative Pro and `Territory.Ability.Stealth` for a dedicated project ability.
+
+Narrative Pro's `GA_Crouch` is an instant toggle, so the ability may already be inactive while its
+infinite `GE_CrouchStealth` effect is still applied. Add that effect to `Stealth Gameplay Effects To
+Remove` and leave `Remove Active Stealth Effects On Exposure` enabled. This removes the temporary
++50 crouch bonus on detection. Do not add permanent Sneak perks or equipment effects: those are
+player capabilities and must survive detection.
+
+Easy setup:
+
+```text
+Stealth Ability Tags To Cancel
+  - Abilities.Crouch
+  - Territory.Ability.Stealth
+
+Stealth Gameplay Effects To Remove
+  - GE_CrouchStealth
+```
 
 ## Multiplayer and persistence
 

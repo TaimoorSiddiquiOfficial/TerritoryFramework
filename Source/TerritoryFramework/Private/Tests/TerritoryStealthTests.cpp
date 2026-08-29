@@ -45,6 +45,10 @@ bool FTFStealthProfileDefaults::RunTest(const FString& Parameters)
 		Profile->ImmediateSightExposureThreshold, 0.8f);
 	TestEqual(TEXT("Narrative attack-compatible minimum sight evidence"),
 		Profile->MinimumSightEvidence, 0.2f);
+	TestTrue(TEXT("Direct guard sight cannot be defeated by rating at point-blank range"),
+		Profile->bPointBlankSightAlwaysExposes);
+	TestEqual(TEXT("Point-blank exposure defaults to three metres"),
+		Profile->PointBlankSightExposureDistance, 300.f);
 	TestEqual(TEXT("Default investigator budget is bounded"),
 		Profile->MaximumInvestigators, 2);
 	TestTrue(TEXT("Default activity follows the Territory Narrative investigation contract"),
@@ -54,6 +58,18 @@ bool FTFStealthProfileDefaults::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Exposure uses the built-in Gameplay Event tag"),
 		Profile->BreakStealthGameplayEventTag,
 		TerritoryStealthTags::Exposed.GetTag());
+	TestTrue(TEXT("Confirmed exposure cancels active stealth abilities by default"),
+		Profile->bCancelActiveStealthAbilitiesOnExposure);
+	TestTrue(TEXT("Dedicated Territory stealth abilities are canceled on exposure"),
+		Profile->StealthAbilityTagsToCancel.HasTagExact(
+			TerritoryStealthTags::StealthAbility.GetTag()));
+	TestTrue(TEXT("Narrative crouch stealth is canceled on exposure"),
+		Profile->StealthAbilityTagsToCancel.HasTagExact(
+			FGameplayTag::RequestGameplayTag(TEXT("Abilities.Crouch"), false)));
+	TestTrue(TEXT("Confirmed exposure removes configured temporary stealth effects by default"),
+		Profile->bRemoveActiveStealthEffectsOnExposure);
+	TestTrue(TEXT("The plugin CDO does not hardcode project or vendor Gameplay Effect assets"),
+		Profile->StealthGameplayEffectsToRemove.IsEmpty());
 	return true;
 }
 
@@ -92,6 +108,9 @@ bool FTFStealthAuthoringContract::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Definition exposes a default stealth profile"),
 		UTerritoryDefinition::StaticClass()->FindPropertyByName(
 			TEXT("DefaultStealthProfile")));
+	TestNotNull(TEXT("Stealth profile exposes temporary Gameplay Effects to remove on detection"),
+		UTerritoryStealthProfile::StaticClass()->FindPropertyByName(
+			TEXT("StealthGameplayEffectsToRemove")));
 
 	const UClass* ControlClass = UTerritoryControlSubsystem::StaticClass();
 	TestTrue(TEXT("Register infiltrator is server-only Blueprint API"),

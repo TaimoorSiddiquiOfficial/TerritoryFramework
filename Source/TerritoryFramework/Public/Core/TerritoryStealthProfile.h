@@ -6,6 +6,7 @@
 #include "TerritoryStealthProfile.generated.h"
 
 class UTerritoryInvestigationActivity;
+class UGameplayEffect;
 
 /** Per-player awareness inside a stealth-enabled Territory. Presence is not exposure. */
 UENUM(BlueprintType)
@@ -128,6 +129,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Sight")
 	bool bRespectNarrativeInvisibleTag = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Sight",
+		meta=(ToolTip="When enabled, a guard that already has Narrative sight of the player exposes them inside Point Blank Exposure Distance even when Stealth Rating would otherwise reduce sight below the evidence threshold. This prevents walking directly in front of a guard while remaining hidden."))
+	bool bPointBlankSightAlwaysExposes = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Sight",
+		meta=(ClampMin="0.0", Units="cm",
+			ToolTip="Maximum guard-to-player distance for unavoidable direct-sight exposure. Narrative AI Perception must still have valid sight and the Narrative Invisible tag is still respected. Easy example: 300 means three metres."))
+	float PointBlankSightExposureDistance = 300.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
 	bool bFireWhileSeenExposes = true;
 
@@ -191,6 +201,22 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 Ability Integration")
 	bool bSendBreakStealthGameplayEvent = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 Ability Integration",
+		meta=(ToolTip="Immediately cancels active Gameplay Abilities matching Stealth Ability Tags To Cancel when a guard confirms the player. Narrative Pro uses Abilities.Crouch for its built-in crouch stealth; Territory.Ability.Stealth is provided for a dedicated project stealth ability."))
+	bool bCancelActiveStealthAbilitiesOnExposure = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 Ability Integration",
+		meta=(ToolTip="Ability tags canceled on confirmed exposure. Defaults cover Narrative Pro crouch stealth and any Territory-aware stealth ability. Add your own ability tag here when using a custom stealth ability."))
+	FGameplayTagContainer StealthAbilityTagsToCancel;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 Ability Integration",
+		meta=(ToolTip="Removes the configured temporary stealth Gameplay Effects when exposure is confirmed. This is needed for instant toggle abilities, such as Narrative Pro crouch, whose ability has already ended while its infinite stealth effect remains active."))
+	bool bRemoveActiveStealthEffectsOnExposure = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 Ability Integration",
+		meta=(ToolTip="Temporary Gameplay Effect classes removed on confirmed exposure. Easy example: add Narrative Pro GE_CrouchStealth here. Do not add permanent Sneak perk or equipment effects; those are capability bonuses and should survive detection."))
+	TArray<TSubclassOf<UGameplayEffect>> StealthGameplayEffectsToRemove;
 
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 };

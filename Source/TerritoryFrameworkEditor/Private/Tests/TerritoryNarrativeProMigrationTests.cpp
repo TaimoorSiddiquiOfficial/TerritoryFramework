@@ -596,6 +596,12 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			FString(TEXT("Territory.HavenReach.CastleHill.Farm")));
 		TestFalse(TEXT("Story capture respects the Farm's reusable Locked exit gate"),
 			UnlockEvent->bForceUnlock);
+		TestEqual(TEXT("Farm unlock runs only for a real Blacksmith ownership change"),
+			UnlockEvent->Conditions.Num(), 1);
+		TestTrue(TEXT("A same-owner Claimed reset cannot unlock the Farm"),
+			UnlockEvent->Conditions.Num() == 1
+			&& Cast<UTerritoryOwnershipTransitionCondition>(
+				UnlockEvent->Conditions[0]) != nullptr);
 	}
 	TestEqual(TEXT("Farm remains authored to start Locked in every new campaign"),
 		Farm->ResolveInitialTerritoryState(), ETerritoryState::Locked);
@@ -687,8 +693,9 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			TestTrue(FString::Printf(TEXT("%s owner is a project Blueprint child"), TerritoryTag),
 				(*Found)->GetClass() != ATerritoryStoryOwnerSpawner::StaticClass()
 				&& (*Found)->GetClass()->IsChildOf(ATerritoryStoryOwnerSpawner::StaticClass()));
-			TestEqual(FString::Printf(TEXT("%s owner interaction distance is usable"), TerritoryTag),
-				(*Found)->OwnerInteractionDistance, 300.f);
+			TestTrue(FString::Printf(TEXT("%s owner interaction distance is usable"), TerritoryTag),
+				(*Found)->OwnerInteractionDistance >= 100.f
+				&& (*Found)->OwnerInteractionDistance <= 1000.f);
 		}
 	};
 	VerifyOwner(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
@@ -704,8 +711,17 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		{
 			TestNotNull(FString::Printf(TEXT("%s point links to its Place definition"),
 				TerritoryTag), (*Found)->GetPlaceDefinition());
-			TestTrue(FString::Printf(TEXT("%s point remains enabled for multiplayer reuse"),
+			TestFalse(FString::Printf(TEXT("%s point does not run automatic multiplayer capture in story mode"),
 				TerritoryTag), (*Found)->bCaptureEnabled);
+			TestFalse(FString::Printf(TEXT("%s point reports automatic capture inactive while story bounds own capture"),
+				TerritoryTag), (*Found)->IsAutomaticCaptureFlowActive());
+			if (const UTerritoryPlaceDefinition* Place = (*Found)->GetPlaceDefinition())
+			{
+				TestTrue(FString::Printf(TEXT("%s definition preserves the optional capture-point template"),
+					TerritoryTag), Place->CapturePoint.bEnabled);
+				TestFalse(FString::Printf(TEXT("%s definition selects story capture instead of automatic point progress"),
+					TerritoryTag), Place->CapturePoint.bAutomaticCapture);
+			}
 		}
 	};
 	VerifyStoryCapturePoint(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));

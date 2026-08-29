@@ -25,7 +25,8 @@ enum class ETerritoryMutationResult : uint8
 	Rejected_Locked,
 	Rejected_ConditionsFailed,
 	Rejected_StateUnchanged,
-	Failed_FinalStateMismatch
+	Failed_FinalStateMismatch,
+	Rejected_DefendersRemain
 };
 
 /**
@@ -66,6 +67,11 @@ struct FTerritoryMutationRequest
 	/** Whether to bypass a locked Territory. Default = false. Set true only for explicit force capture. */
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
 	bool bBypassLock = false;
+
+	/** Whether living registered defenders may be bypassed during an ownership change. Default false. */
+	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation",
+		meta = (ToolTip = "Normally a Place cannot change owner while defenders live. Enable only for an explicit cinematic, admin, save-restore, or forced story override."))
+	bool bBypassDefenders = false;
 
 	/** Optional transition context for Narrative conditions/events. */
 	UPROPERTY(BlueprintReadWrite, Category = "Territory|Mutation")
