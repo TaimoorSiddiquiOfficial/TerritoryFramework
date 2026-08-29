@@ -235,24 +235,6 @@ void ATerritoryGuardCharacter::ApplyGuardBehaviorFromTerritoryDefinition()
 	}
 }
 
-void ATerritoryGuardCharacter::CopyLegacyGuardBehavior(
-	FTerritoryGuardBehaviorTemplate& OutBehavior) const
-{
-	OutBehavior.PatrolGoalClass = PatrolGoalClass;
-	OutBehavior.bEnablePatrolCrowdAvoidance = bEnablePatrolCrowdAvoidance;
-	OutBehavior.PatrolAvoidanceConsiderationRadius = PatrolAvoidanceConsiderationRadius;
-	OutBehavior.PatrolAvoidanceWeight = PatrolAvoidanceWeight;
-	OutBehavior.bPrioritizeClosestHostilePlayer = bPrioritizeClosestHostilePlayer;
-	OutBehavior.ClosestHostilePlayerGoalScoreBonus = ClosestHostilePlayerGoalScoreBonus;
-	if (DiplomacyDialogue)
-	{
-		UTerritoryDiplomacyDialogueProfile* LegacyDialogueProfile = nullptr;
-		DiplomacyDialogue->CopyDialogueProfiles(
-			LegacyDialogueProfile, OutBehavior.FactionDialogueProfiles);
-		OutBehavior.DialogueProfile = LegacyDialogueProfile;
-	}
-}
-
 ETeamAttitude::Type ATerritoryGuardCharacter::GetTeamAttitudeTowards(
 	const AActor& Other) const
 {

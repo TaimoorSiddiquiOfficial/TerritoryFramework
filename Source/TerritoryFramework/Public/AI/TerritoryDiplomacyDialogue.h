@@ -83,23 +83,20 @@ class TERRITORYFRAMEWORK_API UTerritoryDiplomacyDialogueComponent : public UActo
 public:
 	UTerritoryDiplomacyDialogueComponent();
 
-	// Hidden but serialized until every upgraded project has copied old Blueprint
-	// component values into its Territory Definitions. Runtime never treats this as authority.
-	UPROPERTY()
+	/** Runtime cache populated exclusively from the owning Territory Definition. */
+	UPROPERTY(Transient)
 	TObjectPtr<UTerritoryDiplomacyDialogueProfile> DialogueProfile;
 
 	/**
 	 * First exact faction match wins. Easy example: map Bandits to a Bandit profile;
 	 * a Hero using the same pawn Blueprint is not matched and keeps the Hero definition dialogue.
 	 */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<FTerritoryFactionDialogueProfile> FactionDialogueProfiles;
 
 	/** Runtime binding used by Territory Definitions and other DataAsset authorities. */
 	void SetDialogueProfiles(UTerritoryDiplomacyDialogueProfile* InFallbackProfile,
 		const TArray<FTerritoryFactionDialogueProfile>& InFactionProfiles);
-	void CopyDialogueProfiles(UTerritoryDiplomacyDialogueProfile*& OutFallbackProfile,
-		TArray<FTerritoryFactionDialogueProfile>& OutFactionProfiles) const;
 
 	/** Returns the first exact faction profile, then the optional fallback profile. */
 	UFUNCTION(BlueprintPure, Category="Territory|Dialogue",

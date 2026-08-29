@@ -131,11 +131,9 @@ release first, save the converted assets/maps, and only then upgrade to this str
 ordering preserves stable Territory and Guard Post GUIDs and prevents old saved campaigns from
 binding to a different Place.
 
-For the final guard-policy migration, run the City synchronizer once after the full editor rebuild.
-It reads any hidden serialized patrol/avoidance/dialogue values from the old guard Blueprint class,
-copies them into `Guard Behavior` on each Definition, and reports every asset that must be saved.
-Those hidden values are an editor migration bridge only: spawned guards always use the Definition.
-After every reported Definition is saved, the bridge can be removed in the following plugin release.
+Guard-policy migration is complete. Patrol, avoidance, target priority, and faction dialogue are
+serialized only on Territory Definitions. Guard characters and dialogue components contain transient
+runtime caches populated from the current owning Territory; old Blueprint class defaults are ignored.
 
 ## Validation messages
 

@@ -13,7 +13,6 @@ class UTriggerSet;
 class ATerritoryVolume;
 class UTerritoryPatrolGoal;
 class UTerritoryDiplomacyDialogueComponent;
-struct FTerritoryGuardBehaviorTemplate;
 
 /**
  * Territory guard NPC character. Bridges NarrativePro's NPC framework with
@@ -58,9 +57,6 @@ public:
 		ATerritoryGuardSpawnPoint* OwningSpawnPoint);
 
 	virtual void SetNPCDefinition(UNPCDefinition* Definition) override;
-
-	/** Editor migration only: copies hidden serialized Blueprint defaults into a Definition row. */
-	void CopyLegacyGuardBehavior(FTerritoryGuardBehaviorTemplate& OutBehavior) const;
 
 	/**
 	 * Contextual Narrative attitude for a stationary Territory defender.
@@ -140,10 +136,8 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category="Territory|AI", meta=(DisplayName="Owning Spawn Point"))
 	TObjectPtr<ATerritoryGuardSpawnPoint> OwningTerritorySpawnPoint;
 
-	/** Goal class added after Narrative's activity configuration is ready. */
-	// Hidden serialized caches preserve old Blueprint values for one-way editor migration.
-	// Spawned guards overwrite them from the owning Territory Definition.
-	UPROPERTY()
+	/** Runtime goal-class cache populated exclusively from the owning Territory Definition. */
+	UPROPERTY(Transient)
 	TSubclassOf<UTerritoryPatrolGoal> PatrolGoalClass;
 
 	/** Live per-guard goal populated from the assigned spawn point. */
@@ -158,13 +152,13 @@ public:
 	 * Enables Unreal CharacterMovement RVO on the authority that drives Narrative AI.
 	 * Capsules still block, so guards remain physical while steering around each other.
 	 */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	bool bEnablePatrolCrowdAvoidance = true;
 
-	UPROPERTY()
+	UPROPERTY(Transient)
 	float PatrolAvoidanceConsiderationRadius = 500.f;
 
-	UPROPERTY()
+	UPROPERTY(Transient)
 	float PatrolAvoidanceWeight = 0.5f;
 
 	/**
@@ -172,10 +166,10 @@ public:
 	 * player a small Narrative goal-score advantage. Narrative attack tokens still
 	 * decide how many guards may perform attacks at the same time.
 	 */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	bool bPrioritizeClosestHostilePlayer = true;
 
-	UPROPERTY()
+	UPROPERTY(Transient)
 	float ClosestHostilePlayerGoalScoreBonus = 0.75f;
 
 	// ─── Patrol Route Helpers ───

@@ -110,6 +110,14 @@ namespace TFTestUtils
 			&& !Prop->HasAnyPropertyFlags(CPF_BlueprintVisible);
 	}
 
+	static bool IsTransientRuntimeCache(const UClass* Class,
+		const FString& PropertyName)
+	{
+		if (!Class) return false;
+		const FProperty* Prop = Class->FindPropertyByName(FName(*PropertyName));
+		return Prop && Prop->HasAnyPropertyFlags(CPF_Transient);
+	}
+
 	static bool IsEditableBlueprintProperty(const UClass* Class,
 		const FString& PropertyName)
 	{
@@ -377,6 +385,8 @@ bool FTFContract_StrictDefinitionAuthoringSurface::RunTest(const FString& Parame
 	{
 		TestTrue(FString::Printf(TEXT("Guard.%s is Definition-owned, not a Blueprint class default"),
 			FieldName), TFTestUtils::IsInternalOnly(GuardClass, FieldName));
+		TestTrue(FString::Printf(TEXT("Guard.%s is never serialized as legacy Blueprint authority"),
+			FieldName), TFTestUtils::IsTransientRuntimeCache(GuardClass, FieldName));
 	}
 	TestNull(TEXT("Legacy incomplete guard spawn Blueprint node was removed"),
 		GuardClass->FindFunctionByName(TEXT("ConfigureTerritorySpawn")));
@@ -384,8 +394,14 @@ bool FTFContract_StrictDefinitionAuthoringSurface::RunTest(const FString& Parame
 		UTerritoryDiplomacyDialogueComponent::StaticClass();
 	TestTrue(TEXT("Guard fallback dialogue is supplied by a DataAsset authority"),
 		TFTestUtils::IsInternalOnly(DialogueComponentClass, TEXT("DialogueProfile")));
+	TestTrue(TEXT("Guard fallback dialogue component value is runtime-only"),
+		TFTestUtils::IsTransientRuntimeCache(DialogueComponentClass,
+			TEXT("DialogueProfile")));
 	TestTrue(TEXT("Guard faction dialogue mappings are supplied by a DataAsset authority"),
 		TFTestUtils::IsInternalOnly(DialogueComponentClass,
+			TEXT("FactionDialogueProfiles")));
+	TestTrue(TEXT("Guard faction dialogue component mappings are runtime-only"),
+		TFTestUtils::IsTransientRuntimeCache(DialogueComponentClass,
 			TEXT("FactionDialogueProfiles")));
 
 	const UClass* DistrictClass = ATerritoryDistrict::StaticClass();

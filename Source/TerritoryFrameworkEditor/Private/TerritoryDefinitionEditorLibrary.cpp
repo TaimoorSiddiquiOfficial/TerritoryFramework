@@ -1,8 +1,6 @@
 #include "TerritoryDefinitionEditorLibrary.h"
 
-#include "AI/TerritoryPatrolGoal.h"
 #include "Core/TerritoryDefinition.h"
-#include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
@@ -12,121 +10,10 @@
 #include "Interaction/TerritoryCapturePoint.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
-#include "AI/NPCDefinition.h"
 #include "ScopedTransaction.h"
 
 namespace
 {
-	bool IsDefaultGuardBehavior(const FTerritoryGuardBehaviorTemplate& Behavior)
-	{
-		const FTerritoryGuardBehaviorTemplate Defaults;
-		return Behavior.PatrolGoalClass == Defaults.PatrolGoalClass
-			&& Behavior.bEnablePatrolCrowdAvoidance ==
-				Defaults.bEnablePatrolCrowdAvoidance
-			&& FMath::IsNearlyEqual(Behavior.PatrolAvoidanceConsiderationRadius,
-				Defaults.PatrolAvoidanceConsiderationRadius)
-			&& FMath::IsNearlyEqual(Behavior.PatrolAvoidanceWeight,
-				Defaults.PatrolAvoidanceWeight)
-			&& Behavior.bPrioritizeClosestHostilePlayer ==
-				Defaults.bPrioritizeClosestHostilePlayer
-			&& FMath::IsNearlyEqual(Behavior.ClosestHostilePlayerGoalScoreBonus,
-				Defaults.ClosestHostilePlayerGoalScoreBonus)
-			&& !Behavior.DialogueProfile
-			&& Behavior.FactionDialogueProfiles.IsEmpty();
-	}
-
-	const ATerritoryGuardCharacter* GetLegacyGuardCDO(const UNPCDefinition* NPCDefinition)
-	{
-		UClass* GuardClass = NPCDefinition
-			? NPCDefinition->NPCClassPath.LoadSynchronous() : nullptr;
-		return GuardClass && GuardClass->IsChildOf(ATerritoryGuardCharacter::StaticClass())
-			? GuardClass->GetDefaultObject<ATerritoryGuardCharacter>() : nullptr;
-	}
-
-	void AddDialogueMapping(FTerritoryGuardBehaviorTemplate& Behavior,
-		const FGameplayTag& Faction,
-		UTerritoryDiplomacyDialogueProfile* Profile)
-	{
-		if (!Faction.IsValid() || !Profile) return;
-		if (FTerritoryFactionDialogueProfile* Existing =
-			Behavior.FactionDialogueProfiles.FindByPredicate(
-				[&Faction](const FTerritoryFactionDialogueProfile& Row)
-				{
-					return Row.Faction == Faction;
-				}))
-		{
-			Existing->DialogueProfile = Profile;
-			return;
-		}
-		FTerritoryFactionDialogueProfile& Added =
-			Behavior.FactionDialogueProfiles.AddDefaulted_GetRef();
-		Added.Faction = Faction;
-		Added.DialogueProfile = Profile;
-	}
-
-	void MigrateLegacyGuardBehavior(UTerritoryDefinition* Definition,
-		FTerritoryDefinitionSyncReport& Report)
-	{
-		if (!Definition || !IsDefaultGuardBehavior(Definition->GuardBehavior)) return;
-
-		FTerritoryGuardBehaviorTemplate Migrated;
-		bool bFoundLegacyGuard = false;
-		auto MergeDefinition = [&Migrated, &bFoundLegacyGuard](
-			const UNPCDefinition* NPCDefinition, const FGameplayTag& ExpectedFaction)
-		{
-			const ATerritoryGuardCharacter* GuardCDO = GetLegacyGuardCDO(NPCDefinition);
-			if (!GuardCDO) return;
-
-			FTerritoryGuardBehaviorTemplate Candidate;
-			GuardCDO->CopyLegacyGuardBehavior(Candidate);
-			if (!bFoundLegacyGuard)
-			{
-				Migrated = Candidate;
-				bFoundLegacyGuard = true;
-				if (ExpectedFaction.IsValid())
-				{
-					Migrated.DialogueProfile = nullptr;
-				}
-			}
-
-			for (const FTerritoryFactionDialogueProfile& Mapping :
-				Candidate.FactionDialogueProfiles)
-			{
-				AddDialogueMapping(Migrated, Mapping.Faction, Mapping.DialogueProfile);
-			}
-			if (ExpectedFaction.IsValid())
-			{
-				UTerritoryDiplomacyDialogueProfile* ExpectedProfile =
-					Candidate.DialogueProfile;
-				if (const FTerritoryFactionDialogueProfile* Exact =
-					Candidate.FactionDialogueProfiles.FindByPredicate(
-						[&ExpectedFaction](const FTerritoryFactionDialogueProfile& Row)
-						{
-							return Row.Faction == ExpectedFaction;
-						}))
-				{
-					ExpectedProfile = Exact->DialogueProfile;
-				}
-				AddDialogueMapping(Migrated, ExpectedFaction, ExpectedProfile);
-			}
-		};
-
-		MergeDefinition(Definition->DefaultGuardDefinition, FGameplayTag());
-		for (const FTerritoryFactionGuardDefinition& GuardDefinition :
-			Definition->FactionGuardDefinitions)
-		{
-			MergeDefinition(GuardDefinition.NPCDefinition, GuardDefinition.Faction);
-		}
-		if (!bFoundLegacyGuard || IsDefaultGuardBehavior(Migrated)) return;
-
-		Definition->Modify();
-		Definition->GuardBehavior = Migrated;
-		Definition->MarkPackageDirty();
-		Report.Warnings.Add(FString::Printf(
-			TEXT("%s copied hidden guard Blueprint defaults into Guard Behavior; save this Definition before removing the migration bridge."),
-			*Definition->GetPathName()));
-	}
-
 	template<typename TActor>
 	TActor* SpawnTemplateActor(UWorld* World, TSoftClassPtr<TActor> SoftClass,
 		const FTransform& Transform, const FString& Label,
@@ -156,7 +43,6 @@ namespace
 		const FTransform& DesiredTransform, bool bCreate, bool bMoveExisting,
 		FTerritoryDefinitionSyncReport& Report)
 	{
-		MigrateLegacyGuardBehavior(Definition, Report);
 		ATerritoryVolume* Actor = nullptr;
 		bool bCreated = false;
 		for (TActorIterator<ATerritoryVolume> It(World); It; ++It)

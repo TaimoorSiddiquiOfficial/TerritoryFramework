@@ -58,14 +58,6 @@ void UTerritoryDiplomacyDialogueComponent::SetDialogueProfiles(
 	FactionDialogueProfiles = InFactionProfiles;
 }
 
-void UTerritoryDiplomacyDialogueComponent::CopyDialogueProfiles(
-	UTerritoryDiplomacyDialogueProfile*& OutFallbackProfile,
-	TArray<FTerritoryFactionDialogueProfile>& OutFactionProfiles) const
-{
-	OutFallbackProfile = DialogueProfile;
-	OutFactionProfiles = FactionDialogueProfiles;
-}
-
 EDiplomacyState UTerritoryDiplomacyDialogueComponent::ResolveRelationshipForInteractor(
 	const APawn* Interactor, bool& bOutSameFaction) const
 {
