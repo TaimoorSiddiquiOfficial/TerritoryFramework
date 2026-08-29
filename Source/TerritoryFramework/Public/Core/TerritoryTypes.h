@@ -4,6 +4,8 @@
 #include "GameplayTagContainer.h"
 #include "TerritoryTypes.generated.h"
 
+class UTerritoryStealthProfile;
+
 DECLARE_LOG_CATEGORY_EXTERN(LogTerritory, Log, All);
 
 class ATerritoryVolume;
@@ -354,6 +356,15 @@ USTRUCT(BlueprintType)
 struct FTerritoryStateConfig
 {
 	GENERATED_BODY()
+
+	/**
+	 * Optional stealth policy for this state. Empty uses the Territory Definition's
+	 * default profile. This keeps quest infiltration beside the other modular state rules.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Stealth",
+		meta=(DisplayName="Stealth Profile Override",
+			ToolTip="Optional stealth rules while this state is active. Easy example: assign Rescue Mission Stealth to the Claimed row so entering the enemy Place does not start War until a guard confirms the player."))
+	TObjectPtr<UTerritoryStealthProfile> StealthProfileOverride;
 
 	/**
 	 * Strategic controls supplied to the current owning faction while this state

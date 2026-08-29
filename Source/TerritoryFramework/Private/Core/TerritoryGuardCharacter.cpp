@@ -8,6 +8,10 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
+#include "AI/TerritoryInvestigationActivity.h"
+#include "AI/TerritoryInvestigationGoal.h"
+#include "AI/TerritoryStealthObserverComponent.h"
+#include "Core/TerritoryStealthProfile.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "AI/Activities/NPCGoalItem.h"
@@ -74,6 +78,8 @@ ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& Obj
 	PatrolGoalClass = UTerritoryPatrolGoal::StaticClass();
 	DiplomacyDialogue = CreateDefaultSubobject<UTerritoryDiplomacyDialogueComponent>(
 		TEXT("TerritoryDiplomacyDialogue"));
+	StealthObserver = CreateDefaultSubobject<UTerritoryStealthObserverComponent>(
+		TEXT("TerritoryStealthObserver"));
 	AIControllerClass = ANarrativeNPCController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 	GetCapsuleComponent()->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
@@ -265,6 +271,64 @@ bool ATerritoryGuardCharacter::CanEngageTerritoryTarget(const AActor* Target) co
 		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
 	return TargetTeam && Diplomacy
 		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetTeam->GetFactions());
+}
+
+bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(
+	ETerritoryStealthEvidence Evidence, const FVector& InvestigationLocation,
+	const FVector& EstimatedSourceDirection, AActor* SuspectedSource,
+	bool bIdentityConfirmed, const UTerritoryStealthProfile& StealthProfile)
+{
+	if (!HasAuthority() || !IsValid(OwningTerritory)
+		|| Evidence == ETerritoryStealthEvidence::None)
+	{
+		return false;
+	}
+	if (const UNarrativeAbilitySystemComponent* ASC =
+		Cast<UNarrativeAbilitySystemComponent>(GetAbilitySystemComponent()))
+	{
+		if (ASC->IsDead()) return false;
+	}
+	UNPCActivityComponent* ActivityComponent = GetActivityComponent();
+	if (!ActivityComponent) return false;
+
+	TSubclassOf<UTerritoryInvestigationActivity> ActivityClass =
+		StealthProfile.InvestigationActivityClass;
+	if (!ActivityClass)
+	{
+		ActivityClass = UTerritoryInvestigationActivity::StaticClass();
+	}
+	if (!ActivityComponent->GetActivity(ActivityClass)
+		&& !ActivityComponent->AddActivity(ActivityClass, false))
+	{
+		return false;
+	}
+
+	UObject* GoalKey = SuspectedSource
+		? static_cast<UObject*>(SuspectedSource)
+		: static_cast<UObject*>(OwningTerritory.Get());
+	bool bFoundExisting = false;
+	UTerritoryInvestigationGoal* Goal = Cast<UTerritoryInvestigationGoal>(
+		ActivityComponent->GetGoalByKey(
+			UTerritoryInvestigationGoal::StaticClass(), GoalKey, bFoundExisting));
+	if (!Goal)
+	{
+		Goal = NewObject<UTerritoryInvestigationGoal>(
+			ActivityComponent, UTerritoryInvestigationGoal::StaticClass());
+		if (!Goal) return false;
+		Goal->GoalKey = GoalKey;
+	}
+	Goal->Refresh(OwningTerritory->GetTerritoryTag(), Evidence,
+		InvestigationLocation, EstimatedSourceDirection, SuspectedSource,
+		bIdentityConfirmed, StealthProfile.InvestigationDuration,
+		StealthProfile.InvestigationAcceptanceRadius);
+	if (!bFoundExisting)
+	{
+		Goal = Cast<UTerritoryInvestigationGoal>(
+			ActivityComponent->AddGoal(Goal, false));
+		if (!Goal) return false;
+	}
+	ActivityComponent->PerformActivitySelection(true);
+	return true;
 }
 
 bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const

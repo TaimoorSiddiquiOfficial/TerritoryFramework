@@ -1,5 +1,6 @@
 #include "DataValidation/TerritoryDataValidator.h"
 #include "AI/TerritoryPatrolGoal.h"
+#include "AI/TerritoryInvestigationActivity.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritorySavableData.h"
@@ -8,6 +9,7 @@
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryStealthProfile.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
@@ -31,6 +33,47 @@
 
 namespace
 {
+	void ValidateStealthProfile(const UTerritoryStealthProfile* Profile,
+		const FString& Context, TArray<FString>& OutErrors)
+	{
+		if (!Profile) return;
+		auto Error = [&Context, &OutErrors](const TCHAR* Message)
+		{
+			OutErrors.Add(Context.IsEmpty() ? FString(Message)
+				: FString::Printf(TEXT("%s: %s"), *Context, Message));
+		};
+		if (!FMath::IsWithinInclusive(Profile->MinimumSightEvidence, 0.f, 1.f)
+			|| !FMath::IsWithinInclusive(Profile->ImmediateSightExposureThreshold, 0.f, 1.f)
+			|| Profile->MinimumSightEvidence > Profile->ImmediateSightExposureThreshold)
+		{
+			Error(TEXT("stealth sight thresholds must be ordered between zero and one"));
+		}
+		if (!FMath::IsFinite(Profile->GuardDetectionMultiplier)
+			|| Profile->GuardDetectionMultiplier < 0.f
+			|| !FMath::IsFinite(Profile->MaximumStealthRating)
+			|| Profile->MaximumStealthRating <= 0.f)
+		{
+			Error(TEXT("stealth detection multiplier and rating scale must be finite and positive"));
+		}
+		if (Profile->MaximumInvestigators < 0 || Profile->InvestigationRadius < 100.f
+			|| Profile->InvestigationDuration < 0.5f
+			|| Profile->InvestigationAcceptanceRadius < 10.f)
+		{
+			Error(TEXT("stealth investigation count, radius, duration, or acceptance radius is invalid"));
+		}
+		if (!Profile->InvestigationActivityClass
+			|| !Profile->InvestigationActivityClass->IsChildOf(
+				UTerritoryInvestigationActivity::StaticClass()))
+		{
+			Error(TEXT("stealth Investigation Activity Class must inherit Territory Investigation Activity"));
+		}
+		if (Profile->bSendBreakStealthGameplayEvent
+			&& !Profile->BreakStealthGameplayEventTag.IsValid())
+		{
+			Error(TEXT("stealth exposure event is enabled but its Gameplay Tag is empty"));
+		}
+	}
+
 	void ValidateCounterAttackProfileBounds(
 		const UTerritoryCounterAttackProfile* Profile,
 		const FString& Context,
@@ -169,6 +212,7 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 		InAsset->IsA(UTerritoryGuardPostDefinition::StaticClass()) ||
 		InAsset->IsA(UTerritoryCounterAttackProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryProductionProfile::StaticClass()) ||
+		InAsset->IsA(UTerritoryStealthProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryDefinition::StaticClass()))
 	{
 		return true;
@@ -287,6 +331,10 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 			Errors.Add(FString::Printf(TEXT("Invalid production profile: %s"),
 				*FailureReason.ToString()));
 		}
+	}
+	else if (UTerritoryStealthProfile* StealthProfile = Cast<UTerritoryStealthProfile>(InAsset))
+	{
+		ValidateStealthProfile(StealthProfile, TEXT("Stealth profile"), Errors);
 	}
 	else if (UTerritoryDefinition* Definition = Cast<UTerritoryDefinition>(InAsset))
 	{
@@ -753,6 +801,15 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 		CheckObjects(Pair.Value.ExitConditions, TEXT("Exit Conditions"));
 		CheckObjects(Pair.Value.EntryEvents, TEXT("Entry Events"));
 		CheckObjects(Pair.Value.ExitEvents, TEXT("Exit Events"));
+		ValidateStealthProfile(Pair.Value.StealthProfileOverride,
+			FString::Printf(TEXT("%s state %d stealth override"), *Context,
+				static_cast<int32>(Pair.Key)), OutErrors);
+	}
+	ValidateStealthProfile(Definition->DefaultStealthProfile,
+		Context + TEXT(" default stealth profile"), OutErrors);
+	if (Definition->DefaultStealthProfile && !Definition->bStoryCaptureFromBounds)
+	{
+		Warning(TEXT("A stealth profile is assigned but Story Capture From Bounds is disabled; the profile can still drive investigation, but it will not defer a capture-point contest."));
 	}
 
 	if (!Definition->GuardBehavior.PatrolGoalClass)

@@ -19,6 +19,7 @@ class ATerritoryGuardSpawnPoint;
 class UTerritoryNavigationMarkerComponent;
 class UTerritoryCounterAttackProfile;
 class UTerritoryDefinition;
+class UTerritoryStealthProfile;
 /**
  * Base class for all territory volumes (City / District / Property inherit from this).
  *
@@ -192,6 +193,11 @@ public:
 	const TMap<ETerritoryState, FTerritoryStateConfig>& GetStateConfigs() const;
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetDefenderDiedEvents() const;
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetAllDefendersDefeatedEvents() const;
+
+	/** State override first, then Definition default. Empty keeps legacy immediate contesting. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Get Active Territory Stealth Profile"))
+	UTerritoryStealthProfile* GetActiveStealthProfile() const;
 
 	/** Internal/editor synchronization hook. OnConstruction applies the assigned asset automatically. */
 	bool ApplyTerritoryDefinition();
@@ -763,6 +769,9 @@ private:
 
 	/** Server-only players currently registered from the full story Territory bounds. */
 	TMap<TWeakObjectPtr<AActor>, FGameplayTag> StoryBoundsContesters;
+
+	/** Server-only physical occupants whose stealth profile has deferred contest admission. */
+	TMap<TWeakObjectPtr<AActor>, FGameplayTag> StoryBoundsInfiltrators;
 
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC,

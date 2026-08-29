@@ -13,6 +13,9 @@ class UTriggerSet;
 class ATerritoryVolume;
 class UTerritoryPatrolGoal;
 class UTerritoryDiplomacyDialogueComponent;
+class UTerritoryStealthObserverComponent;
+class UTerritoryStealthProfile;
+enum class ETerritoryStealthEvidence : uint8;
 
 /**
  * Territory guard NPC character. Bridges NarrativePro's NPC framework with
@@ -74,6 +77,15 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Guard|Combat",
 		meta=(DisplayName="Can Engage Territory Target"))
 	bool CanEngageTerritoryTarget(const AActor* Target) const;
+
+	/**
+	 * Adds or refreshes a transient Narrative investigation goal. Combat goals keep
+	 * their higher score, so an active fight is never replaced by a distraction.
+	 */
+	bool RequestTerritoryInvestigation(ETerritoryStealthEvidence Evidence,
+		const FVector& InvestigationLocation, const FVector& EstimatedSourceDirection,
+		AActor* SuspectedSource, bool bIdentityConfirmed,
+		const UTerritoryStealthProfile& StealthProfile);
 
 	/**
 	 * Reconciles Narrative Pro's reported event value with its authoritative ASC state,
@@ -147,6 +159,10 @@ public:
 	/** Relationship-aware dialogue selector used by the Territory NPC interactable. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|AI|Dialogue")
 	TObjectPtr<UTerritoryDiplomacyDialogueComponent> DiplomacyDialogue;
+
+	/** Reads the assigned Narrative controller's perception and reports Territory evidence. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|AI|Stealth")
+	TObjectPtr<UTerritoryStealthObserverComponent> StealthObserver;
 
 	/**
 	 * Enables Unreal CharacterMovement RVO on the authority that drives Narrative AI.

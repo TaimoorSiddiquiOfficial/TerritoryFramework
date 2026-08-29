@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — 2026-08-29 (Narrative stealth infiltration and evidence-driven conflict)
+
+- Added reusable Territory Stealth Profile assets at the Definition default and per-state override
+  levels. Territories without a profile preserve the legacy immediate story-bounds contest flow.
+- Added server-owned, per-player `Undetected`, `Suspicious`, and `Exposed` infiltration state.
+  Presence inside a story Place no longer proves hostility; confirmed exposure registers only that
+  player as a contester and lets the existing Contested state event decide diplomacy.
+- Adapted Narrative Pro sight strength, Stealth Rating, `InvisibleToEnemies`, firing, hearing,
+  damage, and death evidence without changing Narrative Pro source or copying its AI controller.
+- Added closest-guard investigation goals/activities for unseen gunshots, correlated bullet impacts,
+  corpses, and throwable distractions. Investigation outranks patrol and remains below Narrative's
+  combat goal.
+- Added Narrative conditions and events for stealth policy, exposure, evidence, suspicion, quest
+  override, scripted reveal, exposure clearing, and story-driven distraction.
+- Added a replicated Narrative distraction projectile base and ready-to-duplicate sample Blueprint
+  with swept collision, bounce, visual mesh, and one-shot tagged hearing stimulus.
+- Configured Blacksmith with `DA_Stealth_RescueMission` and gated its existing Contested War event
+  with `Exposed Or Stealth Is Disabled`. Repaired Farm's reusable Locked exit prerequisite and
+  story-bounds capture setting, then synchronized the Definition tree into `HopDistrictTest`.
+- Completed Development game and editor builds, zero Blueprint compile errors, valid Data Asset
+  checks, a clean PIE log, and all 149 TerritoryFramework automation tests. PIE verified that
+  unseen presence stays Claimed/Undetected, while confirmed exposure becomes Contested/War.
+
 ## Unreleased — 2026-08-29 (Modular Territory Definition assets)
 
 - Added one primary DataAsset type for each Place, District, and City. A City owns its District

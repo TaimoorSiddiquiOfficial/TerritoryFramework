@@ -24,6 +24,7 @@ class UTerritoryDistrictManagementWidget;
 class UTerritoryGuardPostDefinition;
 class UTerritoryPatrolGoal;
 class UTerritoryProductionProfile;
+class UTerritoryStealthProfile;
 class UTriggerSet;
 
 /** A patrol instruction stored relative to its guard-post actor. */
@@ -351,6 +352,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 State Rules",
 		meta=(ToolTip="One reusable table for Locked, Unclaimed, Contested, and Claimed Narrative conditions/events."))
 	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
+
+	/** Default pre-conflict stealth policy. A State Config may override it. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 State Rules|Stealth",
+		meta=(ToolTip="Optional reusable stealth policy. Empty preserves legacy story bounds: entering immediately starts Contested. Easy example: assign a Rescue Mission profile so the player can enter Claimed enemy bounds while undetected."))
+	TObjectPtr<UTerritoryStealthProfile> DefaultStealthProfile;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Capture")
 	bool bStoryCaptureFromBounds = false;

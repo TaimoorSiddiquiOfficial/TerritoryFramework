@@ -21,6 +21,7 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryStealthProfile.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "AI/NPCDefinition.h"
 #include "AI/NarrativeCharacterSubsystem.h"
@@ -970,6 +971,18 @@ ATerritoryVolume::GetAllDefendersDefeatedEvents() const
 	return RuntimeAllDefendersDefeatedEvents;
 }
 
+UTerritoryStealthProfile* ATerritoryVolume::GetActiveStealthProfile() const
+{
+	if (const FTerritoryStateConfig* Config = GetStateConfigs().Find(OwnershipData.State))
+	{
+		if (Config->StealthProfileOverride)
+		{
+			return Config->StealthProfileOverride;
+		}
+	}
+	return TerritoryDefinition ? TerritoryDefinition->DefaultStealthProfile : nullptr;
+}
+
 void ATerritoryVolume::ReconcileStoryBoundsContesters()
 {
 	UWorld* World = GetWorld();
@@ -1011,11 +1024,36 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 
 		SeenInside.Add(Pawn);
 		const TWeakObjectPtr<AActor> PawnKey(Pawn);
+		if (const FGameplayTag* PreviousFaction = StoryBoundsInfiltrators.Find(PawnKey);
+			PreviousFaction && *PreviousFaction != Faction)
+		{
+			Control->UnregisterInfiltrator(this, Pawn);
+			StoryBoundsInfiltrators.Remove(PawnKey);
+		}
 		if (const FGameplayTag* PreviousFaction = StoryBoundsContesters.Find(PawnKey);
 			PreviousFaction && *PreviousFaction != Faction)
 		{
 			Control->UnregisterAttacker(this, Pawn, *PreviousFaction);
 			StoryBoundsContesters.Remove(PawnKey);
+		}
+
+		const bool bStealthDeferred = Control->RegisterInfiltrator(this, Pawn, Faction);
+		if (bStealthDeferred)
+		{
+			StoryBoundsInfiltrators.Add(PawnKey, Faction);
+			const UTerritoryStealthProfile* StealthProfile = GetActiveStealthProfile();
+			const bool bMayEscalateToContest = StealthProfile
+				&& StealthProfile->EscalationScope
+					!= ETerritoryStealthEscalationScope::LocalAlarm;
+			if (!bMayEscalateToContest
+				|| !Control->IsInfiltratorExposed(this, Pawn))
+			{
+				continue;
+			}
+		}
+		else if (StoryBoundsInfiltrators.Remove(PawnKey) > 0)
+		{
+			Control->UnregisterInfiltrator(this, Pawn);
 		}
 
 		if (Control->TryRegisterContester(this, Pawn, Faction))
@@ -1032,6 +1070,14 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 			ToRelease.Add(Pair.Key);
 		}
 	}
+	for (const TPair<TWeakObjectPtr<AActor>, FGameplayTag>& Pair : StoryBoundsInfiltrators)
+	{
+		if ((!Pair.Key.IsValid() || !SeenInside.Contains(Pair.Key))
+			&& !ToRelease.Contains(Pair.Key))
+		{
+			ToRelease.Add(Pair.Key);
+		}
+	}
 	for (const TWeakObjectPtr<AActor>& Participant : ToRelease)
 	{
 		if (AActor* Actor = Participant.Get())
@@ -1041,6 +1087,14 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 				Control->UnregisterAttacker(this, Actor, *Faction);
 			}
 		}
+		if (AActor* Actor = Participant.Get())
+		{
+			if (StoryBoundsInfiltrators.Contains(Participant))
+			{
+				Control->UnregisterInfiltrator(this, Actor);
+			}
+		}
+		StoryBoundsInfiltrators.Remove(Participant);
 		StoryBoundsContesters.Remove(Participant);
 	}
 }
@@ -1059,8 +1113,16 @@ void ATerritoryVolume::ReleaseStoryBoundsContesters()
 				Control->UnregisterAttacker(this, Participant, Pair.Value);
 			}
 		}
+		for (const TPair<TWeakObjectPtr<AActor>, FGameplayTag>& Pair : StoryBoundsInfiltrators)
+		{
+			if (AActor* Participant = Pair.Key.Get())
+			{
+				Control->UnregisterInfiltrator(this, Participant);
+			}
+		}
 	}
 	StoryBoundsContesters.Empty();
+	StoryBoundsInfiltrators.Empty();
 }
 
 ETerritoryState ATerritoryVolume::ResolveInitialTerritoryState() const
@@ -1698,6 +1760,34 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
 	{
 		Killer = Guard->LastDamagingInstigator.Get();
+	}
+	if (Killer)
+	{
+		if (UTerritoryControlSubsystem* Control =
+			GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
+		{
+			Control->ForgetStealthObserver(this, KilledActor);
+			if (UTerritoryStealthProfile* Profile = GetActiveStealthProfile())
+			{
+				const bool bKillSeen = Control->IsTargetCurrentlySeen(this, Killer);
+				if (bKillSeen && Profile->bSeenDefenderKillExposes)
+				{
+					Control->ReportStealthEvidence(this, Killer, nullptr,
+						ETerritoryStealthEvidence::DefenderKilledSeen, 1.f,
+						KilledActor->GetActorLocation(), FVector::ZeroVector, true);
+				}
+				else if (!bKillSeen
+					&& Profile->bUnseenDefenderDeathStartsInvestigation)
+				{
+					// The damage hook knows a suspect internally, but surviving guards
+					// receive only a corpse/search location until perception confirms identity.
+					Control->ReportStealthEvidence(this, Killer, nullptr,
+						ETerritoryStealthEvidence::Corpse,
+						Profile->CorpseSuspicion, KilledActor->GetActorLocation(),
+						FVector::ZeroVector, false);
+				}
+			}
+		}
 	}
 	OnGuardKilled.Broadcast(this, KilledActor, Killer, GetDefenderCount());
 

@@ -5,10 +5,25 @@
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryMutationTypes.h"
+#include "Core/TerritoryStealthProfile.h"
 #include "TerritoryControlSubsystem.generated.h"
 
 class ATerritoryVolume;
 class UNarrativeAbilitySystemComponent;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+	FOnTerritoryStealthEvidenceReported,
+	ATerritoryVolume*, Territory,
+	AActor*, Target,
+	ETerritoryStealthEvidence, Evidence,
+	const FTerritoryInfiltrationSnapshot&, Snapshot);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+	FOnTerritoryExposureChanged,
+	ATerritoryVolume*, Territory,
+	AActor*, Target,
+	ETerritoryExposureState, OldState,
+	ETerritoryExposureState, NewState);
 
 UCLASS()
 class TERRITORYFRAMEWORK_API UTerritoryControlSubsystem : public UWorldSubsystem
@@ -78,6 +93,53 @@ public:
 	bool TryRegisterContester(ATerritoryVolume* Territory, AActor* Attacker,
 		const FGameplayTag& Faction);
 
+	// ─── Stealth infiltration API (authority-only evidence, read-only queries) ───
+
+	/**
+	 * Register physical presence without starting Contested. Returns false when the
+	 * active profile does not allow stealth, so callers can keep legacy behavior.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
+	bool RegisterInfiltrator(ATerritoryVolume* Territory, AActor* Target,
+		const FGameplayTag& Faction);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
+	void UnregisterInfiltrator(ATerritoryVolume* Territory, AActor* Target);
+
+	/** Narrative perception adapters submit evidence here; only the server mutates awareness. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
+	bool ReportStealthEvidence(ATerritoryVolume* Territory, AActor* Target,
+		AActor* Observer, ETerritoryStealthEvidence Evidence, float Strength,
+		const FVector& EvidenceLocation, const FVector& EstimatedSourceDirection,
+		bool bConfirmedIdentity);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
+	bool ClearInfiltratorExposure(ATerritoryVolume* Territory, AActor* Target,
+		bool bResetSuspicion = true);
+
+	/** Quest override. ClearOverride=true returns authoring control to the active Data Asset. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
+	void SetStealthInfiltrationOverride(ATerritoryVolume* Territory,
+		bool bEnabled, bool bClearOverride = false);
+
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
+	bool IsStealthInfiltrationEnabled(const ATerritoryVolume* Territory) const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
+	bool GetInfiltrationSnapshot(const ATerritoryVolume* Territory,
+		const AActor* Target, FTerritoryInfiltrationSnapshot& OutSnapshot) const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
+	bool IsInfiltratorExposed(const ATerritoryVolume* Territory,
+		const AActor* Target) const;
+
+	/** True only while one or more Territory guards currently confirm the target by sight. */
+	bool IsTargetCurrentlySeen(const ATerritoryVolume* Territory,
+		const AActor* Target) const;
+
+	/** Removes one streamed, dead, or unpossessed observer from every target record. */
+	void ForgetStealthObserver(ATerritoryVolume* Territory, AActor* Observer);
+
 	/** Unregister an actor. Removes identity, decrements count only if actor was registered. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
@@ -134,6 +196,12 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Capture")
 	FOnCaptureAttempted OnCaptureAttempted;
 
+	UPROPERTY(BlueprintAssignable, Category="Territory|Stealth")
+	FOnTerritoryStealthEvidenceReported OnStealthEvidenceReported;
+
+	UPROPERTY(BlueprintAssignable, Category="Territory|Stealth")
+	FOnTerritoryExposureChanged OnExposureChanged;
+
 private:
 	friend class FTFCaptureAtomicContestTransition;
 
@@ -155,6 +223,19 @@ private:
 	/** ASC used for the one death binding owned by each registered attacker. */
 	TMap<TWeakObjectPtr<AActor>, TWeakObjectPtr<UNarrativeAbilitySystemComponent>> BoundAttackerASCs;
 
+	struct FInfiltrationRuntime
+	{
+		FTerritoryInfiltrationSnapshot Snapshot;
+		FGameplayTag Faction;
+		TSet<TWeakObjectPtr<AActor>> CurrentSightObservers;
+	};
+
+	TMap<TWeakObjectPtr<ATerritoryVolume>,
+		TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>> TerritoryInfiltrationState;
+
+	/** Explicit quest overrides; absence means use the active Definition profile. */
+	TMap<TWeakObjectPtr<ATerritoryVolume>, bool> StealthInfiltrationOverrides;
+
 	/** Deferred commands to apply AFTER iteration to avoid map mutation during range-for */
 	struct FDeferredCommand
 	{
@@ -172,6 +253,12 @@ private:
 
 	void EvaluateCaptureState(ATerritoryVolume* Territory, float DeltaTime);
 	void CompleteCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
+	void EvaluateInfiltrationState(float DeltaTime);
+	void RemoveInfiltratorFromAllTerritories(AActor* Target);
+	void AssignClosestInvestigators(ATerritoryVolume* Territory, AActor* SuspectedSource,
+		ETerritoryStealthEvidence Evidence, const FVector& Location,
+		const FVector& EstimatedSourceDirection, bool bIdentityConfirmed,
+		const UTerritoryStealthProfile& Profile);
 	FTerritoryTransitionContext BuildTransitionContext(AActor* Attacker, const FGameplayTag& Faction) const;
 	FTerritoryTransitionContext ResolveCaptureContext(
 		const ATerritoryVolume* Territory,

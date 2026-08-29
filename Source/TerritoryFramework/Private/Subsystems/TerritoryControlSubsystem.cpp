@@ -4,6 +4,9 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryMutationTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryStealthProfile.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryDiplomacyTypes.h"
@@ -12,6 +15,8 @@
 #include "Tales/NarrativeFunctionLibrary.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "Abilities/GameplayAbilityTypes.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -19,6 +24,7 @@
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "TimerManager.h"
+#include "NavigationSystem.h"
 
 void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -63,6 +69,8 @@ void UTerritoryControlSubsystem::Deinitialize()
 		}
 	}
 	TerritoryCaptureState.Empty();
+	TerritoryInfiltrationState.Empty();
+	StealthInfiltrationOverrides.Empty();
 	AttackerRegistrationCounts.Empty();
 	BoundAttackerASCs.Empty();
 	Super::Deinitialize();
@@ -235,6 +243,7 @@ void UTerritoryControlSubsystem::OnRegisteredAttackerDied(
 	if (!RegisteredAttacker) return;
 
 	RemoveAttackerFromAllCaptures(RegisteredAttacker);
+	RemoveInfiltratorFromAllTerritories(RegisteredAttacker);
 	UE_LOG(LogTerritory, Verbose, TEXT("[Capture] Removed dead attacker %s from all capture participation"),
 		*GetNameSafe(RegisteredAttacker));
 }
@@ -345,6 +354,7 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 	const float DeltaTime = Settings ? Settings->CaptureTickInterval : 0.1f;
 
 	DeferredCommands.Empty();
+	EvaluateInfiltrationState(DeltaTime);
 
 	// Phase 1: Evaluate all territories WITHOUT mutating the map
 	TArray<TWeakObjectPtr<ATerritoryVolume>> InvalidKeys;
@@ -443,6 +453,407 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 	}
 
 	return ECaptureResult::Success;
+}
+
+bool UTerritoryControlSubsystem::IsStealthInfiltrationEnabled(
+	const ATerritoryVolume* Territory) const
+{
+	if (!Territory) return false;
+	const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
+	if (!Profile) return false;
+	if (const bool* Override = StealthInfiltrationOverrides.Find(Territory))
+	{
+		return *Override;
+	}
+	return Profile->bAllowStealthInfiltration;
+}
+
+bool UTerritoryControlSubsystem::RegisterInfiltrator(ATerritoryVolume* Territory,
+	AActor* Target, const FGameplayTag& Faction)
+{
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Target
+		|| !Faction.IsValid() || !IsStealthInfiltrationEnabled(Territory))
+	{
+		return false;
+	}
+	if (const UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Target))
+	{
+		if (ASC->IsDead()) return false;
+	}
+
+	TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>& PerTarget =
+		TerritoryInfiltrationState.FindOrAdd(Territory);
+	const TWeakObjectPtr<AActor> TargetKey(Target);
+	FInfiltrationRuntime* Existing = PerTarget.Find(TargetKey);
+	if (!Existing)
+	{
+		FInfiltrationRuntime& Added = PerTarget.Add(TargetKey);
+		Added.Faction = Faction;
+		Added.Snapshot.bInsideTerritory = true;
+		AddAttackerRegistration(Target);
+	}
+	else
+	{
+		Existing->Faction = Faction;
+		Existing->Snapshot.bInsideTerritory = true;
+	}
+	return true;
+}
+
+void UTerritoryControlSubsystem::UnregisterInfiltrator(ATerritoryVolume* Territory,
+	AActor* Target)
+{
+	if (!Territory || !Target) return;
+	TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>* PerTarget =
+		TerritoryInfiltrationState.Find(Territory);
+	if (!PerTarget) return;
+	const TWeakObjectPtr<AActor> TargetKey(Target);
+	if (PerTarget->Remove(TargetKey) > 0)
+	{
+		ReleaseAttackerRegistration(TargetKey);
+	}
+	if (PerTarget->IsEmpty())
+	{
+		TerritoryInfiltrationState.Remove(Territory);
+	}
+}
+
+void UTerritoryControlSubsystem::RemoveInfiltratorFromAllTerritories(AActor* Target)
+{
+	if (!Target) return;
+	const TWeakObjectPtr<AActor> TargetKey(Target);
+	int32 RemovedCount = 0;
+	TArray<TWeakObjectPtr<ATerritoryVolume>> EmptyTerritories;
+	for (auto& Pair : TerritoryInfiltrationState)
+	{
+		if (Pair.Value.Remove(TargetKey) > 0) ++RemovedCount;
+		if (Pair.Value.IsEmpty()) EmptyTerritories.Add(Pair.Key);
+	}
+	for (const TWeakObjectPtr<ATerritoryVolume>& Territory : EmptyTerritories)
+	{
+		TerritoryInfiltrationState.Remove(Territory);
+	}
+	for (int32 Index = 0; Index < RemovedCount; ++Index)
+	{
+		ReleaseAttackerRegistration(TargetKey);
+	}
+}
+
+bool UTerritoryControlSubsystem::GetInfiltrationSnapshot(
+	const ATerritoryVolume* Territory, const AActor* Target,
+	FTerritoryInfiltrationSnapshot& OutSnapshot) const
+{
+	OutSnapshot = FTerritoryInfiltrationSnapshot();
+	if (!Territory || !Target) return false;
+	const TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>* PerTarget =
+		TerritoryInfiltrationState.Find(Territory);
+	const FInfiltrationRuntime* Runtime = PerTarget ? PerTarget->Find(Target) : nullptr;
+	if (!Runtime) return false;
+	OutSnapshot = Runtime->Snapshot;
+	OutSnapshot.ConfirmingObserverCount = Runtime->CurrentSightObservers.Num();
+	return true;
+}
+
+bool UTerritoryControlSubsystem::IsInfiltratorExposed(
+	const ATerritoryVolume* Territory, const AActor* Target) const
+{
+	FTerritoryInfiltrationSnapshot Snapshot;
+	return GetInfiltrationSnapshot(Territory, Target, Snapshot)
+		&& Snapshot.ExposureState == ETerritoryExposureState::Exposed;
+}
+
+bool UTerritoryControlSubsystem::IsTargetCurrentlySeen(
+	const ATerritoryVolume* Territory, const AActor* Target) const
+{
+	if (!Territory || !Target) return false;
+	const TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>* PerTarget =
+		TerritoryInfiltrationState.Find(Territory);
+	const FInfiltrationRuntime* Runtime = PerTarget ? PerTarget->Find(Target) : nullptr;
+	return Runtime && !Runtime->CurrentSightObservers.IsEmpty();
+}
+
+void UTerritoryControlSubsystem::ForgetStealthObserver(
+	ATerritoryVolume* Territory, AActor* Observer)
+{
+	if (!Territory || !Observer) return;
+	if (TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>* PerTarget =
+		TerritoryInfiltrationState.Find(Territory))
+	{
+		for (auto& Pair : *PerTarget)
+		{
+			Pair.Value.CurrentSightObservers.Remove(Observer);
+			Pair.Value.Snapshot.ConfirmingObserverCount =
+				Pair.Value.CurrentSightObservers.Num();
+		}
+	}
+}
+
+void UTerritoryControlSubsystem::SetStealthInfiltrationOverride(
+	ATerritoryVolume* Territory, bool bEnabled, bool bClearOverride)
+{
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || !Territory) return;
+	if (bClearOverride)
+	{
+		StealthInfiltrationOverrides.Remove(Territory);
+	}
+	else
+	{
+		StealthInfiltrationOverrides.Add(Territory, bEnabled);
+	}
+}
+
+bool UTerritoryControlSubsystem::ClearInfiltratorExposure(
+	ATerritoryVolume* Territory, AActor* Target, bool bResetSuspicion)
+{
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || !Territory || !Target)
+	{
+		return false;
+	}
+	TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>* PerTarget =
+		TerritoryInfiltrationState.Find(Territory);
+	FInfiltrationRuntime* Runtime = PerTarget ? PerTarget->Find(Target) : nullptr;
+	if (!Runtime) return false;
+	const ETerritoryExposureState OldState = Runtime->Snapshot.ExposureState;
+	Runtime->CurrentSightObservers.Empty();
+	Runtime->Snapshot.ExposureState = bResetSuspicion
+		? ETerritoryExposureState::Undetected
+		: (Runtime->Snapshot.Suspicion > 0.f
+			? ETerritoryExposureState::Suspicious : ETerritoryExposureState::Undetected);
+	if (bResetSuspicion) Runtime->Snapshot.Suspicion = 0.f;
+	if (OldState != Runtime->Snapshot.ExposureState)
+	{
+		OnExposureChanged.Broadcast(Territory, Target, OldState,
+			Runtime->Snapshot.ExposureState);
+	}
+	return true;
+}
+
+bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territory,
+	AActor* Target, AActor* Observer, ETerritoryStealthEvidence Evidence,
+	float Strength, const FVector& EvidenceLocation,
+	const FVector& EstimatedSourceDirection, bool bConfirmedIdentity)
+{
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Target)
+	{
+		return false;
+	}
+	const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
+	if (!Profile || !IsStealthInfiltrationEnabled(Territory)) return false;
+
+	FGameplayTag Faction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Target);
+	if (!RegisterInfiltrator(Territory, Target, Faction)) return false;
+	FInfiltrationRuntime& Runtime = TerritoryInfiltrationState.FindChecked(Territory)
+		.FindChecked(Target);
+	const ETerritoryExposureState OldState = Runtime.Snapshot.ExposureState;
+	const float ClampedStrength = FMath::Clamp(Strength, 0.f, 1.f);
+	const float Now = GetWorld()->GetTimeSeconds();
+
+	if (Evidence == ETerritoryStealthEvidence::Sight)
+	{
+		if (Observer)
+		{
+			if (ClampedStrength >= Profile->MinimumSightEvidence)
+			{
+				Runtime.CurrentSightObservers.Add(Observer);
+			}
+			else
+			{
+				Runtime.CurrentSightObservers.Remove(Observer);
+			}
+		}
+		if (ClampedStrength >= Profile->MinimumSightEvidence)
+		{
+			Runtime.Snapshot.Suspicion = FMath::Clamp(
+				Runtime.Snapshot.Suspicion + ClampedStrength
+					* Profile->SightSuspicionGainPerSecond * 0.25f, 0.f, 1.f);
+		}
+	}
+	else
+	{
+		float EvidenceSuspicion = ClampedStrength;
+		switch (Evidence)
+		{
+		case ETerritoryStealthEvidence::Gunshot:
+			EvidenceSuspicion = Profile->GunshotSuspicion;
+			break;
+		case ETerritoryStealthEvidence::BulletImpact:
+			EvidenceSuspicion = Profile->BulletImpactSuspicion;
+			break;
+		case ETerritoryStealthEvidence::Corpse:
+			EvidenceSuspicion = Profile->CorpseSuspicion;
+			break;
+		case ETerritoryStealthEvidence::ThrowableDistraction:
+			EvidenceSuspicion = Profile->ThrowableDistractionSuspicion;
+			break;
+		default:
+			break;
+		}
+		Runtime.Snapshot.Suspicion = FMath::Clamp(
+			Runtime.Snapshot.Suspicion + EvidenceSuspicion, 0.f, 1.f);
+	}
+
+	const bool bForcedExposure = bConfirmedIdentity
+		|| (Evidence == ETerritoryStealthEvidence::Sight
+			&& ClampedStrength >= Profile->ImmediateSightExposureThreshold)
+		|| (Evidence == ETerritoryStealthEvidence::FireSeen
+			&& Profile->bFireWhileSeenExposes)
+		|| (Evidence == ETerritoryStealthEvidence::Damage
+			&& Profile->bDamageImmediatelyExposes)
+		|| (Evidence == ETerritoryStealthEvidence::DefenderKilledSeen
+			&& Profile->bSeenDefenderKillExposes);
+	if (bForcedExposure || Runtime.Snapshot.Suspicion >= 1.f)
+	{
+		Runtime.Snapshot.ExposureState = ETerritoryExposureState::Exposed;
+	}
+	else if (Runtime.Snapshot.Suspicion > 0.f)
+	{
+		Runtime.Snapshot.ExposureState = ETerritoryExposureState::Suspicious;
+	}
+
+	if (ClampedStrength > 0.f || Evidence != ETerritoryStealthEvidence::Sight)
+	{
+		Runtime.Snapshot.LastEvidence = Evidence;
+		Runtime.Snapshot.LastEvidenceLocation = EvidenceLocation;
+		Runtime.Snapshot.EstimatedSourceDirection =
+			EstimatedSourceDirection.GetSafeNormal();
+		Runtime.Snapshot.LastEvidenceWorldTime = Now;
+	}
+	Runtime.Snapshot.ConfirmingObserverCount = Runtime.CurrentSightObservers.Num();
+	OnStealthEvidenceReported.Broadcast(Territory, Target, Evidence, Runtime.Snapshot);
+
+	if (Runtime.Snapshot.ExposureState != ETerritoryExposureState::Exposed
+		&& (Evidence != ETerritoryStealthEvidence::Sight
+			|| OldState == ETerritoryExposureState::Undetected
+				&& Runtime.Snapshot.ExposureState == ETerritoryExposureState::Suspicious))
+	{
+		AssignClosestInvestigators(Territory, Target, Evidence, EvidenceLocation,
+			EstimatedSourceDirection, false, *Profile);
+	}
+
+	if (OldState != Runtime.Snapshot.ExposureState)
+	{
+		OnExposureChanged.Broadcast(Territory, Target, OldState,
+			Runtime.Snapshot.ExposureState);
+	}
+
+	if (OldState != ETerritoryExposureState::Exposed
+		&& Runtime.Snapshot.ExposureState == ETerritoryExposureState::Exposed)
+	{
+		if (Profile->bSendBreakStealthGameplayEvent
+			&& Profile->BreakStealthGameplayEventTag.IsValid())
+		{
+			FGameplayEventData Payload;
+			Payload.EventTag = Profile->BreakStealthGameplayEventTag;
+			Payload.Instigator = Observer;
+			Payload.Target = Target;
+			Payload.EventMagnitude = Runtime.Snapshot.Suspicion;
+			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
+				Target, Profile->BreakStealthGameplayEventTag, Payload);
+		}
+
+		if (Profile->EscalationScope != ETerritoryStealthEscalationScope::LocalAlarm)
+		{
+			TryRegisterContester(Territory, Target, Runtime.Faction);
+		}
+	}
+	return true;
+}
+
+void UTerritoryControlSubsystem::EvaluateInfiltrationState(float DeltaTime)
+{
+	TArray<TWeakObjectPtr<ATerritoryVolume>> InvalidTerritories;
+	for (auto& TerritoryPair : TerritoryInfiltrationState)
+	{
+		ATerritoryVolume* Territory = TerritoryPair.Key.Get();
+		if (!Territory)
+		{
+			InvalidTerritories.Add(TerritoryPair.Key);
+			continue;
+		}
+		const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
+		TArray<TWeakObjectPtr<AActor>> InvalidTargets;
+		for (auto& TargetPair : TerritoryPair.Value)
+		{
+			AActor* Target = TargetPair.Key.Get();
+			if (!Target)
+			{
+				InvalidTargets.Add(TargetPair.Key);
+				continue;
+			}
+			FInfiltrationRuntime& Runtime = TargetPair.Value;
+			for (auto It = Runtime.CurrentSightObservers.CreateIterator(); It; ++It)
+			{
+				if (!It->IsValid()) It.RemoveCurrent();
+			}
+			if (Profile && Runtime.Snapshot.ExposureState == ETerritoryExposureState::Suspicious
+				&& Runtime.CurrentSightObservers.IsEmpty())
+			{
+				Runtime.Snapshot.Suspicion = FMath::Max(0.f,
+					Runtime.Snapshot.Suspicion - Profile->SuspicionDecayPerSecond * DeltaTime);
+				if (Runtime.Snapshot.Suspicion <= 0.f)
+				{
+					const ETerritoryExposureState OldState = Runtime.Snapshot.ExposureState;
+					Runtime.Snapshot.ExposureState = ETerritoryExposureState::Undetected;
+					OnExposureChanged.Broadcast(Territory, Target, OldState,
+						Runtime.Snapshot.ExposureState);
+				}
+			}
+			Runtime.Snapshot.ConfirmingObserverCount = Runtime.CurrentSightObservers.Num();
+		}
+		for (const TWeakObjectPtr<AActor>& Target : InvalidTargets)
+		{
+			TerritoryPair.Value.Remove(Target);
+			ReleaseAttackerRegistration(Target);
+		}
+		if (TerritoryPair.Value.IsEmpty()) InvalidTerritories.Add(TerritoryPair.Key);
+	}
+	for (const TWeakObjectPtr<ATerritoryVolume>& Territory : InvalidTerritories)
+	{
+		TerritoryInfiltrationState.Remove(Territory);
+		StealthInfiltrationOverrides.Remove(Territory);
+	}
+}
+
+void UTerritoryControlSubsystem::AssignClosestInvestigators(
+	ATerritoryVolume* Territory, AActor* SuspectedSource,
+	ETerritoryStealthEvidence Evidence, const FVector& Location,
+	const FVector& EstimatedSourceDirection, bool bIdentityConfirmed,
+	const UTerritoryStealthProfile& Profile)
+{
+	if (!Territory || Profile.MaximumInvestigators <= 0) return;
+	struct FCandidate
+	{
+		ATerritoryGuardCharacter* Guard = nullptr;
+		double Cost = TNumericLimits<double>::Max();
+	};
+	TArray<FCandidate> Candidates;
+	for (AActor* Defender : Territory->GetRegisteredDefenders())
+	{
+		ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(Defender);
+		if (!Guard || !IsValid(Guard) || Guard->IsActorBeingDestroyed()) continue;
+		const double DirectDistance = FVector::Distance(Guard->GetActorLocation(), Location);
+		if (DirectDistance > Profile.InvestigationRadius) continue;
+		double PathLength = DirectDistance;
+		double QueriedLength = 0.0;
+		if (UNavigationSystemV1::GetPathLength(this, Guard->GetActorLocation(), Location,
+			QueriedLength) == ENavigationQueryResult::Success)
+		{
+			PathLength = QueriedLength;
+		}
+		Candidates.Add({Guard, PathLength});
+	}
+	Candidates.Sort([](const FCandidate& A, const FCandidate& B)
+	{
+		if (!FMath::IsNearlyEqual(A.Cost, B.Cost)) return A.Cost < B.Cost;
+		return GetPathNameSafe(A.Guard) < GetPathNameSafe(B.Guard);
+	});
+	const int32 Count = FMath::Min(Profile.MaximumInvestigators, Candidates.Num());
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		Candidates[Index].Guard->RequestTerritoryInvestigation(
+			Evidence, Location, EstimatedSourceDirection, SuspectedSource,
+			bIdentityConfirmed, Profile);
+	}
 }
 
 ECaptureResult UTerritoryControlSubsystem::ValidateContestAttempt(

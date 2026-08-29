@@ -1,0 +1,10 @@
+#pragma once
+
+#include "NativeGameplayTags.h"
+
+namespace TerritoryStealthTags
+{
+	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Exposed);
+	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(DistractionThrowable);
+	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(InvestigationActive);
+}
