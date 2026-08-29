@@ -34,25 +34,28 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** One Place asset supplies this actor's target and capture policy. */
-	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition")
-	TObjectPtr<UTerritoryPlaceDefinition> PlaceDefinition;
-
-	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
+	/** Internal/editor synchronization hook. OnConstruction applies the serialized binding. */
 	bool ApplyPlaceDefinition();
+	UTerritoryPlaceDefinition* GetPlaceDefinition() const { return PlaceDefinition; }
+	void SetPlaceDefinition(UTerritoryPlaceDefinition* NewDefinition)
+	{
+		PlaceDefinition = NewDefinition;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Territory|Capture")
+	FGameplayTag GetTargetTerritoryTag() const { return TargetTerritoryTag; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Capture")
+	float GetCaptureRadius() const { return CaptureRadius; }
 
 	/** Stable tag of the independent Place controlled by this physical zone. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture",
-		meta=(Categories="Territory"))
+	UPROPERTY(Transient)
 	FGameplayTag TargetTerritoryTag;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture",
-		meta=(ClampMin="100.0", UIMin="100.0", UIMax="2000.0"))
+	UPROPERTY(Transient)
 	float CaptureRadius = 350.f;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture",
-		meta=(DisplayName="Automatic Multiplayer Capture Flow",
-			ToolTip="When enabled, players inside this point fill capture progress after defenders are defeated. A target Territory using Story Capture From Territory Bounds automatically disables this point."))
+	UPROPERTY(Transient)
 	bool bCaptureEnabled = true;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Capture")
@@ -66,8 +69,7 @@ public:
 	TObjectPtr<UStaticMeshComponent> CaptureMarkerMesh;
 
 	/** Hide the world marker while the target Place is story-Locked or unavailable. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture|Presentation",
-		meta=(ToolTip="Recommended. A story-Locked Place stays silent until its Locked State Config exit conditions unlock it."))
+	UPROPERTY(Transient)
 	bool bHideMarkerWhileCaptureUnavailable = true;
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Capture")
@@ -102,6 +104,10 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+	/** Hidden serialized binding maintained by the Definition synchronizer. */
+	UPROPERTY()
+	TObjectPtr<UTerritoryPlaceDefinition> PlaceDefinition;
+
 	struct FParticipantRegistration
 	{
 		TWeakObjectPtr<ATerritoryVolume> Territory;

@@ -83,18 +83,23 @@ class TERRITORYFRAMEWORK_API UTerritoryDiplomacyDialogueComponent : public UActo
 public:
 	UTerritoryDiplomacyDialogueComponent();
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Dialogue",
-		meta=(ToolTip="Optional fallback profile after exact faction mappings. Leave empty on a guard Blueprint shared by several factions so an unmapped faction keeps its own Narrative NPCDefinition dialogue."))
+	// Hidden but serialized until every upgraded project has copied old Blueprint
+	// component values into its Territory Definitions. Runtime never treats this as authority.
+	UPROPERTY()
 	TObjectPtr<UTerritoryDiplomacyDialogueProfile> DialogueProfile;
 
 	/**
 	 * First exact faction match wins. Easy example: map Bandits to a Bandit profile;
 	 * a Hero using the same pawn Blueprint is not matched and keeps the Hero definition dialogue.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Dialogue",
-		meta=(TitleProperty="Faction",
-			ToolTip="Optional per-faction profiles for a pawn class shared by several Narrative NPCDefinitions."))
+	UPROPERTY()
 	TArray<FTerritoryFactionDialogueProfile> FactionDialogueProfiles;
+
+	/** Runtime binding used by Territory Definitions and other DataAsset authorities. */
+	void SetDialogueProfiles(UTerritoryDiplomacyDialogueProfile* InFallbackProfile,
+		const TArray<FTerritoryFactionDialogueProfile>& InFactionProfiles);
+	void CopyDialogueProfiles(UTerritoryDiplomacyDialogueProfile*& OutFallbackProfile,
+		TArray<FTerritoryFactionDialogueProfile>& OutFactionProfiles) const;
 
 	/** Returns the first exact faction profile, then the optional fallback profile. */
 	UFUNCTION(BlueprintPure, Category="Territory|Dialogue",

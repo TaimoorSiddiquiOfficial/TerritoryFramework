@@ -101,11 +101,24 @@ namespace TFTestUtils
 		return Prop && Prop->HasAnyPropertyFlags(CPF_SaveGame);
 	}
 
-	static bool IsEditorReadOnly(const UClass* Class, const FString& PropertyName)
+	static bool IsInternalOnly(const UClass* Class, const FString& PropertyName)
 	{
 		if (!Class) return false;
 		const FProperty* Prop = Class->FindPropertyByName(FName(*PropertyName));
-		return Prop && Prop->HasAnyPropertyFlags(CPF_EditConst);
+		return Prop
+			&& !Prop->HasAnyPropertyFlags(CPF_Edit)
+			&& !Prop->HasAnyPropertyFlags(CPF_BlueprintVisible);
+	}
+
+	static bool IsEditableBlueprintProperty(const UClass* Class,
+		const FString& PropertyName)
+	{
+		if (!Class) return false;
+		const FProperty* Prop = Class->FindPropertyByName(FName(*PropertyName));
+		return Prop
+			&& Prop->HasAnyPropertyFlags(CPF_Edit)
+			&& !Prop->HasAnyPropertyFlags(CPF_EditConst)
+			&& Prop->HasAnyPropertyFlags(CPF_BlueprintVisible);
 	}
 
 	static bool IsBlueprintCallable(const UClass* Class, const FString& FunctionName)
@@ -201,12 +214,12 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 		Class->FindPropertyByName(TEXT("AllDefendersDefeatedEvents")));
 	TestNotNull(TEXT("Territory Definition is the single authoring property"),
 		Class->FindPropertyByName(TEXT("TerritoryDefinition")));
-	TestTrue(TEXT("Applied Territory identity cannot be overridden on the actor"),
-		TFTestUtils::IsEditorReadOnly(Class, TEXT("TerritoryTag")));
-	TestTrue(TEXT("Applied Territory state seed cannot be overridden on the actor"),
-		TFTestUtils::IsEditorReadOnly(Class, TEXT("InitialState")));
-	TestTrue(TEXT("Applied guard policy cannot be overridden on the actor"),
-		TFTestUtils::IsEditorReadOnly(Class, TEXT("GuardSpawnCount")));
+	TestTrue(TEXT("Applied Territory identity is hidden behind its query API"),
+		TFTestUtils::IsInternalOnly(Class, TEXT("TerritoryTag")));
+	TestTrue(TEXT("Applied Territory state seed is hidden behind its query API"),
+		TFTestUtils::IsInternalOnly(Class, TEXT("InitialState")));
+	TestTrue(TEXT("Applied guard policy is hidden behind its query API"),
+		TFTestUtils::IsInternalOnly(Class, TEXT("GuardSpawnCount")));
 	TestNull(TEXT("Ignored legacy maximum guard field was removed"),
 		Class->FindPropertyByName(TEXT("MaxGuardCount")));
 	TestNull(TEXT("Ignored legacy random guard radius was removed"),
@@ -267,6 +280,184 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 		TFTestUtils::HasFunction(Class, TEXT("OnOwnershipChanged")));
 	TestTrue(TEXT("Has OnStateChanged (BP extension point)"),
 		TFTestUtils::HasFunction(Class, TEXT("OnStateChanged")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_StrictDefinitionAuthoringSurface,
+	"TerritoryFramework.Contract.StrictDefinitionAuthoringSurface",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_StrictDefinitionAuthoringSurface::RunTest(const FString& Parameters)
+{
+	const UClass* TerritoryClass = ATerritoryVolume::StaticClass();
+	TestNotNull(TEXT("Territory actor class exists"), TerritoryClass);
+	if (!TerritoryClass) return false;
+
+	TArray<FName> EditableTerritoryProperties;
+	for (TFieldIterator<FProperty> It(TerritoryClass,
+		EFieldIterationFlags::None); It; ++It)
+	{
+		const FProperty* Property = *It;
+		if (Property->HasAnyPropertyFlags(CPF_Edit)
+			&& !Property->HasAnyPropertyFlags(CPF_EditConst))
+		{
+			EditableTerritoryProperties.Add(Property->GetFName());
+		}
+	}
+	TestEqual(TEXT("Territory actors expose exactly one editable gameplay property"),
+		EditableTerritoryProperties.Num(), 1);
+	if (EditableTerritoryProperties.Num() == 1)
+	{
+		TestEqual(TEXT("The one editable gameplay property is Territory Definition"),
+			EditableTerritoryProperties[0], FName(TEXT("TerritoryDefinition")));
+	}
+	TestTrue(TEXT("Territory Definition is editable and Blueprint-readable"),
+		TFTestUtils::IsEditableBlueprintProperty(TerritoryClass,
+			TEXT("TerritoryDefinition")));
+
+	auto TestNoDirectGameplayAuthoring = [this](const UClass* Class)
+	{
+		TArray<FName> EditableProperties;
+		for (TFieldIterator<FProperty> It(Class,
+			EFieldIterationFlags::None); It; ++It)
+		{
+			const FProperty* Property = *It;
+			if (Property->HasAnyPropertyFlags(CPF_Edit)
+				&& !Property->HasAnyPropertyFlags(CPF_EditConst))
+			{
+				EditableProperties.Add(Property->GetFName());
+			}
+		}
+		TestEqual(FString::Printf(TEXT("%s has no direct legacy gameplay authoring fields"),
+			*Class->GetName()), EditableProperties.Num(), 0);
+	};
+	const UClass* DefinitionDrivenActorClasses[] = {
+		ATerritoryDistrict::StaticClass(), ATerritoryProperty::StaticClass(),
+		ATerritoryCity::StaticClass(), ATerritoryGuardSpawnPoint::StaticClass(),
+		ATerritoryCapturePoint::StaticClass(), ATerritoryStoryOwnerSpawner::StaticClass(),
+		ATerritoryDistrictManagementPoint::StaticClass(),
+		ATerritoryGuardCharacter::StaticClass(), ATerritoryAssaultCharacter::StaticClass()
+	};
+	for (const UClass* Class : DefinitionDrivenActorClasses)
+	{
+		TestNoDirectGameplayAuthoring(Class);
+	}
+
+	const TCHAR* TerritoryRuntimeFields[] = {
+		TEXT("TerritoryTag"), TEXT("TerritoryDisplayName"),
+		TEXT("InitialOwningFaction"), TEXT("InitialState"), TEXT("ControlMode"),
+		TEXT("InitialMaxConcurrentAttackers"), TEXT("InitialPeriodicIncome"),
+		TEXT("InitialGuardCost"), TEXT("InitialGuardRecruitmentCost"),
+		TEXT("CounterAttackProfile"), TEXT("CounterAttackApproaches"),
+		TEXT("GuardQuality"), TEXT("FortificationStrength"),
+		TEXT("NearbyAlliedSupport"), TEXT("StrategicValue"),
+		TEXT("ParentTerritoryTag"), TEXT("OwnershipData"),
+		TEXT("GarrisonSnapshot"), TEXT("TerritoryGUID"), TEXT("BoundsShape"),
+		TEXT("bStoryCaptureFromBounds"), TEXT("GuardNPCDefinition"),
+		TEXT("FactionGuardDefinitions"), TEXT("GuardSpawnCount"),
+		TEXT("PostCaptureGarrisonPolicy"), TEXT("GuardSpawnPoints")
+	};
+	for (const TCHAR* FieldName : TerritoryRuntimeFields)
+	{
+		TestTrue(FString::Printf(TEXT("%s is internal and available only through intentional APIs"),
+			FieldName), TFTestUtils::IsInternalOnly(TerritoryClass, FieldName));
+	}
+	TestNull(TEXT("Manual Apply Territory Definition Blueprint button was removed"),
+		TerritoryClass->FindFunctionByName(TEXT("ApplyTerritoryDefinition")));
+
+	const UClass* GuardClass = ATerritoryGuardCharacter::StaticClass();
+	const TCHAR* GuardBehaviorCaches[] = {
+		TEXT("PatrolGoalClass"), TEXT("bEnablePatrolCrowdAvoidance"),
+		TEXT("PatrolAvoidanceConsiderationRadius"), TEXT("PatrolAvoidanceWeight"),
+		TEXT("bPrioritizeClosestHostilePlayer"),
+		TEXT("ClosestHostilePlayerGoalScoreBonus")
+	};
+	for (const TCHAR* FieldName : GuardBehaviorCaches)
+	{
+		TestTrue(FString::Printf(TEXT("Guard.%s is Definition-owned, not a Blueprint class default"),
+			FieldName), TFTestUtils::IsInternalOnly(GuardClass, FieldName));
+	}
+	TestNull(TEXT("Legacy incomplete guard spawn Blueprint node was removed"),
+		GuardClass->FindFunctionByName(TEXT("ConfigureTerritorySpawn")));
+	const UClass* DialogueComponentClass =
+		UTerritoryDiplomacyDialogueComponent::StaticClass();
+	TestTrue(TEXT("Guard fallback dialogue is supplied by a DataAsset authority"),
+		TFTestUtils::IsInternalOnly(DialogueComponentClass, TEXT("DialogueProfile")));
+	TestTrue(TEXT("Guard faction dialogue mappings are supplied by a DataAsset authority"),
+		TFTestUtils::IsInternalOnly(DialogueComponentClass,
+			TEXT("FactionDialogueProfiles")));
+
+	const UClass* DistrictClass = ATerritoryDistrict::StaticClass();
+	TestTrue(TEXT("District capital policy is Definition-only"),
+		TFTestUtils::IsInternalOnly(DistrictClass, TEXT("bIsCapital")));
+	TestTrue(TEXT("District capital multiplier is Definition-only"),
+		TFTestUtils::IsInternalOnly(DistrictClass, TEXT("CapitalIncomeMultiplier")));
+
+	const UClass* PropertyClass = ATerritoryProperty::StaticClass();
+	const TCHAR* PropertyInternalFields[] = {
+		TEXT("UpgradeLevel"), TEXT("MaxUpgradeLevel"),
+		TEXT("UpgradeCostPerLevel"), TEXT("IncomeBonusPerLevel"),
+		TEXT("ProductionProfile")
+	};
+	for (const TCHAR* FieldName : PropertyInternalFields)
+	{
+		TestTrue(FString::Printf(TEXT("Property.%s is not a Blueprint authoring option"),
+			FieldName), TFTestUtils::IsInternalOnly(PropertyClass, FieldName));
+	}
+	TestTrue(TEXT("Runtime upgrade level remains available through a pure query"),
+		TFTestUtils::IsBlueprintPure(PropertyClass, TEXT("GetUpgradeLevel")));
+
+	struct FHelperContract
+	{
+		const UClass* Class;
+		const TCHAR* BindingField;
+		TArray<const TCHAR*> RuntimeFields;
+	};
+	const TArray<FHelperContract> HelperContracts = {
+		{ ATerritoryCapturePoint::StaticClass(), TEXT("PlaceDefinition"),
+			{ TEXT("TargetTerritoryTag"), TEXT("CaptureRadius"),
+				TEXT("bCaptureEnabled"), TEXT("bHideMarkerWhileCaptureUnavailable") } },
+		{ ATerritoryStoryOwnerSpawner::StaticClass(), TEXT("PlaceDefinition"),
+			{ TEXT("TerritoryTag"), TEXT("bBeginDialogueOnActivation"),
+				TEXT("OverrideDialogue"), TEXT("DialogueStartFromID"),
+				TEXT("OwnerInteractionDistance"), TEXT("bHandoverActivated") } },
+		{ ATerritoryDistrictManagementPoint::StaticClass(), TEXT("TerritoryDefinition"),
+			{ TEXT("DistrictTag"), TEXT("ManagementWidgetClass"),
+				TEXT("ManagementLayerTag"), TEXT("ManagementDistance") } },
+		{ ATerritoryGuardSpawnPoint::StaticClass(), TEXT("TerritoryDefinition"),
+			{ TEXT("GuardPostID"), TEXT("OwnerTerritoryTag"), TEXT("ReserveSlots"),
+				TEXT("bAutoSpawnReserves"), TEXT("PatrolRoute"), TEXT("FactionOverride"),
+				TEXT("Priority"), TEXT("ReserveOwnershipPolicy"),
+				TEXT("GuardPostDefinition"), TEXT("NPCDefinitionOverride"),
+				TEXT("ActivityConfigurationOverride"), TEXT("TriggerSetOverrides"),
+				TEXT("CachedTerritory"), TEXT("SpawnPointGUID") } }
+	};
+
+	for (const FHelperContract& Contract : HelperContracts)
+	{
+		TestNotNull(TEXT("Helper class exists"), Contract.Class);
+		if (!Contract.Class) continue;
+		TestTrue(FString::Printf(TEXT("%s binding is hidden and synchronized internally"),
+			Contract.BindingField),
+			TFTestUtils::IsInternalOnly(Contract.Class, Contract.BindingField));
+		for (const TCHAR* FieldName : Contract.RuntimeFields)
+		{
+			TestTrue(FString::Printf(TEXT("%s.%s is not a Blueprint authoring option"),
+				*Contract.Class->GetName(), FieldName),
+				TFTestUtils::IsInternalOnly(Contract.Class, FieldName));
+		}
+	}
+
+	const UClass* GuardPostClass = ATerritoryGuardSpawnPoint::StaticClass();
+	TestNull(TEXT("Unused guard-post editor visualization override was removed"),
+		GuardPostClass->FindPropertyByName(TEXT("bShowPatrolRouteInEditor")));
+	TestNull(TEXT("Unused guard-post spawn color override was removed"),
+		GuardPostClass->FindPropertyByName(TEXT("SpawnPointColor")));
+	TestNull(TEXT("Unused guard-post patrol color override was removed"),
+		GuardPostClass->FindPropertyByName(TEXT("PatrolRouteColor")));
+	TestNull(TEXT("Unused guard-post reserve color override was removed"),
+		GuardPostClass->FindPropertyByName(TEXT("ReserveColor")));
 
 	return true;
 }
@@ -964,7 +1155,7 @@ bool FTFContract_CaptureEvent::RunTest(const FString& Parameters)
 	const ATerritoryStoryOwnerSpawner* OwnerSpawnerCDO =
 		GetDefault<ATerritoryStoryOwnerSpawner>();
 	TestEqual(TEXT("Protected-owner interaction is reliable at three metres by default"),
-		OwnerSpawnerCDO->OwnerInteractionDistance, 300.f);
+		OwnerSpawnerCDO->GetOwnerInteractionDistance(), 300.f);
 
 	return true;
 }
@@ -2859,8 +3050,8 @@ bool FTFContract_TerritoryGuardCharacter::RunTest(const FString& Parameters)
 	TestTrue(TEXT("OwningTerritorySpawnPoint is replicated"),
 		TFTestUtils::IsReplicated(Class, TEXT("OwningTerritorySpawnPoint")));
 
-	TestTrue(TEXT("Has ConfigureTerritorySpawn"),
-		TFTestUtils::HasFunction(Class, TEXT("ConfigureTerritorySpawn")));
+	TestNull(TEXT("Legacy incomplete guard configuration is absent from Blueprint"),
+		Class->FindFunctionByName(TEXT("ConfigureTerritorySpawn")));
 	TestTrue(TEXT("Typed guard configuration is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("ConfigureTerritorySpawnWithContext")));
 	TestTrue(TEXT("Typed guard configuration is authority-only"),
@@ -3623,39 +3814,38 @@ bool FTFTerritoryDefinitionAuxiliaryActors::RunTest(const FString& Parameters)
 	Patrol.RelativeTransform.SetLocation(FVector(200.f, 0.f, 0.f));
 
 	ATerritoryCapturePoint* CapturePoint = NewObject<ATerritoryCapturePoint>();
-	CapturePoint->PlaceDefinition = Place;
+	CapturePoint->SetPlaceDefinition(Place);
 	TestTrue(TEXT("Capture Point accepts the Place Definition"),
 		CapturePoint->ApplyPlaceDefinition());
 	TestEqual(TEXT("Capture Point target comes from the Place asset"),
-		CapturePoint->TargetTerritoryTag, Place->TerritoryTag);
+		CapturePoint->GetTargetTerritoryTag(), Place->TerritoryTag);
 	TestEqual(TEXT("Capture radius comes from the Place asset"),
-		CapturePoint->CaptureRadius, 625.f);
+		CapturePoint->GetCaptureRadius(), 625.f);
 
 	ATerritoryDistrictManagementPoint* Management =
 		NewObject<ATerritoryDistrictManagementPoint>();
-	Management->TerritoryDefinition = Place;
+	Management->SetTerritoryDefinition(Place);
 	TestTrue(TEXT("Management Point accepts the Place Definition"),
 		Management->ApplyTerritoryDefinition());
 	TestEqual(TEXT("Management target comes from the one asset"),
-		Management->DistrictTag,
+		Management->GetManagedDistrictTag(),
 		Place->ManagementPoint.ManagedDistrictOverride);
 	TestEqual(TEXT("Management distance comes from the one asset"),
-		Management->ManagementDistance, 725.f);
+		Management->GetManagementDistance(), 725.f);
 
 	ATerritoryStoryOwnerSpawner* StoryOwner =
 		NewObject<ATerritoryStoryOwnerSpawner>();
-	StoryOwner->PlaceDefinition = Place;
+	StoryOwner->SetPlaceDefinition(Place);
 	TestTrue(TEXT("Story Owner accepts the Place Definition"),
 		StoryOwner->ApplyPlaceDefinition());
 	TestEqual(TEXT("Story Owner target comes from the Place asset"),
-		StoryOwner->TerritoryTag, Place->TerritoryTag);
+		StoryOwner->GetTerritoryTag(), Place->TerritoryTag);
 	TestEqual(TEXT("Story Owner interaction distance comes from the Place asset"),
-		StoryOwner->OwnerInteractionDistance, 425.f);
+		StoryOwner->GetOwnerInteractionDistance(), 425.f);
 
 	ATerritoryGuardSpawnPoint* SpawnPoint =
 		NewObject<ATerritoryGuardSpawnPoint>();
-	SpawnPoint->TerritoryDefinition = Place;
-	SpawnPoint->GuardPostID = GuardPost.GuardPostID;
+	SpawnPoint->SetDefinitionBinding(Place, GuardPost.GuardPostID);
 	TestTrue(TEXT("Guard Post accepts its row from the Place Definition"),
 		SpawnPoint->ApplyTerritoryDefinition());
 	TestEqual(TEXT("Guard Post target comes from the Place asset"),
@@ -3866,8 +4056,8 @@ bool FTFContract_GuardPostDefinition::RunTest(const FString& Parameters)
 		TFTestUtils::HasProperty(SPClass, TEXT("GuardPostDefinition")));
 	TestNull(TEXT("GuardSpawnPoint legacy MaxGuards override was removed"),
 		SPClass->FindPropertyByName(TEXT("MaxGuards")));
-	TestTrue(TEXT("Applied reserve policy cannot be overridden on a placed Guard Post"),
-		TFTestUtils::IsEditorReadOnly(SPClass, TEXT("ReserveSlots")));
+	TestTrue(TEXT("Applied reserve policy is hidden behind its query API"),
+		TFTestUtils::IsInternalOnly(SPClass, TEXT("ReserveSlots")));
 
 	return true;
 }
@@ -4287,10 +4477,15 @@ bool FTFTerritoryGuardCrowdAndDialogueContract::RunTest(const FString& Parameter
 {
 	const ATerritoryGuardCharacter* GuardCDO = GetDefault<ATerritoryGuardCharacter>();
 	const ATerritoryAssaultCharacter* AssaultCDO = GetDefault<ATerritoryAssaultCharacter>();
+	const UTerritoryPlaceDefinition* DefinitionCDO =
+		GetDefault<UTerritoryPlaceDefinition>();
 	TestTrue(TEXT("Patrol crowd avoidance is enabled by default"),
-		GuardCDO && GuardCDO->bEnablePatrolCrowdAvoidance);
+		DefinitionCDO && DefinitionCDO->GuardBehavior.bEnablePatrolCrowdAvoidance);
 	TestTrue(TEXT("Patrol avoidance has a useful consideration radius"),
-		GuardCDO && GuardCDO->PatrolAvoidanceConsiderationRadius >= 100.f);
+		DefinitionCDO
+			&& DefinitionCDO->GuardBehavior.PatrolAvoidanceConsiderationRadius >= 100.f);
+	TestNotNull(TEXT("Definition provides the Narrative patrol goal class"),
+		DefinitionCDO ? DefinitionCDO->GuardBehavior.PatrolGoalClass.Get() : nullptr);
 	TestNotNull(TEXT("Guard owns a diplomacy dialogue resolver"),
 		GuardCDO ? GuardCDO->FindComponentByClass<UTerritoryDiplomacyDialogueComponent>() : nullptr);
 	TestNotNull(TEXT("Guard replaces Narrative's interactable with the contextual adapter"),
@@ -4466,8 +4661,8 @@ bool FTFCapturePointContract::RunTest(const FString& Parameters)
 		TFTestUtils::HasProperty(Class, TEXT("bHideMarkerWhileCaptureUnavailable")));
 	TestNull(TEXT("Capture point legacy progress override was removed"),
 		Class->FindPropertyByName(TEXT("bContributesCaptureProgress")));
-	TestTrue(TEXT("Applied capture policy cannot be overridden on the placed Blueprint"),
-		TFTestUtils::IsEditorReadOnly(Class, TEXT("bCaptureEnabled")));
+	TestTrue(TEXT("Applied capture policy is hidden behind its query API"),
+		TFTestUtils::IsInternalOnly(Class, TEXT("bCaptureEnabled")));
 	TestTrue(TEXT("Capture point exposes its effective automatic-flow query"),
 		TFTestUtils::HasFunction(Class, TEXT("IsAutomaticCaptureFlowActive")));
 	TestTrue(TEXT("Territory exposes full-bounds story capture mode"),

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
+#include "AI/TerritoryDiplomacyDialogue.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryTypes.h"
@@ -21,6 +22,7 @@ class UNPCActivityConfiguration;
 class UTerritoryCounterAttackProfile;
 class UTerritoryDistrictManagementWidget;
 class UTerritoryGuardPostDefinition;
+class UTerritoryPatrolGoal;
 class UTerritoryProductionProfile;
 class UTriggerSet;
 
@@ -40,6 +42,48 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPatrolTemplateNode
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol",
 		meta=(Categories="Guard.Activity"))
 	FGameplayTag ActivityTag;
+};
+
+/** Territory-wide behavior applied to every stationary defender spawned for this asset. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
+{
+	GENERATED_BODY()
+
+	FTerritoryGuardBehaviorTemplate();
+
+	/** Narrative goal created for guards that have a patrol route. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol")
+	TSubclassOf<UTerritoryPatrolGoal> PatrolGoalClass;
+
+	/** Server-side CharacterMovement RVO helps physical guards avoid blocking one another. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Crowd Avoidance")
+	bool bEnablePatrolCrowdAvoidance = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Crowd Avoidance",
+		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="100.0", ClampMax="2000.0", Units="cm"))
+	float PatrolAvoidanceConsiderationRadius = 500.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Crowd Avoidance",
+		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="0.0", ClampMax="1.0"))
+	float PatrolAvoidanceWeight = 0.5f;
+
+	/** Adds a small score preference for the nearest hostile player during a valid Territory war. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat")
+	bool bPrioritizeClosestHostilePlayer = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat",
+		meta=(EditCondition="bPrioritizeClosestHostilePlayer", ClampMin="0.0", ClampMax="10.0"))
+	float ClosestHostilePlayerGoalScoreBonus = 0.75f;
+
+	/** Optional fallback relationship dialogue. Empty keeps the Narrative NPC Definition dialogue. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Dialogue")
+	TObjectPtr<UTerritoryDiplomacyDialogueProfile> DialogueProfile;
+
+	/** Exact owning-faction mappings for a guard class reused by several factions. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Dialogue",
+		meta=(TitleProperty="Faction"))
+	TArray<FTerritoryFactionDialogueProfile> FactionDialogueProfiles;
 };
 
 /** One physical guard slot and its reusable Narrative guard-post profile. */
@@ -328,6 +372,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards")
 	ETerritoryPostCaptureGarrisonPolicy PostCaptureGarrisonPolicy =
 		ETerritoryPostCaptureGarrisonPolicy::PlayerChooses;
+
+	/** Shared patrol, crowd-avoidance, and target-priority policy for this Territory's guards. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards")
+	FTerritoryGuardBehaviorTemplate GuardBehavior;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards",
 		meta=(TitleProperty="GuardPostID"))

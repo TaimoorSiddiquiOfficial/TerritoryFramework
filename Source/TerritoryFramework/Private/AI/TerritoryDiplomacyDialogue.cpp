@@ -1,6 +1,7 @@
 #include "AI/TerritoryDiplomacyDialogue.h"
 
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Tales/Dialogue.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 
 namespace
@@ -47,6 +48,22 @@ UTerritoryDiplomacyDialogueComponent::UTerritoryDiplomacyDialogueComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(false);
+}
+
+void UTerritoryDiplomacyDialogueComponent::SetDialogueProfiles(
+	UTerritoryDiplomacyDialogueProfile* InFallbackProfile,
+	const TArray<FTerritoryFactionDialogueProfile>& InFactionProfiles)
+{
+	DialogueProfile = InFallbackProfile;
+	FactionDialogueProfiles = InFactionProfiles;
+}
+
+void UTerritoryDiplomacyDialogueComponent::CopyDialogueProfiles(
+	UTerritoryDiplomacyDialogueProfile*& OutFallbackProfile,
+	TArray<FTerritoryFactionDialogueProfile>& OutFactionProfiles) const
+{
+	OutFallbackProfile = DialogueProfile;
+	OutFactionProfiles = FactionDialogueProfiles;
 }
 
 EDiplomacyState UTerritoryDiplomacyDialogueComponent::ResolveRelationshipForInteractor(

@@ -269,7 +269,8 @@ void UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged(
 {
 	const ATerritoryDistrictManagementPoint* Point =
 		Cast<ATerritoryDistrictManagementPoint>(GetOwner());
-	if (!Point || !Territory || Territory->GetTerritoryTag() != Point->DistrictTag) return;
+	if (!Point || !Territory
+		|| Territory->GetTerritoryTag() != Point->GetManagedDistrictTag()) return;
 	if (bWasUnregistered && BoundDistrict.Get() == Territory)
 	{
 		UnbindFromDistrict();

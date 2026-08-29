@@ -1,4 +1,5 @@
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
@@ -205,7 +206,51 @@ void ATerritoryGuardCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 		OwningTerritorySpawnPoint = GPendingTerritoryGuardSpawn->OwningSpawnPoint;
 		GPendingTerritoryGuardSpawn->bApplied = true;
 	}
+	ApplyGuardBehaviorFromTerritoryDefinition();
 	Super::SetNPCDefinition(Definition);
+}
+
+void ATerritoryGuardCharacter::ApplyGuardBehaviorFromTerritoryDefinition()
+{
+	const UTerritoryDefinition* Definition = IsValid(OwningTerritory)
+		? OwningTerritory->GetTerritoryDefinition() : nullptr;
+	if (!Definition)
+	{
+		return;
+	}
+
+	const FTerritoryGuardBehaviorTemplate& Behavior = Definition->GuardBehavior;
+	PatrolGoalClass = Behavior.PatrolGoalClass;
+	bEnablePatrolCrowdAvoidance = Behavior.bEnablePatrolCrowdAvoidance;
+	PatrolAvoidanceConsiderationRadius = FMath::Max(
+		100.f, Behavior.PatrolAvoidanceConsiderationRadius);
+	PatrolAvoidanceWeight = FMath::Clamp(Behavior.PatrolAvoidanceWeight, 0.f, 1.f);
+	bPrioritizeClosestHostilePlayer = Behavior.bPrioritizeClosestHostilePlayer;
+	ClosestHostilePlayerGoalScoreBonus = FMath::Max(
+		0.f, Behavior.ClosestHostilePlayerGoalScoreBonus);
+	if (DiplomacyDialogue)
+	{
+		DiplomacyDialogue->SetDialogueProfiles(
+			Behavior.DialogueProfile, Behavior.FactionDialogueProfiles);
+	}
+}
+
+void ATerritoryGuardCharacter::CopyLegacyGuardBehavior(
+	FTerritoryGuardBehaviorTemplate& OutBehavior) const
+{
+	OutBehavior.PatrolGoalClass = PatrolGoalClass;
+	OutBehavior.bEnablePatrolCrowdAvoidance = bEnablePatrolCrowdAvoidance;
+	OutBehavior.PatrolAvoidanceConsiderationRadius = PatrolAvoidanceConsiderationRadius;
+	OutBehavior.PatrolAvoidanceWeight = PatrolAvoidanceWeight;
+	OutBehavior.bPrioritizeClosestHostilePlayer = bPrioritizeClosestHostilePlayer;
+	OutBehavior.ClosestHostilePlayerGoalScoreBonus = ClosestHostilePlayerGoalScoreBonus;
+	if (DiplomacyDialogue)
+	{
+		UTerritoryDiplomacyDialogueProfile* LegacyDialogueProfile = nullptr;
+		DiplomacyDialogue->CopyDialogueProfiles(
+			LegacyDialogueProfile, OutBehavior.FactionDialogueProfiles);
+		OutBehavior.DialogueProfile = LegacyDialogueProfile;
+	}
 }
 
 ETeamAttitude::Type ATerritoryGuardCharacter::GetTeamAttitudeTowards(
@@ -273,6 +318,7 @@ void ATerritoryGuardCharacter::BeginPlay()
 
 	if (HasAuthority())
 	{
+		ApplyGuardBehaviorFromTerritoryDefinition();
 		RefreshPatrolCrowdAvoidance();
 		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
 		{

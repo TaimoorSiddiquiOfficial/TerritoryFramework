@@ -99,25 +99,31 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 
-	/** City/District/Place asset that supplies the management Blueprint policy. */
-	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition")
-	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
-
-	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
+	/** Internal/editor synchronization hook. OnConstruction applies the serialized binding. */
 	bool ApplyTerritoryDefinition();
+	UTerritoryDefinition* GetTerritoryDefinition() const { return TerritoryDefinition; }
+	void SetTerritoryDefinition(UTerritoryDefinition* NewDefinition)
+	{
+		TerritoryDefinition = NewDefinition;
+	}
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Management", meta=(Categories="Territory"))
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	FGameplayTag GetManagedDistrictTag() const { return DistrictTag; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	float GetManagementDistance() const { return ManagementDistance; }
+
+	UPROPERTY(Transient)
 	FGameplayTag DistrictTag;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Management")
+	UPROPERTY(Transient)
 	TSubclassOf<UTerritoryDistrictManagementWidget> ManagementWidgetClass;
 
 	/** Narrative gameplay HUD layer used for the management menu. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Management",
-		meta=(Categories="UI.Layer"))
+	UPROPERTY(Transient)
 	FGameplayTag ManagementLayerTag;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Management", meta=(ClampMin="100"))
+	UPROPERTY(Transient)
 	float ManagementDistance = 600.f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Management")
@@ -142,4 +148,9 @@ public:
 	void OpenManagementWidget(APlayerController* PlayerController);
 
 	void HandleInteraction(APawn* Interactor);
+
+private:
+	/** Hidden serialized binding maintained by the Definition synchronizer. */
+	UPROPERTY()
+	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
 };

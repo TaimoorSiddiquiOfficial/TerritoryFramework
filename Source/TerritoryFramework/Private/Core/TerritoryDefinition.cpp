@@ -1,7 +1,13 @@
 #include "Core/TerritoryDefinition.h"
 
+#include "AI/TerritoryPatrolGoal.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
+
+FTerritoryGuardBehaviorTemplate::FTerritoryGuardBehaviorTemplate()
+	: PatrolGoalClass(UTerritoryPatrolGoal::StaticClass())
+{
+}
 
 bool UTerritoryDefinition::ApplyToTerritory(ATerritoryVolume* Territory) const
 {

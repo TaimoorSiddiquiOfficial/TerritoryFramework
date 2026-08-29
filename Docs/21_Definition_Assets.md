@@ -14,6 +14,8 @@ It can describe:
 - management-point Blueprint, Narrative UI layer, widget, and interaction distance;
 - every guard-post Blueprint, position, stable save ID, patrol route, Narrative activity,
   TriggerSets, reserve settings, and faction override;
+- shared guard patrol goal, crowd avoidance, nearest-hostile priority, and diplomacy-aware
+  dialogue profiles for each possible owning faction;
 - production, upgrades, economy, defender events, and counterattack configuration.
 
 The level still contains physical actors because their bounds and positions are part of the world.
@@ -117,6 +119,10 @@ runtime or in the Blueprint API.
   identity, and saved/replicated campaign state.
 - State rules, defender events, initial ownership, guards, economy, production, assault policy,
   and helper-actor settings come from the Definition.
+- Guard Blueprints no longer author patrol/crowd/target-priority values or diplomacy dialogue
+  mappings. A guard receives those values from the owning Territory Definition before Narrative
+  Pro applies its NPC activity configuration. Empty relationship-dialogue slots still fall back
+  to the owning faction's Narrative NPC Definition dialogue.
 - Missing or incompatible Definitions fail validation and disable runtime activation instead of
   falling back to stale Blueprint values.
 
@@ -125,11 +131,18 @@ release first, save the converted assets/maps, and only then upgrade to this str
 ordering preserves stable Territory and Guard Post GUIDs and prevents old saved campaigns from
 binding to a different Place.
 
+For the final guard-policy migration, run the City synchronizer once after the full editor rebuild.
+It reads any hidden serialized patrol/avoidance/dialogue values from the old guard Blueprint class,
+copies them into `Guard Behavior` on each Definition, and reports every asset that must be saved.
+Those hidden values are an editor migration bridge only: spawned guards always use the Definition.
+After every reported Definition is saved, the bridge can be removed in the following plugin release.
+
 ## Validation messages
 
 Data Validation catches missing/wrong Blueprint classes, stale hierarchy links, duplicate tags
 or save GUIDs, invalid helper transforms/distances, missing story-owner NPC definitions, duplicate
-guard-post IDs/GUIDs, invalid patrol nodes, and unsafe reserve limits.
+guard-post IDs/GUIDs, invalid patrol nodes, unsafe reserve limits, invalid guard avoidance values,
+and duplicate/missing faction dialogue profiles.
 
 Warnings such as “definition is not connected to a parent” are useful while authoring a loose
 District or Place. They disappear after the asset is added to its parent and hierarchy links are

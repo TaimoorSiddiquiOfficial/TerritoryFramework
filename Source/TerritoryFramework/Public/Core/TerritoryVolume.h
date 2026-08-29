@@ -193,9 +193,7 @@ public:
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetDefenderDiedEvents() const;
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetAllDefendersDefeatedEvents() const;
 
-	/** Reapply the assigned asset without changing saved owner/state/progress. */
-	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition",
-		meta=(DisplayName="Apply Territory Definition"))
+	/** Internal/editor synchronization hook. OnConstruction applies the assigned asset automatically. */
 	bool ApplyTerritoryDefinition();
 
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
@@ -597,86 +595,69 @@ protected:
 		meta=(DisplayName="Territory Definition"))
 	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
-		meta=(Categories="Territory", DisplayName="Territory Tag"))
+	UPROPERTY(Transient)
 	FGameplayTag TerritoryTag;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
-		meta=(DisplayName="Display Name"))
+	UPROPERTY(Transient)
 	FText TerritoryDisplayName;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
-		meta=(Categories="Narrative.Factions", DisplayName="Initial Owning Faction",
-			ToolTip="Faction that owns this place in a new campaign. Example: Narrative.Factions.Regime. Saved games keep their saved owner."))
+	UPROPERTY(Transient)
 	FGameplayTag InitialOwningFaction;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
-		meta=(DisplayName="New Campaign Initial State (Authoring Only)",
-			ToolTip="Seed used only when no saved runtime state exists. Easy example: Locked makes every new campaign start locked. A Territory Unlock Event changes the replicated Runtime Territory State, not this authoring seed, so future new campaigns still begin locked."))
+	UPROPERTY(Transient)
 	ETerritoryInitialState InitialState = ETerritoryInitialState::Automatic;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Hierarchy",
-		meta=(DisplayName="Control Mode"))
+	UPROPERTY(Transient)
 	ETerritoryControlMode ControlMode = ETerritoryControlMode::Independent;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory",
-		meta=(ClampMin="1", UIMin="1", UIMax="20", DisplayName="Max Concurrent Attackers"))
+	UPROPERTY(Transient)
 	int32 InitialMaxConcurrentAttackers = 3;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Economy",
-		meta=(ClampMin="0", DisplayName="Periodic Income"))
+	UPROPERTY(Transient)
 	int32 InitialPeriodicIncome = 100;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Economy",
-		meta=(ClampMin="0", DisplayName="Guard Upkeep Per Cycle"))
+	UPROPERTY(Transient)
 	int32 InitialGuardCost = 50;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Economy",
-		meta=(ClampMin="0", DisplayName="Guard Recruitment Cost"))
+	UPROPERTY(Transient)
 	int32 InitialGuardRecruitmentCost = 50;
 
 	// ─── Strategic counterattack configuration ───
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack")
+	UPROPERTY(Transient)
 	TObjectPtr<UTerritoryCounterAttackProfile> CounterAttackProfile;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack",
-		meta=(TitleProperty="ApproachID"))
+	UPROPERTY(Transient)
 	TArray<FTerritoryAssaultApproach> CounterAttackApproaches;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	UPROPERTY(Transient)
 	float GuardQuality = 1.f;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	UPROPERTY(Transient)
 	float FortificationStrength = 0.f;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	UPROPERTY(Transient)
 	float NearbyAlliedSupport = 0.f;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Counter Attack", meta=(ClampMin="0.0"))
+	UPROPERTY(Transient)
 	float StrategicValue = 1.f;
 
 	/** Fire EntryEvents (bEntering=true) or ExitEvents (bEntering=false) for the given state. Uses TransitionContext for instigator. */
 	void FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Hierarchy",
-		meta=(Categories="Territory", DisplayName="Parent Territory Tag"))
+	UPROPERTY(Transient)
 	FGameplayTag ParentTerritoryTag;
 
-	UPROPERTY(SaveGame, ReplicatedUsing = OnRep_OwnershipData, BlueprintReadWrite,
-		Category="Territory|Ownership")
+	UPROPERTY(SaveGame, ReplicatedUsing=OnRep_OwnershipData)
 	FTerritoryOwnershipData OwnershipData;
 
-	UPROPERTY(ReplicatedUsing=OnRep_GarrisonSnapshot, BlueprintReadOnly,
-		Category="Territory|Guards")
+	UPROPERTY(ReplicatedUsing=OnRep_GarrisonSnapshot)
 	FTerritoryGarrisonSnapshot GarrisonSnapshot;
 
-	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadWrite, Category="Territory|Identity",
-		meta=(DisplayName="Territory GUID"))
+	UPROPERTY(SaveGame)
 	FGuid TerritoryGUID;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Visual",
-		meta=(DisplayName="Bounds Shape"))
+	UPROPERTY()
 	TObjectPtr<UShapeComponent> BoundsShape;
 
 	/**
@@ -691,14 +672,11 @@ protected:
 	 * stairs, and second floor. The player can clear every defender on any floor, then
 	 * speak to the protected owner to accept the handover.
 	 */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Capture|Story",
-		meta=(DisplayName="Story Capture From Territory Bounds",
-			ToolTip="Use the full Territory Bounds Shape for a story handover. This holds Contested without automatic progress and automatically disables Capture Points targeting this Territory."))
+	UPROPERTY(Transient)
 	bool bStoryCaptureFromBounds = false;
 
 	/** Navigation marker component — manages map marker, auto-refreshes on state changes. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Visual",
-		meta=(DisplayName="Map Marker Component"))
+	UPROPERTY()
 	TObjectPtr<UTerritoryNavigationMarkerComponent> MapMarkerComponent;
 
 	// ─── Guard Configuration ───
@@ -707,8 +685,7 @@ protected:
 	 * Default guard definition — used when no per-faction entry matches.
 	 * Set this if you want all guards (regardless of owner faction) to use the same NPC class.
 	 */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
-		meta=(AllowedClasses="/Script/NarrativeArsenal.NPCDefinition", DisplayName="Default Guard Definition"))
+	UPROPERTY(Transient)
 	TObjectPtr<UNPCDefinition> GuardNPCDefinition;
 
 	/**
@@ -716,22 +693,18 @@ protected:
 	 * using the definition for the new owner's faction (first match). Falls back to
 	 * GuardNPCDefinition if no matching entry exists.
 	 */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
-		meta=(TitleProperty="{Faction}", DisplayName="Per-Faction Guard Definitions"))
+	UPROPERTY(Transient)
 	TArray<FTerritoryFactionGuardDefinition> FactionGuardDefinitions;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
-		meta=(ClampMin="0", DisplayName="Guard Spawn Count"))
+	UPROPERTY(Transient)
 	int32 GuardSpawnCount = 3;
 
 	/** Player captures start unstaffed by default so the player explicitly controls profit and loss. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
-		meta=(DisplayName="Post Capture Garrison Policy"))
+	UPROPERTY(Transient)
 	ETerritoryPostCaptureGarrisonPolicy PostCaptureGarrisonPolicy =
 		ETerritoryPostCaptureGarrisonPolicy::PlayerChooses;
 
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Guards",
-		meta=(DisplayName="Guard Spawn Points"))
+	UPROPERTY(Transient)
 	TArray<TObjectPtr<ATerritoryGuardSpawnPoint>> GuardSpawnPoints;
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Guard Killed"))

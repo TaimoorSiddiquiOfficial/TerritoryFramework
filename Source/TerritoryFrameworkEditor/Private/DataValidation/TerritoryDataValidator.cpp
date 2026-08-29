@@ -1,4 +1,5 @@
 #include "DataValidation/TerritoryDataValidator.h"
+#include "AI/TerritoryPatrolGoal.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritorySavableData.h"
@@ -752,6 +753,31 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 		CheckObjects(Pair.Value.ExitConditions, TEXT("Exit Conditions"));
 		CheckObjects(Pair.Value.EntryEvents, TEXT("Entry Events"));
 		CheckObjects(Pair.Value.ExitEvents, TEXT("Exit Events"));
+	}
+
+	if (!Definition->GuardBehavior.PatrolGoalClass)
+		Error(TEXT("Guard Behavior requires a Patrol Goal Class"));
+	if (!FMath::IsFinite(Definition->GuardBehavior.PatrolAvoidanceConsiderationRadius)
+		|| Definition->GuardBehavior.PatrolAvoidanceConsiderationRadius < 100.f
+		|| !FMath::IsWithinInclusive(Definition->GuardBehavior.PatrolAvoidanceWeight, 0.f, 1.f)
+		|| !FMath::IsWithinInclusive(
+			Definition->GuardBehavior.ClosestHostilePlayerGoalScoreBonus, 0.f, 10.f))
+	{
+		Error(TEXT("Guard Behavior avoidance or target-priority values are outside supported bounds"));
+	}
+	TSet<FGameplayTag> GuardDialogueFactions;
+	for (const FTerritoryFactionDialogueProfile& Mapping :
+		Definition->GuardBehavior.FactionDialogueProfiles)
+	{
+		if (!Mapping.Faction.IsValid())
+			Error(TEXT("Guard Behavior dialogue mapping requires an exact Narrative faction"));
+		else if (GuardDialogueFactions.Contains(Mapping.Faction))
+			Error(FString::Printf(TEXT("Guard Behavior has duplicate dialogue mapping for %s"),
+				*Mapping.Faction.ToString()));
+		GuardDialogueFactions.Add(Mapping.Faction);
+		if (!Mapping.DialogueProfile)
+			Error(FString::Printf(TEXT("Guard Behavior dialogue mapping for %s has no profile"),
+				*Mapping.Faction.ToString()));
 	}
 
 	TSet<FName> GuardPostIDs;

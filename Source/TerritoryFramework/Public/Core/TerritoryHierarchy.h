@@ -150,12 +150,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	int32 GetEffectiveIncome() const;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|District")
+	UPROPERTY(Transient)
 	bool bIsCapital = false;
 
 	/** Bonus income multiplier applied when this district is a capital (2x by default). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|District",
-		meta = (ClampMin = "1.0", UIMin = "1.0", UIMax = "10.0"))
+	UPROPERTY(Transient)
 	float CapitalIncomeMultiplier = 2.0f;
 
 	// ─── Blueprint Delegates ───
@@ -198,21 +197,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	ATerritoryDistrict* GetOwningDistrict() const;
 
-	UPROPERTY(SaveGame, BlueprintReadWrite, ReplicatedUsing = OnRep_UpgradeLevel, Category = "Territory|Property")
+	UPROPERTY(SaveGame, ReplicatedUsing=OnRep_UpgradeLevel)
 	int32 UpgradeLevel = 0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Property")
+	UPROPERTY(Transient)
 	int32 MaxUpgradeLevel = 3;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Property")
+	UPROPERTY(Transient)
 	int32 UpgradeCostPerLevel = 500;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory|Property")
+	UPROPERTY(Transient)
 	int32 IncomeBonusPerLevel = 25;
 
 	/** Optional item production definition. Null is a valid capturable, non-producing Property. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Property|Production")
+	UPROPERTY(Transient)
 	TObjectPtr<UTerritoryProductionProfile> ProductionProfile = nullptr;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Property")
+	int32 GetUpgradeLevel() const { return UpgradeLevel; }
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Property|Production")
 	UTerritoryProductionProfile* GetProductionProfile() const { return ProductionProfile; }

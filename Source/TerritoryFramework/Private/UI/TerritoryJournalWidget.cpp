@@ -16,6 +16,7 @@
 #include "Components/SpinBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
 #include "Components/WrapBox.h"
 #include "Components/WrapBoxSlot.h"

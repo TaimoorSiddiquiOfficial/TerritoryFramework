@@ -670,7 +670,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		}
 		if (ATerritoryCapturePoint* Point = Cast<ATerritoryCapturePoint>(Actor))
 		{
-			CapturePoints.Add(Point->TargetTerritoryTag, Point);
+			CapturePoints.Add(Point->GetTargetTerritoryTag(), Point);
 		}
 	}
 
@@ -683,7 +683,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		if (Found && *Found)
 		{
 			TestNotNull(FString::Printf(TEXT("%s owner links to its Place definition"),
-				TerritoryTag), (*Found)->PlaceDefinition.Get());
+				TerritoryTag), (*Found)->GetPlaceDefinition());
 			TestTrue(FString::Printf(TEXT("%s owner is a project Blueprint child"), TerritoryTag),
 				(*Found)->GetClass() != ATerritoryStoryOwnerSpawner::StaticClass()
 				&& (*Found)->GetClass()->IsChildOf(ATerritoryStoryOwnerSpawner::StaticClass()));
@@ -703,7 +703,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		if (Found && *Found)
 		{
 			TestNotNull(FString::Printf(TEXT("%s point links to its Place definition"),
-				TerritoryTag), (*Found)->PlaceDefinition.Get());
+				TerritoryTag), (*Found)->GetPlaceDefinition());
 			TestTrue(FString::Printf(TEXT("%s point remains enabled for multiplayer reuse"),
 				TerritoryTag), (*Found)->bCaptureEnabled);
 		}

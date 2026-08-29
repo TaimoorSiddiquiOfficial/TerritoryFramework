@@ -29,32 +29,32 @@ public:
 	ATerritoryStoryOwnerSpawner();
 	virtual void OnConstruction(const FTransform& Transform) override;
 
-	/** One Place asset supplies the protected owner and handover dialogue settings. */
-	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="Territory|Definition")
-	TObjectPtr<UTerritoryPlaceDefinition> PlaceDefinition;
-
-	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
+	/** Internal/editor synchronization hook. OnConstruction applies the serialized binding. */
 	bool ApplyPlaceDefinition();
+	UTerritoryPlaceDefinition* GetPlaceDefinition() const { return PlaceDefinition; }
+	void SetPlaceDefinition(UTerritoryPlaceDefinition* NewDefinition)
+	{
+		PlaceDefinition = NewDefinition;
+	}
 
 	/** Narrative spawn component that owns the single property-owner NPC. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Story Capture")
 	TObjectPtr<UNPCSpawnComponent> OwnerSpawn;
 
 	/** Place served by this owner. Also provides a stable fallback when actor references stream. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture",
-		meta=(Categories="Territory"))
+	UPROPERTY(Transient)
 	FGameplayTag TerritoryTag;
 
 	/** Begin the NPC definition's dialogue immediately after the owner appears. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture")
+	UPROPERTY(Transient)
 	bool bBeginDialogueOnActivation = true;
 
 	/** Optional dialogue override. Empty uses Owner Spawn -> NPC To Spawn -> Dialogue. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture")
+	UPROPERTY(Transient)
 	TSubclassOf<UDialogue> OverrideDialogue;
 
 	/** Optional node ID for beginning at a dedicated surrender branch. */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture")
+	UPROPERTY(Transient)
 	FName DialogueStartFromID;
 
 	/**
@@ -62,15 +62,11 @@ public:
 	 * Narrative's player trace is 1000 cm by default, so values above that still
 	 * require the project's Narrative Player Interaction setting to be increased.
 	 */
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category="Territory|Story Capture",
-		meta=(ClampMin="100.0", ClampMax="1000.0", Units="cm",
-			DisplayName="Owner Interaction Distance",
-			ToolTip="How close the player must be to speak to the protected owner. 300 cm is a forgiving conversation distance."))
+	UPROPERTY(Transient)
 	float OwnerInteractionDistance = 300.f;
 
 	/** Saved and replicated so a completed defeat does not recreate a silent owner state. */
-	UPROPERTY(SaveGame, ReplicatedUsing=OnRep_HandoverActivated, BlueprintReadOnly,
-		Category="Territory|Story Capture")
+	UPROPERTY(SaveGame, ReplicatedUsing=OnRep_HandoverActivated)
 	bool bHandoverActivated = false;
 
 	/** Server-only activation called by UTerritoryOwnerHandoverEvent. */
@@ -84,6 +80,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Story Capture")
 	bool IsHandoverActivated() const { return bHandoverActivated; }
 
+	UFUNCTION(BlueprintPure, Category="Territory|Story Capture")
+	FGameplayTag GetTerritoryTag() const { return TerritoryTag; }
+
+	UFUNCTION(BlueprintPure, Category="Territory|Story Capture")
+	float GetOwnerInteractionDistance() const { return OwnerInteractionDistance; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -92,6 +94,10 @@ protected:
 	void OnRep_HandoverActivated();
 
 private:
+	/** Hidden serialized binding maintained by the Definition synchronizer. */
+	UPROPERTY()
+	TObjectPtr<UTerritoryPlaceDefinition> PlaceDefinition;
+
 	bool EnsureOwnerSpawned();
 	void ApplyOwnerInteractionDistance();
 	bool BeginOwnerDialogue(APawn* NarrativeTarget, APlayerController* Controller,

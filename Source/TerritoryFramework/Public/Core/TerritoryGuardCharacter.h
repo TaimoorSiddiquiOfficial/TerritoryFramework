@@ -13,6 +13,7 @@ class UTriggerSet;
 class ATerritoryVolume;
 class UTerritoryPatrolGoal;
 class UTerritoryDiplomacyDialogueComponent;
+struct FTerritoryGuardBehaviorTemplate;
 
 /**
  * Territory guard NPC character. Bridges NarrativePro's NPC framework with
@@ -58,6 +59,9 @@ public:
 
 	virtual void SetNPCDefinition(UNPCDefinition* Definition) override;
 
+	/** Editor migration only: copies hidden serialized Blueprint defaults into a Definition row. */
+	void CopyLegacyGuardBehavior(FTerritoryGuardBehaviorTemplate& OutBehavior) const;
+
 	/**
 	 * Contextual Narrative attitude for a stationary Territory defender.
 	 * A target is Hostile only while this guard's Territory is Contested AND
@@ -93,9 +97,6 @@ public:
 	 * Call this during deferred spawn (between BeginDeferredActorSpawnFromClass
 	 * and FinishSpawningActor), NOT after FinishSpawningActor.
 	 */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guard",
-		meta=(DisplayName="Configure Territory Spawn (Legacy)", DeprecatedFunction,
-			DeprecationMessage="Use Configure Territory Spawn With Context so ownership is valid before Narrative applies the definition."))
 	void ConfigureTerritorySpawn(
 		UNPCDefinition* Definition,
 		const FGameplayTag& ExactFaction,
@@ -140,7 +141,9 @@ public:
 	TObjectPtr<ATerritoryGuardSpawnPoint> OwningTerritorySpawnPoint;
 
 	/** Goal class added after Narrative's activity configuration is ready. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Patrol")
+	// Hidden serialized caches preserve old Blueprint values for one-way editor migration.
+	// Spawned guards overwrite them from the owning Territory Definition.
+	UPROPERTY()
 	TSubclassOf<UTerritoryPatrolGoal> PatrolGoalClass;
 
 	/** Live per-guard goal populated from the assigned spawn point. */
@@ -155,18 +158,13 @@ public:
 	 * Enables Unreal CharacterMovement RVO on the authority that drives Narrative AI.
 	 * Capsules still block, so guards remain physical while steering around each other.
 	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Patrol|Crowd Avoidance",
-		meta=(ToolTip="Recommended for patrol guards. Uses server-side CharacterMovement RVO to prevent guards from pushing into the same corridor position."))
+	UPROPERTY()
 	bool bEnablePatrolCrowdAvoidance = true;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Patrol|Crowd Avoidance",
-		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="100.0", ClampMax="2000.0", Units="cm",
-			ToolTip="How far this guard considers nearby moving agents for avoidance."))
+	UPROPERTY()
 	float PatrolAvoidanceConsiderationRadius = 500.f;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Patrol|Crowd Avoidance",
-		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="0.0", ClampMax="1.0",
-			ToolTip="Steering priority for this guard. 0.5 gives equal guards an even right-of-way."))
+	UPROPERTY()
 	float PatrolAvoidanceWeight = 0.5f;
 
 	/**
@@ -174,12 +172,10 @@ public:
 	 * player a small Narrative goal-score advantage. Narrative attack tokens still
 	 * decide how many guards may perform attacks at the same time.
 	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Combat",
-		meta=(ToolTip="Keeps target choice responsive without replacing Narrative perception, activities, or attack tokens."))
+	UPROPERTY()
 	bool bPrioritizeClosestHostilePlayer = true;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|AI|Combat",
-		meta=(EditCondition="bPrioritizeClosestHostilePlayer", ClampMin="0.0", ClampMax="10.0"))
+	UPROPERTY()
 	float ClosestHostilePlayerGoalScoreBonus = 0.75f;
 
 	// ─── Patrol Route Helpers ───
@@ -307,6 +303,7 @@ public:
 	TWeakObjectPtr<AActor> LastDamagingInstigator;
 
 private:
+	void ApplyGuardBehaviorFromTerritoryDefinition();
 	void TryWieldDefaultWeapon();
 	TArray<FTerritoryPatrolNode> BuildStaggeredPatrolRoute() const;
 
