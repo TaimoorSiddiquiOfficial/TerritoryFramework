@@ -18,6 +18,7 @@ class ATerritoryGuardCharacter;
 class ATerritoryGuardSpawnPoint;
 class UTerritoryNavigationMarkerComponent;
 class UTerritoryCounterAttackProfile;
+class UTerritoryDefinition;
 /**
  * Base class for all territory volumes (City / District / Property inherit from this).
  *
@@ -44,6 +45,7 @@ class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrative
 {
 	GENERATED_BODY()
 	friend class UTerritoryDataValidator;
+	friend class UTerritoryDefinition;
 	friend class FTFBehavior_GuardRestoreCount;
 	friend class FTFBehavior_TagBoundSpawnPointRegistration;
 	friend class FTFFunctional_PlayerManagedGarrisonPolicy;
@@ -180,6 +182,29 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy", meta=(DisplayName="Get Control Mode"))
 	ETerritoryControlMode GetControlMode() const;
+
+	/** Single authoring source for this City, District, or Place. Runtime state remains on this actor. */
+	UFUNCTION(BlueprintPure, Category="Territory|Definition",
+		meta=(DisplayName="Get Territory Definition"))
+	UTerritoryDefinition* GetTerritoryDefinition() const { return TerritoryDefinition; }
+
+	/** Effective asset-owned state rules, or legacy inline rules during migration. */
+	const TMap<ETerritoryState, FTerritoryStateConfig>& GetStateConfigs() const;
+	const TArray<TObjectPtr<class UNarrativeEvent>>& GetDefenderDiedEvents() const;
+	const TArray<TObjectPtr<class UNarrativeEvent>>& GetAllDefendersDefeatedEvents() const;
+
+	/** Reapply the assigned asset without changing saved owner/state/progress. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition",
+		meta=(DisplayName="Apply Territory Definition"))
+	bool ApplyTerritoryDefinition();
+
+	/**
+	 * Migration button. Assign an empty matching Definition first, then use this once
+	 * to copy old actor settings and its stable save GUID into the asset.
+	 */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition|Migration",
+		meta=(DisplayName="Copy Legacy Actor Settings To Definition"))
+	bool CopyLegacySettingsToDefinition();
 
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	UTerritoryCounterAttackProfile* GetCounterAttackProfile() const { return CounterAttackProfile; }
@@ -562,6 +587,7 @@ public:
 	bool CheckStateTransitionConditions(ETerritoryState OldState, ETerritoryState NewState, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 protected:
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -583,6 +609,15 @@ protected:
 	void OnRep_GarrisonSnapshot();
 
 	// ─── Editable Properties ───
+
+	/**
+	 * Recommended authoring path. When assigned, this asset supplies identity,
+	 * hierarchy, state rules, Narrative events, guards, economy, and assault settings.
+	 * Existing inline properties remain only as a bounded migration fallback.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition",
+		meta=(DisplayName="Territory Definition"))
+	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory",
 		meta=(Categories="Territory", DisplayName="Territory Tag"))
@@ -790,6 +825,7 @@ private:
 	friend class ATerritoryGuardSpawnPoint;
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDefenderNarrativeEventConditions;
+	friend class FTFTerritoryDefinitionLegacyMigration;
 #endif
 
 	static int32 CalculateGuardRestoreCount(bool bLoadedFromSave, int32 DesiredGuards,

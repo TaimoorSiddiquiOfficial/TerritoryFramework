@@ -28,13 +28,17 @@ These are sample names, not framework requirements. Replace `HavenReach`,
 `MarketSquare`, `Blacksmith`, and `Farm` with your own project hierarchy. Runtime
 code never searches for these names.
 
-## Step 3: Place the Territory Hierarchy
+## Step 3: Create and Place the Territory Hierarchy
 
-1. Place one `ATerritoryCity` with tag `Territory.HavenReach` and `AggregateOnly` control.
-2. Place child `ATerritoryDistrict` actors, set `ParentTerritoryTag` to the City tag, and use `AggregateOnly` control.
-3. Place capturable child `ATerritoryProperty` actors, set each `ParentTerritoryTag` to its District, and use `Independent` control.
-4. Give every placed Territory a unique gameplay tag and save the level so its editor-authored stable GUID is baked.
-5. Resize each `BoundsShape` to cover its gameplay area.
+1. Create one `Territory City Definition` Data Asset.
+2. Create its `Territory District Definition` assets.
+3. Create each capturable `Territory Place Definition` asset.
+4. Put Places in their District `Places` arrays and Districts in the City `Districts` array.
+5. Use `Refresh Hierarchy Links` on the City. Parent tags are derived automatically.
+6. Assign project Blueprint classes and use `Synchronize Territory City In Current Level`.
+7. Resize each placed actor's `BoundsShape` to cover its gameplay area.
+
+See [Territory Definition Assets](21_Definition_Assets.md) for duplication and legacy-map migration.
 
 Do not directly capture an aggregate District or City. Capturing all required Places reduces the District owner; capturing all required Districts reduces the City owner through the existing hierarchy authority.
 
@@ -80,11 +84,11 @@ Each spawn-point actor is one active guard slot. The legacy `MaxGuards` property
 
 ## Step 7: Configure Guards (Optional)
 
-On the territory volume:
-1. Set **Guard NPC Definition** → your NPC data asset (or use **Faction Guard Definitions** for per-faction guards)
-2. Set **Guard Spawn Count** → 3 (the existing-owner and AI/script capture target)
+On the Territory Definition asset:
+1. Set **Default Guard Definition** to your Narrative NPC asset (or use **Faction Guard Definitions** for per-faction guards).
+2. Set **Initial Guard Count** to 3 (the existing-owner and AI/script capture target).
 3. Keep **Post Capture Garrison Policy** → Player Chooses when captures by a matching live Narrative player faction should begin unstaffed
-4. Set **Initial Guard Recruitment Cost** for the one-time price and **Initial Guard Cost** for recurring upkeep
+4. Set **Guard Recruitment Cost** for the one-time price and **Guard Upkeep Per Cycle** for recurring upkeep.
 5. Guards inherit combat AI from the NPCDefinition asset (configured in NarrativePro)
 
 ## Step 8: Test in PIE

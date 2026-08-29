@@ -25,22 +25,16 @@ void UTerritoryOwnerHandoverEvent::ExecuteEvent_Implementation(APawn* Target,
 	// AActor::TakeDamage (so the Territory cannot recover a last damaging pawn).
 	// The handover belongs to the Territory/spawner, not to the killer, therefore
 	// never make world resolution depend on a player context being present.
-	UWorld* World = IsValid(OwnerSpawner) ? OwnerSpawner->GetWorld() : GetWorld();
-	if (!World && Target)
-	{
-		World = Target->GetWorld();
-	}
-	if (!World && Controller)
-	{
-		World = Controller->GetWorld();
-	}
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	if (!World && IsValid(OwnerSpawner)) World = OwnerSpawner->GetWorld();
 	if (!World || World->GetNetMode() == NM_Client)
 	{
 		return;
 	}
 
-	ATerritoryStoryOwnerSpawner* ResolvedSpawner = OwnerSpawner;
-	if (!IsValid(ResolvedSpawner) && OwnerTerritoryTag.IsValid())
+	ATerritoryStoryOwnerSpawner* ResolvedSpawner = nullptr;
+	if (OwnerTerritoryTag.IsValid())
 	{
 		for (TActorIterator<ATerritoryStoryOwnerSpawner> It(World); It; ++It)
 		{
@@ -50,6 +44,10 @@ void UTerritoryOwnerHandoverEvent::ExecuteEvent_Implementation(APawn* Target,
 				break;
 			}
 		}
+	}
+	if (!IsValid(ResolvedSpawner) && IsValid(OwnerSpawner))
+	{
+		ResolvedSpawner = OwnerSpawner;
 	}
 
 	if (!IsValid(ResolvedSpawner))

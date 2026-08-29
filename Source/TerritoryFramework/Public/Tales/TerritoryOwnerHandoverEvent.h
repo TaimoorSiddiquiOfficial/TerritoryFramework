@@ -21,11 +21,12 @@ class TERRITORYFRAMEWORK_API UTerritoryOwnerHandoverEvent : public UNarrativeEve
 public:
 	UTerritoryOwnerHandoverEvent(const FObjectInitializer& ObjectInitializer);
 
-	/** Direct level reference. Keep the spawner in the same World Partition cell/data layer as the Place. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
+	/** Legacy level reference. Reusable Definition assets resolve by Owner Territory Tag. */
+	UPROPERTY(meta=(DeprecatedProperty,
+		DeprecationMessage="Use Owner Territory Tag. Direct level actors cannot be safely stored inside reusable DataAssets."))
 	TObjectPtr<ATerritoryStoryOwnerSpawner> OwnerSpawner;
 
-	/** Stable fallback used to resolve the spawner when the direct reference has streamed. */
+	/** Exact Place tag used to find the streamed owner spawner without a level-actor reference. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(Categories="Territory"))
 	FGameplayTag OwnerTerritoryTag;

@@ -4,6 +4,7 @@
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryGuardPostDefinition.h"
+#include "Core/TerritoryDefinition.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -128,6 +129,7 @@ void ATerritoryGuardSpawnPoint::BindToTerritory(ATerritoryVolume* Territory)
 
 void ATerritoryGuardSpawnPoint::BeginPlay()
 {
+	ApplyTerritoryDefinition();
 	Super::BeginPlay();
 
 	// Persistent identities must be editor-authored. A runtime-generated GUID would
@@ -217,6 +219,57 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 	}
 }
 
+bool ATerritoryGuardSpawnPoint::ApplyTerritoryDefinition()
+{
+	if (!TerritoryDefinition) return false;
+	const FTerritoryGuardPostTemplate* Template =
+		TerritoryDefinition->FindGuardPost(GuardPostID);
+	if (!Template) return false;
+
+	OwnerTerritoryTag = TerritoryDefinition->TerritoryTag;
+	GuardPostDefinition = Template->GuardPostDefinition;
+	NPCDefinitionOverride = Template->NPCDefinitionOverride;
+	ActivityConfigurationOverride = Template->ActivityConfigurationOverride;
+	TriggerSetOverrides = Template->TriggerSetOverrides;
+	FactionOverride = Template->FactionOverride;
+	Priority = FMath::Max(0, Template->Priority);
+	ReserveSlots = FMath::Max(0, Template->ReserveSlots);
+	bAutoSpawnReserves = Template->bAutoSpawnReserves;
+	ReserveSpawnDelay = FMath::Max(0.1f, Template->ReserveSpawnDelay);
+	ReserveSpawnRetryInterval =
+		FMath::Max(0.1f, Template->ReserveSpawnRetryInterval);
+	ReserveSpawnRadius = FMath::Max(100.f, Template->ReserveSpawnRadius);
+	ReserveMinimumPlayerDistance =
+		FMath::Max(0.f, Template->ReserveMinimumPlayerDistance);
+	ReserveSpawnCandidateCount =
+		FMath::Clamp(Template->ReserveSpawnCandidateCount, 1, 64);
+	ReserveCameraAvoidanceRetryLimit =
+		FMath::Clamp(Template->ReserveCameraAvoidanceRetryLimit, 0, 20);
+	ReserveTotalRetryLimit =
+		FMath::Clamp(Template->ReserveTotalRetryLimit, 1, 100);
+	ReserveOwnershipPolicy = Template->ReserveOwnershipPolicy;
+	bLoopPatrol = Template->bLoopPatrol;
+	if (Template->StableGuardPostGUID.IsValid())
+	{
+		SpawnPointGUID = Template->StableGuardPostGUID;
+	}
+	if (!Template->PatrolRoute.IsEmpty())
+	{
+		PatrolRoute.Reset(Template->PatrolRoute.Num());
+		for (const FTerritoryGuardPatrolTemplateNode& Source : Template->PatrolRoute)
+		{
+			const FTransform WorldTransform =
+				Source.RelativeTransform * GetActorTransform();
+			FTerritoryPatrolNode& Node = PatrolRoute.AddDefaulted_GetRef();
+			Node.Location = WorldTransform.GetLocation();
+			Node.Rotation = WorldTransform.Rotator();
+			Node.WaitTime = FMath::Max(0.f, Source.WaitTime);
+			Node.ActivityTag = Source.ActivityTag;
+		}
+	}
+	return true;
+}
+
 ATerritoryVolume* ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(
 	TConstArrayView<ATerritoryVolume*> Candidates)
 {
@@ -266,6 +319,7 @@ ATerritoryVolume* ATerritoryGuardSpawnPoint::FindPlacementOrPatrolTerritory(
 void ATerritoryGuardSpawnPoint::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	ApplyTerritoryDefinition();
 	if (GetWorld() && !GetWorld()->IsGameWorld()
 		&& !HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
 	{

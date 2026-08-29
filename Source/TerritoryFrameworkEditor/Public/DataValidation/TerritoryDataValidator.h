@@ -9,6 +9,7 @@ class ULevel;
 class UWorld;
 class UTerritoryCounterAttackProfile;
 class UTerritoryProductionProfile;
+class UTerritoryDefinition;
 
 /**
  * Editor data validator for TerritoryFramework assets.
@@ -55,6 +56,8 @@ public:
 	static bool ValidateLevel(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static bool ValidateWorld(UWorld* World, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static bool ValidateTerritory(ATerritoryVolume* Territory, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
+	static bool ValidateDefinition(UTerritoryDefinition* Definition,
+		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 
 private:
 	static void CheckDuplicateTags(ULevel* Level, TArray<FString>& OutErrors);

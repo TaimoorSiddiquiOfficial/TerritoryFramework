@@ -1,6 +1,7 @@
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
 
 #include "AI/NPCDefinition.h"
+#include "Core/TerritoryDefinition.h"
 #include "Net/UnrealNetwork.h"
 #include "Spawners/NPCSpawnComponent.h"
 #include "Interaction/InteractableComponent.h"
@@ -20,11 +21,35 @@ ATerritoryStoryOwnerSpawner::ATerritoryStoryOwnerSpawner()
 	OwnerSpawn->bDontSpawnIfPreviouslyKilled = true;
 }
 
+void ATerritoryStoryOwnerSpawner::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	ApplyPlaceDefinition();
+}
+
+bool ATerritoryStoryOwnerSpawner::ApplyPlaceDefinition()
+{
+	if (!PlaceDefinition) return false;
+	const FTerritoryStoryOwnerTemplate& Template = PlaceDefinition->StoryOwner;
+	TerritoryTag = PlaceDefinition->TerritoryTag;
+	bBeginDialogueOnActivation = Template.bBeginDialogueOnActivation;
+	OverrideDialogue = Template.DialogueOverride.LoadSynchronous();
+	DialogueStartFromID = Template.DialogueStartFromID;
+	OwnerInteractionDistance = FMath::Clamp(
+		Template.InteractionDistance, 100.f, 1000.f);
+	if (OwnerSpawn)
+	{
+		OwnerSpawn->NPCToSpawn = Template.NPCDefinition;
+	}
+	return Template.bEnabled;
+}
+
 void ATerritoryStoryOwnerSpawner::BeginPlay()
 {
 	// Narrative loads the spawner's SaveGame properties in its BeginPlay. Because
 	// bActivateOnBeginPlay is false, no owner is spawned before the saved activation
 	// flag has been restored.
+	ApplyPlaceDefinition();
 	Super::BeginPlay();
 
 	if (HasAuthority() && bHandoverActivated)
@@ -45,6 +70,10 @@ bool ATerritoryStoryOwnerSpawner::ActivateHandover(APawn* NarrativeTarget,
 	const bool bBeginDialogueImmediately)
 {
 	if (!HasAuthority())
+	{
+		return false;
+	}
+	if (PlaceDefinition && !PlaceDefinition->StoryOwner.bEnabled)
 	{
 		return false;
 	}

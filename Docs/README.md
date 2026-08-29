@@ -37,12 +37,13 @@
 18. [Operations UI](18_Operations_UI.md) — Narrative CommonUI district dashboard, filters, guards, finance, and threats
 19. [Garrison Command Flow](19_Garrison_Command_Flow.md) — Complete capture, staffing, economy, replication, save, and UI lifecycle
 20. [Resource Production](20_Resource_Production.md) — Modular daily inputs/outputs, Narrative item storage, crafting bridge, save, replication, and UI
-21. [Current Remediation Report](REMEDIATION_2026-08-24.md) — Resolved findings, migrations, live MCP evidence, and remaining external gates
-22. [Stabilization Re-audit](STABILIZATION_REAUDIT_2026-08-25.md) — Runtime/editor/Narrative integration findings, guard and assault fixes, UI redesign, release gate, and product roadmap
-23. [Garrison Command Reaudit](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md) — Root causes, implemented fixes, MCP evidence, and remaining release gates
-24. [Earlier Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Broader confirmed fixes and MCP findings
-25. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
-26. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
+21. [Territory Definition Assets](21_Definition_Assets.md) — One modular City/District/Place authoring source, hierarchy builder, migration, and validation
+22. [Current Remediation Report](REMEDIATION_2026-08-24.md) — Resolved findings, migrations, live MCP evidence, and remaining external gates
+23. [Stabilization Re-audit](STABILIZATION_REAUDIT_2026-08-25.md) — Runtime/editor/Narrative integration findings, guard and assault fixes, UI redesign, release gate, and product roadmap
+24. [Garrison Command Reaudit](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md) — Root causes, implemented fixes, MCP evidence, and remaining release gates
+25. [Earlier Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Broader confirmed fixes and MCP findings
+26. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
+27. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
 
 ## Document Index
 
@@ -67,6 +68,7 @@
 | District Management | Game/UI Designers | In-world UI, guard purchasing, POI markers |
 | Counterattack System | AI/Game Designers | Configure deterministic physical counterattacks |
 | Operations UI | UI/Game Designers | Build Narrative CommonUI operations, guard, finance, and threat screens |
+| Territory Definition Assets | All | Configure, duplicate, migrate, synchronize, and validate complete hierarchies |
 | Current Remediation Report | Maintainers | Current defect status, authority impact, migrations, and verification evidence |
 | Deep Reaudit | Maintainers | Findings, ownership, migrations, and verification evidence |
 | Blueprint Extension Guide | C++/BP Devs | Subclassing patterns, Super-call requirements |

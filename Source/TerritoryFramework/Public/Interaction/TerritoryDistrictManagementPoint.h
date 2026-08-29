@@ -11,6 +11,7 @@
 class ATerritoryDistrict;
 class UTerritoryDistrictManagementWidget;
 class USphereComponent;
+class UTerritoryDefinition;
 
 UCLASS(BlueprintType, Blueprintable, EditInlineNew)
 class TERRITORYFRAMEWORK_API UTerritoryDistrictPOIMarker : public UMapMarker
@@ -95,7 +96,15 @@ class TERRITORYFRAMEWORK_API ATerritoryDistrictManagementPoint : public APOIActo
 
 public:
 	ATerritoryDistrictManagementPoint(const FObjectInitializer& ObjectInitializer);
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
+
+	/** City/District/Place asset that supplies the management Blueprint policy. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
+	bool ApplyTerritoryDefinition();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Management", meta=(Categories="Territory"))
 	FGameplayTag DistrictTag;

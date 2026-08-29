@@ -10,6 +10,7 @@ class UNarrativeAbilitySystemComponent;
 class UPrimitiveComponent;
 class USphereComponent;
 class UStaticMeshComponent;
+class UTerritoryPlaceDefinition;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	FOnTerritoryCaptureParticipantChanged,
@@ -32,6 +33,13 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
+
+	/** One Place asset supplies this actor's target and capture policy. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	TObjectPtr<UTerritoryPlaceDefinition> PlaceDefinition;
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
+	bool ApplyPlaceDefinition();
 
 	/** Stable tag of the independent Place controlled by this physical zone. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Capture",

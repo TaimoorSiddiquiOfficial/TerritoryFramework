@@ -20,6 +20,7 @@
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryGuardPostDefinition.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "AI/NPCDefinition.h"
 #include "AI/NarrativeCharacterSubsystem.h"
@@ -67,9 +68,16 @@ ATerritoryVolume::ATerritoryVolume()
 	MapMarkerComponent = CreateDefaultSubobject<UTerritoryNavigationMarkerComponent>(TEXT("MapMarkerComponent"));
 }
 
+void ATerritoryVolume::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	ApplyTerritoryDefinition();
+}
+
 void ATerritoryVolume::BeginPlay()
 {
 	Super::BeginPlay();
+	ApplyTerritoryDefinition();
 
 	// Force-disable collision on the BoundShape at runtime.
 	// Blueprint CDO may override the constructor's NoCollision setting,
@@ -239,7 +247,7 @@ void ATerritoryVolume::BeginPlay()
 void ATerritoryVolume::ApplyInitialStateDiplomacyPolicies()
 {
 	if (!HasAuthority()) return;
-	const FTerritoryStateConfig* Config = StateConfigs.Find(OwnershipData.State);
+	const FTerritoryStateConfig* Config = GetStateConfigs().Find(OwnershipData.State);
 	if (!Config) return;
 
 	for (const TObjectPtr<UNarrativeEvent>& EntryEvent : Config->EntryEvents)
@@ -470,6 +478,7 @@ void ATerritoryVolume::OnRep_OwnershipData()
 void ATerritoryVolume::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
+	ApplyTerritoryDefinition();
 
 	// Auto-generate GUID if not yet assigned (first time placed or edited)
 	if (!TerritoryGUID.IsValid())
@@ -558,6 +567,27 @@ void ATerritoryVolume::PostEditImport()
 	}
 }
 #endif
+
+bool ATerritoryVolume::ApplyTerritoryDefinition()
+{
+	return TerritoryDefinition && TerritoryDefinition->ApplyToTerritory(this);
+}
+
+bool ATerritoryVolume::CopyLegacySettingsToDefinition()
+{
+#if WITH_EDITOR
+	if (!TerritoryDefinition) return false;
+	const bool bCopied = TerritoryDefinition->CopyFromTerritory(this);
+	if (bCopied)
+	{
+		TerritoryDefinition->ApplyToTerritory(this);
+		MarkPackageDirty();
+	}
+	return bCopied;
+#else
+	return false;
+#endif
+}
 
 void ATerritoryVolume::EnsurePersistentTerritoryGUID()
 {
@@ -718,7 +748,7 @@ FText ATerritoryVolume::GetTerritoryDisplayName() const { return TerritoryDispla
 
 FGameplayTagContainer ATerritoryVolume::GetActiveCommandCapabilities() const
 {
-	const FTerritoryStateConfig* Config = StateConfigs.Find(OwnershipData.State);
+	const FTerritoryStateConfig* Config = GetStateConfigs().Find(OwnershipData.State);
 	return Config ? Config->GrantedCommandCapabilities : FGameplayTagContainer();
 }
 
@@ -728,7 +758,7 @@ bool ATerritoryVolume::IsCommandCapabilityConfigured(const FGameplayTag& Capabil
 	{
 		return false;
 	}
-	for (const TPair<ETerritoryState, FTerritoryStateConfig>& Pair : StateConfigs)
+	for (const TPair<ETerritoryState, FTerritoryStateConfig>& Pair : GetStateConfigs())
 	{
 		if (Pair.Value.GrantedCommandCapabilities.HasTagExact(Capability))
 		{
@@ -872,6 +902,27 @@ FGameplayTag ATerritoryVolume::GetInitialOwningFaction() const
 ETerritoryControlMode ATerritoryVolume::GetControlMode() const
 {
 	return ControlMode;
+}
+
+const TMap<ETerritoryState, FTerritoryStateConfig>&
+ATerritoryVolume::GetStateConfigs() const
+{
+	return TerritoryDefinition ? TerritoryDefinition->StateConfigs : StateConfigs;
+}
+
+const TArray<TObjectPtr<UNarrativeEvent>>&
+ATerritoryVolume::GetDefenderDiedEvents() const
+{
+	return TerritoryDefinition
+		? TerritoryDefinition->DefenderDiedEvents : DefenderDiedEvents;
+}
+
+const TArray<TObjectPtr<UNarrativeEvent>>&
+ATerritoryVolume::GetAllDefendersDefeatedEvents() const
+{
+	return TerritoryDefinition
+		? TerritoryDefinition->AllDefendersDefeatedEvents
+		: AllDefendersDefeatedEvents;
 }
 
 void ATerritoryVolume::ReconcileStoryBoundsContesters()
@@ -1280,7 +1331,7 @@ void ATerritoryVolume::ForceSetTerritoryState(ETerritoryState NewState)
 
 bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext) const
 {
-	const FTerritoryStateConfig* Config = StateConfigs.Find(State);
+	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
 	if (!Config || Config->EntryConditions.IsEmpty())
 	{
 		OutFailureReason = FText::GetEmpty();
@@ -1314,7 +1365,7 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason,
 	const FTerritoryTransitionContext& TransitionContext) const
 {
-	const FTerritoryStateConfig* Config = StateConfigs.Find(State);
+	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
 	const TArray<TObjectPtr<UNarrativeCondition>>* Conditions = Config
 		? &Config->ExitConditions : nullptr;
 
@@ -1363,7 +1414,7 @@ bool ATerritoryVolume::CheckStateTransitionConditions(ETerritoryState OldState,
 
 void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext)
 {
-	const FTerritoryStateConfig* Config = StateConfigs.Find(State);
+	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
 	if (!Config) return;
 
 	const TArray<TObjectPtr<UNarrativeEvent>>* Events = bEntering ? &Config->EntryEvents : &Config->ExitEvents;
@@ -1701,7 +1752,7 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 				DefenderEventContext.PlayerController, DefenderEventContext.TalesComponent);
 		}
 	};
-	FireDefenderEvents(DefenderDiedEvents, TEXT("DefenderDiedEvent"));
+	FireDefenderEvents(GetDefenderDiedEvents(), TEXT("DefenderDiedEvent"));
 
 	TryCompleteDefenderDefeat(DefenderEventContext);
 }
@@ -1719,7 +1770,7 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 		*GetTerritoryTag().ToString());
 	OnAllGuardsDefeated();
 	OnAllGuardsDefeatedDelegate.Broadcast(this);
-	for (UNarrativeEvent* Event : AllDefendersDefeatedEvents)
+	for (UNarrativeEvent* Event : GetAllDefendersDefeatedEvents())
 	{
 		if (!Event) continue;
 		FString FailedCondition;

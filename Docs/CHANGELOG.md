@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — 2026-08-29 (Modular Territory Definition assets)
+
+- Added one primary DataAsset type for each Place, District, and City. A City owns its District
+  asset array and each District owns its Place array; parent tags are derived from that tree.
+- Consolidated state conditions/events, capture policy, story owner, management POI, production,
+  economy, guard posts/patrols/reserves, and counterattack authoring behind one definition reference.
+- Kept placed `ATerritoryVolume` actors as runtime owner/state/progress authority and Narrative Pro
+  as faction, NPC, Tales, dialogue, inventory, activity, TriggerSet, and navigation authority.
+- Added bounded legacy migration that preserves save GUIDs, deep-copies instanced Narrative objects,
+  replaces supported direct level-actor event references with stable tags, and flattens effective
+  guard-post profiles into standalone rows.
+- Added an editor synchronizer that links existing actors and can create missing project Blueprint
+  actors from relative templates without placing raw C++ classes or moving existing actors by default.
+- Added validation for hierarchy identity, Blueprint class compatibility, helper settings, patrols,
+  finite reserve limits, and story-owner Narrative requirements, plus community-facing setup docs.
+
 ## Unreleased — 2026-08-29 (Exact-target Narrative unlock and generic faction defaults)
 
 - Fixed the sample story chain so Blacksmith's Claimed event unlocks the exact Farm Place

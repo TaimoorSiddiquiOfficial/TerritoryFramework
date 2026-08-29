@@ -11,6 +11,7 @@ class ATerritoryGuardCharacter;
 class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
+class UTerritoryDefinition;
 enum class ETerritoryState : uint8;
 
 /**
@@ -138,6 +139,16 @@ public:
 #endif
 
 	// ─── Configuration ───
+
+	/** Territory asset and stable row ID supplying this post's reusable configuration. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	TObjectPtr<UTerritoryDefinition> TerritoryDefinition;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	FName GuardPostID;
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
+	bool ApplyTerritoryDefinition();
 
 	/**
 	 * Which territory this spawn point belongs to. A territory's authored GuardSpawnPoints

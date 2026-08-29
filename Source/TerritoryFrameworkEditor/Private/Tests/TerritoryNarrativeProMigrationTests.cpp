@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 
 #include "Core/TerritoryInterfaces.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryVolume.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Economy/TerritoryFactionResourceAccountComponent.h"
@@ -352,6 +353,34 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	TestNotNull(TEXT("Blacksmith Property exists by stable tag"), Blacksmith);
 	TestNotNull(TEXT("Farm Property exists by stable tag"), Farm);
 	if (!Blacksmith || !Farm) return false;
+	const UTerritoryPlaceDefinition* BlacksmithDefinition =
+		Cast<UTerritoryPlaceDefinition>(Blacksmith->GetTerritoryDefinition());
+	const UTerritoryPlaceDefinition* FarmDefinition =
+		Cast<UTerritoryPlaceDefinition>(Farm->GetTerritoryDefinition());
+	TestNotNull(TEXT("Blacksmith reloads its modular Place definition"),
+		BlacksmithDefinition);
+	TestNotNull(TEXT("Farm reloads its modular Place definition"), FarmDefinition);
+	if (BlacksmithDefinition)
+	{
+		TestEqual(TEXT("Blacksmith definition preserves the placed actor save GUID"),
+			BlacksmithDefinition->StableTerritoryGUID,
+			Blacksmith->GetTerritoryGUID());
+		TestEqual(TEXT("Blacksmith definition owns seven physical guard posts"),
+			BlacksmithDefinition->GuardPosts.Num(), 7);
+		TestTrue(TEXT("Blacksmith definition owns capture, management, and owner helpers"),
+			BlacksmithDefinition->CapturePoint.bEnabled
+			&& BlacksmithDefinition->ManagementPoint.bEnabled
+			&& BlacksmithDefinition->StoryOwner.bEnabled);
+	}
+	if (FarmDefinition)
+	{
+		TestEqual(TEXT("Farm definition preserves the placed actor save GUID"),
+			FarmDefinition->StableTerritoryGUID, Farm->GetTerritoryGUID());
+		TestTrue(TEXT("Farm definition owns capture, management, and owner helpers"),
+			FarmDefinition->CapturePoint.bEnabled
+			&& FarmDefinition->ManagementPoint.bEnabled
+			&& FarmDefinition->StoryOwner.bEnabled);
+	}
 
 	TestNotNull(TEXT("Blacksmith has a physical counterattack profile"),
 		Blacksmith->GetCounterAttackProfile());
@@ -387,20 +416,10 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			WorldSpawn.Equals(FVector(2200.f, 0.f, 3.0717f), 1.f));
 	}
 
-	const FMapProperty* StateConfigsProperty = FindFProperty<FMapProperty>(
-		ATerritoryVolume::StaticClass(), TEXT("StateConfigs"));
-	TestNotNull(TEXT("State Config map is reflected"), StateConfigsProperty);
-	if (!StateConfigsProperty) return false;
-	auto GetStateConfigs = [StateConfigsProperty](ATerritoryVolume* Territory)
-	{
-		return StateConfigsProperty->ContainerPtrToValuePtr<
-			TMap<ETerritoryState, FTerritoryStateConfig>>(Territory);
-	};
-
 	const FTerritoryStateConfig* ClaimedConfig =
-		GetStateConfigs(Blacksmith)->Find(ETerritoryState::Claimed);
+		Blacksmith->GetStateConfigs().Find(ETerritoryState::Claimed);
 	const FTerritoryStateConfig* ContestedConfig =
-		GetStateConfigs(Blacksmith)->Find(ETerritoryState::Contested);
+		Blacksmith->GetStateConfigs().Find(ETerritoryState::Contested);
 	const UTerritorySetDiplomacyEvent* ClaimedDiplomacyEvent = nullptr;
 	const UTerritorySetDiplomacyEvent* ContestedDiplomacyEvent = nullptr;
 	const UTerritoryScheduleEnemyWaveEvent* WaveEvent = nullptr;
@@ -541,7 +560,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		Farm->ResolveInitialTerritoryState(), ETerritoryState::Locked);
 
 	const FTerritoryStateConfig* LockedConfig =
-		GetStateConfigs(Farm)->Find(ETerritoryState::Locked);
+		Farm->GetStateConfigs().Find(ETerritoryState::Locked);
 	const UTerritoryOwnershipCondition* CapturedPlaceCondition = nullptr;
 	if (LockedConfig)
 	{
@@ -566,26 +585,20 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			CapturedPlaceCondition->RequiredOwner.IsValid());
 	}
 
-	const FArrayProperty* DefeatedEventsProperty = FindFProperty<FArrayProperty>(
-		ATerritoryVolume::StaticClass(), TEXT("AllDefendersDefeatedEvents"));
-	TestNotNull(TEXT("All-defenders-defeated Narrative hook is reflected"),
-		DefeatedEventsProperty);
-	if (DefeatedEventsProperty)
+	const TArray<TObjectPtr<UNarrativeEvent>>& DefeatedEvents =
+		Blacksmith->GetAllDefendersDefeatedEvents();
+	TestTrue(TEXT("All-defenders-defeated Narrative hook comes from the Place definition"),
+		!DefeatedEvents.IsEmpty());
+	if (!DefeatedEvents.IsEmpty())
 	{
-		const TArray<TObjectPtr<UNarrativeEvent>>* Events =
-			DefeatedEventsProperty->ContainerPtrToValuePtr<
-				TArray<TObjectPtr<UNarrativeEvent>>>(Blacksmith);
 		const UTerritoryOwnerHandoverEvent* HandoverEvent = nullptr;
-		if (Events)
+		for (const TObjectPtr<UNarrativeEvent>& Event : DefeatedEvents)
 		{
-			for (const TObjectPtr<UNarrativeEvent>& Event : *Events)
+			if (const UTerritoryOwnerHandoverEvent* Typed =
+				Cast<UTerritoryOwnerHandoverEvent>(Event))
 			{
-				if (const UTerritoryOwnerHandoverEvent* Typed =
-					Cast<UTerritoryOwnerHandoverEvent>(Event))
-				{
-					HandoverEvent = Typed;
-					break;
-				}
+				HandoverEvent = Typed;
+				break;
 			}
 		}
 		TestNotNull(TEXT("Blacksmith reveals its owner after all defenders are defeated"),
@@ -626,6 +639,8 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			Found ? *Found : nullptr);
 		if (Found && *Found)
 		{
+			TestNotNull(FString::Printf(TEXT("%s owner links to its Place definition"),
+				TerritoryTag), (*Found)->PlaceDefinition.Get());
 			TestTrue(FString::Printf(TEXT("%s owner is a project Blueprint child"), TerritoryTag),
 				(*Found)->GetClass() != ATerritoryStoryOwnerSpawner::StaticClass()
 				&& (*Found)->GetClass()->IsChildOf(ATerritoryStoryOwnerSpawner::StaticClass()));
@@ -644,6 +659,8 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			TerritoryTag), Found ? *Found : nullptr);
 		if (Found && *Found)
 		{
+			TestNotNull(FString::Printf(TEXT("%s point links to its Place definition"),
+				TerritoryTag), (*Found)->PlaceDefinition.Get());
 			TestTrue(FString::Printf(TEXT("%s point remains enabled for multiplayer reuse"),
 				TerritoryTag), (*Found)->bCaptureEnabled);
 		}

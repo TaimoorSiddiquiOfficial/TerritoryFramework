@@ -9,6 +9,7 @@ class ANarrativeNPCCharacter;
 class UDialogue;
 class UNPCSpawnComponent;
 class UTalesComponent;
+class UTerritoryPlaceDefinition;
 
 /**
  * Narrative-owned NPC spawner used by story capture handovers.
@@ -26,6 +27,14 @@ class TERRITORYFRAMEWORK_API ATerritoryStoryOwnerSpawner : public ANPCSpawner
 
 public:
 	ATerritoryStoryOwnerSpawner();
+	virtual void OnConstruction(const FTransform& Transform) override;
+
+	/** One Place asset supplies the protected owner and handover dialogue settings. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Definition")
+	TObjectPtr<UTerritoryPlaceDefinition> PlaceDefinition;
+
+	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
+	bool ApplyPlaceDefinition();
 
 	/** Narrative spawn component that owns the single property-owner NPC. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Story Capture")

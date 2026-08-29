@@ -1,4 +1,5 @@
 #include "Interaction/TerritoryDistrictManagementPoint.h"
+#include "Core/TerritoryDefinition.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
@@ -331,9 +332,16 @@ ATerritoryDistrictManagementPoint::ATerritoryDistrictManagementPoint(const FObje
 	DistrictMarkerComponent = CreateDefaultSubobject<UTerritoryDistrictNavigationMarkerComponent>(TEXT("DistrictMarker"));
 }
 
+void ATerritoryDistrictManagementPoint::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	ApplyTerritoryDefinition();
+}
+
 void ATerritoryDistrictManagementPoint::BeginPlay()
 {
 	Super::BeginPlay();
+	ApplyTerritoryDefinition();
 	if (ATerritoryDistrict* District = ResolveDistrict())
 	{
 		POITag = District->GetTerritoryTag();
@@ -347,6 +355,37 @@ void ATerritoryDistrictManagementPoint::BeginPlay()
 	{
 		InteractableComponent->InteractionDistance = ManagementDistance;
 	}
+}
+
+bool ATerritoryDistrictManagementPoint::ApplyTerritoryDefinition()
+{
+	if (!TerritoryDefinition) return false;
+	const FTerritoryManagementPointTemplate& Template =
+		TerritoryDefinition->ManagementPoint;
+	if (Template.ManagedDistrictOverride.IsValid())
+	{
+		DistrictTag = Template.ManagedDistrictOverride;
+	}
+	else if (TerritoryDefinition->IsA<UTerritoryDistrictDefinition>())
+	{
+		DistrictTag = TerritoryDefinition->TerritoryTag;
+	}
+	else
+	{
+		DistrictTag = TerritoryDefinition->DerivedParentTerritoryTag;
+	}
+	ManagementWidgetClass = Template.WidgetClass.LoadSynchronous();
+	ManagementLayerTag = Template.WidgetLayer;
+	ManagementDistance = FMath::Max(100.f, Template.InteractionDistance);
+	if (InteractionSphere)
+	{
+		InteractionSphere->SetSphereRadius(ManagementDistance);
+	}
+	if (InteractableComponent)
+	{
+		InteractableComponent->InteractionDistance = ManagementDistance;
+	}
+	return Template.bEnabled;
 }
 
 ATerritoryDistrict* ATerritoryDistrictManagementPoint::ResolveDistrict() const

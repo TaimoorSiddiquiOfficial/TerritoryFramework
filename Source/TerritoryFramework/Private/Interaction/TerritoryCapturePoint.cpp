@@ -4,6 +4,7 @@
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
@@ -36,6 +37,7 @@ ATerritoryCapturePoint::ATerritoryCapturePoint()
 void ATerritoryCapturePoint::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+	ApplyPlaceDefinition();
 	if (CaptureZone)
 	{
 		CaptureZone->SetSphereRadius(FMath::Max(100.f, CaptureRadius));
@@ -46,6 +48,7 @@ void ATerritoryCapturePoint::OnConstruction(const FTransform& Transform)
 void ATerritoryCapturePoint::BeginPlay()
 {
 	Super::BeginPlay();
+	ApplyPlaceDefinition();
 	if (!CaptureZone) return;
 	RefreshCaptureMarkerVisibility();
 	if (!TargetTerritoryTag.IsValid())
@@ -77,6 +80,23 @@ void ATerritoryCapturePoint::BeginPlay()
 		}
 		ReconcileOverlappingParticipants();
 	}
+}
+
+bool ATerritoryCapturePoint::ApplyPlaceDefinition()
+{
+	if (!PlaceDefinition) return false;
+	TargetTerritoryTag = PlaceDefinition->TerritoryTag;
+	CaptureRadius = FMath::Max(100.f,
+		PlaceDefinition->CapturePoint.CaptureRadius);
+	bCaptureEnabled = PlaceDefinition->CapturePoint.bEnabled
+		&& PlaceDefinition->CapturePoint.bAutomaticCapture;
+	bHideMarkerWhileCaptureUnavailable =
+		PlaceDefinition->CapturePoint.bHideWhileUnavailable;
+	if (CaptureZone)
+	{
+		CaptureZone->SetSphereRadius(CaptureRadius);
+	}
+	return true;
 }
 
 void ATerritoryCapturePoint::EndPlay(const EEndPlayReason::Type EndPlayReason)

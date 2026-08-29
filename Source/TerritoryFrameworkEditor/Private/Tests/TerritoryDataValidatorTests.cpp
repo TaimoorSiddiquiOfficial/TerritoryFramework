@@ -7,6 +7,8 @@
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Core/TerritoryGuardPostDefinition.h"
+#include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryHierarchy.h"
 #include "DataValidation/TerritoryDataValidator.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "Economy/TerritoryProductionTags.h"
@@ -276,6 +278,61 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		Validator->ValidateLoadedAsset_Implementation(
 			ProductionAssetData, ProductionProfile, ValidProductionContext),
 		EDataValidationResult::Valid);
+
+	UTerritoryPlaceDefinition* Place = NewObject<UTerritoryPlaceDefinition>();
+	Place->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Place->DisplayName = FText::FromString(TEXT("Blacksmith"));
+	Place->StableTerritoryGUID = FGuid::NewGuid();
+	Place->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	FTerritoryGuardPostTemplate& EmbeddedPost =
+		Place->GuardPosts.AddDefaulted_GetRef();
+	EmbeddedPost.GuardPostID = TEXT("FrontDoor");
+	EmbeddedPost.StableGuardPostGUID = FGuid::NewGuid();
+	EmbeddedPost.ActorClass = ATerritoryGuardSpawnPoint::StaticClass();
+	const FAssetData PlaceAssetData(Place);
+	FDataValidationContext ValidPlaceContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestTrue(TEXT("Modern validator accepts modular Place definitions"),
+		Validator->CanValidateAsset_Implementation(
+			PlaceAssetData, Place, ValidPlaceContext));
+	TestEqual(TEXT("A complete embedded guard post passes definition validation"),
+		Validator->ValidateLoadedAsset_Implementation(
+			PlaceAssetData, Place, ValidPlaceContext),
+		EDataValidationResult::Valid);
+
+	EmbeddedPost.ReserveTotalRetryLimit = 0;
+	FDataValidationContext InvalidEmbeddedPostContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("An invalid embedded reserve policy is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			PlaceAssetData, Place, InvalidEmbeddedPostContext),
+		EDataValidationResult::Invalid);
+	EmbeddedPost.ReserveTotalRetryLimit = 10;
+
+	UTerritoryDistrictDefinition* District =
+		NewObject<UTerritoryDistrictDefinition>();
+	UTerritoryCityDefinition* City = NewObject<UTerritoryCityDefinition>();
+	District->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare"), false);
+	District->StableTerritoryGUID = FGuid::NewGuid();
+	District->TerritoryActorClass = ATerritoryDistrict::StaticClass();
+	City->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach"), false);
+	City->StableTerritoryGUID = District->StableTerritoryGUID;
+	City->TerritoryActorClass = ATerritoryCity::StaticClass();
+	District->Places.Add(Place);
+	City->Districts.Add(District);
+	City->RefreshHierarchyLinks();
+	const FAssetData CityAssetData(City);
+	FDataValidationContext DuplicateHierarchyGuidContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A duplicate save GUID in one City hierarchy is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			CityAssetData, City, DuplicateHierarchyGuidContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Duplicate hierarchy identity emits an error"),
+		DuplicateHierarchyGuidContext.GetNumErrors() > 0u);
 
 	return true;
 }

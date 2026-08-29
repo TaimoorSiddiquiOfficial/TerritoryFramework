@@ -6,11 +6,16 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
+#include "Core/TerritoryDefinition.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Economy/TerritoryProductionProfile.h"
+#include "UI/TerritoryDistrictManagementWidget.h"
+#include "Interaction/TerritoryCapturePoint.h"
+#include "Interaction/TerritoryDistrictManagementPoint.h"
+#include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "AI/NPCDefinition.h"
 #include "Components/ShapeComponent.h"
 #include "Engine/Level.h"
@@ -162,7 +167,8 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 		InAsset->IsA(ATerritorySavableData::StaticClass()) ||
 		InAsset->IsA(UTerritoryGuardPostDefinition::StaticClass()) ||
 		InAsset->IsA(UTerritoryCounterAttackProfile::StaticClass()) ||
-		InAsset->IsA(UTerritoryProductionProfile::StaticClass()))
+		InAsset->IsA(UTerritoryProductionProfile::StaticClass()) ||
+		InAsset->IsA(UTerritoryDefinition::StaticClass()))
 	{
 		return true;
 	}
@@ -280,6 +286,10 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 			Errors.Add(FString::Printf(TEXT("Invalid production profile: %s"),
 				*FailureReason.ToString()));
 		}
+	}
+	else if (UTerritoryDefinition* Definition = Cast<UTerritoryDefinition>(InAsset))
+	{
+		ValidateDefinition(Definition, Errors, Warnings);
 	}
 	else if (ATerritoryWorldState* WS = Cast<ATerritoryWorldState>(InAsset))
 	{
@@ -651,6 +661,234 @@ void UTerritoryDataValidator::CheckEconomyConfig(ATerritoryVolume* Territory, TA
 			}
 		}
 	}
+}
+
+bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definition,
+	TArray<FString>& OutErrors, TArray<FString>& OutWarnings)
+{
+	if (!Definition)
+	{
+		OutErrors.Add(TEXT("Territory Definition is null"));
+		return false;
+	}
+
+	const FString Context = Definition->GetPathName();
+	auto Error = [&OutErrors, &Context](const FString& Message)
+	{
+		OutErrors.Add(FString::Printf(TEXT("%s: %s"), *Context, *Message));
+	};
+	auto Warning = [&OutWarnings, &Context](const FString& Message)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: %s"), *Context, *Message));
+	};
+
+	if (!Definition->TerritoryTag.IsValid()) Error(TEXT("Territory Tag is required"));
+	if (Definition->DisplayName.IsEmpty()) Warning(TEXT("Display Name is empty"));
+	if (!Definition->StableTerritoryGUID.IsValid())
+		Error(TEXT("Stable Territory GUID is missing; migration/save identity is unsafe"));
+	if (Definition->RelativeTransform.ContainsNaN()) Error(TEXT("Relative Transform contains invalid values"));
+
+	UClass* ActorClass = Definition->TerritoryActorClass.LoadSynchronous();
+	if (!ActorClass)
+	{
+		Error(TEXT("Territory Actor Class is required"));
+	}
+	else if (Definition->IsA<UTerritoryPlaceDefinition>()
+		&& !ActorClass->IsChildOf(ATerritoryProperty::StaticClass()))
+	{
+		Error(TEXT("Place Definition actor class must inherit TerritoryProperty"));
+	}
+	else if (Definition->IsA<UTerritoryDistrictDefinition>()
+		&& (!ActorClass->IsChildOf(ATerritoryDistrict::StaticClass())
+			|| ActorClass->IsChildOf(ATerritoryCity::StaticClass())))
+	{
+		Error(TEXT("District Definition actor class must inherit TerritoryDistrict"));
+	}
+	else if (Definition->IsA<UTerritoryCityDefinition>()
+		&& !ActorClass->IsChildOf(ATerritoryCity::StaticClass()))
+	{
+		Error(TEXT("City Definition actor class must inherit TerritoryCity"));
+	}
+
+	if (Definition->IsA<UTerritoryCityDefinition>())
+	{
+		if (Definition->DerivedParentTerritoryTag.IsValid())
+			Error(TEXT("City must not have a derived parent tag"));
+	}
+	else if (!Definition->DerivedParentTerritoryTag.IsValid())
+	{
+		Warning(TEXT("Definition is not yet connected to its parent hierarchy asset"));
+	}
+
+	for (const TPair<ETerritoryState, FTerritoryStateConfig>& Pair : Definition->StateConfigs)
+	{
+		auto CheckObjects = [&Error, &Pair](const auto& Objects, const TCHAR* Label)
+		{
+			for (int32 Index = 0; Index < Objects.Num(); ++Index)
+			{
+				if (!Objects[Index]) Error(FString::Printf(
+					TEXT("State %d %s contains a null row at index %d"),
+					static_cast<int32>(Pair.Key), Label, Index));
+			}
+		};
+		CheckObjects(Pair.Value.EntryConditions, TEXT("Entry Conditions"));
+		CheckObjects(Pair.Value.ExitConditions, TEXT("Exit Conditions"));
+		CheckObjects(Pair.Value.EntryEvents, TEXT("Entry Events"));
+		CheckObjects(Pair.Value.ExitEvents, TEXT("Exit Events"));
+	}
+
+	TSet<FName> GuardPostIDs;
+	TSet<FGuid> GuardPostGUIDs;
+	for (const FTerritoryGuardPostTemplate& Post : Definition->GuardPosts)
+	{
+		if (Post.GuardPostID.IsNone()) Error(TEXT("Guard Post ID is required"));
+		else if (GuardPostIDs.Contains(Post.GuardPostID))
+			Error(FString::Printf(TEXT("Duplicate Guard Post ID: %s"), *Post.GuardPostID.ToString()));
+		GuardPostIDs.Add(Post.GuardPostID);
+		if (!Post.StableGuardPostGUID.IsValid()) Error(FString::Printf(
+			TEXT("Guard Post %s has no stable GUID"), *Post.GuardPostID.ToString()));
+		else if (GuardPostGUIDs.Contains(Post.StableGuardPostGUID)) Error(FString::Printf(
+			TEXT("Guard Post %s duplicates another post GUID"), *Post.GuardPostID.ToString()));
+		GuardPostGUIDs.Add(Post.StableGuardPostGUID);
+		if (Post.RelativeTransform.ContainsNaN()) Error(FString::Printf(
+			TEXT("Guard Post %s has an invalid relative transform"), *Post.GuardPostID.ToString()));
+		UClass* GuardPostClass = Post.ActorClass.LoadSynchronous();
+		if (!GuardPostClass) Error(FString::Printf(
+			TEXT("Guard Post %s has no Blueprint actor class"), *Post.GuardPostID.ToString()));
+		else if (!GuardPostClass->IsChildOf(ATerritoryGuardSpawnPoint::StaticClass()))
+			Error(FString::Printf(TEXT("Guard Post %s actor class is not a Territory Guard Spawn Point"),
+				*Post.GuardPostID.ToString()));
+		if (Post.ReserveSlots < 0 || Post.ReserveSpawnDelay < 0.1f
+			|| Post.ReserveSpawnRetryInterval < 0.1f
+			|| Post.ReserveSpawnRadius < 100.f
+			|| Post.ReserveMinimumPlayerDistance < 0.f
+			|| !FMath::IsWithinInclusive(Post.ReserveSpawnCandidateCount, 1, 64)
+			|| !FMath::IsWithinInclusive(Post.ReserveCameraAvoidanceRetryLimit, 0, 20)
+			|| !FMath::IsWithinInclusive(Post.ReserveTotalRetryLimit, 1, 100))
+		{
+			Error(FString::Printf(TEXT("Guard Post %s reserve settings are outside supported bounds"),
+				*Post.GuardPostID.ToString()));
+		}
+		if (Post.NPCDefinitionOverride)
+		{
+			FText FailureReason;
+			if (!ATerritoryGuardCharacter::ValidateNarrativeSpawnDefinition(
+				Post.NPCDefinitionOverride, 1, FailureReason))
+			{
+				Error(FString::Printf(TEXT("Guard Post %s Narrative NPC is not spawn-ready: %s"),
+					*Post.GuardPostID.ToString(), *FailureReason.ToString()));
+			}
+		}
+		for (const FTerritoryGuardPatrolTemplateNode& Node : Post.PatrolRoute)
+		{
+			if (Node.RelativeTransform.ContainsNaN() || !FMath::IsFinite(Node.WaitTime)
+				|| Node.WaitTime < 0.f)
+			{
+				Error(FString::Printf(TEXT("Guard Post %s has an invalid patrol node"),
+					*Post.GuardPostID.ToString()));
+				break;
+			}
+		}
+	}
+
+	if (Definition->CapturePoint.bEnabled)
+	{
+		UClass* CaptureClass = Definition->CapturePoint.ActorClass.LoadSynchronous();
+		if (!Definition->IsA<UTerritoryPlaceDefinition>())
+			Error(TEXT("Only a Place Definition can enable a Capture Point"));
+		if (!CaptureClass) Error(TEXT("Enabled Capture Point has no Blueprint actor class"));
+		else if (!CaptureClass->IsChildOf(ATerritoryCapturePoint::StaticClass()))
+			Error(TEXT("Capture Point class must inherit Territory Capture Point"));
+		if (Definition->CapturePoint.RelativeTransform.ContainsNaN()
+			|| Definition->CapturePoint.CaptureRadius < 100.f)
+			Error(TEXT("Capture Point transform or radius is invalid"));
+	}
+	if (Definition->bStoryCaptureFromBounds && Definition->CapturePoint.bEnabled
+		&& Definition->CapturePoint.bAutomaticCapture)
+		Warning(TEXT("Story Capture From Bounds disables the configured automatic Capture Point"));
+	if (Definition->ManagementPoint.bEnabled)
+	{
+		UClass* ManagementClass = Definition->ManagementPoint.ActorClass.LoadSynchronous();
+		if (!ManagementClass)
+			Error(TEXT("Enabled Management Point has no Blueprint actor class"));
+		else if (!ManagementClass->IsChildOf(
+			ATerritoryDistrictManagementPoint::StaticClass()))
+			Error(TEXT("Management Point class must inherit Territory District Management Point"));
+		if (!Definition->ManagementPoint.WidgetClass.LoadSynchronous())
+			Error(TEXT("Enabled Management Point has no management widget class"));
+		if (Definition->ManagementPoint.RelativeTransform.ContainsNaN()
+			|| Definition->ManagementPoint.InteractionDistance < 100.f)
+			Error(TEXT("Management Point transform or interaction distance is invalid"));
+	}
+
+	if (const UTerritoryPlaceDefinition* Place = Cast<UTerritoryPlaceDefinition>(Definition))
+	{
+		if (Place->StoryOwner.bEnabled)
+		{
+			UClass* StoryOwnerClass = Place->StoryOwner.ActorClass.LoadSynchronous();
+			if (!StoryOwnerClass)
+				Error(TEXT("Enabled Story Owner has no spawner Blueprint class"));
+			else if (!StoryOwnerClass->IsChildOf(
+				ATerritoryStoryOwnerSpawner::StaticClass()))
+				Error(TEXT("Story Owner class must inherit Territory Story Owner Spawner"));
+			if (!Place->StoryOwner.NPCDefinition)
+				Error(TEXT("Enabled Story Owner has no Narrative NPC Definition"));
+			if (Place->StoryOwner.RelativeTransform.ContainsNaN()
+				|| !FMath::IsWithinInclusive(
+					Place->StoryOwner.InteractionDistance, 100.f, 1000.f))
+				Error(TEXT("Story Owner transform or interaction distance is invalid"));
+		}
+	}
+	else if (UTerritoryDistrictDefinition* District =
+		Cast<UTerritoryDistrictDefinition>(Definition))
+	{
+		TSet<FGameplayTag> ChildTags;
+		for (UTerritoryPlaceDefinition* ChildPlace : District->Places)
+		{
+			if (!ChildPlace) { Error(TEXT("Places contains a null asset")); continue; }
+			if (ChildTags.Contains(ChildPlace->TerritoryTag)) Error(FString::Printf(
+				TEXT("Duplicate Place tag in District: %s"), *ChildPlace->TerritoryTag.ToString()));
+			ChildTags.Add(ChildPlace->TerritoryTag);
+			if (ChildPlace->DerivedParentTerritoryTag != District->TerritoryTag)
+				Error(FString::Printf(TEXT("Place %s parent link is stale; use Refresh Hierarchy Links"),
+					*ChildPlace->GetName()));
+		}
+	}
+	else if (UTerritoryCityDefinition* City = Cast<UTerritoryCityDefinition>(Definition))
+	{
+		TSet<FGameplayTag> DistrictTags;
+		TSet<FGameplayTag> PlaceTags;
+		TSet<FGuid> HierarchyGUIDs;
+		HierarchyGUIDs.Add(City->StableTerritoryGUID);
+		for (UTerritoryDistrictDefinition* ChildDistrict : City->Districts)
+		{
+			if (!ChildDistrict) { Error(TEXT("Districts contains a null asset")); continue; }
+			if (DistrictTags.Contains(ChildDistrict->TerritoryTag)) Error(FString::Printf(
+				TEXT("Duplicate District tag in City: %s"), *ChildDistrict->TerritoryTag.ToString()));
+			DistrictTags.Add(ChildDistrict->TerritoryTag);
+			if (HierarchyGUIDs.Contains(ChildDistrict->StableTerritoryGUID)) Error(FString::Printf(
+				TEXT("District %s duplicates a Territory save GUID in this City"),
+				*ChildDistrict->GetName()));
+			HierarchyGUIDs.Add(ChildDistrict->StableTerritoryGUID);
+			if (ChildDistrict->DerivedParentTerritoryTag != City->TerritoryTag)
+				Error(FString::Printf(TEXT("District %s parent link is stale; use Refresh Hierarchy Links"),
+					*ChildDistrict->GetName()));
+			for (UTerritoryPlaceDefinition* ChildPlace : ChildDistrict->Places)
+			{
+				if (!ChildPlace) continue;
+				if (PlaceTags.Contains(ChildPlace->TerritoryTag)) Error(FString::Printf(
+					TEXT("Place tag appears in more than one District: %s"),
+					*ChildPlace->TerritoryTag.ToString()));
+				PlaceTags.Add(ChildPlace->TerritoryTag);
+				if (HierarchyGUIDs.Contains(ChildPlace->StableTerritoryGUID)) Error(FString::Printf(
+					TEXT("Place %s duplicates a Territory save GUID in this City"),
+					*ChildPlace->GetName()));
+				HierarchyGUIDs.Add(ChildPlace->StableTerritoryGUID);
+			}
+		}
+	}
+
+	return OutErrors.IsEmpty();
 }
 
 void UTerritoryDataValidator::CheckDuplicateDisplayNames(ULevel* Level, TArray<FString>& OutWarnings)

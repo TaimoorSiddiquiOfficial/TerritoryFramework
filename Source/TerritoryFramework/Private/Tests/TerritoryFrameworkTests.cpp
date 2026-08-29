@@ -25,6 +25,7 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryGuardPostDefinition.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryMutationTypes.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Debug/TerritoryDebugger.h"
@@ -3517,6 +3518,267 @@ bool FTFContract_CaptureEventUsesMutation::RunTest(const FString& Parameters)
 }
 
 // ─── 5.2: GuardPostDefinition data asset contract ───
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryDefinitionHierarchyAndApplication,
+	"TerritoryFramework.Definition.HierarchyAndRuntimeApplication",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryDefinitionHierarchyAndApplication::RunTest(const FString& Parameters)
+{
+	UTerritoryCityDefinition* City = NewObject<UTerritoryCityDefinition>();
+	UTerritoryDistrictDefinition* District = NewObject<UTerritoryDistrictDefinition>();
+	UTerritoryPlaceDefinition* Place = NewObject<UTerritoryPlaceDefinition>();
+	TestNotNull(TEXT("City Definition created"), City);
+	TestNotNull(TEXT("District Definition created"), District);
+	TestNotNull(TEXT("Place Definition created"), Place);
+	if (!City || !District || !Place) return false;
+
+	City->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach"), false);
+	District->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare"), false);
+	Place->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	City->StableTerritoryGUID = FGuid::NewGuid();
+	District->StableTerritoryGUID = FGuid::NewGuid();
+	Place->StableTerritoryGUID = FGuid::NewGuid();
+	City->TerritoryActorClass = ATerritoryCity::StaticClass();
+	District->TerritoryActorClass = ATerritoryDistrict::StaticClass();
+	Place->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	District->Places.Add(Place);
+	City->Districts.Add(District);
+	City->RefreshHierarchyLinks();
+
+	TestEqual(TEXT("City array derives the District parent tag"),
+		District->DerivedParentTerritoryTag, City->TerritoryTag);
+	TestEqual(TEXT("District array derives the Place parent tag"),
+		Place->DerivedParentTerritoryTag, District->TerritoryTag);
+
+	Place->DisplayName = FText::FromString(TEXT("Reusable Test Place"));
+	Place->InitialState = ETerritoryInitialState::Locked;
+	Place->InitialGuardCount = 2;
+	Place->CapturePoint.bEnabled = true;
+	Place->CapturePoint.bAutomaticCapture = true;
+	Place->CapturePoint.CaptureRadius = 475.f;
+	FTerritoryStateConfig& Claimed =
+		Place->StateConfigs.FindOrAdd(ETerritoryState::Claimed);
+	Claimed.EntryEvents.Add(NewObject<UTerritoryUnlockEvent>(Place));
+
+	ATerritoryProperty* Property = NewObject<ATerritoryProperty>();
+	TestTrue(TEXT("Matching Place Definition applies to TerritoryProperty"),
+		Place->ApplyToTerritory(Property));
+	TestEqual(TEXT("Actor remembers its single authoring asset"),
+		Property->GetTerritoryDefinition(),
+		static_cast<UTerritoryDefinition*>(Place));
+	TestEqual(TEXT("Definition supplies exact Place tag"),
+		Property->GetTerritoryTag(), Place->TerritoryTag);
+	TestEqual(TEXT("Definition supplies derived District parent"),
+		Property->GetParentTerritoryTag(), District->TerritoryTag);
+	TestEqual(TEXT("Definition supplies new-campaign state"),
+		Property->ResolveInitialTerritoryState(), ETerritoryState::Locked);
+	TestEqual(TEXT("Definition supplies garrison target"),
+		Property->GetConfiguredGuardCount(), 2);
+	const FTerritoryStateConfig* EffectiveClaimed =
+		Property->GetStateConfigs().Find(ETerritoryState::Claimed);
+	TestTrue(TEXT("Actor reads Narrative state rules directly from its asset"),
+		EffectiveClaimed && EffectiveClaimed->EntryEvents.Num() == 1
+			&& EffectiveClaimed->EntryEvents[0] == Claimed.EntryEvents[0]);
+
+	ATerritoryDistrict* WrongActor = NewObject<ATerritoryDistrict>();
+	TestFalse(TEXT("Place Definition rejects a District actor"),
+		Place->ApplyToTerritory(WrongActor));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryDefinitionAuxiliaryActors,
+	"TerritoryFramework.Definition.AuxiliaryBlueprintConfiguration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryDefinitionAuxiliaryActors::RunTest(const FString& Parameters)
+{
+	UTerritoryPlaceDefinition* Place = NewObject<UTerritoryPlaceDefinition>();
+	Place->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Place->CapturePoint.bEnabled = true;
+	Place->CapturePoint.bAutomaticCapture = true;
+	Place->CapturePoint.CaptureRadius = 625.f;
+	Place->StoryOwner.bEnabled = true;
+	Place->StoryOwner.InteractionDistance = 425.f;
+	Place->ManagementPoint.bEnabled = true;
+	Place->ManagementPoint.ManagedDistrictOverride =
+		FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare"), false);
+	Place->ManagementPoint.InteractionDistance = 725.f;
+
+	FTerritoryGuardPostTemplate& GuardPost = Place->GuardPosts.AddDefaulted_GetRef();
+	GuardPost.GuardPostID = TEXT("FrontDoor");
+	GuardPost.StableGuardPostGUID = FGuid::NewGuid();
+	GuardPost.Priority = 87;
+	GuardPost.ReserveSlots = 4;
+	GuardPost.bAutoSpawnReserves = false;
+	GuardPost.ReserveSpawnDelay = 6.f;
+	GuardPost.ReserveSpawnRetryInterval = 2.5f;
+	GuardPost.ReserveSpawnRadius = 900.f;
+	GuardPost.ReserveMinimumPlayerDistance = 650.f;
+	GuardPost.ReserveSpawnCandidateCount = 18;
+	GuardPost.ReserveCameraAvoidanceRetryLimit = 5;
+	GuardPost.ReserveTotalRetryLimit = 22;
+	GuardPost.ReserveOwnershipPolicy = EReserveOwnershipPolicy::PersistWithPost;
+	FTerritoryGuardPatrolTemplateNode& Patrol = GuardPost.PatrolRoute.AddDefaulted_GetRef();
+	Patrol.RelativeTransform.SetLocation(FVector(200.f, 0.f, 0.f));
+
+	ATerritoryCapturePoint* CapturePoint = NewObject<ATerritoryCapturePoint>();
+	CapturePoint->PlaceDefinition = Place;
+	TestTrue(TEXT("Capture Point accepts the Place Definition"),
+		CapturePoint->ApplyPlaceDefinition());
+	TestEqual(TEXT("Capture Point target comes from the Place asset"),
+		CapturePoint->TargetTerritoryTag, Place->TerritoryTag);
+	TestEqual(TEXT("Capture radius comes from the Place asset"),
+		CapturePoint->CaptureRadius, 625.f);
+
+	ATerritoryDistrictManagementPoint* Management =
+		NewObject<ATerritoryDistrictManagementPoint>();
+	Management->TerritoryDefinition = Place;
+	TestTrue(TEXT("Management Point accepts the Place Definition"),
+		Management->ApplyTerritoryDefinition());
+	TestEqual(TEXT("Management target comes from the one asset"),
+		Management->DistrictTag,
+		Place->ManagementPoint.ManagedDistrictOverride);
+	TestEqual(TEXT("Management distance comes from the one asset"),
+		Management->ManagementDistance, 725.f);
+
+	ATerritoryStoryOwnerSpawner* StoryOwner =
+		NewObject<ATerritoryStoryOwnerSpawner>();
+	StoryOwner->PlaceDefinition = Place;
+	TestTrue(TEXT("Story Owner accepts the Place Definition"),
+		StoryOwner->ApplyPlaceDefinition());
+	TestEqual(TEXT("Story Owner target comes from the Place asset"),
+		StoryOwner->TerritoryTag, Place->TerritoryTag);
+	TestEqual(TEXT("Story Owner interaction distance comes from the Place asset"),
+		StoryOwner->OwnerInteractionDistance, 425.f);
+
+	ATerritoryGuardSpawnPoint* SpawnPoint =
+		NewObject<ATerritoryGuardSpawnPoint>();
+	SpawnPoint->TerritoryDefinition = Place;
+	SpawnPoint->GuardPostID = GuardPost.GuardPostID;
+	TestTrue(TEXT("Guard Post accepts its row from the Place Definition"),
+		SpawnPoint->ApplyTerritoryDefinition());
+	TestEqual(TEXT("Guard Post target comes from the Place asset"),
+		SpawnPoint->OwnerTerritoryTag, Place->TerritoryTag);
+	TestEqual(TEXT("Guard Post save GUID comes from the Place asset"),
+		SpawnPoint->GetActorGUID_Implementation(), GuardPost.StableGuardPostGUID);
+	TestEqual(TEXT("Relative patrol template creates one world patrol node"),
+		SpawnPoint->GetPatrolRoute().Num(), 1);
+	TestEqual(TEXT("Guard priority comes from the one asset"),
+		SpawnPoint->Priority, 87);
+	TestEqual(TEXT("Finite reserve count comes from the one asset"),
+		SpawnPoint->ReserveSlots, 4);
+	TestFalse(TEXT("Reserve automation policy comes from the one asset"),
+		SpawnPoint->bAutoSpawnReserves);
+	TestEqual(TEXT("Reserve delay comes from the one asset"),
+		SpawnPoint->ReserveSpawnDelay, 6.f);
+	TestEqual(TEXT("Reserve retry limit comes from the one asset"),
+		SpawnPoint->ReserveTotalRetryLimit, 22);
+	TestEqual(TEXT("Reserve owner-change policy comes from the one asset"),
+		SpawnPoint->ReserveOwnershipPolicy,
+		EReserveOwnershipPolicy::PersistWithPost);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryDefinitionLegacyMigration,
+	"TerritoryFramework.Definition.LegacyActorMigration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryDefinitionLegacyMigration::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::EditorPreview, false);
+	TestNotNull(TEXT("Migration preview world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters Params;
+	Params.ObjectFlags = RF_Transient;
+	ATerritoryProperty* Property = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(),
+		FTransform(FRotator::ZeroRotator, FVector(100.f, 200.f, 300.f)), Params);
+	ATerritoryCapturePoint* Capture = World->SpawnActor<ATerritoryCapturePoint>(
+		ATerritoryCapturePoint::StaticClass(),
+		FTransform(FRotator::ZeroRotator, FVector(150.f, 200.f, 300.f)), Params);
+	ATerritoryDistrictManagementPoint* Management =
+		World->SpawnActor<ATerritoryDistrictManagementPoint>(
+			ATerritoryDistrictManagementPoint::StaticClass(),
+			FTransform(FRotator::ZeroRotator, FVector(175.f, 200.f, 300.f)), Params);
+	ATerritoryStoryOwnerSpawner* Owner =
+		World->SpawnActor<ATerritoryStoryOwnerSpawner>(
+			ATerritoryStoryOwnerSpawner::StaticClass(),
+			FTransform(FRotator::ZeroRotator, FVector(200.f, 200.f, 300.f)), Params);
+	UTerritoryPlaceDefinition* Place = NewObject<UTerritoryPlaceDefinition>();
+	TestNotNull(TEXT("Legacy Property exists"), Property);
+	TestNotNull(TEXT("Legacy capture point exists"), Capture);
+	TestNotNull(TEXT("Legacy management point exists"), Management);
+	TestNotNull(TEXT("Legacy owner exists"), Owner);
+	TestNotNull(TEXT("Destination Place definition exists"), Place);
+	if (!Property || !Capture || !Management || !Owner || !Place)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGameplayTag PlaceTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare"), false);
+	Place->TerritoryTag = PlaceTag;
+	Place->StableTerritoryGUID = FGuid::NewGuid();
+	Place->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	TestTrue(TEXT("Definition can be assigned before migration"),
+		Place->ApplyToTerritory(Property));
+	Property->ParentTerritoryTag = DistrictTag;
+	Property->TerritoryDisplayName = FText::FromString(TEXT("Migrated Blacksmith"));
+	Property->TerritoryGUID = FGuid::NewGuid();
+	UTerritoryUnlockEvent* SourceEvent =
+		NewObject<UTerritoryUnlockEvent>(Property);
+	Property->StateConfigs.FindOrAdd(ETerritoryState::Claimed)
+		.EntryEvents.Add(SourceEvent);
+
+	Capture->TargetTerritoryTag = PlaceTag;
+	Capture->CaptureRadius = 510.f;
+	Management->DistrictTag = DistrictTag;
+	Management->ManagementDistance = 735.f;
+	Owner->TerritoryTag = PlaceTag;
+	Owner->OwnerInteractionDistance = 440.f;
+
+	TestTrue(TEXT("One migration call copies the legacy Property and helpers"),
+		Property->CopyLegacySettingsToDefinition());
+	TestEqual(TEXT("Migration preserves the actor save GUID"),
+		Place->StableTerritoryGUID, Property->TerritoryGUID);
+	TestEqual(TEXT("Migration derives the old parent tag"),
+		Place->DerivedParentTerritoryTag, DistrictTag);
+	TestTrue(TEXT("Migration enables all discovered helper templates"),
+		Place->CapturePoint.bEnabled && Place->ManagementPoint.bEnabled
+		&& Place->StoryOwner.bEnabled);
+	TestEqual(TEXT("Capture radius moved into the Place asset"),
+		Place->CapturePoint.CaptureRadius, 510.f);
+	TestEqual(TEXT("Management distance moved into the Place asset"),
+		Place->ManagementPoint.InteractionDistance, 735.f);
+	TestEqual(TEXT("Owner interaction distance moved into the Place asset"),
+		Place->StoryOwner.InteractionDistance, 440.f);
+	TestEqual(TEXT("Existing capture actor is linked back to the asset"),
+		Capture->PlaceDefinition.Get(), Place);
+	TestEqual(TEXT("Existing management actor is linked back to the asset"),
+		Management->TerritoryDefinition.Get(),
+		static_cast<UTerritoryDefinition*>(Place));
+	TestEqual(TEXT("Existing owner actor is linked back to the asset"),
+		Owner->PlaceDefinition.Get(), Place);
+
+	const FTerritoryStateConfig* MigratedClaimed =
+		Place->StateConfigs.Find(ETerritoryState::Claimed);
+	TestTrue(TEXT("Narrative state event is deep-copied into the asset"),
+		MigratedClaimed && MigratedClaimed->EntryEvents.Num() == 1
+		&& MigratedClaimed->EntryEvents[0] != SourceEvent
+		&& MigratedClaimed->EntryEvents[0]->GetOuter() == Place);
+
+	World->DestroyWorld(false);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_GuardPostDefinition,
 	"TerritoryFramework.Contract.GuardPostDefinition",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
