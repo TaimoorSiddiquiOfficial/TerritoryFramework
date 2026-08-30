@@ -6,7 +6,8 @@
 #include "Core/TerritoryTypes.h"
 #include "TerritoryOwnershipCondition.generated.h"
 
-UCLASS(BlueprintType, Blueprintable, EditInlineNew)
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Territory Ownership"))
 class TERRITORYFRAMEWORK_API UTerritoryOwnershipCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -17,7 +18,8 @@ public:
 	FGameplayTag TerritoryToCheck;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Condition",
-		meta = (Categories = "Narrative.Factions"))
+		meta = (Categories = "Narrative.Factions",
+			ToolTip="Optional exact owner. Leave empty to use the Narrative target pawn/controller faction when available; if the event has no faction context, any Captured / Claimed owner passes. Easy example: a locked Farm can require the Blacksmith to belong to whichever faction the player currently represents, without hardcoding Heroes."))
 	FGameplayTag RequiredOwner;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Condition")

@@ -7,7 +7,7 @@
 
 namespace
 {
-	ATerritoryVolume* ResolveEventTerritory(const UObject* Context,
+	ATerritoryVolume* ResolveEventTerritory(const UObject* Context, UWorld* World,
 		const FGameplayTag& TerritoryTag, const APawn* Target)
 	{
 		if (ATerritoryVolume* Containing = Context
@@ -18,7 +18,6 @@ namespace
 				return Containing;
 			}
 		}
-		UWorld* World = Context ? Context->GetWorld() : nullptr;
 		UTerritoryRegistrySubsystem* Registry = World
 			? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 		if (!Registry) return nullptr;
@@ -26,9 +25,8 @@ namespace
 		return Target ? Registry->GetTerritoryAtLocation(Target->GetActorLocation()) : nullptr;
 	}
 
-	UTerritoryControlSubsystem* ResolveControl(const UObject* Context)
+	UTerritoryControlSubsystem* ResolveControl(UWorld* World)
 	{
-		UWorld* World = Context ? Context->GetWorld() : nullptr;
 		return World && World->GetNetMode() != NM_Client
 			? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	}
@@ -44,10 +42,12 @@ void UTerritorySetStealthOverrideEvent::ExecuteEvent_Implementation(APawn* Targe
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
-	if (UTerritoryControlSubsystem* Control = ResolveControl(this))
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	if (UTerritoryControlSubsystem* Control = ResolveControl(World))
 	{
 		Control->SetStealthInfiltrationOverride(
-			ResolveEventTerritory(this, TerritoryToModify, Target),
+			ResolveEventTerritory(this, World, TerritoryToModify, Target),
 			bEnableInfiltration, bClearOverride);
 	}
 }
@@ -71,10 +71,12 @@ void UTerritoryRevealInfiltratorEvent::ExecuteEvent_Implementation(APawn* Target
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;
-	if (UTerritoryControlSubsystem* Control = ResolveControl(this))
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	if (UTerritoryControlSubsystem* Control = ResolveControl(World))
 	{
 		Control->ReportStealthEvidence(
-			ResolveEventTerritory(this, TerritoryToModify, Target), Target, nullptr,
+			ResolveEventTerritory(this, World, TerritoryToModify, Target), Target, nullptr,
 			ETerritoryStealthEvidence::Scripted, 1.f, Target->GetActorLocation(),
 			FVector::ZeroVector, true);
 	}
@@ -97,10 +99,12 @@ void UTerritoryClearExposureEvent::ExecuteEvent_Implementation(APawn* Target,
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;
-	if (UTerritoryControlSubsystem* Control = ResolveControl(this))
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	if (UTerritoryControlSubsystem* Control = ResolveControl(World))
 	{
 		Control->ClearInfiltratorExposure(
-			ResolveEventTerritory(this, TerritoryToModify, Target),
+			ResolveEventTerritory(this, World, TerritoryToModify, Target),
 			Target, bResetSuspicion);
 	}
 }
@@ -123,8 +127,11 @@ void UTerritoryReportDistractionEvent::ExecuteEvent_Implementation(APawn* Target
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;
-	ATerritoryVolume* Territory = ResolveEventTerritory(this, TerritoryToModify, Target);
-	if (UTerritoryControlSubsystem* Control = ResolveControl(this))
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	ATerritoryVolume* Territory = ResolveEventTerritory(
+		this, World, TerritoryToModify, Target);
+	if (UTerritoryControlSubsystem* Control = ResolveControl(World))
 	{
 		Control->ReportStealthEvidence(Territory, Target, nullptr,
 			ETerritoryStealthEvidence::ThrowableDistraction, 0.25f,

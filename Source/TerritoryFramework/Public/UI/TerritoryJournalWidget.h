@@ -44,6 +44,11 @@ public:
 		meta=(DisplayName="Show District In Territory Journal"))
 	void SelectDistrict(ATerritoryDistrict* District);
 
+	/** Select a stable directory row even when World Partition unloaded its actor. */
+	UFUNCTION(BlueprintCallable, Category="Territory|UI",
+		meta=(DisplayName="Show District Tag In Territory Journal"))
+	void SelectDistrictByTag(FGameplayTag DistrictTag);
+
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	FTerritoryDistrictOperationsView GetSelectedDistrictOperationsView() const;
 
@@ -368,6 +373,10 @@ protected:
 
 private:
 	TWeakObjectPtr<ATerritoryDistrict> SelectedDistrict;
+	UPROPERTY(Transient)
+	FGameplayTag SelectedDistrictTag;
+	UPROPERTY(Transient)
+	FTerritoryDistrictOperationsView CachedSelectedDistrictView;
 	TWeakObjectPtr<ATerritoryVolume> SelectedGarrisonTarget;
 	TWeakObjectPtr<UTerritoryPlayerManagementComponent> ManagementComponent;
 	TMap<FString, TWeakObjectPtr<ATerritoryVolume>> GarrisonTargetOptions;
@@ -427,6 +436,7 @@ private:
 	void SelectRelativeGarrisonTarget(int32 Direction);
 	void SubmitSelectedGuardTarget(int32 NewDesiredGuardCount);
 	void UpdateSelectedDistrict(ATerritoryDistrict* District);
+	void UpdateSelectedDistrictView(const FTerritoryDistrictOperationsView& View);
 	void RefreshSelectedHierarchyPanels(const FTerritoryDistrictOperationsView& View);
 	void SetSelectedDetailTab(int32 TabIndex);
 	void SetSelectedTerritoryInfoOpen(bool bOpen);
@@ -553,6 +563,9 @@ private:
 
 	UFUNCTION()
 	void HandleDistrictSelected(ATerritoryDistrict* District);
+
+	UFUNCTION()
+	void HandleDistrictTagSelected(FGameplayTag DistrictTag);
 
 	UFUNCTION()
 	void HandleGuardActionRequested(ATerritoryDistrict* District, int32 Delta);

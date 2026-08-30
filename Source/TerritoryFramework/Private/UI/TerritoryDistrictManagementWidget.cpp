@@ -422,8 +422,8 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	if (OwnerText) OwnerText->SetText(UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(OperationsView.OwnerFaction));
 	if (StateText)
 	{
-		const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-		StateText->SetText(StateEnum ? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(OperationsView.TerritoryState)) : FText::GetEmpty());
+		StateText->SetText(UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			OperationsView.Availability, OperationsView.TerritoryState));
 	}
 	if (GuardCountText)
 	{

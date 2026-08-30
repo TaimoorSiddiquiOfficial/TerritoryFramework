@@ -235,10 +235,45 @@ public:
 	// Debug — Toggle individual debug categories
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	/** Master debug toggle — enables all debug output when true */
+	/** Master gate for the debug system. Enable the individual categories you need below. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug",
-		meta = (DisplayName = "Enable All Debug Output"))
+		meta = (DisplayName = "Enable Debug System (Master Gate)"))
 	bool bEnableDebug = false;
+
+	/** Log Definition seed versus saved/runtime availability and hierarchy lock decisions. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Availability",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugAvailabilityHierarchy = false;
+
+	/** Log strategic scheduling, physical activation, waves, withdrawal, and resolution. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Counter Attacks",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugCounterAttacks = false;
+
+	/** Log production rule selection, inventory inputs, outputs, and block reasons. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Production",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugProduction = false;
+
+	/** Log Territory UI binding, read-model refreshes, visibility, and displayed status. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|UI",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugUI = false;
+
+	/** Log stealth exposure, suspicion, detection, shots, and distraction decisions. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Stealth",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugStealth = false;
+
+	/** Log replicated WorldState/directory publication and runtime actor hydration. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|World State",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugWorldState = false;
+
+	/** Log capture-point, story-owner, management-point, and player interaction decisions. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Interaction",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugInteraction = false;
 
 	/** Log territory registration/unregistration events */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Registry",
@@ -363,25 +398,38 @@ public:
 		meta = (EditCondition = "bEnableDebug", ClampMin = "0", ClampMax = "6", UIMin = "0", UIMax = "6"))
 	int32 DebugVerbosityLevel = 5;
 
-	/** Helper: check if a specific debug category is enabled */
+	/** Helper: master gate plus the configured log threshold. */
+	bool IsDebugLevelEnabled(int32 RequiredLevel = 5) const
+	{
+		return bEnableDebug && DebugVerbosityLevel >= RequiredLevel;
+	}
+
+	/** Helpers: a category checkbox never bypasses the master gate or verbosity. */
 	bool IsDebugEnabled() const { return bEnableDebug; }
-	bool ShouldDebugRegistry() const { return bEnableDebug && bDebugRegistry; }
-	bool ShouldDebugCapture() const { return bEnableDebug && bDebugCapture; }
-	bool ShouldDebugCaptureAttempts() const { return bEnableDebug && bDebugCaptureAttempts; }
-	bool ShouldDebugOwnership() const { return bEnableDebug && bDebugOwnershipChanges; }
-	bool ShouldDebugStateTransitions() const { return bEnableDebug && bDebugStateTransitions; }
-	bool ShouldDebugEconomy() const { return bEnableDebug && bDebugEconomyTicks; }
-	bool ShouldDebugTransactions() const { return bEnableDebug && bDebugTransactions; }
-	bool ShouldDebugGuards() const { return bEnableDebug && bDebugGuardSpawning; }
-	bool ShouldDebugGuardDeaths() const { return bEnableDebug && bDebugGuardDeaths; }
-	bool ShouldDebugDiplomacy() const { return bEnableDebug && bDebugDiplomacy; }
-	bool ShouldDebugAttitudes() const { return bEnableDebug && bDebugFactionAttitudes; }
-	bool ShouldDebugSaveLoad() const { return bEnableDebug && bDebugSaveLoad; }
-	bool ShouldDebugSpatial() const { return bEnableDebug && bDebugSpatialIndex; }
-	bool ShouldDebugMarkers() const { return bEnableDebug && bDebugMapMarkers; }
-	bool ShouldDebugTales() const { return bEnableDebug && bDebugTales; }
+	bool ShouldDebugAvailability() const { return IsDebugLevelEnabled() && bDebugAvailabilityHierarchy; }
+	bool ShouldDebugCounterAttacks() const { return IsDebugLevelEnabled() && bDebugCounterAttacks; }
+	bool ShouldDebugProduction() const { return IsDebugLevelEnabled() && bDebugProduction; }
+	bool ShouldDebugUI() const { return IsDebugLevelEnabled() && bDebugUI; }
+	bool ShouldDebugStealth() const { return IsDebugLevelEnabled() && bDebugStealth; }
+	bool ShouldDebugWorldState() const { return IsDebugLevelEnabled() && bDebugWorldState; }
+	bool ShouldDebugInteraction() const { return IsDebugLevelEnabled() && bDebugInteraction; }
+	bool ShouldDebugRegistry() const { return IsDebugLevelEnabled() && bDebugRegistry; }
+	bool ShouldDebugCapture() const { return IsDebugLevelEnabled() && bDebugCapture; }
+	bool ShouldDebugCaptureAttempts() const { return IsDebugLevelEnabled() && bDebugCaptureAttempts; }
+	bool ShouldDebugOwnership() const { return IsDebugLevelEnabled() && bDebugOwnershipChanges; }
+	bool ShouldDebugStateTransitions() const { return IsDebugLevelEnabled() && bDebugStateTransitions; }
+	bool ShouldDebugEconomy() const { return IsDebugLevelEnabled() && bDebugEconomyTicks; }
+	bool ShouldDebugTransactions() const { return IsDebugLevelEnabled() && bDebugTransactions; }
+	bool ShouldDebugGuards() const { return IsDebugLevelEnabled() && bDebugGuardSpawning; }
+	bool ShouldDebugGuardDeaths() const { return IsDebugLevelEnabled() && bDebugGuardDeaths; }
+	bool ShouldDebugDiplomacy() const { return IsDebugLevelEnabled() && bDebugDiplomacy; }
+	bool ShouldDebugAttitudes() const { return IsDebugLevelEnabled() && bDebugFactionAttitudes; }
+	bool ShouldDebugSaveLoad() const { return IsDebugLevelEnabled() && bDebugSaveLoad; }
+	bool ShouldDebugSpatial() const { return IsDebugLevelEnabled() && bDebugSpatialIndex; }
+	bool ShouldDebugMarkers() const { return IsDebugLevelEnabled() && bDebugMapMarkers; }
+	bool ShouldDebugTales() const { return IsDebugLevelEnabled() && bDebugTales; }
 	UFUNCTION(BlueprintPure, Category = "Territory|Debug")
-	bool ShouldDebugBT() const { return bEnableDebug && bDebugBT; }
+	bool ShouldDebugBT() const { return IsDebugLevelEnabled() && bDebugBT; }
 	UFUNCTION(BlueprintPure, Category = "Territory|Debug")
-	bool ShouldDebugCombat() const { return bEnableDebug && bDebugCombat; }
+	bool ShouldDebugCombat() const { return IsDebugLevelEnabled() && bDebugCombat; }
 };

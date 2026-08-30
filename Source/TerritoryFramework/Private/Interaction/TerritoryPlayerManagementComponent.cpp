@@ -202,6 +202,7 @@ void UTerritoryPlayerManagementComponent::UnbindLiveEventSources()
 		}
 	}
 	ObservedTerritoryStates.Empty();
+	ObservedTerritoryAvailability.Empty();
 	ObservedTerritoryCapabilities.Empty();
 }
 
@@ -213,11 +214,16 @@ void UTerritoryPlayerManagementComponent::BindTerritoryLiveEvents(
 		this, &UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged);
 	Territory->OnTerritoryStateChangedDelegate.RemoveDynamic(
 		this, &UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged);
+	Territory->OnTerritoryAvailabilityChanged.RemoveDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryAvailabilityChanged);
 	Territory->OnTerritoryOwnershipChanged.AddDynamic(
 		this, &UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged);
 	Territory->OnTerritoryStateChangedDelegate.AddDynamic(
 		this, &UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged);
+	Territory->OnTerritoryAvailabilityChanged.AddDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryAvailabilityChanged);
 	ObservedTerritoryStates.Add(Territory, Territory->GetTerritoryState());
+	ObservedTerritoryAvailability.Add(Territory, Territory->GetTerritoryAvailability());
 	ObservedTerritoryCapabilities.Add(Territory,
 		Territory->GetActiveCommandCapabilities());
 }
@@ -230,7 +236,10 @@ void UTerritoryPlayerManagementComponent::UnbindTerritoryLiveEvents(
 		this, &UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged);
 	Territory->OnTerritoryStateChangedDelegate.RemoveDynamic(
 		this, &UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged);
+	Territory->OnTerritoryAvailabilityChanged.RemoveDynamic(
+		this, &UTerritoryPlayerManagementComponent::HandleTerritoryAvailabilityChanged);
 	ObservedTerritoryStates.Remove(Territory);
+	ObservedTerritoryAvailability.Remove(Territory);
 	ObservedTerritoryCapabilities.Remove(Territory);
 }
 
@@ -701,7 +710,7 @@ void UTerritoryPlayerManagementComponent::AddCommandCapabilityChanges(
 void UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged(
 	ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
-	if (!Territory || Territory->GetTerritoryState() == ETerritoryState::Locked) return;
+	if (!Territory || !Territory->IsAvailableForGameplay()) return;
 	const FGameplayTag ViewerFaction = ResolveViewerFaction();
 	const FText Name = Territory->GetTerritoryDisplayName();
 	const FGameplayTagContainer PreviousCapabilities =
@@ -755,15 +764,7 @@ void UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged(
 	ObservedTerritoryStates.Add(Territory, NewState);
 	ObservedTerritoryCapabilities.Add(Territory, CurrentCapabilities);
 	const FText Name = Territory->GetTerritoryDisplayName();
-	if (PreviousState == ETerritoryState::Locked && NewState != ETerritoryState::Locked)
-	{
-		AddLiveEvent(ETerritoryLiveEventType::Unlocked, Territory->GetTerritoryTag(),
-			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "UnlockedHeadline", "{0} unlocked"), Name),
-			NSLOCTEXT("TerritoryLiveEvents", "UnlockedDetail", "New Territory intel is available. Open Operations or set a waypoint."), true, 30.f,
-			ETerritoryIntelligenceCategory::Control,
-			ETerritoryIntelligenceSeverity::Information);
-	}
-	else if (NewState == ETerritoryState::Contested)
+	if (NewState == ETerritoryState::Contested)
 	{
 		AddLiveEvent(ETerritoryLiveEventType::Contested, Territory->GetTerritoryTag(),
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "ContestedHeadline", "{0} is contested"), Name),
@@ -784,6 +785,26 @@ void UTerritoryPlayerManagementComponent::HandleTerritoryStateChanged(
 	{
 		AddCommandCapabilityChanges(Territory, PreviousCapabilities,
 			CurrentCapabilities, false, false);
+	}
+}
+
+void UTerritoryPlayerManagementComponent::HandleTerritoryAvailabilityChanged(
+	ATerritoryVolume* Territory, ETerritoryAvailability NewAvailability)
+{
+	if (!Territory) return;
+	const ETerritoryAvailability PreviousAvailability =
+		ObservedTerritoryAvailability.FindRef(Territory);
+	ObservedTerritoryAvailability.Add(Territory, NewAvailability);
+	if (PreviousAvailability == ETerritoryAvailability::Locked
+		&& NewAvailability == ETerritoryAvailability::Unlocked)
+	{
+		AddLiveEvent(ETerritoryLiveEventType::Unlocked, Territory->GetTerritoryTag(),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "UnlockedHeadline", "{0} unlocked"),
+				Territory->GetTerritoryDisplayName()),
+			NSLOCTEXT("TerritoryLiveEvents", "UnlockedDetail",
+				"New Territory intel is available. Open Operations or set a Place waypoint."),
+			true, 30.f, ETerritoryIntelligenceCategory::Control,
+			ETerritoryIntelligenceSeverity::Information);
 	}
 }
 
@@ -1519,7 +1540,7 @@ bool UTerritoryPlayerManagementComponent::CanEspionageDistrict(
 			"That District is not currently available for reconnaissance.");
 		return false;
 	}
-	if (District->GetTerritoryState() == ETerritoryState::Locked
+	if (!District->IsAvailableForGameplay()
 		|| !UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(this, District))
 	{
 		OutFailureReason = NSLOCTEXT("TerritoryEspionage", "TargetLocked",

@@ -15,6 +15,7 @@
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryGuardSpawnValidation.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryWorldState.h"
@@ -27,6 +28,7 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TerritoryQuestRules.h"
 #include "AI/NarrativeNPCController.h"
@@ -1127,9 +1129,12 @@ bool FTFCounterAttackWorldPartitionTargetRebind::RunTest(const FString& Paramete
 		World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
 	UTerritoryRegistrySubsystem* Registry =
 		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	UTerritoryDiplomacySubsystem* Diplomacy =
+		World->GetSubsystem<UTerritoryDiplomacySubsystem>();
 	TestNotNull(TEXT("Counterattack authority exists"), Counter);
 	TestNotNull(TEXT("Registry authority exists"), Registry);
-	if (!Counter || !Registry)
+	TestNotNull(TEXT("Diplomacy authority exists"), Diplomacy);
+	if (!Counter || !Registry || !Diplomacy)
 	{
 		World->DestroyWorld(false);
 		return false;
@@ -1137,7 +1142,7 @@ bool FTFCounterAttackWorldPartitionTargetRebind::RunTest(const FString& Paramete
 
 	const FGuid TargetGUID = FGuid::NewGuid();
 	const FGameplayTag TargetTag = FGameplayTag::RequestGameplayTag(
-		TEXT("Territory.HavenReach.MarketSquare"), false);
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
 	const FGameplayTag Defenders = FGameplayTag::RequestGameplayTag(
 		TEXT("Narrative.Factions.Heroes"), false);
 	FTerritoryAssaultRecord Saved;
@@ -1152,6 +1157,40 @@ bool FTFCounterAttackWorldPartitionTargetRebind::RunTest(const FString& Paramete
 	Saved.DecisionSeed = 77123;
 	Saved.PlannedForce = 5;
 	Saved.PendingReserveForce = 5;
+
+	// Streaming now immediately revalidates a durable assault, so the fixture must
+	// carry the same valid physical force configuration as a real Definition asset.
+	UTerritoryCounterAttackProfile* Profile =
+		NewObject<UTerritoryCounterAttackProfile>(World);
+	UNPCDefinition* AttackerDefinition = NewObject<UNPCDefinition>(Profile);
+	AttackerDefinition->CharacterID = TEXT("TF_Streamed_Assault_Character");
+	AttackerDefinition->NPCID = TEXT("TF_Streamed_Assault_NPC");
+	AttackerDefinition->bAllowMultipleInstances = true;
+	AttackerDefinition->NPCClassPath = ATerritoryAssaultCharacter::StaticClass();
+	FTerritoryFactionAssaultConfig& Force = Profile->FactionForces.AddDefaulted_GetRef();
+	Force.Faction = Saved.AttackingFaction;
+	Force.AttackerDefinition = AttackerDefinition;
+	Force.PlannedForce = Saved.PlannedForce;
+	Force.WaveSize = Saved.PlannedForce;
+	Force.StagingRequirement = ETerritoryAssaultStagingRequirement::None;
+	FObjectProperty* ProfileProperty = FindFProperty<FObjectProperty>(
+		ATerritoryVolume::StaticClass(), TEXT("CounterAttackProfile"));
+	TestNotNull(TEXT("Counterattack profile property is reflected"), ProfileProperty);
+	if (!ProfileProperty)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	auto ApplyProfile = [ProfileProperty, Profile](ATerritoryVolume* Territory)
+	{
+		ProfileProperty->SetObjectPropertyValue_InContainer(Territory, Profile);
+	};
+
+	// A restored assault may be advanced immediately when its Place streams in.
+	// Keep the fixture valid under the runtime rules: physical counterattacks target
+	// Places and the exact attacker/defender pair must still be at War.
+	Diplomacy->SetDiplomacyState(Saved.AttackingFaction, Defenders,
+		EDiplomacyState::War);
 	Counter->RestorePersistentState({Saved});
 
 	TestNull(TEXT("An unloaded target resolves to no live actor"),
@@ -1161,11 +1200,12 @@ bool FTFCounterAttackWorldPartitionTargetRebind::RunTest(const FString& Paramete
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.ObjectFlags |= RF_Transient;
-	ATerritoryDistrict* ReusedTagInstance = World->SpawnActor<ATerritoryDistrict>(
-		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* ReusedTagInstance = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
 	TestNotNull(TEXT("Unrelated replacement using the old tag is created"), ReusedTagInstance);
 	if (ReusedTagInstance)
 	{
+		ApplyProfile(ReusedTagInstance);
 		ReusedTagInstance->TerritoryGUID = FGuid::NewGuid();
 		ReusedTagInstance->TerritoryTag = TargetTag;
 		FTerritoryOwnershipData ClaimedByDefenders;
@@ -1202,14 +1242,15 @@ bool FTFCounterAttackWorldPartitionTargetRebind::RunTest(const FString& Paramete
 		Registry->UnregisterTerritory(ReusedTagInstance);
 	}
 
-	ATerritoryDistrict* FirstInstance = World->SpawnActor<ATerritoryDistrict>(
-		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* FirstInstance = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
 	TestNotNull(TEXT("First streamed target instance created"), FirstInstance);
 	if (!FirstInstance)
 	{
 		World->DestroyWorld(false);
 		return false;
 	}
+	ApplyProfile(FirstInstance);
 	FirstInstance->TerritoryGUID = TargetGUID;
 	FirstInstance->TerritoryTag = TargetTag;
 	FTerritoryOwnershipData Claimed;
@@ -1231,11 +1272,12 @@ bool FTFCounterAttackWorldPartitionTargetRebind::RunTest(const FString& Paramete
 	TestTrue(TEXT("A physical participant accepts the matching stable target"),
 		MatchingParticipant->MatchesTargetTerritory(FirstInstance));
 
-	ATerritoryDistrict* RenamedIdentity = World->SpawnActor<ATerritoryDistrict>(
-		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* RenamedIdentity = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
 	TestNotNull(TEXT("GUID-preserving renamed target instance is created"), RenamedIdentity);
 	if (RenamedIdentity)
 	{
+		ApplyProfile(RenamedIdentity);
 		const FGameplayTag RenamedTag = FGameplayTag::RequestGameplayTag(
 			TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
 		RenamedIdentity->TerritoryGUID = TargetGUID;
@@ -1258,11 +1300,12 @@ bool FTFCounterAttackWorldPartitionTargetRebind::RunTest(const FString& Paramete
 	TestEqual(TEXT("Stream-out does not reroll the decision seed"),
 		DuringStreamOut.DecisionSeed, Saved.DecisionSeed);
 
-	ATerritoryDistrict* ReloadedInstance = World->SpawnActor<ATerritoryDistrict>(
-		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* ReloadedInstance = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
 	TestNotNull(TEXT("Reloaded target instance created"), ReloadedInstance);
 	if (ReloadedInstance)
 	{
+		ApplyProfile(ReloadedInstance);
 		ReloadedInstance->TerritoryGUID = TargetGUID;
 		ReloadedInstance->TerritoryTag = TargetTag;
 		ReloadedInstance->CommitOwnershipData(Claimed);
@@ -1386,19 +1429,32 @@ bool FTFPatrolOverlapAndDefenceFrontRegression::RunTest(const FString& Parameter
 		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
 	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
 		TEXT("Narrative.Factions.Bandits"), false);
-	City->TerritoryTag = CityTag;
-	City->TerritoryGUID = FGuid::NewGuid();
-	District->TerritoryTag = DistrictTag;
-	District->ParentTerritoryTag = CityTag;
-	District->TerritoryGUID = FGuid::NewGuid();
-	Property->TerritoryTag = PropertyTag;
-	Property->ParentTerritoryTag = DistrictTag;
-	Property->TerritoryGUID = FGuid::NewGuid();
+	UTerritoryCityDefinition* CityDefinition = NewObject<UTerritoryCityDefinition>();
+	UTerritoryDistrictDefinition* DistrictDefinition = NewObject<UTerritoryDistrictDefinition>();
+	UTerritoryPlaceDefinition* PlaceDefinition = NewObject<UTerritoryPlaceDefinition>();
+	CityDefinition->TerritoryTag = CityTag;
+	CityDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	CityDefinition->TerritoryActorClass = ATerritoryCity::StaticClass();
+	DistrictDefinition->TerritoryTag = DistrictTag;
+	DistrictDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	DistrictDefinition->TerritoryActorClass = ATerritoryDistrict::StaticClass();
+	PlaceDefinition->TerritoryTag = PropertyTag;
+	PlaceDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	PlaceDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	DistrictDefinition->Places.Add(PlaceDefinition);
+	CityDefinition->Districts.Add(DistrictDefinition);
+	CityDefinition->RefreshHierarchyLinks();
+	TestTrue(TEXT("City fixture reads its hierarchy Definition"),
+		CityDefinition->ApplyToTerritory(City));
+	TestTrue(TEXT("District fixture reads its hierarchy Definition"),
+		DistrictDefinition->ApplyToTerritory(District));
+	TestTrue(TEXT("Place fixture reads its hierarchy Definition"),
+		PlaceDefinition->ApplyToTerritory(Property));
 	FTerritoryOwnershipData Claimed;
 	Claimed.OwningFaction = Bandits;
 	Claimed.State = ETerritoryState::Claimed;
-	District->CommitOwnershipData(Claimed);
 	Property->CommitOwnershipData(Claimed);
+	District->SetDerivedControl(Bandits, ETerritoryState::Claimed);
 
 	UTerritoryRegistrySubsystem* Registry =
 		World->GetSubsystem<UTerritoryRegistrySubsystem>();
@@ -1415,9 +1471,14 @@ bool FTFPatrolOverlapAndDefenceFrontRegression::RunTest(const FString& Parameter
 	TestEqual(TEXT("Property registers"), Registry->RegisterTerritory(Property),
 		ETerritoryRegistrationResult::Success);
 
-	const TArray<ATerritoryVolume*> PlacementCandidates = {City, District};
-	TestTrue(TEXT("A patrol-node District hit outranks an actor-origin City hit"),
-		ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(PlacementCandidates) == District);
+	const TArray<ATerritoryVolume*> AggregatePlacementCandidates = {City, District};
+	TestNull(TEXT("Aggregate City/District overlaps cannot own a physical guard post"),
+		ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(
+			AggregatePlacementCandidates));
+	const TArray<ATerritoryVolume*> PlacePlacementCandidates = {City, District, Property};
+	TestTrue(TEXT("A Place overlap owns its guard post even inside parent bounds"),
+		ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(
+			PlacePlacementCandidates) == Property);
 	AddExpectedError(TEXT("has no AbilitySystemComponent"),
 		EAutomationExpectedErrorFlags::Contains, 1);
 	Property->RegisterDefender(ChildGuard);
@@ -1427,13 +1488,18 @@ bool FTFPatrolOverlapAndDefenceFrontRegression::RunTest(const FString& Parameter
 	PatrolPost->PatrolRoute.Add(PatrolNode);
 	const TArray<ATerritoryVolume*> DefenceFront =
 		TerritoryAssaultTargetPolicy::BuildDefenceFront(District);
-	TestTrue(TEXT("District physical defence front includes its child Property"),
-		DefenceFront.Contains(Property));
-	TestTrue(TEXT("A child-Property guard is a physical District assault target"),
-		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(District).Contains(ChildGuard));
-	TestTrue(TEXT("A patrol node overlapping the District becomes a shared assault objective"),
-		TerritoryAssaultTargetPolicy::BuildObjectiveLocations(District, false)
-			.Contains(PatrolNode.Location));
+	TestTrue(TEXT("Aggregate District has no physical defence front"),
+		DefenceFront.IsEmpty());
+	TestTrue(TEXT("Aggregate District cannot collect child guards as a direct assault target"),
+		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(District).IsEmpty());
+	TestTrue(TEXT("Aggregate District has no physical assault objective"),
+		TerritoryAssaultTargetPolicy::BuildObjectiveLocations(District, false).IsEmpty());
+	const TArray<ATerritoryVolume*> PlaceDefenceFront =
+		TerritoryAssaultTargetPolicy::BuildDefenceFront(Property);
+	TestTrue(TEXT("A physical Place remains its own assault target"),
+		PlaceDefenceFront.Contains(Property));
+	TestTrue(TEXT("The Place guard remains a physical Place defender"),
+		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Property).Contains(ChildGuard));
 	UTerritoryCounterAttackSubsystem* Counter =
 		World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
 	TestNotNull(TEXT("Counterattack authority exists"), Counter);
@@ -1441,17 +1507,23 @@ bool FTFPatrolOverlapAndDefenceFrontRegression::RunTest(const FString& Parameter
 	{
 		TestEqual(TEXT("One securely Claimed District grants one staging holding"),
 			Counter->GetSecureDistrictCountForFaction(Bandits), 1);
-		FTerritoryOwnershipData Locked = Claimed;
-		Locked.State = ETerritoryState::Locked;
-		District->CommitOwnershipData(Locked);
-		TestEqual(TEXT("A story-Locked owned District remains a staging holding"),
-			Counter->GetSecureDistrictCountForFaction(Bandits), 1);
+		TestTrue(TEXT("District availability can be locked without changing its political state"),
+			District->LockTerritoryWithContext(FText::FromString(TEXT("Story gate")),
+				FTerritoryTransitionContext()));
+		TestEqual(TEXT("Locking availability preserves the Claimed control state"),
+			District->GetTerritoryState(), ETerritoryState::Claimed);
+		TestEqual(TEXT("A story-Locked District is not a secure staging holding"),
+			Counter->GetSecureDistrictCountForFaction(Bandits), 0);
+		TestTrue(TEXT("Forced unlock restores strategic availability"),
+			District->TryUnlockWithContext(FTerritoryTransitionContext(), true));
 		FTerritoryOwnershipData Contested = Claimed;
 		Contested.State = ETerritoryState::Contested;
-		District->CommitOwnershipData(Contested);
+		District->SetDerivedControl(FGameplayTag(), ETerritoryState::Contested);
 		TestEqual(TEXT("A Contested District is not a secure staging holding"),
 			Counter->GetSecureDistrictCountForFaction(Bandits), 0);
-		District->CommitOwnershipData(Locked);
+		TestTrue(TEXT("Contested District availability can also be story-locked"),
+			District->LockTerritoryWithContext(FText::FromString(TEXT("Story gate")),
+				FTerritoryTransitionContext()));
 		Registry->UnregisterTerritory(District);
 		TestEqual(TEXT("A streamed-out District cannot grant phantom staging power"),
 			Counter->GetSecureDistrictCountForFaction(Bandits), 0);

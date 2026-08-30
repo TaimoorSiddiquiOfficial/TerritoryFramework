@@ -19,6 +19,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"UnrealEd",
 			"Slate",
 			"SlateCore",
+			"PropertyEditor",
 			"BlueprintGraph",
 			"DataValidation",
 			"GameplayTags",

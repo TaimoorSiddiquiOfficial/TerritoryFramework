@@ -603,8 +603,18 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			&& Cast<UTerritoryOwnershipTransitionCondition>(
 				UnlockEvent->Conditions[0]) != nullptr);
 	}
-	TestEqual(TEXT("Farm remains authored to start Locked in every new campaign"),
-		Farm->ResolveInitialTerritoryState(), ETerritoryState::Locked);
+	TestEqual(TEXT("Farm remains authored to start unavailable in every new campaign"),
+		Farm->ResolveInitialTerritoryAvailability(), ETerritoryAvailability::Locked);
+	if (FarmDefinition)
+	{
+		TestEqual(TEXT("Farm Definition explicitly seeds Locked availability"),
+			FarmDefinition->InitialAvailability, ETerritoryAvailability::Locked);
+	}
+	if (BlacksmithDefinition)
+	{
+		TestEqual(TEXT("Blacksmith remains available so its capture can unlock Farm"),
+			BlacksmithDefinition->InitialAvailability, ETerritoryAvailability::Unlocked);
+	}
 
 	const FTerritoryStateConfig* LockedConfig =
 		Farm->GetStateConfigs().Find(ETerritoryState::Locked);

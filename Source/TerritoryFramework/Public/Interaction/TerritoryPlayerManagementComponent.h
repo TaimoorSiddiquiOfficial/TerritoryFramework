@@ -190,6 +190,7 @@ private:
 	TArray<FTerritoryLiveEvent> LiveEvents;
 
 	TMap<TWeakObjectPtr<ATerritoryVolume>, ETerritoryState> ObservedTerritoryStates;
+	TMap<TWeakObjectPtr<ATerritoryVolume>, ETerritoryAvailability> ObservedTerritoryAvailability;
 	TMap<TWeakObjectPtr<ATerritoryVolume>, FGameplayTagContainer> ObservedTerritoryCapabilities;
 	TWeakObjectPtr<ATerritoryProperty> LastPlayerPlace;
 	FTimerHandle PlaceDiscoveryTimer;
@@ -232,6 +233,10 @@ private:
 
 	UFUNCTION()
 	void HandleTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
+
+	UFUNCTION()
+	void HandleTerritoryAvailabilityChanged(ATerritoryVolume* Territory,
+		ETerritoryAvailability NewAvailability);
 
 	UFUNCTION()
 	void HandleTransactionRecorded(const FTerritoryTransaction& Transaction);

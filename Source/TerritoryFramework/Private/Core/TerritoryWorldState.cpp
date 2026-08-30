@@ -3,6 +3,8 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
@@ -11,13 +13,83 @@
 #include "SaveSystemStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "TimerManager.h"
+
+namespace
+{
+	ETerritoryHierarchyLevel GetDefinitionHierarchyLevel(
+		const UTerritoryDefinition* Definition)
+	{
+		if (Definition && Definition->IsA<UTerritoryCityDefinition>())
+		{
+			return ETerritoryHierarchyLevel::City;
+		}
+		if (Definition && Definition->IsA<UTerritoryDistrictDefinition>())
+		{
+			return ETerritoryHierarchyLevel::District;
+		}
+		return ETerritoryHierarchyLevel::Place;
+	}
+
+	int32 GetDefinitionChildCount(const UTerritoryDefinition* Definition)
+	{
+		if (const UTerritoryCityDefinition* City =
+			Cast<UTerritoryCityDefinition>(Definition))
+		{
+			return City->Districts.Num();
+		}
+		if (const UTerritoryDistrictDefinition* District =
+			Cast<UTerritoryDistrictDefinition>(Definition))
+		{
+			return District->Places.Num();
+		}
+		return 0;
+	}
+
+	bool MatchesCaptureIdentity(const FReplicatedCaptureSummary& Existing,
+		const FGameplayTag& TerritoryTag, const FGuid& TerritoryGUID)
+	{
+		// Invalid GameplayTags compare equal. They must never collapse two rows that
+		// are intentionally identified by different stable GUIDs.
+		return (TerritoryTag.IsValid() && Existing.TerritoryTag == TerritoryTag)
+			|| (TerritoryGUID.IsValid()
+				&& Existing.TerritoryGUID == TerritoryGUID);
+	}
+
+	void InitializeDefinitionPoliticalState(const UTerritoryDefinition* Definition,
+		FReplicatedCaptureSummary& Summary)
+	{
+		if (!Definition) return;
+		Summary.Availability = Definition->InitialState == ETerritoryInitialState::Locked
+			? ETerritoryAvailability::Locked : Definition->InitialAvailability;
+		const bool bStartsClaimed = Definition->InitialOwningFaction.IsValid()
+			&& Definition->InitialState != ETerritoryInitialState::Unclaimed;
+		Summary.CurrentOwner = bStartsClaimed
+			? Definition->InitialOwningFaction : FGameplayTag();
+		Summary.State = bStartsClaimed
+			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+		Summary.ControlProgress = bStartsClaimed ? 1.f : 0.f;
+	}
+}
 
 ATerritoryWorldState::ATerritoryWorldState()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	bAlwaysRelevant = true;
+}
+
+ATerritoryWorldState* ATerritoryWorldState::FindTerritoryWorldState(
+	const UObject* WorldContextObject)
+{
+	UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+	if (!World) return nullptr;
+	for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
+	{
+		return *It;
+	}
+	return nullptr;
 }
 
 void ATerritoryWorldState::BeginPlay()
@@ -40,6 +112,7 @@ void ATerritoryWorldState::BeginPlay()
 		// P0-02: Subscribe to subsystem delegates for live replication
 		// P1-10: Always subscribe regardless of GUID — live replication works without save
 		SubscribeToLiveUpdates();
+		RefreshStrategicDirectory();
 
 		// Actor BeginPlay order is not guaranteed. Seed summaries for Territory actors
 		// that registered before this WorldState; territories that start later publish
@@ -50,14 +123,7 @@ void ATerritoryWorldState::BeginPlay()
 			for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
 			{
 				if (!Territory) continue;
-				FReplicatedCaptureSummary Summary;
-				Summary.TerritoryTag = Territory->GetTerritoryTag();
-				Summary.TerritoryGUID = Territory->GetTerritoryGUID();
-				Summary.CurrentOwner = Territory->GetOwningFaction();
-				Summary.ContestingFaction = Territory->GetContestingFaction_Implementation();
-				Summary.ControlProgress = Territory->GetControlProgress();
-				Summary.State = Territory->GetTerritoryState();
-				SetCaptureSummary(Summary);
+				PublishTerritorySummary(Territory);
 			}
 		}
 	}
@@ -344,22 +410,229 @@ int32 ATerritoryWorldState::GetReputation(const FGameplayTag& Faction) const
 
 void ATerritoryWorldState::SetCaptureSummary(const FReplicatedCaptureSummary& Summary)
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || (!Summary.TerritoryTag.IsValid()
+		&& !Summary.TerritoryGUID.IsValid())) return;
 
 	for (FReplicatedCaptureSummary& Entry : ReplicatedCaptureSummaries)
 	{
-		if (Entry.TerritoryTag == Summary.TerritoryTag
-			|| (Summary.TerritoryGUID.IsValid()
-				&& Entry.TerritoryGUID == Summary.TerritoryGUID))
+		if (MatchesCaptureIdentity(Entry, Summary.TerritoryTag,
+			Summary.TerritoryGUID))
 		{
-			Entry = Summary;
+			const bool bPoliticalChange = Entry.Availability != Summary.Availability
+				|| Entry.State != Summary.State
+				|| Entry.CurrentOwner != Summary.CurrentOwner
+				|| Entry.ContestingFaction != Summary.ContestingFaction;
+			FReplicatedCaptureSummary Merged = Summary;
+			// Runtime-only publishers from older integrations may omit directory
+			// metadata. Never erase Definition identity that is already replicated.
+			if (!Merged.bDefinitionBacked && Entry.bDefinitionBacked)
+			{
+				Merged.DisplayName = Entry.DisplayName;
+				Merged.HierarchyLevel = Entry.HierarchyLevel;
+				Merged.TotalChildren = Entry.TotalChildren;
+				Merged.bDefinitionBacked = true;
+			}
+			Entry = MoveTemp(Merged);
+			if (bPoliticalChange)
+			{
+				if (const UTerritoryDeveloperSettings* Settings =
+					GetDefault<UTerritoryDeveloperSettings>();
+					Settings && Settings->ShouldDebugWorldState())
+				{
+					UE_LOG(LogTerritory, Log,
+						TEXT("[WorldState] updated %s availability=%d state=%d owner=%s contesting=%s"),
+						*Entry.TerritoryTag.ToString(),
+						static_cast<int32>(Entry.Availability),
+						static_cast<int32>(Entry.State),
+						*Entry.CurrentOwner.ToString(),
+						*Entry.ContestingFaction.ToString());
+				}
+			}
 			ForceNetUpdate();
 			return;
 		}
 	}
 
 	ReplicatedCaptureSummaries.Add(Summary);
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugWorldState())
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("[WorldState] registered %s availability=%d state=%d owner=%s definition=%d"),
+			*Summary.TerritoryTag.ToString(), static_cast<int32>(Summary.Availability),
+			static_cast<int32>(Summary.State), *Summary.CurrentOwner.ToString(),
+			Summary.bDefinitionBacked ? 1 : 0);
+	}
 	ForceNetUpdate();
+}
+
+void ATerritoryWorldState::PublishTerritorySummary(
+	const ATerritoryVolume* Territory)
+{
+	if (!HasAuthority() || !IsValid(Territory)) return;
+
+	const UTerritoryDefinition* Definition = Territory->GetTerritoryDefinition();
+	if (Definition)
+	{
+		RegisterDefinitionHierarchy(Definition);
+	}
+
+	FReplicatedCaptureSummary Summary;
+	Summary.TerritoryTag = Territory->GetTerritoryTag();
+	Summary.TerritoryGUID = Territory->GetTerritoryGUID();
+	Summary.ParentTerritoryTag = Territory->GetParentTerritoryTag();
+	Summary.DisplayName = Territory->GetTerritoryDisplayName();
+	Summary.CurrentOwner = Territory->GetOwningFaction();
+	Summary.ContestingFaction = Territory->GetContestingFaction_Implementation();
+	Summary.ControlProgress = Territory->GetControlProgress();
+	Summary.State = Territory->GetTerritoryState();
+	Summary.Availability = Territory->GetTerritoryAvailability();
+	Summary.bDefinitionBacked = Definition != nullptr;
+	if (Definition)
+	{
+		Summary.HierarchyLevel = GetDefinitionHierarchyLevel(Definition);
+		Summary.TotalChildren = GetDefinitionChildCount(Definition);
+	}
+	else if (Territory->IsA<ATerritoryCity>())
+	{
+		Summary.HierarchyLevel = ETerritoryHierarchyLevel::City;
+		Summary.TotalChildren = CastChecked<ATerritoryCity>(Territory)->GetDistricts().Num();
+	}
+	else if (Territory->IsA<ATerritoryDistrict>())
+	{
+		Summary.HierarchyLevel = ETerritoryHierarchyLevel::District;
+		Summary.TotalChildren = CastChecked<ATerritoryDistrict>(Territory)->GetProperties().Num();
+	}
+	SetCaptureSummary(Summary);
+}
+
+void ATerritoryWorldState::RegisterDefinitionHierarchy(
+	const UTerritoryDefinition* Definition)
+{
+	if (!HasAuthority() || !Definition) return;
+
+	TSet<const UTerritoryDefinition*> Visited;
+	TFunction<void(const UTerritoryDefinition*)> RegisterRecursive;
+	RegisterRecursive = [this, &Visited, &RegisterRecursive](
+		const UTerritoryDefinition* Current)
+	{
+		if (!Current || Visited.Contains(Current)) return;
+		Visited.Add(Current);
+
+		TArray<const UTerritoryDefinition*> Children;
+		if (const UTerritoryCityDefinition* City =
+			Cast<UTerritoryCityDefinition>(Current))
+		{
+			for (const UTerritoryDistrictDefinition* District : City->Districts)
+			{
+				if (District) Children.Add(District);
+			}
+		}
+		else if (const UTerritoryDistrictDefinition* District =
+			Cast<UTerritoryDistrictDefinition>(Current))
+		{
+			for (const UTerritoryPlaceDefinition* Place : District->Places)
+			{
+				if (Place) Children.Add(Place);
+			}
+		}
+		for (const UTerritoryDefinition* Child : Children)
+		{
+			RegisterRecursive(Child);
+		}
+
+		FReplicatedCaptureSummary Seed;
+		Seed.TerritoryTag = Current->TerritoryTag;
+		Seed.TerritoryGUID = Current->StableTerritoryGUID;
+		Seed.ParentTerritoryTag = Current->DerivedParentTerritoryTag;
+		Seed.DisplayName = Current->DisplayName;
+		Seed.HierarchyLevel = GetDefinitionHierarchyLevel(Current);
+		Seed.TotalChildren = Children.Num();
+		Seed.bDefinitionBacked = true;
+		InitializeDefinitionPoliticalState(Current, Seed);
+
+		if (!Children.IsEmpty())
+		{
+			FGameplayTag CommonOwner;
+			bool bAllSecure = true;
+			bool bAnyPoliticalControl = false;
+			for (const UTerritoryDefinition* Child : Children)
+			{
+				const FReplicatedCaptureSummary ChildSummary =
+					GetCaptureSummary(Child->TerritoryTag);
+				if (ChildSummary.TerritoryTag != Child->TerritoryTag)
+				{
+					bAllSecure = false;
+					continue;
+				}
+				bAnyPoliticalControl |= ChildSummary.CurrentOwner.IsValid()
+					|| ChildSummary.State == ETerritoryState::Contested;
+				if (ChildSummary.Availability != ETerritoryAvailability::Unlocked
+					|| ChildSummary.State != ETerritoryState::Claimed
+					|| !ChildSummary.CurrentOwner.IsValid())
+				{
+					bAllSecure = false;
+					continue;
+				}
+				if (!CommonOwner.IsValid()) CommonOwner = ChildSummary.CurrentOwner;
+				else if (CommonOwner != ChildSummary.CurrentOwner) bAllSecure = false;
+			}
+			Seed.CurrentOwner = bAllSecure ? CommonOwner : FGameplayTag();
+			Seed.State = bAllSecure && CommonOwner.IsValid()
+				? ETerritoryState::Claimed
+				: bAnyPoliticalControl ? ETerritoryState::Contested
+					: ETerritoryState::Unclaimed;
+			Seed.ControlProgress = Seed.State == ETerritoryState::Claimed ? 1.f : 0.f;
+		}
+
+		FReplicatedCaptureSummary* Existing = ReplicatedCaptureSummaries.FindByPredicate(
+			[&Seed](const FReplicatedCaptureSummary& Entry)
+			{
+				return MatchesCaptureIdentity(Entry, Seed.TerritoryTag,
+					Seed.TerritoryGUID);
+			});
+		if (Existing)
+		{
+			// Definition registration is presentation reconciliation, never a second
+			// ownership authority. Preserve the live/saved political snapshot.
+			Existing->TerritoryTag = Seed.TerritoryTag;
+			Existing->TerritoryGUID = Seed.TerritoryGUID;
+			Existing->ParentTerritoryTag = Seed.ParentTerritoryTag;
+			Existing->DisplayName = Seed.DisplayName;
+			Existing->HierarchyLevel = Seed.HierarchyLevel;
+			Existing->TotalChildren = Seed.TotalChildren;
+			Existing->bDefinitionBacked = true;
+		}
+		else if (Seed.TerritoryTag.IsValid() || Seed.TerritoryGUID.IsValid())
+		{
+			ReplicatedCaptureSummaries.Add(MoveTemp(Seed));
+		}
+	};
+
+	RegisterRecursive(Definition);
+	ForceNetUpdate();
+}
+
+void ATerritoryWorldState::RefreshStrategicDirectory()
+{
+	if (!HasAuthority()) return;
+	for (const UTerritoryCityDefinition* City : CampaignCities)
+	{
+		RegisterDefinitionHierarchy(City);
+	}
+	if (UWorld* World = GetWorld())
+	{
+		if (const UTerritoryRegistrySubsystem* Registry =
+			World->GetSubsystem<UTerritoryRegistrySubsystem>())
+		{
+			for (const ATerritoryVolume* Territory : Registry->GetAllTerritories())
+			{
+				if (Territory) RegisterDefinitionHierarchy(
+					Territory->GetTerritoryDefinition());
+			}
+		}
+	}
 }
 
 FReplicatedCaptureSummary ATerritoryWorldState::GetCaptureSummary(const FGameplayTag& TerritoryTag) const
@@ -478,18 +751,13 @@ void ATerritoryWorldState::ExportPersistentState()
 
 		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
-			ReplicatedCaptureSummaries.Empty();
+			// Merge loaded actors into the runtime read model. Do not clear summaries
+			// for World Partition actors that are currently unloaded; hierarchy and
+			// effective-availability queries still need their last authoritative row.
 			for (const ATerritoryVolume* Territory : Registry->GetAllTerritories())
 			{
 				if (!Territory) continue;
-				FReplicatedCaptureSummary Summary;
-				Summary.TerritoryTag = Territory->GetTerritoryTag();
-				Summary.TerritoryGUID = Territory->GetActorGUID_Implementation();
-				Summary.CurrentOwner = Territory->GetOwningFaction();
-				Summary.ContestingFaction = Territory->GetOwnershipData().ContestingFaction;
-				Summary.ControlProgress = Territory->GetControlProgress();
-				Summary.State = Territory->GetTerritoryState();
-				ReplicatedCaptureSummaries.Add(Summary);
+				PublishTerritorySummary(Territory);
 			}
 		}
 
@@ -509,7 +777,10 @@ void ATerritoryWorldState::ExportPersistentState()
 	SavedReputation = ReplicatedReputation;
 	SavedDiplomacyHistory = ReplicatedDiplomacyHistory;
 	SavedAssaults = ReplicatedAssaults;
-	// P0-03: SavedCaptureSummaries removed — Volume is sole authority for ownership
+	// This is a presentation/query cache only. It prevents unloaded World Partition
+	// rows from reverting to Definition defaults after a restart, but is never
+	// imported into ATerritoryVolume ownership.
+	SavedStrategicDirectory = ReplicatedCaptureSummaries;
 }
 
 void ATerritoryWorldState::ImportPersistentState()
@@ -525,7 +796,9 @@ void ATerritoryWorldState::ImportPersistentState()
 	ReplicatedReputation = SavedReputation;
 	ReplicatedDiplomacyHistory = SavedDiplomacyHistory;
 	ReplicatedAssaults = SavedAssaults;
-	// P0-03: ReplicatedCaptureSummaries not restored from save — Volume owns persistence
+	ReplicatedCaptureSummaries = SavedStrategicDirectory;
+	// Capture rows are deliberately not pushed into Territory actors. Loaded Volumes
+	// restore their own OwnershipData and then publish over this cached read model.
 
 	SyncSubsystemsFromReplicatedState();
 }
@@ -931,12 +1204,5 @@ void ATerritoryWorldState::OnTerritoryControlChangedLive(ATerritoryVolume* Terri
 	if (!HasAuthority() || !Territory) return;
 	(void)OldOwner;
 	(void)NewOwner;
-	FReplicatedCaptureSummary Summary;
-	Summary.TerritoryTag = Territory->GetTerritoryTag();
-	Summary.TerritoryGUID = Territory->GetTerritoryGUID();
-	Summary.CurrentOwner = Territory->GetOwningFaction();
-	Summary.ContestingFaction = Territory->GetContestingFaction_Implementation();
-	Summary.State = Territory->GetTerritoryState();
-	Summary.ControlProgress = Territory->GetControlProgress();
-	SetCaptureSummary(Summary);
+	PublishTerritorySummary(Territory);
 }

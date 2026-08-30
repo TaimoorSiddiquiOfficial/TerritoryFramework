@@ -37,6 +37,11 @@
 void UTerritoryCounterAttackSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	// Assault scheduling subscribes to all three systems during initialization.
+	// Explicit dependencies prevent missed early ownership or diplomacy events.
+	Collection.InitializeDependency<UTerritoryRegistrySubsystem>();
+	Collection.InitializeDependency<UTerritoryControlSubsystem>();
+	Collection.InitializeDependency<UTerritoryDiplomacySubsystem>();
 	UWorld* World = GetWorld();
 	if (!World) return;
 
@@ -213,7 +218,9 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 	OutInput = FTerritoryAssaultEvaluationInput();
 	OutResult = FTerritoryAssaultEvaluationResult();
 	OutReason = FText::GetEmpty();
-	if (!Territory || Territory->GetTerritoryState() != ETerritoryState::Claimed
+	if (!Territory || Territory->GetControlMode() != ETerritoryControlMode::Independent
+		|| !Territory->IsAvailableForGameplay()
+		|| Territory->GetTerritoryState() != ETerritoryState::Claimed
 		|| !Territory->GetOwningFaction().IsValid())
 	{
 		OutReason = NSLOCTEXT("TerritoryCounterAttack", "PreviewInvalidTerritory",
@@ -424,6 +431,8 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	if (!World || World->GetNetMode() == NM_Client
 		|| !Cast<ANarrativeGameState>(World->GetGameState()) || !Territory
 		|| Territory->GetWorld() != World || !Territory->HasAuthority()
+		|| Territory->GetControlMode() != ETerritoryControlMode::Independent
+		|| !Territory->IsAvailableForGameplay()
 		|| !Territory->GetTerritoryGUID().IsValid()
 		|| !Territory->GetTerritoryTag().IsValid()
 		|| Territory->GetTerritoryState() != ETerritoryState::Claimed
@@ -490,6 +499,15 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		Profile->GracePeriodGameTime, ForceConfig->TerritorialInfluence,
 		Profile->MinimumInfluenceTimingScale);
 	Assaults.Add(Record.AssaultID, Record);
+	if (Settings && Settings->ShouldDebugCounterAttacks())
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("[CounterAttack] scheduled %s target=%s attacker=%s defender=%s mode=%d graceEnd=%.2f force=%d"),
+			*Record.AssaultID.ToString(), *Record.TargetTerritory.ToString(),
+			*Record.AttackingFaction.ToString(), *Record.DefendingFaction.ToString(),
+			static_cast<int32>(Record.LaunchMode), Record.GraceEndsGameTime,
+			ForceConfig->PlannedForce);
+	}
 	BroadcastChanged(Record);
 	return true;
 }
@@ -625,10 +643,10 @@ int32 UTerritoryCounterAttackSubsystem::GetSecureDistrictCountForFaction(
 	for (const ATerritoryVolume* Territory : Registry->GetAllTerritories())
 	{
 		const ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory);
-		const ETerritoryState DistrictState = District
-			? District->GetTerritoryState() : ETerritoryState::Unclaimed;
-		const bool bSecurelyHeld = DistrictState == ETerritoryState::Claimed
-			|| DistrictState == ETerritoryState::Locked;
+		const bool bSecurelyHeld = District
+			&& District->IsAvailableForGameplay()
+			&& District->GetTerritoryState() == ETerritoryState::Claimed
+			&& District->AllPropertiesOwnedBy(Faction);
 		if (District && bSecurelyHeld
 			&& District->GetOwningFaction() == Faction)
 		{
@@ -880,7 +898,9 @@ void UTerritoryCounterAttackSubsystem::TryScheduleRecurringStrategicAssaults()
 	});
 	for (ATerritoryVolume* Target : Targets)
 	{
-		if (!Target || Target->GetTerritoryState() != ETerritoryState::Claimed
+		if (!Target || Target->GetControlMode() != ETerritoryControlMode::Independent
+			|| !Target->IsAvailableForGameplay()
+			|| Target->GetTerritoryState() != ETerritoryState::Claimed
 			|| !Target->GetOwningFaction().IsValid())
 		{
 			continue;
@@ -907,6 +927,13 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	if (Assault.IsTerminal()) return;
 	ATerritoryVolume* Territory = ResolveTerritory(Assault);
 	if (!Territory) return; // World Partition: wait for authoritative actor registration.
+	if (Territory->GetControlMode() != ETerritoryControlMode::Independent
+		|| !Territory->IsAvailableForGameplay())
+	{
+		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
+			ETerritoryAssaultResolution::InvalidTerritory);
+		return;
+	}
 	if (ReconcileAssaultTargetIdentity(Assault, Territory))
 	{
 		// Publish the bounded save migration before any later validation can resolve the assault.
@@ -1171,7 +1198,8 @@ bool UTerritoryCounterAttackSubsystem::ActivateAssault(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory)
 {
 	if (Assault.State != ETerritoryAssaultState::WaitingForPlayerProximity
-		|| !Territory || Assault.SelectedApproaches.IsEmpty())
+		|| !Territory || Territory->GetControlMode() != ETerritoryControlMode::Independent
+		|| !Territory->IsAvailableForGameplay() || Assault.SelectedApproaches.IsEmpty())
 	{
 		return false;
 	}
@@ -1627,6 +1655,17 @@ void UTerritoryCounterAttackSubsystem::BroadcastStateTransition(
 {
 	BroadcastChanged(Assault);
 	if (!ShouldEmitCounterHappened(PreviousState, Assault.State, bRestoringState)) return;
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugCounterAttacks())
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("[CounterAttack] %s target=%s state %d -> %d resolution=%d alive=%d reserve=%d killed=%d withdrawn=%d"),
+			*Assault.AssaultID.ToString(), *Assault.TargetTerritory.ToString(),
+			static_cast<int32>(PreviousState), static_cast<int32>(Assault.State),
+			static_cast<int32>(Assault.Resolution), Assault.AliveForce,
+			Assault.PendingReserveForce, Assault.KilledForce, Assault.WithdrawnForce);
+	}
 
 	const FTerritoryCounterAttackStateEvent Event = MakeCounterHappenedEvent(
 		Assault, PreviousState, GetCampaignGameTime());

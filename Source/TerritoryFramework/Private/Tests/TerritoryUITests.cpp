@@ -3,8 +3,10 @@
 #include "Misc/AutomationTest.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryWorldState.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "NarrativeActivatableWidget.h"
@@ -124,8 +126,12 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetDistrictOperationsViews")));
 	TestTrue(TEXT("Player-visible District list is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetPlayerVisibleDistrictOperationsViews")));
+	TestTrue(TEXT("Player-visible spatial Territory resolver is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetVisibleTerritoryAtLocation")));
 	TestTrue(TEXT("Hierarchy operations builder is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("BuildHierarchyOperationsView")));
+	TestTrue(TEXT("Shared status formatter is Blueprint pure"),
+		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("GetTerritoryStatusText")));
 	TestTrue(TEXT("Hierarchy visibility rule is Blueprint pure"),
 		TerritoryUITest::IsBlueprintPure(LibraryClass, TEXT("IsTerritoryVisibleToPlayer")));
 	TestTrue(TEXT("Selected District hierarchy list is Blueprint pure"),
@@ -190,6 +196,8 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			ViewStruct->FindPropertyByName(TEXT("CityTag")));
 		TestNotNull(TEXT("District view exposes effective hierarchy visibility"),
 			ViewStruct->FindPropertyByName(TEXT("bHierarchyVisible")));
+		TestNotNull(TEXT("District view carries explicit story availability"),
+			ViewStruct->FindPropertyByName(TEXT("Availability")));
 		TestNotNull(TEXT("District view exposes only player-visible Places"),
 			ViewStruct->FindPropertyByName(TEXT("VisiblePlaces")));
 		TestNotNull(TEXT("District view exposes diplomacy context"),
@@ -222,6 +230,8 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			HierarchyStruct->FindPropertyByName(TEXT("HierarchyLevel")));
 		TestNotNull(TEXT("Hierarchy row exposes effective player visibility"),
 			HierarchyStruct->FindPropertyByName(TEXT("bVisibleToPlayer")));
+		TestNotNull(TEXT("Hierarchy row separates availability from political state"),
+			HierarchyStruct->FindPropertyByName(TEXT("Availability")));
 	}
 	const UScriptStruct* GarrisonStruct = FTerritoryGarrisonOperationsView::StaticStruct();
 	TestNotNull(TEXT("Garrison operations view is reflected"), GarrisonStruct);
@@ -296,6 +306,27 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 		ManagementDefaults->EspionageCooldown, 30.f);
 	TestNotNull(TEXT("Live event row exists for authored Reports presentation"),
 		UTerritoryLiveEventRowWidget::StaticClass());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIAvailabilityStatusTest,
+	"TerritoryFramework.UI.Status.AvailabilityPrecedesPoliticalState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIAvailabilityStatusTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("A locked contested Place is presented as Locked"),
+		UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			ETerritoryAvailability::Locked, ETerritoryState::Contested).ToString(),
+		FString(TEXT("Locked")));
+	TestEqual(TEXT("A locked claimed Place is still presented as Locked"),
+		UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			ETerritoryAvailability::Locked, ETerritoryState::Claimed).ToString(),
+		FString(TEXT("Locked")));
+	TestEqual(TEXT("An unlocked contested Place exposes its political state"),
+		UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			ETerritoryAvailability::Unlocked, ETerritoryState::Contested).ToString(),
+		FString(TEXT("Contested")));
 	return true;
 }
 
@@ -432,11 +463,22 @@ bool FTerritoryUIPlayerLocationDistrictTest::RunTest(const FString& Parameters)
 		TEXT("Territory.HavenReach.CastleHill"), false);
 	const FGameplayTag PropertyTag = FGameplayTag::RequestGameplayTag(
 		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
-	District->TerritoryTag = DistrictTag;
-	District->TerritoryGUID = FGuid::NewGuid();
-	Property->TerritoryTag = PropertyTag;
-	Property->ParentTerritoryTag = DistrictTag;
-	Property->TerritoryGUID = FGuid::NewGuid();
+	UTerritoryDistrictDefinition* DistrictDefinition =
+		NewObject<UTerritoryDistrictDefinition>();
+	UTerritoryPlaceDefinition* PlaceDefinition =
+		NewObject<UTerritoryPlaceDefinition>();
+	DistrictDefinition->TerritoryTag = DistrictTag;
+	DistrictDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	DistrictDefinition->TerritoryActorClass = ATerritoryDistrict::StaticClass();
+	PlaceDefinition->TerritoryTag = PropertyTag;
+	PlaceDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	PlaceDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	DistrictDefinition->Places = {PlaceDefinition};
+	DistrictDefinition->RefreshHierarchyLinks();
+	TestTrue(TEXT("District Definition applies to the District"),
+		DistrictDefinition->ApplyToTerritory(District));
+	TestTrue(TEXT("Place Definition applies to the Place"),
+		PlaceDefinition->ApplyToTerritory(Property));
 	UTerritoryRegistrySubsystem* Registry =
 		World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	TestNotNull(TEXT("Registry created"), Registry);
@@ -451,6 +493,17 @@ bool FTerritoryUIPlayerLocationDistrictTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("A player inside a Place resolves its owning District"),
 			UTerritoryUIBlueprintLibrary::GetDistrictAtPlayerLocation(
 				World, PlayerController) == District);
+		TestTrue(TEXT("An unlocked Place is the most-specific visible HUD Territory"),
+			UTerritoryUIBlueprintLibrary::GetVisibleTerritoryAtLocation(
+				World, Pawn->GetActorLocation()) == Property);
+		Property->LockTerritory(FText::FromString(TEXT("Story secret")));
+		TestTrue(TEXT("A locked Place stays unnamed and HUD falls back to its unlocked District"),
+			UTerritoryUIBlueprintLibrary::GetVisibleTerritoryAtLocation(
+				World, Pawn->GetActorLocation()) == District);
+		District->LockTerritory(FText::FromString(TEXT("Story branch secret")));
+		TestNull(TEXT("A completely locked hierarchy branch stays silent in the HUD"),
+			UTerritoryUIBlueprintLibrary::GetVisibleTerritoryAtLocation(
+				World, Pawn->GetActorLocation()));
 	}
 
 	World->DestroyWorld(false);
@@ -517,7 +570,8 @@ bool FTerritoryUIDistrictWaypointResolutionTest::RunTest(const FString& Paramete
 			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
 				PlayerController, District) == Blacksmith);
 
-		Farm->ForceSetTerritoryState(ETerritoryState::Unclaimed);
+		TestTrue(TEXT("A waypoint becomes visible only after an explicit availability unlock"),
+			Farm->TryUnlockWithContext(FTerritoryTransitionContext(), true));
 		TestTrue(TEXT("A District command chooses the nearest visible Place"),
 			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
 				PlayerController, District) == Farm);
@@ -895,6 +949,78 @@ bool FTerritoryUIRevisionRegressionTest::RunTest(const FString& Parameters)
 	const int32 PendingRevision = UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(View);
 	TestNotEqual(TEXT("Pending reserve change invalidates the command-center read model"),
 		GarrisonRevision, PendingRevision);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIUnloadedDistrictDirectoryTest,
+	"TerritoryFramework.UI.WorldPartition.UnloadedDistrictRemainsVisible",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIUnloadedDistrictDirectoryTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Directory UI test world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	ATerritoryWorldState* WorldState = World->SpawnActor<ATerritoryWorldState>(
+		ATerritoryWorldState::StaticClass(), FTransform::Identity, SpawnParams);
+	TestNotNull(TEXT("Directory UI WorldState spawned"), WorldState);
+	if (!WorldState)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGameplayTag CityTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach"), false);
+	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill"), false);
+	const FGameplayTag PlaceTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	FReplicatedCaptureSummary City;
+	City.TerritoryTag = CityTag;
+	City.DisplayName = FText::FromString(TEXT("Haven Reach"));
+	City.HierarchyLevel = ETerritoryHierarchyLevel::City;
+	City.TotalChildren = 1;
+	City.bDefinitionBacked = true;
+	FReplicatedCaptureSummary District;
+	District.TerritoryTag = DistrictTag;
+	District.ParentTerritoryTag = CityTag;
+	District.DisplayName = FText::FromString(TEXT("Castle Hill"));
+	District.HierarchyLevel = ETerritoryHierarchyLevel::District;
+	District.TotalChildren = 1;
+	District.bDefinitionBacked = true;
+	FReplicatedCaptureSummary Place;
+	Place.TerritoryTag = PlaceTag;
+	Place.ParentTerritoryTag = DistrictTag;
+	Place.DisplayName = FText::FromString(TEXT("Farm"));
+	Place.HierarchyLevel = ETerritoryHierarchyLevel::Place;
+	Place.bDefinitionBacked = true;
+	WorldState->SetCaptureSummary(City);
+	WorldState->SetCaptureSummary(District);
+	WorldState->SetCaptureSummary(Place);
+
+	const TArray<FTerritoryDistrictOperationsView> Views =
+		UTerritoryUIBlueprintLibrary::GetPlayerVisibleDistrictOperationsViews(
+			World, nullptr, ETerritoryOperationsFilter::All);
+	TestEqual(TEXT("Unloaded District still appears in the strategic list"),
+		Views.Num(), 1);
+	if (!Views.IsEmpty())
+	{
+		TestNull(TEXT("Directory row does not fake a live actor"), Views[0].District);
+		TestFalse(TEXT("Directory row reports runtime actor as unloaded"),
+			Views[0].bRuntimeLoaded);
+		TestTrue(TEXT("Directory row remains registered for list filtering"),
+			Views[0].bRegistered);
+		TestTrue(TEXT("Unlocked directory row enters Active Territories"),
+			UTerritoryUIBlueprintLibrary::IsDistrictAvailableUnlocked(Views[0]));
+		TestEqual(TEXT("Unlocked child Place remains visible by stable metadata"),
+			Views[0].VisiblePlaces.Num(), 1);
+	}
+
+	World->DestroyActor(WorldState);
+	World->DestroyWorld(false);
 	return true;
 }
 

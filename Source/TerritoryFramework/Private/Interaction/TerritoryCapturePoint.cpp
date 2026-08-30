@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
@@ -69,9 +70,14 @@ void ATerritoryCapturePoint::BeginPlay()
 	else if (const ATerritoryVolume* Territory = ResolveTargetTerritory();
 		Territory && Territory->UsesStoryCaptureFromBounds())
 	{
-		UE_LOG(LogTerritory, Log,
-			TEXT("Capture Point %s is disabled because %s uses story capture from its full bounds."),
-			*GetName(), *Territory->GetTerritoryTag().ToString());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugInteraction())
+		{
+			UE_LOG(LogTerritory, Log,
+				TEXT("[Interaction] Capture Point %s is disabled because %s uses story capture from its full bounds."),
+				*GetName(), *Territory->GetTerritoryTag().ToString());
+		}
 	}
 
 	CaptureZone->OnComponentBeginOverlap.AddUniqueDynamic(
@@ -354,7 +360,7 @@ void ATerritoryCapturePoint::RefreshCaptureMarkerVisibility()
 		const ATerritoryVolume* Territory = ResolveTargetTerritory();
 		bVisible = Territory
 			&& Territory->GetControlMode() == ETerritoryControlMode::Independent
-			&& Territory->GetTerritoryState() != ETerritoryState::Locked;
+			&& Territory->IsAvailableForGameplay();
 	}
 	CaptureMarkerMesh->SetVisibility(bVisible, true);
 	CaptureMarkerMesh->SetHiddenInGame(!bVisible, true);

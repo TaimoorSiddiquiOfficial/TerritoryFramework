@@ -32,8 +32,8 @@ gameplay notifications.
 
 ## Player presence and recapture
 
-`Require Player Proximity For Activation` defaults off. This lets a faction attack a
-district and its registered guards without waiting for the player to arrive.
+`Require Player Proximity For Activation` defaults off. This lets a faction attack an
+unlocked Place and its registered guards without waiting for the player to arrive.
 
 After the complete defence front has no living registered guard and an attacker is
 physically inside the target:
@@ -62,12 +62,13 @@ If the player stays away—or dies defending it—the Place is recaptured by Ban
    Narrative otherwise rejects every pawn after the first.
 4. Set finite `PlannedForce` and `WaveSize` values.
 5. Choose the force's staging rule. `OwnsSecureDistrict` is the domination default: a
-   faction with no loaded District securely held in `Claimed` or story-`Locked` state cannot
-   launch a normal counterattack. `Contested` and `Unclaimed` Districts never qualify.
+   faction with no loaded, unlocked District securely held in `Claimed` cannot launch a
+   normal counterattack. Locked, `Contested`, and `Unclaimed` Districts never qualify.
 6. Enable/disable recurring strategic counters and set a non-zero recurring cooldown.
 7. Enable `bAllowStoryPursuitWithoutStagingDistrict` only for a force that an explicit Tales
    story-pursuit event may launch after the faction loses its final District.
-8. Assign the profile to the capturable `ATerritoryVolume`.
+8. Assign the profile to the capturable Place Definition. City and District Definitions cannot
+   own physical assault policy.
 9. Add one or more enabled `CounterAttackApproaches` with unique `ApproachID` values and transforms relative to the territory.
 10. Build navigation from every approach to at least one shared defence objective: a live
     defence-front guard, overlapping patrol/post point, or the target center fallback.
@@ -147,12 +148,12 @@ and visual data. The reference project uses
 `ApproachID` is not stored in the counterattack profile. It belongs to each placed
 Territory actor:
 
-1. Select the capturable Property/District actor in the level.
+1. Select the capturable Place (`ATerritoryProperty`) actor in the level. City and District are aggregate authorities and never own physical approaches.
 2. Open **Territory > Counter Attack > Counter Attack Approaches**.
 3. Add an element and set **Approach ID** to a stable, unique FName such as
    `Blacksmith_WestRoad` (no display text or localization).
 4. Set its type, relative spawn transform, per-wave limit, and Enabled flag.
-5. Build navigation and verify both the approach position and Territory center project
+5. Build navigation and verify both the approach position and Place objective project
    to navigation with a full, non-partial path between them.
 
 New blank entries are editor-filled with a type/index ID such as `Road_01`. Rename that
@@ -188,8 +189,9 @@ Narrative reports the character definition, controller/activity, appearance obje
 visual load complete. Optional weapon visuals are not a movement prerequisite.
 The durable movement goal scores `2`, below Narrative Pro 2.4.2's attack goal score of `3`.
 Registered-defender combat takes priority and movement resumes afterward. Strategy and physical
-AI consume the same District defence-front adapter: a District includes its same-owner child
-Properties, while a Property includes its District and same-owner siblings. While at least one
+AI consume the same Place defence-front adapter. The target Place may receive help from loaded,
+unlocked, same-owner sibling Places; its parent District grants strategic staging authority but
+is never a guard container or physical objective. While at least one
 live registered hostile defender exists anywhere on that front, the Territory participant temporarily suppresses
 only Narrative attack goals whose `GetGoalKey()` target is not a registered defender. A
 defender goal retains its exact Narrative-authored score. Original non-defender scores are
@@ -225,12 +227,10 @@ not change `EstimatedSuccessProbability`, which remains a finite power-versus-de
 The same timing scale accelerates only already-authored incumbent reserve deployments during
 a live contest; it never creates force or rolls ownership.
 
-Defence cascades without changing capture authority. For a Property target, evaluation
-includes the target, its owning District, and loaded same-owner sibling Properties. For
-a District target, it includes the District and loaded same-owner child Properties.
-Counts, weighted guard quality, fortification, allied support, and strategic value are
-accumulated once. The physical force still attacks one `ATerritoryVolume` and must
-complete that volume's existing capture flow.
+Defence support never changes capture authority. For a Place target, evaluation includes the
+target and loaded, unlocked, same-owner sibling Places once. City and District actors are not
+physical targets and contribute no guards, posts, capture progress, or spawn routes. The force
+must enter and complete the target Place's existing capture flow.
 
 Spawn-point reserves are replacement entitlements, not hidden active defenders. For
 each Territory in the cascade, strategic evaluation counts at most
@@ -250,7 +250,7 @@ Defence invariants are enforced by tests:
 
 - increasing valid defence never increases priority or launch probability;
 - increasing attacker power never reduces launch probability or estimated success;
-- strong factions can still schedule an attack against a fully guarded strategic district unless a hard rule blocks it.
+- strong factions can still schedule an attack against a fully guarded strategic Place unless a hard rule blocks it.
 
 `GracePeriodGameTime` uses Narrative Pro accumulated time-of-day units, which are saved by Narrative GameState. Radii and navigation positions use Unreal units.
 
@@ -352,7 +352,7 @@ No counterattack code calls `SetOwningFaction` or produces offscreen capture pro
 `ATerritoryWorldState` saves and replicates `FTerritoryAssaultRecord` values: IDs, tags, counts, timing, launch mode, terminal time, probabilities, approaches, state, and resolution. It additionally saves—but does not replicate—the scheduler's `FTerritoryAssaultCycleRecord` high-water ledger. Live pawn/controller/UObject pointers are never campaign state.
 
 District staging is deliberately fail-closed under World Partition. Only a registered,
-authoritative District held in `Claimed` or story-`Locked` state grants staging power;
+authoritative, unlocked District derived as `Claimed` grants staging power. Locked,
 `Contested`, `Unclaimed`, and unloaded Districts cannot create a phantom army. Registration and
 the recurring scheduler re-evaluate when authoritative actors become available.
 

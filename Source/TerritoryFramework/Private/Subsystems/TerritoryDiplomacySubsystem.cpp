@@ -50,7 +50,12 @@ void UTerritoryDiplomacySubsystem::Initialize(FSubsystemCollectionBase& Collecti
 			true);
 	}
 
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryDiplomacySubsystem initialized"));
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugDiplomacy())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Diplomacy] subsystem initialized"));
+	}
 }
 
 void UTerritoryDiplomacySubsystem::Deinitialize()

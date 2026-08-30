@@ -153,13 +153,13 @@ If no `GuardPostDefinition` is assigned, the territory's `GuardNPCDefinition` an
 
 ### Placement and patrol overlap ownership
 
-Guard-post ownership resolves in this order: a Territory's typed `GuardSpawnPoints` reference,
-the post's explicit `OwnerTerritoryTag`, then spatial placement/patrol overlap. For an untagged
-post, both the actor origin and every world-space patrol node are queried. The most specific hit
-wins (`Property > District > City`, then smaller bounds and stable tag order). This means a post
-placed just outside a District can still become one of its physical guard slots when its patrol
-route enters that District. The editor validator uses the same overlap rule and no longer reports
-such a post as orphaned.
+Guard-post ownership resolves through its Place Definition binding, then its explicit Place tag,
+then spatial placement/patrol overlap. For an untagged post, both the actor origin and every
+world-space patrol node are queried. Only `ATerritoryProperty` hits are eligible; when Places
+overlap, smaller bounds and stable tag order decide. City and District overlaps are ignored
+because aggregate parents own no physical guard slots. A post just outside Blacksmith may still
+belong to Blacksmith when one patrol node enters that Place. The editor validator applies the
+same rule and reports District-only posts as orphaned.
 
 Patrol overlap decides which Territory owns a post; it does not create duplicate guards or a
 second spawn system. Every unique post remains one active combat slot even when its route crosses
@@ -186,7 +186,7 @@ deployment with camera avoidance is the sole path allowed to select a nearby con
    - `RegisterAttacker(Territory, Actor, Faction)` — progressive capture (identity-based, TSet per faction)
    - `ForceCapture(Territory, Faction)` → bool — authority-only instant capture; validates inputs, bypasses gameplay capture rules, sets progress to 1.0 and state to Claimed. Returns true if territory actually changed.
    - `TerritoryCaptureEvent` — from quest/dialogue (server-authoritative, skips on client)
-3. On capture → `ApplyTerritoryMutation` atomically commits Claimed ownership and resolves the post-capture target from the explicit context. With the default policy, player captures spawn zero friendlies; the player staffs District/Property garrisons from the command UI.
+3. On capture → `ApplyTerritoryMutation` atomically commits Claimed Place ownership and resolves the post-capture target from the explicit context. With the default policy, player captures spawn zero friendlies; the player staffs Place garrisons from the District command UI.
 
 On save, each guard post records reserves, pending deployments, and its finite active count. Load recreates only the saved survivors (or uses the bounded legacy aggregate defender count for older saves); pawn health/activity and live pointers are intentionally not persisted.
 

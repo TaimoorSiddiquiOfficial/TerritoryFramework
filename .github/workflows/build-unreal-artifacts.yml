@@ -1,0 +1,154 @@
+name: Build Unreal artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: territory-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-plugin:
+    name: UE ${{ matrix.unreal }} / Win64
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - unreal: "5.7"
+            runner_label: ue-5.7
+          - unreal: "5.8"
+            runner_label: ue-5.8
+
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+      - ${{ matrix.runner_label }}
+    timeout-minutes: 120
+
+    defaults:
+      run:
+        shell: pwsh
+
+    env:
+      UE_VERSION: ${{ matrix.unreal }}
+
+    steps:
+      - name: Check out plugin source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: true
+
+      - name: Resolve and verify Unreal Engine
+        run: |
+          $candidates = @()
+          if ($env:UE_ROOT) {
+            $candidates += $env:UE_ROOT
+          }
+          $candidates += @(
+            "C:\Program Files\Epic Games\UE_$env:UE_VERSION",
+            "D:\Program Files\Epic Games\UE_$env:UE_VERSION"
+          )
+
+          $engineRoot = $candidates |
+            Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) } |
+            Select-Object -First 1
+          if (-not $engineRoot) {
+            throw "Unreal Engine $env:UE_VERSION was not found. Set UE_ROOT on the ${{ matrix.runner_label }} runner."
+          }
+
+          $versionFile = Join-Path $engineRoot "Engine\Build\Build.version"
+          if (-not (Test-Path -LiteralPath $versionFile -PathType Leaf)) {
+            throw "Unreal Build.version is missing: $versionFile"
+          }
+          $version = Get-Content -LiteralPath $versionFile -Raw | ConvertFrom-Json
+          $actualVersion = "$($version.MajorVersion).$($version.MinorVersion)"
+          if ($actualVersion -ne $env:UE_VERSION) {
+            throw "Runner label expects UE $env:UE_VERSION but UE_ROOT contains UE $actualVersion."
+          }
+
+          $uat = Join-Path $engineRoot "Engine\Build\BatchFiles\RunUAT.bat"
+          if (-not (Test-Path -LiteralPath $uat -PathType Leaf)) {
+            throw "RunUAT.bat is missing: $uat"
+          }
+
+          "UE_ROOT=$engineRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "Verified Unreal Engine $actualVersion at $engineRoot"
+
+      - name: Verify Narrative Pro dependency
+        run: |
+          $narrativeDescriptor = Get-ChildItem `
+            -LiteralPath (Join-Path $env:UE_ROOT "Engine\Plugins") `
+            -Filter "NarrativePro.uplugin" `
+            -File `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+          if (-not $narrativeDescriptor) {
+            throw "Narrative Pro is required to compile TerritoryFramework. Install the licensed plugin under this runner's Engine/Plugins directory."
+          }
+          "Narrative Pro: $($narrativeDescriptor.FullName)"
+
+      - name: Build packaged plugin
+        id: package
+        run: |
+          $pluginDescriptor = Join-Path $env:GITHUB_WORKSPACE "TerritoryFramework.uplugin"
+          if (-not (Test-Path -LiteralPath $pluginDescriptor -PathType Leaf)) {
+            throw "TerritoryFramework.uplugin was not found in the checkout."
+          }
+
+          $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
+          $packageDirectory = [System.IO.Path]::GetFullPath(
+            (Join-Path $runnerTemp "TerritoryFramework-UE$env:UE_VERSION-Win64")
+          )
+          if (-not $packageDirectory.StartsWith($runnerTemp, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to clean a package path outside RUNNER_TEMP: $packageDirectory"
+          }
+          if (Test-Path -LiteralPath $packageDirectory) {
+            Remove-Item -LiteralPath $packageDirectory -Recurse -Force
+          }
+
+          $uat = Join-Path $env:UE_ROOT "Engine\Build\BatchFiles\RunUAT.bat"
+          & $uat BuildPlugin `
+            "-Plugin=$pluginDescriptor" `
+            "-Package=$packageDirectory" `
+            "-TargetPlatforms=Win64" `
+            -Rocket
+          if ($LASTEXITCODE -ne 0) {
+            throw "BuildPlugin failed for Unreal Engine $env:UE_VERSION with exit code $LASTEXITCODE."
+          }
+
+          $packagedDescriptor = Join-Path $packageDirectory "TerritoryFramework.uplugin"
+          if (-not (Test-Path -LiteralPath $packagedDescriptor -PathType Leaf)) {
+            throw "BuildPlugin finished without producing TerritoryFramework.uplugin."
+          }
+
+          @(
+            "Territory Framework packaged plugin"
+            "Unreal Engine: $env:UE_VERSION"
+            "Target: Win64"
+            "Commit: $env:GITHUB_SHA"
+            "Workflow run: $env:GITHUB_RUN_ID"
+          ) | Set-Content -LiteralPath (Join-Path $packageDirectory "BUILD_INFO.txt") -Encoding utf8
+
+          "package_directory=$packageDirectory" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload UE ${{ matrix.unreal }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TerritoryFramework-UE${{ matrix.unreal }}-Win64
+          path: ${{ steps.package.outputs.package_directory }}
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 30

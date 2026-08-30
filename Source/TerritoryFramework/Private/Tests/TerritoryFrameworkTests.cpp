@@ -260,8 +260,10 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("SetOwningFaction")));
 	TestTrue(TEXT("SetOwningFaction is server-authority only"),
 		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("SetOwningFaction")));
-	TestTrue(TEXT("SetTerritoryState is BlueprintCallable"),
-		TFTestUtils::IsBlueprintCallable(Class, TEXT("SetTerritoryState")));
+	TestNull(TEXT("Unsafe SetControlProgress Blueprint node was removed"),
+		Class->FindFunctionByName(TEXT("SetControlProgress")));
+	TestNull(TEXT("Unsafe SetTerritoryState Blueprint node was removed"),
+		Class->FindFunctionByName(TEXT("SetTerritoryState")));
 	TestTrue(TEXT("RegisterDefender is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("RegisterDefender")));
 	TestTrue(TEXT("UnregisterDefender is BlueprintCallable"),
@@ -517,8 +519,10 @@ bool FTFTerritoryInitialStateDefinition::RunTest(const FString& Parameters)
 		Territory->ResolveInitialTerritoryState(), ETerritoryState::Claimed);
 
 	SetInitialState(ETerritoryInitialState::Locked);
-	TestEqual(TEXT("The Definition's explicit Locked state starts locked"),
-		Territory->ResolveInitialTerritoryState(), ETerritoryState::Locked);
+	TestEqual(TEXT("A legacy Locked state preserves the political owner"),
+		Territory->ResolveInitialTerritoryState(), ETerritoryState::Claimed);
+	TestEqual(TEXT("A legacy Locked state migrates to locked availability"),
+		Territory->ResolveInitialTerritoryAvailability(), ETerritoryAvailability::Locked);
 
 	SetInitialState(ETerritoryInitialState::Unclaimed);
 	TestEqual(TEXT("The Definition's explicit Unclaimed state starts unclaimed"),
@@ -575,11 +579,13 @@ bool FTFTerritoryStateTransitionConditions::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Locked gate was cloned into the Territory"), LockedGate);
 	if (!ClaimedGate || !LockedGate) return false;
 
-	Territory->SetTerritoryState(ETerritoryState::Contested);
+	FTerritoryOwnershipData Contested = Territory->GetOwnershipData();
+	Contested.State = ETerritoryState::Contested;
+	Territory->CommitOwnershipData(Contested);
 	TestEqual(TEXT("A failed exit condition blocks the atomic state change"),
 		Territory->GetTerritoryState(), ETerritoryState::Claimed);
 	ClaimedGate->bNot = true;
-	Territory->SetTerritoryState(ETerritoryState::Contested);
+	Territory->CommitOwnershipData(Contested);
 	TestEqual(TEXT("Narrative Not inverts a State Config condition"),
 		Territory->GetTerritoryState(), ETerritoryState::Contested);
 
@@ -678,6 +684,10 @@ bool FTFTerritoryUnlockNarrativeEventRegression::RunTest(const FString& Paramete
 	*GuidProperty->ContainerPtrToValuePtr<FGuid>(Territory) = FGuid::NewGuid();
 	Territory->ForceSetOwningFaction(OwnerFaction);
 	Territory->ForceSetTerritoryState(ETerritoryState::Locked);
+	TestTrue(TEXT("Lock availability is separate from Claimed political control"),
+		Territory->IsLocked());
+	TestEqual(TEXT("Locking preserves the owner-facing control state"),
+		Territory->GetTerritoryState(), ETerritoryState::Claimed);
 
 	UTerritoryRegistrySubsystem* Registry =
 		World->GetSubsystem<UTerritoryRegistrySubsystem>();
@@ -694,15 +704,425 @@ bool FTFTerritoryUnlockNarrativeEventRegression::RunTest(const FString& Paramete
 	// context must still resolve the correct world instead of silently doing nothing.
 	UTerritoryUnlockEvent* UnlockEvent = NewObject<UTerritoryUnlockEvent>();
 	UnlockEvent->TargetTerritoryTag = TerritoryTag;
-	UnlockEvent->bForceUnlock = true;
+	UnlockEvent->UnlockScope = ETerritoryUnlockScope::ForceExact;
 	UnlockEvent->OnActivate(EventTarget, nullptr, nullptr);
 
+	TestFalse(TEXT("Narrative Unlock Event changes availability"), Territory->IsLocked());
 	TestEqual(TEXT("Narrative Unlock Event leaves the exact Place Claimed by its owner"),
 		Territory->GetTerritoryState(), ETerritoryState::Claimed);
 	TestEqual(TEXT("Unlocking does not replace the authored/current owner"),
 		Territory->GetOwningFaction(), OwnerFaction);
 	TestEqual(TEXT("Unlocking restores full control for an owned Place"),
 		Territory->GetControlProgress(), 1.f);
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryClaimedOwnerHandoverEventsRegression,
+	"TerritoryFramework.Tales.Regression.ClaimedOwnerHandoverRunsCapturedEntryEvents",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryClaimedOwnerHandoverEventsRegression::RunTest(
+	const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Claimed-owner handover world created"), World)) return false;
+
+	const FGameplayTag SourceTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	const FGameplayTag LockedTargetTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	const FGameplayTag LostEventTargetTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	if (!TestTrue(TEXT("Claimed-owner handover fixture tags resolve"),
+		SourceTag.IsValid() && LockedTargetTag.IsValid() && LostEventTargetTag.IsValid()
+		&& Bandits.IsValid() && Heroes.IsValid()))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	UTerritoryPlaceDefinition* SourceDefinition =
+		NewObject<UTerritoryPlaceDefinition>();
+	UTerritoryPlaceDefinition* LockedTargetDefinition =
+		NewObject<UTerritoryPlaceDefinition>();
+	UTerritoryPlaceDefinition* LostEventTargetDefinition =
+		NewObject<UTerritoryPlaceDefinition>();
+	SourceDefinition->TerritoryTag = SourceTag;
+	SourceDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	SourceDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	LockedTargetDefinition->TerritoryTag = LockedTargetTag;
+	LockedTargetDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	LockedTargetDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	LockedTargetDefinition->InitialAvailability = ETerritoryAvailability::Locked;
+	LostEventTargetDefinition->TerritoryTag = LostEventTargetTag;
+	LostEventTargetDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	LostEventTargetDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+
+	UTerritoryUnlockEvent* UnlockTemplate =
+		NewObject<UTerritoryUnlockEvent>(SourceDefinition);
+	UnlockTemplate->TargetTerritoryTag = LockedTargetTag;
+	UnlockTemplate->UnlockScope = ETerritoryUnlockScope::ExactOnly;
+	SourceDefinition->StateConfigs.FindOrAdd(ETerritoryState::Claimed)
+		.EntryEvents.Add(UnlockTemplate);
+	UTerritoryUnlockEvent* LostUnlockTemplate =
+		NewObject<UTerritoryUnlockEvent>(SourceDefinition);
+	LostUnlockTemplate->TargetTerritoryTag = LostEventTargetTag;
+	LostUnlockTemplate->UnlockScope = ETerritoryUnlockScope::ExactOnly;
+	SourceDefinition->StateConfigs.FindOrAdd(ETerritoryState::Claimed)
+		.ExitEvents.Add(LostUnlockTemplate);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryProperty* Source = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* LockedTarget = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* LostEventTarget = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!Source || !LockedTarget || !LostEventTarget
+		|| !SourceDefinition->ApplyToTerritory(Source)
+		|| !LockedTargetDefinition->ApplyToTerritory(LockedTarget)
+		|| !LostEventTargetDefinition->ApplyToTerritory(LostEventTarget))
+	{
+		AddError(TEXT("Claimed-owner handover fixture could not be configured"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	TestEqual(TEXT("The target Definition authors a locked new-campaign availability"),
+		LockedTarget->ResolveInitialTerritoryAvailability(),
+		ETerritoryAvailability::Locked);
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry
+		|| Registry->RegisterTerritory(Source) != ETerritoryRegistrationResult::Success
+		|| Registry->RegisterTerritory(LockedTarget)
+			!= ETerritoryRegistrationResult::Success
+		|| Registry->RegisterTerritory(LostEventTarget)
+			!= ETerritoryRegistrationResult::Success)
+	{
+		AddError(TEXT("Claimed-owner handover fixture did not register"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	// Seed the incumbent. Its first Claimed entry may execute the authored event,
+	// so lock the target afterwards to isolate the real Claimed -> Claimed handover.
+	Source->ForceSetOwningFaction(Bandits);
+	LockedTarget->ForceSetTerritoryState(ETerritoryState::Locked);
+	LostEventTarget->ForceSetTerritoryState(ETerritoryState::Locked);
+	TestTrue(TEXT("Target Place is locked before the owner handover"),
+		LockedTarget->IsLocked());
+
+	FTerritoryTransitionContext Context;
+	Context.RequestingFaction = Heroes;
+	Source->ForceSetOwningFactionWithContext(Heroes, Context);
+	TestEqual(TEXT("Source remains Captured / Claimed across a direct handover"),
+		Source->GetTerritoryState(), ETerritoryState::Claimed);
+	TestEqual(TEXT("Source changes to the new capturing faction"),
+		Source->GetOwningFaction(), Heroes);
+	TestFalse(TEXT("Captured Entry Event unlocks the other Place on Claimed-to-Claimed owner change"),
+		LockedTarget->IsLocked());
+	TestFalse(TEXT("Captured Exit Event runs once for the old owner's lost tenure"),
+		LostEventTarget->IsLocked());
+
+	// A save restore or duplicate command for the current owner is not a new capture.
+	LockedTarget->ForceSetTerritoryState(ETerritoryState::Locked);
+	LostEventTarget->ForceSetTerritoryState(ETerritoryState::Locked);
+	Source->ForceSetOwningFactionWithContext(Heroes, Context);
+	TestTrue(TEXT("Same-owner reset does not refire Captured Entry Events"),
+		LockedTarget->IsLocked());
+	TestTrue(TEXT("Same-owner reset does not refire Captured Exit Events"),
+		LostEventTarget->IsLocked());
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryStateEventLifecycleRegression,
+	"TerritoryFramework.Tales.Regression.StateEventsFireOncePerLifecycleTransition",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryStateEventLifecycleRegression::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("State-event lifecycle world created"), World)) return false;
+
+	const FGameplayTag SourceTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	const FGameplayTag TargetTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+
+	UTerritoryPlaceDefinition* SourceDefinition =
+		NewObject<UTerritoryPlaceDefinition>();
+	UTerritoryPlaceDefinition* TargetDefinition =
+		NewObject<UTerritoryPlaceDefinition>();
+	SourceDefinition->TerritoryTag = SourceTag;
+	SourceDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	SourceDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	TargetDefinition->TerritoryTag = TargetTag;
+	TargetDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	TargetDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+
+	auto AddUnlockEvent = [SourceDefinition, TargetTag](ETerritoryState State,
+		bool bEntry)
+	{
+		UTerritoryUnlockEvent* Event =
+			NewObject<UTerritoryUnlockEvent>(SourceDefinition);
+		Event->TargetTerritoryTag = TargetTag;
+		Event->UnlockScope = ETerritoryUnlockScope::ExactOnly;
+		FTerritoryStateConfig& Config =
+			SourceDefinition->StateConfigs.FindOrAdd(State);
+		(bEntry ? Config.EntryEvents : Config.ExitEvents).Add(Event);
+	};
+	AddUnlockEvent(ETerritoryState::Contested, true);
+	AddUnlockEvent(ETerritoryState::Locked, false);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryProperty* Source = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* Target = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!Source || !Target
+		|| !SourceDefinition->ApplyToTerritory(Source)
+		|| !TargetDefinition->ApplyToTerritory(Target))
+	{
+		AddError(TEXT("State-event lifecycle fixture could not be configured"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry
+		|| Registry->RegisterTerritory(Source) != ETerritoryRegistrationResult::Success
+		|| Registry->RegisterTerritory(Target) != ETerritoryRegistrationResult::Success)
+	{
+		AddError(TEXT("State-event lifecycle fixture did not register"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	Source->ForceSetOwningFaction(Bandits);
+	Target->ForceSetTerritoryState(ETerritoryState::Locked);
+	Source->ForceSetTerritoryState(ETerritoryState::Contested);
+	TestFalse(TEXT("Contested Entry Event fires on the first real transition"),
+		Target->IsLocked());
+
+	Target->ForceSetTerritoryState(ETerritoryState::Locked);
+	Source->ForceSetTerritoryState(ETerritoryState::Contested);
+	TestTrue(TEXT("Remaining Contested does not repeat its Entry Events"),
+		Target->IsLocked());
+
+	Source->ForceSetTerritoryState(ETerritoryState::Claimed);
+	Source->ForceSetTerritoryState(ETerritoryState::Contested);
+	TestFalse(TEXT("Leaving and later re-entering Contested fires one new Entry Event"),
+		Target->IsLocked());
+
+	Target->ForceSetTerritoryState(ETerritoryState::Locked);
+	Source->ForceSetTerritoryState(ETerritoryState::Locked);
+	TestTrue(TEXT("Both Territories are locked before the Locked exit check"),
+		Source->IsLocked() && Target->IsLocked());
+	TestTrue(TEXT("Source unlock succeeds"), Source->TryUnlock(true));
+	TestFalse(TEXT("Locked Exit Event executes through Narrative ExecuteEvent"),
+		Target->IsLocked());
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryHierarchyUnlockCascadeRegression,
+	"TerritoryFramework.Tales.Regression.HierarchyUnlockScopeRespectsLocalConditions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryHierarchyUnlockCascadeRegression::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Hierarchy unlock world created"), World)) return false;
+
+	const FGameplayTag CityTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach"), false);
+	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare"), false);
+	const FGameplayTag PlaceATag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	const FGameplayTag PlaceBTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+
+	UTerritoryCityDefinition* CityDefinition = NewObject<UTerritoryCityDefinition>();
+	UTerritoryDistrictDefinition* DistrictDefinition = NewObject<UTerritoryDistrictDefinition>();
+	UTerritoryPlaceDefinition* PlaceADefinition = NewObject<UTerritoryPlaceDefinition>();
+	UTerritoryPlaceDefinition* PlaceBDefinition = NewObject<UTerritoryPlaceDefinition>();
+	CityDefinition->TerritoryTag = CityTag;
+	CityDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	CityDefinition->TerritoryActorClass = ATerritoryCity::StaticClass();
+	DistrictDefinition->TerritoryTag = DistrictTag;
+	DistrictDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	DistrictDefinition->TerritoryActorClass = ATerritoryDistrict::StaticClass();
+	PlaceADefinition->TerritoryTag = PlaceATag;
+	PlaceADefinition->StableTerritoryGUID = FGuid::NewGuid();
+	PlaceADefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	PlaceBDefinition->TerritoryTag = PlaceBTag;
+	PlaceBDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	PlaceBDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	UTerritoryOwnershipCondition* BlockingCondition =
+		NewObject<UTerritoryOwnershipCondition>(PlaceBDefinition);
+	PlaceBDefinition->StateConfigs.FindOrAdd(ETerritoryState::Locked)
+		.ExitConditions.Add(BlockingCondition);
+	DistrictDefinition->Places = {PlaceADefinition, PlaceBDefinition};
+	CityDefinition->Districts = {DistrictDefinition};
+	CityDefinition->RefreshHierarchyLinks();
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryCity* City = World->SpawnActor<ATerritoryCity>(
+		ATerritoryCity::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryDistrict* District = World->SpawnActor<ATerritoryDistrict>(
+		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* PlaceA = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* PlaceB = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!City || !District || !PlaceA || !PlaceB
+		|| !CityDefinition->ApplyToTerritory(City)
+		|| !DistrictDefinition->ApplyToTerritory(District)
+		|| !PlaceADefinition->ApplyToTerritory(PlaceA)
+		|| !PlaceBDefinition->ApplyToTerritory(PlaceB))
+	{
+		AddError(TEXT("Hierarchy unlock fixture could not be configured"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
+	if (!Registry || !Control
+		|| Registry->RegisterTerritory(City) != ETerritoryRegistrationResult::Success
+		|| Registry->RegisterTerritory(District) != ETerritoryRegistrationResult::Success
+		|| Registry->RegisterTerritory(PlaceA) != ETerritoryRegistrationResult::Success
+		|| Registry->RegisterTerritory(PlaceB) != ETerritoryRegistrationResult::Success)
+	{
+		AddError(TEXT("Hierarchy unlock fixture did not register"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	City->ForceSetTerritoryState(ETerritoryState::Locked);
+	District->ForceSetTerritoryState(ETerritoryState::Locked);
+	PlaceA->ForceSetTerritoryState(ETerritoryState::Locked);
+	PlaceB->ForceSetTerritoryState(ETerritoryState::Locked);
+	const FTerritoryUnlockCascadeResult Forced = Control->ApplyUnlockCascade(
+		City, FTerritoryTransitionContext(), ETerritoryUnlockScope::ForceHierarchy);
+	TestTrue(TEXT("Force hierarchy unlock succeeds at the City"), Forced.bTargetSucceeded);
+	TestFalse(TEXT("Force hierarchy opens the complete authored branch"),
+		City->IsLocked() || District->IsLocked() || PlaceA->IsLocked() || PlaceB->IsLocked());
+	City->ForceSetTerritoryState(ETerritoryState::Locked);
+	TestFalse(TEXT("Locking a City does not overwrite a Place's local availability"),
+		PlaceA->IsLocked());
+	TestFalse(TEXT("A locked City still gates descendant Place gameplay"),
+		PlaceA->IsAvailableForGameplay());
+	TestEqual(TEXT("Capture validation reports an ancestor hierarchy lock"),
+		Control->GetContestEligibility(PlaceA, Heroes), ECaptureResult::Locked);
+	TestTrue(TEXT("The City can be reopened without mutating child ownership"),
+		City->TryUnlockWithContext(FTerritoryTransitionContext(), true));
+	TestTrue(TEXT("The descendant Place becomes effective again"),
+		PlaceA->IsAvailableForGameplay());
+
+	PlaceA->ForceSetTerritoryState(ETerritoryState::Locked);
+	PlaceB->ForceSetTerritoryState(ETerritoryState::Locked);
+	const FTerritoryUnlockCascadeResult DistrictResult = Control->ApplyUnlockCascade(
+		District, FTerritoryTransitionContext(), ETerritoryUnlockScope::AutomaticHierarchy);
+	TestTrue(TEXT("District target unlock succeeds"), DistrictResult.bTargetSucceeded);
+	TestFalse(TEXT("Eligible child Place unlocks"), PlaceA->IsLocked());
+	TestTrue(TEXT("A child Place keeps its own failed lock condition"), PlaceB->IsLocked());
+	TestTrue(TEXT("Blocked child is reported"), DistrictResult.BlockedCount >= 1);
+
+	PlaceB->TryUnlock(true);
+	PlaceA->ForceSetTerritoryState(ETerritoryState::Locked);
+	PlaceB->ForceSetTerritoryState(ETerritoryState::Locked);
+	const FTerritoryUnlockCascadeResult PlaceResult = Control->ApplyUnlockCascade(
+		PlaceA, FTerritoryTransitionContext(), ETerritoryUnlockScope::AutomaticHierarchy);
+	TestTrue(TEXT("Place unlock opens its ancestor path"), PlaceResult.bTargetSucceeded);
+	TestFalse(TEXT("Exact Place becomes available"), PlaceA->IsLocked());
+	TestTrue(TEXT("Place unlock never opens a sibling"), PlaceB->IsLocked());
+
+	TestTrue(TEXT("Expected sibling can be explicitly unlocked for hierarchy reduction"),
+		PlaceB->TryUnlockWithContext(FTerritoryTransitionContext(), true));
+
+	// Effective availability must remain deterministic when a parent streams out.
+	ATerritoryWorldState* WorldState = World->SpawnActor<ATerritoryWorldState>(
+		ATerritoryWorldState::StaticClass(), FTransform::Identity, SpawnParams);
+	TestNotNull(TEXT("WorldState fixture exists for unloaded-parent availability"), WorldState);
+	if (WorldState)
+	{
+		Registry->UnregisterTerritory(District);
+		FReplicatedCaptureSummary DistrictSummary;
+		DistrictSummary.TerritoryTag = DistrictTag;
+		DistrictSummary.TerritoryGUID = District->GetTerritoryGUID();
+		DistrictSummary.ParentTerritoryTag = CityTag;
+		DistrictSummary.Availability = ETerritoryAvailability::Locked;
+		WorldState->SetCaptureSummary(DistrictSummary);
+		TestFalse(TEXT("A streamed-out locked District gates its loaded Place"),
+			PlaceA->IsAvailableForGameplay());
+		DistrictSummary.Availability = ETerritoryAvailability::Unlocked;
+		WorldState->SetCaptureSummary(DistrictSummary);
+		TestTrue(TEXT("A streamed-out unlocked District preserves the Place path"),
+			PlaceA->IsAvailableForGameplay());
+		TestEqual(TEXT("District can register again after the World Partition check"),
+			Registry->RegisterTerritory(District), ETerritoryRegistrationResult::Success);
+	}
+	PlaceA->ForceSetOwningFaction(Heroes);
+	PlaceB->ForceSetOwningFaction(Heroes);
+	TestEqual(TEXT("City count comes from its authored Definition array"),
+		City->GetDistrictCount(), 1);
+	TestEqual(TEXT("District exposes its two exact authored loaded Places"),
+		District->GetProperties().Num(), 2);
+	TestEqual(TEXT("A Place resolves only its authored District"),
+		PlaceA->GetOwningDistrict(), District);
+	TestTrue(TEXT("Complete authored Place set can secure its District"),
+		District->AllPropertiesOwnedBy(Heroes));
+
+	// A loaded actor that merely points at the District must never substitute for
+	// an authored child that World Partition did not load.
+	// Remove the persistence fixture first: unregistering while WorldState exists
+	// intentionally preserves an exact unloaded-child summary, which is a valid
+	// authored child rather than the missing-child case exercised below.
+	if (WorldState)
+	{
+		World->DestroyActor(WorldState);
+		WorldState = nullptr;
+	}
+	Registry->UnregisterTerritory(PlaceB);
+	FStructProperty* RuntimeTagProperty = FindFProperty<FStructProperty>(
+		PlaceB->GetClass(), TEXT("TerritoryTag"));
+	TestNotNull(TEXT("Runtime Territory tag is reflected for mismatch regression"),
+		RuntimeTagProperty);
+	if (RuntimeTagProperty)
+	{
+		*RuntimeTagProperty->ContainerPtrToValuePtr<FGameplayTag>(PlaceB) =
+			FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.CastleHill"), false);
+		TestEqual(TEXT("Unrelated loaded sibling registers as a stray child"),
+			Registry->RegisterTerritory(PlaceB), ETerritoryRegistrationResult::Success);
+		TestFalse(TEXT("A stray loaded child cannot replace the missing authored Place"),
+			District->AllPropertiesOwnedBy(Heroes));
+		TestFalse(TEXT("A stray runtime child is absent from the Definition-backed Place list"),
+			District->GetProperties().Contains(PlaceB));
+		TestNull(TEXT("A stray child cannot infer a District from its tag prefix"),
+			PlaceB->GetOwningDistrict());
+		TestNotEqual(TEXT("Missing authored child keeps the District insecure"),
+			District->GetTerritoryState(), ETerritoryState::Claimed);
+	}
 
 	World->DestroyWorld(false);
 	return true;
@@ -1044,6 +1464,37 @@ bool FTFContract_CombatDirector::RunTest(const FString& Parameters)
 	const UClass* DebuggerClass = UTerritoryDebugger::StaticClass();
 	TestTrue(TEXT("Territory debugger exposes a Blueprint summary"),
 		TFTestUtils::IsBlueprintPure(DebuggerClass, TEXT("BuildTerritoryDebugSummary")));
+	TestTrue(TEXT("Territory debugger supports exact-tag lookup"),
+		TFTestUtils::IsBlueprintPure(DebuggerClass, TEXT("BuildTerritoryDebugSummaryByTag")));
+	TestTrue(TEXT("Territory debugger exposes a complete runtime report"),
+		TFTestUtils::IsBlueprintPure(DebuggerClass, TEXT("BuildTerritorySystemDebugReport")));
+	TestTrue(TEXT("Territory debugger explains category and always-on diagnostics"),
+		TFTestUtils::IsBlueprintPure(DebuggerClass, TEXT("BuildDebugSettingsSummary")));
+	TestTrue(TEXT("Runtime source is visible to Blueprint diagnostics"),
+		TFTestUtils::IsBlueprintPure(ATerritoryVolume::StaticClass(),
+			TEXT("WasRestoredFromCampaignSave")));
+	const FString DebugSettingsSummary =
+		UTerritoryDebugger::BuildDebugSettingsSummary().ToString();
+	TestTrue(TEXT("Debug summary explains intentional diagnostics outside the master gate"),
+		DebugSettingsSummary.Contains(TEXT("Always on (outside the debug gate)")));
+	TestTrue(TEXT("Debug summary explains manually requested tools outside the master gate"),
+		DebugSettingsSummary.Contains(TEXT("Explicitly requested tools also bypass the gate")));
+
+	const UClass* SettingsClass = UTerritoryDeveloperSettings::StaticClass();
+	TestNotNull(TEXT("Availability and hierarchy have a debug category"),
+		SettingsClass->FindPropertyByName(TEXT("bDebugAvailabilityHierarchy")));
+	TestNotNull(TEXT("Counterattacks have a debug category"),
+		SettingsClass->FindPropertyByName(TEXT("bDebugCounterAttacks")));
+	TestNotNull(TEXT("Production has a debug category"),
+		SettingsClass->FindPropertyByName(TEXT("bDebugProduction")));
+	TestNotNull(TEXT("UI binding has a debug category"),
+		SettingsClass->FindPropertyByName(TEXT("bDebugUI")));
+	TestNotNull(TEXT("Stealth has a debug category"),
+		SettingsClass->FindPropertyByName(TEXT("bDebugStealth")));
+	TestNotNull(TEXT("WorldState has a debug category"),
+		SettingsClass->FindPropertyByName(TEXT("bDebugWorldState")));
+	TestNotNull(TEXT("Interaction has a debug category"),
+		SettingsClass->FindPropertyByName(TEXT("bDebugInteraction")));
 
 	return true;
 }
@@ -3256,12 +3707,12 @@ bool FTFFunctional_RuntimeInvariants::RunTest(const FString& Parameters)
 
 	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
 	Territory->SetOwningFaction(Heroes);
-	Territory->SetTerritoryState(ETerritoryState::Contested);
+	Territory->ForceSetTerritoryState(ETerritoryState::Contested);
 	TestEqual(TEXT("Contested territory preserves incumbent faction"),
 		Territory->GetOwningFaction(), Heroes);
 	TestFalse(TEXT("Contested incumbent is not active ownership"),
 		Territory->IsOwnedByFaction(Heroes));
-	Territory->SetTerritoryState(ETerritoryState::Claimed);
+	Territory->ForceSetTerritoryState(ETerritoryState::Claimed);
 	TestTrue(TEXT("Restored claim belongs to incumbent"),
 		Territory->IsOwnedByFaction(Heroes));
 
@@ -3379,10 +3830,13 @@ bool FTFBehavior_HierarchyContestedRecovery::RunTest(const FString& Parameters)
 			TFTestUtils::HasFunction(DistrictClass, TEXT("AllPropertiesOwnedBy")));
 	}
 
-	// Verify state transition functions exist
+	// Low-level state/progress setters must not remain in reflection. Runtime
+	// callers use capture operations or ApplyTerritoryMutation instead.
 	const UClass* VolumeClass = ATerritoryVolume::StaticClass();
-	TestTrue(TEXT("SetTerritoryState exists"),
+	TestFalse(TEXT("SetTerritoryState reflection surface was removed"),
 		TFTestUtils::HasFunction(VolumeClass, TEXT("SetTerritoryState")));
+	TestFalse(TEXT("SetControlProgress reflection surface was removed"),
+		TFTestUtils::HasFunction(VolumeClass, TEXT("SetControlProgress")));
 	TestTrue(TEXT("GetTerritoryState exists"),
 		TFTestUtils::HasFunction(VolumeClass, TEXT("GetTerritoryState")));
 
@@ -3590,6 +4044,8 @@ bool FTFBehavior_LiveReplicationSubscriptions::RunTest(const FString& Parameters
 	// SavedCaptureSummaries should NOT exist on WorldState (Volume is sole authority)
 	TestFalse(TEXT("SavedCaptureSummaries removed from WorldState (P0-03)"),
 		TFTestUtils::HasProperty(WSClass, TEXT("SavedCaptureSummaries")));
+	TestTrue(TEXT("Unloaded strategic directory is persisted as a read-only projection"),
+		TFTestUtils::IsSaveGame(WSClass, TEXT("SavedStrategicDirectory")));
 
 	// ApplyPendingCaptureSummaries should NOT exist (dead code removed)
 	TestFalse(TEXT("ApplyPendingCaptureSummaries removed from WorldState (P0-03)"),
@@ -3732,6 +4188,14 @@ bool FTFTerritoryDefinitionHierarchyAndApplication::RunTest(const FString& Param
 	TestNotNull(TEXT("District Definition created"), District);
 	TestNotNull(TEXT("Place Definition created"), Place);
 	if (!City || !District || !Place) return false;
+	TestTrue(TEXT("Every Definition exposes the Locked availability rule row"),
+		Place->StateConfigs.Contains(ETerritoryState::Locked));
+	TestTrue(TEXT("Every Definition exposes the Unclaimed rule row"),
+		Place->StateConfigs.Contains(ETerritoryState::Unclaimed));
+	TestTrue(TEXT("Every Definition exposes the Contested rule row"),
+		Place->StateConfigs.Contains(ETerritoryState::Contested));
+	TestTrue(TEXT("Every Definition exposes the Captured / Claimed rule row"),
+		Place->StateConfigs.Contains(ETerritoryState::Claimed));
 
 	City->TerritoryTag = FGameplayTag::RequestGameplayTag(
 		TEXT("Territory.HavenReach"), false);
@@ -3755,7 +4219,8 @@ bool FTFTerritoryDefinitionHierarchyAndApplication::RunTest(const FString& Param
 		Place->DerivedParentTerritoryTag, District->TerritoryTag);
 
 	Place->DisplayName = FText::FromString(TEXT("Reusable Test Place"));
-	Place->InitialState = ETerritoryInitialState::Locked;
+	Place->InitialState = ETerritoryInitialState::Automatic;
+	Place->InitialAvailability = ETerritoryAvailability::Locked;
 	Place->InitialGuardCount = 2;
 	Place->CapturePoint.bEnabled = true;
 	Place->CapturePoint.bAutomaticCapture = true;
@@ -3774,8 +4239,10 @@ bool FTFTerritoryDefinitionHierarchyAndApplication::RunTest(const FString& Param
 		Property->GetTerritoryTag(), Place->TerritoryTag);
 	TestEqual(TEXT("Definition supplies derived District parent"),
 		Property->GetParentTerritoryTag(), District->TerritoryTag);
-	TestEqual(TEXT("Definition supplies new-campaign state"),
-		Property->ResolveInitialTerritoryState(), ETerritoryState::Locked);
+	TestEqual(TEXT("Definition supplies new-campaign political state"),
+		Property->ResolveInitialTerritoryState(), ETerritoryState::Unclaimed);
+	TestEqual(TEXT("Definition supplies separate new-campaign availability"),
+		Property->ResolveInitialTerritoryAvailability(), ETerritoryAvailability::Locked);
 	TestEqual(TEXT("Definition supplies garrison target"),
 		Property->GetConfiguredGuardCount(), 2);
 	const FTerritoryStateConfig* EffectiveClaimed =
@@ -3790,6 +4257,19 @@ bool FTFTerritoryDefinitionHierarchyAndApplication::RunTest(const FString& Param
 		EAutomationExpectedErrorFlags::Contains, 1);
 	TestFalse(TEXT("Place Definition rejects a District actor"),
 		Place->ApplyToTerritory(WrongActor));
+	District->InitialGuardCount = 9;
+	District->bStoryCaptureFromBounds = true;
+	District->CounterAttackApproaches.AddDefaulted();
+	TestTrue(TEXT("District Definition applies to a District actor"),
+		District->ApplyToTerritory(WrongActor));
+	TestEqual(TEXT("District is always aggregate control"),
+		WrongActor->GetControlMode(), ETerritoryControlMode::AggregateOnly);
+	TestEqual(TEXT("District cannot inherit a physical guard target"),
+		WrongActor->GetConfiguredGuardCount(), 0);
+	TestFalse(TEXT("District cannot run Place story capture bounds"),
+		WrongActor->UsesStoryCaptureFromBounds());
+	TestTrue(TEXT("District cannot inherit physical assault approaches"),
+		WrongActor->GetCounterAttackApproaches().IsEmpty());
 	return true;
 }
 
@@ -4369,6 +4849,77 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDetachedNarrativeWorldResolution,
+	"TerritoryFramework.Tales.Regression.DetachedNarrativeAdaptersUseLiveExecutionWorld",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDetachedNarrativeWorldResolution::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Detached Narrative adapter world created"), World)) return false;
+
+	const FGameplayTag TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	if (!TestTrue(TEXT("Detached adapter fixture tags resolve"),
+		TerritoryTag.IsValid() && Heroes.IsValid()))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	UTerritoryPlaceDefinition* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = TerritoryTag;
+	Definition->StableTerritoryGUID = FGuid::NewGuid();
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryProperty* Territory = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	APawn* ContextPawn = World->SpawnActor<APawn>(
+		APawn::StaticClass(), FTransform::Identity, SpawnParams);
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	UTerritoryDiplomacySubsystem* Diplomacy =
+		World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	if (!Territory || !ContextPawn || !Registry || !Diplomacy
+		|| !Definition->ApplyToTerritory(Territory)
+		|| Registry->RegisterTerritory(Territory)
+			!= ETerritoryRegistrationResult::Success)
+	{
+		AddError(TEXT("Detached Narrative adapter fixture could not be configured"));
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	// These objects deliberately have no gameplay-world outer. Narrative execution
+	// still supplies a valid target pawn, which is the authoritative runtime context.
+	UTerritoryStateCondition* StateCondition =
+		NewObject<UTerritoryStateCondition>(GetTransientPackage());
+	StateCondition->TerritoryToCheck = TerritoryTag;
+	StateCondition->RequiredState = ETerritoryState::Unclaimed;
+	TestNull(TEXT("Detached condition has no world from its UObject outer"),
+		StateCondition->GetWorld());
+	TestTrue(TEXT("Detached condition reads Territory state through the live Narrative target"),
+		StateCondition->CheckCondition(ContextPawn, nullptr, nullptr));
+
+	UTerritoryModifyReputationEvent* ReputationEvent =
+		NewObject<UTerritoryModifyReputationEvent>(GetTransientPackage());
+	ReputationEvent->Faction = Heroes;
+	ReputationEvent->Operation = ETerritoryReputationOperation::Set;
+	ReputationEvent->Value = 37;
+	TestNull(TEXT("Detached event has no world from its UObject outer"),
+		ReputationEvent->GetWorld());
+	ReputationEvent->ExecuteEvent(ContextPawn, nullptr, nullptr);
+	TestEqual(TEXT("Detached event mutates the live world's diplomacy subsystem"),
+		Diplomacy->GetReputation(Heroes), 37);
+
+	World->DestroyWorld(false);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDiplomacyStateEventFactionResolution,
 	"TerritoryFramework.Diplomacy.StateEvents.OwnerRelativeFactionResolution",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -4485,6 +5036,153 @@ bool FTFDiplomacyWorldPartitionConflictReadModel::RunTest(const FString& Paramet
 	WorldState->SetCaptureSummary(FarmConflict);
 	TestFalse(TEXT("A terminal claimed summary no longer blocks peace"),
 		WorldState->HasContestedTerritoryBetweenFactions(Bandits, Heroes, Market));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDefinitionBackedStrategicDirectoryRegression,
+	"TerritoryFramework.WorldPartition.DefinitionBackedStrategicDirectory",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDefinitionBackedStrategicDirectoryRegression::RunTest(
+	const FString& Parameters)
+{
+	const FGameplayTag CityTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach"), false);
+	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill"), false);
+	const FGameplayTag FarmTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	const FGameplayTag MarketTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	TestTrue(TEXT("Directory fixture tags exist"), CityTag.IsValid()
+		&& DistrictTag.IsValid() && FarmTag.IsValid() && MarketTag.IsValid()
+		&& Heroes.IsValid() && Bandits.IsValid());
+
+	UTerritoryCityDefinition* City = NewObject<UTerritoryCityDefinition>();
+	UTerritoryDistrictDefinition* District =
+		NewObject<UTerritoryDistrictDefinition>();
+	UTerritoryPlaceDefinition* Farm = NewObject<UTerritoryPlaceDefinition>();
+	UTerritoryPlaceDefinition* Market = NewObject<UTerritoryPlaceDefinition>();
+	ATerritoryWorldState* WorldState = NewObject<ATerritoryWorldState>();
+	TestNotNull(TEXT("Directory WorldState created"), WorldState);
+	if (!City || !District || !Farm || !Market || !WorldState) return false;
+
+	City->TerritoryTag = CityTag;
+	City->DisplayName = FText::FromString(TEXT("Haven Reach"));
+	City->StableTerritoryGUID = FGuid::NewGuid();
+	District->TerritoryTag = DistrictTag;
+	District->DisplayName = FText::FromString(TEXT("Castle Hill"));
+	District->StableTerritoryGUID = FGuid::NewGuid();
+	Farm->TerritoryTag = FarmTag;
+	Farm->DisplayName = FText::FromString(TEXT("Farm"));
+	Farm->StableTerritoryGUID = FGuid::NewGuid();
+	Farm->InitialOwningFaction = Heroes;
+	Farm->InitialState = ETerritoryInitialState::Claimed;
+	Market->TerritoryTag = MarketTag;
+	Market->DisplayName = FText::FromString(TEXT("Blacksmith"));
+	Market->StableTerritoryGUID = FGuid::NewGuid();
+	Market->InitialOwningFaction = Heroes;
+	Market->InitialState = ETerritoryInitialState::Claimed;
+	Market->InitialAvailability = ETerritoryAvailability::Locked;
+	District->Places = {Farm, Market};
+	City->Districts = {District};
+	City->RefreshHierarchyLinks();
+
+	WorldState->RegisterDefinitionHierarchy(City);
+	const TArray<FReplicatedCaptureSummary> Rows =
+		WorldState->GetAllCaptureSummaries();
+	TestEqual(TEXT("One City asset seeds its complete four-row hierarchy"),
+		Rows.Num(), 4);
+	const FReplicatedCaptureSummary DistrictRow =
+		WorldState->GetCaptureSummary(DistrictTag);
+	TestEqual(TEXT("District row has stable hierarchy identity"),
+		DistrictRow.HierarchyLevel, ETerritoryHierarchyLevel::District);
+	TestEqual(TEXT("District row exposes only the authored child count"),
+		DistrictRow.TotalChildren, 2);
+	TestEqual(TEXT("A locked claimed Place prevents secure aggregate ownership"),
+		DistrictRow.State, ETerritoryState::Contested);
+	TestFalse(TEXT("Contested aggregate has no secure owner"),
+		DistrictRow.CurrentOwner.IsValid());
+
+	FReplicatedCaptureSummary LiveDistrict = DistrictRow;
+	LiveDistrict.CurrentOwner = Bandits;
+	LiveDistrict.State = ETerritoryState::Claimed;
+	LiveDistrict.ControlProgress = 1.f;
+	WorldState->SetCaptureSummary(LiveDistrict);
+	District->DisplayName = FText::FromString(TEXT("Castle Hill Updated"));
+	WorldState->RegisterDefinitionHierarchy(City);
+	const FReplicatedCaptureSummary Reconciled =
+		WorldState->GetCaptureSummary(DistrictTag);
+	TestEqual(TEXT("Definition refresh preserves live political authority"),
+		Reconciled.CurrentOwner, Bandits);
+	TestEqual(TEXT("Definition refresh updates stable presentation"),
+		Reconciled.DisplayName.ToString(), FString(TEXT("Castle Hill Updated")));
+
+	FReplicatedCaptureSummary GuidOnlyA;
+	GuidOnlyA.TerritoryGUID = FGuid::NewGuid();
+	GuidOnlyA.DisplayName = FText::FromString(TEXT("Pending Tag A"));
+	FReplicatedCaptureSummary GuidOnlyB;
+	GuidOnlyB.TerritoryGUID = FGuid::NewGuid();
+	GuidOnlyB.DisplayName = FText::FromString(TEXT("Pending Tag B"));
+	WorldState->SetCaptureSummary(GuidOnlyA);
+	WorldState->SetCaptureSummary(GuidOnlyB);
+	TestEqual(TEXT("Invalid tags never collapse distinct GUID-backed rows"),
+		WorldState->GetAllCaptureSummaries().Num(), 6);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFSavedStrategicDirectoryProjectionRoundTrip,
+	"TerritoryFramework.WorldPartition.SavedStrategicDirectoryProjectionRoundTrip",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFSavedStrategicDirectoryProjectionRoundTrip::RunTest(
+	const FString& Parameters)
+{
+	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	TestTrue(TEXT("Saved directory fixture tags exist"),
+		DistrictTag.IsValid() && Heroes.IsValid() && Bandits.IsValid());
+
+	ATerritoryWorldState* WorldState = NewObject<ATerritoryWorldState>();
+	TestNotNull(TEXT("Saved directory WorldState created"), WorldState);
+	if (!WorldState) return false;
+
+	FReplicatedCaptureSummary SavedRow;
+	SavedRow.TerritoryTag = DistrictTag;
+	SavedRow.TerritoryGUID = FGuid::NewGuid();
+	SavedRow.DisplayName = FText::FromString(TEXT("Castle Hill"));
+	SavedRow.HierarchyLevel = ETerritoryHierarchyLevel::District;
+	SavedRow.CurrentOwner = Heroes;
+	SavedRow.State = ETerritoryState::Claimed;
+	SavedRow.ControlProgress = 1.f;
+	SavedRow.bDefinitionBacked = true;
+	WorldState->SetCaptureSummary(SavedRow);
+	WorldState->ExportPersistentState();
+
+	FReplicatedCaptureSummary UnsavedRuntimeRow = SavedRow;
+	UnsavedRuntimeRow.CurrentOwner = Bandits;
+	WorldState->SetCaptureSummary(UnsavedRuntimeRow);
+	TestEqual(TEXT("Runtime row changed after the save boundary"),
+		WorldState->GetCaptureSummary(DistrictTag).CurrentOwner, Bandits);
+
+	WorldState->ImportPersistentState();
+	const FReplicatedCaptureSummary Restored =
+		WorldState->GetCaptureSummary(DistrictTag);
+	TestEqual(TEXT("Load restores the unloaded directory projection"),
+		Restored.CurrentOwner, Heroes);
+	TestEqual(TEXT("Saved directory keeps stable presentation"),
+		Restored.DisplayName.ToString(), FString(TEXT("Castle Hill")));
+	TestTrue(TEXT("Legacy actor-application path remains absent"),
+		!TFTestUtils::HasFunction(ATerritoryWorldState::StaticClass(),
+			TEXT("ApplyPendingCaptureSummaries")));
 	return true;
 }
 

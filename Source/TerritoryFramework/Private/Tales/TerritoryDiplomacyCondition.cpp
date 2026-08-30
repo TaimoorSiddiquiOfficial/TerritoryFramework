@@ -1,8 +1,10 @@
 #include "Tales/TerritoryDiplomacyCondition.h"
 
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Engine/World.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 UTerritoryDiplomacyCondition::UTerritoryDiplomacyCondition()
 {
@@ -12,10 +14,6 @@ UTerritoryDiplomacyCondition::UTerritoryDiplomacyCondition()
 bool UTerritoryDiplomacyCondition::CheckCondition_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	(void)Target;
-	(void)Controller;
-	(void)NarrativeComponent;
-
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB)
 	{
 		UE_LOG(LogTerritory, Warning,
@@ -23,13 +21,20 @@ bool UTerritoryDiplomacyCondition::CheckCondition_Implementation(APawn* Target,
 		return false;
 	}
 
-	const UWorld* World = GetWorld();
+	const UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	const UTerritoryDiplomacySubsystem* Diplomacy = World
 		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
 	if (!Diplomacy)
 	{
-		UE_LOG(LogTerritory, Verbose,
-			TEXT("[TalesDiplomacyCondition] Territory diplomacy is not available"));
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugTales()
+			&& Settings->IsDebugLevelEnabled(6))
+		{
+			UE_LOG(LogTerritory, Log,
+				TEXT("[TalesDiplomacyCondition] Territory diplomacy is not available"));
+		}
 		return false;
 	}
 

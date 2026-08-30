@@ -4,8 +4,8 @@
 #include "SaveSystemStatics.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryWorldState.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 
 ATerritorySavableData::ATerritorySavableData()
 {
@@ -75,12 +75,7 @@ void ATerritorySavableData::Load_Implementation()
 
 bool ATerritorySavableData::IsSuppressedByWorldState() const
 {
-	if (!GetWorld()) return false;
-	for (TActorIterator<ATerritoryWorldState> It(GetWorld()); It; ++It)
-	{
-		return true;
-	}
-	return false;
+	return ATerritoryWorldState::FindTerritoryWorldState(this) != nullptr;
 }
 
 void ATerritorySavableData::SaveToSelf()
@@ -124,6 +119,11 @@ void ATerritorySavableData::LoadFromSelf()
 		Diplomacy->RestorePersistentState(SavedTreaties, SavedReputation, SavedDiplomacyHistory);
 	}
 
-	UE_LOG(LogTerritory, Log, TEXT("TerritorySavableData loaded: %d treasuries, %d treaties"),
-		SavedTreasuries.Num(), SavedTreaties.Num());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugSaveLoad())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[SaveLoad] TerritorySavableData loaded: %d treasuries, %d treaties"),
+			SavedTreasuries.Num(), SavedTreaties.Num());
+	}
 }

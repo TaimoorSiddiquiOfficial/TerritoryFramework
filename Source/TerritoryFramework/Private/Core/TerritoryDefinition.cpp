@@ -4,6 +4,115 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 
+namespace
+{
+	bool EnsureCompleteStateConfigs(UTerritoryDefinition* Definition)
+	{
+		if (!Definition) return false;
+		bool bChanged = false;
+		for (const ETerritoryState State : {
+			ETerritoryState::Locked,
+			ETerritoryState::Unclaimed,
+			ETerritoryState::Contested,
+			ETerritoryState::Claimed })
+		{
+			if (!Definition->StateConfigs.Contains(State))
+			{
+				Definition->StateConfigs.Add(State, FTerritoryStateConfig());
+				bChanged = true;
+			}
+		}
+		return bChanged;
+	}
+
+	bool NormalizeAggregateDefinition(UTerritoryDefinition* Definition)
+	{
+		if (!Definition || Definition->IsA<UTerritoryPlaceDefinition>()) return false;
+
+		const FTerritoryCapturePointTemplate DefaultCapturePoint;
+		const FTerritoryGuardBehaviorTemplate DefaultGuardBehavior;
+		const bool bChanged = Definition->InitialOwningFaction.IsValid()
+			|| Definition->InitialState != ETerritoryInitialState::Automatic
+			|| Definition->ControlMode != ETerritoryControlMode::AggregateOnly
+			|| Definition->MaxConcurrentAttackers != 1
+			|| Definition->PeriodicIncome != 0
+			|| Definition->GuardUpkeepPerCycle != 0
+			|| Definition->GuardRecruitmentCost != 0
+			|| Definition->DefaultStealthProfile != nullptr
+			|| Definition->bStoryCaptureFromBounds
+			|| Definition->CapturePoint.bEnabled
+			|| !Definition->CapturePoint.ActorClass.IsNull()
+			|| !Definition->CapturePoint.RelativeTransform.Equals(
+				DefaultCapturePoint.RelativeTransform)
+			|| !FMath::IsNearlyEqual(Definition->CapturePoint.CaptureRadius,
+				DefaultCapturePoint.CaptureRadius)
+			|| Definition->CapturePoint.bAutomaticCapture
+				!= DefaultCapturePoint.bAutomaticCapture
+			|| Definition->CapturePoint.bHideWhileUnavailable
+				!= DefaultCapturePoint.bHideWhileUnavailable
+			|| Definition->DefaultGuardDefinition != nullptr
+			|| !Definition->FactionGuardDefinitions.IsEmpty()
+			|| Definition->InitialGuardCount != 0
+			|| Definition->PostCaptureGarrisonPolicy
+				!= ETerritoryPostCaptureGarrisonPolicy::AlwaysUnstaffed
+			|| Definition->GuardBehavior.PatrolGoalClass
+				!= DefaultGuardBehavior.PatrolGoalClass
+			|| Definition->GuardBehavior.bEnablePatrolCrowdAvoidance
+				!= DefaultGuardBehavior.bEnablePatrolCrowdAvoidance
+			|| !FMath::IsNearlyEqual(
+				Definition->GuardBehavior.PatrolAvoidanceConsiderationRadius,
+				DefaultGuardBehavior.PatrolAvoidanceConsiderationRadius)
+			|| !FMath::IsNearlyEqual(Definition->GuardBehavior.PatrolAvoidanceWeight,
+				DefaultGuardBehavior.PatrolAvoidanceWeight)
+			|| Definition->GuardBehavior.bPrioritizeClosestHostilePlayer
+				!= DefaultGuardBehavior.bPrioritizeClosestHostilePlayer
+			|| !FMath::IsNearlyEqual(
+				Definition->GuardBehavior.ClosestHostilePlayerGoalScoreBonus,
+				DefaultGuardBehavior.ClosestHostilePlayerGoalScoreBonus)
+			|| Definition->GuardBehavior.DialogueProfile != nullptr
+			|| !Definition->GuardBehavior.FactionDialogueProfiles.IsEmpty()
+			|| !Definition->GuardPosts.IsEmpty()
+			|| !Definition->DefenderDiedEvents.IsEmpty()
+			|| !Definition->AllDefendersDefeatedEvents.IsEmpty()
+			|| Definition->CounterAttackProfile != nullptr
+			|| !Definition->CounterAttackApproaches.IsEmpty()
+			|| !FMath::IsNearlyZero(Definition->GuardQuality)
+			|| !FMath::IsNearlyZero(Definition->FortificationStrength)
+			|| !FMath::IsNearlyZero(Definition->NearbyAlliedSupport);
+
+		Definition->InitialOwningFaction = FGameplayTag();
+		Definition->InitialState = ETerritoryInitialState::Automatic;
+		Definition->ControlMode = ETerritoryControlMode::AggregateOnly;
+		Definition->MaxConcurrentAttackers = 1;
+		Definition->PeriodicIncome = 0;
+		Definition->GuardUpkeepPerCycle = 0;
+		Definition->GuardRecruitmentCost = 0;
+		Definition->DefaultStealthProfile = nullptr;
+		Definition->bStoryCaptureFromBounds = false;
+		Definition->CapturePoint = FTerritoryCapturePointTemplate();
+		Definition->DefaultGuardDefinition = nullptr;
+		Definition->FactionGuardDefinitions.Reset();
+		Definition->InitialGuardCount = 0;
+		Definition->PostCaptureGarrisonPolicy =
+			ETerritoryPostCaptureGarrisonPolicy::AlwaysUnstaffed;
+		Definition->GuardBehavior = FTerritoryGuardBehaviorTemplate();
+		Definition->GuardPosts.Reset();
+		Definition->DefenderDiedEvents.Reset();
+		Definition->AllDefendersDefeatedEvents.Reset();
+		Definition->CounterAttackProfile = nullptr;
+		Definition->CounterAttackApproaches.Reset();
+		Definition->GuardQuality = 0.f;
+		Definition->FortificationStrength = 0.f;
+		Definition->NearbyAlliedSupport = 0.f;
+		return bChanged;
+	}
+}
+
+UTerritoryDefinition::UTerritoryDefinition()
+{
+	EnsureCompleteStateConfigs(this);
+}
+
 FTerritoryGuardBehaviorTemplate::FTerritoryGuardBehaviorTemplate()
 	: PatrolGoalClass(UTerritoryPatrolGoal::StaticClass())
 {
@@ -30,24 +139,36 @@ bool UTerritoryDefinition::ApplyToTerritory(ATerritoryVolume* Territory) const
 	Territory->TerritoryTag = TerritoryTag;
 	Territory->TerritoryDisplayName = DisplayName;
 	Territory->InitialOwningFaction = InitialOwningFaction;
+	Territory->InitialAvailability = InitialState == ETerritoryInitialState::Locked
+		? ETerritoryAvailability::Locked : InitialAvailability;
 	Territory->InitialState = InitialState;
-	Territory->ControlMode = ControlMode;
-	Territory->InitialMaxConcurrentAttackers = FMath::Max(1, MaxConcurrentAttackers);
-	Territory->InitialPeriodicIncome = FMath::Max(0, PeriodicIncome);
-	Territory->InitialGuardCost = FMath::Max(0, GuardUpkeepPerCycle);
-	Territory->InitialGuardRecruitmentCost = FMath::Max(0, GuardRecruitmentCost);
 	Territory->ParentTerritoryTag = DerivedParentTerritoryTag;
-	Territory->bStoryCaptureFromBounds = bStoryCaptureFromBounds;
-	Territory->GuardNPCDefinition = DefaultGuardDefinition;
-	Territory->FactionGuardDefinitions = FactionGuardDefinitions;
-	Territory->GuardSpawnCount = FMath::Max(0, InitialGuardCount);
-	Territory->PostCaptureGarrisonPolicy = PostCaptureGarrisonPolicy;
-	Territory->CounterAttackProfile = CounterAttackProfile;
-	Territory->CounterAttackApproaches = CounterAttackApproaches;
-	Territory->GuardQuality = FMath::Max(0.f, GuardQuality);
-	Territory->FortificationStrength = FMath::Max(0.f, FortificationStrength);
-	Territory->NearbyAlliedSupport = FMath::Max(0.f, NearbyAlliedSupport);
 	Territory->StrategicValue = FMath::Max(0.f, StrategicValue);
+
+	const bool bPhysicalPlace = IsA<UTerritoryPlaceDefinition>();
+	Territory->ControlMode = bPhysicalPlace
+		? ETerritoryControlMode::Independent : ETerritoryControlMode::AggregateOnly;
+	Territory->InitialMaxConcurrentAttackers = bPhysicalPlace
+		? FMath::Max(1, MaxConcurrentAttackers) : 1;
+	Territory->InitialPeriodicIncome = bPhysicalPlace ? FMath::Max(0, PeriodicIncome) : 0;
+	Territory->InitialGuardCost = bPhysicalPlace ? FMath::Max(0, GuardUpkeepPerCycle) : 0;
+	Territory->InitialGuardRecruitmentCost = bPhysicalPlace
+		? FMath::Max(0, GuardRecruitmentCost) : 0;
+	Territory->bStoryCaptureFromBounds = bPhysicalPlace && bStoryCaptureFromBounds;
+	Territory->GuardNPCDefinition = bPhysicalPlace ? DefaultGuardDefinition : nullptr;
+	Territory->FactionGuardDefinitions = bPhysicalPlace
+		? FactionGuardDefinitions : TArray<FTerritoryFactionGuardDefinition>();
+	Territory->GuardSpawnCount = bPhysicalPlace ? FMath::Max(0, InitialGuardCount) : 0;
+	Territory->PostCaptureGarrisonPolicy = bPhysicalPlace
+		? PostCaptureGarrisonPolicy : ETerritoryPostCaptureGarrisonPolicy::AlwaysUnstaffed;
+	Territory->CounterAttackProfile = bPhysicalPlace ? CounterAttackProfile : nullptr;
+	Territory->CounterAttackApproaches = bPhysicalPlace
+		? CounterAttackApproaches : TArray<FTerritoryAssaultApproach>();
+	Territory->GuardQuality = bPhysicalPlace ? FMath::Max(0.f, GuardQuality) : 0.f;
+	Territory->FortificationStrength = bPhysicalPlace
+		? FMath::Max(0.f, FortificationStrength) : 0.f;
+	Territory->NearbyAlliedSupport = bPhysicalPlace
+		? FMath::Max(0.f, NearbyAlliedSupport) : 0.f;
 
 	if (StableTerritoryGUID.IsValid())
 	{
@@ -127,6 +248,40 @@ bool UTerritoryDefinition::IsDefinitionCompatible(
 	return Territory != nullptr;
 }
 
+void UTerritoryDefinition::PostLoad()
+{
+	Super::PostLoad();
+	bool bMigrated = EnsureCompleteStateConfigs(this);
+	if (InitialState == ETerritoryInitialState::Locked)
+	{
+		// One-time in-memory migration for definitions saved before availability and
+		// political control were separated. Keep the same new-campaign behavior.
+		InitialAvailability = ETerritoryAvailability::Locked;
+		InitialState = InitialOwningFaction.IsValid()
+			? ETerritoryInitialState::Claimed : ETerritoryInitialState::Unclaimed;
+		bMigrated = true;
+	}
+
+	if (IsA<UTerritoryPlaceDefinition>())
+	{
+		if (ControlMode != ETerritoryControlMode::Independent)
+		{
+			ControlMode = ETerritoryControlMode::Independent;
+			bMigrated = true;
+		}
+	}
+	else
+	{
+		bMigrated |= NormalizeAggregateDefinition(this);
+	}
+#if WITH_EDITOR
+	if (bMigrated && !IsRunningCookCommandlet())
+	{
+		MarkPackageDirty();
+	}
+#endif
+}
+
 void UTerritoryDefinition::SetDerivedParentTag(const FGameplayTag& ParentTag)
 {
 	if (DerivedParentTerritoryTag == ParentTag) return;
@@ -170,6 +325,7 @@ void UTerritoryDefinition::PostEditChangeProperty(
 	FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
+	EnsureCompleteStateConfigs(this);
 	if (!StableTerritoryGUID.IsValid())
 	{
 		StableTerritoryGUID = FGuid::NewGuid();
@@ -196,7 +352,7 @@ bool UTerritoryPlaceDefinition::IsDefinitionCompatible(
 
 UTerritoryDistrictDefinition::UTerritoryDistrictDefinition()
 {
-	ControlMode = ETerritoryControlMode::AggregateOnly;
+	NormalizeAggregateDefinition(this);
 }
 
 FPrimaryAssetId UTerritoryDistrictDefinition::GetPrimaryAssetId() const
@@ -222,7 +378,7 @@ bool UTerritoryDistrictDefinition::IsDefinitionCompatible(
 
 UTerritoryCityDefinition::UTerritoryCityDefinition()
 {
-	ControlMode = ETerritoryControlMode::AggregateOnly;
+	NormalizeAggregateDefinition(this);
 }
 
 FPrimaryAssetId UTerritoryCityDefinition::GetPrimaryAssetId() const

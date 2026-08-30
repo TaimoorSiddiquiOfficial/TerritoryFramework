@@ -2,11 +2,11 @@
 
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryCommandTags.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryWorldState.h"
-#include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "UI/TerritoryActivatableWidget.h"
@@ -129,12 +129,7 @@ namespace
 
 	const ATerritoryWorldState* FindTerritoryWorldState(const UWorld* World)
 	{
-		if (!World) return nullptr;
-		for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
-		{
-			return *It;
-		}
-		return nullptr;
+		return ATerritoryWorldState::FindTerritoryWorldState(World);
 	}
 
 	int32 GetStoredResourceQuantity(const FTerritoryFactionResourceSnapshot& Snapshot,
@@ -529,6 +524,29 @@ ATerritoryDistrict* UTerritoryUIBlueprintLibrary::GetDistrictAtPlayerLocation(
 	return nullptr;
 }
 
+ATerritoryVolume* UTerritoryUIBlueprintLibrary::GetVisibleTerritoryAtLocation(
+	const UObject* WorldContextObject, FVector WorldLocation)
+{
+	UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+	UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!Registry) return nullptr;
+
+	ATerritoryVolume* Territory = Registry->GetTerritoryAtLocation(WorldLocation);
+	TSet<FGameplayTag> VisitedParents;
+	while (Territory && !IsTerritoryVisibleToPlayer(WorldContextObject, Territory))
+	{
+		const FGameplayTag ParentTag = Territory->GetParentTerritoryTag();
+		if (!ParentTag.IsValid() || VisitedParents.Contains(ParentTag))
+		{
+			return nullptr;
+		}
+		VisitedParents.Add(ParentTag);
+		Territory = Registry->GetTerritoryByTag(ParentTag);
+	}
+	return Territory;
+}
+
 bool UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
 	const UObject* WorldContextObject, ATerritoryVolume* Territory)
 {
@@ -541,38 +559,7 @@ bool UTerritoryUIBlueprintLibrary::IsTerritoryVisibleToPlayer(
 		return false;
 	}
 
-	TSet<FGameplayTag> Visited;
-	ATerritoryVolume* Current = Territory;
-	while (Current)
-	{
-		if (Current->GetTerritoryState() == ETerritoryState::Locked)
-		{
-			return false;
-		}
-
-		const FGameplayTag CurrentTag = Current->GetTerritoryTag();
-		if (!CurrentTag.IsValid() || Visited.Contains(CurrentTag))
-		{
-			return false;
-		}
-		Visited.Add(CurrentTag);
-
-		const FGameplayTag ParentTag = Current->GetParentTerritoryTag();
-		if (!ParentTag.IsValid())
-		{
-			return true;
-		}
-
-		// Fail closed when a World Partition parent is not loaded. This prevents a
-		// child Place from revealing the existence of an unloaded story-locked City
-		// or District and keeps the player list structurally coherent.
-		Current = Registry->GetTerritoryByTag(ParentTag);
-		if (!Current)
-		{
-			return false;
-		}
-	}
-	return false;
+	return Territory->IsAvailableForGameplay();
 }
 
 bool UTerritoryUIBlueprintLibrary::BuildHierarchyOperationsView(
@@ -590,6 +577,7 @@ bool UTerritoryUIBlueprintLibrary::BuildHierarchyOperationsView(
 	OutView.TerritoryTag = Territory->GetTerritoryTag();
 	OutView.ParentTerritoryTag = Territory->GetParentTerritoryTag();
 	OutView.DisplayName = Territory->GetTerritoryDisplayName();
+	OutView.Availability = Territory->GetTerritoryAvailability();
 	OutView.TerritoryState = Territory->GetTerritoryState();
 	OutView.OwnerFaction = Territory->GetOwningFaction();
 	OutView.ViewerFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
@@ -689,6 +677,7 @@ bool UTerritoryUIBlueprintLibrary::BuildGarrisonOperationsView(
 {
 	OutView = FTerritoryGarrisonOperationsView();
 	if (!WorldContextObject || !Territory || !WorldContextObject->GetWorld()) return false;
+	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly) return false;
 
 	UWorld* World = WorldContextObject->GetWorld();
 	AActor* ViewerActor = ResolveViewerActor(Viewer);
@@ -702,6 +691,7 @@ bool UTerritoryUIBlueprintLibrary::BuildGarrisonOperationsView(
 		&& Territory->GetOwningFaction() == ViewerFaction;
 	const UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	OutView.bManageable = ViewerActor && OutView.bOwnedByViewer
+		&& Territory->IsAvailableForGameplay()
 		&& Territory->GetTerritoryState() == ETerritoryState::Claimed
 		&& Registry && Registry->GetTerritoryByTag(OutView.TerritoryTag) == Territory;
 
@@ -756,11 +746,6 @@ TArray<FTerritoryGarrisonOperationsView> UTerritoryUIBlueprintLibrary::GetDistri
 {
 	TArray<FTerritoryGarrisonOperationsView> Result;
 	if (!District) return Result;
-	FTerritoryGarrisonOperationsView DistrictView;
-	if (BuildGarrisonOperationsView(WorldContextObject, District, Viewer, DistrictView))
-	{
-		Result.Add(MoveTemp(DistrictView));
-	}
 	for (ATerritoryVolume* Property : District->GetProperties())
 	{
 		FTerritoryGarrisonOperationsView PropertyView;
@@ -811,6 +796,7 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	OutView.OwnerFaction = District->GetOwningFaction();
 	OutView.ViewerFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(WorldContextObject, ViewerActor);
 	OutView.ContestingFaction = District->GetOwnershipData().ContestingFaction;
+	OutView.Availability = District->GetTerritoryAvailability();
 	OutView.TerritoryState = District->GetTerritoryState();
 	OutView.LockReason = District->GetLockReason();
 
@@ -818,14 +804,10 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	{
 		OutView.bRegistered = Registry->GetTerritoryByTag(OutView.DistrictTag) == District;
 	}
-	OutView.bUnlocked = OutView.TerritoryState != ETerritoryState::Locked;
+	OutView.bRuntimeLoaded = OutView.bRegistered;
+	OutView.bUnlocked = !District->IsLocked();
 	OutView.bHierarchyVisible = IsTerritoryVisibleToPlayer(WorldContextObject, District);
 	OutView.bOwnedByViewer = OutView.ViewerFaction.IsValid() && OutView.OwnerFaction == OutView.ViewerFaction;
-	TArray<ATerritoryVolume*> AllProperties = District->GetProperties();
-	AllProperties.RemoveAll([](const ATerritoryVolume* Property)
-	{
-		return !IsValid(Property);
-	});
 	OutView.Hierarchy = GetDistrictHierarchyOperationsViews(WorldContextObject, District, Viewer);
 	TArray<ATerritoryVolume*> VisibleProperties;
 	for (const FTerritoryHierarchyOperationsView& Item : OutView.Hierarchy)
@@ -837,7 +819,18 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 			OutView.ContestableProperties += Item.bAvailableForCapture ? 1 : 0;
 		}
 	}
-	OutView.TotalProperties = AllProperties.Num();
+	// The Definition is the hierarchy authority, so the completion denominator
+	// remains stable when a locked/remote Place is absent under World Partition.
+	// Only the anonymous count is exposed; identities stay hidden until available.
+	if (const UTerritoryDistrictDefinition* DistrictDefinition =
+		Cast<UTerritoryDistrictDefinition>(District->GetTerritoryDefinition()))
+	{
+		OutView.TotalProperties = DistrictDefinition->Places.Num();
+	}
+	else
+	{
+		OutView.TotalProperties = District->GetProperties().Num();
+	}
 	OutView.KnownProperties = OutView.VisiblePlaces.Num();
 	OutView.HiddenProperties = FMath::Max(0,
 		OutView.TotalProperties - OutView.KnownProperties);
@@ -856,9 +849,8 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	if (const UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>())
 	{
 		OutView.CaptureEligibility = Control->GetCaptureEligibility(District, OutView.ViewerFaction);
-		OutView.bCaptureInProgress = Control->IsCaptureInProgress(District)
-			|| OutView.TerritoryState == ETerritoryState::Contested;
-		OutView.CaptureProgress = District->GetControlProgress();
+		OutView.bCaptureInProgress = false;
+		OutView.CaptureProgress = 0.f;
 		OutView.bAttackerCountKnown = World->GetNetMode() != NM_Client;
 		if (OutView.bAttackerCountKnown && OutView.ContestingFaction.IsValid())
 		{
@@ -896,6 +888,7 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 
 	OutView.bManageable = OutView.bRegistered
 		&& OutView.bHierarchyVisible
+		&& OutView.bUnlocked
 		&& OutView.bOwnedByViewer
 		&& OutView.TerritoryState == ETerritoryState::Claimed
 		&& ViewerActor != nullptr;
@@ -1142,7 +1135,8 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		}
 	}
 
-	OutView.bUnderAttack = OutView.bUnderAttack || OutView.TerritoryState == ETerritoryState::Contested;
+	// Aggregate Contested means child control disagrees; only a physical child
+	// capture/counterattack is an active attack.
 	if (OutView.bUnderAttack)
 	{
 		OutView.ThreatLevel = ETerritoryThreatLevel::Critical;
@@ -1203,19 +1197,296 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	return true;
 }
 
+bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsViewFromSummary(
+	const UObject* WorldContextObject,
+	const FReplicatedCaptureSummary& Summary,
+	APlayerController* Viewer,
+	FTerritoryDistrictOperationsView& OutView)
+{
+	OutView = FTerritoryDistrictOperationsView();
+	if (!WorldContextObject || !Summary.TerritoryTag.IsValid()
+		|| Summary.HierarchyLevel != ETerritoryHierarchyLevel::District)
+	{
+		OutView.AvailabilityReason = NSLOCTEXT(
+			"TerritoryOperations", "InvalidDirectoryDistrict",
+			"The strategic directory row is not a valid District.");
+		return false;
+	}
+
+	UWorld* World = WorldContextObject->GetWorld();
+	const ATerritoryWorldState* WorldState = FindTerritoryWorldState(World);
+	if (!World || !WorldState)
+	{
+		OutView.AvailabilityReason = NSLOCTEXT(
+			"TerritoryOperations", "DirectoryUnavailable",
+			"The replicated Territory directory is unavailable.");
+		return false;
+	}
+
+	// If the actor streamed back between directory enumeration and view building,
+	// immediately return the richer live projection.
+	if (const UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>())
+	{
+		if (ATerritoryDistrict* Loaded = Cast<ATerritoryDistrict>(
+			Registry->GetTerritoryByTag(Summary.TerritoryTag)))
+		{
+			return BuildDistrictOperationsView(
+				WorldContextObject, Loaded, Viewer, OutView);
+		}
+	}
+
+	AActor* ViewerActor = ResolveViewerActor(Viewer);
+	OutView.DistrictTag = Summary.TerritoryTag;
+	OutView.DisplayName = Summary.DisplayName.IsEmpty()
+		? UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Summary.TerritoryTag)
+		: Summary.DisplayName;
+	OutView.CityTag = Summary.ParentTerritoryTag;
+	OutView.OwnerFaction = Summary.CurrentOwner;
+	OutView.ViewerFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+		WorldContextObject, ViewerActor);
+	OutView.ContestingFaction = Summary.ContestingFaction;
+	OutView.Availability = Summary.Availability;
+	OutView.TerritoryState = Summary.State;
+	OutView.CaptureProgress = FMath::Clamp(Summary.ControlProgress, 0.f, 1.f);
+	OutView.bRegistered = true;
+	OutView.bRuntimeLoaded = false;
+	OutView.bUnlocked = Summary.Availability == ETerritoryAvailability::Unlocked;
+	OutView.bHierarchyVisible = OutView.bUnlocked;
+	OutView.TotalProperties = FMath::Max(0, Summary.TotalChildren);
+
+	const TArray<FReplicatedCaptureSummary> Directory =
+		WorldState->GetAllCaptureSummaries();
+	if (OutView.CityTag.IsValid())
+	{
+		const FReplicatedCaptureSummary* City = Directory.FindByPredicate(
+			[&OutView](const FReplicatedCaptureSummary& Entry)
+			{
+				return Entry.TerritoryTag == OutView.CityTag
+					&& Entry.HierarchyLevel == ETerritoryHierarchyLevel::City;
+			});
+		if (!City)
+		{
+			// A missing parent row is ambiguous and must not reveal an orphaned child.
+			OutView.bHierarchyVisible = false;
+		}
+		else
+		{
+			OutView.CityDisplayName = City->DisplayName.IsEmpty()
+				? UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(City->TerritoryTag)
+				: City->DisplayName;
+			OutView.bHierarchyVisible &=
+				City->Availability == ETerritoryAvailability::Unlocked;
+
+			FTerritoryHierarchyOperationsView CityView;
+			CityView.TerritoryTag = City->TerritoryTag;
+			CityView.ParentTerritoryTag = City->ParentTerritoryTag;
+			CityView.DisplayName = OutView.CityDisplayName;
+			CityView.HierarchyLevel = ETerritoryHierarchyLevel::City;
+			CityView.Availability = City->Availability;
+			CityView.TerritoryState = City->State;
+			CityView.OwnerFaction = City->CurrentOwner;
+			CityView.ViewerFaction = OutView.ViewerFaction;
+			CityView.bRegistered = true;
+			CityView.bVisibleToPlayer = OutView.bHierarchyVisible;
+			CityView.bOwnedByViewer = OutView.ViewerFaction.IsValid()
+				&& City->CurrentOwner == OutView.ViewerFaction;
+			OutView.Hierarchy.Add(MoveTemp(CityView));
+		}
+	}
+
+	FTerritoryHierarchyOperationsView DistrictView;
+	DistrictView.TerritoryTag = OutView.DistrictTag;
+	DistrictView.ParentTerritoryTag = OutView.CityTag;
+	DistrictView.DisplayName = OutView.DisplayName;
+	DistrictView.HierarchyLevel = ETerritoryHierarchyLevel::District;
+	DistrictView.Availability = OutView.Availability;
+	DistrictView.TerritoryState = OutView.TerritoryState;
+	DistrictView.OwnerFaction = OutView.OwnerFaction;
+	DistrictView.ViewerFaction = OutView.ViewerFaction;
+	DistrictView.bRegistered = true;
+	DistrictView.bVisibleToPlayer = OutView.bHierarchyVisible;
+	DistrictView.bOwnedByViewer = OutView.ViewerFaction.IsValid()
+		&& OutView.OwnerFaction == OutView.ViewerFaction;
+	OutView.Hierarchy.Add(MoveTemp(DistrictView));
+
+	for (const FReplicatedCaptureSummary& Child : Directory)
+	{
+		if (Child.ParentTerritoryTag != OutView.DistrictTag
+			|| Child.HierarchyLevel != ETerritoryHierarchyLevel::Place
+			|| Child.Availability != ETerritoryAvailability::Unlocked)
+		{
+			continue;
+		}
+		FTerritoryHierarchyOperationsView PlaceView;
+		PlaceView.TerritoryTag = Child.TerritoryTag;
+		PlaceView.ParentTerritoryTag = Child.ParentTerritoryTag;
+		PlaceView.DisplayName = Child.DisplayName.IsEmpty()
+			? UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Child.TerritoryTag)
+			: Child.DisplayName;
+		PlaceView.HierarchyLevel = ETerritoryHierarchyLevel::Place;
+		PlaceView.Availability = Child.Availability;
+		PlaceView.TerritoryState = Child.State;
+		PlaceView.OwnerFaction = Child.CurrentOwner;
+		PlaceView.ViewerFaction = OutView.ViewerFaction;
+		PlaceView.bRegistered = true;
+		PlaceView.bVisibleToPlayer = OutView.bHierarchyVisible;
+		PlaceView.bOwnedByViewer = OutView.ViewerFaction.IsValid()
+			&& Child.CurrentOwner == OutView.ViewerFaction;
+		OutView.OwnedProperties += PlaceView.bOwnedByViewer ? 1 : 0;
+		OutView.bCaptureInProgress |= Child.State == ETerritoryState::Contested;
+		if (Child.ControlProgress >= OutView.CaptureProgress)
+		{
+			OutView.CaptureProgress = Child.ControlProgress;
+			if (Child.ContestingFaction.IsValid())
+			{
+				OutView.ContestingFaction = Child.ContestingFaction;
+			}
+		}
+		OutView.VisiblePlaces.Add(PlaceView);
+		OutView.Hierarchy.Add(MoveTemp(PlaceView));
+	}
+	OutView.VisiblePlaces.Sort([](const FTerritoryHierarchyOperationsView& A,
+		const FTerritoryHierarchyOperationsView& B)
+	{
+		return A.DisplayName.ToString() < B.DisplayName.ToString();
+	});
+	OutView.KnownProperties = OutView.VisiblePlaces.Num();
+	if (OutView.TotalProperties <= 0)
+	{
+		OutView.TotalProperties = OutView.KnownProperties;
+	}
+	OutView.HiddenProperties = FMath::Max(0,
+		OutView.TotalProperties - OutView.KnownProperties);
+	OutView.bAllPlacesDiscovered = OutView.TotalProperties > 0
+		&& OutView.HiddenProperties == 0;
+	OutView.bCaptureInProgress |= Summary.State == ETerritoryState::Contested;
+	OutView.bOwnedByViewer = OutView.ViewerFaction.IsValid()
+		&& OutView.OwnerFaction == OutView.ViewerFaction;
+	OutView.bManageable = false;
+	OutView.bAvailableForCapture = false;
+	OutView.CaptureEligibility = ECaptureResult::InvalidTerritory;
+	OutView.bAvailable = false;
+	OutView.ManagementFailureReason = NSLOCTEXT(
+		"TerritoryOperations", "DistrictStreamedOutManagement",
+		"Travel near this District to load its Places before issuing commands.");
+	OutView.AvailabilityReason = OutView.bHierarchyVisible
+		? NSLOCTEXT("TerritoryOperations", "DistrictStreamedOutAvailable",
+			"Strategic intelligence is available. Travel near this District to interact.")
+		: NSLOCTEXT("TerritoryOperations", "DirectoryHierarchyLocked",
+			"This Territory branch is story locked.");
+	OutView.bAttackerCountKnown = false;
+	OutView.bReserveCountKnown = false;
+
+	// Production already uses a WorldState read model, so it remains useful while
+	// the Place actor is unloaded.
+	const FTerritoryFactionResourceSnapshot ResourceSnapshot =
+		WorldState->GetFactionResourceSnapshot(OutView.OwnerFaction);
+	for (const FTerritoryProductionSiteRecord& Record : WorldState->GetProductionSites())
+	{
+		if (Record.ParentTerritoryTag != OutView.DistrictTag) continue;
+		const bool bVisible = OutView.VisiblePlaces.ContainsByPredicate(
+			[&Record](const FTerritoryHierarchyOperationsView& Place)
+			{
+				return Place.TerritoryTag == Record.TerritoryTag;
+			});
+		if (!bVisible) continue;
+		FTerritoryProductionSiteOperationsView Site =
+			BuildProductionSiteView(Record, ResourceSnapshot);
+		OutView.ProducingSiteCount += Site.bProducing ? 1 : 0;
+		OutView.BlockedProductionSiteCount += Site.bBlocked ? 1 : 0;
+		OutView.ProductionSites.Add(MoveTemp(Site));
+	}
+	MergeResourceFlows(OutView.ProductionSites, ResourceSnapshot,
+		OutView.ResourceFlows);
+
+	const FTerritoryAssaultRecord* Preferred = nullptr;
+	for (const FTerritoryAssaultRecord& Assault : WorldState->GetAllAssaultSummaries())
+	{
+		const FReplicatedCaptureSummary* TargetSummary = Directory.FindByPredicate(
+			[&Assault](const FReplicatedCaptureSummary& Entry)
+			{
+				return Entry.TerritoryTag == Assault.TargetTerritory;
+			});
+		const bool bTargetsDistrict = Assault.TargetTerritory == OutView.DistrictTag
+			|| (TargetSummary
+				&& TargetSummary->ParentTerritoryTag == OutView.DistrictTag);
+		if (!bTargetsDistrict || Assault.IsTerminal()) continue;
+		++OutView.NonTerminalAssaultCount;
+		if (!Preferred || GetAssaultPriority(Assault.State)
+			> GetAssaultPriority(Preferred->State))
+		{
+			Preferred = &Assault;
+		}
+	}
+	if (Preferred)
+	{
+		OutView.AssaultID = Preferred->AssaultID;
+		OutView.ThreatTargetTerritory = Preferred->TargetTerritory;
+		OutView.AssaultState = Preferred->State;
+		OutView.AssaultResolution = Preferred->Resolution;
+		OutView.AttackingFaction = Preferred->AttackingFaction;
+		OutView.PlannedAttackers = Preferred->PlannedForce;
+		OutView.AliveAttackers = Preferred->AliveForce;
+		OutView.PendingReserveAttackers = Preferred->PendingReserveForce;
+		OutView.KilledAttackers = Preferred->KilledForce;
+		OutView.WithdrawnAttackers = Preferred->WithdrawnForce;
+		OutView.LaunchProbability = Preferred->EvaluationResult.LaunchProbability;
+		OutView.EstimatedSuccessProbability =
+			Preferred->EvaluationResult.EstimatedSuccessProbability;
+		OutView.AttackPriority = Preferred->EvaluationResult.AttackPriority;
+		OutView.DistrictDefencePower = Preferred->EvaluationResult.DistrictDefencePower;
+		OutView.PowerRatio = Preferred->EvaluationResult.PowerRatio;
+		OutView.SelectedApproaches = Preferred->SelectedApproaches;
+		OutView.bUnderAttack = Preferred->State == ETerritoryAssaultState::Active
+			|| Preferred->State == ETerritoryAssaultState::RecaptureCountdown;
+		OutView.bAttackScheduled = !OutView.bUnderAttack;
+		OutView.ThreatLevel = OutView.bUnderAttack
+			? ETerritoryThreatLevel::Critical : ETerritoryThreatLevel::Warning;
+	}
+	OutView.ThreatSummary = BuildThreatSummary(OutView);
+	return true;
+}
+
 TArray<FTerritoryDistrictOperationsView> UTerritoryUIBlueprintLibrary::GetDistrictOperationsViews(
 	const UObject* WorldContextObject,
 	APlayerController* Viewer,
 	ETerritoryOperationsFilter Filter)
 {
 	TArray<FTerritoryDistrictOperationsView> Result;
+	TSet<FGameplayTag> AddedDistricts;
 	for (ATerritoryDistrict* District : UTerritoryBlueprintLibrary::GetAllDistricts(WorldContextObject))
 	{
 		FTerritoryDistrictOperationsView View;
 		if (BuildDistrictOperationsView(WorldContextObject, District, Viewer, View)
 			&& DoesDistrictMatchFilter(View, Filter))
 		{
+			AddedDistricts.Add(View.DistrictTag);
 			Result.Add(MoveTemp(View));
+		}
+	}
+	if (WorldContextObject)
+	{
+		if (const ATerritoryWorldState* WorldState =
+			FindTerritoryWorldState(WorldContextObject->GetWorld()))
+		{
+			for (const FReplicatedCaptureSummary& Summary :
+				WorldState->GetAllCaptureSummaries())
+			{
+				if (Summary.HierarchyLevel != ETerritoryHierarchyLevel::District
+					|| AddedDistricts.Contains(Summary.TerritoryTag))
+				{
+					continue;
+				}
+				FTerritoryDistrictOperationsView View;
+				if (BuildDistrictOperationsViewFromSummary(
+					WorldContextObject, Summary, Viewer, View)
+					&& DoesDistrictMatchFilter(View, Filter))
+				{
+					AddedDistricts.Add(View.DistrictTag);
+					Result.Add(MoveTemp(View));
+				}
+			}
 		}
 	}
 	Result.Sort([](const FTerritoryDistrictOperationsView& A, const FTerritoryDistrictOperationsView& B)
@@ -1308,10 +1579,8 @@ bool UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(
 		return true;
 	}
 
-	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-	const FString StateName = StateEnum
-		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(View.TerritoryState)).ToString()
-		: FString();
+	const FString StateName = GetTerritoryStatusText(
+		View.Availability, View.TerritoryState).ToString();
 	TArray<FString> SearchFields = {
 		View.DisplayName.ToString(),
 		View.DistrictTag.ToString(),
@@ -1401,10 +1670,12 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 	Hash = HashCombineFast(Hash, GetTypeHash(View.OwnerFaction));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ViewerFaction));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ContestingFaction));
+	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.Availability)));
 	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.TerritoryState)));
 	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.CaptureEligibility)));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bRegistered));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bUnlocked));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bRuntimeLoaded));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bHierarchyVisible));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bAvailable));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bManageable));
@@ -1452,6 +1723,7 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 	{
 		Hash = HashCombineFast(Hash, GetTypeHash(Place.TerritoryTag));
 		Hash = HashCombineFast(Hash, GetTypeHash(Place.OwnerFaction));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Place.Availability)));
 		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Place.TerritoryState)));
 		Hash = HashCombineFast(Hash, GetTypeHash(Place.ActiveGuards));
 		Hash = HashCombineFast(Hash, GetTypeHash(Place.DesiredGuards));
@@ -1543,12 +1815,8 @@ FTerritoryEconomyOperationsView UTerritoryUIBlueprintLibrary::BuildEconomyOperat
 	}
 	else
 	{
-		const ATerritoryWorldState* WorldState = nullptr;
-		for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
-		{
-			WorldState = *It;
-			break;
-		}
+		const ATerritoryWorldState* WorldState =
+			ATerritoryWorldState::FindTerritoryWorldState(World);
 		if (WorldState)
 		{
 			const FTerritoryTreasury Snapshot = WorldState->GetFactionTreasury(View.Faction);
@@ -1695,6 +1963,20 @@ FText UTerritoryUIBlueprintLibrary::GetThreatLevelText(ETerritoryThreatLevel Thr
 	case ETerritoryThreatLevel::None:
 	default: return NSLOCTEXT("TerritoryOperations", "ThreatNone", "SECURE");
 	}
+}
+
+FText UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+	ETerritoryAvailability Availability, ETerritoryState PoliticalState)
+{
+	if (Availability == ETerritoryAvailability::Locked)
+	{
+		return NSLOCTEXT("TerritoryOperations", "AvailabilityLocked", "Locked");
+	}
+
+	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
+	return StateEnum
+		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(PoliticalState))
+		: FText::GetEmpty();
 }
 
 FText UTerritoryUIBlueprintLibrary::GetAssaultStateText(ETerritoryAssaultState AssaultState)

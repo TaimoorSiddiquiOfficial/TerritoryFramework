@@ -16,12 +16,49 @@
 #include "Items/NarrativeItem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "TimerManager.h"
 #include "GameFramework/PlayerController.h"
 
 namespace
 {
+bool IsProductionSiteAvailable(UWorld* World,
+	const FTerritoryProductionSiteRecord& Site)
+{
+	if (!World || Site.Availability == ETerritoryAvailability::Locked) return false;
+	FGameplayTag ParentTag = Site.ParentTerritoryTag;
+	if (!ParentTag.IsValid()) return true;
+
+	const UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	const ATerritoryWorldState* WorldState =
+		ATerritoryWorldState::FindTerritoryWorldState(World);
+
+	TSet<FGameplayTag> Visited;
+	if (Site.TerritoryTag.IsValid()) Visited.Add(Site.TerritoryTag);
+	while (ParentTag.IsValid())
+	{
+		if (Visited.Contains(ParentTag)) return false;
+		Visited.Add(ParentTag);
+		if (const ATerritoryVolume* Parent = Registry
+			? Registry->GetTerritoryByTag(ParentTag) : nullptr)
+		{
+			if (Parent->IsLocked()) return false;
+			ParentTag = Parent->GetParentTerritoryTag();
+			continue;
+		}
+		if (!WorldState) return false;
+		const FReplicatedCaptureSummary Summary =
+			WorldState->GetCaptureSummary(ParentTag);
+		if (Summary.TerritoryTag != ParentTag
+			|| Summary.Availability == ETerritoryAvailability::Locked)
+		{
+			return false;
+		}
+		ParentTag = Summary.ParentTerritoryTag;
+	}
+	return true;
+}
+
 bool BuildScaledAmounts(const TArray<FTerritoryResourceRate>& Rates,
 	int32 UpgradeLevel, int32 BatchCount,
 	TArray<FTerritoryResourceAmount>& OutAmounts, FText& OutFailureReason)
@@ -229,6 +266,8 @@ bool CanApplyResourceTransaction(UNarrativeInventoryComponent* Inventory,
 void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	// Production binds registration and ownership delegates immediately below.
+	Collection.InitializeDependency<UTerritoryRegistrySubsystem>();
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings)
@@ -255,6 +294,8 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 				if (Territory)
 				{
 					Territory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+					Territory->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryStateChanged);
+					Territory->OnTerritoryAvailabilityChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryAvailabilityChanged);
 					if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
 					{
 						RefreshProductionSite(Property);
@@ -290,8 +331,11 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 			true);
 	}
 
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryEconomySubsystem initialized (tick: %.0fs, server-only: %s)"),
-		TickIntervalSeconds, World && World->GetNetMode() != NM_Client ? TEXT("true") : TEXT("false"));
+	if (Settings && Settings->ShouldDebugEconomy())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Economy] subsystem initialized (tick: %.0fs, server-only: %s)"),
+			TickIntervalSeconds, World && World->GetNetMode() != NM_Client ? TEXT("true") : TEXT("false"));
+	}
 }
 
 void UTerritoryEconomySubsystem::Deinitialize()
@@ -312,6 +356,8 @@ void UTerritoryEconomySubsystem::Deinitialize()
 				if (Territory)
 				{
 					Territory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+					Territory->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryStateChanged);
+					Territory->OnTerritoryAvailabilityChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryAvailabilityChanged);
 				}
 			}
 		}
@@ -1109,6 +1155,7 @@ void UTerritoryEconomySubsystem::RefreshProductionSite(ATerritoryProperty* Prope
 	Site.ProductionProfile = Property->GetProductionProfile();
 	Site.UpgradeLevel = FMath::Max(0, Property->UpgradeLevel);
 	Site.TerritoryState = Property->GetTerritoryState();
+	Site.Availability = Property->GetTerritoryAvailability();
 
 	const int64 CurrentCycle = GetCurrentProductionCycle();
 	UTerritoryProductionProfile* Profile = Property->GetProductionProfile();
@@ -1262,7 +1309,14 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 			Result.CycleIndex = EvaluationCycle;
 
 			FText StateFailure;
-			if (!Site.OwnerFaction.IsValid()
+			if (!IsProductionSiteAvailable(GetWorld(), Site))
+			{
+				Result.Status = ETerritoryProductionStatus::Inactive;
+				Result.FailureReason = NSLOCTEXT("TerritoryProduction", "TerritoryLocked",
+					"Production is paused while this Place or one of its parent Territories is story-locked.");
+				Checkpoint.LastProcessedCycle = EvaluationCycle;
+			}
+			else if (!Site.OwnerFaction.IsValid()
 				|| !UTerritoryProductionProfile::CanRuleRunForState(
 					*Rule, Site.TerritoryState, Site.UpgradeLevel, StateFailure))
 			{
@@ -1301,6 +1355,17 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 			RuleState.StatusReason = Result.FailureReason;
 			RuleState.LastInputs = Result.InputsConsumed;
 			RuleState.LastOutputs = Result.OutputsProduced;
+			if (const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+				Settings && Settings->ShouldDebugProduction())
+			{
+				UE_LOG(LogTerritory, Log,
+					TEXT("[Production] cycle=%lld territory=%s faction=%s rule=%s status=%d inputs=%d outputs=%d reason=%s"),
+					EvaluationCycle, *Site.TerritoryTag.ToString(),
+					*Site.OwnerFaction.ToString(), *Rule->RuleTag.ToString(),
+					static_cast<int32>(Result.Status), Result.InputsConsumed.Num(),
+					Result.OutputsProduced.Num(), *Result.FailureReason.ToString());
+			}
 			OnProductionSettled.Broadcast(Result);
 		}
 	}
@@ -1430,11 +1495,11 @@ void UTerritoryEconomySubsystem::PublishProductionState() const
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client) return;
-	for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
+	if (ATerritoryWorldState* WorldState =
+		ATerritoryWorldState::FindTerritoryWorldState(World))
 	{
-		It->SetProductionState(GetProductionCheckpoints(), GetAllProductionSites(),
+		WorldState->SetProductionState(GetProductionCheckpoints(), GetAllProductionSites(),
 			GetAllResourceSnapshots());
-		break;
 	}
 }
 
@@ -1674,16 +1739,18 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 
 	int64 TotalIncome = 0;
 	int64 TotalCosts = 0;
-	Treasury.TerritoryCount = Territories.Num();
+	int32 ActivePlaceCount = 0;
 
 	for (const ATerritoryVolume* Territory : Territories)
 	{
+		if (!Territory || !Territory->IsAvailableForGameplay()) continue;
 		// Only count leaf-level (Property) income to avoid hierarchy double-counting.
 		// Cities and Districts are containers — their PeriodicIncome is metadata
 		// for UI display, not a separate income source.
 		if (Territory->IsA<ATerritoryProperty>())
 		{
 			const ATerritoryProperty* Property = Cast<const ATerritoryProperty>(Territory);
+			++ActivePlaceCount;
 			TotalIncome += static_cast<int64>(Property->GetEffectiveIncome());
 		}
 
@@ -1693,15 +1760,16 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 			* static_cast<int64>(Territory->GetDesiredGuardCount());
 		TotalCosts += GuardUpkeep;
 	}
+	Treasury.TerritoryCount = ActivePlaceCount;
 	Treasury.IncomePerTick = static_cast<int32>(FMath::Clamp<int64>(TotalIncome, 0, MAX_int32));
 	Treasury.CostsPerTick = static_cast<int32>(FMath::Clamp<int64>(TotalCosts, 0, MAX_int32));
 
 	// WorldState owns the replicated/late-join economy read model. Publish every
 	// recalculation so staffing changes do not wait for the next payout interval.
-	for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
+	if (ATerritoryWorldState* WorldState =
+		ATerritoryWorldState::FindTerritoryWorldState(World))
 	{
-		It->SetFactionTreasury(Faction, Treasury);
-		break;
+		WorldState->SetFactionTreasury(Faction, Treasury);
 	}
 }
 
@@ -1725,6 +1793,59 @@ void UTerritoryEconomySubsystem::OnTerritoryControlChanged(ATerritoryVolume* Ter
 	}
 }
 
+void UTerritoryEconomySubsystem::OnTerritoryStateChanged(
+	ATerritoryVolume* Territory, ETerritoryState NewState)
+{
+	if (!Territory) return;
+	if (Territory->GetOwningFaction().IsValid()) MarkFactionDirty(Territory->GetOwningFaction());
+	if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
+	{
+		RefreshProductionSite(Property);
+		PublishProductionState();
+	}
+}
+
+void UTerritoryEconomySubsystem::OnTerritoryAvailabilityChanged(
+	ATerritoryVolume* Territory, ETerritoryAvailability NewAvailability)
+{
+	OnTerritoryStateChanged(Territory,
+		Territory ? Territory->GetTerritoryState() : ETerritoryState::Unclaimed);
+	if (!Territory || Territory->GetControlMode() != ETerritoryControlMode::AggregateOnly)
+	{
+		return;
+	}
+
+	// A parent availability change gates every descendant Place without mutating
+	// child ownership. Dirty the affected faction ledgers so income/upkeep changes
+	// on the next economy pass instead of waiting for a child transition.
+	UTerritoryRegistrySubsystem* Registry = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!Registry) return;
+	const FGameplayTag AncestorTag = Territory->GetTerritoryTag();
+	for (ATerritoryVolume* Candidate : Registry->GetAllTerritories())
+	{
+		ATerritoryProperty* Place = Cast<ATerritoryProperty>(Candidate);
+		if (!Place) continue;
+		TSet<FGameplayTag> Visited;
+		FGameplayTag ParentTag = Place->GetParentTerritoryTag();
+		while (ParentTag.IsValid() && !Visited.Contains(ParentTag))
+		{
+			if (ParentTag == AncestorTag)
+			{
+				if (Place->GetOwningFaction().IsValid())
+				{
+					MarkFactionDirty(Place->GetOwningFaction());
+				}
+				break;
+			}
+			Visited.Add(ParentTag);
+			const ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
+			if (!Parent) break;
+			ParentTag = Parent->GetParentTerritoryTag();
+		}
+	}
+}
+
 void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
 {
 	if (!Territory || bWasUnregistered) return;
@@ -1736,6 +1857,8 @@ void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territo
 
 	// When a territory registers, bind its control-changed delegate
 	Territory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+	Territory->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryStateChanged);
+	Territory->OnTerritoryAvailabilityChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryAvailabilityChanged);
 	if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
 	{
 		RefreshProductionSite(Property);
@@ -1761,6 +1884,8 @@ void UTerritoryEconomySubsystem::OnTerritoryUnregistered(ATerritoryVolume* Terri
 
 	// Unbind the control-changed delegate to prevent dangling references
 	Territory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);
+	Territory->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryStateChanged);
+	Territory->OnTerritoryAvailabilityChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryAvailabilityChanged);
 
 	// Recalculate income for the owning faction (territory removed from their count)
 	FGameplayTag Owner = Territory->GetOwningFaction();

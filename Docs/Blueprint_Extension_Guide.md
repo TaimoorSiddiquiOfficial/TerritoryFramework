@@ -526,6 +526,10 @@ notifications are ignored by Territory casualty accounting.
 
 `ATerritoryGuardCharacter` has no `EndPlay` override. Guards destroyed by paths other than ASC-death (World Partition stream-out, `DespawnGuards`, editor close) do not self-notify their spawn point. The spawn point's `ActiveGuards` array retains stale weak pointers until cleaned by the next ownership transition or save recompute. This is transient drift only — save/load recomputes from `SavedActiveGuardCount`.
 
-### SetControlProgress BP Node
+### State and progress mutation
 
-`SetControlProgress` is `BlueprintCallable` but now routes through `CommitOwnershipData` internally. This means calling it will fire the full ownership-changed event bundle. It should not be called in tight loops — use the capture subsystem's `AddCaptureProgress` for incremental updates.
+The old `SetControlProgress` and `SetTerritoryState` Blueprint nodes were removed.
+They allowed a graph to write only part of the ownership transaction and could
+produce combinations such as `Claimed` without an owner. Use the Control
+Subsystem's capture operations for live contest progress, or `Apply Territory
+Mutation` for an explicit terminal ownership change with a structured result.

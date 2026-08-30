@@ -35,8 +35,13 @@ void UTerritoryCaptureTask::BeginTask()
 
 	if (!CachedTerritory.IsValid())
 	{
-		UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureTask] Territory '%s' not registered yet — waiting for registration"),
-			*TargetTerritoryTag.ToString());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugTales())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureTask] Territory '%s' not registered yet — waiting for registration"),
+				*TargetTerritoryTag.ToString());
+		}
 		bWaitingForRegistration = true;
 		Registry->OnTerritoryRegistered.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryRegistered);
 		return;
@@ -141,8 +146,13 @@ void UTerritoryCaptureTask::OnTerritoryRegistered(ATerritoryVolume* Territory, b
 
 	InitialOwner = Territory->GetOwningFaction();
 
-	UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureTask] Territory '%s' late-bound after registration"),
-		*TargetTerritoryTag.ToString());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugTales())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureTask] Territory '%s' late-bound after registration"),
+			*TargetTerritoryTag.ToString());
+	}
 
 	// Check if already in desired state
 	if (bCompleteOnLoss)

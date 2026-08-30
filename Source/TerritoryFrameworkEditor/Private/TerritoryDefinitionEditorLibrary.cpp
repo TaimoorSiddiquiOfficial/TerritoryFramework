@@ -163,6 +163,40 @@ namespace
 				++Report.UpdatedActors;
 			}
 		}
+
+		// Guard posts are physical Place infrastructure. City/District definitions
+		// are aggregate authority records and must never create them.
+		for (const FTerritoryGuardPostTemplate& Post : Definition->GuardPosts)
+		{
+			ATerritoryGuardSpawnPoint* GuardPost = nullptr;
+			for (TActorIterator<ATerritoryGuardSpawnPoint> It(World); It; ++It)
+			{
+				if ((It->GetTerritoryDefinition() == Definition
+					|| It->OwnerTerritoryTag == Definition->TerritoryTag)
+					&& (It->GetGuardPostID() == Post.GuardPostID
+						|| (It->GetGuardPostID().IsNone()
+							&& It->GetName() == Post.GuardPostID.ToString())))
+				{
+					GuardPost = *It;
+					break;
+				}
+			}
+			if (!GuardPost && bCreate)
+			{
+				GuardPost = SpawnTemplateActor<ATerritoryGuardSpawnPoint>(World,
+					Post.ActorClass, Post.RelativeTransform * Parent,
+					Definition->GetName() + TEXT("_") + Post.GuardPostID.ToString(), Report);
+			}
+			if (GuardPost)
+			{
+				GuardPost->Modify();
+				GuardPost->SetDefinitionBinding(Definition, Post.GuardPostID);
+				GuardPost->ApplyTerritoryDefinition();
+				if (bMoveExisting) GuardPost->SetActorTransform(
+					Post.RelativeTransform * Parent);
+				++Report.UpdatedActors;
+			}
+		}
 	}
 
 	void SyncCommonHelpers(UWorld* World, UTerritoryDefinition* Definition,
@@ -199,38 +233,6 @@ namespace
 				Management->ApplyTerritoryDefinition();
 				if (bMoveExisting) Management->SetActorTransform(
 					Definition->ManagementPoint.RelativeTransform * Parent);
-				++Report.UpdatedActors;
-			}
-		}
-
-		for (const FTerritoryGuardPostTemplate& Post : Definition->GuardPosts)
-		{
-			ATerritoryGuardSpawnPoint* GuardPost = nullptr;
-			for (TActorIterator<ATerritoryGuardSpawnPoint> It(World); It; ++It)
-			{
-				if ((It->GetTerritoryDefinition() == Definition
-					|| It->OwnerTerritoryTag == Definition->TerritoryTag)
-					&& (It->GetGuardPostID() == Post.GuardPostID
-						|| (It->GetGuardPostID().IsNone()
-							&& It->GetName() == Post.GuardPostID.ToString())))
-				{
-					GuardPost = *It;
-					break;
-				}
-			}
-			if (!GuardPost && bCreate)
-			{
-				GuardPost = SpawnTemplateActor<ATerritoryGuardSpawnPoint>(World,
-					Post.ActorClass, Post.RelativeTransform * Parent,
-					Definition->GetName() + TEXT("_") + Post.GuardPostID.ToString(), Report);
-			}
-			if (GuardPost)
-			{
-				GuardPost->Modify();
-				GuardPost->SetDefinitionBinding(Definition, Post.GuardPostID);
-				GuardPost->ApplyTerritoryDefinition();
-				if (bMoveExisting) GuardPost->SetActorTransform(
-					Post.RelativeTransform * Parent);
 				++Report.UpdatedActors;
 			}
 		}

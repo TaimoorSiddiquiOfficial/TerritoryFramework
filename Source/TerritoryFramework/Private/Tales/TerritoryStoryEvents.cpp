@@ -4,6 +4,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryMutationTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Engine/World.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
@@ -19,9 +20,8 @@ namespace
 		return Controller ? static_cast<AActor*>(Controller->GetPawn().Get()) : nullptr;
 	}
 
-	ATerritoryVolume* ResolveTerritory(UObject* Context, const FGameplayTag& TerritoryTag)
+	ATerritoryVolume* ResolveTerritory(UWorld* World, const FGameplayTag& TerritoryTag)
 	{
-		UWorld* World = Context ? Context->GetWorld() : nullptr;
 		UTerritoryRegistrySubsystem* Registry = World
 			? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 		return Registry && TerritoryTag.IsValid()
@@ -37,8 +37,14 @@ namespace
 		{
 			return true;
 		}
-		UE_LOG(LogTerritory, Verbose, TEXT("[TalesEvent] %s skipped because condition '%s' failed"),
-			*GetNameSafe(Event), *FailedCondition);
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		if (Settings && Settings->ShouldDebugTales()
+			&& Settings->IsDebugLevelEnabled(6))
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[TalesEvent] %s skipped because condition '%s' failed"),
+				*GetNameSafe(Event), *FailedCondition);
+		}
 		return false;
 	}
 
@@ -71,7 +77,8 @@ void UTerritoryHierarchyStoryOverrideEvent::ExecuteEvent_Implementation(
 	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || World->GetNetMode() == NM_Client || !RootTerritory.IsValid()) return;
 
 	UTerritoryRegistrySubsystem* Registry =
@@ -154,9 +161,14 @@ void UTerritoryHierarchyStoryOverrideEvent::ExecuteEvent_Implementation(
 		}
 	}
 
-	UE_LOG(LogTerritory, Log,
-		TEXT("[HierarchyStoryOverride] %s applied to %d loaded hierarchy actors (%d rejected). World Partition descendants must be loaded when this one-shot event runs."),
-		*RootTerritory.ToString(), ChangedCount, RejectedCount);
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugTales())
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("[HierarchyStoryOverride] %s applied to %d loaded hierarchy actors (%d rejected). World Partition descendants must be loaded when this one-shot event runs."),
+			*RootTerritory.ToString(), ChangedCount, RejectedCount);
+	}
 }
 
 FString UTerritoryHierarchyStoryOverrideEvent::GetGraphDisplayText_Implementation()
@@ -179,9 +191,10 @@ void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || World->GetNetMode() == NM_Client) return;
-	ATerritoryVolume* Territory = ResolveTerritory(this, TargetTerritory);
+	ATerritoryVolume* Territory = ResolveTerritory(World, TargetTerritory);
 	UTerritoryCounterAttackSubsystem* Counter = World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
 	if (!Territory || !Counter)
 	{
@@ -225,11 +238,12 @@ void UTerritoryCancelEnemyWavesEvent::ExecuteEvent_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || World->GetNetMode() == NM_Client || !TargetTerritory.IsValid()) return;
 	UTerritoryCounterAttackSubsystem* Counter = World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
 	if (!Counter) return;
-	const ATerritoryVolume* LoadedTerritory = ResolveTerritory(this, TargetTerritory);
+	const ATerritoryVolume* LoadedTerritory = ResolveTerritory(World, TargetTerritory);
 	const TArray<FTerritoryAssaultRecord> MatchingAssaults = LoadedTerritory
 		? Counter->GetAssaultsForTerritoryActor(LoadedTerritory)
 		: Counter->GetAssaultsForTerritory(TargetTerritory);
@@ -248,8 +262,14 @@ void UTerritoryCancelEnemyWavesEvent::ExecuteEvent_Implementation(APawn* Target,
 	}
 	if (CancelledCount == 0)
 	{
-		UE_LOG(LogTerritory, Verbose, TEXT("[CancelEnemyWaveEvent] No matching non-terminal assault for %s"),
-			*TargetTerritory.ToString());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugTales()
+			&& Settings->IsDebugLevelEnabled(6))
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[CancelEnemyWaveEvent] No matching non-terminal assault for %s"),
+				*TargetTerritory.ToString());
+		}
 	}
 }
 
@@ -270,9 +290,10 @@ void UTerritorySetGarrisonTargetEvent::ExecuteEvent_Implementation(APawn* Target
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || World->GetNetMode() == NM_Client) return;
-	ATerritoryVolume* Territory = ResolveTerritory(this, TargetTerritory);
+	ATerritoryVolume* Territory = ResolveTerritory(World, TargetTerritory);
 	AActor* Requester = ResolveExplicitRequester(Target, Controller);
 	if (!Territory || !Requester)
 	{
@@ -307,9 +328,11 @@ void UTerritoryUpgradePropertyEvent::ExecuteEvent_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || World->GetNetMode() == NM_Client) return;
-	ATerritoryProperty* Property = Cast<ATerritoryProperty>(ResolveTerritory(this, TargetProperty));
+	ATerritoryProperty* Property = Cast<ATerritoryProperty>(
+		ResolveTerritory(World, TargetProperty));
 	AActor* Requester = ResolveExplicitRequester(Target, Controller);
 	if (!Property || !Requester || !Property->TryUpgrade(Requester))
 	{
@@ -335,7 +358,8 @@ void UTerritoryExecuteResourceRecipeEvent::ExecuteEvent_Implementation(APawn* Ta
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || World->GetNetMode() == NM_Client) return;
 	AActor* Requester = ResolveExplicitRequester(Target, Controller);
 	UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>();

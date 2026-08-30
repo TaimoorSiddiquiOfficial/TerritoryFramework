@@ -43,13 +43,13 @@
 | Active treaties (with timing) | ✅ |
 | Faction reputation | ✅ |
 | Diplomacy history | ✅ |
-| Capture summaries | Replicated projection; ownership persists on each Volume |
+| Strategic capture directory | ✅ SaveGame + replicated read-only projection; ownership persists only on each Volume |
 | Counterattack records | ✅ SaveGame + replicated |
 | Resource production checkpoints | ✅ SaveGame; stable Territory GUID + RuleTag + owner + last consumed cycle |
 | Production site records and per-rule outcomes | ✅ SaveGame + replicated read model; supports unloaded World Partition Properties |
 | Resource stockpile snapshots | ✅ SaveGame + replicated read model; actual items remain in Narrative inventory |
 
-Server subsystem delegates keep WorldState projections current between saves. `ExportPersistentState()` rebuilds them at the save boundary. Capture summaries are not a second durable ownership source; `ATerritoryVolume::OwnershipData` remains authoritative.
+Server subsystem delegates keep WorldState projections current between saves. `ExportPersistentState()` rebuilds them at the save boundary. `SavedStrategicDirectory` keeps the last known presentation and political read model for World Partition actors that are still unloaded after restart. It is never applied to a Territory actor: `ATerritoryVolume::OwnershipData` remains the sole durable capture authority, and a loaded Volume immediately publishes over its cached row.
 
 ### ATerritorySavableData (single-player legacy)
 
@@ -86,7 +86,7 @@ After the fix: each placement receives a unique GUID, that GUID persists in the 
 ```
 1. Narrative Save System calls PrepareForSave on all INarrativeSavableActor
 2. ATerritoryVolume::PrepareForSave — OwnershipData auto-serialized via SaveGame flags
-3. ATerritoryWorldState::PrepareForSave — ExportPersistentState rebuilds subsystem snapshots, then copies replicated → saved arrays
+3. ATerritoryWorldState::PrepareForSave — ExportPersistentState rebuilds subsystem snapshots, then copies replicated → saved arrays, including the unloaded strategic directory projection
 4. Narrative serializes actors to FNarrativeActorRecord
 5. UGameplayStatics::SaveGameToSlot
 ```
@@ -98,12 +98,13 @@ After the fix: each placement receives a unique GUID, that GUID persists in the 
 2. For each INarrativeSavableActor in world: Load_Implementation
 3. ATerritoryVolume::Load — hydrates referenced guard posts, reconstructs finite active guards, and restores capture decay state
 4. ATerritoryWorldState::Load — ImportPersistentState:
-   a. Direct assignment (no artificial transactions)
+   a. Direct assignment (no artificial transactions), including the read-only strategic directory cache
     b. SyncSubsystemsFromReplicatedState:
         - Push income/cost/count parameters to EconomySubsystem via SetFactionTreasury (Narrative inventory currency is separate)
         - Restore production checkpoints, site records, per-rule outcomes, and resource read models without restoring item balances
         - Replay treaty states and reputation to DiplomacySubsystem
         - Diplomacy syncs to Narrative GameState attitudes
+        - Do not push capture directory rows into Territory actors; each loaded Volume restores and publishes its own OwnershipData
         - Hydrate client-side economy/diplomacy query models from RepNotify
         - Restore counterattack decisions, the per-territory/faction evaluation-cycle high-water ledger, and reconstruct saved active survivors as finite pending force
 

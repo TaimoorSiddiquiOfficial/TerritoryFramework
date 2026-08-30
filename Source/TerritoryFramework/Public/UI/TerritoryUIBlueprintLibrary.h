@@ -4,6 +4,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Economy/TerritoryProductionProfile.h"
@@ -44,15 +45,6 @@ enum class ETerritoryThreatLevel : uint8
 	Critical UMETA(ToolTip="Physical attackers are active or capture pressure is dangerous.")
 };
 
-/** Player-facing City -> District -> Place level used by hierarchy lists. */
-UENUM(BlueprintType)
-enum class ETerritoryHierarchyLevel : uint8
-{
-	City UMETA(ToolTip="A City groups Districts."),
-	District UMETA(ToolTip="A District belongs to a City and groups Places."),
-	Place UMETA(ToolTip="A capturable Property/Place inside a District.")
-};
-
 /**
  * One read-only hierarchy row. "Place" is the player-facing name for
  * ATerritoryProperty; gameplay authority remains on the original Territory actor.
@@ -67,6 +59,8 @@ struct TERRITORYFRAMEWORK_API FTerritoryHierarchyOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FGameplayTag ParentTerritoryTag;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FText DisplayName;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") ETerritoryHierarchyLevel HierarchyLevel = ETerritoryHierarchyLevel::Place;
+	/** Availability is a story gate. It is intentionally separate from political State. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") ETerritoryState TerritoryState = ETerritoryState::Unclaimed;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FGameplayTag OwnerFaction;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") FGameplayTag ViewerFaction;
@@ -185,9 +179,13 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") FGameplayTag OwnerFaction;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") FGameplayTag ViewerFaction;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") FGameplayTag ContestingFaction;
+	/** Explicit story availability. UI must render Locked before political State. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI") ETerritoryState TerritoryState = ETerritoryState::Unclaimed;
 
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bRegistered = false;
+	/** False means the stable directory row exists but its runtime actor is streamed out. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bRuntimeLoaded = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bUnlocked = false;
 	/** Locked City/District ancestors also hide this District from player-facing lists. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Availability") bool bHierarchyVisible = false;
@@ -215,7 +213,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float AlliedSupport = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float StrategicValue = 1.f;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bUnguarded = false;
-	/** Total loaded, registered child Places, including story-locked Places. Only this aggregate count may reveal locked content. */
+	/** Total authored child Places from the District Definition, including locked or streamed-out Places. Only this aggregate count may reveal locked content. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 TotalProperties = 0;
 	/** Places whose identity is visible to the player after City, District, and Place lock checks. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 KnownProperties = 0;
@@ -225,7 +223,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 OwnedProperties = 0;
 	/** Known child Places the viewer can currently contest under authoritative capture rules. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 ContestableProperties = 0;
-	/** True only when every configured loaded Place is visible; hidden Places keep full District control unavailable. */
+	/** True only when every authored Place is visible; locked or streamed-out Places keep full District control unavailable. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bAllPlacesDiscovered = false;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 ManageableGarrisonTargets = 0;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int32 UnguardedGarrisonTargets = 0;
@@ -372,11 +370,30 @@ public:
 		const UObject* WorldContextObject,
 		APlayerController* PlayerController);
 
+	/**
+	 * Most-specific player-visible Territory at a point. If the spatial Place is
+	 * locked, this walks to its first unlocked parent without revealing the Place.
+	 * Example: locked Farm -> unlocked Castle Hill District.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Availability",
+		meta=(WorldContext="WorldContextObject"))
+	static ATerritoryVolume* GetVisibleTerritoryAtLocation(
+		const UObject* WorldContextObject, FVector WorldLocation);
+
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
 		meta=(WorldContext="WorldContextObject"))
 	static bool BuildDistrictOperationsView(
 		const UObject* WorldContextObject,
 		ATerritoryDistrict* District,
+		APlayerController* Viewer,
+		FTerritoryDistrictOperationsView& OutView);
+
+	/** Build a read-only District row when its actor is unloaded under World Partition. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations",
+		meta=(WorldContext="WorldContextObject", DisplayName="Build District Operations View From Summary"))
+	static bool BuildDistrictOperationsViewFromSummary(
+		const UObject* WorldContextObject,
+		const FReplicatedCaptureSummary& Summary,
 		APlayerController* Viewer,
 		FTerritoryDistrictOperationsView& OutView);
 
@@ -485,6 +502,16 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static FText GetThreatLevelText(ETerritoryThreatLevel ThreatLevel);
+
+	/**
+	 * Player-facing status with the correct precedence.
+	 * Example: Locked + Contested is shown as "Locked", because the story gate
+	 * decides whether the political state is currently actionable.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Availability")
+	static FText GetTerritoryStatusText(
+		ETerritoryAvailability Availability,
+		ETerritoryState PoliticalState);
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static FText GetAssaultStateText(ETerritoryAssaultState AssaultState);

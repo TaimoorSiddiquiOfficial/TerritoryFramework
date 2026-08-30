@@ -21,7 +21,8 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	if (!TargetTerritoryTag.IsValid()) return;
 
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World) return;
 
 	// Capture mutations are server-authoritative — skip on clients to prevent desync.
@@ -33,7 +34,7 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	ATerritoryVolume* Territory = Registry->GetTerritoryByTag(TargetTerritoryTag);
 	if (!Territory) return;
 
-	if (Territory->GetTerritoryState() == ETerritoryState::Locked && !bForceCapture)
+	if (!Territory->IsAvailableForGameplay() && !bForceCapture)
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("TerritoryCaptureEvent: %s is locked, skipping (bForceCapture=false)"),
 			*TargetTerritoryTag.ToString());
@@ -109,11 +110,10 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugTales();
 
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryCaptureEvent: %s captured by %s via event"),
-		*TargetTerritoryTag.ToString(), *ResolvedCapturingFaction.ToString());
-
 	if (bDebug)
 	{
+		UE_LOG(LogTerritory, Log, TEXT("TerritoryCaptureEvent: %s captured by %s via event"),
+			*TargetTerritoryTag.ToString(), *ResolvedCapturingFaction.ToString());
 		UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureEvent] ForceCapture %s → %s (force=%s)"),
 			*TargetTerritoryTag.ToString(), *ResolvedCapturingFaction.ToString(),
 			bForceCapture ? TEXT("true") : TEXT("false"));

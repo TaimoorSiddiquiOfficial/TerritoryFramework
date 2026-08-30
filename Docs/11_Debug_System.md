@@ -1,105 +1,189 @@
 # Debug System
 
-## Overview
+Use this system to answer four questions:
 
-TerritoryFramework has 17 individual debug toggles organized into categories, plus 5 visual debug toggles. All are in **Project Settings → Territory Framework → Debug**.
+1. Which exact Territory did gameplay or UI select?
+2. What does the Definition say for a new campaign?
+3. What does the runtime save/server say now?
+4. Which rule allowed or blocked the action?
 
-## Master Toggle
+## Enable it
 
-**Enable All Debug Output** — When false, no debug logs fire regardless of individual toggles.
+Open `Edit -> Project Settings -> Territory Framework -> Debug`.
 
-## Log Categories
+1. Enable **Enable Debug System (Master Gate)**.
+2. Enable one or more categories.
+3. Choose a verbosity level.
+4. Filter Output Log with `LogTerritory`.
 
-| Toggle | Log Prefix | What It Shows |
+The master setting is a gate. It does not automatically turn on every category.
+
+## Log categories
+
+| Category | Prefix or subject | Use it for |
 |---|---|---|
-| Debug Registry | `[Registry]` | Territory registration/unregistration |
-| Debug Capture | `[CaptureTick]` | Progress per contested territory every tick |
-| Debug Capture Attempts | `[CaptureAttempt]` | Who's attacking what, current state |
-| Debug Ownership | `[Ownership]` | Faction changes with before/after |
-| Debug State Transitions | `[StateChange]` | Unclaimed→Claimed→Contested etc. |
-| Debug Economy Ticks | `[EconomyTick]` | Gold, income, costs per faction per tick |
-| Debug Transactions | `[Transaction]` | Every CREDIT/DEBIT with reason |
-| Debug Guard Spawning | (in SpawnGuards) | Guard spawn events with faction/GUID |
-| Debug Guard Deaths | `[GuardDeath]` | Name + remaining defenders |
-| Debug Diplomacy | `[Diplomacy]` | Treaty state changes |
-| Debug Faction Attitudes | `[Attitude]` | Attitude query results |
-| Debug SaveLoad | `[SaveLoad]` | Territory load state |
-| Debug Spatial | `[Spatial]` | QueryPoint results |
-| Debug Map Markers | `[Marker]` | Refresh events |
-| Debug Tales | `[TalesCaptureTask/Event]` | Task/event integration |
-| Debug Combat | `[Combat]` | Assault slot grants/denials, slot cleanup |
-| Debug BT | `[BT]` | Behavior tree execution and state |
+| Availability + Hierarchy | `[Availability]`, `[Lock]` | Initial versus runtime lock, parent path, unlock failures |
+| Registry | `[Registry]` | Registration, duplicate identity, unload/reload |
+| Capture Progression | `[CaptureTick]` | Progress and decay |
+| Capture Attempts | `[CaptureAttempt]` | Attacker, owner, and eligibility |
+| Ownership | `[CommitOwnership]` | Atomic owner changes |
+| State Transitions | `[StateChange]` | Unclaimed, Contested, and Claimed transitions |
+| Economy | `[EconomyTick]` | Income, upkeep, and faction settlement |
+| Transactions | `[Transaction]` | Individual credit/debit records |
+| Production | `[Production]` | Rule, cycle, status, inputs, outputs, failure reason |
+| Guard Spawning | guard spawn records | Spawn definition, posts, and counts |
+| Guard Deaths | `[GuardDeath]` | Defender and reserve lifecycle |
+| Diplomacy | `[Diplomacy]` | War, peace, and treaty changes |
+| Faction Attitudes | `[Attitude]` | Narrative attitude decisions |
+| Counterattacks | `[CounterAttack]` | Schedule and every assault state transition |
+| Stealth | `[Stealth]` | Evidence, suspicion, exposure, and observers |
+| Save/Load | `[SaveLoad]` | Saved runtime source and restore |
+| WorldState | `[WorldState]` | Replicated directory changes and hydration |
+| Spatial | `[Spatial]` | Overlap query and most-specific Territory selection |
+| Markers | `[Marker]` | POI and waypoint refresh |
+| UI | `[UI]` | Exact bound Territory, status, and overlapping candidates |
+| Interaction | `[Interaction]` | Capture point and story/management interaction decisions |
+| Narrative/Tales | state events and task/event logs | Conditions and explicit event context |
+| Behavior Trees | `[BT]` | Territory AI task flow |
+| Combat | combat director records | Attack permission and concurrent attack budget |
 
-## Visual Debug Toggles
+## Verbosity
 
-| Toggle | Effect |
-|---|---|
-| Draw Territory Bounds | ✅ Draws box bounds in PIE (respects rotation) |
-| Draw Ownership Overlay | ✅ Green overlay for owned territories |
-| Draw Capture Progress | ✅ Progress bar above contested territories |
-| Draw Guard Spawn Points | ✅ Yellow spheres at spawn points, cyan for patrol nodes |
-| Draw Spatial Grid | ✅ Spatial index cell visualization |
+| Value | Meaning |
+|---:|---|
+| 0 | No optional debug logs |
+| 1 | Fatal threshold |
+| 2 | Error threshold |
+| 3 | Warning threshold |
+| 4 | Display threshold |
+| 5 | Normal category logs |
+| 6 | Detailed/verbose category logs |
 
-## Developer Settings — Economy / Capture
+Normal debug categories require level 5. Very detailed call sites may also require level 6.
+Unreal's Output Log category can still be changed with `log LogTerritory Verbose` when verbose
+engine log lines are needed.
 
-| Setting | Default | Range | Description |
-|---|---|---|---|
-| EconomyTickIntervalSeconds | 300 | 10–3600 | Seconds between economy ticks |
-| CaptureTickInterval | 0.1 | 0.01–1.0 | Seconds between capture ticks |
-| CaptureProgressPerSecond | 0.1 | 0.01–1.0 | Progress rate per second per attacker |
-| CaptureProgressDecayPerSecond | 0.05 | 0.01–0.5 | Decay rate when no attackers present |
-| TreatyExpirationCheckInterval | 10 | 1–60 | Seconds between treaty expiration checks |
-| SpatialCellSize | 2000 | 500–10000 | Spatial index cell size in UU |
-| DefaultPatrolArrivalThreshold | 100 | 5–200 | Distance to consider patrol node reached |
-| DefaultPatrolAcceptanceRadius | 50 | 5–100 | Movement acceptance radius for patrol |
-| DefaultPatrolWaitTime | 2.0 | 0.5–30 | Default wait time at patrol nodes |
-| MaxPatrolRouteNodes | 32 | 2–128 | Maximum patrol route length |
-| MaxConcurrentAttackers | 3 | 1–10 | Default NPC attack slot limit per territory |
+## Exact Territory report
 
-## UTerritoryDebugWidget
+Use the Blueprint-pure function:
 
-A tick-based live overlay widget showing all territory state.
+```text
+Build Territory Debug Summary By Tag
+```
 
-### Usage
+This is safer than a location query when City, District, and Place bounds overlap.
 
-1. Create a Blueprint child of `UTerritoryDebugWidget`
-2. Override `OnUpdateDebugText(FText)` to update a TextBlock
-3. Add widget to viewport
-4. Call `SetDebugEnabled(true)` to start polling
+Example tag:
 
-**Performance:** Widget throttles rebuilds to every **0.5 seconds** (not every frame). Subsystem pointers are cached on first access.
+```text
+Territory.HavenReach.CastleHill.Farm
+```
 
-### Sections Displayed
+The report contains:
 
-- **Territories**: Name, tag, owner, state, guard count, income
-- **Economy**: Faction wealth (aggregate from player inventories), income, costs, territory count
-- **Diplomacy**: Active treaties with state type
-- **Capture**: Contested territories with progress %
+- exact actor path and Definition path;
+- runtime source: Definition seed, campaign save, or server replication;
+- runtime Availability and Political State;
+- UI Status after availability-first formatting;
+- new-campaign Availability and State;
+- local and effective hierarchy availability;
+- complete loaded parent path;
+- owner, contesting faction, progress, guard counts, and assault records;
+- an explanation when runtime differs from the Definition seed.
+
+The UI category logs both the most-specific spatial result and the visible Territory finally
+shown to the player. Easy example: the spatial result may be the locked Farm, while the HUD safely
+falls back to the unlocked Castle Hill District without revealing the Farm name.
+
+## Farm example
+
+If the Definition says `Initial Availability = Locked`, but the report says:
+
+```text
+Runtime source = Campaign save
+Runtime Availability = Unlocked
+Political State = Contested
+```
+
+then the save is intentionally overriding the new-campaign seed. Use a new campaign to test the
+initial setup, or run an explicit Lock Event to change the current campaign.
+
+If runtime Availability is Locked and Political State is Contested, the report will show
+`UI Status = Locked`. That is the correct presentation.
+
+## Whole-system report
+
+`Build Territory System Debug Report` includes the active Debug Settings summary and one sorted
+line for every loaded Territory. This is useful after World Partition streaming, save load, or a
+hierarchy cascade.
+
+`Build Debug Settings Summary` lists the master gate, verbosity, and every active category. It
+also lists active visual overlays and explains everything that intentionally stays outside the
+optional debug gate.
 
 ## Gameplay Debugger
 
-Developer builds register a `Territory` Gameplay Debugger category. Select an actor and
-enable that category through Unreal's standard Gameplay Debugger controls to inspect:
+Developer builds register a `Territory` Gameplay Debugger category. When a Territory actor is
+selected, it shows the same detailed report. When another actor is selected, the framework uses
+the actor location and reports the most-specific overlapping Place, then District, then City.
 
-- Territory tag, owner, state, and capture progress
-- active, desired, and maximum guard counts
-- assault record count and each assault's planned, alive, pending, and killed force
+## Debug widget
 
-The same text is available to Blueprint tools through the pure
-`UTerritoryDebugger::BuildTerritoryDebugSummary(WorldContextObject, DebugActor)` function.
-When the selected actor is not a Territory, the query uses the Territory registry's spatial
-lookup at the actor location. Shipping builds do not register the Gameplay Debugger module.
+Create a Blueprint child of `UTerritoryDebugWidget`, implement `OnUpdateDebugText`, and call
+`SetDebugEnabled(true)`. It presents a throttled overview of Territories, economy, diplomacy,
+capture, and counterattacks.
 
-## Console Commands
+## Visual toggles
 
-```bash
-# Enable territory logging
-log LogTerritory All
+| Toggle | Result |
+|---|---|
+| Draw Territory Bounds | Draws volume bounds in PIE |
+| Draw Ownership Overlay | Shows ownership color |
+| Draw Capture Progress | Shows contested progress |
+| Draw Guard Spawn Points | Shows posts and patrol route data |
+| Draw Spatial Grid | Shows spatial index cells |
 
-# Set specific verbosity
+## Diagnostics outside the optional gate
+
+These Error/Warning diagnostics are always visible by design:
+
+- invalid or missing Definition;
+- duplicate tag or GUID;
+- invalid/cyclic hierarchy;
+- authority or security rejection;
+- save corruption or missing persistent identity;
+- invalid guard or assault class;
+- an asset configuration that would make gameplay silently fail.
+
+They are product safety and content validation, not optional debug noise.
+
+The following tools also work outside the master gate because a developer must request them
+directly:
+
+- `Print Territory Debug` and `Print All Territory Debug`;
+- `Build Territory Debug Summary`, exact-tag summary, and whole-system report;
+- the Territory Gameplay Debugger category;
+- a `UTerritoryDebugWidget` after `Set Debug Enabled(true)` is called;
+- editor-only notices that a stable GUID or counterattack Approach ID was generated while an
+  author saves an asset.
+
+These tools cannot create background log spam by themselves. Calling or opening one is the opt-in.
+
+## Useful Output Log commands
+
+```text
+log LogTerritory Log
 log LogTerritory Verbose
+log LogTerritory Warning
 ```
 
-## Reading Debug Output
+## Recommended problem presets
 
-All territory debug output goes to the **LogTerritory** category. Filter the Output Log by `LogTerritory` to see only territory events.
+| Problem | Categories |
+|---|---|
+| Locked or unlock | Availability + Hierarchy, Save/Load, WorldState, Narrative/Tales, UI |
+| Capture | Capture Attempts, Capture Progression, Ownership, State Transitions, Diplomacy, Interaction |
+| Guard or AI | Guard Spawning, Guard Deaths, Diplomacy, Attitudes, Behavior Trees, Combat |
+| Counterattack | Counterattacks, Diplomacy, WorldState, Guards, Combat |
+| Production | Production, Economy, Transactions, Save/Load, WorldState |
+| Stealth | Stealth, Diplomacy, Capture Attempts, Narrative/Tales |

@@ -1,5 +1,64 @@
 # Changelog
 
+## Unreleased — 2026-08-30 (Availability-first UI and community debug guide)
+
+- Separated story Availability from Political State in every shared Territory UI read model.
+  Player-facing status now always presents `Locked` before `Unclaimed`, `Contested`, or `Claimed`.
+- Added an exact-tag runtime report that shows Definition seed, campaign-save/replication source,
+  effective hierarchy availability, selected actor and Definition paths, UI status, garrison, and
+  active assaults. This directly diagnoses a Locked Farm that appears Contested in an old save.
+- Refactored Developer Settings into a real master gate, verbosity threshold, and focused categories
+  for availability, UI, WorldState, production, counterattacks, stealth, and interaction. Routine
+  diagnostic logs now honor their category; safety Errors/Warnings remain intentionally visible.
+- Implemented the previously exposed but non-functional `Draw Spatial Grid` overlay and included all
+  active visual overlays in the settings report.
+- Restored the authored Blacksmith Claimed-state `Try Unlock Territory` event for Castle Hill Farm.
+  It runs only on a real ownership change, does not force the lock, and therefore still respects
+  Farm's reusable Locked exit condition.
+- Added `00_Easy_Complete_Guide.md`, a plain-English explanation of the complete framework with one
+  consistent Haven Reach / Blacksmith / Castle Hill Farm example.
+- Rebuilt the same `TDAEditor` and `TDA` Development targets with the editor closed. All 157
+  `TerritoryFramework.*` tests passed; 56 Territory Blueprints compiled; all five modular Territory
+  Definitions validated with zero errors; and the `HopDistrictTest` headless runtime smoke produced
+  no Blueprint runtime, Territory, assertion, ensure, or fatal error.
+- Added a GitHub Actions matrix workflow for packaged Win64 artifacts on Unreal 5.7 and 5.8.
+  Licensed engine and Narrative Pro dependencies stay on version-labeled self-hosted runners;
+  successful jobs upload separate, versioned plugin artifacts with reproducible build metadata.
+
+## Unreleased — 2026-08-30 (State lifecycle and Narrative execution-context repair)
+
+- Fixed direct `Captured / Claimed` faction handovers. Even when the enum remains Claimed, the
+  old owner's Claimed Exit conditions/events and the new owner's Claimed Entry conditions/events
+  now run once. Same-owner restore commands do not refire either lifecycle.
+- Repaired the Blacksmith-to-Farm story unlock asset. `Try Unlock Territory` preserves the live
+  transition faction, and Farm's Locked Exit condition no longer hardcodes Heroes.
+- Completed live-world resolution across every Territory Narrative event and condition. Reusable
+  quest/dialogue objects with a worldless asset outer now use the explicit target, controller, or
+  Tales component supplied by Narrative Pro instead of silently doing nothing.
+- Standardized State Config, initial diplomacy, defender-died, and all-defenders-defeated dispatch
+  on `ExecuteEvent`. Inherited conditions, including Narrative's Not option, are evaluated exactly
+  once before each event.
+- Removed the remaining public Blueprint shortcuts that could write Territory state or capture
+  progress outside `UTerritoryControlSubsystem`. Forced state changes now commit one complete
+  ownership transaction, including owner, contesting faction, state, progress, lifecycle events,
+  replication, hierarchy reduction, and strategic read-model publication.
+- Added a Definition-backed strategic directory to `ATerritoryWorldState`. Campaign City assets
+  seed City, District, and non-secret Place rows before their actors stream in; loaded actors then
+  publish the authoritative live row. Command Center lists can therefore retain unloaded Districts
+  without exposing the names of locked Places.
+- Persisted that strategic directory as a read-only save projection. It preserves the last known UI
+  and political row across restart but is never written back into a Territory actor; each loaded
+  `ATerritoryVolume` remains the sole durable owner/state/progress authority.
+- Centralized WorldState discovery in `Get Territory World State`, fixed GUID-only summary identity
+  collisions, and routed contesting-faction changes through the same atomic ownership commit.
+- Rebuilt both `TDAEditor` and `TDA` Development targets and passed all 156
+  `TerritoryFramework.*` automation tests with no Territory warning/error, Blueprint runtime error,
+  `Accessed None`, ensure, assertion, or failed test.
+- Compiled all 56 `/Game/TerritoryFramework` Blueprints successfully, validated all 10 authored
+  Territory Definition/profile assets with zero validation errors, and completed a clean headless
+  runtime smoke on `/Game/HopDistrictTest`. The wider project Blueprint commandlet still reports
+  seven failures in unrelated Narrative/demo/Marketplace sample assets; none references Territory.
+
 ## Unreleased — 2026-08-29 (Narrative stealth infiltration and evidence-driven conflict)
 
 - Added reusable Territory Stealth Profile assets at the Definition default and per-state override

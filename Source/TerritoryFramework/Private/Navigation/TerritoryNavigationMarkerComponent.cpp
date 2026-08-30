@@ -43,6 +43,7 @@ void UTerritoryNavigationMarkerComponent::BeginPlay()
 			TerritoryMapMarker->SetTerritoryVolume(CachedTerritory.Get());
 		}
 	}
+	RefreshAncestorAvailabilityBindings();
 }
 
 void UTerritoryNavigationMarkerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -62,6 +63,15 @@ void UTerritoryNavigationMarkerComponent::EndPlay(const EEndPlayReason::Type End
 	{
 		TerritoryMapMarker->ClearTerritoryBinding();
 	}
+	for (const TWeakObjectPtr<ATerritoryVolume>& AncestorPtr : BoundAvailabilityAncestors)
+	{
+		if (ATerritoryVolume* Ancestor = AncestorPtr.Get())
+		{
+			Ancestor->OnTerritoryAvailabilityChanged.RemoveDynamic(
+				this, &UTerritoryNavigationMarkerComponent::OnAncestorAvailabilityChanged);
+		}
+	}
+	BoundAvailabilityAncestors.Empty();
 
 	// ClearTerritoryBinding performs the one normal runtime unregister. During
 	// world teardown it deliberately emits no Narrative UI callbacks because the
@@ -108,6 +118,7 @@ void UTerritoryNavigationMarkerComponent::OnRegistryTerritoryChanged(
 	ATerritoryVolume* Territory, bool bWasUnregistered)
 {
 	if (!CachedTerritory.IsValid() || !Territory) return;
+	RefreshAncestorAvailabilityBindings();
 	const FGameplayTag ChangedTag = Territory->GetTerritoryTag();
 	if (Territory == CachedTerritory.Get())
 	{
@@ -130,6 +141,45 @@ void UTerritoryNavigationMarkerComponent::OnRegistryTerritoryChanged(
 		const ATerritoryVolume* Parent = Registry
 			? Registry->GetTerritoryByTag(ParentTag) : nullptr;
 		if (!Parent) return;
+		ParentTag = Parent->GetParentTerritoryTag();
+	}
+}
+
+void UTerritoryNavigationMarkerComponent::OnAncestorAvailabilityChanged(
+	ATerritoryVolume* Territory, ETerritoryAvailability NewAvailability)
+{
+	(void)Territory;
+	(void)NewAvailability;
+	RefreshTerritoryMarker();
+}
+
+void UTerritoryNavigationMarkerComponent::RefreshAncestorAvailabilityBindings()
+{
+	for (const TWeakObjectPtr<ATerritoryVolume>& AncestorPtr : BoundAvailabilityAncestors)
+	{
+		if (ATerritoryVolume* Ancestor = AncestorPtr.Get())
+		{
+			Ancestor->OnTerritoryAvailabilityChanged.RemoveDynamic(
+				this, &UTerritoryNavigationMarkerComponent::OnAncestorAvailabilityChanged);
+		}
+	}
+	BoundAvailabilityAncestors.Empty();
+
+	if (!CachedTerritory.IsValid() || !GetWorld()) return;
+	UTerritoryRegistrySubsystem* Registry =
+		GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry) return;
+
+	TSet<FGameplayTag> Visited;
+	FGameplayTag ParentTag = CachedTerritory->GetParentTerritoryTag();
+	while (ParentTag.IsValid() && !Visited.Contains(ParentTag))
+	{
+		Visited.Add(ParentTag);
+		ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
+		if (!Parent) break;
+		Parent->OnTerritoryAvailabilityChanged.AddUniqueDynamic(
+			this, &UTerritoryNavigationMarkerComponent::OnAncestorAvailabilityChanged);
+		BoundAvailabilityAncestors.Add(Parent);
 		ParentTag = Parent->GetParentTerritoryTag();
 	}
 }

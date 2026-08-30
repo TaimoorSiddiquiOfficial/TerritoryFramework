@@ -72,6 +72,17 @@ public:
 		meta = (DisplayName = "Apply Territory Mutation"))
 	FTerritoryMutationResponse ApplyTerritoryMutation(const FTerritoryMutationRequest& Request);
 
+	/**
+	 * Applies a Narrative unlock as one hierarchy-aware transaction.
+	 * Place targets open only their City/District path. District and City targets
+	 * cascade downward while every child keeps its own lock conditions.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Lock",
+		meta=(DisplayName="Apply Territory Unlock"))
+	FTerritoryUnlockCascadeResult ApplyUnlockCascade(ATerritoryVolume* Target,
+		const FTerritoryTransitionContext& TransitionContext,
+		ETerritoryUnlockScope Scope = ETerritoryUnlockScope::AutomaticHierarchy);
+
 	/** Register an actor as an attacker for a faction. Identity-based — duplicates ignored. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void RegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);

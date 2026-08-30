@@ -20,7 +20,10 @@ UTerritoryDistrictManagementWidget (UTerritoryActivatableWidget)
   └─ UTerritoryPlayerManagementComponent RPC bridge
 ```
 
-`ATerritoryDistrict` remains the owner/state/guard authority. The control, economy, counterattack, registry, and Narrative inventory systems supply their respective projections.
+`ATerritoryDistrict` is the aggregate owner/state and strategic-rights read model. Each
+`ATerritoryProperty` is the authority for its physical guards, capture, production, and local
+income. The control, economy, counterattack, registry, and Narrative inventory systems supply
+their respective projections.
 
 ## Opening the screen
 

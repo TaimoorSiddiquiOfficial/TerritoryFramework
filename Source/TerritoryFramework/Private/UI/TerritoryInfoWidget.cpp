@@ -1,5 +1,6 @@
 #include "UI/TerritoryInfoWidget.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -54,12 +55,31 @@ void UTerritoryInfoWidget::BindToTerritoryAtPlayer()
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return;
 
-	ATerritoryVolume* Territory = Registry->GetTerritoryAtLocation(PC->GetPawn()->GetActorLocation());
+	ATerritoryVolume* SpatialTerritory = Registry->GetTerritoryAtLocation(
+		PC->GetPawn()->GetActorLocation());
+	ATerritoryVolume* Territory =
+		UTerritoryUIBlueprintLibrary::GetVisibleTerritoryAtLocation(
+			this, PC->GetPawn()->GetActorLocation());
 	// P2-N18: Skip rebind if territory hasn't changed
 	if (Territory == BoundTerritory.Get()) return;
 
 	if (Territory)
 	{
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugUI())
+		{
+			UE_LOG(LogTerritory, Log,
+				TEXT("[UI] %s player location %s selected spatial=%s, visible=%s (%s, political state %d); overlapping candidates=%d"),
+				*GetName(), *PC->GetPawn()->GetActorLocation().ToString(),
+				SpatialTerritory ? *SpatialTerritory->GetTerritoryTag().ToString()
+					: TEXT("None"),
+				*Territory->GetTerritoryTag().ToString(),
+				Territory->IsLocked() ? TEXT("Locked") : TEXT("Unlocked"),
+				static_cast<int32>(Territory->GetTerritoryState()),
+				Registry->GetTerritoriesAtLocation(
+					PC->GetPawn()->GetActorLocation()).Num());
+		}
 		UnbindDelegates();
 		BoundTerritory = Territory;
 		BoundTerritoryTag = Territory->GetTerritoryTag();
@@ -154,10 +174,8 @@ void UTerritoryInfoWidget::RefreshTerritoryDisplay()
 	}
 	if (TerritoryStateText)
 	{
-		const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-		TerritoryStateText->SetText(StateEnum
-			? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(Territory->GetTerritoryState()))
-			: FText::GetEmpty());
+		TerritoryStateText->SetText(UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			Territory->GetTerritoryAvailability(), Territory->GetTerritoryState()));
 	}
 	if (TerritoryGuardCountText)
 	{

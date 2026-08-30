@@ -299,6 +299,13 @@ private:
 	void OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
 	UFUNCTION()
+	void OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
+
+	UFUNCTION()
+	void OnTerritoryAvailabilityChanged(ATerritoryVolume* Territory,
+		ETerritoryAvailability NewAvailability);
+
+	UFUNCTION()
 	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 
 	UFUNCTION()

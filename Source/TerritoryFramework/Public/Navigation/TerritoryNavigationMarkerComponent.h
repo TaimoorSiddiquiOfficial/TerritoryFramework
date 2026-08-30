@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Core/TerritoryTypes.h"
 #include "Navigation/NavigationMarkerComponent.h"
 #include "TerritoryNavigationMarkerComponent.generated.h"
 
@@ -51,4 +52,13 @@ private:
 
 	UFUNCTION()
 	void OnRegistryTerritoryChanged(ATerritoryVolume* Territory, bool bWasUnregistered);
+
+	UFUNCTION()
+	void OnAncestorAvailabilityChanged(ATerritoryVolume* Territory,
+		ETerritoryAvailability NewAvailability);
+
+	void RefreshAncestorAvailabilityBindings();
+
+	UPROPERTY()
+	TArray<TWeakObjectPtr<ATerritoryVolume>> BoundAvailabilityAncestors;
 };

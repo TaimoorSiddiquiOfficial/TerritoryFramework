@@ -73,8 +73,6 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | Function | Category |
 |---|---|
 | SetOwningFaction(NewFaction) | Territory — validated wrapper through ControlSubsystem; use Apply Territory Mutation for a result/context |
-| SetControlProgress(Progress) | Territory |
-| SetTerritoryState(NewState) | Territory |
 | RegisterDefender(Defender) | Territory |
 | UnregisterDefender(Defender) | Territory |
 | SpawnGuards() | Territory\|Guards |

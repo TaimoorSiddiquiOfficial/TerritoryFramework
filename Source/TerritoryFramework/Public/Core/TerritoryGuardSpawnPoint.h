@@ -151,10 +151,11 @@ public:
 	}
 
 	/**
-	 * Which territory this spawn point belongs to. A territory's authored GuardSpawnPoints
-	 * reference takes precedence, followed by this tag, then placement/patrol overlap.
-	 * An untagged post whose actor origin is outside a District can still belong to it
-	 * when at least one world-space patrol node overlaps that District.
+	 * Which Place this spawn point belongs to. A Place Definition binding takes
+	 * precedence, followed by this tag, then placement/patrol overlap with a Place.
+	 * City and District bounds are ignored because aggregate parents own no guards.
+	 * Easy example: a Blacksmith patrol post may sit outside the Blacksmith bounds when
+	 * one patrol node overlaps that Place; overlapping only Market Square is invalid.
 	 */
 	UPROPERTY(Transient)
 	FGameplayTag OwnerTerritoryTag;
@@ -444,7 +445,7 @@ public:
 	static bool IsOwnerReserveDeploymentStateValid(ETerritoryState State,
 		const FGameplayTag& OwningFaction, const FGameplayTag& ContestingFaction);
 
-	/** Deterministically selects the most specific Territory from placement/patrol hits. */
+	/** Deterministically selects the smallest physical Place from placement/patrol hits. Aggregate City/District hits are ignored. */
 	static ATerritoryVolume* ChooseMostSpecificTerritory(
 		TConstArrayView<ATerritoryVolume*> Candidates);
 

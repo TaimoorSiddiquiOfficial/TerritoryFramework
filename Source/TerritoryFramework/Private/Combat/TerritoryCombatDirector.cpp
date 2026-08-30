@@ -3,6 +3,7 @@
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "AI/NarrativeNPCController.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
@@ -14,7 +15,12 @@
 void UTerritoryCombatDirector::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryCombatDirector initialized (assault budget manager)"));
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugCombat())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Combat] director initialized (assault budget manager)"));
+	}
 }
 
 void UTerritoryCombatDirector::Deinitialize()
@@ -35,7 +41,7 @@ bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, A
 	if (!Territory || !Controller || !GetWorld() || GetWorld()->GetNetMode() == NM_Client) return false;
 	if (!IsEligibleAssaultController(Territory, Controller)) return false;
 
-	if (Territory->GetTerritoryState() == ETerritoryState::Locked) return false;
+	if (!Territory->IsAvailableForGameplay()) return false;
 
 	// Periodically clean stale territory keys (destroyed territories) to prevent
 	// SlotMap from accumulating dead entries over time.
@@ -63,9 +69,14 @@ bool UTerritoryCombatDirector::RequestAssaultSlot(ATerritoryVolume* Territory, A
 	// reaches BTTask_ReleaseTerritoryPermission (e.g. NPC killed mid-assault).
 	BindControllerDeath(Controller);
 
-	UE_LOG(LogTerritory, Verbose, TEXT("Assault slot granted in %s (%d/%d)"),
-		*Territory->GetTerritoryTag().ToString(),
-		Slots.GrantedControllers.Num(), MaxSlots);
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugCombat())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Combat] Assault slot granted in %s (%d/%d)"),
+			*Territory->GetTerritoryTag().ToString(),
+			Slots.GrantedControllers.Num(), MaxSlots);
+	}
 
 	return true;
 }
@@ -286,8 +297,13 @@ void UTerritoryCombatDirector::OnAssaultControllerDied(AActor* KilledActor,
 	ReleaseAllSlots(DeadController);
 	BoundControllers.Remove(DeadController);
 
-	UE_LOG(LogTerritory, Verbose, TEXT("CombatDirector: released assault slots for dead controller %s"),
-		*DeadController->GetName());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugCombat())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Combat] released assault slots for dead controller %s"),
+			*DeadController->GetName());
+	}
 }
 
 bool UTerritoryCombatDirector::ControllerHasAnySlot(const ANarrativeNPCController* Controller) const

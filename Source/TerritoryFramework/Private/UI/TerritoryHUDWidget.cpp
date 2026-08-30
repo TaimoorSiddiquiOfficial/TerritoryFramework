@@ -95,17 +95,15 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	}
 
 	const ETerritoryState State = Territory->GetTerritoryState();
-	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-	const FText StateText = StateEnum
-		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(State))
-		: FText::GetEmpty();
-	const FLinearColor StateAccent = State == ETerritoryState::Contested
+	const FText StateText = UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+		Territory->GetTerritoryAvailability(), State);
+	const FLinearColor StateAccent = Territory->IsLocked()
+		? FLinearColor(0.42f, 0.47f, 0.52f, 1.f)
+		: State == ETerritoryState::Contested
 		? FLinearColor(1.f, 0.25f, 0.16f, 1.f)
 		: State == ETerritoryState::Claimed
 			? FLinearColor(0.08f, 0.88f, 0.62f, 1.f)
-			: State == ETerritoryState::Locked
-				? FLinearColor(0.42f, 0.47f, 0.52f, 1.f)
-				: FLinearColor(1.f, 0.84f, 0.f, 1.f);
+			: FLinearColor(1.f, 0.84f, 0.f, 1.f);
 
 	if (Text_DistrictName)
 	{

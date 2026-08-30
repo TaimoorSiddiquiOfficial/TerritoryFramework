@@ -140,16 +140,26 @@ Easy examples:
 - Read an intelligence document to reveal and unlock a hidden tunnel property.
 - Complete a dialogue choice to make the property owner willing to surrender.
 
-Do not use a second "start locked" Boolean. The State Config is the one source of truth.
+Do not use a second "start locked" Boolean. Author the initial availability and use the
+Locked State Config for its conditions/events.
 
-Use `Territory Unlock Event` for an explicit quest or dialogue unlock. Its target must
-be the complete tag of the locked actor. For example, if `OldTown.Farm` is Locked,
-target `Territory.MyCity.OldTown.Farm`; targeting `Territory.MyCity.OldTown` only asks
-the parent District to unlock.
+Use `Territory Unlock Event` for an explicit quest or dialogue unlock. Its target must be
+the complete tag of the locked actor. `Unlock Scope` controls the transaction:
 
-The event changes the saved and replicated runtime state from Locked to Claimed or
-Unclaimed. It does not rewrite **New Campaign Initial State (Authoring Only)**. That
-property remains Locked so a brand-new campaign still begins behind the intended gate.
+- `Automatic Hierarchy` on a Place unlocks its City/District path and that Place, but never a sibling.
+- `Automatic Hierarchy` on a District or City attempts its authored descendants too.
+- `Exact Only` attempts only the target.
+- `Force Exact` and `Force Hierarchy` bypass local lock conditions for an intentional admin,
+  migration, or cinematic override.
+
+Every normal cascade still checks each actor's own Locked exit conditions. If Farm Hill has an
+unfinished quest condition, unlocking Castle Hill reports Farm Hill as blocked instead of
+silently opening it. A streamed-out authored child is reported as missing; it is never assumed
+to be unlocked.
+
+The event changes saved and replicated availability from Locked to Unlocked. It does not change
+the political control state or owner, and it does not rewrite **Initial Availability** in the
+Definition. A brand-new campaign therefore still begins behind the intended gate.
 
 ## Reserve waves that feel staged
 
@@ -189,8 +199,8 @@ strategic upper bound.
 Territory guards may temporarily prioritize the closest hostile player while their Place
 is Contested. This priority requires exact War diplomacy. Neutral / No Treaty never
 becomes hostile merely because the player is visible. Registered defending guards remain
-the preferred targets of assault participants, so a counterattack can attack the District
-without the player being present.
+the preferred targets of assault participants, so a counterattack can attack an unlocked
+Place and its garrison without the player being present.
 
 ## Adaptive difficulty after skill unlocks
 

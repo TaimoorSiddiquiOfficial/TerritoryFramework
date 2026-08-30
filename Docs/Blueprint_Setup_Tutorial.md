@@ -52,17 +52,17 @@ Create an `NPCDefinition` data asset for your territory guards:
 
 ### 3.2 Guard Spawn Points
 
-1. Place `BP_TerritoryGuardSpawnPoint` actors inside the Property/District volume
+1. Add Guard Post rows to the Place Definition, then synchronize them into the level. A patrol post may be outside the Place only when its patrol route enters that Place; District-only overlap is invalid.
 2. Set on each:
    - **Max Guards** = 2
    - **Reserve Slots** = 1
    - **Priority** = 50 (higher = fills first)
    - **Patrol Route** = add waypoints (optional — Narrative handles patrol via NPCDefinition)
-3. Reference these in the Territory Volume's **Guard Spawn Points** array
+3. Keep the generated post linked to that Place Definition and stable Guard Post ID
 
 ### 3.3 Territory Guard Configuration
 
-On the Property/District volume:
+On the Place Definition:
 - **Guard NPC Definition** = your NPCDefinition asset
 - **Guard Spawn Count** = 3 (authored target for existing ownership and non-player capture)
 - **Post Capture Garrison Policy** = Player Chooses (a capture by a matching live Narrative player faction starts at 0)
@@ -76,7 +76,7 @@ On the Property/District volume:
 
 ### 4.1 Initial Owner
 
-On each territory volume:
+On each Place Definition:
 - **Initial Owning Faction** = `Narrative.Factions.Bandits`
 - This sets the territory to **Claimed** (red marker) on BeginPlay
 

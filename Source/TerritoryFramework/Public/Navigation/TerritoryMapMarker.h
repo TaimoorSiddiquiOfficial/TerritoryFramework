@@ -106,4 +106,8 @@ private:
 
 	UFUNCTION()
 	void OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
+
+	UFUNCTION()
+	void OnTerritoryAvailabilityChanged(ATerritoryVolume* Territory,
+		ETerritoryAvailability NewAvailability);
 };

@@ -173,6 +173,9 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionSiteRecord
 	ETerritoryState TerritoryState = ETerritoryState::Unclaimed;
 
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
+	ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	ETerritoryProductionStatus LastStatus = ETerritoryProductionStatus::NeverEvaluated;
 
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")

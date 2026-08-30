@@ -37,7 +37,8 @@ class UTerritoryStealthProfile;
  *
  * Blueprint usage (read-only queries are BlueprintPure):
  *   Volume->GetOwningFaction()     -> "Narrative.Factions.Merchants"
- *   Volume->GetTerritoryState()    -> Claimed / Contested / Locked / Unclaimed
+ *   Volume->GetTerritoryState()    -> Claimed / Contested / Unclaimed
+ *   Volume->GetTerritoryAvailability() -> Locked / Unlocked
  *   Volume->IsOwnedByFaction(Tag)  -> true/false
  *   Volume->GetControlProgress()   -> 0.0 to 1.0
  */
@@ -100,6 +101,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Territory State"))
 	ETerritoryState GetTerritoryState() const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Get Territory Availability"))
+	ETerritoryAvailability GetTerritoryAvailability() const { return OwnershipData.Availability; }
+
+	/** True only when this Territory and every authored ancestor are unlocked. */
+	UFUNCTION(BlueprintPure, Category="Territory|Lock",
+		meta=(DisplayName="Is Available For Gameplay",
+			ToolTip="Checks this Territory plus its City/District ancestor path. Missing or cyclic hierarchy data fails closed."))
+	bool IsAvailableForGameplay() const;
 
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Control Progress"))
 	float GetControlProgress() const;
@@ -181,6 +191,20 @@ public:
 			ToolTip="Preview the state used for a new campaign. Saved games keep their saved state."))
 	ETerritoryState ResolveInitialTerritoryState() const;
 
+	/** Resolves the Definition-owned Initial Availability for a new campaign. */
+	UFUNCTION(BlueprintPure, Category="Territory|Lock",
+		meta=(DisplayName="Get Resolved Initial Availability",
+			ToolTip="Preview whether a new campaign starts locked. Saved games keep their saved availability."))
+	ETerritoryAvailability ResolveInitialTerritoryAvailability() const;
+
+	/**
+	 * True on the authority when this runtime record was restored from a campaign save.
+	 * Initial Definition values are new-campaign seeds and do not overwrite that record.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Save",
+		meta=(DisplayName="Was Restored From Campaign Save"))
+	bool WasRestoredFromCampaignSave() const { return bLoadedFromSave; }
+
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy", meta=(DisplayName="Get Control Mode"))
 	ETerritoryControlMode GetControlMode() const;
 
@@ -240,6 +264,10 @@ public:
 	void SetDerivedOwningFaction(const FGameplayTag& NewFaction,
 		const FTerritoryTransitionContext& TransitionContext);
 
+	/** Internal hierarchy reducer path. Aggregate parents never change their children. */
+	void SetDerivedControl(const FGameplayTag& SecuredOwner, ETerritoryState DerivedState,
+		const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
+
 	/** Valid only while an atomic transition is broadcasting its synchronous event bundle. */
 	const FTerritoryTransitionContext& GetActiveTransitionContext() const { return ActiveTransitionContext; }
 
@@ -268,12 +296,6 @@ public:
 	void ForceSetOwningFactionWithContext(const FGameplayTag& NewFaction,
 		const FTerritoryTransitionContext& TransitionContext);
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership", meta=(DisplayName="Set Control Progress"))
-	void SetControlProgress(float Progress);
-
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership", meta=(DisplayName="Set Territory State"))
-	void SetTerritoryState(ETerritoryState NewState);
-
 	/** Internal authority path for explicit quest/script overrides and save restore. */
 	void ForceSetTerritoryState(ETerritoryState NewState);
 
@@ -287,13 +309,8 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Defenders", meta=(DisplayName="Get Registered Defenders"))
 	TArray<AActor*> GetRegisteredDefenders() const;
 
-	/** P0-03: Set contesting faction with no-op detection. Replicates via OwnershipData RepNotify. */
-	void SetContestingFaction(const FGameplayTag& Faction)
-	{
-		if (!HasAuthority()) return;
-		if (OwnershipData.ContestingFaction == Faction) return;
-		OwnershipData.ContestingFaction = Faction;
-	}
+	/** Set contesting faction through the atomic ownership commit path. */
+	void SetContestingFaction(const FGameplayTag& Faction);
 
 	/**
 	 * P0-05: Atomically commit a new FTerritoryOwnershipData struct.
@@ -349,6 +366,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory", meta=(DisplayName="On State Changed"))
 	FOnTerritoryStateChanged OnTerritoryStateChangedDelegate;
 
+	UPROPERTY(BlueprintAssignable, Category="Territory|Lock", meta=(DisplayName="On Availability Changed"))
+	FOnTerritoryAvailabilityChanged OnTerritoryAvailabilityChanged;
+
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On All Guards Defeated"))
 	FOnAllGuardsDefeated OnAllGuardsDefeatedDelegate;
 
@@ -361,7 +381,8 @@ public:
 
 	/**
 	 * Returns true if the territory is currently locked (can't be captured).
-	 * Locked territories still generate income and pay upkeep, just can't change ownership.
+	 * Locked territories preserve saved political ownership but remain unavailable for
+	 * capture, production, economy settlement, garrison command, and counterattacks.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Is Locked"))
 	bool IsLocked() const;
@@ -611,6 +632,9 @@ protected:
 	FGameplayTag InitialOwningFaction;
 
 	UPROPERTY(Transient)
+	ETerritoryAvailability InitialAvailability = ETerritoryAvailability::Unlocked;
+
+	UPROPERTY(Transient)
 	ETerritoryInitialState InitialState = ETerritoryInitialState::Automatic;
 
 	UPROPERTY(Transient)
@@ -748,6 +772,7 @@ private:
 
 	FGameplayTag PreviousOwningFaction;
 	ETerritoryState PreviousState = ETerritoryState::Unclaimed;
+	ETerritoryAvailability PreviousAvailability = ETerritoryAvailability::Unlocked;
 	FBox LastKnownBounds;
 	bool bLoadedFromSave = false;
 	bool bGuardsReconciled = false;
@@ -785,6 +810,7 @@ private:
 	void TryCompleteDefenderDefeat(const FTerritoryTransitionContext& EventContext);
 	void ReconcileStoryBoundsContesters();
 	void ReleaseStoryBoundsContesters();
+	void ReconcileAvailabilityDependentSystems();
 	void ApplyInitialStateDiplomacyPolicies();
 	void RebuildRuntimeNarrativeConfiguration(const UTerritoryDefinition& Definition);
 	void PublishCaptureSummary();

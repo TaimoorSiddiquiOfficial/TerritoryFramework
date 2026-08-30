@@ -6,6 +6,15 @@
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
 > **Vendor rule:** Narrative Pro source/assets are read-only; all compatibility code lives in TerritoryFramework.
 
+## Start Here
+
+Read [Territory Framework — Easy Complete Guide](00_Easy_Complete_Guide.md) first. It explains
+the complete system in simple English, including the Castle Hill Farm Locked-versus-Contested
+example, DataAsset versus saved runtime state, hierarchy, capture, guards, diplomacy,
+counterattacks, production, stealth, UI, events, conditions, multiplayer, and debugging.
+
+The numbered documents below are the advanced reference.
+
 ## Current Implementation Limits
 
 - `ATerritoryWorldState` is the persistence/late-join projection. Server subsystem delegates keep its economy, diplomacy, capture, and assault arrays current; RepNotify handlers hydrate client query subsystems.
@@ -17,6 +26,8 @@
 
 ## Table of Contents
 
+- [Easy Complete Guide](00_Easy_Complete_Guide.md) — community-facing source of truth with simple examples
+
 1. [Quick Start](01_Quick_Start.md) — 5-minute setup guide
 2. [Interfaces](02_Interfaces.md) — Interface contracts, real examples, multi-domain usage
 3. [Core Actors](03_Core_Actors.md) — TerritoryVolume, City, District, Property, GuardSpawnPoint
@@ -27,7 +38,7 @@
 8. [Diplomacy System](08_Diplomacy_System.md) — Treaties, wars, reputation
 9. [Map & Navigation](09_Map_Navigation.md) — Markers, territory outline drawing
 10. [Save/Load](10_Save_Load.md) — Savable actors, WorldState, SavableData
-11. [Debug System](11_Debug_System.md) — 16 debug toggles, DebugWidget, PIE tips
+11. [Debug System](11_Debug_System.md) — category-gated logs, five visual overlays, exact reports, DebugWidget, PIE tips
 12. [Blueprint Reference](12_Blueprint_Reference.md) — All BlueprintCallable/Pure/Assignable
 13. [Multiplayer Guide](13_Multiplayer.md) — Authority, replication, client behavior
 14. [API Reference](14_API_Reference.md) — Complete C++ function signatures
@@ -39,12 +50,14 @@
 20. [Resource Production](20_Resource_Production.md) — Modular daily inputs/outputs, Narrative item storage, crafting bridge, save, replication, and UI
 21. [Territory Definition Assets](21_Definition_Assets.md) — One modular City/District/Place authoring source, hierarchy builder, migration, and validation
 22. [Stealth Infiltration](22_Stealth_Infiltration.md) — Narrative stealth rating, evidence, investigation, quest rules, multi-floor behavior, and exposure-driven diplomacy
-23. [Current Remediation Report](REMEDIATION_2026-08-24.md) — Resolved findings, migrations, live MCP evidence, and remaining external gates
-24. [Stabilization Re-audit](STABILIZATION_REAUDIT_2026-08-25.md) — Runtime/editor/Narrative integration findings, guard and assault fixes, UI redesign, release gate, and product roadmap
-25. [Garrison Command Reaudit](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md) — Root causes, implemented fixes, MCP evidence, and remaining release gates
-26. [Earlier Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Broader confirmed fixes and MCP findings
-27. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
-28. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
+23. [Hierarchy, Availability, and Unlocks](Hierarchy_Availability_and_Unlocks.md) — City/District/Place authority, bottom-up control, and Narrative unlock transactions
+24. [CI Artifacts](24_CI_Artifacts.md) — Build separate Win64 plugin artifacts with Unreal 5.7 and 5.8
+25. [Current Remediation Report](REMEDIATION_2026-08-24.md) — Resolved findings, migrations, live MCP evidence, and remaining external gates
+26. [Stabilization Re-audit](STABILIZATION_REAUDIT_2026-08-25.md) — Runtime/editor/Narrative integration findings, guard and assault fixes, UI redesign, release gate, and product roadmap
+27. [Garrison Command Reaudit](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md) — Root causes, implemented fixes, MCP evidence, and remaining release gates
+28. [Earlier Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Broader confirmed fixes and MCP findings
+29. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
+30. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
 
 ## Document Index
 
@@ -71,6 +84,8 @@
 | Operations UI | UI/Game Designers | Build Narrative CommonUI operations, guard, finance, and threat screens |
 | Territory Definition Assets | All | Configure, duplicate, migrate, synchronize, and validate complete hierarchies |
 | Stealth Infiltration | All | Configure Narrative-driven evidence, investigation, quest overrides, and exposure-gated conflict |
+| Hierarchy, Availability, and Unlocks | All | Understand layer ownership, bottom-up control, locked availability, and unlock cascade outcomes |
+| CI Artifacts | Maintainers | Configure self-hosted UE 5.7/5.8 runners and download compiled Win64 plugin packages |
 | Current Remediation Report | Maintainers | Current defect status, authority impact, migrations, and verification evidence |
 | Deep Reaudit | Maintainers | Findings, ownership, migrations, and verification evidence |
 | Blueprint Extension Guide | C++/BP Devs | Subclassing patterns, Super-call requirements |

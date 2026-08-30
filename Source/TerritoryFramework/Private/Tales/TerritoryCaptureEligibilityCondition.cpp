@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 UTerritoryCaptureEligibilityCondition::UTerritoryCaptureEligibilityCondition()
 {
@@ -12,9 +13,10 @@ UTerritoryCaptureEligibilityCondition::UTerritoryCaptureEligibilityCondition()
 }
 
 bool UTerritoryCaptureEligibilityCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent*)
+	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	UTerritoryRegistrySubsystem* Registry = World
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	UTerritoryControlSubsystem* Control = World
@@ -23,7 +25,7 @@ bool UTerritoryCaptureEligibilityCondition::CheckCondition_Implementation(
 		? Registry->GetTerritoryByTag(TerritoryToCheck) : nullptr;
 	if (!Territory || !Control
 		|| Territory->GetControlMode() != ETerritoryControlMode::Independent
-		|| Territory->GetTerritoryState() == ETerritoryState::Locked
+		|| !Territory->IsAvailableForGameplay()
 		|| (bRequireNoLivingDefenders && Territory->GetDefenderCount() > 0)
 		|| (bRequireContestedState
 			&& Territory->GetTerritoryState() != ETerritoryState::Contested))

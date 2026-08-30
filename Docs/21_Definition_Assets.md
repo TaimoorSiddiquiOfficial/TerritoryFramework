@@ -32,12 +32,33 @@ DA_City_HavenReach
 The City array creates the District parent links. Each District array creates its Place parent
 links. Do not type the same parent tag on several actors.
 
+## The three layers
+
+The hierarchy has one clear job at each level:
+
+| Layer | Owns |
+|---|---|
+| City | District membership, city authority/settings, and the derived city-control summary |
+| District | Place membership, district rights/perks, and the derived district-control summary |
+| Place | Physical bounds, capture, defenders, guard posts, story owner, production, and counterattack target |
+
+A City or District is never a second physical capture point. It is `Claimed` only when every
+authored child is loaded, unlocked, claimed, and owned by the same faction. Mixed ownership,
+a locked child, or an incomplete World Partition child set cannot produce a false secure claim.
+Parent control is reduced from children; it is never pushed down into them.
+
+Easy example: Heroes own Blacksmith, but Bandits own Farm Hill. Market Square is `Contested`.
+Capturing Blacksmith must not rewrite Farm Hill. After every authored Place is unlocked and
+Heroes capture all of them, the District becomes `Claimed` by Heroes automatically.
+
 ## What owns what
 
 | Information | Authority |
 |---|---|
 | Reusable setup | Territory Definition asset |
-| Current owner, state, progress | placed Territory actor |
+| Current Place owner, state, progress | placed Place actor |
+| Current City/District control | derived from the complete authored child set |
+| Locked/unlocked availability | saved and replicated separately from political control |
 | Capture validation/progress | Territory Control Subsystem |
 | Factions, NPCs, activities, dialogue, inventory, POI | Narrative Pro |
 | Persistent snapshot and late join | Territory World State |
@@ -91,6 +112,10 @@ the existing server-authoritative capture flow.
 `State Configs` is the modular table for `Locked`, `Unclaimed`, `Contested`, and `Claimed`.
 Each row supports inherited Narrative conditions plus entry and exit events.
 
+`Locked` is an availability lifecycle row, not a political ownership state. A locked Place can
+still remember that Bandits politically own it, while remaining hidden, non-capturable, and
+economically inactive. The other three rows describe control.
+
 Easy examples:
 
 - Locked exit condition: the quest `Meet the Informant` is complete.
@@ -104,8 +129,32 @@ Narrative event needs the live actor's World and transition context. Executing t
 from the Content Browser would make diplomacy, handover, spawning, and other world actions silently
 fail.
 
+Set **Initial Availability** to `Locked` for a story gate. **Initial State** now describes only
+political control (`Automatic`, `Unclaimed`, or `Claimed`). Older Definition assets that stored
+`Locked` in Initial State migrate automatically without losing their initial owner or stable GUID.
+
 Direct references from a reusable event to one level actor are not supported. Use stable Territory
 tags instead, so the correct live actor can be found after World Partition loads it.
+
+## Campaign directory and World Partition
+
+On the single `ATerritoryWorldState`, add every root City Definition to **Campaign City
+Definitions**. The WorldState walks each City → District → Place tree and creates a replicated
+strategic directory even when those actors are currently unloaded.
+
+- Unlocked Districts remain available to the Command Center and campaign overview.
+- Locked Place names stay hidden until their availability changes; parent totals can still say that
+  more Places exist.
+- Map markers, espionage, capture interaction, garrison commands, and other physical actions remain
+  disabled until the relevant actor/cell is loaded.
+- When an actor loads, its saved and replicated runtime state replaces the Definition seed.
+- Saving keeps the last known directory row only as a UI/query cache. It never changes actor
+  ownership during load.
+
+Example: Haven Reach has five Places but only Blacksmith is unlocked. The District row may show
+`1 / 5`, but the four locked Place names are not revealed. If Castle Hill streams out after being
+captured, it remains in the Captured list; setting a physical Place waypoint waits until that Place
+and its POI are loaded.
 
 ## Completed migration and strict authority
 
@@ -117,8 +166,12 @@ runtime or in the Blueprint API.
   Definition (plus a Guard Post row ID where required).
 - A placed Territory actor stores only its Definition link, physical bounds/presentation, stable
   identity, and saved/replicated campaign state.
-- State rules, defender events, initial ownership, guards, economy, production, assault policy,
-  and helper-actor settings come from the Definition.
+- Physical capture, guard, spawn, defender, story-owner, production, and counterattack settings
+  are valid only on Place Definitions. Parent editor panels hide those legacy fields, runtime
+  clears them, and Data Validation reports authored parent values as errors.
+- State rules, availability, strategic rights, and management settings come from every
+  Definition. Initial ownership, defenders, guards, economy, production, physical capture,
+  and assault approaches are Place-only.
 - Guard Blueprints no longer author patrol/crowd/target-priority values or diplomacy dialogue
   mappings. A guard receives those values from the owning Territory Definition before Narrative
   Pro applies its NPC activity configuration. Empty relationship-dialogue slots still fall back

@@ -57,6 +57,10 @@ protected:
 		FGameplayTag OldOwner, FGameplayTag NewOwner);
 
 	UFUNCTION()
+	void OnTerritoryAvailabilityChanged(ATerritoryVolume* Territory,
+		ETerritoryAvailability NewAvailability);
+
+	UFUNCTION()
 	void OnRegistryTerritoryChanged(ATerritoryVolume* Territory, bool bWasUnregistered);
 
 private:
@@ -65,8 +69,12 @@ private:
 
 	TWeakObjectPtr<ATerritoryDistrict> BoundDistrict;
 
+	UPROPERTY()
+	TArray<TWeakObjectPtr<ATerritoryVolume>> BoundAvailabilityAncestors;
+
 	void BindToDistrictIfAvailable();
 	void UnbindFromDistrict();
+	void RefreshAncestorAvailabilityBindings();
 	void RefreshMarkerPolicy();
 };
 

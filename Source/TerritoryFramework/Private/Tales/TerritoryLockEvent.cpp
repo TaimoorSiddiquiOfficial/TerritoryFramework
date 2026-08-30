@@ -1,7 +1,9 @@
 #include "Tales/TerritoryLockEvent.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Subsystems/TerritoryControlSubsystem.h"
 #include "Engine/World.h"
 #include "Tales/TerritoryTalesUtilities.h"
 #include "Tales/TalesComponent.h"
@@ -76,34 +78,69 @@ void UTerritoryUnlockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerCo
 	}
 
 	FTerritoryTransitionContext Context;
-	Context.Instigator = Target;
-	Context.TargetPawn = Target;
-	Context.PlayerController = Controller;
-	Context.TalesComponent = NarrativeComponent;
-	const ETerritoryState StateBefore = Territory->GetTerritoryState();
-	if (!Territory->TryUnlockWithContext(Context, bForceUnlock))
+	if (const ATerritoryVolume* SourceTerritory = GetTypedOuter<ATerritoryVolume>();
+		SourceTerritory && SourceTerritory->IsOwnershipTransitionActive())
+	{
+		// Preserve the faction and instigator that caused the source Territory event.
+		// This is essential for a captured Place unlocking another Place whose Locked
+		// Exit Conditions use the live capturing faction instead of a hardcoded tag.
+		Context = SourceTerritory->GetActiveTransitionContext();
+	}
+	if (!Context.Instigator) Context.Instigator = Target;
+	if (!Context.TargetPawn) Context.TargetPawn = Target;
+	if (!Context.PlayerController) Context.PlayerController = Controller;
+	if (!Context.TalesComponent) Context.TalesComponent = NarrativeComponent;
+	if (!Context.RequestingFaction.IsValid())
+	{
+		Context.RequestingFaction =
+			UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Context.TargetPawn);
+		if (!Context.RequestingFaction.IsValid())
+		{
+			Context.RequestingFaction =
+				UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Context.PlayerController);
+		}
+	}
+	UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
+	if (!Control) return;
+	ETerritoryUnlockScope EffectiveScope = UnlockScope;
+	if (bForceUnlock)
+	{
+		// Bounded compatibility for already-saved inline Narrative events. The field
+		// is hidden/deprecated; resaving the asset should use an explicit Force scope.
+		EffectiveScope = UnlockScope == ETerritoryUnlockScope::ExactOnly
+			? ETerritoryUnlockScope::ForceExact : ETerritoryUnlockScope::ForceHierarchy;
+	}
+	const FTerritoryUnlockCascadeResult Result = Control->ApplyUnlockCascade(
+		Territory, Context, EffectiveScope);
+	if (!Result.bTargetSucceeded)
 	{
 		UE_LOG(LogTerritory, Warning,
-			TEXT("[UnlockEvent] %s remained %d. Check its Locked Exit Conditions or enable Force Unlock."),
-			*TargetTerritoryTag.ToString(), static_cast<int32>(StateBefore));
+			TEXT("[UnlockEvent] %s remained locked/blocked (scope=%d, blocked=%d). Check the result rows and local Locked Exit Conditions."),
+			*TargetTerritoryTag.ToString(), static_cast<int32>(EffectiveScope), Result.BlockedCount);
+		for (const FTerritoryUnlockResultRow& Row : Result.Results)
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("[UnlockEvent]   %s outcome=%d reason=%s"),
+				*Row.TerritoryTag.ToString(), static_cast<int32>(Row.Outcome),
+				*Row.Reason.ToString());
+		}
 		return;
 	}
 
-	if (StateBefore != ETerritoryState::Locked)
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && (Settings->ShouldDebugTales()
+			|| Settings->ShouldDebugAvailability()))
 	{
-		UE_LOG(LogTerritory, Warning,
-			TEXT("[UnlockEvent] %s was already unlocked (state %d). Verify that the event targets the exact locked Place rather than its parent District."),
-			*TargetTerritoryTag.ToString(), static_cast<int32>(StateBefore));
-		return;
+		UE_LOG(LogTerritory, Log,
+			TEXT("[UnlockEvent] %s applied (scope=%d, unlocked=%d, blocked=%d)"),
+			*TargetTerritoryTag.ToString(), static_cast<int32>(EffectiveScope),
+			Result.UnlockedCount, Result.BlockedCount);
 	}
-
-	UE_LOG(LogTerritory, Log,
-		TEXT("[UnlockEvent] %s runtime state changed from Locked to %d"),
-		*TargetTerritoryTag.ToString(),
-		static_cast<int32>(Territory->GetTerritoryState()));
 }
 
 FString UTerritoryUnlockEvent::GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Unlock %s%s"), *TargetTerritoryTag.ToString(), bForceUnlock ? TEXT(" (Force)") : TEXT(""));
+	return FString::Printf(TEXT("Unlock %s (Scope %d)"),
+		*TargetTerritoryTag.ToString(), static_cast<int32>(UnlockScope));
 }

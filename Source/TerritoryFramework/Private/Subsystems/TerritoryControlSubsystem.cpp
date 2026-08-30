@@ -1,6 +1,8 @@
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryMutationTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -26,10 +28,215 @@
 #include "Engine/Engine.h"
 #include "TimerManager.h"
 #include "NavigationSystem.h"
+#include "Algo/Reverse.h"
+
+FTerritoryUnlockCascadeResult UTerritoryControlSubsystem::ApplyUnlockCascade(
+	ATerritoryVolume* Target, const FTerritoryTransitionContext& TransitionContext,
+	ETerritoryUnlockScope Scope)
+{
+	FTerritoryUnlockCascadeResult Result;
+	UWorld* World = GetWorld();
+	if (!Target || !World || Target->GetWorld() != World || World->GetNetMode() == NM_Client)
+	{
+		FTerritoryUnlockResultRow& Row = Result.Results.AddDefaulted_GetRef();
+		Row.Outcome = ETerritoryUnlockOutcome::InvalidTarget;
+		Row.Reason = FText::FromString(TEXT("The runtime Territory target is invalid or this is not the server."));
+		Result.BlockedCount = 1;
+		return Result;
+	}
+
+	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry)
+	{
+		FTerritoryUnlockResultRow& Row = Result.Results.AddDefaulted_GetRef();
+		Row.TerritoryTag = Target->GetTerritoryTag();
+		Row.Outcome = ETerritoryUnlockOutcome::InvalidTarget;
+		Row.Reason = FText::FromString(TEXT("Territory Registry is unavailable."));
+		Result.BlockedCount = 1;
+		return Result;
+	}
+
+	auto AddResult = [&Result](const FGameplayTag& Tag, ETerritoryUnlockOutcome Outcome,
+		const FString& Reason)
+	{
+		FTerritoryUnlockResultRow& Row = Result.Results.AddDefaulted_GetRef();
+		Row.TerritoryTag = Tag;
+		Row.Outcome = Outcome;
+		Row.Reason = FText::FromString(Reason);
+		if (Outcome == ETerritoryUnlockOutcome::Unlocked) ++Result.UnlockedCount;
+		else if (Outcome != ETerritoryUnlockOutcome::AlreadyUnlocked) ++Result.BlockedCount;
+	};
+
+	auto GetAuthoredChildTags = [](const ATerritoryVolume* Parent)
+	{
+		TArray<FGameplayTag> Tags;
+		if (!Parent) return Tags;
+		if (const UTerritoryCityDefinition* City =
+			Cast<UTerritoryCityDefinition>(Parent->GetTerritoryDefinition()))
+		{
+			for (const UTerritoryDistrictDefinition* District : City->Districts)
+			{
+				Tags.Add(District ? District->TerritoryTag : FGameplayTag());
+			}
+		}
+		else if (const UTerritoryDistrictDefinition* District =
+			Cast<UTerritoryDistrictDefinition>(Parent->GetTerritoryDefinition()))
+		{
+			for (const UTerritoryPlaceDefinition* Place : District->Places)
+			{
+				Tags.Add(Place ? Place->TerritoryTag : FGameplayTag());
+			}
+		}
+		return Tags;
+	};
+
+	const bool bForce = Scope == ETerritoryUnlockScope::ForceExact
+		|| Scope == ETerritoryUnlockScope::ForceHierarchy;
+	auto TryOne = [&](ATerritoryVolume* Territory)
+	{
+		if (!Territory)
+		{
+			return ETerritoryUnlockOutcome::InvalidTarget;
+		}
+		if (!Territory->IsLocked())
+		{
+			AddResult(Territory->GetTerritoryTag(), ETerritoryUnlockOutcome::AlreadyUnlocked,
+				TEXT("Already unlocked."));
+			return ETerritoryUnlockOutcome::AlreadyUnlocked;
+		}
+		if (Territory->TryUnlockWithContext(TransitionContext, bForce))
+		{
+			AddResult(Territory->GetTerritoryTag(), ETerritoryUnlockOutcome::Unlocked,
+				TEXT("Unlocked."));
+			return ETerritoryUnlockOutcome::Unlocked;
+		}
+		AddResult(Territory->GetTerritoryTag(), ETerritoryUnlockOutcome::BlockedByCondition,
+			TEXT("Its local Locked Exit Conditions did not pass."));
+		return ETerritoryUnlockOutcome::BlockedByCondition;
+	};
+
+	if (Scope == ETerritoryUnlockScope::ExactOnly
+		|| Scope == ETerritoryUnlockScope::ForceExact)
+	{
+		const ETerritoryUnlockOutcome Outcome = TryOne(Target);
+		Result.bTargetSucceeded = Outcome == ETerritoryUnlockOutcome::Unlocked
+			|| Outcome == ETerritoryUnlockOutcome::AlreadyUnlocked;
+		return Result;
+	}
+
+	// A Place opens only its ancestor path. Siblings remain completely silent.
+	if (Target->GetControlMode() == ETerritoryControlMode::Independent)
+	{
+		TArray<ATerritoryVolume*> Path;
+		Path.Add(Target);
+		TSet<FGameplayTag> VisitedAncestors;
+		FGameplayTag ParentTag = Target->GetParentTerritoryTag();
+		while (ParentTag.IsValid())
+		{
+			if (VisitedAncestors.Contains(ParentTag))
+			{
+				AddResult(ParentTag, ETerritoryUnlockOutcome::InvalidTarget,
+					TEXT("The authored hierarchy contains an ancestor cycle."));
+				Result.bTargetSucceeded = false;
+				return Result;
+			}
+			VisitedAncestors.Add(ParentTag);
+			ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
+			if (!Parent)
+			{
+				AddResult(ParentTag, ETerritoryUnlockOutcome::MissingRuntimeTerritory,
+					TEXT("The ancestor is not loaded in the runtime registry."));
+				Result.bTargetSucceeded = false;
+				return Result;
+			}
+			const TArray<FGameplayTag> AuthoredChildren = GetAuthoredChildTags(Parent);
+			if (!AuthoredChildren.Contains(Path.Last()->GetTerritoryTag()))
+			{
+				AddResult(Path.Last()->GetTerritoryTag(), ETerritoryUnlockOutcome::InvalidTarget,
+					TEXT("The loaded ancestor does not author this child in its Definition."));
+				Result.bTargetSucceeded = false;
+				return Result;
+			}
+			Path.Add(Parent);
+			ParentTag = Parent->GetParentTerritoryTag();
+		}
+		Algo::Reverse(Path);
+		for (int32 Index = 0; Index < Path.Num(); ++Index)
+		{
+			const ETerritoryUnlockOutcome Outcome = TryOne(Path[Index]);
+			if (Outcome != ETerritoryUnlockOutcome::Unlocked
+				&& Outcome != ETerritoryUnlockOutcome::AlreadyUnlocked)
+			{
+				for (int32 SkippedIndex = Index + 1; SkippedIndex < Path.Num(); ++SkippedIndex)
+				{
+					AddResult(Path[SkippedIndex]->GetTerritoryTag(),
+						ETerritoryUnlockOutcome::SkippedBlockedParent,
+						TEXT("Skipped because an ancestor remained locked."));
+				}
+				Result.bTargetSucceeded = false;
+				return Result;
+			}
+		}
+		Result.bTargetSucceeded = true;
+		return Result;
+	}
+
+	const ETerritoryUnlockOutcome TargetOutcome = TryOne(Target);
+	Result.bTargetSucceeded = TargetOutcome == ETerritoryUnlockOutcome::Unlocked
+		|| TargetOutcome == ETerritoryUnlockOutcome::AlreadyUnlocked;
+	if (!Result.bTargetSucceeded) return Result;
+
+	TSet<FGameplayTag> VisitedDescendants;
+	VisitedDescendants.Add(Target->GetTerritoryTag());
+	TFunction<void(ATerritoryVolume*, bool)> VisitChildren;
+	VisitChildren = [&](ATerritoryVolume* Parent, bool bParentPassed)
+	{
+		TArray<FGameplayTag> ChildTags = GetAuthoredChildTags(Parent);
+		for (const FGameplayTag& ChildTag : ChildTags)
+		{
+			if (!ChildTag.IsValid())
+			{
+				AddResult(ChildTag, ETerritoryUnlockOutcome::InvalidTarget,
+					TEXT("The parent Definition contains a null or invalid child."));
+				continue;
+			}
+			if (VisitedDescendants.Contains(ChildTag))
+			{
+				AddResult(ChildTag, ETerritoryUnlockOutcome::InvalidTarget,
+					TEXT("The authored hierarchy contains a duplicate child or cycle."));
+				continue;
+			}
+			VisitedDescendants.Add(ChildTag);
+			ATerritoryVolume* Child = Registry->GetTerritoryByTag(ChildTag);
+			if (!Child)
+			{
+				AddResult(ChildTag, ETerritoryUnlockOutcome::MissingRuntimeTerritory,
+					TEXT("Authored child is not loaded in the runtime registry."));
+				continue;
+			}
+			if (!bParentPassed)
+			{
+				AddResult(ChildTag, ETerritoryUnlockOutcome::SkippedBlockedParent,
+					TEXT("Skipped because its parent remained locked."));
+				VisitChildren(Child, false);
+				continue;
+			}
+			const ETerritoryUnlockOutcome ChildOutcome = TryOne(Child);
+			const bool bChildPassed = ChildOutcome == ETerritoryUnlockOutcome::Unlocked
+				|| ChildOutcome == ETerritoryUnlockOutcome::AlreadyUnlocked;
+			VisitChildren(Child, bChildPassed);
+		}
+	};
+	VisitChildren(Target, true);
+	return Result;
+}
 
 void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	// Capture, hierarchy unlocks, and mutation lookup all require the registry.
+	// Make the order explicit instead of depending on WorldSubsystem creation order.
+	Collection.InitializeDependency<UTerritoryRegistrySubsystem>();
 
 	UWorld* World = GetWorld();
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -45,8 +252,11 @@ void UTerritoryControlSubsystem::Initialize(FSubsystemCollectionBase& Collection
 			true);
 	}
 
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryControlSubsystem initialized (tick: %.2fs)"),
-		CaptureTickInterval);
+	if (Settings && Settings->ShouldDebugCapture())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Capture] subsystem initialized (tick: %.2fs)"),
+			CaptureTickInterval);
+	}
 }
 
 void UTerritoryControlSubsystem::Deinitialize()
@@ -245,8 +455,14 @@ void UTerritoryControlSubsystem::OnRegisteredAttackerDied(
 
 	RemoveAttackerFromAllCaptures(RegisteredAttacker);
 	RemoveInfiltratorFromAllTerritories(RegisteredAttacker);
-	UE_LOG(LogTerritory, Verbose, TEXT("[Capture] Removed dead attacker %s from all capture participation"),
-		*GetNameSafe(RegisteredAttacker));
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugCapture()
+		&& Settings->IsDebugLevelEnabled(6))
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Capture] Removed dead attacker %s from all capture participation"),
+			*GetNameSafe(RegisteredAttacker));
+	}
 }
 
 FTerritoryTransitionContext UTerritoryControlSubsystem::BuildTransitionContext(
@@ -351,7 +567,8 @@ FTerritoryTransitionContext UTerritoryControlSubsystem::ResolveFactionPlayerCont
 void UTerritoryControlSubsystem::OnCaptureTick()
 {
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	const bool bDebug = Settings && Settings->ShouldDebugCapture();
+	const bool bDebug = Settings && Settings->ShouldDebugCapture()
+		&& Settings->IsDebugLevelEnabled(6);
 	const float DeltaTime = Settings ? Settings->CaptureTickInterval : 0.1f;
 
 	DeferredCommands.Empty();
@@ -371,7 +588,7 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 
 		if (bDebug)
 		{
-			UE_LOG(LogTerritory, Verbose, TEXT("[CaptureTick] %s: progress=%.2f"),
+			UE_LOG(LogTerritory, Log, TEXT("[CaptureTick] %s: progress=%.2f"),
 				*Territory->GetTerritoryTag().ToString(), GetCaptureProgress(Territory));
 		}
 
@@ -430,7 +647,7 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 	{
 		return ECaptureResult::InvalidTerritory;
 	}
-	if (Territory->GetTerritoryState() == ETerritoryState::Locked)
+	if (!Territory->IsAvailableForGameplay())
 	{
 		return ECaptureResult::Locked;
 	}
@@ -459,7 +676,7 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 bool UTerritoryControlSubsystem::IsStealthInfiltrationEnabled(
 	const ATerritoryVolume* Territory) const
 {
-	if (!Territory) return false;
+	if (!Territory || !Territory->IsAvailableForGameplay()) return false;
 	const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
 	if (!Profile) return false;
 	if (const bool* Override = StealthInfiltrationOverrides.Find(Territory))
@@ -720,6 +937,18 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 		Runtime.Snapshot.LastEvidenceWorldTime = Now;
 	}
 	Runtime.Snapshot.ConfirmingObserverCount = Runtime.CurrentSightObservers.Num();
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugStealth())
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("[Stealth] territory=%s target=%s observer=%s evidence=%d strength=%.2f suspicion=%.2f exposure=%d confirmed=%d observers=%d"),
+			*Territory->GetTerritoryTag().ToString(), *GetNameSafe(Target),
+			*GetNameSafe(Observer), static_cast<int32>(Evidence), ClampedStrength,
+			Runtime.Snapshot.Suspicion,
+			static_cast<int32>(Runtime.Snapshot.ExposureState),
+			bConfirmedIdentity ? 1 : 0, Runtime.Snapshot.ConfirmingObserverCount);
+	}
 	OnStealthEvidenceReported.Broadcast(Territory, Target, Evidence, Runtime.Snapshot);
 
 	if (Runtime.Snapshot.ExposureState != ETerritoryExposureState::Exposed
@@ -898,8 +1127,7 @@ ECaptureResult UTerritoryControlSubsystem::ValidateContestAttempt(
 		return ECaptureResult::InvalidTerritory;
 	}
 
-	const ETerritoryState CurrentState = Territory->GetTerritoryState();
-	if (CurrentState == ETerritoryState::Locked)
+	if (!Territory->IsAvailableForGameplay())
 	{
 		return ECaptureResult::Locked;
 	}
@@ -1176,9 +1404,14 @@ bool UTerritoryControlSubsystem::ForceCaptureWithContext(ATerritoryVolume* Terri
 
 	if (Response.Result == ETerritoryMutationResult::Success)
 	{
-		UE_LOG(LogTerritory, Log, TEXT("[ForceCapture] %s captured by %s (was %s)"),
-			*Territory->GetTerritoryTag().ToString(),
-			*NewOwner.ToString(), *Response.OldOwner.ToString());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugOwnership())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[ForceCapture] %s captured by %s (was %s)"),
+				*Territory->GetTerritoryTag().ToString(),
+				*NewOwner.ToString(), *Response.OldOwner.ToString());
+		}
 		return true;
 	}
 
@@ -1214,6 +1447,17 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		return Response;
 	}
 
+	// Locked is retained in ETerritoryState only for serialized legacy assets. Runtime
+	// locking is an availability transaction and must go through LockTerritory or the
+	// Territory Lock Event so political ownership is preserved.
+	if (Request.DesiredState == ETerritoryState::Locked)
+	{
+		Response.Result = ETerritoryMutationResult::Rejected_Locked;
+		Response.Explanation = FText::FromString(
+			TEXT("Locked is an availability, not an ownership state; use Lock Territory or Territory Lock Event"));
+		return Response;
+	}
+
 	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_AggregateOnly;
@@ -1224,8 +1468,7 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Step 2: Validate locks
 	// ═══════════════════════════════════════════════════════════════════════════
-	if (Territory->IsLocked() && Request.DesiredState != ETerritoryState::Locked
-		&& !Request.bBypassLock)
+	if (!Territory->IsAvailableForGameplay() && !Request.bBypassLock)
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_Locked;
 		Response.Explanation = FText::FromString(TEXT("Territory is locked"));
@@ -1322,7 +1565,6 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	// regardless of bClearCaptureState. Terminal states have strict contracts:
 	//   Claimed:   valid owner, no contesting faction, progress 1.0
 	//   Unclaimed: no owner, no contesting faction, progress 0.0
-	//   Locked:    no contesting faction, progress 0.0
 	Candidate.ContestingFaction = FGameplayTag();
 	switch (Request.DesiredState)
 	{
@@ -1330,7 +1572,6 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		Candidate.ControlProgress = 1.f;
 		break;
 	case ETerritoryState::Unclaimed:
-	case ETerritoryState::Locked:
 		Candidate.ControlProgress = 0.f;
 		break;
 	default:
@@ -1351,8 +1592,9 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	}
 	// else: same owner — preserve existing DesiredGuardCount
 
-	// Clear lock reason unless transitioning to Locked
-	if (Request.DesiredState != ETerritoryState::Locked)
+	// An explicit forced mutation may change political ownership while the Place
+	// remains story-locked. Preserve that availability explanation in this case.
+	if (Candidate.Availability == ETerritoryAvailability::Unlocked)
 	{
 		Candidate.LockReason = FText();
 	}
@@ -1402,7 +1644,12 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 		FText::FromString(Response.OldOwner.ToString()),
 		FText::FromString(Response.NewOwner.ToString()));
 
-	UE_LOG(LogTerritory, Log, TEXT("[Mutation] %s"), *Response.Explanation.ToString());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugOwnership())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Mutation] %s"), *Response.Explanation.ToString());
+	}
 	OnTerritoryControlChanged.Broadcast(Territory, Response.OldOwner, Response.NewOwner);
 
 	return Response;
@@ -1704,7 +1951,7 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 {
 	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
 	if (!State) return;
-	if (Territory->IsLocked())
+	if (!Territory->IsAvailableForGameplay())
 	{
 		DeferredCommands.Add({FDeferredCommand::Reset, Territory, FGameplayTag()});
 		return;
@@ -1843,7 +2090,7 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 
 	// Re-validate lock state — territory may have been locked via quest event
 	// between progress start and completion.
-	if (Territory->IsLocked())
+	if (!Territory->IsAvailableForGameplay())
 	{
 		ResetCapture(Territory);
 		UE_LOG(LogTerritory, Warning, TEXT("[Capture] %s was locked before completion — capture aborted"),
@@ -1890,14 +2137,12 @@ void UTerritoryControlSubsystem::CompleteCapture(ATerritoryVolume* Territory, co
 		return;
 	}
 
-	UE_LOG(LogTerritory, Log, TEXT("[Capture] %s captured by %s (was %s)"),
-		*Territory->GetTerritoryTag().ToString(),
-		*NewOwner.ToString(),
-		*OldOwner.ToString());
-
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	if (Settings && Settings->IsDebugEnabled())
+	if (Settings && (Settings->ShouldDebugCapture() || Settings->ShouldDebugOwnership()))
 	{
+		UE_LOG(LogTerritory, Log, TEXT("[Capture] %s captured by %s (was %s)"),
+			*Territory->GetTerritoryTag().ToString(),
+			*NewOwner.ToString(), *OldOwner.ToString());
 		const FString Msg = FString::Printf(TEXT("[Capture] %s → %s"),
 			*Territory->GetTerritoryDisplayName().ToString(), *NewOwner.ToString());
 		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, Msg);

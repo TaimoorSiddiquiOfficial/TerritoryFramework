@@ -10,6 +10,8 @@
 #include "TerritoryWorldState.generated.h"
 
 class ATerritoryVolume;
+class UTerritoryCityDefinition;
+class UTerritoryDefinition;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTerritoryProductionStateChanged);
 
@@ -114,6 +116,25 @@ struct FReplicatedCaptureSummary
 	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
 	FGuid TerritoryGUID;
 
+	/** Exact authored parent used to evaluate availability while World Partition unloads it. */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	FGameplayTag ParentTerritoryTag;
+
+	/** Stable presentation survives actor streaming; it is copied from the Definition. */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture|Directory")
+	FText DisplayName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture|Directory")
+	ETerritoryHierarchyLevel HierarchyLevel = ETerritoryHierarchyLevel::Place;
+
+	/** Authored direct-child count. Child identities remain hidden while locked. */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture|Directory")
+	int32 TotalChildren = 0;
+
+	/** True when the row was reconciled with a Territory Definition asset. */
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture|Directory")
+	bool bDefinitionBacked = false;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag CurrentOwner;
 
@@ -125,6 +146,9 @@ struct FReplicatedCaptureSummary
 
 	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
 	ETerritoryState State = ETerritoryState::Unclaimed;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
 };
 
 /**
@@ -157,6 +181,12 @@ class TERRITORYFRAMEWORK_API ATerritoryWorldState : public AActor, public INarra
 
 public:
 	ATerritoryWorldState();
+
+	/** Resolve the single strategic read-model actor for this world. */
+	UFUNCTION(BlueprintPure, Category="Territory|World State",
+		meta=(WorldContext="WorldContextObject", DisplayName="Get Territory World State"))
+	static ATerritoryWorldState* FindTerritoryWorldState(
+		const UObject* WorldContextObject);
 
 	// INarrativeSavableActor
 	virtual FGuid GetActorGUID_Implementation() const override;
@@ -224,11 +254,46 @@ public:
 
 	// ─── Capture Summary API (server-authoritative) ───
 
+	/**
+	 * Root campaign assets used to seed City -> District -> Place directory rows
+	 * before World Partition loads their actors. One City asset brings its complete
+	 * hierarchy; designers do not repeat every District and Place here.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Directory",
+		meta=(DisplayName="Campaign City Definitions"))
+	TArray<TObjectPtr<UTerritoryCityDefinition>> CampaignCities;
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void SetCaptureSummary(const FReplicatedCaptureSummary& Summary);
 
+	/** Publish one loaded actor through the canonical replicated read-model builder. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Capture")
+	void PublishTerritorySummary(const ATerritoryVolume* Territory);
+
+	/** Add Definition-backed rows without overwriting authoritative live ownership. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Directory")
+	void RegisterDefinitionHierarchy(const UTerritoryDefinition* Definition);
+
+	/** Reconcile configured City assets and all currently loaded Territory Definitions. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Directory")
+	void RefreshStrategicDirectory();
+
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	FReplicatedCaptureSummary GetCaptureSummary(const FGameplayTag& TerritoryTag) const;
+
+	/** Complete replicated directory, including Definition rows whose actors are unloaded. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
+	TArray<FReplicatedCaptureSummary> GetAllCaptureSummaries() const
+	{
+		return ReplicatedCaptureSummaries;
+	}
+
+	/** Replicated physical assault read model used by strategic UI for unloaded cells. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Assault")
+	TArray<FTerritoryAssaultRecord> GetAllAssaultSummaries() const
+	{
+		return ReplicatedAssaults;
+	}
 
 	/**
 	 * Checks the replicated capture read model, including summaries left behind by
@@ -346,9 +411,14 @@ protected:
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryAssaultCycleRecord> SavedAssaultCycles;
 
-	// P0-03: SavedCaptureSummaries removed — TerritoryVolume is sole authority
-	// for its own ownership persistence via SaveGame on OwnershipData.
-	// ReplicatedCaptureSummaries remains for runtime client visibility only.
+	/**
+	 * Read-only strategic directory cache for actors that may still be unloaded when
+	 * a campaign resumes. This array is never applied to ATerritoryVolume; each
+	 * Volume's SaveGame OwnershipData remains the sole durable capture authority.
+	 * A loaded Volume publishes over the cached row as soon as it registers.
+	 */
+	UPROPERTY(SaveGame)
+	TArray<FReplicatedCaptureSummary> SavedStrategicDirectory;
 
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
 		meta = (DisplayName = "World State GUID (auto-generated)"))
@@ -358,6 +428,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDiplomacyWorldStateLiveBridge;
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
+	friend class FTFSavedStrategicDirectoryProjectionRoundTrip;
 #endif
 	void SyncSubsystemsFromReplicatedState();
 	void SyncEconomySubsystemFromReplicatedState();

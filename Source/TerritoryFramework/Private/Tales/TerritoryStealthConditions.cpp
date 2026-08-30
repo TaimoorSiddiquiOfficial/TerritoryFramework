@@ -3,10 +3,11 @@
 #include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 namespace
 {
-	ATerritoryVolume* ResolveStealthTerritory(const UObject* Context,
+	ATerritoryVolume* ResolveStealthTerritory(const UObject* Context, UWorld* World,
 		const FGameplayTag& TerritoryTag, const APawn* Target)
 	{
 		if (ATerritoryVolume* Containing = Context
@@ -17,7 +18,6 @@ namespace
 				return Containing;
 			}
 		}
-		UWorld* World = Context ? Context->GetWorld() : nullptr;
 		UTerritoryRegistrySubsystem* Registry = World
 			? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 		if (!Registry) return nullptr;
@@ -32,10 +32,12 @@ UTerritoryStealthPolicyCondition::UTerritoryStealthPolicyCondition()
 }
 
 bool UTerritoryStealthPolicyCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController*, UTalesComponent*)
+	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	ATerritoryVolume* Territory = ResolveStealthTerritory(this, TerritoryToCheck, Target);
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	ATerritoryVolume* Territory = ResolveStealthTerritory(
+		this, World, TerritoryToCheck, Target);
 	const UTerritoryControlSubsystem* Control = World
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	return Control && Territory
@@ -54,10 +56,12 @@ UTerritoryExposureCondition::UTerritoryExposureCondition()
 }
 
 bool UTerritoryExposureCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController*, UTalesComponent*)
+	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	ATerritoryVolume* Territory = ResolveStealthTerritory(this, TerritoryToCheck, Target);
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	ATerritoryVolume* Territory = ResolveStealthTerritory(
+		this, World, TerritoryToCheck, Target);
 	const UTerritoryControlSubsystem* Control = World
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	if (!Control || !Territory || !Target) return false;
@@ -96,10 +100,12 @@ UTerritoryStealthEvidenceCondition::UTerritoryStealthEvidenceCondition()
 }
 
 bool UTerritoryStealthEvidenceCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController*, UTalesComponent*)
+	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	ATerritoryVolume* Territory = ResolveStealthTerritory(this, TerritoryToCheck, Target);
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	ATerritoryVolume* Territory = ResolveStealthTerritory(
+		this, World, TerritoryToCheck, Target);
 	const UTerritoryControlSubsystem* Control = World
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	FTerritoryInfiltrationSnapshot Snapshot;
@@ -127,10 +133,12 @@ UTerritorySuspicionCondition::UTerritorySuspicionCondition()
 }
 
 bool UTerritorySuspicionCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController*, UTalesComponent*)
+	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	ATerritoryVolume* Territory = ResolveStealthTerritory(this, TerritoryToCheck, Target);
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	ATerritoryVolume* Territory = ResolveStealthTerritory(
+		this, World, TerritoryToCheck, Target);
 	const UTerritoryControlSubsystem* Control = World
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	FTerritoryInfiltrationSnapshot Snapshot;

@@ -3,8 +3,8 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryWorldState.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Engine/World.h"
-#include "EngineUtils.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TerritoryTalesUtilities.h"
@@ -117,9 +117,11 @@ namespace
 			}
 		}
 
-		for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
+		if (const ATerritoryWorldState* WorldState =
+			ATerritoryWorldState::FindTerritoryWorldState(World))
 		{
-			if (It->HasContestedTerritoryBetweenFactions(FactionA, FactionB, ExcludedTag))
+			if (WorldState->HasContestedTerritoryBetweenFactions(
+				FactionA, FactionB, ExcludedTag))
 			{
 				return true;
 			}
@@ -149,11 +151,8 @@ void UTerritorySetDiplomacyEvent::ExecuteEvent_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
-	(void)Target;
-	(void)Controller;
-	(void)NarrativeComponent;
-
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || World->GetNetMode() == NM_Client) return;
 	FGameplayTag ResolvedFactionA;
 	FGameplayTag ResolvedFactionB;
@@ -186,9 +185,15 @@ void UTerritorySetDiplomacyEvent::ExecuteEvent_Implementation(APawn* Target,
 		&& HasOtherActiveTerritoryConflict(World, ContainingTerritory,
 			ResolvedFactionA, ResolvedFactionB))
 	{
-		UE_LOG(LogTerritory, Log,
-			TEXT("[TalesDiplomacyEvent] Kept %s/%s at War because another Territory is still Contested"),
-			*ResolvedFactionA.ToString(), *ResolvedFactionB.ToString());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && (Settings->ShouldDebugDiplomacy()
+				|| Settings->ShouldDebugTales()))
+		{
+			UE_LOG(LogTerritory, Log,
+				TEXT("[TalesDiplomacyEvent] Kept %s/%s at War because another Territory is still Contested"),
+				*ResolvedFactionA.ToString(), *ResolvedFactionB.ToString());
+		}
 		return;
 	}
 
@@ -248,11 +253,8 @@ void UTerritoryModifyReputationEvent::ExecuteEvent_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
-	(void)Target;
-	(void)Controller;
-	(void)NarrativeComponent;
-
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	if (!World || World->GetNetMode() == NM_Client || !Faction.IsValid()) return;
 	UTerritoryDiplomacySubsystem* Diplomacy =
 		World->GetSubsystem<UTerritoryDiplomacySubsystem>();

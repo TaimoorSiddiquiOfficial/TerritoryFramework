@@ -189,6 +189,7 @@ void UTerritoryDistrictNavigationMarkerComponent::BeginPlay()
 				this, &UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged);
 		}
 		BindToDistrictIfAvailable();
+		RefreshAncestorAvailabilityBindings();
 		RefreshMarkerPolicy();
 		GetWorld()->GetTimerManager().SetTimerForNextTick(
 			FTimerDelegate::CreateUObject(
@@ -209,6 +210,15 @@ void UTerritoryDistrictNavigationMarkerComponent::EndPlay(const EEndPlayReason::
 				this, &UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged);
 		}
 	}
+	for (const TWeakObjectPtr<ATerritoryVolume>& AncestorPtr : BoundAvailabilityAncestors)
+	{
+		if (ATerritoryVolume* Ancestor = AncestorPtr.Get())
+		{
+			Ancestor->OnTerritoryAvailabilityChanged.RemoveDynamic(
+				this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryAvailabilityChanged);
+		}
+	}
+	BoundAvailabilityAncestors.Empty();
 	UnbindFromDistrict();
 	if (DistrictMarker)
 	{
@@ -232,6 +242,8 @@ void UTerritoryDistrictNavigationMarkerComponent::BindToDistrictIfAvailable()
 		this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged);
 	District->OnTerritoryOwnershipChanged.AddUniqueDynamic(
 		this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged);
+	District->OnTerritoryAvailabilityChanged.AddUniqueDynamic(
+		this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryAvailabilityChanged);
 }
 
 void UTerritoryDistrictNavigationMarkerComponent::UnbindFromDistrict()
@@ -242,6 +254,8 @@ void UTerritoryDistrictNavigationMarkerComponent::UnbindFromDistrict()
 			this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryStateChanged);
 		BoundDistrict->OnTerritoryOwnershipChanged.RemoveDynamic(
 			this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged);
+		BoundDistrict->OnTerritoryAvailabilityChanged.RemoveDynamic(
+			this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryAvailabilityChanged);
 	}
 	BoundDistrict = nullptr;
 }
@@ -249,6 +263,7 @@ void UTerritoryDistrictNavigationMarkerComponent::UnbindFromDistrict()
 void UTerritoryDistrictNavigationMarkerComponent::RefreshMarkerPolicy()
 {
 	BindToDistrictIfAvailable();
+	RefreshAncestorAvailabilityBindings();
 	if (DistrictMarker) DistrictMarker->RefreshPresentationPolicy();
 }
 
@@ -264,18 +279,57 @@ void UTerritoryDistrictNavigationMarkerComponent::OnTerritoryOwnershipChanged(
 	RefreshMarkerPolicy();
 }
 
+void UTerritoryDistrictNavigationMarkerComponent::OnTerritoryAvailabilityChanged(
+	ATerritoryVolume* Territory, ETerritoryAvailability NewAvailability)
+{
+	(void)Territory;
+	(void)NewAvailability;
+	if (DistrictMarker) DistrictMarker->RefreshPresentationPolicy();
+}
+
 void UTerritoryDistrictNavigationMarkerComponent::OnRegistryTerritoryChanged(
 	ATerritoryVolume* Territory, bool bWasUnregistered)
 {
 	const ATerritoryDistrictManagementPoint* Point =
 		Cast<ATerritoryDistrictManagementPoint>(GetOwner());
-	if (!Point || !Territory
-		|| Territory->GetTerritoryTag() != Point->GetManagedDistrictTag()) return;
+	if (!Point || !Territory) return;
 	if (bWasUnregistered && BoundDistrict.Get() == Territory)
 	{
 		UnbindFromDistrict();
 	}
 	RefreshMarkerPolicy();
+}
+
+void UTerritoryDistrictNavigationMarkerComponent::RefreshAncestorAvailabilityBindings()
+{
+	for (const TWeakObjectPtr<ATerritoryVolume>& AncestorPtr : BoundAvailabilityAncestors)
+	{
+		if (ATerritoryVolume* Ancestor = AncestorPtr.Get())
+		{
+			Ancestor->OnTerritoryAvailabilityChanged.RemoveDynamic(
+				this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryAvailabilityChanged);
+		}
+	}
+	BoundAvailabilityAncestors.Empty();
+
+	ATerritoryDistrict* District = BoundDistrict.Get();
+	if (!District || !GetWorld()) return;
+	UTerritoryRegistrySubsystem* Registry =
+		GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Registry) return;
+
+	TSet<FGameplayTag> Visited;
+	FGameplayTag ParentTag = District->GetParentTerritoryTag();
+	while (ParentTag.IsValid() && !Visited.Contains(ParentTag))
+	{
+		Visited.Add(ParentTag);
+		ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
+		if (!Parent) break;
+		Parent->OnTerritoryAvailabilityChanged.AddUniqueDynamic(
+			this, &UTerritoryDistrictNavigationMarkerComponent::OnTerritoryAvailabilityChanged);
+		BoundAvailabilityAncestors.Add(Parent);
+		ParentTag = Parent->GetParentTerritoryTag();
+	}
 }
 
 FText UTerritoryDistrictInteractableComponent::GetInteractableNameText_Implementation(
@@ -411,6 +465,11 @@ bool ATerritoryDistrictManagementPoint::CanManage(APawn* Interactor, FText& OutF
 	if (!District || !Interactor)
 	{
 		OutFailureReason = FText::FromString(TEXT("District management is unavailable."));
+		return false;
+	}
+	if (!District->IsAvailableForGameplay())
+	{
+		OutFailureReason = FText::FromString(TEXT("District management is locked by story progression."));
 		return false;
 	}
 	if (District->GetTerritoryState() != ETerritoryState::Claimed)

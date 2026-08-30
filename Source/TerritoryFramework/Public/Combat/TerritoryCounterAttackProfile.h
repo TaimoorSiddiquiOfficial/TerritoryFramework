@@ -109,7 +109,7 @@ public:
 	/**
 	 * After the first relevant player has physically activated an assault, deploy its
 	 * remaining finite reserve waves even if that player leaves the radius. This lets
-	 * already-launched NPCs finish attacking the District and guards without requiring
+	 * already-launched NPCs finish attacking the target Place and guards without requiring
 	 * the player to remain present. The separate activation option decides whether an
 	 * initial proximity gate exists.
 	 */

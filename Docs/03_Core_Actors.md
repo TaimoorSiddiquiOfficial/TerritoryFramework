@@ -20,19 +20,23 @@ ATerritoryVolume (base — placed in level for any territory)
 
 The values in this table are authored in the assigned City, District, or Place Definition. The
 placed actor displays the applied values for inspection, but it is not a second authoring source.
+Physical rows (capture, guards, production, local economy, stealth, and assault approaches) are
+valid only on Place Definitions. City/District keep hierarchy, availability, state rules,
+strategic value, management points, and command rights.
 
 | Property | Type | Default | Purpose |
 |---|---|---|---|
 | TerritoryTag | GameplayTag | — | Unique identity (e.g., `Territory.HavenReach.MarketSquare`) |
 | TerritoryDisplayName | Text | — | Player-facing name |
-| InitialOwningFaction | GameplayTag | — | Who owns at game start |
+| InitialAvailability | ETerritoryAvailability | Unlocked | Local story gate, independent from political control |
+| InitialOwningFaction | GameplayTag | — | Place-only new-campaign owner; City/District derive from children |
 | InitialState | ETerritoryInitialState | Automatic | New-campaign state. Automatic derives Claimed/Unclaimed from InitialOwningFaction |
 | InitialMaxConcurrentAttackers | int32 | 3 | NPC attack slot limit |
 | InitialPeriodicIncome | int32 | 100 | Gold per economy tick |
 | InitialGuardCost | int32 | 50 | Recurring upkeep per assigned guard per economy cycle |
 | InitialGuardRecruitmentCost | int32 | 50 | One-time Narrative inventory price per target increase |
 | PostCaptureGarrisonPolicy | enum | PlayerChooses | Resolves the new owner's initial desired garrison |
-| ControlMode | ETerritoryControlMode | Independent | How ownership is resolved: Independent (direct capture), AggregateOnly (derived from children), Cascading (direct + child cascade) |
+| ControlMode | ETerritoryControlMode | class-fixed | Place = Independent; City/District = AggregateOnly |
 | StateConfigs | TMap\<ETerritoryState, FTerritoryStateConfig\> | — | Modular Narrative entry/exit conditions and entry/exit events for every state |
 | CounterAttackProfile | UTerritoryCounterAttackProfile* | — | Counterattack data asset (see [Counterattack System](17_Counterattack_System.md)) |
 | CounterAttackApproaches | TArray\<FTerritoryAssaultApproach\> | — | Typed attack approaches for this territory |
@@ -46,7 +50,7 @@ placed actor displays the applied values for inspection, but it is not a second 
 | GuardSpawnCount | int32 | 3 | Authored initial target for existing ownership and non-player capture |
 | GuardSpawnPoints | Array<ATerritoryGuardSpawnPoint*> | — | Explicit posts; their unique union with tag/proximity posts is the exact active capacity, one guard per point |
 
-To start locked, set **Initial State = Locked** in the Definition, then put quest or diplomacy
+To start locked, set **Initial Availability = Locked** in the Definition, then put quest or diplomacy
 requirements in `State Configs -> Locked -> Exit Conditions`. The former `bStartsLocked`,
 `LockConditions`, and actor-side `StateConfigs` properties have been removed after migration.
 There is one modular state configuration and it belongs to the Definition asset.
@@ -64,7 +68,9 @@ See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-
 
 > **Missing GUID:** If `TerritoryGUID` is not baked (missed editor save), the territory logs an error and skips save/load. Always save the level after placement to bake a proper GUID.
 >
-> **Actor Tick:** `bStartWithTickEnabled` is `false` on all territory volumes. All periodic logic (capture, economy, diplomacy, bounds tracking) runs through subsystem timers. The volume's native `Tick` is unused and only logs a deprecation warning.
+> **Actor Tick:** `bStartWithTickEnabled` is `false` by default. Subsystems own ordinary
+> capture/economy/diplomacy timers; only a Place using Story Capture From Bounds enables the
+> small server reconciliation tick (plus optional PIE debug drawing).
 
 ### Key Delegates (BlueprintAssignable)
 
@@ -72,6 +78,7 @@ See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-
 |---|---|---|
 | OnTerritoryOwnershipChanged | (Volume*, OldOwner, NewOwner) | Verified atomic ownership commit + OnOwnershipChanged BP event |
 | OnTerritoryStateChangedDelegate | (Volume*, NewState) | Verified atomic state commit + OnStateChanged BP event |
+| OnTerritoryAvailabilityChanged | (Volume*, NewAvailability) | Verified local lock/unlock commit; political ownership is unchanged |
 | OnGuardKilled | (Volume*, Guard, Killer, RemainingDefenders) | Per defender death, before all-defeated check |
 | OnAllGuardsDefeatedDelegate | (Volume*) | OnAllGuardsDefeated BP event |
 
@@ -84,11 +91,11 @@ you need explicit context and a structured result.
 
 - **Claimed → Contested**: Preserves the incumbent `OwningFaction` and surviving registered guards while active ownership is suspended
 - **Contested → Claimed**: Keeps surviving guards and does not grant free replacements; an actual owner change applies the selected post-capture garrison policy
-- **Locked → Claimed**: Respawns guards for owner (territory was locked, now defended again)
-- **Any → Locked**: Despawns all guards
+- **Availability Locked → Unlocked**: Preserves political owner/state; eligible Place systems resume
+- **Availability Unlocked → Locked**: Preserves political owner/state but capture, production, commands, POI, and counters become unavailable
 - **Contested → Unclaimed**: Not reached by guard defeat alone. Guard defeat leaves the owner intact and vulnerable (DefenderCount=0); ownership changes only through the capture flow (RegisterAttacker → progress → CompleteCapture)
 
-`GetOwningFaction()` therefore returns the incumbent defender while contested. `IsOwnedByFaction()` requires `State == Claimed`, so it returns false while the territory is Contested, Locked, or Unclaimed.
+`GetOwningFaction()` therefore returns the incumbent defender while contested. `IsOwnedByFaction()` requires `State == Claimed`, so it returns false while the territory is Contested or Unclaimed. Use `IsAvailableForGameplay()` to include local and ancestor story locks.
 
 ## ATerritoryCapturePoint
 
@@ -118,8 +125,8 @@ None beyond base.
 ### Additional Functions
 | Function | Returns | Purpose |
 |---|---|---|
-| GetDistricts() | Array<Volume*> | All child districts |
-| GetDistrictCount() | int32 | Number of districts |
+| GetDistricts() | Array<Volume*> | Loaded Districts from the City Definition array, in authored order |
+| GetDistrictCount() | int32 | Total authored District slots, including streamed-out Districts |
 | AllDistrictsOwnedBy(Faction) | bool | Check if faction controls all |
 | GetCityControlPercentage(Faction) | float | 0.0-1.0 |
 | GetMajorityOwner() | GameplayTag | Faction controlling >50% of districts, or empty |
@@ -189,7 +196,7 @@ When a city with capital districts is fully captured:
 | Function | Returns | Purpose |
 |---|---|---|
 | GetOwningCity() | City* | Parent city via ParentTerritoryTag |
-| GetProperties() | Array<Volume*> | All child properties |
+| GetProperties() | Array<Volume*> | Loaded Places from the District Definition array, in authored order |
 | IsCapitalDistrict() | bool | Returns bIsCapital |
 | GetPropertyCountForFaction(Faction) | int32 | Properties owned by faction |
 | AllPropertiesOwnedBy(Faction) | bool | All properties owned by faction |
@@ -326,6 +333,11 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 
 **Place exactly ONE in the level** for global persistence and late-join read models. Server subsystem delegates maintain the replicated projection between saves.
 
+Assign every root `UTerritoryCityDefinition` to **Campaign City Definitions**. This builds the
+strategic directory from the full City → District → Place asset tree before World Partition actors
+load. The Command Center can then show known unlocked Districts across the campaign, while locked
+Place identities remain hidden. A loaded Territory actor always publishes over its Definition row.
+
 ### What It Stores (replicated)
 - Faction economy params (income, costs, territory count) — faction wealth lives in NarrativePro player inventories
 - Transaction history (audit trail)
@@ -335,4 +347,9 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 - Capture summaries (per territory)
 - Counterattack decisions, lifecycle state, and finite casualty counts
 
-`ExportPersistentState()` rebuilds the authoritative snapshot at save time. Live economy, diplomacy, capture, and assault delegates keep it current between saves; RepNotify hydrates client query subsystems. Saved contests resume leading progress without attacker identities. Saved active assaults reconstruct surviving finite force without saving pawn pointers.
+`ExportPersistentState()` rebuilds the authoritative snapshot at save time. Live economy,
+diplomacy, capture, and assault delegates keep it current between saves; RepNotify hydrates client
+query subsystems. `SavedStrategicDirectory` preserves unloaded rows for presentation after restart,
+but never restores ownership into an actor. `ATerritoryVolume` still restores its own durable state
+and replaces the cached row when it loads. Saved contests resume leading progress without attacker
+identities. Saved active assaults reconstruct surviving finite force without saving pawn pointers.

@@ -786,6 +786,39 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 		Warning(TEXT("Definition is not yet connected to its parent hierarchy asset"));
 	}
 
+	const bool bPlaceDefinition = Definition->IsA<UTerritoryPlaceDefinition>();
+	if (bPlaceDefinition && Definition->ControlMode != ETerritoryControlMode::Independent)
+	{
+		Error(TEXT("Place Definition control mode must be Independent"));
+	}
+	if (!bPlaceDefinition)
+	{
+		if (Definition->ControlMode != ETerritoryControlMode::AggregateOnly)
+			Error(TEXT("City and District control mode must be Aggregate Only"));
+		if (Definition->InitialOwningFaction.IsValid()
+			|| Definition->InitialState != ETerritoryInitialState::Automatic)
+			Error(TEXT("City and District initial owner/state are derived from children; author only Initial Availability and State Rules on the parent"));
+		if (Definition->MaxConcurrentAttackers != 1 || Definition->PeriodicIncome != 0
+			|| Definition->GuardUpkeepPerCycle != 0 || Definition->GuardRecruitmentCost != 0)
+			Error(TEXT("City and District cannot author physical attacker, income, or guard-cost values; put them on child Places"));
+		if (Definition->bStoryCaptureFromBounds || Definition->CapturePoint.bEnabled)
+			Error(TEXT("City and District cannot author physical capture; put it on a child Place"));
+		if (Definition->DefaultGuardDefinition || !Definition->FactionGuardDefinitions.IsEmpty()
+			|| Definition->InitialGuardCount != 0 || !Definition->GuardPosts.IsEmpty())
+			Error(TEXT("City and District cannot author guards or spawn posts; put them on child Places"));
+		if (!Definition->DefenderDiedEvents.IsEmpty()
+			|| !Definition->AllDefendersDefeatedEvents.IsEmpty())
+			Error(TEXT("Defender events are Place-only because aggregate parents have no physical defenders"));
+		if (Definition->CounterAttackProfile || !Definition->CounterAttackApproaches.IsEmpty())
+			Error(TEXT("Physical counterattack profiles and approaches belong to a target Place"));
+		if (!FMath::IsNearlyZero(Definition->GuardQuality)
+			|| !FMath::IsNearlyZero(Definition->FortificationStrength)
+			|| !FMath::IsNearlyZero(Definition->NearbyAlliedSupport))
+			Error(TEXT("City and District cannot author physical guard quality, fortification, or local support"));
+		if (Definition->DefaultStealthProfile)
+			Error(TEXT("Stealth infiltration belongs to a physical Place, not an aggregate City or District"));
+	}
+
 	for (const TPair<ETerritoryState, FTerritoryStateConfig>& Pair : Definition->StateConfigs)
 	{
 		auto CheckObjects = [&Error, &Pair](const auto& Objects, const TCHAR* Label)
@@ -1249,12 +1282,12 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 	const TArray<ATerritoryGuardSpawnPoint*> SpawnPoints =
 		GetActorsForValidation<ATerritoryGuardSpawnPoint>(Level);
 	TSet<AActor*> ReferencedSpawnPoints;
-	TSet<FGameplayTag> TerritoryTags;
+	TMap<FGameplayTag, ATerritoryVolume*> TerritoriesByTag;
 	for (ATerritoryVolume* Territory : Territories)
 	{
 		if (Territory->GetTerritoryTag().IsValid())
 		{
-			TerritoryTags.Add(Territory->GetTerritoryTag());
+			TerritoriesByTag.Add(Territory->GetTerritoryTag(), Territory);
 		}
 		for (AActor* SP : Territory->GuardSpawnPoints)
 		{
@@ -1268,7 +1301,15 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 		if (ReferencedSpawnPoints.Contains(SP)) continue;
 		if (SP->OwnerTerritoryTag.IsValid())
 		{
-			if (TerritoryTags.Contains(SP->OwnerTerritoryTag)) continue;
+			if (ATerritoryVolume* const* Resolved =
+				TerritoriesByTag.Find(SP->OwnerTerritoryTag))
+			{
+				if ((*Resolved)->IsA<ATerritoryProperty>()) continue;
+				OutWarnings.Add(FString::Printf(
+					TEXT("GuardSpawnPoint '%s' targets aggregate Territory '%s'; guard posts belong to Place Definitions only"),
+					*SP->GetActorLabel(), *SP->OwnerTerritoryTag.ToString()));
+				continue;
+			}
 			OutWarnings.Add(FString::Printf(
 				TEXT("GuardSpawnPoint '%s' OwnerTerritoryTag '%s' does not resolve to a loaded territory"),
 				*SP->GetActorLabel(), *SP->OwnerTerritoryTag.ToString()));
@@ -1287,7 +1328,7 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 			}
 			if (!ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(PlacementHits))
 			{
-				OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — set OwnerTerritoryTag, add it to GuardSpawnPoints, or overlap its placement/patrol route with a Territory"),
+				OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — bind it through a Place Definition or overlap its placement/patrol route with a Place"),
 					*SP->GetActorLabel()));
 			}
 		}
@@ -1297,7 +1338,8 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 	// because the Territory has no explicit, tag-bound, or contained point.
 	for (ATerritoryVolume* Territory : Territories)
 	{
-		if (!Territory || Territory->GuardSpawnCount <= 0) continue;
+		if (!Territory || !Territory->IsA<ATerritoryProperty>()
+			|| Territory->GuardSpawnCount <= 0) continue;
 		bool bHasPhysicalSlot = false;
 		for (AActor* ReferencedPoint : Territory->GuardSpawnPoints)
 		{

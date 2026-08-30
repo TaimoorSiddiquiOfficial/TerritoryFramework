@@ -299,6 +299,8 @@ class TERRITORYFRAMEWORK_API UTerritoryDefinition : public UPrimaryDataAsset
 	friend class UTerritoryCityDefinition;
 
 public:
+	UTerritoryDefinition();
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="01 Identity",
 		meta=(Categories="Territory"))
 	FGameplayTag TerritoryTag;
@@ -327,10 +329,17 @@ public:
 		meta=(Categories="Narrative.Factions"))
 	FGameplayTag InitialOwningFaction;
 
+	/** Story availability is independent from political control. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 New Campaign",
+		meta=(DisplayName="Initial Availability",
+			ToolTip="Locked keeps this Territory silent until its Narrative Locked exit conditions pass. Ownership is preserved."))
+	ETerritoryAvailability InitialAvailability = ETerritoryAvailability::Unlocked;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 New Campaign")
 	ETerritoryInitialState InitialState = ETerritoryInitialState::Automatic;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 New Campaign")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="03 New Campaign",
+		meta=(ToolTip="Place Definitions are Independent. City and District Definitions are Aggregate Only. The class fixes this value automatically."))
 	ETerritoryControlMode ControlMode = ETerritoryControlMode::Independent;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 New Campaign",
@@ -349,8 +358,9 @@ public:
 		meta=(ClampMin="0"))
 	int32 GuardRecruitmentCost = 50;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 State Rules",
-		meta=(ToolTip="One reusable table for Locked, Unclaimed, Contested, and Claimed Narrative conditions/events."))
+	UPROPERTY(EditAnywhere, EditFixedSize, BlueprintReadOnly, Category="05 State Rules",
+		meta=(DisplayName="State Rules (All Runtime States)",
+			ToolTip="Always contains four rows: Locked availability, Unclaimed, Contested, and Captured / Claimed. Captured / Claimed is the On Captured row. Contested Entry Events run once whenever gameplay really enters Contested, not every capture tick."))
 	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
 
 	/** Default pre-conflict stealth policy. A State Config may override it. */
@@ -435,6 +445,7 @@ public:
 	virtual void RefreshHierarchyLinks();
 
 	virtual bool IsDefinitionCompatible(const ATerritoryVolume* Territory) const;
+	virtual void PostLoad() override;
 
 #if WITH_EDITOR
 	virtual void PostInitProperties() override;

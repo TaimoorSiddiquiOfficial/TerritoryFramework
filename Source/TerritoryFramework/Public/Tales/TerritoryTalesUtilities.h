@@ -13,6 +13,25 @@ class UWorld;
 namespace TerritoryTales
 {
 	/**
+	 * Marks one event as already condition-checked for the current synchronous call.
+	 * Territory state dispatch uses this so generic Narrative events are checked once,
+	 * while Territory events that defensively check themselves do not evaluate a
+	 * Blueprint condition twice.
+	 */
+	class TERRITORYFRAMEWORK_API FScopedPrevalidatedEvent
+	{
+	public:
+		explicit FScopedPrevalidatedEvent(const UNarrativeEvent* Event);
+		~FScopedPrevalidatedEvent();
+
+		FScopedPrevalidatedEvent(const FScopedPrevalidatedEvent&) = delete;
+		FScopedPrevalidatedEvent& operator=(const FScopedPrevalidatedEvent&) = delete;
+
+	private:
+		const UNarrativeEvent* Event = nullptr;
+	};
+
+	/**
 	 * Resolves the gameplay world from the live Narrative execution context before
 	 * falling back to the event/condition outer. This keeps reusable quest/dialogue
 	 * assets working even when their UObject outer has no world.

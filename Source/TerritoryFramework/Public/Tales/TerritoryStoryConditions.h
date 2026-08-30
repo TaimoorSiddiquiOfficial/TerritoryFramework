@@ -217,7 +217,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(ClampMin="0",
-			ToolTip="Number of loaded Districts securely held in Claimed or story-Locked state. Example: At Least 1 means the faction still has a military base for normal counters. Contested and Unclaimed Districts do not count; 0 means a story pursuit needs an explicit exception."))
+			ToolTip="Number of loaded, unlocked Districts fully secured through their authored Places. Example: At Least 1 means Bandits still have one operational base for normal counters. Locked, Contested, partial, and Unclaimed Districts do not count; a story pursuit needs an explicit exception."))
 	int32 DistrictCount = 1;
 
 protected:

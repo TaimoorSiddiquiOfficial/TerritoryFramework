@@ -31,7 +31,6 @@
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Character/CharacterDefinition.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "DrawDebugHelpers.h"
@@ -139,26 +138,28 @@ void ATerritoryVolume::BeginPlay()
 		SpawnPoint->BindToTerritory(this);
 	}
 
-	// ═══════════════════════════════════════════════════════════════════════════
-	// P0-01: Register on ALL net modes so clients can resolve territory lookups.
-	// Save/load, guards, and authority mutations remain server-only below.
-	// ═══════════════════════════════════════════════════════════════════════════
-	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
+	auto RegisterRuntimeTerritory = [this]()
 	{
-		ETerritoryRegistrationResult RegResult = Registry->RegisterTerritory(this);
+		UTerritoryRegistrySubsystem* Registry =
+			GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+		if (!Registry) return false;
+		const ETerritoryRegistrationResult RegResult = Registry->RegisterTerritory(this);
 		if (RegResult != ETerritoryRegistrationResult::Success)
 		{
-			UE_LOG(LogTerritory, Error, TEXT("%s registration rejected (%d) — aborting gameplay activation"),
+			UE_LOG(LogTerritory, Error,
+				TEXT("%s registration rejected (%d) — aborting gameplay activation"),
 				*GetPathName(), static_cast<int32>(RegResult));
 			SetActorTickEnabled(false);
-			return;
+			return false;
 		}
 		LastKnownBounds = GetTerritoryBounds();
-	}
+		return true;
+	};
 
 	if (HasAuthority())
 	{
 		bool bInitializedFromLevelDefaults = false;
+		bool bSeedConfiguredGarrisonAfterRegistration = false;
 		// GUID must be baked at editor placement time.
 		// If missing here, it means the level wasn't saved after GUID baking.
 		if (!TerritoryGUID.IsValid())
@@ -182,8 +183,12 @@ void ATerritoryVolume::BeginPlay()
 			OwnershipData.GuardRecruitmentCost = InitialGuardRecruitmentCost;
 			OwnershipData.OwningFaction = InitialOwningFaction;
 			OwnershipData.State = ResolveInitialTerritoryState();
+			OwnershipData.Availability = ResolveInitialTerritoryAvailability();
 			OwnershipData.ContestingFaction = FGameplayTag();
-			OwnershipData.LockReason = FText();
+			if (OwnershipData.Availability == ETerritoryAvailability::Unlocked)
+			{
+				OwnershipData.LockReason = FText();
+			}
 			if (OwnershipData.State == ETerritoryState::Unclaimed)
 			{
 				OwnershipData.OwningFaction = FGameplayTag();
@@ -194,12 +199,24 @@ void ATerritoryVolume::BeginPlay()
 			{
 				OwnershipData.ControlProgress = OwnershipData.State == ETerritoryState::Claimed
 					? 1.f : 0.f;
-				OwnershipData.DesiredGuardCount = OwnershipData.OwningFaction.IsValid()
-					? FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount()) : 0;
+				// Definition-owned guard posts late-bind while the Territory registers.
+				// Capacity is therefore still zero here even when the Place has authored
+				// posts. Seed the configured target after registration has resolved them.
+				OwnershipData.DesiredGuardCount = 0;
+				bSeedConfiguredGarrisonAfterRegistration =
+					OwnershipData.OwningFaction.IsValid();
 			}
 		}
 		else
 		{
+			// Bounded migration for saves authored before availability was separated
+			// from political control. Preserve the owner and convert only the enum value.
+			if (OwnershipData.State == ETerritoryState::Locked)
+			{
+				OwnershipData.Availability = ETerritoryAvailability::Locked;
+				OwnershipData.State = OwnershipData.OwningFaction.IsValid()
+					? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+			}
 			// Save loaded — sync level-config settings only
 			OwnershipData.MaxConcurrentAttackers = InitialMaxConcurrentAttackers;
 			OwnershipData.PeriodicIncome = InitialPeriodicIncome;
@@ -207,12 +224,29 @@ void ATerritoryVolume::BeginPlay()
 			OwnershipData.GuardRecruitmentCost = InitialGuardRecruitmentCost;
 			if (OwnershipData.DesiredGuardCount < 0)
 			{
-				OwnershipData.DesiredGuardCount = FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount());
+				OwnershipData.DesiredGuardCount = 0;
+				bSeedConfiguredGarrisonAfterRegistration =
+					OwnershipData.OwningFaction.IsValid();
+			}
+		}
+
+		// City and District are strategic aggregate read models. They never seed or
+		// restore a physical garrison, and a fresh campaign never trusts a parent owner.
+		if (ControlMode == ETerritoryControlMode::AggregateOnly)
+		{
+			OwnershipData.DesiredGuardCount = 0;
+			OwnershipData.DefenderCount = 0;
+			if (bInitializedFromLevelDefaults)
+			{
+				OwnershipData.OwningFaction = FGameplayTag();
+				OwnershipData.State = ETerritoryState::Unclaimed;
+				OwnershipData.ControlProgress = 0.f;
 			}
 		}
 
 		PreviousOwningFaction = OwnershipData.OwningFaction;
 		PreviousState = OwnershipData.State;
+		PreviousAvailability = OwnershipData.Availability;
 		bReplicationInitialized = true;
 		PublishCaptureSummary();
 
@@ -226,6 +260,30 @@ void ATerritoryVolume::BeginPlay()
 					static_cast<int32>(OwnershipData.State),
 					bSuccessfullyLoaded || bLoadedFromSave ? 1 : 0);
 			}
+			if (DevSettings && DevSettings->ShouldDebugAvailability())
+			{
+				UE_LOG(LogTerritory, Log,
+					TEXT("[Availability] %s runtime=%s/state=%d initial=%s/state=%d source=%s parent=%s"),
+					*GetTerritoryTag().ToString(),
+					OwnershipData.Availability == ETerritoryAvailability::Locked
+						? TEXT("Locked") : TEXT("Unlocked"),
+					static_cast<int32>(OwnershipData.State),
+					ResolveInitialTerritoryAvailability() == ETerritoryAvailability::Locked
+						? TEXT("Locked") : TEXT("Unlocked"),
+					static_cast<int32>(ResolveInitialTerritoryState()),
+					bSuccessfullyLoaded || bLoadedFromSave
+						? TEXT("CampaignSave") : TEXT("DefinitionSeed"),
+					*GetParentTerritoryTag().ToString());
+			}
+		}
+
+		// Register only after saved/default identity and political/availability state
+		// are final. Parent reducers and WorldState listeners must never see CDO data.
+		if (!RegisterRuntimeTerritory()) return;
+		if (bSeedConfiguredGarrisonAfterRegistration)
+		{
+			OwnershipData.DesiredGuardCount =
+				FMath::Clamp(GuardSpawnCount, 0, GetMaxGuardCount());
 		}
 
 		// Only diplomacy events opt into initial-state policy. Broadly firing the
@@ -243,6 +301,11 @@ void ATerritoryVolume::BeginPlay()
 		}
 		RefreshGarrisonSnapshot();
 	}
+	else if (!RegisterRuntimeTerritory())
+	{
+		// Clients still register their replicated actor for local UI/navigation lookup.
+		return;
+	}
 
 	// Components begin play before the actor registers and before fresh/save state
 	// is reconciled. Re-apply the final navigation policy so locked territories are
@@ -250,6 +313,10 @@ void ATerritoryVolume::BeginPlay()
 	if (MapMarkerComponent)
 	{
 		MapMarkerComponent->RefreshTerritoryMarker();
+	}
+	if (HasAuthority())
+	{
+		ReconcileAvailabilityDependentSystems();
 	}
 
 	// Fire BP-exposed initialization event (only reached if registration succeeded)
@@ -302,13 +369,20 @@ void ATerritoryVolume::ApplyInitialStateDiplomacyPolicies()
 		if (!TerritoryTales::DoEventConditionsPass(DiplomacyEvent, nullptr, nullptr,
 			nullptr, &FailedCondition))
 		{
-			UE_LOG(LogTerritory, Verbose,
-				TEXT("[InitialStateDiplomacy] %s skipped on %s because condition '%s' failed"),
-				*DiplomacyEvent->GetGraphDisplayText(), *TerritoryTag.ToString(),
-				*FailedCondition);
+			const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			if (Settings && Settings->ShouldDebugTales()
+				&& Settings->IsDebugLevelEnabled(6))
+			{
+				UE_LOG(LogTerritory, Log,
+					TEXT("[InitialStateDiplomacy] %s skipped on %s because condition '%s' failed"),
+					*DiplomacyEvent->GetGraphDisplayText(), *TerritoryTag.ToString(),
+					*FailedCondition);
+			}
 			continue;
 		}
-		DiplomacyEvent->OnActivate(nullptr, nullptr, nullptr);
+		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(DiplomacyEvent);
+		DiplomacyEvent->ExecuteEvent(nullptr, nullptr, nullptr);
 	}
 }
 
@@ -318,16 +392,10 @@ void ATerritoryVolume::PublishCaptureSummary()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	FReplicatedCaptureSummary Summary;
-	Summary.TerritoryTag = GetTerritoryTag();
-	Summary.TerritoryGUID = GetTerritoryGUID();
-	Summary.CurrentOwner = GetOwningFaction();
-	Summary.ContestingFaction = GetContestingFaction_Implementation();
-	Summary.ControlProgress = GetControlProgress();
-	Summary.State = GetTerritoryState();
-	for (TActorIterator<ATerritoryWorldState> It(World); It; ++It)
+	if (ATerritoryWorldState* WorldState =
+		ATerritoryWorldState::FindTerritoryWorldState(this))
 	{
-		It->SetCaptureSummary(Summary);
+		WorldState->PublishTerritorySummary(this);
 	}
 }
 
@@ -454,6 +522,43 @@ void ATerritoryVolume::Tick(float DeltaSeconds)
 			}
 		}
 	}
+
+	// Draw the same XY cells used by the registry's spatial hash. This setting
+	// previously enabled actor ticking but drew nothing, which made the public
+	// Developer Setting misleading. Very large volumes are sampled to keep the
+	// debug overlay bounded.
+	if (Settings->bDrawSpatialGrid)
+	{
+		const float CellSize = FMath::Max(500.f, Settings->SpatialCellSize);
+		const int32 MinCellX = FMath::FloorToInt(Bounds.Min.X / CellSize);
+		const int32 MaxCellX = FMath::FloorToInt(Bounds.Max.X / CellSize);
+		const int32 MinCellY = FMath::FloorToInt(Bounds.Min.Y / CellSize);
+		const int32 MaxCellY = FMath::FloorToInt(Bounds.Max.Y / CellSize);
+		const int32 XLineCount = FMath::Max(1, MaxCellX - MinCellX + 2);
+		const int32 YLineCount = FMath::Max(1, MaxCellY - MinCellY + 2);
+		const int32 XStride = FMath::Max(1, FMath::CeilToInt(
+			static_cast<float>(XLineCount) / 128.f));
+		const int32 YStride = FMath::Max(1, FMath::CeilToInt(
+			static_cast<float>(YLineCount) / 128.f));
+		const float GridMinX = static_cast<float>(MinCellX) * CellSize;
+		const float GridMaxX = static_cast<float>(MaxCellX + 1) * CellSize;
+		const float GridMinY = static_cast<float>(MinCellY) * CellSize;
+		const float GridMaxY = static_cast<float>(MaxCellY + 1) * CellSize;
+		const float GridZ = Bounds.Min.Z + 2.f;
+
+		for (int32 CellX = MinCellX; CellX <= MaxCellX + 1; CellX += XStride)
+		{
+			const float X = static_cast<float>(CellX) * CellSize;
+			DrawDebugLine(World, FVector(X, GridMinY, GridZ),
+				FVector(X, GridMaxY, GridZ), FColor::Blue, false, 0.f, 2, 0.75f);
+		}
+		for (int32 CellY = MinCellY; CellY <= MaxCellY + 1; CellY += YStride)
+		{
+			const float Y = static_cast<float>(CellY) * CellSize;
+			DrawDebugLine(World, FVector(GridMinX, Y, GridZ),
+				FVector(GridMaxX, Y, GridZ), FColor::Blue, false, 0.f, 2, 0.75f);
+		}
+	}
 #endif
 }
 
@@ -479,6 +584,7 @@ void ATerritoryVolume::OnRep_OwnershipData()
 		bReplicationInitialized = true;
 		PreviousOwningFaction = OwnershipData.OwningFaction;
 		PreviousState = OwnershipData.State;
+		PreviousAvailability = OwnershipData.Availability;
 		return;
 	}
 
@@ -491,10 +597,16 @@ void ATerritoryVolume::OnRep_OwnershipData()
 			OnOwnershipChanged(PreviousOwningFaction, OwnershipData.OwningFaction);
 		}
 		OnTerritoryOwnershipChanged.Broadcast(this, PreviousOwningFaction, OwnershipData.OwningFaction);
-		UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s ownership: %s → %s"),
-			*GetTerritoryTag().ToString(),
-			*PreviousOwningFaction.ToString(),
-			*OwnershipData.OwningFaction.ToString());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugOwnership()
+			&& Settings->IsDebugLevelEnabled(6))
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[Client] %s ownership: %s → %s"),
+				*GetTerritoryTag().ToString(),
+				*PreviousOwningFaction.ToString(),
+				*OwnershipData.OwningFaction.ToString());
+		}
 		PreviousOwningFaction = OwnershipData.OwningFaction;
 	}
 
@@ -506,9 +618,21 @@ void ATerritoryVolume::OnRep_OwnershipData()
 			OnStateChanged(PreviousState, OwnershipData.State);
 		}
 		OnTerritoryStateChangedDelegate.Broadcast(this, OwnershipData.State);
-		UE_LOG(LogTerritory, Verbose, TEXT("[Client] %s state → %d"),
-			*GetTerritoryTag().ToString(), static_cast<int32>(OwnershipData.State));
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugStateTransitions()
+			&& Settings->IsDebugLevelEnabled(6))
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[Client] %s state → %d"),
+				*GetTerritoryTag().ToString(), static_cast<int32>(OwnershipData.State));
+		}
 		PreviousState = OwnershipData.State;
+	}
+
+	if (PreviousAvailability != OwnershipData.Availability)
+	{
+		OnTerritoryAvailabilityChanged.Broadcast(this, OwnershipData.Availability);
+		PreviousAvailability = OwnershipData.Availability;
 	}
 }
 
@@ -632,10 +756,18 @@ void ATerritoryVolume::RebuildRuntimeNarrativeConfiguration(
 		RuntimeStateConfigs.Add(Pair.Key,
 			CloneStateConfigForTerritory(Pair.Value, this));
 	}
-	RuntimeDefenderDiedEvents = CloneNarrativeArrayForTerritory(
-		Definition.DefenderDiedEvents, this);
-	RuntimeAllDefendersDefeatedEvents = CloneNarrativeArrayForTerritory(
-		Definition.AllDefendersDefeatedEvents, this);
+	if (Definition.IsA<UTerritoryPlaceDefinition>())
+	{
+		RuntimeDefenderDiedEvents = CloneNarrativeArrayForTerritory(
+			Definition.DefenderDiedEvents, this);
+		RuntimeAllDefendersDefeatedEvents = CloneNarrativeArrayForTerritory(
+			Definition.AllDefendersDefeatedEvents, this);
+	}
+	else
+	{
+		RuntimeDefenderDiedEvents.Reset();
+		RuntimeAllDefendersDefeatedEvents.Reset();
+	}
 }
 
 void ATerritoryVolume::EnsurePersistentTerritoryGUID()
@@ -690,6 +822,18 @@ void ATerritoryVolume::Load_Implementation()
 void ATerritoryVolume::ReconcileGuardsAfterLoad()
 {
 	if (!HasAuthority()) return;
+	if (ControlMode == ETerritoryControlMode::AggregateOnly)
+	{
+		DespawnGuards();
+		RegisteredDefenders.Reset();
+		OwnershipData.DesiredGuardCount = 0;
+		OwnershipData.DefenderCount = 0;
+		PreviousOwningFaction = OwnershipData.OwningFaction;
+		PreviousState = OwnershipData.State;
+		PreviousAvailability = OwnershipData.Availability;
+		RefreshGarrisonSnapshot();
+		return;
+	}
 	const TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
 	int32 SavedActiveGuards = 0;
 	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
@@ -715,7 +859,8 @@ void ATerritoryVolume::ReconcileGuardsAfterLoad()
 	OwnershipData.DefenderCount = RegisteredDefenders.Num();
 
 	// Spawn guards for the loaded/current owner
-	if (OwnershipData.State == ETerritoryState::Claimed
+	if (IsAvailableForGameplay()
+		&& OwnershipData.State == ETerritoryState::Claimed
 		&& OwnershipData.OwningFaction.IsValid()
 		&& ResolveGuardDefinition(OwnershipData.OwningFaction)
 		&& SavedActiveGuards > 0)
@@ -767,20 +912,16 @@ void ATerritoryVolume::OnTerritoryControlChanged_Implementation(FGameplayTag InT
 
 void ATerritoryVolume::OnTerritoryContested_Implementation(FGameplayTag InTerritoryTag, FGameplayTag ContestingFaction)
 {
-	// P1-N01: Server-authoritative — don't write replicated data on clients
-	if (!HasAuthority()) return;
-	if (InTerritoryTag == TerritoryTag && OwnershipData.ContestingFaction != ContestingFaction)
+	if (InTerritoryTag == TerritoryTag)
 	{
-		OwnershipData.ContestingFaction = ContestingFaction;
+		SetContestingFaction(ContestingFaction);
 	}
 }
 
 void ATerritoryVolume::OnTerritoryUncontested_Implementation(FGameplayTag InTerritoryTag)
 {
-	// P1-N02: Server-authoritative — don't write replicated data on clients
-	if (!HasAuthority()) return;
 	if (InTerritoryTag != TerritoryTag) return;
-	OwnershipData.ContestingFaction = FGameplayTag();
+	SetContestingFaction(FGameplayTag());
 }
 
 void ATerritoryVolume::OnTerritoryStateChanged_Implementation(FGameplayTag InTerritoryTag, ETerritoryState NewState)
@@ -795,8 +936,60 @@ bool ATerritoryVolume::IsContested() const { return OwnershipData.State == ETerr
 FGameplayTag ATerritoryVolume::GetTerritoryTag() const { return TerritoryTag; }
 FText ATerritoryVolume::GetTerritoryDisplayName() const { return TerritoryDisplayName; }
 
+void ATerritoryVolume::SetContestingFaction(const FGameplayTag& Faction)
+{
+	if (!HasAuthority() || OwnershipData.ContestingFaction == Faction) return;
+	FTerritoryOwnershipData Candidate = OwnershipData;
+	Candidate.ContestingFaction = Faction;
+	CommitOwnershipData(Candidate, FTerritoryTransitionContext());
+}
+
+bool ATerritoryVolume::IsAvailableForGameplay() const
+{
+	if (IsLocked()) return false;
+
+	FGameplayTag ParentTag = GetParentTerritoryTag();
+	if (!ParentTag.IsValid()) return true;
+
+	UWorld* World = GetWorld();
+	const UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!World || !Registry) return false;
+
+	const ATerritoryWorldState* WorldState =
+		ATerritoryWorldState::FindTerritoryWorldState(this);
+
+	TSet<FGameplayTag> Visited;
+	if (TerritoryTag.IsValid()) Visited.Add(TerritoryTag);
+	while (ParentTag.IsValid())
+	{
+		if (Visited.Contains(ParentTag)) return false;
+		Visited.Add(ParentTag);
+
+		if (const ATerritoryVolume* LoadedParent =
+			Registry->GetTerritoryByTag(ParentTag))
+		{
+			if (LoadedParent->IsLocked()) return false;
+			ParentTag = LoadedParent->GetParentTerritoryTag();
+			continue;
+		}
+
+		if (!WorldState) return false;
+		const FReplicatedCaptureSummary Summary =
+			WorldState->GetCaptureSummary(ParentTag);
+		if (Summary.TerritoryTag != ParentTag
+			|| Summary.Availability == ETerritoryAvailability::Locked)
+		{
+			return false;
+		}
+		ParentTag = Summary.ParentTerritoryTag;
+	}
+	return true;
+}
+
 FGameplayTagContainer ATerritoryVolume::GetActiveCommandCapabilities() const
 {
+	if (!IsAvailableForGameplay()) return FGameplayTagContainer();
 	const FTerritoryStateConfig* Config = GetStateConfigs().Find(OwnershipData.State);
 	return Config ? Config->GrantedCommandCapabilities : FGameplayTagContainer();
 }
@@ -817,12 +1010,20 @@ bool ATerritoryVolume::IsCommandCapabilityConfigured(const FGameplayTag& Capabil
 	return false;
 }
 int32 ATerritoryVolume::GetMaxConcurrentAttackers() const { return OwnershipData.MaxConcurrentAttackers; }
-int32 ATerritoryVolume::GetDefenderCount() const { return OwnershipData.DefenderCount; }
+int32 ATerritoryVolume::GetDefenderCount() const
+{
+	return ControlMode == ETerritoryControlMode::AggregateOnly
+		? 0 : OwnershipData.DefenderCount;
+}
 int32 ATerritoryVolume::GetPeriodicIncome() const { return OwnershipData.PeriodicIncome; }
 int32 ATerritoryVolume::GetGuardCost() const { return OwnershipData.GuardCost; }
 
 int32 ATerritoryVolume::GetMaxGuardCount() const
 {
+	if (ControlMode == ETerritoryControlMode::AggregateOnly)
+	{
+		return 0;
+	}
 	if (!HasAuthority())
 	{
 		return FMath::Max(0, GarrisonSnapshot.MaximumGuards);
@@ -973,6 +1174,7 @@ ATerritoryVolume::GetAllDefendersDefeatedEvents() const
 
 UTerritoryStealthProfile* ATerritoryVolume::GetActiveStealthProfile() const
 {
+	if (ControlMode == ETerritoryControlMode::AggregateOnly) return nullptr;
 	if (const FTerritoryStateConfig* Config = GetStateConfigs().Find(OwnershipData.State))
 	{
 		if (Config->StealthProfileOverride)
@@ -989,7 +1191,8 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 	UTerritoryControlSubsystem* Control = World
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	if (!HasAuthority() || !World || !Control || !bStoryCaptureFromBounds
-		|| ControlMode != ETerritoryControlMode::Independent)
+		|| ControlMode != ETerritoryControlMode::Independent
+		|| !IsAvailableForGameplay())
 	{
 		ReleaseStoryBoundsContesters();
 		return;
@@ -1125,6 +1328,117 @@ void ATerritoryVolume::ReleaseStoryBoundsContesters()
 	StoryBoundsInfiltrators.Empty();
 }
 
+void ATerritoryVolume::ReconcileAvailabilityDependentSystems()
+{
+	if (!HasAuthority()) return;
+
+	// City/District availability gates descendants without rewriting their local
+	// availability or political ownership. Reconcile all loaded Places because
+	// World Partition may leave an intermediate parent represented only by WorldState.
+	if (ControlMode == ETerritoryControlMode::AggregateOnly)
+	{
+		UTerritoryRegistrySubsystem* Registry = GetWorld()
+			? GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+		if (!Registry) return;
+		ATerritoryWorldState* WorldState =
+			ATerritoryWorldState::FindTerritoryWorldState(this);
+		const FGameplayTag ChangedAncestorTag = GetTerritoryTag();
+		auto IsExactDescendant = [Registry, WorldState, ChangedAncestorTag](
+			const ATerritoryVolume* Candidate)
+		{
+			if (!Candidate || !ChangedAncestorTag.IsValid()) return false;
+			const UTerritoryDefinition* CandidateDefinition =
+				Candidate->GetTerritoryDefinition();
+			if (!CandidateDefinition
+				|| CandidateDefinition->TerritoryTag != Candidate->GetTerritoryTag())
+			{
+				return false;
+			}
+			TSet<FGameplayTag> Visited;
+			FGameplayTag ChildTag = Candidate->GetTerritoryTag();
+			FGameplayTag ParentTag = Candidate->GetParentTerritoryTag();
+			while (ParentTag.IsValid() && !Visited.Contains(ParentTag))
+			{
+				Visited.Add(ParentTag);
+				if (const ATerritoryVolume* Parent =
+					Registry->GetTerritoryByTag(ParentTag))
+				{
+					bool bAuthorsChild = false;
+					if (const UTerritoryCityDefinition* City =
+						Cast<UTerritoryCityDefinition>(Parent->GetTerritoryDefinition()))
+					{
+						bAuthorsChild = City->Districts.ContainsByPredicate(
+							[ChildTag](const UTerritoryDistrictDefinition* District)
+							{
+								return District && District->TerritoryTag == ChildTag;
+							});
+					}
+					else if (const UTerritoryDistrictDefinition* District =
+						Cast<UTerritoryDistrictDefinition>(Parent->GetTerritoryDefinition()))
+					{
+						bAuthorsChild = District->Places.ContainsByPredicate(
+							[ChildTag](const UTerritoryPlaceDefinition* Place)
+							{
+								return Place && Place->TerritoryTag == ChildTag;
+							});
+					}
+					if (!bAuthorsChild) return false;
+					if (ParentTag == ChangedAncestorTag) return true;
+					ChildTag = ParentTag;
+					ParentTag = Parent->GetParentTerritoryTag();
+					continue;
+				}
+				if (!WorldState) return false;
+				const FReplicatedCaptureSummary Summary =
+					WorldState->GetCaptureSummary(ParentTag);
+				if (Summary.TerritoryTag != ParentTag) return false;
+				if (ParentTag == ChangedAncestorTag) return true;
+				ChildTag = ParentTag;
+				ParentTag = Summary.ParentTerritoryTag;
+			}
+			return false;
+		};
+		for (ATerritoryVolume* Territory : Registry->GetAllTerritories())
+		{
+			if (Territory && Territory != this
+				&& Territory->GetControlMode() == ETerritoryControlMode::Independent
+				&& IsExactDescendant(Territory))
+			{
+				Territory->ReconcileAvailabilityDependentSystems();
+			}
+		}
+		return;
+	}
+
+	if (!IsAvailableForGameplay())
+	{
+		if (UTerritoryControlSubsystem* Control = GetWorld()
+			? GetWorld()->GetSubsystem<UTerritoryControlSubsystem>() : nullptr)
+		{
+			if (!IsLocked() && GetTerritoryState() == ETerritoryState::Contested)
+			{
+				Control->ResetCapture(this);
+			}
+			else
+			{
+				Control->ClearCaptureTrackingOnly(this);
+			}
+		}
+		ReleaseStoryBoundsContesters();
+		CancelPendingReserveDeployments();
+		DespawnGuards();
+		RefreshGarrisonSnapshot();
+		return;
+	}
+
+	if (GetTerritoryState() == ETerritoryState::Claimed
+		&& GetOwningFaction().IsValid() && GetDesiredGuardCount() > 0)
+	{
+		SpawnGuardsToCount(GetDesiredGuardCount());
+	}
+	RefreshGarrisonSnapshot();
+}
+
 ETerritoryState ATerritoryVolume::ResolveInitialTerritoryState() const
 {
 	switch (InitialState)
@@ -1136,12 +1450,21 @@ ETerritoryState ATerritoryVolume::ResolveInitialTerritoryState() const
 		return InitialOwningFaction.IsValid()
 			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
 	case ETerritoryInitialState::Locked:
-		return ETerritoryState::Locked;
+		// Legacy definitions resolve their political control independently. Their
+		// availability is handled by ResolveInitialTerritoryAvailability().
+		return InitialOwningFaction.IsValid()
+			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
 	case ETerritoryInitialState::Automatic:
 	default:
 		return InitialOwningFaction.IsValid()
 			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
 	}
+}
+
+ETerritoryAvailability ATerritoryVolume::ResolveInitialTerritoryAvailability() const
+{
+	return InitialState == ETerritoryInitialState::Locked
+		? ETerritoryAvailability::Locked : InitialAvailability;
 }
 
 void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
@@ -1194,6 +1517,7 @@ void ATerritoryVolume::SetOwningFactionWithContext(const FGameplayTag& NewFactio
 	// P0-04: Thin wrapper — delegate to CommitOwnershipData for single authoritative path
 	if (!HasAuthority() || bTransitionInProgress
 		|| (ControlMode == ETerritoryControlMode::AggregateOnly && !bApplyingDerivedOwnership)) return;
+	if (IsLocked() && !bBypassTransitionConditions) return;
 
 	FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	if (OldOwner == NewFaction) return;
@@ -1209,7 +1533,7 @@ void ATerritoryVolume::SetOwningFactionWithContext(const FGameplayTag& NewFactio
 	Candidate.DesiredGuardCount = NewFaction.IsValid()
 		? GetPostCaptureGuardCountForOwner(TransitionContext, NewFaction)
 		: 0;
-	if (NewState != ETerritoryState::Locked)
+	if (OwnershipData.Availability == ETerritoryAvailability::Unlocked)
 	{
 		Candidate.LockReason = FText();
 	}
@@ -1225,10 +1549,45 @@ void ATerritoryVolume::SetDerivedOwningFaction(const FGameplayTag& NewFaction)
 void ATerritoryVolume::SetDerivedOwningFaction(const FGameplayTag& NewFaction,
 	const FTerritoryTransitionContext& TransitionContext)
 {
-	if (!HasAuthority()) return;
+	SetDerivedControl(NewFaction,
+		NewFaction.IsValid() ? ETerritoryState::Claimed : ETerritoryState::Unclaimed,
+		TransitionContext);
+}
+
+void ATerritoryVolume::SetDerivedControl(const FGameplayTag& SecuredOwner,
+	ETerritoryState DerivedState, const FTerritoryTransitionContext& TransitionContext)
+{
+	if (!HasAuthority() || ControlMode != ETerritoryControlMode::AggregateOnly
+		|| bTransitionInProgress)
+	{
+		return;
+	}
+
+	if (DerivedState == ETerritoryState::Locked)
+	{
+		DerivedState = SecuredOwner.IsValid()
+			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+	}
+	if (DerivedState == ETerritoryState::Claimed && !SecuredOwner.IsValid())
+	{
+		DerivedState = ETerritoryState::Unclaimed;
+	}
+
+	FTerritoryOwnershipData Candidate = OwnershipData;
+	Candidate.OwningFaction = DerivedState == ETerritoryState::Claimed
+		? SecuredOwner : FGameplayTag();
+	Candidate.State = DerivedState;
+	Candidate.ContestingFaction = FGameplayTag();
+	Candidate.ControlProgress = DerivedState == ETerritoryState::Claimed ? 1.f : 0.f;
+	Candidate.DesiredGuardCount = 0;
+	Candidate.DefenderCount = 0;
+
 	const bool bWasApplyingDerivedOwnership = bApplyingDerivedOwnership;
+	const bool bWasBypassing = bBypassTransitionConditions;
 	bApplyingDerivedOwnership = true;
-	SetOwningFactionWithContext(NewFaction, TransitionContext);
+	bBypassTransitionConditions = true;
+	CommitOwnershipData(Candidate, TransitionContext);
+	bBypassTransitionConditions = bWasBypassing;
 	bApplyingDerivedOwnership = bWasApplyingDerivedOwnership;
 }
 
@@ -1240,7 +1599,7 @@ void ATerritoryVolume::ForceSetOwningFaction(const FGameplayTag& NewFaction)
 void ATerritoryVolume::ForceSetOwningFactionWithContext(const FGameplayTag& NewFaction,
 	const FTerritoryTransitionContext& TransitionContext)
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly) return;
 	const bool bWasBypassing = bBypassTransitionConditions;
 	const bool bWasApplyingDerivedOwnership = bApplyingDerivedOwnership;
 	bBypassTransitionConditions = true;
@@ -1253,6 +1612,25 @@ void ATerritoryVolume::ForceSetOwningFactionWithContext(const FGameplayTag& NewF
 bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewData, const FTerritoryTransitionContext& TransitionContext)
 {
 	if (!HasAuthority()) return false;
+	if (NewData.State == ETerritoryState::Locked)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[CommitOwnership] %s rejected legacy Locked control state; use LockTerritoryWithContext"),
+			*GetTerritoryTag().ToString());
+		return false;
+	}
+	const bool bPoliticalControlChanged = OwnershipData.OwningFaction != NewData.OwningFaction
+		|| OwnershipData.State != NewData.State
+		|| OwnershipData.ContestingFaction != NewData.ContestingFaction
+		|| !FMath::IsNearlyEqual(OwnershipData.ControlProgress, NewData.ControlProgress);
+	if (ControlMode == ETerritoryControlMode::AggregateOnly
+		&& bPoliticalControlChanged && !bApplyingDerivedOwnership)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[CommitOwnership] %s rejected direct aggregate control mutation; parent control is reduced from authored children"),
+			*GetTerritoryTag().ToString());
+		return false;
+	}
 
 	// Prevent reentrant commits during the synchronous event bundle.
 	// A delegate listener that calls back into CommitOwnershipData mid-broadcast
@@ -1261,23 +1639,43 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 
 	const FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	const ETerritoryState OldState = OwnershipData.State;
+	const ETerritoryAvailability OldAvailability = OwnershipData.Availability;
 	const FGameplayTag NewOwner = NewData.OwningFaction;
 	const ETerritoryState NewState = NewData.State;
+	const ETerritoryAvailability NewAvailability = NewData.Availability;
+	const bool bCapturedByDifferentOwner =
+		OldState == ETerritoryState::Claimed
+		&& NewState == ETerritoryState::Claimed
+		&& NewOwner.IsValid() && OldOwner != NewOwner;
 
-	if (OldState != NewState && !bBypassTransitionConditions)
+	if ((OldState != NewState || bCapturedByDifferentOwner)
+		&& !bBypassTransitionConditions)
 	{
 		FText ConditionFailure;
-		if (!CheckStateTransitionConditions(OldState, NewState, ConditionFailure, TransitionContext))
+		const bool bConditionsPass = OldState != NewState
+			? CheckStateTransitionConditions(OldState, NewState,
+				ConditionFailure, TransitionContext)
+			: CheckStateExitConditions(ETerritoryState::Claimed,
+				ConditionFailure, TransitionContext)
+				&& CheckStateConditions(ETerritoryState::Claimed,
+					ConditionFailure, TransitionContext);
+		if (!bConditionsPass)
 		{
-			UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s: %d -> %d blocked - %s"),
-				*GetTerritoryTag().ToString(), static_cast<int32>(OldState),
-				static_cast<int32>(NewState), *ConditionFailure.ToString());
+			if (const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+				Settings && Settings->ShouldDebugStateTransitions())
+			{
+				UE_LOG(LogTerritory, Log, TEXT("[StateChange] %s: %d -> %d blocked - %s"),
+					*GetTerritoryTag().ToString(), static_cast<int32>(OldState),
+					static_cast<int32>(NewState), *ConditionFailure.ToString());
+			}
 			return false;
 		}
 	}
 
 	// P2-N01: Compare all ownership data fields, not just owner/state/contest/progress
 	if (OldOwner == NewOwner && OldState == NewState
+		&& OldAvailability == NewAvailability
 		&& OwnershipData.ContestingFaction == NewData.ContestingFaction
 		&& FMath::IsNearlyEqual(OwnershipData.ControlProgress, NewData.ControlProgress)
 		&& OwnershipData.DesiredGuardCount == NewData.DesiredGuardCount
@@ -1297,6 +1695,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	// Cache previous values for RepNotify diff
 	PreviousOwningFaction = OldOwner;
 	PreviousState = OldState;
+	PreviousAvailability = OldAvailability;
 
 	// ─── Atomic struct write ───
 	OwnershipData = NewData;
@@ -1360,6 +1759,24 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		FireStateEvents(OldState, false, TransitionContext);
 		FireStateEvents(NewState, true, TransitionContext);
 	}
+	else if (bCapturedByDifferentOwner)
+	{
+		// A story handover and some trusted capture events can atomically replace
+		// Faction A with Faction B without first writing Contested. Politically the
+		// enum remains Claimed, but the old ownership tenure ended and a new one
+		// started. Run both Captured / Claimed lifecycle sides exactly once so
+		// designers can author On Lost and On Captured behavior in the same row.
+		// Same-owner resets are excluded by the owner comparison above.
+		FireStateEvents(ETerritoryState::Claimed, false, TransitionContext);
+		FireStateEvents(ETerritoryState::Claimed, true, TransitionContext);
+	}
+	if (OldAvailability != NewAvailability)
+	{
+		// Locked state config remains the authoring home for lock/unlock events,
+		// but lock availability no longer replaces political control state.
+		FireStateEvents(ETerritoryState::Locked,
+			NewAvailability == ETerritoryAvailability::Locked, TransitionContext);
+	}
 
 	if (OldOwner != NewOwner)
 	{
@@ -1371,6 +1788,10 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	{
 		OnStateChanged(OldState, NewState);
 		OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
+	}
+	if (OldAvailability != NewAvailability)
+	{
+		OnTerritoryAvailabilityChanged.Broadcast(this, NewAvailability);
 	}
 
 	// P1-N03: Clear any stale capture state in ControlSubsystem when ownership changes
@@ -1395,41 +1816,53 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	return true;
 }
 
-void ATerritoryVolume::SetControlProgress(float Progress)
-{
-	if (!HasAuthority() || bTransitionInProgress) return;
-	const float ClampedProgress = FMath::Clamp(Progress, 0.f, 1.f);
-	// P0-03: No-op detection — skip write if value unchanged (avoids unnecessary replication)
-	if (FMath::IsNearlyEqual(OwnershipData.ControlProgress, ClampedProgress)) return;
-
-	// Route through CommitOwnershipData so replication, ForceNetUpdate, and any
-	// registered delegates fire consistently. Direct struct mutation without
-	// CommitOwnershipData creates client-side stale state.
-	FTerritoryOwnershipData NewData = OwnershipData;
-	NewData.ControlProgress = ClampedProgress;
-	CommitOwnershipData(NewData);
-}
-
-void ATerritoryVolume::SetTerritoryState(ETerritoryState NewState)
-{
-	if (!HasAuthority() || bTransitionInProgress) return;
-	if (OwnershipData.State == NewState) return;
-
-	FTerritoryOwnershipData Candidate = OwnershipData;
-	Candidate.State = NewState;
-	if (NewState != ETerritoryState::Locked)
-	{
-		Candidate.LockReason = FText();
-	}
-	CommitOwnershipData(Candidate, FTerritoryTransitionContext());
-}
-
 void ATerritoryVolume::ForceSetTerritoryState(ETerritoryState NewState)
 {
 	if (!HasAuthority()) return;
+	if (NewState == ETerritoryState::Locked)
+	{
+		const bool bWasBypassingLock = bBypassTransitionConditions;
+		bBypassTransitionConditions = true;
+		LockTerritoryWithContext(FText(), FTerritoryTransitionContext());
+		bBypassTransitionConditions = bWasBypassingLock;
+		return;
+	}
+	if (ControlMode == ETerritoryControlMode::AggregateOnly && !bApplyingDerivedOwnership)
+	{
+		return;
+	}
+
+	FTerritoryOwnershipData Candidate = OwnershipData;
+	Candidate.State = NewState;
+	Candidate.ContestingFaction = NewState == ETerritoryState::Contested
+		? Candidate.ContestingFaction : FGameplayTag();
+	if (NewState == ETerritoryState::Unclaimed)
+	{
+		Candidate.OwningFaction = FGameplayTag();
+		Candidate.ControlProgress = 0.f;
+		Candidate.DesiredGuardCount = 0;
+	}
+	else if (NewState == ETerritoryState::Claimed)
+	{
+		// A claimed state without an owner is contradictory. Trusted callers must
+		// set the owner atomically through ForceCapture/ApplyTerritoryMutation.
+		if (!Candidate.OwningFaction.IsValid())
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("[ForceState] %s rejected Claimed without an owning faction"),
+				*GetTerritoryTag().ToString());
+			return;
+		}
+		Candidate.ControlProgress = 1.f;
+	}
+	if (OwnershipData.Availability == ETerritoryAvailability::Unlocked)
+	{
+		Candidate.LockReason = FText();
+	}
+
 	const bool bWasBypassing = bBypassTransitionConditions;
 	bBypassTransitionConditions = true;
-	SetTerritoryState(NewState);
+	CommitOwnershipData(Candidate, FTerritoryTransitionContext());
 	bBypassTransitionConditions = bWasBypassing;
 }
 
@@ -1523,7 +1956,9 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 	// conditions requiring a pawn/controller will evaluate against null and fail.
 	// Callers must provide explicit TransitionContext for player-dependent conditions.
 
-	// P0-03: Use Narrative event lifecycle — OnActivate for entry, OnDeactivate for exit
+	// State-config arrays contain one-shot Narrative events. Narrative's own quest and
+	// dialogue Start/End paths both call ExecuteEvent; base OnDeactivate is empty.
+	// Execute both arrays the same way so Exit Events cannot silently do nothing.
 	for (const TObjectPtr<UNarrativeEvent>& Event : *Events)
 	{
 		if (!Event) continue;
@@ -1531,19 +1966,19 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 		if (!TerritoryTales::DoEventConditionsPass(Event, ContextPawn, ContextPC,
 			TransitionContext.TalesComponent, &FailedCondition))
 		{
-			UE_LOG(LogTerritory, Verbose,
-				TEXT("[StateEvent] %s skipped on %s because condition '%s' failed"),
-				*Event->GetGraphDisplayText(), *TerritoryTag.ToString(), *FailedCondition);
+			const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			if (Settings && Settings->ShouldDebugTales()
+				&& Settings->IsDebugLevelEnabled(6))
+			{
+				UE_LOG(LogTerritory, Log,
+					TEXT("[StateEvent] %s skipped on %s because condition '%s' failed"),
+					*Event->GetGraphDisplayText(), *TerritoryTag.ToString(), *FailedCondition);
+			}
 			continue;
 		}
-		if (bEntering)
-		{
-			Event->OnActivate(ContextPawn, ContextPC, TransitionContext.TalesComponent);
-		}
-		else
-		{
-			Event->OnDeactivate(ContextPawn, ContextPC, TransitionContext.TalesComponent);
-		}
+		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
+		Event->ExecuteEvent(ContextPawn, ContextPC, TransitionContext.TalesComponent);
 	}
 }
 
@@ -1551,7 +1986,10 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 
 bool ATerritoryVolume::IsLocked() const
 {
-	return OwnershipData.State == ETerritoryState::Locked;
+	// The state check keeps detached legacy test objects readable until they pass
+	// through BeginPlay's save/config migration.
+	return OwnershipData.Availability == ETerritoryAvailability::Locked
+		|| OwnershipData.State == ETerritoryState::Locked;
 }
 
 bool ATerritoryVolume::CanUnlock() const
@@ -1563,11 +2001,8 @@ bool ATerritoryVolume::CanUnlockWithContext(const FTerritoryTransitionContext& T
 {
 	if (!IsLocked()) return true;
 
-	const ETerritoryState TargetState = OwnershipData.OwningFaction.IsValid()
-		? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
 	FText FailureReason;
-	return CheckStateTransitionConditions(ETerritoryState::Locked, TargetState,
-		FailureReason, TransitionContext);
+	return CheckStateExitConditions(ETerritoryState::Locked, FailureReason, TransitionContext);
 }
 
 void ATerritoryVolume::LockTerritory(const FText& Reason)
@@ -1580,16 +2015,44 @@ bool ATerritoryVolume::LockTerritoryWithContext(
 	const FTerritoryTransitionContext& TransitionContext)
 {
 	if (!HasAuthority()) return false;
+	if (!bBypassTransitionConditions)
+	{
+		FText FailureReason;
+		if (!CheckStateConditions(ETerritoryState::Locked, FailureReason, TransitionContext))
+		{
+			const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			if (Settings && Settings->ShouldDebugAvailability())
+			{
+				UE_LOG(LogTerritory, Log, TEXT("[Lock] %s was not locked: %s"),
+					*GetTerritoryTag().ToString(), *FailureReason.ToString());
+			}
+			return false;
+		}
+	}
 
 	FTerritoryOwnershipData Candidate = OwnershipData;
-	Candidate.State = ETerritoryState::Locked;
+	Candidate.Availability = ETerritoryAvailability::Locked;
+	if (ControlMode == ETerritoryControlMode::Independent
+		&& (Candidate.State == ETerritoryState::Locked
+			|| Candidate.State == ETerritoryState::Contested))
+	{
+		Candidate.State = Candidate.OwningFaction.IsValid()
+			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+		Candidate.ControlProgress = Candidate.OwningFaction.IsValid() ? 1.f : 0.f;
+	}
 	Candidate.ContestingFaction = FGameplayTag();
-	Candidate.ControlProgress = 0.f;
 	Candidate.LockReason = Reason;
 	if (!CommitOwnershipData(Candidate, TransitionContext)) return false;
+	ReconcileAvailabilityDependentSystems();
 
-	UE_LOG(LogTerritory, Log, TEXT("[Lock] %s locked: %s"),
-		*GetTerritoryTag().ToString(), *Reason.ToString());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugAvailability())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Lock] %s locked: %s"),
+			*GetTerritoryTag().ToString(), *Reason.ToString());
+	}
 	return true;
 }
 
@@ -1605,29 +2068,51 @@ bool ATerritoryVolume::TryUnlockWithContext(
 	if (!HasAuthority()) return false;
 	if (!IsLocked()) return true;
 
-	const ETerritoryState TargetState = OwnershipData.OwningFaction.IsValid()
-		? ETerritoryState::Claimed
-		: ETerritoryState::Unclaimed;
+	if (!bForce)
+	{
+		FText FailureReason;
+		if (!CheckStateExitConditions(ETerritoryState::Locked, FailureReason, TransitionContext))
+		{
+			const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			if (Settings && Settings->ShouldDebugAvailability())
+			{
+				UE_LOG(LogTerritory, Log, TEXT("[Lock] %s remains locked: %s"),
+					*GetTerritoryTag().ToString(), *FailureReason.ToString());
+			}
+			return false;
+		}
+	}
 
 	FTerritoryOwnershipData Candidate = OwnershipData;
-	Candidate.State = TargetState;
+	Candidate.Availability = ETerritoryAvailability::Unlocked;
+	if (Candidate.State == ETerritoryState::Locked)
+	{
+		Candidate.State = Candidate.OwningFaction.IsValid()
+			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+	}
 	Candidate.ContestingFaction = FGameplayTag();
-	Candidate.ControlProgress = OwnershipData.OwningFaction.IsValid() ? 1.f : 0.f;
 	Candidate.LockReason = FText();
 	const bool bWasBypassing = bBypassTransitionConditions;
 	bBypassTransitionConditions = bWasBypassing || bForce;
 	const bool bCommitted = CommitOwnershipData(Candidate, TransitionContext);
 	bBypassTransitionConditions = bWasBypassing;
 	if (!bCommitted) return false;
+	ReconcileAvailabilityDependentSystems();
 
-	UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlocked"),
-		*GetTerritoryTag().ToString());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugAvailability())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Lock] %s unlocked"),
+			*GetTerritoryTag().ToString());
+	}
 	return true;
 }
 
 void ATerritoryVolume::RegisterDefender(AActor* Defender)
 {
-	if (!Defender || !HasAuthority()) return;
+	if (!Defender || !HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly) return;
 
 	if (!Cast<IAbilitySystemInterface>(Defender))
 	{
@@ -1681,8 +2166,13 @@ void ATerritoryVolume::OnStateChanged_Implementation(ETerritoryState OldState, E
 
 void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
 {
-	UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All guards defeated in %s — territory is now undefended"),
-		*GetTerritoryTag().ToString());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugGuardDeaths())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All guards defeated in %s — territory is now undefended"),
+			*GetTerritoryTag().ToString());
+	}
 
 	if (HasAuthority())
 	{
@@ -1707,9 +2197,15 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	// unrelated callback before it can refire story mutations or all-defeated logic.
 	if (!KilledActor || !RegisteredDefenders.Contains(KilledActor))
 	{
-		UE_LOG(LogTerritory, VeryVerbose,
-			TEXT("[GuardDeath] Ignoring unregistered or duplicate defender callback in %s"),
-			*GetTerritoryTag().ToString());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugGuardDeaths()
+			&& Settings->IsDebugLevelEnabled(6))
+		{
+			UE_LOG(LogTerritory, Log,
+				TEXT("[GuardDeath] Ignoring unregistered or duplicate defender callback in %s"),
+				*GetTerritoryTag().ToString());
+		}
 		return;
 	}
 
@@ -1818,13 +2314,20 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 				DefenderEventContext.TargetPawn, DefenderEventContext.PlayerController,
 				DefenderEventContext.TalesComponent, &FailedCondition))
 			{
-				UE_LOG(LogTerritory, Verbose,
-					TEXT("[%s] %s skipped on %s because condition '%s' failed"),
-					HookName, *Event->GetGraphDisplayText(), *TerritoryTag.ToString(),
-					*FailedCondition);
+				const UTerritoryDeveloperSettings* Settings =
+					GetDefault<UTerritoryDeveloperSettings>();
+				if (Settings && Settings->ShouldDebugTales()
+					&& Settings->IsDebugLevelEnabled(6))
+				{
+					UE_LOG(LogTerritory, Log,
+						TEXT("[%s] %s skipped on %s because condition '%s' failed"),
+						HookName, *Event->GetGraphDisplayText(), *TerritoryTag.ToString(),
+						*FailedCondition);
+				}
 				continue;
 			}
-			Event->OnActivate(DefenderEventContext.TargetPawn,
+			TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
+			Event->ExecuteEvent(DefenderEventContext.TargetPawn,
 				DefenderEventContext.PlayerController, DefenderEventContext.TalesComponent);
 		}
 	};
@@ -1842,8 +2345,13 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 	CleanupInvalidDefenders();
 	if (RegisteredDefenders.Num() != 0 || HasPendingReserveDeployments()) return;
 
-	UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All defenders defeated in %s"),
-		*GetTerritoryTag().ToString());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugGuardDeaths())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[GuardDeath] All defenders defeated in %s"),
+			*GetTerritoryTag().ToString());
+	}
 	OnAllGuardsDefeated();
 	OnAllGuardsDefeatedDelegate.Broadcast(this);
 	for (UNarrativeEvent* Event : GetAllDefendersDefeatedEvents())
@@ -1854,12 +2362,19 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 			EventContext.TargetPawn, EventContext.PlayerController,
 			EventContext.TalesComponent, &FailedCondition))
 		{
-			UE_LOG(LogTerritory, Verbose,
-				TEXT("[AllDefendersDefeatedEvent] %s skipped on %s because condition '%s' failed"),
-				*Event->GetGraphDisplayText(), *TerritoryTag.ToString(), *FailedCondition);
+			const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			if (Settings && Settings->ShouldDebugTales()
+				&& Settings->IsDebugLevelEnabled(6))
+			{
+				UE_LOG(LogTerritory, Log,
+					TEXT("[AllDefendersDefeatedEvent] %s skipped on %s because condition '%s' failed"),
+					*Event->GetGraphDisplayText(), *TerritoryTag.ToString(), *FailedCondition);
+			}
 			continue;
 		}
-		Event->OnActivate(EventContext.TargetPawn,
+		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
+		Event->ExecuteEvent(EventContext.TargetPawn,
 			EventContext.PlayerController, EventContext.TalesComponent);
 	}
 }
@@ -2129,12 +2644,14 @@ void ATerritoryVolume::ResolveSpawnPointNarrativeOverrides(
 
 void ATerritoryVolume::SpawnGuards()
 {
+	if (ControlMode == ETerritoryControlMode::AggregateOnly) return;
 	SpawnGuardsToCount(GetDesiredGuardCount());
 }
 
 void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly
+		|| !IsAvailableForGameplay()) return;
 	if (bSpawningGuards)
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("SpawnGuards: reentrant call blocked for %s"), *GetTerritoryTag().ToString());
@@ -2219,7 +2736,9 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 
 bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint, bool bRequireConcealment)
 {
-	if (!HasAuthority() || !ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
+	if (!HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly
+		|| !IsAvailableForGameplay()
+		|| !ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
 		OwnershipData.State, OwnershipData.OwningFaction, OwnershipData.ContestingFaction))
 	{
 		return false;
@@ -2319,10 +2838,14 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	}
 	RefreshGarrisonSnapshot();
 
-	UE_LOG(LogTerritory, Log, TEXT("[GuardReserve] 1 replacement spawned at %s for %s (faction=%s)"),
-		SpawnPoint ? *SpawnPoint->GetName() : TEXT("random"),
-		*GetTerritoryTag().ToString(),
-		*OwnerFaction.ToString());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugGuards())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[GuardReserve] 1 replacement spawned at %s for %s (faction=%s)"),
+			SpawnPoint ? *SpawnPoint->GetName() : TEXT("random"),
+			*GetTerritoryTag().ToString(), *OwnerFaction.ToString());
+	}
 	return true;
 }
 
@@ -2897,8 +3420,13 @@ void ATerritoryVolume::DespawnGuards()
 	OwnershipData.DefenderCount = RegisteredDefenders.Num();
 	RefreshGarrisonSnapshot();
 
-	UE_LOG(LogTerritory, Log, TEXT("Despawned all guards for %s"),
-		*GetTerritoryTag().ToString());
+	if (const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+		Settings && Settings->ShouldDebugGuards())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("Despawned all guards for %s"),
+			*GetTerritoryTag().ToString());
+	}
 }
 
 int32 ATerritoryVolume::GetSpawnedGuardCount() const
@@ -2923,6 +3451,10 @@ bool ATerritoryVolume::HasGuardsAlive() const
 TArray<ATerritoryGuardSpawnPoint*> ATerritoryVolume::GetGuardSpawnPoints() const
 {
 	TArray<ATerritoryGuardSpawnPoint*> Result;
+	if (ControlMode == ETerritoryControlMode::AggregateOnly)
+	{
+		return Result;
+	}
 	for (const TObjectPtr<AActor>& Ptr : GuardSpawnPoints)
 	{
 		if (ATerritoryGuardSpawnPoint* SP = Cast<ATerritoryGuardSpawnPoint>(Ptr))
@@ -2983,12 +3515,24 @@ UTerritoryNavigationMarkerComponent* ATerritoryVolume::GetMapMarkerComponent() c
 
 FString ATerritoryVolume::GetDebugString() const
 {
-	return FString::Printf(TEXT("%s | Owner=%s | State=%d | Progress=%.2f | Guards=%d/%d | Defenders=%d"),
+	const UEnum* AvailabilityEnum = StaticEnum<ETerritoryAvailability>();
+	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
+	return FString::Printf(
+		TEXT("%s | Owner=%s | Availability=%s | PoliticalState=%s | Progress=%.2f | Guards=%d/%d | Defenders=%d | Source=%s | Initial=%s/%s"),
 		*TerritoryTag.ToString(),
 		*OwnershipData.OwningFaction.ToString(),
-		static_cast<int32>(OwnershipData.State),
+		AvailabilityEnum ? *AvailabilityEnum->GetDisplayNameTextByValue(
+			static_cast<int64>(OwnershipData.Availability)).ToString() : TEXT("Unknown"),
+		StateEnum ? *StateEnum->GetDisplayNameTextByValue(
+			static_cast<int64>(OwnershipData.State)).ToString() : TEXT("Unknown"),
 		OwnershipData.ControlProgress,
 		GetSpawnedGuardCount(),
 		GetMaxGuardCount(),
-		GetDefenderCount());
+		GetDefenderCount(),
+		bLoadedFromSave ? TEXT("CampaignSave")
+			: HasAuthority() ? TEXT("DefinitionOrGameplay") : TEXT("Replication"),
+		AvailabilityEnum ? *AvailabilityEnum->GetDisplayNameTextByValue(
+			static_cast<int64>(ResolveInitialTerritoryAvailability())).ToString() : TEXT("Unknown"),
+		StateEnum ? *StateEnum->GetDisplayNameTextByValue(
+			static_cast<int64>(ResolveInitialTerritoryState())).ToString() : TEXT("Unknown"));
 }

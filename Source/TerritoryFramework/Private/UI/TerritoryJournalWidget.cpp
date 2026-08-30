@@ -138,10 +138,9 @@ namespace
 			return FString();
 		}
 
-		const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-		return StateEnum
-			? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(District->GetTerritoryState())).ToString()
-			: FString();
+		return UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			District->GetTerritoryAvailability(),
+			District->GetTerritoryState()).ToString();
 	}
 
 	int32 GetLiveEventListRevision(const TArray<FTerritoryLiveEvent>& Events)
@@ -152,6 +151,15 @@ namespace
 			Hash = HashCombineFast(Hash, Event.GetPresentationRevision());
 		}
 		return static_cast<int32>(Hash);
+	}
+
+	FString GetStateOption(ETerritoryState State)
+	{
+		const UEnum* StateEnum = StaticEnum<ETerritoryState>();
+		return StateEnum
+			? StateEnum->GetDisplayNameTextByValue(
+				static_cast<int64>(State)).ToString()
+			: FString();
 	}
 }
 
@@ -249,7 +257,8 @@ void UTerritoryJournalWidget::RefreshEntrySelection()
 		{
 			continue;
 		}
-		const bool bIsSelected = Entry->GetDistrict() == SelectedDistrict.Get();
+		const bool bIsSelected = Entry->GetOperationsView().DistrictTag
+			== SelectedDistrictTag;
 		Entry->SetSelected(bIsSelected);
 		if (!bIsSelected)
 		{
@@ -260,7 +269,6 @@ void UTerritoryJournalWidget::RefreshEntrySelection()
 
 void UTerritoryJournalWidget::SelectDistrict(ATerritoryDistrict* District)
 {
-	bSelectedTerritoryInfoRequested = false;
 	FTerritoryDistrictOperationsView View;
 	if (District && UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		this, District, GetOwningPlayer(), View))
@@ -269,8 +277,35 @@ void UTerritoryJournalWidget::SelectDistrict(ATerritoryDistrict* District)
 		// rows only expand their name-only Place directory and espionage action.
 		bSelectedTerritoryInfoRequested =
 			UTerritoryUIBlueprintLibrary::IsDistrictCapturedOwned(View);
+		UpdateSelectedDistrictView(View);
 	}
-	UpdateSelectedDistrict(District);
+	else
+	{
+		UpdateSelectedDistrictView(FTerritoryDistrictOperationsView());
+	}
+	RefreshEntrySelection();
+}
+
+void UTerritoryJournalWidget::SelectDistrictByTag(FGameplayTag DistrictTag)
+{
+	if (!DistrictTag.IsValid())
+	{
+		UpdateSelectedDistrictView(FTerritoryDistrictOperationsView());
+		RefreshEntrySelection();
+		return;
+	}
+	for (const FTerritoryDistrictOperationsView& View :
+		UTerritoryUIBlueprintLibrary::GetPlayerVisibleDistrictOperationsViews(
+			this, GetOwningPlayer(), ETerritoryOperationsFilter::All))
+	{
+		if (View.DistrictTag != DistrictTag) continue;
+		bSelectedTerritoryInfoRequested =
+			UTerritoryUIBlueprintLibrary::IsDistrictCapturedOwned(View);
+		UpdateSelectedDistrictView(View);
+		RefreshEntrySelection();
+		return;
+	}
+	UpdateSelectedDistrictView(FTerritoryDistrictOperationsView());
 	RefreshEntrySelection();
 }
 
@@ -514,7 +549,7 @@ void UTerritoryJournalWidget::NativeConstruct()
 	RefreshFilterOptions();
 	SetSelectedDetailTab(SelectedDetailTab);
 	RefreshDistrictList();
-	bSelectedTerritoryInfoRequested = SelectedDistrict.IsValid();
+	bSelectedTerritoryInfoRequested = SelectedDistrictTag.IsValid();
 	SetSelectedTerritoryInfoOpen(bSelectedTerritoryInfoRequested);
 	if (Btn_TerritoryTab) Btn_TerritoryTab->SetIsSelected(true);
 	if (Btn_EarningsTab) Btn_EarningsTab->SetIsSelected(false);
@@ -1238,13 +1273,7 @@ void UTerritoryJournalWidget::RefreshFilterOptions()
 	TSet<FString> StateNames;
 	for (const FTerritoryDistrictOperationsView& View : VisibleViews)
 	{
-		ATerritoryDistrict* District = View.District;
-		if (!District)
-		{
-			continue;
-		}
-
-		const FGameplayTag OwnerTag = District->GetOwningFaction();
+		const FGameplayTag OwnerTag = View.OwnerFaction;
 		const FString OwnerName = UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(OwnerTag).ToString();
 		if (!OwnerName.IsEmpty() && !OwnerNames.Contains(OwnerName))
 		{
@@ -1256,7 +1285,7 @@ void UTerritoryJournalWidget::RefreshFilterOptions()
 			}
 		}
 
-		const FString StateName = GetStateOption(District);
+		const FString StateName = GetStateOption(View.TerritoryState);
 		if (!StateName.IsEmpty() && !StateNames.Contains(StateName))
 		{
 			StateNames.Add(StateName);
@@ -1291,12 +1320,6 @@ void UTerritoryJournalWidget::RefreshFilterOptions()
 
 bool UTerritoryJournalWidget::PassesFilters(const FTerritoryDistrictOperationsView& View) const
 {
-	const ATerritoryDistrict* District = View.District;
-	if (!District)
-	{
-		return false;
-	}
-
 	if (!UTerritoryUIBlueprintLibrary::DoesDistrictMatchSearch(View, SearchFilter))
 	{
 		return false;
@@ -1305,7 +1328,7 @@ bool UTerritoryJournalWidget::PassesFilters(const FTerritoryDistrictOperationsVi
 	if (!SelectedOwnerFilter.IsEmpty() && SelectedOwnerFilter != AllOwnersOption)
 	{
 		const FGameplayTag* OwnerTag = OwnerFilterTags.Find(SelectedOwnerFilter);
-		if (!OwnerTag || District->GetOwningFaction() != *OwnerTag)
+		if (!OwnerTag || View.OwnerFaction != *OwnerTag)
 		{
 			return false;
 		}
@@ -1313,7 +1336,7 @@ bool UTerritoryJournalWidget::PassesFilters(const FTerritoryDistrictOperationsVi
 
 	const bool bPassesState = SelectedStateFilter.IsEmpty()
 		|| SelectedStateFilter == AllStatesOption
-		|| SelectedStateFilter == GetStateOption(District);
+		|| SelectedStateFilter == GetStateOption(View.TerritoryState);
 	return bPassesState
 		&& UTerritoryUIBlueprintLibrary::DoesDistrictMatchFilter(View, SelectedOperationsFilter);
 }
@@ -1359,7 +1382,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	}
 
 	int32 VisibleCount = 0;
-	ATerritoryDistrict* FirstOwnedDistrict = nullptr;
+	FGameplayTag FirstOwnedDistrictTag;
 	bool bSelectedStillVisible = false;
 	FGameplayTag LastDirectoryCity;
 	bool bHasDirectoryHeading = false;
@@ -1370,12 +1393,12 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 			continue;
 		}
 
-		if (!FirstOwnedDistrict
+		if (!FirstOwnedDistrictTag.IsValid()
 			&& UTerritoryUIBlueprintLibrary::IsDistrictCapturedOwned(View))
 		{
-			FirstOwnedDistrict = View.District;
+			FirstOwnedDistrictTag = View.DistrictTag;
 		}
-		bSelectedStillVisible |= SelectedDistrict.Get() == View.District;
+		bSelectedStillVisible |= SelectedDistrictTag == View.DistrictTag;
 		++VisibleCount;
 
 		if (DistrictList)
@@ -1410,16 +1433,37 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 	}
 	if (VisibleCount <= 0)
 	{
-		UpdateSelectedDistrict(nullptr);
+		UpdateSelectedDistrictView(FTerritoryDistrictOperationsView());
 	}
-	else if (!SelectedDistrict.IsValid() || !bSelectedStillVisible)
+	else if (!SelectedDistrictTag.IsValid() || !bSelectedStillVisible)
 	{
-		bSelectedTerritoryInfoRequested = FirstOwnedDistrict != nullptr;
-		UpdateSelectedDistrict(FirstOwnedDistrict);
+		bSelectedTerritoryInfoRequested = FirstOwnedDistrictTag.IsValid();
+		if (FirstOwnedDistrictTag.IsValid())
+		{
+			for (const FTerritoryDistrictOperationsView& View : AllViews)
+			{
+				if (View.DistrictTag == FirstOwnedDistrictTag)
+				{
+					UpdateSelectedDistrictView(View);
+					break;
+				}
+			}
+		}
+		else
+		{
+			UpdateSelectedDistrictView(FTerritoryDistrictOperationsView());
+		}
 	}
-	else if (SelectedDistrict.IsValid())
+	else
 	{
-		UpdateSelectedDistrict(SelectedDistrict.Get());
+		for (const FTerritoryDistrictOperationsView& View : AllViews)
+		{
+			if (View.DistrictTag == SelectedDistrictTag)
+			{
+				UpdateSelectedDistrictView(View);
+				break;
+			}
+		}
 	}
 
 	if (Text_FilterSummary)
@@ -1512,11 +1556,12 @@ UTerritoryDistrictRowWidget* UTerritoryJournalWidget::CreateOperationsRow(
 	if (Row)
 	{
 		Row->InitializeOperationsView(View);
-		const bool bIsSelected = SelectedDistrict.Get() == View.District;
+		const bool bIsSelected = SelectedDistrictTag == View.DistrictTag;
 		Row->SetSelected(bIsSelected);
 		Row->SetExpanded(bIsSelected
 			&& (bSelectedTerritoryInfoRequested || !View.bOwnedByViewer));
-		Row->OnDistrictSelected.AddUniqueDynamic(this, &UTerritoryJournalWidget::HandleDistrictSelected);
+		Row->OnDistrictTagSelected.AddUniqueDynamic(
+			this, &UTerritoryJournalWidget::HandleDistrictTagSelected);
 		Row->OnGuardActionRequested.AddUniqueDynamic(this, &UTerritoryJournalWidget::HandleGuardActionRequested);
 		Row->OnWaypointRequested.AddUniqueDynamic(
 			this, &UTerritoryJournalWidget::HandleWaypointRequested);
@@ -1661,14 +1706,6 @@ UTextBlock* UTerritoryJournalWidget::CreateHierarchyTextRow(
 void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
 	const FTerritoryDistrictOperationsView& View)
 {
-	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-	auto GetStateText = [StateEnum](ETerritoryState State)
-	{
-		return StateEnum
-			? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(State))
-			: FText::GetEmpty();
-	};
-
 	const FText CityName = View.CityDisplayName.IsEmpty()
 		? NSLOCTEXT("TerritoryJournal", "IndependentCity", "Independent")
 		: View.CityDisplayName;
@@ -1684,7 +1721,8 @@ void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
 			NSLOCTEXT("TerritoryJournal", "SelectedOverview",
 				"Owner: {0}\nState: {1}\nPlaces controlled: {2} / {3}\nDiscovered: {4}  |  Hidden: {5}\nControl pressure: {6}%\n{7}"),
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.OwnerFaction),
-			GetStateText(View.TerritoryState),
+			UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+				View.Availability, View.TerritoryState),
 			FText::AsNumber(View.OwnedProperties),
 			FText::AsNumber(View.TotalProperties),
 			FText::AsNumber(View.KnownProperties),
@@ -1729,7 +1767,8 @@ void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
 					"PLACE  /  {0}\nOwner {1}  |  {2}\nGuards {3}/{4}/{5}  |  Net {6}"),
 				Place.DisplayName,
 				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Place.OwnerFaction),
-				GetStateText(Place.TerritoryState),
+				UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+					Place.Availability, Place.TerritoryState),
 				FText::AsNumber(Place.ActiveGuards), FText::AsNumber(Place.DesiredGuards),
 				FText::AsNumber(Place.MaximumGuards), FText::AsNumber(Place.NetIncome));
 			if (UTextBlock* Row = CreateHierarchyTextRow(PlaceText,
@@ -1792,8 +1831,23 @@ void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
 
 void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* District)
 {
-	SelectedDistrict = District;
-	if (!District)
+	FTerritoryDistrictOperationsView View;
+	if (District && UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
+		this, District, GetOwningPlayer(), View))
+	{
+		UpdateSelectedDistrictView(View);
+		return;
+	}
+	UpdateSelectedDistrictView(FTerritoryDistrictOperationsView());
+}
+
+void UTerritoryJournalWidget::UpdateSelectedDistrictView(
+	const FTerritoryDistrictOperationsView& View)
+{
+	SelectedDistrict = View.District;
+	SelectedDistrictTag = View.DistrictTag;
+	CachedSelectedDistrictView = View;
+	if (!View.DistrictTag.IsValid())
 	{
 		bSelectedTerritoryInfoRequested = false;
 		SetSelectedTerritoryInfoOpen(false);
@@ -1823,12 +1877,6 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 		if (Btn_CommandRemoveFiveGuards) Btn_CommandRemoveFiveGuards->SetIsEnabled(false);
 		return;
 	}
-	FTerritoryDistrictOperationsView View;
-	if (!UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
-		this, District, GetOwningPlayer(), View))
-	{
-		return;
-	}
 	RefreshGarrisonManagementControls(View);
 	RefreshSelectedHierarchyPanels(View);
 
@@ -1847,10 +1895,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrict(ATerritoryDistrict* Distric
 		SelectedTitle->SetText(View.DisplayName);
 	}
 
-	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-	const FText StateText = StateEnum
-		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(View.TerritoryState))
-		: FText::GetEmpty();
+	const FText StateText = UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+		View.Availability, View.TerritoryState);
 	const FLinearColor SelectedAccent =
 		(View.bUnderAttack || View.bAttackScheduled || View.bThreatPreviewAvailable)
 			? FLinearColor(1.f, 0.25f, 0.16f, 1.f)
@@ -2431,7 +2477,7 @@ void UTerritoryJournalWidget::HandleDiplomacyDetailTabClicked()
 
 void UTerritoryJournalWidget::HandleTerritoryTabClicked()
 {
-	bSelectedTerritoryInfoRequested = SelectedDistrict.IsValid();
+	bSelectedTerritoryInfoRequested = SelectedDistrictTag.IsValid();
 	SetSelectedTerritoryInfoOpen(bSelectedTerritoryInfoRequested);
 	if (TabSwitcher)
 	{
@@ -2619,6 +2665,11 @@ void UTerritoryJournalWidget::HandleDistrictSelected(ATerritoryDistrict* Distric
 	SelectDistrict(District);
 }
 
+void UTerritoryJournalWidget::HandleDistrictTagSelected(FGameplayTag DistrictTag)
+{
+	SelectDistrictByTag(DistrictTag);
+}
+
 void UTerritoryJournalWidget::HandleGuardActionRequested(ATerritoryDistrict* District, int32 Delta)
 {
 	if (!District || Delta == 0)
@@ -2678,9 +2729,25 @@ void UTerritoryJournalWidget::HandleGuardManagementResult(
 FTerritoryDistrictOperationsView UTerritoryJournalWidget::GetSelectedDistrictOperationsView() const
 {
 	FTerritoryDistrictOperationsView View;
-	UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
-		this, SelectedDistrict.Get(), GetOwningPlayer(), View);
-	return View;
+	if (SelectedDistrict.IsValid()
+		&& UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
+			this, SelectedDistrict.Get(), GetOwningPlayer(), View))
+	{
+		return View;
+	}
+	if (SelectedDistrictTag.IsValid())
+	{
+		for (const FTerritoryDistrictOperationsView& Candidate :
+			UTerritoryUIBlueprintLibrary::GetPlayerVisibleDistrictOperationsViews(
+				this, GetOwningPlayer(), ETerritoryOperationsFilter::All))
+		{
+			if (Candidate.DistrictTag == SelectedDistrictTag)
+			{
+				return Candidate;
+			}
+		}
+	}
+	return CachedSelectedDistrictView;
 }
 
 void UTerritoryJournalWidget::SetOperationsFilter(ETerritoryOperationsFilter Filter)

@@ -27,7 +27,10 @@ void UTerritoryRegistrySubsystem::Initialize(FSubsystemCollectionBase& Collectio
 			true);
 	}
 
-	UE_LOG(LogTerritory, Log, TEXT("TerritoryRegistrySubsystem initialized (spatial cell: %.0fu)"), CellSize);
+	if (Settings && Settings->ShouldDebugRegistry())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Registry] subsystem initialized (spatial cell: %.0fu)"), CellSize);
+	}
 }
 
 void UTerritoryRegistrySubsystem::Deinitialize()
@@ -144,9 +147,12 @@ ETerritoryRegistrationResult UTerritoryRegistrySubsystem::RegisterTerritory(ATer
 	SpatialIndex.Insert(Territory);
 
 	OnTerritoryRegistered.Broadcast(Territory, false);
-	UE_LOG(LogTerritory, Log, TEXT("Registered territory: %s (tag: %s, GUID: %s, cells: %d)"),
-		*Territory->GetName(), *Tag.ToString(), *GUID.ToString(),
-		SpatialIndex.GetCellCount());
+	if (bDebug)
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[Registry] Registered territory: %s (tag: %s, GUID: %s, cells: %d)"),
+			*Territory->GetName(), *Tag.ToString(), *GUID.ToString(),
+			SpatialIndex.GetCellCount());
+	}
 
 	return ETerritoryRegistrationResult::Success;
 }

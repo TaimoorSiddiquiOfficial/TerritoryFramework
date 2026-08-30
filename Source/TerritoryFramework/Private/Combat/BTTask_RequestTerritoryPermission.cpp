@@ -74,7 +74,7 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::ExecuteTask(UBehaviorTre
 	BB->SetValueAsBool(bPermissionGrantedKey.SelectedKeyName, bGranted);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	if (Settings && Settings->IsDebugEnabled())
+	if (Settings && Settings->ShouldDebugBT())
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[BT] RequestPermission: %s → %s (%s)"),
 			*Territory->GetTerritoryTag().ToString(),
@@ -125,7 +125,7 @@ EBTNodeResult::Type UBTTask_RequestTerritoryPermission::AbortTask(UBehaviorTreeC
 		Director->ReleaseAssaultSlot(Territory, NPCController);
 
 		const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-		if (Settings && Settings->IsDebugEnabled())
+		if (Settings && Settings->ShouldDebugBT())
 		{
 			UE_LOG(LogTerritory, Log, TEXT("[BT] RequestPermission ABORTED — released slot for %s (%s)"),
 				*Territory->GetTerritoryTag().ToString(),

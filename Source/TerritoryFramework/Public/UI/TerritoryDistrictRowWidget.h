@@ -14,6 +14,7 @@ class UNarrativeCommonButtonBase;
 class UNarrativeCommonTextBlock;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryDistrictRowSelected, ATerritoryDistrict*, District);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryDistrictTagSelected, FGameplayTag, DistrictTag);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTerritoryGuardActionRequested, ATerritoryDistrict*, District, int32, Delta);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryWaypointRequested, ATerritoryDistrict*, District);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryEspionageRequested, ATerritoryDistrict*, District);
@@ -60,6 +61,10 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryDistrictRowSelected OnDistrictSelected;
+
+	/** Stable selection event that also works while the District actor is streamed out. */
+	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
+	FOnTerritoryDistrictTagSelected OnDistrictTagSelected;
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryGuardActionRequested OnGuardActionRequested;

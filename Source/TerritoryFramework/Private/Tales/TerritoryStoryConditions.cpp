@@ -12,12 +12,12 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TalesComponent.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 namespace
 {
-	ATerritoryVolume* ResolveLoadedTerritory(const UObject* Context, const FGameplayTag& Tag)
+	ATerritoryVolume* ResolveLoadedTerritory(UWorld* World, const FGameplayTag& Tag)
 	{
-		UWorld* World = Context ? Context->GetWorld() : nullptr;
 		UTerritoryRegistrySubsystem* Registry = World
 			? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 		return Registry && Tag.IsValid() ? Registry->GetTerritoryByTag(Tag) : nullptr;
@@ -122,9 +122,12 @@ UTerritoryStateCondition::UTerritoryStateCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryStateCondition::CheckCondition_Implementation(APawn*, APlayerController*, UTalesComponent*)
+bool UTerritoryStateCondition::CheckCondition_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	const ATerritoryVolume* Territory = ResolveLoadedTerritory(this, TerritoryToCheck);
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	const ATerritoryVolume* Territory = ResolveLoadedTerritory(World, TerritoryToCheck);
 	return Territory && Territory->GetTerritoryState() == RequiredState;
 }
 
@@ -154,9 +157,12 @@ bool UTerritoryControlProgressCondition::CompareValues(float ActualValue,
 	}
 }
 
-bool UTerritoryControlProgressCondition::CheckCondition_Implementation(APawn*, APlayerController*, UTalesComponent*)
+bool UTerritoryControlProgressCondition::CheckCondition_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	const ATerritoryVolume* Territory = ResolveLoadedTerritory(this, TerritoryToCheck);
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	const ATerritoryVolume* Territory = ResolveLoadedTerritory(World, TerritoryToCheck);
 	return Territory && CompareValues(Territory->GetControlProgress() * 100.f, Comparison,
 		FMath::Clamp(ProgressPercent, 0.f, 100.f), FMath::Max(0.f, EqualityTolerancePercent));
 }
@@ -173,9 +179,11 @@ UTerritoryReputationCondition::UTerritoryReputationCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryReputationCondition::CheckCondition_Implementation(APawn*, APlayerController*, UTalesComponent*)
+bool UTerritoryReputationCondition::CheckCondition_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	const UTerritoryDiplomacySubsystem* Diplomacy = World
 		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
 	return Diplomacy && Faction.IsValid()
@@ -194,9 +202,10 @@ UTerritoryFactionDistrictHoldingCondition::UTerritoryFactionDistrictHoldingCondi
 }
 
 bool UTerritoryFactionDistrictHoldingCondition::CheckCondition_Implementation(
-	APawn*, APlayerController*, UTalesComponent*)
+	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	const UTerritoryCounterAttackSubsystem* Counter = World
 		? World->GetSubsystem<UTerritoryCounterAttackSubsystem>() : nullptr;
 	return Counter && Faction.IsValid()
@@ -248,14 +257,16 @@ const FTerritoryAssaultRecord* UTerritoryAssaultCondition::SelectLatestRecord(
 	return Best;
 }
 
-bool UTerritoryAssaultCondition::CheckCondition_Implementation(APawn*, APlayerController*, UTalesComponent*)
+bool UTerritoryAssaultCondition::CheckCondition_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	const UTerritoryCounterAttackSubsystem* Counter = World
 		? World->GetSubsystem<UTerritoryCounterAttackSubsystem>() : nullptr;
 	if (!Counter || !TerritoryToCheck.IsValid()) return false;
 
-	const ATerritoryVolume* LoadedTerritory = ResolveLoadedTerritory(this, TerritoryToCheck);
+	const ATerritoryVolume* LoadedTerritory = ResolveLoadedTerritory(World, TerritoryToCheck);
 	const TArray<FTerritoryAssaultRecord> Records = LoadedTerritory
 		? Counter->GetAssaultsForTerritoryActor(LoadedTerritory)
 		: Counter->GetAssaultsForTerritory(TerritoryToCheck);
@@ -308,10 +319,11 @@ UTerritoryPresenceCondition::UTerritoryPresenceCondition()
 }
 
 bool UTerritoryPresenceCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent*)
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	APawn* ContextPawn = Target ? Target : (Controller ? Controller->GetPawn().Get() : nullptr);
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	UTerritoryRegistrySubsystem* Registry = World
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	if (!ContextPawn || !Registry || !TerritoryToCheck.IsValid()) return false;
@@ -339,9 +351,11 @@ UTerritoryProductionStatusCondition::UTerritoryProductionStatusCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryProductionStatusCondition::CheckCondition_Implementation(APawn*, APlayerController*, UTalesComponent*)
+bool UTerritoryProductionStatusCondition::CheckCondition_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	const UTerritoryEconomySubsystem* Economy = World
 		? World->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
 	if (!Economy || !TerritoryToCheck.IsValid()) return false;
@@ -368,9 +382,11 @@ UTerritoryResourceCondition::UTerritoryResourceCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryResourceCondition::CheckCondition_Implementation(APawn*, APlayerController*, UTalesComponent*)
+bool UTerritoryResourceCondition::CheckCondition_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	const UTerritoryEconomySubsystem* Economy = World
 		? World->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
 	if (!Economy || !Faction.IsValid() || !ResourceItem) return false;

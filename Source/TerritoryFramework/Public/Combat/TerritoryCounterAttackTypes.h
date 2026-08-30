@@ -58,7 +58,7 @@ enum class ETerritoryAssaultResolution : uint8
 	QuestRuleBlocked UMETA(DisplayName="Narrative Quest Rule Blocked",
 		ToolTip="A pending strategic counterattack was cancelled because its Narrative quest rules no longer passed."),
 	StagingDistrictUnavailable UMETA(DisplayName="No Secure Staging District",
-		ToolTip="The attacking faction no longer owns a loaded District in Claimed or story-Locked state, so an undeployed strategic counterattack cannot continue.")
+		ToolTip="The attacking faction no longer owns a loaded, unlocked District whose complete authored Place set is secure, so an undeployed strategic counterattack cannot continue.")
 };
 
 /** Why an assault was admitted. Story pursuit is explicit and never selected by normal strategy. */
@@ -78,7 +78,7 @@ enum class ETerritoryAssaultStagingRequirement : uint8
 	None UMETA(DisplayName="No Territory Holding Required",
 		ToolTip="Use only for forces that should not depend on domination holdings."),
 	OwnsSecureDistrict UMETA(DisplayName="Owns At Least One Secure District",
-		ToolTip="The faction must own at least one loaded District in Claimed or story-Locked state. Example: a Locked Bandit base still supports normal counters, but a Contested or Unclaimed District does not.")
+		ToolTip="The faction must own at least one loaded, unlocked District whose complete authored Place set is secure. Example: Bandits may counter from Castle Hill only after every unlocked Place there is securely Bandit-owned. Locked, partial, Contested, and Unclaimed Districts do not count.")
 };
 
 /** Editor-authored, typed ingress point stored relative to its Territory actor. */
@@ -93,11 +93,11 @@ struct FTerritoryAssaultApproach
 	FName ApproachID;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack",
-		meta=(ToolTip="Meaning of this route for UI and project rules. It does not replace navigation validation."))
+		meta=(ToolTip="Meaning of this Place ingress route for UI and project rules. It does not replace navigation validation."))
 	ETerritoryAttackApproachType Type = ETerritoryAttackApproachType::Road;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack",
-		meta=(ToolTip="Spawn point relative to the Territory actor. Example: 2,000 cm west of the District center."))
+		meta=(ToolTip="Spawn point relative to the Place actor. Example: 2,000 cm west of the Blacksmith entrance."))
 	FTransform RelativeSpawnTransform;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack",
@@ -179,7 +179,7 @@ struct FTerritoryFactionAssaultConfig
 
 	/** Domination holding needed for ordinary strategic counters. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Staging",
-		meta=(ToolTip="Normal strategic admission rule. Recommended: require one loaded District in Claimed or story-Locked state so a defeated faction with no secure District cannot keep launching counters."))
+		meta=(ToolTip="Normal strategic admission rule. Recommended: require one loaded, unlocked District fully secured through its authored Places, so a defeated faction with no operational holding cannot keep launching counters."))
 	ETerritoryAssaultStagingRequirement StagingRequirement =
 		ETerritoryAssaultStagingRequirement::OwnsSecureDistrict;
 

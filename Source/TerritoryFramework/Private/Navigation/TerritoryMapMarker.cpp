@@ -111,6 +111,7 @@ void UTerritoryMapMarker::SetTerritoryVolume(ATerritoryVolume* InTerritory)
 	// Subscribe to ownership and state changes for auto-refresh
 	InTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
 	InTerritory->OnTerritoryStateChangedDelegate.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
+	InTerritory->OnTerritoryAvailabilityChanged.AddDynamic(this, &UTerritoryMapMarker::OnTerritoryAvailabilityChanged);
 
 	RefreshTerritoryPresentation();
 }
@@ -132,6 +133,7 @@ void UTerritoryMapMarker::ClearTerritoryBinding()
 	{
 		TerritoryVolume->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryChanged);
 		TerritoryVolume->OnTerritoryStateChangedDelegate.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryStateChanged);
+		TerritoryVolume->OnTerritoryAvailabilityChanged.RemoveDynamic(this, &UTerritoryMapMarker::OnTerritoryAvailabilityChanged);
 	}
 	TerritoryVolume = nullptr;
 	ActorOwner = nullptr;
@@ -156,6 +158,12 @@ void UTerritoryMapMarker::OnTerritoryStateChanged(ATerritoryVolume* Territory, E
 		UE_LOG(LogTerritory, Log, TEXT("[Marker] Refresh: %s state → %d"),
 			*Territory->GetTerritoryTag().ToString(), static_cast<int32>(NewState));
 	}
+	RefreshTerritoryPresentation();
+}
+
+void UTerritoryMapMarker::OnTerritoryAvailabilityChanged(
+	ATerritoryVolume* Territory, ETerritoryAvailability NewAvailability)
+{
 	RefreshTerritoryPresentation();
 }
 

@@ -44,9 +44,11 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/** Loaded District actors authored by the City Definition, in Definition order. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	TArray<ATerritoryVolume*> GetDistricts() const;
 
+	/** Total authored District slots, including children currently streamed out. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	int32 GetDistrictCount() const;
 
@@ -100,14 +102,16 @@ private:
 	void OnDistrictControlChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
 	UFUNCTION()
+	void OnDistrictStateChanged(ATerritoryVolume* District, ETerritoryState NewState);
+
+	UFUNCTION()
+	void OnDistrictAvailabilityChanged(ATerritoryVolume* District, ETerritoryAvailability NewAvailability);
+
+	UFUNCTION()
 	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 
 	void BindToDistrict(ATerritoryVolume* District);
-
-	void CascadeCaptureToProperties(ATerritoryVolume* District, FGameplayTag NewOwner);
-
-	/** Prevents OnCityLost from firing multiple times for the same loss episode. */
-	bool bCityLostFired = false;
+	void ReconcileDerivedControl(ATerritoryVolume* ChangedDistrict = nullptr);
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -128,6 +132,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	ATerritoryCity* GetOwningCity() const;
 
+	/** Loaded Place actors authored by the District Definition, in Definition order. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	TArray<ATerritoryVolume*> GetProperties() const;
 
@@ -174,9 +179,16 @@ private:
 	void OnPropertyControlChanged(ATerritoryVolume* Property, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
 	UFUNCTION()
+	void OnPropertyStateChanged(ATerritoryVolume* Property, ETerritoryState NewState);
+
+	UFUNCTION()
+	void OnPropertyAvailabilityChanged(ATerritoryVolume* Property, ETerritoryAvailability NewAvailability);
+
+	UFUNCTION()
 	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 
 	void BindToProperty(ATerritoryVolume* Property);
+	void ReconcileDerivedControl(ATerritoryVolume* ChangedProperty = nullptr);
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -194,6 +206,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/** Exact authored District. Returns null rather than guessing from tag prefixes. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	ATerritoryDistrict* GetOwningDistrict() const;
 
@@ -242,15 +255,6 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory|Property")
 	void OnPropertyCaptured(FGameplayTag NewOwner);
 	virtual void OnPropertyCaptured_Implementation(FGameplayTag NewOwner);
-
-	/** Late-binding support — listens for districts registered after this property. */
-	UFUNCTION()
-	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
-
-	void BindToOwningDistrict(class ATerritoryDistrict* District);
-
-	UFUNCTION()
-	void OnDistrictOwnershipChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
 protected:
 	// Override base class ownership change to invoke property-specific side effects

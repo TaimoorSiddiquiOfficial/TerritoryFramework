@@ -89,7 +89,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	FString GetAssaultDebugString(FGuid AssaultID) const;
 
-	/** Loaded, authoritative Districts securely held in Claimed or story-Locked state. */
+	/** Loaded, unlocked Districts whose complete authored Place set is securely held. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack|Staging")
 	int32 GetSecureDistrictCountForFaction(FGameplayTag Faction) const;
 

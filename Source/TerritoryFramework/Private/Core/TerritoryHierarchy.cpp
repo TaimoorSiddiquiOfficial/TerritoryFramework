@@ -1,5 +1,7 @@
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -9,10 +11,229 @@
 
 namespace
 {
-	FGameplayTag GetSecureClaimedOwner(const ATerritoryVolume* Territory)
+	bool ShouldLogHierarchyOwnership()
 	{
-		return Territory && Territory->GetTerritoryState() == ETerritoryState::Claimed
-			? Territory->GetOwningFaction() : FGameplayTag();
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		return Settings && Settings->ShouldDebugOwnership();
+	}
+
+	bool ShouldLogPropertyEconomy()
+	{
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		return Settings && Settings->ShouldDebugEconomy();
+	}
+
+	struct FChildControlView
+	{
+		FGameplayTag Owner;
+		ETerritoryState State = ETerritoryState::Unclaimed;
+		ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
+	};
+
+	TArray<FGameplayTag> GetExpectedChildTags(const ATerritoryVolume* Parent)
+	{
+		TArray<FGameplayTag> Result;
+		if (!Parent) return Result;
+		if (const UTerritoryCityDefinition* CityDefinition =
+			Cast<UTerritoryCityDefinition>(Parent->GetTerritoryDefinition()))
+		{
+			Result.Reserve(CityDefinition->Districts.Num());
+			for (const UTerritoryDistrictDefinition* District : CityDefinition->Districts)
+			{
+				Result.Add(District ? District->TerritoryTag : FGameplayTag());
+			}
+			return Result;
+		}
+		if (const UTerritoryDistrictDefinition* DistrictDefinition =
+			Cast<UTerritoryDistrictDefinition>(Parent->GetTerritoryDefinition()))
+		{
+			Result.Reserve(DistrictDefinition->Places.Num());
+			for (const UTerritoryPlaceDefinition* Place : DistrictDefinition->Places)
+			{
+				Result.Add(Place ? Place->TerritoryTag : FGameplayTag());
+			}
+		}
+		return Result;
+	}
+
+	bool IsExpectedAuthoredChild(const ATerritoryVolume* Parent,
+		const ATerritoryVolume* Child)
+	{
+		if (!Parent || !Child
+			|| Child->GetParentTerritoryTag() != Parent->GetTerritoryTag()
+			|| !GetExpectedChildTags(Parent).Contains(Child->GetTerritoryTag()))
+		{
+			return false;
+		}
+		if (Parent->IsA<ATerritoryCity>())
+		{
+			return Child->IsA<ATerritoryDistrict>() && !Child->IsA<ATerritoryCity>();
+		}
+		if (Parent->IsA<ATerritoryDistrict>())
+		{
+			return Child->IsA<ATerritoryProperty>();
+		}
+		return false;
+	}
+
+	TArray<ATerritoryVolume*> GetLoadedAuthoredChildren(
+		const ATerritoryVolume* Parent)
+	{
+		TArray<ATerritoryVolume*> Result;
+		if (!Parent || !Parent->GetWorld()) return Result;
+		const UTerritoryRegistrySubsystem* Registry =
+			Parent->GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+		if (!Registry) return Result;
+
+		TSet<FGameplayTag> SeenTags;
+		for (const FGameplayTag& ChildTag : GetExpectedChildTags(Parent))
+		{
+			if (!ChildTag.IsValid() || SeenTags.Contains(ChildTag)) continue;
+			SeenTags.Add(ChildTag);
+			ATerritoryVolume* Child = Registry->GetTerritoryByTag(ChildTag);
+			if (IsExpectedAuthoredChild(Parent, Child)) Result.Add(Child);
+		}
+		return Result;
+	}
+
+	const ATerritoryVolume* FindLoadedExpectedChild(
+		TConstArrayView<ATerritoryVolume*> LoadedChildren,
+		const FGameplayTag& ExpectedTag)
+	{
+		if (!ExpectedTag.IsValid()) return nullptr;
+		for (const ATerritoryVolume* Child : LoadedChildren)
+		{
+			if (Child && Child->GetTerritoryTag() == ExpectedTag) return Child;
+		}
+		return nullptr;
+	}
+
+	bool ResolveExpectedChildControl(const ATerritoryVolume* Parent,
+		TConstArrayView<ATerritoryVolume*> LoadedChildren,
+		const FGameplayTag& ExpectedTag, FChildControlView& OutView)
+	{
+		if (!Parent || !ExpectedTag.IsValid()) return false;
+		if (const ATerritoryVolume* Child = FindLoadedExpectedChild(
+			LoadedChildren, ExpectedTag))
+		{
+			OutView.Owner = Child->GetOwningFaction();
+			OutView.State = Child->GetTerritoryState();
+			OutView.Availability = Child->IsLocked()
+				? ETerritoryAvailability::Locked : ETerritoryAvailability::Unlocked;
+			return true;
+		}
+
+		// WorldState is the durable read model for an authored child that World
+		// Partition has unloaded. Without an exact summary, fail closed.
+		if (const ATerritoryWorldState* WorldState =
+			ATerritoryWorldState::FindTerritoryWorldState(Parent))
+		{
+			const FReplicatedCaptureSummary Summary =
+				WorldState->GetCaptureSummary(ExpectedTag);
+			if (Summary.TerritoryTag == ExpectedTag)
+			{
+				OutView.Owner = Summary.CurrentOwner;
+				OutView.State = Summary.State;
+				OutView.Availability = Summary.Availability;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	FGameplayTag GetSecureClaimedOwner(const FChildControlView& View)
+	{
+		return View.Availability == ETerritoryAvailability::Unlocked
+			&& View.State == ETerritoryState::Claimed && View.Owner.IsValid()
+			? View.Owner : FGameplayTag();
+	}
+
+	TArray<FGameplayTag> BuildExpectedSecureOwners(const ATerritoryVolume* Parent,
+		const TArray<ATerritoryVolume*>& LoadedChildren)
+	{
+		TArray<FGameplayTag> Owners;
+		const TArray<FGameplayTag> ExpectedTags = GetExpectedChildTags(Parent);
+		Owners.Reserve(ExpectedTags.Num());
+		TSet<FGameplayTag> SeenTags;
+		for (const FGameplayTag& ExpectedTag : ExpectedTags)
+		{
+			if (!ExpectedTag.IsValid() || SeenTags.Contains(ExpectedTag))
+			{
+				Owners.Add(FGameplayTag());
+				continue;
+			}
+			SeenTags.Add(ExpectedTag);
+			FChildControlView View;
+			Owners.Add(ResolveExpectedChildControl(Parent, LoadedChildren,
+				ExpectedTag, View) ? GetSecureClaimedOwner(View) : FGameplayTag());
+		}
+		return Owners;
+	}
+
+	struct FDerivedHierarchyControl
+	{
+		FGameplayTag SecuredOwner;
+		ETerritoryState State = ETerritoryState::Unclaimed;
+	};
+
+	FDerivedHierarchyControl ReduceChildControl(const ATerritoryVolume* Parent,
+		const TArray<ATerritoryVolume*>& LoadedChildren)
+	{
+		FDerivedHierarchyControl Result;
+		const TArray<FGameplayTag> ExpectedTags = GetExpectedChildTags(Parent);
+		if (ExpectedTags.IsEmpty())
+		{
+			return Result;
+		}
+
+		FGameplayTag CommonOwner;
+		bool bAllSecure = true;
+		bool bAnyPoliticalControl = false;
+		TSet<FGameplayTag> SeenTags;
+		for (const FGameplayTag& ExpectedTag : ExpectedTags)
+		{
+			if (!ExpectedTag.IsValid() || SeenTags.Contains(ExpectedTag))
+			{
+				bAllSecure = false;
+				continue;
+			}
+			SeenTags.Add(ExpectedTag);
+			FChildControlView Child;
+			if (!ResolveExpectedChildControl(Parent, LoadedChildren, ExpectedTag, Child))
+			{
+				// World Partition and invalid hierarchy references fail closed. An
+				// unrelated actor with the same parent can never replace this tag.
+				bAllSecure = false;
+				continue;
+			}
+
+			const FGameplayTag ChildOwner = Child.Owner;
+			bAnyPoliticalControl |= ChildOwner.IsValid()
+				|| Child.State == ETerritoryState::Contested;
+			if (Child.Availability == ETerritoryAvailability::Locked
+				|| Child.State != ETerritoryState::Claimed
+				|| !ChildOwner.IsValid())
+			{
+				bAllSecure = false;
+				continue;
+			}
+
+			if (!CommonOwner.IsValid()) CommonOwner = ChildOwner;
+			else if (CommonOwner != ChildOwner) bAllSecure = false;
+		}
+
+		if (bAllSecure && CommonOwner.IsValid())
+		{
+			Result.SecuredOwner = CommonOwner;
+			Result.State = ETerritoryState::Claimed;
+		}
+		else if (bAnyPoliticalControl)
+		{
+			Result.State = ETerritoryState::Contested;
+		}
+		return Result;
 	}
 }
 
@@ -76,23 +297,16 @@ void ATerritoryCity::BeginPlay()
 		// Bind to registry for late-registered districts (World Partition, streaming)
 		// P1-N06: AddUniqueDynamic prevents duplicate bindings on PIE restart
 		Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryCity::OnTerritoryRegistered);
+		Registry->OnTerritoryUnregistered.AddUniqueDynamic(this, &ATerritoryCity::OnTerritoryRegistered);
 
 		// Bind to currently registered districts
-		TArray<ATerritoryVolume*> Districts = Registry->GetChildTerritories(GetTerritoryTag());
+		TArray<ATerritoryVolume*> Districts = GetDistricts();
 		for (ATerritoryVolume* District : Districts)
 		{
 			BindToDistrict(District);
 		}
 
-		// Reconcile derived state from already-registered children (World Partition / save-load order)
-		if (!Districts.IsEmpty())
-		{
-			FGameplayTag MajorityOwner = GetMajorityOwner();
-			if (MajorityOwner.IsValid() && AllDistrictsOwnedBy(MajorityOwner) && GetOwningFaction() != MajorityOwner)
-			{
-				SetDerivedOwningFaction(MajorityOwner);
-			}
-		}
+		ReconcileDerivedControl();
 	}
 }
 
@@ -102,17 +316,18 @@ void ATerritoryCity::BindToDistrict(ATerritoryVolume* District)
 
 	// Check if already bound to avoid double-binding
 	District->OnTerritoryOwnershipChanged.AddUniqueDynamic(this, &ATerritoryCity::OnDistrictControlChanged);
+	District->OnTerritoryStateChangedDelegate.AddUniqueDynamic(this, &ATerritoryCity::OnDistrictStateChanged);
+	District->OnTerritoryAvailabilityChanged.AddUniqueDynamic(this, &ATerritoryCity::OnDistrictAvailabilityChanged);
 }
 
 void ATerritoryCity::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
 {
-	if (bWasUnregistered) return;
-
-	// Check if this territory is a child of this city
-	FGameplayTag ChildParent = Territory->GetParentTerritoryTag();
-	if (ChildParent == GetTerritoryTag())
+	// Definitions are the only hierarchy authority. A runtime actor cannot join a
+	// City merely by claiming its parent tag.
+	if (IsExpectedAuthoredChild(this, Territory))
 	{
-		BindToDistrict(Territory);
+		if (!bWasUnregistered) BindToDistrict(Territory);
+		ReconcileDerivedControl(Territory);
 	}
 }
 
@@ -123,6 +338,7 @@ void ATerritoryCity::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
 			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryCity::OnTerritoryRegistered);
+			Registry->OnTerritoryUnregistered.RemoveDynamic(this, &ATerritoryCity::OnTerritoryRegistered);
 		}
 	}
 	Super::EndPlay(EndPlayReason);
@@ -130,44 +346,29 @@ void ATerritoryCity::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 TArray<ATerritoryVolume*> ATerritoryCity::GetDistricts() const
 {
-	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
-	if (!Registry) return TArray<ATerritoryVolume*>();
-
-	return Registry->GetChildTerritories(GetTerritoryTag());
+	return GetLoadedAuthoredChildren(this);
 }
 
 int32 ATerritoryCity::GetDistrictCount() const
 {
-	return GetDistricts().Num();
+	return GetExpectedChildTags(this).Num();
 }
 
 bool ATerritoryCity::AllDistrictsOwnedBy(FGameplayTag Faction) const
 {
-	TArray<FGameplayTag> Owners;
-	for (const ATerritoryVolume* District : GetDistricts())
-	{
-		Owners.Add(GetSecureClaimedOwner(District));
-	}
+	const TArray<FGameplayTag> Owners = BuildExpectedSecureOwners(this, GetDistricts());
 	return TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(Owners, Faction);
 }
 
 float ATerritoryCity::GetCityControlPercentage(FGameplayTag Faction) const
 {
-	TArray<FGameplayTag> Owners;
-	for (const ATerritoryVolume* District : GetDistricts())
-	{
-		Owners.Add(GetSecureClaimedOwner(District));
-	}
+	const TArray<FGameplayTag> Owners = BuildExpectedSecureOwners(this, GetDistricts());
 	return TerritoryHierarchyPolicy::CalculateControlFraction(Owners, Faction);
 }
 
 FGameplayTag ATerritoryCity::GetMajorityOwner() const
 {
-	TArray<FGameplayTag> Owners;
-	for (const ATerritoryVolume* District : GetDistricts())
-	{
-		Owners.Add(GetSecureClaimedOwner(District));
-	}
+	const TArray<FGameplayTag> Owners = BuildExpectedSecureOwners(this, GetDistricts());
 	return TerritoryHierarchyPolicy::FindStrictMajorityOwner(Owners);
 }
 
@@ -208,8 +409,11 @@ bool ATerritoryCity::HasCapitalDistrict() const
 
 void ATerritoryCity::OnCityFullyCaptured_Implementation(FGameplayTag CapturingFaction)
 {
-	UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s fully captured by %s"),
-		*GetTerritoryTag().ToString(), *CapturingFaction.ToString());
+	if (ShouldLogHierarchyOwnership())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s fully captured by %s"),
+			*GetTerritoryTag().ToString(), *CapturingFaction.ToString());
+	}
 
 	// Recalculate income for both the capturing faction and the losing faction
 	UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
@@ -229,60 +433,21 @@ void ATerritoryCity::OnCityFullyCaptured_Implementation(FGameplayTag CapturingFa
 			Economy->CreditCurrencyToFaction(CapturingFaction, 1000,
 				Economy->IncomePayoutPolicy, TEXT("Capital city captured"),
 				ETerritoryTransactionType::Reward, PreferredBeneficiary);
-			UE_LOG(LogTerritory, Log, TEXT("[CityCapture] Capital bonus: 1000 gold to %s"),
-				*CapturingFaction.ToString());
+			if (ShouldLogPropertyEconomy())
+			{
+				UE_LOG(LogTerritory, Log, TEXT("[CityCapture] Capital bonus: 1000 gold to %s"),
+					*CapturingFaction.ToString());
+			}
 		}
 	}
 }
 
 void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 {
-	UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s lost by %s"),
-		*GetTerritoryTag().ToString(), *PreviousFaction.ToString());
-
-	// Only unclaim if the old owner holds NO districts. If they still hold some,
-	// transition to Contested — the city is partially held, not fully lost.
-	if (HasAuthority() && !IsLocked())
+	if (ShouldLogHierarchyOwnership())
 	{
-		if (AllDistrictsOwnedBy(PreviousFaction))
-		{
-			UE_LOG(LogTerritory, Warning, TEXT("[CityCapture] OnCityLost fired for %s but previous faction %s still holds all districts — unexpected state"),
-				*GetTerritoryTag().ToString(), *PreviousFaction.ToString());
-		}
-		else
-		{
-			// P2-N08: O(N) ownership count instead of O(N²) AllDistrictsOwnedBy calls
-			TArray<ATerritoryVolume*> Districts = GetDistricts();
-			TMap<FGameplayTag, int32> OwnerCounts;
-			for (ATerritoryVolume* District : Districts)
-			{
-				FGameplayTag DistrictOwner = District->GetOwningFaction();
-				if (DistrictOwner.IsValid())
-				{
-					OwnerCounts.FindOrAdd(DistrictOwner)++;
-				}
-			}
-			const int32 TotalDistricts = Districts.Num();
-			bool bAnyFactionOwnsAll = false;
-			for (const auto& Pair : OwnerCounts)
-			{
-				if (Pair.Value >= TotalDistricts && Pair.Key != PreviousFaction)
-				{
-					SetDerivedOwningFaction(Pair.Key);
-					bAnyFactionOwnsAll = true;
-					break;
-				}
-			}
-
-			if (!bAnyFactionOwnsAll)
-			{
-				// No faction owns all districts — city is contested
-				if (OwnershipData.State == ETerritoryState::Claimed)
-				{
-					SetTerritoryState(ETerritoryState::Contested);
-				}
-			}
-		}
+		UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s lost by %s"),
+			*GetTerritoryTag().ToString(), *PreviousFaction.ToString());
 	}
 
 	// Recalculate income for the faction that lost the city
@@ -295,10 +460,13 @@ void ATerritoryCity::OnCityLost_Implementation(FGameplayTag PreviousFaction)
 
 void ATerritoryCity::OnDistrictCapturedInCity_Implementation(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
-	UE_LOG(LogTerritory, Log, TEXT("[CityCapture] District %s captured in city %s: %s → %s"),
-		*District->GetTerritoryTag().ToString(),
-		*GetTerritoryTag().ToString(),
-		*OldOwner.ToString(), *NewOwner.ToString());
+	if (ShouldLogHierarchyOwnership())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[CityCapture] District %s captured in city %s: %s → %s"),
+			*District->GetTerritoryTag().ToString(),
+			*GetTerritoryTag().ToString(),
+			*OldOwner.ToString(), *NewOwner.ToString());
+	}
 }
 
 void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner)
@@ -308,110 +476,41 @@ void ATerritoryCity::OnDistrictControlChanged(ATerritoryVolume* District, FGamep
 	// Fire the BP-exposed hook for any district capture within this city
 	OnDistrictCapturedInCity(District, OldOwner, NewOwner);
 
-	// Server-only mutations from here
-	if (!HasAuthority()) return;
-
-	// Cascade ownership change to child properties of the district
-	CascadeCaptureToProperties(District, NewOwner);
-
-	// ─── Hierarchy Lock Propagation ───
-	// If any district still has enemy-held properties, the district stays contested
-	// and the city can't be fully captured. Lock propagates bottom-up.
-
-	if (NewOwner.IsValid())
-	{
-		// Check if all districts now owned by the same faction
-		if (AllDistrictsOwnedBy(NewOwner))
-		{
-			FGameplayTag CityOldOwner = GetOwningFaction();
-			if (CityOldOwner != NewOwner)
-			{
-				// City fully captured by new faction — unlock if it was locked
-				if (IsLocked())
-				{
-					TryUnlock(true);
-				}
-				SetDerivedOwningFaction(NewOwner, District->GetActiveTransitionContext());
-				OnCityFullyCaptured(NewOwner);
-				OnCityCapturedDelegate.Broadcast(this, NewOwner);
-				bCityLostFired = false;
-			}
-			else
-			{
-				// Incumbent retakes all districts — recover from Contested to Claimed
-				if (OwnershipData.State == ETerritoryState::Contested)
-				{
-					SetTerritoryState(ETerritoryState::Claimed);
-					UE_LOG(LogTerritory, Log, TEXT("[CityCapture] %s recovered from Contested to Claimed — incumbent %s retakes all districts"),
-						*GetTerritoryTag().ToString(), *NewOwner.ToString());
-				}
-				bCityLostFired = false;
-			}
-		}
-		else
-		{
-			// Not all districts owned by one faction — city stays contested
-			if (OwnershipData.State == ETerritoryState::Claimed)
-			{
-				SetTerritoryState(ETerritoryState::Contested);
-			}
-		}
-	}
-
-	// Check if city was lost — the previous owner no longer controls all districts.
-	if (OldOwner.IsValid())
-	{
-		FGameplayTag CityOwner = GetOwningFaction();
-		bool bCityLost = false;
-
-		if (CityOwner == OldOwner && !AllDistrictsOwnedBy(OldOwner))
-		{
-			bCityLost = true;
-		}
-		else if (!CityOwner.IsValid() && OldOwner.IsValid() && !AllDistrictsOwnedBy(OldOwner))
-		{
-			// Handles explicitly unclaimed cities as well as legacy loaded state.
-			bCityLost = true;
-		}
-
-		if (bCityLost && !bCityLostFired)
-		{
-			bCityLostFired = true;
-			OnCityLost(OldOwner);
-			OnCityLostDelegate.Broadcast(this, OldOwner);
-		}
-	}
+	ReconcileDerivedControl(District);
 }
 
-void ATerritoryCity::CascadeCaptureToProperties(ATerritoryVolume* District, FGameplayTag NewOwner)
+void ATerritoryCity::OnDistrictStateChanged(ATerritoryVolume* District, ETerritoryState NewState)
 {
-	if (!District || !NewOwner.IsValid() || !HasAuthority()) return;
+	ReconcileDerivedControl(District);
+}
 
-	ATerritoryDistrict* D = Cast<ATerritoryDistrict>(District);
-	if (!D) return;
+void ATerritoryCity::OnDistrictAvailabilityChanged(ATerritoryVolume* District,
+	ETerritoryAvailability NewAvailability)
+{
+	ReconcileDerivedControl(District);
+}
 
-	// Hierarchy collapse: when a district changes owner, all child properties
-	// auto-reassign to the new district owner
-	TArray<ATerritoryVolume*> Properties = D->GetProperties();
-	for (ATerritoryVolume* Property : Properties)
+void ATerritoryCity::ReconcileDerivedControl(ATerritoryVolume* ChangedDistrict)
+{
+	if (!HasAuthority()) return;
+	const FGameplayTag PreviousOwner = GetOwningFaction();
+	const ETerritoryState PreviousControlState = GetTerritoryState();
+	const FDerivedHierarchyControl Derived = ReduceChildControl(this, GetDistricts());
+	const FTerritoryTransitionContext Context = ChangedDistrict
+		? ChangedDistrict->GetActiveTransitionContext() : FTerritoryTransitionContext();
+	SetDerivedControl(Derived.SecuredOwner, Derived.State, Context);
+
+	if (PreviousOwner.IsValid() && PreviousControlState == ETerritoryState::Claimed
+		&& (Derived.State != ETerritoryState::Claimed || Derived.SecuredOwner != PreviousOwner))
 	{
-		if (!Property) continue;
-
-		FGameplayTag PropOwner = Property->GetOwningFaction();
-		if (PropOwner != NewOwner)
-		{
-			UE_LOG(LogTerritory, Log, TEXT("[HierarchyCollapse] Property %s auto-reassigned: %s → %s (district %s captured)"),
-				*Property->GetTerritoryTag().ToString(),
-				*PropOwner.ToString(), *NewOwner.ToString(),
-				*District->GetTerritoryTag().ToString());
-
-			// ForceSetOwningFaction bypasses state conditions (Contested, etc.) so the
-			// hierarchy cascade can enforce unanimous ownership regardless of current property state.
-			// OnOwnershipChanged → OnPropertyCaptured + delegate broadcast still fires.
-			// Do NOT call OnPropertyCaptured/Broadcast again here — that would fire events twice.
-			Property->ForceSetOwningFactionWithContext(
-				NewOwner, District->GetActiveTransitionContext());
-		}
+		OnCityLost(PreviousOwner);
+		OnCityLostDelegate.Broadcast(this, PreviousOwner);
+	}
+	if (Derived.State == ETerritoryState::Claimed && Derived.SecuredOwner.IsValid()
+		&& (PreviousControlState != ETerritoryState::Claimed || PreviousOwner != Derived.SecuredOwner))
+	{
+		OnCityFullyCaptured(Derived.SecuredOwner);
+		OnCityCapturedDelegate.Broadcast(this, Derived.SecuredOwner);
 	}
 }
 
@@ -434,31 +533,15 @@ void ATerritoryDistrict::BeginPlay()
 	{
 		// P1-N06: AddUniqueDynamic prevents duplicate bindings
 		Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryDistrict::OnTerritoryRegistered);
+		Registry->OnTerritoryUnregistered.AddUniqueDynamic(this, &ATerritoryDistrict::OnTerritoryRegistered);
 
-		TArray<ATerritoryVolume*> Properties = Registry->GetChildTerritories(GetTerritoryTag());
+		TArray<ATerritoryVolume*> Properties = GetProperties();
 		for (ATerritoryVolume* Property : Properties)
 		{
 			BindToProperty(Property);
 		}
 
-		// Reconcile derived state from already-registered children
-		if (!Properties.IsEmpty())
-		{
-			// Check if all properties share one owner
-			FGameplayTag FirstOwner;
-			bool bAllSame = true;
-			for (const ATerritoryVolume* Prop : Properties)
-			{
-				FGameplayTag PropOwner = Prop->GetOwningFaction();
-				if (!PropOwner.IsValid()) { bAllSame = false; break; }
-				if (!FirstOwner.IsValid()) FirstOwner = PropOwner;
-				else if (PropOwner != FirstOwner) { bAllSame = false; break; }
-			}
-			if (bAllSame && FirstOwner.IsValid() && GetOwningFaction() != FirstOwner)
-			{
-				SetDerivedOwningFaction(FirstOwner);
-			}
-		}
+		ReconcileDerivedControl();
 	}
 }
 
@@ -466,6 +549,8 @@ void ATerritoryDistrict::BindToProperty(ATerritoryVolume* Property)
 {
 	if (!Property) return;
 	Property->OnTerritoryOwnershipChanged.AddUniqueDynamic(this, &ATerritoryDistrict::OnPropertyControlChanged);
+	Property->OnTerritoryStateChangedDelegate.AddUniqueDynamic(this, &ATerritoryDistrict::OnPropertyStateChanged);
+	Property->OnTerritoryAvailabilityChanged.AddUniqueDynamic(this, &ATerritoryDistrict::OnPropertyAvailabilityChanged);
 }
 
 void ATerritoryDistrict::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -475,6 +560,7 @@ void ATerritoryDistrict::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
 			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryDistrict::OnTerritoryRegistered);
+			Registry->OnTerritoryUnregistered.RemoveDynamic(this, &ATerritoryDistrict::OnTerritoryRegistered);
 		}
 	}
 	Super::EndPlay(EndPlayReason);
@@ -482,12 +568,10 @@ void ATerritoryDistrict::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ATerritoryDistrict::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
 {
-	if (bWasUnregistered) return;
-
-	FGameplayTag ChildParent = Territory->GetParentTerritoryTag();
-	if (ChildParent == GetTerritoryTag())
+	if (IsExpectedAuthoredChild(this, Territory))
 	{
-		BindToProperty(Territory);
+		if (!bWasUnregistered) BindToProperty(Territory);
+		ReconcileDerivedControl(Territory);
 	}
 }
 
@@ -505,45 +589,28 @@ void ATerritoryDistrict::OnPropertyControlChanged(ATerritoryVolume* Property, FG
 		if (NewOwner.IsValid()) Economy->MarkFactionDirty(NewOwner);
 	}
 
-	// ─── Hierarchy Capture Policy: Unanimity ───
-	// A district is captured ONLY when ALL its properties are owned by the same faction.
-	// No majority capture, no partial control — clean and predictable.
-	// Story overrides must mutate independent Places; AggregateOnly prevents direct
-	// District ownership shortcuts and the reducer derives the parent afterward.
-	if (NewOwner.IsValid())
-	{
-		FGameplayTag DistrictOwner = GetOwningFaction();
-		if (DistrictOwner != NewOwner)
-		{
-			if (AllPropertiesOwnedBy(NewOwner))
-			{
-				// All properties aligned — district captured by new faction
-				if (IsLocked())
-				{
-					TryUnlock(true);
-				}
-				SetDerivedOwningFaction(NewOwner,
-					Property ? Property->GetActiveTransitionContext() : FTerritoryTransitionContext());
-			}
-		}
-		else if (AllPropertiesOwnedBy(DistrictOwner))
-		{
-			// Incumbent retakes all properties — recover from Contested to Claimed
-			if (OwnershipData.State == ETerritoryState::Contested)
-			{
-				SetTerritoryState(ETerritoryState::Claimed);
-				UE_LOG(LogTerritory, Log, TEXT("[DistrictCapture] %s recovered from Contested to Claimed — incumbent %s retakes all properties"),
-					*GetTerritoryTag().ToString(), *DistrictOwner.ToString());
-			}
-		}
-	}
+	ReconcileDerivedControl(Property);
+}
 
-	const FGameplayTag DistrictOwnerCheck = GetOwningFaction();
-	if (DistrictOwnerCheck.IsValid() && !AllPropertiesOwnedBy(DistrictOwnerCheck)
-		&& OwnershipData.State == ETerritoryState::Claimed)
-	{
-		SetTerritoryState(ETerritoryState::Contested);
-	}
+void ATerritoryDistrict::OnPropertyStateChanged(ATerritoryVolume* Property,
+	ETerritoryState NewState)
+{
+	ReconcileDerivedControl(Property);
+}
+
+void ATerritoryDistrict::OnPropertyAvailabilityChanged(ATerritoryVolume* Property,
+	ETerritoryAvailability NewAvailability)
+{
+	ReconcileDerivedControl(Property);
+}
+
+void ATerritoryDistrict::ReconcileDerivedControl(ATerritoryVolume* ChangedProperty)
+{
+	if (!HasAuthority()) return;
+	const FDerivedHierarchyControl Derived = ReduceChildControl(this, GetProperties());
+	const FTerritoryTransitionContext Context = ChangedProperty
+		? ChangedProperty->GetActiveTransitionContext() : FTerritoryTransitionContext();
+	SetDerivedControl(Derived.SecuredOwner, Derived.State, Context);
 }
 
 void ATerritoryDistrict::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
@@ -558,8 +625,11 @@ void ATerritoryDistrict::OnOwnershipChanged_Implementation(FGameplayTag OldOwner
 
 void ATerritoryDistrict::OnDistrictFullyCaptured_Implementation(FGameplayTag CapturingFaction)
 {
-	UE_LOG(LogTerritory, Log, TEXT("[DistrictCapture] %s fully captured by %s"),
-		*GetTerritoryTag().ToString(), *CapturingFaction.ToString());
+	if (ShouldLogHierarchyOwnership())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[DistrictCapture] %s fully captured by %s"),
+			*GetTerritoryTag().ToString(), *CapturingFaction.ToString());
+	}
 
 	// Capital district bonus
 	if (bIsCapital)
@@ -586,7 +656,8 @@ ATerritoryCity* ATerritoryDistrict::GetOwningCity() const
 	if (ParentTag.IsValid())
 	{
 		ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
-		return Cast<ATerritoryCity>(Parent);
+		ATerritoryCity* City = Cast<ATerritoryCity>(Parent);
+		return IsExpectedAuthoredChild(City, this) ? City : nullptr;
 	}
 
 	// P2-07: Removed dead fallback — a district without ParentTerritoryTag cannot resolve its city.
@@ -597,10 +668,7 @@ ATerritoryCity* ATerritoryDistrict::GetOwningCity() const
 
 TArray<ATerritoryVolume*> ATerritoryDistrict::GetProperties() const
 {
-	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
-	if (!Registry) return TArray<ATerritoryVolume*>();
-
-	return Registry->GetChildTerritories(GetTerritoryTag());
+	return GetLoadedAuthoredChildren(this);
 }
 
 bool ATerritoryDistrict::IsCapitalDistrict() const
@@ -624,21 +692,13 @@ int32 ATerritoryDistrict::GetPropertyCountForFaction(FGameplayTag Faction) const
 
 bool ATerritoryDistrict::AllPropertiesOwnedBy(FGameplayTag Faction) const
 {
-	TArray<FGameplayTag> Owners;
-	for (const ATerritoryVolume* Property : GetProperties())
-	{
-		Owners.Add(GetSecureClaimedOwner(Property));
-	}
+	const TArray<FGameplayTag> Owners = BuildExpectedSecureOwners(this, GetProperties());
 	return TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(Owners, Faction);
 }
 
 FGameplayTag ATerritoryDistrict::GetMajorityPropertyOwner() const
 {
-	TArray<FGameplayTag> Owners;
-	for (const ATerritoryVolume* Property : GetProperties())
-	{
-		Owners.Add(GetSecureClaimedOwner(Property));
-	}
+	const TArray<FGameplayTag> Owners = BuildExpectedSecureOwners(this, GetProperties());
 	return TerritoryHierarchyPolicy::FindStrictMajorityOwner(Owners);
 }
 
@@ -670,91 +730,11 @@ ATerritoryProperty::ATerritoryProperty()
 void ATerritoryProperty::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// Bind to registry for late-registered districts (World Partition, streaming)
-	if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
-	{
-		// P1-N06: AddUniqueDynamic prevents duplicate bindings
-		Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryProperty::OnTerritoryRegistered);
-
-		// Also scan the registry for already-registered districts
-		if (GetParentTerritoryTag().IsValid())
-		{
-			TArray<ATerritoryVolume*> Candidates = Registry->GetChildTerritories(GetParentTerritoryTag());
-			for (ATerritoryVolume* Candidate : Candidates)
-			{
-				if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Candidate))
-				{
-					BindToOwningDistrict(District);
-				}
-			}
-		}
-	}
-
-	// Only sync to district owner if property has NO owner (first-time init).
-	// Do NOT overwrite saved ownership — SaveSystem already restored it in Super::BeginPlay.
-	if (HasAuthority() && !GetOwningFaction().IsValid())
-	{
-		ATerritoryDistrict* District = GetOwningDistrict();
-		if (District)
-		{
-			FGameplayTag DistrictOwner = District->GetOwningFaction();
-			if (DistrictOwner.IsValid())
-			{
-				SetOwningFaction(DistrictOwner);
-			}
-		}
-	}
 }
 
 void ATerritoryProperty::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (UWorld* World = GetWorld())
-	{
-		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
-		{
-			Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryProperty::OnTerritoryRegistered);
-		}
-	}
 	Super::EndPlay(EndPlayReason);
-}
-
-void ATerritoryProperty::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
-{
-	if (bWasUnregistered) return;
-
-	// Check if this territory is a district that should own this property
-	if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Territory))
-	{
-		FGameplayTag DistrictTag = District->GetTerritoryTag();
-		// Match by ParentTerritoryTag or tag hierarchy
-		if (DistrictTag.IsValid() && (GetParentTerritoryTag() == DistrictTag ||
-			(!GetParentTerritoryTag().IsValid() && GetTerritoryTag().MatchesTag(DistrictTag))))
-		{
-			BindToOwningDistrict(District);
-		}
-	}
-}
-
-void ATerritoryProperty::BindToOwningDistrict(ATerritoryDistrict* District)
-{
-	if (!District) return;
-	District->OnTerritoryOwnershipChanged.AddUniqueDynamic(this, &ATerritoryProperty::OnDistrictOwnershipChanged);
-}
-
-void ATerritoryProperty::OnDistrictOwnershipChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner)
-{
-	// When the owning district changes ownership, sync this property to the new owner
-	// if it currently belongs to the old owner. This handles world-partition late binding
-	// where the property loads before the district has been set up.
-	if (!HasAuthority() || !NewOwner.IsValid()) return;
-
-	if (!GetOwningFaction().IsValid() || GetOwningFaction() == OldOwner)
-	{
-		const FTerritoryTransitionContext Context = District
-			? District->GetActiveTransitionContext() : FTerritoryTransitionContext();
-		SetOwningFactionWithContext(NewOwner, Context);
-	}
 }
 
 void ATerritoryProperty::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -777,28 +757,22 @@ ATerritoryDistrict* ATerritoryProperty::GetOwningDistrict() const
 	if (ParentTag.IsValid())
 	{
 		ATerritoryVolume* Parent = Registry->GetTerritoryByTag(ParentTag);
-		return Cast<ATerritoryDistrict>(Parent);
+		ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Parent);
+		return IsExpectedAuthoredChild(District, this) ? District : nullptr;
 	}
 
-	FGameplayTag MyTag = GetTerritoryTag();
-	if (!MyTag.IsValid()) return nullptr;
-
-	TArray<ATerritoryVolume*> All = Registry->GetAllTerritories();
-	for (ATerritoryVolume* Volume : All)
-	{
-		ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Volume);
-		if (District && MyTag.MatchesTag(District->GetTerritoryTag()) && static_cast<const AActor*>(District) != this)
-		{
-			return District;
-		}
-	}
+	// Never infer hierarchy from a gameplay-tag prefix. The District Definition's
+	// Places array is the sole authority and the synchronizer writes this parent tag.
 	return nullptr;
 }
 
 void ATerritoryProperty::OnPropertyCaptured_Implementation(FGameplayTag NewOwner)
 {
-	UE_LOG(LogTerritory, Log, TEXT("[PropertyCapture] %s captured by %s"),
-		*GetTerritoryTag().ToString(), *NewOwner.ToString());
+	if (ShouldLogHierarchyOwnership())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[PropertyCapture] %s captured by %s"),
+			*GetTerritoryTag().ToString(), *NewOwner.ToString());
+	}
 
 	// Reset upgrade level on capture by a new faction — use SetUpgradeLevel to
 	// ensure income recalculation and logging are triggered.
@@ -878,8 +852,11 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 	// Recalculate income for the owning faction
 	Economy->MarkFactionDirty(OwnerFaction);
 
-	UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s upgraded to level %d (cost: %d, faction: %s)"),
-		*GetTerritoryTag().ToString(), UpgradeLevel, Cost, *OwnerFaction.ToString());
+	if (ShouldLogPropertyEconomy())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s upgraded to level %d (cost: %d, faction: %s)"),
+			*GetTerritoryTag().ToString(), UpgradeLevel, Cost, *OwnerFaction.ToString());
+	}
 
 	return true;
 }
@@ -907,8 +884,11 @@ void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 			Economy->RefreshProductionSite(this);
 		}
 
-		UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s set to level %d (was %d)"),
-			*GetTerritoryTag().ToString(), UpgradeLevel, OldLevel);
+		if (ShouldLogPropertyEconomy())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s set to level %d (was %d)"),
+				*GetTerritoryTag().ToString(), UpgradeLevel, OldLevel);
+		}
 
 		OnUpgradeLevelChanged(UpgradeLevel);
 	}

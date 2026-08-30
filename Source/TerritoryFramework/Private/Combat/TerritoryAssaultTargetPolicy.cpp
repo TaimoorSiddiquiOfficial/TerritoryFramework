@@ -33,19 +33,20 @@ TArray<ATerritoryVolume*> TerritoryAssaultTargetPolicy::BuildDefenceFront(
 	ATerritoryVolume* TargetTerritory)
 {
 	TArray<ATerritoryVolume*> Result;
-	if (!TargetTerritory) return Result;
+	if (!TargetTerritory
+		|| TargetTerritory->GetControlMode() != ETerritoryControlMode::Independent)
+	{
+		return Result;
+	}
 	Result.Add(TargetTerritory);
 
 	TArray<ATerritoryVolume*> Additional;
-	if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(TargetTerritory))
-	{
-		Additional = District->GetProperties();
-	}
-	else if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(TargetTerritory))
+	if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(TargetTerritory))
 	{
 		if (ATerritoryDistrict* OwningDistrict = Property->GetOwningDistrict())
 		{
-			Additional.Add(OwningDistrict);
+			// A District grants strategic staging rights; it is never a physical
+			// defender or assault objective. Same-owner sibling Places may reinforce.
 			Additional.Append(OwningDistrict->GetProperties());
 		}
 	}
@@ -56,7 +57,11 @@ TArray<ATerritoryVolume*> TerritoryAssaultTargetPolicy::BuildDefenceFront(
 	});
 	for (ATerritoryVolume* Candidate : Additional)
 	{
-		Result.AddUnique(Candidate);
+		if (Candidate && Candidate->IsAvailableForGameplay()
+			&& Candidate->GetControlMode() == ETerritoryControlMode::Independent)
+		{
+			Result.AddUnique(Candidate);
+		}
 	}
 	return Result;
 }
@@ -93,7 +98,15 @@ TArray<FVector> TerritoryAssaultTargetPolicy::BuildObjectiveLocations(
 	ATerritoryVolume* TargetTerritory, bool bIncludeRegisteredDefenders)
 {
 	TArray<FVector> Result;
-	if (!TargetTerritory) return Result;
+	// Cities and Districts are strategic aggregate records. Their authored Places
+	// own the physical defenders, posts, patrol routes, and assault objectives.
+	// Falling back to an aggregate bounds centre makes attackers ignore that
+	// defence front and march toward an arbitrary map point.
+	if (!TargetTerritory
+		|| TargetTerritory->GetControlMode() != ETerritoryControlMode::Independent)
+	{
+		return Result;
+	}
 
 	if (bIncludeRegisteredDefenders)
 	{

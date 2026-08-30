@@ -54,9 +54,38 @@ UENUM(BlueprintType)
 enum class ETerritoryState : uint8
 {
 	Unclaimed UMETA(DisplayName="Unclaimed", ToolTip="No faction owns this place. Example: an abandoned farm that any hostile faction may capture."),
-	Claimed UMETA(DisplayName="Claimed", ToolTip="One faction owns this place. Example: Faction.Heroes controls the market."),
-	Contested UMETA(DisplayName="Contested", ToolTip="A physical capture is in progress or child territories disagree. This is runtime state, not a recommended starting state."),
-	Locked UMETA(DisplayName="Locked", ToolTip="Ownership cannot change until this state's Exit Conditions pass. Example: finish the 'Open the City Gates' quest before leaving Locked.")
+	Claimed UMETA(DisplayName="Captured / Claimed", ToolTip="One faction owns this Territory. This is the captured state. A real Faction A to Faction B handover runs the old Captured Exit Events and new Captured Entry Events even though the enum remains Captured / Claimed. Same-owner resets do not refire."),
+	Contested UMETA(DisplayName="Contested", ToolTip="A real physical capture has started, or an aggregate City/District has children owned by different factions. Entry Events run once when the state changes into Contested; they do not repeat every capture tick. Merely walking through a Place triggers this only when its story-bounds rules actually register the player as a valid attacker."),
+	Locked UMETA(DisplayName="Locked (Legacy)", ToolTip="Legacy serialized value. Runtime lock availability is stored separately so a locked enemy Place can still contribute political power.")
+};
+
+/** Capture availability is independent from political control. */
+UENUM(BlueprintType)
+enum class ETerritoryAvailability : uint8
+{
+	Unlocked UMETA(DisplayName="Unlocked", ToolTip="This Territory may participate in gameplay, subject to normal capture and diplomacy rules."),
+	Locked UMETA(DisplayName="Locked", ToolTip="This Territory is unavailable until its Narrative unlock conditions pass. Existing ownership and power are preserved.")
+};
+
+/** Scope used by the Narrative Unlock Territory event. */
+UENUM(BlueprintType)
+enum class ETerritoryUnlockScope : uint8
+{
+	AutomaticHierarchy UMETA(DisplayName="Automatic Hierarchy (Recommended)", ToolTip="Place: open its ancestor path and only that Place. District/City: open the target and eligible descendants while respecting every local lock condition."),
+	ExactOnly UMETA(DisplayName="Exact Target Only", ToolTip="Attempt only the selected Territory and do not open ancestors, siblings, or descendants."),
+	ForceExact UMETA(DisplayName="Force Exact Target", ToolTip="Trusted story override that bypasses lock conditions only for the exact target."),
+	ForceHierarchy UMETA(DisplayName="Force Complete Hierarchy", ToolTip="Trusted story override that bypasses lock conditions for the target path and all descendants.")
+};
+
+UENUM(BlueprintType)
+enum class ETerritoryUnlockOutcome : uint8
+{
+	Unlocked,
+	AlreadyUnlocked,
+	BlockedByCondition,
+	MissingRuntimeTerritory,
+	SkippedBlockedParent,
+	InvalidTarget
 };
 
 /**
@@ -69,8 +98,8 @@ enum class ETerritoryInitialState : uint8
 {
 	Automatic UMETA(DisplayName="Automatic (Recommended)", ToolTip="Start Claimed when Initial Owning Faction is set; otherwise start Unclaimed. Existing Starts Locked assets remain locked until migrated."),
 	Unclaimed UMETA(DisplayName="Unclaimed", ToolTip="Start with no owner, even if Initial Owning Faction is filled."),
-	Claimed UMETA(DisplayName="Claimed", ToolTip="Start owned by Initial Owning Faction. If that faction is empty, the safe result is Unclaimed."),
-	Locked UMETA(DisplayName="Locked", ToolTip="Start locked. The place may still have an Initial Owning Faction, but ownership cannot change until Locked Exit Conditions pass.")
+	Claimed UMETA(DisplayName="Captured / Claimed", ToolTip="Start captured and owned by Initial Owning Faction. If that faction is empty, the safe result is Unclaimed."),
+	Locked UMETA(Hidden, DisplayName="Locked (Legacy)", ToolTip="Serialized compatibility value. Use Initial Availability instead.")
 };
 
 UENUM(BlueprintType)
@@ -78,7 +107,16 @@ enum class ETerritoryControlMode : uint8
 {
 	Independent UMETA(DisplayName="Independent", ToolTip="Capture this actor directly. Example: a single farm with its own physical capture point."),
 	AggregateOnly UMETA(DisplayName="Aggregate Only", ToolTip="Never capture this actor directly; child ownership decides it. Example: a City becomes owned when its Districts agree."),
-	Cascading UMETA(DisplayName="Cascading", ToolTip="This actor may be captured directly and may also change child ownership. Use only when your game intentionally wants a parent capture to cascade.")
+	Cascading UMETA(Hidden, DisplayName="Cascading (Legacy)", ToolTip="Serialized compatibility value. Definition assets now enforce Place=Independent and City/District=Aggregate Only; parent capture never rewrites children.")
+};
+
+/** Stable hierarchy identity used by runtime actors, replicated directory rows, and UI. */
+UENUM(BlueprintType)
+enum class ETerritoryHierarchyLevel : uint8
+{
+	City UMETA(ToolTip="A City groups Districts and derives control from them."),
+	District UMETA(ToolTip="A District belongs to a City and derives control from Places."),
+	Place UMETA(ToolTip="An independently capturable Property/Place inside a District.")
 };
 
 /** Determines the desired garrison assigned when ownership changes. */
@@ -153,6 +191,10 @@ struct FTerritoryOwnershipData
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	ETerritoryState State = ETerritoryState::Unclaimed;
 
+	/** Saved and replicated independently from control. Old State=Locked saves migrate on load. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
+	ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
+
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	float ControlProgress = 0.f;
 
@@ -182,6 +224,39 @@ struct FTerritoryOwnershipData
 	/** Why the territory is locked. Empty when not locked. Replicated + saved. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	FText LockReason;
+};
+
+USTRUCT(BlueprintType)
+struct FTerritoryUnlockResultRow
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
+	FGameplayTag TerritoryTag;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
+	ETerritoryUnlockOutcome Outcome = ETerritoryUnlockOutcome::InvalidTarget;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
+	FText Reason;
+};
+
+USTRUCT(BlueprintType)
+struct FTerritoryUnlockCascadeResult
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
+	bool bTargetSucceeded = false;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
+	int32 UnlockedCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
+	int32 BlockedCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
+	TArray<FTerritoryUnlockResultRow> Results;
 };
 
 /** Exact replicated read model for guard UI; live pawn pointers remain server-owned. */
@@ -350,6 +425,8 @@ struct FCaptureAttempt
 /**
  * Per-state configuration for Narrative conditions and events.
  * Entry conditions must pass before entering. Exit conditions must pass before leaving.
+ * Claimed is the captured state. Contested Entry Events fire once per real transition,
+ * not continuously while capture progress changes.
  * Example: put a quest-complete condition in Locked -> Exit Conditions to unlock a city.
  */
 USTRUCT(BlueprintType)
@@ -379,7 +456,7 @@ struct FTerritoryStateConfig
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
 		meta=(DisplayName="Entry Conditions",
-			ToolTip="Every condition must pass before the enum state can begin. Example: entering Locked may require a story event to be active. A direct Claimed owner swap does not enter Claimed again; normal physical capture passes through Contested first."))
+			ToolTip="Every condition must pass before the state can begin. Captured / Claimed means capture completed. Contested begins only after gameplay registers a valid contest; walking through a Place is not enough unless Story Capture From Bounds intentionally makes that player an attacker. A real Faction A to Faction B capture evaluates the Captured / Claimed row even if the enum was already Captured; a same-owner reset does not."))
 	TArray<TObjectPtr<class UNarrativeCondition>> EntryConditions;
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
@@ -389,7 +466,7 @@ struct FTerritoryStateConfig
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",
 		meta=(DisplayName="Entry Events",
-			ToolTip="Narrative events fired after the enum state is committed. Each event runs only when all conditions inside that event pass, including Narrative's Not option. Example: when Contested becomes Claimed, schedule an enemy wave only if the two factions are at War. Use the control-changed delegate for trusted direct Claimed-to-Claimed owner swaps."))
+			ToolTip="Narrative events fired once after the state is committed. Captured / Claimed is the On Captured row and also fires for a real Faction A to Faction B handover even when the enum remains Captured. The same handover first runs this row's Exit Events for the old owner. Same-owner resets do not refire. Contested fires once when a valid contest begins, not every progress tick. Each event runs only when all inherited conditions pass, including Narrative's Not option."))
 	TArray<TObjectPtr<class UNarrativeEvent>> EntryEvents;
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",
@@ -412,6 +489,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnTerritoryStateChanged,
 	ATerritoryVolume*, Territory,
 	ETerritoryState, NewState);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnTerritoryAvailabilityChanged,
+	ATerritoryVolume*, Territory,
+	ETerritoryAvailability, NewAvailability);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnTerritoryRegistered,

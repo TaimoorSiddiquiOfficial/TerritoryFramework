@@ -109,8 +109,8 @@ With `PlayerChooses`, a capture whose context belongs to the new owner starts at
 ## Step 9: Enable Debug (Optional)
 
 1. Edit → Project Settings → Territory Framework
-2. Enable **"Enable All Debug Output"**
-3. Enable individual categories
+2. Enable **Enable Debug System (Master Gate)**
+3. Enable only the individual categories needed for the problem
 4. Check Output Log for detailed territory events
 
 ## Troubleshooting
@@ -121,7 +121,8 @@ With `PlayerChooses`, a capture whose context belongs to the new owner starts at
 | Guards don't fight | Configure ActivityConfiguration + TriggerSets on the NPCDefinition asset |
 | Territory doesn't save | Place TerritoryWorldState actor in level |
 | Capture doesn't work | Confirm the point targets an `Independent` Property, the pawn is player-controlled, its Narrative faction is valid, and diplomacy allows capture |
-| Territory Unlock Event changes nothing | Select the complete tag of the locked actor. A locked Place needs its Place tag, not its parent District tag. Check **Get Territory State** during PIE; **New Campaign Initial State** is an authoring seed and intentionally stays unchanged. |
+| Territory Unlock Event changes nothing | Select the complete tag of the locked actor. A locked Place needs its Place tag, not its parent District tag. Check runtime **Availability**, Locked exit conditions, and explicit Narrative context. Initial values seed only a new campaign. |
+| Definition says Locked but HUD says Contested | Use **Build Territory Debug Summary By Tag**. A campaign save may be overriding the new-campaign seed. The UI must show Locked whenever runtime Availability is Locked. |
 | Player is treated as the wrong test faction | Assign the live faction through Narrative Pro. The optional Territory Framework player fallback is empty by default and never overrides Narrative. |
 | Guards float on hit | Already fixed — BoundsShape has NoCollision |
 | Map marker not showing | MapMarkerComponent is auto-created — check marker color settings |

@@ -1,4 +1,5 @@
 #include "UI/TerritoryDebugWidget.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryTypes.h"
@@ -102,21 +103,16 @@ FText UTerritoryDebugWidget::BuildTerritorySummary() const
 		FString Name = Terr->GetTerritoryDisplayName().ToString();
 		if (Name.IsEmpty()) Name = Terr->GetTerritoryTag().ToString();
 
-		FString StateStr;
-		switch (Terr->GetTerritoryState())
-		{
-		case ETerritoryState::Unclaimed: StateStr = TEXT("Unclaimed"); break;
-		case ETerritoryState::Claimed: StateStr = TEXT("Claimed"); break;
-		case ETerritoryState::Contested: StateStr = TEXT("Contested"); break;
-		case ETerritoryState::Locked: StateStr = TEXT("Locked"); break;
-		default: StateStr = TEXT("Unknown"); break;
-		}
+		const FString StateStr = UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			Terr->GetTerritoryAvailability(), Terr->GetTerritoryState()).ToString();
 
-		Result += FString::Printf(TEXT("  %s [%s] Owner=%s State=%s Guards=%d Income=%d\n"),
+		Result += FString::Printf(TEXT("  %s [%s] Owner=%s Status=%s Political=%d Source=%s Guards=%d Income=%d\n"),
 			*Name,
 			*Terr->GetTerritoryTag().ToString(),
 			*Terr->GetOwningFaction().ToString(),
 			*StateStr,
+			static_cast<int32>(Terr->GetTerritoryState()),
+			Terr->WasRestoredFromCampaignSave() ? TEXT("Save") : TEXT("Definition/Runtime"),
 			Terr->GetDefenderCount(),
 			Terr->GetPeriodicIncome());
 	}

@@ -1,6 +1,7 @@
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "AI/TerritoryDiplomacyDialogue.h"
@@ -626,9 +627,15 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 	if (!bHasEquippedWeapon && DefaultWeaponPostInitializationAttempts >= 12)
 	{
 		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
-		UE_LOG(LogTerritory, Verbose,
-			TEXT("GuardCharacter %s has no equipped weapon; keeping the valid unarmed Narrative loadout"),
-			*GetName());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugGuards()
+			&& Settings->IsDebugLevelEnabled(6))
+		{
+			UE_LOG(LogTerritory, Log,
+				TEXT("GuardCharacter %s has no equipped weapon; keeping the valid unarmed Narrative loadout"),
+				*GetName());
+		}
 		return;
 	}
 	if (bHasEquippedWeapon && DefaultWeaponPostInitializationAttempts >= 120)
@@ -644,8 +651,14 @@ void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 	// condition; the GameplayTags above may all be valid even when no item exists yet.
 	if (DefaultWeaponWieldAttempts == 1)
 	{
-		UE_LOG(LogTerritory, Verbose, TEXT("GuardCharacter %s has no equipped weapon in a supported slot yet; retrying while the Narrative definition loads"),
-			*GetName());
+		if (const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugGuards()
+			&& Settings->IsDebugLevelEnabled(6))
+		{
+			UE_LOG(LogTerritory, Log, TEXT("GuardCharacter %s has no equipped weapon in a supported slot yet; retrying while the Narrative definition loads"),
+				*GetName());
+		}
 	}
 }
 

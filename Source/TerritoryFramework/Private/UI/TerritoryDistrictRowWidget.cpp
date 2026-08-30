@@ -478,6 +478,14 @@ void UTerritoryDistrictRowWidget::InitializeDistrict(ATerritoryDistrict* InDistr
 	District = InDistrict;
 	OperationsView = FTerritoryDistrictOperationsView();
 	OperationsView.District = InDistrict;
+	if (InDistrict)
+	{
+		OperationsView.DistrictTag = InDistrict->GetTerritoryTag();
+		OperationsView.DisplayName = InDistrict->GetTerritoryDisplayName();
+		OperationsView.Availability = InDistrict->GetTerritoryAvailability();
+		OperationsView.TerritoryState = InDistrict->GetTerritoryState();
+		OperationsView.bRuntimeLoaded = true;
+	}
 	RefreshRow();
 }
 
@@ -587,19 +595,19 @@ ATerritoryDistrict* UTerritoryDistrictRowWidget::GetDistrict() const
 void UTerritoryDistrictRowWidget::RefreshRow()
 {
 	ATerritoryDistrict* CurrentDistrict = District.Get();
-	if (!CurrentDistrict)
+	if (!CurrentDistrict && !OperationsView.DistrictTag.IsValid())
 	{
 		return;
 	}
 
-	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-	const FText StateText = StateEnum
-		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(CurrentDistrict->GetTerritoryState()))
-		: FText::GetEmpty();
+	const FText StateText = UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+		OperationsView.Availability, OperationsView.TerritoryState);
 	if (DistrictName)
 	{
 		const FText DistrictDisplayName = OperationsView.DisplayName.IsEmpty()
-			? CurrentDistrict->GetTerritoryDisplayName()
+			? (CurrentDistrict ? CurrentDistrict->GetTerritoryDisplayName()
+				: UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
+					OperationsView.DistrictTag))
 			: OperationsView.DisplayName;
 		DistrictName->SetText(DistrictDisplayName);
 	}
@@ -631,12 +639,15 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 	if (SetWaypointButton)
 	{
 		ATerritoryVolume* WaypointTarget =
-			UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
-				GetOwningPlayer(), CurrentDistrict);
+			CurrentDistrict
+				? UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
+					GetOwningPlayer(), CurrentDistrict)
+				: nullptr;
 		const bool bCanTrack = OperationsView.bUnlocked
 			&& OperationsView.bHierarchyVisible && WaypointTarget;
-		const bool bTracked = UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
-			GetOwningPlayer(), CurrentDistrict);
+		const bool bTracked = CurrentDistrict
+			&& UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
+				GetOwningPlayer(), CurrentDistrict);
 		SetWaypointButton->SetButtonText(bTracked
 			? NSLOCTEXT("TerritoryDistrictRow", "WaypointTracked", "TRACKED  ✓")
 			: NSLOCTEXT("TerritoryDistrictRow", "SetWaypoint", "WAYPOINT"));
@@ -755,12 +766,10 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 		return;
 	}
 
-	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
 	for (const FTerritoryHierarchyOperationsView& Place : OperationsView.VisiblePlaces)
 	{
-		const FText StateText = StateEnum
-			? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(Place.TerritoryState))
-			: FText::GetEmpty();
+		const FText StateText = UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			Place.Availability, Place.TerritoryState);
 		const FLinearColor Accent = Place.bOwnedByViewer
 			? FLinearColor(0.16f, 0.72f, 0.55f, 1.f)
 			: Place.bAvailableForCapture
@@ -821,10 +830,14 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 
 void UTerritoryDistrictRowWidget::HandleSelected()
 {
-	if (District.IsValid())
+	if (OperationsView.DistrictTag.IsValid())
 	{
 		SetExpanded(!bExpanded);
-		OnDistrictSelected.Broadcast(District.Get());
+		OnDistrictTagSelected.Broadcast(OperationsView.DistrictTag);
+		if (District.IsValid())
+		{
+			OnDistrictSelected.Broadcast(District.Get());
+		}
 	}
 }
 

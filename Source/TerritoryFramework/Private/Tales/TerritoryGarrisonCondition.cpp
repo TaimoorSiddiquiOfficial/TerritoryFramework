@@ -5,6 +5,7 @@
 #include "Core/TerritoryVolume.h"
 #include "Engine/World.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 UTerritoryGarrisonCondition::UTerritoryGarrisonCondition()
 {
@@ -29,10 +30,6 @@ bool UTerritoryGarrisonCondition::CompareValues(int32 ActualValue,
 bool UTerritoryGarrisonCondition::CheckCondition_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	(void)Target;
-	(void)Controller;
-	(void)NarrativeComponent;
-
 	if (!TerritoryToCheck.IsValid())
 	{
 		UE_LOG(LogTerritory, Warning,
@@ -40,7 +37,8 @@ bool UTerritoryGarrisonCondition::CheckCondition_Implementation(APawn* Target,
 		return false;
 	}
 
-	UWorld* World = GetWorld();
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
 	UTerritoryRegistrySubsystem* Registry = World
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	ATerritoryVolume* Territory = Registry

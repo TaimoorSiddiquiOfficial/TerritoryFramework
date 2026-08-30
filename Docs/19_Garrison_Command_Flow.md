@@ -1,6 +1,9 @@
 # Garrison Command Flow
 
-This is the implemented end-to-end flow for player-managed District and Property guards. It replaces the former implicit “capture, spawn three, charge 150 upkeep” behavior while preserving authored staffing for AI/script ownership and old saves.
+This is the implemented end-to-end flow for player-managed Place guards presented through a
+District command surface. District and City own strategic rights/read models, never physical
+guards. The flow replaces the former implicit “capture, spawn three, charge 150 upkeep” behavior
+while preserving authored Place staffing for AI/script ownership and old saves.
 
 ## Outcome
 
@@ -9,7 +12,7 @@ This is the implemented end-to-end flow for player-managed District and Property
   live player controller, pawn, and player state for exact Narrative membership in the
   committed owner faction. It never chooses a first controller and never uses a parent
   faction-tag match.
-- The District Command Center can select the District container or any loaded registered child Property.
+- The District Command Center selects loaded registered child Places; its District row is an aggregate summary, not a garrison target.
 - The player sets one absolute target with Apply, 0, Max, or the compatibility `+1/-1/+5/-5` commands.
 - Recruitment is a one-time Narrative inventory debit; `GuardCost` remains recurring upkeep.
 - District finance is the sum of owned Property income minus all selected-target upkeep.
@@ -21,7 +24,7 @@ This is the implemented end-to-end flow for player-managed District and Property
 Physical/Tales capture request
   -> UTerritoryControlSubsystem validates participants, diplomacy, defenders, and context
   -> ATerritoryVolume commits owner/state/progress atomically
-  -> explicit FTerritoryTransitionContext flows through City/District/Property cascades
+  -> explicit FTerritoryTransitionContext remains on the Place transition while parent read models reduce bottom-up
   -> PostCaptureGarrisonPolicy resolves desired target
        PlayerChooses + live Narrative player faction: 0
        AI/script: GuardSpawnCount
@@ -30,7 +33,7 @@ Physical/Tales capture request
   -> guard reconciliation applies Narrative NPC definition/activity/TriggerSets
   -> ownership + exact garrison snapshots replicate
   -> WorldState exposes client economy snapshots
-  -> journal/in-world management builds District + Property target views
+  -> journal/in-world management builds one District summary plus Place target views
   -> player previews target, recruitment price, upkeep, and net result
   -> server validates and commits the absolute target once
   -> Narrative inventory debit + deployment/withdrawal + desired target commit
@@ -44,17 +47,20 @@ Physical/Tales capture request
 
 | Data or behavior | Authority | UI/client projection |
 |---|---|---|
-| Owner, state, desired guard count, guard rates | `ATerritoryVolume::OwnershipData` | Replicated ownership data plus `FTerritoryGarrisonSnapshot` |
+| Place owner/state, desired guard count, guard rates | `ATerritoryProperty` / `ATerritoryVolume::OwnershipData` | Replicated ownership data plus `FTerritoryGarrisonSnapshot` |
 | Capture validation/progress | `UTerritoryControlSubsystem` | Existing capture delegates/read models |
 | Physical active guards | `ATerritoryVolume` + registered `ATerritoryGuardSpawnPoint` actors | Exact replicated active/reserve/pending counts; no live NPC pointers saved or replicated as the read model |
 | Recruitment/upkeep/income rates | `UTerritoryEconomySubsystem` | `ATerritoryWorldState` replicated economy snapshots for clients/late join |
 | Real player funds | Narrative inventory/account | Affordability projection only; mutation occurs on server |
-| District/Property relationship | Territory hierarchy/registry | `FTerritoryDistrictOperationsView::GarrisonTargets` |
+| City/District/Place relationship | Definition hierarchy plus territory registry | District summary plus Place garrison views |
 | Widget styling/layout | Project Blueprint widgets | C++ parent injects the complete command controls into an existing vertical command stack |
 
 ## Capture and hierarchy rules
 
-`FTerritoryTransitionContext` contains the instigator, pawn, controller, Tales component, and requesting faction. The active context remains available during the synchronous ownership event bundle, so derived City/District ownership and Property cascades make the same staffing decision as the original capture.
+`FTerritoryTransitionContext` contains the instigator, pawn, controller, Tales component, and
+requesting faction. The active context remains available during the synchronous Place ownership
+event bundle. District and City then reduce their control from the complete authored child set;
+they never rewrite a child owner or make a staffing decision.
 
 Normal and forced `UTerritoryCaptureEvent` execution use that same request and context. Force mode sets explicit condition, diplomacy, and lock bypass flags on the atomic request; it no longer switches to a context-free helper that could restore the authored guard target.
 

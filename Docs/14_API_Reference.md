@@ -108,7 +108,8 @@ values for runtime queries; it is not a supported Blueprint authoring fallback.
 | TerritoryTag | FGameplayTag | Territory | — | — | Unique identifier tag |
 | TerritoryDisplayName | FText | Territory | — | — | Display name for UI |
 | InitialOwningFaction | FGameplayTag | Territory | — | — | Set at design time, applied in BeginPlay |
-| InitialState | ETerritoryInitialState | Territory | — | — | Automatic, Unclaimed, Claimed, Contested, or Locked new-campaign state |
+| InitialAvailability | ETerritoryAvailability | Definition asset | — | — | Unlocked or Locked story availability; independent from owner/state |
+| InitialState | ETerritoryInitialState | Definition asset | — | — | Automatic, Unclaimed, or Claimed political state; parent state is derived |
 | InitialMaxConcurrentAttackers | int32 | Territory\|Capture | — | — | Design-time default |
 | InitialPeriodicIncome | int32 | Territory\|Economy | — | — | Design-time default |
 | InitialGuardCost | int32 | Territory\|Economy | — | — | Recurring upkeep per assigned guard per cycle |
@@ -121,11 +122,11 @@ values for runtime queries; it is not a supported Blueprint authoring fallback.
 | GuardSpawnCount | int32 | Territory\|Guards | — | — | Authored initial target for non-player captures |
 | PostCaptureGarrisonPolicy | ETerritoryPostCaptureGarrisonPolicy | Territory\|Guards | — | — | Default `PlayerChooses` starts captures by a resolved matching live Narrative player faction at zero |
 | GuardSpawnPoints | TArray<ATerritoryGuardSpawnPoint*> | Territory\|Guards | — | — | Explicit post references; the unique resolved union is active capacity, one guard per point |
-| ControlMode | ETerritoryControlMode | Territory\|Hierarchy | — | — | Independent (default), AggregateOnly, or Cascading |
+| ControlMode | ETerritoryControlMode | Definition asset | — | — | Class-fixed: Place Independent; City/District AggregateOnly |
 | StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Definition asset | — | — | Per-state entry/exit conditions/events, cloned privately into each live actor |
 
 Legacy `bStartsLocked`, `LockConditions`, actor-side `StateConfigs`, and migration functions are
-removed. Definitions use `InitialState` and the Locked row's Exit Conditions.
+removed. Definitions use `InitialAvailability` and the Locked row's Exit Conditions.
 
 ### OwnershipData (Replicated, RepNotify)
 
@@ -133,6 +134,7 @@ removed. Definitions use `InitialState` and the Locked row's Exit Conditions.
 |---|---|---|
 | OwningFaction | FGameplayTag | Stable owner; retains the incumbent defender while Contested |
 | TerritoryState | ETerritoryState | Current state |
+| Availability | ETerritoryAvailability | Local story availability; `IsAvailableForGameplay` also checks ancestors |
 | ControlProgress | float | 0.0–1.0 |
 | ContestingFaction | FGameplayTag | Who is attacking |
 | DefenderCount | int32 | Active defenders |
@@ -186,8 +188,6 @@ removed. Definitions use `InitialState` and the Locked row's Exit Conditions.
 | Function | Parameters | Description |
 |---|---|---|
 | SetOwningFaction | NewFaction (GameplayTag) | Validated compatibility wrapper through `ApplyTerritoryMutation`; use that subsystem API for an explicit context/result |
-| SetControlProgress | Progress (float) | Set capture progress |
-| SetTerritoryState | NewState (ETerritoryState) | Force-set state |
 | RegisterDefender | Defender (Actor*) | Add to defender list |
 | UnregisterDefender | Defender (Actor*) | Remove from defender list |
 | SpawnGuards | — | Spawn all guards per config |
@@ -491,10 +491,21 @@ Global persistence and late-join projection for economy, diplomacy, capture summ
 
 | Function | Type | Description |
 |---|---|---|
+| FindTerritoryWorldState | BlueprintPure / static | Resolve the single WorldState for an explicit world context (`Get Territory World State` in Blueprint) |
 | ExportPersistentState | AuthorityOnly | Copy subsystem state → replicated arrays |
 | ImportPersistentState | AuthorityOnly | Copy replicated arrays → subsystems |
+| PublishTerritorySummary | AuthorityOnly | Publish one loaded Territory through the canonical summary builder |
+| RegisterDefinitionHierarchy | AuthorityOnly | Add a Definition and its descendants without overwriting live political data |
+| RefreshStrategicDirectory | AuthorityOnly | Reconcile Campaign City assets and currently loaded Territory Definitions |
+| GetCaptureSummary | Pure | Read one summary by stable Territory tag |
+| GetAllCaptureSummaries | Pure | Read the full replicated directory, including unloaded Definition-backed rows |
 
-`ExportPersistentState` rebuilds economy, transaction, treaty, reputation, capture projections, assault records, and the counterattack cycle ledger. Import restores the economy ledger, rich treaty metadata, finite assault state, and deterministic high-water marks. TerritoryVolume owns durable ownership; participant actor identities are not persisted.
+`ExportPersistentState` rebuilds economy, transaction, treaty, reputation, capture projections, assault records, and the counterattack cycle ledger. Import restores the economy ledger, rich treaty metadata, finite assault state, deterministic high-water marks, and the read-only strategic directory used before World Partition actors load. TerritoryVolume remains the sole durable ownership authority; cached directory rows are never applied to actors, and participant actor identities are not persisted.
+
+`CampaignCities` is the root authoring list for the strategic directory. Assign each campaign City
+Definition once; District and Place rows are derived recursively. A Definition-backed row contains
+stable identity, display name, hierarchy level, parent/child counts, and initial political
+presentation. It is replaced by the authoritative actor row as soon as that actor loads.
 
 ### Delegates
 
@@ -1133,7 +1144,7 @@ See [17_Counterattack_System.md](17_Counterattack_System.md) for lifecycle and c
 |---|---|
 | Independent | Standard territory — owns its own state, can be captured directly |
 | AggregateOnly | Parent-only — state derived from children, cannot be directly captured |
-| Cascading | Capture cascades to children; direct capture allowed and child ownership follows |
+| Cascading | Hidden legacy serialization value; current Definition assets never author it |
 
 ### ETerritoryState
 
@@ -1142,7 +1153,7 @@ See [17_Counterattack_System.md](17_Counterattack_System.md) for lifecycle and c
 | Unclaimed | No owner |
 | Claimed | Owned and stable |
 | Contested | Capture in progress |
-| Locked | Cannot be captured |
+| Locked | Hidden legacy serialization value; runtime availability is separate |
 
 ### ETerritoryRegistrationResult
 

@@ -5,6 +5,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -14,6 +15,23 @@
 #include "NavigationSystem.h"
 #include "TimerManager.h"
 #include "SaveSystemStatics.h"
+
+namespace
+{
+	bool ShouldLogGuardSpawning()
+	{
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		return Settings && Settings->ShouldDebugGuards();
+	}
+
+	bool ShouldLogGuardSaveLoad()
+	{
+		const UTerritoryDeveloperSettings* Settings =
+			GetDefault<UTerritoryDeveloperSettings>();
+		return Settings && Settings->ShouldDebugSaveLoad();
+	}
+}
 
 #if WITH_EDITOR
 #include "Components/ArrowComponent.h"
@@ -57,9 +75,12 @@ void ATerritoryGuardSpawnPoint::Load_Implementation()
 {
 	if (SavedActiveGuardCount > 1 || PendingReserveSpawns > 1)
 	{
-		UE_LOG(LogTerritory, Log,
-			TEXT("GuardSpawnPoint %s migrated legacy multi-slot save state to one active combat slot"),
-			*GetPathName());
+		if (ShouldLogGuardSaveLoad())
+		{
+			UE_LOG(LogTerritory, Log,
+				TEXT("[SaveLoad] GuardSpawnPoint %s migrated legacy multi-slot save state to one active combat slot"),
+				*GetPathName());
+		}
 	}
 	SavedActiveGuardCount = FMath::Clamp(SavedActiveGuardCount, 0, 1);
 	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
@@ -106,6 +127,13 @@ void ATerritoryGuardSpawnPoint::PostDuplicate(EDuplicateMode::Type DuplicateMode
 void ATerritoryGuardSpawnPoint::BindToTerritory(ATerritoryVolume* Territory)
 {
 	if (!Territory) return;
+	if (!Territory->IsA<ATerritoryProperty>())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("GuardSpawnPoint %s rejected aggregate territory %s. Guard posts belong to Place Definitions only."),
+			*GetPathName(), *Territory->GetTerritoryTag().ToString());
+		return;
+	}
 
 	const FGameplayTag TerritoryTag = Territory->GetTerritoryTag();
 	if (OwnerTerritoryTag.IsValid() && OwnerTerritoryTag != TerritoryTag)
@@ -202,8 +230,11 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 		if (!CachedTerritory.IsValid() && Territory->GetTerritoryTag() == OwnerTerritoryTag)
 		{
 			SetResolvedTerritory(Territory);
-			UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s late-bound to territory %s"),
-				*GetName(), *OwnerTerritoryTag.ToString());
+			if (ShouldLogGuardSpawning())
+			{
+				UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s late-bound to territory %s"),
+					*GetName(), *OwnerTerritoryTag.ToString());
+			}
 
 			if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
 			{
@@ -219,15 +250,21 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 		if (ResolvedTerritory && CachedTerritory.Get() != ResolvedTerritory)
 		{
 			SetResolvedTerritory(ResolvedTerritory);
-			UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s proximity-bound to territory %s"),
-				*GetName(), *ResolvedTerritory->GetTerritoryTag().ToString());
+			if (ShouldLogGuardSpawning())
+			{
+				UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s proximity-bound to territory %s"),
+					*GetName(), *ResolvedTerritory->GetTerritoryTag().ToString());
+			}
 		}
 	}
 }
 
 bool ATerritoryGuardSpawnPoint::ApplyTerritoryDefinition()
 {
-	if (!TerritoryDefinition) return false;
+	if (!TerritoryDefinition || !TerritoryDefinition->IsA<UTerritoryPlaceDefinition>())
+	{
+		return false;
+	}
 	const FTerritoryGuardPostTemplate* Template =
 		TerritoryDefinition->FindGuardPost(GuardPostID);
 	if (!Template) return false;
@@ -285,11 +322,11 @@ ATerritoryVolume* ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(
 	FString BestTag;
 	for (ATerritoryVolume* Candidate : Candidates)
 	{
-		if (!IsValid(Candidate)) continue;
-		int32 Priority = 0;
-		if (Candidate->IsA<ATerritoryProperty>()) Priority = 3;
-		else if (Candidate->IsA<ATerritoryDistrict>()) Priority = 2;
-		else if (Candidate->IsA<ATerritoryCity>()) Priority = 1;
+		// City and District are aggregate read models. A placement or patrol overlap
+		// may pass through their large bounds, but it must never make either parent
+		// the physical owner of a guard post.
+		if (!IsValid(Candidate) || !Candidate->IsA<ATerritoryProperty>()) continue;
+		constexpr int32 Priority = 3;
 		const FVector Size = Candidate->GetTerritoryBounds().GetSize();
 		const double BoundsVolume = FMath::Abs(
 			static_cast<double>(Size.X) * Size.Y * Size.Z);
@@ -336,6 +373,13 @@ void ATerritoryGuardSpawnPoint::OnConstruction(const FTransform& Transform)
 
 void ATerritoryGuardSpawnPoint::SetResolvedTerritory(ATerritoryVolume* Territory)
 {
+	if (Territory && !Territory->IsA<ATerritoryProperty>())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("GuardSpawnPoint %s refused non-Place owner %s"),
+			*GetPathName(), *Territory->GetTerritoryTag().ToString());
+		Territory = nullptr;
+	}
 	ATerritoryVolume* PreviousTerritory = CachedTerritory.Get();
 	if (PreviousTerritory == Territory)
 	{
@@ -373,8 +417,11 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 
 	if (CachedTerritory.IsValid())
 	{
-		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s resolved to territory %s"),
-			*GetName(), *CachedTerritory->GetTerritoryTag().ToString());
+		if (ShouldLogGuardSpawning())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s resolved to territory %s"),
+				*GetName(), *CachedTerritory->GetTerritoryTag().ToString());
+		}
 	}
 	else
 	{
@@ -383,9 +430,12 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 		// expected wait state rather than a broken ownership binding.
 		if (OwnerTerritoryTag.IsValid())
 		{
-			UE_LOG(LogTerritory, Verbose,
-				TEXT("GuardSpawnPoint %s is waiting for owning territory %s to register"),
-				*GetName(), *OwnerTerritoryTag.ToString());
+			if (ShouldLogGuardSpawning())
+			{
+				UE_LOG(LogTerritory, Log,
+					TEXT("GuardSpawnPoint %s is waiting for owning territory %s to register"),
+					*GetName(), *OwnerTerritoryTag.ToString());
+			}
 		}
 		else
 		{
@@ -556,8 +606,11 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard,
 	}
 	else if (Reason == EGuardRemovalReason::Killed)
 	{
-		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: guard died, no uncommitted reserves"),
-			*GetName());
+		if (ShouldLogGuardSpawning())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: guard died, no uncommitted reserves"),
+				*GetName());
+		}
 	}
 }
 
@@ -575,8 +628,11 @@ void ATerritoryGuardSpawnPoint::QueueReserveSpawn()
 		AutomaticReserveSpawnFailures = 0;
 	}
 	++PendingReserveSpawns;
-	UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: queued reserve deployment (%d pending, %d available)"),
-		*GetName(), PendingReserveSpawns, CurrentReserveCount);
+	if (ShouldLogGuardSpawning())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: queued reserve deployment (%d pending, %d available)"),
+			*GetName(), PendingReserveSpawns, CurrentReserveCount);
+	}
 
 	ATerritoryVolume* Territory = GetOwningTerritory();
 	if (bAutoSpawnReserves)
@@ -610,7 +666,8 @@ void ATerritoryGuardSpawnPoint::TryAutomaticReserveSpawn()
 	}
 
 	ATerritoryVolume* Territory = GetOwningTerritory();
-	if (!Territory || !IsOwnerReserveDeploymentStateValid(
+	if (!Territory || !Territory->IsAvailableForGameplay()
+		|| !IsOwnerReserveDeploymentStateValid(
 		Territory->GetTerritoryState(), Territory->GetOwningFaction(),
 		Territory->GetOwnershipData().ContestingFaction))
 	{
@@ -661,7 +718,8 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 		Territory->RefreshGarrisonSnapshot();
 		return false;
 	}
-	if (!Territory || !IsOwnerReserveDeploymentStateValid(
+	if (!Territory || !Territory->IsAvailableForGameplay()
+		|| !IsOwnerReserveDeploymentStateValid(
 			Territory->GetTerritoryState(), Territory->GetOwningFaction(),
 			Territory->GetOwnershipData().ContestingFaction)
 		|| !Territory->TrySpawnSingleGuard(this, bRequireCameraAvoidance))
@@ -675,8 +733,11 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 	--CurrentReserveCount;
 	PendingReserveSpawns = FMath::Max(0, PendingReserveSpawns - 1);
 	Territory->RefreshGarrisonSnapshot();
-	UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: deployed one reserve (%d remaining, %d pending)"),
-		*GetName(), CurrentReserveCount, PendingReserveSpawns);
+	if (ShouldLogGuardSpawning())
+	{
+		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: deployed one reserve (%d remaining, %d pending)"),
+			*GetName(), CurrentReserveCount, PendingReserveSpawns);
+	}
 
 	if (bAutoSpawnReserves && HasPendingReserveSpawn())
 	{
