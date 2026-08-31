@@ -8,6 +8,8 @@
 #include "Story/TerritoryStoryOutcomeAnalyzer.h"
 #include "Story/STerritoryStoryOutcomePanel.h"
 #include "Tales/TerritoryOwnershipCondition.h"
+#include "Modules/ModuleManager.h"
+#include "PropertyEditorModule.h"
 
 namespace TerritoryStoryOutcomeTests
 {
@@ -241,6 +243,29 @@ bool FTFTerritoryStoryOutcomePanelSmoke::RunTest(const FString& Parameters)
 		Panel->GetChildren() != nullptr);
 	TestFalse(TEXT("Constructing the Details panel does not dirty the Definition"),
 		Package->IsDirty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryStoryOutcomeSingleRegistration,
+	"TerritoryFramework.Editor.StoryOutcome.SingleInheritedDetailsRegistration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryStoryOutcomeSingleRegistration::RunTest(
+	const FString& Parameters)
+{
+	FPropertyEditorModule& PropertyEditor =
+		FModuleManager::LoadModuleChecked<FPropertyEditorModule>(
+			TEXT("PropertyEditor"));
+	const FCustomDetailLayoutNameMap& Layouts =
+		PropertyEditor.GetClassNameToDetailLayoutNameMap();
+	TestTrue(TEXT("The base Territory Definition owns the inherited customization"),
+		Layouts.Contains(UTerritoryDefinition::StaticClass()->GetFName()));
+	TestFalse(TEXT("Place does not register the same customization a second time"),
+		Layouts.Contains(UTerritoryPlaceDefinition::StaticClass()->GetFName()));
+	TestFalse(TEXT("District does not register the same customization a second time"),
+		Layouts.Contains(UTerritoryDistrictDefinition::StaticClass()->GetFName()));
+	TestFalse(TEXT("City does not register the same customization a second time"),
+		Layouts.Contains(UTerritoryCityDefinition::StaticClass()->GetFName()));
 	return true;
 }
 

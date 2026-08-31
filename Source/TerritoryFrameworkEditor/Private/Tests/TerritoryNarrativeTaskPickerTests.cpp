@@ -3,6 +3,10 @@
 #include "Misc/AutomationTest.h"
 
 #include "Engine/Blueprint.h"
+#include "Misc/PackageName.h"
+#include "Tales/Quest.h"
+#include "Tales/QuestBlueprintGeneratedClass.h"
+#include "Tales/QuestSM.h"
 #include "UObject/UnrealType.h"
 #include "Tales/TerritoryAIObservationTask.h"
 #include "Tales/TerritoryAssaultTask.h"
@@ -112,6 +116,62 @@ bool FTFTerritoryNarrativeTaskPickerAssets::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Narrative Quest Editor searches the Territory task asset folder"),
 		bHasTerritoryPath);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryNarrativeQuestCaptureFixture,
+	"TerritoryFramework.Editor.Tales.OptionalProjectCaptureQuest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryNarrativeQuestCaptureFixture::RunTest(const FString& Parameters)
+{
+	static const TCHAR* QuestPackage =
+		TEXT("/Game/TerritoryFramework/NQ_CaptureBlacksmith");
+	if (!FPackageName::DoesPackageExist(QuestPackage))
+	{
+		AddInfo(TEXT("Skipped optional TDA Capture Blacksmith quest fixture; "
+			"the community plugin does not require this project asset."));
+		return true;
+	}
+
+	UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr,
+		TEXT("/Game/TerritoryFramework/NQ_CaptureBlacksmith.NQ_CaptureBlacksmith"));
+	TestNotNull(TEXT("Capture Blacksmith Narrative Quest loads"), Blueprint);
+	if (!Blueprint) return false;
+
+	const UQuestBlueprintGeneratedClass* QuestClass =
+		Cast<UQuestBlueprintGeneratedClass>(Blueprint->GeneratedClass.Get());
+	TestNotNull(TEXT("Capture Blacksmith uses Narrative's Quest generated class"),
+		QuestClass);
+	if (!QuestClass) return false;
+
+	const UQuest* Template = QuestClass->GetQuestTemplate();
+	TestNotNull(TEXT("Narrative compiled a Quest template"), Template);
+	if (!Template) return false;
+
+	TestFalse(TEXT("Capture quest has a player-facing name"),
+		Template->GetQuestName().IsEmpty());
+	TestNotNull(TEXT("Capture quest has a start state"),
+		Template->GetQuestStartState());
+	TestTrue(TEXT("Capture quest has at least one objective branch"),
+		!Template->GetBranches().IsEmpty());
+
+	const FGameplayTag Blacksmith = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	bool bHasBlacksmithCaptureTask = false;
+	for (const UQuestBranch* Branch : Template->GetBranches())
+	{
+		if (!Branch) continue;
+		for (const UNarrativeTask* Task : Branch->QuestTasks)
+		{
+			const UTerritoryCaptureTask* CaptureTask =
+				Cast<UTerritoryCaptureTask>(Task);
+			bHasBlacksmithCaptureTask |= CaptureTask
+				&& CaptureTask->TargetTerritoryTag == Blacksmith;
+		}
+	}
+	TestTrue(TEXT("Quest observes Blacksmith through Territory Capture Task"),
+		bHasBlacksmithCaptureTask);
 	return true;
 }
 

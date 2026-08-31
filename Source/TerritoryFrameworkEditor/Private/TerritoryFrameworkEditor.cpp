@@ -218,14 +218,15 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 	const bool bNarrativeTasksRegistered = RegisterNarrativeTaskSearchPath();
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(
 		TEXT("PropertyEditor"));
-	for (const FName ClassName : { FName(TEXT("TerritoryDefinition")),
-		FName(TEXT("TerritoryPlaceDefinition")), FName(TEXT("TerritoryDistrictDefinition")),
-		FName(TEXT("TerritoryCityDefinition")) })
-	{
-		PropertyEditor.RegisterCustomClassLayout(ClassName,
-			FOnGetDetailCustomizationInstance::CreateStatic(
-				&FTerritoryDefinitionDetails::MakeInstance));
-	}
+	// PropertyEditor queries registered layouts for both the concrete class and
+	// its registered parents. Registering this same customization for the base
+	// and all three derived Definition classes therefore inserts the complete
+	// Story Outcome panel twice. One base registration is inherited by Place,
+	// District, and City and still receives the concrete selected objects.
+	PropertyEditor.RegisterCustomClassLayout(
+		UTerritoryDefinition::StaticClass()->GetFName(),
+		FOnGetDetailCustomizationInstance::CreateStatic(
+			&FTerritoryDefinitionDetails::MakeInstance));
 	PropertyEditor.NotifyCustomizationModuleChanged();
 	EnsureVehicleRoadsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Territory.Editor.EnsureVehicleRoads"),
@@ -276,12 +277,8 @@ void FTerritoryFrameworkEditorModule::ShutdownModule()
 	{
 		FPropertyEditorModule& PropertyEditor = FModuleManager::GetModuleChecked<FPropertyEditorModule>(
 			TEXT("PropertyEditor"));
-		for (const FName ClassName : { FName(TEXT("TerritoryDefinition")),
-			FName(TEXT("TerritoryPlaceDefinition")), FName(TEXT("TerritoryDistrictDefinition")),
-			FName(TEXT("TerritoryCityDefinition")) })
-		{
-			PropertyEditor.UnregisterCustomClassLayout(ClassName);
-		}
+		PropertyEditor.UnregisterCustomClassLayout(
+			UTerritoryDefinition::StaticClass()->GetFName());
 	}
 	UE_LOG(LogTemp, Log, TEXT("TerritoryFrameworkEditor module unloaded"));
 }

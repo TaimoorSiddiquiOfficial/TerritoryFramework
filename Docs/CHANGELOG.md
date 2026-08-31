@@ -2,6 +2,15 @@
 
 ## Unreleased — 2026-08-31 (Narrative Territory tasks and scenario cleanup)
 
+- Fixed the Story Outcome Details customization being registered for both the base Definition and
+  every derived class. Unreal executed both layouts and rendered the complete panel twice; one
+  inherited base registration now gives Place, District, and City exactly one panel.
+- Added an optional project-fixture check for `NQ_CaptureBlacksmith`: when installed, the Narrative
+  Quest must compile with a start state, an objective branch, and a Territory Capture Task that
+  watches Blacksmith. Community projects without this example asset remain independent.
+- Hardened Narrative integration regression fixtures: GAS task tests use Narrative's dedicated ASC
+  actor without triggering stable-save registration, and the TDA GameMode check now rejects a
+  plugin-local Player Definition with a missing Default Appearance before it can assert in play.
 - Reorganized the documentation into one unique 00–31 learning path, separated dated audit
   evidence from current setup guidance, repaired internal links, and added a current remaining-work
   and gameplay roadmap.

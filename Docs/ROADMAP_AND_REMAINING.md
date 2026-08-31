@@ -15,6 +15,12 @@
   chance, or changing the asset.
 - The Narrative Task library covers Territory state/capture, counterattacks, disguise, boss
   and chase outcomes, movement, GAS state, combat progress, and AI observation.
+- Story Outcome Preview is registered once on the base Definition and inherited once by Place,
+  District, and City; the previous duplicated panel has a regression test.
+- Current-source verification on 2026-08-31 built `TDAEditor` and `TDA`, passed all 179
+  `TerritoryFramework.*` tests, compiled the Blacksmith Narrative Quest fixture, and ran a
+  15-second `HopDistrictTest` headless game smoke with no Blueprint runtime, Accessed None,
+  Territory, assertion, or critical errors.
 - The documentation learning path is uniquely numbered from 00 to 31. Reports and tutorials
   are separate appendices.
 
@@ -22,9 +28,10 @@
 
 These are verification jobs, not permission to invent a second gameplay authority.
 
-1. **Final current-source verification** — build `TDAEditor` and `TDA`, run the complete
-   `TerritoryFramework.*` automation suite, validate the task assets, and run the
-   `HopDistrictTest` PIE smoke after the Unreal Editor is closed.
+1. **Interactive capture-quest PIE** — the automated source, asset, and headless runtime checks
+   are green. In visible PIE, begin `NQ_CaptureBlacksmith`, defeat the defenders, complete the
+   owner handover, claim the Place, confirm the quest task completes once, and confirm diplomacy
+   returns from the local contest war without disturbing unrelated wars.
 2. **Real multiplayer session** — use a genuine dedicated server with two connected clients.
    Capture a Place, recruit one guard, patrol, launch a counterattack, kill the guard and
    attackers, and verify exact-once capture/XP results on every client.
@@ -39,6 +46,10 @@ These are verification jobs, not permission to invent a second gameplay authorit
 6. **Authored road playtest** — drive a faction vehicle from the road-guide start to its Place,
    then test reverse boss pursuit, blocked traffic, abandonment, cleanup, player carjacking,
    and the final on-foot fight with real navigation and camera framing.
+7. **Project content cleanup** — remove or replace stale Narrative demo item references reported
+   during runtime, repair the invalid `GameplayCue.TakeDamage.Fire` tag, and confirm a usable
+   RecastNavMesh exists in the authored gameplay map. These are project/vendor-content warnings,
+   not Territory ownership failures, but they can hide equipment, cue, or AI navigation defects.
 
 ## Engineering improvements after the gates
 

@@ -20,7 +20,10 @@
 #include "Tales/TerritoryStoryConditions.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
+#include "UnrealFramework/NarrativeGameMode.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
+#include "Character/CharacterAppearance.h"
+#include "Character/PlayerDefinition.h"
 #include "GAS/NarrativeAttributeSetBase.h"
 #include "NarrativeGameplayTags.h"
 
@@ -151,6 +154,40 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 			GameModeCDO->DefaultPawnClass.Get() == ProjectPlayer->GeneratedClass.Get());
 		TestTrue(TEXT("Territory GameMode uses the project Narrative controller"),
 			GameModeCDO->PlayerControllerClass.Get() == ProjectController->GeneratedClass.Get());
+	}
+	const ANarrativeGameMode* NarrativeGameModeCDO =
+		Cast<ANarrativeGameMode>(GameModeCDO);
+	TestNotNull(TEXT("Territory GameMode retains Narrative player definitions"),
+		NarrativeGameModeCDO);
+	if (NarrativeGameModeCDO)
+	{
+		const FArrayProperty* DefinitionsProperty =
+			FindFProperty<FArrayProperty>(NarrativeGameModeCDO->GetClass(),
+				TEXT("PlayerDefinitions"));
+		const FObjectPropertyBase* DefinitionProperty = DefinitionsProperty
+			? CastField<FObjectPropertyBase>(DefinitionsProperty->Inner) : nullptr;
+		TestNotNull(TEXT("Narrative exposes the Player Definitions array"),
+			DefinitionsProperty);
+		TestNotNull(TEXT("Narrative Player Definitions are object references"),
+			DefinitionProperty);
+		if (!DefinitionsProperty || !DefinitionProperty) return false;
+		FScriptArrayHelper Definitions(DefinitionsProperty,
+			DefinitionsProperty->ContainerPtrToValuePtr<void>(NarrativeGameModeCDO));
+		TestTrue(TEXT("Territory GameMode assigns at least one Player Definition"),
+			Definitions.Num() > 0);
+		for (int32 Index = 0; Index < Definitions.Num(); ++Index)
+		{
+			const UPlayerDefinition* Definition = Cast<UPlayerDefinition>(
+				DefinitionProperty->GetObjectPropertyValue(Definitions.GetRawPtr(Index)));
+			TestNotNull(TEXT("Every configured Player Definition resolves"), Definition);
+			if (!Definition) continue;
+			TestTrue(TEXT("Player Definition lives in project content for reliable bundles"),
+				Definition->GetPackage()->GetName().StartsWith(TEXT("/Game/")));
+			TestFalse(TEXT("Player Definition has a Default Appearance"),
+				Definition->DefaultAppearance.IsNull());
+			TestNotNull(TEXT("Player Definition Default Appearance loads"),
+				Definition->DefaultAppearance.LoadSynchronous());
+		}
 	}
 
 	const USimpleConstructionScript* ControllerSCS = ProjectController->SimpleConstructionScript;

@@ -6,6 +6,8 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Engine/World.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "GAS/NarrativeASCActor.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Tales/QuestTask.h"
 #include "Tales/TerritoryAIObservationTask.h"
@@ -215,6 +217,16 @@ bool FTFCommunityTaskReadOnlyQueries::RunTest(const FString& Parameters)
 		World->DestroyWorld(false);
 		return false;
 	}
+	// Narrative's base character deliberately receives its ASC from PlayerState.
+	// Use Narrative's dedicated ASC test actor for GAS queries; unlike the NPC
+	// class, it has no stable-save registration that asserts in an empty test world.
+	ANarrativeASCActor* GASActor = World->SpawnActor<ANarrativeASCActor>(
+		ANarrativeASCActor::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Narrative GAS fixture exists"), GASActor))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
 
 	UTerritoryCharacterActionTask* MovementTask =
 		NewObject<UTerritoryCharacterActionTask>();
@@ -228,7 +240,8 @@ bool FTFCommunityTaskReadOnlyQueries::RunTest(const FString& Parameters)
 	const FGameplayTag TestTag = FGameplayTag::RequestGameplayTag(
 		TEXT("Narrative.State.Stumbling"), false);
 	UNarrativeAbilitySystemComponent* AbilitySystem =
-		Character->GetNarrativeAbilitySystemComponent();
+		Cast<UNarrativeAbilitySystemComponent>(
+			UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(GASActor));
 	if (TestTrue(TEXT("GAS task fixture is available"),
 		TestTag.IsValid() && AbilitySystem != nullptr))
 	{
@@ -238,7 +251,7 @@ bool FTFCommunityTaskReadOnlyQueries::RunTest(const FString& Parameters)
 		GameplayTask->RequiredTags.AddTag(TestTag);
 		AbilitySystem->AddLooseGameplayTag(TestTag);
 		TestTrue(TEXT("GAS preview reads a real ASC-owned tag"),
-			GameplayTask->IsGameplayStateSatisfiedBy(Character));
+			GameplayTask->IsGameplayStateSatisfiedBy(GASActor));
 		TestTrue(TEXT("GAS preview does not remove the observed tag"),
 			AbilitySystem->HasMatchingGameplayTag(TestTag));
 		AbilitySystem->RemoveLooseGameplayTag(TestTag);
