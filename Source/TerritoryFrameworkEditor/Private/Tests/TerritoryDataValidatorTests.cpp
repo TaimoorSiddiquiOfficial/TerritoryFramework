@@ -16,6 +16,10 @@
 #include "Misc/DataValidation.h"
 #include "Misc/PackageName.h"
 #include "Music/TaggedMusicSet.h"
+#include "QuestBlueprint.h"
+#include "Tales/Quest.h"
+#include "Tales/QuestSM.h"
+#include "Tales/TerritoryCaptureTask.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectNPCDefinitionIdentityRegression,
@@ -400,6 +404,58 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Duplicate hierarchy identity emits an error"),
 		DuplicateHierarchyGuidContext.GetNumErrors() > 0u);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryQuestTerminalStateValidation,
+	"TerritoryFramework.Editor.DataValidation.NarrativeQuestTerminalState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryQuestTerminalStateValidation::RunTest(const FString& Parameters)
+{
+	UQuestBlueprint* Blueprint = NewObject<UQuestBlueprint>();
+	TestNotNull(TEXT("Narrative Quest Blueprint creates its Quest Template"),
+		Blueprint->QuestTemplate);
+	if (!Blueprint->QuestTemplate) return false;
+
+	UQuestState* Start = NewObject<UQuestState>(Blueprint->QuestTemplate);
+	UQuestState* Intermediate = NewObject<UQuestState>(Blueprint->QuestTemplate);
+	UQuestState* Success = NewObject<UQuestState>(Blueprint->QuestTemplate);
+	UQuestBranch* FirstBranch = NewObject<UQuestBranch>(Blueprint->QuestTemplate);
+	UQuestBranch* CaptureBranch = NewObject<UQuestBranch>(Blueprint->QuestTemplate);
+	UTerritoryCaptureTask* CaptureTask = NewObject<UTerritoryCaptureTask>(CaptureBranch);
+
+	Start->StateNodeType = EStateNodeType::Regular;
+	Intermediate->StateNodeType = EStateNodeType::Success;
+	Success->StateNodeType = EStateNodeType::Success;
+	FirstBranch->DestinationState = Intermediate;
+	CaptureBranch->DestinationState = Success;
+	CaptureBranch->QuestTasks.Add(CaptureTask);
+	Start->Branches.Add(FirstBranch);
+	Intermediate->Branches.Add(CaptureBranch);
+	Blueprint->QuestTemplate->AddState(Start);
+	Blueprint->QuestTemplate->AddState(Intermediate);
+	Blueprint->QuestTemplate->AddState(Success);
+	Blueprint->QuestTemplate->AddBranch(FirstBranch);
+	Blueprint->QuestTemplate->AddBranch(CaptureBranch);
+	Blueprint->QuestTemplate->SetQuestStartState(Start);
+
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	TestFalse(TEXT("A Success state with a later Territory objective is invalid"),
+		UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
+	TestTrue(TEXT("The validation message explains duplicate completion"),
+		Errors.ContainsByPredicate([](const FString& Error)
+		{
+			return Error.Contains(TEXT("complete the same quest again"));
+		}));
+
+	Intermediate->StateNodeType = EStateNodeType::Regular;
+	FirstBranch->QuestTasks.Add(NewObject<UTerritoryCaptureTask>(FirstBranch));
+	Errors.Reset();
+	Warnings.Reset();
+	TestTrue(TEXT("A Regular intermediate state followed by one final Success is valid"),
+		UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
 	return true;
 }
 

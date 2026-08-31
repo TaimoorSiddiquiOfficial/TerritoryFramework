@@ -60,8 +60,23 @@ void ATerritoryStoryOwnerSpawner::BeginPlay()
 
 	if (HasAuthority() && bHandoverActivated)
 	{
-		EnsureOwnerSpawned();
+		PendingNarrativeTarget.Reset();
+		PendingController.Reset();
+		PendingNarrativeComponent.Reset();
+		bPendingBeginDialogue = false;
+		HandoverSpawnRetryAttempts = 0;
+		if (!TryCompletePendingHandover())
+		{
+			SchedulePendingHandoverRetry();
+		}
 	}
+}
+
+void ATerritoryStoryOwnerSpawner::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	ClearPendingHandover();
+	Super::EndPlay(EndPlayReason);
 }
 
 void ATerritoryStoryOwnerSpawner::GetLifetimeReplicatedProps(
@@ -84,22 +99,20 @@ bool ATerritoryStoryOwnerSpawner::ActivateHandover(APawn* NarrativeTarget,
 		return false;
 	}
 
-	if (!EnsureOwnerSpawned())
+	PendingNarrativeTarget = NarrativeTarget;
+	PendingController = Controller;
+	PendingNarrativeComponent = NarrativeComponent;
+	bPendingBeginDialogue = bBeginDialogueImmediately;
+	HandoverSpawnRetryAttempts = 0;
+
+	// Narrative NPC spawning can complete one or more ticks after SpawnActors().
+	// Accept the valid request now, then finish activation and dialogue only when
+	// Narrative exposes the spawned NPC. This avoids a silent owner when guards are
+	// defeated immediately after BeginPlay or after a streamed cell becomes ready.
+	if (!TryCompletePendingHandover())
 	{
-		return false;
+		SchedulePendingHandoverRetry();
 	}
-
-	// Save and replicate activation only after Narrative has produced a valid NPC.
-	// Otherwise a missing definition could permanently save a completed handover
-	// whose owner never existed.
-	bHandoverActivated = true;
-	ForceNetUpdate();
-
-	if (bBeginDialogueImmediately && bBeginDialogueOnActivation)
-	{
-		return BeginOwnerDialogue(NarrativeTarget, Controller, NarrativeComponent);
-	}
-
 	return true;
 }
 
@@ -160,6 +173,22 @@ bool ATerritoryStoryOwnerSpawner::BeginOwnerDialogue(APawn* NarrativeTarget,
 		return false;
 	}
 
+	// Defender-death events are also raised by environment damage, GAS effects, and
+	// server-side scripted kills. Those paths may not carry the damaging pawn or its
+	// Tales component. Resolve the authoritative player here so an automatic story
+	// handover behaves the same as a normal player weapon kill.
+	if (!IsValid(Controller) && IsValid(NarrativeTarget))
+	{
+		Controller = Cast<APlayerController>(NarrativeTarget->GetController());
+	}
+	if (!IsValid(Controller) && GetWorld())
+	{
+		Controller = GetWorld()->GetFirstPlayerController();
+	}
+	if (!IsValid(NarrativeTarget) && IsValid(Controller))
+	{
+		NarrativeTarget = Controller->GetPawn();
+	}
 	if (!IsValid(NarrativeComponent) && IsValid(NarrativeTarget))
 	{
 		NarrativeComponent = UNarrativeFunctionLibrary::GetTalesComponent(NarrativeTarget);
@@ -196,4 +225,70 @@ bool ATerritoryStoryOwnerSpawner::BeginOwnerDialogue(APawn* NarrativeTarget,
 	PlayParams.bCanBeExited = true;
 
 	return NarrativeComponent->BeginDialogue(DialogueClass, PlayParams);
+}
+
+bool ATerritoryStoryOwnerSpawner::TryCompletePendingHandover()
+{
+	if (!EnsureOwnerSpawned())
+	{
+		return false;
+	}
+
+	// Save and replicate activation only after Narrative has produced a valid NPC.
+	// Otherwise a missing definition could permanently save a completed handover
+	// whose owner never existed.
+	if (!bHandoverActivated)
+	{
+		bHandoverActivated = true;
+		ForceNetUpdate();
+	}
+
+	if (bPendingBeginDialogue && bBeginDialogueOnActivation)
+	{
+		return BeginOwnerDialogue(PendingNarrativeTarget.Get(),
+			PendingController.Get(), PendingNarrativeComponent.Get());
+	}
+
+	return true;
+}
+
+void ATerritoryStoryOwnerSpawner::SchedulePendingHandoverRetry()
+{
+	if (!HasAuthority()
+		|| GetWorldTimerManager().IsTimerActive(HandoverSpawnRetryTimer))
+	{
+		return;
+	}
+
+	GetWorldTimerManager().SetTimer(HandoverSpawnRetryTimer, this,
+		&ATerritoryStoryOwnerSpawner::RetryPendingHandover, 0.1f, true);
+}
+
+void ATerritoryStoryOwnerSpawner::RetryPendingHandover()
+{
+	++HandoverSpawnRetryAttempts;
+	if (TryCompletePendingHandover())
+	{
+		ClearPendingHandover();
+		return;
+	}
+
+	if (HandoverSpawnRetryAttempts >= MaxHandoverSpawnRetryAttempts)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("Territory story owner %s did not become ready for %s after %.1f seconds; handover dialogue remains manually recoverable."),
+			*GetPathName(), *TerritoryTag.ToString(),
+			MaxHandoverSpawnRetryAttempts * 0.1f);
+		ClearPendingHandover();
+	}
+}
+
+void ATerritoryStoryOwnerSpawner::ClearPendingHandover()
+{
+	GetWorldTimerManager().ClearTimer(HandoverSpawnRetryTimer);
+	PendingNarrativeTarget.Reset();
+	PendingController.Reset();
+	PendingNarrativeComponent.Reset();
+	bPendingBeginDialogue = false;
+	HandoverSpawnRetryAttempts = 0;
 }

@@ -10,6 +10,7 @@ class UWorld;
 class UTerritoryCounterAttackProfile;
 class UTerritoryProductionProfile;
 class UTerritoryDefinition;
+class UQuestBlueprint;
 
 /**
  * Editor data validator for TerritoryFramework assets.
@@ -57,6 +58,8 @@ public:
 	static bool ValidateWorld(UWorld* World, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static bool ValidateTerritory(ATerritoryVolume* Territory, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static bool ValidateDefinition(UTerritoryDefinition* Definition,
+		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
+	static bool ValidateQuest(UQuestBlueprint* QuestBlueprint,
 		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 
 private:

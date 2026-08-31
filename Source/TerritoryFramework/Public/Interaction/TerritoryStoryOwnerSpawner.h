@@ -88,6 +88,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION()
@@ -102,4 +103,16 @@ private:
 	void ApplyOwnerInteractionDistance();
 	bool BeginOwnerDialogue(APawn* NarrativeTarget, APlayerController* Controller,
 		UTalesComponent* NarrativeComponent);
+	bool TryCompletePendingHandover();
+	void SchedulePendingHandoverRetry();
+	void RetryPendingHandover();
+	void ClearPendingHandover();
+
+	FTimerHandle HandoverSpawnRetryTimer;
+	TWeakObjectPtr<APawn> PendingNarrativeTarget;
+	TWeakObjectPtr<APlayerController> PendingController;
+	TWeakObjectPtr<UTalesComponent> PendingNarrativeComponent;
+	bool bPendingBeginDialogue = false;
+	int32 HandoverSpawnRetryAttempts = 0;
+	static constexpr int32 MaxHandoverSpawnRetryAttempts = 30;
 };

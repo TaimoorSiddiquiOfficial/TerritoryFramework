@@ -35,6 +35,10 @@
 #include "Misc/DataValidation.h"
 #include "NarrativeGameplayTags.h"
 #include "NavigationSystem.h"
+#include "QuestBlueprint.h"
+#include "Tales/Quest.h"
+#include "Tales/QuestSM.h"
+#include "Tales/QuestTask.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "WorldPartition/WorldPartitionHandle.h"
@@ -42,6 +46,34 @@
 
 namespace
 {
+	bool IsTerritoryNarrativeTask(const UNarrativeTask* Task)
+	{
+		for (const UClass* Class = Task ? Task->GetClass() : nullptr;
+			Class; Class = Class->GetSuperClass())
+		{
+			if (Class->GetOutermost()->GetName() == TEXT("/Script/TerritoryFramework"))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	bool UsesTerritoryNarrativeTask(const UQuestBlueprint* QuestBlueprint)
+	{
+		const UQuest* Quest = QuestBlueprint ? QuestBlueprint->QuestTemplate : nullptr;
+		if (!Quest) return false;
+		for (const UQuestBranch* Branch : Quest->GetBranches())
+		{
+			if (!Branch) continue;
+			for (const UNarrativeTask* Task : Branch->QuestTasks)
+			{
+				if (IsTerritoryNarrativeTask(Task)) return true;
+			}
+		}
+		return false;
+	}
+
 	bool HasNarrativeAttackDamageSetByCaller(
 		TSubclassOf<UGameplayEffect> EffectClass)
 	{
@@ -359,6 +391,10 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 	{
 		return true;
 	}
+	if (const UQuestBlueprint* QuestBlueprint = Cast<UQuestBlueprint>(InAsset))
+	{
+		return UsesTerritoryNarrativeTask(QuestBlueprint);
+	}
 
 	return false;
 }
@@ -494,6 +530,10 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 	else if (UTerritoryStealthProfile* StealthProfile = Cast<UTerritoryStealthProfile>(InAsset))
 	{
 		ValidateStealthProfile(StealthProfile, TEXT("Stealth profile"), Errors);
+	}
+	else if (UQuestBlueprint* QuestBlueprint = Cast<UQuestBlueprint>(InAsset))
+	{
+		ValidateQuest(QuestBlueprint, Errors, Warnings);
 	}
 	else if (UTerritoryDisguiseProfile* DisguiseProfile = Cast<UTerritoryDisguiseProfile>(InAsset))
 	{
@@ -890,6 +930,80 @@ void UTerritoryDataValidator::CheckEconomyConfig(ATerritoryVolume* Territory, TA
 			}
 		}
 	}
+}
+
+bool UTerritoryDataValidator::ValidateQuest(UQuestBlueprint* QuestBlueprint,
+	TArray<FString>& OutErrors, TArray<FString>& OutWarnings)
+{
+	if (!QuestBlueprint || !QuestBlueprint->QuestTemplate)
+	{
+		OutErrors.Add(TEXT("Narrative Quest has no Quest Template"));
+		return false;
+	}
+
+	const FString Context = QuestBlueprint->GetPathName();
+	const UQuest* Quest = QuestBlueprint->QuestTemplate;
+	auto Error = [&OutErrors, &Context](const FString& Message)
+	{
+		OutErrors.Add(FString::Printf(TEXT("%s: %s"), *Context, *Message));
+	};
+	auto Warning = [&OutWarnings, &Context](const FString& Message)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("%s: %s"), *Context, *Message));
+	};
+
+	if (!Quest->GetQuestStartState())
+	{
+		Error(TEXT("Quest Start State is required"));
+	}
+
+	for (const UQuestState* State : Quest->GetStates())
+	{
+		if (!State)
+		{
+			Error(TEXT("Quest States contains an empty row"));
+			continue;
+		}
+		if (State->StateNodeType != EStateNodeType::Regular
+			&& !State->Branches.IsEmpty())
+		{
+			const FString StateType = StaticEnum<EStateNodeType>()->GetNameStringByValue(
+				static_cast<int64>(State->StateNodeType));
+			Error(FString::Printf(
+				TEXT("Quest state '%s' is marked %s but still has an outgoing objective. Narrative completes the quest as soon as this state is entered, so the later Territory task can complete the same quest again. Change this intermediate state to Regular and keep Success or Failure only on the final state."),
+				*GetNameSafe(State), *StateType));
+		}
+	}
+
+	for (const UQuestBranch* Branch : Quest->GetBranches())
+	{
+		if (!Branch)
+		{
+			Error(TEXT("Quest Branches contains an empty row"));
+			continue;
+		}
+		if (!Branch->DestinationState)
+		{
+			Error(FString::Printf(TEXT("Quest branch '%s' has no Destination State"),
+				*GetNameSafe(Branch)));
+		}
+		if (Branch->QuestTasks.IsEmpty())
+		{
+			Warning(FString::Printf(
+				TEXT("Quest branch '%s' has no tasks and may advance immediately"),
+				*GetNameSafe(Branch)));
+		}
+		for (const UNarrativeTask* Task : Branch->QuestTasks)
+		{
+			if (!Task)
+			{
+				Error(FString::Printf(TEXT("Quest branch '%s' contains an empty task row"),
+					*GetNameSafe(Branch)));
+			}
+		}
+	}
+
+	return OutErrors.IsEmpty();
 }
 
 bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definition,

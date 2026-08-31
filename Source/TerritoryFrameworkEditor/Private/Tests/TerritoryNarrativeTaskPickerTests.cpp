@@ -4,6 +4,7 @@
 
 #include "Engine/Blueprint.h"
 #include "Misc/PackageName.h"
+#include "QuestBlueprint.h"
 #include "Tales/Quest.h"
 #include "Tales/QuestBlueprintGeneratedClass.h"
 #include "Tales/QuestSM.h"
@@ -16,6 +17,7 @@
 #include "Tales/TerritoryDisguiseTask.h"
 #include "Tales/TerritoryGameplayStateTask.h"
 #include "Tales/TerritoryStateTask.h"
+#include "DataValidation/TerritoryDataValidator.h"
 
 namespace TerritoryNarrativeTaskPickerTests
 {
@@ -172,6 +174,22 @@ bool FTFTerritoryNarrativeQuestCaptureFixture::RunTest(const FString& Parameters
 	}
 	TestTrue(TEXT("Quest observes Blacksmith through Territory Capture Task"),
 		bHasBlacksmithCaptureTask);
+
+	UQuestBlueprint* QuestBlueprint = Cast<UQuestBlueprint>(Blueprint);
+	TestNotNull(TEXT("Capture Blacksmith remains an editable Narrative Quest"),
+		QuestBlueprint);
+	if (QuestBlueprint)
+	{
+		TArray<FString> ValidationErrors;
+		TArray<FString> ValidationWarnings;
+		TestTrue(TEXT("Capture quest does not finish before its final objective"),
+			UTerritoryDataValidator::ValidateQuest(QuestBlueprint,
+				ValidationErrors, ValidationWarnings));
+		for (const FString& Error : ValidationErrors)
+		{
+			AddError(Error);
+		}
+	}
 	return true;
 }
 
