@@ -19,7 +19,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Condition",
 		meta = (Categories = "Narrative.Factions",
-			ToolTip="Optional exact owner. Leave empty to use the Narrative target pawn/controller faction when available; if the event has no faction context, any Captured / Claimed owner passes. Easy example: a locked Farm can require the Blacksmith to belong to whichever faction the player currently represents, without hardcoding Heroes."))
+			ToolTip="Optional exact owner. Leave empty to use the Narrative target pawn/controller faction when available; if the event has no faction context, any Claimed owner passes. Easy example: a locked Farm can require the Blacksmith to belong to whichever faction the player currently represents, without hardcoding Heroes."))
 	FGameplayTag RequiredOwner;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Condition")

@@ -153,7 +153,7 @@ strategic directory even when those actors are currently unloaded.
 
 Example: Haven Reach has five Places but only Blacksmith is unlocked. The District row may show
 `1 / 5`, but the four locked Place names are not revealed. If Castle Hill streams out after being
-captured, it remains in the Captured list; setting a physical Place waypoint waits until that Place
+claimed, it remains in the Claimed list; setting a physical Place waypoint waits until that Place
 and its POI are loaded.
 
 ## Completed migration and strict authority

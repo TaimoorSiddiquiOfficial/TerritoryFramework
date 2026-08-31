@@ -7,9 +7,11 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryWorldState.h"
 #include "AIController.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "AI/Activities/NPCActivityComponent.h"
+#include "NarrativeGameplayTags.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -274,6 +276,11 @@ bool UTerritoryBlueprintLibrary::IsSameFaction(const FGameplayTag& FactionA, con
 	return FactionA == FactionB && FactionA.IsValid();
 }
 
+FGameplayTag UTerritoryBlueprintLibrary::GetNarrativeAttackDamageSetByCallerTag()
+{
+	return FNarrativeGameplayTags::Get().SetByCaller_AttackDamage;
+}
+
 FText UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(const FGameplayTag& Tag)
 {
 	if (!Tag.IsValid())
@@ -450,10 +457,31 @@ int32 UTerritoryBlueprintLibrary::GetFactionCityCount(const UObject* WorldContex
 int32 UTerritoryBlueprintLibrary::GetFactionDistrictCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag)
 {
 	if (!FactionTag.IsValid()) return 0;
+	if (const ATerritoryWorldState* WorldState =
+		ATerritoryWorldState::FindTerritoryWorldState(WorldContextObject))
+	{
+		const bool bHasStrategicDistrictRows =
+			WorldState->GetAllCaptureSummaries().ContainsByPredicate(
+				[](const FReplicatedCaptureSummary& Summary)
+				{
+					return Summary.HierarchyLevel
+						== ETerritoryHierarchyLevel::District;
+				});
+		if (bHasStrategicDistrictRows)
+		{
+			return WorldState->GetClaimedDistrictCountForFaction(FactionTag);
+		}
+	}
+
+	// Small maps may intentionally omit TerritoryWorldState. In that case the
+	// loaded aggregate District remains the authority and must be fully secured.
 	int32 Count = 0;
 	for (ATerritoryDistrict* D : GetAllDistricts(WorldContextObject))
 	{
-		if (D && D->IsOwnedByFaction(FactionTag))
+		if (D && D->IsAvailableForGameplay()
+			&& D->GetTerritoryState() == ETerritoryState::Claimed
+			&& D->GetOwningFaction() == FactionTag
+			&& D->AllPropertiesOwnedBy(FactionTag))
 		{
 			++Count;
 		}

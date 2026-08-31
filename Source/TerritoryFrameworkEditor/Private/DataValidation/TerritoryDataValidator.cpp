@@ -10,6 +10,7 @@
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryDisguiseProfile.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
@@ -19,12 +20,19 @@
 #include "Interaction/TerritoryCapturePoint.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
+#include "Navigation/TerritoryRoadGuide.h"
 #include "AI/NPCDefinition.h"
+#include "AI/Activities/NPCGoalItem.h"
+#include "Vehicles/NarrativeVehicleBase.h"
 #include "Components/ShapeComponent.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameplayEffect.h"
 #include "GameplayTagContainer.h"
+#include "GAS/NarrativeAttributeSetBase.h"
 #include "Misc/DataValidation.h"
+#include "NarrativeGameplayTags.h"
 #include "NavigationSystem.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
@@ -33,6 +41,100 @@
 
 namespace
 {
+	bool HasNarrativeAttackDamageSetByCaller(
+		TSubclassOf<UGameplayEffect> EffectClass)
+	{
+		const UGameplayEffect* Effect = EffectClass
+			? EffectClass->GetDefaultObject<UGameplayEffect>() : nullptr;
+		if (!Effect) return false;
+
+		return Effect->Modifiers.ContainsByPredicate(
+			[](const FGameplayModifierInfo& Modifier)
+			{
+				return Modifier.Attribute
+						== UNarrativeAttributeSetBase::GetAttackDamageAttribute()
+					&& Modifier.ModifierMagnitude.GetMagnitudeCalculationType()
+						== EGameplayEffectMagnitudeCalculation::SetByCaller
+					&& Modifier.ModifierMagnitude.GetSetByCallerFloat().DataTag
+						== FNarrativeGameplayTags::Get().SetByCaller_AttackDamage;
+			});
+	}
+
+	void ValidateCounterAttackForceSchedule(
+		const FTerritoryFactionAssaultConfig& Force,
+		const FString& Context,
+		TArray<FString>& OutErrors)
+	{
+		auto Error = [&Context, &OutErrors](const FString& Message)
+		{
+			OutErrors.Add(Context.IsEmpty() ? Message
+				: FString::Printf(TEXT("%s: %s"), *Context, *Message));
+		};
+		const FString FactionName = Force.Faction.IsValid()
+			? Force.Faction.ToString() : TEXT("<missing faction>");
+		if (Force.ScheduleMode != ETerritoryCounterScheduleMode::SingleAssault
+			&& (!FMath::IsFinite(Force.RecurringCounterCooldownGameTime)
+				|| Force.RecurringCounterCooldownGameTime < 1.f))
+		{
+			Error(FString::Printf(TEXT("counterattack force %s recurring cooldown must be finite and at least one for a repeating schedule"),
+				*FactionName));
+		}
+		if (Force.ScheduleMode == ETerritoryCounterScheduleMode::FiniteSeries
+			&& Force.MaximumScheduledAssaults < 1)
+		{
+			Error(FString::Printf(TEXT("counterattack force %s finite schedule must allow at least one assault"),
+				*FactionName));
+		}
+		if (Force.TimePolicy == ETerritoryCounterTimePolicy::NarrativeTimeWindow
+			&& (!FMath::IsFinite(Force.TimeWindowStart)
+				|| !FMath::IsFinite(Force.TimeWindowEnd)
+				|| !FMath::IsWithinInclusive(Force.TimeWindowStart, 0.f, 2400.f)
+				|| !FMath::IsWithinInclusive(Force.TimeWindowEnd, 0.f, 2400.f)))
+		{
+			Error(FString::Printf(TEXT("counterattack force %s Narrative time window must use finite values from 0000 through 2400"),
+				*FactionName));
+		}
+	}
+
+	void ValidateCounterAttackFactionVehicles(
+		const FTerritoryFactionAssaultConfig& Force,
+		const FString& Context, TArray<FString>& OutErrors)
+	{
+		auto Error = [&Context, &OutErrors](const FString& Message)
+		{
+			OutErrors.Add(Context.IsEmpty() ? Message
+				: FString::Printf(TEXT("%s: %s"), *Context, *Message));
+		};
+		const FString FactionName = Force.Faction.IsValid()
+			? Force.Faction.ToString() : TEXT("<missing faction>");
+		if (!Force.SignatureVehicleClass.IsNull())
+		{
+			UClass* SignatureClass = Force.SignatureVehicleClass.LoadSynchronous();
+			if (!SignatureClass
+				|| !SignatureClass->IsChildOf(ANarrativeVehicleBase::StaticClass()))
+			{
+				Error(FString::Printf(TEXT("counterattack force %s signature vehicle must derive from ANarrativeVehicleBase"),
+					*FactionName));
+			}
+		}
+		TSet<ENarrativeGameplayDifficulty> SeenDifficulties;
+		for (const FTerritoryDifficultyVehicleCount& Entry :
+			Force.VehicleCountsByDifficulty)
+		{
+			if (SeenDifficulties.Contains(Entry.Difficulty))
+			{
+				Error(FString::Printf(TEXT("counterattack force %s has duplicate car-count rows for one Narrative difficulty"),
+					*FactionName));
+			}
+			SeenDifficulties.Add(Entry.Difficulty);
+			if (!FMath::IsWithinInclusive(Entry.MaximumCars, 0, 8))
+			{
+				Error(FString::Printf(TEXT("counterattack force %s difficulty car count must be between zero and eight"),
+					*FactionName));
+			}
+		}
+	}
+
 	void ValidateStealthProfile(const UTerritoryStealthProfile* Profile,
 		const FString& Context, TArray<FString>& OutErrors)
 	{
@@ -71,6 +173,38 @@ namespace
 			&& !Profile->BreakStealthGameplayEventTag.IsValid())
 		{
 			Error(TEXT("stealth exposure event is enabled but its Gameplay Tag is empty"));
+		}
+		if (!FMath::IsWithinInclusive(Profile->MinimumDisguiseQuality, 0.f, 1.f))
+		{
+			Error(TEXT("minimum disguise quality must be between zero and one"));
+		}
+	}
+
+	void ValidateDisguiseProfile(const UTerritoryDisguiseProfile* Profile,
+		const FString& Context, TArray<FString>& OutErrors)
+	{
+		if (!Profile) return;
+		auto Error = [&Context, &OutErrors](const TCHAR* Message)
+		{
+			OutErrors.Add(Context.IsEmpty() ? FString(Message)
+				: FString::Printf(TEXT("%s: %s"), *Context, Message));
+		};
+		if (!Profile->PerceivedFaction.IsValid())
+		{
+			Error(TEXT("disguise must define a perceived Narrative faction"));
+		}
+		if (!FMath::IsWithinInclusive(Profile->Quality, 0.f, 1.f))
+		{
+			Error(TEXT("disguise quality must be between zero and one"));
+		}
+		if (!Profile->ActivatedEventTag.IsValid()
+			|| !Profile->RemovedEventTag.IsValid()
+			|| !Profile->CompromisedEventTag.IsValid()
+			|| !Profile->RestoredEventTag.IsValid()
+			|| !Profile->IdentityCheckPassedEventTag.IsValid()
+			|| !Profile->IdentityCheckFailedEventTag.IsValid())
+		{
+			Error(TEXT("disguise Gameplay Event tags must all be configured"));
 		}
 	}
 
@@ -129,6 +263,12 @@ namespace
 		if (!FMath::IsWithinInclusive(Profile->MaxStalledMovementRetries, 1, 100))
 		{
 			AddError(TEXT("counterattack MaxStalledMovementRetries must be between 1 and 100"));
+		}
+		if (!FMath::IsFinite(Profile->DefendingPlayerEngagementPadding)
+			|| !FMath::IsWithinInclusive(
+				Profile->DefendingPlayerEngagementPadding, 0.f, 5000.f))
+		{
+			AddError(TEXT("counterattack DefendingPlayerEngagementPadding must be between 0 and 5000 cm"));
 		}
 		if (!FMath::IsWithinInclusive(Profile->MaxConsecutiveSpawnFailures, 1, 100))
 		{
@@ -213,6 +353,7 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 		InAsset->IsA(UTerritoryCounterAttackProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryProductionProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryStealthProfile::StaticClass()) ||
+		InAsset->IsA(UTerritoryDisguiseProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryDefinition::StaticClass()))
 	{
 		return true;
@@ -278,9 +419,26 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 				TEXT("Counterattack force %s must have positive military power"), *Force.Faction.ToString()));
 			if (!FMath::IsWithinInclusive(Force.TerritorialInfluence, 0.f, 1.f)) Errors.Add(FString::Printf(
 				TEXT("Counterattack force %s TerritorialInfluence must be between zero and one"), *Force.Faction.ToString()));
-			if (!FMath::IsFinite(Force.RecurringCounterCooldownGameTime)
-				|| Force.RecurringCounterCooldownGameTime < 1.f) Errors.Add(FString::Printf(
-				TEXT("Counterattack force %s recurring cooldown must be finite and at least one"), *Force.Faction.ToString()));
+			ValidateCounterAttackForceSchedule(Force,
+				TEXT("Counterattack profile"), Errors);
+			ValidateCounterAttackFactionVehicles(Force,
+				TEXT("Counterattack profile"), Errors);
+			if (Force.bScaleLevelToRelevantPlayerPower
+				&& Force.PowerScalingMagnitudePerEnemyLevel > 0.f)
+			{
+				if (!Force.PowerScalingEffect)
+				{
+					Errors.Add(FString::Printf(
+						TEXT("Counterattack force %s has Attack Damage per level but no Power Scaling Effect"),
+						*Force.Faction.ToString()));
+				}
+				else if (!HasNarrativeAttackDamageSetByCaller(Force.PowerScalingEffect))
+				{
+					Errors.Add(FString::Printf(
+						TEXT("Counterattack force %s Power Scaling Effect must modify Narrative AttackDamage from SetByCaller.AttackDamage"),
+						*Force.Faction.ToString()));
+				}
+			}
 		}
 	}
 	else if (UTerritoryGuardPostDefinition* GuardPost =
@@ -335,6 +493,10 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 	else if (UTerritoryStealthProfile* StealthProfile = Cast<UTerritoryStealthProfile>(InAsset))
 	{
 		ValidateStealthProfile(StealthProfile, TEXT("Stealth profile"), Errors);
+	}
+	else if (UTerritoryDisguiseProfile* DisguiseProfile = Cast<UTerritoryDisguiseProfile>(InAsset))
+	{
+		ValidateDisguiseProfile(DisguiseProfile, TEXT("Disguise profile"), Errors);
 	}
 	else if (UTerritoryDefinition* Definition = Cast<UTerritoryDefinition>(InAsset))
 	{
@@ -1194,11 +1356,23 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 			OutErrors.Add(FString::Printf(TEXT("%s: counterattack force %s TerritorialInfluence must be between zero and one"),
 				*Label, *Force.Faction.ToString()));
 		}
-		if (!FMath::IsFinite(Force.RecurringCounterCooldownGameTime)
-			|| Force.RecurringCounterCooldownGameTime < 1.f)
+		ValidateCounterAttackForceSchedule(Force, Label, OutErrors);
+		ValidateCounterAttackFactionVehicles(Force, Label, OutErrors);
+		if (Force.bScaleLevelToRelevantPlayerPower
+			&& Force.PowerScalingMagnitudePerEnemyLevel > 0.f)
 		{
-			OutErrors.Add(FString::Printf(TEXT("%s: counterattack force %s recurring cooldown must be finite and at least one"),
-				*Label, *Force.Faction.ToString()));
+			if (!Force.PowerScalingEffect)
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("%s: counterattack force %s has Attack Damage per level but no Power Scaling Effect"),
+					*Label, *Force.Faction.ToString()));
+			}
+			else if (!HasNarrativeAttackDamageSetByCaller(Force.PowerScalingEffect))
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("%s: counterattack force %s Power Scaling Effect must modify Narrative AttackDamage from SetByCaller.AttackDamage"),
+					*Label, *Force.Faction.ToString()));
+			}
 		}
 	}
 
@@ -1226,6 +1400,35 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 			OutErrors.Add(FString::Printf(TEXT("%s: approach '%s' has invalid MaxWaveSize"),
 				*Label, *Approach.ApproachID.ToString()));
 		}
+		if (Approach.EntryType == ETerritoryAssaultEntryType::NarrativeVehicle)
+		{
+			for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
+			{
+				UClass* VehicleClass =
+					UTerritoryCounterAttackProfile::ResolveVehicleClass(
+						Force, Approach).LoadSynchronous();
+				if (!VehicleClass
+					|| !VehicleClass->IsChildOf(ANarrativeVehicleBase::StaticClass()))
+				{
+					OutErrors.Add(FString::Printf(
+						TEXT("%s: vehicle approach '%s' needs either a fallback car or a valid signature car for faction %s"),
+						*Label, *Approach.ApproachID.ToString(),
+						*Force.Faction.ToString()));
+				}
+			}
+			if (Approach.MaximumVehicleDeployments <= 0
+				|| !FMath::IsFinite(Approach.VehicleMaximumDriveSpeed)
+				|| Approach.VehicleMaximumDriveSpeed < 0.f
+				|| Approach.VehicleAwareness.BrakingDistance
+					<= Approach.VehicleAwareness.EmergencyStopDistance
+				|| Approach.VehicleRetirement.HardRetirementTimeout
+					<= Approach.VehicleRetirement.EarliestRetirementDelay)
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("%s: vehicle approach '%s' has invalid deployment, drive, awareness, or retirement settings"),
+					*Label, *Approach.ApproachID.ToString()));
+			}
+		}
 		if (!Navigation)
 		{
 			OutWarnings.AddUnique(FString::Printf(
@@ -1234,15 +1437,83 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 			continue;
 		}
 
-		const FTransform WorldTransform =
+		FTransform WorldTransform =
 			Approach.RelativeSpawnTransform * Territory->GetActorTransform();
+		FTransform FootDeploymentTransform = WorldTransform;
+		if (Approach.EntryType == ETerritoryAssaultEntryType::NarrativeVehicle)
+		{
+			const FName RequestedGuideID = Approach.RoadGuideID.IsNone()
+				? Approach.ApproachID : Approach.RoadGuideID;
+			ATerritoryRoadGuide* RoadGuide = nullptr;
+			int32 MatchingGuideCount = 0;
+			for (TActorIterator<ATerritoryRoadGuide> It(ValidationWorld); It; ++It)
+			{
+				if (It->GetRoadGuideID() == RequestedGuideID)
+				{
+					++MatchingGuideCount;
+					if (!RoadGuide || It->GetPathName() < RoadGuide->GetPathName())
+					{
+						RoadGuide = *It;
+					}
+				}
+			}
+			if (MatchingGuideCount > 1)
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("%s: vehicle approach '%s' resolves to %d Road Guides named '%s'; Road Guide IDs must be level-wide unique"),
+					*Label, *Approach.ApproachID.ToString(), MatchingGuideCount,
+					*RequestedGuideID.ToString()));
+			}
+			if (Approach.RoadGuideID.IsNone() == false && !RoadGuide)
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("%s: vehicle approach '%s' explicitly references missing Road Guide '%s'"),
+					*Label, *Approach.ApproachID.ToString(),
+					*Approach.RoadGuideID.ToString()));
+			}
+			if (RoadGuide)
+			{
+				FText GuideFailure;
+				if (!RoadGuide->ValidateRoadGuide(GuideFailure))
+				{
+					OutErrors.Add(FString::Printf(
+						TEXT("%s: Road Guide '%s' for approach '%s' is invalid: %s"),
+						*Label, *RequestedGuideID.ToString(),
+						*Approach.ApproachID.ToString(),
+						*GuideFailure.ToString()));
+				}
+				WorldTransform = RoadGuide->GetRouteStartTransform(
+					false, Approach.RoadLaneSide);
+				FootDeploymentTransform = RoadGuide->GetRouteEndTransform(
+					false, Approach.RoadLaneSide);
+			}
+			else
+			{
+				FootDeploymentTransform = Approach.RelativeVehicleDropOffTransform
+					* Territory->GetActorTransform();
+			}
+			if (!RoadGuide && !WorldTransform.GetLocation().Equals(
+				FootDeploymentTransform.GetLocation(), 100.f))
+			{
+				if (!UTerritoryCounterAttackSubsystem::ValidateNarrativeVehicleRoute(
+					ValidationWorld,
+					WorldTransform.GetLocation(), FootDeploymentTransform.GetLocation(),
+					nullptr))
+				{
+					OutErrors.Add(FString::Printf(
+						TEXT("%s: vehicle approach '%s' has no complete Narrative ZoneGraph route from spawn to drop-off"),
+						*Label, *Approach.ApproachID.ToString()));
+				}
+			}
+		}
 		FString RouteFailure = TEXT("No shared Territory defence objective is reachable");
 		bool bHasRoute = false;
 		for (const FVector& Objective :
 			TerritoryAssaultTargetPolicy::BuildObjectiveLocations(Territory, true))
 		{
 			if (UTerritoryCounterAttackSubsystem::ValidateNavigationRoute(
-				ValidationWorld, WorldTransform.GetLocation(), Objective, &RouteFailure))
+				ValidationWorld, FootDeploymentTransform.GetLocation(), Objective,
+				&RouteFailure))
 			{
 				bHasRoute = true;
 				break;

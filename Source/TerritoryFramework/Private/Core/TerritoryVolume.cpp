@@ -1764,7 +1764,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		// A story handover and some trusted capture events can atomically replace
 		// Faction A with Faction B without first writing Contested. Politically the
 		// enum remains Claimed, but the old ownership tenure ended and a new one
-		// started. Run both Captured / Claimed lifecycle sides exactly once so
+		// started. Run both Claimed lifecycle sides exactly once so
 		// designers can author On Lost and On Captured behavior in the same row.
 		// Same-owner resets are excluded by the owner comparison above.
 		FireStateEvents(ETerritoryState::Claimed, false, TransitionContext);

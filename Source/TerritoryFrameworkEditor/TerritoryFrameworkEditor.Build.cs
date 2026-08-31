@@ -22,9 +22,13 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"PropertyEditor",
 			"BlueprintGraph",
 			"DataValidation",
+			"GameplayAbilities",
 			"GameplayTags",
 			"NavigationSystem",
-			"NarrativeArsenal"
+			"NarrativeArsenal",
+			"ZoneGraph",
+			"MassSpawner",
+			"MassEntity"
 		});
 	}
 }

@@ -54,7 +54,7 @@ UENUM(BlueprintType)
 enum class ETerritoryState : uint8
 {
 	Unclaimed UMETA(DisplayName="Unclaimed", ToolTip="No faction owns this place. Example: an abandoned farm that any hostile faction may capture."),
-	Claimed UMETA(DisplayName="Captured / Claimed", ToolTip="One faction owns this Territory. This is the captured state. A real Faction A to Faction B handover runs the old Captured Exit Events and new Captured Entry Events even though the enum remains Captured / Claimed. Same-owner resets do not refire."),
+	Claimed UMETA(DisplayName="Claimed", ToolTip="One faction securely owns this Territory. Capture is the action; Claimed is the stable result. A real Faction A to Faction B handover runs the old owner's Claimed Exit Events and the new owner's Claimed Entry Events. Same-owner resets do not refire."),
 	Contested UMETA(DisplayName="Contested", ToolTip="A real physical capture has started, or an aggregate City/District has children owned by different factions. Entry Events run once when the state changes into Contested; they do not repeat every capture tick. Merely walking through a Place triggers this only when its story-bounds rules actually register the player as a valid attacker."),
 	Locked UMETA(DisplayName="Locked (Legacy)", ToolTip="Legacy serialized value. Runtime lock availability is stored separately so a locked enemy Place can still contribute political power.")
 };
@@ -98,7 +98,7 @@ enum class ETerritoryInitialState : uint8
 {
 	Automatic UMETA(DisplayName="Automatic (Recommended)", ToolTip="Start Claimed when Initial Owning Faction is set; otherwise start Unclaimed. Existing Starts Locked assets remain locked until migrated."),
 	Unclaimed UMETA(DisplayName="Unclaimed", ToolTip="Start with no owner, even if Initial Owning Faction is filled."),
-	Claimed UMETA(DisplayName="Captured / Claimed", ToolTip="Start captured and owned by Initial Owning Faction. If that faction is empty, the safe result is Unclaimed."),
+	Claimed UMETA(DisplayName="Claimed", ToolTip="Start securely owned by Initial Owning Faction. If that faction is empty, the safe result is Unclaimed."),
 	Locked UMETA(Hidden, DisplayName="Locked (Legacy)", ToolTip="Serialized compatibility value. Use Initial Availability instead.")
 };
 
@@ -425,7 +425,7 @@ struct FCaptureAttempt
 /**
  * Per-state configuration for Narrative conditions and events.
  * Entry conditions must pass before entering. Exit conditions must pass before leaving.
- * Claimed is the captured state. Contested Entry Events fire once per real transition,
+ * Claimed is the stable ownership state after capture. Contested Entry Events fire once per real transition,
  * not continuously while capture progress changes.
  * Example: put a quest-complete condition in Locked -> Exit Conditions to unlock a city.
  */
@@ -456,7 +456,7 @@ struct FTerritoryStateConfig
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
 		meta=(DisplayName="Entry Conditions",
-			ToolTip="Every condition must pass before the state can begin. Captured / Claimed means capture completed. Contested begins only after gameplay registers a valid contest; walking through a Place is not enough unless Story Capture From Bounds intentionally makes that player an attacker. A real Faction A to Faction B capture evaluates the Captured / Claimed row even if the enum was already Captured; a same-owner reset does not."))
+			ToolTip="Every condition must pass before the state can begin. Claimed means capture completed. Contested begins only after gameplay registers a valid contest; walking through a Place is not enough unless Story Capture From Bounds intentionally makes that player an attacker. A real Faction A to Faction B capture evaluates the Claimed row even if the political enum was already Claimed; a same-owner reset does not."))
 	TArray<TObjectPtr<class UNarrativeCondition>> EntryConditions;
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
@@ -466,7 +466,7 @@ struct FTerritoryStateConfig
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",
 		meta=(DisplayName="Entry Events",
-			ToolTip="Narrative events fired once after the state is committed. Captured / Claimed is the On Captured row and also fires for a real Faction A to Faction B handover even when the enum remains Captured. The same handover first runs this row's Exit Events for the old owner. Same-owner resets do not refire. Contested fires once when a valid contest begins, not every progress tick. Each event runs only when all inherited conditions pass, including Narrative's Not option."))
+			ToolTip="Narrative events fired once after the state is committed. The Claimed row also fires for a real Faction A to Faction B handover even when the political enum remains Claimed. The same handover first runs this row's Exit Events for the old owner. Same-owner resets do not refire. Contested fires once when a valid contest begins, not every progress tick. Each event runs only when all inherited conditions pass, including Narrative's Not option."))
 	TArray<TObjectPtr<class UNarrativeEvent>> EntryEvents;
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",

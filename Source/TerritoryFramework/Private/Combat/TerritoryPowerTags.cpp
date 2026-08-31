@@ -15,7 +15,4 @@ namespace TerritoryPowerTags
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(ReservesArrivingDialogue,
 		"Territory.Dialogue.ReservesArriving",
 		"Optional Narrative tagged dialogue line for a newly arrived reserve wave.");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(PowerAttackDamageMagnitude,
-		"Territory.SetByCaller.PowerAttackDamage",
-		"Additive Attack Damage magnitude supplied by adaptive enemy power scaling.");
 }

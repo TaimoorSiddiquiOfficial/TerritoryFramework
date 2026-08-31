@@ -64,10 +64,13 @@ protected:
 
 /**
  * Schedules one finite physical enemy assault through the existing counterattack authority.
- * The inherited Narrative Event -> Conditions array is evaluated before scheduling.
+ * The inherited Narrative Event -> Conditions array is evaluated before scheduling. A
+ * Strategic Counterattack may later repeat only when the selected force profile permits
+ * a finite/unlimited schedule and its cooldown, Narrative time, quest, diplomacy, staging,
+ * route, and budget rules still pass. Story Pursuit never repeats automatically.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Wave of Enemies (Schedule Finite Territory Assault)"))
+	meta=(DisplayName="Wave of Enemies (Schedule Territory Assault)"))
 class TERRITORYFRAMEWORK_API UTerritoryScheduleEnemyWaveEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -89,9 +92,44 @@ public:
 	FGameplayTag AttackingFaction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
-		meta=(ToolTip="Strategic Counterattack requires the force's normal District staging rule. Story Pursuit / Boss Chase is a deliberate Tales exception and also requires permission in the selected force profile."))
+		meta=(ToolTip="Strategic Counterattack starts one finite battle and may later follow the force profile's One Assault, Finite Series, or Unlimited Schedule policy. Story Pursuit / Boss Chase is a deliberate Tales exception, requires force-profile permission, and never repeats automatically."))
 	ETerritoryAssaultLaunchMode LaunchMode =
 		ETerritoryAssaultLaunchMode::StrategicCounterattack;
+
+protected:
+	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent) override;
+	virtual FString GetGraphDisplayText_Implementation() override;
+};
+
+/**
+ * Easy Tales event for a one-shot boss pursuit. Narrative owns mounting, driving, arrival,
+ * dismount and combat. Territory supplies the finite scenario, route direction, optional
+ * capture policy and outcome. Use it for hunters arriving by car or a capo escaping by car.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Start Territory Boss Chase"))
+class TERRITORYFRAMEWORK_API UTerritoryStartBossChaseEvent : public UNarrativeEvent
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryStartBossChaseEvent(const FObjectInitializer& ObjectInitializer);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(Categories="Territory",
+			ToolTip="Claimed Place where the boss force will pursue the player. Its Territory Definition supplies the vehicle and foot approaches."))
+	FGameplayTag TargetTerritory;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(Categories="Narrative.Factions",
+			ToolTip="Exact pursuing faction. Configure that faction's Attacker Definition as the boss or boss-force NPC Definition in the target's counterattack profile."))
+	FGameplayTag PursuingFaction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ShowOnlyInnerProperties,
+			ToolTip="Reusable story options. Enemy Chases Player drives into the Place and hands off to combat. Player Chases Enemy reverses the authored vehicle route and records Target Escaped if the capo reaches the exit."))
+	FTerritoryStoryPursuitOptions PursuitOptions;
 
 protected:
 	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,

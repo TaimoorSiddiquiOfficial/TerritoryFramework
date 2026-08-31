@@ -456,7 +456,19 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | OnAssaultWarning | BlueprintAssignable |
 | OnCounterHappened | BlueprintAssignable; post-commit state transition payload (`Assault`, `PreviousState`, `NewState`, `Resolution`, `EventGameTime`) |
 
-The warning state is notification-only: it creates no physical NPCs and no capture pressure. Physical activation occurs once, on the server, when a relevant player enters the configured radius.
+The warning state is notification-only: it creates no physical NPCs and no capture pressure.
+Physical activation occurs once on the server after the warning, or waits for a relevant player
+only when **Require Player Proximity To Activate** is explicitly enabled.
+
+Strategic scheduling requires `Territory.Capability.Reinforcements` by default. A faction force
+may choose a recognizable Signature Vehicle and per-Narrative-difficulty total car limits. These
+are resolved and snapshotted when the durable assault is evaluated.
+
+### UTerritoryAssaultTask
+
+Narrative Quest task with Territory, optional attacking faction, optional Story Scenario ID, and
+an objective: repel, takeover, attacker kills, assault activation, final fight, or target escaped.
+Use inherited `Required Quantity` for attacker kills. Marker settings attach to the Territory.
 
 ### Context-aware territory transitions
 
@@ -480,6 +492,7 @@ These `EditInlineNew` Narrative classes can be added directly under a Territory'
 | `UTerritoryStateCondition` | Territory tag, required state | District must be Contested |
 | `UTerritoryControlProgressCondition` | Territory, comparison, percent, optional tolerance | Control Progress At Least 75% |
 | `UTerritoryReputationCondition` | Faction, comparison, signed value | Regime Reputation Less Than -50 |
+| `UTerritoryFactionDistrictHoldingCondition` | Faction source, comparison, Claimed District count | Current Player Faction has At Least 2 complete Districts |
 | `UTerritoryAssaultCondition` | Territory, query, state/result or number comparison | Remaining Attackers Equal 0 |
 | `UTerritoryPresenceCondition` | Territory, include child Places | Narrative target is inside Castle Hill |
 | `UTerritoryEventContextCondition` | Required target/player/ASC/controller/Tales context | Give XP only to the player pawn that caused capture |
@@ -527,6 +540,13 @@ Diplomacy faction sources are `Explicit Tag`, `Current Owning Faction`, `Previou
 Faction`, `Contesting Faction`, and `Transition Requesting Faction`. Use dynamic sources for a
 Place that can change hands between several story factions. `Resolve Territory Diplomacy Faction
 Pair` shows the pair that the event would use now.
+
+The Claimed District count condition has its own faction sources: `Explicit Faction`, `Narrative
+Target / Player Faction`, and `Player Controller Pawn Faction`. Its count uses the replicated
+strategic directory, so World Partition does not silently turn two claimed Districts into zero.
+Only unlocked, stable Claimed Districts count. Put this condition inside `Set Territory
+Diplomacy -> Conditions` for rules such as “become hostile after the player's current faction
+controls at least two Districts.”
 
 Do not place a player-only GAS reward in a State Config without an event-level context condition.
 `Contested -> Claimed` can also mean that failed capture pressure decayed and the current owner

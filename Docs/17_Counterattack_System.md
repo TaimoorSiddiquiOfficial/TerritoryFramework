@@ -9,7 +9,7 @@ for the explicit unattended/dead-player recapture outcomes described below; ordi
 capture still belongs to `UTerritoryControlSubsystem`.
 
 ```text
-Captured
+Ownership changed / Place is Claimed
   -> Grace
   -> Evaluating
   -> ScheduledWarning
@@ -22,6 +22,52 @@ Captured
 ```
 
 A decision roll can schedule an assault; it cannot capture a territory. `LaunchProbability` is scheduling policy. `EstimatedSuccessProbability` is planning information derived from finite attacker power versus defence.
+
+## The rules in easy English
+
+- A strategic counterattack is a **reinforcement operation**. With **Require Reinforcement
+  Capability** enabled, the faction must currently own a Territory whose active State Config
+  grants `Territory.Capability.Reinforcements`. Losing that perk cancels an attack that has not
+  physically deployed. An already deployed finite force is allowed to finish.
+- The faction's **Signature Vehicle** is the recognizable car Blueprint used on every vehicle
+  approach. Example: Bandits use a rusty pickup; the Regime uses a black sedan. An Approach car
+  is only the fallback when the faction has no signature car.
+- Narrative Pro difficulty chooses the total car budget when **Scale Car Count With Narrative
+  Difficulty** is enabled. Defaults are Easy 1, Medium 1, Hard 2, Insane 3. The result is always
+  clamped by the finite force and the authored road limits.
+- Strategic attackers are **takeover-first**. They fight registered guards and defending players
+  inside the local Territory battle area, then stand inside the Place and apply real capture
+  pressure. A visible player far outside the battle area cannot lure the complete force away and
+  freeze the takeover.
+- A **Story Pursuit / Boss Chase** is different. It does not capture, does not require the
+  reinforcement perk, and may pursue outside Territory bounds because the quest explicitly owns
+  that story encounter.
+
+Example: Heroes own Blacksmith. Bandits still own Radio District, whose Claimed State Config
+grants Reinforcements. On Hard, two Bandit signature cars may arrive. If the player runs outside
+Market Square, attackers continue taking Blacksmith. Use a separate Story Pursuit event when the
+design calls for those enemies to abandon the Place and chase the player through the city.
+
+## Four ways an enemy response can begin
+
+All four paths enter the same authoritative assault subsystem. They do not create a second
+combat, spawn, or capture implementation.
+
+1. **Automatic ownership response:** after a Place changes owner, the framework asks the
+   profile for the best eligible hostile faction. The former owner is only a tie-break; another
+   stronger faction may attack when diplomacy and staging allow it.
+2. **Scheduled follow-up:** after a strategic battle ends and its cooldown passes, Finite Series
+   or Unlimited Schedule may create another separate finite battle.
+3. **Narrative Wave event:** a quest/dialogue runs `Wave of Enemies` in Strategic mode. The
+   event's inherited Narrative Conditions must pass, then the profile controls the battle and
+   any allowed future schedule.
+4. **Story Pursuit / Boss Chase:** a Narrative Event explicitly selects Story Pursuit. It may
+   send hunters toward the player or reverse a vehicle route so the player chases an escaping
+   capo. It may use the profile's authored staging exception, but it never repeats automatically.
+
+Every normal strategic path still requires the attacker to hold a secure District when the
+force uses the domination staging rule. A faction with no secure District cannot counter merely
+because its tag appears in the profile.
 
 Every arrow after the initial record creation emits one post-commit
 `FTerritoryCounterAttackStateEvent`. Its embedded record is already in `NewState` and includes
@@ -54,7 +100,10 @@ If the player stays away—or dies defending it—the Place is recaptured by Ban
 ## Required setup
 
 1. Create a `UTerritoryCounterAttackProfile` data asset.
-2. Add one `FTerritoryFactionAssaultConfig` for each possible attacking Narrative faction.
+2. Add one `FTerritoryFactionAssaultConfig` for each possible attacking Narrative faction. Give
+   each faction a Signature Vehicle, or run `Territory.Editor.MigrateFactionSignatureVehicles`
+   once to copy the first authored vehicle-approach fallback into blank faction entries. Review
+   the result and Save All.
 3. Assign a `UNPCDefinition`. Its `NPCClassPath` must derive from
    `ATerritoryAssaultCharacter`, use an `ANarrativeNPCController`-derived controller,
    and set Auto Possess AI to include dynamically spawned actors. When `PlannedForce`
@@ -64,15 +113,24 @@ If the player stays away—or dies defending it—the Place is recaptured by Ban
 5. Choose the force's staging rule. `OwnsSecureDistrict` is the domination default: a
    faction with no loaded, unlocked District securely held in `Claimed` cannot launch a
    normal counterattack. Locked, `Contested`, and `Unclaimed` Districts never qualify.
-6. Enable/disable recurring strategic counters and set a non-zero recurring cooldown.
-7. Enable `bAllowStoryPursuitWithoutStagingDistrict` only for a force that an explicit Tales
+6. Choose **One Assault**, **Finite Series**, or **Unlimited Schedule**. For a repeating
+   schedule, set a non-zero recurring cooldown. For a finite series, also set the maximum
+   number of separate battles.
+7. Optionally choose a Narrative time window. `1800 -> 0500` means evening through early
+   morning and correctly wraps across midnight.
+8. Enable `bAllowStoryPursuitWithoutStagingDistrict` only for a force that an explicit Tales
    story-pursuit event may launch after the faction loses its final District.
-8. Assign the profile to the capturable Place Definition. City and District Definitions cannot
+9. Assign the profile to the capturable Place Definition. City and District Definitions cannot
    own physical assault policy.
-9. Add one or more enabled `CounterAttackApproaches` with unique `ApproachID` values and transforms relative to the territory.
-10. Build navigation from every approach to at least one shared defence objective: a live
+10. Add one or more enabled `CounterAttackApproaches` with unique `ApproachID` values and transforms relative to the territory.
+11. Choose **On Foot** or **Narrative Vehicle** on each approach. A vehicle approach needs an
+    existing Narrative vehicle class and a roadside drop-off relative to the Place.
+12. Build a ZoneGraph **Road** from each vehicle spawn to its drop-off. For a simple straight,
+    unobstructed street, run **Ensure Straight Vehicle Approach Road** from the Territory editor
+    library. Use normal ZoneShape editing for curves, intersections, bridges, or obstacles.
+13. Build navigation from every approach to at least one shared defence objective: a live
     defence-front guard, overlapping patrol/post point, or the target center fallback.
-11. Place exactly one `ATerritoryWorldState` for persistence and late-join replication.
+14. Place exactly one `ATerritoryWorldState` for persistence and late-join replication.
 
 The editor validator now uses the exact runtime route contract: the approach must project to
 navigable ground within 500 cm, the Territory target within 1,000 cm, and the resulting path
@@ -84,7 +142,7 @@ The demo map currently provides two validated physical approaches:
 
 | Territory | Approach | World spawn | Result |
 |---|---|---:|---|
-| Blacksmith | `Blacksmith_WestRoad` | `(-3952, 795.4146, 3.0717)` | Projects within 500 cm; complete path |
+| Blacksmith | `Blacksmith_WestRoad` | `(-3952, 795.4146, 3.0717)` | Complete ZoneGraph drive plus NavMesh entry |
 | Farm | `Farm_WestField` | `(2200, 0, 3.0717)` | Projects within 500 cm; complete path to the projected Farm target |
 
 On ownership change, automatic scheduling calls
@@ -100,7 +158,35 @@ With the domination default, losing the final secure District cancels a grace/wa
 record as `StagingDistrictUnavailable`. A physically Active finite force is already deployed
 and may finish; losing a District does not erase living NPCs. After a terminal strategic
 record, `RecurringCounterCooldownGameTime` must elapse before the same still-hostile front is
-eligible again. Story-pursuit records never repeat automatically.
+eligible again. The profile then applies its schedule mode:
+
+| Schedule mode | Meaning | Easy example |
+|---|---|---|
+| One Assault | Never creates a later automatic battle | A one-time tutorial raid |
+| Finite Series | Stops when the authored total battle count is reached | Maximum 3 = the first attack plus at most two later counterattacks |
+| Unlimited Schedule | May keep creating later finite battles while every rule continues to pass | A regime periodically tries to reclaim its frontier for the rest of the campaign |
+
+“Unlimited” never means infinite spawning inside one fight. Every battle still has its own
+finite `PlannedForce`, finite waves, casualty accounting, and terminal result. Story-pursuit
+records never repeat automatically.
+
+### Narrative Pro and Ultra Dynamic Sky time
+
+`Any Narrative Time` admits the battle after grace/cooldown. `Narrative / Ultra Dynamic Sky
+Time Window` keeps a strategic record in Grace until `ANarrativeGameState::GetTimeOfDay()` is
+inside the configured range. The Narrative Pro Ultra Dynamic Sky add-on describes its sky as
+synchronized to Narrative Pro time, so Territory deliberately reads the same Narrative clock
+instead of depending directly on the commercial sky asset.
+
+Examples:
+
+- `0600 -> 1000`: dawn and morning attacks.
+- `1800 -> 0500`: night attacks; the wrapped range includes 23:00 and 03:00.
+- `0000 -> 0000`: all day.
+
+The schedule still rechecks ownership, War diplomacy, secure-District staging, quest rules,
+route, and budgets. A night window changes *when* a battle may evaluate; it does not force an
+otherwise invalid attack to happen.
 
 ## Narrative quest rules
 
@@ -126,6 +212,11 @@ explicit `Wave of Enemies` event in Story Pursuit / Boss Chase mode uses the Nar
 inherited `Conditions` array instead. Add `Narrative Quest State Condition` there when a pursuit
 must happen only during one quest; use its inherited **Not** option when the pursuit must not
 happen during that quest.
+
+In Strategic Counterattack mode, `Wave of Enemies` schedules the first finite battle through
+the same profile. Its inherited event Conditions gate that activation. Later automatic battles
+are controlled by the force's schedule mode and recheck the profile Quest Rules; event
+Conditions are not silently replayed without a Narrative event context.
 
 The native `ATerritoryAssaultCharacter` is spawn-ready by default: it selects
 `ANarrativeNPCController` and `PlacedInWorldOrSpawned`. A project Blueprint subclass may
@@ -162,6 +253,72 @@ scheduled assault records. The transform is relative to the Territory actor, so 
 scale and rotation affect the final world position. A valid ID with an invalid route is
 still rejected as `InvalidApproachOrRoute`.
 
+### Vehicle and on-foot entries
+
+Vehicle entry composes Narrative Pro with Territory's ZoneGraph road driver:
+
+```text
+Territory vehicle approach
+  -> spawn the configured ANarrativeVehicleBase (server only, runtime-only)
+  -> spawn one finite ATerritoryAssaultCharacter beside it
+  -> wait until Narrative finishes the NPC Definition and visual spawn
+  -> Narrative claims the seat, runs its mount ability, animation and controller possession
+  -> Territory follows sampled ZoneGraph road points through the vehicle's Chaos movement
+  -> at the drop-off, Territory calls Narrative's public StopInteractBehavior API
+     so the authored mount ability performs its normal dismount and cleanup
+  -> only now allow Territory hostility, reserve waves and capture pressure
+  -> Territory assault movement/combat continues from the roadside drop-off
+```
+
+Easy Blacksmith example:
+
+- `Blacksmith_WestRoad`: Narrative Vehicle; Sedan at the west road; drop-off beside
+  the market entrance; Maximum Vehicle Deployments = 1. The first tracked attacker is the
+  driver; later members of the same finite force enter on foot from that drop-off.
+- Optionally add `Blacksmith_Alley_Foot`: On Foot; guards run through the alley.
+- Set Maximum Approaches to at least 2 when a strong assault should select one valid route of
+  each entry type. The selector preserves vehicle/on-foot variety when both are available.
+
+The vehicle route must have a complete ZoneGraph path from car spawn to drop-off. The drop-off
+must then have a complete NavMesh path into the Place. The same tests run in editor validation
+and at runtime. After the bounded number of cars has deployed, remaining finite attackers may
+enter on foot from the drop-off, but they wait until the current vehicle finishes ingress. The
+driver is neutral to combat and cannot contest the Place while mount/drive/park/dismount is active.
+A failed car, invalid route, driver spawn, or bounded ingress timeout withdraws cleanly.
+Terminal cleanup stops all vehicle inputs before giving the transient car a short retirement delay.
+This avoids Narrative's stock `BTS_ClaimInteractableSlot` null-target error without modifying
+Narrative Pro content. Assault
+cars and actor pointers are never saved; active survivors are reconstructed from the saved route
+and remaining force after load.
+
+The straight-road editor helper is idempotent: it finds its ZoneShape by a stable Territory
+GUID + Approach ID tag, updates its two points and Road lane profile, rebuilds ZoneGraph, and
+marks the map dirty. It never edits Narrative Pro. Re-run it after moving either transform.
+For a road that is not truly straight and clear, adjust the generated ZoneShape in the normal
+ZoneGraph editor before validation.
+
+Use the Tales event **Start Territory Boss Chase** for a one-shot pursuit. Select the claimed
+target Place, hostile Narrative faction, and one reusable **Pursuit Options** structure:
+
+- **Enemy Chases Player:** the route runs spawn -> drop-off; Narrative dismounts the hunter and
+  normal combat begins.
+- **Player Chases Enemy:** only Narrative Vehicle approaches are eligible; the route runs
+  drop-off -> spawn. Killing the finite target resolves `AllAttackersRemoved`; reaching the exit
+  resolves `TargetEscaped`.
+- **Allows Territory Capture:** off by default. Leave it off for an optional capo/underboss
+  objective that must not silently reclaim the Place. Turn it on only for a real story invasion.
+- **Attacker Definition Override:** optional Narrative NPC Definition for the capo or hunter.
+- **Planned Force / Wave Override:** defaults to one target in the Boss Chase event; increase it
+  for a finite escort or hunter squad.
+- **Use Strategic Decision Roll:** off by default, so a quest event that passes its Conditions is
+  deterministic. Enable it only when the story intentionally wants the profile probability.
+- **Scenario ID:** optional stable name such as `CastleHill_UnderbossEscape` for save/log/outcome
+  handling.
+
+The event still requires War, valid directional routes, budgets and the force's explicit
+story-pursuit staging exception. Its inherited Narrative Conditions are the correct place for
+“Betrayal quest is In Progress”, “District was Claimed”, or “Underboss has not already died”.
+
 The editor validator rejects invalid stable GUIDs, duplicate faction definitions,
 incompatible Narrative NPC classes, non-positive military power, invalid force/wave
 counts, duplicate approach IDs, and territories with no enabled approach. Runtime
@@ -169,6 +326,35 @@ scheduling revalidates authority, world, state, faction, profile, NPC class, dip
 route, and global budgets.
 
 ## Narrative Pro reuse
+
+### Damage authority
+
+Territory does not calculate a second combat-damage result. A scaled assault NPC may receive
+an optional self Gameplay Effect that adds to Narrative's `AttackDamage` attribute. Territory
+always supplies that modifier through Narrative Pro's existing `SetByCaller.AttackDamage` tag;
+there is no editable Territory damage tag anymore. The actual hit still runs Narrative's damage
+effect/execution, including Attack Damage, Attack Rating, target Armor, physical-material or
+head multipliers, faction attitude and friendly-fire policy.
+
+Easy example: level 6 and `1.5 per level` supplies `7.5` through
+`SetByCaller.AttackDamage` to the additive Attack Damage effect. It does not mean “deal 7.5 raw
+damage now.” The sword/gun ability later makes the real Narrative damage spec.
+
+### Player gunfire while seated
+
+Narrative's architecture can keep player abilities alive in a vehicle: its player controller
+caches the Narrative character, leaves the player ASC avatar on that character, and binds ability
+input on the controller so possession of a car does not remove the inputs. Weapon targeting also
+resolves the cached Narrative character and controller view.
+
+The stock `GA_Mount_Vehicle`, however, grants `Narrative.State.Weapon.ForceHolster`. Therefore
+the supplied Sedan intentionally does **not** support player gunfire from its stock seats. Do not
+remove that tag from Narrative Pro content. For a project drive-by seat, create project-owned
+children of the mount ability and seat behavior, omit Force Holster only on the intended passenger
+seat, add seated upper-body/aim animations and limits, and make weapon traces/projectiles ignore
+the occupied vehicle. Narrative's current `GetIgnoreCharacterParams()` ignores the character and
+its children/attached actors, but a parent vehicle is not automatically ignored. Verify muzzle
+clearance, camera, server ability activation and remote-client montage/aim before enabling it.
 
 Physical attackers are `ANarrativeNPCCharacter` instances spawned and registered through
 `UNarrativeCharacterSubsystem::SpawnNPC`, then configured through the public Narrative APIs:
@@ -361,6 +547,11 @@ On authoritative load, saved live survivors become pending finite force; killed 
 Offscreen simulation is intentionally disabled. A future implementation must use multiple saved attrition rounds, not a hidden ownership roll.
 
 ## Blueprint and debug API
+
+Vehicle counterattacks and boss pursuits can use a placed spline Road Guide, two-way lanes,
+Narrative Mass traffic controls, chase-distance failure, a disabled-vehicle final-fight handoff,
+and delayed player-safe vehicle retirement. See [22_Road_Missions.md](22_Road_Missions.md) for
+the complete level-design workflow and easy examples.
 
 Server mutations:
 

@@ -65,7 +65,8 @@ namespace TerritoryAssaultTargetPolicy
 	TERRITORYFRAMEWORK_API FTerritoryDefenderGoalPreferenceResult ApplyDefenderPreference(
 		const FNPCGoalContainer& NarrativeAttackGoals,
 		TConstArrayView<AActor*> RegisteredDefenders,
-		TArray<FTerritoryNarrativeGoalScoreOverride>& InOutOverrides);
+		TArray<FTerritoryNarrativeGoalScoreOverride>& InOutOverrides,
+		bool bSuppressNonDefenderGoalsWhenNoDefender = false);
 
 	TERRITORYFRAMEWORK_API bool RestoreGoalScores(
 		TArray<FTerritoryNarrativeGoalScoreOverride>& InOutOverrides);

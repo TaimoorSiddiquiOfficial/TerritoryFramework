@@ -30,6 +30,7 @@
 #include "Combat/TerritoryCombatDirector.h"
 #include "Debug/TerritoryDebugger.h"
 #include "Tales/TerritoryCaptureTask.h"
+#include "Tales/TerritoryAssaultTask.h"
 #include "Tales/TerritoryCaptureEvent.h"
 #include "Tales/TerritoryCaptureEligibilityCondition.h"
 #include "Tales/TerritoryOwnerHandoverEvent.h"
@@ -41,6 +42,8 @@
 #include "Tales/TerritoryGarrisonCondition.h"
 #include "Tales/TerritoryStoryConditions.h"
 #include "Tales/TerritoryStoryEvents.h"
+#include "Tales/TerritoryStealthConditions.h"
+#include "Tales/TerritoryStealthEvents.h"
 #include "Tales/TerritoryTalesUtilities.h"
 #include "Navigation/TerritoryMapMarker.h"
 #include "Navigation/TerritoryNavigationMarkerComponent.h"
@@ -56,6 +59,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
+#include "UObject/UObjectIterator.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
 
@@ -823,7 +827,7 @@ bool FTFTerritoryClaimedOwnerHandoverEventsRegression::RunTest(
 	FTerritoryTransitionContext Context;
 	Context.RequestingFaction = Heroes;
 	Source->ForceSetOwningFactionWithContext(Heroes, Context);
-	TestEqual(TEXT("Source remains Captured / Claimed across a direct handover"),
+	TestEqual(TEXT("Source remains Claimed across a direct handover"),
 		Source->GetTerritoryState(), ETerritoryState::Claimed);
 	TestEqual(TEXT("Source changes to the new capturing faction"),
 		Source->GetOwningFaction(), Heroes);
@@ -2007,6 +2011,17 @@ bool FTFContract_NarrativeIntegration::RunTest(const FString& Parameters)
 			TFTestUtils::HasProperty(TaskClass, TEXT("MarkerSettings")));
 	}
 
+	// Counterattack and chase objectives use the same Narrative quest contract.
+	{
+		const UClass* TaskClass = UTerritoryAssaultTask::StaticClass();
+		TestTrue(TEXT("AssaultTask is-a NarrativeTask"),
+			TaskClass->IsChildOf(UNarrativeTask::StaticClass()));
+		TestTrue(TEXT("AssaultTask inherits RequiredQuantity"),
+			TFTestUtils::HasProperty(TaskClass, TEXT("RequiredQuantity")));
+		TestTrue(TEXT("AssaultTask inherits MarkerSettings"),
+			TFTestUtils::HasProperty(TaskClass, TEXT("MarkerSettings")));
+	}
+
 	// ─── Capture Event → UNarrativeEvent ───
 	{
 		const UClass* EventClass = UTerritoryCaptureEvent::StaticClass();
@@ -2095,6 +2110,7 @@ bool FTFContract_ModuleSanity::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("UTerritoryEconomySubsystem::StaticClass()"), UTerritoryEconomySubsystem::StaticClass());
 	TestNotNull(TEXT("UTerritoryCombatDirector::StaticClass()"), UTerritoryCombatDirector::StaticClass());
 	TestNotNull(TEXT("UTerritoryCaptureTask::StaticClass()"), UTerritoryCaptureTask::StaticClass());
+	TestNotNull(TEXT("UTerritoryAssaultTask::StaticClass()"), UTerritoryAssaultTask::StaticClass());
 	TestNotNull(TEXT("UTerritoryCaptureEvent::StaticClass()"), UTerritoryCaptureEvent::StaticClass());
 	TestNotNull(TEXT("UTerritoryOwnershipCondition::StaticClass()"), UTerritoryOwnershipCondition::StaticClass());
 	TestNotNull(TEXT("UTerritoryMapMarker::StaticClass()"), UTerritoryMapMarker::StaticClass());
@@ -2692,6 +2708,19 @@ bool FTFIntegration_TalesInheritance::RunTest(const FString& Parameters)
 			TFTestUtils::HasProperty(CaptureTask, TEXT("TargetTerritoryTag")));
 		TestTrue(TEXT("CaptureTask has RequiredCapturingFaction"),
 			TFTestUtils::HasProperty(CaptureTask, TEXT("RequiredCapturingFaction")));
+	}
+
+	// ─── UTerritoryAssaultTask is a reusable counterattack/chase objective ───
+	{
+		const UClass* AssaultTask = UTerritoryAssaultTask::StaticClass();
+		TestTrue(TEXT("AssaultTask is-a NarrativeTask"),
+			AssaultTask->IsChildOf(UNarrativeTask::StaticClass()));
+		TestTrue(TEXT("AssaultTask inherits RequiredQuantity"),
+			TFTestUtils::HasProperty(AssaultTask, TEXT("RequiredQuantity")));
+		TestTrue(TEXT("AssaultTask has Objective"),
+			TFTestUtils::HasProperty(AssaultTask, TEXT("Objective")));
+		TestTrue(TEXT("AssaultTask has ScenarioID"),
+			TFTestUtils::HasProperty(AssaultTask, TEXT("ScenarioID")));
 	}
 
 	// ─── UNarrativeEvent base class contract ───
@@ -4194,7 +4223,7 @@ bool FTFTerritoryDefinitionHierarchyAndApplication::RunTest(const FString& Param
 		Place->StateConfigs.Contains(ETerritoryState::Unclaimed));
 	TestTrue(TEXT("Every Definition exposes the Contested rule row"),
 		Place->StateConfigs.Contains(ETerritoryState::Contested));
-	TestTrue(TEXT("Every Definition exposes the Captured / Claimed rule row"),
+	TestTrue(TEXT("Every Definition exposes the Claimed rule row"),
 		Place->StateConfigs.Contains(ETerritoryState::Claimed));
 
 	City->TerritoryTag = FGameplayTag::RequestGameplayTag(
@@ -4756,6 +4785,7 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 	const TArray<UClass*> NewEventClasses = {
 		UTerritoryHierarchyStoryOverrideEvent::StaticClass(),
 		UTerritoryScheduleEnemyWaveEvent::StaticClass(),
+		UTerritoryStartBossChaseEvent::StaticClass(),
 		UTerritoryCancelEnemyWavesEvent::StaticClass(),
 		UTerritorySetGarrisonTargetEvent::StaticClass(),
 		UTerritoryUpgradePropertyEvent::StaticClass(),
@@ -4829,9 +4859,24 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 		TerritoryTales::DoEventConditionsPass(ConditionalEvent, nullptr, nullptr, nullptr));
 	TestTrue(TEXT("Wave events expose an explicit strategic or story launch mode"),
 		TFTestUtils::HasProperty(UTerritoryScheduleEnemyWaveEvent::StaticClass(), TEXT("LaunchMode")));
+	TestTrue(TEXT("Boss chase event exposes the exact pursuing Narrative faction"),
+		TFTestUtils::HasProperty(UTerritoryStartBossChaseEvent::StaticClass(),
+			TEXT("PursuingFaction")));
+	TestTrue(TEXT("Boss chase event exposes one reusable pursuit configuration"),
+		TFTestUtils::HasProperty(UTerritoryStartBossChaseEvent::StaticClass(),
+			TEXT("PursuitOptions")));
+	const UTerritoryStartBossChaseEvent* BossDefaults =
+		GetDefault<UTerritoryStartBossChaseEvent>();
+	TestEqual(TEXT("Boss event defaults to one finite story target"),
+		BossDefaults->PursuitOptions.PlannedForceOverride, 1);
+	TestFalse(TEXT("Boss event is story-only unless capture is explicitly enabled"),
+		BossDefaults->PursuitOptions.bAllowsTerritoryCapture);
 	TestTrue(TEXT("Faction holdings condition exposes the secure District threshold"),
 		TFTestUtils::HasProperty(UTerritoryFactionDistrictHoldingCondition::StaticClass(),
 			TEXT("DistrictCount")));
+	TestTrue(TEXT("Faction holdings condition resolves a dynamic current faction"),
+		TFTestUtils::HasProperty(UTerritoryFactionDistrictHoldingCondition::StaticClass(),
+			TEXT("FactionSource")));
 	TestTrue(TEXT("Ownership-transition condition reuses Narrative's condition pipeline"),
 		UTerritoryOwnershipTransitionCondition::StaticClass()->IsChildOf(
 			UNarrativeCondition::StaticClass()));
@@ -4846,6 +4891,278 @@ bool FTFContract_StateConfigNarrativeExtensions::RunTest(const FString& Paramete
 	TestTrue(TEXT("Definitions expose the all-defenders-defeated event hook"),
 		TFTestUtils::HasProperty(DefinitionClass, TEXT("AllDefendersDefeatedEvents")));
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFContract_AssaultTask,
+	"TerritoryFramework.Contract.AssaultTask",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFContract_AssaultTask::RunTest(const FString& Parameters)
+{
+	const UClass* Class = UTerritoryAssaultTask::StaticClass();
+	TestNotNull(TEXT("UTerritoryAssaultTask::StaticClass()"), Class);
+	TestTrue(TEXT("Assault task inherits Narrative task"),
+		Class->IsChildOf(UNarrativeTask::StaticClass()));
+	TestTrue(TEXT("Assault task filters one Territory"),
+		TFTestUtils::HasProperty(Class, TEXT("TargetTerritory")));
+	TestTrue(TEXT("Assault task can filter an attacking faction"),
+		TFTestUtils::HasProperty(Class, TEXT("AttackingFaction")));
+	TestTrue(TEXT("Assault task can filter a story pursuit"),
+		TFTestUtils::HasProperty(Class, TEXT("ScenarioID")));
+	TestTrue(TEXT("Assault task exposes a story objective"),
+		TFTestUtils::HasProperty(Class, TEXT("Objective")));
+	TestTrue(TEXT("Assault task inherits Narrative marker settings"),
+		TFTestUtils::HasProperty(Class, TEXT("MarkerSettings")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTalesCompleteConditionEventAudit,
+	"TerritoryFramework.Tales.Audit.AllConditionsAndEventsAreNarrativeReady",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
+{
+	const TArray<UClass*> ExpectedConditions = {
+		UTerritoryCaptureEligibilityCondition::StaticClass(),
+		UTerritoryDiplomacyCondition::StaticClass(),
+		UTerritoryGarrisonCondition::StaticClass(),
+		UTerritoryOwnershipCondition::StaticClass(),
+		UTerritoryQuestStateCondition::StaticClass(),
+		UTerritoryEventContextCondition::StaticClass(),
+		UTerritoryOwnershipTransitionCondition::StaticClass(),
+		UTerritoryStateCondition::StaticClass(),
+		UTerritoryControlProgressCondition::StaticClass(),
+		UTerritoryReputationCondition::StaticClass(),
+		UTerritoryFactionDistrictHoldingCondition::StaticClass(),
+		UTerritoryAssaultCondition::StaticClass(),
+		UTerritoryPresenceCondition::StaticClass(),
+		UTerritoryProductionStatusCondition::StaticClass(),
+		UTerritoryResourceCondition::StaticClass(),
+		UTerritoryStealthPolicyCondition::StaticClass(),
+		UTerritoryExposureCondition::StaticClass(),
+		UTerritoryStealthEvidenceCondition::StaticClass(),
+		UTerritorySuspicionCondition::StaticClass(),
+		UTerritoryDisguiseCondition::StaticClass()
+	};
+	const TArray<UClass*> ExpectedEvents = {
+		UTerritoryCaptureEvent::StaticClass(),
+		UTerritoryOwnerHandoverEvent::StaticClass(),
+		UTerritoryLockEvent::StaticClass(),
+		UTerritoryUnlockEvent::StaticClass(),
+		UTerritorySetDiplomacyEvent::StaticClass(),
+		UTerritoryModifyReputationEvent::StaticClass(),
+		UTerritoryHierarchyStoryOverrideEvent::StaticClass(),
+		UTerritoryScheduleEnemyWaveEvent::StaticClass(),
+		UTerritoryStartBossChaseEvent::StaticClass(),
+		UTerritoryCancelEnemyWavesEvent::StaticClass(),
+		UTerritorySetGarrisonTargetEvent::StaticClass(),
+		UTerritoryUpgradePropertyEvent::StaticClass(),
+		UTerritoryExecuteResourceRecipeEvent::StaticClass(),
+		UTerritorySetStealthOverrideEvent::StaticClass(),
+		UTerritoryRevealInfiltratorEvent::StaticClass(),
+		UTerritoryClearExposureEvent::StaticClass(),
+		UTerritoryReportDistractionEvent::StaticClass(),
+		UTerritoryActivateDisguiseEvent::StaticClass(),
+		UTerritoryRemoveDisguiseEvent::StaticClass(),
+		UTerritorySetDisguiseCoverEvent::StaticClass(),
+		UTerritoryDisguiseIdentityCheckEvent::StaticClass()
+	};
+
+	auto AuditClasses = [this](const TArray<UClass*>& Classes,
+		const UClass* RequiredBase, bool bAreEvents)
+	{
+		for (const UClass* Class : Classes)
+		{
+			const FString ClassName = GetNameSafe(Class);
+			TestNotNull(*FString::Printf(TEXT("%s resolves"), *ClassName), Class);
+			if (!Class) continue;
+			TestTrue(*FString::Printf(TEXT("%s inherits its Narrative base"), *ClassName),
+				Class->IsChildOf(RequiredBase));
+#if WITH_METADATA
+			TestTrue(*FString::Printf(TEXT("%s is Blueprint type"), *ClassName),
+				Class->GetBoolMetaDataHierarchical(TEXT("BlueprintType")));
+			TestTrue(*FString::Printf(TEXT("%s is Blueprintable"), *ClassName),
+				Class->GetBoolMetaDataHierarchical(TEXT("IsBlueprintBase")));
+#endif
+			TestTrue(*FString::Printf(TEXT("%s is inline-editable in Data Assets"), *ClassName),
+				Class->HasAnyClassFlags(CLASS_EditInlineNew));
+			TestFalse(*FString::Printf(TEXT("%s is not deprecated"), *ClassName),
+				Class->HasAnyClassFlags(CLASS_Deprecated | CLASS_NewerVersionExists));
+#if WITH_METADATA
+			TestFalse(*FString::Printf(TEXT("%s has a readable editor name"), *ClassName),
+				Class->GetDisplayNameText().IsEmpty());
+#endif
+
+			if (bAreEvents)
+			{
+				UNarrativeEvent* Event =
+					NewObject<UNarrativeEvent>(GetTransientPackage(),
+						const_cast<UClass*>(Class));
+				TestTrue(*FString::Printf(
+					TEXT("%s cannot replay a mutation during quest load"), *ClassName),
+					Event && !Event->bRefireOnLoad);
+				TestTrue(*FString::Printf(TEXT("%s has readable graph text"), *ClassName),
+					Event && !Event->GetGraphDisplayText().IsEmpty());
+			}
+			else
+			{
+				UNarrativeCondition* Condition =
+					NewObject<UNarrativeCondition>(GetTransientPackage(),
+						const_cast<UClass*>(Class));
+				TestTrue(*FString::Printf(TEXT("%s has readable graph text"), *ClassName),
+					Condition && !Condition->GetGraphDisplayText().IsEmpty());
+			}
+		}
+	};
+	AuditClasses(ExpectedConditions, UNarrativeCondition::StaticClass(), false);
+	AuditClasses(ExpectedEvents, UNarrativeEvent::StaticClass(), true);
+
+	TSet<UClass*> DiscoveredConditions;
+	TSet<UClass*> DiscoveredEvents;
+	for (TObjectIterator<UClass> It; It; ++It)
+	{
+		UClass* Class = *It;
+		if (!Class || Class->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated)
+			|| Class->GetOutermost()->GetName() != TEXT("/Script/TerritoryFramework"))
+		{
+			continue;
+		}
+		if (Class->IsChildOf(UNarrativeCondition::StaticClass()))
+		{
+			DiscoveredConditions.Add(Class);
+		}
+		if (Class->IsChildOf(UNarrativeEvent::StaticClass()))
+		{
+			DiscoveredEvents.Add(Class);
+		}
+	}
+	TestEqual(TEXT("Audit list covers every Territory Narrative Condition"),
+		DiscoveredConditions.Num(), ExpectedConditions.Num());
+	TestEqual(TEXT("Audit list covers every Territory Narrative Event"),
+		DiscoveredEvents.Num(), ExpectedEvents.Num());
+	for (UClass* Class : DiscoveredConditions)
+	{
+		TestTrue(*FString::Printf(TEXT("Condition audit includes %s"), *GetNameSafe(Class)),
+			ExpectedConditions.Contains(Class));
+	}
+	for (UClass* Class : DiscoveredEvents)
+	{
+		TestTrue(*FString::Printf(TEXT("Event audit includes %s"), *GetNameSafe(Class)),
+			ExpectedEvents.Contains(Class));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFFactionClaimedDistrictCountCondition,
+	"TerritoryFramework.Tales.Conditions.FactionClaimedDistrictCount",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFFactionClaimedDistrictCountCondition::RunTest(const FString& Parameters)
+{
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag Market = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare"), false);
+	const FGameplayTag Castle = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill"), false);
+	if (!TestTrue(TEXT("Claimed District fixtures resolve"),
+		Heroes.IsValid() && Bandits.IsValid() && Market.IsValid() && Castle.IsValid()))
+	{
+		return false;
+	}
+
+	auto MakeSummary = [](const FGameplayTag& Tag, const FGameplayTag& Owner,
+		ETerritoryHierarchyLevel Level, ETerritoryState State,
+		ETerritoryAvailability Availability)
+	{
+		FReplicatedCaptureSummary Summary;
+		Summary.TerritoryTag = Tag;
+		Summary.TerritoryGUID = FGuid::NewGuid();
+		Summary.HierarchyLevel = Level;
+		Summary.CurrentOwner = Owner;
+		Summary.State = State;
+		Summary.Availability = Availability;
+		return Summary;
+	};
+
+	TArray<FReplicatedCaptureSummary> Summaries;
+	Summaries.Add(MakeSummary(Market, Heroes, ETerritoryHierarchyLevel::District,
+		ETerritoryState::Claimed, ETerritoryAvailability::Unlocked));
+	Summaries.Add(MakeSummary(Castle, Heroes, ETerritoryHierarchyLevel::District,
+		ETerritoryState::Claimed, ETerritoryAvailability::Unlocked));
+	Summaries.Add(MakeSummary(FGameplayTag(), Heroes, ETerritoryHierarchyLevel::District,
+		ETerritoryState::Contested, ETerritoryAvailability::Unlocked));
+	Summaries.Add(MakeSummary(FGameplayTag(), Heroes, ETerritoryHierarchyLevel::District,
+		ETerritoryState::Claimed, ETerritoryAvailability::Locked));
+	Summaries.Add(MakeSummary(FGameplayTag(), Heroes, ETerritoryHierarchyLevel::Place,
+		ETerritoryState::Claimed, ETerritoryAvailability::Unlocked));
+	Summaries.Add(MakeSummary(FGameplayTag(), Bandits, ETerritoryHierarchyLevel::District,
+		ETerritoryState::Claimed, ETerritoryAvailability::Unlocked));
+	const FReplicatedCaptureSummary DuplicateMarket = Summaries[0];
+	Summaries.Add(DuplicateMarket);
+
+	TestEqual(TEXT("Only unique, unlocked, stable Claimed Districts count"),
+		ATerritoryWorldState::CountClaimedDistrictsForFaction(Summaries, Heroes), 2);
+	TestEqual(TEXT("Another faction receives only its own Claimed Districts"),
+		ATerritoryWorldState::CountClaimedDistrictsForFaction(Summaries, Bandits), 1);
+	TestEqual(TEXT("An invalid faction never counts political rows"),
+		ATerritoryWorldState::CountClaimedDistrictsForFaction(
+			Summaries, FGameplayTag()), 0);
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Claimed District condition world created"), World)) return false;
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryWorldState* WorldState = World->SpawnActor<ATerritoryWorldState>(
+		ATerritoryWorldState::StaticClass(), FTransform::Identity, SpawnParams);
+	APawn* ContextPawn = World->SpawnActor<APawn>(
+		APawn::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!WorldState || !ContextPawn)
+	{
+		AddError(TEXT("Claimed District runtime fixture could not spawn"));
+		World->DestroyWorld(false);
+		return false;
+	}
+	for (const FReplicatedCaptureSummary& Summary : Summaries)
+	{
+		WorldState->SetCaptureSummary(Summary);
+	}
+	TestEqual(TEXT("World State exposes the same World Partition-safe count"),
+		WorldState->GetClaimedDistrictCountForFaction(Heroes), 2);
+	TestEqual(TEXT("Blueprint hierarchy query uses the strategic directory"),
+		UTerritoryBlueprintLibrary::GetFactionDistrictCount(World, Heroes), 2);
+
+	UTerritoryFactionDistrictHoldingCondition* Condition =
+		NewObject<UTerritoryFactionDistrictHoldingCondition>(GetTransientPackage());
+	Condition->FactionSource = ETerritoryCaptureFactionSource::ExplicitFaction;
+	Condition->Faction = Heroes;
+	Condition->Comparison = ETerritoryIntegerComparison::AtLeast;
+	Condition->DistrictCount = 1;
+	TestTrue(TEXT("At Least 1 passes after the faction claims one or more Districts"),
+		Condition->CheckCondition(ContextPawn, nullptr, nullptr));
+	Condition->DistrictCount = 2;
+	TestTrue(TEXT("At Least 2 passes when the faction claims two Districts"),
+		Condition->CheckCondition(ContextPawn, nullptr, nullptr));
+	Condition->DistrictCount = 3;
+	TestFalse(TEXT("At Least 3 fails when only two Districts are Claimed"),
+		Condition->CheckCondition(ContextPawn, nullptr, nullptr));
+
+	ATerritoryGuardCharacter* DynamicFactionActor =
+		NewObject<ATerritoryGuardCharacter>();
+	if (INarrativeTeamAgentInterface* TeamAgent =
+		Cast<INarrativeTeamAgentInterface>(DynamicFactionActor))
+	{
+		TeamAgent->AddFaction(Heroes);
+	}
+	Condition->FactionSource =
+		ETerritoryCaptureFactionSource::NarrativeTargetFaction;
+	TestEqual(TEXT("Narrative Target source follows the current story faction"),
+		Condition->ResolveFaction(DynamicFactionActor, nullptr), Heroes);
+
+	World->DestroyWorld(false);
 	return true;
 }
 

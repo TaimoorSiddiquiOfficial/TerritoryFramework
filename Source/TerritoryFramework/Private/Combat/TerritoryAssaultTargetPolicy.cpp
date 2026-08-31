@@ -226,10 +226,11 @@ FTerritoryDefenderGoalPreferenceResult
 TerritoryAssaultTargetPolicy::ApplyDefenderPreference(
 	const FNPCGoalContainer& NarrativeAttackGoals,
 	TConstArrayView<AActor*> RegisteredDefenders,
-	TArray<FTerritoryNarrativeGoalScoreOverride>& InOutOverrides)
+	TArray<FTerritoryNarrativeGoalScoreOverride>& InOutOverrides,
+	const bool bSuppressNonDefenderGoalsWhenNoDefender)
 {
 	FTerritoryDefenderGoalPreferenceResult Result;
-	if (RegisteredDefenders.IsEmpty())
+	if (RegisteredDefenders.IsEmpty() && !bSuppressNonDefenderGoalsWhenNoDefender)
 	{
 		Result.bScoresChanged = RestoreGoalScores(InOutOverrides);
 		return Result;

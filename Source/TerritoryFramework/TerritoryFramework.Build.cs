@@ -18,14 +18,18 @@ public class TerritoryFramework : ModuleRules
 			"CommonUI",
 			"EnhancedInput",
 			"NavigationSystem",
+			"ChaosVehicles",
 			"NarrativeArsenal",
 			"NarrativeCommonUI",
-			"NarrativeSaveSystem"
+			"NarrativeSaveSystem",
+			"MassSpawner",
+			"MassEntity"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"DeveloperSettings"
+			"DeveloperSettings",
+			"ZoneGraph"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

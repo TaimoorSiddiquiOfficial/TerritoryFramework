@@ -360,7 +360,7 @@ public:
 
 	UPROPERTY(EditAnywhere, EditFixedSize, BlueprintReadOnly, Category="05 State Rules",
 		meta=(DisplayName="State Rules (All Runtime States)",
-			ToolTip="Always contains four rows: Locked availability, Unclaimed, Contested, and Captured / Claimed. Captured / Claimed is the On Captured row. Contested Entry Events run once whenever gameplay really enters Contested, not every capture tick."))
+			ToolTip="Always contains four rows: Locked availability, Unclaimed, Contested, and Claimed. Claimed is the stable ownership row after capture completes. Contested Entry Events run once whenever gameplay really enters Contested, not every capture tick."))
 	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
 
 	/** Default pre-conflict stealth policy. A State Config may override it. */

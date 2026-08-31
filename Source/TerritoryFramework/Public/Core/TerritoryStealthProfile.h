@@ -218,5 +218,28 @@ public:
 		meta=(ToolTip="Temporary Gameplay Effect classes removed on confirmed exposure. Easy example: add Narrative Pro GE_CrouchStealth here. Do not add permanent Sneak perk or equipment effects; those are capability bonuses and should survive detection."))
 	TArray<TSubclassOf<UGameplayEffect>> StealthGameplayEffectsToRemove;
 
+	/** Allow an equipped Territory disguise to replace only the perceived faction used by guards. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Disguise",
+		meta=(ToolTip="Enables faction uniforms in this Territory. The player's real Narrative faction and diplomacy are never changed."))
+	bool bAllowFactionDisguises = true;
+
+	/** The uniform must represent this Place's owning faction, not merely any friendly faction. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Disguise",
+		meta=(ToolTip="Recommended for enemy bases. A Bandit Place accepts a Bandit uniform; a Civilian uniform does not automatically pass."))
+	bool bRequireOwningFactionDisguise = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Disguise",
+		meta=(ClampMin="0.0", ClampMax="1.0",
+			ToolTip="Minimum profile quality accepted here. Easy example: use 0.5 for public streets and 0.9 for a guarded headquarters."))
+	float MinimumDisguiseQuality = 0.5f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Disguise",
+		meta=(ToolTip="All of these access tags must exist on the uniform. Easy example: an officer-only floor can require Territory.Disguise.Clearance.Officer."))
+	FGameplayTagContainer RequiredDisguiseClearanceTags;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Disguise",
+		meta=(ToolTip="A failed scripted identity check burns the disguise for the checking faction. Disable this for a warning-only checkpoint."))
+	bool bCompromiseDisguiseOnFailedIdentityCheck = true;
+
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 };

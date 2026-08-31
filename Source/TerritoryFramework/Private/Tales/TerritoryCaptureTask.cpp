@@ -5,6 +5,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Tales/TalesComponent.h"
+#include "Navigation/MapMarker.h"
 #include "Engine/World.h"
 
 void UTerritoryCaptureTask::BeginTask()
@@ -30,6 +31,10 @@ void UTerritoryCaptureTask::BeginTask()
 		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureTask] BeginTask: no Registry subsystem"));
 		return;
 	}
+	Registry->OnTerritoryRegistered.AddUniqueDynamic(
+		this, &UTerritoryCaptureTask::OnTerritoryRegistered);
+	Registry->OnTerritoryUnregistered.AddUniqueDynamic(
+		this, &UTerritoryCaptureTask::OnTerritoryUnregistered);
 
 	CachedTerritory = Registry->GetTerritoryByTag(TargetTerritoryTag);
 
@@ -43,11 +48,11 @@ void UTerritoryCaptureTask::BeginTask()
 				*TargetTerritoryTag.ToString());
 		}
 		bWaitingForRegistration = true;
-		Registry->OnTerritoryRegistered.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryRegistered);
 		return;
 	}
 
-	CachedTerritory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
+	CachedTerritory->OnTerritoryOwnershipChanged.AddUniqueDynamic(
+		this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 
 	// Store the initial owner for loss detection
 	InitialOwner = CachedTerritory->GetOwningFaction();
@@ -79,17 +84,18 @@ void UTerritoryCaptureTask::EndTask()
 		CachedTerritory->OnTerritoryOwnershipChanged.RemoveDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 	}
 
-	if (bWaitingForRegistration)
+	if (UWorld* World = OwningComp ? OwningComp->GetWorld() : nullptr)
 	{
-		if (UWorld* World = OwningComp ? OwningComp->GetWorld() : nullptr)
+		if (UTerritoryRegistrySubsystem* Registry =
+			World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
-			if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
-			{
-				Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryCaptureTask::OnTerritoryRegistered);
-			}
+			Registry->OnTerritoryRegistered.RemoveDynamic(
+				this, &UTerritoryCaptureTask::OnTerritoryRegistered);
+			Registry->OnTerritoryUnregistered.RemoveDynamic(
+				this, &UTerritoryCaptureTask::OnTerritoryUnregistered);
 		}
-		bWaitingForRegistration = false;
 	}
+	bWaitingForRegistration = false;
 
 	Super::EndTask();
 }
@@ -127,22 +133,14 @@ void UTerritoryCaptureTask::OnTerritoryControlChanged(ATerritoryVolume* Territor
 
 void UTerritoryCaptureTask::OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered)
 {
-	if (!bWaitingForRegistration) return;
 	if (!Territory || Territory->GetTerritoryTag() != TargetTerritoryTag) return;
 
 	// Territory just registered — bind now
 	CachedTerritory = Territory;
 	bWaitingForRegistration = false;
 
-	if (UWorld* World = OwningComp ? OwningComp->GetWorld() : nullptr)
-	{
-		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
-		{
-			Registry->OnTerritoryRegistered.RemoveDynamic(this, &UTerritoryCaptureTask::OnTerritoryRegistered);
-		}
-	}
-
-	Territory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
+	Territory->OnTerritoryOwnershipChanged.AddUniqueDynamic(
+		this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
 
 	InitialOwner = Territory->GetOwningFaction();
 
@@ -169,6 +167,24 @@ void UTerritoryCaptureTask::OnTerritoryRegistered(ATerritoryVolume* Territory, b
 			CompleteTask();
 		}
 	}
+
+	if (SpawnedMarker)
+	{
+		SpawnedMarker->RemoveMarker();
+		SpawnedMarker = nullptr;
+		SpawnDefaultNavigationMarker();
+	}
+}
+
+void UTerritoryCaptureTask::OnTerritoryUnregistered(
+	ATerritoryVolume* Territory, bool bWasUnregistered)
+{
+	(void)bWasUnregistered;
+	if (!Territory || Territory != CachedTerritory.Get()) return;
+	Territory->OnTerritoryOwnershipChanged.RemoveDynamic(
+		this, &UTerritoryCaptureTask::OnTerritoryControlChanged);
+	CachedTerritory.Reset();
+	bWaitingForRegistration = true;
 }
 
 FText UTerritoryCaptureTask::GetTaskDescription_Implementation() const
@@ -196,4 +212,15 @@ FText UTerritoryCaptureTask::GetTaskProgressText_Implementation() const
 		return FText::FromString(FString::Printf(TEXT("%.0f%%"), CachedTerritory->GetControlProgress() * 100.f));
 	}
 	return Super::GetTaskProgressText_Implementation();
+}
+
+FVector UTerritoryCaptureTask::GetNavigationMarkerLocation_Implementation() const
+{
+	return CachedTerritory.IsValid()
+		? FVector::ZeroVector : MarkerSettings.ActorFallbackLocation;
+}
+
+AActor* UTerritoryCaptureTask::GetNavigationMarkerAttachActor_Implementation() const
+{
+	return CachedTerritory.Get();
 }

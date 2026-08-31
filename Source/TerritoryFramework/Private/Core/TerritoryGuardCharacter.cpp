@@ -7,6 +7,7 @@
 #include "AI/TerritoryDiplomacyDialogue.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/TerritoryInvestigationActivity.h"
@@ -249,6 +250,16 @@ ETeamAttitude::Type ATerritoryGuardCharacter::GetTeamAttitudeTowards(
 	{
 		return ETeamAttitude::Hostile;
 	}
+	if (const UTerritoryDisguiseSubsystem* Disguises = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr)
+	{
+		const FGameplayTagContainer Perceived = Disguises->ResolvePerceivedFactions(
+			&Other, OwningTerritory, GetGuardFaction());
+		if (GetFactions().HasAnyExact(Perceived))
+		{
+			return ETeamAttitude::Friendly;
+		}
+	}
 
 	// Preserve a genuine friendly result for same/allied actors, but deliberately
 	// downgrade stale Narrative hostility and the pawn Hostiles override to Neutral.
@@ -270,8 +281,14 @@ bool ATerritoryGuardCharacter::CanEngageTerritoryTarget(const AActor* Target) co
 	const UWorld* World = GetWorld();
 	const UTerritoryDiplomacySubsystem* Diplomacy = World
 		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
+	const UTerritoryDisguiseSubsystem* Disguises = World
+		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
+	const FGameplayTagContainer TargetFactions = Disguises
+		? Disguises->ResolvePerceivedFactions(
+			Target, OwningTerritory, GetGuardFaction())
+		: TargetTeam ? TargetTeam->GetFactions() : FGameplayTagContainer();
 	return TargetTeam && Diplomacy
-		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetTeam->GetFactions());
+		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetFactions);
 }
 
 bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(

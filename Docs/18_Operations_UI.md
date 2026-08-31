@@ -88,7 +88,7 @@ not a dashboard that only borrows Quest names:
 
 1. **Active Territories** is a bounded `ScrollBox`, in the same role as
    `ActiveQuestsBox`. It contains unlocked, non-owned District entry widgets.
-2. **Captured Territories** is the second bounded `ScrollBox`, in the same role as
+2. **Claimed Territories** is the second bounded `ScrollBox`, in the same role as
    `FinishedQuestsBox`. It contains Districts currently owned by the viewer's faction.
 3. **Territory Intelligence** is the full-width top strip. Current reports use the live accent;
    expired reports stay readable in a disabled colour, and actionable reports expose waypoint
@@ -114,7 +114,7 @@ The action and ownership predicates remain strict, while visibility is broader:
 
 ```text
 Available / Unlocked = registered AND unlocked AND currently available AND not owned by viewer
-Captured / Owned     = registered AND owned by viewer AND state is not Unclaimed
+Claimed / Owned      = registered AND owned by viewer AND state is not Unclaimed
 Player Directory     = registered AND this District and every parent are loaded and unlocked
 ```
 
@@ -147,6 +147,15 @@ widgets and ignore empty-state text. Example: before taking Market Square the ex
 can be `Active = 1, Captured = 0`; after the player's faction owns it, the expected result is
 `Active = 0, Captured = 1`.
 
+`GetCapturedTerritoryEntryCount` keeps its old API name so existing community Blueprints do not
+break. The actual heading, status, and new Blueprint UI should say **Claimed**.
+
+The Places tab is an intelligence/command list, not a debug dump. Every visible Place receives
+a themed card with a status accent and clear hierarchy. Viewer-owned Claimed Places show known
+garrison capacity, staffing, net income, and production availability. Hostile Places keep guard
+and economy values unknown until Espionage succeeds, so the command screen stays useful without
+spoiling the encounter.
+
 The garrison planner selects the first manageable target with capacity (normally a child
 Property when the District is a zero-capacity container), navigates District/Property posts
 with Previous/Next controls, and exposes an integer target, capacity progress, projected
@@ -159,7 +168,7 @@ staffing changes remain in the selected information pane.
 |---|---|
 | `W_TerritoryPlayerMenu` | Existing Narrative player menu with the Territory journal tab and a valid activation focus target |
 | `WBP_MainHopTerritoryJornal` | Narrative menu wrapper around the Territory journal; forwards activation focus to the inner widget |
-| `WBP_HopTerritoryJournalWidget` | Narrative Quest Journal-style Command Center with Active/Captured Territory ScrollBoxes, a selected-item detail pane, seven control tabs, and visible intelligence |
+| `WBP_HopTerritoryJournalWidget` | Narrative Quest Journal-style Command Center with Active/Claimed Territory ScrollBoxes, a selected-item detail pane, control tabs, and visible intelligence |
 | `WBP_TerritoryCommandRow` | Compact reusable Narrative CommonUI entry with selected styling, Place count, known-Place accordion, and waypoint action |
 | `WBP_TerritoryDistrictManagement` | In-world district command panel for guards, funds, income, production summary, availability, and threat status |
 | `WBP_TerritoryEconomyWidget` | Faction economy health plus bounded scrolling stockpile and production-site modules |

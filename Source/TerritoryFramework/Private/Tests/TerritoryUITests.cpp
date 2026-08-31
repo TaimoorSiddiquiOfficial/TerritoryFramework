@@ -70,7 +70,7 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Journal exposes Active Territory population diagnostics"),
 		TerritoryUITest::IsBlueprintPure(
 			UTerritoryJournalWidget::StaticClass(), TEXT("GetActiveTerritoryEntryCount")));
-	TestTrue(TEXT("Journal exposes Captured Territory population diagnostics"),
+	TestTrue(TEXT("Journal exposes Claimed Territory population diagnostics (legacy function name remains binary compatible)"),
 		TerritoryUITest::IsBlueprintPure(
 			UTerritoryJournalWidget::StaticClass(), TEXT("GetCapturedTerritoryEntryCount")));
 	const FObjectPropertyBase* ActiveTerritoriesProperty = CastField<FObjectPropertyBase>(
@@ -80,7 +80,7 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 			&& ActiveTerritoriesProperty->PropertyClass->IsChildOf(UScrollBox::StaticClass()));
 	const FObjectPropertyBase* CapturedTerritoriesProperty = CastField<FObjectPropertyBase>(
 		UTerritoryJournalWidget::StaticClass()->FindPropertyByName(TEXT("CapturedTerritoriesBox")));
-	TestTrue(TEXT("Captured Territories uses the Quest Journal ScrollBox template"),
+	TestTrue(TEXT("Claimed Territories uses the Quest Journal ScrollBox template"),
 		CapturedTerritoriesProperty
 			&& CapturedTerritoriesProperty->PropertyClass->IsChildOf(UScrollBox::StaticClass()));
 	TestNotNull(TEXT("Journal exposes the persistent selected Territory information pane"),
@@ -94,6 +94,17 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Community projects can scale compact Territory typography"),
 		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
 			TEXT("TerritoryTextScale")));
+	const UScriptStruct* NotificationStruct = FTerritoryNotificationSettings::StaticStruct();
+	TestNotNull(TEXT("Money/resource notification policy is reflected"), NotificationStruct);
+	if (NotificationStruct)
+	{
+		TestNotNull(TEXT("Money earning HUD notifications are configurable"),
+			NotificationStruct->FindPropertyByName(TEXT("bShowMoneyEarningsOnHUD")));
+		TestNotNull(TEXT("Resource earning HUD notifications are configurable"),
+			NotificationStruct->FindPropertyByName(TEXT("bShowResourceEarningsOnHUD")));
+		TestNotNull(TEXT("Command Center production retention is configurable"),
+			NotificationStruct->FindPropertyByName(TEXT("bRecordResourceProduction")));
+	}
 	const UClass* PlayerManagementClass = UTerritoryPlayerManagementComponent::StaticClass();
 	TestTrue(TEXT("Place discovery can be requested from Blueprint"),
 		TerritoryUITest::IsBlueprintCallable(

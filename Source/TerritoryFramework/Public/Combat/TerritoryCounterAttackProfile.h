@@ -55,6 +55,16 @@ class TERRITORYFRAMEWORK_API UTerritoryCounterAttackProfile : public UPrimaryDat
 	GENERATED_BODY()
 
 public:
+	/**
+	 * Treat an automatic counterattack as a faction reinforcement operation. The
+	 * gate remains backward compatible: when no Territory config uses the built-in
+	 * Reinforcements capability, legacy projects are allowed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling|Capability",
+		meta=(DisplayName="Require Reinforcement Capability",
+			ToolTip="Recommended. A strategic counterattack can be prepared only while the attacking faction owns a Territory whose active State Config grants Territory.Capability.Reinforcements. Easy example: losing the Radio District removes the Bandits' ability to prepare another counterattack. A Story Pursuit ignores this strategic perk."))
+	bool bRequireReinforcementCapabilityForStrategicCounterattacks = true;
+
 	/** Grace duration in Narrative Pro accumulated time-of-day units. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling", meta=(ClampMin="0.0"))
 	float GracePeriodGameTime = 300.f;
@@ -220,6 +230,19 @@ public:
 		meta=(ToolTip="Uses each participant's stable save GUID to distribute a wave across reachable defence objectives instead of making every attacker crowd the same point."))
 	bool bDistributeParticipantsAcrossObjectives = true;
 
+	/** Keep normal counterattack NPCs focused on taking the Place instead of chasing a distant visible player. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement|Takeover",
+		meta=(DisplayName="Prioritize Territory Takeover",
+			ToolTip="Recommended. Strategic attackers fight registered guards and defending players inside the local defence area, then move into the Place and hold it. A distant player outside that area cannot freeze capture. Story Pursuit / Boss Chase remains free to leave Territory bounds."))
+	bool bPrioritizeTerritoryTakeover = true;
+
+	/** Small forgiving area around each physical Place in the local defence front. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement|Takeover",
+		meta=(EditCondition="bPrioritizeTerritoryTakeover", ClampMin="0.0", ClampMax="5000.0", Units="cm",
+			DisplayName="Defending Player Engagement Padding",
+			ToolTip="How far outside a Place bound a defending player may stand and still be treated as part of the fight. Easy example: 800 lets guards fight a player just outside the gate, but not chase them across the city."))
+	float DefendingPlayerEngagementPadding = 800.f;
+
 	/** Delay before retrying an idle assault move that stopped outside the target. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement",
 		meta=(ClampMin="0.25", ClampMax="10.0"))
@@ -235,6 +258,17 @@ public:
 	int32 MaxConsecutiveSpawnFailures = 5;
 
 	const FTerritoryFactionAssaultConfig* FindFactionForce(const FGameplayTag& Faction) const;
+
+	/** Faction signature car wins; an empty signature safely falls back to the road Approach vehicle. */
+	static TSoftClassPtr<ANarrativeVehicleBase> ResolveVehicleClass(
+		const FTerritoryFactionAssaultConfig& Force,
+		const FTerritoryAssaultApproach& Approach);
+
+	/** Pure difficulty adapter used by runtime, Blueprint metadata tests and save-stable planning. */
+	static int32 ResolveVehicleCountForDifficulty(
+		const FTerritoryFactionAssaultConfig& Force,
+		ENarrativeGameplayDifficulty Difficulty, int32 AuthoredRoadMaximum,
+		int32 FiniteForce);
 
 	/** Pure all-player reduction used by runtime and native regression tests. */
 	static bool DoesQuestRulePass(ETerritoryCounterQuestRuleAction Action,

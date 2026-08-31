@@ -6,6 +6,7 @@
 #include "Economy/TerritoryProductionProfile.h"
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeCondition.h"
+#include "Tales/TerritoryCaptureEvent.h"
 #include "Tales/TerritoryGarrisonCondition.h"
 #include "Tales/TerritoryQuestRules.h"
 #include "TerritoryStoryConditions.generated.h"
@@ -197,9 +198,13 @@ protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
-/** Checks the same secure-District holding used by normal strategic counterattacks. */
+/**
+ * Counts the faction's current unlocked, stable Claimed Districts. Attach this
+ * to any Narrative event, including Set Territory Diplomacy, to branch story
+ * policy from territorial power without hard-coding the Heroes faction.
+ */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Faction District Holdings Condition"))
+	meta=(DisplayName="Territory Faction Claimed District Count Condition"))
 class TERRITORYFRAMEWORK_API UTerritoryFactionDistrictHoldingCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -208,8 +213,15 @@ public:
 	UTerritoryFactionDistrictHoldingCondition();
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(ToolTip="Where the faction comes from. Explicit keeps a fixed faction. Narrative Target follows the character who caused the quest/event. Controller Pawn follows the current possessed player, so a story faction change is respected."))
+	ETerritoryCaptureFactionSource FactionSource =
+		ETerritoryCaptureFactionSource::ExplicitFaction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(Categories="Narrative.Factions",
-			ToolTip="Faction whose secure Districts are counted. Example: Narrative.Factions.Bandits."))
+			EditCondition="FactionSource == ETerritoryCaptureFactionSource::ExplicitFaction",
+			EditConditionHides,
+			ToolTip="Fixed faction whose Claimed Districts are counted. Example: Narrative.Factions.Bandits."))
 	FGameplayTag Faction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
@@ -217,8 +229,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(ClampMin="0",
-			ToolTip="Number of loaded, unlocked Districts fully secured through their authored Places. Example: At Least 1 means Bandits still have one operational base for normal counters. Locked, Contested, partial, and Unclaimed Districts do not count; a story pursuit needs an explicit exception."))
+			DisplayName="Claimed District Count",
+			ToolTip="Number of unlocked Districts fully Claimed through their authored Places. Example: At Least 1 means this faction controls one complete District. At Least 2 can trigger a diplomacy reaction. World Partition Districts count through the replicated strategic directory. Locked, Contested, partial, and Unclaimed Districts do not count."))
 	int32 DistrictCount = 1;
+
+	/** Resolve the exact faction used by this condition for Blueprint debugging. */
+	UFUNCTION(BlueprintPure, Category="Territory|Conditions",
+		meta=(DisplayName="Resolve Claimed District Count Faction"))
+	FGameplayTag ResolveFaction(APawn* NarrativeTarget,
+		APlayerController* Controller) const;
 
 protected:
 	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,

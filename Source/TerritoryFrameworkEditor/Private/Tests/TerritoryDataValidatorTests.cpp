@@ -169,6 +169,36 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		InvalidRecurringContext.GetNumErrors() > 0u);
 	Force.RecurringCounterCooldownGameTime = 900.f;
 	Profile->FactionForces = {Force};
+	Force.ScheduleMode = ETerritoryCounterScheduleMode::FiniteSeries;
+	Force.MaximumScheduledAssaults = 0;
+	Profile->FactionForces = {Force};
+	FDataValidationContext InvalidFiniteScheduleContext(
+		false,
+		EDataValidationUsecase::Script,
+		NoAssociatedAssets);
+	TestEqual(TEXT("A finite schedule with no allowed assault is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, InvalidFiniteScheduleContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Invalid finite schedule emits a validation error"),
+		InvalidFiniteScheduleContext.GetNumErrors() > 0u);
+	Force.MaximumScheduledAssaults = 3;
+	Force.TimePolicy = ETerritoryCounterTimePolicy::NarrativeTimeWindow;
+	Force.TimeWindowStart = -1.f;
+	Profile->FactionForces = {Force};
+	FDataValidationContext InvalidTimeWindowContext(
+		false,
+		EDataValidationUsecase::Script,
+		NoAssociatedAssets);
+	TestEqual(TEXT("An out-of-range Narrative time window is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, InvalidTimeWindowContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Invalid Narrative time window emits a validation error"),
+		InvalidTimeWindowContext.GetNumErrors() > 0u);
+	Force.TimeWindowStart = 1800.f;
+	Force.TimeWindowEnd = 500.f;
+	Profile->FactionForces = {Force};
 
 	Definition->bAllowMultipleInstances = false;
 	FDataValidationContext SingleInstanceContext(

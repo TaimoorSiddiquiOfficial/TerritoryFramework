@@ -11,6 +11,7 @@
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -276,6 +277,20 @@ ETeamAttitude::Type ATerritoryAssaultCharacter::GetTeamAttitudeTowards(
 	{
 		return ETeamAttitude::Hostile;
 	}
+	if (const UTerritoryDisguiseSubsystem* Disguises = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr)
+	{
+		const ATerritoryVolume* Territory = AssaultParticipant
+			? AssaultParticipant->GetTargetTerritory() : nullptr;
+		const FGameplayTag ObserverFaction = AssaultParticipant
+			? AssaultParticipant->GetAttackingFaction() : FGameplayTag();
+		const FGameplayTagContainer Perceived = Disguises->ResolvePerceivedFactions(
+			&Other, Territory, ObserverFaction);
+		if (GetFactions().HasAnyExact(Perceived))
+		{
+			return ETeamAttitude::Friendly;
+		}
+	}
 	const ETeamAttitude::Type NarrativeAttitude = Super::GetTeamAttitudeTowards(Other);
 	return NarrativeAttitude == ETeamAttitude::Friendly
 		? ETeamAttitude::Friendly : ETeamAttitude::Neutral;
@@ -296,9 +311,18 @@ bool ATerritoryAssaultCharacter::CanEngageAssaultTarget(const AActor* Target) co
 		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
 	const INarrativeTeamAgentInterface* TargetTeam =
 		Cast<INarrativeTeamAgentInterface>(Target);
+	const ATerritoryVolume* TargetTerritory =
+		AssaultParticipant->GetTargetTerritory();
+	const UTerritoryDisguiseSubsystem* Disguises = World
+		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
+	const FGameplayTagContainer TargetFactions = Disguises
+		? Disguises->ResolvePerceivedFactions(
+			Target, TargetTerritory, AssaultParticipant->GetAttackingFaction())
+		: TargetTeam ? TargetTeam->GetFactions() : FGameplayTagContainer();
 	return Counterattacks && Diplomacy && TargetTeam
+		&& AssaultParticipant->CanEngageCombat()
 		&& Counterattacks->IsAssaultActive(AssaultParticipant->GetAssaultID())
-		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetTeam->GetFactions());
+		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetFactions);
 }
 
 void ATerritoryAssaultCharacter::BeginPlay()

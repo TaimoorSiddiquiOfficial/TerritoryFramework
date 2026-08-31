@@ -647,6 +647,52 @@ FReplicatedCaptureSummary ATerritoryWorldState::GetCaptureSummary(const FGamepla
 	return FReplicatedCaptureSummary();
 }
 
+int32 ATerritoryWorldState::GetClaimedDistrictCountForFaction(
+	const FGameplayTag& Faction) const
+{
+	return CountClaimedDistrictsForFaction(ReplicatedCaptureSummaries, Faction);
+}
+
+int32 ATerritoryWorldState::CountClaimedDistrictsForFaction(
+	TConstArrayView<FReplicatedCaptureSummary> Summaries,
+	const FGameplayTag& Faction)
+{
+	if (!Faction.IsValid()) return 0;
+
+	int32 Count = 0;
+	TSet<FGameplayTag> CountedTags;
+	TSet<FGuid> CountedGuids;
+	for (const FReplicatedCaptureSummary& Summary : Summaries)
+	{
+		if (Summary.HierarchyLevel != ETerritoryHierarchyLevel::District
+			|| Summary.Availability != ETerritoryAvailability::Unlocked
+			|| Summary.State != ETerritoryState::Claimed
+			|| Summary.CurrentOwner != Faction)
+		{
+			continue;
+		}
+
+		// The live directory is already unique, but defensive identity filtering
+		// prevents a malformed migration cache from inflating a story condition.
+		if (Summary.TerritoryTag.IsValid())
+		{
+			if (CountedTags.Contains(Summary.TerritoryTag)) continue;
+			CountedTags.Add(Summary.TerritoryTag);
+		}
+		else if (Summary.TerritoryGUID.IsValid())
+		{
+			if (CountedGuids.Contains(Summary.TerritoryGUID)) continue;
+			CountedGuids.Add(Summary.TerritoryGUID);
+		}
+		else
+		{
+			continue;
+		}
+		++Count;
+	}
+	return Count;
+}
+
 bool ATerritoryWorldState::HasContestedTerritoryBetweenFactions(
 	const FGameplayTag& FactionA, const FGameplayTag& FactionB,
 	const FGameplayTag& ExcludedTerritoryTag) const

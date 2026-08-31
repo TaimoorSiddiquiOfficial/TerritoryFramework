@@ -11,6 +11,7 @@
 #include "Core/TerritoryStealthProfile.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
@@ -858,6 +859,18 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 	const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
 	if (!Profile || !IsStealthInfiltrationEnabled(Territory)) return false;
 
+	// A valid faction uniform masks ordinary visual identity, not physical presence.
+	// Hostile evidence is processed by the disguise layer first and may burn the
+	// cover for this Territory's faction without ever mutating global diplomacy.
+	if (UTerritoryDisguiseSubsystem* Disguises =
+		GetWorld()->GetSubsystem<UTerritoryDisguiseSubsystem>();
+		Disguises && Disguises->ProcessStealthEvidence(
+			Target, Territory, Observer, Evidence, bConfirmedIdentity))
+	{
+		Strength = 0.f;
+		bConfirmedIdentity = false;
+	}
+
 	FGameplayTag Faction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Target);
 	if (!RegisterInfiltrator(Territory, Target, Faction)) return false;
 	FInfiltrationRuntime& Runtime = TerritoryInfiltrationState.FindChecked(Territory)
@@ -969,6 +982,17 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 	if (OldState != ETerritoryExposureState::Exposed
 		&& Runtime.Snapshot.ExposureState == ETerritoryExposureState::Exposed)
 	{
+		// Reaching confirmed exposure through accumulated anonymous evidence also
+		// burns the current uniform for this Territory's faction. Otherwise the
+		// player could be Exposed/Contesting while guards still considered them a
+		// friendly disguised member.
+		if (UTerritoryDisguiseSubsystem* Disguises =
+			GetWorld()->GetSubsystem<UTerritoryDisguiseSubsystem>())
+		{
+			Disguises->CompromiseDisguise(
+				Target, Territory->GetOwningFaction(), Territory);
+		}
+
 		// Narrative Pro's built-in stealth is supplied by the active Crouch ability
 		// (Abilities.Crouch) plus StealthRating. A Gameplay Event alone only helps an
 		// ability that explicitly listens for it, so also cancel configured stealth

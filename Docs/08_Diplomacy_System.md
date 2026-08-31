@@ -99,6 +99,24 @@ This state-first authoring is modular: Narrative conditions may prevent either e
 same guard class remains reusable in every Place. `Requesting Faction` is also available for a
 quest capture performed on behalf of a story faction.
 
+### React to a faction's Claimed District count
+
+Every Territory Narrative event inherits a `Conditions` array. Add `Territory Faction Claimed
+District Count Condition` to a `Set Territory Diplomacy` event when expansion should change a
+relationship:
+
+```text
+Faction Source = Narrative Target / Player Faction
+Comparison = At Least
+Claimed District Count = 2
+```
+
+The rule becomes true when that live Narrative faction owns two unlocked Districts in stable
+`Claimed` state. The count is current political control, not lifetime capture history. Partial,
+Contested, Locked, and Unclaimed Districts are excluded, and Definition-backed World Partition
+rows remain visible through `TerritoryWorldState`. Use `Explicit Faction` for a fixed rule such as
+“Bandits need at least one District before they can stage a strategic counterattack.”
+
 ## Diplomacy-aware NPC dialogue
 
 Narrative NPCDefinition provides one default interaction dialogue. Territory adds an optional

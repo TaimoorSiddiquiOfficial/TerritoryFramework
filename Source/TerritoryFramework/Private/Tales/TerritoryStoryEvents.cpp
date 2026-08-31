@@ -212,7 +212,7 @@ void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target
 	if (!bScheduled)
 	{
 		UE_LOG(LogTerritory, Warning,
-			TEXT("[EnemyWaveEvent] No finite wave was scheduled for %s; check owner, diplomacy, profile, route, cooldown, and budgets"),
+			TEXT("[EnemyWaveEvent] No Territory assault was scheduled for %s; check inherited conditions, owner, diplomacy, profile, staging, route, schedule, time window, cooldown, and budgets"),
 			*TargetTerritory.ToString());
 	}
 }
@@ -221,10 +221,59 @@ FString UTerritoryScheduleEnemyWaveEvent::GetGraphDisplayText_Implementation()
 {
 	const bool bStoryPursuit = LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit;
 	return FString::Printf(TEXT("Enemy wave (%s): schedule %s against %s"),
-		bStoryPursuit ? TEXT("story pursuit") : TEXT("strategic counter"),
+		bStoryPursuit ? TEXT("one story pursuit") : TEXT("profile-governed strategic response"),
 		!bStoryPursuit && bChooseBestEligibleAttacker
 			? TEXT("best eligible faction") : *AttackingFaction.ToString(),
 		*TargetTerritory.ToString());
+}
+
+UTerritoryStartBossChaseEvent::UTerritoryStartBossChaseEvent(
+	const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+	PursuitOptions.PlannedForceOverride = 1;
+	PursuitOptions.WaveSizeOverride = 1;
+	PursuitOptions.bAllowsTerritoryCapture = false;
+	PursuitOptions.bUseStrategicDecisionRoll = false;
+	PursuitOptions.GracePeriodOverrideGameTime = 0.f;
+}
+
+void UTerritoryStartBossChaseEvent::ExecuteEvent_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	if (!World || World->GetNetMode() == NM_Client || !PursuingFaction.IsValid()) return;
+	ATerritoryVolume* Territory = ResolveTerritory(World, TargetTerritory);
+	UTerritoryCounterAttackSubsystem* Counter =
+		World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
+	FTerritoryStoryPursuitOptions RuntimeOptions = PursuitOptions;
+	AActor* StoryTarget = ResolveExplicitRequester(Target, Controller);
+	if (RuntimeOptions.StoryFocusLocation.IsNearlyZero() && StoryTarget)
+	{
+		RuntimeOptions.StoryFocusLocation = StoryTarget->GetActorLocation();
+	}
+	if (!Territory || !Counter
+		|| !Counter->ScheduleStoryPursuitWithOptions(
+			Territory, PursuingFaction, RuntimeOptions))
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[BossChaseEvent] Could not start %s against %s; check inherited conditions, claimed owner, war diplomacy, story-pursuit force permission, finite definition, route direction, vehicle goal and budgets"),
+			*PursuingFaction.ToString(), *TargetTerritory.ToString());
+	}
+}
+
+FString UTerritoryStartBossChaseEvent::GetGraphDisplayText_Implementation()
+{
+	const bool bEnemyEscapes = PursuitOptions.Direction ==
+		ETerritoryStoryPursuitDirection::PlayerChasesEnemy;
+	return FString::Printf(TEXT("Boss chase: %s %s at %s%s"),
+		*PursuingFaction.ToString(),
+		bEnemyEscapes ? TEXT("escapes while player pursues") : TEXT("drives in and pursues player"),
+		*TargetTerritory.ToString(),
+		PursuitOptions.bAllowsTerritoryCapture ? TEXT(" (capture enabled)") : TEXT(" (story only)"));
 }
 
 UTerritoryCancelEnemyWavesEvent::UTerritoryCancelEnemyWavesEvent(

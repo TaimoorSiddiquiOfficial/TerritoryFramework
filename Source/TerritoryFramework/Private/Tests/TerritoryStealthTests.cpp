@@ -6,6 +6,7 @@
 #include "AI/TerritoryInvestigationGoal.h"
 #include "AI/TerritoryStealthObserverComponent.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryDisguiseProfile.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryStealthProfile.h"
 #include "Core/TerritoryStealthTags.h"
@@ -13,7 +14,10 @@
 #include "GAS/NarrativeAttributeSetBase.h"
 #include "Interaction/TerritoryDistractionComponent.h"
 #include "Interaction/TerritoryDistractionProjectile.h"
+#include "Items/TerritoryDisguiseClothingItem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Subsystems/TerritoryDisguiseSubsystem.h"
+#include "Tales/TerritoryDisguiseTask.h"
 #include "Tales/TerritoryStealthConditions.h"
 #include "Tales/TerritoryStealthEvents.h"
 #include "UnrealFramework/NarrativeCharacter.h"
@@ -168,6 +172,83 @@ bool FTFStealthNarrativeIntegrationContract::RunTest(const FString& Parameters)
 		GetDefault<UTerritoryInvestigationGoal>();
 	TestTrue(TEXT("Investigation interrupts patrol but remains below Narrative attack"),
 		Goal && Goal->DefaultScore > 1.f && Goal->DefaultScore < 3.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDisguisePolicy,
+	"TerritoryFramework.Stealth.Disguise.Policy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDisguisePolicy::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	UTerritoryDisguiseProfile* Disguise =
+		NewObject<UTerritoryDisguiseProfile>(GetTransientPackage());
+	UTerritoryStealthProfile* TerritoryPolicy =
+		NewObject<UTerritoryStealthProfile>(GetTransientPackage());
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	Disguise->PerceivedFaction = Bandits;
+	Disguise->Quality = 1.f;
+	FText Reason;
+	TestTrue(TEXT("Perfect Bandit uniform passes ordinary Bandit security"),
+		UTerritoryDisguiseSubsystem::EvaluateDisguisePolicy(
+			Disguise, TerritoryPolicy, Bandits, Bandits, false, Reason));
+	TestFalse(TEXT("A Bandit uniform does not impersonate Heroes"),
+		UTerritoryDisguiseSubsystem::EvaluateDisguisePolicy(
+			Disguise, TerritoryPolicy, Heroes, Heroes, false, Reason));
+	TestFalse(TEXT("A faction that burned the identity rejects it"),
+		UTerritoryDisguiseSubsystem::EvaluateDisguisePolicy(
+			Disguise, TerritoryPolicy, Bandits, Bandits, true, Reason));
+
+	TerritoryPolicy->RequiredDisguiseClearanceTags.AddTag(
+		TerritoryStealthTags::DisguiseOfficerClearance);
+	TestFalse(TEXT("Normal uniform fails an officer checkpoint"),
+		UTerritoryDisguiseSubsystem::EvaluateDisguisePolicy(
+			Disguise, TerritoryPolicy, Bandits, Bandits, false, Reason));
+	Disguise->ClearanceTags.AddTag(TerritoryStealthTags::DisguiseOfficerClearance);
+	TestTrue(TEXT("Officer uniform passes the officer checkpoint"),
+		UTerritoryDisguiseSubsystem::EvaluateDisguisePolicy(
+			Disguise, TerritoryPolicy, Bandits, Bandits, false, Reason));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDisguiseAuthoringContract,
+	"TerritoryFramework.Stealth.Disguise.AuthoringContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDisguiseAuthoringContract::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const UTerritoryDisguiseProfile* Profile =
+		GetDefault<UTerritoryDisguiseProfile>();
+	TestNotNull(TEXT("Disguise profile is available"), Profile);
+	TestTrue(TEXT("Disguise profile defaults to perfect normal quality"),
+		Profile && FMath::IsNearlyEqual(Profile->Quality, 1.f));
+	TestTrue(TEXT("Disguise activation event defaults to a registered tag"),
+		Profile && Profile->ActivatedEventTag.IsValid());
+	TestTrue(TEXT("Disguise compromise event defaults to a registered tag"),
+		Profile && Profile->CompromisedEventTag.IsValid());
+	TestTrue(TEXT("Narrative clothing integration derives from clothing"),
+		UTerritoryDisguiseClothingItem::StaticClass()->IsChildOf(
+			UEquippableItem_Clothing::StaticClass()));
+	TestTrue(TEXT("Disguise condition is inline authorable"),
+		UTerritoryDisguiseCondition::StaticClass()->HasAnyClassFlags(CLASS_EditInlineNew));
+	TestTrue(TEXT("Identity-check event is inline authorable"),
+		UTerritoryDisguiseIdentityCheckEvent::StaticClass()->HasAnyClassFlags(
+			CLASS_EditInlineNew));
+	TestTrue(TEXT("Double-agent quest task is inline authorable"),
+		UTerritoryDisguiseTask::StaticClass()->HasAnyClassFlags(CLASS_EditInlineNew));
+
+	const UClass* SubsystemClass = UTerritoryDisguiseSubsystem::StaticClass();
+	TestTrue(TEXT("Activate Disguise is server-only Blueprint API"),
+		IsBlueprintAuthorityFunction(SubsystemClass, TEXT("ActivateDisguise")));
+	TestTrue(TEXT("Identity Check is server-only Blueprint API"),
+		IsBlueprintAuthorityFunction(SubsystemClass, TEXT("PerformIdentityCheck")));
+	TestTrue(TEXT("Active disguise GAS state tag exists"),
+		TerritoryStealthTags::DisguiseActive.GetTag().IsValid());
 	return true;
 }
 

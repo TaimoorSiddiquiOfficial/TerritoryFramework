@@ -2,6 +2,7 @@
 
 #include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TerritoryTalesUtilities.h"
 
@@ -151,4 +152,55 @@ FString UTerritorySuspicionCondition::GetGraphDisplayText_Implementation()
 {
 	return FString::Printf(TEXT("Territory suspicion is at least %.0f%%"),
 		MinimumSuspicionPercent);
+}
+
+UTerritoryDisguiseCondition::UTerritoryDisguiseCondition()
+{
+	ConditionFilter = EConditionFilter::CF_OnlyPlayers;
+}
+
+bool UTerritoryDisguiseCondition::CheckCondition_Implementation(
+	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	const UTerritoryDisguiseSubsystem* Disguises = World
+		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
+	FTerritoryDisguiseSnapshot Snapshot;
+	if (!Disguises || !Target
+		|| !Disguises->GetDisguiseSnapshot(Target, Snapshot))
+	{
+		return false;
+	}
+	switch (Requirement)
+	{
+	case ETerritoryDisguiseRequirement::Active:
+		return Snapshot.bActive;
+	case ETerritoryDisguiseRequirement::PerceivedAsFaction:
+		return Faction.IsValid() && Snapshot.PerceivedFaction == Faction;
+	case ETerritoryDisguiseRequirement::TrueFaction:
+		return Faction.IsValid() && Snapshot.TrueFaction == Faction;
+	case ETerritoryDisguiseRequirement::CompromisedForFaction:
+		return Snapshot.bCompromisedForEveryone
+			|| Faction.IsValid() && Snapshot.CompromisedForFactions.Contains(Faction);
+	case ETerritoryDisguiseRequirement::AcceptedByTerritory:
+	{
+		ATerritoryVolume* Territory = ResolveStealthTerritory(
+			this, World, TerritoryToCheck, Target);
+		FText Reason;
+		return Territory && Disguises->IsDisguiseAccepted(
+			Target, Territory, Faction, Reason);
+	}
+	default:
+		return false;
+	}
+}
+
+FString UTerritoryDisguiseCondition::GetGraphDisplayText_Implementation()
+{
+	const UEnum* Enum = StaticEnum<ETerritoryDisguiseRequirement>();
+	return FString::Printf(TEXT("Territory disguise: %s%s"), Enum
+		? *Enum->GetDisplayNameTextByValue(static_cast<int64>(Requirement)).ToString()
+		: TEXT("required state"),
+		Faction.IsValid() ? *FString::Printf(TEXT(" (%s)"), *Faction.ToString()) : TEXT(""));
 }

@@ -11,6 +11,7 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryLockEvent.h"
@@ -20,6 +21,8 @@
 #include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
+#include "GAS/NarrativeAttributeSetBase.h"
+#include "NarrativeGameplayTags.h"
 
 #include "EdGraph/EdGraph.h"
 #include "Engine/Blueprint.h"
@@ -27,6 +30,7 @@
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameplayEffect.h"
 #include "K2Node_CallParentFunction.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_IfThenElse.h"
@@ -442,6 +446,31 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			* Blacksmith->GetActorTransform()).GetLocation();
 		TestTrue(TEXT("Blacksmith route remains on the repaired nav-side point"),
 			WorldSpawn.Equals(FVector(-3952.f, 795.4146f, 3.0717f), 1.f));
+		TestEqual(TEXT("Blacksmith west road uses the Narrative vehicle entry"),
+			BlacksmithRoute->EntryType,
+			ETerritoryAssaultEntryType::NarrativeVehicle);
+		TestTrue(TEXT("Blacksmith vehicle route references the project Sedan"),
+			BlacksmithRoute->VehicleClass.ToSoftObjectPath().ToString()
+				.Contains(TEXT("BPV_Sedan_Mass")));
+		TestEqual(TEXT("Blacksmith permits one vehicle deployment per assault route"),
+			BlacksmithRoute->MaximumVehicleDeployments, 1);
+
+		const FVector WorldDropOff =
+			(BlacksmithRoute->RelativeVehicleDropOffTransform
+				* Blacksmith->GetActorTransform()).GetLocation();
+		FString RouteFailure;
+		const bool bVehicleRouteValid =
+			UTerritoryCounterAttackSubsystem::ValidateNarrativeVehicleRoute(
+				World, WorldSpawn, WorldDropOff, &RouteFailure);
+		TestTrue(FString::Printf(TEXT("Blacksmith Sedan route is complete: %s"),
+			*RouteFailure),
+			bVehicleRouteValid);
+		TArray<FVector> RoutePoints;
+		TestTrue(TEXT("Blacksmith route supplies ordered Territory drive points"),
+			UTerritoryCounterAttackSubsystem::BuildNarrativeVehicleRoute(
+				World, WorldSpawn, WorldDropOff, RoutePoints, &RouteFailure));
+		TestTrue(TEXT("Blacksmith drive route has more than its endpoints"),
+			RoutePoints.Num() > 2);
 	}
 	if (FarmRoute)
 	{
@@ -449,6 +478,26 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			* Farm->GetActorTransform()).GetLocation();
 		TestTrue(TEXT("Farm route remains on its validated west-field point"),
 			WorldSpawn.Equals(FVector(2200.f, 0.f, 3.0717f), 1.f));
+	}
+
+	UClass* AdaptiveEffectClass = LoadClass<UGameplayEffect>(nullptr,
+		TEXT("/Game/TerritoryFramework/AI/Combat/GE_TerritoryAdaptiveEnemyPower.GE_TerritoryAdaptiveEnemyPower_C"));
+	const UGameplayEffect* AdaptiveEffect = AdaptiveEffectClass
+		? AdaptiveEffectClass->GetDefaultObject<UGameplayEffect>() : nullptr;
+	TestNotNull(TEXT("Adaptive Narrative Attack Damage effect loads"), AdaptiveEffect);
+	if (AdaptiveEffect)
+	{
+		TestTrue(TEXT("Adaptive effect consumes Narrative's canonical Attack Damage SetByCaller tag"),
+			AdaptiveEffect->Modifiers.ContainsByPredicate(
+				[](const FGameplayModifierInfo& Modifier)
+				{
+					return Modifier.Attribute
+							== UNarrativeAttributeSetBase::GetAttackDamageAttribute()
+						&& Modifier.ModifierMagnitude.GetMagnitudeCalculationType()
+							== EGameplayEffectMagnitudeCalculation::SetByCaller
+						&& Modifier.ModifierMagnitude.GetSetByCallerFloat().DataTag
+							== FNarrativeGameplayTags::Get().SetByCaller_AttackDamage;
+				}));
 	}
 
 	const FTerritoryStateConfig* ClaimedConfig =

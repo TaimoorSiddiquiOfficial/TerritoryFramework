@@ -82,7 +82,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
 	float OutlineThickness = 2.f;
 
-	/** Selected captured Territory accent. Unselected Territories never enter the compass domain. */
+	/** Selected Claimed Territory accent. Unselected Territories never enter the compass domain. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Waypoint")
 	FLinearColor TrackedCapturedColor = FLinearColor(0.08f, 0.95f, 0.46f, 1.f);
 

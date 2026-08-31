@@ -10,7 +10,17 @@
 #include "Interaction/TerritoryCapturePoint.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
+#include "Navigation/TerritoryRoadGuide.h"
+#include "Core/TerritoryDeveloperSettings.h"
+#include "GameplayEffect.h"
+#include "GAS/NarrativeAttributeSetBase.h"
+#include "NarrativeGameplayTags.h"
 #include "ScopedTransaction.h"
+#include "ZoneGraphSettings.h"
+#include "ZoneGraphSubsystem.h"
+#include "ZoneGraphDelegates.h"
+#include "ZoneShapeActor.h"
+#include "ZoneShapeComponent.h"
 
 namespace
 {
@@ -237,6 +247,247 @@ namespace
 			}
 		}
 	}
+}
+
+bool UTerritoryDefinitionEditorLibrary::AlignAttackDamageEffectWithNarrativePro(
+	TSubclassOf<UGameplayEffect> GameplayEffectClass, FText& OutFailureReason)
+{
+	OutFailureReason = FText::GetEmpty();
+	UGameplayEffect* Effect = GameplayEffectClass
+		? GameplayEffectClass->GetDefaultObject<UGameplayEffect>() : nullptr;
+	if (!Effect)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "MissingAdaptiveDamageEffect",
+			"Select a Gameplay Effect class.");
+		return false;
+	}
+
+	FGameplayModifierInfo* AttackDamageModifier = Effect->Modifiers.FindByPredicate(
+		[](const FGameplayModifierInfo& Modifier)
+		{
+			return Modifier.Attribute == UNarrativeAttributeSetBase::GetAttackDamageAttribute()
+				&& Modifier.ModifierMagnitude.GetMagnitudeCalculationType()
+					== EGameplayEffectMagnitudeCalculation::SetByCaller;
+		});
+	if (!AttackDamageModifier)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "MissingAdaptiveDamageModifier",
+			"The Gameplay Effect needs a Set By Caller modifier for Narrative AttackDamage.");
+		return false;
+	}
+
+	Effect->Modify();
+	FSetByCallerFloat NarrativeAttackDamage;
+	NarrativeAttackDamage.DataTag =
+		FNarrativeGameplayTags::Get().SetByCaller_AttackDamage;
+	AttackDamageModifier->ModifierMagnitude =
+		FGameplayEffectModifierMagnitude(NarrativeAttackDamage);
+	Effect->MarkPackageDirty();
+	return true;
+}
+
+bool UTerritoryDefinitionEditorLibrary::EnsureStraightVehicleApproachRoad(
+	ATerritoryVolume* Territory, FName ApproachID, FText& OutFailureReason)
+{
+	OutFailureReason = FText::GetEmpty();
+	UWorld* World = Territory ? Territory->GetWorld() : nullptr;
+	if (!Territory || !World || World->IsGameWorld())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadNeedsEditorTerritory",
+			"Select a Territory actor in a non-PIE editor world.");
+		return false;
+	}
+
+	const FTerritoryAssaultApproach* Approach =
+		Territory->GetCounterAttackApproaches().FindByPredicate(
+			[ApproachID](const FTerritoryAssaultApproach& Candidate)
+			{
+				return Candidate.ApproachID == ApproachID;
+			});
+	if (!Approach || !Approach->bEnabled
+		|| Approach->EntryType != ETerritoryAssaultEntryType::NarrativeVehicle)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadNeedsApproach",
+			"The enabled approach must exist and use Narrative Vehicle entry.");
+		return false;
+	}
+
+	const UZoneGraphSettings* Settings = GetDefault<UZoneGraphSettings>();
+	const FZoneLaneProfile* RoadProfile = Settings
+		? Settings->GetLaneProfiles().FindByPredicate(
+			[](const FZoneLaneProfile& Profile)
+			{
+				return Profile.Name == TEXT("Road");
+			}) : nullptr;
+	if (!RoadProfile)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadNeedsProfile",
+			"ZoneGraph Settings needs a lane profile named Road.");
+		return false;
+	}
+
+	const FString StableTagString = FString::Printf(TEXT("TerritoryVehicleRoad_%s_%s"),
+		*Territory->GetTerritoryGUID().ToString(EGuidFormats::Digits),
+		*ApproachID.ToString());
+	const FName StableTag(*StableTagString);
+	AZoneShape* RoadShape = nullptr;
+	ATerritoryRoadGuide* RoadGuide = nullptr;
+	for (TActorIterator<AZoneShape> It(World); It; ++It)
+	{
+		if (It->Tags.Contains(StableTag))
+		{
+			RoadShape = *It;
+			break;
+		}
+	}
+	for (TActorIterator<ATerritoryRoadGuide> It(World); It; ++It)
+	{
+		if (It->Tags.Contains(StableTag))
+		{
+			RoadGuide = *It;
+			break;
+		}
+	}
+
+	const FScopedTransaction Transaction(
+		NSLOCTEXT("TerritoryEditor", "EnsureVehicleRoadTransaction",
+			"Ensure Territory Vehicle Approach Road"));
+	Territory->Modify();
+	if (!RoadShape)
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.OverrideLevel = Territory->GetLevel();
+		SpawnParams.ObjectFlags = RF_Transactional;
+		RoadShape = World->SpawnActor<AZoneShape>(AZoneShape::StaticClass(),
+			FTransform::Identity, SpawnParams);
+		if (!RoadShape)
+		{
+			OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadSpawnFailed",
+				"Could not create the ZoneShape road actor.");
+			return false;
+		}
+		RoadShape->Tags.Add(StableTag);
+		RoadShape->SetActorLabel(FString::Printf(TEXT("Vehicle Road - %s - %s"),
+			*Territory->GetTerritoryDisplayName().ToString(), *ApproachID.ToString()));
+	}
+	if (!RoadGuide)
+	{
+		UClass* RoadGuideClass = nullptr;
+		if (const UTerritoryDeveloperSettings* TerritorySettings =
+			GetDefault<UTerritoryDeveloperSettings>())
+		{
+			RoadGuideClass = TerritorySettings->RoadGuideBlueprintClass.LoadSynchronous();
+		}
+		if (!RoadGuideClass
+			|| !RoadGuideClass->IsChildOf(ATerritoryRoadGuide::StaticClass()))
+		{
+			OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleGuideBlueprintMissing",
+				"Set Territory Framework > Road Guide Blueprint Class to a Blueprint child of TerritoryRoadGuide before creating production level roads.");
+			return false;
+		}
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.OverrideLevel = Territory->GetLevel();
+		SpawnParams.ObjectFlags = RF_Transactional;
+		RoadGuide = World->SpawnActor<ATerritoryRoadGuide>(
+			RoadGuideClass, FTransform::Identity, SpawnParams);
+		if (!RoadGuide)
+		{
+			OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleGuideSpawnFailed",
+				"Could not create the Territory spline Road Guide actor.");
+			return false;
+		}
+		RoadGuide->Tags.Add(StableTag);
+		RoadGuide->SetActorLabel(FString::Printf(TEXT("Road Guide - %s - %s"),
+			*Territory->GetTerritoryDisplayName().ToString(), *ApproachID.ToString()));
+	}
+
+	const FTransform TerritoryTransform = Territory->GetActorTransform();
+	const FVector WorldSpawn =
+		(Approach->RelativeSpawnTransform * TerritoryTransform).GetLocation();
+	const FVector WorldDropOff =
+		(Approach->RelativeVehicleDropOffTransform * TerritoryTransform).GetLocation();
+	if (FVector::DistSquared(WorldSpawn, WorldDropOff) < FMath::Square(100.f))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadTooShort",
+			"Vehicle spawn and drop-off must be at least 100 cm apart.");
+		return false;
+	}
+
+	RoadShape->Modify();
+	RoadShape->SetActorTransform(FTransform(FRotator::ZeroRotator, WorldSpawn));
+	UZoneShapeComponent* Shape = const_cast<UZoneShapeComponent*>(RoadShape->GetShape());
+	if (!Shape)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadShapeMissing",
+			"The ZoneShape actor has no ZoneShape component.");
+		return false;
+	}
+
+	Shape->Modify();
+	Shape->SetShapeType(FZoneShapeType::Spline);
+	Shape->SetCommonLaneProfile(FZoneLaneProfileRef(*RoadProfile));
+	TArray<FZoneShapePoint>& Points = Shape->GetMutablePoints();
+	Points.Reset(2);
+	Points.Emplace(FVector::ZeroVector);
+	Points.Emplace(RoadShape->GetActorTransform().InverseTransformPosition(WorldDropOff));
+	Shape->UpdateShape();
+	Shape->MarkPackageDirty();
+
+	RoadGuide->Modify();
+	RoadGuide->RoadGuideID = Approach->RoadGuideID.IsNone()
+		? Approach->ApproachID : Approach->RoadGuideID;
+	RoadGuide->SetStraightRoute(WorldSpawn, WorldDropOff);
+	RoadGuide->MarkPackageDirty();
+
+	if (World->GetSubsystem<UZoneGraphSubsystem>())
+	{
+		UE::ZoneGraphDelegates::OnZoneGraphRequestRebuild.Broadcast();
+	}
+	else
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadSubsystemMissing",
+			"ZoneGraph subsystem is unavailable in this editor world.");
+		return false;
+	}
+	World->MarkPackageDirty();
+	return true;
+}
+
+bool UTerritoryDefinitionEditorLibrary::EnsureStraightVehicleApproachRoadFromDefinition(
+	UWorld* World, UTerritoryDefinition* TerritoryDefinition, FName ApproachID,
+	FText& OutFailureReason)
+{
+	OutFailureReason = FText::GetEmpty();
+	if (!World || !TerritoryDefinition || !World->PersistentLevel)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadNeedsDefinitionWorld",
+			"Load a map and select a Territory Definition.");
+		return false;
+	}
+
+	ATerritoryVolume* Territory = nullptr;
+	for (AActor* Actor : World->PersistentLevel->Actors)
+	{
+		ATerritoryVolume* Candidate = Cast<ATerritoryVolume>(Actor);
+		if (Candidate
+			&& (Candidate->GetTerritoryDefinition() == TerritoryDefinition
+				|| Candidate->GetTerritoryTag() == TerritoryDefinition->TerritoryTag))
+		{
+			Territory = Candidate;
+			break;
+		}
+	}
+	if (!Territory)
+	{
+		OutFailureReason = FText::Format(
+			NSLOCTEXT("TerritoryEditor", "VehicleRoadDefinitionActorMissing",
+				"No actor in this map uses {0}."),
+			FText::FromString(TerritoryDefinition->GetPathName()));
+		return false;
+	}
+
+	return EnsureStraightVehicleApproachRoad(
+		Territory, ApproachID, OutFailureReason);
 }
 
 FTerritoryDefinitionSyncReport

@@ -8,7 +8,10 @@
 
 class ATerritoryAssaultCharacter;
 class ATerritoryVolume;
+class ANarrativeVehicleBase;
+class ATerritoryRoadGuide;
 class APawn;
+class UNPCGoalItem;
 class UTerritoryCounterAttackProfile;
 struct FTerritoryFactionAssaultConfig;
 enum class EDiplomacyState : uint8;
@@ -39,6 +42,11 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Counter Attack|Story")
 	bool ScheduleStoryPursuit(ATerritoryVolume* Territory, FGameplayTag AttackingFaction);
+
+	/** Reusable story contract for hunter arrival, capo escape, optional capture and finite boss/escort overrides. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Counter Attack|Story")
+	bool ScheduleStoryPursuitWithOptions(ATerritoryVolume* Territory,
+		FGameplayTag AttackingFaction, const FTerritoryStoryPursuitOptions& Options);
 
 	/**
 	 * Diplomacy-first automatic admission. Evaluates every configured, valid faction and
@@ -117,6 +125,15 @@ public:
 		ETerritoryAssaultState AssaultState, ETerritoryState TerritoryState,
 		const FGameplayTag& ContestingFaction, const FGameplayTag& AttackingFaction);
 
+	/**
+	 * Waiting-state activation policy. Strategic counterattacks require a claimed
+	 * target because they may recapture it; story pursuits that explicitly disable
+	 * capture may activate in any available Territory state.
+	 */
+	static bool ShouldActivateWaitingAssault(bool bAllowsTerritoryCapture,
+		ETerritoryState TerritoryState, bool bRequirePlayerProximity,
+		bool bRelevantPlayerNearby);
+
 	/** State events are live transition notifications, never save/load replays or same-state updates. */
 	static bool ShouldEmitCounterHappened(ETerritoryAssaultState PreviousState,
 		ETerritoryAssaultState NewState, bool bIsRestoringState);
@@ -156,6 +173,17 @@ public:
 	static bool IsRecurringCooldownComplete(const FTerritoryAssaultRecord& PreviousAssault,
 		double CurrentGameTime, float CooldownGameTime);
 
+	/**
+	 * Narrative time-window rule. A wrapped range such as 1800 -> 0500 includes
+	 * evening and early morning; equal start/end values mean the full day.
+	 */
+	static bool IsNarrativeTimeInWindow(float TimeOfDay, float WindowStart,
+		float WindowEnd);
+
+	/** True when another battle is permitted by the selected schedule mode. */
+	static bool CanContinueSchedule(ETerritoryCounterScheduleMode ScheduleMode,
+		int32 PreviousOccurrence, int32 MaximumScheduledAssaults);
+
 	/** Deterministic three-column deployment formation facing the target Territory. */
 	static FTransform CalculateParticipantDeploymentTransform(
 		const FTransform& ApproachTransform, const FVector& TargetLocation,
@@ -176,6 +204,18 @@ public:
 	static bool ValidateNavigationRoute(UWorld* World, const FVector& Start,
 		const FVector& End, FString* OutFailureReason = nullptr);
 
+	/**
+	 * Mirrors Narrative Pro's default ZoneGraph vehicle-route admission (1,000 cm
+	 * lane search, unfiltered lanes) without depending on a project vehicle Blueprint.
+	 */
+	static bool ValidateNarrativeVehicleRoute(UWorld* World, const FVector& Start,
+		const FVector& End, FString* OutFailureReason = nullptr);
+
+	/** Builds sampled, ordered ZoneGraph road points for Territory's possessed Narrative driver. */
+	static bool BuildNarrativeVehicleRoute(UWorld* World, const FVector& Start,
+		const FVector& End, TArray<FVector>& OutRoutePoints,
+		FString* OutFailureReason = nullptr);
+
 	/** Global persistence/replication bridge owned by ATerritoryWorldState. */
 	TArray<FTerritoryAssaultRecord> GetPersistentState() const;
 	TArray<FTerritoryAssaultCycleRecord> GetPersistentCycleState() const;
@@ -185,6 +225,15 @@ public:
 
 	/** Participant lifecycle callbacks. Each physical NPC may report removal once. */
 	void NotifyParticipantRemoved(FGuid AssaultID, ATerritoryAssaultCharacter* Participant, bool bKilled);
+	/** Called after the possessed Narrative vehicle reaches the authored exit for a fleeing story target. */
+	void NotifyVehicleStoryTargetEscaped(FGuid AssaultID,
+		ATerritoryAssaultCharacter* Participant);
+	/** The player lost the fleeing target for longer than the authored grace period. */
+	void NotifyVehicleStoryTargetLostByDistance(FGuid AssaultID,
+		ATerritoryAssaultCharacter* Participant);
+	/** Non-terminal handoff: the damaged/blocked target left its car for the final fight. */
+	void NotifyVehicleStoryTargetAbandoned(FGuid AssaultID,
+		ATerritoryAssaultCharacter* Participant);
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryAssaultChanged OnAssaultChanged;
@@ -204,6 +253,19 @@ private:
 	TMap<FGuid, FTerritoryAssaultRecord> Assaults;
 	TMap<FGuid, TMap<FGameplayTag, int32>> EvaluationCycleHighWater;
 	TMap<FGuid, TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>>> LiveParticipants;
+	/** Runtime-only Narrative vehicles; durable saves retain route IDs, never actor pointers. */
+	TMap<FGuid, TSet<TWeakObjectPtr<ANarrativeVehicleBase>>> LiveAssaultVehicles;
+	TMap<TWeakObjectPtr<ANarrativeVehicleBase>, FTerritoryVehicleRetirementSettings>
+		LiveVehicleRetirementRules;
+	TMap<FGuid, TSet<TWeakObjectPtr<ATerritoryRoadGuide>>> LiveAssaultRoadGuides;
+	struct FRetiringVehicle
+	{
+		TWeakObjectPtr<ANarrativeVehicleBase> Vehicle;
+		double EarliestRetirementTime = 0.0;
+		double HardRetirementTime = 0.0;
+		float PlayerKeepAliveDistance = 0.f;
+	};
+	TArray<FRetiringVehicle> RetiringVehicles;
 	TMap<FGuid, TSet<TWeakObjectPtr<APlayerController>>> WarnedControllers;
 	FTimerHandle UpdateTimer;
 	bool bRestoringState = false;
@@ -227,11 +289,23 @@ private:
 	void SpawnNextWave(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
 	ATerritoryAssaultCharacter* SpawnParticipant(FTerritoryAssaultRecord& Assault,
 		ATerritoryVolume* Territory, const FTerritoryFactionAssaultConfig& ForceConfig,
+		UNPCDefinition* AttackerDefinition,
 		const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform,
+		int32 OverrideNarrativeLevel);
+	ATerritoryAssaultCharacter* SpawnNarrativeVehicleParticipant(
+		FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory,
+		const FTerritoryFactionAssaultConfig& ForceConfig,
+		UNPCDefinition* AttackerDefinition,
+		const FTerritoryAssaultApproach& Approach,
+		const FTransform& VehicleSpawnTransform,
+		const FTransform& DriverSpawnTransform,
+		const FTransform& DropOffTransform, const FVector& WalkDestination,
 		int32 OverrideNarrativeLevel);
 	void ResolveAssault(FTerritoryAssaultRecord& Assault, ETerritoryAssaultState FinalState,
 		ETerritoryAssaultResolution Reason);
 	void RetireLiveParticipants(FTerritoryAssaultRecord& Assault, bool bDestroyActors);
+	void RetireLiveVehicles(const FGuid& AssaultID, bool bDestroyActors);
+	void UpdateRetiringVehicles();
 	void BroadcastChanged(const FTerritoryAssaultRecord& Assault);
 	void BroadcastStateTransition(const FTerritoryAssaultRecord& Assault,
 		ETerritoryAssaultState PreviousState);
@@ -268,6 +342,14 @@ private:
 		const UTerritoryCounterAttackProfile* Profile, float PowerRatio) const;
 	bool ResolveApproach(const ATerritoryVolume* Territory, FName ApproachID,
 		FTerritoryAssaultApproach& OutApproach, FTransform& OutWorldTransform) const;
+	ATerritoryRoadGuide* ResolveRoadGuide(
+		const FTerritoryAssaultApproach& Approach) const;
+	bool ResolveApproachObjective(const ATerritoryVolume* Territory,
+		const FTerritoryAssaultApproach& Approach,
+		const FTransform& ApproachWorldTransform, FVector& OutObjective,
+		FTransform& OutFootDeploymentTransform,
+		FTransform* OutVehicleDropOffTransform = nullptr,
+		FString* OutFailureReason = nullptr) const;
 	bool IsDeploymentLocationSeparated(const FVector& Location, float MinimumSpacing) const;
 	bool HasNavigationRoute(const FVector& Start, const FVector& End) const;
 	FTerritoryAssaultEvaluationInput BuildEvaluationInput(const ATerritoryVolume* Territory,
@@ -278,15 +360,24 @@ private:
 		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason,
 		bool bRequireRecurringEligibility = false) const;
 	bool ScheduleAssault(ATerritoryVolume* Territory, FGameplayTag AttackingFaction,
-		ETerritoryAssaultLaunchMode LaunchMode);
+		ETerritoryAssaultLaunchMode LaunchMode,
+		bool bContinueExistingSchedule = false,
+		const FTerritoryStoryPursuitOptions* StoryOptions = nullptr);
+	bool HasPendingVehicleIngress(const FGuid& AssaultID) const;
 	bool DoesForceMeetStagingRequirement(const FTerritoryFactionAssaultConfig& ForceConfig,
 		ETerritoryAssaultLaunchMode LaunchMode) const;
+	bool DoesFactionMeetReinforcementCapabilityRequirement(
+		const UTerritoryCounterAttackProfile* Profile,
+		const FGameplayTag& Faction, ETerritoryAssaultLaunchMode LaunchMode,
+		FText* OutFailureReason = nullptr) const;
 	bool DoStrategicQuestRulesPass(const UTerritoryCounterAttackProfile* Profile,
 		const FGameplayTag& AttackingFaction, const FGameplayTag& DefendingFaction,
 		FText* OutFailureReason = nullptr) const;
 	bool FindReachableObjective(const ATerritoryVolume* Territory, const FVector& Start,
 		FVector& OutObjective, FString* OutFailureReason = nullptr) const;
 	double GetCampaignGameTime() const;
+	float GetNarrativeTimeOfDay() const;
+	bool IsForceTimeWindowOpen(const FTerritoryFactionAssaultConfig& ForceConfig) const;
 	int32 MakeDecisionSeed(const ATerritoryVolume* Territory,
 		const FGameplayTag& AttackingFaction, int32 EvaluationCycle) const;
 	int32 ReserveNextEvaluationCycle(const FGuid& TerritoryGUID,

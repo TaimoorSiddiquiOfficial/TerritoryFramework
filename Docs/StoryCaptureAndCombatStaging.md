@@ -216,9 +216,10 @@ NPC level does not change constant attributes. If an NPC ability configuration h
 health, attack damage, and armour, assign `Power Scaling Effect` with scalable modifiers.
 If the Narrative configuration already uses level curves, leave the effect empty.
 
-For a SetByCaller modifier, set `Power Scaling Magnitude Tag` and
-`Power Scaling Magnitude Per Enemy Level`. Example: the included project profile uses
-`Territory.SetByCaller.PowerAttackDamage` and 1.5, so level 6 adds 7.5 Attack Damage.
+For a SetByCaller modifier, set only `Power Scaling Magnitude Per Enemy Level`. Territory
+always uses Narrative Pro's existing `SetByCaller.AttackDamage` tag. Example: 1.5 means
+level 6 supplies +7.5 to the additive Narrative Attack Damage effect. The actual hit still
+runs Narrative's normal AttackDamage, AttackRating, Armor and friendly-fire execution.
 
 Keep Narrative difficulty and adaptive power separate:
 

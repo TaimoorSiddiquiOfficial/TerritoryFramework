@@ -2,6 +2,7 @@
 
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryVolume.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -206,17 +207,39 @@ bool UTerritoryFactionDistrictHoldingCondition::CheckCondition_Implementation(
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
-	const UTerritoryCounterAttackSubsystem* Counter = World
-		? World->GetSubsystem<UTerritoryCounterAttackSubsystem>() : nullptr;
-	return Counter && Faction.IsValid()
+	const FGameplayTag ResolvedFaction = ResolveFaction(Target, Controller);
+	return World && ResolvedFaction.IsValid()
 		&& UTerritoryGarrisonCondition::CompareValues(
-			Counter->GetSecureDistrictCountForFaction(Faction), Comparison,
+			UTerritoryBlueprintLibrary::GetFactionDistrictCount(
+				World, ResolvedFaction), Comparison,
 			FMath::Max(0, DistrictCount));
+}
+
+FGameplayTag UTerritoryFactionDistrictHoldingCondition::ResolveFaction(
+	APawn* NarrativeTarget, APlayerController* Controller) const
+{
+	if (FactionSource == ETerritoryCaptureFactionSource::NarrativeTargetFaction)
+	{
+		return UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+			this, NarrativeTarget);
+	}
+	if (FactionSource == ETerritoryCaptureFactionSource::ControllerPawnFaction)
+	{
+		return UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+			this, Controller ? Controller->GetPawn() : nullptr);
+	}
+	return Faction;
 }
 
 FString UTerritoryFactionDistrictHoldingCondition::GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Secure Districts: %s %s %d"), *Faction.ToString(),
+	const UEnum* SourceEnum = StaticEnum<ETerritoryCaptureFactionSource>();
+	const FString FactionLabel = FactionSource
+		== ETerritoryCaptureFactionSource::ExplicitFaction
+		? Faction.ToString()
+		: EnumDisplayName(SourceEnum, static_cast<int64>(FactionSource),
+			TEXT("Dynamic Faction"));
+	return FString::Printf(TEXT("Claimed Districts: %s %s %d"), *FactionLabel,
 		*EnumDisplayName(StaticEnum<ETerritoryIntegerComparison>(),
 			static_cast<int64>(Comparison), TEXT("Compare")), FMath::Max(0, DistrictCount));
 }

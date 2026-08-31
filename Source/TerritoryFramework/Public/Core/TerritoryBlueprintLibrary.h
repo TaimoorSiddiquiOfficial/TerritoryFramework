@@ -227,6 +227,16 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Utility", meta=(DisplayName="Is Same Faction"))
 	static bool IsSameFaction(const FGameplayTag& FactionA, const FGameplayTag& FactionB);
 
+	/**
+	 * Narrative Pro's canonical SetByCaller tag for an additive AttackDamage modifier.
+	 * Use this instead of creating a Territory-specific damage tag. The eventual hit
+	 * remains governed by Narrative's AttackDamage, AttackRating, Armor, material,
+	 * faction-attitude, and friendly-fire rules.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Narrative Pro|Damage",
+		meta=(DisplayName="Get Narrative Attack Damage Set By Caller Tag"))
+	static FGameplayTag GetNarrativeAttackDamageSetByCallerTag();
+
 	/** Converts a gameplay tag into UI-friendly text without exposing the full hierarchy. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI", meta=(DisplayName="Get Friendly Tag Display Name"))
 	static FText GetFriendlyTagDisplayName(const FGameplayTag& Tag);
@@ -314,6 +324,10 @@ public:
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction City Count"))
 	static int32 GetFactionCityCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag);
 
+	/**
+	 * Current unlocked Claimed Districts, including Definition-backed World
+	 * Partition rows. Contested, partial, locked, and unclaimed Districts do not count.
+	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction District Count"))
 	static int32 GetFactionDistrictCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag);

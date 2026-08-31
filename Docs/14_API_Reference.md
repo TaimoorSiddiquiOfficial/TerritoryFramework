@@ -873,7 +873,7 @@ Narrative-activatable operations dashboard.
 | SetOperationsFilter | void | Apply the viewer-relative operational filter |
 | GetSelectedDistrictOperationsView | View | Current detail/security/finance/threat projection |
 | GetActiveTerritoryEntryCount | int32 | Count real District rows under Active Territories; empty-state text is not counted |
-| GetCapturedTerritoryEntryCount | int32 | Count real District rows under Captured Territories; empty-state text is not counted |
+| GetCapturedTerritoryEntryCount | int32 | Count real District rows under Claimed Territories; legacy API name is retained for Blueprint compatibility and empty-state text is not counted |
 
 The supplied widget follows Narrative Pro's Quest Journal contract: Active and Captured
 Territory `ScrollBox` lists, one reusable entry class, one selected District, and one persistent
@@ -1010,6 +1010,25 @@ Extends `UNarrativeTask`. Quest task for territory capture objectives.
 - Tracks `InitialOwner` at activation
 - Completes when `OnTerritoryOwnershipChanged` fires and new owner == `RequiredCapturingFaction`
 - If `bCompleteOnLoss`, completes on ANY ownership change from `InitialOwner`
+- Navigation marker attaches to the live Territory and rebinds when World Partition registers a
+  replacement actor
+
+---
+
+## UTerritoryAssaultTask
+
+Extends `UNarrativeTask`. Uses durable counterattack records for normal Quest objectives instead
+of asking Blueprint to track transient spawned NPCs.
+
+| Property | Type | Notes |
+|---|---|---|
+| TargetTerritory | FGameplayTag | Required Place watched by the task |
+| AttackingFaction | FGameplayTag | Optional exact faction filter |
+| ScenarioID | FName | Optional Story Pursuit / chase filter |
+| Objective | ETerritoryAssaultTaskObjective | Repel, takeover, kills, activation, final fight, or escape |
+
+`KillAttackers` uses inherited `RequiredQuantity`. The inherited Narrative marker attaches to the
+live Territory actor and uses its configured fallback location while the actor is streamed out.
 
 ---
 
@@ -1102,6 +1121,8 @@ Server-authoritative scheduler for deterministic, finite physical assaults. It n
 |---|---|---|
 | ScheduleCounterAttack(Territory, AttackingFaction) | AuthorityOnly | bool |
 | ScheduleBestCounterAttack(Territory, PreferredFaction) | AuthorityOnly | bool; evaluates every configured diplomacy-eligible force and schedules the strongest |
+| ScheduleStoryPursuit(Territory, AttackingFaction) | AuthorityOnly | bool; one finite non-recurring pursuit, used by the boss-chase Narrative Event |
+| ScheduleStoryPursuitWithOptions(Territory, AttackingFaction, Options) | AuthorityOnly | bool; one deterministic/configurable story encounter with chase direction, optional capture, boss Definition, finite force/wave overrides, chase range/grace, damaged-car final fight, mission traffic, story focus and Scenario ID |
 | CancelAssault(AssaultID, Reason) | AuthorityOnly | bool |
 | GetAssault(AssaultID, OutAssault) | Pure | bool |
 | GetAllAssaults() | Pure | Array<AssaultRecord> |
@@ -1111,6 +1132,19 @@ Server-authoritative scheduler for deterministic, finite physical assaults. It n
 | IsAssaultPendingOrActive(AssaultID) | Pure | bool |
 | GetAssaultDebugString(AssaultID) | Pure | string |
 | GetBestEligibleAttackerPreview(Territory, PreferredFaction, OutFaction, OutInput, OutResult, OutReason) | Pure | bool; planning only, no cycle reservation or decision roll |
+| ValidateNarrativeVehicleRoute(World, Start, End, OutReason) | Native static | bool; same unfiltered 1,000 cm ZoneGraph route contract used by runtime and editor validation |
+
+`UTerritoryDefinitionEditorLibrary` also exposes:
+
+- **Align Attack Damage Effect With Narrative Pro** — rewrites a project Gameplay Effect's
+  Narrative `AttackDamage` SetByCaller modifier to `SetByCaller.AttackDamage`.
+- **Ensure Straight Vehicle Approach Road** — creates or updates a stable two-point ZoneShape
+  Road for a selected Territory vehicle approach and rebuilds ZoneGraph.
+- **Ensure Straight Vehicle Approach Road From Definition** — DataAsset-first form for
+  commandlets and community editor tooling.
+
+The straight-road helper is only for unobstructed streets. Curved roads, intersections and
+multi-level routes remain normal ZoneGraph authoring work.
 
 | Delegate | Delivery | Payload |
 |---|---|---|
@@ -1130,9 +1164,43 @@ weights, maximum approaches, and per-faction `FTerritoryFactionAssaultConfig` va
 same-owner District/Property defence cascade has zero active guards after hard
 diplomacy/admission gates.
 
+Normal strategic records require the active `Territory.Capability.Reinforcements` capability by
+default. The check is backward-compatible when no loaded Territory config authors that capability.
+Pending records cancel if the faction loses it; a physically deployed finite force completes.
+
+Each `FTerritoryFactionAssaultConfig` can supply a `SignatureVehicleClass`. It overrides the
+selected Approach's fallback class, allowing recognizable faction cars on shared roads.
+`VehicleCountsByDifficulty` overrides the safe Easy 1 / Medium 1 / Hard 2 / Insane 3 car budget.
+`FTerritoryAssaultRecord` persists the difficulty snapshot, total budget, total used, and
+per-approach used counts so load cannot duplicate deployments.
+
+`FTerritoryAssaultApproach::EntryType` chooses `OnFoot` or `NarrativeVehicle`. Vehicle entries
+expose `VehicleClass`, fallback spawn/drop-off transforms, `RoadGuideID`, `RoadLaneSide`,
+`VehicleAwareness`, `VehicleRetirement`, `MaximumVehicleDeployments`, and optional
+`VehicleMaximumDriveSpeed`. A blank Road Guide ID uses the stable Approach ID by convention.
+`ATerritoryRoadGuide` samples an authored spline in either direction, validates optional Narrative
+ZoneGraph coverage, supplies the final-fight transform, and reference-counts optional
+`AQuestRoadControls` mission traffic. When no guide exists, Territory preserves the legacy
+ZoneGraph endpoint route. Territory then builds ordered drive points,
+while Narrative remains authoritative for the mount seat, interaction ability, animation,
+controller possession, vehicle pawn, and damage. The stock `Goal_DriveToDestination` field is
+intentionally absent because its interact-slot service is unsafe for an already mounted runtime
+driver. Runtime vehicle/pawn pointers are not part of `FTerritoryAssaultRecord`.
+
+`FTerritoryStoryPursuitOptions` additionally exposes maximum chase distance, a real-time grace
+period, damaged-car abandonment threshold, mission-traffic activation, and traffic-count
+override. `ChaseDistanceLost` is terminal; `bStoryTargetAbandonedVehicle` is non-terminal and
+keeps the finite target active for the on-foot final fight. See
+[22_Road_Missions.md](22_Road_Missions.md).
+
+Adaptive force scaling always writes its optional additive magnitude through Narrative Pro's
+`SetByCaller.AttackDamage`; the old configurable `PowerScalingMagnitudeTag` was removed.
+Blueprint and editor utilities can obtain that exact registered tag from
+`Get Narrative Attack Damage Set By Caller Tag`; do not type or register a duplicate tag.
+
 ## ATerritoryAssaultCharacter and Narrative activity
 
-`ATerritoryAssaultCharacter` derives from `ANarrativeNPCCharacter`. `UTerritoryAssaultParticipantComponent` owns replicated assault identity and exact-once capture/death registration. `UTerritoryAssaultGoal` derives from `UNPCGoalItem` and scores below Narrative's attack goal; `UTerritoryAssaultActivity` derives from `UNPCActivity`. `TerritoryAssaultTargetPolicy` is a transient adapter over Narrative's public goal-key/score contract: while registered hostile defenders remain, it suppresses non-defender attack goals, preserves defender scores, and restores exact original scores afterward. It does not persist or replicate goal pointers/scores and does not replace Narrative perception, activities, behavior trees, GAS, or attack tokens. Combat priority is score-driven rather than dependent on Narrative's unused interrupt flag.
+`ATerritoryAssaultCharacter` derives from `ANarrativeNPCCharacter`. `UTerritoryAssaultParticipantComponent` owns replicated assault identity and exact-once capture/death registration. `UTerritoryAssaultGoal` derives from `UNPCGoalItem` and scores below Narrative's attack goal; `UTerritoryAssaultActivity` derives from `UNPCActivity`. `TerritoryAssaultTargetPolicy` is a transient adapter over Narrative's public goal-key/score contract. Strategic takeover keeps registered guards and defending players inside the configured local engagement area as combat goals; when none remain, non-objective attack goals stay suppressed so a visible distant player cannot stop physical takeover. Story Pursuit does not enable that suppression and may chase outside Territory bounds. Original Narrative scores are restored exactly on retirement. The adapter does not persist or replicate goal pointers/scores and does not replace Narrative perception, activities, behavior trees, GAS, or attack tokens.
 
 See [17_Counterattack_System.md](17_Counterattack_System.md) for lifecycle and configuration.
 
@@ -1418,6 +1486,18 @@ Replicates the treaty parties, state, signed/expiry times, permanence, and a can
 | FOnDiplomacyEvent | (const FDiplomacyEvent&) | Diplomacy |
 | FOnReputationChanged | (FGameplayTag, int32) | Diplomacy |
 | FOnTreatyExpired | (FGameplayTag, FGameplayTag, EDiplomacyState) | Diplomacy — fires when timed treaty expires |
+| FOnTerritoryDisguiseChanged | (AActor*, ETerritoryDisguiseChange, ObserverFaction, ATerritoryVolume*, Snapshot) | Disguise |
+
+### Disguise API
+
+`UTerritoryDisguiseSubsystem` is the server-authoritative perceived-identity service. Its main
+Blueprint functions are `ActivateDisguise`, `RemoveDisguise`, `CompromiseDisguise`,
+`RestoreDisguise`, `PerformIdentityCheck`, `GetDisguiseSnapshot`, and `IsDisguiseAccepted`.
+`EvaluateDisguisePolicy` is pure and deterministic for UI previews and tests.
+
+`ResolvePerceivedFactions` is native integration API for Territory-aware AI and dialogue. It
+returns the temporary disguise faction only when the local Territory policy accepts it; otherwise
+it returns the actor's real Narrative factions. It never mutates `ANarrativePlayerState`.
 
 > **Note:** `UTerritoryCombatDirector` has no `BlueprintAssignable` delegates. Slot grant/denial is signaled via return values on `RequestAssaultSlot`.
 

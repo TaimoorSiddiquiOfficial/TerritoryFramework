@@ -9,7 +9,8 @@ UENUM(BlueprintType)
 enum class ETerritoryLiveEventType : uint8
 {
 	Unlocked UMETA(DisplayName="Territory Unlocked"),
-	Captured UMETA(DisplayName="Territory Captured"),
+	/** Kept as the serialized enum name; all player-facing copy uses Claimed. */
+	Captured UMETA(DisplayName="Territory Claimed"),
 	Lost UMETA(DisplayName="Territory Lost"),
 	Contested UMETA(DisplayName="Territory Contested"),
 	Secured UMETA(DisplayName="Territory Secured"),

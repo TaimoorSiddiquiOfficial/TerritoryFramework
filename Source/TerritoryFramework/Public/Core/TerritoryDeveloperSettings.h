@@ -9,6 +9,68 @@ class UNarrativeCommonButtonBase;
 class UCommonButtonStyle;
 class UCommonTextStyle;
 class UTexture2D;
+class ATerritoryRoadGuide;
+class ATerritoryRoadTrafficControls;
+class AMassVehicleSpawner;
+class UMassEntityConfigAsset;
+
+/**
+ * Player-facing Territory notification policy.
+ *
+ * The Command Center log and the short Narrative HUD toast are separate choices:
+ * a studio can keep a complete audit trail without interrupting the player every
+ * production cycle. Currency and item storage remain owned by Narrative Pro.
+ */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryNotificationSettings
+{
+	GENERATED_BODY()
+
+	/** Keep successful and failed money transactions in Command Center intelligence. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Money",
+		meta=(DisplayName="Record Money Transactions In Command Center"))
+	bool bRecordMoneyTransactions = true;
+
+	/** Show a short Narrative HUD toast after money was actually credited. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Money",
+		meta=(DisplayName="Show Money Earnings On HUD"))
+	bool bShowMoneyEarningsOnHUD = true;
+
+	/** Expenses stay in the log by default without repeatedly interrupting play. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Money",
+		meta=(DisplayName="Show Money Expenses On HUD"))
+	bool bShowMoneyExpensesOnHUD = false;
+
+	/** Smaller transactions are still authoritative, but do not create a HUD toast. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Money",
+		meta=(ClampMin="1", DisplayName="Minimum Money For HUD Notification"))
+	int32 MinimumMoneyForHUDNotification = 1;
+
+	/** Keep each settled production result in Command Center intelligence. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Resources",
+		meta=(DisplayName="Record Resource Production In Command Center"))
+	bool bRecordResourceProduction = true;
+
+	/** Show the exact Narrative item names and quantities after a successful cycle. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Resources",
+		meta=(DisplayName="Show Resource Earnings On HUD"))
+	bool bShowResourceEarningsOnHUD = true;
+
+	/** A blocked cycle is important by default because it needs player action. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Resources",
+		meta=(DisplayName="Show Blocked Production On HUD"))
+	bool bShowBlockedProductionOnHUD = true;
+
+	/** Smaller successful item batches remain in the log but do not create a HUD toast. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Resources",
+		meta=(ClampMin="1", DisplayName="Minimum Resource Units For HUD Notification"))
+	int32 MinimumResourceUnitsForHUDNotification = 1;
+
+	/** Duration requested from Narrative Pro for money and resource toasts. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Presentation",
+		meta=(ClampMin="1.0", ClampMax="15.0", Units="s"))
+	float EconomyHUDNotificationDuration = 5.f;
+};
 
 UCLASS(BlueprintType, config = Engine, defaultconfig, meta = (DisplayName = "Territory Framework"))
 class TERRITORYFRAMEWORK_API UTerritoryDeveloperSettings : public UDeveloperSettings
@@ -17,6 +79,11 @@ class TERRITORYFRAMEWORK_API UTerritoryDeveloperSettings : public UDeveloperSett
 
 public:
 	UTerritoryDeveloperSettings();
+
+	/** Global defaults for Territory intelligence and Narrative HUD economy toasts. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Notifications",
+		meta=(ShowOnlyInnerProperties))
+	FTerritoryNotificationSettings Notifications;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Economy
@@ -98,6 +165,30 @@ public:
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(ClampMin="1"))
 	int32 MaxRetainedAssaultRecords = 100;
+
+	/**
+	 * Blueprint class placed by the straight-road editor helper. Keep project-specific
+	 * visuals and defaults in this Blueprint instead of placing the native C++ class.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly,
+		Category="Territory|Counter Attack|Road Missions",
+		meta=(DisplayName="Road Guide Blueprint Class"))
+	TSoftClassPtr<ATerritoryRoadGuide> RoadGuideBlueprintClass;
+
+	/** Blueprint placed once per traffic-enabled world; it owns the shared road bounds. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly,
+		Category="Territory|Counter Attack|Road Missions")
+	TSoftClassPtr<ATerritoryRoadTrafficControls> RoadTrafficControlsBlueprintClass;
+
+	/** Blueprint placed once per traffic-enabled world; it owns Narrative Mass traffic entities. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly,
+		Category="Territory|Counter Attack|Road Missions")
+	TSoftClassPtr<AMassVehicleSpawner> RoadTrafficSpawnerBlueprintClass;
+
+	/** Narrative Mass Entity Config used for ordinary mission traffic. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly,
+		Category="Territory|Counter Attack|Road Missions")
+	TSoftObjectPtr<UMassEntityConfigAsset> DefaultRoadTrafficEntityConfig;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Spatial Index

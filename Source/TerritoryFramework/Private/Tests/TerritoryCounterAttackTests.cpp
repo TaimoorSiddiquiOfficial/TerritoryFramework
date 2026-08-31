@@ -10,7 +10,9 @@
 #include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Combat/TerritoryPowerTags.h"
+#include "NarrativeGameplayTags.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
@@ -26,6 +28,7 @@
 #include "Engine/World.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Navigation/TerritoryRoadGuide.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
@@ -236,18 +239,83 @@ bool FTFCounterAttackPlayerRelativeReserveStaging::RunTest(const FString& Parame
 	const UScriptStruct* ForceStruct = FTerritoryFactionAssaultConfig::StaticStruct();
 	TestNotNull(TEXT("Faction force exposes a reserve-wave dialogue alert"),
 		ForceStruct->FindPropertyByName(TEXT("ReserveWaveAlertDialogueTag")));
+	TestNotNull(TEXT("Faction force exposes a recognizable signature vehicle"),
+		ForceStruct->FindPropertyByName(TEXT("SignatureVehicleClass")));
+	TestNotNull(TEXT("Faction vehicle count follows Narrative difficulty"),
+		ForceStruct->FindPropertyByName(TEXT("VehicleCountsByDifficulty")));
+	TestNotNull(TEXT("Takeover can play Narrative tagged dialogue"),
+		ForceStruct->FindPropertyByName(TEXT("TakeoverStartedDialogueTag")));
+	TestNotNull(TEXT("Final fight can play Narrative tagged dialogue"),
+		ForceStruct->FindPropertyByName(TEXT("FinalFightDialogueTag")));
 	TestNotNull(TEXT("Faction force exposes opt-in player power scaling"),
 		ForceStruct->FindPropertyByName(TEXT("bScaleLevelToRelevantPlayerPower")));
 	TestNotNull(TEXT("Faction force exposes an optional scalable Gameplay Effect"),
 		ForceStruct->FindPropertyByName(TEXT("PowerScalingEffect")));
-	TestNotNull(TEXT("Faction force exposes a SetByCaller scaling tag"),
-		ForceStruct->FindPropertyByName(TEXT("PowerScalingMagnitudeTag")));
 	TestNotNull(TEXT("Faction force exposes a per-level scaling magnitude"),
 		ForceStruct->FindPropertyByName(TEXT("PowerScalingMagnitudePerEnemyLevel")));
 	TestTrue(TEXT("The built-in skill power tier tag is registered by the plugin"),
 		TerritoryPowerTags::Tier3.GetTag().IsValid());
-	TestTrue(TEXT("The adaptive Attack Damage SetByCaller tag is registered by the plugin"),
-		TerritoryPowerTags::PowerAttackDamageMagnitude.GetTag().IsValid());
+	TestTrue(TEXT("Adaptive attack power reuses Narrative Pro's existing Attack Damage SetByCaller tag"),
+		FNarrativeGameplayTags::Get().SetByCaller_AttackDamage.IsValid());
+	TestEqual(TEXT("Blueprint/editor integrations receive the same Narrative Attack Damage tag"),
+		UTerritoryBlueprintLibrary::GetNarrativeAttackDamageSetByCallerTag(),
+		FNarrativeGameplayTags::Get().SetByCaller_AttackDamage);
+	TestNull(TEXT("Territory no longer exposes a second configurable damage magnitude tag"),
+		ForceStruct->FindPropertyByName(TEXT("PowerScalingMagnitudeTag")));
+	UScriptStruct* ApproachStruct = FTerritoryAssaultApproach::StaticStruct();
+	TestNotNull(TEXT("An approach selects on-foot or Narrative vehicle entry"),
+		ApproachStruct->FindPropertyByName(TEXT("EntryType")));
+	TestNotNull(TEXT("A vehicle approach references an existing Narrative vehicle class"),
+		ApproachStruct->FindPropertyByName(TEXT("VehicleClass")));
+	TestNull(TEXT("Vehicle approaches do not expose Narrative's faulty stock drive-goal service"),
+		ApproachStruct->FindPropertyByName(TEXT("VehicleDriveGoalClass")));
+	TestNotNull(TEXT("A vehicle approach authors a roadside drop-off"),
+		ApproachStruct->FindPropertyByName(TEXT("RelativeVehicleDropOffTransform")));
+	TestNotNull(TEXT("A vehicle approach bounds Narrative ingress time"),
+		ApproachStruct->FindPropertyByName(TEXT("VehicleIngressTimeoutSeconds")));
+	TestTrue(TEXT("Vehicle ingress timeout is safely bounded by default"),
+		FTerritoryAssaultApproach().VehicleIngressTimeoutSeconds >= 5.f);
+	const UTerritoryCounterAttackProfile* Profile =
+		GetDefault<UTerritoryCounterAttackProfile>();
+	TestTrue(TEXT("Strategic counters are reinforcement-capability operations by default"),
+		Profile->bRequireReinforcementCapabilityForStrategicCounterattacks);
+	TestTrue(TEXT("Strategic attackers prioritize physical takeover by default"),
+		Profile->bPrioritizeTerritoryTakeover);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackNarrativeDifficultyVehicleBudget,
+	"TerritoryFramework.CounterAttack.Vehicle.NarrativeDifficultyBudget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackNarrativeDifficultyVehicleBudget::RunTest(
+	const FString& Parameters)
+{
+	FTerritoryFactionAssaultConfig Force;
+	TestEqual(TEXT("Easy sends one recognizable car"),
+		UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
+			Force, ENarrativeGameplayDifficulty::Easy, 6, 6), 1);
+	TestEqual(TEXT("Medium sends one recognizable car"),
+		UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
+			Force, ENarrativeGameplayDifficulty::Medium, 6, 6), 1);
+	TestEqual(TEXT("Hard sends two cars"),
+		UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
+			Force, ENarrativeGameplayDifficulty::Hard, 6, 6), 2);
+	TestEqual(TEXT("Insane sends three cars"),
+		UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
+			Force, ENarrativeGameplayDifficulty::Insane, 6, 6), 3);
+
+	FTerritoryDifficultyVehicleCount& Override =
+		Force.VehicleCountsByDifficulty.AddDefaulted_GetRef();
+	Override.Difficulty = ENarrativeGameplayDifficulty::Hard;
+	Override.MaximumCars = 4;
+	TestEqual(TEXT("Designer difficulty override wins but remains finite"),
+		UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
+			Force, ENarrativeGameplayDifficulty::Hard, 8, 3), 3);
+	Force.bScaleVehicleCountByNarrativeDifficulty = false;
+	TestEqual(TEXT("Disabled scaling uses the authored road/force limit"),
+		UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
+			Force, ENarrativeGameplayDifficulty::Easy, 5, 4), 4);
 	return true;
 }
 
@@ -362,6 +430,19 @@ bool FTFCounterAttackRegisteredDefenderGoalPreference::RunTest(const FString& Pa
 		PlayerGoal->DefaultScore, 4.75f);
 	TestTrue(TEXT("Transient score overrides are never retained as campaign state"),
 		Overrides.IsEmpty());
+
+	TestTrue(TEXT("Takeover mode suppresses a distant player even after the last guard dies"),
+		TerritoryAssaultTargetPolicy::ApplyDefenderPreference(
+			NarrativeAttackGoals, NoDefenders, Overrides, true).bScoresChanged);
+	TestEqual(TEXT("The distant player cannot freeze physical takeover"),
+		PlayerGoal->DefaultScore, 0.f);
+	TestEqual(TEXT("Both non-objective attack goals are suppressed with no local defender"),
+		Overrides.Num(), 2);
+	TestTrue(TEXT("Story chase mode restores unrestricted Narrative combat"),
+		TerritoryAssaultTargetPolicy::ApplyDefenderPreference(
+			NarrativeAttackGoals, NoDefenders, Overrides, false).bScoresChanged);
+	TestEqual(TEXT("Story chase restores the exact player combat score"),
+		PlayerGoal->DefaultScore, 4.75f);
 
 	World->DestroyWorld(false);
 	return true;
@@ -559,6 +640,27 @@ bool FTFCounterAttackStateEventPayload::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Event carries the committed finite-force snapshot"),
 		Event.Assault.AliveForce, 3);
 	TestEqual(TEXT("Event carries campaign time"), Event.EventGameTime, 314.25);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFStoryPursuitOptionalCaptureActivation,
+	"TerritoryFramework.CounterAttack.Regression.StoryPursuitWithoutCaptureCanActivate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFStoryPursuitOptionalCaptureActivation::RunTest(const FString& Parameters)
+{
+	TestTrue(TEXT("An optional story pursuit can activate without claiming territory"),
+		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
+			false, ETerritoryState::Contested, true, true));
+	TestFalse(TEXT("Player proximity remains required when configured"),
+		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
+			false, ETerritoryState::Contested, true, false));
+	TestFalse(TEXT("A capturing counterattack still requires a claimed target"),
+		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
+			true, ETerritoryState::Contested, false, false));
+	TestTrue(TEXT("A claimed capturing counterattack can activate without proximity when disabled"),
+		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
+			true, ETerritoryState::Claimed, false, false));
 	return true;
 }
 
@@ -901,6 +1003,15 @@ bool FTFCounterAttackSaveRestore::RunTest(const FString& Parameters)
 		TEXT("Territory.HavenReach.MarketSquare"), false);
 	Saved.State = ETerritoryAssaultState::Active;
 	Saved.LaunchMode = ETerritoryAssaultLaunchMode::StoryPursuit;
+	Saved.StoryPursuitDirection = ETerritoryStoryPursuitDirection::PlayerChasesEnemy;
+	Saved.bAllowsTerritoryCapture = false;
+	Saved.bUseStrategicDecisionRoll = false;
+	Saved.StoryFocusLocation = FVector(100.f, 200.f, 300.f);
+	Saved.StoryPlannedForceOverride = 1;
+	Saved.StoryWaveSizeOverride = 1;
+	Saved.StoryScenarioID = TEXT("CastleHill_UnderbossEscape");
+	Saved.ScheduleSeriesID = FGuid::NewGuid();
+	Saved.ScheduleOccurrence = 2;
 	Saved.ResolvedGameTime = 321.0;
 	Saved.DecisionSeed = 94731;
 	Saved.DecisionRoll = 0.271f;
@@ -918,6 +1029,23 @@ bool FTFCounterAttackSaveRestore::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Decision roll is not rerolled"), Restored.DecisionRoll, Saved.DecisionRoll);
 	TestEqual(TEXT("Explicit story launch mode survives save/load"), Restored.LaunchMode,
 		ETerritoryAssaultLaunchMode::StoryPursuit);
+	TestEqual(TEXT("Story pursuit direction survives save/load"),
+		Restored.StoryPursuitDirection,
+		ETerritoryStoryPursuitDirection::PlayerChasesEnemy);
+	TestFalse(TEXT("Optional boss chase remains unable to capture after save/load"),
+		Restored.bAllowsTerritoryCapture);
+	TestFalse(TEXT("Deterministic Tales pursuit does not gain a strategic roll after load"),
+		Restored.bUseStrategicDecisionRoll);
+	TestEqual(TEXT("Story focus is a durable value rather than an actor pointer"),
+		Restored.StoryFocusLocation, Saved.StoryFocusLocation);
+	TestEqual(TEXT("Single capo force override survives save/load"),
+		Restored.StoryPlannedForceOverride, 1);
+	TestEqual(TEXT("Story scenario identity survives save/load"),
+		Restored.StoryScenarioID, FName(TEXT("CastleHill_UnderbossEscape")));
+	TestEqual(TEXT("Schedule series identity survives save/load"),
+		Restored.ScheduleSeriesID, Saved.ScheduleSeriesID);
+	TestEqual(TEXT("Schedule occurrence survives save/load"),
+		Restored.ScheduleOccurrence, 2);
 	TestEqual(TEXT("Recurring timestamp survives save/load"), Restored.ResolvedGameTime, 321.0);
 	TestEqual(TEXT("Killed force remains consumed"), Restored.KilledForce, 2);
 	TestEqual(TEXT("Withdrawn force remains consumed"), Restored.WithdrawnForce, 1);
@@ -1545,8 +1673,28 @@ bool FTFStrategicStagingRecurringAndOffscreenWavePolicy::RunTest(const FString& 
 		ETerritoryAssaultStagingRequirement::OwnsSecureDistrict);
 	TestFalse(TEXT("Story pursuit bypass needs explicit force opt-in"),
 		DefaultForce.bAllowStoryPursuitWithoutStagingDistrict);
-	TestTrue(TEXT("Recurring strategic counters are available by default"),
-		DefaultForce.bEnableRecurringStrategicCounters);
+	TestEqual(TEXT("Recurring strategic counters use an explicit unlimited schedule by default"),
+		DefaultForce.ScheduleMode, ETerritoryCounterScheduleMode::UnlimitedSeries);
+	TestFalse(TEXT("One Assault never creates a later battle"),
+		UTerritoryCounterAttackSubsystem::CanContinueSchedule(
+			ETerritoryCounterScheduleMode::SingleAssault, 1, 3));
+	TestTrue(TEXT("Finite Series permits a battle below its authored maximum"),
+		UTerritoryCounterAttackSubsystem::CanContinueSchedule(
+			ETerritoryCounterScheduleMode::FiniteSeries, 2, 3));
+	TestFalse(TEXT("Finite Series stops exactly at its authored maximum"),
+		UTerritoryCounterAttackSubsystem::CanContinueSchedule(
+			ETerritoryCounterScheduleMode::FiniteSeries, 3, 3));
+	TestTrue(TEXT("Unlimited Schedule permits a later finite battle"),
+		UTerritoryCounterAttackSubsystem::CanContinueSchedule(
+			ETerritoryCounterScheduleMode::UnlimitedSeries, 99, 1));
+	TestTrue(TEXT("Narrative night window includes evening"),
+		UTerritoryCounterAttackSubsystem::IsNarrativeTimeInWindow(1900.f, 1800.f, 500.f));
+	TestTrue(TEXT("Narrative night window wraps through early morning"),
+		UTerritoryCounterAttackSubsystem::IsNarrativeTimeInWindow(300.f, 1800.f, 500.f));
+	TestFalse(TEXT("Narrative night window excludes midday"),
+		UTerritoryCounterAttackSubsystem::IsNarrativeTimeInWindow(1200.f, 1800.f, 500.f));
+	TestTrue(TEXT("Equal Narrative time bounds intentionally mean all day"),
+		UTerritoryCounterAttackSubsystem::IsNarrativeTimeInWindow(1200.f, 600.f, 600.f));
 
 	FTerritoryAssaultRecord Active;
 	Active.State = ETerritoryAssaultState::Active;
@@ -1778,6 +1926,9 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 		HasFunctionFlag(CounterClass, TEXT("ScheduleCounterAttack"), FUNC_BlueprintAuthorityOnly));
 	TestTrue(TEXT("Explicit story pursuit scheduling is Blueprint authority-only"),
 		HasFunctionFlag(CounterClass, TEXT("ScheduleStoryPursuit"), FUNC_BlueprintAuthorityOnly));
+	TestTrue(TEXT("Configured story pursuit scheduling is Blueprint authority-only"),
+		HasFunctionFlag(CounterClass, TEXT("ScheduleStoryPursuitWithOptions"),
+			FUNC_BlueprintAuthorityOnly));
 	TestTrue(TEXT("Strongest eligible automatic scheduling is Blueprint authority-only"),
 		HasFunctionFlag(CounterClass, TEXT("ScheduleBestCounterAttack"), FUNC_BlueprintAuthorityOnly));
 	TestTrue(TEXT("Strategic candidate preview is side-effect-free Blueprint data"),
@@ -1832,7 +1983,21 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 		TEXT("LaunchMode"), TEXT("DecisionSeed"), TEXT("DecisionRoll"), TEXT("ResolvedGameTime"),
 		TEXT("PlannedForce"), TEXT("AliveForce"),
 		TEXT("PendingReserveForce"), TEXT("KilledForce"), TEXT("WithdrawnForce"),
-		TEXT("ConsecutiveSpawnFailures")})
+		TEXT("ConsecutiveSpawnFailures"), TEXT("StoryPursuitDirection"),
+		TEXT("bAllowsTerritoryCapture"), TEXT("bUseStrategicDecisionRoll"),
+		TEXT("StoryFocusLocation"), TEXT("StoryAttackerDefinitionOverride"),
+		TEXT("StoryPlannedForceOverride"), TEXT("StoryWaveSizeOverride"),
+		TEXT("StoryScenarioID"), TEXT("StoryMaximumChaseDistance"),
+		TEXT("StoryChaseDistanceGraceSeconds"),
+		TEXT("bStoryAbandonDamagedVehicleForFinalFight"),
+		TEXT("StoryVehicleAbandonHealthFraction"),
+		TEXT("bStoryActivateRoadMissionTraffic"),
+		TEXT("StoryMissionTrafficVehicleCountOverride"),
+		TEXT("bStoryTargetAbandonedVehicle"),
+		TEXT("NarrativeDifficultyAtLaunch"),
+		TEXT("MaximumVehicleDeployments"),
+		TEXT("VehicleDeploymentsUsed"),
+		TEXT("VehicleDeploymentsByApproach")})
 	{
 		TestTrue(FString::Printf(TEXT("%s is SaveGame"), *Field.ToString()),
 			HasPropertyFlag(FTerritoryAssaultRecord::StaticStruct(), Field, CPF_SaveGame));
@@ -1846,11 +2011,23 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 
 	const UClass* ParticipantClass = UTerritoryAssaultParticipantComponent::StaticClass();
 	for (const FName Field : {TEXT("AssaultID"), TEXT("TargetTerritoryGUID"), TEXT("TargetTerritory"),
-		TEXT("AttackingFaction"), TEXT("bCaptureRegistered")})
+		TEXT("AttackingFaction"), TEXT("bCaptureRegistered"),
+		TEXT("bAllowsTerritoryCapture")})
 	{
 		TestTrue(FString::Printf(TEXT("Participant %s replicates"), *Field.ToString()),
 			HasPropertyFlag(ParticipantClass, Field, CPF_Net));
 	}
+	TestTrue(TEXT("Vehicle ingress state is visible without exposing Narrative internals"),
+		HasFunctionFlag(ParticipantClass, TEXT("IsVehicleIngressPending"), FUNC_BlueprintPure));
+	TestTrue(TEXT("Combat gating is visible for project AI diagnostics"),
+		HasFunctionFlag(ParticipantClass, TEXT("CanEngageCombat"), FUNC_BlueprintPure));
+	const FTerritoryStoryPursuitOptions StoryDefaults;
+	TestEqual(TEXT("Story pursuit defaults to an enemy arrival"), StoryDefaults.Direction,
+		ETerritoryStoryPursuitDirection::EnemyChasesPlayer);
+	TestFalse(TEXT("A story pursuit cannot capture unless the author explicitly enables it"),
+		StoryDefaults.bAllowsTerritoryCapture);
+	TestFalse(TEXT("An explicit story pursuit is deterministic by default"),
+		StoryDefaults.bUseStrategicDecisionRoll);
 	TestTrue(TEXT("Physical attacker derives from Narrative NPC"),
 		ATerritoryAssaultCharacter::StaticClass()->IsChildOf(ANarrativeNPCCharacter::StaticClass()));
 	TestTrue(TEXT("Assault activity consumes Territory assault goals"),
@@ -1876,6 +2053,69 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 		GetDefault<UTerritoryCounterAttackProfile>()->MaxStalledMovementRetries > 0);
 	TestEqual(TEXT("An empty defence cascade defaults to certain launch after hard admission gates"),
 		GetDefault<UTerritoryCounterAttackProfile>()->UnguardedLaunchProbability, 1.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFRoadMissionRules,
+	"TerritoryFramework.CounterAttack.Vehicle.RoadMissionRules",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFRoadMissionRules::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("Obstacle outside braking distance preserves full road speed"),
+		UTerritoryAssaultParticipantComponent::CalculateObstacleSpeedFactor(
+			1400.f, 300.f, 1000.f), 1.f);
+	TestEqual(TEXT("Obstacle inside emergency distance stops the mission vehicle"),
+		UTerritoryAssaultParticipantComponent::CalculateObstacleSpeedFactor(
+			200.f, 300.f, 1000.f), 0.f);
+	TestTrue(TEXT("Obstacle braking is progressive rather than binary"),
+		FMath::IsNearlyEqual(
+			UTerritoryAssaultParticipantComponent::CalculateObstacleSpeedFactor(
+				650.f, 300.f, 1000.f), 0.5f));
+
+	TestFalse(TEXT("A short separation does not fail the chase"),
+		UTerritoryAssaultParticipantComponent::ShouldFailChaseDistance(
+			4.f, 10.f, 12000.f, 9000.f));
+	TestTrue(TEXT("Sustained separation fails the chase after its grace period"),
+		UTerritoryAssaultParticipantComponent::ShouldFailChaseDistance(
+			10.f, 10.f, 12000.f, 9000.f));
+	TestFalse(TEXT("A close co-op player keeps the chase alive"),
+		UTerritoryAssaultParticipantComponent::ShouldFailChaseDistance(
+			20.f, 10.f, 7000.f, 9000.f));
+
+	TestTrue(TEXT("A damaged Narrative vehicle hands off to the final fight"),
+		UTerritoryAssaultParticipantComponent::ShouldAbandonVehicle(
+			0.3f, 0.35f, 0.f, 12.f));
+	TestTrue(TEXT("A prolonged traffic block can hand off to the final fight"),
+		UTerritoryAssaultParticipantComponent::ShouldAbandonVehicle(
+			1.f, 0.35f, 12.f, 12.f));
+	TestFalse(TEXT("Healthy moving target stays in its vehicle"),
+		UTerritoryAssaultParticipantComponent::ShouldAbandonVehicle(
+			1.f, 0.35f, 1.f, 12.f));
+
+	const FTerritoryAssaultApproach Approach;
+	TestEqual(TEXT("Two-way road helper defaults to right-side traffic"),
+		Approach.RoadLaneSide, ETerritoryRoadLaneSide::Right);
+	TestTrue(TEXT("Temporary reinforcement car has a bounded retirement timeout"),
+		Approach.VehicleRetirement.HardRetirementTimeout
+			> Approach.VehicleRetirement.EarliestRetirementDelay);
+	for (const FName Field : {TEXT("RoadGuideID"), TEXT("RoadLaneSide"),
+		TEXT("VehicleAwareness"), TEXT("VehicleRetirement")})
+	{
+		TestNotNull(FString::Printf(TEXT("Approach exposes %s"), *Field.ToString()),
+			FTerritoryAssaultApproach::StaticStruct()->FindPropertyByName(Field));
+	}
+	const UClass* GuideClass = ATerritoryRoadGuide::StaticClass();
+	TestNotNull(TEXT("Road Guide exposes its authored spline"),
+		GuideClass->FindPropertyByName(TEXT("RouteSpline")));
+	const UFunction* BeginTraffic =
+		GuideClass->FindFunctionByName(TEXT("BeginMissionTraffic"));
+	TestNotNull(TEXT("Road Guide exposes mission traffic activation"), BeginTraffic);
+	if (BeginTraffic)
+	{
+		TestTrue(TEXT("Mission traffic activation is authority-only"),
+			BeginTraffic->HasAnyFunctionFlags(FUNC_BlueprintAuthorityOnly));
+	}
 	return true;
 }
 

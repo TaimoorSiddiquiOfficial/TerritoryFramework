@@ -31,6 +31,8 @@ Haven Reach City
 
 The **Place** is where physical gameplay happens. A Place can have bounds, guards, patrols,
 capture rules, a protected story owner, production, a map marker, and counterattack approaches.
+Vehicle approaches may reference a placed spline Road Guide for reinforcement arrivals and
+two-way boss chases; see [22_Road_Missions.md](22_Road_Missions.md).
 
 The **District** summarizes its Places. The **City** summarizes its Districts. A District or City
 does not need its own physical guards or capture point.
@@ -67,6 +69,17 @@ Availability always comes first in player UI.
 
 A locked Place may remember an owner or an old political state. That information is useful for
 the story and save game, but it must still appear as **Locked** to the player.
+
+### Capture and Claimed are not the same word
+
+- **Capture** is the action: the player defeats defenders, fills progress, or accepts a story
+  handover.
+- **Claimed** is the stable result: one faction now securely owns the Territory.
+
+Player lists, status chips, reports, and documentation therefore say **Claimed**, not
+“Captured”, when they describe saved ownership. Some old C++/Blueprint function names still
+contain `Captured` for binary compatibility; they return the same Claimed list and should not
+be used as player-facing text.
 
 ## 3. The Castle Hill Farm example
 
@@ -220,7 +233,7 @@ Changed by capture, lock/unlock, diplomacy, quests, story handover, and server g
 
 Restored when the campaign continues. They take priority over initial values.
 
-This is deliberate. Otherwise a plugin update could erase a player's captured territory.
+This is deliberate. Otherwise a plugin update could erase a player's Claimed Territory.
 
 ## 9. State Configs
 
@@ -353,6 +366,34 @@ Counterattack flow:
 3. Player warning.
 4. Wait for physical activation range when configured.
 5. Spawn finite waves from valid typed approaches.
+
+An approach can be **On Foot** or **Narrative Vehicle**. For a vehicle arrival, select an
+existing Narrative vehicle Blueprint and a roadside drop-off. Example: one Bandit drives the Sedan to Blacksmith while the rest enter through the
+same drop-off on foot or through a second alley approach. Build a ZoneGraph Road between the
+car spawn and drop-off; the Territory editor library can generate a simple straight road.
+Territory still counts every attacker once. Narrative owns the mount interaction, animation,
+controller possession, vehicle pawn, combat and damage; Territory supplies the validated
+ZoneGraph steering route after possession.
+
+The car is now a real arrival, not decoration. Territory waits while Narrative seats the driver,
+then follows the road, parks, and asks Narrative to dismount. During that ingress the driver cannot attack, cannot add
+capture pressure, and later reserve attackers do not pop in ahead of the car. After Narrative
+reports a completed dismount, normal Territory combat begins. If the route or car fails, a bounded timeout
+withdraws that finite attacker cleanly.
+
+For a quest, use **Start Territory Boss Chase** and choose one direction:
+
+- **Enemy Chases Player:** regime hunters drive from the approach spawn to the Place, get out,
+  then fight the player and guards.
+- **Player Chases Enemy:** a capo starts at the roadside drop-off and drives toward the approach
+  exit. Kill the finite target to defeat the encounter. If the car reaches the exit, the saved
+  result is **Target Escaped**.
+
+Capture is off by default for a boss chase. This lets “kill the Castle Hill underboss” remain an
+optional objective while ordinary Place/District capture continues independently. Enable capture
+only when this exact story encounter is allowed to contest and reclaim the Place. You may also
+override the Narrative NPC Definition, force size, wave size, story delay, and stable Scenario ID;
+the default is one deterministic boss with no random strategic roll.
 6. Attack the Place and its guards with or without the player.
 7. Resolve as succeeded, defeated, cancelled, or another explicit result.
 
@@ -409,7 +450,7 @@ identity.
 - Locked Territories stay silent and do not reveal their names or markers.
 - First discovery uses Narrative navigation discovery.
 - A waypoint button tracks the selected unlocked Place.
-- Captured markers can use the friendly/green presentation.
+- Claimed markers can use the friendly/green presentation.
 - The HUD and compass use the same selected marker truth.
 
 ## 17. Command Center and HUD
@@ -427,12 +468,31 @@ The Command Center is the detailed Territory journal. It provides:
 
 - Live Notifications and archived intelligence;
 - Active/unlocked Territories;
-- Captured Territories;
+- Claimed Territories;
 - City -> District -> visible Place hierarchy;
 - hidden Place count without leaking locked names;
 - Overview, Places, Garrison, Economy, Production, Threats, Diplomacy, and Command details;
 - waypoint, espionage, guard staffing, reinforcement, and perk information;
-- durable reports for income, attack, loss, capture, perk gain, and perk loss.
+- durable reports for income, attack, loss, claim, perk gain, and perk loss.
+
+The Places tab uses compact themed cards rather than raw debug paragraphs. An owned Place can
+show owner, garrison staffing, capacity, net income, and production status. A hostile Place does
+not leak guard or economy numbers: it tells the player to use Espionage first.
+
+### Money and resource notifications
+
+Open **Project Settings -> Territory Framework -> Notifications**. Money and Narrative-item
+production have separate switches for:
+
+- keeping the result in Command Center intelligence;
+- showing a short HUD notification;
+- the minimum amount that is important enough for the HUD;
+- the HUD notification duration.
+
+Easy example: Farm produces `+5 Grain`. Narrative Inventory receives the five Grain first.
+Command Center records `Resources earned: +5 Grain`, and the HUD shows the same short message.
+If the studio disables **Show Resource Earnings On HUD**, production still works and the report
+can remain in Command Center without interrupting the player every cycle.
 
 UI read models never own gameplay state. Buttons send validated requests to server authority.
 
@@ -459,7 +519,7 @@ Friendly purpose first; the C++ class name is included for search.
 | Try Unlock Territory (`UTerritoryUnlockEvent`) | Unlock exact or hierarchical targets after conditions |
 | Set Diplomacy (`UTerritorySetDiplomacyEvent`) | War, peace, alliance, trade, or neutral story change |
 | Modify Reputation (`UTerritoryModifyReputationEvent`) | Raise or lower faction reputation |
-| Schedule Enemy Wave (`UTerritoryScheduleEnemyWaveEvent`) | Finite strategic or story assault |
+| Schedule Enemy Wave (`UTerritoryScheduleEnemyWaveEvent`) | Start one finite strategic or story assault; the force profile decides whether later strategic battles are allowed |
 | Cancel Enemy Waves (`UTerritoryCancelEnemyWavesEvent`) | Cancel matching non-terminal assaults |
 | Hierarchy Story Override (`UTerritoryHierarchyStoryOverrideEvent`) | Explicit story control across a hierarchy |
 | Set Garrison Target (`UTerritorySetGarrisonTargetEvent`) | Script desired guard staffing |
@@ -486,7 +546,7 @@ Friendly purpose first; the C++ class name is included for search.
 | Territory State | Blacksmith is Contested |
 | Control Progress | Capture pressure is at least 75% |
 | Reputation | Bandit reputation is at least 50 |
-| District Holdings | Bandits still hold at least one secure District |
+| Claimed District Count | Player's current faction has at least one unlocked, fully Claimed District; unloaded World Partition Districts still count |
 | Assault | Latest wave has at least three killed attackers |
 | Presence | Narrative target is inside Castle Hill or a child Place |
 | Production Status | Farm is Missing Input |
@@ -498,6 +558,12 @@ Friendly purpose first; the C++ class name is included for search.
 
 All events inherit Narrative Pro's event-condition support. The defender-died and
 all-defenders-defeated arrays can therefore run an event only when its attached conditions pass.
+
+For a diplomacy reaction after expansion, add **Territory Faction Claimed District Count** to
+the `Set Territory Diplomacy` event's inherited Conditions. Choose **Narrative Target / Player
+Faction**, **At Least**, and **1** (or a larger threshold). This checks current holdings, not how
+many Districts the player ever captured in the past. Contested, partial, locked, and unclaimed
+Districts do not count.
 
 ## 21. Debug system
 
@@ -597,6 +663,7 @@ These are not optional debug noise. Hiding them could make broken community cont
 - [Counterattacks](17_Counterattack_System.md)
 - [Production](20_Resource_Production.md)
 - [Stealth](22_Stealth_Infiltration.md)
+- [Disguises and Double-Agent Missions](25_Disguise_and_Double_Agent_Missions.md)
 - [Operations UI](18_Operations_UI.md)
 
 The advanced documents explain exact APIs. This guide remains the easiest source of truth for

@@ -124,7 +124,7 @@ indirectly through the C++ adapters above.
 
 ## Tales, save, economy, navigation, and UI
 
-- `UTerritoryCaptureTask`, `UTerritoryCaptureEvent`, `UTerritoryLockEvent`,
+- `UTerritoryCaptureTask`, `UTerritoryAssaultTask`, `UTerritoryCaptureEvent`, `UTerritoryLockEvent`,
   `UTerritoryHierarchyStoryOverrideEvent`, `UTerritoryOwnershipCondition`,
   `UTerritoryQuestStateCondition`, `UTerritoryDiplomacyCondition`,
   `UTerritoryGarrisonCondition`, `UTerritorySetDiplomacyEvent`, and
@@ -144,6 +144,28 @@ indirectly through the C++ adapters above.
 `BPA_ReturnToTerritory` uses the Narrative Pro 2.4.2 level-sequence API. Its explicit empty
 `IdleSequenceViewers` array means all relevant players may receive the sequence; it does not use
 `GetPlayerController(0)`.
+
+### Counterattack and chase quest tasks
+
+Use **Territory Counterattack / Chase Task** inside a normal Narrative Quest. It reads the real
+durable assault record, so a quest does not need to count temporary pawns itself.
+
+| Objective | Easy story example |
+|---|---|
+| Repel the Counterattack | Defend Blacksmith until the finite Bandit force is defeated |
+| Allow the Faction to Take the Territory | An undercover quest succeeds when Bandits complete physical takeover |
+| Defeat Counterattack Enemies | Set Narrative Required Quantity to 3 |
+| Counterattack Reaches the Territory | Advance dialogue when the warning becomes a live battle |
+| Final Fight Started | Advance when the underboss leaves a damaged car |
+| Target Escaped | Branch the quest after a chase escape or lost-distance outcome |
+
+Filter by Territory, optional attacking faction, and optional Story Scenario ID. The task uses
+Narrative's inherited marker settings and attaches its marker to the live Territory actor. The
+Capture/Lose task also rebinds after World Partition streams its actor out and back in.
+
+Faction force presentation has three optional Narrative tagged-dialogue moments: reserve wave
+arrival, first physical takeover pressure, and damaged-car final fight. Dialogue content remains
+in Narrative; Territory only chooses the story moment and speaker.
 
 ## Diplomacy-aware guard dialogue
 
@@ -175,34 +197,73 @@ waves, inventory, and other events always have valid World and transition contex
 
 | Definition-owned Narrative template | Plain-English use | Easy example |
 |---|---|---|
+| `UTerritoryCaptureEligibilityCondition` | Check whether an independent Place may be handed to the resolved faction now | The neutral Blacksmith owner offers surrender only after every defender is defeated |
 | `UTerritoryQuestStateCondition` | Read one Narrative Quest from the explicit player's Tales component | Run a boss pursuit only while Betrayal is In Progress; use inherited Not to block it during that quest |
 | `UTerritoryOwnershipCondition` | Check who owns a loaded place | Farm unlocks after Blacksmith is Claimed by Heroes |
+| `UTerritoryOwnershipTransitionCondition` | Distinguish a real owner handover from same-owner recovery | Give capture XP only when Claimed was entered by a new faction |
 | `UTerritoryDiplomacyCondition` | Check the exact rich treaty between two Narrative factions | Locked exit requires Heroes and Bandits to be at War |
 | `UTerritoryGarrisonCondition` | Compare guards, every registered defender, reserve, pending replacements, or staffing shortfall | Living Defenders equals 0 means the Place is genuinely undefended |
 | `UTerritoryStateCondition` | Check Unclaimed, Claimed, Contested, or Locked | Use emergency dialogue only while a District is Contested |
 | `UTerritoryControlProgressCondition` | Compare real capture progress as a percentage | Start the final warning after control pressure reaches 75% |
 | `UTerritoryReputationCondition` | Compare one faction's saved reputation | Regime reputation below -50 opens betrayal dialogue |
-| `UTerritoryFactionDistrictHoldingCondition` | Compare the secure Districts currently held by a faction | Bandits need at least one District for a normal counter; zero can branch to defeated-faction dialogue |
+| `UTerritoryFactionDistrictHoldingCondition` | Compare current unlocked Claimed Districts for an explicit, Narrative-target, or controller-pawn faction; World Partition rows are included | Player Faction At Least 2 can trigger a Regime diplomacy reaction; Bandits At Least 1 allows a normal counter |
 | `UTerritoryAssaultCondition` | Check warning/active/result state or finite force counts | Complete “Hold the Line” after Remaining Attackers equals 0 |
 | `UTerritoryPresenceCondition` | Check whether the explicit Narrative target is inside a Place | The commander speaks only while the player is inside Castle Hill |
 | `UTerritoryEventContextCondition` | Require the exact pawn/controller/Tales/GAS context an event needs | Give XP only when a player pawn with a valid Ability System caused the transition |
 | `UTerritoryProductionStatusCondition` | Check a Property's durable overall or per-rule production result | Missing Input begins a supply quest, even after World Partition streaming |
 | `UTerritoryResourceCondition` | Compare an exact Narrative inventory resource for a faction | At least 10 medicine permits a relief operation |
+| `UTerritoryStealthPolicyCondition` | Check whether the Place currently permits infiltration | Rescue dialogue is available only while stealth policy is enabled |
+| `UTerritoryExposureCondition` | Check hidden, suspicious, exposed, or burned-cover state | Continue the disguise branch only while the player is not exposed |
+| `UTerritoryStealthEvidenceCondition` | Check the latest authored evidence type | A bullet impact starts the armed-investigation branch |
+| `UTerritorySuspicionCondition` | Compare current suspicion with a threshold | Extraction remains quiet while suspicion is below 50% |
 | `UTerritorySetDiplomacyEvent` | Change Territory treaty metadata and the matching Narrative AI attitude | A betrayal changes Heroes and Regime to War |
 | `UTerritoryModifyReputationEvent` | Add to or set the saved reputation integer for one faction | Attacking a Bandit convoy adds -20 Bandit reputation |
 | `UTerritoryScheduleEnemyWaveEvent` | Schedule a normal strategic counter or an explicit finite story pursuit | A regime boss chases the betrayed player only after the event's quest conditions pass |
+| `UTerritoryStartBossChaseEvent` | Start one finite, non-recurring pursuit through the target Place profile | The regime boss arrives in the configured Narrative Sedan after Betrayal becomes In Progress |
 | `UTerritoryCancelEnemyWavesEvent` | Cancel matching durable assault records | A peace treaty cancels warnings that have not physically activated |
 | `UTerritorySetGarrisonTargetEvent` | Use the atomic guard target and Narrative currency transaction | A player dialogue assigns two guards and pays their recruitment cost |
 | `UTerritoryUpgradePropertyEvent` | Buy exactly one normal Property upgrade | A reconstruction quest buys one Farm level if the player can pay |
 | `UTerritoryExecuteResourceRecipeEvent` | Atomically consume/produce resources in the explicit Narrative inventory | Consume medicine and food to make one relief shipment |
 | `UTerritoryLockEvent` / `UTerritoryUnlockEvent` | Change one Territory's Locked state through its existing authority | A gate quest unlocks a District |
 | `UTerritoryCaptureEvent` | Request the existing atomic capture mutation | A trusted quest awards an undefended outpost |
+| `UTerritoryOwnerHandoverEvent` | Reveal or invoke the configured neutral owner handover flow | The Blacksmith owner appears after the final defender dies |
 | `UTerritoryHierarchyStoryOverrideEvent` | Claim, clear, lock, or unlock one loaded Place/District/City tree while preserving the normal hierarchy authority | After a regime betrayal, give every loaded independent Place under Haven Reach to the Regime; District and City ownership derive from the leaves |
+| `UTerritorySetStealthOverrideEvent` | Temporarily enable, disable, or clear a Place's infiltration override | A rescue quest permits stealth inside an otherwise open battle zone |
+| `UTerritoryRevealInfiltratorEvent` | Force confirmed exposure for the explicit player | A scripted alarm burns the player's cover |
+| `UTerritoryClearExposureEvent` | Clear exposure and optionally suspicion | Changing disguise after escape resets the stealth state |
+| `UTerritoryReportDistractionEvent` | Submit an authored investigation stimulus | A thrown bottle makes the closest guard investigate its landing point |
 
 All State Config conditions must pass. Every Narrative Event also has its own inherited
 `Conditions` array; all conditions inside that event must pass before the event mutates anything.
 Narrative's inherited **Not** option is honored in both places. Territory mutation events set
 `Refire On Load` false so quest restoration cannot purchase, spawn, or reward twice.
+
+### Claimed District count -> diplomacy
+
+`Territory Faction Claimed District Count Condition` measures current political control, not a
+historical lifetime capture total. A District counts only when it is **Unlocked**, its aggregate
+state is **Claimed**, and all authored Places have reduced to the same owner. Contested, partial,
+locked, and unclaimed Districts do not count. The replicated World State directory keeps the
+answer valid while a District actor is streamed out.
+
+Easy betrayal setup on `Set Territory Diplomacy`:
+
+```text
+Set Territory Diplomacy
+  Faction A = Regime
+  Faction B = Heroes (or your current story faction)
+  New State = War
+  Conditions
+    Territory Faction Claimed District Count
+      Faction Source = Narrative Target / Player Faction
+      Comparison = At Least
+      Claimed District Count = 2
+```
+
+This means: “declare the betrayal only after the faction currently represented by the player
+controls two complete Districts.” If choices later change the player's Narrative faction tag, the
+same condition follows the new tag. Use `Explicit Faction` when the rule should always inspect a
+fixed group such as Bandits, and use inherited **Not** to invert the answer.
 
 Quest conditions require a real Narrative event context. Capture and player-triggered events
 carry the explicit Tales component. Defender-death hooks resolve it through the killer's
@@ -232,9 +293,11 @@ as: “when the final defender dies, schedule the Bandit wave only if Heroes and
 Unregistered or duplicate defender-death callbacks are ignored, so the same casualty cannot
 refire the story mutation.
 The wave still obeys profile, route, grace, warning, first-player proximity, finite force,
-diplomacy, and budget rules. Strategic mode also requires the force's normal District staging
-rule. Story Pursuit / Boss Chase may bypass missing staging only when both the event and the
-force profile explicitly opt in. It never rolls ownership or creates an infinite respawn system.
+diplomacy, Narrative-time window, and budget rules. Strategic mode also requires the force's
+normal District staging rule. Its profile chooses One Assault, Finite Series, or Unlimited
+Schedule; every individual fight still has a finite force. Story Pursuit / Boss Chase may bypass
+missing staging only when both the event and the force profile explicitly opt in. It never rolls
+ownership, repeats automatically, or creates an infinite respawn system.
 
 A missing or World-Partition-unloaded actor makes live state/garrison/presence conditions return
 false rather than guessing from a second actor database. Production and assault conditions read
@@ -259,7 +322,24 @@ The design follows Narrative's documented extension contracts: custom conditions
 `CheckCondition`, conditions already provide inversion, and custom events may own assigned
 conditions. Narrative NPC definitions/spawn parameters remain the physical enemy source.
 
+## Disguise and double-agent integration
+
+Territory disguise clothing derives from Narrative's normal Clothing Equippable Item. Narrative
+continues to own inventory, equipment slots, character meshes, save/load, abilities, Armor,
+Attack Rating, Stealth Rating, and the Equipment Gameplay Effect. Territory adds only a temporary
+perceived faction. The player's PlayerState faction container is never edited.
+
+Use `UTerritoryDisguiseTask` for equip, accepted entry, checkpoint, compromised cover, restored
+cover, remove, and undetected exit objectives. Use `UTerritoryDisguiseCondition` in dialogue or
+event conditions, and use the four disguise Narrative Events to activate, remove, burn, restore,
+or explicitly check a cover identity. Complete setup and examples are in
+[Disguises and Double-Agent Missions](25_Disguise_and_Double_Agent_Missions.md).
+
 ## Marketplace update procedure
+
+Road missions reuse Narrative's Chaos vehicle, ZoneGraph, Mass traffic, Quest Road Controls,
+impact mesh, and destructible response rather than editing them. Territory's integration and
+mission-authoring boundary is documented in [22_Road_Missions.md](22_Road_Missions.md).
 
 1. Close Unreal Editor and verify no dirty packages.
 2. Back up the complete active Narrative Pro plugin directory outside the project.

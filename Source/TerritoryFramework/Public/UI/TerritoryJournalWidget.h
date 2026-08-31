@@ -59,7 +59,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Diagnostics")
 	int32 GetActiveTerritoryEntryCount() const;
 
-	/** Number of real District rows currently shown under Captured Territories (empty-state text is excluded). */
+	/** Number of real District rows currently shown under Claimed Territories (empty-state text is excluded). */
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Diagnostics")
 	int32 GetCapturedTerritoryEntryCount() const;
 
@@ -135,7 +135,7 @@ protected:
 
 	/**
 	 * Narrative Quest Journal pattern: one bounded ScrollBox for unlocked,
-	 * non-owned Districts and one for captured Districts owned by the viewer.
+	 * non-owned Districts and one for claimed Districts owned by the viewer.
 	 */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UScrollBox> ActiveTerritoriesBox;
@@ -445,6 +445,7 @@ private:
 	UWidget* GetSelectedTerritoryInfoWidget() const;
 	void RefreshEntrySelection();
 	UTextBlock* CreateHierarchyTextRow(const FText& Text, FName WidgetName, bool bHeading = false);
+	UWidget* CreatePlaceCommandCard(const FTerritoryHierarchyOperationsView& Place);
 	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
 	void RefreshCommandCenterIdentity(const TArray<FTerritoryDistrictOperationsView>& Views);
 	void BuildLiveEventPanel();

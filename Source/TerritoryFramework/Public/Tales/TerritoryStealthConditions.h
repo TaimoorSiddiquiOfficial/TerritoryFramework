@@ -7,6 +7,16 @@
 #include "TerritoryStealthConditions.generated.h"
 
 UENUM(BlueprintType)
+enum class ETerritoryDisguiseRequirement : uint8
+{
+	Active UMETA(DisplayName="Any Disguise Is Active"),
+	PerceivedAsFaction UMETA(DisplayName="Perceived As Faction"),
+	TrueFaction UMETA(DisplayName="True Faction Is"),
+	CompromisedForFaction UMETA(DisplayName="Compromised For Faction"),
+	AcceptedByTerritory UMETA(DisplayName="Accepted By Territory Security")
+};
+
+UENUM(BlueprintType)
 enum class ETerritoryExposureRequirement : uint8
 {
 	Undetected UMETA(DisplayName="Undetected"),
@@ -106,6 +116,36 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
 	float MinimumSuspicionPercent = 50.f;
+
+protected:
+	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent) override;
+	virtual FString GetGraphDisplayText_Implementation() override;
+};
+
+/** Dialogue/event condition for double-agent and uniform-based mission branches. */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Territory Disguise Condition"))
+class TERRITORYFRAMEWORK_API UTerritoryDisguiseCondition : public UNarrativeCondition
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryDisguiseCondition();
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
+	ETerritoryDisguiseRequirement Requirement =
+		ETerritoryDisguiseRequirement::Active;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(Categories="Narrative.Factions",
+			ToolTip="Faction used by Perceived, True, or Compromised checks."))
+	FGameplayTag Faction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(Categories="Territory",
+			ToolTip="Optional exact Territory for security acceptance. Empty uses the Place containing the player."))
+	FGameplayTag TerritoryToCheck;
 
 protected:
 	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,

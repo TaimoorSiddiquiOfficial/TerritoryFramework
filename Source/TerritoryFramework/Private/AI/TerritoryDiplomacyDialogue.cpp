@@ -1,6 +1,8 @@
 #include "AI/TerritoryDiplomacyDialogue.h"
 
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryDisguiseSubsystem.h"
+#include "Core/TerritoryGuardCharacter.h"
 #include "Tales/Dialogue.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 
@@ -76,7 +78,18 @@ EDiplomacyState UTerritoryDiplomacyDialogueComponent::ResolveRelationshipForInte
 	}
 
 	const FGameplayTagContainer OwnerFactions = OwnerTeam->GetFactions();
-	const FGameplayTagContainer InteractorFactions = InteractorTeam->GetFactions();
+	const ATerritoryGuardCharacter* TerritoryGuard =
+		Cast<ATerritoryGuardCharacter>(OwnerActor);
+	const ATerritoryVolume* Territory = TerritoryGuard
+		? TerritoryGuard->GetOwningTerritory() : nullptr;
+	const FGameplayTag OwnerPrimaryFaction = OwnerFactions.IsEmpty()
+		? FGameplayTag() : OwnerFactions.GetByIndex(0);
+	const UTerritoryDisguiseSubsystem* Disguises = World
+		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
+	const FGameplayTagContainer InteractorFactions = Disguises
+		? Disguises->ResolvePerceivedFactions(
+			Interactor, Territory, OwnerPrimaryFaction)
+		: InteractorTeam->GetFactions();
 	bOutSameFaction = OwnerFactions.HasAnyExact(InteractorFactions);
 	if (bOutSameFaction)
 	{

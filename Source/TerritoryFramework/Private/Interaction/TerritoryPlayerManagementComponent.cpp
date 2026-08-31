@@ -1,8 +1,10 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
+#include "Items/NarrativeItem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -23,6 +25,36 @@ namespace
 		return FGuid(GetTypeHash(Event.FactionA), GetTypeHash(Event.FactionB),
 			GetTypeHash(static_cast<uint8>(Event.EventType)),
 			GetTypeHash(Event.GameTime));
+	}
+
+	FText GetProducedItemName(const TSubclassOf<UNarrativeItem>& ItemClass)
+	{
+		if (const UNarrativeItem* Item = ItemClass
+			? ItemClass->GetDefaultObject<UNarrativeItem>() : nullptr)
+		{
+			if (!Item->DisplayName.IsEmpty())
+			{
+				return Item->DisplayName;
+			}
+		}
+		return ItemClass
+			? FText::FromString(FName::NameToDisplayString(ItemClass->GetName(), false))
+			: NSLOCTEXT("TerritoryIntelligence", "UnknownResource", "Unknown resource");
+	}
+
+	FText BuildProducedResourceSummary(
+		const TArray<FTerritoryResourceAmount>& Outputs)
+	{
+		TArray<FString> Parts;
+		for (const FTerritoryResourceAmount& Output : Outputs)
+		{
+			if (!Output.ItemClass || Output.Quantity <= 0) continue;
+			Parts.Add(FString::Printf(TEXT("+%d %s"), Output.Quantity,
+				*GetProducedItemName(Output.ItemClass).ToString()));
+		}
+		return Parts.IsEmpty()
+			? NSLOCTEXT("TerritoryIntelligence", "NoProducedResources", "No resources")
+			: FText::FromString(FString::Join(Parts, TEXT(", ")));
 	}
 }
 
@@ -287,7 +319,8 @@ void UTerritoryPlayerManagementComponent::AddLiveEvent(
 	ETerritoryIntelligenceSeverity Severity, FGameplayTag SourceFaction,
 	FGameplayTag TargetFaction, FGameplayTagContainer CommandCapabilities,
 	int64 IncomeDelta, int64 UpkeepDelta, int64 CurrencyDelta,
-	bool bShowHUDNotification, FGuid SourceRecordID)
+	bool bShowHUDNotification, FGuid SourceRecordID,
+	bool bRetainInCommandCenter)
 {
 	UWorld* World = GetWorld();
 	if (!World || !Cast<APlayerController>(GetOwner())
@@ -328,14 +361,20 @@ void UTerritoryPlayerManagementComponent::AddLiveEvent(
 		? ActiveDuration : LiveEventActiveDuration;
 	Event.bCanSetWaypoint = bCanSetWaypoint && TerritoryTag.IsValid();
 	Event.bWasHUDNotification = bShowHUDNotification;
-	LiveEvents.Insert(Event, 0);
-	if (LiveEvents.Num() > FMath::Max(1, MaxLiveEventHistory))
+	if (bRetainInCommandCenter)
 	{
-		LiveEvents.SetNum(FMath::Max(1, MaxLiveEventHistory));
+		LiveEvents.Insert(Event, 0);
+		if (LiveEvents.Num() > FMath::Max(1, MaxLiveEventHistory))
+		{
+			LiveEvents.SetNum(FMath::Max(1, MaxLiveEventHistory));
+		}
 	}
 
 	OnLiveEventAdded.Broadcast(Event);
-	OnLiveEventsChanged.Broadcast();
+	if (bRetainInCommandCenter)
+	{
+		OnLiveEventsChanged.Broadcast();
+	}
 	if (bShowHUDNotification && (Severity == ETerritoryIntelligenceSeverity::Warning
 		|| Severity == ETerritoryIntelligenceSeverity::Critical
 		|| Severity == ETerritoryIntelligenceSeverity::Positive))
@@ -375,8 +414,12 @@ UTerritoryPlayerManagementComponent::GetTerritoryIntelligence(
 	ETerritoryIntelligenceFilter Filter, bool bIncludeArchived) const
 {
 	TArray<FTerritoryLiveEvent> Events = GetLiveEvents(bIncludeArchived);
-	if (Filter == ETerritoryIntelligenceFilter::All
-		|| Filter == ETerritoryIntelligenceFilter::Economy)
+	const UTerritoryDeveloperSettings* TerritorySettings =
+		GetDefault<UTerritoryDeveloperSettings>();
+	const bool bRecordMoney = !TerritorySettings
+		|| TerritorySettings->Notifications.bRecordMoneyTransactions;
+	if (bRecordMoney && (Filter == ETerritoryIntelligenceFilter::All
+		|| Filter == ETerritoryIntelligenceFilter::Economy))
 	{
 		if (const UWorld* World = GetWorld())
 		{
@@ -489,7 +532,7 @@ UTerritoryPlayerManagementComponent::GetTerritoryIntelligence(
 						Event.Type = ETerritoryLiveEventType::CounterAttackSucceeded;
 						Event.Severity = ETerritoryIntelligenceSeverity::Critical;
 						Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
-							"ArchivedCounterSucceeded", "Counterattack captured: {0}"),
+							"ArchivedCounterSucceeded", "Counterattack claimed: {0}"),
 							Event.TerritoryName);
 						break;
 					case ETerritoryAssaultState::Cancelled:
@@ -723,7 +766,7 @@ void UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged(
 	if (ViewerFaction.IsValid() && NewOwner == ViewerFaction)
 	{
 		AddLiveEvent(ETerritoryLiveEventType::Captured, Territory->GetTerritoryTag(),
-			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CapturedHeadline", "{0} captured"), Name),
+			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "ClaimedHeadline", "{0} claimed"), Name),
 			FText::Format(NSLOCTEXT("TerritoryIntelligence", "CapturedImpactDetail",
 				"Your faction now controls this Territory. Recurring impact: +{0} income and +{1} guard upkeep per cycle; net change {2}."),
 				FText::AsNumber(Income), FText::AsNumber(Upkeep),
@@ -813,8 +856,17 @@ void UTerritoryPlayerManagementComponent::HandleTransactionRecorded(
 {
 	const FGameplayTag ViewerFaction = ResolveViewerFaction();
 	if (!ViewerFaction.IsValid() || Transaction.Faction != ViewerFaction) return;
+	const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+	const FTerritoryNotificationSettings Policy = Settings
+		? Settings->Notifications : FTerritoryNotificationSettings();
 
 	const bool bIncome = Transaction.Amount > 0;
+	const bool bShowHUD = FMath::Abs(Transaction.Amount)
+			>= FMath::Max(1, Policy.MinimumMoneyForHUDNotification)
+		&& (bIncome ? Policy.bShowMoneyEarningsOnHUD
+			: Policy.bShowMoneyExpensesOnHUD);
+	if (!Policy.bRecordMoneyTransactions && !bShowHUD) return;
 	const FText TerritoryName = Transaction.SourceTerritory.IsValid()
 		? ResolveTerritoryName(Transaction.SourceTerritory)
 		: NSLOCTEXT("TerritoryIntelligence", "FactionAccount", "Faction account");
@@ -832,12 +884,14 @@ void UTerritoryPlayerManagementComponent::HandleTransactionRecorded(
 		FText::Format(NSLOCTEXT("TerritoryIntelligence", "TransactionDetail",
 			"{0} • {1} Current balance: {2}."),
 			TerritoryName, Reason, FText::AsNumber(Transaction.BalanceAfter)),
-		Transaction.SourceTerritory.IsValid(), 12.f,
+		Transaction.SourceTerritory.IsValid(),
+		FMath::Max(1.f, Policy.EconomyHUDNotificationDuration),
 		ETerritoryIntelligenceCategory::Economy,
 		bIncome ? ETerritoryIntelligenceSeverity::Positive
 			: ETerritoryIntelligenceSeverity::Information,
 		ViewerFaction, FGameplayTag(), FGameplayTagContainer(), 0, 0,
-		Transaction.Amount, false, Transaction.TransactionID);
+		Transaction.Amount, bShowHUD, Transaction.TransactionID,
+		Policy.bRecordMoneyTransactions);
 }
 
 void UTerritoryPlayerManagementComponent::HandleFactionUpkeepDeficit(
@@ -862,6 +916,10 @@ void UTerritoryPlayerManagementComponent::HandleProductionSettled(
 {
 	const FGameplayTag ViewerFaction = ResolveViewerFaction();
 	if (!ViewerFaction.IsValid() || Result.Faction != ViewerFaction) return;
+	const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+	const FTerritoryNotificationSettings Policy = Settings
+		? Settings->Notifications : FTerritoryNotificationSettings();
 	int32 InputCount = 0;
 	int32 OutputCount = 0;
 	for (const FTerritoryResourceAmount& Input : Result.InputsConsumed)
@@ -874,29 +932,38 @@ void UTerritoryPlayerManagementComponent::HandleProductionSettled(
 	}
 	const FText RuleName = UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
 		Result.RuleTag);
+	const FText ProducedResources = BuildProducedResourceSummary(Result.OutputsProduced);
+	const bool bShowHUD = Result.bSuccess
+		? Policy.bShowResourceEarningsOnHUD
+			&& OutputCount >= FMath::Max(1, Policy.MinimumResourceUnitsForHUDNotification)
+		: Policy.bShowBlockedProductionOnHUD;
+	if (!Policy.bRecordResourceProduction && !bShowHUD) return;
 	AddLiveEvent(
 		Result.bSuccess ? ETerritoryLiveEventType::ProductionCompleted
 			: ETerritoryLiveEventType::ProductionBlocked,
 		Result.TerritoryTag,
 		FText::Format(Result.bSuccess
 			? NSLOCTEXT("TerritoryIntelligence", "ProductionCompleteHeadline",
-				"Production completed: {0}")
+				"Resources earned: {0}")
 			: NSLOCTEXT("TerritoryIntelligence", "ProductionBlockedHeadline",
-				"Production blocked: {0}"), RuleName),
+				"Production blocked: {0}"),
+			Result.bSuccess ? ProducedResources : RuleName),
 		Result.bSuccess
 			? FText::Format(NSLOCTEXT("TerritoryIntelligence", "ProductionCompleteDetail",
-				"Cycle {0} consumed {1} item units and produced {2}. The Narrative inventory remains the resource authority."),
+				"Narrative inventory received {0}. Cycle {1} consumed {2} item units and produced {3} item units."),
+				ProducedResources,
 				FText::AsNumber(Result.CycleIndex), FText::AsNumber(InputCount),
 				FText::AsNumber(OutputCount))
 			: FText::Format(NSLOCTEXT("TerritoryIntelligence", "ProductionBlockedDetail",
 				"Cycle {0} produced nothing. Reason: {1}"),
 				FText::AsNumber(Result.CycleIndex), Result.FailureReason),
-		Result.TerritoryTag.IsValid(), Result.bSuccess ? 15.f : 45.f,
+		Result.TerritoryTag.IsValid(),
+		FMath::Max(1.f, Policy.EconomyHUDNotificationDuration),
 		ETerritoryIntelligenceCategory::Production,
 		Result.bSuccess ? ETerritoryIntelligenceSeverity::Positive
 			: ETerritoryIntelligenceSeverity::Warning,
 		ViewerFaction, FGameplayTag(), FGameplayTagContainer(), 0, 0, 0,
-		!Result.bSuccess);
+		bShowHUD, Result.BatchID, Policy.bRecordResourceProduction);
 }
 
 void UTerritoryPlayerManagementComponent::HandleDiplomacyEvent(

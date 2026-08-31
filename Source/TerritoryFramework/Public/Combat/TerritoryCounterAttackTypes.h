@@ -2,12 +2,15 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Navigation/TerritoryRoadTypes.h"
+#include "UnrealFramework/NarrativeGameUserSettings.h"
 #include "TerritoryCounterAttackTypes.generated.h"
 
 class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
 class UGameplayEffect;
+class ANarrativeVehicleBase;
 
 UENUM(BlueprintType)
 enum class ETerritoryAttackApproachType : uint8
@@ -58,7 +61,13 @@ enum class ETerritoryAssaultResolution : uint8
 	QuestRuleBlocked UMETA(DisplayName="Narrative Quest Rule Blocked",
 		ToolTip="A pending strategic counterattack was cancelled because its Narrative quest rules no longer passed."),
 	StagingDistrictUnavailable UMETA(DisplayName="No Secure Staging District",
-		ToolTip="The attacking faction no longer owns a loaded, unlocked District whose complete authored Place set is secure, so an undeployed strategic counterattack cannot continue.")
+		ToolTip="The attacking faction no longer owns a loaded, unlocked District whose complete authored Place set is secure, so an undeployed strategic counterattack cannot continue."),
+	TargetEscaped UMETA(DisplayName="Story Target Escaped",
+		ToolTip="A player-chases-enemy story target completed Narrative's authored vehicle exit route before the finite target was killed."),
+	ChaseDistanceLost UMETA(DisplayName="Story Chase Distance Lost",
+		ToolTip="Every player remained beyond the configured chase distance for the full grace period, so the finite story target escaped."),
+	ReinforcementCapabilityLost UMETA(DisplayName="Reinforcement Capability Lost",
+		ToolTip="The faction lost the Territory.Capability.Reinforcements perk before its physical counterattack deployed. Already deployed attackers are never erased by this rule.")
 };
 
 /** Why an assault was admitted. Story pursuit is explicit and never selected by normal strategy. */
@@ -71,6 +80,16 @@ enum class ETerritoryAssaultLaunchMode : uint8
 		ToolTip="Tales-triggered pursuit. It may bypass the staging-District rule only when the force profile also allows that exception; it never bypasses diplomacy, finite force, route, or physical capture rules.")
 };
 
+/** Direction of one explicit Tales-driven pursuit. Normal strategic counters ignore this. */
+UENUM(BlueprintType)
+enum class ETerritoryStoryPursuitDirection : uint8
+{
+	EnemyChasesPlayer UMETA(DisplayName="Enemy Chases Player",
+		ToolTip="The hostile driver enters at the authored vehicle spawn, parks at the Place drop-off, dismounts, then Narrative combat takes over. Example: regime hunters arrive after a betrayal."),
+	PlayerChasesEnemy UMETA(DisplayName="Player Chases Enemy",
+		ToolTip="The capo or underboss starts at the Place drop-off and drives toward the authored route exit. Killing the finite target defeats the pursuit; reaching the exit records Target Escaped.")
+};
+
 /** Strategic territory holding required before this faction may launch a normal counterattack. */
 UENUM(BlueprintType)
 enum class ETerritoryAssaultStagingRequirement : uint8
@@ -79,6 +98,38 @@ enum class ETerritoryAssaultStagingRequirement : uint8
 		ToolTip="Use only for forces that should not depend on domination holdings."),
 	OwnsSecureDistrict UMETA(DisplayName="Owns At Least One Secure District",
 		ToolTip="The faction must own at least one loaded, unlocked District whose complete authored Place set is secure. Example: Bandits may counter from Castle Hill only after every unlocked Place there is securely Bandit-owned. Locked, partial, Contested, and Unclaimed Districts do not count.")
+};
+
+/** How many separate finite battles one ownership-response schedule may create. */
+UENUM(BlueprintType)
+enum class ETerritoryCounterScheduleMode : uint8
+{
+	SingleAssault UMETA(DisplayName="One Assault",
+		ToolTip="Schedules one finite battle and never repeats it automatically."),
+	FiniteSeries UMETA(DisplayName="Finite Series",
+		ToolTip="Repeats after the cooldown until Maximum Scheduled Assaults is reached. Every battle still has its own finite Planned Force."),
+	UnlimitedSeries UMETA(DisplayName="Unlimited Schedule",
+		ToolTip="May schedule future finite battles for as long as ownership, war, staging, quest, route, and budget rules continue to pass. It never creates infinite attackers inside one battle.")
+};
+
+/** Narrative Pro campaign-clock policy used before a strategic battle is evaluated. */
+UENUM(BlueprintType)
+enum class ETerritoryCounterTimePolicy : uint8
+{
+	AnyTime UMETA(DisplayName="Any Narrative Time",
+		ToolTip="The grace/cooldown is the only time gate."),
+	NarrativeTimeWindow UMETA(DisplayName="Narrative / Ultra Dynamic Sky Time Window",
+		ToolTip="After grace, wait until Narrative Game State enters the configured time-of-day window. A Narrative Pro Ultra Dynamic Sky setup follows the same clock.")
+};
+
+/** Physical arrival used by one authored ingress route. */
+UENUM(BlueprintType)
+enum class ETerritoryAssaultEntryType : uint8
+{
+	OnFoot UMETA(DisplayName="On Foot",
+		ToolTip="Spawn finite Territory assault NPCs at this approach and use Narrative NPC navigation to enter the Place."),
+	NarrativeVehicle UMETA(DisplayName="Narrative Vehicle",
+		ToolTip="The first configured deployments arrive with a Narrative vehicle. Territory follows the validated ZoneGraph road after Narrative mounts and possesses it; remaining force can continue on foot from the authored drop-off.")
 };
 
 /** Editor-authored, typed ingress point stored relative to its Territory actor. */
@@ -96,9 +147,71 @@ struct FTerritoryAssaultApproach
 		meta=(ToolTip="Meaning of this Place ingress route for UI and project rules. It does not replace navigation validation."))
 	ETerritoryAttackApproachType Type = ETerritoryAttackApproachType::Road;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Entry",
+		meta=(ToolTip="Choose On Foot for a normal Narrative NPC route, or Narrative Vehicle for a road arrival that reuses Narrative's vehicle, seat, interaction ability, controller possession, and ZoneGraph road network."))
+	ETerritoryAssaultEntryType EntryType = ETerritoryAssaultEntryType::OnFoot;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack",
 		meta=(ToolTip="Spawn point relative to the Place actor. Example: 2,000 cm west of the Blacksmith entrance."))
 	FTransform RelativeSpawnTransform;
+
+	/** Existing Narrative vehicle Blueprint. Example: /Game/HOPTRENDY/BPV_Sedan_Mass. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Entry",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides,
+			ToolTip="Narrative Vehicle class spawned on the server. It must derive from ANarrativeVehicleBase and provide usable mount seats."))
+	TSoftClassPtr<ANarrativeVehicleBase> VehicleClass;
+
+	/** Roadside park/dismount point relative to the Territory actor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Entry",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides,
+			ToolTip="Vehicle park and dismount transform relative to this Place. Put it on a ZoneGraph road with a NavMesh walk route into the Place."))
+	FTransform RelativeVehicleDropOffTransform;
+
+	/** Optional placed ATerritoryRoadGuide. Blank uses Approach ID by convention. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Road Guide",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides,
+			ToolTip="Stable ID of a placed Territory Road Guide. Blank looks for a guide whose ID matches this Approach ID. When found, its spline start/end replace the fallback spawn/drop-off transforms."))
+	FName RoadGuideID;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Road Guide",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides,
+			ToolTip="Directional lane on the Road Guide. Reverse story pursuits automatically mirror left/right so both directions stay on the correct side."))
+	ETerritoryRoadLaneSide RoadLaneSide = ETerritoryRoadLaneSide::Right;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Road Guide",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides,
+			ToolTip="Centre/left/right collision probes used by the possessed Narrative mission car. Narrative Mass traffic continues using its own obstacle grid."))
+	FTerritoryVehicleAwarenessSettings VehicleAwareness;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Road Guide",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides,
+			ToolTip="Safe cleanup policy for this temporary reinforcement or pursuit car."))
+	FTerritoryVehicleRetirementSettings VehicleRetirement;
+
+	/** Bounded number of cars created from this route in one finite assault. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Entry",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides, ClampMin="1", ClampMax="8",
+			ToolTip="Maximum Narrative vehicles deployed by this approach during one assault. Later finite attackers use the drop-off as an on-foot entry."))
+	int32 MaximumVehicleDeployments = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Entry",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides, ClampMin="0.0",
+			ToolTip="Desired AI road speed in cm/s. Zero uses Territory's safe default of 1,400 cm/s. The vehicle still uses Narrative possession and its Chaos movement component."))
+	float VehicleMaximumDriveSpeed = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Entry",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides, ClampMin="5.0", ClampMax="600.0",
+			ToolTip="Maximum real seconds allowed to mount, follow the ZoneGraph road, park and dismount. A timed-out driver withdraws safely instead of leaving a broken controller or car."))
+	float VehicleIngressTimeoutSeconds = 120.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack",
 		meta=(ClampMin="1", ToolTip="Largest part of one wave allowed to use this approach. This never creates infinite reserves."))
@@ -107,6 +220,73 @@ struct FTerritoryAssaultApproach
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack",
 		meta=(ToolTip="Disabled approaches are never selected or used for physical spawning."))
 	bool bEnabled = true;
+};
+
+/** Optional overrides for one deliberate story pursuit. No live actor pointer is persisted. */
+USTRUCT(BlueprintType)
+struct FTerritoryStoryPursuitOptions
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit")
+	ETerritoryStoryPursuitDirection Direction =
+		ETerritoryStoryPursuitDirection::EnemyChasesPlayer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit",
+		meta=(ToolTip="When false, this story encounter may fight and chase but can never register capture pressure or hand the Place to the hostile faction. Useful for an optional capo encounter during District capture."))
+	bool bAllowsTerritoryCapture = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit",
+		meta=(ToolTip="When false, the explicit Narrative Event always launches after validation. Enable only when the authored story intentionally wants the profile's strategic probability roll."))
+	bool bUseStrategicDecisionRoll = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit",
+		meta=(ToolTip="Optional player or story focus captured when the event starts. Zero uses the normal Place objective. This is a value, not a saved actor reference."))
+	FVector StoryFocusLocation = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit",
+		meta=(ToolTip="Optional Narrative NPC Definition for the capo, underboss, hunter or escort. Empty reuses the attacking faction definition from the Counter Attack Profile."))
+	TSoftObjectPtr<UNPCDefinition> AttackerDefinitionOverride;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit",
+		meta=(ClampMin="0", ClampMax="64", ToolTip="Zero reuses Planned Force from the profile. One creates a single kill-or-escape target; larger values create a finite escort or hunter group."))
+	int32 PlannedForceOverride = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit",
+		meta=(ClampMin="0", ClampMax="32", ToolTip="Zero reuses the profile Wave Size. The effective value is always clamped to the finite planned force."))
+	int32 WaveSizeOverride = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit",
+		meta=(ClampMin="-1.0", ToolTip="Negative uses the profile grace period. Zero begins evaluation immediately. Positive values provide an authored story delay in Narrative campaign time."))
+	float GracePeriodOverrideGameTime = 0.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit",
+		meta=(ToolTip="Optional stable, non-localized identifier used by saves, logs and story outcome handling. Example: CastleHill_UnderbossEscape."))
+	FName ScenarioID;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit|Chase",
+		meta=(ClampMin="0.0", ToolTip="Maximum distance from the closest participating player to a fleeing target vehicle. Zero disables the distance failure rule."))
+	float MaximumChaseDistance = 9000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit|Chase",
+		meta=(ClampMin="0.0", ToolTip="How long every player may remain outside Maximum Chase Distance before the target escapes. This protects the mission from a single short road separation."))
+	float ChaseDistanceGraceSeconds = 10.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit|Final Fight",
+		meta=(ToolTip="When enabled, a fleeing target whose Narrative vehicle falls below the health threshold dismounts and moves to the Road Guide final-fight point instead of being declared escaped."))
+	bool bAbandonDamagedVehicleForFinalFight = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit|Final Fight",
+		meta=(ClampMin="0.01", ClampMax="0.95", ToolTip="Narrative vehicle health fraction that triggers the authored abandonment/final-fight handoff."))
+	float VehicleAbandonHealthFraction = 0.35f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit|Traffic",
+		meta=(ToolTip="Activate the Road Guide's referenced Narrative Quest Road Controls while this pursuit is active. Use it for authored slow traffic, intersections, and chase pressure."))
+	bool bActivateRoadMissionTraffic = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit|Traffic",
+		meta=(ClampMin="-1", ClampMax="200", ToolTip="Negative uses the Road Guide traffic count. Zero clears controlled ambient traffic; positive values request that many Narrative Mass vehicles."))
+	int32 MissionTrafficVehicleCountOverride = -1;
 };
 
 /** Maps one replicated player power tag to a simple campaign power level. */
@@ -124,6 +304,22 @@ struct FTerritoryPlayerPowerTier
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
 		meta=(ClampMin="1", ToolTip="Campaign power level represented by the tag. Example: tier 3 can map to player power level 6."))
 	int32 PlayerPowerLevel = 1;
+};
+
+/** One designer override for how many signature cars a faction receives at a Narrative difficulty. */
+USTRUCT(BlueprintType)
+struct FTerritoryDifficultyVehicleCount
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(ToolTip="Narrative Pro gameplay difficulty selected in Game User Settings. Easy example: Hard can send two Bandit cars while Easy sends one."))
+	ENarrativeGameplayDifficulty Difficulty = ENarrativeGameplayDifficulty::Medium;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
+		meta=(ClampMin="0", ClampMax="8",
+			ToolTip="Maximum cars in the complete finite assault, not per wave. Zero makes this faction arrive on foot at this difficulty."))
+	int32 MaximumCars = 1;
 };
 
 /** Per-attacking-faction physical force configuration. */
@@ -147,6 +343,24 @@ struct FTerritoryFactionAssaultConfig
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(ToolTip="Optional Narrative TriggerSets added to the spawned attackers."))
 	TArray<TSoftObjectPtr<UTriggerSet>> TriggerSetOverrides;
+
+	/** Faction identity shown to the player before the occupants are visible. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle",
+		meta=(DisplayName="Faction Signature Vehicle",
+			ToolTip="Narrative Vehicle Blueprint used by this faction on every vehicle approach. Easy example: Bandits use a rusty pickup while the Regime uses a black sedan, so the player recognizes the attacker from far away. Leave empty to use the vehicle stored on each Approach."))
+	TSoftClassPtr<ANarrativeVehicleBase> SignatureVehicleClass;
+
+	/** Narrative difficulty chooses a bounded car budget without changing the finite attacker count. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle|Difficulty",
+		meta=(DisplayName="Scale Car Count With Narrative Difficulty",
+			ToolTip="Recommended. Uses Narrative Pro's current gameplay difficulty when the assault is evaluated. Empty overrides use Easy 1, Medium 1, Hard 2, Insane 3, always clamped by the authored road approaches and finite force."))
+	bool bScaleVehicleCountByNarrativeDifficulty = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle|Difficulty",
+		meta=(EditCondition="bScaleVehicleCountByNarrativeDifficulty", EditConditionHides,
+			TitleProperty="Difficulty",
+			ToolTip="Optional per-difficulty replacement values. Add only the difficulties you want to change; missing rows use the safe built-in values."))
+	TArray<FTerritoryDifficultyVehicleCount> VehicleCountsByDifficulty;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(ClampMin="0.0", ToolTip="Strategic strength used for planning probability. Example: 200 is twice a baseline force of 100; it never captures by itself."))
@@ -188,20 +402,60 @@ struct FTerritoryFactionAssaultConfig
 		meta=(ToolTip="Allows this force to be used by a Story Pursuit / Boss Chase event without owning a District. The event must also explicitly select Story Pursuit. Normal counters never use this exception."))
 	bool bAllowStoryPursuitWithoutStagingDistrict = false;
 
-	/** Enables repeated strategic responses after a previous response has ended. */
+	/** Select one battle, a bounded series, or an unlimited schedule of finite battles. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Recurring",
-		meta=(ToolTip="When enabled, this faction may counter the same still-hostile owner again after the cooldown, but only while its staging and all other admission rules still pass."))
-	bool bEnableRecurringStrategicCounters = true;
+		meta=(ToolTip="Easy example: Finite Series + 3 allows the faction to attempt at most three separate battles during this response series. Unlimited Schedule keeps trying after cooldowns while every gameplay rule still passes."))
+	ETerritoryCounterScheduleMode ScheduleMode =
+		ETerritoryCounterScheduleMode::UnlimitedSeries;
+
+	/** Total battles in one finite series, including the first response. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Recurring",
+		meta=(EditCondition="ScheduleMode == ETerritoryCounterScheduleMode::FiniteSeries",
+			EditConditionHides, ClampMin="1", ClampMax="100",
+			DisplayName="Maximum Scheduled Assaults",
+			ToolTip="Example: 3 means the first finite battle plus at most two later finite counterattacks."))
+	int32 MaximumScheduledAssaults = 3;
 
 	/** Campaign-time delay after a resolved response before another strategic response may be admitted. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Recurring",
 		meta=(ClampMin="1.0", ToolTip="Time between finite counterattack attempts. Example: 900 means a defeated wave cannot immediately reroll every subsystem update."))
 	float RecurringCounterCooldownGameTime = 900.f;
 
+	/** Optional launch window driven by Narrative Pro's authoritative campaign clock. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Time Of Day",
+		meta=(ToolTip="Use Narrative / Ultra Dynamic Sky Time Window when attacks should begin only at night, dawn, or another story-friendly period."))
+	ETerritoryCounterTimePolicy TimePolicy = ETerritoryCounterTimePolicy::AnyTime;
+
+	/** Inclusive window start in Narrative's 0000-2400 time format. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Time Of Day",
+		meta=(EditCondition="TimePolicy == ETerritoryCounterTimePolicy::NarrativeTimeWindow",
+			EditConditionHides, ClampMin="0.0", ClampMax="2400.0",
+			DisplayName="Window Start (Narrative Time)",
+			ToolTip="Example: 1800 starts the window at 6 PM."))
+	float TimeWindowStart = 1800.f;
+
+	/** Exclusive window end. An end earlier than start wraps across midnight. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Time Of Day",
+		meta=(EditCondition="TimePolicy == ETerritoryCounterTimePolicy::NarrativeTimeWindow",
+			EditConditionHides, ClampMin="0.0", ClampMax="2400.0",
+			DisplayName="Window End (Narrative Time)",
+			ToolTip="Example: Start 1800 and End 0500 permits night attacks across midnight. Equal values mean all day."))
+	float TimeWindowEnd = 500.f;
+
 	/** Optional Narrative tagged line played by the first reserve attacker in each successful wave. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Presentation",
 		meta=(ToolTip="Optional Narrative dialogue tag used to alert a nearby player as a reserve wave arrives. Example: Territory.Dialogue.ReservesArriving."))
 	FGameplayTag ReserveWaveAlertDialogueTag;
+
+	/** Optional combat line played when the first attacker physically begins holding the Place. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Presentation",
+		meta=(ToolTip="Optional Narrative tagged dialogue played once by the first attacker that enters the target and registers takeover pressure. Easy example: 'The market belongs to us now!'"))
+	FGameplayTag TakeoverStartedDialogueTag;
+
+	/** Optional line for the damaged-car to on-foot boss-fight transition. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Presentation",
+		meta=(ToolTip="Optional Narrative tagged dialogue played when a chase target abandons a damaged or blocked car and begins the final on-foot fight."))
+	FGameplayTag FinalFightDialogueTag;
 
 	/** Enemy level follows the strongest relevant player's Narrative level or mapped power-tier tag. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
@@ -229,14 +483,9 @@ struct FTerritoryFactionAssaultConfig
 		meta=(EditCondition="bScaleLevelToRelevantPlayerPower", ToolTip="Optional Gameplay Effect whose scalable modifiers use the resolved enemy level. Leave empty when the Narrative NPC configuration already has level curves."))
 	TSubclassOf<UGameplayEffect> PowerScalingEffect;
 
-	/** Optional SetByCaller tag written into Power Scaling Effect from the resolved level. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
-		meta=(EditCondition="bScaleLevelToRelevantPlayerPower && PowerScalingEffect != nullptr", ToolTip="Optional SetByCaller magnitude tag consumed by Power Scaling Effect. Easy example: Territory.SetByCaller.PowerAttackDamage."))
-	FGameplayTag PowerScalingMagnitudeTag;
-
 	/** Magnitude added for every enemy level above level one. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack|Difficulty",
-		meta=(EditCondition="bScaleLevelToRelevantPlayerPower && PowerScalingEffect != nullptr", ClampMin="0.0", ToolTip="Value sent through the SetByCaller tag for each level above one. Example: 1.5 gives a level 6 enemy +7.5 Attack Damage."))
+		meta=(EditCondition="bScaleLevelToRelevantPlayerPower && PowerScalingEffect != nullptr", ClampMin="0.0", ToolTip="Value sent through Narrative Pro's existing SetByCaller.AttackDamage tag for each level above one. Example: 1.5 gives a level 6 enemy +7.5 Attack Damage. Narrative's AttackDamage, AttackRating, Armor, material and friendly-fire rules remain authoritative."))
 	float PowerScalingMagnitudePerEnemyLevel = 0.f;
 };
 
@@ -290,6 +539,19 @@ struct FTerritoryAssaultCycleRecord
 	int32 HighestEvaluationCycle = 0;
 };
 
+/** Save/RPC-safe per-road car count; Unreal replicated payloads do not support TMap fields. */
+USTRUCT(BlueprintType)
+struct FTerritoryVehicleDeploymentCount
+{
+	GENERATED_BODY()
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle")
+	FName ApproachID;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle")
+	int32 Count = 0;
+};
+
 /** Durable decision/casualty record. Contains no live UObject pointers. */
 USTRUCT(BlueprintType)
 struct FTerritoryAssaultRecord
@@ -302,9 +564,29 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(Categories="Narrative.Factions")) FGameplayTag AttackingFaction;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(Categories="Narrative.Factions")) FGameplayTag DefendingFaction;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultLaunchMode LaunchMode = ETerritoryAssaultLaunchMode::StrategicCounterattack;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") ETerritoryStoryPursuitDirection StoryPursuitDirection = ETerritoryStoryPursuitDirection::EnemyChasesPlayer;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bAllowsTerritoryCapture = true;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bUseStrategicDecisionRoll = true;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") FVector StoryFocusLocation = FVector::ZeroVector;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") TSoftObjectPtr<UNPCDefinition> StoryAttackerDefinitionOverride;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") int32 StoryPlannedForceOverride = 0;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") int32 StoryWaveSizeOverride = 0;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") FName StoryScenarioID;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") float StoryMaximumChaseDistance = 9000.f;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") float StoryChaseDistanceGraceSeconds = 10.f;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bStoryAbandonDamagedVehicleForFinalFight = true;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") float StoryVehicleAbandonHealthFraction = 0.35f;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bStoryActivateRoadMissionTraffic = true;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") int32 StoryMissionTrafficVehicleCountOverride = -1;
+	/** True after the driver has left a disabled/blocked vehicle and the encounter has become a Narrative on-foot final fight. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bStoryTargetAbandonedVehicle = false;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultState State = ETerritoryAssaultState::Grace;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultResolution Resolution = ETerritoryAssaultResolution::None;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 EvaluationCycle = 0;
+	/** Groups the first response and all of its later scheduled battles. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") FGuid ScheduleSeriesID;
+	/** One-based battle number within Schedule Series ID. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="1")) int32 ScheduleOccurrence = 1;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 DecisionSeed = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float DecisionRoll = 0.f;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double CapturedGameTime = 0.0;
@@ -321,6 +603,13 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 KilledForce = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WithdrawnForce = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WaveSize = 1;
+	/** Narrative difficulty is snapshotted so loading cannot silently change this assault's car budget. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") ENarrativeGameplayDifficulty NarrativeDifficultyAtLaunch = ENarrativeGameplayDifficulty::Medium;
+	/** Maximum signature/fallback cars across every road approach in this finite assault. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") int32 MaximumVehicleDeployments = 0;
+	/** Durable total and per-road usage prevent save/load from creating extra cars. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") int32 VehicleDeploymentsUsed = 0;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") TArray<FTerritoryVehicleDeploymentCount> VehicleDeploymentsByApproach;
 	/** Bounded physical deployment failure count; reset after any successful spawn. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 ConsecutiveSpawnFailures = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") TArray<FName> SelectedApproaches;

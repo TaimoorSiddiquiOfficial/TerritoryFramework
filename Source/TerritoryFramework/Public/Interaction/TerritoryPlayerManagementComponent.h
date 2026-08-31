@@ -211,7 +211,8 @@ private:
 		FGameplayTag TargetFaction = FGameplayTag(),
 		FGameplayTagContainer CommandCapabilities = FGameplayTagContainer(),
 		int64 IncomeDelta = 0, int64 UpkeepDelta = 0, int64 CurrencyDelta = 0,
-		bool bShowHUDNotification = true, FGuid SourceRecordID = FGuid());
+		bool bShowHUDNotification = true, FGuid SourceRecordID = FGuid(),
+		bool bRetainInCommandCenter = true);
 	FText ResolveTerritoryName(const FGameplayTag& TerritoryTag) const;
 	FGameplayTag ResolveViewerFaction() const;
 	void AddCommandCapabilityChanges(ATerritoryVolume* Territory,

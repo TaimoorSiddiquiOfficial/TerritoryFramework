@@ -1,7 +1,9 @@
 #include "Tales/TerritoryStealthEvents.h"
 
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryDisguiseProfile.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TerritoryTalesUtilities.h"
 
@@ -142,4 +144,122 @@ void UTerritoryReportDistractionEvent::ExecuteEvent_Implementation(APawn* Target
 FString UTerritoryReportDistractionEvent::GetGraphDisplayText_Implementation()
 {
 	return TEXT("Report an anonymous Territory distraction");
+}
+
+UTerritoryActivateDisguiseEvent::UTerritoryActivateDisguiseEvent(
+	const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+	EventFilter = EEventFilter::EF_OnlyPlayers;
+}
+
+void UTerritoryActivateDisguiseEvent::ExecuteEvent_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
+		|| !Target || !DisguiseProfile) return;
+	UWorld* World = TerritoryTales::ResolveWorld(this, Target, Controller, NarrativeComponent);
+	if (UTerritoryDisguiseSubsystem* Disguises = ResolveControl(World)
+		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr)
+	{
+		Disguises->ActivateDisguise(Target, DisguiseProfile, this);
+	}
+}
+
+FString UTerritoryActivateDisguiseEvent::GetGraphDisplayText_Implementation()
+{
+	return FString::Printf(TEXT("Activate disguise: %s"), *GetNameSafe(DisguiseProfile));
+}
+
+UTerritoryRemoveDisguiseEvent::UTerritoryRemoveDisguiseEvent(
+	const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+	EventFilter = EEventFilter::EF_OnlyPlayers;
+}
+
+void UTerritoryRemoveDisguiseEvent::ExecuteEvent_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
+		|| !Target) return;
+	UWorld* World = TerritoryTales::ResolveWorld(this, Target, Controller, NarrativeComponent);
+	if (UTerritoryDisguiseSubsystem* Disguises = ResolveControl(World)
+		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr)
+	{
+		Disguises->RemoveDisguise(Target, nullptr);
+	}
+}
+
+FString UTerritoryRemoveDisguiseEvent::GetGraphDisplayText_Implementation()
+{
+	return TEXT("Remove the player's Territory disguise");
+}
+
+UTerritorySetDisguiseCoverEvent::UTerritorySetDisguiseCoverEvent(
+	const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+	EventFilter = EEventFilter::EF_OnlyPlayers;
+}
+
+void UTerritorySetDisguiseCoverEvent::ExecuteEvent_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
+		|| !Target) return;
+	UWorld* World = TerritoryTales::ResolveWorld(this, Target, Controller, NarrativeComponent);
+	UTerritoryDisguiseSubsystem* Disguises = ResolveControl(World)
+		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
+	ATerritoryVolume* Territory = ResolveEventTerritory(
+		this, World, TerritoryContext, Target);
+	if (!Disguises) return;
+	if (Action == ETerritoryDisguiseEventAction::Compromise)
+	{
+		Disguises->CompromiseDisguise(Target, ObserverFaction, Territory);
+	}
+	else
+	{
+		Disguises->RestoreDisguise(Target, ObserverFaction);
+	}
+}
+
+FString UTerritorySetDisguiseCoverEvent::GetGraphDisplayText_Implementation()
+{
+	return FString::Printf(TEXT("%s Territory disguise for %s"),
+		Action == ETerritoryDisguiseEventAction::Compromise
+			? TEXT("Compromise") : TEXT("Restore"),
+		ObserverFaction.IsValid() ? *ObserverFaction.ToString() : TEXT("all factions"));
+}
+
+UTerritoryDisguiseIdentityCheckEvent::UTerritoryDisguiseIdentityCheckEvent(
+	const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+	EventFilter = EEventFilter::EF_OnlyPlayers;
+}
+
+void UTerritoryDisguiseIdentityCheckEvent::ExecuteEvent_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
+		|| !Target) return;
+	UWorld* World = TerritoryTales::ResolveWorld(this, Target, Controller, NarrativeComponent);
+	UTerritoryDisguiseSubsystem* Disguises = ResolveControl(World)
+		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
+	ATerritoryVolume* Territory = ResolveEventTerritory(
+		this, World, TerritoryToCheck, Target);
+	FText Reason;
+	if (Disguises && Territory)
+	{
+		Disguises->PerformIdentityCheck(
+			Target, Territory, ObserverFaction, Reason);
+	}
+}
+
+FString UTerritoryDisguiseIdentityCheckEvent::GetGraphDisplayText_Implementation()
+{
+	return TerritoryToCheck.IsValid()
+		? FString::Printf(TEXT("Check disguise at %s"), *TerritoryToCheck.ToString())
+		: TEXT("Check disguise at the player's current Territory");
 }

@@ -1,5 +1,94 @@
 # Changelog
 
+## Unreleased — 2026-08-30 (Claimed UI, economy notifications, and scheduled counterattacks)
+
+- Added Narrative clothing-based faction disguises for double-agent missions. A uniform supplies
+  a temporary perceived faction while the player's true Narrative faction, diplomacy, reputation,
+  capture credit, and ownership remain unchanged.
+- Added local Territory disguise quality and clearance rules, faction-scoped cover compromise,
+  Territory guard/reinforcement attitude integration, perceived-faction dialogue, six GAS events,
+  two GAS state tags, four Narrative Events, a reusable condition, and a seven-objective quest task.
+- Added easy disguise metadata, deterministic policy validation/tests, 100 Stealth Rating on new
+  disguise clothing, and a complete Bandit-uniform mission example.
+
+- Added faction Signature Vehicle selection with an editor migration command, durable
+  per-approach car budgets, and Narrative difficulty car-count scaling (Easy/Medium/Hard/Insane).
+- Made strategic attackers takeover-first: they fight the local defence front, ignore distant
+  player bait that would freeze capture, enter the Place, and apply real recapture pressure.
+  Explicit Story Pursuits keep unrestricted chase behavior outside Territory bounds.
+- Made normal strategic counters require the active `Territory.Capability.Reinforcements` perk by
+  default, while preserving backward compatibility when a project has not authored that capability.
+- Added `UTerritoryAssaultTask` for repel, takeover, attacker-kill, activation, final-fight, and
+  escape quest objectives; repaired Capture Task marker rebinding across World Partition.
+- Added easy tooltips for signature cars, Narrative difficulty budgets, takeover behavior, and
+  phase dialogue tags; validation now catches invalid signature cars and duplicate difficulty rows.
+- Added `ATerritoryRoadGuide`, a stable-ID spline mission helper shared by forward reinforcement
+  arrivals and reverse boss pursuits. It validates Narrative ZoneGraph coverage, mirrors two-way
+  lane offsets, and can reference-count Narrative Quest Road Controls for bounded mission traffic.
+- Added a Development-only `Territory.Debug.StartStoryPursuit` PIE command that routes multiplayer
+  requests to the authority world, making road arrivals and reverse chases repeatable without
+  editing campaign ownership or Narrative assets.
+- Made the editor road setup repair Narrative Mass spawner generator ownership on placed Blueprint
+  instances, preventing a private Blueprint-CDO reference from blocking level saves without
+  modifying Narrative Pro source.
+- Added centre/left/right physical awareness for possessed mission cars, progressive braking,
+  optional side correction, configurable chase-range failure, damaged/blocked vehicle abandonment
+  into a Narrative on-foot final fight, and a durable abandoned-vehicle story flag.
+- Replaced one-frame assault-car deletion with delayed, proximity-aware cleanup. Empty cars retire
+  after bounded time; a car possessed or carjacked by a player is released from Territory cleanup.
+- Explicitly declared and enabled the Chaos Vehicles, ZoneGraph, ZoneGraph Annotations, Mass
+  Gameplay, and Mass AI plugin requirements used by the Narrative/Territory road stack.
+- Reworked Narrative Vehicle assaults into a real ingress lifecycle. Narrative owns the seat,
+  mount ability, animation, controller possession, vehicle pawn, dismount, damage and combat;
+  Territory follows the validated ZoneGraph road through Chaos vehicle inputs. This removes the
+  stock drive activity's null `InteractableTarget` error while keeping Narrative content untouched.
+- Expanded **Start Territory Boss Chase** into a reusable Far Cry-style story encounter. It can
+  drive hunters toward the player or reverse the authored vehicle route for a fleeing capo,
+  records `TargetEscaped`, supports an optional Narrative boss Definition and finite force/wave
+  overrides, and keeps Territory capture disabled by default.
+- Fixed the diplomacy/control delegate ordering race that could mark a completed recapture as
+  `DiplomacyBlocked` after the Claimed state changed the two factions away from War.
+- Refactored the Territory Faction District Holdings Narrative condition into a dynamic,
+  World Partition-safe Claimed District count. It can resolve an explicit faction, the Narrative
+  event target's current faction, or the controller pawn's faction, making it suitable for
+  diplomacy reactions after one or more complete District captures.
+- Added a complete reflection audit for all Territory Narrative Conditions and Events plus
+  behavioral coverage for unique Claimed counting, excluded locked/contested/partial rows,
+  threshold comparisons, and dynamic player-faction resolution.
+- Replaced Territory's private adaptive attack-damage magnitude tag with Narrative Pro's
+  existing `SetByCaller.AttackDamage`, preserving Narrative AttackDamage/AttackRating/Armor and
+  friendly-fire execution as the only combat-damage authority.
+- Added authored On Foot and Narrative Vehicle counterattack approaches. Vehicle entries reuse
+  `ANarrativeVehicleBase`, Narrative mounting/possession, ZoneGraph and Chaos vehicle movement;
+  cars and occupants remain finite, server-authoritative and unsaved.
+- Migrated Blacksmith's adaptive power effect to Narrative's canonical Attack Damage tag and its
+  west-road approach to the project Sedan. Added editor helpers for safe effect migration and an
+  idempotent straight ZoneGraph road, then authored and validated that road in `HopDistrictTest`.
+- Added the easy **Start Territory Boss Chase** Tales event and documented why the stock Narrative
+  Sedan forces weapon holstering plus the project-child seat/ability work required for drive-by fire.
+- Standardized current player-facing ownership language: `Capture` is the action and `Claimed` is
+  the stable political state. Command Center categories, status chips, events, and current guides
+  now use `Claimed`; legacy C++/Blueprint property names remain intact for asset compatibility.
+- Replaced the Command Center Places tab's raw text blocks with compact themed cards. Each card
+  presents ownership and status first, exposes garrison/economy details only for viewer-owned
+  Places, and directs players to Espionage instead of leaking exact hostile intelligence.
+- Added Territory Notification settings for Command Center retention, HUD visibility, thresholds,
+  and duration of money income, expenses, produced resources, and blocked production. Successful
+  production now names the Narrative Item and confirms that it reached Narrative Inventory.
+- Split strategic counterattack scheduling from each finite physical assault. Profiles can launch
+  one assault, a finite series, or an unlimited schedule while every spawned force remains finite,
+  saved, and consumed normally.
+- Added optional Narrative-time windows for scheduled assaults. The subsystem reads
+  `ANarrativeGameState::GetTimeOfDay`, so projects where Narrative Pro is driven by Ultra Dynamic
+  Sky use the same authoritative clock instead of introducing a second time system.
+- Clarified the four supported enemy-response paths: automatic ownership response, profile-driven
+  scheduled follow-up, conditional Narrative Wave events, and non-recurring Story Pursuit/Boss
+  Chase events. Narrative Wave events continue to honor inherited Narrative conditions.
+- Repaired `DA_Place_Farm` story setup found by the map integration test: story capture is bound to
+  the Territory Bounds, automatic CapturePoint progress is disabled, and the configured neutral
+  Story Owner is enabled while the Place still starts Locked.
+- Rebuilt `TDAEditor` for Unreal 5.7 and passed all 161 `TerritoryFramework.*` automation tests.
+
 ## Unreleased — 2026-08-30 (Availability-first UI and community debug guide)
 
 - Separated story Availability from Political State in every shared Territory UI read model.

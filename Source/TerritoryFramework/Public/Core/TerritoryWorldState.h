@@ -288,6 +288,20 @@ public:
 		return ReplicatedCaptureSummaries;
 	}
 
+	/**
+	 * Counts the faction's currently unlocked, stable Claimed Districts from the
+	 * complete replicated strategic directory. Definition-backed rows keep this
+	 * correct while a District actor is unloaded by World Partition.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Capture|Hierarchy",
+		meta=(DisplayName="Get Claimed District Count For Faction"))
+	int32 GetClaimedDistrictCountForFaction(const FGameplayTag& Faction) const;
+
+	/** Pure summary reducer shared by runtime queries and regression tests. */
+	static int32 CountClaimedDistrictsForFaction(
+		TConstArrayView<FReplicatedCaptureSummary> Summaries,
+		const FGameplayTag& Faction);
+
 	/** Replicated physical assault read model used by strategic UI for unloaded cells. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Assault")
 	TArray<FTerritoryAssaultRecord> GetAllAssaultSummaries() const

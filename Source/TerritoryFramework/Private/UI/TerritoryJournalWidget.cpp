@@ -419,7 +419,7 @@ void UTerritoryJournalWidget::NativeConstruct()
 	if (!GetActiveTerritoriesPanel() || !GetCapturedTerritoriesPanel())
 	{
 		UE_LOG(LogTerritory, Error,
-			TEXT("Territory Journal cannot populate Active/Captured lists: authored panel bindings are missing."));
+			TEXT("Territory Journal cannot populate Active/Claimed lists: authored panel bindings are missing."));
 	}
 
 	// Narrative's Skills screen gives page selectors and command buttons different
@@ -1703,6 +1703,135 @@ UTextBlock* UTerritoryJournalWidget::CreateHierarchyTextRow(
 	return Row;
 }
 
+UWidget* UTerritoryJournalWidget::CreatePlaceCommandCard(
+	const FTerritoryHierarchyOperationsView& Place)
+{
+	if (!WidgetTree) return nullptr;
+	const uint32 StableHash = GetTypeHash(Place.TerritoryTag);
+	const bool bClaimed = Place.Availability == ETerritoryAvailability::Unlocked
+		&& Place.TerritoryState == ETerritoryState::Claimed;
+	const bool bContested = Place.Availability == ETerritoryAvailability::Unlocked
+		&& Place.TerritoryState == ETerritoryState::Contested;
+	const FLinearColor Accent = Place.bOwnedByViewer && bClaimed
+		? FLinearColor(0.08f, 0.88f, 0.62f, 1.f)
+		: bContested
+			? FLinearColor(0.95f, 0.24f, 0.16f, 1.f)
+			: Place.bAvailableForCapture
+				? FLinearColor(1.f, 0.76f, 0.12f, 1.f)
+				: FLinearColor(0.45f, 0.52f, 0.55f, 1.f);
+
+	UBorder* Card = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), FName(*FString::Printf(TEXT("PlaceCard_%u"), StableHash)));
+	Card->SetPadding(FMargin(10.f, 8.f));
+	StyleGeneratedTerritorySurface(Card,
+		FLinearColor(0.018f, 0.024f, 0.026f, 0.96f),
+		FLinearColor(Accent.R, Accent.G, Accent.B, 0.52f), 4.f);
+
+	UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(
+		UVerticalBox::StaticClass(), FName(*FString::Printf(TEXT("PlaceStack_%u"), StableHash)));
+	Card->SetContent(Stack);
+
+	UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>(
+		UHorizontalBox::StaticClass(), FName(*FString::Printf(TEXT("PlaceHeader_%u"), StableHash)));
+	Stack->AddChildToVerticalBox(Header);
+
+	UVerticalBox* Identity = WidgetTree->ConstructWidget<UVerticalBox>(
+		UVerticalBox::StaticClass(), FName(*FString::Printf(TEXT("PlaceIdentity_%u"), StableHash)));
+	if (UHorizontalBoxSlot* IdentitySlot = Header->AddChildToHorizontalBox(Identity))
+	{
+		IdentitySlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		IdentitySlot->SetVerticalAlignment(VAlign_Center);
+	}
+	UNarrativeCommonTextBlock* Eyebrow = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(),
+		FName(*FString::Printf(TEXT("PlaceEyebrow_%u"), StableHash)));
+	Eyebrow->SetText(FText::Format(NSLOCTEXT("TerritoryJournal", "PlaceCardEyebrow",
+		"PLACE  //  {0}"), UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			Place.Availability, Place.TerritoryState)));
+	StyleGeneratedTerritoryText(Eyebrow, 9, Accent,
+		ETerritoryGeneratedTextRole::Heading);
+	Eyebrow->SetAutoWrapText(false);
+	Identity->AddChildToVerticalBox(Eyebrow);
+
+	UNarrativeCommonTextBlock* Name = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(),
+		FName(*FString::Printf(TEXT("PlaceName_%u"), StableHash)));
+	Name->SetText(Place.DisplayName);
+	StyleGeneratedTerritoryText(Name, 15,
+		FLinearColor(0.96f, 0.95f, 0.91f, 1.f),
+		ETerritoryGeneratedTextRole::Heading);
+	Name->SetAutoWrapText(false);
+	Identity->AddChildToVerticalBox(Name);
+
+	UBorder* StatusChip = WidgetTree->ConstructWidget<UBorder>(
+		UBorder::StaticClass(), FName(*FString::Printf(TEXT("PlaceChip_%u"), StableHash)));
+	StatusChip->SetPadding(FMargin(8.f, 4.f));
+	StyleGeneratedTerritorySurface(StatusChip,
+		FLinearColor(Accent.R * 0.16f, Accent.G * 0.16f, Accent.B * 0.16f, 0.95f),
+		FLinearColor(Accent.R, Accent.G, Accent.B, 0.72f), 3.f);
+	UNarrativeCommonTextBlock* ChipText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(),
+		FName(*FString::Printf(TEXT("PlaceChipText_%u"), StableHash)));
+	ChipText->SetText(Place.bOwnedByViewer && bClaimed
+		? NSLOCTEXT("TerritoryJournal", "PlaceCommandReady", "COMMAND READY")
+		: bContested
+			? NSLOCTEXT("TerritoryJournal", "PlaceContestedNow", "CONTESTED")
+			: Place.bAvailableForCapture
+				? NSLOCTEXT("TerritoryJournal", "PlaceReadyToContest", "READY TO CONTEST")
+				: NSLOCTEXT("TerritoryJournal", "PlaceIntelligenceOnly", "INTELLIGENCE"));
+	StyleGeneratedTerritoryText(ChipText, 9, Accent,
+		ETerritoryGeneratedTextRole::Heading);
+	ChipText->SetAutoWrapText(false);
+	StatusChip->SetContent(ChipText);
+	if (UHorizontalBoxSlot* ChipSlot = Header->AddChildToHorizontalBox(StatusChip))
+	{
+		ChipSlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
+		ChipSlot->SetVerticalAlignment(VAlign_Center);
+	}
+
+	const FText Owner = Place.OwnerFaction.IsValid()
+		? UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Place.OwnerFaction)
+		: NSLOCTEXT("TerritoryJournal", "PlaceNoOwner", "No faction");
+	const FText Security = Place.bOwnedByViewer
+		? FText::Format(NSLOCTEXT("TerritoryJournal", "PlaceKnownSecurity",
+			"GARRISON  {0} ACTIVE  /  {1} ASSIGNED  /  {2} CAPACITY"),
+			FText::AsNumber(Place.ActiveGuards), FText::AsNumber(Place.DesiredGuards),
+			FText::AsNumber(Place.MaximumGuards))
+		: NSLOCTEXT("TerritoryJournal", "PlaceUnknownSecurity",
+			"GARRISON  UNKNOWN  //  USE ESPIONAGE FOR DEFENDER INTELLIGENCE");
+	UNarrativeCommonTextBlock* SecurityText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(),
+		FName(*FString::Printf(TEXT("PlaceSecurity_%u"), StableHash)));
+	SecurityText->SetText(FText::Format(NSLOCTEXT("TerritoryJournal", "PlaceSecurityLine",
+		"OWNER  {0}   •   {1}"), Owner, Security));
+	StyleGeneratedTerritoryText(SecurityText, 10,
+		FLinearColor(0.72f, 0.74f, 0.71f, 1.f));
+	if (UVerticalBoxSlot* SecuritySlot = Stack->AddChildToVerticalBox(SecurityText))
+	{
+		SecuritySlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+	}
+
+	const FText Economy = Place.bOwnedByViewer
+		? FText::Format(NSLOCTEXT("TerritoryJournal", "PlaceEconomyKnown",
+			"NET  {0} / CYCLE   •   PRODUCTION  {1}"),
+			FText::AsNumber(Place.NetIncome),
+			Place.bHasProductionProfile
+				? NSLOCTEXT("TerritoryJournal", "PlaceProductionConfigured", "CONFIGURED")
+				: NSLOCTEXT("TerritoryJournal", "PlaceNoProduction", "NONE"))
+		: NSLOCTEXT("TerritoryJournal", "PlaceEconomyUnknown",
+			"ECONOMY  UNKNOWN UNTIL CLAIMED");
+	UNarrativeCommonTextBlock* EconomyText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+		UNarrativeCommonTextBlock::StaticClass(),
+		FName(*FString::Printf(TEXT("PlaceEconomy_%u"), StableHash)));
+	EconomyText->SetText(Economy);
+	StyleGeneratedTerritoryText(EconomyText, 10,
+		Place.bOwnedByViewer ? Accent : FLinearColor(0.56f, 0.60f, 0.59f, 1.f),
+		Place.bOwnedByViewer ? ETerritoryGeneratedTextRole::Body
+			: ETerritoryGeneratedTextRole::Muted);
+	Stack->AddChildToVerticalBox(EconomyText);
+	return Card;
+}
+
 void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
 	const FTerritoryDistrictOperationsView& View)
 {
@@ -1762,19 +1891,13 @@ void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
 		}
 		for (const FTerritoryHierarchyOperationsView& Place : View.VisiblePlaces)
 		{
-			const FText PlaceText = FText::Format(
-				NSLOCTEXT("TerritoryJournal", "PlaceHierarchyRow",
-					"PLACE  /  {0}\nOwner {1}  |  {2}\nGuards {3}/{4}/{5}  |  Net {6}"),
-				Place.DisplayName,
-				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Place.OwnerFaction),
-				UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
-					Place.Availability, Place.TerritoryState),
-				FText::AsNumber(Place.ActiveGuards), FText::AsNumber(Place.DesiredGuards),
-				FText::AsNumber(Place.MaximumGuards), FText::AsNumber(Place.NetIncome));
-			if (UTextBlock* Row = CreateHierarchyTextRow(PlaceText,
-				FName(*FString::Printf(TEXT("Place_%u"), GetTypeHash(Place.TerritoryTag)))))
+			if (UWidget* Card = CreatePlaceCommandCard(Place))
 			{
-				PlaceHierarchyList->AddChild(Row);
+				if (UVerticalBoxSlot* CardSlot =
+					PlaceHierarchyList->AddChildToVerticalBox(Card))
+				{
+					CardSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+				}
 			}
 		}
 		if (View.HiddenProperties > 0)
@@ -2281,8 +2404,8 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	{
 		AddEmptyMessage(CapturedPanel,
 			OwnedCount == 0
-				? NSLOCTEXT("TerritoryJournal", "NoCapturedOwned", "Your faction controls no loaded districts.")
-				: NSLOCTEXT("TerritoryJournal", "CapturedEntriesUnavailable", "Captured District data is available, but its entry widget could not be created."),
+				? NSLOCTEXT("TerritoryJournal", "NoClaimedOwned", "Your faction has no loaded claimed Districts.")
+				: NSLOCTEXT("TerritoryJournal", "ClaimedEntriesUnavailable", "Claimed District data is available, but its entry widget could not be created."),
 			TEXT("NoCapturedOwnedDistricts"));
 	}
 	if (OwnedCount == 0)
@@ -2326,7 +2449,7 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	if (CapturedCountText)
 	{
 		CapturedCountText->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "CapturedDistrictCount", "CAPTURED TERRITORIES  //  {0}"),
+			NSLOCTEXT("TerritoryJournal", "ClaimedDistrictCount", "CLAIMED TERRITORIES  //  {0}"),
 			FText::AsNumber(OwnedCount)));
 	}
 	if (Text_HeaderStatus)
