@@ -9,24 +9,25 @@
 class ATerritoryVolume;
 
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Capture or Lose Territory Task"))
+	meta=(DisplayName="Capture or Lose Territory Task",
+		ToolTip="Narrative Task that completes when a Place, District, or City is captured by the requested faction, or when its starting owner loses it."))
 class TERRITORYFRAMEWORK_API UTerritoryCaptureTask : public UNarrativeTask
 {
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Task",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Task|Target",
 		meta = (Categories = "Territory",
 			ToolTip="Place, District, or City watched by this Narrative quest task. Easy example: Territory.HavenReach.MarketSquare.Blacksmith."))
 	FGameplayTag TargetTerritoryTag;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Task",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Task|Ownership",
 		meta = (Categories = "Narrative.Factions",
-			ToolTip="Faction that must own the Territory. Leave empty to accept the first valid new owner."))
+			ToolTip="Faction that must own the Territory. Leave empty to accept any valid owner. Easy example: Narrative.Factions.Heroes means only a Heroes capture completes the task."))
 	FGameplayTag RequiredCapturingFaction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Task",
-		meta=(ToolTip="Complete when the owner present at task start loses control. Use this for a defend-location failure or consequence branch."))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Task|Ownership",
+		meta=(ToolTip="Complete when the owner present at task start loses control. Easy example: start this while Bandits own Blacksmith, then complete when Bandits lose it."))
 	bool bCompleteOnLoss = false;
 
 protected:

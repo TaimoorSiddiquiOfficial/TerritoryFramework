@@ -21,6 +21,7 @@
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "Navigation/TerritoryRoadGuide.h"
+#include "Music/TaggedMusicSet.h"
 #include "AI/NPCDefinition.h"
 #include "AI/Activities/NPCGoalItem.h"
 #include "Vehicles/NarrativeVehicleBase.h"
@@ -999,6 +1000,68 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 		ValidateStealthProfile(Pair.Value.StealthProfileOverride,
 			FString::Printf(TEXT("%s state %d stealth override"), *Context,
 				static_cast<int32>(Pair.Key)), OutErrors);
+
+		const FTerritoryStateAudioConfig& Audio = Pair.Value.Audio;
+		if (Audio.bOverrideNarrativeMusic)
+		{
+			if (!Audio.MusicTheme.IsValid())
+			{
+				Error(FString::Printf(
+					TEXT("State %d enables Narrative Music but has no Music Theme"),
+					static_cast<int32>(Pair.Key)));
+			}
+			else
+			{
+				const FGameplayTag MusicRoot = FGameplayTag::RequestGameplayTag(
+					TEXT("Music"), false);
+				if (MusicRoot.IsValid() && !Audio.MusicTheme.MatchesTag(MusicRoot))
+				{
+					Error(FString::Printf(
+						TEXT("State %d Music Theme must be under the Music tag root"),
+						static_cast<int32>(Pair.Key)));
+				}
+
+				if (!Audio.MusicSetOverride.IsNull())
+				{
+					UTaggedMusicSet* MusicSet =
+						Audio.MusicSetOverride.LoadSynchronous();
+					if (!MusicSet)
+					{
+						Error(FString::Printf(
+							TEXT("State %d Narrative Music Set could not be loaded"),
+							static_cast<int32>(Pair.Key)));
+					}
+					else if (!MusicSet->Has(Audio.MusicTheme))
+					{
+						Error(FString::Printf(
+							TEXT("State %d Narrative Music Set has no track row for %s"),
+							static_cast<int32>(Pair.Key),
+							*Audio.MusicTheme.ToString()));
+					}
+				}
+			}
+		}
+		if (!FMath::IsWithinInclusive(Audio.StateEffectVolume, 0.f, 4.f)
+			|| !FMath::IsWithinInclusive(Audio.StateEffectPitch, 0.25f, 4.f))
+		{
+			Error(FString::Printf(
+				TEXT("State %d audio effect volume or pitch is outside supported bounds"),
+				static_cast<int32>(Pair.Key)));
+		}
+		if (Audio.bPlayEnteredSoundOnPlayerArrival
+			&& Audio.StateEnteredSound.IsNull())
+		{
+			Warning(FString::Printf(
+				TEXT("State %d enables the arrival cue but has no State Entered Sound"),
+				static_cast<int32>(Pair.Key)));
+		}
+		if (Audio.bPlayExitedSoundOnPlayerDeparture
+			&& Audio.StateExitedSound.IsNull())
+		{
+			Warning(FString::Printf(
+				TEXT("State %d enables the departure cue but has no State Exited Sound"),
+				static_cast<int32>(Pair.Key)));
+		}
 	}
 	ValidateStealthProfile(Definition->DefaultStealthProfile,
 		Context + TEXT(" default stealth profile"), OutErrors);

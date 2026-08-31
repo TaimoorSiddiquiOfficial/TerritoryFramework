@@ -17,12 +17,66 @@
 #include "HAL/IConsoleManager.h"
 #include "UObject/UnrealType.h"
 #include "IDetailCustomization.h"
+#include "DetailCategoryBuilder.h"
 #include "DetailLayoutBuilder.h"
+#include "DetailWidgetRow.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
+#include "Story/STerritoryStoryOutcomePanel.h"
 
 namespace
 {
+	constexpr TCHAR TerritoryNarrativeTaskSearchPath[] =
+		TEXT("/TerritoryFramework/Tales/Tasks/");
+
+	/**
+	 * Narrative discovers task Blueprint assets from an editor setting rather than
+	 * from native UNarrativeTask classes. Plugin DefaultEngine.ini files do not
+	 * participate in the project's Engine config hierarchy, so register our
+	 * content-only path on the settings CDO without changing Narrative or the
+	 * host project's config file.
+	 */
+	bool RegisterNarrativeTaskSearchPath()
+	{
+		FModuleManager::LoadModulePtr<IModuleInterface>(TEXT("NarrativeQuestEditor"));
+		UClass* SettingsClass = FindObject<UClass>(
+			nullptr, TEXT("/Script/NarrativeQuestEditor.QuestEditorSettings"));
+		if (!SettingsClass)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("[TerritoryNarrativeTask] Narrative Quest Editor settings class is unavailable; Territory tasks will not appear in its picker."));
+			return false;
+		}
+
+		FArrayProperty* SearchPathsProperty = FindFProperty<FArrayProperty>(
+			SettingsClass, TEXT("QuestTaskSearchPaths"));
+		FStrProperty* PathProperty = SearchPathsProperty
+			? CastField<FStrProperty>(SearchPathsProperty->Inner) : nullptr;
+		UObject* Settings = SettingsClass->GetDefaultObject();
+		if (!SearchPathsProperty || !PathProperty || !Settings)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("[TerritoryNarrativeTask] Narrative QuestTaskSearchPaths has an unexpected shape; Territory tasks will not appear in its picker."));
+			return false;
+		}
+
+		FScriptArrayHelper Paths(SearchPathsProperty,
+			SearchPathsProperty->ContainerPtrToValuePtr<void>(Settings));
+		for (int32 Index = 0; Index < Paths.Num(); ++Index)
+		{
+			if (PathProperty->GetPropertyValue(Paths.GetRawPtr(Index)).Equals(
+				TerritoryNarrativeTaskSearchPath, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+
+		const int32 NewIndex = Paths.AddValue();
+		PathProperty->SetPropertyValue(Paths.GetRawPtr(NewIndex),
+			TerritoryNarrativeTaskSearchPath);
+		return true;
+	}
+
 	/**
 	 * Narrative's AMassVehicleSpawner constructor creates its generator with no
 	 * explicit Outer. Blueprint instances can consequently retain an archetype
@@ -93,14 +147,32 @@ namespace
 		{
 			TArray<TWeakObjectPtr<UObject>> Objects;
 			DetailBuilder.GetObjectsBeingCustomized(Objects);
+			UTerritoryDefinition* SelectedDefinition = nullptr;
 			bool bContainsNonPlace = false;
 			for (const TWeakObjectPtr<UObject>& Object : Objects)
 			{
+				if (!SelectedDefinition)
+				{
+					SelectedDefinition = Cast<UTerritoryDefinition>(Object.Get());
+				}
 				if (Object.IsValid() && !Object->IsA<UTerritoryPlaceDefinition>())
 				{
 					bContainsNonPlace = true;
-					break;
 				}
+			}
+			if (SelectedDefinition)
+			{
+				IDetailCategoryBuilder& StoryOutcome = DetailBuilder.EditCategory(
+					TEXT("00 Story Outcome (Read Only)"),
+					FText::FromString(TEXT("Story Outcome (Read Only)")),
+					ECategoryPriority::Important);
+				StoryOutcome.InitiallyCollapsed(false);
+				StoryOutcome.AddCustomRow(FText::FromString(TEXT("Story Outcome")))
+				.WholeRowContent()
+				[
+					SNew(STerritoryStoryOutcomePanel)
+					.Definition(SelectedDefinition)
+				];
 			}
 			if (!bContainsNonPlace) return;
 
@@ -143,6 +215,7 @@ namespace
 
 void FTerritoryFrameworkEditorModule::StartupModule()
 {
+	const bool bNarrativeTasksRegistered = RegisterNarrativeTaskSearchPath();
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(
 		TEXT("PropertyEditor"));
 	for (const FName ClassName : { FName(TEXT("TerritoryDefinition")),
@@ -174,7 +247,9 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 		ECVF_Default);
 	// UEditorValidator subclasses are auto-registered by the DataValidation system
 	// when the module loads — no manual registration needed
-	UE_LOG(LogTemp, Log, TEXT("TerritoryFrameworkEditor module loaded (auto-validators registered)"));
+	UE_LOG(LogTemp, Log,
+		TEXT("TerritoryFrameworkEditor module loaded (auto-validators registered, Narrative tasks %s)"),
+		bNarrativeTasksRegistered ? TEXT("registered") : TEXT("unavailable"));
 }
 
 void FTerritoryFrameworkEditorModule::ShutdownModule()

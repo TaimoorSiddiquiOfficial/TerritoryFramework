@@ -22,22 +22,24 @@ enum class ETerritoryDisguiseTaskObjective : uint8
 
 /** Narrative quest objectives for uniforms, checkpoints, and double-agent missions. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Disguise Mission Task"))
+	meta=(DisplayName="Territory Disguise Mission Task",
+		ToolTip="Narrative Task for disguise, checkpoint, cover exposure, and double-agent objectives."))
 class TERRITORYFRAMEWORK_API UTerritoryDisguiseTask : public UNarrativeTask
 {
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Task")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Task|Objective",
+		meta=(ToolTip="Disguise outcome followed by the quest. Easy example: Pass an Identity Check advances after guards accept the player's cover."))
 	ETerritoryDisguiseTaskObjective Objective =
 		ETerritoryDisguiseTaskObjective::EquipDisguise;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Task",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Task|Target",
 		meta=(Categories="Territory",
 			ToolTip="Required by enter/exit objectives and useful as an identity-check filter."))
 	FGameplayTag TargetTerritory;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Task",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Task|Filter",
 		meta=(Categories="Narrative.Factions",
 			ToolTip="Optional perceived or observing faction filter. Easy example: Bandits for a Bandit uniform mission."))
 	FGameplayTag Faction;

@@ -1,5 +1,62 @@
 # Changelog
 
+## Unreleased — 2026-08-31 (Narrative Territory tasks and scenario cleanup)
+
+- Reorganized the documentation into one unique 00–31 learning path, separated dated audit
+  evidence from current setup guidance, repaired internal links, and added a current remaining-work
+  and gameplay roadmap.
+- Added a five-category Narrative Quest Task library with 54 focused objectives for Territory boss
+  fights and chases, movement/traversal tutorials, GAS tag/attribute state, combat progress, and
+  Narrative AI observation.
+- Added distinct durable story branches for boss defeated, final fight, target road exit, chase
+  distance lost, warning, recapture countdown, withdrawal, resolution, and cancellation.
+- Reused Narrative Character, movement, ASC, Actor Provider, Activity/Goal, AI Perception, vehicle
+  possession, attack-token, quest progress, save, and marker authorities. The tasks only observe;
+  they never command gameplay or create duplicate state.
+- Added actor/effect/scenario filters, provider rebinding, transition-safe lost-sight/vehicle-exit/
+  token-release behavior, read-only preview helpers, behavioral tests, categorized Blueprint picker
+  wrappers, and an easy-English community guide.
+- Consolidated Locked availability into one Story Outcome row and added exact outcome
+  de-duplication, so the same authored result is not rendered twice.
+- Added `UTerritoryStateTask`, a real `UNarrativeTask` adapter for unlock, lock, Unclaimed,
+  Contested, Claimed, all-defenders-defeated, desired-garrison, enter, and leave objectives.
+- Added Narrative Quest Task search-path integration and categorized Territory task wrappers with
+  friendly display names and easy Blueprint descriptions.
+- Improved Capture, Assault, and Disguise task metadata and fixed Capture Task so an empty faction
+  filter correctly accepts a Territory that is already owned when the task begins or rebinds.
+- Added read-only objective evaluation, Narrative inheritance/metadata tests, scenario duplicate
+  regression coverage, and a complete easy-English task guide.
+
+## Unreleased — 2026-08-31 (Read-only Story Outcome preview)
+
+- Added an editor-only Story Outcome analyzer for every Territory Place, District, and City
+  Definition. It describes new-campaign seeds, availability, state rules, Narrative conditions and
+  events, stealth, capture/handover, guards, economy, production, counterattacks, management,
+  presentation, and hierarchy consequences as separate success/failure branches.
+- Added a compact expandable panel at the top of Definition Details with configured,
+  runtime-conditional, chance-based, custom-Blueprint, and setup-warning labels plus plain-text copy.
+- Reused Narrative's public graph-display text and the existing Territory Definition validator.
+  Preview generation never checks live conditions, executes events, rolls probability, changes
+  gameplay state, serializes duplicate outcome text, or dirties the Definition package.
+- Added regression coverage for locked Place seeds, story capture, aggregate hierarchy warnings,
+  production gates, finite counter schedules, validation output, and read-only package behavior.
+
+## Unreleased — 2026-08-31 (Narrative Music and Territory state audio)
+
+- Added Definition-backed Narrative Music selection to every Territory state row. A Place may
+  select a unique Tagged Music Set/theme or inherit the first configured District/City rule.
+- Applied the framework's availability-first rule to audio: a locally or hierarchically Locked
+  Territory selects its Locked row without bringing back a second legacy control state.
+- Added local state-entered/state-exited cues with opt-in boundary replay, volume, pitch, and
+  first-observation suppression so loading a save never produces a false capture fanfare.
+- Added a client-cosmetic GameInstance adapter that uses replicated Territory state, delegates
+  soundtrack playback and cross-fades to Narrative Music, restores the prior selection, and does
+  not run on dedicated servers.
+- Added optional `Music.Territory.State.*` tags, easy metadata, Definition validation, native
+  contract/round-trip tests, and a complete community authoring guide.
+- Fixed the common State Config runtime clone so both state-specific Audio and the previously
+  omitted Stealth Profile Override survive Definition-to-actor synchronization.
+
 ## Unreleased — 2026-08-30 (Claimed UI, economy notifications, and scheduled counterattacks)
 
 - Added Narrative clothing-based faction disguises for double-agent missions. A uniform supplies

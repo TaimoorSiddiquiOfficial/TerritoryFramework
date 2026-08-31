@@ -24,10 +24,21 @@ Runtime module dependencies are `NarrativeArsenal`, `NarrativeCommonUI`, and
 | Tales | Narrative tasks, conditions, events, and `UTalesComponent` | Territory capture/lock/query adapters preserve the real Tales instigator |
 | Persistence | Narrative save interfaces | Territory actors expose stable records; live UObject and pawn pointers are not saved |
 | Navigation/UI | Narrative POI, map marker, HUD, and CommonUI | Territory adds state data and project-owned presentation widgets |
+| Music | `UNarrativeMusicSubsystem` and `UTaggedMusicSet` | A local cosmetic adapter selects Definition-authored state themes and restores earlier Narrative music |
 
 Territory owner, contest state, and progress remain authoritative on
 `ATerritoryVolume` and `UTerritoryControlSubsystem`. Narrative faction membership is not
 territory ownership.
+
+## Music and state audio
+
+`UTerritoryMusicSubsystem` is the local bridge to Narrative Music. It reads replicated Territory
+state but never changes ownership or capture. The State Config's `Audio` row can select a Narrative
+Tagged Music Set and `Music.*` theme, plus optional state-entered/state-exited sounds. Place rules
+win over District rules, District rules win over City rules, and an unconfigured hierarchy leaves
+the current world music alone. Dedicated servers never create this subsystem. Full authoring and
+troubleshooting are in
+[27_Narrative_Music_and_State_Audio.md](27_Narrative_Music_and_State_Audio.md).
 
 ## Player integration
 
@@ -124,7 +135,10 @@ indirectly through the C++ adapters above.
 
 ## Tales, save, economy, navigation, and UI
 
-- `UTerritoryCaptureTask`, `UTerritoryAssaultTask`, `UTerritoryCaptureEvent`, `UTerritoryLockEvent`,
+- `UTerritoryCaptureTask`, `UTerritoryStateTask`, `UTerritoryAssaultTask`,
+  `UTerritoryDisguiseTask`, `UTerritoryCharacterActionTask`,
+  `UTerritoryGameplayStateTask`, `UTerritoryCombatProgressTask`,
+  `UTerritoryAIObservationTask`, `UTerritoryCaptureEvent`, `UTerritoryLockEvent`,
   `UTerritoryHierarchyStoryOverrideEvent`, `UTerritoryOwnershipCondition`,
   `UTerritoryQuestStateCondition`, `UTerritoryDiplomacyCondition`,
   `UTerritoryGarrisonCondition`, `UTerritorySetDiplomacyEvent`, and
@@ -147,6 +161,17 @@ indirectly through the C++ adapters above.
 
 ### Counterattack and chase quest tasks
 
+All Territory quest tasks are real `UNarrativeTask` children. The Territory editor module adds
+the plugin-owned `/TerritoryFramework/Tales/Tasks/` folder to Narrative's in-memory search list;
+it does not edit Narrative or require a project config change. Narrative discovers the small
+Blueprint wrappers there and lists them under **Tasks: Territory**, **Territory Story**, and the
+four **Community** categories using the Blueprint Display Name, Category, and Description metadata
+expected by `UQuestGraphSchema`. See
+[Territory Narrative Quest Tasks](29_Narrative_Quest_Tasks.md) for the unlock, state, defenders,
+garrison, presence, capture, assault, and disguise objective matrix, and
+[Community Narrative Quest Tasks](30_Community_Narrative_Tasks.md) for movement, GAS, combat, AI,
+boss, and chase examples.
+
 Use **Territory Counterattack / Chase Task** inside a normal Narrative Quest. It reads the real
 durable assault record, so a quest does not need to count temporary pawns itself.
 
@@ -158,6 +183,11 @@ durable assault record, so a quest does not need to count temporary pawns itself
 | Counterattack Reaches the Territory | Advance dialogue when the warning becomes a live battle |
 | Final Fight Started | Advance when the underboss leaves a damaged car |
 | Target Escaped | Branch the quest after a chase escape or lost-distance outcome |
+| Defeat Story Boss | Complete only after an explicit finite Story Pursuit boss force is removed |
+| Chase Target Reaches Exit | Branch only when the target reaches the authored Road Guide exit |
+| Player Loses Chase Distance | Branch only after every player exceeds chase distance for the grace period |
+| Force Attackers to Withdraw | Count the durable withdrawn force with Narrative Required Quantity |
+| Assault Is Cancelled | React to diplomacy, quest rule, ownership, route, capability, or story cancellation |
 
 Filter by Territory, optional attacking faction, and optional Story Scenario ID. The task uses
 Narrative's inherited marker settings and attaches its marker to the live Territory actor. The
@@ -339,7 +369,7 @@ or explicitly check a cover identity. Complete setup and examples are in
 
 Road missions reuse Narrative's Chaos vehicle, ZoneGraph, Mass traffic, Quest Road Controls,
 impact mesh, and destructible response rather than editing them. Territory's integration and
-mission-authoring boundary is documented in [22_Road_Missions.md](22_Road_Missions.md).
+mission-authoring boundary is documented in [23_Road_Missions.md](23_Road_Missions.md).
 
 1. Close Unreal Editor and verify no dirty packages.
 2. Back up the complete active Narrative Pro plugin directory outside the project.

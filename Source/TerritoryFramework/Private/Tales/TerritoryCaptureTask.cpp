@@ -75,6 +75,10 @@ void UTerritoryCaptureTask::BeginTask()
 			return;
 		}
 	}
+	else if (CachedTerritory->GetOwningFaction().IsValid())
+	{
+		CompleteTask();
+	}
 }
 
 void UTerritoryCaptureTask::EndTask()
@@ -167,6 +171,10 @@ void UTerritoryCaptureTask::OnTerritoryRegistered(ATerritoryVolume* Territory, b
 			CompleteTask();
 		}
 	}
+	else if (Territory->GetOwningFaction().IsValid())
+	{
+		CompleteTask();
+	}
 
 	if (SpawnedMarker)
 	{
@@ -189,20 +197,39 @@ void UTerritoryCaptureTask::OnTerritoryUnregistered(
 
 FText UTerritoryCaptureTask::GetTaskDescription_Implementation() const
 {
-	if (!DescriptionOverride.IsEmpty()) return DescriptionOverride;
+	if (!DescriptionOverride.IsEmptyOrWhitespace()) return DescriptionOverride;
+
+	FText TerritoryName;
+	if (CachedTerritory.IsValid())
+	{
+		TerritoryName = CachedTerritory->GetTerritoryDisplayName();
+	}
+	else
+	{
+		FString Name = TargetTerritoryTag.ToString();
+		int32 Separator = INDEX_NONE;
+		if (Name.FindLastChar(TEXT('.'), Separator))
+		{
+			Name.RightChopInline(Separator + 1);
+		}
+		TerritoryName = FText::FromString(FName::NameToDisplayString(Name, false));
+	}
 
 	if (bCompleteOnLoss)
 	{
-		return FText::FromString(FString::Printf(TEXT("Lose control of %s"), *TargetTerritoryTag.ToString()));
+		return FText::Format(NSLOCTEXT("TerritoryTask", "LoseControl",
+			"Lose control of {0}"), TerritoryName);
 	}
 
 	if (RequiredCapturingFaction.IsValid())
 	{
-		return FText::FromString(FString::Printf(TEXT("Capture %s for %s"),
-			*TargetTerritoryTag.ToString(), *RequiredCapturingFaction.ToString()));
+		return FText::Format(NSLOCTEXT("TerritoryTask", "CaptureForFaction",
+			"Capture {0} for {1}"), TerritoryName,
+			FText::FromName(RequiredCapturingFaction.GetTagName()));
 	}
 
-	return FText::FromString(FString::Printf(TEXT("Capture %s"), *TargetTerritoryTag.ToString()));
+	return FText::Format(NSLOCTEXT("TerritoryTask", "CaptureAny",
+		"Capture {0}"), TerritoryName);
 }
 
 FText UTerritoryCaptureTask::GetTaskProgressText_Implementation() const

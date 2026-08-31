@@ -17,6 +17,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"UnrealEd",
+			"ApplicationCore",
 			"Slate",
 			"SlateCore",
 			"PropertyEditor",
@@ -26,6 +27,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"GameplayTags",
 			"NavigationSystem",
 			"NarrativeArsenal",
+			"NarrativeQuestEditor",
 			"ZoneGraph",
 			"MassSpawner",
 			"MassEntity"

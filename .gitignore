@@ -1,6 +1,10 @@
 # Unreal Engine
 Binaries/
-Content/
+Content/*
+!Content/Tales/
+Content/Tales/*
+!Content/Tales/Tasks/
+!Content/Tales/Tasks/*.uasset
 DerivedDataCache/
 Intermediate/
 Saved/

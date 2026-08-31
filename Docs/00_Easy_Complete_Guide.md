@@ -32,7 +32,12 @@ Haven Reach City
 The **Place** is where physical gameplay happens. A Place can have bounds, guards, patrols,
 capture rules, a protected story owner, production, a map marker, and counterattack approaches.
 Vehicle approaches may reference a placed spline Road Guide for reinforcement arrivals and
-two-way boss chases; see [22_Road_Missions.md](22_Road_Missions.md).
+two-way boss chases; see [23_Road_Missions.md](23_Road_Missions.md).
+
+Every City, District, or Place State Config may also select a Narrative music theme and short
+state cue. For example, Blacksmith uses `Music.Combat` while Contested and returns to
+`Music.Ambient` when Claimed. The Place inherits its District or City music when it has no local
+rule. See [27_Narrative_Music_and_State_Audio.md](27_Narrative_Music_and_State_Audio.md).
 
 The **District** summarizes its Places. The **City** summarizes its Districts. A District or City
 does not need its own physical guards or capture point.
@@ -532,6 +537,11 @@ Friendly purpose first; the C++ class name is included for search.
 
 `UTerritoryCaptureTask` is the Narrative quest task that follows Territory capture ownership.
 
+For story bosses, road chases, movement tutorials, GAS state, damage/healing, and Narrative AI
+milestones, use the categorized task library in
+[Community Narrative Quest Tasks](30_Community_Narrative_Tasks.md). These tasks only watch the
+real Territory/Narrative result; use Events, abilities, dialogue, or AI goals to cause the action.
+
 ## 20. Narrative Conditions supplied by the framework
 
 | Condition | Easy example |
@@ -657,12 +667,12 @@ These are not optional debug noise. Hiding them could make broken community cont
 
 - [Quick Start](01_Quick_Start.md)
 - [Definition Assets](21_Definition_Assets.md)
-- [Hierarchy, Availability, and Unlocks](Hierarchy_Availability_and_Unlocks.md)
+- [Hierarchy, Availability, and Unlocks](22_Hierarchy_Availability_and_Unlocks.md)
 - [Debug System](11_Debug_System.md)
 - [Narrative Integration](06_Narrative_Integration.md)
 - [Counterattacks](17_Counterattack_System.md)
 - [Production](20_Resource_Production.md)
-- [Stealth](22_Stealth_Infiltration.md)
+- [Stealth](24_Stealth_Infiltration.md)
 - [Disguises and Double-Agent Missions](25_Disguise_and_Double_Agent_Missions.md)
 - [Operations UI](18_Operations_UI.md)
 

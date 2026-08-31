@@ -12,6 +12,7 @@
 - [ATerritoryWorldState](#aterritoryworldstate)
 - [ATerritorySavableData](#aterritorysavabledata)
 - [UTerritoryRegistrySubsystem](#uterritoryregistrysubsystem)
+- [UTerritoryMusicSubsystem](#uterritorymusicsubsystem)
 - [UTerritoryControlSubsystem](#uterritorycontrolsubsystem)
 - [UTerritoryEconomySubsystem](#uterritoryeconomysubsystem)
 - [UTerritoryDiplomacySubsystem](#uterritorydiplomacysubsystem)
@@ -29,6 +30,7 @@
 - [BTTask_RequestTerritoryPermission](#btask_requestterritorypermission)
 - [BTTask_ReleaseTerritoryPermission](#btask_releaseterritorypermission)
 - [UTerritoryCaptureTask](#uterritorycapturetask)
+- [Narrative Community Tasks](#narrative-community-tasks)
 - [UTerritoryCaptureEvent](#uterritorycaptureevent)
 - [UTerritoryOwnershipCondition](#uterritoryownershipcondition)
 - [ITerritoryOwnershipInterface](#iterritoryownershipinterface)
@@ -166,6 +168,7 @@ removed. Definitions use `InitialAvailability` and the Locked row's Exit Conditi
 | GetSpawnedGuardCount | int32 | Territory\|Guards |
 | HasGuardsAlive | bool | Territory\|Guards |
 | GetGuardSpawnPoints | Array<TerritoryGuardSpawnPoint*> | Territory\|Guards |
+| GetActiveTerritoryAudioConfig(OutConfig) | bool | Territory\|Audio |
 | GetDesiredGuardCount | int32 | Territory\|Guards |
 | GetMaxGuardCount | int32 | Territory\|Guards (unique loaded spawn-point count) |
 | GetPostCaptureGuardCount | int32 | Territory\|Guards |
@@ -554,6 +557,23 @@ Uses `PostEditChangeProperty` and `PostDuplicate` to maintain stable GUIDs acros
 |---|---|
 | OnTerritoryRegistered | (ATerritoryVolume*, bool bWasUnregistered) |
 | OnTerritoryUnregistered | (ATerritoryVolume*, bool bWasUnregistered) |
+
+---
+
+## UTerritoryMusicSubsystem
+
+Client-cosmetic GameInstance adapter for Narrative Music. It selects the most-specific configured
+Place, District, or City state row and never changes authoritative Territory gameplay.
+
+| Function | Type | Returns | Description |
+|---|---|---|---|
+| RefreshNow | BlueprintCosmetic | void | Re-evaluate the explicit local listener, state effects, and Narrative music rule |
+| GetObservedTerritory | Pure, Cosmetic | ATerritoryVolume* | Most-specific Territory containing the listener |
+| GetMusicTerritory | Pure, Cosmetic | ATerritoryVolume* | Territory supplying the active music rule; may be a parent |
+| GetAppliedMusicTheme | Pure, Cosmetic | FGameplayTag | Last Territory theme successfully selected or awaiting set load |
+
+The subsystem is not created on a dedicated server. See
+[27_Narrative_Music_and_State_Audio.md](27_Narrative_Music_and_State_Audio.md).
 
 ---
 
@@ -1025,10 +1045,29 @@ of asking Blueprint to track transient spawned NPCs.
 | TargetTerritory | FGameplayTag | Required Place watched by the task |
 | AttackingFaction | FGameplayTag | Optional exact faction filter |
 | ScenarioID | FName | Optional Story Pursuit / chase filter |
-| Objective | ETerritoryAssaultTaskObjective | Repel, takeover, kills, activation, final fight, or escape |
+| Objective | ETerritoryAssaultTaskObjective | Repel, takeover, kills, activation, warning, recapture countdown, boss/chase branches, withdrawal, resolution, or cancellation |
 
 `KillAttackers` uses inherited `RequiredQuantity`. The inherited Narrative marker attaches to the
 live Territory actor and uses its configured fallback location while the actor is streamed out.
+
+## Narrative Community Tasks
+
+All classes extend Narrative's `UNarrativeTask`, use Narrative's server-authoritative progress,
+and expose a BlueprintPure preview that never mutates gameplay.
+
+| Class | Main properties | Authority observed |
+|---|---|---|
+| `UTerritoryCharacterActionTask` | Subject Provider, Objective, Count Initial State | `ACharacter`, `ANarrativeCharacter`, `UNarrativeCharacterMovement` |
+| `UTerritoryGameplayStateTask` | Subject Provider, Objective, Required Tags, Attribute, Threshold | subject `UAbilitySystemComponent` |
+| `UTerritoryCombatProgressTask` | Subject/Counterparty Providers, Objective, Effect Tags | Narrative ASC damage/heal/death delegates |
+| `UTerritoryAIObservationTask` | Target/Destination Providers, Objective, Goal/Activity Class, Distance | Narrative activities/goals, AI Perception, vehicle possession, attack tokens |
+
+`UTerritoryCharacterActionTask` covers 19 discrete movement and traversal actions. Narrative's
+built-in Move task remains the distance authority. `UTerritoryGameplayStateTask` adds multi-tag,
+tag-removal, and attribute-threshold objectives beyond Narrative's single-tag wait task.
+`UTerritoryCombatProgressTask` counts Narrative damage, healing, hits, death, and revive with
+optional effect/actor filters. `UTerritoryAIObservationTask` observes AI story state but never adds
+a goal or runs an activity. See [Community Narrative Quest Tasks](30_Community_Narrative_Tasks.md).
 
 ---
 
@@ -1191,7 +1230,7 @@ driver. Runtime vehicle/pawn pointers are not part of `FTerritoryAssaultRecord`.
 period, damaged-car abandonment threshold, mission-traffic activation, and traffic-count
 override. `ChaseDistanceLost` is terminal; `bStoryTargetAbandonedVehicle` is non-terminal and
 keeps the finite target active for the on-foot final fight. See
-[22_Road_Missions.md](22_Road_Missions.md).
+[23_Road_Missions.md](23_Road_Missions.md).
 
 Adaptive force scaling always writes its optional additive magnitude through Narrative Pro's
 `SetByCaller.AttackDamage`; the old configurable `PowerScalingMagnitudeTag` was removed.
@@ -1302,13 +1341,32 @@ See [17_Counterattack_System.md](17_Counterattack_System.md) for lifecycle and c
 
 ### FTerritoryStateConfig
 
-Per-state configuration for territory transitions. Designer-authored via `StateConfigs` TMap on ATerritoryVolume.
+Per-state configuration for transitions and local presentation. Designer-authored through the
+`StateConfigs` map on the Territory Definition and cloned into its live actor.
 
 | Field | Type | Description |
 |-------|------|-------------|
+| Audio | FTerritoryStateAudioConfig | Optional Narrative Music theme/set and local transition cues |
+| StealthProfileOverride | UTerritoryStealthProfile* | Optional state-specific stealth rules |
 | EntryConditions | TArray<UNarrativeCondition*> | Conditions that must pass before entering this state |
 | EntryEvents | TArray<UNarrativeEvent*> | Events fired when entering this state |
+| ExitConditions | TArray<UNarrativeCondition*> | Conditions that must pass before leaving this state |
 | ExitEvents | TArray<UNarrativeEvent*> | Events fired when leaving this state |
+
+### FTerritoryStateAudioConfig
+
+| Field | Type | Description |
+|---|---|---|
+| bOverrideNarrativeMusic | bool | Makes this state row a candidate for local Narrative music |
+| MusicSetOverride | TSoftObjectPtr<UTaggedMusicSet> | Optional location/state-specific Narrative music library |
+| MusicTheme | FGameplayTag | Exact `Music.*` theme selected from that set |
+| bImmediateThemeChange | bool | Bypasses authored track fade for sudden transitions |
+| StateEnteredSound | TSoftObjectPtr<USoundBase> | Local 2D cue when this state begins |
+| StateExitedSound | TSoftObjectPtr<USoundBase> | Local 2D cue when this state ends |
+| bPlayEnteredSoundOnPlayerArrival | bool | Also replay the Enter cue on physical arrival |
+| bPlayExitedSoundOnPlayerDeparture | bool | Also replay the Exit cue on physical departure |
+| StateEffectVolume | float | State-cue volume multiplier, 0–4 |
+| StateEffectPitch | float | State-cue pitch multiplier, 0.25–4 |
 
 ### FTerritoryTransitionContext
 

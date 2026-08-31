@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Core/TerritoryAudioTypes.h"
 #include "TerritoryTypes.generated.h"
 
 class UTerritoryStealthProfile;
@@ -433,6 +434,15 @@ USTRUCT(BlueprintType)
 struct FTerritoryStateConfig
 {
 	GENERATED_BODY()
+
+	/**
+	 * Local music and one-shot effects for this state. Narrative Music owns the
+	 * soundtrack; this row only selects its tagged set/theme for a player inside.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Audio",
+		meta=(DisplayName="Narrative Music And State Effects",
+			ToolTip="Optional local audio for this state. Easy example: Contested selects Music.Combat and plays an alarm; Claimed selects Music.Ambient and plays a short victory cue. Empty keeps the parent Territory or current world music."))
+	FTerritoryStateAudioConfig Audio;
 
 	/**
 	 * Optional stealth policy for this state. Empty uses the Territory Definition's

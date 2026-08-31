@@ -24,69 +24,75 @@ The numbered documents below are the advanced reference.
 - Narrative attitudes collapse multiple friendly treaty types to the same attitude when treaty metadata is rebuilt from GameState alone; WorldState/SavableData restore the richer saved metadata directly.
 - Counterattacks require a `UTerritoryCounterAttackProfile`, at least one typed approach with a valid navigation route, and Narrative NPC definitions whose class derives from `ATerritoryAssaultCharacter`, uses a Narrative NPC controller, and auto-possesses spawned actors. Offscreen capture simulation is intentionally disabled.
 
-## Table of Contents
+## Numbered learning path
 
-- [Easy Complete Guide](00_Easy_Complete_Guide.md) — community-facing source of truth with simple examples
+The chapter number is also the recommended reading order. Every number is unique; historical
+audits are kept outside this learning path so they cannot be mistaken for current setup guidance.
 
-1. [Quick Start](01_Quick_Start.md) — 5-minute setup guide
-2. [Interfaces](02_Interfaces.md) — Interface contracts, real examples, multi-domain usage
-3. [Core Actors](03_Core_Actors.md) — TerritoryVolume, City, District, Property, GuardSpawnPoint
-4. [Subsystems](04_Subsystems.md) — Registry, Control, Economy, Diplomacy, Combat
-5. [Guard System](05_Guard_System.md) — Guard spawning, patrol routes, reserves, BT integration
-6. [Narrative Pro Integration](06_Narrative_Integration.md) — Factions, GAS, Tales, Save, Navigation
-7. [Economy System](07_Economy_System.md) — Income, transactions, upgrades, and Narrative currency bridge
-8. [Diplomacy System](08_Diplomacy_System.md) — Treaties, wars, reputation
-9. [Map & Navigation](09_Map_Navigation.md) — Markers, territory outline drawing
-10. [Save/Load](10_Save_Load.md) — Savable actors, WorldState, SavableData
-11. [Debug System](11_Debug_System.md) — category-gated logs, five visual overlays, exact reports, DebugWidget, PIE tips
-12. [Blueprint Reference](12_Blueprint_Reference.md) — All BlueprintCallable/Pure/Assignable
-13. [Multiplayer Guide](13_Multiplayer.md) — Authority, replication, client behavior
-14. [API Reference](14_API_Reference.md) — Complete C++ function signatures
-15. [AI Integration](15_AI_Integration.md) — CombatDirector, BT tasks, Tales integration
-16. [District Management](16_District_Management.md) — In-world management UI, guard purchasing, POI markers
-17. [Counterattack System](17_Counterattack_System.md) — Deterministic scheduling, proximity activation, finite Narrative NPC forces
-18. [Operations UI](18_Operations_UI.md) — Narrative CommonUI district dashboard, filters, guards, finance, and threats
-19. [Garrison Command Flow](19_Garrison_Command_Flow.md) — Complete capture, staffing, economy, replication, save, and UI lifecycle
-20. [Resource Production](20_Resource_Production.md) — Modular daily inputs/outputs, Narrative item storage, crafting bridge, save, replication, and UI
-21. [Territory Definition Assets](21_Definition_Assets.md) — One modular City/District/Place authoring source, hierarchy builder, migration, and validation
-22. [Stealth Infiltration](22_Stealth_Infiltration.md) — Narrative stealth rating, evidence, investigation, quest rules, multi-floor behavior, and exposure-driven diplomacy
-23. [Hierarchy, Availability, and Unlocks](Hierarchy_Availability_and_Unlocks.md) — City/District/Place authority, bottom-up control, and Narrative unlock transactions
-24. [CI Artifacts](24_CI_Artifacts.md) — Build separate Win64 plugin artifacts with Unreal 5.7 and 5.8
-25. [Current Remediation Report](REMEDIATION_2026-08-24.md) — Resolved findings, migrations, live MCP evidence, and remaining external gates
-26. [Stabilization Re-audit](STABILIZATION_REAUDIT_2026-08-25.md) — Runtime/editor/Narrative integration findings, guard and assault fixes, UI redesign, release gate, and product roadmap
-27. [Garrison Command Reaudit](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md) — Root causes, implemented fixes, MCP evidence, and remaining release gates
-28. [Earlier Deep Reaudit](DEEP_REAUDIT_2026-07-30.md) — Broader confirmed fixes and MCP findings
-29. [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — Subclassing patterns, Super-call requirements
-30. [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — Step-by-step Blueprint configuration
+| Chapter | Guide | Purpose |
+|---:|---|---|
+| 00 | [Easy Complete Guide](00_Easy_Complete_Guide.md) | Plain-English source of truth and Castle Hill examples |
+| 01 | [Quick Start](01_Quick_Start.md) | Place, configure, and capture a Territory in five minutes |
+| 02 | [Interfaces](02_Interfaces.md) | Reusable ownership, economy, and event contracts |
+| 03 | [Core Actors](03_Core_Actors.md) | City, District, Place, guards, capture, and management actors |
+| 04 | [Subsystems](04_Subsystems.md) | Registry, control, economy, diplomacy, combat, and queries |
+| 05 | [Guard System](05_Guard_System.md) | Spawn posts, patrols, reserves, collision, and behavior |
+| 06 | [Narrative Pro Integration](06_Narrative_Integration.md) | Factions, Tales, GAS, save, AI, navigation, UI, and vendor boundary |
+| 07 | [Economy System](07_Economy_System.md) | Currency, transactions, upgrades, and Narrative inventory |
+| 08 | [Diplomacy System](08_Diplomacy_System.md) | War, peace, alliance, reputation, attitude, and dialogue |
+| 09 | [Map and Navigation](09_Map_Navigation.md) | POIs, compass, map markers, tracking, and outlines |
+| 10 | [Save and Load](10_Save_Load.md) | Stable identities, WorldState, SavableData, and late join |
+| 11 | [Debug System](11_Debug_System.md) | Logs, visual overlays, reports, commands, and PIE diagnosis |
+| 12 | [Blueprint Reference](12_Blueprint_Reference.md) | Blueprint functions, properties, delegates, events, and conditions |
+| 13 | [Multiplayer Guide](13_Multiplayer.md) | Server authority, replication, ownership, and clients |
+| 14 | [C++ API Reference](14_API_Reference.md) | Complete native symbol catalog |
+| 15 | [AI Integration](15_AI_Integration.md) | Combat direction, attack tokens, goals, patrols, and Tales |
+| 16 | [District Management](16_District_Management.md) | In-world access point, actions, perks, and guard purchasing |
+| 17 | [Counterattack System](17_Counterattack_System.md) | Scheduling, staging, finite waves, capture goal, and vehicles |
+| 18 | [Operations UI](18_Operations_UI.md) | Command Center, intelligence, notifications, lists, and controls |
+| 19 | [Garrison Command Flow](19_Garrison_Command_Flow.md) | Capture-to-staffing lifecycle and management authority |
+| 20 | [Resource Production](20_Resource_Production.md) | Inputs, outputs, cycles, inventory, upgrades, and notifications |
+| 21 | [Territory Definition Assets](21_Definition_Assets.md) | One modular authoring source per City, District, and Place |
+| 22 | [Hierarchy, Availability, and Unlocks](22_Hierarchy_Availability_and_Unlocks.md) | Bottom-up control and top-down availability rules |
+| 23 | [Road Missions](23_Road_Missions.md) | ZoneGraph roads, reinforcement arrivals, traffic, and chases |
+| 24 | [Stealth Infiltration](24_Stealth_Infiltration.md) | Evidence, investigation, multi-floor stealth, and escalation |
+| 25 | [Disguise and Double-Agent Missions](25_Disguise_and_Double_Agent_Missions.md) | Clothing identity, checkpoints, exposure, and diplomacy safety |
+| 26 | [Narrative Abilities, Skills, and Territory](26_Narrative_Abilities_Skills_and_Territory.md) | Existing abilities, capability growth, damage, and integration choices |
+| 27 | [Narrative Music and State Audio](27_Narrative_Music_and_State_Audio.md) | State music, cues, hierarchy fallback, and multiplayer playback |
+| 28 | [Story Outcome Preview](28_Story_Outcome_Preview.md) | Read-only scenario summaries generated from Definitions |
+| 29 | [Territory Narrative Quest Tasks](29_Narrative_Quest_Tasks.md) | Capture, state, garrison, assault, and disguise tasks |
+| 30 | [Community Narrative Quest Tasks](30_Community_Narrative_Tasks.md) | Boss, chase, movement, GAS, combat, and AI task library |
+| 31 | [CI Artifacts](31_CI_Artifacts.md) | Unreal 5.7/5.8 self-hosted builds and downloadable artifacts |
 
-## Document Index
+## Choose by role
 
-| Doc | Audience | What You'll Learn |
-|---|---|---|
-| Quick Start | All | Place territory, assign faction, capture in PIE |
-| Interfaces | C++/BP Devs | How to implement ITerritoryOwnershipInterface on ANY actor |
-| Core Actors | Level Designers | Configure City/District/Property hierarchy |
-| Subsystems | Programmers | Query and mutate territory state from code |
-| Guard System | AI Designers | Spawn points, patrol routes, reserve guards |
-| Narrative Integration | All | How Territory extends Narrative without modifying it |
-| Economy | Game Designers | Narrative currency payouts, item-resource recipes, production cycles, and property upgrades |
-| Diplomacy | Game Designers | War/peace/alliance/non-aggression treaties with Narrative attitudes |
-| Map & Navigation | UI Designers | Map markers, ownership colors, outline painting |
-| Save/Load | Programmers | Narrative save adapter, stable GUIDs, WorldState |
-| Garrison Command Flow | All | End-to-end authority, capture policy, staffing transaction, P&L, replication, migration, and validation |
-| Debug System | All | Enable debug in Project Settings, read output |
-| Blueprint Reference | BP Devs | Every Blueprint-exposed function, property, delegate |
-| Multiplayer | Programmers | Server authority, client replication, known limits |
-| API Reference | C++ Devs | Complete function signatures with return types |
-| AI Integration | AI Designers | CombatDirector, BT tasks, Tales events/conditions |
-| District Management | Game/UI Designers | In-world UI, guard purchasing, POI markers |
-| Counterattack System | AI/Game Designers | Configure deterministic physical counterattacks |
-| Operations UI | UI/Game Designers | Build Narrative CommonUI operations, guard, finance, and threat screens |
-| Territory Definition Assets | All | Configure, duplicate, migrate, synchronize, and validate complete hierarchies |
-| Stealth Infiltration | All | Configure Narrative-driven evidence, investigation, quest overrides, and exposure-gated conflict |
-| Hierarchy, Availability, and Unlocks | All | Understand layer ownership, bottom-up control, locked availability, and unlock cascade outcomes |
-| CI Artifacts | Maintainers | Configure self-hosted UE 5.7/5.8 runners and download compiled Win64 plugin packages |
-| Current Remediation Report | Maintainers | Current defect status, authority impact, migrations, and verification evidence |
-| Deep Reaudit | Maintainers | Findings, ownership, migrations, and verification evidence |
-| Blueprint Extension Guide | C++/BP Devs | Subclassing patterns, Super-call requirements |
-| Blueprint Setup Tutorial | BP Devs | Step-by-step Blueprint configuration |
+- **New community developer:** 00, 01, 06, 21, 22, 29, then 30.
+- **Level or mission designer:** 03, 05, 17, 21–30.
+- **AI/combat designer:** 05, 08, 15, 17, 23–26, and 30.
+- **UI designer:** 09, 16, 18, 27–30.
+- **Blueprint developer:** 02, 04, 12, plus the extension/setup appendices below.
+- **C++ or multiplayer developer:** 02, 04, 10, 13, 14, and 31.
+
+## Appendices
+
+- [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — safe subclassing and Super-call rules.
+- [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — detailed Blueprint setup walkthrough.
+- [Story Capture and Combat Staging](StoryCaptureAndCombatStaging.md) — authored owner handover and staged-fight patterns.
+- [Remaining Work and Roadmap](ROADMAP_AND_REMAINING.md) — current release gates, engineering debt, and ranked gameplay ideas.
+- [Changelog](CHANGELOG.md) — chronological implementation history.
+
+## Release evidence and historical audits
+
+These reports explain what was found and tested on their stated dates. Use the numbered guides
+above for current setup; use reports for traceability.
+
+- [Vision and complete re-audit — 2026-08-25](VISION_AND_COMPLETE_REAUDIT_2026-08-25.md)
+- [Stabilization re-audit — 2026-08-25](STABILIZATION_REAUDIT_2026-08-25.md)
+- [Current remediation evidence — 2026-08-24](REMEDIATION_2026-08-24.md)
+- [Audit summary — 2026-08-09](AUDIT_SUMMARY_2026-08-09.md)
+- [Cascade audit — 2026-08-09](CASCADE_AUDIT_2026-08-09.md)
+- [Deep re-audit — 2026-08-09](DEEP_REAUDIT_2026-08-09.md)
+- [Final re-audit — 2026-08-09](FINAL_REAUDIT_2026-08-09.md)
+- [Release gates — 2026-08-09](RELEASE_GATES_2026-08-09.md)
+- [Garrison Command re-audit — 2026-08-06](DEEP_REAUDIT_2026-08-06_GARRISON_COMMAND.md)
+- [Earlier deep re-audit — 2026-07-30](DEEP_REAUDIT_2026-07-30.md)

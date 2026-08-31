@@ -64,6 +64,8 @@ namespace
 		const FTerritoryStateConfig& Template, ATerritoryVolume* Territory)
 	{
 		FTerritoryStateConfig Result;
+		Result.Audio = Template.Audio;
+		Result.StealthProfileOverride = Template.StealthProfileOverride;
 		Result.GrantedCommandCapabilities = Template.GrantedCommandCapabilities;
 		Result.EntryConditions = CloneNarrativeArrayForTerritory(
 			Template.EntryConditions, Territory);
@@ -1183,6 +1185,24 @@ UTerritoryStealthProfile* ATerritoryVolume::GetActiveStealthProfile() const
 		}
 	}
 	return TerritoryDefinition ? TerritoryDefinition->DefaultStealthProfile : nullptr;
+}
+
+bool ATerritoryVolume::GetActiveTerritoryAudioConfig(
+	FTerritoryStateAudioConfig& OutConfig) const
+{
+	// Availability is presented before political control everywhere else in the
+	// framework. A locally or hierarchically unavailable Territory therefore
+	// selects the Locked row without reviving the removed legacy Locked state.
+	const ETerritoryState AudioState = IsAvailableForGameplay()
+		? OwnershipData.State : ETerritoryState::Locked;
+	if (const FTerritoryStateConfig* Config = GetStateConfigs().Find(AudioState))
+	{
+		OutConfig = Config->Audio;
+		return true;
+	}
+
+	OutConfig = FTerritoryStateAudioConfig();
+	return false;
 }
 
 void ATerritoryVolume::ReconcileStoryBoundsContesters()

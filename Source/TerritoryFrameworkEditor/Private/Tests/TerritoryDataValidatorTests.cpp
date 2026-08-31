@@ -15,6 +15,7 @@
 #include "Items/NarrativeItem.h"
 #include "Misc/DataValidation.h"
 #include "Misc/PackageName.h"
+#include "Music/TaggedMusicSet.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectNPCDefinitionIdentityRegression,
@@ -330,6 +331,41 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		Validator->ValidateLoadedAsset_Implementation(
 			PlaceAssetData, Place, ValidPlaceContext),
 		EDataValidationResult::Valid);
+
+	FTerritoryStateAudioConfig& PlaceAudio = Place->StateConfigs.FindChecked(
+		ETerritoryState::Contested).Audio;
+	PlaceAudio.bOverrideNarrativeMusic = true;
+	FDataValidationContext MissingMusicThemeContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A music override without a theme is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			PlaceAssetData, Place, MissingMusicThemeContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("A missing Territory music theme emits an error"),
+		MissingMusicThemeContext.GetNumErrors() > 0u);
+
+	PlaceAudio.MusicTheme = FGameplayTag::RequestGameplayTag(
+		TEXT("Music.Combat"), false);
+	PlaceAudio.StateEffectVolume = 5.f;
+	FDataValidationContext InvalidStateEffectContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("An out-of-range Territory state effect is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			PlaceAssetData, Place, InvalidStateEffectContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("An invalid Territory state effect emits an error"),
+		InvalidStateEffectContext.GetNumErrors() > 0u);
+	PlaceAudio.StateEffectVolume = 1.f;
+	PlaceAudio.MusicSetOverride = NewObject<UTaggedMusicSet>(Place);
+	FDataValidationContext MissingMusicTrackContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A Tagged Music Set without the selected theme is rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			PlaceAssetData, Place, MissingMusicTrackContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("A missing Tagged Music Set theme row emits an error"),
+		MissingMusicTrackContext.GetNumErrors() > 0u);
+	PlaceAudio = FTerritoryStateAudioConfig();
 
 	EmbeddedPost.ReserveTotalRetryLimit = 0;
 	FDataValidationContext InvalidEmbeddedPostContext(

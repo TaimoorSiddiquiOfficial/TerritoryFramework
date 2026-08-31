@@ -1,0 +1,139 @@
+# Territory Framework — Remaining Work and Roadmap
+
+> **Reviewed:** 2026-08-31
+> **Purpose:** one current list of release gates, engineering debt, and possible future features.
+> Historical audit reports are evidence, not the current task list.
+
+## What is complete in this branch
+
+- City, District, and Place authoring is Definition-first. A Place owns physical gameplay;
+  Districts and Cities aggregate their children and provide higher-level policy.
+- Territory capture, guards, patrols, diplomacy, counterattacks, production, UI, POIs,
+  stealth, disguise, roads, music, save data, and Narrative Tales adapters use the existing
+  Narrative Pro authorities instead of replacing them.
+- Story Outcome Preview explains authored consequences without running conditions, rolling
+  chance, or changing the asset.
+- The Narrative Task library covers Territory state/capture, counterattacks, disguise, boss
+  and chase outcomes, movement, GAS state, combat progress, and AI observation.
+- The documentation learning path is uniquely numbered from 00 to 31. Reports and tutorials
+  are separate appendices.
+
+## Release gates still open
+
+These are verification jobs, not permission to invent a second gameplay authority.
+
+1. **Final current-source verification** — build `TDAEditor` and `TDA`, run the complete
+   `TerritoryFramework.*` automation suite, validate the task assets, and run the
+   `HopDistrictTest` PIE smoke after the Unreal Editor is closed.
+2. **Real multiplayer session** — use a genuine dedicated server with two connected clients.
+   Capture a Place, recruit one guard, patrol, launch a counterattack, kill the guard and
+   attackers, and verify exact-once capture/XP results on every client.
+3. **Live save slot** — save while a finite assault has living NPCs, restart, load the same
+   slot, and verify the remaining force is reconstructed once. Native archive tests already
+   cover the durable data contract; this gate covers the project's actual save-slot setup.
+4. **World Partition map** — stream one Place, its posts, and an active assault out and back
+   in. `HopDistrictTest` is not World Partition-enabled, so it cannot prove this gate.
+5. **Packaged server/cook** — repeat packaging after the project and vendor missing-content,
+   shader, and headless Narrative editor-module failures are repaired. A Server target also
+   requires a source engine or an Unreal installation that includes Server support.
+6. **Authored road playtest** — drive a faction vehicle from the road-guide start to its Place,
+   then test reverse boss pursuit, blocked traffic, abandonment, cleanup, player carjacking,
+   and the final on-foot fight with real navigation and camera framing.
+
+## Engineering improvements after the gates
+
+| Priority | Improvement | Why it matters |
+|---|---|---|
+| High | Replace low-level Blueprint state/progress setters with structured control requests | Prevents designers from creating half-finished transitions |
+| High | Add a one-click Definition setup audit and hierarchy repair report | Makes community onboarding safer and faster |
+| High | Add patrol, guard-post, capture-bound, and assault-route visualizers | Shows physical mistakes before PIE |
+| Medium | Publish an explicit streamed global capture-progress read model | Lets a world map show unloaded Places without treating UI data as ownership |
+| Medium | Move large replicated histories to `FFastArraySerializer` | Reduces bandwidth in long campaigns |
+| Medium | Add automated accessibility and gamepad navigation checks for Command Center | Protects the compact UI as more controls are added |
+| Later | Persist optional live-NPC detail such as health/activity | Current finite-count reconstruction is safer; add detail only when truly needed |
+
+## Best next gameplay ideas
+
+### 1. Mission Recipe Definition
+
+A designer selects reusable ingredients such as **Scout Place**, **Disable Alarm**, **Defeat
+Captain**, **Capture Place**, and **Escape Pursuit**. The recipe generates or validates a
+Narrative Quest layout; Narrative Tales remains the quest authority.
+
+**Example:** Blacksmith requires espionage, one alarm sabotage, the foreman dialogue, a boss
+fight, then capture. The recipe warns if a required actor provider, task, event, or POI is absent.
+
+### 2. Faction Doctrine Profile
+
+Give each faction a recognizable strategy as well as a signature vehicle. A doctrine can select
+reinforcement size, preferred approach, aggression range, disguise checks, dialogue tone,
+music theme, and post-capture policy.
+
+**Example:** Bandits arrive quickly in light cars and flank. The Regime arrives slowly in armoured
+vehicles, establishes a roadblock, and sends an officer who can order a withdrawal.
+
+### 3. District Heat and Manhunt
+
+Heat is temporary pressure, not ownership or diplomacy. Witnesses, alarms, guard deaths, and
+failed disguises raise heat; hiding, bribery, changing clothes, or a Narrative quest lowers it.
+
+**Example:** Heroes are neutral with Bandits, but stealing a uniform raises local heat. Guards
+investigate the player without declaring a permanent faction war.
+
+### 4. Supply Lines
+
+Use controlled adjacent Places and road guides to derive whether production and reinforcements
+are supplied. Never transfer ownership offscreen; lack of supply changes capability only.
+
+**Example:** Capturing the Fuel Depot disables the Regime's vehicle wave at Blacksmith. Destroying
+one convoy delays the next wave; it does not magically capture either Place.
+
+### 5. Officer and Underboss Network
+
+Named officers provide a local perk, doctrine modifier, intel secret, or reinforcement route.
+They can be killed, captured, persuaded, or allowed to escape into a later chase.
+
+**Example:** Capturing the radio officer reveals two hidden Places. Letting the underboss escape
+makes the next District counterattack stronger but creates a tracked boss-chase quest.
+
+### 6. Post-capture Stabilization Choice
+
+After a Place is Claimed, let the player choose one short policy: guards, relief, propaganda,
+extraction, or local autonomy. Apply consequences through existing economy, diplomacy,
+production, perks, dialogue, and Narrative Events.
+
+**Example:** Relief reduces immediate funds but improves civilian reputation and production.
+Extraction gives funds now but increases unrest and the next counterattack chance.
+
+### 7. Intelligence Quality and False Reports
+
+Espionage should return a confidence level. Better scouts, nearby owned Places, captured officers,
+and faction reputation improve accuracy. Poor intelligence may show a range, never secretly alter
+the actual guard count.
+
+**Example:** “Two to five defenders; vehicle support possible” becomes “Three defenders, one
+reserve sedan, west-road approach” after the radio tower is controlled.
+
+### 8. Cooperative Territory Tasks
+
+Add observer-only Narrative Tasks for **all required players present**, **revive ally inside a
+Place**, **two objectives completed together**, and **escort player reaches extraction**.
+
+**Example:** one player disables the alarm on floor one while another rescues the owner on floor
+two. The Place becomes capturable only after both Narrative objectives complete.
+
+## Design rules for every future feature
+
+1. Narrative Pro stays authoritative for factions, quests, dialogue, inventory, GAS, AI,
+   vehicles, music, POIs, save orchestration, and difficulty.
+2. Territory Framework stays authoritative for availability, ownership, capture pressure,
+   garrisons, production, strategic assaults, and Territory read models.
+3. A Place owns physical actors and combat. A District owns Place policy and aggregated control.
+   A City owns District policy and aggregated control.
+4. Locked means unavailable. Claimed, Unclaimed, and Contested describe control only.
+5. Conditions observe, Events request one action, and Tasks observe progress. None should tick a
+   second version of the same system.
+6. AI ownership changes require physical participants. Strategic simulation may schedule and
+   inform, but it must not silently capture a Place.
+7. New community options need easy metadata, one small example, validation, automation coverage,
+   multiplayer authority notes, and a migration path.

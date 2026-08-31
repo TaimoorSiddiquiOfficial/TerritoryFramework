@@ -223,6 +223,12 @@ public:
 		meta=(DisplayName="Get Active Territory Stealth Profile"))
 	UTerritoryStealthProfile* GetActiveStealthProfile() const;
 
+	/** Resolves the Definition-owned audio row for effective availability/state. */
+	UFUNCTION(BlueprintPure, Category="Territory|Audio",
+		meta=(DisplayName="Get Active Territory Audio Config",
+			ToolTip="Returns this Territory's local Narrative Music and state-effect settings. Locked availability uses the Locked row; otherwise the current political state is used. False means the row is missing."))
+	bool GetActiveTerritoryAudioConfig(FTerritoryStateAudioConfig& OutConfig) const;
+
 	/** Internal/editor synchronization hook. OnConstruction applies the assigned asset automatically. */
 	bool ApplyTerritoryDefinition();
 
