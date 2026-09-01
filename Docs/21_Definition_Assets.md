@@ -100,9 +100,14 @@ from loading the Blacksmith's saved state. Never copy a stable GUID by hand.
 
 - `Story Capture From Bounds = true`: the complete multi-floor Place bounds can start contesting.
   Defeating all defenders may activate the configured story owner. A Narrative dialogue/event
-  performs the handover. Automatic capture-point progress is disabled.
+  performs the handover. Automatic capture-point progress is disabled and the editor immediately
+  clears that contradictory checkbox.
 - `Capture Point > Enabled = true`: the configured Blueprint provides physical progress for
   domination or multiplayer. Its target tag always comes from the Place asset.
+
+The Place Details panel shows one read-only **Active Capture Mode** line: Story Bounds, Physical
+Automatic, Manual Capture Point, or Explicit Story/Server. A physical point may remain enabled as
+a flag or interaction prop during Story Bounds mode, but it cannot also own automatic progress.
 
 These settings cannot create a second owner or progress value. They only configure adapters to
 the existing server-authoritative capture flow.

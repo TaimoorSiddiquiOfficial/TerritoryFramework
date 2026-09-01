@@ -36,6 +36,12 @@ Every task also inherits Narrative's normal settings:
 | Territory Counterattack / Chase | A durable counterattack or boss-chase record must reach an outcome | Repel the Bandit counterattack at Blacksmith |
 | Territory Disguise Mission | A disguise, checkpoint, cover, or double-agent outcome must occur | Enter the Bandit camp with an accepted Bandit uniform |
 
+Quest Cascade Recipes also generate an internal **Wait For Narrative Conditions** task whenever a
+State or Branch contains conditions. This adapter exists because current Narrative Pro Quest nodes
+do not evaluate their displayed Conditions array. Designers normally configure the recipe's
+friendly Conditions lists instead of adding this hidden task themselves. It uses Narrative's own
+condition evaluator and never creates another quest, condition, save, or multiplayer authority.
+
 The dedicated **Tasks: Territory Story** wrapper exposes detailed boss and chase branches such as
 boss defeated, target reaches the road exit, chase distance lost, final fight started, attackers
 withdrawn, and assault cancelled. Community movement, GAS, combat, and AI tasks are documented in

@@ -7,12 +7,17 @@
 | Property / Function | Meaning |
 |---|---|
 | `QuestName`, `QuestDescription` | Copied into the generated Narrative Quest |
+| `bTracked` | Initial Narrative Quest tracked state; tracked tasks may show their markers |
+| `QuestDialogue`, `QuestDialoguePlayParams`, `bResumeDialogueAfterLoad` | Normal Narrative linked-dialogue setup copied into the Quest |
 | `StartStateID` | Objective state used as Narrative's root state |
 | `States` | Objective, Success, and Failure state templates |
+| State `Conditions` | AND requirements shared by every route leaving that state |
 | `FTerritoryQuestCascadeState.Branches` | Alternative routes leaving one Objective state |
+| Branch `Conditions` | AND requirements for only that route |
 | `FTerritoryQuestCascadeBranch.Tasks` | Narrative tasks that must **all** complete on that route |
 | State/Branch `Events` | Inline Narrative Events copied onto the generated node |
 | `ValidateRecipe` | Pure validation report with errors and warnings |
+| `BuildMissionLogicSummary` | Structured counts, flow lines, validation, and runtime developer summary |
 | `BuildPlainTextPreview` | Easy-English, read-only graph summary |
 
 ### `UTerritoryQuestCascadeEditorLibrary`
@@ -25,6 +30,10 @@
 
 The recipe Details panel exposes the safe one-click workflow. See
 [Narrative Quest Cascade Recipes](32_Narrative_Quest_Cascade_Recipes.md).
+
+Generated State/Branch conditions are mirrored onto the Narrative nodes and enforced by a hidden
+`UTerritoryNarrativeConditionTask`. This adapter is required because the current Narrative Quest
+runtime does not evaluate Quest-node conditions, although Dialogue and Event conditions work.
 
 ## Operations UI
 

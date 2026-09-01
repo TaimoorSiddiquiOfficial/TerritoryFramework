@@ -20,6 +20,60 @@ namespace TerritoryQuestCascadeRecipe
 			return LOCTEXT("UnknownType", "Unknown");
 		}
 	}
+
+	void ValidateConditions(
+		const TArray<TObjectPtr<UNarrativeCondition>>& Conditions,
+		const FString& OwnerLabel,
+		const TFunctionRef<void(const FText&)>& Error)
+	{
+		for (int32 Index = 0; Index < Conditions.Num(); ++Index)
+		{
+			if (!IsValid(Conditions[Index]))
+			{
+				Error(FText::Format(LOCTEXT("EmptyCondition",
+					"Condition row {0} on {1} is empty."),
+					FText::AsNumber(Index), FText::FromString(OwnerLabel)));
+			}
+		}
+	}
+
+	void ValidateEvents(
+		const TArray<TObjectPtr<UNarrativeEvent>>& Events,
+		const FString& OwnerLabel,
+		const TFunctionRef<void(const FText&)>& Error)
+	{
+		for (int32 EventIndex = 0; EventIndex < Events.Num(); ++EventIndex)
+		{
+			const UNarrativeEvent* Event = Events[EventIndex];
+			if (!IsValid(Event))
+			{
+				Error(FText::Format(LOCTEXT("EmptyEvent",
+					"Event row {0} on {1} is empty."),
+					FText::AsNumber(EventIndex), FText::FromString(OwnerLabel)));
+				continue;
+			}
+			for (int32 ConditionIndex = 0;
+				ConditionIndex < Event->Conditions.Num(); ++ConditionIndex)
+			{
+				if (!IsValid(Event->Conditions[ConditionIndex]))
+				{
+					Error(FText::Format(LOCTEXT("EmptyEventCondition",
+						"Condition row {0} on event '{1}' on {2} is empty."),
+						FText::AsNumber(ConditionIndex),
+						FText::FromString(GetNameSafe(Event)),
+						FText::FromString(OwnerLabel)));
+				}
+			}
+		}
+	}
+
+	FString ConditionLabel(const UNarrativeCondition* Condition)
+	{
+		if (!Condition) return TEXT("EMPTY CONDITION");
+		const FString Display = const_cast<UNarrativeCondition*>(Condition)
+			->GetGraphDisplayText();
+		return Display.IsEmpty() ? GetNameSafe(Condition) : Display;
+	}
 }
 
 FTerritoryQuestCascadeValidation
@@ -39,6 +93,11 @@ UTerritoryQuestCascadeRecipe::ValidateRecipe() const
 	{
 		Warning(LOCTEXT("MissingQuestName",
 			"Quest Name is empty; the generated Narrative journal entry will have no friendly title."));
+	}
+	if (!QuestDialogue && bResumeDialogueAfterLoad)
+	{
+		Warning(LOCTEXT("ResumeWithoutDialogue",
+			"Resume Dialogue After Load is enabled, but no Quest Dialogue is assigned. Narrative has no linked conversation to resume."));
 	}
 	if (States.IsEmpty())
 	{
@@ -94,6 +153,13 @@ UTerritoryQuestCascadeRecipe::ValidateRecipe() const
 				"Terminal state '{0}' cannot have outgoing branches."),
 				FText::FromName(State.StateID)));
 		}
+		if (State.Type != ETerritoryQuestCascadeStateType::Objective
+			&& !State.Conditions.IsEmpty())
+		{
+			Warning(FText::Format(LOCTEXT("TerminalHasConditions",
+				"Terminal state '{0}' has departure conditions, but an ending has no outgoing route to gate. Move them to the branch that enters this ending."),
+				FText::FromName(State.StateID)));
+		}
 		if (State.Type == ETerritoryQuestCascadeStateType::Objective
 			&& State.Branches.IsEmpty())
 		{
@@ -101,6 +167,10 @@ UTerritoryQuestCascadeRecipe::ValidateRecipe() const
 				"Objective state '{0}' has no route forward, so the quest will stop there."),
 				FText::FromName(State.StateID)));
 		}
+		TerritoryQuestCascadeRecipe::ValidateConditions(State.Conditions,
+			FString::Printf(TEXT("state '%s'"), *State.StateID.ToString()), Error);
+		TerritoryQuestCascadeRecipe::ValidateEvents(State.Events,
+			FString::Printf(TEXT("state '%s'"), *State.StateID.ToString()), Error);
 
 		for (int32 BranchIndex = 0;
 			BranchIndex < State.Branches.Num(); ++BranchIndex)
@@ -127,12 +197,19 @@ UTerritoryQuestCascadeRecipe::ValidateRecipe() const
 					"Branch '{0}' has no Destination State ID."),
 					FText::FromName(Branch.BranchID)));
 			}
-			if (Branch.Tasks.IsEmpty())
+			const bool bHasAnyGateCondition =
+				!State.Conditions.IsEmpty() || !Branch.Conditions.IsEmpty();
+			if (Branch.Tasks.IsEmpty() && !bHasAnyGateCondition)
 			{
 				Error(FText::Format(LOCTEXT("BranchNoTasks",
-					"Branch '{0}' needs at least one Narrative Task. Empty Narrative branches complete immediately and are unsafe."),
+					"Branch '{0}' needs at least one Narrative Task or Condition. A completely empty Narrative branch completes immediately and is unsafe."),
 					FText::FromName(Branch.BranchID)));
 			}
+			TerritoryQuestCascadeRecipe::ValidateConditions(Branch.Conditions,
+				FString::Printf(TEXT("branch '%s'"), *Branch.BranchID.ToString()), Error);
+			TerritoryQuestCascadeRecipe::ValidateEvents(Branch.Events,
+				FString::Printf(TEXT("branch '%s'"), *Branch.BranchID.ToString()), Error);
+			bool bAllAuthoredTasksOptional = !Branch.Tasks.IsEmpty();
 			for (int32 TaskIndex = 0; TaskIndex < Branch.Tasks.Num(); ++TaskIndex)
 			{
 				const UNarrativeTask* Task = Branch.Tasks[TaskIndex];
@@ -148,6 +225,24 @@ UTerritoryQuestCascadeRecipe::ValidateRecipe() const
 						"Task row {0} on branch '{1}' has Required Quantity below 1."),
 						FText::AsNumber(TaskIndex), FText::FromName(Branch.BranchID)));
 				}
+				if (Task)
+				{
+					bAllAuthoredTasksOptional &= Task->bOptional;
+					if (Task->MarkerSettings.bAddNavigationMarker
+						&& !Task->MarkerSettings.MarkerClass)
+					{
+						Warning(FText::Format(LOCTEXT("MarkerWithoutClass",
+							"Task row {0} on branch '{1}' enables a navigation marker but has no Marker Class."),
+							FText::AsNumber(TaskIndex),
+							FText::FromName(Branch.BranchID)));
+					}
+				}
+			}
+			if (bAllAuthoredTasksOptional && !bHasAnyGateCondition)
+			{
+				Error(FText::Format(LOCTEXT("OnlyOptionalTasks",
+					"Branch '{0}' contains only Optional tasks and no conditions, so Narrative will complete it immediately. Add one required task or a condition."),
+					FText::FromName(Branch.BranchID)));
 			}
 		}
 	}
@@ -224,45 +319,131 @@ UTerritoryQuestCascadeRecipe::ValidateRecipe() const
 	return Result;
 }
 
-FString UTerritoryQuestCascadeRecipe::BuildPlainTextPreview() const
+FTerritoryQuestCascadeLogicSummary
+UTerritoryQuestCascadeRecipe::BuildMissionLogicSummary() const
 {
-	FString Preview = FString::Printf(
-		TEXT("NARRATIVE QUEST CASCADE (AUTHORING RECIPE)\n%s\n%s\nStart: %s\n\n"),
-		*QuestName.ToString(), *QuestDescription.ToString(),
-		*StartStateID.ToString());
+	FTerritoryQuestCascadeLogicSummary Summary;
+	const FTerritoryQuestCascadeValidation Validation = ValidateRecipe();
+	Summary.bValid = Validation.bValid;
+	Summary.Errors = Validation.Errors;
+	Summary.Warnings = Validation.Warnings;
+
 	for (const FTerritoryQuestCascadeState& State : States)
 	{
-		Preview += FString::Printf(TEXT("STATE %s [%s]\n%s\n"),
-			*State.StateID.ToString(),
-			*TerritoryQuestCascadeRecipe::StateTypeText(State.Type).ToString(),
-			*State.Description.ToString());
+		switch (State.Type)
+		{
+		case ETerritoryQuestCascadeStateType::Objective:
+			++Summary.ObjectiveStates;
+			break;
+		case ETerritoryQuestCascadeStateType::Success:
+			++Summary.SuccessEndings;
+			break;
+		case ETerritoryQuestCascadeStateType::Failure:
+			++Summary.FailureEndings;
+			break;
+		default:
+			break;
+		}
+		Summary.Conditions += State.Conditions.Num();
+		Summary.Events += State.Events.Num();
 		for (const FTerritoryQuestCascadeBranch& Branch : State.Branches)
 		{
-			Preview += FString::Printf(TEXT("  -> %s -> %s (%d task%s; ALL required)%s\n"),
+			++Summary.Routes;
+			Summary.PlayerTasks += Branch.Tasks.Num();
+			Summary.Conditions += Branch.Conditions.Num();
+			Summary.Events += Branch.Events.Num();
+			for (const UNarrativeEvent* Event : Branch.Events)
+			{
+				Summary.Conditions += Event ? Event->Conditions.Num() : 0;
+			}
+			for (const UNarrativeTask* Task : Branch.Tasks)
+			{
+				if (!Task) continue;
+				Summary.OptionalTasks += Task->bOptional ? 1 : 0;
+				Summary.HiddenTasks += Task->bHidden ? 1 : 0;
+				Summary.NavigationMarkerTasks +=
+					Task->MarkerSettings.bAddNavigationMarker ? 1 : 0;
+			}
+			Summary.FlowLines.Add(FString::Printf(
+				TEXT("%s -> %s -> %s | %d task(s), %d route condition(s)%s"),
+				*State.StateID.ToString(), *Branch.BranchID.ToString(),
+				*Branch.DestinationStateID.ToString(), Branch.Tasks.Num(),
+				State.Conditions.Num() + Branch.Conditions.Num(),
+				Branch.bHidden ? TEXT(" | hidden route") : TEXT("")));
+		}
+		for (const UNarrativeEvent* Event : State.Events)
+		{
+			Summary.Conditions += Event ? Event->Conditions.Num() : 0;
+		}
+	}
+
+	Summary.Headline = FString::Printf(
+		TEXT("%d objective state(s) • %d route(s) • %d player task(s) • %d condition(s) • %d event(s) • %d success / %d failure ending(s)"),
+		Summary.ObjectiveStates, Summary.Routes, Summary.PlayerTasks,
+		Summary.Conditions, Summary.Events, Summary.SuccessEndings,
+		Summary.FailureEndings);
+	return Summary;
+}
+
+FString UTerritoryQuestCascadeRecipe::BuildPlainTextPreview() const
+{
+	const FTerritoryQuestCascadeLogicSummary Summary = BuildMissionLogicSummary();
+	FString Preview = FString::Printf(
+		TEXT("NARRATIVE QUEST CASCADE (AUTHORING RECIPE)\n%s\n%s\nStart: %s\nTracked: %s\nQuest Dialogue: %s\nResume Dialogue After Load: %s\n%s\n\n"),
+		*QuestName.ToString(), *QuestDescription.ToString(),
+		*StartStateID.ToString(), bTracked ? TEXT("Yes") : TEXT("No"),
+		QuestDialogue ? *GetNameSafe(QuestDialogue.Get()) : TEXT("None"),
+		bResumeDialogueAfterLoad ? TEXT("Yes") : TEXT("No"),
+		*Summary.Headline);
+	for (const FTerritoryQuestCascadeState& State : States)
+	{
+		Preview += FString::Printf(TEXT("STATE %s [%s] | %d shared condition(s) | %d event(s)\n%s\n"),
+			*State.StateID.ToString(),
+			*TerritoryQuestCascadeRecipe::StateTypeText(State.Type).ToString(),
+			State.Conditions.Num(), State.Events.Num(),
+			*State.Description.ToString());
+		for (const UNarrativeCondition* Condition : State.Conditions)
+		{
+			Preview += FString::Printf(TEXT("     REQUIRE EVERY ROUTE: %s\n"),
+				*TerritoryQuestCascadeRecipe::ConditionLabel(Condition));
+		}
+		for (const FTerritoryQuestCascadeBranch& Branch : State.Branches)
+		{
+			Preview += FString::Printf(TEXT("  -> %s -> %s (%d task%s; ALL non-optional tasks required; %d route condition%s)%s\n"),
 				*Branch.BranchID.ToString(),
 				*Branch.DestinationStateID.ToString(), Branch.Tasks.Num(),
 				Branch.Tasks.Num() == 1 ? TEXT("") : TEXT("s"),
+				Branch.Conditions.Num(), Branch.Conditions.Num() == 1 ? TEXT("") : TEXT("s"),
 				Branch.bHidden ? TEXT(" [hidden]") : TEXT(""));
+			for (const UNarrativeCondition* Condition : Branch.Conditions)
+			{
+				Preview += FString::Printf(TEXT("     REQUIRE THIS ROUTE: %s\n"),
+					*TerritoryQuestCascadeRecipe::ConditionLabel(Condition));
+			}
 			for (const UNarrativeTask* Task : Branch.Tasks)
 			{
-				Preview += FString::Printf(TEXT("     - %s: %s\n"),
+				Preview += FString::Printf(TEXT("     - %s: %s | quantity %d%s%s%s\n"),
 					*GetNameSafe(Task), Task
 						? *Task->GetTaskDescription().ToString()
-						: TEXT("EMPTY TASK"));
+						: TEXT("EMPTY TASK"), Task ? Task->RequiredQuantity : 0,
+					Task && Task->bOptional ? TEXT(" | optional") : TEXT(""),
+					Task && Task->bHidden ? TEXT(" | hidden") : TEXT(""),
+					Task && Task->MarkerSettings.bAddNavigationMarker
+						? TEXT(" | navigation marker") : TEXT(""));
 			}
+			Preview += FString::Printf(TEXT("     EVENTS: %d\n"), Branch.Events.Num());
 		}
 		Preview += TEXT("\n");
 	}
 
-	const FTerritoryQuestCascadeValidation Validation = ValidateRecipe();
-	Preview += Validation.bValid
+	Preview += Summary.bValid
 		? TEXT("VALID: Ready to generate a Narrative Quest.\n")
 		: TEXT("INVALID: Fix the errors below before generation.\n");
-	for (const FText& Error : Validation.Errors)
+	for (const FText& Error : Summary.Errors)
 	{
 		Preview += TEXT("Error: ") + Error.ToString() + TEXT("\n");
 	}
-	for (const FText& Warning : Validation.Warnings)
+	for (const FText& Warning : Summary.Warnings)
 	{
 		Preview += TEXT("Warning: ") + Warning.ToString() + TEXT("\n");
 	}

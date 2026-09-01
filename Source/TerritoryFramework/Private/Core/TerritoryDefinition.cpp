@@ -326,6 +326,15 @@ void UTerritoryDefinition::PostEditChangeProperty(
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	EnsureCompleteStateConfigs(this);
+	// A Place must have one capture authority. Story bounds cover multi-floor
+	// missions; physical automatic progress covers domination/multiplayer. Keep
+	// authored assets unambiguous instead of allowing a checked option that the
+	// runtime then has to ignore.
+	if (IsA<UTerritoryPlaceDefinition>() && bStoryCaptureFromBounds
+		&& CapturePoint.bAutomaticCapture)
+	{
+		CapturePoint.bAutomaticCapture = false;
+	}
 	if (!StableTerritoryGUID.IsValid())
 	{
 		StableTerritoryGUID = FGuid::NewGuid();

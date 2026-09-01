@@ -1,0 +1,76 @@
+#include "Tales/TerritoryNarrativeConditionTask.h"
+
+#include "Tales/NarrativeCondition.h"
+#include "Tales/NarrativeNodeBase.h"
+
+#define LOCTEXT_NAMESPACE "TerritoryNarrativeConditionTask"
+
+UTerritoryNarrativeConditionTask::UTerritoryNarrativeConditionTask()
+{
+	RequiredQuantity = 1;
+	bOptional = false;
+	bHidden = true;
+	TickInterval = EvaluationInterval;
+	MarkerSettings.bAddNavigationMarker = false;
+}
+
+void UTerritoryNarrativeConditionTask::BeginTask()
+{
+	bHasLatched = false;
+	TickInterval = FMath::Max(0.05f, EvaluationInterval);
+	ConditionProbe = NewObject<UNarrativeNodeBase>(this, NAME_None, RF_Transient);
+	if (ConditionProbe)
+	{
+		ConditionProbe->Conditions.Reset();
+		for (UNarrativeCondition* Condition : Conditions)
+		{
+			if (IsValid(Condition))
+			{
+				ConditionProbe->Conditions.Add(Condition);
+			}
+		}
+	}
+	Super::BeginTask();
+}
+
+void UTerritoryNarrativeConditionTask::TickTask_Implementation()
+{
+	const bool bPassed = bHasLatched || AreGateConditionsMet();
+	if (bPassed && bLatchOnceSatisfied)
+	{
+		bHasLatched = true;
+	}
+	SetProgress(bPassed ? RequiredQuantity : 0);
+}
+
+void UTerritoryNarrativeConditionTask::EndTask()
+{
+	ConditionProbe = nullptr;
+	Super::EndTask();
+}
+
+bool UTerritoryNarrativeConditionTask::AreGateConditionsMet() const
+{
+	if (Conditions.IsEmpty() || !IsValid(ConditionProbe)
+		|| !IsValid(OwningComp))
+	{
+		return false;
+	}
+	return ConditionProbe->AreConditionsMet(
+		OwningPawn, OwningController, OwningComp);
+}
+
+FText UTerritoryNarrativeConditionTask::GetTaskDescription_Implementation() const
+{
+	return RequirementDescription.IsEmpty()
+		? LOCTEXT("DefaultRequirement", "Meet the mission requirements")
+		: RequirementDescription;
+}
+
+FText UTerritoryNarrativeConditionTask::GetTaskNodeDescription_Implementation() const
+{
+	return FText::Format(LOCTEXT("NodeDescription", "Wait for {0} condition(s)"),
+		FText::AsNumber(Conditions.Num()));
+}
+
+#undef LOCTEXT_NAMESPACE

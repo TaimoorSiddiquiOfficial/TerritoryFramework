@@ -368,10 +368,13 @@ public:
 		meta=(ToolTip="Optional reusable stealth policy. Empty preserves legacy story bounds: entering immediately starts Contested. Easy example: assign a Rescue Mission profile so the player can enter Claimed enemy bounds while undetected."))
 	TObjectPtr<UTerritoryStealthProfile> DefaultStealthProfile;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Capture")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Capture",
+		meta=(DisplayName="Story Capture From Whole Place Bounds",
+			ToolTip="Story mode uses the full multi-floor Place volume for contesting and explicit owner handover. Enabling this automatically turns off physical Capture Point progress, because both modes must never compete for capture authority."))
 	bool bStoryCaptureFromBounds = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Capture")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Capture",
+		meta=(ToolTip="Optional physical point, flag, or interaction actor. Automatic progress is for domination/multiplayer mode and is automatically turned off when Story Capture From Whole Place Bounds is enabled."))
 	FTerritoryCapturePointTemplate CapturePoint;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards")

@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased — 2026-09-02 (Mission recipes and functional Quest conditions)
+
+- Completed the Territory Narrative Quest Cascade authoring model with Narrative tracked state,
+  linked Quest Dialogue, Dialogue Play Params, resume-after-load, State Conditions, Branch
+  Conditions, inherited task options, and stronger validation for unsafe instant routes, empty
+  templates, terminal requirements, and invalid markers.
+- Added a live read-only Mission Logic panel and Blueprint summary that explain every state,
+  alternative route, AND requirement, task, condition, event, marker, and ending in easy English.
+- Added a functional hidden Narrative Condition task during generation. Current Narrative Pro
+  displays Quest-node conditions but does not evaluate them; the adapter calls Narrative's own
+  evaluator so `Not`, target filtering, and party policy work without vendor edits or a second
+  Quest runtime.
+- Made Story Bounds and Physical Automatic capture mutually exclusive in Place authoring and added
+  an Active Capture Mode explanation, eliminating a checked option that runtime intentionally had
+  to ignore.
+- Rebuilt the UE 5.7 Editor and Game Development targets and passed all 187
+  `TerritoryFramework.*` automation tests. The final log contains no failed test, fatal error,
+  Accessed None, or Blueprint Runtime Error.
+
 ## Unreleased — 2026-09-01 (Authority boundaries and complete system re-audit)
 
 - Added a dedicated **Territory Framework** Content Browser Add/New category modeled on

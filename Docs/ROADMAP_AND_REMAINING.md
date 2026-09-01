@@ -16,8 +16,9 @@
 - The Narrative Task library covers Territory state/capture, counterattacks, disguise, boss
   and chase outcomes, movement, GAS state, combat progress, and AI observation.
 - Reusable Quest Cascade Recipe Data Assets generate safe, normal Narrative Quest graphs with
-  ordered states, alternative branches, multiple AND tasks, events, validation, automatic layout,
-  compilation, and overwrite protection.
+  ordered states, alternative branches, multiple AND tasks, functional state/route conditions,
+  Quest Dialogue/tracking options, events, a live Mission Logic report, validation, automatic
+  layout, compilation, and overwrite protection.
 - Story Outcome Preview is registered once on the base Definition and inherited once by Place,
   District, and City; the previous duplicated panel has a regression test.
 - Ownership, property upgrades, economy restore, and WorldState projections no longer expose
@@ -26,13 +27,13 @@
   kills never choose an arbitrary first player in multiplayer.
 - The Blacksmith visible PIE fixture has completed defender death, owner spawn, dialogue,
   faction handover, and its Narrative capture task exactly once.
-- Current-source verification on 2026-09-01 built the UE 5.7 `TDAEditor` and `TDA` Development
-  targets and passed all 181 `TerritoryFramework.*` tests. The automation log contains no failed
+- Current-source verification on 2026-09-02 built the UE 5.7 `TDAEditor` and `TDA` Development
+  targets and passed all 187 `TerritoryFramework.*` tests. The automation log contains no failed
   test, Blueprint Runtime Error, Accessed None, assertion, fatal, or Territory error.
 - A current `/Game/HopDistrictTest` headless runtime smoke loaded the map and player/HUD, then
   exited normally with no Blueprint runtime, Accessed None, assertion, ensure, fatal, or Territory
   warning/error.
-- The documentation learning path is uniquely numbered from 00 to 32. Reports and tutorials
+- The documentation learning path is uniquely numbered from 00 to 33. Reports and tutorials
   are separate appendices.
 
 ## Release gates still open

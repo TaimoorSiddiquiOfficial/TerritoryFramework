@@ -4,6 +4,7 @@
 
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "Tales/TerritoryStateTask.h"
+#include "Tales/TerritoryStoryConditions.h"
 
 namespace TerritoryQuestCascadeRecipeTests
 {
@@ -19,6 +20,8 @@ namespace TerritoryQuestCascadeRecipeTests
 		FTerritoryQuestCascadeState& Assault = Recipe->States.AddDefaulted_GetRef();
 		Assault.StateID = TEXT("Assault");
 		Assault.Description = FText::FromString(TEXT("Clear the defenders."));
+		Assault.Conditions.Add(
+			NewObject<UTerritoryEventContextCondition>(Recipe));
 		FTerritoryQuestCascadeBranch& Route =
 			Assault.Branches.AddDefaulted_GetRef();
 		Route.BranchID = TEXT("DefendersCleared");
@@ -46,10 +49,17 @@ bool FTFTerritoryQuestCascadeRecipeContract::RunTest(const FString& Parameters)
 		Validation.bValid);
 	TestTrue(TEXT("Valid recipe has no errors"), Validation.Errors.IsEmpty());
 	const FString Preview = Recipe->BuildPlainTextPreview();
-	TestTrue(TEXT("Preview explains that same-branch tasks are all required"),
-		Preview.Contains(TEXT("ALL required")));
+	TestTrue(TEXT("Preview explains same-branch AND task logic"),
+		Preview.Contains(TEXT("ALL non-optional tasks required")));
 	TestTrue(TEXT("Preview names the reusable branch"),
 		Preview.Contains(TEXT("DefendersCleared")));
+	TestTrue(TEXT("Preview explains shared state requirements"),
+		Preview.Contains(TEXT("REQUIRE EVERY ROUTE")));
+	const FTerritoryQuestCascadeLogicSummary Summary =
+		Recipe->BuildMissionLogicSummary();
+	TestEqual(TEXT("Summary counts the route condition"), Summary.Conditions, 1);
+	TestEqual(TEXT("Summary counts the authored player task"),
+		Summary.PlayerTasks, 1);
 	return true;
 }
 
@@ -64,6 +74,7 @@ bool FTFTerritoryQuestCascadeRecipeValidation::RunTest(const FString& Parameters
 	Recipe->States[0].Branches[0].BranchID = Recipe->States[1].StateID;
 	Recipe->States[0].Branches[0].DestinationStateID = TEXT("MissingEnding");
 	Recipe->States[0].Branches[0].Tasks.Reset();
+	Recipe->States[0].Conditions.Reset();
 
 	const FTerritoryQuestCascadeValidation Validation = Recipe->ValidateRecipe();
 	TestFalse(TEXT("Duplicate IDs, missing destination, and empty tasks are invalid"),
@@ -74,4 +85,3 @@ bool FTFTerritoryQuestCascadeRecipeValidation::RunTest(const FString& Parameters
 }
 
 #endif // WITH_DEV_AUTOMATION_TESTS
-

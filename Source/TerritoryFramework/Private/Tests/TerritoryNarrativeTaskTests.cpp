@@ -17,6 +17,7 @@
 #include "Tales/TerritoryCombatProgressTask.h"
 #include "Tales/TerritoryDisguiseTask.h"
 #include "Tales/TerritoryGameplayStateTask.h"
+#include "Tales/TerritoryNarrativeConditionTask.h"
 #include "Tales/TerritoryStateTask.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 
@@ -34,7 +35,8 @@ bool FTFTerritoryNarrativeTaskContract::RunTest(const FString& Parameters)
 		UTerritoryCharacterActionTask::StaticClass(),
 		UTerritoryGameplayStateTask::StaticClass(),
 		UTerritoryCombatProgressTask::StaticClass(),
-		UTerritoryAIObservationTask::StaticClass() })
+		UTerritoryAIObservationTask::StaticClass(),
+		UTerritoryNarrativeConditionTask::StaticClass() })
 	{
 		TestTrue(*FString::Printf(TEXT("%s inherits Narrative Task"),
 			*TaskClass->GetName()), TaskClass->IsChildOf(UNarrativeTask::StaticClass()));
@@ -62,6 +64,20 @@ bool FTFTerritoryNarrativeTaskContract::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("AI task exposes a read-only state preview"),
 		UTerritoryAIObservationTask::StaticClass()->FindFunctionByName(
 			TEXT("IsAIStateSatisfiedBy")));
+	TestNotNull(TEXT("Condition gate exposes Narrative condition templates"),
+		UTerritoryNarrativeConditionTask::StaticClass()->FindPropertyByName(
+			TEXT("Conditions")));
+	TestNotNull(TEXT("Condition gate exposes its read-only evaluation query"),
+		UTerritoryNarrativeConditionTask::StaticClass()->FindFunctionByName(
+			TEXT("AreGateConditionsMet")));
+	const UTerritoryNarrativeConditionTask* GateDefaults =
+		GetDefault<UTerritoryNarrativeConditionTask>();
+	TestTrue(TEXT("Generated condition gates are hidden from player task UI"),
+		GateDefaults->bHidden);
+	TestFalse(TEXT("Condition gates remain required Narrative tasks"),
+		GateDefaults->bOptional);
+	TestTrue(TEXT("Condition gates poll at a positive server interval"),
+		GateDefaults->EvaluationInterval > 0.f);
 	return true;
 }
 

@@ -10,6 +10,7 @@
 #include "Tales/TerritoryOwnershipCondition.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
+#include "UObject/UnrealType.h"
 
 namespace TerritoryStoryOutcomeTests
 {
@@ -22,6 +23,34 @@ namespace TerritoryStoryOutcomeTests
 				return Scenario.Title == Title;
 			});
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCaptureAuthoringModeNormalization,
+	"TerritoryFramework.Editor.Definitions.CaptureModesAreMutuallyExclusive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCaptureAuthoringModeNormalization::RunTest(
+	const FString& Parameters)
+{
+	UTerritoryPlaceDefinition* Place =
+		NewObject<UTerritoryPlaceDefinition>();
+	Place->CapturePoint.bEnabled = true;
+	Place->CapturePoint.bAutomaticCapture = true;
+	Place->bStoryCaptureFromBounds = true;
+	FProperty* StoryProperty = FindFProperty<FProperty>(
+		UTerritoryDefinition::StaticClass(),
+		GET_MEMBER_NAME_CHECKED(UTerritoryDefinition,
+			bStoryCaptureFromBounds));
+	FPropertyChangedEvent ChangeEvent(StoryProperty,
+		EPropertyChangeType::ValueSet);
+	Place->PostEditChangeProperty(ChangeEvent);
+	TestTrue(TEXT("Story bounds remains the selected capture authority"),
+		Place->bStoryCaptureFromBounds);
+	TestFalse(TEXT("Story bounds turns off contradictory physical auto capture"),
+		Place->CapturePoint.bAutomaticCapture);
+	TestTrue(TEXT("The optional physical point may remain for presentation"),
+		Place->CapturePoint.bEnabled);
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryStoryOutcomePlaceReport,

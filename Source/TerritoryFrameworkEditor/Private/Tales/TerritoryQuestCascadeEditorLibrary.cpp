@@ -15,8 +15,10 @@
 #include "QuestBlueprint.h"
 #include "ScopedTransaction.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/NarrativeCondition.h"
 #include "Tales/Quest.h"
 #include "Tales/QuestSM.h"
+#include "Tales/TerritoryNarrativeConditionTask.h"
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "UObject/UnrealType.h"
 
@@ -124,19 +126,64 @@ namespace TerritoryQuestCascadeEditor
 		return Node;
 	}
 
-	void CopyEvents(const TArray<TObjectPtr<UNarrativeEvent>>& Templates,
+	int32 CopyEvents(const TArray<TObjectPtr<UNarrativeEvent>>& Templates,
 		UNarrativeNodeBase* Destination)
 	{
-		if (!Destination) return;
+		if (!Destination) return 0;
 		Destination->Events.Reset();
+		int32 Copied = 0;
 		for (const UNarrativeEvent* EventTemplate : Templates)
 		{
 			if (EventTemplate)
 			{
 				Destination->Events.Add(DuplicateObject<UNarrativeEvent>(
 					EventTemplate, Destination));
+				++Copied;
 			}
 		}
+		return Copied;
+	}
+
+	int32 CopyConditions(
+		const TArray<TObjectPtr<UNarrativeCondition>>& Templates,
+		UNarrativeNodeBase* Destination)
+	{
+		if (!Destination) return 0;
+		Destination->Conditions.Reset();
+		int32 Copied = 0;
+		for (const UNarrativeCondition* Template : Templates)
+		{
+			if (Template)
+			{
+				Destination->Conditions.Add(DuplicateObject<UNarrativeCondition>(
+					Template, Destination));
+				++Copied;
+			}
+		}
+		return Copied;
+	}
+
+	bool CopyMatchingProperty(const UObject* Source, UObject* Destination,
+		const FName PropertyName, FTerritoryQuestCascadeBuildReport& Report)
+	{
+		const FProperty* SourceProperty = Source
+			? FindFProperty<FProperty>(Source->GetClass(), PropertyName) : nullptr;
+		FProperty* DestinationProperty = Destination
+			? FindFProperty<FProperty>(Destination->GetClass(), PropertyName) : nullptr;
+		if (!SourceProperty || !DestinationProperty
+			|| !SourceProperty->SameType(DestinationProperty))
+		{
+			Report.Errors.Add(FText::Format(LOCTEXT("QuestPropertyMismatch",
+				"Could not copy Narrative Quest setting '{0}'. The installed Narrative Pro API may have changed."),
+				FText::FromName(PropertyName)));
+			return false;
+		}
+		void* DestinationValue =
+			DestinationProperty->ContainerPtrToValuePtr<void>(Destination);
+		const void* SourceValue =
+			SourceProperty->ContainerPtrToValuePtr<void>(Source);
+		DestinationProperty->CopyCompleteValue(DestinationValue, SourceValue);
+		return true;
 	}
 
 	void ComputeStatePositions(const UTerritoryQuestCascadeRecipe* Recipe,
@@ -434,7 +481,9 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 		RuntimeState->Modify();
 		RuntimeState->SetID(StateSpec.StateID);
 		RuntimeState->Description = StateSpec.Description;
-		CopyEvents(StateSpec.Events, RuntimeState);
+		Report.CopiedEvents += CopyEvents(StateSpec.Events, RuntimeState);
+		Report.CopiedConditions += CopyConditions(
+			StateSpec.Conditions, RuntimeState);
 		StateNodes.Add(StateSpec.StateID, GraphNode);
 		RuntimeStates.Add(StateSpec.StateID, RuntimeState);
 		++Report.CreatedStates;
@@ -444,6 +493,18 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 		RuntimeStates.FindRef(Recipe->StartStateID));
 	EmptyQuest->QuestTemplate->SetQuestName(Recipe->QuestName);
 	EmptyQuest->QuestTemplate->SetQuestDescription(Recipe->QuestDescription);
+	const FName QuestSettingsToCopy[] = {
+		TEXT("bTracked"), TEXT("QuestDialogue"),
+		TEXT("QuestDialoguePlayParams"), TEXT("bResumeDialogueAfterLoad")
+	};
+	for (const FName Setting : QuestSettingsToCopy)
+	{
+		if (!CopyMatchingProperty(Recipe, EmptyQuest->QuestTemplate,
+			Setting, Report))
+		{
+			return Report;
+		}
+	}
 
 	for (const FTerritoryQuestCascadeState& StateSpec : Recipe->States)
 	{
@@ -460,7 +521,39 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 			RuntimeBranch->SetID(BranchSpec.BranchID);
 			RuntimeBranch->Description = BranchSpec.Description;
 			RuntimeBranch->bHidden = BranchSpec.bHidden;
-			CopyEvents(BranchSpec.Events, RuntimeBranch);
+			Report.CopiedEvents += CopyEvents(BranchSpec.Events, RuntimeBranch);
+			Report.CopiedConditions += CopyConditions(
+				BranchSpec.Conditions, RuntimeBranch);
+
+			if (!StateSpec.Conditions.IsEmpty()
+				|| !BranchSpec.Conditions.IsEmpty())
+			{
+				UTerritoryNarrativeConditionTask* Gate =
+					NewObject<UTerritoryNarrativeConditionTask>(
+						RuntimeBranch, NAME_None, RF_Transactional);
+				Gate->RequirementDescription = BranchSpec.Description.IsEmpty()
+					? FText::FromString(TEXT("Meet the route requirements"))
+					: BranchSpec.Description;
+				for (const UNarrativeCondition* Template : StateSpec.Conditions)
+				{
+					if (Template)
+					{
+						Gate->Conditions.Add(DuplicateObject<UNarrativeCondition>(
+							Template, Gate));
+					}
+				}
+				for (const UNarrativeCondition* Template : BranchSpec.Conditions)
+				{
+					if (Template)
+					{
+						Gate->Conditions.Add(DuplicateObject<UNarrativeCondition>(
+							Template, Gate));
+					}
+				}
+				RuntimeBranch->QuestTasks.Add(Gate);
+				++Report.CreatedTasks;
+				++Report.CreatedConditionGates;
+			}
 			for (const UNarrativeTask* TaskTemplate : BranchSpec.Tasks)
 			{
 				if (TaskTemplate)

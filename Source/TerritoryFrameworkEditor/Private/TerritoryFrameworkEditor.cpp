@@ -32,7 +32,9 @@
 #include "DetailWidgetRow.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
+#include "Styling/AppStyle.h"
 #include "Story/STerritoryStoryOutcomePanel.h"
+#include "Tales/STerritoryQuestMissionSummaryPanel.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
@@ -161,12 +163,17 @@ namespace
 			TArray<TWeakObjectPtr<UObject>> Objects;
 			DetailBuilder.GetObjectsBeingCustomized(Objects);
 			UTerritoryDefinition* SelectedDefinition = nullptr;
+			TWeakObjectPtr<UTerritoryPlaceDefinition> SelectedPlace;
 			bool bContainsNonPlace = false;
 			for (const TWeakObjectPtr<UObject>& Object : Objects)
 			{
 				if (!SelectedDefinition)
 				{
 					SelectedDefinition = Cast<UTerritoryDefinition>(Object.Get());
+				}
+				if (!SelectedPlace.IsValid())
+				{
+					SelectedPlace = Cast<UTerritoryPlaceDefinition>(Object.Get());
 				}
 				if (Object.IsValid() && !Object->IsA<UTerritoryPlaceDefinition>())
 				{
@@ -185,6 +192,49 @@ namespace
 				[
 					SNew(STerritoryStoryOutcomePanel)
 					.Definition(SelectedDefinition)
+				];
+			}
+			if (SelectedPlace.IsValid())
+			{
+				IDetailCategoryBuilder& Capture = DetailBuilder.EditCategory(
+					TEXT("06 Capture"), FText::FromString(TEXT("Capture")));
+				Capture.AddCustomRow(FText::FromString(TEXT("Active Capture Mode")))
+				.NameContent()
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(TEXT("Active Capture Mode")))
+					.Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.NormalFont")))
+				]
+				.ValueContent()
+				.MinDesiredWidth(400.f)
+				[
+					SNew(STextBlock)
+					.Text_Lambda([SelectedPlace]()
+					{
+						const UTerritoryPlaceDefinition* Place = SelectedPlace.Get();
+						if (!Place) return FText::GetEmpty();
+						if (Place->bStoryCaptureFromBounds)
+						{
+							return FText::FromString(
+								TEXT("Story Bounds — multi-floor contest + explicit handover; physical automatic progress is off."));
+						}
+						if (Place->CapturePoint.bEnabled
+							&& Place->CapturePoint.bAutomaticCapture)
+						{
+							return FText::FromString(
+								TEXT("Physical Automatic — domination/multiplayer progress inside the Capture Point."));
+						}
+						if (Place->CapturePoint.bEnabled)
+						{
+							return FText::FromString(
+								TEXT("Manual Capture Point — visible/interactable point; Narrative or server logic owns capture."));
+						}
+						return FText::FromString(
+							TEXT("Explicit Story/Server — no physical point; a Narrative Event, owner handover, or server action captures."));
+					})
+					.AutoWrapText(true)
+					.ToolTipText(FText::FromString(
+						TEXT("This is the effective capture authority. Story Bounds and Physical Automatic are mutually exclusive.")))
 				];
 			}
 			if (!bContainsNonPlace) return;
@@ -248,6 +298,18 @@ namespace
 			}
 			if (!Recipe.IsValid()) return;
 
+			IDetailCategoryBuilder& MissionSummary = DetailBuilder.EditCategory(
+				TEXT("00 Mission Logic (Read Only)"),
+				FText::FromString(TEXT("Mission Logic (Read Only)")),
+				ECategoryPriority::Important);
+			MissionSummary.InitiallyCollapsed(false);
+			MissionSummary.AddCustomRow(FText::FromString(TEXT("Mission Logic")))
+			.WholeRowContent()
+			[
+				SNew(STerritoryQuestMissionSummaryPanel)
+				.Recipe(Recipe)
+			];
+
 			IDetailCategoryBuilder& Generate = DetailBuilder.EditCategory(
 				TEXT("00 Create Narrative Quest"),
 				FText::FromString(TEXT("Create Narrative Quest")),
@@ -289,9 +351,10 @@ namespace
 					if (Report.bSucceeded && Report.QuestAsset && GEditor)
 					{
 						UE_LOG(LogTemp, Display,
-							TEXT("[TerritoryQuestCascade] Created %s with %d states, %d branches, and %d tasks."),
+							TEXT("[TerritoryQuestCascade] Created %s with %d states, %d branches, %d tasks, and %d functional condition gates."),
 							*Report.QuestPackageName, Report.CreatedStates,
-							Report.CreatedBranches, Report.CreatedTasks);
+							Report.CreatedBranches, Report.CreatedTasks,
+							Report.CreatedConditionGates);
 						GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()
 							->OpenEditorForAsset(Report.QuestAsset);
 					}
@@ -489,7 +552,7 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 		UTerritoryQuestCascadeRecipe::StaticClass(),
 		LOCTEXT("TerritoryQuestCascadeRecipeAsset", "Territory Quest Cascade Recipe"),
 		LOCTEXT("TerritoryQuestCascadeRecipeDescription",
-			"Builds a normal Narrative Quest from reusable states, alternative branches, tasks, and events."),
+			"Builds a normal Narrative Quest from reusable states, route conditions, tasks, events, dialogue settings, and alternative endings."),
 		StoryMenu,
 		FColor(78, 171, 204));
 }

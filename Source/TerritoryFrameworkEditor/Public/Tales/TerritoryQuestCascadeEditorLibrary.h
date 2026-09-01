@@ -31,6 +31,16 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryQuestCascadeBuildReport
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CreatedTasks = 0;
 
+	/** Hidden functional adapters generated for state/branch conditions. */
+	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
+	int32 CreatedConditionGates = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
+	int32 CopiedConditions = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
+	int32 CopiedEvents = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	TArray<FText> Errors;
 
@@ -77,4 +87,3 @@ public:
 		UQuestBlueprint* EmptyQuest,
 		UTerritoryQuestCascadeRecipe* Recipe);
 };
-

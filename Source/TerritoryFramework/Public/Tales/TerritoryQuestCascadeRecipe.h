@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Tales/Dialogue.h"
+#include "Tales/NarrativeCondition.h"
 #include "Tales/QuestTask.h"
 #include "Tales/NarrativeEvent.h"
 #include "TerritoryQuestCascadeRecipe.generated.h"
@@ -51,6 +53,15 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeBranch
 	bool bHidden = false;
 
 	/**
+	 * Every condition must remain true before this route may complete.
+	 * Territory generates a hidden condition-gate task because Narrative Pro's
+	 * Quest runtime currently displays node conditions but does not evaluate them.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="Branch|Conditions",
+		meta=(ToolTip="All conditions must pass before this route can finish. Easy example: Diplomacy is War AND the player is inside Blacksmith. Territory adds a hidden runtime gate so these work in Narrative Quests."))
+	TArray<TObjectPtr<UNarrativeCondition>> Conditions;
+
+	/**
 	 * Reusable Narrative tasks for this route. Narrative requires every task in
 	 * this array to complete before advancing.
 	 */
@@ -87,6 +98,14 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeState
 		ToolTip="The current story situation shown by Narrative. Easy example: The defenders are down. Find the owner and negotiate a handover."))
 	FText Description;
 
+	/**
+	 * Requirements shared by every route leaving this state. These do not block
+	 * the Quest from entering the state; they block departure from it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="State|Conditions",
+		meta=(ToolTip="All conditions must pass before any route may leave this state. Easy example: after the guards are defeated, wait until the owner handover is accepted. Put route-specific requirements on that Branch instead."))
+	TArray<TObjectPtr<UNarrativeCondition>> Conditions;
+
 	/** Narrative Events copied onto the generated state. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="State|Events",
 		meta=(ToolTip="Events run by Narrative when this state starts, ends, or both. Easy example: unlock the Farm when the Blacksmith success state begins."))
@@ -112,6 +131,58 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeValidation
 	TArray<FText> Errors;
 
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
+	TArray<FText> Warnings;
+};
+
+/** Read-only mission architecture summary available in editor tools and at runtime. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeLogicSummary
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	bool bValid = false;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 ObjectiveStates = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 SuccessEndings = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 FailureEndings = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 Routes = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 PlayerTasks = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 Conditions = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 Events = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 OptionalTasks = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 HiddenTasks = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 NavigationMarkerTasks = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	FString Headline;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	TArray<FString> FlowLines;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	TArray<FText> Errors;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	TArray<FText> Warnings;
 };
 
@@ -145,6 +216,28 @@ public:
 		ToolTip="Player-facing quest summary copied into Narrative. Easy example: Remove the occupation and convince the owner to support your faction."))
 	FText QuestDescription;
 
+	/** Start the generated Narrative Quest as the tracked quest. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest|Journal and Tracking",
+		meta=(ToolTip="When enabled, Narrative tracks this quest and displays navigation markers from its active tasks. Easy example: enable it for the main liberation mission; disable it for a hidden background mission."))
+	bool bTracked = true;
+
+	/** Optional Narrative Dialogue containing conversations used by this quest. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest|Dialogue",
+		meta=(ToolTip="Optional Narrative Dialogue linked to the generated quest. Easy example: one dialogue contains the briefing, owner handover, and betrayal conversation."))
+	TSubclassOf<UDialogue> QuestDialogue;
+
+	/** How Narrative should start and control the linked quest dialogue. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest|Dialogue",
+		meta=(EditCondition="QuestDialogue != nullptr", EditConditionHides,
+			ToolTip="Narrative's normal dialogue start node, priority, movement, skipping, and exit overrides. Easy example: start from OwnerHandover and stop player movement for the negotiation."))
+	FDialoguePlayParams QuestDialoguePlayParams;
+
+	/** Resume an interrupted linked quest dialogue after loading a save. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest|Dialogue",
+		meta=(EditCondition="QuestDialogue != nullptr", EditConditionHides,
+			ToolTip="Resume the linked dialogue after loading. Enable for an important multi-step conversation; disable for a short ambient exchange that may safely restart later."))
+	bool bResumeDialogueAfterLoad = false;
+
 	/** State used as Narrative's root/start state. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest",
 		meta=(ToolTip="The State ID where the quest begins. It must be an Objective state. Easy example: ApproachBlacksmith."))
@@ -160,6 +253,10 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Narrative Quest Cascade")
 	FTerritoryQuestCascadeValidation ValidateRecipe() const;
 
+	/** Counts and explains the complete mission flow without running or changing it. */
+	UFUNCTION(BlueprintPure, Category="Territory|Narrative Quest Cascade")
+	FTerritoryQuestCascadeLogicSummary BuildMissionLogicSummary() const;
+
 	/** Easy-English, read-only preview useful during quest planning and review. */
 	UFUNCTION(BlueprintPure, Category="Territory|Narrative Quest Cascade")
 	FString BuildPlainTextPreview() const;
@@ -169,4 +266,3 @@ public:
 		const override;
 #endif
 };
-
