@@ -98,6 +98,13 @@ bool ATerritoryStoryOwnerSpawner::ActivateHandover(APawn* NarrativeTarget,
 	{
 		return false;
 	}
+	if (!IsValid(OwnerSpawn) || !IsValid(OwnerSpawn->NPCToSpawn))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Territory story owner %s rejected handover for %s: the Place Definition has no Narrative NPC definition."),
+			*GetPathName(), *TerritoryTag.ToString());
+		return false;
+	}
 
 	PendingNarrativeTarget = NarrativeTarget;
 	PendingController = Controller;
@@ -173,25 +180,36 @@ bool ATerritoryStoryOwnerSpawner::BeginOwnerDialogue(APawn* NarrativeTarget,
 		return false;
 	}
 
-	// Defender-death events are also raised by environment damage, GAS effects, and
-	// server-side scripted kills. Those paths may not carry the damaging pawn or its
-	// Tales component. Resolve the authoritative player here so an automatic story
-	// handover behaves the same as a normal player weapon kill.
-	if (!IsValid(Controller) && IsValid(NarrativeTarget))
+	// Keep the exact Narrative participant supplied by the event. Environment damage,
+	// GAS effects, and server scripts are allowed to provide no participant; in that
+	// case the owner remains manually interactable. Never select an arbitrary world
+	// player because that can start another client's dialogue on a dedicated server.
+	if (IsValid(NarrativeComponent))
 	{
-		Controller = Cast<APlayerController>(NarrativeTarget->GetController());
+		if (!IsValid(NarrativeTarget))
+		{
+			NarrativeTarget = NarrativeComponent->GetOwningPawn();
+		}
+		if (!IsValid(Controller))
+		{
+			Controller = NarrativeComponent->GetOwningController();
+		}
 	}
-	if (!IsValid(Controller) && GetWorld())
-	{
-		Controller = GetWorld()->GetFirstPlayerController();
-	}
-	if (!IsValid(NarrativeTarget) && IsValid(Controller))
-	{
-		NarrativeTarget = Controller->GetPawn();
-	}
-	if (!IsValid(NarrativeComponent) && IsValid(NarrativeTarget))
+	else if (IsValid(NarrativeTarget))
 	{
 		NarrativeComponent = UNarrativeFunctionLibrary::GetTalesComponent(NarrativeTarget);
+		if (!IsValid(Controller))
+		{
+			Controller = Cast<APlayerController>(NarrativeTarget->GetController());
+		}
+	}
+	else if (IsValid(Controller))
+	{
+		NarrativeTarget = Controller->GetPawn();
+		if (IsValid(NarrativeTarget))
+		{
+			NarrativeComponent = UNarrativeFunctionLibrary::GetTalesComponent(NarrativeTarget);
+		}
 	}
 
 	if (!IsValid(NarrativeComponent))

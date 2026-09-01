@@ -1716,14 +1716,6 @@ void UTerritoryEconomySubsystem::RestoreTreasuryState(const TMap<FGameplayTag, F
 	DirtyFactions.Empty();
 }
 
-void UTerritoryEconomySubsystem::SetFactionTreasury(const FGameplayTag& Faction, const FTerritoryTreasury& Treasury)
-{
-	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client) return;
-	if (!Faction.IsValid()) return;
-	FactionTreasuries.Add(Faction, Treasury);
-}
-
 void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 {
 	UWorld* World = GetWorld();

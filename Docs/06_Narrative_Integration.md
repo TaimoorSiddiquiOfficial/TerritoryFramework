@@ -172,6 +172,14 @@ garrison, presence, capture, assault, and disguise objective matrix, and
 [Community Narrative Quest Tasks](30_Community_Narrative_Tasks.md) for movement, GAS, combat, AI,
 boss, and chase examples.
 
+For repeated mission structures, use a
+[`UTerritoryQuestCascadeRecipe`](32_Narrative_Quest_Cascade_Recipes.md). It is an editor-time
+authoring template that copies real Narrative tasks and events into a new normal Narrative Quest.
+It never becomes a second runtime or save authority. Multiple tasks on one generated branch are
+AND requirements; multiple branches from one state are alternative routes. The generator rejects
+invalid IDs, missing destinations, empty branches, unreachable states, and any attempt to
+overwrite an already-authored Quest.
+
 Use **Territory Counterattack / Chase Task** inside a normal Narrative Quest. It reads the real
 durable assault record, so a quest does not need to count temporary pawns itself.
 
@@ -267,6 +275,19 @@ All State Config conditions must pass. Every Narrative Event also has its own in
 `Conditions` array; all conditions inside that event must pass before the event mutates anything.
 Narrative's inherited **Not** option is honored in both places. Territory mutation events set
 `Refire On Load` false so quest restoration cannot purchase, spawn, or reward twice.
+
+### Change the player's real faction in a story
+
+`Set Narrative Player Factions` changes the saved, replicated faction container on the exact
+Narrative Player State supplied by the quest/dialogue target. **Replace Existing Factions** is the
+normal betrayal or allegiance choice: the Player State receives the selected container in one
+Narrative update. Disable it only when the player genuinely belongs to several factions.
+
+This event never chooses the first player, changes a disguise, captures a Territory, or transfers
+an existing Place. Easy example: replace `Police` with `Heroes` when the Regime expels the player.
+Blacksmith stays Police-owned until another real handover or capture occurs. Then use
+`Set Territory Diplomacy` to author the new relationship; faction membership and diplomacy are
+connected story facts, but they are not the same state.
 
 ### Claimed District count -> diplomacy
 

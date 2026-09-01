@@ -100,7 +100,7 @@ After the fix: each placement receives a unique GUID, that GUID persists in the 
 4. ATerritoryWorldState::Load — ImportPersistentState:
    a. Direct assignment (no artificial transactions), including the read-only strategic directory cache
     b. SyncSubsystemsFromReplicatedState:
-        - Push income/cost/count parameters to EconomySubsystem via SetFactionTreasury (Narrative inventory currency is separate)
+        - Restore income/cost/count parameters through the native bulk treasury snapshot bridge (Narrative inventory currency is separate)
         - Restore production checkpoints, site records, per-rule outcomes, and resource read models without restoring item balances
         - Replay treaty states and reputation to DiplomacySubsystem
         - Diplomacy syncs to Narrative GameState attitudes

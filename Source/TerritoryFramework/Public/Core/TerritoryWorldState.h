@@ -197,7 +197,7 @@ public:
 
 	// ─── Economy API (server-authoritative) ───
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	/** Projection writer used by the economy authority. Blueprint must mutate the economy subsystem. */
 	void SetFactionTreasury(const FGameplayTag& Faction, const FTerritoryTreasury& Treasury);
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
@@ -206,8 +206,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	TArray<FGameplayTag> GetAllFactionsWithEconomy() const;
 
-	/** Replace scheduler checkpoints and replicated resource read models atomically. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy|Resources")
+	/** Projection writer used by the economy authority; not a gameplay mutation API. */
 	void SetProductionState(
 		const TArray<FTerritoryProductionCheckpoint>& Checkpoints,
 		const TArray<FTerritoryProductionSiteRecord>& Sites,
@@ -224,7 +223,7 @@ public:
 
 	// ─── Transaction API (server-authoritative) ───
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Transaction")
+	/** Projection writer used by the economy authority; not a gameplay mutation API. */
 	void RecordTransaction(const FReplicatedTransaction& Transaction);
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Transaction")
@@ -232,10 +231,10 @@ public:
 
 	// ─── Treaty API (server-authoritative) ───
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
+	/** Projection writer used by the diplomacy authority. Blueprint must mutate that subsystem. */
 	void SetTreaty(const FReplicatedTreaty& Treaty);
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
+	/** Projection writer used by the diplomacy authority. Blueprint must mutate that subsystem. */
 	void RemoveTreaty(const FGuid& TreatyID);
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
@@ -246,7 +245,7 @@ public:
 
 	// ─── Reputation API (server-authoritative) ───
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
+	/** Projection writer used by the diplomacy authority. Blueprint must mutate that subsystem. */
 	void SetReputation(const FGameplayTag& Faction, int32 Value);
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
@@ -263,19 +262,16 @@ public:
 		meta=(DisplayName="Campaign City Definitions"))
 	TArray<TObjectPtr<UTerritoryCityDefinition>> CampaignCities;
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
+	/** Projection writer used by Territory actors/subsystems; not a gameplay mutation API. */
 	void SetCaptureSummary(const FReplicatedCaptureSummary& Summary);
 
-	/** Publish one loaded actor through the canonical replicated read-model builder. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Capture")
+	/** Native projection writer for one loaded actor. */
 	void PublishTerritorySummary(const ATerritoryVolume* Territory);
 
-	/** Add Definition-backed rows without overwriting authoritative live ownership. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Directory")
+	/** Native projection writer for Definition rows; never overwrites live ownership. */
 	void RegisterDefinitionHierarchy(const UTerritoryDefinition* Definition);
 
-	/** Reconcile configured City assets and all currently loaded Territory Definitions. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Directory")
+	/** Native projection reconciliation for configured and loaded Definitions. */
 	void RefreshStrategicDirectory();
 
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
@@ -325,10 +321,10 @@ public:
 
 	// ─── State Export/Import for Save System ───
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Save")
+	/** Native Narrative save bridge. Blueprint treats WorldState as read-only. */
 	void ExportPersistentState();
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Save")
+	/** Native Narrative load bridge. Blueprint treats WorldState as read-only. */
 	void ImportPersistentState();
 
 	// ─── Delegates ───

@@ -44,11 +44,12 @@ rules as physical capture.
 
 #### Ready-to-use owner handover
 
-Place `ATerritoryStoryOwnerSpawner` beside the property instead of placing a second,
-always-active NPC. Assign its `Owner Spawn > NPC To Spawn` to a normal Narrative Pro
-`NPCDefinition` whose `Dialogue` is the surrender dialogue. The spawner derives from
-Narrative Pro's `ANPCSpawner`, remains inactive before handover, and saves and replicates
-`Handover Activated`.
+Configure the **Story Owner** template on the Place Definition: enable it, select the project
+Blueprint derived from `ATerritoryStoryOwnerSpawner`, select a normal Narrative Pro
+`NPCDefinition`, and set its relative transform/dialogue options. The Definition synchronizer
+creates or updates the placed Blueprint. Do not author `Owner Spawn > NPC To Spawn` separately;
+the Data Asset is the source. The spawner remains inactive before handover and saves and
+replicates `Handover Activated`.
 
 Add `UTerritoryOwnerHandoverEvent` to the correct modular State Config event list:
 
@@ -56,10 +57,15 @@ Add `UTerritoryOwnerHandoverEvent` to the correct modular State Config event lis
 - A story-locked Place uses the Locked State Config's `Exit Events`, so its owner stays
   silent until the authored quest, ownership, or diplomacy conditions unlock it.
 
-The event accepts a direct owner-spawner reference and a Territory tag fallback. The
-fallback keeps the event usable when World Partition or actor-reference serialization
-cannot retain the direct reference. On the server, it spawns exactly one owner and can
-start that NPC's Narrative dialogue immediately. It does not create a client duplicate.
+The reusable event stores only the stable Territory tag. At runtime it resolves the matching
+Definition-backed spawner, which remains safe across World Partition and asset duplication. On
+the server it spawns exactly one owner and can start that NPC's Narrative dialogue immediately.
+It does not create a client duplicate.
+
+Automatic dialogue uses only the pawn/controller/Tales component supplied by the Narrative
+event. If an environment or scripted kill has no player participant, the owner still appears but
+remains manually interactable. The framework never chooses the first world player, so one
+client cannot accidentally receive another client's handover dialogue.
 
 For a story-only Place, enable `Story Capture From Territory Bounds` on the Place. The
 complete `Bounds Shape` becomes the combat area, including every floor covered by that

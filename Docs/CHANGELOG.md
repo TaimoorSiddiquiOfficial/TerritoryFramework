@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased — 2026-09-01 (Authority boundaries and complete system re-audit)
+
+- Added a dedicated **Territory Framework** Content Browser Add/New category modeled on
+  Narrative Pro's clear asset-authoring workflow. Six named submenus expose all ten Territory
+  Definition/Profile/recipe assets plus ten exact-parent Blueprint templates for hierarchy,
+  capture, management, roads, story owners, guards, and assault characters. Designers no longer
+  need the generic Data Asset or Blueprint class picker; tooltips explain the intended authority
+  and simplest use of every entry.
+- Added reusable Territory Narrative Quest Cascade Recipe Data Assets. Designers author normal
+  Narrative Objective/Success/Failure states, alternative branches, multiple AND tasks, and
+  state/branch Narrative Events once, then create a compiled, fully editable Narrative Quest with
+  one button. Validation rejects unstable IDs, missing destinations, empty routes, invalid task
+  quantities, bad terminals, and unreachable states; generation never overwrites an authored
+  Quest and introduces no second runtime/save authority.
+- Added `Set Narrative Player Factions`, an explicit-target Narrative Event for saved/replicated
+  allegiance and betrayal choices. Replace mode updates the exact Narrative Player State in one
+  operation; add mode supports intentional multi-faction membership. It never guesses a player,
+  changes disguise identity, or transfers Territory ownership.
+- Removed the arbitrary first-player fallback from Story Owner dialogue. Automatic handover now
+  keeps the exact Narrative pawn/controller/Tales context; participant-free environment or
+  scripted kills spawn the owner for safe manual interaction.
+- Rejected an enabled Story Owner template immediately when its Place Definition has no Narrative
+  NPC Definition, instead of accepting the request and exhausting asynchronous spawn retries.
+- Made the complete WorldState write surface native-only, including treasury, production,
+  transaction, treaty, reputation, capture/directory publication, and save/import bridges.
+  Gameplay Blueprints mutate the owning subsystem and read WorldState as a save/late-join/UI model.
+- Added immediate network updates for direct transaction, treaty, and reputation projection
+  changes used by native restore/tests.
+- Made raw Territory ownership and property level setters native-only. Blueprint uses structured
+  `Apply Territory Mutation` and validated `TryUpgrade(Requester)`.
+- Routed all property level changes through one internal writer so production, income, Blueprint
+  notification, replication, and forced network update stay synchronized.
+- Removed the dead direct Economy `SetFactionTreasury` node; save/load already uses the native
+  bulk snapshot bridge, while gameplay currency remains in Narrative inventory.
+- Added API-boundary and invalid Story Owner regression coverage, corrected stale Blueprint/API/
+  save/economy/story-capture documentation, and published the 2026-09-01 complete system re-audit
+  plus the recommended story vertical-slice plan.
+- Rebuilt both UE 5.7 Development targets, passed all 181 Territory automation tests, and ran a
+  clean `/Game/HopDistrictTest` headless smoke with no Blueprint runtime, Accessed None, assertion,
+  ensure, fatal, or Territory warning/error. Remaining missing demo content, Fire gameplay-cue,
+  and navigation warnings are recorded as project/vendor cleanup rather than Territory failures.
+
 ## Unreleased — 2026-08-31 (Narrative Territory tasks and scenario cleanup)
 
 - Fixed the Story Outcome Details customization being registered for both the base Definition and

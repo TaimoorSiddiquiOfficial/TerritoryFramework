@@ -7,6 +7,42 @@
 #include "Tales/NarrativeEvent.h"
 #include "TerritoryStoryEvents.generated.h"
 
+class ANarrativePlayerState;
+
+/**
+ * Changes the exact Narrative quest player's saved faction membership.
+ * This is political identity, not a disguise and not Territory ownership.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Set Narrative Player Factions"))
+class TERRITORYFRAMEWORK_API UTerritorySetNarrativePlayerFactionsEvent
+	: public UNarrativeEvent
+{
+	GENERATED_BODY()
+
+public:
+	UTerritorySetNarrativePlayerFactionsEvent(
+		const FObjectInitializer& ObjectInitializer);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(Categories="Narrative.Factions",
+			ToolTip="Faction memberships applied to the exact Narrative target player. Easy example: replace Police with Heroes after the Regime betrays the player."))
+	FGameplayTagContainer NewFactions;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ToolTip="True replaces every existing player faction in one Narrative Player State update. False adds the selected memberships and preserves existing ones."))
+	bool bReplaceExistingFactions = true;
+
+	/** Native helper used by execution and regression tests. */
+	bool ApplyToPlayerState(ANarrativePlayerState* PlayerState) const;
+
+protected:
+	virtual void ExecuteEvent_Implementation(APawn* Target,
+		APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent) override;
+	virtual FString GetGraphDisplayText_Implementation() override;
+};
+
 UENUM(BlueprintType)
 enum class ETerritoryHierarchyStoryOperation : uint8
 {

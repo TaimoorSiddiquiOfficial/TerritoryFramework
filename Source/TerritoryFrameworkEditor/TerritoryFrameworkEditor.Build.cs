@@ -17,6 +17,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"UnrealEd",
+			"AssetTools",
 			"ApplicationCore",
 			"Slate",
 			"SlateCore",

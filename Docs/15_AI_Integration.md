@@ -256,7 +256,7 @@ BPA_Patrol / BPA_ReturnToTerritory
 ### 7. Territory Capture → Player-Managed Garrison
 
 ```
-Territory captured (SetOwningFaction called):
+Territory capture mutation succeeds:
   1. DespawnGuards()                                → destroys old faction guards
   2. OwnershipData.OwningFaction = NewOwner
   3. OwnershipData.State = Claimed

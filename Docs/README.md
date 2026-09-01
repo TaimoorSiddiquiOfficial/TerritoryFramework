@@ -63,14 +63,16 @@ audits are kept outside this learning path so they cannot be mistaken for curren
 | 29 | [Territory Narrative Quest Tasks](29_Narrative_Quest_Tasks.md) | Capture, state, garrison, assault, and disguise tasks |
 | 30 | [Community Narrative Quest Tasks](30_Community_Narrative_Tasks.md) | Boss, chase, movement, GAS, combat, and AI task library |
 | 31 | [CI Artifacts](31_CI_Artifacts.md) | Unreal 5.7/5.8 self-hosted builds and downloadable artifacts |
+| 32 | [Narrative Quest Cascade Recipes](32_Narrative_Quest_Cascade_Recipes.md) | Reusable story graphs that generate normal Narrative Quests |
+| 33 | [Territory Asset Creation Menu](33_Territory_Asset_Creation_Menu.md) | Dedicated Add/New category for every Territory Definition, profile, recipe, and core Blueprint template |
 
 ## Choose by role
 
-- **New community developer:** 00, 01, 06, 21, 22, 29, then 30.
-- **Level or mission designer:** 03, 05, 17, 21–30.
+- **New community developer:** 00, 01, 33, 06, 21, 22, 29, 30, then 32.
+- **Level or mission designer:** 03, 05, 17, 21–30, then 32 and 33.
 - **AI/combat designer:** 05, 08, 15, 17, 23–26, and 30.
 - **UI designer:** 09, 16, 18, 27–30.
-- **Blueprint developer:** 02, 04, 12, plus the extension/setup appendices below.
+- **Blueprint developer:** 02, 04, 12, 29, 30, 32, 33, plus the extension/setup appendices below.
 - **C++ or multiplayer developer:** 02, 04, 10, 13, 14, and 31.
 
 ## Appendices
@@ -86,6 +88,7 @@ audits are kept outside this learning path so they cannot be mistaken for curren
 These reports explain what was found and tested on their stated dates. Use the numbered guides
 above for current setup; use reports for traceability.
 
+- [Complete system re-audit — 2026-09-01](COMPLETE_SYSTEM_REAUDIT_2026-09-01.md)
 - [Vision and complete re-audit — 2026-08-25](VISION_AND_COMPLETE_REAUDIT_2026-08-25.md)
 - [Stabilization re-audit — 2026-08-25](STABILIZATION_REAUDIT_2026-08-25.md)
 - [Current remediation evidence — 2026-08-24](REMEDIATION_2026-08-24.md)

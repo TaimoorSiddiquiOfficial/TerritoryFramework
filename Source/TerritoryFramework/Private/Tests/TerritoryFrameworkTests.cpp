@@ -62,6 +62,7 @@
 #include "UObject/UObjectIterator.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
+#include "UnrealFramework/NarrativePlayerState.h"
 
 // ─── Helper ──────────────────────────────────────────────────────────────────
 
@@ -260,10 +261,8 @@ bool FTFContract_VolumeClass::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPeriodicIncome")));
 	TestTrue(TEXT("ContainsPoint is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("ContainsPoint")));
-	TestTrue(TEXT("SetOwningFaction is BlueprintCallable"),
-		TFTestUtils::IsBlueprintCallable(Class, TEXT("SetOwningFaction")));
-	TestTrue(TEXT("SetOwningFaction is server-authority only"),
-		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("SetOwningFaction")));
+	TestNull(TEXT("Low-level SetOwningFaction Blueprint node was removed"),
+		Class->FindFunctionByName(TEXT("SetOwningFaction")));
 	TestNull(TEXT("Unsafe SetControlProgress Blueprint node was removed"),
 		Class->FindFunctionByName(TEXT("SetControlProgress")));
 	TestNull(TEXT("Unsafe SetTerritoryState Blueprint node was removed"),
@@ -1628,6 +1627,22 @@ bool FTFContract_CaptureEvent::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Protected-owner interaction is reliable at three metres by default"),
 		OwnerSpawnerCDO->GetOwnerInteractionDistance(), 300.f);
 
+	UTerritoryPlaceDefinition* InvalidOwnerPlace =
+		NewObject<UTerritoryPlaceDefinition>();
+	InvalidOwnerPlace->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.Test.StoryOwner.Invalid"), false);
+	InvalidOwnerPlace->StoryOwner.bEnabled = true;
+	ATerritoryStoryOwnerSpawner* InvalidOwnerSpawner =
+		NewObject<ATerritoryStoryOwnerSpawner>();
+	TestTrue(TEXT("Invalid Story Owner fixture executes with server authority"),
+		InvalidOwnerSpawner->HasAuthority());
+	InvalidOwnerSpawner->SetPlaceDefinition(InvalidOwnerPlace);
+	InvalidOwnerSpawner->ApplyPlaceDefinition();
+	AddExpectedError(TEXT("has no Narrative NPC definition"),
+		EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Handover rejects an enabled template without a Narrative NPC definition"),
+		InvalidOwnerSpawner->ActivateHandover(nullptr, nullptr, nullptr, true));
+
 	return true;
 }
 
@@ -2292,6 +2307,12 @@ bool FTFContract_Hierarchy::RunTest(const FString& Parameters)
 		TestTrue(TEXT("CanUpgrade is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("CanUpgrade")));
 		TestTrue(TEXT("GetUpgradeCost is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("GetUpgradeCost")));
 		TestTrue(TEXT("GetEffectiveIncome is BlueprintCallable"), TFTestUtils::IsBlueprintCallable(Class, TEXT("GetEffectiveIncome")));
+		TestTrue(TEXT("Validated TryUpgrade remains BlueprintCallable"),
+			TFTestUtils::IsBlueprintCallable(Class, TEXT("TryUpgrade")));
+		TestTrue(TEXT("Validated TryUpgrade remains authority-only"),
+			TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("TryUpgrade")));
+		TestNull(TEXT("Free SetUpgradeLevel Blueprint node was removed"),
+			Class->FindFunctionByName(TEXT("SetUpgradeLevel")));
 	}
 
 	return true;
@@ -3391,7 +3412,8 @@ bool FTFContract_EconomySubsystemExtended::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Has CreditCurrencyToFaction"), TFTestUtils::HasFunction(Class, TEXT("CreditCurrencyToFaction")));
 	TestTrue(TEXT("Has AddToTreasury"), TFTestUtils::HasFunction(Class, TEXT("AddToTreasury")));
 	TestTrue(TEXT("Has TryDebitTreasury"), TFTestUtils::HasFunction(Class, TEXT("TryDebitTreasury")));
-	TestTrue(TEXT("Has SetFactionTreasury"), TFTestUtils::HasFunction(Class, TEXT("SetFactionTreasury")));
+	TestFalse(TEXT("Direct SetFactionTreasury Blueprint mutation was removed"),
+		TFTestUtils::HasFunction(Class, TEXT("SetFactionTreasury")));
 	TestTrue(TEXT("Has GetFactionEconomy"), TFTestUtils::HasFunction(Class, TEXT("GetFactionEconomy")));
 	TestTrue(TEXT("Has GetAllFactionsWithTreasury"), TFTestUtils::HasFunction(Class, TEXT("GetAllFactionsWithTreasury")));
 	TestTrue(TEXT("Has RecalculateIncome"), TFTestUtils::HasFunction(Class, TEXT("RecalculateIncome")));
@@ -3674,10 +3696,8 @@ bool FTFContract_VolumePureGetters::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetDebugString")));
 
 	// ─── Mutation functions must remain BlueprintCallable (NOT Pure) ───
-	TestTrue(TEXT("SetOwningFaction is BlueprintCallable"),
-		TFTestUtils::IsBlueprintCallable(Class, TEXT("SetOwningFaction")));
-	TestTrue(TEXT("SetOwningFaction is server-authority only"),
-		TFTestUtils::IsBlueprintAuthorityOnly(Class, TEXT("SetOwningFaction")));
+	TestNull(TEXT("Low-level SetOwningFaction Blueprint node was removed"),
+		Class->FindFunctionByName(TEXT("SetOwningFaction")));
 	TestTrue(TEXT("LockTerritory is BlueprintCallable"),
 		TFTestUtils::IsBlueprintCallable(Class, TEXT("LockTerritory")));
 	TestTrue(TEXT("SpawnGuards is BlueprintCallable"),
@@ -4068,6 +4088,34 @@ bool FTFBehavior_LiveReplicationSubscriptions::RunTest(const FString& Parameters
 		TFTestUtils::HasFunction(WSClass, TEXT("OnReputationChangedLive")));
 	TestTrue(TEXT("OnTerritoryControlChangedLive handler exists"),
 		TFTestUtils::HasFunction(WSClass, TEXT("OnTerritoryControlChangedLive")));
+
+	// WorldState is a replicated read model. Gameplay mutations must go through
+	// their owning subsystem so validation, events, save state, and projections
+	// cannot diverge.
+	TestFalse(TEXT("WorldState treasury projection is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("SetFactionTreasury")));
+	TestFalse(TEXT("WorldState production projection is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("SetProductionState")));
+	TestFalse(TEXT("WorldState transaction projection is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("RecordTransaction")));
+	TestFalse(TEXT("WorldState treaty projection is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("SetTreaty")));
+	TestFalse(TEXT("WorldState treaty removal is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("RemoveTreaty")));
+	TestFalse(TEXT("WorldState reputation projection is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("SetReputation")));
+	TestFalse(TEXT("WorldState capture projection is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("SetCaptureSummary")));
+	TestFalse(TEXT("WorldState actor publication is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("PublishTerritorySummary")));
+	TestFalse(TEXT("WorldState Definition publication is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("RegisterDefinitionHierarchy")));
+	TestFalse(TEXT("WorldState directory reconciliation is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("RefreshStrategicDirectory")));
+	TestFalse(TEXT("WorldState save export is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("ExportPersistentState")));
+	TestFalse(TEXT("WorldState save import is not a Blueprint mutation API"),
+		TFTestUtils::HasFunction(WSClass, TEXT("ImportPersistentState")));
 
 	// ─── P0-03: Verify single-authority persistence ───
 	// SavedCaptureSummaries should NOT exist on WorldState (Volume is sole authority)
@@ -4952,6 +5000,7 @@ bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 		UTerritoryUnlockEvent::StaticClass(),
 		UTerritorySetDiplomacyEvent::StaticClass(),
 		UTerritoryModifyReputationEvent::StaticClass(),
+		UTerritorySetNarrativePlayerFactionsEvent::StaticClass(),
 		UTerritoryHierarchyStoryOverrideEvent::StaticClass(),
 		UTerritoryScheduleEnemyWaveEvent::StaticClass(),
 		UTerritoryStartBossChaseEvent::StaticClass(),
@@ -5161,6 +5210,69 @@ bool FTFFactionClaimedDistrictCountCondition::RunTest(const FString& Parameters)
 		ETerritoryCaptureFactionSource::NarrativeTargetFaction;
 	TestEqual(TEXT("Narrative Target source follows the current story faction"),
 		Condition->ResolveFaction(DynamicFactionActor, nullptr), Heroes);
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFSetNarrativePlayerFactionsEvent,
+	"TerritoryFramework.Tales.Story.SetNarrativePlayerFactions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFSetNarrativePlayerFactionsEvent::RunTest(const FString& Parameters)
+{
+	const FGameplayTag Police = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Police"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	if (!TestTrue(TEXT("Story faction fixtures resolve"),
+		Police.IsValid() && Heroes.IsValid() && Bandits.IsValid()))
+	{
+		return false;
+	}
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Faction event world created"), World)) return false;
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ANarrativePlayerState* PlayerState =
+		World->SpawnActor<ANarrativePlayerState>(
+			ANarrativePlayerState::StaticClass(), FTransform::Identity, SpawnParams);
+	APawn* ContextPawn = World->SpawnActor<APawn>(
+		APawn::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!PlayerState || !ContextPawn)
+	{
+		AddError(TEXT("Faction event fixture could not spawn"));
+		World->DestroyWorld(false);
+		return false;
+	}
+	ContextPawn->SetPlayerState(PlayerState);
+	PlayerState->AddFaction(Police);
+
+	UTerritorySetNarrativePlayerFactionsEvent* Event =
+		NewObject<UTerritorySetNarrativePlayerFactionsEvent>(GetTransientPackage());
+	Event->NewFactions.AddTag(Heroes);
+	Event->bReplaceExistingFactions = true;
+	Event->ExecuteEvent(ContextPawn, nullptr, nullptr);
+	TestTrue(TEXT("Betrayal event replaces Police with Heroes"),
+		PlayerState->GetFactions().HasTagExact(Heroes));
+	TestFalse(TEXT("Replaced Police membership is removed"),
+		PlayerState->GetFactions().HasTagExact(Police));
+	TestEqual(TEXT("Replace mode commits one exact membership"),
+		PlayerState->GetFactions().Num(), 1);
+
+	Event->NewFactions.Reset();
+	Event->NewFactions.AddTag(Bandits);
+	Event->bReplaceExistingFactions = false;
+	Event->ExecuteEvent(ContextPawn, nullptr, nullptr);
+	TestTrue(TEXT("Add mode preserves the existing membership"),
+		PlayerState->GetFactions().HasTagExact(Heroes));
+	TestTrue(TEXT("Add mode appends the selected membership"),
+		PlayerState->GetFactions().HasTagExact(Bandits));
+	TestEqual(TEXT("Add mode produces two memberships"),
+		PlayerState->GetFactions().Num(), 2);
 
 	World->DestroyWorld(false);
 	return true;

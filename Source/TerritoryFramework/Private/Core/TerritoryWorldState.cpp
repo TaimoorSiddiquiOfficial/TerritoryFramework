@@ -315,6 +315,7 @@ void ATerritoryWorldState::RecordTransaction(const FReplicatedTransaction& Trans
 	Tx.Reason = Transaction.Reason;
 	Tx.SourceTerritory = Transaction.SourceTerritory;
 	OnTransactionRecorded.Broadcast(Tx);
+	ForceNetUpdate();
 }
 
 TArray<FReplicatedTransaction> ATerritoryWorldState::GetTransactionHistory(const FGameplayTag& Faction, int32 MaxEntries) const
@@ -342,17 +343,23 @@ void ATerritoryWorldState::SetTreaty(const FReplicatedTreaty& Treaty)
 			(Existing.FactionA == Treaty.FactionB && Existing.FactionB == Treaty.FactionA))
 		{
 			Existing = Treaty;
+			ForceNetUpdate();
 			return;
 		}
 	}
 
 	ReplicatedTreaties.Add(Treaty);
+	ForceNetUpdate();
 }
 
 void ATerritoryWorldState::RemoveTreaty(const FGuid& TreatyID)
 {
 	if (!HasAuthority()) return;
-	ReplicatedTreaties.RemoveAll([&TreatyID](const FReplicatedTreaty& T) { return T.TreatyID == TreatyID; });
+	if (ReplicatedTreaties.RemoveAll(
+		[&TreatyID](const FReplicatedTreaty& T) { return T.TreatyID == TreatyID; }) > 0)
+	{
+		ForceNetUpdate();
+	}
 }
 
 TArray<FReplicatedTreaty> ATerritoryWorldState::GetAllTreaties() const
@@ -384,6 +391,7 @@ void ATerritoryWorldState::SetReputation(const FGameplayTag& Faction, int32 Valu
 		if (Entry.Faction == Faction)
 		{
 			Entry.Reputation = Value;
+			ForceNetUpdate();
 			return;
 		}
 	}
@@ -392,6 +400,7 @@ void ATerritoryWorldState::SetReputation(const FGameplayTag& Faction, int32 Valu
 	NewEntry.Faction = Faction;
 	NewEntry.Reputation = Value;
 	ReplicatedReputation.Add(NewEntry);
+	ForceNetUpdate();
 }
 
 int32 ATerritoryWorldState::GetReputation(const FGameplayTag& Faction) const

@@ -85,9 +85,9 @@ See [Blueprint_Extension_Guide.md](Blueprint_Extension_Guide.md) for full Super-
 ### State Transition Logic (C++)
 
 Guard lifecycle runs in the **non-virtual** atomic commit path before the BP virtual fires.
-The Blueprint **Set Owning Faction** node now routes through
-`UTerritoryControlSubsystem::ApplyTerritoryMutation`; use **Apply Territory Mutation** when
-you need explicit context and a structured result.
+Blueprint does not expose a raw **Set Owning Faction** node. Use
+`UTerritoryControlSubsystem::ApplyTerritoryMutation` with explicit context and inspect its
+structured result. The native `SetOwningFaction` wrapper exists only for C++ compatibility.
 
 - **Claimed → Contested**: Preserves the incumbent `OwningFaction` and surviving registered guards while active ownership is suspended
 - **Contested → Claimed**: Keeps surviving guards and does not grant free replacements; an actual owner change applies the selected post-capture garrison policy
@@ -250,9 +250,11 @@ BP_TerritoryDistrict "Market Square"
 | CanUpgrade() | bool | Check if upgradeable |
 | GetUpgradeCost() | int32 | Current upgrade cost |
 | GetEffectiveIncome() | int32 | Base + upgrade bonus + capital multiplier |
-| TryUpgrade() | bool | Authority-only upgrade (debits treasury) |
-| SetUpgradeLevel(Level) | void | Authority-only direct set |
+| TryUpgrade(Requester) | bool | Authority-only upgrade (debits the requester's Narrative inventory currency) |
 | GetOwningDistrict() | District* | Parent district via ParentTerritoryTag |
+
+The level setter is native-only for capture reset and save restore. Blueprint gameplay must use
+`TryUpgrade(Requester)`, which validates ownership and Narrative inventory currency.
 
 ### Events
 | Event | Type | When |

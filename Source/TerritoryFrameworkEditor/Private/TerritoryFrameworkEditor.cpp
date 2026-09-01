@@ -1,11 +1,19 @@
 #include "TerritoryFrameworkEditor.h"
+#include "AI/TerritoryDiplomacyDialogue.h"
+#include "Assets/TerritoryAssetTypeActions.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryDisguiseProfile.h"
+#include "Core/TerritoryGuardPostDefinition.h"
+#include "Core/TerritoryStealthProfile.h"
 #include "Core/TerritoryVolume.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Economy/TerritoryProductionProfile.h"
 #include "Navigation/TerritoryRoadGuide.h"
 #include "Navigation/TerritoryRoadTrafficActors.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
+#include "Tales/TerritoryQuestCascadeRecipe.h"
+#include "Tales/TerritoryQuestCascadeEditorLibrary.h"
 #include "TerritoryDefinitionEditorLibrary.h"
 #include "Vehicles/Mass/MassVehicleSpawner.h"
 #include "MassEntitySpawnDataGeneratorBase.h"
@@ -15,6 +23,8 @@
 #include "Editor.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
+#include "AssetToolsModule.h"
+#include "IAssetTools.h"
 #include "UObject/UnrealType.h"
 #include "IDetailCustomization.h"
 #include "DetailCategoryBuilder.h"
@@ -23,6 +33,9 @@
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
 #include "Story/STerritoryStoryOutcomePanel.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "Widgets/Input/SButton.h"
+#include "Widgets/Text/STextBlock.h"
 
 namespace
 {
@@ -209,12 +222,91 @@ namespace
 			}
 		}
 	};
+
+	class FTerritoryQuestCascadeRecipeDetails final
+		: public IDetailCustomization
+	{
+	public:
+		static TSharedRef<IDetailCustomization> MakeInstance()
+		{
+			return MakeShared<FTerritoryQuestCascadeRecipeDetails>();
+		}
+
+		virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override
+		{
+			TArray<TWeakObjectPtr<UObject>> Objects;
+			DetailBuilder.GetObjectsBeingCustomized(Objects);
+			TWeakObjectPtr<UTerritoryQuestCascadeRecipe> Recipe;
+			for (const TWeakObjectPtr<UObject>& Object : Objects)
+			{
+				if (UTerritoryQuestCascadeRecipe* Candidate =
+					Cast<UTerritoryQuestCascadeRecipe>(Object.Get()))
+				{
+					Recipe = Candidate;
+					break;
+				}
+			}
+			if (!Recipe.IsValid()) return;
+
+			IDetailCategoryBuilder& Generate = DetailBuilder.EditCategory(
+				TEXT("00 Create Narrative Quest"),
+				FText::FromString(TEXT("Create Narrative Quest")),
+				ECategoryPriority::Important);
+			Generate.InitiallyCollapsed(false);
+			Generate.AddCustomRow(FText::FromString(TEXT("Explanation")))
+			.WholeRowContent()
+			[
+				SNew(STextBlock)
+				.AutoWrapText(true)
+				.Text(FText::FromString(
+					TEXT("Creates a new, editable Narrative Quest beside this recipe. "
+						"Tasks on one branch are ALL required; separate branches are alternative routes. "
+						"The recipe is never used as a second runtime.")))
+			];
+			Generate.AddCustomRow(FText::FromString(TEXT("Generate Quest")))
+			.WholeRowContent()
+			[
+				SNew(SButton)
+				.Text(FText::FromString(TEXT("Create New Narrative Quest From This Recipe")))
+				.ToolTipText(FText::FromString(
+					TEXT("Validates the recipe, creates a unique NQ_ asset in this folder, "
+						"builds its normal Narrative graph, compiles it, and opens it.")))
+				.OnClicked_Lambda([Recipe]()
+				{
+					FTerritoryQuestCascadeBuildReport Report =
+						UTerritoryQuestCascadeEditorLibrary::CreateQuestBesideRecipe(
+							Recipe.Get());
+					for (const FText& Error : Report.Errors)
+					{
+						UE_LOG(LogTemp, Error,
+							TEXT("[TerritoryQuestCascade] %s"), *Error.ToString());
+					}
+					for (const FText& Warning : Report.Warnings)
+					{
+						UE_LOG(LogTemp, Warning,
+							TEXT("[TerritoryQuestCascade] %s"), *Warning.ToString());
+					}
+					if (Report.bSucceeded && Report.QuestAsset && GEditor)
+					{
+						UE_LOG(LogTemp, Display,
+							TEXT("[TerritoryQuestCascade] Created %s with %d states, %d branches, and %d tasks."),
+							*Report.QuestPackageName, Report.CreatedStates,
+							Report.CreatedBranches, Report.CreatedTasks);
+						GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()
+							->OpenEditorForAsset(Report.QuestAsset);
+					}
+					return FReply::Handled();
+				})
+			];
+		}
+	};
 }
 
 #define LOCTEXT_NAMESPACE "FTerritoryFrameworkEditorModule"
 
 void FTerritoryFrameworkEditorModule::StartupModule()
 {
+	RegisterTerritoryAssetTypes();
 	const bool bNarrativeTasksRegistered = RegisterNarrativeTaskSearchPath();
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(
 		TEXT("PropertyEditor"));
@@ -227,6 +319,10 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 		UTerritoryDefinition::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(
 			&FTerritoryDefinitionDetails::MakeInstance));
+	PropertyEditor.RegisterCustomClassLayout(
+		UTerritoryQuestCascadeRecipe::StaticClass()->GetFName(),
+		FOnGetDetailCustomizationInstance::CreateStatic(
+			&FTerritoryQuestCascadeRecipeDetails::MakeInstance));
 	PropertyEditor.NotifyCustomizationModuleChanged();
 	EnsureVehicleRoadsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Territory.Editor.EnsureVehicleRoads"),
@@ -255,6 +351,7 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 
 void FTerritoryFrameworkEditorModule::ShutdownModule()
 {
+	UnregisterTerritoryAssetTypes();
 	if (EnsureVehicleRoadsConsoleCommand)
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(
@@ -279,8 +376,140 @@ void FTerritoryFrameworkEditorModule::ShutdownModule()
 			TEXT("PropertyEditor"));
 		PropertyEditor.UnregisterCustomClassLayout(
 			UTerritoryDefinition::StaticClass()->GetFName());
+		PropertyEditor.UnregisterCustomClassLayout(
+			UTerritoryQuestCascadeRecipe::StaticClass()->GetFName());
 	}
 	UE_LOG(LogTemp, Log, TEXT("TerritoryFrameworkEditor module unloaded"));
+}
+
+void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
+{
+	IAssetTools& AssetTools =
+		FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
+
+	TerritoryAssetCategory = AssetTools.FindAdvancedAssetCategory(
+		FName(TEXT("TerritoryFramework")));
+	if (TerritoryAssetCategory == EAssetTypeCategories::Misc)
+	{
+		TerritoryAssetCategory = AssetTools.RegisterAdvancedAssetCategory(
+			FName(TEXT("TerritoryFramework")),
+			LOCTEXT("TerritoryFrameworkAssetCategory", "Territory Framework"));
+	}
+
+	auto Register = [this, &AssetTools](
+		UClass* AssetClass,
+		const FText& Name,
+		const FText& Description,
+		const FText& SubMenu,
+		const FColor& Color)
+	{
+		TSharedPtr<IAssetTypeActions> Action =
+			MakeShared<FTerritoryAssetTypeActions>(
+				AssetClass,
+				Name,
+				Description,
+				SubMenu,
+				TerritoryAssetCategory,
+				Color);
+		AssetTools.RegisterAssetTypeActions(Action.ToSharedRef());
+		RegisteredAssetTypeActions.Add(MoveTemp(Action));
+	};
+
+	const FText WorldMenu = LOCTEXT("TerritoryWorldAssetSubMenu", "World & Hierarchy");
+	const FText CombatMenu = LOCTEXT("TerritoryCombatAssetSubMenu", "Combat & Defence");
+	const FText EconomyMenu = LOCTEXT("TerritoryEconomyAssetSubMenu", "Economy");
+	const FText StealthMenu = LOCTEXT("TerritoryStealthAssetSubMenu", "Stealth & Disguise");
+	const FText DiplomacyMenu = LOCTEXT("TerritoryDiplomacyAssetSubMenu", "AI & Diplomacy");
+	const FText StoryMenu = LOCTEXT("TerritoryStoryAssetSubMenu", "Story & Quests");
+
+	Register(
+		UTerritoryPlaceDefinition::StaticClass(),
+		LOCTEXT("TerritoryPlaceDefinitionAsset", "Territory Place Definition"),
+		LOCTEXT("TerritoryPlaceDefinitionDescription",
+			"Creates one capturable location, such as a farm, blacksmith, checkpoint, or police station."),
+		WorldMenu,
+		FColor(50, 184, 159));
+	Register(
+		UTerritoryDistrictDefinition::StaticClass(),
+		LOCTEXT("TerritoryDistrictDefinitionAsset", "Territory District Definition"),
+		LOCTEXT("TerritoryDistrictDefinitionDescription",
+			"Groups Place Definitions and calculates district control from those places."),
+		WorldMenu,
+		FColor(45, 156, 191));
+	Register(
+		UTerritoryCityDefinition::StaticClass(),
+		LOCTEXT("TerritoryCityDefinitionAsset", "Territory City Definition"),
+		LOCTEXT("TerritoryCityDefinitionDescription",
+			"Groups District Definitions and calculates city control from those districts."),
+		WorldMenu,
+		FColor(55, 123, 181));
+	Register(
+		UTerritoryCounterAttackProfile::StaticClass(),
+		LOCTEXT("TerritoryCounterAttackProfileAsset", "Territory Counter-Attack Profile"),
+		LOCTEXT("TerritoryCounterAttackProfileDescription",
+			"Configures faction forces, schedules, reinforcement vehicles, difficulty, and recapture behavior."),
+		CombatMenu,
+		FColor(216, 103, 52));
+	Register(
+		UTerritoryGuardPostDefinition::StaticClass(),
+		LOCTEXT("TerritoryGuardPostDefinitionAsset", "Territory Guard Post Definition"),
+		LOCTEXT("TerritoryGuardPostDefinitionDescription",
+			"Creates reusable guard capacity, spawn, patrol, and garrison placement settings."),
+		CombatMenu,
+		FColor(185, 81, 65));
+	Register(
+		UTerritoryProductionProfile::StaticClass(),
+		LOCTEXT("TerritoryProductionProfileAsset", "Territory Production Profile"),
+		LOCTEXT("TerritoryProductionProfileDescription",
+			"Defines money or Narrative Item production, required inputs, cycle timing, and ownership gates."),
+		EconomyMenu,
+		FColor(213, 174, 62));
+	Register(
+		UTerritoryStealthProfile::StaticClass(),
+		LOCTEXT("TerritoryStealthProfileAsset", "Territory Stealth Profile"),
+		LOCTEXT("TerritoryStealthProfileDescription",
+			"Defines detection, exposure, suspicious actions, gunfire, and stealth-breaking rules."),
+		StealthMenu,
+		FColor(116, 105, 190));
+	Register(
+		UTerritoryDisguiseProfile::StaticClass(),
+		LOCTEXT("TerritoryDisguiseProfileAsset", "Territory Disguise Profile"),
+		LOCTEXT("TerritoryDisguiseProfileDescription",
+			"Defines which faction a disguise represents and how suspicion can expose the player."),
+		StealthMenu,
+		FColor(148, 96, 184));
+	Register(
+		UTerritoryDiplomacyDialogueProfile::StaticClass(),
+		LOCTEXT("TerritoryDiplomacyDialogueProfileAsset", "Territory Diplomacy Dialogue Profile"),
+		LOCTEXT("TerritoryDiplomacyDialogueProfileDescription",
+			"Selects friendly, neutral, suspicious, and hostile dialogue from the current faction relationship."),
+		DiplomacyMenu,
+		FColor(191, 88, 141));
+	Register(
+		UTerritoryQuestCascadeRecipe::StaticClass(),
+		LOCTEXT("TerritoryQuestCascadeRecipeAsset", "Territory Quest Cascade Recipe"),
+		LOCTEXT("TerritoryQuestCascadeRecipeDescription",
+			"Builds a normal Narrative Quest from reusable states, alternative branches, tasks, and events."),
+		StoryMenu,
+		FColor(78, 171, 204));
+}
+
+void FTerritoryFrameworkEditorModule::UnregisterTerritoryAssetTypes()
+{
+	if (FModuleManager::Get().IsModuleLoaded(TEXT("AssetTools")))
+	{
+		IAssetTools& AssetTools =
+			FModuleManager::GetModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
+		for (const TSharedPtr<IAssetTypeActions>& Action : RegisteredAssetTypeActions)
+		{
+			if (Action.IsValid())
+			{
+				AssetTools.UnregisterAssetTypeActions(Action.ToSharedRef());
+			}
+		}
+	}
+	RegisteredAssetTypeActions.Reset();
+	TerritoryAssetCategory = EAssetTypeCategories::Misc;
 }
 
 void FTerritoryFrameworkEditorModule::MigrateFactionSignatureVehiclesForLoadedLevel()

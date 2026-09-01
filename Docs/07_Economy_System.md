@@ -73,8 +73,8 @@ Income recalculation is **deferred** — ownership changes mark factions dirty, 
 Triggers for deferred recalculation:
 - Territory registered/unregistered
 - Territory ownership changes (via `MarkFactionDirty`)
-- Property upgraded (via `SetUpgradeLevel` → `MarkFactionDirty`)
-- Property captured (via `OnPropertyCaptured` → `SetUpgradeLevel(0)` → `MarkFactionDirty`)
+- Property upgraded (validated `TryUpgrade` → one internal level writer → `MarkFactionDirty`)
+- Property captured (`OnPropertyCaptured` → internal level reset → `MarkFactionDirty`)
 
 ### Income Formula (Leaf-Only)
 
@@ -209,7 +209,7 @@ Economy state is saved through:
 - `ATerritoryWorldState` (multiplayer — replicated arrays)
 - `ATerritorySavableData` (single-player — SaveGame properties, **DEPRECATED** — use WorldState)
 
-On load, `SetFactionTreasury` restores only `IncomePerTick`, `CostsPerTick`, and `TerritoryCount`. Currency belongs to Narrative inventory accounts and is not restored by TerritoryFramework. Explicit shared/leader registrations are live references only and must be registered again after their account actors stream or respawn.
+On load, the native bulk treasury snapshot bridge restores only `IncomePerTick`, `CostsPerTick`, and `TerritoryCount`. Currency belongs to Narrative inventory accounts and is not restored by TerritoryFramework. There is no Blueprint direct-set treasury node. Explicit shared/leader registrations are live references only and must be registered again after their account actors stream or respawn.
 
 Credits reject overflow rather than wrapping. Equal distribution pays only what online Narrative player accounts can store and logs any remainder; no transaction is recorded for currency that was not actually delivered. Runtime account registrations are deliberately not saved as UObject pointers and must be restored by the owning game system after load/streaming.
 

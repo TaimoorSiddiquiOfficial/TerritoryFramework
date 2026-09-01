@@ -31,6 +31,7 @@
 - [BTTask_ReleaseTerritoryPermission](#btask_releaseterritorypermission)
 - [UTerritoryCaptureTask](#uterritorycapturetask)
 - [Narrative Community Tasks](#narrative-community-tasks)
+- [UTerritorySetNarrativePlayerFactionsEvent](#uterritorysetnarrativeplayerfactionsevent)
 - [UTerritoryCaptureEvent](#uterritorycaptureevent)
 - [UTerritoryOwnershipCondition](#uterritoryownershipcondition)
 - [ITerritoryOwnershipInterface](#iterritoryownershipinterface)
@@ -188,9 +189,12 @@ removed. Definitions use `InitialAvailability` and the Locked row's Exit Conditi
 
 ### BlueprintCallable (AuthorityOnly)
 
+Ownership is changed through `UTerritoryControlSubsystem::ApplyTerritoryMutation`.
+`ATerritoryVolume::SetOwningFaction` and `CommitOwnershipData` are native compatibility/
+commit helpers, not Blueprint gameplay nodes.
+
 | Function | Parameters | Description |
 |---|---|---|
-| SetOwningFaction | NewFaction (GameplayTag) | Validated compatibility wrapper through `ApplyTerritoryMutation`; use that subsystem API for an explicit context/result |
 | RegisterDefender | Defender (Actor*) | Add to defender list |
 | UnregisterDefender | Defender (Actor*) | Remove from defender list |
 | SpawnGuards | — | Spawn all guards per config |
@@ -198,8 +202,6 @@ removed. Definitions use `InitialAvailability` and the Locked row's Exit Conditi
 | TryPurchaseGuards | RequestingPawn, Count | Compatibility delta wrapper over absolute staffing target |
 | TryRemoveGuards | RequestingPawn, Count | Compatibility delta wrapper; does not require missing/dead guards to be live |
 | TrySetDesiredGuardCount | Requester, NewDesiredGuardCount | Atomically debit recruitment, deploy/withdraw, update upkeep, or fully roll back |
-| SetUpgradeLevel | Level (int32) | Force-set property upgrade level |
-| CommitOwnershipData | NewData (FTerritoryOwnershipData), TransitionContext (FTerritoryTransitionContext) | bool | Atomically commits new ownership data — single struct write, one ordered event bundle (guards → state events → ownership delegates → state delegates). Returns false if no-op. |
 | LockTerritory | Reason (FText) | void | Lock the territory with optional reason |
 | TryUnlock | bForce (bool) | bool | Unlock — force bypasses conditions |
 | SpawnSingleGuard | SpawnPoint (ATerritoryGuardSpawnPoint*) | void | Spawn one guard at the given spawn point |
@@ -273,15 +275,15 @@ Extends `ATerritoryVolume`. A sub-zone within a city.
 
 Extends `ATerritoryVolume`. An upgradeable property within a district.
 
-### Properties (BlueprintReadWrite)
+### Definition-backed and runtime properties
 
 | Property | Type | SaveGame | Replicated | RepNotify | Notes |
 |---|---|---|---|---|---|
-| UpgradeLevel | int32 | ✅ | ✅ | ✅ OnRep_UpgradeLevel | Current upgrade tier |
-| MaxUpgradeLevel | int32 | — | — | — | Cap (default 3) |
-| UpgradeCostPerLevel | int32 | — | — | — | Base cost per level |
-| IncomeBonusPerLevel | int32 | — | — | — | Income added per level |
-| ProductionProfile | UTerritoryProductionProfile* | — | — | — | Optional item-resource recipe asset; capture does not require one |
+| UpgradeLevel | int32 | ✅ | ✅ | ✅ OnRep_UpgradeLevel | Runtime tier; read with `GetUpgradeLevel` |
+| MaxUpgradeLevel | int32 | — | — | — | Applied from the Place Definition |
+| UpgradeCostPerLevel | int32 | — | — | — | Applied from the Place Definition |
+| IncomeBonusPerLevel | int32 | — | — | — | Applied from the Place Definition |
+| ProductionProfile | UTerritoryProductionProfile* | — | — | — | Applied from the Place Definition; optional |
 
 ### BlueprintPure
 
@@ -297,7 +299,9 @@ Extends `ATerritoryVolume`. An upgradeable property within a district.
 | Function | Returns | Description |
 |---|---|---|
 | TryUpgrade | bool | Debits requester's Narrative inventory, increments level |
-| SetUpgradeLevel | void | Force-set level |
+
+`SetUpgradeLevel` is a native restore/reset helper. It is intentionally absent from Blueprint
+so a graph cannot grant a free upgrade while bypassing currency and ownership checks.
 
 ### BlueprintImplementableEvent
 
@@ -483,7 +487,7 @@ Global persistence and late-join projection for economy, diplomacy, capture summ
 | ReplicatedProductionSites | FTerritoryProductionSiteRecord | World Partition-safe site and per-rule status projection |
 | ReplicatedResourceSnapshots | FTerritoryFactionResourceSnapshot | Read-only Narrative stockpile projection |
 | ReplicatedTreaties | FReplicatedTreaty | Active treaties |
-| ReplicatedCaptureSummaries | FReplicatedCaptureSummary | Per-territory state at the last export/setter update |
+| ReplicatedCaptureSummaries | FReplicatedCaptureSummary | Per-territory state at the last actor/subsystem publication |
 | ReplicatedReputation | FReplicatedFactionReputation | Faction reputation |
 | ReplicatedDiplomacyHistory | FDiplomacyEvent | Diplomacy event history |
 | ReplicatedAssaults | FTerritoryAssaultRecord | Deterministic decisions, lifecycle, and finite force counts |
@@ -495,11 +499,11 @@ Global persistence and late-join projection for economy, diplomacy, capture summ
 | Function | Type | Description |
 |---|---|---|
 | FindTerritoryWorldState | BlueprintPure / static | Resolve the single WorldState for an explicit world context (`Get Territory World State` in Blueprint) |
-| ExportPersistentState | AuthorityOnly | Copy subsystem state → replicated arrays |
-| ImportPersistentState | AuthorityOnly | Copy replicated arrays → subsystems |
-| PublishTerritorySummary | AuthorityOnly | Publish one loaded Territory through the canonical summary builder |
-| RegisterDefinitionHierarchy | AuthorityOnly | Add a Definition and its descendants without overwriting live political data |
-| RefreshStrategicDirectory | AuthorityOnly | Reconcile Campaign City assets and currently loaded Territory Definitions |
+| ExportPersistentState | Native save bridge | Copy subsystem state → replicated arrays |
+| ImportPersistentState | Native load bridge | Copy replicated arrays → subsystems |
+| PublishTerritorySummary | Native projection writer | Publish one loaded Territory through the canonical summary builder |
+| RegisterDefinitionHierarchy | Native projection writer | Add a Definition and its descendants without overwriting live political data |
+| RefreshStrategicDirectory | Native projection writer | Reconcile Campaign City assets and currently loaded Territory Definitions |
 | GetCaptureSummary | Pure | Read one summary by stable Territory tag |
 | GetAllCaptureSummaries | Pure | Read the full replicated directory, including unloaded Definition-backed rows |
 
@@ -509,6 +513,10 @@ Global persistence and late-join projection for economy, diplomacy, capture summ
 Definition once; District and Place rows are derived recursively. A Definition-backed row contains
 stable identity, display name, hierarchy level, parent/child counts, and initial political
 presentation. It is replaced by the authoritative actor row as soon as that actor loads.
+
+All WorldState writers and save/import bridges are native-only. Blueprint gameplay changes the
+owning Control, Diplomacy, or Economy subsystem and reads WorldState queries; WorldState then
+replicates the authoritative result for UI, save/load, unloaded cells, and late joiners.
 
 ### Delegates
 
@@ -627,7 +635,6 @@ The subsystem is not created on a dedicated server. See
 | UnregisterFactionResourceAccount | Faction, AccountActor | void |
 | ProcessResourceProduction | none | void |
 | ExecuteResourceRecipe | Requester, Faction, Rule, UpgradeLevel, BatchCount, SourceTerritory, OutResult | bool |
-| SetFactionTreasury | Faction, Treasury | void |
 | RecalculateIncome | Faction | void |
 
 ### Queries (BlueprintPure)
@@ -1068,6 +1075,29 @@ tag-removal, and attribute-threshold objectives beyond Narrative's single-tag wa
 `UTerritoryCombatProgressTask` counts Narrative damage, healing, hits, death, and revive with
 optional effect/actor filters. `UTerritoryAIObservationTask` observes AI story state but never adds
 a goal or runs an activity. See [Community Narrative Quest Tasks](30_Community_Narrative_Tasks.md).
+
+---
+
+## UTerritorySetNarrativePlayerFactionsEvent
+
+Extends `UNarrativeEvent`. Changes the saved and replicated faction membership of the exact
+Narrative player supplied by the event target or controller.
+
+### Properties
+
+| Property | Type | Notes |
+|---|---|---|
+| NewFactions | FGameplayTagContainer | One or more valid `Narrative.Factions` memberships |
+| bReplaceExistingFactions | bool | Replace the complete container in one Narrative Player State update, or add memberships |
+
+### Behavior
+
+- Executes only in an authoritative world and resolves no fallback player.
+- Replace mode calls Narrative Player State's normal saved/replicated faction setter.
+- Add mode uses Narrative's faction membership API and preserves existing memberships.
+- Calls `ForceNetUpdate` after the Narrative mutation.
+- Does not change disguise identity, diplomacy, reputation, capture credit, or Territory ownership.
+- Sets `Refire On Load` false so restoring a quest cannot replay an allegiance decision.
 
 ---
 

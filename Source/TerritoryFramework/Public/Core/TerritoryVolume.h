@@ -256,9 +256,11 @@ public:
 	// Mutation API (BlueprintAuthorityOnly — server-only)
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Ownership",
-		meta=(DisplayName="Set Owning Faction",
-			ToolTip="Validated server ownership change. Uses the Territory Control Subsystem so locks, diplomacy, state conditions, guards, capture cleanup, counterattacks, save snapshots, and replication stay synchronized. Use Apply Territory Mutation when you need a result or explicit context."))
+	/**
+	 * C++ compatibility wrapper. Blueprint gameplay must use
+	 * UTerritoryControlSubsystem::ApplyTerritoryMutation so it supplies an explicit
+	 * transition context and receives a structured result.
+	 */
 	void SetOwningFaction(const FGameplayTag& NewFaction);
 
 	/** Internal explicit-context ownership path used by synchronous hierarchy cascades. */

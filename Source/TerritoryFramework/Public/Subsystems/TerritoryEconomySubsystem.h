@@ -179,10 +179,6 @@ public:
 		meta=(DeprecatedFunction, DeprecationMessage="Use TryDebitCurrency(Requester, Amount, Faction, Reason, Type)."))
 	bool TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason = TEXT(""), ETerritoryTransactionType Type = ETerritoryTransactionType::ManualDebit);
 
-	/** Direct treasury state assignment (used by WorldState actor during load/restore) */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
-	void SetFactionTreasury(const FGameplayTag& Faction, const FTerritoryTreasury& Treasury);
-
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	FTerritoryTreasury GetFactionEconomy(const FGameplayTag& Faction) const;
 

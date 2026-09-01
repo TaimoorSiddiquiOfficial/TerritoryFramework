@@ -244,7 +244,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property")
 	bool TryUpgrade(AActor* Requester);
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property")
+	/** Internal restore/reset helper. Blueprint gameplay must use TryUpgrade. */
 	void SetUpgradeLevel(int32 NewLevel);
 
 	// ─── Blueprint Delegates ───

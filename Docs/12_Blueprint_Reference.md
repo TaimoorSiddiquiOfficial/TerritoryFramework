@@ -1,5 +1,31 @@
 # Blueprint Reference — All Exposed Functions, Properties, Delegates
 
+## Narrative Quest Cascade authoring (editor only)
+
+### `UTerritoryQuestCascadeRecipe`
+
+| Property / Function | Meaning |
+|---|---|
+| `QuestName`, `QuestDescription` | Copied into the generated Narrative Quest |
+| `StartStateID` | Objective state used as Narrative's root state |
+| `States` | Objective, Success, and Failure state templates |
+| `FTerritoryQuestCascadeState.Branches` | Alternative routes leaving one Objective state |
+| `FTerritoryQuestCascadeBranch.Tasks` | Narrative tasks that must **all** complete on that route |
+| State/Branch `Events` | Inline Narrative Events copied onto the generated node |
+| `ValidateRecipe` | Pure validation report with errors and warnings |
+| `BuildPlainTextPreview` | Easy-English, read-only graph summary |
+
+### `UTerritoryQuestCascadeEditorLibrary`
+
+| Function | Meaning |
+|---|---|
+| `CreateQuestBesideRecipe` | Creates, compiles, and opens a unique normal Narrative Quest next to the recipe |
+| `CreateQuestFromRecipe` | Same operation with an explicit `/Game/...` destination and desired asset name |
+| `BuildEmptyQuestFromRecipe` | Populates an empty Narrative Quest; refuses to overwrite authored nodes |
+
+The recipe Details panel exposes the safe one-click workflow. See
+[Narrative Quest Cascade Recipes](32_Narrative_Quest_Cascade_Recipes.md).
+
 ## Operations UI
 
 ### `UTerritoryUIBlueprintLibrary`
@@ -72,11 +98,14 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 
 | Function | Category |
 |---|---|
-| SetOwningFaction(NewFaction) | Territory — validated wrapper through ControlSubsystem; use Apply Territory Mutation for a result/context |
 | RegisterDefender(Defender) | Territory |
 | UnregisterDefender(Defender) | Territory |
 | SpawnGuards() | Territory\|Guards |
 | DespawnGuards() | Territory\|Guards |
+
+Ownership changes are not actor setter nodes. Use **Apply Territory Mutation** on
+`UTerritoryControlSubsystem` and provide `FTerritoryTransitionContext`. This returns a
+structured success or rejection instead of leaving a half-finished transition.
 
 ### BlueprintNativeEvent
 
@@ -261,8 +290,10 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 
 | Function |
 |---|
-| TryUpgrade() → bool |
-| SetUpgradeLevel(NewLevel) |
+| TryUpgrade(Requester) → bool |
+
+`SetUpgradeLevel` is an internal C++ restore/reset helper. Gameplay Blueprints use
+`TryUpgrade`, which validates the owner faction and debits Narrative inventory currency.
 
 ### BlueprintNativeEvent
 
@@ -404,7 +435,6 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | UnregisterFactionResourceAccount(Faction, AccountActor) | AuthorityOnly |
 | ProcessResourceProduction() | AuthorityOnly |
 | ExecuteResourceRecipe(Requester, Faction, Rule, UpgradeLevel, BatchCount, SourceTerritory, OutResult) | AuthorityOnly → bool |
-| SetFactionTreasury(Faction, Treasury) | AuthorityOnly |
 | RecalculateIncome(Faction) | AuthorityOnly |
 | GetActorCurrency(Requester) | Pure → int32 |
 | GetIncome(Faction) | Pure → int32 |
@@ -498,6 +528,7 @@ These `EditInlineNew` Narrative classes can be added directly under a Territory'
 | `UTerritoryEventContextCondition` | Required target/player/ASC/controller/Tales context | Give XP only to the player pawn that caused capture |
 | `UTerritoryProductionStatusCondition` | Property, optional rule, required status | Farm production is Missing Input |
 | `UTerritoryResourceCondition` | Faction, Narrative item class, comparison, quantity | Heroes have At Least 10 Medicine |
+| `UTerritorySetNarrativePlayerFactionsEvent` | New faction container, replace or add | Replace Police membership with Heroes after a betrayal choice |
 | `UTerritorySetDiplomacyEvent` | Faction A/B sources, fallback tags, owner/conflict safety, new state | Contested: Current Owner and Contesting Faction become War |
 | `UTerritoryModifyReputationEvent` | Faction, Add/Set, value | Add -20 to Bandit reputation |
 | `UTerritoryScheduleEnemyWaveEvent` | Target, exact/best attacker | Schedule one finite Bandit assault |
@@ -547,6 +578,10 @@ strategic directory, so World Partition does not silently turn two claimed Distr
 Only unlocked, stable Claimed Districts count. Put this condition inside `Set Territory
 Diplomacy -> Conditions` for rules such as “become hostile after the player's current faction
 controls at least two Districts.”
+
+`Set Narrative Player Factions` changes the exact Narrative quest player's real, saved faction
+membership. Replace mode is appropriate for one political allegiance; add mode supports a real
+multi-faction membership. It is not a disguise and does not transfer Territory ownership.
 
 Do not place a player-only GAS reward in a State Config without an event-level context condition.
 `Contested -> Claimed` can also mean that failed capture pressure decayed and the current owner

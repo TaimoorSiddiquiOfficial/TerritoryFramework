@@ -178,7 +178,7 @@ These events have C++ `_Implementation` that is either **empty** or does only co
 | **When it fires** | After the ownership commit finishes guard reconciliation, state, and replicated/save data |
 | **Parameters** | `OldOwner`, `NewOwner` — faction tags before and after |
 
-**C++ `_Implementation`:** Empty. All guard lifecycle, state transitions, and replication are handled by the non-virtual atomic ownership commit before this event fires. The public Blueprint `Set Owning Faction` node reaches that commit through the Control subsystem transaction.
+**C++ `_Implementation`:** Empty. All guard lifecycle, state transitions, and replication are handled by the non-virtual atomic ownership commit before this event fires. Blueprint requests ownership through `Apply Territory Mutation` on the Control subsystem.
 
 **Super required:** **No.** Safe to override freely.
 

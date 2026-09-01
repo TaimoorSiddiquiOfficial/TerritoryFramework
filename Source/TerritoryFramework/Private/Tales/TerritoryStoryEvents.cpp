@@ -6,14 +6,32 @@
 #include "Core/TerritoryMutationTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TerritoryTalesUtilities.h"
+#include "UnrealFramework/NarrativePlayerState.h"
 
 namespace
 {
+	ANarrativePlayerState* ResolveExplicitNarrativePlayerState(
+		APawn* Target, APlayerController* Controller)
+	{
+		if (Target)
+		{
+			if (ANarrativePlayerState* PlayerState =
+				Target->GetPlayerState<ANarrativePlayerState>())
+			{
+				return PlayerState;
+			}
+		}
+		return Controller
+			? Controller->GetPlayerState<ANarrativePlayerState>() : nullptr;
+	}
+
 	AActor* ResolveExplicitRequester(APawn* Target, APlayerController* Controller)
 	{
 		if (Target) return Target;
@@ -64,6 +82,66 @@ namespace
 			CollectLoadedHierarchy(Registry, Child, OutTerritories);
 		}
 	}
+}
+
+UTerritorySetNarrativePlayerFactionsEvent::
+	UTerritorySetNarrativePlayerFactionsEvent(
+		const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	bRefireOnLoad = false;
+}
+
+bool UTerritorySetNarrativePlayerFactionsEvent::ApplyToPlayerState(
+	ANarrativePlayerState* PlayerState) const
+{
+	if (!IsValid(PlayerState) || !PlayerState->HasAuthority()
+		|| !NewFactions.IsValid())
+	{
+		return false;
+	}
+
+	if (bReplaceExistingFactions)
+	{
+		PlayerState->SetFactions(NewFactions);
+	}
+	else
+	{
+		TArray<FGameplayTag> Factions;
+		NewFactions.GetGameplayTagArray(Factions);
+		for (const FGameplayTag& Faction : Factions)
+		{
+			PlayerState->AddFaction(Faction);
+		}
+	}
+	PlayerState->ForceNetUpdate();
+	return true;
+}
+
+void UTerritorySetNarrativePlayerFactionsEvent::ExecuteEvent_Implementation(
+	APawn* Target, APlayerController* Controller,
+	UTalesComponent* NarrativeComponent)
+{
+	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	if (!World || World->GetNetMode() == NM_Client) return;
+
+	ANarrativePlayerState* PlayerState =
+		ResolveExplicitNarrativePlayerState(Target, Controller);
+	if (!ApplyToPlayerState(PlayerState))
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[SetNarrativePlayerFactions] Requires an explicit authoritative Narrative player and at least one valid Narrative faction"));
+	}
+}
+
+FString UTerritorySetNarrativePlayerFactionsEvent::
+	GetGraphDisplayText_Implementation()
+{
+	return FString::Printf(TEXT("Player factions: %s %s"),
+		bReplaceExistingFactions ? TEXT("replace with") : TEXT("add"),
+		*NewFactions.ToStringSimple());
 }
 
 UTerritoryHierarchyStoryOverrideEvent::UTerritoryHierarchyStoryOverrideEvent(

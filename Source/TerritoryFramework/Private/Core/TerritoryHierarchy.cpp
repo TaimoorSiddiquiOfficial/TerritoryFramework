@@ -837,7 +837,7 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 	// Check if faction can afford the upgrade
 	if (!Economy->CanActorAfford(Requester, Cost)) return false;
 
-	// Debit treasury
+	// Debit Narrative's authoritative currency account.
 	FString Reason = FString::Printf(TEXT("Property upgrade %s level %d→%d"),
 		*GetTerritoryTag().ToString(), UpgradeLevel, UpgradeLevel + 1);
 	if (!Economy->TryDebitCurrency(Requester, Cost, OwnerFaction, Reason, ETerritoryTransactionType::UpgradeCost))
@@ -845,12 +845,9 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 		return false;
 	}
 
-	// Increment upgrade level (replicated)
-	UpgradeLevel++;
-	Economy->RefreshProductionSite(this);
-
-	// Recalculate income for the owning faction
-	Economy->MarkFactionDirty(OwnerFaction);
+	// Use the single internal level writer so production, income, replication, and
+	// Blueprint presentation receive the same update as restore/reset paths.
+	SetUpgradeLevel(UpgradeLevel + 1);
 
 	if (ShouldLogPropertyEconomy())
 	{
@@ -891,5 +888,6 @@ void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 		}
 
 		OnUpgradeLevelChanged(UpgradeLevel);
+		ForceNetUpdate();
 	}
 }
