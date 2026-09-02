@@ -3,8 +3,11 @@
 #include "Misc/AutomationTest.h"
 
 #include "Tales/TerritoryQuestCascadeRecipe.h"
+#include "Tales/TerritoryNarrativeCheckpointEvent.h"
 #include "Tales/TerritoryStateTask.h"
 #include "Tales/TerritoryStoryConditions.h"
+#include "Tales/TalesComponent.h"
+#include "UObject/UnrealType.h"
 
 namespace TerritoryQuestCascadeRecipeTests
 {
@@ -60,6 +63,41 @@ bool FTFTerritoryQuestCascadeRecipeContract::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Summary counts the route condition"), Summary.Conditions, 1);
 	TestEqual(TEXT("Summary counts the authored player task"),
 		Summary.PlayerTasks, 1);
+	Recipe->CheckpointMode = ETerritoryQuestCheckpointMode::ObjectiveStates;
+	TestEqual(TEXT("Summary explains the generated objective checkpoint"),
+		Recipe->BuildMissionLogicSummary().AutomaticCheckpoints, 1);
+	TestTrue(TEXT("Plain preview explains checkpoint policy"),
+		Recipe->BuildPlainTextPreview().Contains(
+			TEXT("Auto Checkpoint: Every Objective State")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryQuestCheckpointContract,
+	"TerritoryFramework.Tales.QuestCascade.CheckpointUsesNarrativePersistence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryQuestCheckpointContract::RunTest(const FString& Parameters)
+{
+	const UTerritoryNarrativeCheckpointEvent* Event =
+		GetDefault<UTerritoryNarrativeCheckpointEvent>();
+	TestEqual(TEXT("Checkpoint runs when a state begins"), Event->EventRuntime,
+		EEventRuntime::Start);
+	TestFalse(TEXT("Loading a checkpoint never writes another checkpoint"),
+		Event->bRefireOnLoad);
+
+	const UScriptStruct* SavedQuestStruct = FNarrativeSavedQuest::StaticStruct();
+	const FProperty* CurrentState = FindFProperty<FProperty>(
+		SavedQuestStruct, TEXT("CurrentStateID"));
+	const FProperty* BranchProgress = FindFProperty<FProperty>(
+		SavedQuestStruct, TEXT("QuestBranches"));
+	const FProperty* ReachedStates = FindFProperty<FProperty>(
+		SavedQuestStruct, TEXT("ReachedStateNames"));
+	TestTrue(TEXT("Narrative saves the current quest state"), CurrentState
+		&& CurrentState->HasAnyPropertyFlags(CPF_SaveGame));
+	TestTrue(TEXT("Narrative saves branch task progress"), BranchProgress
+		&& BranchProgress->HasAnyPropertyFlags(CPF_SaveGame));
+	TestTrue(TEXT("Narrative saves reached states"), ReachedStates
+		&& ReachedStates->HasAnyPropertyFlags(CPF_SaveGame));
 	return true;
 }
 

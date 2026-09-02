@@ -105,6 +105,11 @@ UTerritoryQuestCascadeRecipeFactory::UTerritoryQuestCascadeRecipeFactory()
 	InitializeFor(UTerritoryQuestCascadeRecipe::StaticClass());
 }
 
+FString UTerritoryQuestCascadeRecipeFactory::GetDefaultNewAssetName() const
+{
+	return TEXT("DA_QC_NewMission");
+}
+
 UTerritoryBlueprintFactoryBase::UTerritoryBlueprintFactoryBase()
 {
 	bCreateNew = true;

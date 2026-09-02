@@ -137,7 +137,8 @@ enum class ECaptureResult : uint8
 	Locked,
 	DefendersRemain,
 	DiplomaticallyBlocked,
-	InvalidTerritory
+	InvalidTerritory,
+	QuestOverrideActive UMETA(DisplayName="Quest Override Active")
 };
 
 /**

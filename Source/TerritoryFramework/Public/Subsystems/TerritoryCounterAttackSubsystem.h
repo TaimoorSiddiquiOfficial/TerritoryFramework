@@ -57,9 +57,52 @@ public:
 	bool ScheduleBestCounterAttack(ATerritoryVolume* Territory,
 		FGameplayTag PreferredFaction = FGameplayTag());
 
+	/**
+	 * Diagnostic scheduling path used by Narrative Events and Blueprint tools. It runs
+	 * the same authoritative admission as Schedule Counter Attack / Story Pursuit and
+	 * explains the first rejected rule instead of returning an unexplained false.
+	 * Story Options are ignored for Strategic Counterattack.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category="Territory|Counter Attack|Diagnostics",
+		meta=(DisplayName="Try Schedule Territory Assault (With Reason)"))
+	bool TryScheduleAssaultWithReason(ATerritoryVolume* Territory,
+		FGameplayTag AttackingFaction, ETerritoryAssaultLaunchMode LaunchMode,
+		const FTerritoryStoryPursuitOptions& StoryOptions,
+		FText& OutFailureReason);
+
+	/**
+	 * Explicit Narrative path with optional immediate physical deployment. An authored
+	 * Wave does not require the automatic strategy layer's secure-District,
+	 * Reinforcements-capability, or counter-Quest gates. It still validates authority,
+	 * opposing ownership, diplomacy, finite force, spawn definitions, budget, and route.
+	 * Immediate also skips grace, time window, chance, warning delay, and proximity.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category="Territory|Counter Attack|Diagnostics",
+		meta=(DisplayName="Try Schedule Territory Assault Advanced (With Reason)"))
+	bool TryScheduleAssaultAdvancedWithReason(ATerritoryVolume* Territory,
+		FGameplayTag AttackingFaction, ETerritoryAssaultLaunchMode LaunchMode,
+		const FTerritoryStoryPursuitOptions& StoryOptions,
+		bool bStartImmediately, FText& OutFailureReason);
+
+	/** Best-attacker admission with a player/developer-readable rejection reason. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category="Territory|Counter Attack|Diagnostics",
+		meta=(DisplayName="Try Schedule Best Counterattack (With Reason)"))
+	bool TryScheduleBestCounterAttackWithReason(ATerritoryVolume* Territory,
+		FGameplayTag PreferredFaction, FText& OutFailureReason);
+
 	/** Read-only strategic preview used by District command UI. Does not reserve a cycle or roll. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	bool GetBestEligibleAttackerPreview(const ATerritoryVolume* Territory,
+		FGameplayTag PreferredFaction, FGameplayTag& OutAttackingFaction,
+		FTerritoryAssaultEvaluationInput& OutInput,
+		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const;
+
+	/** Best hostile configured force for one explicit Narrative Wave. */
+	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack|Story")
+	bool GetBestAuthoredWaveAttackerPreview(const ATerritoryVolume* Territory,
 		FGameplayTag PreferredFaction, FGameplayTag& OutAttackingFaction,
 		FTerritoryAssaultEvaluationInput& OutInput,
 		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const;
@@ -358,11 +401,17 @@ private:
 		const FGameplayTag& PreferredFaction, FGameplayTag& OutAttackingFaction,
 		FTerritoryAssaultEvaluationInput& OutInput,
 		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason,
-		bool bRequireRecurringEligibility = false) const;
+		bool bRequireRecurringEligibility = false,
+		bool bExplicitNarrativeRequest = false) const;
 	bool ScheduleAssault(ATerritoryVolume* Territory, FGameplayTag AttackingFaction,
 		ETerritoryAssaultLaunchMode LaunchMode,
 		bool bContinueExistingSchedule = false,
-		const FTerritoryStoryPursuitOptions* StoryOptions = nullptr);
+		const FTerritoryStoryPursuitOptions* StoryOptions = nullptr,
+		FText* OutFailureReason = nullptr,
+		bool bQuestOverrideAuthorized = false,
+		bool bStartImmediately = false);
+	bool StartAssaultImmediately(FTerritoryAssaultRecord& Assault,
+		ATerritoryVolume* Territory, FText* OutFailureReason = nullptr);
 	bool HasPendingVehicleIngress(const FGuid& AssaultID) const;
 	bool DoesForceMeetStagingRequirement(const FTerritoryFactionAssaultConfig& ForceConfig,
 		ETerritoryAssaultLaunchMode LaunchMode) const;

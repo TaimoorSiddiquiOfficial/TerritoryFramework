@@ -32,6 +32,7 @@
 #include "DetailWidgetRow.h"
 #include "Modules/ModuleManager.h"
 #include "PropertyEditorModule.h"
+#include "QuestBlueprint.h"
 #include "Styling/AppStyle.h"
 #include "Story/STerritoryStoryOutcomePanel.h"
 #include "Tales/STerritoryQuestMissionSummaryPanel.h"
@@ -303,6 +304,9 @@ namespace
 				FText::FromString(TEXT("Mission Logic (Read Only)")),
 				ECategoryPriority::Important);
 			MissionSummary.InitiallyCollapsed(false);
+			MissionSummary.AddProperty(DetailBuilder.GetProperty(
+				GET_MEMBER_NAME_CHECKED(UTerritoryQuestCascadeRecipe,
+					NarrativeQuestGraph)));
 			MissionSummary.AddCustomRow(FText::FromString(TEXT("Mission Logic")))
 			.WholeRowContent()
 			[
@@ -351,12 +355,50 @@ namespace
 					if (Report.bSucceeded && Report.QuestAsset && GEditor)
 					{
 						UE_LOG(LogTemp, Display,
-							TEXT("[TerritoryQuestCascade] Created %s with %d states, %d branches, %d tasks, and %d functional condition gates."),
+							TEXT("[TerritoryQuestCascade] Created %s with %d states, %d branches, %d tasks, %d functional condition gates, and %d automatic checkpoints."),
 							*Report.QuestPackageName, Report.CreatedStates,
 							Report.CreatedBranches, Report.CreatedTasks,
-							Report.CreatedConditionGates);
+							Report.CreatedConditionGates,
+							Report.CreatedCheckpointEvents);
 						GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()
 							->OpenEditorForAsset(Report.QuestAsset);
+					}
+					return FReply::Handled();
+				})
+			];
+			Generate.AddCustomRow(FText::FromString(TEXT("Migrate Quest Conditions")))
+			.WholeRowContent()
+			[
+				SNew(SButton)
+				.Text(FText::FromString(
+					TEXT("Remove Unsupported Quest-Node Conditions")))
+				.ToolTipText(FText::FromString(
+					TEXT("Moves State and Branch condition rows from the selected Narrative Quest into hidden Wait For Narrative Conditions Tasks, then clears the unsupported Quest-node arrays. Event conditions are unchanged.")))
+				.OnClicked_Lambda([Recipe]()
+				{
+					UClass* QuestClass = Recipe.IsValid()
+						? Recipe->NarrativeQuestGraph.LoadSynchronous() : nullptr;
+					UQuestBlueprint* QuestBlueprint = QuestClass
+						? Cast<UQuestBlueprint>(QuestClass->ClassGeneratedBy) : nullptr;
+					FTerritoryQuestCascadeBuildReport Report =
+						UTerritoryQuestCascadeEditorLibrary::
+						MigrateQuestNodeConditionsToGateTasks(QuestBlueprint);
+					for (const FText& Error : Report.Errors)
+					{
+						UE_LOG(LogTemp, Error,
+							TEXT("[TerritoryQuestCascade] %s"), *Error.ToString());
+					}
+					for (const FText& Warning : Report.Warnings)
+					{
+						UE_LOG(LogTemp, Warning,
+							TEXT("[TerritoryQuestCascade] %s"), *Warning.ToString());
+					}
+					if (Report.bSucceeded)
+					{
+						UE_LOG(LogTemp, Display,
+							TEXT("[TerritoryQuestCascade] Removed %d unsupported Quest-node condition rows and copied %d missing requirements into functional gate Tasks."),
+							Report.RemovedQuestNodeConditions,
+							Report.CopiedConditions);
 					}
 					return FReply::Handled();
 				})

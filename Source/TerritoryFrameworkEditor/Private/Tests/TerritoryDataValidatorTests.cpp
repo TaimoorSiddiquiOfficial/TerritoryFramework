@@ -20,6 +20,8 @@
 #include "Tales/Quest.h"
 #include "Tales/QuestSM.h"
 #include "Tales/TerritoryCaptureTask.h"
+#include "Tales/TerritoryDiplomacyEvent.h"
+#include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectNPCDefinitionIdentityRegression,
@@ -335,6 +337,33 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		Validator->ValidateLoadedAsset_Implementation(
 			PlaceAssetData, Place, ValidPlaceContext),
 		EDataValidationResult::Valid);
+
+	FTerritoryStateConfig& ClaimedConfig = Place->StateConfigs.FindChecked(
+		ETerritoryState::Claimed);
+	ClaimedConfig.EntryEvents.Add(
+		NewObject<UTerritoryScheduleEnemyWaveEvent>(Place));
+	UTerritorySetDiplomacyEvent* PrematurePeace =
+		NewObject<UTerritorySetDiplomacyEvent>(Place);
+	PrematurePeace->NewState = EDiplomacyState::None;
+	ClaimedConfig.EntryEvents.Add(PrematurePeace);
+	FDataValidationContext ContradictoryWaveContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A Wave plus immediate peace remains structurally valid"),
+		Validator->ValidateLoadedAsset_Implementation(
+			PlaceAssetData, Place, ContradictoryWaveContext),
+		EDataValidationResult::Valid);
+	TArray<FText> ContradictoryWaveWarnings;
+	TArray<FText> ContradictoryWaveErrors;
+	ContradictoryWaveContext.SplitIssues(
+		ContradictoryWaveWarnings, ContradictoryWaveErrors);
+	TestTrue(TEXT("A Wave plus immediate peace explains why deployment will cancel"),
+		ContradictoryWaveWarnings.ContainsByPredicate(
+			[](const FText& Warning)
+			{
+				return Warning.ToString().Contains(
+					TEXT("peace-like event will cancel the Wave"));
+			}));
+	ClaimedConfig.EntryEvents.Reset();
 
 	FTerritoryStateAudioConfig& PlaceAudio = Place->StateConfigs.FindChecked(
 		ETerritoryState::Contested).Audio;

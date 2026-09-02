@@ -14,6 +14,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryTalesUtilities.h"
+#include "UnrealFramework/NarrativeGameState.h"
 
 namespace
 {
@@ -213,6 +214,44 @@ bool UTerritoryFactionDistrictHoldingCondition::CheckCondition_Implementation(
 			UTerritoryBlueprintLibrary::GetFactionDistrictCount(
 				World, ResolvedFaction), Comparison,
 			FMath::Max(0, DistrictCount));
+}
+
+UTerritoryWaitTimeCondition::UTerritoryWaitTimeCondition()
+{
+	ConditionFilter = EConditionFilter::CF_DontTarget;
+}
+
+bool UTerritoryWaitTimeCondition::HasWaitFinished(
+	double CurrentTimeSeconds, float RequiredWaitSeconds)
+{
+	return CurrentTimeSeconds >= FMath::Max(0.f, RequiredWaitSeconds);
+}
+
+bool UTerritoryWaitTimeCondition::CheckCondition_Implementation(
+	APawn* Target, APlayerController* Controller,
+	UTalesComponent* NarrativeComponent)
+{
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	if (!World) return false;
+
+	double CurrentTime = World->GetTimeSeconds();
+	if (TimeSource == ETerritoryWaitTimeSource::NarrativeCampaignElapsed)
+	{
+		const ANarrativeGameState* NarrativeGameState =
+			Cast<ANarrativeGameState>(World->GetGameState());
+		if (!NarrativeGameState) return false;
+		CurrentTime = NarrativeGameState->GetAccumulatedTime();
+	}
+	return HasWaitFinished(CurrentTime, WaitTimeSeconds);
+}
+
+FString UTerritoryWaitTimeCondition::GetGraphDisplayText_Implementation()
+{
+	return FString::Printf(TEXT("Wait until %s reaches %.1f seconds"),
+		TimeSource == ETerritoryWaitTimeSource::NarrativeCampaignElapsed
+			? TEXT("saved Narrative campaign time") : TEXT("current World time"),
+		FMath::Max(0.f, WaitTimeSeconds));
 }
 
 FGameplayTag UTerritoryFactionDistrictHoldingCondition::ResolveFaction(

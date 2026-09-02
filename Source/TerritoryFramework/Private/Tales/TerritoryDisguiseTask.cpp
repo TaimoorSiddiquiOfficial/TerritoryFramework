@@ -7,6 +7,9 @@
 
 void UTerritoryDisguiseTask::BeginTask()
 {
+	// Narrative may enter the same branch again. BeginTask immediately invokes the
+	// first tick through UNarrativeTask, so stale inside-state must be cleared first.
+	bWasInsideTarget = false;
 	if (Objective == ETerritoryDisguiseTaskObjective::EnterTerritoryAccepted
 		|| Objective == ETerritoryDisguiseTaskObjective::ExitTerritoryUndetected)
 	{
@@ -44,6 +47,7 @@ void UTerritoryDisguiseTask::EndTask()
 				this, &UTerritoryDisguiseTask::HandleDisguiseChanged);
 		}
 	}
+	bWasInsideTarget = false;
 	Super::EndTask();
 }
 

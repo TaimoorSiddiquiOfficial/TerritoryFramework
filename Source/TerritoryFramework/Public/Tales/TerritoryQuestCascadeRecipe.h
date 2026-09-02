@@ -8,6 +8,8 @@
 #include "Tales/NarrativeEvent.h"
 #include "TerritoryQuestCascadeRecipe.generated.h"
 
+class UQuest;
+
 /**
  * The kind of Narrative Quest state a cascade recipe will create.
  * Objective states keep the quest running. Success and Failure states end it.
@@ -21,6 +23,18 @@ enum class ETerritoryQuestCascadeStateType : uint8
 		ToolTip="Reaching this state completes the Narrative Quest. Easy example: the owner accepts the handover and the mission succeeds."),
 	Failure UMETA(DisplayName="Failure",
 		ToolTip="Reaching this state fails the Narrative Quest. Easy example: the rescue target dies before the player escapes.")
+};
+
+/** When a generated quest should commit Narrative Pro's current save. */
+UENUM(BlueprintType)
+enum class ETerritoryQuestCheckpointMode : uint8
+{
+	Disabled UMETA(DisplayName="Disabled",
+		ToolTip="Do not inject automatic save events. You may still add Save Narrative Quest Checkpoint manually to selected states."),
+	ObjectiveStates UMETA(DisplayName="Every Objective State",
+		ToolTip="Save when each playable objective state begins. Easy example: after State 1 passes and State 2 begins, death reloads State 2."),
+	EveryState UMETA(DisplayName="Every State Including Endings",
+		ToolTip="Save objective, success, and failure states. Use this when quest completion must be committed immediately.")
 };
 
 /**
@@ -143,6 +157,22 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeLogicSummary
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	bool bValid = false;
 
+	/** Recipe asset or compiled Narrative Quest class inspected by this report. */
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	FString Source;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	FText InspectedQuestName;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	FText InspectedQuestDescription;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	FName InspectedStartState = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	bool bInspectedQuestTracked = false;
+
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 ObjectiveStates = 0;
 
@@ -158,11 +188,18 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeLogicSummary
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 PlayerTasks = 0;
 
+	/** Hidden bridge tasks generated only to make Narrative Conditions gate Quest routes. */
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 InternalTasks = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 Conditions = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 Events = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
+	int32 AutomaticCheckpoints = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 OptionalTasks = 0;
@@ -206,6 +243,15 @@ class TERRITORYFRAMEWORK_API UTerritoryQuestCascadeRecipe final
 	GENERATED_BODY()
 
 public:
+	/**
+	 * Optional existing Narrative Quest whose compiled runtime graph is inspected
+	 * beside this recipe. This does not replace, start, or modify that Quest.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest|Runtime Graph Inspection",
+		meta=(DisplayName="Narrative Quest Graph",
+			ToolTip="Select an existing Narrative Quest file to inspect its compiled runtime graph. The read-only panel shows the real states, routes, tasks, conditions, events, settings, and setup findings. Press Refresh Runtime Quest Summary after editing the Quest graph."))
+	TSoftClassPtr<UQuest> NarrativeQuestGraph;
+
 	/** Name copied into the generated Narrative Quest journal entry. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest",
 		meta=(ToolTip="Player-facing quest name copied into Narrative. Easy example: Liberate the Blacksmith."))
@@ -238,6 +284,25 @@ public:
 			ToolTip="Resume the linked dialogue after loading. Enable for an important multi-step conversation; disable for a short ambient exchange that may safely restart later."))
 	bool bResumeDialogueAfterLoad = false;
 
+	/** Automatically inject checkpoint events into the generated quest states. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest|Saving",
+		meta=(ToolTip="Choose when generated states automatically save Narrative Pro progress. Easy example: Every Objective State makes a three-state quest resume at the latest reached objective after death."))
+	ETerritoryQuestCheckpointMode CheckpointMode =
+		ETerritoryQuestCheckpointMode::Disabled;
+
+	/** Optional exact save name used by generated automatic checkpoints. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest|Saving",
+		meta=(EditCondition="CheckpointMode != ETerritoryQuestCheckpointMode::Disabled", EditConditionHides,
+			ToolTip="Usually leave empty so the active Narrative campaign is reused. Easy example: an empty value keeps saving NarrativeSave2 if slot 2 is active."))
+	FString CheckpointSaveNameOverride;
+
+	/** Fallback campaign number when no Narrative campaign is active yet. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest|Saving",
+		meta=(EditCondition="CheckpointMode != ETerritoryQuestCheckpointMode::Disabled", EditConditionHides,
+			ClampMin="0", UIMin="0",
+			ToolTip="Used only before a campaign is active. Easy example: 0 falls back to NarrativeSave0."))
+	int32 CheckpointFallbackCampaignIndex = 0;
+
 	/** State used as Narrative's root/start state. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest",
 		meta=(ToolTip="The State ID where the quest begins. It must be an Objective state. Easy example: ApproachBlacksmith."))
@@ -260,6 +325,16 @@ public:
 	/** Easy-English, read-only preview useful during quest planning and review. */
 	UFUNCTION(BlueprintPure, Category="Territory|Narrative Quest Cascade")
 	FString BuildPlainTextPreview() const;
+
+	/** Counts the selected Narrative Quest's compiled runtime graph, not the recipe rows. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Quest Cascade",
+		meta=(DisplayName="Build Selected Runtime Quest Summary"))
+	FTerritoryQuestCascadeLogicSummary BuildSelectedRuntimeQuestSummary() const;
+
+	/** Complete copyable report for the selected compiled Narrative Quest graph. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Quest Cascade",
+		meta=(DisplayName="Build Selected Runtime Quest Report"))
+	FString BuildSelectedRuntimeQuestReport() const;
 
 #if WITH_EDITOR
 	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context)

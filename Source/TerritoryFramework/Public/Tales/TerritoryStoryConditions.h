@@ -14,6 +14,13 @@
 class UNarrativeItem;
 class UQuest;
 
+UENUM(BlueprintType)
+enum class ETerritoryWaitTimeSource : uint8
+{
+	NarrativeCampaignElapsed UMETA(DisplayName="Narrative Campaign Elapsed Time (Saved)"),
+	CurrentWorldElapsed UMETA(DisplayName="Current World Elapsed Time (Not Saved)")
+};
+
 /** Uses the explicit Narrative event's Tales component; no second quest state is stored. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Narrative Quest State Condition"))
@@ -35,6 +42,40 @@ public:
 
 protected:
 	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent) override;
+	virtual FString GetGraphDisplayText_Implementation() override;
+};
+
+/**
+ * Deterministic non-latent time gate for State Configs, event Conditions, and dialogue.
+ * It does not sleep or hold an Event: the calling rule passes on its next evaluation
+ * after the selected clock reaches Wait Time.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Territory Wait Time Condition"))
+class TERRITORYFRAMEWORK_API UTerritoryWaitTimeCondition : public UNarrativeCondition
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryWaitTimeCondition();
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(ToolTip="Narrative Campaign time is saved and recommended for story rules. Current World time restarts when the level/world starts."))
+	ETerritoryWaitTimeSource TimeSource =
+		ETerritoryWaitTimeSource::NarrativeCampaignElapsed;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(ClampMin="0.0", Units="s",
+			ToolTip="The condition passes when the selected elapsed clock reaches this value. Easy example: 600 means wait until ten minutes of campaign time have elapsed."))
+	float WaitTimeSeconds = 0.f;
+
+	static bool HasWaitFinished(double CurrentTimeSeconds,
+		float RequiredWaitSeconds);
+
+protected:
+	virtual bool CheckCondition_Implementation(APawn* Target,
+		APlayerController* Controller,
 		class UTalesComponent* NarrativeComponent) override;
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

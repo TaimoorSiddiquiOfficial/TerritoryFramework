@@ -42,6 +42,11 @@ do not evaluate their displayed Conditions array. Designers normally configure t
 friendly Conditions lists instead of adding this hidden task themselves. It uses Narrative's own
 condition evaluator and never creates another quest, condition, save, or multiplayer authority.
 
+Quest Cascade Recipes may also inject **Save Narrative Quest Checkpoint**, which is a Narrative
+Event rather than a task. A task waits for player progress; a checkpoint event commits the current
+Narrative state after the next objective begins. See
+[Narrative Quest Cascade Recipes](32_Narrative_Quest_Cascade_Recipes.md#checkpoints-death-and-saveload).
+
 The dedicated **Tasks: Territory Story** wrapper exposes detailed boss and chase branches such as
 boss defeated, target reaches the road exit, chase distance lost, final fight started, attackers
 withdrawn, and assault cancelled. Community movement, GAS, combat, and AI tasks are documented in
@@ -136,6 +141,9 @@ fallback location; when the actor registers again, the task rebinds and refreshe
 - Tasks only observe those authorities and call Narrative `CompleteTask` or `SetProgress` on the
   authoritative quest component.
 - Tasks never capture, unlock, spawn guards, change diplomacy, or award rewards by themselves.
+- Edge-triggered disguise and AI objectives clear their observation latches before Narrative's
+  immediate first tick, so returning to a Quest branch cannot inherit a previous visit's
+  inside/perception/vehicle/attack-token state.
 
 This keeps save/load and multiplayer deterministic: the task follows the saved Territory state
 instead of inventing another objective database.
@@ -149,3 +157,6 @@ instead of inventing another objective database.
   that folder to Narrative Quest Task Search Paths.
 - Do not edit task assets under `/NarrativePro`. Territory wrappers live under
   `/TerritoryFramework` and survive Narrative marketplace updates.
+- Do not rely on a raw Condition displayed on a manually authored Quest State or Branch. Add
+  `Wait For Narrative Conditions`, or generate the graph from a Cascade Recipe. Use the recipe's
+  selected runtime Quest report to find missing gates.

@@ -280,26 +280,54 @@ void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target
 			*TargetTerritory.ToString());
 		return;
 	}
-	const bool bScheduled = LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
-		? (AttackingFaction.IsValid()
-			&& Counter->ScheduleStoryPursuit(Territory, AttackingFaction))
-		: (bChooseBestEligibleAttacker
-			? Counter->ScheduleBestCounterAttack(Territory, AttackingFaction)
-			: (AttackingFaction.IsValid()
-				&& Counter->ScheduleCounterAttack(Territory, AttackingFaction)));
+	FText FailureReason;
+	bool bScheduled = false;
+	if (LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit)
+	{
+		FTerritoryStoryPursuitOptions LegacyOptions;
+		LegacyOptions.bAllowsTerritoryCapture = true;
+		LegacyOptions.bUseStrategicDecisionRoll = true;
+		LegacyOptions.GracePeriodOverrideGameTime = -1.f;
+		bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(Territory,
+			AttackingFaction, LaunchMode, LegacyOptions,
+			bStartImmediately, FailureReason);
+	}
+	else if (bChooseBestEligibleAttacker)
+	{
+		FGameplayTag ChosenFaction;
+		FTerritoryAssaultEvaluationInput PreviewInput;
+		FTerritoryAssaultEvaluationResult PreviewResult;
+		if (Counter->GetBestAuthoredWaveAttackerPreview(Territory,
+			AttackingFaction, ChosenFaction, PreviewInput, PreviewResult,
+			FailureReason))
+		{
+			FTerritoryStoryPursuitOptions IgnoredStoryOptions;
+			bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(
+				Territory, ChosenFaction, LaunchMode, IgnoredStoryOptions,
+				bStartImmediately, FailureReason);
+		}
+	}
+	else
+	{
+		FTerritoryStoryPursuitOptions IgnoredStoryOptions;
+		bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(Territory,
+			AttackingFaction, LaunchMode, IgnoredStoryOptions,
+			bStartImmediately, FailureReason);
+	}
 	if (!bScheduled)
 	{
 		UE_LOG(LogTerritory, Warning,
-			TEXT("[EnemyWaveEvent] No Territory assault was scheduled for %s; check inherited conditions, owner, diplomacy, profile, staging, route, schedule, time window, cooldown, and budgets"),
-			*TargetTerritory.ToString());
+			TEXT("[EnemyWaveEvent] No Territory assault was scheduled for %s: %s"),
+			*TargetTerritory.ToString(), *FailureReason.ToString());
 	}
 }
 
 FString UTerritoryScheduleEnemyWaveEvent::GetGraphDisplayText_Implementation()
 {
 	const bool bStoryPursuit = LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit;
-	return FString::Printf(TEXT("Enemy wave (%s): schedule %s against %s"),
+	return FString::Printf(TEXT("Enemy wave (%s%s): schedule %s against %s"),
 		bStoryPursuit ? TEXT("one story pursuit") : TEXT("profile-governed strategic response"),
+		bStartImmediately ? TEXT(", immediate deployment") : TEXT(""),
 		!bStoryPursuit && bChooseBestEligibleAttacker
 			? TEXT("best eligible faction") : *AttackingFaction.ToString(),
 		*TargetTerritory.ToString());
@@ -333,13 +361,28 @@ void UTerritoryStartBossChaseEvent::ExecuteEvent_Implementation(APawn* Target,
 	{
 		RuntimeOptions.StoryFocusLocation = StoryTarget->GetActorLocation();
 	}
-	if (!Territory || !Counter
-		|| !Counter->ScheduleStoryPursuitWithOptions(
-			Territory, PursuingFaction, RuntimeOptions))
+	FText FailureReason;
+	if (!Territory)
+	{
+		FailureReason = FText::Format(NSLOCTEXT("TerritoryStoryEvent",
+			"BossTargetUnavailable", "Target Territory {0} is not loaded or registered."),
+			FText::FromName(TargetTerritory.GetTagName()));
+	}
+	else if (!Counter)
+	{
+		FailureReason = NSLOCTEXT("TerritoryStoryEvent",
+			"BossCounterSubsystemUnavailable", "The Territory Counterattack subsystem is unavailable.");
+	}
+	const bool bScheduled = Territory && Counter
+		&& Counter->TryScheduleAssaultWithReason(Territory, PursuingFaction,
+			ETerritoryAssaultLaunchMode::StoryPursuit, RuntimeOptions,
+			FailureReason);
+	if (!bScheduled)
 	{
 		UE_LOG(LogTerritory, Warning,
-			TEXT("[BossChaseEvent] Could not start %s against %s; check inherited conditions, claimed owner, war diplomacy, story-pursuit force permission, finite definition, route direction, vehicle goal and budgets"),
-			*PursuingFaction.ToString(), *TargetTerritory.ToString());
+			TEXT("[BossChaseEvent] Could not start %s against %s: %s"),
+			*PursuingFaction.ToString(), *TargetTerritory.ToString(),
+			*FailureReason.ToString());
 	}
 }
 

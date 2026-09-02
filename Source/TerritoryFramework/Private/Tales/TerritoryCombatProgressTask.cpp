@@ -5,6 +5,7 @@
 
 void UTerritoryCombatProgressTask::BeginTask()
 {
+	bObservedDeadState = false;
 	if (SubjectProvider || CounterpartyProvider) TickInterval = 0.25f;
 	Super::BeginTask();
 	if (IsComplete()) return;
@@ -37,6 +38,7 @@ void UTerritoryCombatProgressTask::EndTask()
 	}
 	UnbindSubject();
 	CachedCounterparty.Reset();
+	bObservedDeadState = false;
 	Super::EndTask();
 }
 

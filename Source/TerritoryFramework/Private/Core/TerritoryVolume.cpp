@@ -1212,7 +1212,9 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	if (!HasAuthority() || !World || !Control || !bStoryCaptureFromBounds
 		|| ControlMode != ETerritoryControlMode::Independent
-		|| !IsAvailableForGameplay())
+		|| !IsAvailableForGameplay()
+		|| IsPrimaryRuntimeRuleSuspendedWithContext(
+			ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr))
 	{
 		ReleaseStoryBoundsContesters();
 		return;
@@ -1888,6 +1890,15 @@ void ATerritoryVolume::ForceSetTerritoryState(ETerritoryState NewState)
 
 bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext) const
 {
+	if (IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::StateRules,
+		TransitionContext.TalesComponent, &OutFailureReason))
+	{
+		// Quest-owned transitions deliberately bypass the primary state rule. The
+		// mutation itself still runs through the authoritative ownership reducer.
+		OutFailureReason = FText::GetEmpty();
+		return true;
+	}
 	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
 	if (!Config || Config->EntryConditions.IsEmpty())
 	{
@@ -1922,6 +1933,13 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason,
 	const FTerritoryTransitionContext& TransitionContext) const
 {
+	if (IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::StateRules,
+		TransitionContext.TalesComponent, &OutFailureReason))
+	{
+		OutFailureReason = FText::GetEmpty();
+		return true;
+	}
 	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
 	const TArray<TObjectPtr<UNarrativeCondition>>* Conditions = Config
 		? &Config->ExitConditions : nullptr;
@@ -1963,6 +1981,14 @@ bool ATerritoryVolume::CheckStateTransitionConditions(ETerritoryState OldState,
 
 void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext)
 {
+	if (IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::StateRules,
+		TransitionContext.TalesComponent))
+	{
+		// Do not queue these events for replay. When the Quest ends, future primary
+		// transitions continue from the live state produced by the Quest.
+		return;
+	}
 	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
 	if (!Config) return;
 
@@ -3555,4 +3581,62 @@ FString ATerritoryVolume::GetDebugString() const
 			static_cast<int64>(ResolveInitialTerritoryAvailability())).ToString() : TEXT("Unknown"),
 		StateEnum ? *StateEnum->GetDisplayNameTextByValue(
 			static_cast<int64>(ResolveInitialTerritoryState())).ToString() : TEXT("Unknown"));
+}
+
+bool ATerritoryVolume::IsPrimaryRuntimeRuleSuspended(
+	ETerritoryQuestOverrideEffect Effect, FText& OutReason) const
+{
+	return IsPrimaryRuntimeRuleSuspendedWithContext(Effect, nullptr, &OutReason);
+}
+
+bool ATerritoryVolume::IsPrimaryRuntimeRuleSuspendedWithContext(
+	ETerritoryQuestOverrideEffect Effect,
+	const UTalesComponent* OptionalContextTales,
+	FText* OutReason) const
+{
+	if (OutReason) *OutReason = FText::GetEmpty();
+
+	const UWorld* World = GetWorld();
+	const UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	const ATerritoryVolume* Current = this;
+	bool bCheckingSelf = true;
+	for (int32 Depth = 0; Current && Depth < 32; ++Depth)
+	{
+		const UTerritoryDefinition* Definition =
+			Current->GetTerritoryDefinition();
+		if (Definition)
+		{
+			for (const FTerritoryQuestRuntimeOverrideRule& Rule :
+				Definition->QuestRuntimeOverrides)
+			{
+				if (!Rule.QuestClass || !Rule.Pauses(Effect)
+					|| (!bCheckingSelf && !Rule.bIncludeChildTerritories))
+				{
+					continue;
+				}
+				if (UTerritoryQuestRulesLibrary::DoesAnyOnlinePlayerMatchQuestState(
+					World, Rule.QuestClass, Rule.ActiveQuestState,
+					OptionalContextTales))
+				{
+					if (OutReason)
+					{
+						*OutReason = FText::Format(NSLOCTEXT(
+							"TerritoryQuestOverride", "PrimaryRulePaused",
+							"Narrative Quest {0} temporarily owns {1} through the override authored on {2}."),
+							FText::FromString(GetNameSafe(Rule.QuestClass.Get())),
+							FText::FromString(UEnum::GetDisplayValueAsText(Effect).ToString()),
+							FText::FromName(Current->GetTerritoryTag().GetTagName()));
+					}
+					return true;
+				}
+			}
+		}
+
+		bCheckingSelf = false;
+		if (!Registry || !Current->GetParentTerritoryTag().IsValid()) break;
+		Current = Registry->GetTerritoryByTag(
+			Current->GetParentTerritoryTag());
+	}
+	return false;
 }

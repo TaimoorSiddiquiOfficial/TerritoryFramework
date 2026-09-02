@@ -132,6 +132,19 @@ public:
 	ETerritoryAssaultLaunchMode LaunchMode =
 		ETerritoryAssaultLaunchMode::StrategicCounterattack;
 
+	/**
+	 * Special story beat: deploy now after admission. An explicit Narrative Wave
+	 * does not require the automatic strategy layer's secure District,
+	 * Reinforcements capability, or counter-Quest gate. Immediate also skips profile
+	 * grace, time window, probability, warning delay, and player proximity. Authority,
+	 * opposing ownership, diplomacy, finite force, budgets, approaches, and routes
+	 * remain mandatory.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(DisplayName="Start Counterattack Immediately",
+			ToolTip="Launch the physical force immediately after validation. Use for an authored ambush or Quest climax. Leave off for the normal strategic schedule."))
+	bool bStartImmediately = false;
+
 protected:
 	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
 		class UTalesComponent* NarrativeComponent) override;

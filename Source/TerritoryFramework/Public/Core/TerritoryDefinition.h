@@ -7,6 +7,7 @@
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryTypes.h"
+#include "Tales/TerritoryQuestRules.h"
 #include "TerritoryDefinition.generated.h"
 
 class AActor;
@@ -362,6 +363,17 @@ public:
 		meta=(DisplayName="State Rules (All Runtime States)",
 			ToolTip="Always contains four rows: Locked availability, Unclaimed, Contested, and Claimed. Claimed is the stable ownership row after capture completes. Contested Entry Events run once whenever gameplay really enters Contested, not every capture tick."))
 	TMap<ETerritoryState, FTerritoryStateConfig> StateConfigs;
+
+	/**
+	 * Optional Quest-owned runtime phases. While a matching Quest is active, only
+	 * the selected primary/automatic rules pause; explicit Narrative Territory
+	 * events and the live City -> District -> Place ownership reducer still work.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 State Rules|Quest Override",
+		meta=(TitleProperty="QuestClass",
+			DisplayName="Quest Runtime Overrides",
+			ToolTip="Assign Quests that temporarily control this Territory. When the Quest ends, the normal rules continue from the current live state; skipped state rewards/events are not replayed."))
+	TArray<FTerritoryQuestRuntimeOverrideRule> QuestRuntimeOverrides;
 
 	/** Default pre-conflict stealth policy. A State Config may override it. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 State Rules|Stealth",

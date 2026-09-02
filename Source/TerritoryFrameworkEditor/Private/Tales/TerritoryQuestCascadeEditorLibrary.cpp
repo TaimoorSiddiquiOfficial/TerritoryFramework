@@ -18,6 +18,7 @@
 #include "Tales/NarrativeCondition.h"
 #include "Tales/Quest.h"
 #include "Tales/QuestSM.h"
+#include "Tales/TerritoryNarrativeCheckpointEvent.h"
 #include "Tales/TerritoryNarrativeConditionTask.h"
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "UObject/UnrealType.h"
@@ -144,23 +145,64 @@ namespace TerritoryQuestCascadeEditor
 		return Copied;
 	}
 
-	int32 CopyConditions(
-		const TArray<TObjectPtr<UNarrativeCondition>>& Templates,
-		UNarrativeNodeBase* Destination)
+	bool AreConditionsEquivalent(const UNarrativeCondition* A,
+		const UNarrativeCondition* B)
 	{
-		if (!Destination) return 0;
-		Destination->Conditions.Reset();
-		int32 Copied = 0;
-		for (const UNarrativeCondition* Template : Templates)
+		if (!A || !B || A->GetClass() != B->GetClass()) return false;
+		for (TFieldIterator<FProperty> It(A->GetClass(),
+			EFieldIteratorFlags::IncludeSuper); It; ++It)
 		{
-			if (Template)
+			const FProperty* Property = *It;
+			if (!Property->HasAnyPropertyFlags(CPF_Transient)
+				&& !Property->Identical_InContainer(A, B, PPF_None))
 			{
-				Destination->Conditions.Add(DuplicateObject<UNarrativeCondition>(
-					Template, Destination));
-				++Copied;
+				return false;
 			}
 		}
-		return Copied;
+		return true;
+	}
+
+	UTerritoryNarrativeConditionTask* FindOrCreateConditionGate(
+		UQuestBranch* Branch, FTerritoryQuestCascadeBuildReport& Report)
+	{
+		if (!Branch) return nullptr;
+		for (UNarrativeTask* Task : Branch->QuestTasks)
+		{
+			if (UTerritoryNarrativeConditionTask* Gate =
+				Cast<UTerritoryNarrativeConditionTask>(Task))
+			{
+				return Gate;
+			}
+		}
+
+		UTerritoryNarrativeConditionTask* Gate =
+			NewObject<UTerritoryNarrativeConditionTask>(
+				Branch, NAME_None, RF_Transactional);
+		Gate->RequirementDescription = Branch->Description.IsEmpty()
+			? LOCTEXT("DefaultMigratedGateDescription", "Meet the route requirements")
+			: Branch->Description;
+		Branch->QuestTasks.Insert(Gate, 0);
+		++Report.CreatedTasks;
+		++Report.CreatedConditionGates;
+		return Gate;
+	}
+
+	void AddUniqueGateCondition(const UNarrativeCondition* Template,
+		UTerritoryNarrativeConditionTask* Gate,
+		FTerritoryQuestCascadeBuildReport& Report)
+	{
+		if (!Template || !Gate) return;
+		if (Gate->Conditions.ContainsByPredicate(
+			[Template](const UNarrativeCondition* Existing)
+			{
+				return AreConditionsEquivalent(Template, Existing);
+			}))
+		{
+			return;
+		}
+		Gate->Conditions.Add(DuplicateObject<UNarrativeCondition>(
+			Template, Gate));
+		++Report.CopiedConditions;
 	}
 
 	bool CopyMatchingProperty(const UObject* Source, UObject* Destination,
@@ -184,6 +226,81 @@ namespace TerritoryQuestCascadeEditor
 			SourceProperty->ContainerPtrToValuePtr<void>(Source);
 		DestinationProperty->CopyCompleteValue(DestinationValue, SourceValue);
 		return true;
+	}
+
+	bool ApplyQuestDefaults(const UTerritoryQuestCascadeRecipe* Recipe,
+		UQuest* Destination, FTerritoryQuestCascadeBuildReport& Report)
+	{
+		if (!Recipe || !Destination) return false;
+		Destination->Modify();
+		Destination->SetQuestName(Recipe->QuestName);
+		Destination->SetQuestDescription(Recipe->QuestDescription);
+		const FName SettingsToCopy[] = {
+			TEXT("bTracked"), TEXT("QuestDialogue"),
+			TEXT("QuestDialoguePlayParams"), TEXT("bResumeDialogueAfterLoad")
+		};
+		for (const FName Setting : SettingsToCopy)
+		{
+			if (!CopyMatchingProperty(Recipe, Destination, Setting, Report))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	FString MakeCompactAssetStem(const FString& Source)
+	{
+		FString Result;
+		bool bCapitalizeNext = true;
+		for (const TCHAR Character : Source)
+		{
+			if (FChar::IsAlnum(Character))
+			{
+				Result.AppendChar(bCapitalizeNext
+					? FChar::ToUpper(Character) : Character);
+				bCapitalizeNext = false;
+			}
+			else
+			{
+				bCapitalizeNext = true;
+			}
+		}
+		return ObjectTools::SanitizeObjectName(Result);
+	}
+
+	bool IsGenericRecipeName(const FString& Name)
+	{
+		return Name.StartsWith(TEXT("NewTerritoryQuestCascadeRecipe"),
+			ESearchCase::IgnoreCase)
+			|| Name.Equals(TEXT("TerritoryQuestCascadeRecipe"),
+				ESearchCase::IgnoreCase)
+			|| Name.StartsWith(TEXT("DA_QC_NewMission"),
+				ESearchCase::IgnoreCase)
+			|| Name.StartsWith(TEXT("NewMission"), ESearchCase::IgnoreCase);
+	}
+
+	bool ShouldGenerateCheckpoint(
+		const UTerritoryQuestCascadeRecipe* Recipe,
+		const FTerritoryQuestCascadeState& State)
+	{
+		if (!Recipe
+			|| Recipe->CheckpointMode == ETerritoryQuestCheckpointMode::Disabled)
+		{
+			return false;
+		}
+		if (Recipe->CheckpointMode ==
+			ETerritoryQuestCheckpointMode::ObjectiveStates
+			&& State.Type != ETerritoryQuestCascadeStateType::Objective)
+		{
+			return false;
+		}
+		return !State.Events.ContainsByPredicate(
+			[](const TObjectPtr<UNarrativeEvent>& Event)
+			{
+				return Event
+					&& Event->IsA<UTerritoryNarrativeCheckpointEvent>();
+			});
 	}
 
 	void ComputeStatePositions(const UTerritoryQuestCascadeRecipe* Recipe,
@@ -321,6 +438,27 @@ namespace TerritoryQuestCascadeEditor
 	}
 }
 
+FString UTerritoryQuestCascadeEditorLibrary::GetSuggestedQuestAssetName(
+	const UTerritoryQuestCascadeRecipe* Recipe)
+{
+	if (!Recipe) return TEXT("NQ_TerritoryStory");
+
+	FString RecipeName = Recipe->GetName();
+	RecipeName.RemoveFromStart(TEXT("DA_QC_"));
+	RecipeName.RemoveFromStart(TEXT("DA_"));
+	RecipeName.RemoveFromStart(TEXT("QC_"));
+	FString Stem = RecipeName;
+	if (TerritoryQuestCascadeEditor::IsGenericRecipeName(Recipe->GetName())
+		|| TerritoryQuestCascadeEditor::IsGenericRecipeName(RecipeName))
+	{
+		Stem = TerritoryQuestCascadeEditor::MakeCompactAssetStem(
+			Recipe->QuestName.ToString());
+	}
+	Stem = ObjectTools::SanitizeObjectName(Stem);
+	if (Stem.IsEmpty()) Stem = TEXT("TerritoryStory");
+	return Stem.StartsWith(TEXT("NQ_")) ? Stem : TEXT("NQ_") + Stem;
+}
+
 FTerritoryQuestCascadeBuildReport
 UTerritoryQuestCascadeEditorLibrary::CreateQuestBesideRecipe(
 	UTerritoryQuestCascadeRecipe* Recipe)
@@ -334,11 +472,8 @@ UTerritoryQuestCascadeEditorLibrary::CreateQuestBesideRecipe(
 	}
 	const FString RecipePackage = Recipe->GetOutermost()->GetName();
 	const FString Folder = FPackageName::GetLongPackagePath(RecipePackage);
-	FString RecipeName = Recipe->GetName();
-	RecipeName.RemoveFromStart(TEXT("DA_QC_"));
-	RecipeName.RemoveFromStart(TEXT("DA_"));
 	return CreateQuestFromRecipe(Recipe, Folder,
-		TEXT("NQ_") + RecipeName);
+		GetSuggestedQuestAssetName(Recipe));
 }
 
 FTerritoryQuestCascadeBuildReport
@@ -482,8 +617,21 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 		RuntimeState->SetID(StateSpec.StateID);
 		RuntimeState->Description = StateSpec.Description;
 		Report.CopiedEvents += CopyEvents(StateSpec.Events, RuntimeState);
-		Report.CopiedConditions += CopyConditions(
-			StateSpec.Conditions, RuntimeState);
+		if (ShouldGenerateCheckpoint(Recipe, StateSpec))
+		{
+			UTerritoryNarrativeCheckpointEvent* Checkpoint =
+				NewObject<UTerritoryNarrativeCheckpointEvent>(
+					RuntimeState, NAME_None, RF_Transactional);
+			Checkpoint->SaveNameOverride = Recipe->CheckpointSaveNameOverride;
+			Checkpoint->FallbackCampaignIndex =
+				Recipe->CheckpointFallbackCampaignIndex;
+			RuntimeState->Events.Add(Checkpoint);
+			++Report.CreatedCheckpointEvents;
+		}
+		// Narrative Pro exposes Conditions on its common node base, but its Quest
+		// state machine never evaluates state/branch Conditions. Recipe conditions
+		// are therefore materialized only into the functional hidden gate Task below.
+		RuntimeState->Conditions.Reset();
 		StateNodes.Add(StateSpec.StateID, GraphNode);
 		RuntimeStates.Add(StateSpec.StateID, RuntimeState);
 		++Report.CreatedStates;
@@ -491,19 +639,18 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 
 	EmptyQuest->QuestTemplate->SetQuestStartState(
 		RuntimeStates.FindRef(Recipe->StartStateID));
-	EmptyQuest->QuestTemplate->SetQuestName(Recipe->QuestName);
-	EmptyQuest->QuestTemplate->SetQuestDescription(Recipe->QuestDescription);
-	const FName QuestSettingsToCopy[] = {
-		TEXT("bTracked"), TEXT("QuestDialogue"),
-		TEXT("QuestDialoguePlayParams"), TEXT("bResumeDialogueAfterLoad")
-	};
-	for (const FName Setting : QuestSettingsToCopy)
+	if (!ApplyQuestDefaults(Recipe, EmptyQuest->QuestTemplate, Report))
 	{
-		if (!CopyMatchingProperty(Recipe, EmptyQuest->QuestTemplate,
-			Setting, Report))
-		{
-			return Report;
-		}
+		return Report;
+	}
+	UQuest* QuestClassDefaults = EmptyQuest->GeneratedClass
+		? Cast<UQuest>(EmptyQuest->GeneratedClass->GetDefaultObject()) : nullptr;
+	if (!QuestClassDefaults
+		|| !ApplyQuestDefaults(Recipe, QuestClassDefaults, Report))
+	{
+		Report.Errors.Add(LOCTEXT("QuestDefaultsMissing",
+			"The generated Narrative Quest class defaults are unavailable. Quest Name and Description could not be copied."));
+		return Report;
 	}
 
 	for (const FTerritoryQuestCascadeState& StateSpec : Recipe->States)
@@ -522,8 +669,7 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 			RuntimeBranch->Description = BranchSpec.Description;
 			RuntimeBranch->bHidden = BranchSpec.bHidden;
 			Report.CopiedEvents += CopyEvents(BranchSpec.Events, RuntimeBranch);
-			Report.CopiedConditions += CopyConditions(
-				BranchSpec.Conditions, RuntimeBranch);
+			RuntimeBranch->Conditions.Reset();
 
 			if (!StateSpec.Conditions.IsEmpty()
 				|| !BranchSpec.Conditions.IsEmpty())
@@ -536,19 +682,11 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 					: BranchSpec.Description;
 				for (const UNarrativeCondition* Template : StateSpec.Conditions)
 				{
-					if (Template)
-					{
-						Gate->Conditions.Add(DuplicateObject<UNarrativeCondition>(
-							Template, Gate));
-					}
+					AddUniqueGateCondition(Template, Gate, Report);
 				}
 				for (const UNarrativeCondition* Template : BranchSpec.Conditions)
 				{
-					if (Template)
-					{
-						Gate->Conditions.Add(DuplicateObject<UNarrativeCondition>(
-							Template, Gate));
-					}
+					AddUniqueGateCondition(Template, Gate, Report);
 				}
 				RuntimeBranch->QuestTasks.Add(Gate);
 				++Report.CreatedTasks;
@@ -603,6 +741,18 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(EmptyQuest);
 	FKismetEditorUtilities::CompileBlueprint(EmptyQuest);
+	// Narrative reads the journal title, description, tracking, and dialogue
+	// settings from the generated class default object. Compilation may replace
+	// that object, so apply the recipe to the final CDO as well as QuestTemplate.
+	QuestClassDefaults = EmptyQuest->GeneratedClass
+		? Cast<UQuest>(EmptyQuest->GeneratedClass->GetDefaultObject()) : nullptr;
+	if (!QuestClassDefaults
+		|| !ApplyQuestDefaults(Recipe, QuestClassDefaults, Report))
+	{
+		Report.Errors.Add(LOCTEXT("CompiledQuestDefaultsMissing",
+			"The compiled Narrative Quest defaults are unavailable. Quest Name and Description were not preserved."));
+		return Report;
+	}
 	EmptyQuest->MarkPackageDirty();
 	Graph->NotifyGraphChanged();
 	Report.bSucceeded = EmptyQuest->Status != BS_Error;
@@ -610,6 +760,104 @@ UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
 	{
 		Report.Errors.Add(LOCTEXT("GeneratedQuestCompileFailed",
 			"The generated Narrative Quest did not compile. Open it to inspect compiler messages."));
+	}
+	return Report;
+}
+
+FTerritoryQuestCascadeBuildReport
+UTerritoryQuestCascadeEditorLibrary::MigrateQuestNodeConditionsToGateTasks(
+	UQuestBlueprint* QuestBlueprint)
+{
+	using namespace TerritoryQuestCascadeEditor;
+	FTerritoryQuestCascadeBuildReport Report;
+	Report.QuestAsset = QuestBlueprint;
+	Report.QuestPackageName = QuestBlueprint
+		? QuestBlueprint->GetOutermost()->GetName() : FString();
+	UQuest* Quest = QuestBlueprint ? QuestBlueprint->QuestTemplate : nullptr;
+	if (!QuestBlueprint || !Quest)
+	{
+		Report.Errors.Add(LOCTEXT("QuestMigrationAssetRequired",
+			"Select a compiled Narrative Quest Blueprint with a valid Quest Template."));
+		return Report;
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("MigrateQuestConditionsTransaction",
+		"Migrate Unsupported Narrative Quest Node Conditions"));
+	QuestBlueprint->Modify();
+	Quest->Modify();
+	TSet<UQuestBranch*> ReachedBranches;
+
+	const auto MigrateBranch = [&Report](UQuestBranch* Branch,
+		const TArray<UNarrativeCondition*>& SharedStateConditions)
+	{
+		if (!Branch) return;
+		Branch->Modify();
+		const bool bNeedsGate = !SharedStateConditions.IsEmpty()
+			|| !Branch->Conditions.IsEmpty();
+		if (!bNeedsGate) return;
+
+		UTerritoryNarrativeConditionTask* Gate =
+			FindOrCreateConditionGate(Branch, Report);
+		if (!Gate) return;
+		Gate->Modify();
+		for (const UNarrativeCondition* Condition : SharedStateConditions)
+		{
+			AddUniqueGateCondition(Condition, Gate, Report);
+		}
+		for (const UNarrativeCondition* Condition : Branch->Conditions)
+		{
+			AddUniqueGateCondition(Condition, Gate, Report);
+		}
+		Report.RemovedQuestNodeConditions += Branch->Conditions.Num();
+		Branch->Conditions.Reset();
+	};
+
+	for (UQuestState* State : Quest->GetStates())
+	{
+		if (!State) continue;
+		State->Modify();
+		TArray<UNarrativeCondition*> SharedStateConditions;
+		SharedStateConditions.Reserve(State->Conditions.Num());
+		for (UNarrativeCondition* Condition : State->Conditions)
+		{
+			SharedStateConditions.Add(Condition);
+		}
+		if (!SharedStateConditions.IsEmpty() && State->Branches.IsEmpty())
+		{
+			Report.Warnings.Add(FText::Format(LOCTEXT("TerminalStateConditionRemoved",
+				"Terminal Quest State '{0}' had {1} unsupported condition row(s). It has no outgoing route to gate, so those rows were removed."),
+				FText::FromName(State->GetID()),
+				FText::AsNumber(SharedStateConditions.Num())));
+		}
+		for (UQuestBranch* Branch : State->Branches)
+		{
+			ReachedBranches.Add(Branch);
+			MigrateBranch(Branch, SharedStateConditions);
+		}
+		Report.RemovedQuestNodeConditions += State->Conditions.Num();
+		State->Conditions.Reset();
+	}
+
+	// Preserve conditions from malformed/orphan branches too. The runtime summary
+	// will still report the unreachable route, but no authored requirement is lost.
+	for (UQuestBranch* Branch : Quest->GetBranches())
+	{
+		if (Branch && !ReachedBranches.Contains(Branch))
+		{
+			const TArray<UNarrativeCondition*> NoSharedConditions;
+			MigrateBranch(Branch, NoSharedConditions);
+		}
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(QuestBlueprint);
+	FKismetEditorUtilities::CompileBlueprint(QuestBlueprint);
+	QuestBlueprint->MarkPackageDirty();
+	Report.bSucceeded = QuestBlueprint->Status != BS_Error
+		&& Report.Errors.IsEmpty();
+	if (!Report.bSucceeded && QuestBlueprint->Status == BS_Error)
+	{
+		Report.Errors.Add(LOCTEXT("MigratedQuestCompileFailed",
+			"The Narrative Quest did not compile after migration. Open it and inspect the compiler messages before saving."));
 	}
 	return Report;
 }

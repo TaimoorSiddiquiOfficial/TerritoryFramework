@@ -7,6 +7,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryInterfaces.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
+#include "Tales/TerritoryQuestRules.h"
 #include "TerritoryVolume.generated.h"
 
 class UNarrativeAbilitySystemComponent;
@@ -568,6 +569,21 @@ public:
 	/** Returns a human-readable debug string: owner, state, progress, guard count. */
 	UFUNCTION(BlueprintPure, Category="Territory|Debug", meta=(DisplayName="Get Debug String", CompactNodeTitle="Debug"))
 	FString GetDebugString() const;
+
+	/**
+	 * True when this Territory, or an ancestor configured to include children,
+	 * is temporarily controlled by a matching online player's Narrative Quest.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Tales|Quest Override",
+		meta=(DisplayName="Is Primary Territory Rule Suspended"))
+	bool IsPrimaryRuntimeRuleSuspended(
+		ETerritoryQuestOverrideEffect Effect, FText& OutReason) const;
+
+	/** Context-aware native form used while an explicit Narrative transition is running. */
+	bool IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect Effect,
+		const class UTalesComponent* OptionalContextTales,
+		FText* OutReason = nullptr) const;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Internal — public for subsystem access only

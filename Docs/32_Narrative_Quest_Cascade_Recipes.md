@@ -24,6 +24,7 @@ The recipe is not a second quest system. After generation:
 
 The recipe now mirrors Narrative's complete reusable Quest setup: journal name/description,
 initial tracked state, optional linked Quest Dialogue, Dialogue Play Params, resume-after-load,
+state checkpoint policy,
 Objective/Success/Failure states, route visibility, tasks, conditions, and events. Narrative's
 custom Blueprint functions and parent-Quest `Inheritable States` remain hand-authored features:
 the recipe cannot safely generate a function body that does not exist, and it deliberately
@@ -44,9 +45,9 @@ Create separate **Assault** and **Stealth** branches when either method may adva
 
 ## Create a recipe
 
-1. In the Content Browser, choose **Miscellaneous > Data Asset**.
-2. Select **Territory Narrative Quest Cascade Recipe**.
-3. Name it `DA_QC_LiberatePlace`.
+1. In the Content Browser, choose **Territory Framework > Story and Quests > Territory Quest
+   Cascade Recipe**.
+2. Rename the suggested `DA_QC_NewMission` asset to `DA_QC_LiberatePlace`.
 4. Set `Quest Name`, `Quest Description`, initial `Tracked` state, and `Start State ID`.
 5. Optionally assign a Narrative `Quest Dialogue`, configure its normal Play Params, and choose
    whether it resumes after loading.
@@ -56,8 +57,10 @@ Create separate **Assault** and **Stealth** branches when either method may adva
    its normal properties.
 9. Add shared State Conditions, route-specific Branch Conditions, and Narrative Events where
    required.
-10. Read the live **Mission Logic (Read Only)** panel and fix its Data Validation messages.
-11. At the top of the recipe Details panel, press
+10. Choose a checkpoint policy under **Quest > Saving** when death/loading should resume the
+    latest reached objective.
+11. Read the live **Mission Logic (Read Only)** panel and fix its Data Validation messages.
+12. At the top of the recipe Details panel, press
    **Create New Narrative Quest From This Recipe**.
 
 The editor creates a unique `NQ_` asset in the same folder, lays out its graph, copies every task
@@ -65,12 +68,60 @@ and Narrative Event, condition gate, and Quest setting, compiles it, and opens i
 `NQ_LiberatePlace` already exists, the next
 asset receives a unique name; no quest is overwritten.
 
+If the recipe still has a generic filename such as `NewTerritoryQuestCascadeRecipe` or
+`DA_QC_NewMission`, the generator uses the player-facing Quest Name instead. For example,
+`Quest Name = Liberate the Blacksmith` creates `NQ_LiberateTheBlacksmith`, not
+`NQ_NewTerritoryQuestCascadeRecipe`. The generated Quest's real class defaults receive the same
+Quest Name and Quest Description, so the Narrative journal does not show a filename or the vendor
+placeholder text.
+
+## Checkpoints, death, and save/load
+
+Narrative Pro already serializes:
+
+- the current Quest State ID;
+- every branch task's progress;
+- every reached State ID;
+- SaveGame properties on the Quest.
+
+That data reaches disk only when Narrative's Save subsystem commits a save. The recipe provides
+three `Checkpoint Mode` choices:
+
+- **Disabled** — no automatic save is injected;
+- **Every Objective State** — save after each playable state becomes current;
+- **Every State Including Endings** — also commit Success and Failure immediately.
+
+Easy three-state example:
+
+```text
+State 1: Reach Blacksmith
+  -> passes
+State 2: Defeat Guards       <- automatic checkpoint is written here
+  -> player dies
+Load latest campaign save
+  -> State 2 resumes; State 1 is still recorded as reached
+State 3: Capture Blacksmith
+```
+
+Automatic checkpoints are normal inline `Save Narrative Quest Checkpoint` events generated on
+State Start. They run on server authority, wait until the current state transition finishes, use
+Narrative's active campaign save name, and never refire while a save is loading. If no campaign is
+active yet, the default fallback is `NarrativeSave0`. Set `Checkpoint Save Name Override` only
+when the host game intentionally uses a different save contract.
+
+The reusable event can also be added manually to one State. A manual checkpoint on that State
+prevents the generator from adding a duplicate. Saving a checkpoint does not decide the game's
+death screen behavior: the host game's death/respawn flow must load the latest Narrative save if
+death is meant to rewind the world. If the game respawns without loading, the current in-memory
+quest naturally remains where it was.
+
 ## Conditions that really work in quests
 
 Narrative Pro exposes a Conditions array on Quest states and branches, but the current Narrative
-Quest runtime does not evaluate those arrays. Dialogue nodes and Narrative Events do evaluate
-their conditions. Copying Quest-node conditions alone would therefore create a dangerous editor
-option that appears configured but never blocks progress.
+Quest runtime does not evaluate those arrays. Dialogue nodes use Narrative's evaluator. Territory
+Narrative Events explicitly evaluate their own inherited Conditions because the installed Quest
+event dispatcher does not do so automatically. Copying Quest-node conditions alone would
+therefore create a dangerous editor option that appears configured but never blocks progress.
 
 Territory resolves this without modifying Narrative Pro:
 
@@ -79,8 +130,8 @@ Territory resolves this without modifying Narrative Pro:
 - **Branch Conditions** apply only to that route.
 - all listed State + Branch conditions use AND logic and must remain true until the other required
   tasks complete;
-- the generator mirrors conditions onto the normal Narrative nodes for graph visibility, then
-  adds one hidden `Wait For Narrative Conditions` task to make them functional at runtime;
+- the generator leaves Narrative's unsupported Quest State/Branch condition arrays empty and
+  copies every requirement only into one hidden `Wait For Narrative Conditions` task;
 - the hidden task calls Narrative's own evaluator, preserving inherited `Not`, character filters,
   and multiplayer party policies;
 - a Success or Failure state has no route to leave, so conditions placed on it produce a warning.
@@ -100,8 +151,9 @@ Branch: OwnerRefuses -> EscapeFailure
   Task: Finish the refusal dialogue
 ```
 
-Conditions inside a Narrative Event are different: they decide whether that one event fires.
-They do not gate the whole route, and Narrative already evaluates them normally.
+Conditions inside a Territory Narrative Event are different: they decide whether that one event
+fires. They do not gate the whole route, and each Territory event runs them through Narrative's
+normal condition semantics (`Not`, filters, and party policy) before mutating gameplay.
 
 ## Mission Logic summary
 
@@ -113,11 +165,41 @@ Story Outcome. It shows:
 - player tasks, Required Quantity, Optional, Hidden, and Navigation Marker settings;
 - shared and route-specific conditions;
 - state/branch events and their totals;
+- automatic checkpoint count and policy;
 - unreachable states, unsafe instant routes, missing IDs, and other setup problems.
 
 `BuildMissionLogicSummary()` exposes the same counts, flow lines, errors, and warnings to Blueprint
 at runtime for developer tools. `BuildPlainTextPreview()` returns the complete copyable report.
 Both are read-only; neither starts or changes a Quest.
+
+### Inspect an existing Narrative Quest graph
+
+A recipe can also audit a Quest that was built or edited directly in Narrative's graph editor.
+This does not copy the Quest into the recipe and does not replace its runtime:
+
+1. Assign **Narrative Quest Graph** at the top of the recipe Details panel.
+2. Press **Refresh Runtime Quest Summary** after compiling or saving that Quest.
+3. Read the expanded runtime report, or press **Copy Runtime Report**.
+
+The report reads `UQuestBlueprintGeneratedClass::QuestTemplate`, which is the compiled template
+Narrative duplicates when the Quest starts. It includes the real Quest name/description, tracked
+state, Start State, every state and route, each task's class and editable settings, hidden
+condition gates, event runtime/options, event conditions, markers, endings, and reachability.
+It therefore also covers hand-authored options that do not exist in the recipe.
+
+Important findings are explicit. An empty Event row is an error. A state not reachable from the
+Start State is a warning. A hand-authored Quest State/Branch Condition without a hidden
+`Wait For Narrative Conditions` task is also warned because this Narrative Pro version displays
+those arrays but does not evaluate them in Quest progression.
+
+For an older generated Quest, assign it to **Narrative Quest Graph** and press
+**Remove Unsupported Quest-Node Conditions**. The migration preserves missing requirements in
+hidden gate Tasks, clears the ineffective State/Branch arrays, recompiles the Quest, and marks it
+dirty for review and Save. Event Conditions are already functional and are never moved.
+
+`BuildSelectedRuntimeQuestSummary()` returns the structured result and
+`BuildSelectedRuntimeQuestReport()` returns the complete text. Both are read-only; pressing
+Refresh never starts, recompiles, saves, or edits the selected Quest.
 
 ## Simple kill-and-capture recipe
 
@@ -184,7 +266,7 @@ The recipe reports errors for:
 - branches leaving a Success or Failure state;
 - no Success state.
 
-It warns about an empty quest title, an Objective with no route forward, and states unreachable
+It warns about an empty quest title or description, an Objective with no route forward, and states unreachable
 from the Start State. It also reports empty condition/event rows, all-Optional instant routes,
 terminal-state departure conditions, marker tasks without a Marker Class, and dialogue resume
 enabled without a linked Quest Dialogue.
@@ -199,11 +281,15 @@ task quantities, and layout may change more safely; IDs should remain stable.
 
 - Runtime recipe: `UTerritoryQuestCascadeRecipe`
 - Validation: `ValidateRecipe()`
-- Structured read-only report: `BuildMissionLogicSummary()`
+- Structured recipe report: `BuildMissionLogicSummary()`
 - Read-only plan export: `BuildPlainTextPreview()`
+- Selected compiled Quest report: `BuildSelectedRuntimeQuestSummary()` and
+  `BuildSelectedRuntimeQuestReport()`
 - Create beside recipe: `CreateQuestBesideRecipe()`
 - Create in a selected content path: `CreateQuestFromRecipe()`
 - Populate an empty Narrative Quest: `BuildEmptyQuestFromRecipe()`
+- Friendly generated filename: `GetSuggestedQuestAssetName()`
+- Manual checkpoint event: `UTerritoryNarrativeCheckpointEvent`
 
 `BuildEmptyQuestFromRecipe` rejects any Narrative Quest that already contains authored nodes. This
 is intentional protection for community developers' hand-written quest graphs.

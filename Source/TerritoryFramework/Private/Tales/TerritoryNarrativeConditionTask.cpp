@@ -22,13 +22,6 @@ void UTerritoryNarrativeConditionTask::BeginTask()
 	if (ConditionProbe)
 	{
 		ConditionProbe->Conditions.Reset();
-		for (UNarrativeCondition* Condition : Conditions)
-		{
-			if (IsValid(Condition))
-			{
-				ConditionProbe->Conditions.Add(Condition);
-			}
-		}
 	}
 	Super::BeginTask();
 }
@@ -56,8 +49,21 @@ bool UTerritoryNarrativeConditionTask::AreGateConditionsMet() const
 	{
 		return false;
 	}
-	return ConditionProbe->AreConditionsMet(
-		OwningPawn, OwningController, OwningComp);
+	for (UNarrativeCondition* Condition : Conditions)
+	{
+		if (!IsValid(Condition)) return false;
+		// Narrative's party-policy evaluator returns after one condition. Run each
+		// row separately so every authored State + Branch requirement still uses
+		// Narrative semantics while retaining the recipe's documented AND logic.
+		ConditionProbe->Conditions.Reset();
+		ConditionProbe->Conditions.Add(Condition);
+		if (!ConditionProbe->AreConditionsMet(
+			OwningPawn, OwningController, OwningComp))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 FText UTerritoryNarrativeConditionTask::GetTaskDescription_Implementation() const

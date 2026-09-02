@@ -17,6 +17,7 @@ namespace
 
 void UTerritoryStateTask::BeginTask()
 {
+	bWasInsideTarget = false;
 	if (IsPresenceObjective(Objective)
 		|| Objective == ETerritoryStateTaskObjective::BecomeAvailable)
 	{

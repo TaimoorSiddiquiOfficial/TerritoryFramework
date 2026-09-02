@@ -2,6 +2,7 @@
 
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/NarrativeNodeBase.h"
 #include "Tales/TalesComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -54,6 +55,36 @@ bool TerritoryTales::DoEventConditionsPass(const UNarrativeEvent* Event, APawn* 
 	if (OutFailedCondition) OutFailedCondition->Reset();
 	if (!Event) return false;
 	if (GPrevalidatedTerritoryEvents.Contains(Event)) return true;
+	if (IsValid(NarrativeComponent))
+	{
+		// UNarrativeEvent owns Conditions but Narrative's Quest event dispatcher does
+		// not evaluate them. Reuse the real node evaluator so Not, character targets,
+		// and multiplayer party policies have exactly Narrative's normal semantics.
+		UNarrativeNodeBase* Probe = NewObject<UNarrativeNodeBase>(
+			GetTransientPackage(), NAME_None, RF_Transient);
+		if (Probe)
+		{
+			for (UNarrativeCondition* Condition : Event->Conditions)
+			{
+				if (!IsValid(Condition)) continue;
+				// Evaluate one row at a time. Narrative's party-policy path returns
+				// after one condition, so a multi-row probe would skip later AND rows.
+				Probe->Conditions.Reset();
+				Probe->Conditions.Add(Condition);
+				if (!Probe->AreConditionsMet(Target, Controller, NarrativeComponent))
+				{
+					if (OutFailedCondition)
+					{
+						*OutFailedCondition = Condition->GetGraphDisplayText();
+					}
+					return false;
+				}
+			}
+			return true;
+		}
+	}
+	// Detached definition/state tests may intentionally have no Tales component.
+	// Preserve the direct single-target fallback while still honoring Narrative Not.
 	for (UNarrativeCondition* Condition : Event->Conditions)
 	{
 		if (Condition && !DoesConditionPass(Condition, Target, Controller, NarrativeComponent))

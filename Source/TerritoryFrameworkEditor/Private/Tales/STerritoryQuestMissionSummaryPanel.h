@@ -25,7 +25,9 @@ private:
 		FPropertyChangedEvent& PropertyChangedEvent);
 	EActiveTimerReturnType HandleDeferredRefresh(double CurrentTime,
 		float DeltaTime);
+	FReply RefreshRuntimeQuestSummary();
 	FReply CopyReportToClipboard();
+	FReply CopyRuntimeQuestReportToClipboard();
 	TSharedRef<SWidget> BuildBranchBody(
 		const FTerritoryQuestCascadeBranch& Branch,
 		int32 SharedConditionCount) const;

@@ -38,8 +38,16 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryQuestCascadeBuildReport
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CopiedConditions = 0;
 
+	/** Unsupported state/branch condition rows removed from an existing Quest. */
+	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
+	int32 RemovedQuestNodeConditions = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CopiedEvents = 0;
+
+	/** Automatic save events injected by the recipe checkpoint policy. */
+	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
+	int32 CreatedCheckpointEvents = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	TArray<FText> Errors;
@@ -60,6 +68,11 @@ class TERRITORYFRAMEWORKEDITOR_API UTerritoryQuestCascadeEditorLibrary final
 	GENERATED_BODY()
 
 public:
+	/** Suggested NQ_ asset name derived from the recipe asset or Quest Name. */
+	UFUNCTION(BlueprintPure, Category="Territory|Narrative Quest Cascade|Editor")
+	static FString GetSuggestedQuestAssetName(
+		const UTerritoryQuestCascadeRecipe* Recipe);
+
 	/**
 	 * Create a uniquely named Narrative Quest beside the recipe.
 	 * Easy example: DA_QC_LiberatePlace creates NQ_LiberatePlace in the same folder.
@@ -86,4 +99,13 @@ public:
 	static FTerritoryQuestCascadeBuildReport BuildEmptyQuestFromRecipe(
 		UQuestBlueprint* EmptyQuest,
 		UTerritoryQuestCascadeRecipe* Recipe);
+
+	/**
+	 * Move legacy Quest state/branch Conditions into functional hidden condition-gate
+	 * Tasks, then clear the unsupported Narrative Quest-node arrays.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Quest Cascade|Editor",
+		meta=(DisplayName="Migrate Quest Node Conditions To Gate Tasks"))
+	static FTerritoryQuestCascadeBuildReport MigrateQuestNodeConditionsToGateTasks(
+		UQuestBlueprint* QuestBlueprint);
 };

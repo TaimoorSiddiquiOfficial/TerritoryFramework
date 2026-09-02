@@ -9,6 +9,8 @@
 | `QuestName`, `QuestDescription` | Copied into the generated Narrative Quest |
 | `bTracked` | Initial Narrative Quest tracked state; tracked tasks may show their markers |
 | `QuestDialogue`, `QuestDialoguePlayParams`, `bResumeDialogueAfterLoad` | Normal Narrative linked-dialogue setup copied into the Quest |
+| `CheckpointMode` | Disabled, every Objective state, or every state including endings |
+| `CheckpointSaveNameOverride`, `CheckpointFallbackCampaignIndex` | Optional save target; normally reuse Narrative's active campaign |
 | `StartStateID` | Objective state used as Narrative's root state |
 | `States` | Objective, Success, and Failure state templates |
 | State `Conditions` | AND requirements shared by every route leaving that state |
@@ -19,21 +21,32 @@
 | `ValidateRecipe` | Pure validation report with errors and warnings |
 | `BuildMissionLogicSummary` | Structured counts, flow lines, validation, and runtime developer summary |
 | `BuildPlainTextPreview` | Easy-English, read-only graph summary |
+| `NarrativeQuestGraph` | Existing Narrative Quest class whose compiled runtime template should be audited |
+| `BuildSelectedRuntimeQuestSummary` | Structured report for the selected compiled Quest graph |
+| `BuildSelectedRuntimeQuestReport` | Complete copyable states/routes/tasks/conditions/events/settings report |
 
 ### `UTerritoryQuestCascadeEditorLibrary`
 
 | Function | Meaning |
 |---|---|
 | `CreateQuestBesideRecipe` | Creates, compiles, and opens a unique normal Narrative Quest next to the recipe |
+| `GetSuggestedQuestAssetName` | Returns a stable `NQ_` name, using Quest Name when the recipe still has a generic filename |
 | `CreateQuestFromRecipe` | Same operation with an explicit `/Game/...` destination and desired asset name |
 | `BuildEmptyQuestFromRecipe` | Populates an empty Narrative Quest; refuses to overwrite authored nodes |
+| `MigrateQuestNodeConditionsToGateTasks` | Moves unsupported legacy State/Branch condition rows into functional hidden gate Tasks and clears the node arrays |
 
 The recipe Details panel exposes the safe one-click workflow. See
 [Narrative Quest Cascade Recipes](32_Narrative_Quest_Cascade_Recipes.md).
 
-Generated State/Branch conditions are mirrored onto the Narrative nodes and enforced by a hidden
-`UTerritoryNarrativeConditionTask`. This adapter is required because the current Narrative Quest
-runtime does not evaluate Quest-node conditions, although Dialogue and Event conditions work.
+Generated State/Branch conditions exist only in a hidden
+`UTerritoryNarrativeConditionTask`; the generator deliberately leaves Narrative's unsupported
+Quest-node condition arrays empty. Dialogue nodes use Narrative's condition
+pipeline. Territory Narrative Events defensively evaluate their own inherited Conditions because
+the installed Narrative Quest event dispatcher does not do that automatically.
+
+`UTerritoryNarrativeCheckpointEvent` is an inline Narrative Event that commits the active
+Narrative save after a quest-state transition. Narrative already serializes current state,
+reached states, and branch task progress; this event supplies the explicit disk-save moment.
 
 ## Operations UI
 
@@ -482,6 +495,8 @@ structured success or rejection instead of leaving a half-finished transition.
 |---|---|
 | ScheduleCounterAttack(Territory, AttackingFaction) | AuthorityOnly → bool |
 | ScheduleBestCounterAttack(Territory, PreferredFaction) | AuthorityOnly → bool; diplomacy-first strongest configured eligible faction |
+| TryScheduleAssaultWithReason(Territory, AttackingFaction, LaunchMode, StoryOptions, OutReason) | AuthorityOnly → bool + exact first admission result |
+| TryScheduleBestCounterAttackWithReason(Territory, PreferredFaction, OutReason) | AuthorityOnly → bool + exact best-attacker/admission result |
 | CancelAssault(AssaultID, Reason) | AuthorityOnly → bool |
 | GetAssault(AssaultID, OutAssault) | Pure → bool |
 | GetAllAssaults() | Pure → Array<AssaultRecord> |

@@ -8,8 +8,11 @@
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SExpandableArea.h"
+#include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Text/STextBlock.h"
 
 namespace
@@ -38,6 +41,21 @@ namespace
 		case ETerritoryQuestCascadeStateType::Success: return TEXT("SUCCESS ENDING");
 		case ETerritoryQuestCascadeStateType::Failure: return TEXT("FAILURE ENDING");
 		default: return TEXT("UNKNOWN");
+		}
+	}
+
+	FString CheckpointModeText(const ETerritoryQuestCheckpointMode Mode)
+	{
+		switch (Mode)
+		{
+		case ETerritoryQuestCheckpointMode::Disabled:
+			return TEXT("No automatic checkpoints");
+		case ETerritoryQuestCheckpointMode::ObjectiveStates:
+			return TEXT("Save at every Objective state");
+		case ETerritoryQuestCheckpointMode::EveryState:
+			return TEXT("Save at every state, including endings");
+		default:
+			return TEXT("Unknown checkpoint policy");
 		}
 	}
 }
@@ -158,6 +176,88 @@ void STerritoryQuestMissionSummaryPanel::Rebuild()
 	if (!Current) return;
 	const FTerritoryQuestCascadeLogicSummary Summary =
 		Current->BuildMissionLogicSummary();
+	const bool bHasRuntimeQuest = !Current->NarrativeQuestGraph.IsNull();
+	const FTerritoryQuestCascadeLogicSummary RuntimeSummary =
+		Current->BuildSelectedRuntimeQuestSummary();
+	const FString RuntimeReport = bHasRuntimeQuest
+		? Current->BuildSelectedRuntimeQuestReport()
+		: FString(TEXT("Select a Narrative Quest Graph above, then press Refresh Runtime Quest Summary. The report reads the compiled Quest template used by Narrative at runtime; it never changes or starts the selected Quest."));
+
+	Content->AddSlot().AutoHeight().Padding(0.f, 0.f, 0.f, 9.f)
+	[
+		SNew(SExpandableArea)
+		.InitiallyCollapsed(false)
+		.HeaderContent()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+			[
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight()
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(bHasRuntimeQuest
+						? FString::Printf(TEXT("RUNTIME QUEST GRAPH  |  %s  |  %s"),
+							*RuntimeSummary.InspectedQuestName.ToString(),
+							RuntimeSummary.bValid ? TEXT("READY") : TEXT("CHECK FINDINGS"))
+						: TEXT("RUNTIME QUEST GRAPH  |  NOT SELECTED")))
+					.Font(FAppStyle::GetFontStyle(TEXT("BoldFont")))
+					.ColorAndOpacity(!bHasRuntimeQuest
+						? FSlateColor(FLinearColor(0.65f, 0.72f, 0.78f))
+						: RuntimeSummary.bValid
+							? FSlateColor(FLinearColor(0.32f, 0.78f, 0.55f))
+							: FSlateColor(FLinearColor(0.95f, 0.72f, 0.25f)))
+				]
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 2.f)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(bHasRuntimeQuest
+						? RuntimeSummary.Headline
+						: TEXT("Inspect the complete compiled Narrative Quest, including options that were authored outside this recipe.")))
+					.AutoWrapText(true)
+				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(6.f, 0.f)
+			[
+				SNew(SButton)
+				.Text(FText::FromString(TEXT("Refresh Runtime Quest Summary")))
+				.ToolTipText(FText::FromString(
+					TEXT("Reload the selected Quest class and rebuild this report from its compiled runtime graph. Use this after compiling or saving the Narrative Quest.")))
+				.OnClicked(this,
+					&STerritoryQuestMissionSummaryPanel::RefreshRuntimeQuestSummary)
+			]
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SButton)
+				.Text(FText::FromString(TEXT("Copy Runtime Report")))
+				.IsEnabled(bHasRuntimeQuest)
+				.ToolTipText(FText::FromString(
+					TEXT("Copy every compiled state, route, task option, condition, event, journal setting, and validation finding.")))
+				.OnClicked(this,
+					&STerritoryQuestMissionSummaryPanel::CopyRuntimeQuestReportToClipboard)
+			]
+		]
+		.BodyContent()
+		[
+			SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush(TEXT("Brushes.Panel")))
+			.Padding(FMargin(8.f, 6.f))
+			[
+				SNew(SBox)
+				.MaxDesiredHeight(520.f)
+				[
+					SNew(SScrollBox)
+					+ SScrollBox::Slot()
+					[
+						SNew(SMultiLineEditableText)
+						.Text(FText::FromString(RuntimeReport))
+						.IsReadOnly(true)
+						.AutoWrapText(true)
+					]
+				]
+			]
+		]
+	];
 
 	Content->AddSlot().AutoHeight().Padding(0.f, 0.f, 0.f, 6.f)
 	[
@@ -197,8 +297,9 @@ void STerritoryQuestMissionSummaryPanel::Rebuild()
 	Content->AddSlot().AutoHeight().Padding(0.f, 0.f, 0.f, 7.f)
 	[
 		SNew(STextBlock)
-		.Text(FText::FromString(
-			TEXT("State conditions gate every route leaving that state. Branch conditions gate only that route. Conditions use AND logic. Separate branches are alternative routes. Events keep their own optional conditions.")))
+		.Text(FText::FromString(FString::Printf(
+			TEXT("State conditions gate every route leaving that state. Branch conditions gate only that route. Conditions use AND logic. Separate branches are alternative routes. Events keep their own optional conditions. Checkpoint policy: %s."),
+			*CheckpointModeText(Current->CheckpointMode))))
 		.AutoWrapText(true)
 		.ColorAndOpacity(FSlateColor(FLinearColor(0.65f, 0.72f, 0.78f)))
 	];
@@ -305,6 +406,22 @@ FReply STerritoryQuestMissionSummaryPanel::CopyReportToClipboard()
 	{
 		FPlatformApplicationMisc::ClipboardCopy(
 			*Current->BuildPlainTextPreview());
+	}
+	return FReply::Handled();
+}
+
+FReply STerritoryQuestMissionSummaryPanel::RefreshRuntimeQuestSummary()
+{
+	Rebuild();
+	return FReply::Handled();
+}
+
+FReply STerritoryQuestMissionSummaryPanel::CopyRuntimeQuestReportToClipboard()
+{
+	if (const UTerritoryQuestCascadeRecipe* Current = Recipe.Get())
+	{
+		FPlatformApplicationMisc::ClipboardCopy(
+			*Current->BuildSelectedRuntimeQuestReport());
 	}
 	return FReply::Handled();
 }

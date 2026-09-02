@@ -12,6 +12,7 @@
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "Tales/STerritoryQuestMissionSummaryPanel.h"
 #include "Tales/TerritoryCaptureTask.h"
+#include "Tales/TerritoryNarrativeCheckpointEvent.h"
 #include "Tales/TerritoryNarrativeConditionTask.h"
 #include "Tales/TerritoryStateTask.h"
 #include "Tales/TerritoryStoryConditions.h"
@@ -27,6 +28,8 @@ namespace TerritoryQuestCascadeEditorTests
 		Recipe->QuestDescription = FText::FromString(
 			TEXT("Defeat the defenders and claim the Place."));
 		Recipe->bTracked = false;
+		Recipe->CheckpointMode =
+			ETerritoryQuestCheckpointMode::ObjectiveStates;
 		Recipe->QuestDialoguePlayParams.StartFromID = TEXT("MissionBriefing");
 		Recipe->QuestDialoguePlayParams.Priority = 7;
 		Recipe->StartStateID = TEXT("Assault");
@@ -54,6 +57,7 @@ namespace TerritoryQuestCascadeEditorTests
 
 	UQuestBlueprint* MakeQuestBlueprint()
 	{
+		static int32 FixtureIndex = 0;
 		FModuleManager::LoadModulePtr<IModuleInterface>(TEXT("NarrativeQuestEditor"));
 		UClass* FactoryClass = FindObject<UClass>(nullptr,
 			TEXT("/Script/NarrativeQuestEditor.QuestAssetFactory"));
@@ -61,7 +65,9 @@ namespace TerritoryQuestCascadeEditorTests
 		{
 			return nullptr;
 		}
-		UPackage* Package = CreatePackage(TEXT("/Temp/TF_CascadeQuest"));
+		const FString PackageName = FString::Printf(
+			TEXT("/Temp/TF_CascadeQuest_%d"), ++FixtureIndex);
+		UPackage* Package = CreatePackage(*PackageName);
 		UFactory* Factory = NewObject<UFactory>(GetTransientPackage(), FactoryClass);
 		return Cast<UQuestBlueprint>(Factory->FactoryCreateNew(
 			UQuestBlueprint::StaticClass(), Package, TEXT("NQ_CascadeTest"),
@@ -102,8 +108,10 @@ bool FTFTerritoryQuestCascadeMaterializesNarrative::RunTest(
 		Report.CreatedTasks, 3);
 	TestEqual(TEXT("Generator creates one functional condition gate"),
 		Report.CreatedConditionGates, 1);
-	TestEqual(TEXT("Generator mirrors one condition onto its Narrative state"),
+	TestEqual(TEXT("Generator copies one condition into its functional gate"),
 		Report.CopiedConditions, 1);
+	TestEqual(TEXT("Generator injects a checkpoint on the playable objective state"),
+		Report.CreatedCheckpointEvents, 1);
 
 	const UQuest* SourceTemplate = Quest->QuestTemplate;
 	TestNotNull(TEXT("Editable Narrative Quest retains its source template"),
@@ -138,14 +146,23 @@ bool FTFTerritoryQuestCascadeMaterializesNarrative::RunTest(
 			SourceTemplate->GetStates().Num(), 2);
 		if (SourceTemplate->GetStates().Num() > 0)
 		{
-			TestEqual(TEXT("Generator mirrors the state condition for graph visibility"),
-				SourceTemplate->GetStates()[0]->Conditions.Num(), 1);
+			TestEqual(TEXT("Generator never writes unsupported Quest-state conditions"),
+				SourceTemplate->GetStates()[0]->Conditions.Num(), 0);
+			TestTrue(TEXT("Objective state owns the generated checkpoint event"),
+				SourceTemplate->GetStates()[0]->Events.ContainsByPredicate(
+					[](const UNarrativeEvent* Event)
+					{
+						return Event && Event->IsA<
+							UTerritoryNarrativeCheckpointEvent>();
+					}));
 		}
 		TestEqual(TEXT("Source template has one branch"),
 			SourceTemplate->GetBranches().Num(), 1);
 		if (SourceTemplate->GetBranches().Num() == 1)
 		{
 			const UQuestBranch* Branch = SourceTemplate->GetBranches()[0];
+			TestEqual(TEXT("Generator never writes unsupported Quest-branch conditions"),
+				Branch->Conditions.Num(), 0);
 			TestEqual(TEXT("Condition gate and both task templates live on one Narrative branch"),
 				Branch->QuestTasks.Num(), 3);
 			if (!Branch->QuestTasks.IsEmpty())
@@ -178,11 +195,27 @@ bool FTFTerritoryQuestCascadeMaterializesNarrative::RunTest(
 		GeneratedClass);
 	if (GeneratedClass)
 	{
+		const UQuest* QuestDefaults = Cast<UQuest>(
+			GeneratedClass->GetDefaultObject());
+		TestNotNull(TEXT("Generated Narrative class has quest defaults"),
+			QuestDefaults);
+		if (QuestDefaults)
+		{
+			TestEqual(TEXT("Generated journal name comes from the recipe"),
+				QuestDefaults->GetQuestName().ToString(),
+				FString(TEXT("Liberate the Blacksmith")));
+			TestEqual(TEXT("Generated journal description comes from the recipe"),
+				QuestDefaults->GetQuestDescription().ToString(),
+				FString(TEXT("Defeat the defenders and claim the Place.")));
+		}
 		const UQuest* CompiledTemplate = GeneratedClass->GetQuestTemplate();
 		TestNotNull(TEXT("Compiled Narrative class owns its Quest template"),
 			CompiledTemplate);
 		if (CompiledTemplate)
 		{
+			TestEqual(TEXT("Compiled graph template retains the recipe quest name"),
+				CompiledTemplate->GetQuestName().ToString(),
+				FString(TEXT("Liberate the Blacksmith")));
 			TestEqual(TEXT("Compiled Narrative template has one branch"),
 				CompiledTemplate->GetBranches().Num(), 1);
 			if (CompiledTemplate->GetBranches().Num() == 1)
@@ -192,6 +225,28 @@ bool FTFTerritoryQuestCascadeMaterializesNarrative::RunTest(
 			}
 		}
 	}
+
+	Recipe->NarrativeQuestGraph = TSoftClassPtr<UQuest>(Quest->GeneratedClass);
+	const FTerritoryQuestCascadeLogicSummary RuntimeSummary =
+		Recipe->BuildSelectedRuntimeQuestSummary();
+	TestTrue(TEXT("Selected compiled Narrative Quest runtime graph is valid"),
+		RuntimeSummary.bValid);
+	TestEqual(TEXT("Runtime summary reads the compiled objective state"),
+		RuntimeSummary.ObjectiveStates, 1);
+	TestEqual(TEXT("Runtime summary reads the compiled route"),
+		RuntimeSummary.Routes, 1);
+	TestEqual(TEXT("Runtime summary separates authored tasks from its hidden condition gate"),
+		RuntimeSummary.PlayerTasks, 2);
+	TestEqual(TEXT("Runtime summary exposes the generated internal condition gate"),
+		RuntimeSummary.InternalTasks, 1);
+	TestEqual(TEXT("Runtime summary reads the functional gated condition once"),
+		RuntimeSummary.Conditions, 1);
+	const FString RuntimeReport = Recipe->BuildSelectedRuntimeQuestReport();
+	TestTrue(TEXT("Runtime report names the selected compiled Quest"),
+		RuntimeReport.Contains(TEXT("Liberate the Blacksmith")));
+	TestTrue(TEXT("Runtime report extracts the real branch task configuration"),
+		RuntimeReport.Contains(TEXT("TASK:"))
+		&& RuntimeReport.Contains(TEXT("ClearAndCapture")));
 
 	const int32 StatesBefore = SourceTemplate
 		? SourceTemplate->GetStates().Num() : 0;
@@ -203,6 +258,100 @@ bool FTFTerritoryQuestCascadeMaterializesNarrative::RunTest(
 	TestEqual(TEXT("Rejected overwrite leaves existing states unchanged"),
 		Quest->QuestTemplate->GetStates().Num(), StatesBefore);
 	Recipe->RemoveFromRoot();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryQuestNodeConditionMigration,
+	"TerritoryFramework.Editor.Tales.QuestCascade.MigratesUnsupportedNodeConditions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryQuestNodeConditionMigration::RunTest(const FString& Parameters)
+{
+	UQuestBlueprint* Quest = TerritoryQuestCascadeEditorTests::MakeQuestBlueprint();
+	if (!TestNotNull(TEXT("Narrative Quest factory creates migration fixture"), Quest))
+	{
+		return false;
+	}
+	UTerritoryQuestCascadeRecipe* Recipe =
+		TerritoryQuestCascadeEditorTests::MakeRecipe();
+	Recipe->AddToRoot();
+	const FTerritoryQuestCascadeBuildReport Build =
+		UTerritoryQuestCascadeEditorLibrary::BuildEmptyQuestFromRecipe(
+			Quest, Recipe);
+	TestTrue(TEXT("Migration fixture generates"), Build.bSucceeded);
+	UQuestBranch* Branch = Quest->QuestTemplate
+		&& Quest->QuestTemplate->GetBranches().Num() == 1
+		? Quest->QuestTemplate->GetBranches()[0] : nullptr;
+	if (!TestNotNull(TEXT("Generated fixture has one route"), Branch))
+	{
+		Recipe->RemoveFromRoot();
+		return false;
+	}
+
+	UTerritoryEventContextCondition* LegacyNodeCondition =
+		NewObject<UTerritoryEventContextCondition>(Branch);
+	LegacyNodeCondition->bNot = true;
+	Branch->Conditions.Add(LegacyNodeCondition);
+	const FTerritoryQuestCascadeBuildReport Migration =
+		UTerritoryQuestCascadeEditorLibrary::
+		MigrateQuestNodeConditionsToGateTasks(Quest);
+	TestTrue(TEXT("Legacy Quest-node migration succeeds"), Migration.bSucceeded);
+	TestEqual(TEXT("Migration removes the unsupported route condition"),
+		Migration.RemovedQuestNodeConditions, 1);
+	TestEqual(TEXT("Migration preserves the missing requirement in the gate"),
+		Migration.CopiedConditions, 1);
+	Branch = Quest->QuestTemplate
+		&& Quest->QuestTemplate->GetBranches().Num() == 1
+		? Quest->QuestTemplate->GetBranches()[0] : nullptr;
+	if (!TestNotNull(TEXT("Compiled migrated route remains available"), Branch))
+	{
+		Recipe->RemoveFromRoot();
+		return false;
+	}
+	TestEqual(TEXT("Runtime branch has no unsupported condition rows"),
+		Branch->Conditions.Num(), 0);
+	const UTerritoryNarrativeConditionTask* Gate = nullptr;
+	for (const UNarrativeTask* Task : Branch->QuestTasks)
+	{
+		if ((Gate = Cast<UTerritoryNarrativeConditionTask>(Task))) break;
+	}
+	TestNotNull(TEXT("Existing functional condition gate remains"), Gate);
+	if (Gate)
+	{
+		TestEqual(TEXT("Gate retains original and migrated requirements"),
+			Gate->Conditions.Num(), 2);
+	}
+	Recipe->RemoveFromRoot();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryQuestSuggestedAssetName,
+	"TerritoryFramework.Editor.Tales.QuestCascade.UsesFriendlyGeneratedAssetName",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryQuestSuggestedAssetName::RunTest(const FString& Parameters)
+{
+	UPackage* Package = CreatePackage(TEXT("/Temp/TF_FriendlyQuestName"));
+	UTerritoryQuestCascadeRecipe* GenericRecipe =
+		NewObject<UTerritoryQuestCascadeRecipe>(Package,
+			TEXT("NewTerritoryQuestCascadeRecipe"));
+	GenericRecipe->QuestName = FText::FromString(TEXT("Liberate the Blacksmith"));
+	TestEqual(TEXT("Generic recipe filename falls back to its player-facing title"),
+		UTerritoryQuestCascadeEditorLibrary::GetSuggestedQuestAssetName(
+			GenericRecipe), FString(TEXT("NQ_LiberateTheBlacksmith")));
+	GenericRecipe->Rename(TEXT("NewTerritoryQuestCascadeRecipe_2"), Package,
+		REN_DontCreateRedirectors);
+	TestEqual(TEXT("Numbered generic recipe filename also uses the friendly title"),
+		UTerritoryQuestCascadeEditorLibrary::GetSuggestedQuestAssetName(
+			GenericRecipe), FString(TEXT("NQ_LiberateTheBlacksmith")));
+
+	UTerritoryQuestCascadeRecipe* NamedRecipe =
+		NewObject<UTerritoryQuestCascadeRecipe>(Package,
+			TEXT("DA_QC_CastleHillCapture"));
+	NamedRecipe->QuestName = FText::FromString(TEXT("Any Display Name"));
+	TestEqual(TEXT("A meaningful recipe filename remains the stable quest asset name"),
+		UTerritoryQuestCascadeEditorLibrary::GetSuggestedQuestAssetName(
+			NamedRecipe), FString(TEXT("NQ_CastleHillCapture")));
 	return true;
 }
 

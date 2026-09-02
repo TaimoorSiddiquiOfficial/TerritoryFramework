@@ -21,6 +21,7 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryHierarchy.h"
@@ -42,6 +43,7 @@
 #include "Tales/TerritoryGarrisonCondition.h"
 #include "Tales/TerritoryStoryConditions.h"
 #include "Tales/TerritoryStoryEvents.h"
+#include "Tales/TerritoryNarrativeCheckpointEvent.h"
 #include "Tales/TerritoryStealthConditions.h"
 #include "Tales/TerritoryStealthEvents.h"
 #include "Tales/TerritoryTalesUtilities.h"
@@ -4977,6 +4979,7 @@ bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 		UTerritoryGarrisonCondition::StaticClass(),
 		UTerritoryOwnershipCondition::StaticClass(),
 		UTerritoryQuestStateCondition::StaticClass(),
+		UTerritoryWaitTimeCondition::StaticClass(),
 		UTerritoryEventContextCondition::StaticClass(),
 		UTerritoryOwnershipTransitionCondition::StaticClass(),
 		UTerritoryStateCondition::StaticClass(),
@@ -5008,6 +5011,7 @@ bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 		UTerritorySetGarrisonTargetEvent::StaticClass(),
 		UTerritoryUpgradePropertyEvent::StaticClass(),
 		UTerritoryExecuteResourceRecipeEvent::StaticClass(),
+		UTerritoryNarrativeCheckpointEvent::StaticClass(),
 		UTerritorySetStealthOverrideEvent::StaticClass(),
 		UTerritoryRevealInfiltratorEvent::StaticClass(),
 		UTerritoryClearExposureEvent::StaticClass(),
@@ -5888,6 +5892,62 @@ bool FTFContestCriteriaSeparated::RunTest(const FString& Parameters)
 		ECaptureResult::DefendersRemain);
 
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFQuestOwnedTerritoryRuntimePolicy,
+	"TerritoryFramework.Tales.QuestOverride.RuntimePolicyContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFQuestOwnedTerritoryRuntimePolicy::RunTest(const FString& Parameters)
+{
+	FTerritoryQuestRuntimeOverrideRule Rule;
+	TestTrue(TEXT("Quest override pauses primary state rules by default"),
+		Rule.Pauses(ETerritoryQuestOverrideEffect::StateRules));
+	TestTrue(TEXT("Quest override pauses physical automatic capture by default"),
+		Rule.Pauses(ETerritoryQuestOverrideEffect::AutomaticCapture));
+	TestTrue(TEXT("Quest override pauses strategic automatic counterattacks by default"),
+		Rule.Pauses(ETerritoryQuestOverrideEffect::AutomaticCounterattacks));
+
+	Rule.bPauseAutomaticCapture = false;
+	TestFalse(TEXT("Each automatic subsystem can be resumed independently"),
+		Rule.Pauses(ETerritoryQuestOverrideEffect::AutomaticCapture));
+	TestTrue(TEXT("Changing capture policy does not silently change state policy"),
+		Rule.Pauses(ETerritoryQuestOverrideEffect::StateRules));
+
+	TestNotNull(TEXT("All City, District, and Place Definitions expose Quest Runtime Overrides"),
+		UTerritoryDefinition::StaticClass()->FindPropertyByName(
+			TEXT("QuestRuntimeOverrides")));
+	TestNotNull(TEXT("Runtime actor exposes a Blueprint-readable suspension query"),
+		ATerritoryVolume::StaticClass()->FindFunctionByName(
+			TEXT("IsPrimaryRuntimeRuleSuspended")));
+	TestNotNull(TEXT("Enemy Wave exposes explicit instant deployment"),
+		UTerritoryScheduleEnemyWaveEvent::StaticClass()->FindPropertyByName(
+			TEXT("bStartImmediately")));
+	TestNotNull(TEXT("Counter authority exposes advanced diagnostic scheduling"),
+		UTerritoryCounterAttackSubsystem::StaticClass()->FindFunctionByName(
+			TEXT("TryScheduleAssaultAdvancedWithReason")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryWaitTimeConditionPolicy,
+	"TerritoryFramework.Tales.Conditions.WaitTimePolicy",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryWaitTimeConditionPolicy::RunTest(const FString& Parameters)
+{
+	TestFalse(TEXT("Wait is false before its selected clock reaches the threshold"),
+		UTerritoryWaitTimeCondition::HasWaitFinished(59.99, 60.f));
+	TestTrue(TEXT("Wait passes exactly at the threshold"),
+		UTerritoryWaitTimeCondition::HasWaitFinished(60.0, 60.f));
+	TestTrue(TEXT("Negative authored wait is safely treated as zero"),
+		UTerritoryWaitTimeCondition::HasWaitFinished(0.0, -5.f));
+
+	const UTerritoryWaitTimeCondition* Condition =
+		GetDefault<UTerritoryWaitTimeCondition>();
+	TestEqual(TEXT("Saved Narrative campaign time is the safe story default"),
+		Condition->TimeSource,
+		ETerritoryWaitTimeSource::NarrativeCampaignElapsed);
 	return true;
 }
 

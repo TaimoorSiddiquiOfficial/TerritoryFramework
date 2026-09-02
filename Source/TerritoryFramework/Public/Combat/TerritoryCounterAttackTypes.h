@@ -567,6 +567,13 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") ETerritoryStoryPursuitDirection StoryPursuitDirection = ETerritoryStoryPursuitDirection::EnemyChasesPlayer;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bAllowsTerritoryCapture = true;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bUseStrategicDecisionRoll = true;
+	/**
+	 * True for an explicit Narrative Event request. It may run during a Quest-owned
+	 * phase and does not require the automatic strategic staging/capability gates.
+	 */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bQuestOverrideAuthorized = false;
+	/** Skips grace, time window, warning delay, and player-proximity wait after admission. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bImmediateDeployment = false;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") FVector StoryFocusLocation = FVector::ZeroVector;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") TSoftObjectPtr<UNPCDefinition> StoryAttackerDefinitionOverride;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") int32 StoryPlannedForceOverride = 0;

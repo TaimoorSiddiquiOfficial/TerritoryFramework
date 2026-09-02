@@ -306,7 +306,7 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 	const ATerritoryVolume* Territory, const FGameplayTag& PreferredFaction,
 	FGameplayTag& OutAttackingFaction, FTerritoryAssaultEvaluationInput& OutInput,
 	FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason,
-	bool bRequireRecurringEligibility) const
+	bool bRequireRecurringEligibility, bool bExplicitNarrativeRequest) const
 {
 	OutAttackingFaction = FGameplayTag();
 	OutInput = FTerritoryAssaultEvaluationInput();
@@ -347,20 +347,22 @@ bool UTerritoryCounterAttackSubsystem::FindBestEligibleAttacker(
 			continue;
 		}
 		++ConfiguredCandidateCount;
-		if (!DoesForceMeetStagingRequirement(
+		if (!bExplicitNarrativeRequest && !DoesForceMeetStagingRequirement(
 			Force, ETerritoryAssaultLaunchMode::StrategicCounterattack))
 		{
 			++StagingBlockedCount;
 			continue;
 		}
-		if (!DoesFactionMeetReinforcementCapabilityRequirement(Profile,
+		if (!bExplicitNarrativeRequest
+			&& !DoesFactionMeetReinforcementCapabilityRequirement(Profile,
 			Force.Faction, ETerritoryAssaultLaunchMode::StrategicCounterattack))
 		{
 			++CapabilityBlockedCount;
 			continue;
 		}
 		FText QuestFailureReason;
-		if (!DoStrategicQuestRulesPass(Profile, Force.Faction,
+		if (!bExplicitNarrativeRequest
+			&& !DoStrategicQuestRulesPass(Profile, Force.Faction,
 			Territory->GetOwningFaction(), &QuestFailureReason))
 		{
 			++QuestBlockedCount;
@@ -496,23 +498,91 @@ bool UTerritoryCounterAttackSubsystem::GetBestEligibleAttackerPreview(
 		OutAttackingFaction, OutInput, OutResult, OutReason);
 }
 
+bool UTerritoryCounterAttackSubsystem::GetBestAuthoredWaveAttackerPreview(
+	const ATerritoryVolume* Territory, FGameplayTag PreferredFaction,
+	FGameplayTag& OutAttackingFaction,
+	FTerritoryAssaultEvaluationInput& OutInput,
+	FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const
+{
+	return FindBestEligibleAttacker(Territory, PreferredFaction,
+		OutAttackingFaction, OutInput, OutResult, OutReason,
+		false, true);
+}
+
 bool UTerritoryCounterAttackSubsystem::ScheduleBestCounterAttack(
 	ATerritoryVolume* Territory, FGameplayTag PreferredFaction)
 {
+	FText FailureReason;
+	return TryScheduleBestCounterAttackWithReason(
+		Territory, PreferredFaction, FailureReason);
+}
+
+bool UTerritoryCounterAttackSubsystem::TryScheduleBestCounterAttackWithReason(
+	ATerritoryVolume* Territory, FGameplayTag PreferredFaction,
+	FText& OutFailureReason)
+{
+	OutFailureReason = FText::GetEmpty();
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client || !Territory
-		|| Territory->GetWorld() != World || !Territory->HasAuthority())
+	if (!World)
 	{
+		OutFailureReason = NSLOCTEXT("TerritoryCounterAttack", "NoWorld",
+			"The Territory Counterattack subsystem has no World.");
+		return false;
+	}
+	if (World->GetNetMode() == NM_Client)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryCounterAttack", "ClientCannotSchedule",
+			"Only the authoritative server can schedule an assault.");
+		return false;
+	}
+	if (!IsValid(Territory) || Territory->GetWorld() != World)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryCounterAttack", "InvalidTargetTerritory",
+			"The target Territory is invalid, unloaded, or belongs to another World.");
+		return false;
+	}
+	if (!Territory->HasAuthority())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryCounterAttack", "TargetNotAuthority",
+			"The loaded target Territory is not authoritative on this machine.");
 		return false;
 	}
 
 	FGameplayTag AttackingFaction;
 	FTerritoryAssaultEvaluationInput Input;
 	FTerritoryAssaultEvaluationResult Result;
-	FText Reason;
-	return FindBestEligibleAttacker(Territory, PreferredFaction,
-		AttackingFaction, Input, Result, Reason)
-		&& ScheduleCounterAttack(Territory, AttackingFaction);
+	if (!FindBestEligibleAttacker(Territory, PreferredFaction,
+		AttackingFaction, Input, Result, OutFailureReason))
+	{
+		return false;
+	}
+	return ScheduleAssault(Territory, AttackingFaction,
+		ETerritoryAssaultLaunchMode::StrategicCounterattack,
+		false, nullptr, &OutFailureReason, false, false);
+}
+
+bool UTerritoryCounterAttackSubsystem::TryScheduleAssaultWithReason(
+	ATerritoryVolume* Territory, FGameplayTag AttackingFaction,
+	ETerritoryAssaultLaunchMode LaunchMode,
+	const FTerritoryStoryPursuitOptions& StoryOptions,
+	FText& OutFailureReason)
+{
+	return TryScheduleAssaultAdvancedWithReason(Territory, AttackingFaction,
+		LaunchMode, StoryOptions, false, OutFailureReason);
+}
+
+bool UTerritoryCounterAttackSubsystem::TryScheduleAssaultAdvancedWithReason(
+	ATerritoryVolume* Territory, FGameplayTag AttackingFaction,
+	ETerritoryAssaultLaunchMode LaunchMode,
+	const FTerritoryStoryPursuitOptions& StoryOptions,
+	bool bStartImmediately, FText& OutFailureReason)
+{
+	OutFailureReason = FText::GetEmpty();
+	const FTerritoryStoryPursuitOptions* Options =
+		LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
+		? &StoryOptions : nullptr;
+	return ScheduleAssault(Territory, AttackingFaction, LaunchMode,
+		false, Options, &OutFailureReason, true, bStartImmediately);
 }
 
 bool UTerritoryCounterAttackSubsystem::ScheduleCounterAttack(
@@ -531,7 +601,8 @@ bool UTerritoryCounterAttackSubsystem::ScheduleStoryPursuit(
 	LegacyOptions.bUseStrategicDecisionRoll = true;
 	LegacyOptions.GracePeriodOverrideGameTime = -1.f;
 	return ScheduleAssault(Territory, AttackingFaction,
-		ETerritoryAssaultLaunchMode::StoryPursuit, false, &LegacyOptions);
+		ETerritoryAssaultLaunchMode::StoryPursuit, false, &LegacyOptions,
+		nullptr, true, false);
 }
 
 bool UTerritoryCounterAttackSubsystem::ScheduleStoryPursuitWithOptions(
@@ -539,28 +610,52 @@ bool UTerritoryCounterAttackSubsystem::ScheduleStoryPursuitWithOptions(
 	const FTerritoryStoryPursuitOptions& Options)
 {
 	return ScheduleAssault(Territory, AttackingFaction,
-		ETerritoryAssaultLaunchMode::StoryPursuit, false, &Options);
+		ETerritoryAssaultLaunchMode::StoryPursuit, false, &Options,
+		nullptr, true, false);
 }
 
 bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	ATerritoryVolume* Territory, FGameplayTag AttackingFaction,
 	ETerritoryAssaultLaunchMode LaunchMode, bool bContinueExistingSchedule,
-	const FTerritoryStoryPursuitOptions* StoryOptions)
+	const FTerritoryStoryPursuitOptions* StoryOptions,
+	FText* OutFailureReason, bool bQuestOverrideAuthorized,
+	bool bStartImmediately)
 {
-	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client
-		|| !Cast<ANarrativeGameState>(World->GetGameState()) || !Territory
-		|| Territory->GetWorld() != World || !Territory->HasAuthority()
-		|| Territory->GetControlMode() != ETerritoryControlMode::Independent
-		|| !Territory->IsAvailableForGameplay()
-		|| !Territory->GetTerritoryGUID().IsValid()
-		|| !Territory->GetTerritoryTag().IsValid()
-		|| Territory->GetTerritoryState() != ETerritoryState::Claimed
-		|| !AttackingFaction.IsValid() || !Territory->GetOwningFaction().IsValid()
-		|| Territory->GetOwningFaction() == AttackingFaction)
+	if (OutFailureReason) *OutFailureReason = FText::GetEmpty();
+	const auto Reject = [OutFailureReason](const FText& Reason)
 	{
+		if (OutFailureReason) *OutFailureReason = Reason;
 		return false;
-	}
+	};
+
+	UWorld* World = GetWorld();
+	if (!World) return Reject(NSLOCTEXT("TerritoryCounterAttack", "ScheduleNoWorld",
+		"The Territory Counterattack subsystem has no World."));
+	if (World->GetNetMode() == NM_Client) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "ScheduleClient", "Only the authoritative server can schedule an assault."));
+	if (!Cast<ANarrativeGameState>(World->GetGameState())) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "MissingNarrativeGameState", "The active Game State is not a Narrative Game State."));
+	if (!IsValid(Territory) || Territory->GetWorld() != World) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "ScheduleInvalidTerritory", "The target Territory is invalid, unloaded, or belongs to another World."));
+	if (!Territory->HasAuthority()) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "ScheduleNoAuthority", "The target Territory is not authoritative on this machine."));
+	if (Territory->GetControlMode() != ETerritoryControlMode::Independent) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "InheritedControlTarget", "The target uses inherited control. Schedule the assault against an independently controlled Place."));
+	if (!Territory->IsAvailableForGameplay()) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "TargetUnavailable", "The target Territory or one of its ancestors is locked."));
+	if (!Territory->GetTerritoryGUID().IsValid()) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "MissingTargetGuid", "The target Territory has no stable GUID. Assign a Territory Definition and save it."));
+	if (!Territory->GetTerritoryTag().IsValid()) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "MissingTargetTag", "The target Territory has no valid Territory gameplay tag."));
+	if (Territory->GetTerritoryState() != ETerritoryState::Claimed) return Reject(FText::Format(
+		NSLOCTEXT("TerritoryCounterAttack", "TargetNotClaimed", "The target Territory must be Claimed before an assault can be scheduled. Current state: {0}."),
+		FText::FromString(UEnum::GetValueAsString(Territory->GetTerritoryState()))));
+	if (!AttackingFaction.IsValid()) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "MissingAttackerFaction", "No valid attacking faction was supplied."));
+	if (!Territory->GetOwningFaction().IsValid()) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "MissingDefenderFaction", "The claimed target has no valid owning/defending faction."));
+	if (Territory->GetOwningFaction() == AttackingFaction) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "AttackerOwnsTarget", "The attacking faction already owns the target Territory."));
 
 	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
 	const FTerritoryFactionAssaultConfig* ForceConfig = Profile
@@ -571,19 +666,30 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		&& !StoryOptions->AttackerDefinitionOverride.IsNull()
 		? StoryOptions->AttackerDefinitionOverride.LoadSynchronous()
 		: (ForceConfig ? ForceConfig->AttackerDefinition.Get() : nullptr);
-	if (!Profile || !ForceConfig || RequestedForce <= 0 || ForceConfig->WaveSize <= 0
-		|| ForceConfig->MilitaryPower <= 0.f)
-	{
-		return false;
-	}
-	if (!DoesForceMeetStagingRequirement(*ForceConfig, LaunchMode)) return false;
-	if (!DoesFactionMeetReinforcementCapabilityRequirement(Profile,
-		AttackingFaction, LaunchMode)) return false;
-	if (LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
+	if (!Profile) return Reject(NSLOCTEXT("TerritoryCounterAttack", "MissingProfile",
+		"The target Territory Definition has no Counterattack Profile."));
+	if (!ForceConfig) return Reject(FText::Format(NSLOCTEXT("TerritoryCounterAttack", "MissingFactionForce",
+		"The Counterattack Profile has no force entry for {0}."), FText::FromName(AttackingFaction.GetTagName())));
+	if (RequestedForce <= 0) return Reject(NSLOCTEXT("TerritoryCounterAttack", "EmptyPlannedForce",
+		"Planned Force must be greater than zero."));
+	if (ForceConfig->WaveSize <= 0 && !(StoryOptions && StoryOptions->WaveSizeOverride > 0))
+		return Reject(NSLOCTEXT("TerritoryCounterAttack", "EmptyWaveSize",
+			"Wave Size must be greater than zero, or the Story Pursuit must provide a Wave Size Override."));
+	if (ForceConfig->MilitaryPower <= 0.f) return Reject(NSLOCTEXT("TerritoryCounterAttack", "NoMilitaryPower",
+		"The attacking faction's Military Power must be greater than zero."));
+	if (!bQuestOverrideAuthorized
+		&& !DoesForceMeetStagingRequirement(*ForceConfig, LaunchMode)) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "NoStagingDistrict", "This force requires the attacker to securely hold a complete District before it can stage an assault."));
+	FText AdmissionFailure;
+	if (!bQuestOverrideAuthorized
+		&& !DoesFactionMeetReinforcementCapabilityRequirement(Profile,
+		AttackingFaction, LaunchMode, &AdmissionFailure)) return Reject(AdmissionFailure);
+	if (!bQuestOverrideAuthorized
+		&& LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
 		&& !DoStrategicQuestRulesPass(Profile, AttackingFaction,
-			Territory->GetOwningFaction()))
+			Territory->GetOwningFaction(), &AdmissionFailure))
 	{
-		return false;
+		return Reject(AdmissionFailure);
 	}
 	FText SpawnClassFailure;
 	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
@@ -592,25 +698,53 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		UE_LOG(LogTerritory, Error,
 			TEXT("Counterattack definition %s is not physically spawn-ready: %s"),
 			*GetNameSafe(RequestedDefinition), *SpawnClassFailure.ToString());
-		return false;
+		return Reject(SpawnClassFailure);
 	}
 	FTerritoryAssaultRecord AdmissionRecord;
 	AdmissionRecord.AttackingFaction = AttackingFaction;
 	AdmissionRecord.DefendingFaction = Territory->GetOwningFaction();
-	if (IsDiplomacyBlocked(AdmissionRecord, Territory)) return false;
+	if (IsDiplomacyBlocked(AdmissionRecord, Territory)) return Reject(FText::Format(
+		NSLOCTEXT("TerritoryCounterAttack", "DiplomacyBlocksAssault",
+			"Diplomacy does not permit {0} to attack the defending faction {1}. War is required unless the profile explicitly allows a different state."),
+		FText::FromName(AttackingFaction.GetTagName()),
+		FText::FromName(Territory->GetOwningFaction().GetTagName())));
 
-	if (HasNonTerminalAssaultForTerritory(Territory)) return false;
+	if (HasNonTerminalAssaultForTerritory(Territory)) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "AssaultAlreadyPending", "This Territory already has a pending or active assault."));
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings && (CountNonTerminalAssaults() >= Settings->MaxConcurrentScheduledAssaults
 		|| CountNonTerminalAssaults(&AttackingFaction) >= Settings->MaxConcurrentAssaultsPerFaction))
 	{
-		return false;
+		return Reject(NSLOCTEXT("TerritoryCounterAttack", "AssaultBudgetFull",
+			"The global or per-faction concurrent assault budget is full."));
+	}
+
+	const FTerritoryAssaultRecord* PreviousSchedule = nullptr;
+	if (bContinueExistingSchedule)
+	{
+		for (const auto& Pair : Assaults)
+		{
+			const FTerritoryAssaultRecord& Candidate = Pair.Value;
+			if (!Candidate.IsTerminal()
+				|| Candidate.LaunchMode != LaunchMode
+				|| !DoesAssaultTargetTerritory(Candidate, Territory)
+				|| Candidate.AttackingFaction != AttackingFaction
+				|| Candidate.DefendingFaction != Territory->GetOwningFaction()) continue;
+			if (!PreviousSchedule
+				|| Candidate.ResolvedGameTime > PreviousSchedule->ResolvedGameTime)
+			{
+				PreviousSchedule = &Candidate;
+			}
+		}
+		if (!PreviousSchedule) return Reject(NSLOCTEXT(
+			"TerritoryCounterAttack", "MissingPreviousSchedule", "A recurring assault was requested, but no matching completed schedule exists."));
 	}
 
 	const int32 EvaluationCycle = ReserveNextEvaluationCycle(
 		Territory->GetTerritoryGUID(), AttackingFaction);
-	if (EvaluationCycle <= 0) return false;
+	if (EvaluationCycle <= 0) return Reject(NSLOCTEXT("TerritoryCounterAttack", "InvalidEvaluationCycle",
+		"The scheduler could not reserve a deterministic evaluation cycle."));
 
 	FTerritoryAssaultRecord Record;
 	Record.AssaultID = FGuid::NewGuid();
@@ -619,11 +753,20 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	Record.AttackingFaction = AttackingFaction;
 	Record.DefendingFaction = Territory->GetOwningFaction();
 	Record.LaunchMode = LaunchMode;
+	Record.bQuestOverrideAuthorized = bQuestOverrideAuthorized;
+	Record.bImmediateDeployment = bStartImmediately;
+	if (bStartImmediately)
+	{
+		// An explicit instant Wave is deterministic after admission. Strategic chance
+		// belongs to the normal scheduler, not to a designer-authored immediate event.
+		Record.bUseStrategicDecisionRoll = false;
+	}
 	if (LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit && StoryOptions)
 	{
 		Record.StoryPursuitDirection = StoryOptions->Direction;
 		Record.bAllowsTerritoryCapture = StoryOptions->bAllowsTerritoryCapture;
-		Record.bUseStrategicDecisionRoll = StoryOptions->bUseStrategicDecisionRoll;
+		Record.bUseStrategicDecisionRoll = bStartImmediately
+			? false : StoryOptions->bUseStrategicDecisionRoll;
 		Record.StoryFocusLocation = StoryOptions->StoryFocusLocation;
 		Record.StoryAttackerDefinitionOverride = StoryOptions->AttackerDefinitionOverride;
 		Record.StoryPlannedForceOverride = FMath::Max(0, StoryOptions->PlannedForceOverride);
@@ -646,24 +789,9 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	Record.EvaluationCycle = EvaluationCycle;
 	if (bContinueExistingSchedule)
 	{
-		const FTerritoryAssaultRecord* Previous = nullptr;
-		for (const auto& Pair : Assaults)
-		{
-			const FTerritoryAssaultRecord& Candidate = Pair.Value;
-			if (!Candidate.IsTerminal()
-				|| Candidate.LaunchMode != LaunchMode
-				|| !DoesAssaultTargetTerritory(Candidate, Territory)
-				|| Candidate.AttackingFaction != AttackingFaction
-				|| Candidate.DefendingFaction != Territory->GetOwningFaction()) continue;
-			if (!Previous || Candidate.ResolvedGameTime > Previous->ResolvedGameTime)
-			{
-				Previous = &Candidate;
-			}
-		}
-		if (!Previous) return false;
-		Record.ScheduleSeriesID = Previous->ScheduleSeriesID.IsValid()
-			? Previous->ScheduleSeriesID : Previous->AssaultID;
-		Record.ScheduleOccurrence = FMath::Max(1, Previous->ScheduleOccurrence) + 1;
+		Record.ScheduleSeriesID = PreviousSchedule->ScheduleSeriesID.IsValid()
+			? PreviousSchedule->ScheduleSeriesID : PreviousSchedule->AssaultID;
+		Record.ScheduleOccurrence = FMath::Max(1, PreviousSchedule->ScheduleOccurrence) + 1;
 	}
 	else
 	{
@@ -690,7 +818,65 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 			RequestedForce);
 	}
 	BroadcastChanged(Record);
+	if (bStartImmediately)
+	{
+		FTerritoryAssaultRecord* Added = Assaults.Find(Record.AssaultID);
+		if (!Added || !StartAssaultImmediately(*Added, Territory,
+			OutFailureReason))
+		{
+			return false;
+		}
+	}
+	if (OutFailureReason)
+	{
+		*OutFailureReason = NSLOCTEXT("TerritoryCounterAttack", "AssaultScheduled",
+			"The finite physical assault was scheduled successfully.");
+	}
 	return true;
+}
+
+bool UTerritoryCounterAttackSubsystem::StartAssaultImmediately(
+	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory,
+	FText* OutFailureReason)
+{
+	if (!Territory || Assault.IsTerminal()) return false;
+	if (Assault.State == ETerritoryAssaultState::Grace)
+	{
+		const ETerritoryAssaultState PreviousState = Assault.State;
+		Assault.State = ETerritoryAssaultState::Evaluating;
+		BroadcastStateTransition(Assault, PreviousState);
+		EvaluateAssault(Assault, Territory);
+	}
+	if (Assault.IsTerminal())
+	{
+		if (OutFailureReason)
+		{
+			*OutFailureReason = FText::Format(NSLOCTEXT(
+				"TerritoryCounterAttack", "ImmediateEvaluationFailed",
+				"The immediate assault failed during route/force evaluation. Resolution: {0}."),
+				UEnum::GetDisplayValueAsText(Assault.Resolution));
+		}
+		return false;
+	}
+	if (Assault.State == ETerritoryAssaultState::ScheduledWarning)
+	{
+		NotifyRelevantPlayers(Assault, Territory);
+		const ETerritoryAssaultState PreviousState = Assault.State;
+		Assault.State = ETerritoryAssaultState::WaitingForPlayerProximity;
+		BroadcastStateTransition(Assault, PreviousState);
+	}
+	if (Assault.State == ETerritoryAssaultState::WaitingForPlayerProximity
+		&& ActivateAssault(Assault, Territory))
+	{
+		return true;
+	}
+	if (OutFailureReason)
+	{
+		*OutFailureReason = NSLOCTEXT("TerritoryCounterAttack",
+			"ImmediateActivationFailed",
+			"The assault passed admission but could not deploy immediately. Check its approaches and physical route.");
+	}
+	return false;
 }
 
 bool UTerritoryCounterAttackSubsystem::CancelAssault(
@@ -1107,7 +1293,9 @@ void UTerritoryCounterAttackSubsystem::TryScheduleRecurringStrategicAssaults()
 		if (!Target || Target->GetControlMode() != ETerritoryControlMode::Independent
 			|| !Target->IsAvailableForGameplay()
 			|| Target->GetTerritoryState() != ETerritoryState::Claimed
-			|| !Target->GetOwningFaction().IsValid())
+			|| !Target->GetOwningFaction().IsValid()
+			|| Target->IsPrimaryRuntimeRuleSuspendedWithContext(
+				ETerritoryQuestOverrideEffect::AutomaticCounterattacks, nullptr))
 		{
 			continue;
 		}
@@ -1172,7 +1360,8 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	}
 	const bool bPhysicalAssault = Assault.State == ETerritoryAssaultState::Active
 		|| Assault.State == ETerritoryAssaultState::RecaptureCountdown;
-	if (Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
+	if (!Assault.bQuestOverrideAuthorized
+		&& Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
 		&& !bPhysicalAssault
 		&& !DoesForceMeetStagingRequirement(*ForceConfig, Assault.LaunchMode))
 	{
@@ -1180,7 +1369,20 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 			ETerritoryAssaultResolution::StagingDistrictUnavailable);
 		return;
 	}
-	if (Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
+	const bool bPhysicalAssaultAlreadyActive =
+		Assault.State == ETerritoryAssaultState::Active
+		|| Assault.State == ETerritoryAssaultState::RecaptureCountdown;
+	if (!Assault.bQuestOverrideAuthorized && !bPhysicalAssaultAlreadyActive
+		&& Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
+			ETerritoryQuestOverrideEffect::AutomaticCounterattacks, nullptr))
+	{
+		// Freeze grace/warning/waiting. Campaign time may pass, so the primary
+		// schedule can continue promptly after the Quest finishes. A battle that
+		// is already physical is never despawned by a story-state change.
+		return;
+	}
+	if (!Assault.bQuestOverrideAuthorized
+		&& Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
 		&& !bPhysicalAssault
 		&& !DoesFactionMeetReinforcementCapabilityRequirement(Profile,
 			Assault.AttackingFaction, Assault.LaunchMode))
@@ -1189,7 +1391,8 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 			ETerritoryAssaultResolution::ReinforcementCapabilityLost);
 		return;
 	}
-	if (Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
+	if (!Assault.bQuestOverrideAuthorized
+		&& Assault.LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack
 		&& !bPhysicalAssault
 		&& !DoStrategicQuestRulesPass(Profile, Assault.AttackingFaction,
 			Assault.DefendingFaction))
@@ -3334,7 +3537,11 @@ void UTerritoryCounterAttackSubsystem::HandleTerritoryControlChanged(
 
 	if (OldOwner.IsValid() && NewOwner.IsValid() && OldOwner != NewOwner)
 	{
-		ScheduleBestCounterAttack(Territory, OldOwner);
+		if (!Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
+			ETerritoryQuestOverrideEffect::AutomaticCounterattacks, nullptr))
+		{
+			ScheduleBestCounterAttack(Territory, OldOwner);
+		}
 	}
 }
 

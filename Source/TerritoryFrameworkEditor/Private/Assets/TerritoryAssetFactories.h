@@ -109,6 +109,7 @@ class UTerritoryQuestCascadeRecipeFactory : public UTerritoryAssetFactoryBase
 	GENERATED_BODY()
 public:
 	UTerritoryQuestCascadeRecipeFactory();
+	virtual FString GetDefaultNewAssetName() const override;
 };
 
 /**

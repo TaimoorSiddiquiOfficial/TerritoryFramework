@@ -65,11 +65,12 @@ audits are kept outside this learning path so they cannot be mistaken for curren
 | 31 | [CI Artifacts](31_CI_Artifacts.md) | Unreal 5.7/5.8 self-hosted builds and downloadable artifacts |
 | 32 | [Narrative Quest Cascade Recipes](32_Narrative_Quest_Cascade_Recipes.md) | Reusable story graphs that generate normal Narrative Quests |
 | 33 | [Territory Asset Creation Menu](33_Territory_Asset_Creation_Menu.md) | Dedicated Add/New category for every Territory Definition, profile, recipe, and core Blueprint template |
+| 34 | [Quest-Owned Runtime Rules](34_Quest_Owned_Runtime_Rules.md) | Pause primary state/capture/counter rules while a Narrative Quest owns the story flow |
 
 ## Choose by role
 
 - **New community developer:** 00, 01, 33, 06, 21, 22, 29, 30, then 32.
-- **Level or mission designer:** 03, 05, 17, 21–30, then 32 and 33.
+- **Level or mission designer:** 03, 05, 17, 21–30, then 32–34.
 - **AI/combat designer:** 05, 08, 15, 17, 23–26, and 30.
 - **UI designer:** 09, 16, 18, 27–30.
 - **Blueprint developer:** 02, 04, 12, 29, 30, 32, 33, plus the extension/setup appendices below.

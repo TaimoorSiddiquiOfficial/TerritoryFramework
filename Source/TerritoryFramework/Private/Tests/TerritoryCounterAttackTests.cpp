@@ -74,6 +74,83 @@ bool FTFCounterAttackQuestRuleBehavior::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackAuthoredWaveAdmission,
+	"TerritoryFramework.CounterAttack.Behavior.AuthoredWaveBypassesOnlyStrategicInfrastructure",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackAuthoredWaveAdmission::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Authored-wave test world exists"), World)) return false;
+	UTerritoryCounterAttackSubsystem* Counter =
+		World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
+	UTerritoryDiplomacySubsystem* Diplomacy =
+		World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	ATerritoryProperty* Territory = World->SpawnActor<ATerritoryProperty>();
+	TestNotNull(TEXT("Counterattack authority exists"), Counter);
+	TestNotNull(TEXT("Diplomacy authority exists"), Diplomacy);
+	TestNotNull(TEXT("Target Place exists"), Territory);
+	if (!Counter || !Diplomacy || !Territory)
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	FTerritoryOwnershipData Claimed;
+	Claimed.OwningFaction = Heroes;
+	Claimed.State = ETerritoryState::Claimed;
+	Territory->CommitOwnershipData(Claimed);
+	Diplomacy->SetDiplomacyState(Bandits, Heroes, EDiplomacyState::War);
+
+	UTerritoryCounterAttackProfile* Profile =
+		NewObject<UTerritoryCounterAttackProfile>(Territory);
+	UNPCDefinition* AttackerDefinition = NewObject<UNPCDefinition>(Profile);
+	AttackerDefinition->CharacterID = TEXT("TF_AuthoredWave_Character");
+	AttackerDefinition->NPCID = TEXT("TF_AuthoredWave_NPC");
+	AttackerDefinition->bAllowMultipleInstances = true;
+	AttackerDefinition->NPCClassPath = ATerritoryAssaultCharacter::StaticClass();
+	FTerritoryFactionAssaultConfig& Force =
+		Profile->FactionForces.AddDefaulted_GetRef();
+	Force.Faction = Bandits;
+	Force.AttackerDefinition = AttackerDefinition;
+	Force.PlannedForce = 3;
+	Force.WaveSize = 3;
+	Force.MilitaryPower = 100.f;
+	Force.StagingRequirement =
+		ETerritoryAssaultStagingRequirement::OwnsSecureDistrict;
+	FObjectProperty* ProfileProperty = FindFProperty<FObjectProperty>(
+		ATerritoryVolume::StaticClass(), TEXT("CounterAttackProfile"));
+	TestNotNull(TEXT("Target exposes its counterattack profile"), ProfileProperty);
+	if (ProfileProperty)
+	{
+		ProfileProperty->SetObjectPropertyValue_InContainer(Territory, Profile);
+	}
+
+	FGameplayTag Selected;
+	FTerritoryAssaultEvaluationInput Input;
+	FTerritoryAssaultEvaluationResult Result;
+	FText Reason;
+	TestFalse(TEXT("Automatic strategy still requires secure holdings/capability"),
+		Counter->GetBestEligibleAttackerPreview(
+			Territory, Bandits, Selected, Input, Result, Reason));
+	TestTrue(TEXT("Explicit Narrative Wave may use the configured hostile force"),
+		Counter->GetBestAuthoredWaveAttackerPreview(
+			Territory, Bandits, Selected, Input, Result, Reason));
+	TestEqual(TEXT("Authored Wave selects the hostile configured faction"),
+		Selected, Bandits);
+
+	Diplomacy->SetDiplomacyState(Bandits, Heroes, EDiplomacyState::None);
+	TestFalse(TEXT("Explicit Narrative Wave still obeys diplomacy"),
+		Counter->GetBestAuthoredWaveAttackerPreview(
+			Territory, Bandits, Selected, Input, Result, Reason));
+	World->DestroyWorld(false);
+	return true;
+}
+
 namespace TerritoryCounterAttackTests
 {
 	static FTerritoryAssaultEvaluationInput MakeBaselineInput()
@@ -1931,8 +2008,17 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 			FUNC_BlueprintAuthorityOnly));
 	TestTrue(TEXT("Strongest eligible automatic scheduling is Blueprint authority-only"),
 		HasFunctionFlag(CounterClass, TEXT("ScheduleBestCounterAttack"), FUNC_BlueprintAuthorityOnly));
+	TestTrue(TEXT("Exact assault admission exposes an authoritative rejection reason"),
+		HasFunctionFlag(CounterClass, TEXT("TryScheduleAssaultWithReason"),
+			FUNC_BlueprintAuthorityOnly));
+	TestTrue(TEXT("Best-attacker admission exposes an authoritative rejection reason"),
+		HasFunctionFlag(CounterClass, TEXT("TryScheduleBestCounterAttackWithReason"),
+			FUNC_BlueprintAuthorityOnly));
 	TestTrue(TEXT("Strategic candidate preview is side-effect-free Blueprint data"),
 		HasFunctionFlag(CounterClass, TEXT("GetBestEligibleAttackerPreview"), FUNC_BlueprintPure));
+	TestTrue(TEXT("Authored Wave candidate preview is side-effect-free Blueprint data"),
+		HasFunctionFlag(CounterClass, TEXT("GetBestAuthoredWaveAttackerPreview"),
+			FUNC_BlueprintPure));
 	TestTrue(TEXT("Secure District count is a side-effect-free Blueprint query"),
 		HasFunctionFlag(CounterClass, TEXT("GetSecureDistrictCountForFaction"), FUNC_BlueprintPure));
 	TestTrue(TEXT("Strategic staging admission is a side-effect-free Blueprint query"),
@@ -1985,6 +2071,7 @@ bool FTFCounterAttackContracts::RunTest(const FString& Parameters)
 		TEXT("PendingReserveForce"), TEXT("KilledForce"), TEXT("WithdrawnForce"),
 		TEXT("ConsecutiveSpawnFailures"), TEXT("StoryPursuitDirection"),
 		TEXT("bAllowsTerritoryCapture"), TEXT("bUseStrategicDecisionRoll"),
+		TEXT("bQuestOverrideAuthorized"), TEXT("bImmediateDeployment"),
 		TEXT("StoryFocusLocation"), TEXT("StoryAttackerDefinitionOverride"),
 		TEXT("StoryPlannedForceOverride"), TEXT("StoryWaveSizeOverride"),
 		TEXT("StoryScenarioID"), TEXT("StoryMaximumChaseDistance"),

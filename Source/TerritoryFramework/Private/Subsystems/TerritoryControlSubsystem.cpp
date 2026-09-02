@@ -652,6 +652,11 @@ ECaptureResult UTerritoryControlSubsystem::ValidateCaptureAttempt(
 	{
 		return ECaptureResult::Locked;
 	}
+	if (Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr))
+	{
+		return ECaptureResult::QuestOverrideActive;
+	}
 
 	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
 	if (DefendingFaction.IsValid() && DefendingFaction == AttackingFaction)
@@ -1155,6 +1160,11 @@ ECaptureResult UTerritoryControlSubsystem::ValidateContestAttempt(
 	{
 		return ECaptureResult::Locked;
 	}
+	if (Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr))
+	{
+		return ECaptureResult::QuestOverrideActive;
+	}
 
 	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
 	if (DefendingFaction.IsValid() && DefendingFaction == AttackingFaction)
@@ -1186,6 +1196,11 @@ ECaptureResult UTerritoryControlSubsystem::GetContestEligibility(
 
 ECaptureResult UTerritoryControlSubsystem::AttemptCapture(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction)
 {
+	if (Territory && Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr))
+	{
+		return ECaptureResult::QuestOverrideActive;
+	}
 	return ValidateAndBeginCapture(Territory, AttackingFaction, true);
 }
 
@@ -1383,6 +1398,8 @@ void UTerritoryControlSubsystem::ClearCaptureTrackingOnly(ATerritoryVolume* Terr
 void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction, float ProgressDelta)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !AttackingFaction.IsValid()) return;
+	if (Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr)) return;
 
 	// Revalidate this faction on every external progress mutation.
 	if (ValidateAndBeginCapture(Territory, AttackingFaction, false) != ECaptureResult::Success) return;
@@ -1700,6 +1717,8 @@ bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 	const bool bContributesCaptureProgress)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Attacker || !Faction.IsValid()) return false;
+	if (Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr)) return false;
 	if (const UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Attacker))
 	{
 		if (ASC->IsDead()) return false;
@@ -1975,6 +1994,13 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 {
 	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
 	if (!State) return;
+	if (Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr))
+	{
+		// Freeze existing pressure exactly where it is. Explicit Quest mutations can
+		// still commit ownership; if they do, the normal mutation path clears this map.
+		return;
+	}
 	if (!Territory->IsAvailableForGameplay())
 	{
 		DeferredCommands.Add({FDeferredCommand::Reset, Territory, FGameplayTag()});

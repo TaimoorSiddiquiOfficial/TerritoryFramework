@@ -39,6 +39,8 @@
 #include "Tales/Quest.h"
 #include "Tales/QuestSM.h"
 #include "Tales/QuestTask.h"
+#include "Tales/TerritoryDiplomacyEvent.h"
+#include "Tales/TerritoryStoryEvents.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "WorldPartition/WorldPartitionHandle.h"
@@ -1111,6 +1113,24 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 		CheckObjects(Pair.Value.ExitConditions, TEXT("Exit Conditions"));
 		CheckObjects(Pair.Value.EntryEvents, TEXT("Entry Events"));
 		CheckObjects(Pair.Value.ExitEvents, TEXT("Exit Events"));
+		bool bSchedulesEnemyWave = false;
+		bool bEndsWar = false;
+		for (const UNarrativeEvent* Event : Pair.Value.EntryEvents)
+		{
+			bSchedulesEnemyWave |= Event
+				&& Event->IsA<UTerritoryScheduleEnemyWaveEvent>();
+			if (const UTerritorySetDiplomacyEvent* DiplomacyEvent =
+				Cast<UTerritorySetDiplomacyEvent>(Event))
+			{
+				bEndsWar |= DiplomacyEvent->NewState != EDiplomacyState::War;
+			}
+		}
+		if (bSchedulesEnemyWave && bEndsWar)
+		{
+			Warning(FString::Printf(
+				TEXT("State %d schedules an enemy Wave and also ends War in the same Entry Events row. Territory assaults require War during admission and deployment, so the peace-like event will cancel the Wave. Move peace to the Quest/assault-resolution path."),
+				static_cast<int32>(Pair.Key)));
+		}
 		ValidateStealthProfile(Pair.Value.StealthProfileOverride,
 			FString::Printf(TEXT("%s state %d stealth override"), *Context,
 				static_cast<int32>(Pair.Key)), OutErrors);

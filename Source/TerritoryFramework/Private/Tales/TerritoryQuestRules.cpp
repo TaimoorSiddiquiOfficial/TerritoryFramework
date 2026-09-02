@@ -2,6 +2,21 @@
 
 #include "Tales/Quest.h"
 #include "Tales/TalesComponent.h"
+#include "UnrealFramework/NarrativePlayerController.h"
+#include "Engine/World.h"
+
+bool FTerritoryQuestRuntimeOverrideRule::Pauses(
+	ETerritoryQuestOverrideEffect Effect) const
+{
+	switch (Effect)
+	{
+	case ETerritoryQuestOverrideEffect::StateRules: return bPauseStateRules;
+	case ETerritoryQuestOverrideEffect::AutomaticCapture: return bPauseAutomaticCapture;
+	case ETerritoryQuestOverrideEffect::AutomaticCounterattacks:
+		return bPauseAutomaticCounterattacks;
+	default: return false;
+	}
+}
 
 bool UTerritoryQuestRulesLibrary::DoesQuestStateMatch(
 	const UTalesComponent* TalesComponent, TSubclassOf<UQuest> QuestClass,
@@ -31,4 +46,31 @@ bool UTerritoryQuestRulesLibrary::DoesQuestStateMatchValues(
 	case ETerritoryQuestStateRequirement::StartedOrFinished: return bStartedOrFinished;
 	default: return false;
 	}
+}
+
+bool UTerritoryQuestRulesLibrary::DoesAnyOnlinePlayerMatchQuestState(
+	const UWorld* World, TSubclassOf<UQuest> QuestClass,
+	ETerritoryQuestStateRequirement RequiredState,
+	const UTalesComponent* OptionalContextTales)
+{
+	if (!QuestClass) return false;
+	if (DoesQuestStateMatch(OptionalContextTales, QuestClass, RequiredState))
+	{
+		return true;
+	}
+	if (!World) return false;
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator();
+		It; ++It)
+	{
+		const ANarrativePlayerController* PC =
+			Cast<ANarrativePlayerController>(It->Get());
+		if (PC && PC->GetTalesComponent() != OptionalContextTales
+			&& DoesQuestStateMatch(PC->GetTalesComponent(), QuestClass,
+				RequiredState))
+		{
+			return true;
+		}
+	}
+	return false;
 }

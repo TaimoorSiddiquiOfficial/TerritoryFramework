@@ -2,20 +2,59 @@
 
 ## Unreleased — 2026-09-02 (Mission recipes and functional Quest conditions)
 
+- Added Definition-owned Narrative Quest Runtime Overrides for City, District, and Place. A
+  matching online player's Quest can independently pause primary State Config rules/events,
+  automatic capture pressure, and automatic counterattacks, with optional parent-to-child scope.
+  Explicit Quest mutations and Wave events remain authorized, hierarchy aggregation remains live,
+  and skipped state rewards are never replayed after the Quest ends.
+- Added the reusable saved-campaign/current-world **Territory Wait Time Condition**.
+- Added **Start Counterattack Immediately** to Wave of Enemies. It skips grace, time window,
+  strategic chance, warning delay, and proximity after authoritative admission while preserving
+  ownership, diplomacy, force, budget, approach, and route validation. Explicit Narrative Waves
+  no longer incorrectly require automatic strategy's secure District, Reinforcements perk, or
+  counter-Quest gate; later automatic recurrence still requires all three.
+
+- Fixed Cascade generation writing Quest Name, Quest Description, tracking, and dialogue settings
+  only to Narrative's graph template. They are now also written to the generated Quest class
+  defaults used by the journal and runtime.
+- Replaced the generic `NQ_NewTerritoryQuestCascadeRecipe` fallback with a friendly name derived
+  from Quest Name, while preserving meaningful `DA_QC_` recipe filenames as stable asset names.
+- Added the reusable `Save Narrative Quest Checkpoint` event and recipe checkpoint policies for
+  objective states or all states. Checkpoints reuse Narrative's active campaign, run after the
+  state transition settles, never refire during load, and rely on Narrative's existing saved
+  current-state, reached-state, and task-progress contract.
 - Completed the Territory Narrative Quest Cascade authoring model with Narrative tracked state,
   linked Quest Dialogue, Dialogue Play Params, resume-after-load, State Conditions, Branch
   Conditions, inherited task options, and stronger validation for unsafe instant routes, empty
   templates, terminal requirements, and invalid markers.
 - Added a live read-only Mission Logic panel and Blueprint summary that explain every state,
   alternative route, AND requirement, task, condition, event, marker, and ending in easy English.
+- Added **Narrative Quest Graph** inspection to Cascade Recipes. The panel reads the selected
+  Quest's compiled runtime template and exposes an explicit refresh button plus a complete
+  copyable report for states, routes, task classes/settings, conditions, events, checkpoints,
+  reachability, and structural findings.
 - Added a functional hidden Narrative Condition task during generation. Current Narrative Pro
-  displays Quest-node conditions but does not evaluate them; the adapter calls Narrative's own
-  evaluator so `Not`, target filtering, and party policy work without vendor edits or a second
-  Quest runtime.
+  displays Quest-node conditions but does not evaluate them; the generator now leaves those node
+  arrays empty and stores requirements only in the functional adapter. Added a safe migration for
+  older generated Quests that moves missing requirements into gate Tasks before clearing the
+  ineffective State/Branch rows. Migrated and saved `NQ_CaptureBlacksmith`; its former
+  `QuestBranch_20` condition now lives only in the working gate Task.
+- Re-audited every Territory Narrative Task, Condition, and Event. Added the new checkpoint event
+  to the exhaustive reflected-class audit, made checkpoint Event Conditions functional, and reset
+  edge-triggered disguise/AI/combat/state latches safely on branch re-entry.
+- Replaced the Wave/Boss event's generic scheduling warning with the exact authoritative
+  admission reason and exposed reason-returning Blueprint scheduler nodes. The diagnostic keeps
+  secure-District, diplomacy, quest, force, staging, and budget rules intact.
+- Added Definition validation for a Wave and peace-like diplomacy event in the same State Entry
+  row. That contradictory authoring cancels deployment by design; validation now explains that
+  peace belongs on the Quest/assault-resolution path.
+- Restored the Blacksmith Contested-state diplomacy policy as a dynamic owner-versus-contester
+  War event. Bandits and Heroes remain migration fallbacks, so later third-faction recapture
+  stories do not inherit a stale hardcoded pair.
 - Made Story Bounds and Physical Automatic capture mutually exclusive in Place authoring and added
   an Active Capture Mode explanation, eliminating a checked option that runtime intentionally had
   to ignore.
-- Rebuilt the UE 5.7 Editor and Game Development targets and passed all 187
+- Rebuilt the UE 5.7 Editor and Game Development targets and passed all 193
   `TerritoryFramework.*` automation tests. The final log contains no failed test, fatal error,
   Accessed None, or Blueprint Runtime Error.
 

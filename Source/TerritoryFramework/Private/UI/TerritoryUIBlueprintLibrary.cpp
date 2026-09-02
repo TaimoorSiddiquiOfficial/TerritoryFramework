@@ -280,6 +280,8 @@ namespace
 			return NSLOCTEXT("TerritoryOperations", "DefendersRemain", "Defenders must be defeated before capture can begin.");
 		case ECaptureResult::DiplomaticallyBlocked:
 			return NSLOCTEXT("TerritoryOperations", "DiplomacyBlocked", "A treaty or friendly Narrative attitude blocks an assault.");
+		case ECaptureResult::QuestOverrideActive:
+			return NSLOCTEXT("TerritoryOperations", "QuestOverrideActive", "The current Narrative Quest controls this Territory.");
 		case ECaptureResult::InvalidTerritory:
 		default:
 			return Territory && Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly

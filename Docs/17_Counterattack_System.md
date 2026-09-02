@@ -59,15 +59,18 @@ combat, spawn, or capture implementation.
 2. **Scheduled follow-up:** after a strategic battle ends and its cooldown passes, Finite Series
    or Unlimited Schedule may create another separate finite battle.
 3. **Narrative Wave event:** a quest/dialogue runs `Wave of Enemies` in Strategic mode. The
-   event's inherited Narrative Conditions must pass, then the profile controls the battle and
-   any allowed future schedule.
+   event's inherited Narrative Conditions must pass. Because this is an explicit authored story
+   beat, its first finite battle does not require a secure staging District, Reinforcements perk,
+   or automatic counter-Quest rule. Diplomacy, opposing ownership, force, budget, and route remain
+   mandatory. Any later automatic schedule returns to the full strategic rules.
 4. **Story Pursuit / Boss Chase:** a Narrative Event explicitly selects Story Pursuit. It may
    send hunters toward the player or reverse a vehicle route so the player chases an escaping
    capo. It may use the profile's authored staging exception, but it never repeats automatically.
 
-Every normal strategic path still requires the attacker to hold a secure District when the
+Every automatic strategic path still requires the attacker to hold a secure District when the
 force uses the domination staging rule. A faction with no secure District cannot counter merely
-because its tag appears in the profile.
+because its tag appears in the profile. Only an explicit Narrative Wave/Story request can bypass
+that infrastructure gate; it never bypasses War diplomacy or physical route validation.
 
 Every arrow after the initial record creation emits one post-commit
 `FTerritoryCounterAttackStateEvent`. Its embedded record is already in `NewState` and includes
@@ -214,9 +217,31 @@ must happen only during one quest; use its inherited **Not** option when the pur
 happen during that quest.
 
 In Strategic Counterattack mode, `Wave of Enemies` schedules the first finite battle through
-the same profile. Its inherited event Conditions gate that activation. Later automatic battles
-are controlled by the force's schedule mode and recheck the profile Quest Rules; event
+the same profile but identifies it as an explicit Narrative request. Its inherited event
+Conditions gate that activation. Later automatic battles are controlled by the force's schedule
+mode and again require secure staging, Reinforcements capability, and profile Quest Rules; event
 Conditions are not silently replayed without a Narrative event context.
+
+`Wave of Enemies` and `Start Territory Boss Chase` now log the first exact admission failure.
+Blueprint can call **Try Schedule Territory Assault (With Reason)** or **Try Schedule Best
+Counterattack (With Reason)** to show the same explanation in a developer widget. Examples are:
+
+- attacker has no secure District;
+- target is Locked, inherited-control, Unclaimed, or Contested instead of Claimed;
+- force entry, finite attacker definition, military power, planned force, or wave size is missing;
+- diplomacy is not permitted;
+- a quest rule, reinforcement capability, or concurrent-assault budget blocks admission;
+- another assault is already pending for the Place.
+
+The automatic diagnostic does not bypass a rule. The authored-Wave preview intentionally ignores
+only automatic infrastructure gates. It still rejects peace/neutral diplomacy, an attacker that
+already owns the target, malformed Narrative NPC definitions, exhausted budgets, and invalid
+approaches/routes.
+
+Do not put a peace-like **Set Territory Diplomacy** event in the same State Entry Events row
+as a Wave. The Wave requires War while it waits and deploys, so changing the pair to None,
+Ceasefire, Non-Aggression, or Alliance cancels it. Easy example: keep Bandits and Heroes at War
+through the Blacksmith counter battle, then let the Quest's victory route set peace afterward.
 
 The native `ATerritoryAssaultCharacter` is spawn-ready by default: it selects
 `ANarrativeNPCController` and `PlacedInWorldOrSpawned`. A project Blueprint subclass may

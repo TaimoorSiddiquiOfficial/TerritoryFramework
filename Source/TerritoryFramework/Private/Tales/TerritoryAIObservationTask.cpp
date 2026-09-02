@@ -10,6 +10,12 @@
 
 void UTerritoryAIObservationTask::BeginTask()
 {
+	// Transition objectives are edge-triggered. Reset their observation latches
+	// before Super performs Narrative's immediate first tick on branch re-entry.
+	bObservedPerception = false;
+	bObservedVehicle = false;
+	bObservedAttackToken = false;
+	bObservedUnsatisfiedState = false;
 	TickInterval = 0.2f;
 	Super::BeginTask();
 	if (IsComplete()) return;
@@ -43,6 +49,10 @@ void UTerritoryAIObservationTask::EndTask()
 	}
 	UnbindTarget();
 	CachedDestination.Reset();
+	bObservedPerception = false;
+	bObservedVehicle = false;
+	bObservedAttackToken = false;
+	bObservedUnsatisfiedState = false;
 	Super::EndTask();
 }
 
