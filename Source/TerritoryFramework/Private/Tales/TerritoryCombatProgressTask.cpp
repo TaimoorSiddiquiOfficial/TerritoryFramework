@@ -1,6 +1,6 @@
 #include "Tales/TerritoryCombatProgressTask.h"
 
-#include "AbilitySystemBlueprintLibrary.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GAS/NarrativeAttributeSetBase.h"
 
 void UTerritoryCombatProgressTask::BeginTask()
@@ -76,8 +76,7 @@ AActor* UTerritoryCombatProgressTask::ResolveCounterparty() const
 UNarrativeAbilitySystemComponent*
 UTerritoryCombatProgressTask::ResolveNarrativeAbilitySystem(AActor* Actor) const
 {
-	return Actor ? Cast<UNarrativeAbilitySystemComponent>(
-		UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Actor)) : nullptr;
+	return FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Actor);
 }
 
 void UTerritoryCombatProgressTask::BindSubject(AActor* Subject)

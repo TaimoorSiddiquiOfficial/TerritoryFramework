@@ -9,6 +9,36 @@ separates three ideas that are easy to mix together:
 
 The asset snapshot was checked against the project on 2026-08-30.
 
+## Runtime Ability System ownership
+
+Territory calls `FTerritoryNarrativeProAdapter` whenever it needs the live Narrative Ability
+System. Do not assume that the Actor passed to a Territory event owns the component directly:
+
+| Subject | Ability System selected by Territory |
+|---|---|
+| Narrative NPC or guard | The component on that character |
+| Player pawn | The component exposed through Narrative PlayerState |
+| Player Controller | PlayerState first, then the controlled pawn |
+| AI Controller | Its controlled Narrative NPC |
+| Player driving a vehicle | The player's PlayerState component, not the vehicle component |
+
+The last row is important. Narrative intentionally keeps player abilities on the character while
+driving. A Territory Gameplay Event therefore goes directly through the resolved Ability System
+and uses its current avatar as the event target. This prevents Controller-based AI, dialogue, or
+quest callbacks from silently losing the event.
+
+State Config Entry and Exit Events remain the reusable authoring layer for state-dependent
+abilities and effects. Territory does not add a second state-profile authority. Easy example:
+the Blacksmith Claimed Entry row may apply a Narrative effect, while its Claimed Exit row removes
+it. Add `Territory Event Context Condition` whenever the event requires a real player pawn or ASC.
+
+For a Quest that should begin with a level, place `Territory Narrative Quest Starter` and select
+the generated Narrative Quest class. The starter waits for the server player's pawn and Tales
+component and for Tales save loading to finish; it never calls `Begin Quest` on Level Blueprint
+`BeginPlay`. Enable **Start For Every Player** and **Keep Polling For Late Joining Players** for
+personal multiplayer story progress. Easy example: one starter in Blacksmith safely begins
+`NQ_CaptureBlacksmith` for the host and every joining client without restarting a saved Quest.
+
 ## Current player loadout in Haven Reach
 
 The live `BP_TerritoryPlayerCharacter` Ability System starts with these nine abilities:
@@ -151,6 +181,12 @@ Territory Stealth Profile
   Add the ability tag to Stealth Ability Tags To Cancel
   Add the temporary effect to Stealth Gameplay Effects To Remove
 ```
+
+Editor validation rejects duplicate/empty temporary effect rows and Instant Gameplay Effects in
+`Stealth Gameplay Effects To Remove`; an Instant effect has no active handle that exposure can
+remove. Adaptive counterattack validation also rejects duplicate power-tier tags, non-positive
+power levels, inverted enemy-level ranges, and an Attack Damage magnitude without the canonical
+Narrative `SetByCaller.AttackDamage` modifier.
 
 ## Capture and fight requirement
 

@@ -1,12 +1,12 @@
 #include "AI/TerritoryStealthObserverComponent.h"
 
-#include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "AIController.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryStealthProfile.h"
 #include "Core/TerritoryStealthTags.h"
 #include "Core/TerritoryVolume.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "NarrativeGameplayTags.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AIPerceptionSystem.h"
@@ -122,8 +122,8 @@ void UTerritoryStealthObserverComponent::UnbindFromPerception()
 
 bool UTerritoryStealthObserverComponent::IsTargetFiring(AActor* Target) const
 {
-	const UAbilitySystemComponent* ASC = Target
-		? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target) : nullptr;
+	const UAbilitySystemComponent* ASC =
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Target);
 	return ASC && ASC->HasMatchingGameplayTag(
 		FNarrativeGameplayTags::Get().State_Weapon_IsFiring);
 }
@@ -136,7 +136,7 @@ bool UTerritoryStealthObserverComponent::IsNarrativeInvisible(AActor* Target) co
 		return false;
 	}
 	const UAbilitySystemComponent* ASC =
-		UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target);
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Target);
 	return ASC && ASC->HasMatchingGameplayTag(
 		FNarrativeGameplayTags::Get().State_InvisibleToEnemies);
 }

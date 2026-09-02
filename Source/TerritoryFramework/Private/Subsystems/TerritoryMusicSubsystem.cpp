@@ -492,6 +492,9 @@ bool UTerritoryMusicSubsystem::SetNarrativeTheme(
 	UNarrativeMusicSubsystem* Music, FGameplayTag Theme, bool bImmediate)
 {
 	if (!Music || !Theme.IsValid()) return false;
+	// Narrative Pro exposes this function to reflection/Blueprint but does not
+	// export its native symbol from NarrativeArsenal. A direct C++ call therefore
+	// produces LNK2019 in external modules. Keep this narrow, signature-tested bridge.
 	UFunction* Function = Music->FindFunction(
 		GET_FUNCTION_NAME_CHECKED(UNarrativeMusicSubsystem, SetTheme));
 	if (!Function) return false;

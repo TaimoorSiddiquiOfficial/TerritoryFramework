@@ -1,6 +1,6 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-02
+> **Reviewed:** 2026-09-03
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
@@ -27,9 +27,11 @@
   kills never choose an arbitrary first player in multiplayer.
 - The Blacksmith visible PIE fixture has completed defender death, owner spawn, dialogue,
   faction handover, and its Narrative capture task exactly once.
-- Current-source verification on 2026-09-02 built the UE 5.7 `TDAEditor` and `TDA` Development
-  targets and passed all 193 `TerritoryFramework.*` tests. The automation log contains no failed
+- Current-source verification on 2026-09-03 built the UE 5.7 `TDAEditor` Development target and
+  passed all 197 `TerritoryFramework.*` tests. The automation log contains no failed
   test, Blueprint Runtime Error, Accessed None, assertion, fatal, or Territory error.
+- Scoped editor verification compiled all 69 Territory Blueprints and validated 101 assets under
+  the project/plugin Territory paths plus `HopDistrictTest`, with zero errors or warnings.
 - A current `/Game/HopDistrictTest` headless runtime smoke loaded the map and player/HUD, then
   exited normally with no Blueprint runtime, Accessed None, assertion, ensure, fatal, or Territory
   warning/error.

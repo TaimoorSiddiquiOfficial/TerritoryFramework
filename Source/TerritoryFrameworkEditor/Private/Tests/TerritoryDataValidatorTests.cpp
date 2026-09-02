@@ -9,12 +9,14 @@
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryStealthProfile.h"
 #include "DataValidation/TerritoryDataValidator.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "Economy/TerritoryProductionTags.h"
 #include "Items/NarrativeItem.h"
 #include "Misc/DataValidation.h"
 #include "Misc/PackageName.h"
+#include "GameplayEffect.h"
 #include "Music/TaggedMusicSet.h"
 #include "QuestBlueprint.h"
 #include "Tales/Quest.h"
@@ -161,6 +163,53 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		EDataValidationResult::Valid);
 	TestEqual(TEXT("Spawn-ready class emits no validation error"),
 		SpawnReadyContext.GetNumErrors(), 0u);
+
+	Force.bScaleLevelToRelevantPlayerPower = true;
+	Force.MinimumScaledEnemyLevel = 10;
+	Force.MaximumScaledEnemyLevel = 5;
+	Profile->FactionForces = {Force};
+	FDataValidationContext InvalidPowerRangeContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("Adaptive scaling rejects an inverted Narrative level range"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, InvalidPowerRangeContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Invalid adaptive level range emits an error"),
+		InvalidPowerRangeContext.GetNumErrors() > 0u);
+	Force.MinimumScaledEnemyLevel = 1;
+	Force.MaximumScaledEnemyLevel = 100;
+
+	FTerritoryPlayerPowerTier DuplicateTier;
+	DuplicateTier.PlayerPowerTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.Power.Tier.1"), false);
+	DuplicateTier.PlayerPowerLevel = 1;
+	Force.PlayerPowerTiers = {DuplicateTier, DuplicateTier};
+	Profile->FactionForces = {Force};
+	FDataValidationContext DuplicatePowerTierContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("Adaptive scaling rejects duplicate replicated power tags"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, DuplicatePowerTierContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Duplicate power tag emits an error"),
+		DuplicatePowerTierContext.GetNumErrors() > 0u);
+	Force.PlayerPowerTiers.Reset();
+	Force.bScaleLevelToRelevantPlayerPower = false;
+	Profile->FactionForces = {Force};
+
+	UTerritoryStealthProfile* StealthProfile =
+		NewObject<UTerritoryStealthProfile>();
+	StealthProfile->StealthGameplayEffectsToRemove = {
+		UGameplayEffect::StaticClass()};
+	const FAssetData StealthAssetData(StealthProfile);
+	FDataValidationContext InstantStealthEffectContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("Stealth exposure rejects an Instant effect removal"),
+		Validator->ValidateLoadedAsset_Implementation(
+			StealthAssetData, StealthProfile, InstantStealthEffectContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Instant stealth effect removal emits an error"),
+		InstantStealthEffectContext.GetNumErrors() > 0u);
 
 	Force.RecurringCounterCooldownGameTime = 0.f;
 	Profile->FactionForces = {Force};
@@ -340,8 +389,12 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 
 	FTerritoryStateConfig& ClaimedConfig = Place->StateConfigs.FindChecked(
 		ETerritoryState::Claimed);
-	ClaimedConfig.EntryEvents.Add(
-		NewObject<UTerritoryScheduleEnemyWaveEvent>(Place));
+	UTerritoryScheduleEnemyWaveEvent* ConfiguredWave =
+		NewObject<UTerritoryScheduleEnemyWaveEvent>(Place);
+	ConfiguredWave->TargetTerritory = Place->TerritoryTag;
+	ConfiguredWave->AttackingFaction = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	ClaimedConfig.EntryEvents.Add(ConfiguredWave);
 	UTerritorySetDiplomacyEvent* PrematurePeace =
 		NewObject<UTerritorySetDiplomacyEvent>(Place);
 	PrematurePeace->NewState = EDiplomacyState::None;
@@ -363,6 +416,31 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 				return Warning.ToString().Contains(
 					TEXT("peace-like event will cancel the Wave"));
 			}));
+	ClaimedConfig.EntryEvents.Reset();
+
+	UTerritoryScheduleEnemyWaveEvent* IncompleteWave =
+		NewObject<UTerritoryScheduleEnemyWaveEvent>(Place);
+	ClaimedConfig.EntryEvents.Add(IncompleteWave);
+	FDataValidationContext IncompleteWaveContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A Wave without target and attacker is rejected during authoring"),
+		Validator->ValidateLoadedAsset_Implementation(
+			PlaceAssetData, Place, IncompleteWaveContext),
+		EDataValidationResult::Invalid);
+	TArray<FText> IncompleteWaveWarnings;
+	TArray<FText> IncompleteWaveErrors;
+	IncompleteWaveContext.SplitIssues(
+		IncompleteWaveWarnings, IncompleteWaveErrors);
+	TestTrue(TEXT("An incomplete Wave explains the missing target"),
+		IncompleteWaveErrors.ContainsByPredicate([](const FText& ErrorText)
+		{
+			return ErrorText.ToString().Contains(TEXT("without a target Territory"));
+		}));
+	TestTrue(TEXT("An incomplete Wave explains the missing attacker"),
+		IncompleteWaveErrors.ContainsByPredicate([](const FText& ErrorText)
+		{
+			return ErrorText.ToString().Contains(TEXT("without an attacking faction"));
+		}));
 	ClaimedConfig.EntryEvents.Reset();
 
 	FTerritoryStateAudioConfig& PlaceAudio = Place->StateConfigs.FindChecked(

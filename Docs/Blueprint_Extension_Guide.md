@@ -524,7 +524,11 @@ notifications are ignored by Territory casualty accounting.
 
 ### Guard EndPlay Cleanup
 
-`ATerritoryGuardCharacter` has no `EndPlay` override. Guards destroyed by paths other than ASC-death (World Partition stream-out, `DespawnGuards`, editor close) do not self-notify their spawn point. The spawn point's `ActiveGuards` array retains stale weak pointers until cleaned by the next ownership transition or save recompute. This is transient drift only — save/load recomputes from `SavedActiveGuardCount`.
+`ATerritoryGuardCharacter::EndPlay` is the final cleanup path for guards removed without an
+ASC death event, such as World Partition stream-out or a story script destroying the actor. It
+unregisters the guard from its post with `ManualRemoval` (so teardown never spends a reserve),
+unregisters it as a Territory defender, and refreshes the authoritative garrison snapshot. The
+normal death and Territory-owned despawn paths may run first; cleanup is intentionally idempotent.
 
 ### State and progress mutation
 

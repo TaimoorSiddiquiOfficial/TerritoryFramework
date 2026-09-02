@@ -2,6 +2,42 @@
 
 ## Unreleased — 2026-09-02 (Mission recipes and functional Quest conditions)
 
+- Fixed guard lifecycle cleanup outside the normal Narrative death path. World Partition
+  stream-out, story-driven destruction, and other external removal now release the guard post and
+  Territory defender registration without consuming reserves, while active-count queries exclude
+  actors already being destroyed.
+- Documented and signature-tested the narrow Territory music reflection bridge. Narrative Pro
+  exposes `SetTheme`, `OverrideMusicSet`, and `ResetMusicSetToDefault` to Blueprint but does not
+  export their native symbols from NarrativeArsenal, so external modules cannot link direct calls.
+- Added authoring validation for Wave of Enemies events with no target or attacker, plus a clear
+  warning when neither an earlier War event nor a War condition explains the required diplomacy
+  gate. Counterattack failure text now matches the actual rule: physical Territory assaults require
+  War; there is no hidden profile bypass.
+- Made espionage chance resolution deterministic and save-aware. The authoritative management
+  component now persists an attempt sequence and combines it with the District GUID and an authored
+  seed, so save/load cannot silently reroll the same reconnaissance attempt.
+- Centralized cross-actor Territory Narrative Ability System lookup in
+  `FTerritoryNarrativeProAdapter`. Player Controllers resolve PlayerState before a possessed
+  vehicle/NPC ASC, AI Controllers resolve their NPC pawn, and Gameplay Events are delivered
+  directly through the resolved ASC with its live avatar. This fixes stealth/disguise events that
+  could be lost when an integration callback supplied a Controller instead of the pawn.
+- Routed capture, defender death, stealth, disguise, combat tasks, AI observations, attack-token
+  slots, and adaptive counterattack power through the same Narrative GAS ownership rule.
+- Expanded Editor validation for adaptive enemy-level ranges, duplicate or invalid replicated
+  power tiers, missing canonical Attack Damage SetByCaller modifiers, and temporary stealth effect
+  rows that are empty, duplicated, or Instant.
+- Reused existing State Config Entry/Exit Narrative Events for state-dependent effects instead of
+  introducing a second Territory state-profile authority.
+- Verified the final UE 5.7 Editor target build and all 197 Territory automation tests (191 clean,
+  6 successful warning-producing fixtures, 0 failures), 69 scoped Territory Blueprint compiles,
+  101 scoped authored-asset validations, and a clean 15-second `HopDistrictTest` runtime smoke.
+- Repaired the Blacksmith Claimed-state Wave policy. The row now reasserts dynamic owner-versus-
+  opposing-faction War before scheduling the physical assault, does not apply that War merely
+  because a new campaign starts Claimed, and no longer cancels the Wave with same-row peace.
+- Added `Territory Narrative Quest Starter`, a reusable placed actor that waits for Narrative Tales
+  and Tales save loading before beginning a Quest on authority. It is idempotent per player,
+  supports late joiners, and replaces unsafe Level Blueprint BeginPlay quest calls.
+
 - Added Definition-owned Narrative Quest Runtime Overrides for City, District, and Place. A
   matching online player's Quest can independently pause primary State Config rules/events,
   automatic capture pressure, and automatic counterattacks, with optional parent-to-child scope.

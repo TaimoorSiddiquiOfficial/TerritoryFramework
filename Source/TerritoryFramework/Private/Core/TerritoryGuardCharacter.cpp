@@ -410,6 +410,26 @@ void ATerritoryGuardCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 	GetWorldTimerManager().ClearTimer(CombatPriorityTimer);
 	RestoreClosestHostilePlayerPriority(false);
+
+	// A guard can leave play without travelling through the Narrative death path
+	// (World Partition stream-out, a story script, or direct actor destruction).
+	// Release both runtime registrations here as a final idempotent safety net.
+	// ManualRemoval is important: teardown must never spend a reserve or queue a
+	// replacement. Territory-owned despawn/death paths may already have removed
+	// these entries, and both unregister functions deliberately tolerate that.
+	if (HasAuthority())
+	{
+		if (IsValid(OwningTerritorySpawnPoint))
+		{
+			OwningTerritorySpawnPoint->UnregisterGuard(
+				this, EGuardRemovalReason::ManualRemoval);
+		}
+		if (IsValid(OwningTerritory))
+		{
+			OwningTerritory->UnregisterDefender(this);
+			OwningTerritory->RefreshGarrisonSnapshot();
+		}
+	}
 	Super::EndPlay(EndPlayReason);
 }
 

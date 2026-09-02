@@ -1,9 +1,9 @@
 #include "Tales/TerritoryStoryConditions.h"
 
-#include "AbilitySystemBlueprintLibrary.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryVolume.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -70,7 +70,7 @@ bool UTerritoryEventContextCondition::CheckCondition_Implementation(APawn* Targe
 	}
 	if (bRequireAbilitySystemComponent
 		&& (!bHasValidTarget
-			|| !UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target)))
+			|| !FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Target)))
 	{
 		return false;
 	}

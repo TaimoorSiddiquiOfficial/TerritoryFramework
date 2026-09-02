@@ -1072,6 +1072,16 @@ float UTerritoryPlayerManagementComponent::CalculateEspionageSuccessChance(
 		+ 0.25f * GarrisonReadiness, 0.15f, 0.90f);
 }
 
+float UTerritoryPlayerManagementComponent::CalculateEspionageDecisionRoll(
+	int32 CampaignSeed, int32 AttemptSequence, const FGuid& TerritoryGUID)
+{
+	uint32 CombinedSeed = HashCombineFast(GetTypeHash(CampaignSeed),
+		GetTypeHash(FMath::Max(1, AttemptSequence)));
+	CombinedSeed = HashCombineFast(CombinedSeed, GetTypeHash(TerritoryGUID));
+	FRandomStream DecisionStream(static_cast<int32>(CombinedSeed));
+	return DecisionStream.FRand();
+}
+
 void UTerritoryPlayerManagementComponent::GetEspionageStrengthInputs(
 	int32& OutControlledDistricts, int32& OutTotalUnlockedDistricts,
 	int32& OutActiveFriendlyGuards, int32& OutAssignedFriendlyGuards) const
@@ -1647,7 +1657,12 @@ void UTerritoryPlayerManagementComponent::PerformEspionage(
 	}
 
 	const float SuccessChance = GetEspionageSuccessChance();
-	const bool bSuccess = FMath::FRand() <= SuccessChance;
+	EspionageAttemptSequence = EspionageAttemptSequence == MAX_int32
+		? 1 : EspionageAttemptSequence + 1;
+	const float DecisionRoll = CalculateEspionageDecisionRoll(
+		EspionageDecisionSeed, EspionageAttemptSequence,
+		District->GetTerritoryGUID());
+	const bool bSuccess = DecisionRoll <= SuccessChance;
 	const FGameplayTag DefendingFaction = bSuccess
 		? District->GetOwningFaction() : FGameplayTag();
 	int32 ActiveDefenders = 0;

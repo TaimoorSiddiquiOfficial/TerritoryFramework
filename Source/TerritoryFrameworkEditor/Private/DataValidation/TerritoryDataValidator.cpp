@@ -39,6 +39,7 @@
 #include "Tales/Quest.h"
 #include "Tales/QuestSM.h"
 #include "Tales/QuestTask.h"
+#include "Tales/TerritoryDiplomacyCondition.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "WorldPartition/WorldPartition.h"
@@ -93,6 +94,77 @@ namespace
 					&& Modifier.ModifierMagnitude.GetSetByCallerFloat().DataTag
 						== FNarrativeGameplayTags::Get().SetByCaller_AttackDamage;
 			});
+	}
+
+	void ValidateCounterAttackPowerScaling(
+		const FTerritoryFactionAssaultConfig& Force,
+		const FString& Context,
+		TArray<FString>& OutErrors,
+		TArray<FString>& OutWarnings)
+	{
+		if (!Force.bScaleLevelToRelevantPlayerPower) return;
+		const FString FactionName = Force.Faction.IsValid()
+			? Force.Faction.ToString() : TEXT("<missing faction>");
+		auto Error = [&Context, &OutErrors](const FString& Message)
+		{
+			OutErrors.Add(Context.IsEmpty() ? Message
+				: FString::Printf(TEXT("%s: %s"), *Context, *Message));
+		};
+		auto Warning = [&Context, &OutWarnings](const FString& Message)
+		{
+			OutWarnings.Add(Context.IsEmpty() ? Message
+				: FString::Printf(TEXT("%s: %s"), *Context, *Message));
+		};
+
+		if (Force.MinimumScaledEnemyLevel < 1
+			|| Force.MaximumScaledEnemyLevel < Force.MinimumScaledEnemyLevel)
+		{
+			Error(FString::Printf(TEXT("counterattack force %s adaptive enemy level range is invalid"),
+				*FactionName));
+		}
+
+		TSet<FGameplayTag> SeenPowerTags;
+		for (const FTerritoryPlayerPowerTier& Tier : Force.PlayerPowerTiers)
+		{
+			if (!Tier.PlayerPowerTag.IsValid())
+			{
+				Error(FString::Printf(TEXT("counterattack force %s has a power tier without a Gameplay Tag"),
+					*FactionName));
+				continue;
+			}
+			if (SeenPowerTags.Contains(Tier.PlayerPowerTag))
+			{
+				Error(FString::Printf(TEXT("counterattack force %s repeats player power tag %s"),
+					*FactionName, *Tier.PlayerPowerTag.ToString()));
+			}
+			SeenPowerTags.Add(Tier.PlayerPowerTag);
+			if (Tier.PlayerPowerLevel < 1)
+			{
+				Error(FString::Printf(TEXT("counterattack force %s power tag %s must map to level one or higher"),
+					*FactionName, *Tier.PlayerPowerTag.ToString()));
+			}
+		}
+
+		if (Force.PowerScalingMagnitudePerEnemyLevel > 0.f)
+		{
+			if (!Force.PowerScalingEffect)
+			{
+				Error(FString::Printf(TEXT("counterattack force %s has Attack Damage per level but no Power Scaling Effect"),
+					*FactionName));
+			}
+			else if (!HasNarrativeAttackDamageSetByCaller(Force.PowerScalingEffect))
+			{
+				Error(FString::Printf(TEXT("counterattack force %s Power Scaling Effect must modify Narrative AttackDamage from SetByCaller.AttackDamage"),
+					*FactionName));
+			}
+		}
+
+		if (Force.PowerScalingEffect
+			&& Force.PowerScalingMagnitudePerEnemyLevel <= 0.f)
+		{
+			Warning(FString::Printf(TEXT("counterattack force %s uses only the Gameplay Effect level curve; verify the effect does not require SetByCaller.AttackDamage"),
+				*FactionName));
+		}
 	}
 
 	void ValidateCounterAttackForceSchedule(
@@ -208,6 +280,26 @@ namespace
 			&& !Profile->BreakStealthGameplayEventTag.IsValid())
 		{
 			Error(TEXT("stealth exposure event is enabled but its Gameplay Tag is empty"));
+		}
+		TSet<TSubclassOf<UGameplayEffect>> SeenStealthEffects;
+		for (const TSubclassOf<UGameplayEffect> EffectClass :
+			Profile->StealthGameplayEffectsToRemove)
+		{
+			if (!EffectClass)
+			{
+				Error(TEXT("stealth exposure contains an empty Gameplay Effect removal entry"));
+				continue;
+			}
+			if (SeenStealthEffects.Contains(EffectClass))
+			{
+				Error(TEXT("stealth exposure repeats a Gameplay Effect removal entry"));
+			}
+			SeenStealthEffects.Add(EffectClass);
+			const UGameplayEffect* Effect = EffectClass->GetDefaultObject<UGameplayEffect>();
+			if (Effect && Effect->DurationPolicy == EGameplayEffectDurationType::Instant)
+			{
+				Error(TEXT("stealth exposure cannot remove an Instant Gameplay Effect because it has no active handle"));
+			}
 		}
 		if (!FMath::IsWithinInclusive(Profile->MinimumDisguiseQuality, 0.f, 1.f))
 		{
@@ -462,22 +554,8 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 				TEXT("Counterattack profile"), Errors);
 			ValidateCounterAttackFactionVehicles(Force,
 				TEXT("Counterattack profile"), Errors);
-			if (Force.bScaleLevelToRelevantPlayerPower
-				&& Force.PowerScalingMagnitudePerEnemyLevel > 0.f)
-			{
-				if (!Force.PowerScalingEffect)
-				{
-					Errors.Add(FString::Printf(
-						TEXT("Counterattack force %s has Attack Damage per level but no Power Scaling Effect"),
-						*Force.Faction.ToString()));
-				}
-				else if (!HasNarrativeAttackDamageSetByCaller(Force.PowerScalingEffect))
-				{
-					Errors.Add(FString::Printf(
-						TEXT("Counterattack force %s Power Scaling Effect must modify Narrative AttackDamage from SetByCaller.AttackDamage"),
-						*Force.Faction.ToString()));
-				}
-			}
+			ValidateCounterAttackPowerScaling(Force,
+				TEXT("Counterattack profile"), Errors, Warnings);
 		}
 	}
 	else if (UTerritoryGuardPostDefinition* GuardPost =
@@ -1115,14 +1193,48 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 		CheckObjects(Pair.Value.ExitEvents, TEXT("Exit Events"));
 		bool bSchedulesEnemyWave = false;
 		bool bEndsWar = false;
+		bool bWarEstablishedBeforeWave = false;
 		for (const UNarrativeEvent* Event : Pair.Value.EntryEvents)
 		{
-			bSchedulesEnemyWave |= Event
-				&& Event->IsA<UTerritoryScheduleEnemyWaveEvent>();
 			if (const UTerritorySetDiplomacyEvent* DiplomacyEvent =
 				Cast<UTerritorySetDiplomacyEvent>(Event))
 			{
 				bEndsWar |= DiplomacyEvent->NewState != EDiplomacyState::War;
+				bWarEstablishedBeforeWave |=
+					DiplomacyEvent->NewState == EDiplomacyState::War;
+			}
+
+			const UTerritoryScheduleEnemyWaveEvent* WaveEvent =
+				Cast<UTerritoryScheduleEnemyWaveEvent>(Event);
+			if (!WaveEvent) continue;
+			bSchedulesEnemyWave = true;
+			if (!WaveEvent->TargetTerritory.IsValid())
+			{
+				Error(FString::Printf(
+					TEXT("State %d contains a Wave of Enemies event without a target Territory"),
+					static_cast<int32>(Pair.Key)));
+			}
+			if (!WaveEvent->bChooseBestEligibleAttacker
+				&& !WaveEvent->AttackingFaction.IsValid())
+			{
+				Error(FString::Printf(
+					TEXT("State %d contains a Wave of Enemies event without an attacking faction; choose an attacker or enable Best Eligible Attacker"),
+					static_cast<int32>(Pair.Key)));
+			}
+
+			const bool bHasWarCondition = WaveEvent->Conditions.ContainsByPredicate(
+				[](const UNarrativeCondition* Condition)
+				{
+					const UTerritoryDiplomacyCondition* DiplomacyCondition =
+						Cast<UTerritoryDiplomacyCondition>(Condition);
+					return DiplomacyCondition
+						&& DiplomacyCondition->RequiredState == EDiplomacyState::War;
+				});
+			if (!bWarEstablishedBeforeWave && !bHasWarCondition)
+			{
+				Warning(FString::Printf(
+					TEXT("State %d schedules a Wave of Enemies without an earlier Set Territory Diplomacy = War event or an inherited Territory Diplomacy Condition requiring War. The runtime will reject the Wave while the attacker and defender are Neutral, allied, under ceasefire, trading, or non-aggressive."),
+					static_cast<int32>(Pair.Key)));
 			}
 		}
 		if (bSchedulesEnemyWave && bEndsWar)
@@ -1555,22 +1667,7 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 		}
 		ValidateCounterAttackForceSchedule(Force, Label, OutErrors);
 		ValidateCounterAttackFactionVehicles(Force, Label, OutErrors);
-		if (Force.bScaleLevelToRelevantPlayerPower
-			&& Force.PowerScalingMagnitudePerEnemyLevel > 0.f)
-		{
-			if (!Force.PowerScalingEffect)
-			{
-				OutErrors.Add(FString::Printf(
-					TEXT("%s: counterattack force %s has Attack Damage per level but no Power Scaling Effect"),
-					*Label, *Force.Faction.ToString()));
-			}
-			else if (!HasNarrativeAttackDamageSetByCaller(Force.PowerScalingEffect))
-			{
-				OutErrors.Add(FString::Printf(
-					TEXT("%s: counterattack force %s Power Scaling Effect must modify Narrative AttackDamage from SetByCaller.AttackDamage"),
-					*Label, *Force.Faction.ToString()));
-			}
-		}
+		ValidateCounterAttackPowerScaling(Force, Label, OutErrors, OutWarnings);
 	}
 
 	TSet<FName> SeenApproachIDs;

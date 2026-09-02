@@ -538,7 +538,8 @@ int32 ATerritoryGuardSpawnPoint::GetActiveGuardCount() const
 	int32 Count = 0;
 	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr : ActiveGuards)
 	{
-		if (Ptr.IsValid()) ++Count;
+		const ATerritoryGuardCharacter* Guard = Ptr.Get();
+		if (IsValid(Guard) && !Guard->IsActorBeingDestroyed()) ++Count;
 	}
 	return Count;
 }

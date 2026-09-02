@@ -1,7 +1,7 @@
 #include "Tales/TerritoryGameplayStateTask.h"
 
-#include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 
 void UTerritoryGameplayStateTask::BeginTask()
 {
@@ -91,8 +91,8 @@ AActor* UTerritoryGameplayStateTask::ResolveSubject() const
 UAbilitySystemComponent* UTerritoryGameplayStateTask::ResolveAbilitySystem(
 	const AActor* Subject) const
 {
-	return Subject ? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(
-		const_cast<AActor*>(Subject)) : nullptr;
+	return FTerritoryNarrativeProAdapter::ResolveAbilitySystem(
+		const_cast<AActor*>(Subject));
 }
 
 void UTerritoryGameplayStateTask::BindSubject(AActor* Subject)

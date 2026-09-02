@@ -3,7 +3,7 @@
 #include "AI/Activities/NPCActivity.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "AI/NarrativeNPCController.h"
-#include "AbilitySystemBlueprintLibrary.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GameFramework/Pawn.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
@@ -178,8 +178,7 @@ UTerritoryAIObservationTask::ResolveNarrativeAbilitySystem(AActor* Target) const
 	{
 		if (Controller->GetOwnedNPC()) AbilityOwner = Controller->GetOwnedNPC();
 	}
-	return Cast<UNarrativeAbilitySystemComponent>(
-		UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(AbilityOwner));
+	return FTerritoryNarrativeProAdapter::ResolveAbilitySystem(AbilityOwner);
 }
 
 bool UTerritoryAIObservationTask::IsPerceivingQuestOwner(
@@ -217,8 +216,7 @@ bool UTerritoryAIObservationTask::HasAttackToken(
 {
 	if (!Controller || !OwningPawn) return false;
 	const UNarrativeAbilitySystemComponent* PlayerASC =
-		Cast<UNarrativeAbilitySystemComponent>(
-			UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(OwningPawn));
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(OwningPawn);
 	if (!PlayerASC) return false;
 	return PlayerASC->GrantedAttackTokens.ContainsByPredicate(
 		[Controller](const FAttackToken& Token)

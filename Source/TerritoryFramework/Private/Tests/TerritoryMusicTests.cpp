@@ -61,14 +61,43 @@ bool FTFTerritoryMusicAuthoringContract::RunTest(const FString& Parameters)
 			AudioProperty->HasAnyPropertyFlags(CPF_Net));
 	}
 
-	TestNotNull(TEXT("Narrative Music exposes Set Theme"),
-		UNarrativeMusicSubsystem::StaticClass()->FindFunctionByName(TEXT("SetTheme")));
+	const UFunction* SetTheme = UNarrativeMusicSubsystem::StaticClass()
+		->FindFunctionByName(TEXT("SetTheme"));
+	const UFunction* OverrideMusicSet = UNarrativeMusicSubsystem::StaticClass()
+		->FindFunctionByName(TEXT("OverrideMusicSet"));
+	const UFunction* ResetMusicSet = UNarrativeMusicSubsystem::StaticClass()
+		->FindFunctionByName(TEXT("ResetMusicSetToDefault"));
+	TestNotNull(TEXT("Narrative Music exposes Set Theme"), SetTheme);
 	TestNotNull(TEXT("Narrative Music exposes Tagged Music Set override"),
-		UNarrativeMusicSubsystem::StaticClass()->FindFunctionByName(
-			TEXT("OverrideMusicSet")));
-	TestNotNull(TEXT("Narrative Music exposes default-set restore"),
-		UNarrativeMusicSubsystem::StaticClass()->FindFunctionByName(
-			TEXT("ResetMusicSetToDefault")));
+		OverrideMusicSet);
+	TestNotNull(TEXT("Narrative Music exposes default-set restore"), ResetMusicSet);
+	if (SetTheme)
+	{
+		const FStructProperty* ThemeProperty =
+			FindFProperty<FStructProperty>(SetTheme, TEXT("Theme"));
+		TestTrue(TEXT("Set Theme reflection bridge still receives a Gameplay Tag"),
+			ThemeProperty && ThemeProperty->Struct == TBaseStructure<FGameplayTag>::Get());
+		TestNotNull(TEXT("Set Theme reflection bridge still receives Immediate"),
+			FindFProperty<FBoolProperty>(SetTheme, TEXT("bImmediate")));
+		const FBoolProperty* ReturnProperty =
+			FindFProperty<FBoolProperty>(SetTheme, TEXT("ReturnValue"));
+		TestTrue(TEXT("Set Theme reflection bridge still returns success"),
+			ReturnProperty && ReturnProperty->HasAnyPropertyFlags(CPF_ReturnParm));
+	}
+	if (OverrideMusicSet)
+	{
+		const FSoftObjectProperty* SetProperty =
+			FindFProperty<FSoftObjectProperty>(OverrideMusicSet, TEXT("NewMusicSet"));
+		TestTrue(TEXT("Music Set reflection bridge still receives a Tagged Music Set"),
+			SetProperty && SetProperty->PropertyClass == UTaggedMusicSet::StaticClass());
+	}
+	if (ResetMusicSet)
+	{
+		const FBoolProperty* ReturnProperty =
+			FindFProperty<FBoolProperty>(ResetMusicSet, TEXT("ReturnValue"));
+		TestTrue(TEXT("Reset Music Set reflection bridge still returns success"),
+			ReturnProperty && ReturnProperty->HasAnyPropertyFlags(CPF_ReturnParm));
+	}
 	TestTrue(TEXT("Territory adapter is a GameInstance subsystem like Narrative Music"),
 		UTerritoryMusicSubsystem::StaticClass()->IsChildOf(
 			UGameInstanceSubsystem::StaticClass()));

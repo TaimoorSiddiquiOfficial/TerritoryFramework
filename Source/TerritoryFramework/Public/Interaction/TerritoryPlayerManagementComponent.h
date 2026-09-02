@@ -180,14 +180,28 @@ public:
 		int32 TotalUnlockedDistricts, int32 ActiveFriendlyGuards,
 		int32 AssignedFriendlyGuards);
 
+	/** Save-reproducible server decision used by espionage; exposed for balance tests. */
+	static float CalculateEspionageDecisionRoll(int32 CampaignSeed,
+		int32 AttemptSequence, const FGuid& TerritoryGUID);
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Intelligence",
 		meta=(ClampMin="0.0", ToolTip="Minimum seconds between espionage requests from this player."))
 	float EspionageCooldown = 30.f;
+
+	/** Stable campaign salt for reproducible espionage decisions. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Intelligence",
+		meta=(DisplayName="Espionage Decision Seed",
+			ToolTip="Stable salt for deterministic server espionage rolls. Change this on a game-specific management-component Blueprint to create a different campaign decision sequence."))
+	int32 EspionageDecisionSeed = 21991;
 
 private:
 	/** Narrative Save System persists the bounded campaign archive on a savable player controller. */
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryLiveEvent> LiveEvents;
+
+	/** Persisted so reloading cannot repeat the same espionage roll. */
+	UPROPERTY(SaveGame)
+	int32 EspionageAttemptSequence = 0;
 
 	TMap<TWeakObjectPtr<ATerritoryVolume>, ETerritoryState> ObservedTerritoryStates;
 	TMap<TWeakObjectPtr<ATerritoryVolume>, ETerritoryAvailability> ObservedTerritoryAvailability;

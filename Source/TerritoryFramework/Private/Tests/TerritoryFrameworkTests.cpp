@@ -60,6 +60,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "UObject/UObjectIterator.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
@@ -5948,6 +5949,92 @@ bool FTFTerritoryWaitTimeConditionPolicy::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Saved Narrative campaign time is the safe story default"),
 		Condition->TimeSource,
 		ETerritoryWaitTimeSource::NarrativeCampaignElapsed);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardExternalEndPlayCleanup,
+	"TerritoryFramework.Guards.Regression.ExternalEndPlayReleasesRegistrations",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFGuardExternalEndPlayCleanup::RunTest(const FString& Parameters)
+{
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Guard cleanup test world exists"), World)) return false;
+	WorldContext.SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryVolume* Territory = World->SpawnActor<ATerritoryVolume>(
+		ATerritoryVolume::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryGuardSpawnPoint* SpawnPoint = World->SpawnActor<ATerritoryGuardSpawnPoint>(
+		ATerritoryGuardSpawnPoint::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryGuardCharacter* Guard = World->SpawnActor<ATerritoryGuardCharacter>(
+		ATerritoryGuardCharacter::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Territory fixture exists"), Territory)
+		|| !TestNotNull(TEXT("Guard post fixture exists"), SpawnPoint)
+		|| !TestNotNull(TEXT("Guard fixture exists"), Guard))
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+
+	Guard->OwningTerritory = Territory;
+	Guard->OwningTerritorySpawnPoint = SpawnPoint;
+	Territory->RegisterDefender(Guard);
+	SpawnPoint->RegisterSpawnedGuard(Guard);
+	TestEqual(TEXT("Guard begins registered at its authored post"),
+		SpawnPoint->GetActiveGuardCount(), 1);
+	TestEqual(TEXT("Guard begins registered as a Territory defender"),
+		Territory->GetDefenderCount(), 1);
+
+	// A scripted Destroy represents the non-ASC path that previously left the
+	// spawn post occupied. DispatchBeginPlay gives Destroy a real EndPlay lifecycle
+	// in this intentionally minimal automation world.
+	Guard->DispatchBeginPlay();
+	Guard->Destroy();
+	TestEqual(TEXT("External destruction frees the saved guard-post slot"),
+		SpawnPoint->GetSavedActiveGuardCount(), 0);
+	TestEqual(TEXT("External destruction releases the Territory defender"),
+		Territory->GetDefenderCount(), 0);
+	TestEqual(TEXT("A destroying guard is never reported as active"),
+		SpawnPoint->GetActiveGuardCount(), 0);
+
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFEspionageDeterministicDecision,
+	"TerritoryFramework.Intelligence.EspionageDeterministicSavedSequence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFEspionageDeterministicDecision::RunTest(const FString& Parameters)
+{
+	const FGuid DistrictGUID(0xA11CE001, 0xB22CE002, 0xC33CE003, 0xD44CE004);
+	const float First =
+		UTerritoryPlayerManagementComponent::CalculateEspionageDecisionRoll(
+			21991, 7, DistrictGUID);
+	const float Replayed =
+		UTerritoryPlayerManagementComponent::CalculateEspionageDecisionRoll(
+			21991, 7, DistrictGUID);
+	const float Next =
+		UTerritoryPlayerManagementComponent::CalculateEspionageDecisionRoll(
+			21991, 8, DistrictGUID);
+	TestEqual(TEXT("The same saved espionage sequence reproduces the same server roll"),
+		First, Replayed);
+	TestNotEqual(TEXT("Advancing the saved sequence produces a new decision"),
+		First, Next);
+	TestTrue(TEXT("Espionage roll remains normalized"),
+		First >= 0.f && First <= 1.f && Next >= 0.f && Next <= 1.f);
+
+	const FProperty* SequenceProperty =
+		UTerritoryPlayerManagementComponent::StaticClass()->FindPropertyByName(
+			TEXT("EspionageAttemptSequence"));
+	TestTrue(TEXT("Espionage attempt sequence is persisted by Narrative save"),
+		SequenceProperty && SequenceProperty->HasAnyPropertyFlags(CPF_SaveGame));
 	return true;
 }
 

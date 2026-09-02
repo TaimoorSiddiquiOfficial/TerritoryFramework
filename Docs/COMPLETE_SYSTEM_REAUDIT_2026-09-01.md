@@ -1,6 +1,6 @@
 # Territory Framework — Complete System Re-audit
 
-> **Date:** 2026-09-01  
+> **Date:** 2026-09-03 (updated)
 > **Scope:** Territory runtime C++, editor/Definition integration, Narrative Pro boundaries,
 > Blueprint API safety, save/replication read models, tests, documentation, and story readiness.
 
@@ -80,6 +80,31 @@ though save/load already uses the native bulk snapshot bridge.
 **Fix:** the dead function was removed. Gameplay credits/debits Narrative inventory; save/load
 restores only Territory income/cost/count parameters through the bulk native bridge.
 
+### 7. Guards removed outside the normal death callback stayed registered
+
+**Defect:** streaming, story cleanup, or external destruction could leave a dying guard counted
+by its post and Territory until a later reconciliation.
+
+**Fix:** authoritative `EndPlay` now releases both registrations without spending reserve lives.
+All active-count queries also ignore actors already being destroyed.
+
+### 8. Blacksmith Wave configured itself out of existence
+
+**Defect:** the Claimed row scheduled a Bandit Wave and then changed the same faction pair to
+peace. The scheduler correctly requires War, so delayed deployment was cancelled.
+
+**Fix:** the row now establishes the live owner-versus-opponent War before the Wave and leaves
+peace to an explicit quest or assault-resolution event. Fresh-campaign initialization does not
+run this transition-only War event.
+
+### 9. Espionage could reroll after save/load
+
+**Defect:** reconnaissance used process-global random state, so retrying the same save could
+silently produce a different result.
+
+**Fix:** each authoritative attempt advances a saved sequence and uses the campaign seed plus
+District GUID to produce a deterministic roll.
+
 ## Blueprint migration
 
 | Old graph action | Supported action now |
@@ -119,17 +144,18 @@ reported node using this table.
 | Project Blueprint/map reference scan for removed nodes | Passed; zero references |
 | Unreal Header Tool | Passed for Editor and Game targets |
 | UE 5.7 `TDAEditor` Development build | Passed |
-| Full `TerritoryFramework.*` automation | Passed: 181/181 after adding the explicit Narrative player-faction story event |
+| Full `TerritoryFramework.*` automation | Passed: 197/197; 191 clean and 6 successful warning-producing fixtures |
 | Automation runtime-error scan | Passed: no failed tests, Blueprint Runtime Error, Accessed None, assertion, fatal, or Territory error |
-| UE 5.7 `TDA` Development game build | Passed |
+| UE 5.7 `TDAEditor` Development build | Passed after the final source changes |
+| Scoped Territory Blueprint compile | Passed: 69/69, zero compiler errors or warnings |
+| Scoped Territory asset validation | Passed: 101/101 project/plugin Territory assets plus the test map, zero errors or warnings |
 | `/Game/HopDistrictTest` headless runtime smoke | Passed: map loaded, player/HUD initialized, benchmark exited with status 0, and no Blueprint runtime, Accessed None, assertion, ensure, fatal, or Territory warning/error was logged |
 | Visible capture-quest PIE fixture | Passed before this hardening batch |
 
-The optional command-line Data Validation command ignored its requested Territory asset path and
-started scanning the complete 30K+ project library. It was stopped after unrelated MiddleEast
-cinematic assets reported missing Movie Render Pipeline classes. Territory validator execution,
-valid/invalid cases, Story Owner setup, hierarchy, deployment, production, music, and scheduling
-remain covered by the passing editor automation suite.
+UE 5.7's Data Validation commandlet does not implement an `AssetPath` parameter; using that label
+therefore scans the complete 30K+ project library. This audit instead used the commandlet's real
+class filter for all five Definitions, then an editor-side Asset Registry scope for the 101 assets
+under the two Territory paths plus `HopDistrictTest`. Both targeted passes completed cleanly.
 
 The smoke log still reports project/vendor-content warnings: two missing City Sample Crowd
 materials, two missing Narrative demo weapons, an invalid `GameplayCue.TakeDamage.Fire` tag, and

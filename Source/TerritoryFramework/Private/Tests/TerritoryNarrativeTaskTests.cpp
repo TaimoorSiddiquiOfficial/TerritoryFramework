@@ -7,8 +7,11 @@
 #include "Core/TerritoryVolume.h"
 #include "Engine/World.h"
 #include "AbilitySystemBlueprintLibrary.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GAS/NarrativeASCActor.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Tales/QuestTask.h"
 #include "Tales/TerritoryAIObservationTask.h"
 #include "Tales/TerritoryAssaultTask.h"
@@ -18,8 +21,10 @@
 #include "Tales/TerritoryDisguiseTask.h"
 #include "Tales/TerritoryGameplayStateTask.h"
 #include "Tales/TerritoryNarrativeConditionTask.h"
+#include "Tales/TerritoryNarrativeQuestStarter.h"
 #include "Tales/TerritoryStateTask.h"
 #include "UnrealFramework/NarrativeCharacter.h"
+#include "UnrealFramework/NarrativePlayerState.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryNarrativeTaskContract,
 	"TerritoryFramework.Tales.Tasks.NarrativeContractAndMetadata",
@@ -287,6 +292,91 @@ bool FTFCommunityTaskReadOnlyQueries::RunTest(const FString& Parameters)
 		Character->GetActorLocation(), FVector::ZeroVector);
 
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryNarrativeASCAdapter,
+	"TerritoryFramework.Narrative.GAS.AdapterResolvesDirectAndControllerOwnedASC",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryNarrativeASCAdapter::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("GAS adapter test world exists"), World)) return false;
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+
+	ANarrativeASCActor* DirectActor = World->SpawnActor<ANarrativeASCActor>(
+		ANarrativeASCActor::StaticClass(), FTransform::Identity, SpawnParams);
+	ANarrativePlayerState* PlayerState = World->SpawnActor<ANarrativePlayerState>(
+		ANarrativePlayerState::StaticClass(), FTransform::Identity, SpawnParams);
+	APawn* ControlledPawn = World->SpawnActor<APawn>(
+		APawn::StaticClass(), FTransform::Identity, SpawnParams);
+	APlayerController* Controller = World->SpawnActor<APlayerController>(
+		APlayerController::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Direct Narrative ASC actor exists"), DirectActor)
+		|| !TestNotNull(TEXT("Narrative PlayerState exists"), PlayerState)
+		|| !TestNotNull(TEXT("Controlled pawn exists"), ControlledPawn)
+		|| !TestNotNull(TEXT("Controller fixture exists"), Controller))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	UNarrativeAbilitySystemComponent* DirectASC =
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(DirectActor);
+	UNarrativeAbilitySystemComponent* PlayerStateASC =
+		Cast<UNarrativeAbilitySystemComponent>(PlayerState->GetAbilitySystemComponent());
+	Controller->SetPlayerState(PlayerState);
+	Controller->SetPawn(ControlledPawn);
+	TestNotNull(TEXT("Adapter resolves an ASC exposed directly by an actor"), DirectASC);
+	TestEqual(TEXT("Adapter follows a Controller with a controlled pawn to Narrative PlayerState ASC"),
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Controller), PlayerStateASC);
+
+	if (PlayerStateASC)
+	{
+		PlayerStateASC->InitAbilityActorInfo(PlayerState, DirectActor);
+		TestEqual(TEXT("Adapter preserves Narrative's configured ability avatar"),
+			FTerritoryNarrativeProAdapter::ResolveAbilityAvatar(Controller),
+			static_cast<AActor*>(DirectActor));
+	}
+	TestNull(TEXT("Adapter rejects actors without a Narrative ASC"),
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(
+			World->SpawnActor<AActor>(AActor::StaticClass(), FTransform::Identity,
+				SpawnParams)));
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryNarrativeQuestStarterContract,
+	"TerritoryFramework.Tales.QuestStarter.AuthorityReadinessContract",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryNarrativeQuestStarterContract::RunTest(
+	const FString& Parameters)
+{
+	const UClass* StarterClass = ATerritoryNarrativeQuestStarter::StaticClass();
+	const ATerritoryNarrativeQuestStarter* Defaults =
+		GetDefault<ATerritoryNarrativeQuestStarter>();
+	TestNotNull(TEXT("Quest Starter exposes a Narrative Quest class"),
+		StarterClass->FindPropertyByName(TEXT("QuestClass")));
+	TestNotNull(TEXT("Quest Starter exposes a Narrative start state"),
+		StarterClass->FindPropertyByName(TEXT("StartFromID")));
+	TestNotNull(TEXT("Quest Starter exposes multiplayer audience policy"),
+		StarterClass->FindPropertyByName(TEXT("bStartForEveryPlayer")));
+	TestNotNull(TEXT("Quest Starter exposes late-join policy"),
+		StarterClass->FindPropertyByName(TEXT("bKeepPollingForLateJoiningPlayers")));
+	TestNotNull(TEXT("Quest Starter exposes an idempotent readiness check"),
+		StarterClass->FindFunctionByName(TEXT("TryStartPendingPlayers")));
+	TestTrue(TEXT("Quest Starter defaults to every player's personal Quest progress"),
+		Defaults->bStartForEveryPlayer);
+	TestTrue(TEXT("Quest Starter defaults to supporting late joiners"),
+		Defaults->bKeepPollingForLateJoiningPlayers);
+	TestFalse(TEXT("Quest Starter leaves replication to Narrative Tales"),
+		Defaults->GetIsReplicated());
+	TestTrue(TEXT("Quest Starter retry interval is bounded above zero"),
+		Defaults->RetryInterval >= 0.1f);
 	return true;
 }
 

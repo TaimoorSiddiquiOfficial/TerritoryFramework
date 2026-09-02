@@ -1,9 +1,9 @@
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
 
-#include "AbilitySystemBlueprintLibrary.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryStealthTags.h"
 #include "Core/TerritoryVolume.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 
@@ -218,7 +218,7 @@ bool UTerritoryDisguiseSubsystem::PerformIdentityCheck(AActor* Target,
 		Payload.EventTag = TerritoryStealthTags::DisguiseCheckFailedEvent.GetTag();
 		Payload.Instigator = Territory;
 		Payload.Target = Target;
-		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(Target,
+		FTerritoryNarrativeProAdapter::SendGameplayEvent(Target,
 			TerritoryStealthTags::DisguiseCheckFailedEvent.GetTag(), Payload);
 		OutReason = NSLOCTEXT("Territory", "IdentityCheckNoDisguise",
 			"The player is not wearing a disguise.");
@@ -351,9 +351,8 @@ FTerritoryDisguiseSnapshot UTerritoryDisguiseSubsystem::MakeSnapshot(
 void UTerritoryDisguiseSubsystem::RefreshStateTags(AActor* Target,
 	FDisguiseRuntime& Runtime)
 {
-	UNarrativeAbilitySystemComponent* ASC = Target
-		? Cast<UNarrativeAbilitySystemComponent>(
-			UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Target)) : nullptr;
+	UNarrativeAbilitySystemComponent* ASC =
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Target);
 	if (!ASC) return;
 	if (!Runtime.ActiveTagHandle.IsValid())
 	{
@@ -411,7 +410,6 @@ void UTerritoryDisguiseSubsystem::EmitChange(AActor* Target,
 		Payload.Target = Target;
 		Payload.OptionalObject = Runtime.Profile;
 		Payload.EventMagnitude = Runtime.Profile->Quality;
-		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
-			Target, EventTag, Payload);
+		FTerritoryNarrativeProAdapter::SendGameplayEvent(Target, EventTag, Payload);
 	}
 }

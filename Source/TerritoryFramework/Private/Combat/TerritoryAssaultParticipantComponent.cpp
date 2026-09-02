@@ -9,6 +9,7 @@
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -21,7 +22,6 @@
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "GAS/NarrativeAttributeSetBase.h"
-#include "AbilitySystemInterface.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
@@ -290,10 +290,8 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeActivityAndGoal()
 
 bool UTerritoryAssaultParticipantComponent::BindNarrativeDeathAfterSpawnReady()
 {
-	IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(GetOwner());
-	UNarrativeAbilitySystemComponent* ASC = AbilityOwner
-		? Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent())
-		: nullptr;
+	UNarrativeAbilitySystemComponent* ASC =
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(GetOwner());
 	if (!ASC) return false;
 
 	if (BoundASC.Get() != ASC)
@@ -504,16 +502,13 @@ bool UTerritoryAssaultParticipantComponent::MaintainAssaultMovement(
 			LiveHostileDefenders.RemoveAtSwap(DefenderIndex);
 			continue;
 		}
-		if (IAbilitySystemInterface* AbilityDefender = Cast<IAbilitySystemInterface>(Defender))
+		if (UNarrativeAbilitySystemComponent* DefenderASC =
+			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Defender))
 		{
-			if (UNarrativeAbilitySystemComponent* DefenderASC =
-				Cast<UNarrativeAbilitySystemComponent>(AbilityDefender->GetAbilitySystemComponent()))
+			if (DefenderASC->IsDead())
 			{
-				if (DefenderASC->IsDead())
-				{
-					LiveHostileDefenders.RemoveAtSwap(DefenderIndex);
-					continue;
-				}
+				LiveHostileDefenders.RemoveAtSwap(DefenderIndex);
+				continue;
 			}
 		}
 		const INarrativeTeamAgentInterface* NarrativeTeam =
@@ -739,12 +734,10 @@ TArray<AActor*> UTerritoryAssaultParticipantComponent::CollectTakeoverCombatants
 		{
 			continue;
 		}
-		if (const IAbilitySystemInterface* AbilityPawn =
-			Cast<IAbilitySystemInterface>(Pawn))
+		if (const UNarrativeAbilitySystemComponent* ASC =
+			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Pawn))
 		{
-			if (const UNarrativeAbilitySystemComponent* ASC =
-				Cast<UNarrativeAbilitySystemComponent>(
-					AbilityPawn->GetAbilitySystemComponent()); ASC && ASC->IsDead())
+			if (ASC->IsDead())
 			{
 				continue;
 			}

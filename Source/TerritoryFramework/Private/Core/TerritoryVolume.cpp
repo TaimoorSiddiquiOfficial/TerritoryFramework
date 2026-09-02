@@ -6,11 +6,11 @@
 #include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryCommandTags.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
-#include "AbilitySystemInterface.h"
 #include "SaveSystemStatics.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -1230,11 +1230,10 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 			continue;
 		}
 
-		if (const IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Pawn))
+		if (const UNarrativeAbilitySystemComponent* ASC =
+			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Pawn))
 		{
-			if (const UNarrativeAbilitySystemComponent* ASC =
-				Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent());
-				ASC && ASC->IsDead())
+			if (ASC->IsDead())
 			{
 				continue;
 			}
@@ -2160,7 +2159,7 @@ void ATerritoryVolume::RegisterDefender(AActor* Defender)
 {
 	if (!Defender || !HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly) return;
 
-	if (!Cast<IAbilitySystemInterface>(Defender))
+	if (!FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Defender))
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("RegisterDefender: %s has no AbilitySystemComponent — death will not be detected, defender may become immortal in %s"),
 			*GetNameSafe(Defender), *GetTerritoryTag().ToString());
@@ -2428,28 +2427,25 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 bool ATerritoryVolume::BindDefenderDeath(AActor* Defender)
 {
 	if (!Defender) return false;
-	if (IAbilitySystemInterface* ASCInterface = Cast<IAbilitySystemInterface>(Defender))
+	if (UNarrativeAbilitySystemComponent* ASC =
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Defender))
 	{
-		if (UNarrativeAbilitySystemComponent* ASC =
-			Cast<UNarrativeAbilitySystemComponent>(ASCInterface->GetAbilitySystemComponent()))
+		if (const TWeakObjectPtr<UNarrativeAbilitySystemComponent>* Existing =
+			BoundDefenderASCs.Find(Defender))
 		{
-			if (const TWeakObjectPtr<UNarrativeAbilitySystemComponent>* Existing =
-				BoundDefenderASCs.Find(Defender))
+			if (UNarrativeAbilitySystemComponent* Previous = Existing->Get(); Previous && Previous != ASC)
 			{
-				if (UNarrativeAbilitySystemComponent* Previous = Existing->Get(); Previous && Previous != ASC)
-				{
-					Previous->OnDeathStateChanged.RemoveDynamic(this, &ATerritoryVolume::OnDefenderDied);
-				}
+				Previous->OnDeathStateChanged.RemoveDynamic(this, &ATerritoryVolume::OnDefenderDied);
 			}
-			ASC->OnDeathStateChanged.AddUniqueDynamic(this, &ATerritoryVolume::OnDefenderDied);
-			BoundDefenderASCs.Add(Defender, ASC);
-			PendingDefenderDeathBindAttempts.Remove(Defender);
-			if (ASC->IsDead())
-			{
-				OnDefenderDied(Defender, ASC, true);
-			}
-			return true;
 		}
+		ASC->OnDeathStateChanged.AddUniqueDynamic(this, &ATerritoryVolume::OnDefenderDied);
+		BoundDefenderASCs.Add(Defender, ASC);
+		PendingDefenderDeathBindAttempts.Remove(Defender);
+		if (ASC->IsDead())
+		{
+			OnDefenderDied(Defender, ASC, true);
+		}
+		return true;
 	}
 	return false;
 }
@@ -3484,7 +3480,8 @@ int32 ATerritoryVolume::GetSpawnedGuardCount() const
 	int32 Count = 0;
 	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& Ptr : SpawnedGuards)
 	{
-		if (Ptr.IsValid()) ++Count;
+		const ATerritoryGuardCharacter* Guard = Ptr.Get();
+		if (IsValid(Guard) && !Guard->IsActorBeingDestroyed()) ++Count;
 	}
 	return Count;
 }

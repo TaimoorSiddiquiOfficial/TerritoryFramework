@@ -11,6 +11,7 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Navigation/TerritoryRoadGuide.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
@@ -28,7 +29,6 @@
 #include "Tales/TerritoryQuestRules.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 #include "AbilitySystemComponent.h"
-#include "AbilitySystemInterface.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -705,7 +705,7 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	AdmissionRecord.DefendingFaction = Territory->GetOwningFaction();
 	if (IsDiplomacyBlocked(AdmissionRecord, Territory)) return Reject(FText::Format(
 		NSLOCTEXT("TerritoryCounterAttack", "DiplomacyBlocksAssault",
-			"Diplomacy does not permit {0} to attack the defending faction {1}. War is required unless the profile explicitly allows a different state."),
+			"Diplomacy does not permit {0} to attack the defending faction {1}. Territory counterattacks require War."),
 		FText::FromName(AttackingFaction.GetTagName()),
 		FText::FromName(Territory->GetOwningFaction().GetTagName())));
 
@@ -2763,13 +2763,10 @@ void UTerritoryCounterAttackSubsystem::GetDefendingPlayerPresence(
 		if (!bInside) continue;
 
 		bool bDead = false;
-		if (const IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Pawn))
+		if (const UNarrativeAbilitySystemComponent* ASC =
+			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Pawn))
 		{
-			if (const UNarrativeAbilitySystemComponent* ASC =
-				Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent()))
-			{
-				bDead = ASC->IsDead();
-			}
+			bDead = ASC->IsDead();
 		}
 		bOutDeadInside |= bDead;
 		bOutAliveInside |= !bDead;
@@ -2877,18 +2874,16 @@ int32 UTerritoryCounterAttackSubsystem::ResolveScaledEnemyLevel(
 			StrongestPlayerPower = FMath::Max(
 				StrongestPlayerPower, Character->GetCharacterLevel());
 		}
-		if (const IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Pawn))
+		if (const UAbilitySystemComponent* ASC =
+			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Pawn))
 		{
-			if (const UAbilitySystemComponent* ASC = AbilityOwner->GetAbilitySystemComponent())
+			for (const FTerritoryPlayerPowerTier& Tier : ForceConfig.PlayerPowerTiers)
 			{
-				for (const FTerritoryPlayerPowerTier& Tier : ForceConfig.PlayerPowerTiers)
+				if (Tier.PlayerPowerTag.IsValid()
+					&& ASC->HasMatchingGameplayTag(Tier.PlayerPowerTag))
 				{
-					if (Tier.PlayerPowerTag.IsValid()
-						&& ASC->HasMatchingGameplayTag(Tier.PlayerPowerTag))
-					{
-						StrongestPlayerPower = FMath::Max(
-							StrongestPlayerPower, Tier.PlayerPowerLevel);
-					}
+					StrongestPlayerPower = FMath::Max(
+						StrongestPlayerPower, Tier.PlayerPowerLevel);
 				}
 			}
 		}

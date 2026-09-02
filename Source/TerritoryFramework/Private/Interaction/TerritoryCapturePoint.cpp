@@ -1,6 +1,5 @@
 #include "Interaction/TerritoryCapturePoint.h"
 
-#include "AbilitySystemInterface.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
@@ -8,6 +7,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
@@ -339,10 +339,7 @@ void ATerritoryCapturePoint::ReconcileOverlappingParticipants()
 UNarrativeAbilitySystemComponent* ATerritoryCapturePoint::ResolveParticipantAbilitySystem(
 	AActor* Participant) const
 {
-	IAbilitySystemInterface* AbilitySystemOwner = Cast<IAbilitySystemInterface>(Participant);
-	return AbilitySystemOwner
-		? Cast<UNarrativeAbilitySystemComponent>(AbilitySystemOwner->GetAbilitySystemComponent())
-		: nullptr;
+	return FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Participant);
 }
 
 bool ATerritoryCapturePoint::IsEligiblePlayerParticipant(AActor* Participant) const

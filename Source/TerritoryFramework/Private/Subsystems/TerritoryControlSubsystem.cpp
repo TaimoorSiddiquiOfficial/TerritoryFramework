@@ -9,6 +9,7 @@
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
@@ -17,8 +18,6 @@
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Tales/NarrativeFunctionLibrary.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
-#include "AbilitySystemInterface.h"
-#include "AbilitySystemBlueprintLibrary.h"
 #include "Abilities/GameplayAbilityTypes.h"
 #include "GameplayEffect.h"
 #include "GameFramework/Controller.h"
@@ -290,19 +289,7 @@ void UTerritoryControlSubsystem::Deinitialize()
 
 UNarrativeAbilitySystemComponent* UTerritoryControlSubsystem::ResolveAttackerASC(AActor* Attacker) const
 {
-	if (!Attacker) return nullptr;
-	if (IAbilitySystemInterface* AbilityOwner = Cast<IAbilitySystemInterface>(Attacker))
-	{
-		return Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent());
-	}
-	if (const AController* Controller = Cast<AController>(Attacker))
-	{
-		if (IAbilitySystemInterface* PawnAbilityOwner = Cast<IAbilitySystemInterface>(Controller->GetPawn()))
-		{
-			return Cast<UNarrativeAbilitySystemComponent>(PawnAbilityOwner->GetAbilitySystemComponent());
-		}
-	}
-	return nullptr;
+	return FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Attacker);
 }
 
 void UTerritoryControlSubsystem::AddAttackerRegistration(AActor* Attacker)
@@ -1037,7 +1024,7 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 			Payload.Instigator = Observer;
 			Payload.Target = Target;
 			Payload.EventMagnitude = Runtime.Snapshot.Suspicion;
-			UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
+			FTerritoryNarrativeProAdapter::SendGameplayEvent(
 				Target, Profile->BreakStealthGameplayEventTag, Payload);
 		}
 

@@ -4,9 +4,9 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "AI/NarrativeNPCController.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
-#include "AbilitySystemInterface.h"
 #include "Engine/World.h"
 #include "Settings/NarrativeCombatDeveloperSettings.h"
 #include "UnrealFramework/NarrativeGameUserSettings.h"
@@ -324,14 +324,5 @@ bool UTerritoryCombatDirector::ControllerHasAnySlot(const ANarrativeNPCControlle
 
 UNarrativeAbilitySystemComponent* UTerritoryCombatDirector::ResolveControllerASC(ANarrativeNPCController* Controller) const
 {
-	if (!Controller) return nullptr;
-	if (IAbilitySystemInterface* PawnASC = Cast<IAbilitySystemInterface>(Controller->GetPawn()))
-	{
-		return Cast<UNarrativeAbilitySystemComponent>(PawnASC->GetAbilitySystemComponent());
-	}
-	if (IAbilitySystemInterface* ControllerASC = Cast<IAbilitySystemInterface>(Controller))
-	{
-		return Cast<UNarrativeAbilitySystemComponent>(ControllerASC->GetAbilitySystemComponent());
-	}
-	return nullptr;
+	return FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Controller);
 }
