@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased — 2026-09-03 (Release persistence and packaged multiplayer gates)
+
+- Fixed real save-slot persistence for nested WorldState data. Economy snapshots, transaction
+  history, treaties, strategic capture-directory entries, reputation, and counterattack evaluation
+  fields now participate in Unreal's `SaveGame` archive instead of relying only on the outer actor
+  property.
+- Added development-only active-assault start and save/reload gates that resolve the authoritative
+  game world in Editor, packaged Game, listener, and dedicated execution.
+- Extended the WorldState Narrative archive regression to prove one live assault, War diplomacy,
+  strategic directory data, and evaluation state survive without duplication.
+- Passed the full 197-test UE 5.7 suite, a real active-assault save/reload across two independent
+  packaged processes, a no-cache cook with zero errors, and a fresh Windows stage/package/archive.
+- Passed packaged dedicated-listener topology with two independent clients during a live immediate
+  assault. Added three separated `HopDistrictTest` PlayerStarts, removing the second-client pawn
+  spawn failure.
+- Removed project-owned stale Narrative demo loadouts from the ordinary Bandit, assault Bandit,
+  Hero guard, and player definitions. Territory NPCs now receive one Territory weapon rather than
+  inheriting demo armor sets or Seth's complete loadout.
+- Repaired project configuration for the Fire gameplay cue, absent mobile touch interface, valid
+  game-entry map, Narrative definition scan roots, SM6 rendering, and missing player appearance
+  material overrides.
+- Added a dated release-verification report and converted the roadmap's six vague open items into
+  passed, partially passed, and fixture/manual gates.
+
 ## Unreleased — 2026-09-02 (Mission recipes and functional Quest conditions)
 
 - Fixed guard lifecycle cleanup outside the normal Narrative death path. World Partition

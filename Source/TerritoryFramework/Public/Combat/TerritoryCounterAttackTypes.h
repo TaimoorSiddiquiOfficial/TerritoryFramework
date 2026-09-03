@@ -495,19 +495,19 @@ struct FTerritoryAssaultEvaluationInput
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") int32 ActiveGuards = 0;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") int32 DesiredGuards = 0;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") int32 MaximumGuards = 0;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") int32 ReserveGuards = 0;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float GuardQuality = 1.f;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float Fortification = 0.f;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float NearbyAlliedSupport = 0.f;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float AttackingMilitaryPower = 0.f;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float EconomyReadiness = 0.f;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float SupplyReadiness = 0.f;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float StrategicValue = 1.f;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float RecentMomentum = 0.f;
-	UPROPERTY(BlueprintReadWrite, Category="Territory|Counter Attack") float FactionInfluence = 0.5f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") int32 ActiveGuards = 0;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") int32 DesiredGuards = 0;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") int32 MaximumGuards = 0;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") int32 ReserveGuards = 0;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float GuardQuality = 1.f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float Fortification = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float NearbyAlliedSupport = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float AttackingMilitaryPower = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float EconomyReadiness = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float SupplyReadiness = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float StrategicValue = 1.f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float RecentMomentum = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float FactionInfluence = 0.5f;
 };
 
 USTRUCT(BlueprintType)
@@ -515,11 +515,11 @@ struct FTerritoryAssaultEvaluationResult
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack") float DistrictDefencePower = 0.f;
-	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack") float PowerRatio = 0.f;
-	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack") float AttackPriority = 0.f;
-	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack") float LaunchProbability = 0.f;
-	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack") float EstimatedSuccessProbability = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float DistrictDefencePower = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float PowerRatio = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float AttackPriority = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float LaunchProbability = 0.f;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float EstimatedSuccessProbability = 0.f;
 };
 
 /** Durable high-water mark preventing a trimmed assault history from reusing a deterministic decision cycle. */

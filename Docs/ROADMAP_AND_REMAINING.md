@@ -30,6 +30,16 @@
 - Current-source verification on 2026-09-03 built the UE 5.7 `TDAEditor` Development target and
   passed all 197 `TerritoryFramework.*` tests. The automation log contains no failed
   test, Blueprint Runtime Error, Accessed None, assertion, fatal, or Territory error.
+- All nested active-assault, diplomacy, strategic-directory, economy, and evaluation fields now
+  participate in Unreal's `SaveGame` archive. A packaged game created an active assault, saved it,
+  reloaded it once, exited, and a second independent packaged process restored the same live
+  assault once from the same slot.
+- A packaged dedicated-listener process admitted two independent clients while a real immediate
+  Bandit-versus-Heroes assault was live. Both clients were welcomed and created their own server
+  pawn. Three authored PlayerStarts now remove the previous second-client origin-spawn failure.
+- A no-asset-registry-cache cook of `HopDistrictTest` and a fresh stage/package/archive completed
+  with zero errors. The invalid Fire cue, missing mobile touch interface, missing player appearance
+  materials, and project-owned Narrative demo loadout leaks were repaired.
 - Scoped editor verification compiled all 69 Territory Blueprints and validated 101 assets under
   the project/plugin Territory paths plus `HopDistrictTest`, with zero errors or warnings.
 - A current `/Game/HopDistrictTest` headless runtime smoke loaded the map and player/HUD, then
@@ -38,28 +48,35 @@
 - The documentation learning path is uniquely numbered from 00 to 34. Reports and tutorials
   are separate appendices.
 
-## Release gates still open
+## Release verification status
 
 These are verification jobs, not permission to invent a second gameplay authority.
 
-1. **Real multiplayer session** — use a genuine dedicated server with two connected clients.
-   Capture a Place, recruit one guard, patrol, launch a counterattack, kill the guard and
-   attackers, and verify exact-once capture/XP results on every client.
-2. **Live save slot** — save while a finite assault has living NPCs, restart, load the same
-   slot, and verify the remaining force is reconstructed once. Native archive tests already
-   cover the durable data contract; this gate covers the project's actual save-slot setup.
-3. **World Partition map** — stream one Place, its posts, and an active assault out and back
-   in. `HopDistrictTest` is not World Partition-enabled, so it cannot prove this gate.
-4. **Packaged server/cook** — repeat packaging after the project and vendor missing-content,
-   shader, and headless Narrative editor-module failures are repaired. A Server target also
-   requires a source engine or an Unreal installation that includes Server support.
-5. **Authored road playtest** — drive a faction vehicle from the road-guide start to its Place,
-   then test reverse boss pursuit, blocked traffic, abandonment, cleanup, player carjacking,
-   and the final on-foot fight with real navigation and camera framing.
-6. **Project content cleanup** — remove or replace stale Narrative demo item references reported
-   during runtime, repair the invalid `GameplayCue.TakeDamage.Fire` tag, and confirm a usable
-   RecastNavMesh exists in the authored gameplay map. These are project/vendor-content warnings,
-   not Territory ownership failures, but they can hide equipment, cue, or AI navigation defects.
+1. **Dedicated topology — automated portion passed.** A packaged Game executable ran as a real
+   dedicated listener with two separate client processes and a live immediate assault. Both joins
+   and pawn spawns succeeded. Still manual: capture a Place, recruit one guard, patrol, resolve the
+   assault, and observe exact-once capture/XP presentation on both rendered clients.
+2. **Live save slot — passed.** A finite active assault survived save/reload once in-process and
+   restored once again after a complete packaged-process restart. The 197-test suite also covers
+   the nested archive contract.
+3. **World Partition map — fixture still required.** Stable identity and stream-safe actor cleanup
+   are automated, but `HopDistrictTest` is not World Partition-enabled. A physical stream-out and
+   stream-in of a Place, its posts, and a live assault remains a map-level playtest.
+4. **Packaged cook/game — passed for the installed engine.** A clean no-cache Windows cook plus
+   stage, package, and archive completed with zero errors. Epic's installed UE 5.7 build cannot
+   produce separate Client/Server target binaries; a source engine or installed Server support is
+   required for that optional target split. The packaged Game binary successfully exercised the
+   dedicated-server topology.
+5. **Authored road playtest — partly passed.** The authored assault vehicle claimed its Narrative
+   driver, followed ten ZoneGraph guide points, stopped, dismounted, and completed takeover in the
+   existing runtime gate. Still manual: reverse boss pursuit, deliberate traffic blocking,
+   damage-triggered abandonment, cleanup timing, player carjacking, and final-fight camera framing.
+6. **Project cleanup — project-owned defects fixed; vendor/headless warnings remain.** Fire cue and
+   touch-interface configuration are valid, missing player appearance overrides were removed,
+   all three Territory NPC definitions now grant only the Territory weapon, three PlayerStarts are
+   present, and the map owns a RecastNavMesh. Remaining cook warnings are inside Narrative Pro's
+   Character Creator/configuration, while `-nullrhi` clients report Narrative UI widgets that do
+   not exist in a headless viewport. Do not patch vendor assets from Territory Framework.
 
 ## Engineering improvements after the gates
 

@@ -21,20 +21,20 @@ struct FReplicatedFactionEconomy
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Economy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	FGameplayTag Faction;
 
 	/** Reserved for compatibility; currency is stored in Narrative character inventories. */
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Economy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	int32 Treasury = 0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Economy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	int32 IncomePerTick = 0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Economy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	int32 CostsPerTick = 0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Economy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	int32 TerritoryCount = 0;
 };
 
@@ -46,28 +46,28 @@ struct FReplicatedTransaction
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Transaction")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	FGuid TransactionID;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Transaction")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	FGameplayTag Faction;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Transaction")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	ETerritoryTransactionType Type = ETerritoryTransactionType::Income;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Transaction")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	int32 Amount = 0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Transaction")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	int32 BalanceAfter = 0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Transaction")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	double GameTime = 0.0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Transaction")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	FString Reason;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Transaction")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	FGameplayTag SourceTerritory;
 };
 
@@ -79,25 +79,25 @@ struct FReplicatedTreaty
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	FGuid TreatyID;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	FGameplayTag FactionA;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	FGameplayTag FactionB;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	EDiplomacyState State = EDiplomacyState::None;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	double SignedGameTime = 0.0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	double ExpiryGameTime = -1.0;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	bool bPermanent = true;
 };
 
@@ -109,45 +109,45 @@ struct FReplicatedCaptureSummary
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag TerritoryTag;
 
 	/** Stable actor identity used when the territory is streamed or its tag changes. */
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGuid TerritoryGUID;
 
 	/** Exact authored parent used to evaluate availability while World Partition unloads it. */
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag ParentTerritoryTag;
 
 	/** Stable presentation survives actor streaming; it is copied from the Definition. */
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture|Directory")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture|Directory")
 	FText DisplayName;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture|Directory")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture|Directory")
 	ETerritoryHierarchyLevel HierarchyLevel = ETerritoryHierarchyLevel::Place;
 
 	/** Authored direct-child count. Child identities remain hidden while locked. */
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture|Directory")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture|Directory")
 	int32 TotalChildren = 0;
 
 	/** True when the row was reconciled with a Territory Definition asset. */
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture|Directory")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture|Directory")
 	bool bDefinitionBacked = false;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag CurrentOwner;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag ContestingFaction;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	float ControlProgress = 0.f;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	ETerritoryState State = ETerritoryState::Unclaimed;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Capture")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
 };
 
@@ -159,10 +159,10 @@ struct FReplicatedFactionReputation
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	FGameplayTag Faction;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Diplomacy")
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	int32 Reputation = 0;
 };
 

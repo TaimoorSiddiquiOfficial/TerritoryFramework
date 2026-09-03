@@ -1225,6 +1225,8 @@ bool FTFWorldStateAssaultPersistenceRoundTrip::RunTest(const FString& Parameters
 		TEXT("Territory.HavenReach.MarketSquare"), false);
 	Saved.AttackingFaction = FGameplayTag::RequestGameplayTag(
 		TEXT("Narrative.Factions.Bandits"), false);
+	Saved.DefendingFaction = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
 	Saved.State = ETerritoryAssaultState::WaitingForPlayerProximity;
 	Saved.EvaluationCycle = 9;
 	Saved.DecisionSeed = 17041;
@@ -1234,6 +1236,8 @@ bool FTFWorldStateAssaultPersistenceRoundTrip::RunTest(const FString& Parameters
 	Saved.KilledForce = 2;
 	Saved.WithdrawnForce = 1;
 	Saved.bNotificationSent = true;
+	Saved.EvaluationInput.AttackingMilitaryPower = 175.f;
+	Saved.EvaluationResult.LaunchProbability = 0.73f;
 	Counter->RestorePersistentState({Saved});
 
 	WorldState->PrepareForSave_Implementation();
@@ -1256,6 +1260,20 @@ bool FTFWorldStateAssaultPersistenceRoundTrip::RunTest(const FString& Parameters
 	ActiveSaved.KilledForce = 2;
 	ActiveSaved.WithdrawnForce = 1;
 	WorldState->SavedAssaults.Add(ActiveSaved);
+	FReplicatedTreaty SavedWar;
+	SavedWar.TreatyID = FGuid::NewGuid();
+	SavedWar.FactionA = Saved.AttackingFaction;
+	SavedWar.FactionB = Saved.DefendingFaction;
+	SavedWar.State = EDiplomacyState::War;
+	SavedWar.SignedGameTime = 42.0;
+	WorldState->SavedTreaties = {SavedWar};
+	FReplicatedCaptureSummary SavedDirectoryRow;
+	SavedDirectoryRow.TerritoryTag = Saved.TargetTerritory;
+	SavedDirectoryRow.TerritoryGUID = Saved.TargetTerritoryGUID;
+	SavedDirectoryRow.DisplayName = FText::FromString(TEXT("Market Square"));
+	SavedDirectoryRow.CurrentOwner = Saved.DefendingFaction;
+	SavedDirectoryRow.State = ETerritoryState::Claimed;
+	WorldState->SavedStrategicDirectory = {SavedDirectoryRow};
 
 	TArray<uint8> SavedBytes;
 	FMemoryWriter Writer(SavedBytes);
@@ -1267,6 +1285,8 @@ bool FTFWorldStateAssaultPersistenceRoundTrip::RunTest(const FString& Parameters
 	Counter->RestorePersistentState({});
 	WorldState->SavedAssaults.Empty();
 	WorldState->SavedAssaultCycles.Empty();
+	WorldState->SavedTreaties.Empty();
+	WorldState->SavedStrategicDirectory.Empty();
 	FMemoryReader Reader(SavedBytes);
 	FObjectAndNameAsStringProxyArchive LoadArchive(Reader, true);
 	LoadArchive.ArIsSaveGame = true;
@@ -1283,6 +1303,12 @@ bool FTFWorldStateAssaultPersistenceRoundTrip::RunTest(const FString& Parameters
 		Restored.DecisionSeed, Saved.DecisionSeed);
 	TestEqual(TEXT("Archive round-trip preserves the decision roll"),
 		Restored.DecisionRoll, Saved.DecisionRoll);
+	TestEqual(TEXT("Archive round-trip preserves the evaluation input"),
+		Restored.EvaluationInput.AttackingMilitaryPower,
+		Saved.EvaluationInput.AttackingMilitaryPower);
+	TestEqual(TEXT("Archive round-trip preserves the evaluation result"),
+		Restored.EvaluationResult.LaunchProbability,
+		Saved.EvaluationResult.LaunchProbability);
 	TestEqual(TEXT("Archive round-trip preserves killed force"),
 		Restored.KilledForce, Saved.KilledForce);
 	TestEqual(TEXT("Archive round-trip preserves withdrawn force"),
@@ -1292,6 +1318,27 @@ bool FTFWorldStateAssaultPersistenceRoundTrip::RunTest(const FString& Parameters
 	TestEqual(TEXT("Archive round-trip preserves the next decision cycle"),
 		Counter->ReserveNextEvaluationCycle(
 			Saved.TargetTerritoryGUID, Saved.AttackingFaction), 10);
+	const UTerritoryDiplomacySubsystem* Diplomacy =
+		World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	TestNotNull(TEXT("Diplomacy authority exists after archive load"), Diplomacy);
+	if (Diplomacy)
+	{
+		TestEqual(TEXT("Nested treaty fields survive a real SaveGame archive"),
+			Diplomacy->GetDiplomacyState(
+				Saved.AttackingFaction, Saved.DefendingFaction),
+			EDiplomacyState::War);
+	}
+	TestEqual(TEXT("Strategic directory survives a real SaveGame archive"),
+		WorldState->SavedStrategicDirectory.Num(), 1);
+	if (!WorldState->SavedStrategicDirectory.IsEmpty())
+	{
+		TestEqual(TEXT("Strategic directory keeps its stable Territory identity"),
+			WorldState->SavedStrategicDirectory[0].TerritoryGUID,
+			Saved.TargetTerritoryGUID);
+		TestEqual(TEXT("Strategic directory keeps its owner"),
+			WorldState->SavedStrategicDirectory[0].CurrentOwner,
+			Saved.DefendingFaction);
+	}
 
 	FTerritoryAssaultRecord NormalizedActive;
 	TestTrue(TEXT("An active saved assault remains durable after physical pawn reconstruction"),
