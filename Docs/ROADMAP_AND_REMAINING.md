@@ -37,6 +37,12 @@
 - A packaged dedicated-listener process admitted two independent clients while a real immediate
   Bandit-versus-Heroes assault was live. Both clients were welcomed and created their own server
   pawn. Three authored PlayerStarts now remove the previous second-client origin-spawn failure.
+- A later rendered two-client pass showed both clients in the world, the contested Territory HUD,
+  the remote player, and the vehicle assault. It also exposed two project Blueprint timing defects
+  hidden by the shorter gate: duplicate assault activity cleanup after death and Narrative local UI
+  initialization before possession created `GameplayHUD`. Both project graphs are now corrected and
+  compile cleanly; targeted PIE startup and forced assault-death smokes contain zero Blueprint
+  runtime or `Accessed None` errors.
 - A no-asset-registry-cache cook of `HopDistrictTest` and a fresh stage/package/archive completed
   with zero errors. The invalid Fire cue, missing mobile touch interface, missing player appearance
   materials, and project-owned Narrative demo loadout leaks were repaired.
@@ -52,10 +58,12 @@
 
 These are verification jobs, not permission to invent a second gameplay authority.
 
-1. **Dedicated topology — automated portion passed.** A packaged Game executable ran as a real
-   dedicated listener with two separate client processes and a live immediate assault. Both joins
-   and pawn spawns succeeded. Still manual: capture a Place, recruit one guard, patrol, resolve the
-   assault, and observe exact-once capture/XP presentation on both rendered clients.
+1. **Dedicated topology — rendered admission passed.** A packaged Game executable ran as a real
+   dedicated listener with two separate rendered client processes and a live immediate assault.
+   Both joins, pawn spawns, Territory HUDs, remote-player presentation, forward road ingress, and
+   dismount were visible. The rendered pass found and drove the project Blueprint timing fixes
+   described above. Still manual after the next package refresh: capture a Place, recruit one guard,
+   patrol, resolve the assault, and observe exact-once capture/XP presentation on both clients.
 2. **Live save slot — passed.** A finite active assault survived save/reload once in-process and
    restored once again after a complete packaged-process restart. The 197-test suite also covers
    the nested archive contract.
@@ -71,12 +79,14 @@ These are verification jobs, not permission to invent a second gameplay authorit
    driver, followed ten ZoneGraph guide points, stopped, dismounted, and completed takeover in the
    existing runtime gate. Still manual: reverse boss pursuit, deliberate traffic blocking,
    damage-triggered abandonment, cleanup timing, player carjacking, and final-fight camera framing.
-6. **Project cleanup — project-owned defects fixed; vendor/headless warnings remain.** Fire cue and
-   touch-interface configuration are valid, missing player appearance overrides were removed,
-   all three Territory NPC definitions now grant only the Territory weapon, three PlayerStarts are
-   present, and the map owns a RecastNavMesh. Remaining cook warnings are inside Narrative Pro's
-   Character Creator/configuration, while `-nullrhi` clients report Narrative UI widgets that do
-   not exist in a headless viewport. Do not patch vendor assets from Territory Framework.
+6. **Project cleanup — project-owned defects fixed; vendor cue warnings remain.** The registered
+   damage cue and touch-interface configuration are valid, the Territory melee ability no longer
+   emits Narrative's firearm `GameplayCue.Weapon.Fire`, missing player appearance overrides were
+   removed, all three Territory NPC definitions grant only the Territory weapon, three PlayerStarts
+   are present, and the map owns a RecastNavMesh. Narrative's generic unarmed-impact cue still
+   dereferences a null Niagara decal result on a dedicated server, and its damage cue can read a
+   not-yet-created Character Visual on a replicated client. Those graphs live in Narrative Pro;
+   Territory Framework must not patch the vendor assets.
 
 ## Engineering improvements after the gates
 

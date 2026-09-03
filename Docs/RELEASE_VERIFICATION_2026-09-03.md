@@ -48,6 +48,25 @@ connected to `127.0.0.1:7804`.
 Result: **topology and live-assault admission passed**. A visible two-player capture/guard/XP
 resolution remains a manual presentation and exact-once gameplay playtest.
 
+### Rendered follow-up
+
+A later pass ran the packaged listener with two real windowed clients. Both clients rendered the
+world, Territory HUD, contested Haven Reach state, remote player, vehicle arrival, ten-point road
+route, stop, and dismount. The longer session corrected an earlier assumption that all UI warnings
+were headless-only. It exposed two project-owned Blueprint timing defects:
+
+- `BP_TerritoryAssualtGuard1` called `RemoveAllGoals` again after its safe native death parent,
+  through a nullable activity component; and
+- the project Narrative controller entered the vendor Local Init graph before possession had
+  created `GameplayHUD`.
+
+The redundant assault cleanup node was removed while preserving weapon-drop presentation. The
+controller now defers its parent Blueprint BeginPlay graph by 0.05 seconds so Narrative's native
+possession path creates the HUD first. Both assets compile without warnings. A 45-second PIE assault
+startup and a second targeted PIE session that invoked assault death reported zero Blueprint
+runtime, `Accessed None`, pending-kill, or activity-component errors. A refreshed packaged render is
+still required because the existing package predates these asset fixes.
+
 ## Cook and package
 
 A direct cook used `-NoAssetRegistryCache` so an old generated registry could not hide missing
@@ -88,10 +107,18 @@ active-count cleanup. They cannot physically stream `HopDistrictTest`, because t
 World Partition map. Final proof requires a World Partition fixture containing a Place, guard
 posts, and a live finite assault.
 
-## Headless-only Narrative UI warnings
+## Narrative Pro cue warnings kept outside Territory ownership
 
-Both `-nullrhi` clients joined correctly but Narrative's player controller attempted to read
-`GameplayHUD` and `LoadingMenu` without a rendered viewport. These are Narrative headless-client
-assumptions, not Territory ownership, replication, or assault failures. The manual visible-client
-gate should confirm that normal UI creation eliminates them before deciding whether the project
-needs a controller-side headless guard.
+The rendered test also proved two remaining warnings are inside Narrative Pro assets rather than
+Territory ownership or assault state:
+
+- `GC_Burst_Unarmed` calls its generic `Spawn Decal` graph on the dedicated server, where Niagara
+  returns no decal component and the vendor graph dereferences `DecalPS` without a validity check;
+- `GC_TakeDamage` can read `GetCharacterVisual` before a replicated character's asynchronous visual
+  is available.
+
+The project Territory sword ability did have one incorrect inherited setting: it emitted the
+firearm `GameplayCue.Weapon.Fire` on every melee swing. That tag is now empty, avoiding unrelated
+muzzle-fire cue RPCs and per-net-update cue-budget warnings from Territory sword attacks. The two
+generic Narrative cue graphs remain vendor-owned and should be fixed by a Narrative Pro update or a
+project-level vendor override, never by changing Territory's gameplay authority.

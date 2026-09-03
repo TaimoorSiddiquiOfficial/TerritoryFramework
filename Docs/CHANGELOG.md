@@ -23,6 +23,19 @@
   material overrides.
 - Added a dated release-verification report and converted the roadmap's six vague open items into
   passed, partially passed, and fixture/manual gates.
+- Ran a longer rendered two-client dedicated-listener pass. It visibly verified both clients,
+  remote-player presentation, contested Territory HUD state, and the forward vehicle road route,
+  then exposed two timing defects hidden by the short headless gate.
+- Removed the assault guard Blueprint's duplicate post-parent `RemoveAllGoals` call, which could
+  dereference a missing Narrative activity component during replicated death while preserving its
+  weapon-drop presentation.
+- Deferred the project Narrative controller's parent Blueprint BeginPlay graph by a bounded
+  startup delay so native possession creates `GameplayHUD` before Narrative Local Init opens LoadingMenu.
+- Cleared the inherited firearm `GameplayCue.Weapon.Fire` from the Territory melee sword ability.
+  Added integration regressions for the death graph, HUD-readiness ordering, and melee cue contract.
+- Passed a 45-second PIE assault startup plus a targeted forced assault-death smoke with zero
+  Blueprint runtime, Accessed None, pending-kill, or activity-component errors. Narrative's generic
+  dedicated-server decal and replicated Character Visual cue warnings remain vendor-owned.
 
 ## Unreleased — 2026-09-02 (Mission recipes and functional Quest conditions)
 

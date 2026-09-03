@@ -33,6 +33,7 @@
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameplayTagContainer.h"
 #include "GameplayEffect.h"
 #include "K2Node_CallParentFunction.h"
 #include "K2Node_CallFunction.h"
@@ -108,6 +109,8 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 		TEXT("/Game/TerritoryFramework/Framework/Controller_Reworked/BP_HopNarrativePlayerController_DemoMap"),
 		TEXT("/Game/TerritoryFramework/UI/WBP_TerritoryGameplayHUD_Modular"),
 		TEXT("/Game/TerritoryFramework/AI/BP_TerritoryGuard"),
+		TEXT("/Game/TerritoryFramework/AI/BP_TerritoryAssualtGuard1"),
+		TEXT("/Game/TerritoryFramework/AI/Combat/GA_TerritoryGuardSwordAttack"),
 		TEXT("/Game/TerritoryFramework/Blueprints/BP_Property_Blacksmith"),
 		TEXT("/Game/TerritoryFramework/AI/BPA_ReturnToTerritory")
 	};
@@ -220,6 +223,33 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 				ProjectController->GeneratedClass->GetDefaultObject()));
 		TestTrue(TEXT("Project controller selects the modular Territory GameplayHUD"),
 			ConfiguredGameplayHUD == ProjectGameplayHUD->GeneratedClass.Get());
+	}
+
+	UK2Node_CallParentFunction* ParentBeginPlay = nullptr;
+	for (UK2Node_CallFunction* Call : FindCalls(ProjectController, TEXT("ReceiveBeginPlay")))
+	{
+		ParentBeginPlay = Cast<UK2Node_CallParentFunction>(Call);
+		if (ParentBeginPlay) break;
+	}
+	TestNotNull(TEXT("Project controller calls the Narrative BeginPlay graph"),
+		ParentBeginPlay);
+	if (ParentBeginPlay)
+	{
+		const UEdGraphPin* ExecutePin = ParentBeginPlay->GetExecPin();
+		const UK2Node_CallFunction* ReadinessDelay = ExecutePin
+			&& ExecutePin->LinkedTo.Num() == 1
+			? Cast<UK2Node_CallFunction>(ExecutePin->LinkedTo[0]->GetOwningNode()) : nullptr;
+		TestTrue(TEXT("Narrative local UI initialization waits for possession to create GameplayHUD"),
+			ReadinessDelay
+			&& ReadinessDelay->FunctionReference.GetMemberName() == TEXT("Delay"));
+		if (ReadinessDelay)
+		{
+			const UEdGraphPin* DurationPin = ReadinessDelay->FindPin(TEXT("Duration"));
+			TestTrue(TEXT("GameplayHUD readiness delay is a positive bounded frame delay"),
+				DurationPin
+				&& FCString::Atof(*DurationPin->DefaultValue) > 0.f
+				&& FCString::Atof(*DurationPin->DefaultValue) <= 0.25f);
+		}
 	}
 
 	const TArray<UK2Node_CallFunction*> RegisterLayerCalls =
@@ -508,6 +538,44 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 				World, WorldSpawn, WorldDropOff, RoutePoints, &RouteFailure));
 		TestTrue(TEXT("Blacksmith drive route has more than its endpoints"),
 			RoutePoints.Num() > 2);
+	}
+
+	UBlueprint* TerritoryAssaultGuard = LoadBlueprint(
+		TEXT("/Game/TerritoryFramework/AI/BP_TerritoryAssualtGuard1.BP_TerritoryAssualtGuard1"));
+	TestNotNull(TEXT("Territory assault guard Blueprint loads"), TerritoryAssaultGuard);
+	if (TerritoryAssaultGuard)
+	{
+		TestEqual(TEXT("Assault death leaves activity cleanup to the safe native parent"),
+			FindCalls(TerritoryAssaultGuard, TEXT("RemoveAllGoals")).Num(), 0);
+		TestEqual(TEXT("Assault death no longer dereferences a late activity component"),
+			FindCalls(TerritoryAssaultGuard, TEXT("GetActivityComponent")).Num(), 0);
+
+		UK2Node_CallParentFunction* ParentDeath = nullptr;
+		for (UK2Node_CallFunction* Call : FindCalls(TerritoryAssaultGuard, TEXT("HandleDeath")))
+		{
+			ParentDeath = Cast<UK2Node_CallParentFunction>(Call);
+			if (ParentDeath) break;
+		}
+		TestNotNull(TEXT("Assault death still calls the Territory native parent"),
+			ParentDeath);
+	}
+
+	UBlueprint* TerritorySwordAttack = LoadBlueprint(
+		TEXT("/Game/TerritoryFramework/AI/Combat/GA_TerritoryGuardSwordAttack.GA_TerritoryGuardSwordAttack"));
+	TestNotNull(TEXT("Territory sword attack ability loads"), TerritorySwordAttack);
+	if (TerritorySwordAttack)
+	{
+		const FStructProperty* FireCueProperty = FindFProperty<FStructProperty>(
+			TerritorySwordAttack->GeneratedClass, TEXT("FireCueTag"));
+		TestNotNull(TEXT("Narrative combat ability exposes its fire cue tag"),
+			FireCueProperty);
+		if (FireCueProperty)
+		{
+			const FGameplayTag* FireCueTag = FireCueProperty->ContainerPtrToValuePtr<FGameplayTag>(
+				TerritorySwordAttack->GeneratedClass->GetDefaultObject());
+			TestTrue(TEXT("Melee sword attacks do not emit the firearm cue"),
+				FireCueTag && !FireCueTag->IsValid());
+		}
 	}
 	if (FarmRoute)
 	{
