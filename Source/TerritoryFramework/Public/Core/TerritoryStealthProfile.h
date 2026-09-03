@@ -2,11 +2,11 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "GameplayEffect.h"
 #include "GameplayTagContainer.h"
 #include "TerritoryStealthProfile.generated.h"
 
 class UTerritoryInvestigationActivity;
-class UGameplayEffect;
 
 /** Per-player awareness inside a stealth-enabled Territory. Presence is not exposure. */
 UENUM(BlueprintType)

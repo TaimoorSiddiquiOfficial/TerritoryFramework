@@ -12,6 +12,7 @@
 #include "Navigation/TerritoryRoadGuide.h"
 #include "Navigation/TerritoryRoadTrafficActors.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
+#include "Tales/TerritoryStoryEvents.h"
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "Tales/TerritoryQuestCascadeEditorLibrary.h"
 #include "TerritoryDefinitionEditorLibrary.h"
@@ -437,7 +438,7 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 		ECVF_Default);
 	NormalizeClaimedDiplomacyConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Territory.Editor.NormalizeClaimedDiplomacy"),
-		TEXT("Migrate owner-relative Claimed state diplomacy rules in the loaded editor level to Neutral / No Treaty."),
+		TEXT("Normalize owner-relative Claimed diplomacy in the loaded editor level: retaliation Wave rows establish War before scheduling; ordinary Claimed rows clean up to Neutral."),
 		FConsoleCommandDelegate::CreateRaw(
 			this, &FTerritoryFrameworkEditorModule::NormalizeClaimedDiplomacyForLoadedLevel),
 		ECVF_Default);
@@ -698,9 +699,23 @@ void FTerritoryFrameworkEditorModule::NormalizeClaimedDiplomacyForLoadedLevel()
 			Definition->StateConfigs.Find(ETerritoryState::Claimed);
 		if (!ClaimedConfig) continue;
 
+		// A Claimed row which launches a physical retaliation must keep the exact
+		// owner/opponent pair at War through admission and deployment. A generic
+		// Claimed row may instead clean the completed contest back to Neutral.
+		// Derive that policy from the authored row instead of blindly normalizing
+		// every captured Place to peace (which configured its Wave out of existence).
+		const bool bSchedulesEnemyWave = ClaimedConfig->EntryEvents.ContainsByPredicate(
+			[](const UNarrativeEvent* Event)
+			{
+				return Event && Event->IsA<UTerritoryScheduleEnemyWaveEvent>();
+			});
+		const EDiplomacyState DesiredClaimedState = bSchedulesEnemyWave
+			? EDiplomacyState::War : EDiplomacyState::None;
+		const bool bApplyOnFreshInitialState = !bSchedulesEnemyWave;
+
 		// Older Place assets sometimes retained the Contested=War rule but lost
-		// the matching Claimed=Neutral cleanup event. Repair that pair only when
-		// the author has clearly opted into state-driven diplomacy.
+		// the matching owner/opponent Claimed relationship event. Repair that pair
+		// only when the author has clearly opted into state-driven diplomacy.
 		UTerritorySetDiplomacyEvent* ExistingClaimedDiplomacy = nullptr;
 		for (const TObjectPtr<UNarrativeEvent>& Event : ClaimedConfig->EntryEvents)
 		{
@@ -729,22 +744,25 @@ void FTerritoryFrameworkEditorModule::NormalizeClaimedDiplomacyForLoadedLevel()
 		if (!ExistingClaimedDiplomacy && ContestedWarTemplate)
 		{
 			Definition->Modify();
-			UTerritorySetDiplomacyEvent* PeaceEvent =
+			UTerritorySetDiplomacyEvent* RelationshipEvent =
 				NewObject<UTerritorySetDiplomacyEvent>(Definition, NAME_None,
 					RF_Transactional);
-			PeaceEvent->FactionASource =
+			RelationshipEvent->FactionASource =
 				ETerritoryDiplomacyFactionSource::CurrentOwningFaction;
-			PeaceEvent->FactionBSource =
+			RelationshipEvent->FactionBSource =
 				ETerritoryDiplomacyFactionSource::TransitionOpposingFaction;
-			PeaceEvent->FactionA = ContestedWarTemplate->FactionA;
-			PeaceEvent->FactionB = ContestedWarTemplate->FactionB;
-			PeaceEvent->NewState = EDiplomacyState::None;
-			PeaceEvent->bApplyWhenStateStartsActive = true;
-			PeaceEvent->bRequireContainingTerritoryOwner = true;
-			PeaceEvent->bPreserveOtherActiveTerritoryWars = true;
-			ClaimedConfig->EntryEvents.Add(PeaceEvent);
+			RelationshipEvent->FactionA = ContestedWarTemplate->FactionA;
+			RelationshipEvent->FactionB = ContestedWarTemplate->FactionB;
+			RelationshipEvent->NewState = DesiredClaimedState;
+			RelationshipEvent->bApplyWhenStateStartsActive =
+				bApplyOnFreshInitialState;
+			RelationshipEvent->bRequireContainingTerritoryOwner = true;
+			RelationshipEvent->bPreserveOtherActiveTerritoryWars = true;
+			// War must be established before a same-row Wave evaluates diplomacy.
+			ClaimedConfig->EntryEvents.Insert(RelationshipEvent, 0);
 			Definition->MarkPackageDirty();
 			++UpdatedEvents;
+			ExistingClaimedDiplomacy = RelationshipEvent;
 		}
 
 		for (const TObjectPtr<UNarrativeEvent>& EntryEvent :
@@ -762,20 +780,42 @@ void FTerritoryFrameworkEditorModule::NormalizeClaimedDiplomacyForLoadedLevel()
 			}
 
 			const bool bNeedsMigration =
-				DiplomacyEvent->NewState != EDiplomacyState::None
-				|| !DiplomacyEvent->bApplyWhenStateStartsActive
+				DiplomacyEvent->NewState != DesiredClaimedState
+				|| DiplomacyEvent->bApplyWhenStateStartsActive
+					!= bApplyOnFreshInitialState
 				|| !DiplomacyEvent->bRequireContainingTerritoryOwner
 				|| !DiplomacyEvent->bPreserveOtherActiveTerritoryWars;
 			if (bNeedsMigration)
 			{
 				Definition->Modify();
 				DiplomacyEvent->Modify();
-				DiplomacyEvent->NewState = EDiplomacyState::None;
-				DiplomacyEvent->bApplyWhenStateStartsActive = true;
+				DiplomacyEvent->NewState = DesiredClaimedState;
+				DiplomacyEvent->bApplyWhenStateStartsActive =
+					bApplyOnFreshInitialState;
 				DiplomacyEvent->bRequireContainingTerritoryOwner = true;
 				DiplomacyEvent->bPreserveOtherActiveTerritoryWars = true;
 				Definition->MarkPackageDirty();
 				++UpdatedEvents;
+			}
+
+			if (bSchedulesEnemyWave)
+			{
+				const int32 DiplomacyIndex =
+					ClaimedConfig->EntryEvents.IndexOfByKey(DiplomacyEvent);
+				const int32 FirstWaveIndex = ClaimedConfig->EntryEvents.IndexOfByPredicate(
+					[](const UNarrativeEvent* Event)
+					{
+						return Event && Event->IsA<UTerritoryScheduleEnemyWaveEvent>();
+					});
+				if (DiplomacyIndex != INDEX_NONE && FirstWaveIndex != INDEX_NONE
+					&& DiplomacyIndex > FirstWaveIndex)
+				{
+					Definition->Modify();
+					ClaimedConfig->EntryEvents.RemoveAt(DiplomacyIndex);
+					ClaimedConfig->EntryEvents.Insert(DiplomacyEvent, FirstWaveIndex);
+					Definition->MarkPackageDirty();
+					++UpdatedEvents;
+				}
 			}
 		}
 	}
@@ -791,7 +831,7 @@ void FTerritoryFrameworkEditorModule::NormalizeClaimedDiplomacyForLoadedLevel()
 		}
 	}
 	UE_LOG(LogTemp, Display,
-		TEXT("[TerritoryDiplomacyMigration] Normalized %d owner-relative Claimed diplomacy event template(s) in %s. Save All to persist the changed Territory Definitions."),
+		TEXT("[TerritoryDiplomacyMigration] Normalized %d owner-relative Claimed diplomacy event template(s) in %s. Wave rows keep War and run it first; non-Wave rows clean up to Neutral. Save All to persist the changed Territory Definitions."),
 		UpdatedEvents, *World->GetName());
 }
 

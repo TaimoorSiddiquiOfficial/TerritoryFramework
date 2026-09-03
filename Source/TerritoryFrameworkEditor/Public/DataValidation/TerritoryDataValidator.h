@@ -11,6 +11,7 @@ class UTerritoryCounterAttackProfile;
 class UTerritoryProductionProfile;
 class UTerritoryDefinition;
 class UQuestBlueprint;
+class UDialogue;
 
 /**
  * Editor data validator for TerritoryFramework assets.
@@ -60,6 +61,9 @@ public:
 	static bool ValidateDefinition(UTerritoryDefinition* Definition,
 		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static bool ValidateQuest(UQuestBlueprint* QuestBlueprint,
+		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
+	/** Validate Narrative shot coverage and every referenced Level Sequence binding. */
+	static bool ValidateDialogue(UDialogue* Dialogue,
 		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 
 private:

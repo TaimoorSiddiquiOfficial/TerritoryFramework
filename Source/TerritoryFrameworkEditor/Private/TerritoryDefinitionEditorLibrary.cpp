@@ -261,6 +261,14 @@ bool UTerritoryDefinitionEditorLibrary::AlignAttackDamageEffectWithNarrativePro(
 			"Select a Gameplay Effect class.");
 		return false;
 	}
+	const FString EffectPackageName = Effect->GetOutermost()->GetName();
+	if (EffectPackageName == TEXT("/NarrativePro")
+		|| EffectPackageName.StartsWith(TEXT("/NarrativePro/")))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "NarrativeVendorEffectReadOnly",
+			"Narrative Pro content is read-only. Create a project-owned Gameplay Effect child or copy, then align that asset instead.");
+		return false;
+	}
 
 	FGameplayModifierInfo* AttackDamageModifier = Effect->Modifiers.FindByPredicate(
 		[](const FGameplayModifierInfo& Modifier)
@@ -348,31 +356,9 @@ bool UTerritoryDefinitionEditorLibrary::EnsureStraightVehicleApproachRoad(
 			break;
 		}
 	}
-
-	const FScopedTransaction Transaction(
-		NSLOCTEXT("TerritoryEditor", "EnsureVehicleRoadTransaction",
-			"Ensure Territory Vehicle Approach Road"));
-	Territory->Modify();
-	if (!RoadShape)
-	{
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.OverrideLevel = Territory->GetLevel();
-		SpawnParams.ObjectFlags = RF_Transactional;
-		RoadShape = World->SpawnActor<AZoneShape>(AZoneShape::StaticClass(),
-			FTransform::Identity, SpawnParams);
-		if (!RoadShape)
-		{
-			OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadSpawnFailed",
-				"Could not create the ZoneShape road actor.");
-			return false;
-		}
-		RoadShape->Tags.Add(StableTag);
-		RoadShape->SetActorLabel(FString::Printf(TEXT("Vehicle Road - %s - %s"),
-			*Territory->GetTerritoryDisplayName().ToString(), *ApproachID.ToString()));
-	}
+	UClass* RoadGuideClass = nullptr;
 	if (!RoadGuide)
 	{
-		UClass* RoadGuideClass = nullptr;
 		if (const UTerritoryDeveloperSettings* TerritorySettings =
 			GetDefault<UTerritoryDeveloperSettings>())
 		{
@@ -385,20 +371,6 @@ bool UTerritoryDefinitionEditorLibrary::EnsureStraightVehicleApproachRoad(
 				"Set Territory Framework > Road Guide Blueprint Class to a Blueprint child of TerritoryRoadGuide before creating production level roads.");
 			return false;
 		}
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.OverrideLevel = Territory->GetLevel();
-		SpawnParams.ObjectFlags = RF_Transactional;
-		RoadGuide = World->SpawnActor<ATerritoryRoadGuide>(
-			RoadGuideClass, FTransform::Identity, SpawnParams);
-		if (!RoadGuide)
-		{
-			OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleGuideSpawnFailed",
-				"Could not create the Territory spline Road Guide actor.");
-			return false;
-		}
-		RoadGuide->Tags.Add(StableTag);
-		RoadGuide->SetActorLabel(FString::Printf(TEXT("Road Guide - %s - %s"),
-			*Territory->GetTerritoryDisplayName().ToString(), *ApproachID.ToString()));
 	}
 
 	const FTransform TerritoryTransform = Territory->GetActorTransform();
@@ -412,17 +384,75 @@ bool UTerritoryDefinitionEditorLibrary::EnsureStraightVehicleApproachRoad(
 			"Vehicle spawn and drop-off must be at least 100 cm apart.");
 		return false;
 	}
-
-	RoadShape->Modify();
-	RoadShape->SetActorTransform(FTransform(FRotator::ZeroRotator, WorldSpawn));
-	UZoneShapeComponent* Shape = const_cast<UZoneShapeComponent*>(RoadShape->GetShape());
-	if (!Shape)
+	if (!World->GetSubsystem<UZoneGraphSubsystem>())
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadSubsystemMissing",
+			"ZoneGraph subsystem is unavailable in this editor world.");
+		return false;
+	}
+	if (RoadShape && !RoadShape->GetShape())
 	{
 		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadShapeMissing",
 			"The ZoneShape actor has no ZoneShape component.");
 		return false;
 	}
 
+	const FScopedTransaction Transaction(
+		NSLOCTEXT("TerritoryEditor", "EnsureVehicleRoadTransaction",
+			"Ensure Territory Vehicle Approach Road"));
+	bool bCreatedRoadGuide = false;
+	bool bCreatedRoadShape = false;
+	if (!RoadGuide)
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.OverrideLevel = Territory->GetLevel();
+		SpawnParams.ObjectFlags = RF_Transactional;
+		RoadGuide = World->SpawnActor<ATerritoryRoadGuide>(
+			RoadGuideClass, FTransform::Identity, SpawnParams);
+		if (!RoadGuide)
+		{
+			OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleGuideSpawnFailed",
+				"Could not create the Territory spline Road Guide actor.");
+			return false;
+		}
+		bCreatedRoadGuide = true;
+		RoadGuide->Tags.Add(StableTag);
+		RoadGuide->SetActorLabel(FString::Printf(TEXT("Road Guide - %s - %s"),
+			*Territory->GetTerritoryDisplayName().ToString(), *ApproachID.ToString()));
+	}
+	if (!RoadShape)
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.OverrideLevel = Territory->GetLevel();
+		SpawnParams.ObjectFlags = RF_Transactional;
+		RoadShape = World->SpawnActor<AZoneShape>(AZoneShape::StaticClass(),
+			FTransform::Identity, SpawnParams);
+		if (!RoadShape)
+		{
+			if (bCreatedRoadGuide) RoadGuide->Destroy();
+			OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadSpawnFailed",
+				"Could not create the ZoneShape road actor.");
+			return false;
+		}
+		bCreatedRoadShape = true;
+		RoadShape->Tags.Add(StableTag);
+		RoadShape->SetActorLabel(FString::Printf(TEXT("Vehicle Road - %s - %s"),
+			*Territory->GetTerritoryDisplayName().ToString(), *ApproachID.ToString()));
+	}
+
+	UZoneShapeComponent* Shape = const_cast<UZoneShapeComponent*>(RoadShape->GetShape());
+	if (!Shape)
+	{
+		if (bCreatedRoadShape) RoadShape->Destroy();
+		if (bCreatedRoadGuide) RoadGuide->Destroy();
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadShapeMissing",
+			"The ZoneShape actor has no ZoneShape component.");
+		return false;
+	}
+
+	Territory->Modify();
+	RoadShape->Modify();
+	RoadShape->SetActorTransform(FTransform(FRotator::ZeroRotator, WorldSpawn));
 	Shape->Modify();
 	Shape->SetShapeType(FZoneShapeType::Spline);
 	Shape->SetCommonLaneProfile(FZoneLaneProfileRef(*RoadProfile));
@@ -439,16 +469,7 @@ bool UTerritoryDefinitionEditorLibrary::EnsureStraightVehicleApproachRoad(
 	RoadGuide->SetStraightRoute(WorldSpawn, WorldDropOff);
 	RoadGuide->MarkPackageDirty();
 
-	if (World->GetSubsystem<UZoneGraphSubsystem>())
-	{
-		UE::ZoneGraphDelegates::OnZoneGraphRequestRebuild.Broadcast();
-	}
-	else
-	{
-		OutFailureReason = NSLOCTEXT("TerritoryEditor", "VehicleRoadSubsystemMissing",
-			"ZoneGraph subsystem is unavailable in this editor world.");
-		return false;
-	}
+	UE::ZoneGraphDelegates::OnZoneGraphRequestRebuild.Broadcast();
 	World->MarkPackageDirty();
 	return true;
 }

@@ -23,6 +23,7 @@
 #include "Navigation/TerritoryRoadGuide.h"
 #include "Music/TaggedMusicSet.h"
 #include "AI/NPCDefinition.h"
+#include "DialogueBlueprint.h"
 #include "AI/Activities/NPCGoalItem.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 #include "Components/ShapeComponent.h"
@@ -31,6 +32,8 @@
 #include "EngineUtils.h"
 #include "GameplayEffect.h"
 #include "GameplayTagContainer.h"
+#include "LevelSequence.h"
+#include "MovieScene.h"
 #include "GAS/NarrativeAttributeSetBase.h"
 #include "Misc/DataValidation.h"
 #include "NarrativeGameplayTags.h"
@@ -39,6 +42,8 @@
 #include "Tales/Quest.h"
 #include "Tales/QuestSM.h"
 #include "Tales/QuestTask.h"
+#include "Tales/Dialogue.h"
+#include "Tales/NarrativeDialogueSequence.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryStoryEvents.h"
@@ -46,9 +51,68 @@
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "WorldPartition/WorldPartitionHandle.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
+#include "Tracks/MovieSceneSpawnTrack.h"
 
 namespace
 {
+	bool IsTerritoryStoryCaptureAsset(const FAssetData& AssetData)
+	{
+		return AssetData.PackageName.ToString().StartsWith(
+			TEXT("/Game/TerritoryFramework/StoryCapture/"));
+	}
+
+	void ValidateDialogueShot(const UNarrativeDialogueSequence* Shot,
+		const FString& Context, TSet<const UNarrativeDialogueSequence*>& Visited,
+		TArray<FString>& OutErrors)
+	{
+		if (!Shot || Visited.Contains(Shot)) return;
+		Visited.Add(Shot);
+
+		const TArray<ULevelSequence*> Sequences = Shot->GetSequenceAssets();
+		if (Sequences.IsEmpty())
+		{
+			OutErrors.Add(FString::Printf(
+				TEXT("%s has no Level Sequence; Narrative cannot create a camera cut"),
+				*Context));
+			return;
+		}
+		for (int32 Index = 0; Index < Sequences.Num(); ++Index)
+		{
+			const ULevelSequence* Sequence = Sequences[Index];
+			if (!Sequence)
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("%s contains an empty Level Sequence entry at index %d"),
+					*Context, Index));
+				continue;
+			}
+			if (Sequence->FindBindingsByTag(TEXT("Cinecam")).IsEmpty())
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("%s sequence %s has no binding tagged Cinecam; Narrative focus, crop, and Territory lens settings cannot be applied"),
+					*Context, *Sequence->GetName()));
+			}
+			else if (UMovieScene* MovieScene = const_cast<UMovieScene*>(
+				Sequence->GetMovieScene()))
+			{
+				for (const FMovieSceneObjectBindingID& Binding :
+					Sequence->FindBindingsByTag(TEXT("Cinecam")))
+				{
+					const FGuid Guid = Binding.GetGuid();
+					const UMovieSceneSpawnTrack* SpawnTrack =
+						MovieScene->FindTrack<UMovieSceneSpawnTrack>(Guid);
+					if (!MovieScene->FindSpawnable(Guid) || !SpawnTrack
+						|| SpawnTrack->GetAllSections().IsEmpty())
+					{
+						OutErrors.Add(FString::Printf(
+							TEXT("%s sequence %s Cinecam must be a spawnable with an explicit non-empty Spawn track; otherwise Narrative can bind a camera cut without creating the camera"),
+							*Context, *Sequence->GetName()));
+					}
+				}
+			}
+		}
+	}
+
 	bool IsTerritoryNarrativeTask(const UNarrativeTask* Task)
 	{
 		for (const UClass* Class = Task ? Task->GetClass() : nullptr;
@@ -145,7 +209,13 @@ namespace
 			}
 		}
 
-		if (Force.PowerScalingMagnitudePerEnemyLevel > 0.f)
+		if (!FMath::IsFinite(Force.PowerScalingMagnitudePerEnemyLevel)
+			|| Force.PowerScalingMagnitudePerEnemyLevel < 0.f)
+		{
+			Error(FString::Printf(TEXT("counterattack force %s Attack Damage per level must be finite and non-negative"),
+				*FactionName));
+		}
+		else if (Force.PowerScalingMagnitudePerEnemyLevel > 0.f)
 		{
 			if (!Force.PowerScalingEffect)
 			{
@@ -160,7 +230,7 @@ namespace
 		}
 
 		if (Force.PowerScalingEffect
-			&& Force.PowerScalingMagnitudePerEnemyLevel <= 0.f)
+			&& FMath::IsNearlyZero(Force.PowerScalingMagnitudePerEnemyLevel))
 		{
 			Warning(FString::Printf(TEXT("counterattack force %s uses only the Gameplay Effect level curve; verify the effect does not require SetByCaller.AttackDamage"),
 				*FactionName));
@@ -444,6 +514,12 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 	(void)InAssetData;
 	(void)InContext;
 	if (!InAsset) return false;
+	if (IsTerritoryStoryCaptureAsset(InAssetData)
+		&& (InAsset->IsA(UNPCDefinition::StaticClass())
+			|| InAsset->IsA(UDialogueBlueprint::StaticClass())))
+	{
+		return true;
+	}
 
 	// Validate any level/world that contains territory actors
 	if (ULevel* Level = Cast<ULevel>(InAsset))
@@ -610,6 +686,29 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 	else if (UTerritoryStealthProfile* StealthProfile = Cast<UTerritoryStealthProfile>(InAsset))
 	{
 		ValidateStealthProfile(StealthProfile, TEXT("Stealth profile"), Errors);
+	}
+	else if (UDialogueBlueprint* DialogueBlueprint = Cast<UDialogueBlueprint>(InAsset))
+	{
+		ValidateDialogue(DialogueBlueprint->DialogueTemplate, Errors, Warnings);
+	}
+	else if (UNPCDefinition* NPCDefinition = Cast<UNPCDefinition>(InAsset))
+	{
+		const FSoftObjectPath AppearancePath =
+			NPCDefinition->DefaultAppearance.ToSoftObjectPath();
+		if (AppearancePath.IsNull())
+		{
+			Errors.Add(TEXT("Story NPC has no Narrative Character Appearance"));
+		}
+		else if (AppearancePath.GetLongPackageName().Contains(TEXT("/Mannequin/")))
+		{
+			Warnings.Add(FString::Printf(
+				TEXT("Story NPC uses prototype Narrative mannequin appearance %s; mesh/card hair cannot receive MetaHuman Groom quality—replace it with an authored cinematic appearance or MetaHuman-compatible NPC visual"),
+				*AppearancePath.ToString()));
+		}
+		if (NPCDefinition->Dialogue.IsNull())
+		{
+			Warnings.Add(TEXT("Story NPC has no default Narrative dialogue"));
+		}
 	}
 	else if (UQuestBlueprint* QuestBlueprint = Cast<UQuestBlueprint>(InAsset))
 	{
@@ -1083,6 +1182,67 @@ bool UTerritoryDataValidator::ValidateQuest(UQuestBlueprint* QuestBlueprint,
 		}
 	}
 
+	return OutErrors.IsEmpty();
+}
+
+bool UTerritoryDataValidator::ValidateDialogue(UDialogue* Dialogue,
+	TArray<FString>& OutErrors, TArray<FString>& OutWarnings)
+{
+	if (!Dialogue)
+	{
+		OutErrors.Add(TEXT("Narrative dialogue has no template object"));
+		return false;
+	}
+
+	TSet<const UNarrativeDialogueSequence*> VisitedShots;
+	bool bHasAnyShot = Dialogue->DefaultDialogueShot != nullptr;
+	ValidateDialogueShot(Dialogue->DefaultDialogueShot,
+		TEXT("Default dialogue shot"), VisitedShots, OutErrors);
+
+	for (const FSpeakerInfo& Speaker : Dialogue->Speakers)
+	{
+		bHasAnyShot |= Speaker.DefaultSpeakerShot != nullptr;
+		ValidateDialogueShot(Speaker.DefaultSpeakerShot,
+			FString::Printf(TEXT("Speaker %s default shot"),
+				*Speaker.GetSpeakerID().ToString()), VisitedShots, OutErrors);
+	}
+	bHasAnyShot |= Dialogue->PlayerSpeakerInfo.DefaultSpeakerShot != nullptr;
+	bHasAnyShot |= Dialogue->PlayerSpeakerInfo.SelectingReplyShot != nullptr;
+	ValidateDialogueShot(Dialogue->PlayerSpeakerInfo.DefaultSpeakerShot,
+		TEXT("Player default shot"), VisitedShots, OutErrors);
+	ValidateDialogueShot(Dialogue->PlayerSpeakerInfo.SelectingReplyShot,
+		TEXT("Player reply-selection shot"), VisitedShots, OutErrors);
+
+	for (const UDialogueNode* Node : Dialogue->GetNodes())
+	{
+		if (!Node) continue;
+		const FString NodeContext = FString::Printf(TEXT("Dialogue node %s"),
+			*Node->GetName());
+		bHasAnyShot |= Node->Line.Shot != nullptr;
+		ValidateDialogueShot(Node->Line.Shot, NodeContext,
+			VisitedShots, OutErrors);
+		for (int32 LineIndex = 0; LineIndex < Node->AlternativeLines.Num(); ++LineIndex)
+		{
+			const FDialogueLine& Line = Node->AlternativeLines[LineIndex];
+			bHasAnyShot |= Line.Shot != nullptr;
+			ValidateDialogueShot(Line.Shot,
+				FString::Printf(TEXT("%s alternative line %d"),
+					*NodeContext, LineIndex), VisitedShots, OutErrors);
+		}
+	}
+
+	if (!bHasAnyShot)
+	{
+		OutWarnings.Add(TEXT("Dialogue has no default, speaker, reply-selection, or line shot; it will retain gameplay framing and HUD instead of a controlled cinematic camera"));
+	}
+	if (!Dialogue->bFreeMovement && !Dialogue->bAutoStopMovement)
+	{
+		OutWarnings.Add(TEXT("Cinematic dialogue does not auto-stop participant movement; anchored shots can drift out of composition"));
+	}
+	if (Dialogue->DialogueBlendOutTime <= 0.f)
+	{
+		OutWarnings.Add(TEXT("Dialogue blend-out time is zero; the final shot will hard-cut to gameplay camera"));
+	}
 	return OutErrors.IsEmpty();
 }
 

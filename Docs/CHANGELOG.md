@@ -1,5 +1,71 @@
 # Changelog
 
+## Unreleased — 2026-09-03 (AAA dialogue shots, retaliation repair, and HDR scene maker)
+
+- Fixed Claimed-entry retaliation authoring so a `Wave of Enemies` row establishes owner-versus-
+  attacker **War before the Wave**, and does not apply that War merely because a campaign starts in
+  Claimed. Ordinary Claimed rows still normalize to peace. The Blacksmith Definition was migrated
+  to this exact event order, resolving the runtime “diplomacy does not permit ... requires War”
+  rejection.
+- Added an idempotent seven-shot Narrative dialogue pack generator: Establishing, Two Shot,
+  Over Shoulder, Medium Close-Up, Close-Up, Reaction, and Insert. Every Level Sequence now owns a
+  tagged Cinecam spawnable, explicit full-range Spawn track, static transform, full-range Camera
+  Cut, manual focus, smoothed focus, lens/aperture preset, and indexed best-use guidance.
+- Extended Story Capture validation to reject a Dialogue shot whose Cinecam tag is not a spawnable
+  with a non-empty explicit Spawn track, preventing Narrative from selecting a camera cut while no
+  camera is spawned.
+- Added the Editor Utility Blueprint API `Create Or Update Territory AAA HDR Scene`. It reuses or
+  creates Narrative Pro's Ultra Dynamic Sky bridge, a tagged unbound Lumen Post Process Volume,
+  Balanced/Performance/AAA Cinematic presets, and a read-only unique loaded-resource memory
+  estimate with top offenders and an artist-defined budget.
+- Extended the HDR Scene Maker with neutral white balance, restrained global saturation/contrast,
+  grain, chromatic-aberration and motion-blur controls; every option has safe ranges and production
+  guidance. Existing Editor Utility Blueprints remain source-compatible.
+- Added the read-only `Audit Territory AAA HDR Scene` node and automatic post-build audit. It
+  returns structured pass/advisory/warning/error items for Narrative UDS uniqueness, tagged and
+  competing unbound post processes, Lumen, Mesh Distance Fields, Virtual Shadow Maps, extended
+  EV100, TSR, Nanite, texture streaming, ray-tracing geometry budget, and loaded-scene resources.
+  Interactive runs now publish the summary as an editor notification and full findings to Output
+  Log, so an EUB does not need custom report-printing nodes.
+- Raised the project ray-tracing resident geometry pool from UE's 400 MiB default to a conservative
+  512 MiB after the live viewport requested roughly 406 MiB. The 23 GiB RTX 4090 target has ample
+  headroom, while the audit still requires profiling before any further increase.
+- Verified the HDR tool against `HopDistrictTest` without saving the map: Narrative UDS and the
+  post-process actor resolved, 1,407 unique loaded assets were analyzed at an estimated 1,185.27
+  MiB, and the 4,096 MiB provisional budget was not exceeded.
+- Re-audited Narrative's Open World demo Dialogue and Quest assets as read-only references. They
+  demonstrate Narrative Quest-owned NPC goals and move-to-destination behavior, but contain no car,
+  seat, mount, driving, or vehicle-ability graph. Territory vehicle assaults therefore remain
+  aligned to the actual Narrative public contracts (`ANarrativeVehicleBase`, `UMountComponent`,
+  interaction slots, NPC Activity goals, and Narrative ASC health/damage) rather than copying a
+  non-existent demo vehicle flow.
+- Passed a clean non-hot-reload UE 5.7 `TDAEditor` Development build and all 204
+  `TerritoryFramework.*` automation tests (198 clean, 6 successful warning fixtures, 0 failed or
+  skipped). Cold asset verification passed all seven Spawn tracks and the Blacksmith Dialogue shot.
+
+## Unreleased — 2026-09-03 (Narrative damage and dual-target re-audit)
+
+- Removed Territory's legacy guard `TakeDamage` observer. Guard kill attribution now listens to
+  Narrative ASC `OnDamagedBy`, records only positive accepted Gameplay Effect damage, and clears
+  stale opponent credit for self-authored damage. Narrative remains the sole Health,
+  invulnerability, and death authority.
+- Hardened Community Combat Progress Tasks against provider replacement and pawn/controller/
+  PlayerState representation changes by unbinding stale subjects and matching Narrative ASC
+  identity.
+- Routed counterattack power scaling through the shared Narrative adapter and made a configured
+  scaling effect fail deployment when no Narrative ASC or valid effect spec exists. Non-finite and
+  negative Attack Damage-per-level values are now invalid authoring data.
+- Made the Attack Damage editor alignment helper reject `/NarrativePro` assets. Authors must use a
+  project-owned Gameplay Effect child or copy, preserving the vendor read-only boundary.
+- Refactored the straight vehicle-road helper to validate its Blueprint class, route length,
+  subsystem, and existing shape before mutation, with cleanup for creation failure so editor
+  errors cannot leave partial road actors.
+- Fixed non-editor include-boundary failures for Gameplay Effect subclasses and Gameplay Debugger
+  player-controller conversion that unity/editor builds could mask.
+- Passed UE 5.7 Game and Editor Development targets, UHT warnings-as-errors, both editor module
+  links, and all 200 `TerritoryFramework.*` automation tests (194 clean, 6 successful
+  warning-producing fixtures, 0 failed or skipped).
+
 ## Unreleased — 2026-09-03 (Release persistence and packaged multiplayer gates)
 
 - Fixed real save-slot persistence for nested WorldState data. Economy snapshots, transaction

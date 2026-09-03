@@ -1,16 +1,22 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include <limits>
+
 #include "Misc/AutomationTest.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AI/NPCDefinition.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Cinematics/TerritoryDialogueShot.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryStealthProfile.h"
 #include "DataValidation/TerritoryDataValidator.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "TerritoryDefinitionEditorLibrary.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "Economy/TerritoryProductionTags.h"
 #include "Items/NarrativeItem.h"
@@ -18,13 +24,16 @@
 #include "Misc/PackageName.h"
 #include "GameplayEffect.h"
 #include "Music/TaggedMusicSet.h"
+#include "Navigation/TerritoryRoadGuide.h"
 #include "QuestBlueprint.h"
 #include "Tales/Quest.h"
+#include "Tales/Dialogue.h"
 #include "Tales/QuestSM.h"
 #include "Tales/TerritoryCaptureTask.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "ZoneShapeActor.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectNPCDefinitionIdentityRegression,
 	"TerritoryFramework.Editor.Identity.ProjectNPCDefinitionsUseDistinctGuids",
@@ -194,6 +203,18 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Duplicate power tag emits an error"),
 		DuplicatePowerTierContext.GetNumErrors() > 0u);
 	Force.PlayerPowerTiers.Reset();
+	Force.PowerScalingMagnitudePerEnemyLevel =
+		std::numeric_limits<float>::quiet_NaN();
+	Profile->FactionForces = {Force};
+	FDataValidationContext NonFiniteDamageScalingContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("Adaptive scaling rejects non-finite Narrative Attack Damage"),
+		Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Profile, NonFiniteDamageScalingContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("Non-finite Narrative Attack Damage emits an error"),
+		NonFiniteDamageScalingContext.GetNumErrors() > 0u);
+	Force.PowerScalingMagnitudePerEnemyLevel = 0.f;
 	Force.bScaleLevelToRelevantPlayerPower = false;
 	Profile->FactionForces = {Force};
 
@@ -563,6 +584,116 @@ bool FTFTerritoryQuestTerminalStateValidation::RunTest(const FString& Parameters
 	Warnings.Reset();
 	TestTrue(TEXT("A Regular intermediate state followed by one final Success is valid"),
 		UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFNarrativeDamageEditorBoundary,
+	"TerritoryFramework.Editor.Narrative.DamageAlignmentRejectsVendorMutation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFNarrativeDamageEditorBoundary::RunTest(const FString& Parameters)
+{
+	UClass* NarrativeDamageEffect = LoadClass<UGameplayEffect>(nullptr,
+		TEXT("/NarrativePro/Pro/Core/Abilities/GameplayEffects/GE_Damage_SetByCaller.GE_Damage_SetByCaller_C"));
+	TestNotNull(TEXT("Narrative canonical damage effect is available"),
+		NarrativeDamageEffect);
+	if (!NarrativeDamageEffect) return false;
+
+	FText FailureReason;
+	TestFalse(TEXT("Territory editor helper refuses to mutate Narrative Pro content"),
+		UTerritoryDefinitionEditorLibrary::AlignAttackDamageEffectWithNarrativePro(
+			NarrativeDamageEffect, FailureReason));
+	TestTrue(TEXT("Vendor-boundary failure tells the author to use project content"),
+		FailureReason.ToString().Contains(TEXT("Narrative Pro")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFNarrativeDialogueCinematicValidation,
+	"TerritoryFramework.Editor.DataValidation.NarrativeDialogueCinematicCoverage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFNarrativeDialogueCinematicValidation::RunTest(const FString& Parameters)
+{
+	UDialogue* Dialogue = NewObject<UDialogue>();
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	TestTrue(TEXT("A shotless dialogue remains loadable but reports authoring warnings"),
+		UTerritoryDataValidator::ValidateDialogue(Dialogue, Errors, Warnings));
+	TestTrue(TEXT("Shotless dialogue explains gameplay-camera fallback"),
+		Warnings.ContainsByPredicate([](const FString& Warning)
+		{
+			return Warning.Contains(TEXT("no default, speaker"));
+		}));
+
+	Dialogue->DefaultDialogueShot = NewObject<UTerritoryDialogueShot>(Dialogue);
+	Errors.Reset();
+	Warnings.Reset();
+	TestFalse(TEXT("A configured shot without a Level Sequence is invalid"),
+		UTerritoryDataValidator::ValidateDialogue(Dialogue, Errors, Warnings));
+	TestTrue(TEXT("Missing shot sequence produces an actionable validation error"),
+		Errors.ContainsByPredicate([](const FString& Error)
+		{
+			return Error.Contains(TEXT("no Level Sequence"));
+		}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFVehicleRoadPreflightIsNonMutating,
+	"TerritoryFramework.Editor.Roads.InvalidRoutePreflightDoesNotMutateWorld",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFVehicleRoadPreflightIsNonMutating::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::EditorPreview, false);
+	if (!TestNotNull(TEXT("Vehicle road editor world exists"), World)) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryProperty* Territory = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryRoadGuide* ExistingGuide = World->SpawnActor<ATerritoryRoadGuide>(
+		ATerritoryRoadGuide::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Vehicle road Territory exists"), Territory)
+		|| !TestNotNull(TEXT("Existing road guide exists"), ExistingGuide))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FName ApproachID(TEXT("TooShortRoad"));
+	UTerritoryPlaceDefinition* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Definition->StableTerritoryGUID = FGuid(1, 2, 3, 4);
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	FTerritoryAssaultApproach Approach;
+	Approach.ApproachID = ApproachID;
+	Approach.EntryType = ETerritoryAssaultEntryType::NarrativeVehicle;
+	Approach.RelativeSpawnTransform = FTransform(FVector::ZeroVector);
+	Approach.RelativeVehicleDropOffTransform = FTransform(FVector(50.f, 0.f, 0.f));
+	Definition->CounterAttackApproaches.Add(Approach);
+	TestTrue(TEXT("Vehicle road fixture Definition applies"),
+		Definition->ApplyToTerritory(Territory));
+
+	const FName StableTag(*FString::Printf(TEXT("TerritoryVehicleRoad_%s_%s"),
+		*Territory->GetTerritoryGUID().ToString(EGuidFormats::Digits),
+		*ApproachID.ToString()));
+	ExistingGuide->Tags.Add(StableTag);
+	int32 ShapesBefore = 0;
+	for (TActorIterator<AZoneShape> It(World); It; ++It) ++ShapesBefore;
+
+	FText FailureReason;
+	TestFalse(TEXT("A route shorter than 100 cm is rejected"),
+		UTerritoryDefinitionEditorLibrary::EnsureStraightVehicleApproachRoad(
+			Territory, ApproachID, FailureReason));
+	TestTrue(TEXT("Failure is reported by route-length preflight"),
+		FailureReason.ToString().Contains(TEXT("100 cm")));
+	int32 ShapesAfter = 0;
+	for (TActorIterator<AZoneShape> It(World); It; ++It) ++ShapesAfter;
+	TestEqual(TEXT("Rejected preflight creates no partial ZoneShape actor"),
+		ShapesAfter, ShapesBefore);
+
+	World->DestroyWorld(false);
 	return true;
 }
 

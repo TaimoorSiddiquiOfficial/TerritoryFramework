@@ -4,6 +4,10 @@
 > **Scope:** Territory runtime C++, editor/Definition integration, Narrative Pro boundaries,
 > Blueprint API safety, save/replication read models, tests, documentation, and story readiness.
 
+> **2026-09-03 follow-up:** Narrative damage ownership, Game/Editor target boundaries, and editor
+> mutation safety were re-audited and remediated in
+> [Narrative damage and dual-target re-audit](NARRATIVE_DAMAGE_REAUDIT_2026-09-03.md).
+
 ## Decision
 
 The framework has a coherent architecture for starting game-story design. It is not yet a final
@@ -144,7 +148,8 @@ reported node using this table.
 | Project Blueprint/map reference scan for removed nodes | Passed; zero references |
 | Unreal Header Tool | Passed for Editor and Game targets |
 | UE 5.7 `TDAEditor` Development build | Passed |
-| Full `TerritoryFramework.*` automation | Passed: 197/197; 191 clean and 6 successful warning-producing fixtures |
+| Full `TerritoryFramework.*` automation | Passed: 200/200; 194 clean and 6 successful warning-producing fixtures |
+| UE 5.7 `TDA` Game Development build | Passed after explicit runtime include-boundary fixes |
 | Automation runtime-error scan | Passed: no failed tests, Blueprint Runtime Error, Accessed None, assertion, fatal, or Territory error |
 | UE 5.7 `TDAEditor` Development build | Passed after the final source changes |
 | Scoped Territory Blueprint compile | Passed: 69/69, zero compiler errors or warnings |

@@ -86,6 +86,30 @@ public:
 	FTerritoryNotificationSettings Notifications;
 
 	// ═══════════════════════════════════════════════════════════════════════════
+	// Narrative cinematic presentation
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	/** Keep Territory's passive capture card out of Narrative dialogue shots. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly,
+		Category="Territory|Presentation|Narrative Cinematics",
+		meta=(DisplayName="Hide Territory HUD During Narrative Dialogue"))
+	bool bHideTerritoryHUDDuringNarrativeDialogue = true;
+
+	/**
+	 * Temporarily requests LOD 0 for Narrative dialogue participants, including
+	 * MetaHuman LODSync and Groom components. Exact pre-dialogue values are restored.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly,
+		Category="Territory|Presentation|Narrative Cinematics",
+		meta=(DisplayName="Use Cinematic Participant LOD During Dialogue"))
+	bool bUseCinematicParticipantLODDuringDialogue = true;
+
+	/** Include attached visual actors when applying temporary dialogue LOD quality. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly,
+		Category="Territory|Presentation|Narrative Cinematics")
+	bool bIncludeAttachedActorsInCinematicLOD = true;
+
+	// ═══════════════════════════════════════════════════════════════════════════
 	// Economy
 	// ═══════════════════════════════════════════════════════════════════════════
 

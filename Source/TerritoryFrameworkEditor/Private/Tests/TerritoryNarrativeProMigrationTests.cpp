@@ -435,6 +435,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackMapConfigurationRegression,
 
 bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Parameters)
 {
+	using namespace TerritoryNarrativeMigrationTests;
+
 	if (!FPackageName::DoesPackageExist(TEXT("/Game/HopDistrictTest")))
 	{
 		AddInfo(TEXT("Skipped optional TDA counterattack map fixture; /Game/HopDistrictTest is not installed."));
@@ -680,9 +682,9 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	{
 		TestEqual(TEXT("Claimed diplomacy executes from the live Blacksmith actor"),
 			ClaimedDiplomacyEvent->GetOuter(), static_cast<UObject*>(Blacksmith));
-		TestEqual(TEXT("Claimed entry keeps Heroes and Bandits Neutral"),
-			ClaimedDiplomacyEvent->NewState, EDiplomacyState::None);
-		TestTrue(TEXT("Claimed diplomacy policy applies on a fresh already-active state"),
+		TestEqual(TEXT("Claimed retaliation keeps Heroes and Bandits at War"),
+			ClaimedDiplomacyEvent->NewState, EDiplomacyState::War);
+		TestFalse(TEXT("Transition-only retaliation War does not apply merely because a fresh map starts Claimed"),
 			ClaimedDiplomacyEvent->bApplyWhenStateStartsActive);
 		TestEqual(TEXT("Claimed diplomacy first party follows the current owner"),
 			ClaimedDiplomacyEvent->FactionASource,
@@ -727,6 +729,13 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	TestNotNull(TEXT("Blacksmith Claimed state schedules its finite enemy wave"), WaveEvent);
 	if (WaveEvent)
 	{
+		const int32 DiplomacyIndex = ClaimedConfig
+			? ClaimedConfig->EntryEvents.IndexOfByKey(ClaimedDiplomacyEvent) : INDEX_NONE;
+		const int32 WaveIndex = ClaimedConfig
+			? ClaimedConfig->EntryEvents.IndexOfByKey(WaveEvent) : INDEX_NONE;
+		TestTrue(TEXT("Claimed retaliation establishes War before scheduling its wave"),
+			DiplomacyIndex != INDEX_NONE && WaveIndex != INDEX_NONE
+			&& DiplomacyIndex < WaveIndex);
 		TestEqual(TEXT("Claimed wave executes from the live Blacksmith actor"),
 			WaveEvent->GetOuter(), static_cast<UObject*>(Blacksmith));
 		TestEqual(TEXT("Claimed wave targets Blacksmith"), WaveEvent->TargetTerritory.ToString(),

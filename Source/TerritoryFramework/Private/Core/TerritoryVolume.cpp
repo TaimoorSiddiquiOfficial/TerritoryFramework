@@ -2296,7 +2296,8 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	RefreshGarrisonSnapshot();
 
 	// Determine the killer from the guard's tracked last damaging instigator.
-	// This is populated by ATerritoryGuardCharacter::TakeDamage.
+	// This is populated only after Narrative's ASC reports positive Gameplay
+	// Effect damage, so invulnerable/blocked hits cannot become kill credit.
 	AActor* Killer = nullptr;
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
 	{

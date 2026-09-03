@@ -305,14 +305,22 @@ protected:
 	// Prevent Narrative save system from restoring stale guards on load.
 	virtual bool ShouldRespawn_Implementation() const override;
 
-	virtual float TakeDamage(float Damage, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser) override;
-
 public:
-	/** Most recent actor that dealt damage to this guard. Used by OnGuardKilled to provide the killer. */
-	UPROPERTY(BlueprintReadOnly, Category = "Territory|Guard")
+	/**
+	 * Most recent Narrative ASC avatar that dealt positive Gameplay Effect damage.
+	 * This is an observer cache for story context; Narrative remains the damage,
+	 * Health, invulnerability, and death authority.
+	 */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Territory|Guard")
 	TWeakObjectPtr<AActor> LastDamagingInstigator;
 
 private:
+	UFUNCTION()
+	void HandleNarrativeDamagedBy(
+		UNarrativeAbilitySystemComponent* DamageCauserASC,
+		const float Damage,
+		const FGameplayEffectSpec& DamageEffectSpec);
+
 	void ApplyGuardBehaviorFromTerritoryDefinition();
 	void TryWieldDefaultWeapon();
 	TArray<FTerritoryPatrolNode> BuildStaggeredPatrolRoute() const;

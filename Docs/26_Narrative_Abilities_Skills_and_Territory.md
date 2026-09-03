@@ -27,6 +27,31 @@ driving. A Territory Gameplay Event therefore goes directly through the resolved
 and uses its current avatar as the event target. This prevents Controller-based AI, dialogue, or
 quest callbacks from silently losing the event.
 
+## Damage authority and Territory observers
+
+Narrative Pro is the only combat-damage authority. An attack Gameplay Ability produces the
+configured Narrative Gameplay Effect; the effect writes Narrative's `Damage` meta attribute,
+invulnerability is checked, Health is reduced, and the Narrative Ability System broadcasts
+`OnDamagedBy`/`OnDealtDamage` before its normal death state and death event. Territory does not
+call Unreal's separate `ApplyDamage`/`TakeDamage` path and never writes Health directly.
+
+Territory observes those Narrative delegates for quest progress and story context:
+
+- a guard records the source Narrative ASC avatar only after positive accepted damage, so blocked,
+  invulnerable, and zero-damage hits cannot receive kill credit;
+- self-authored damage clears stale opponent credit;
+- Combat Progress Tasks compare Narrative ASC identity, so a pawn, controller, PlayerState, or
+  temporarily possessed vehicle can still describe the same combatant; and
+- Narrative's death delegate remains the only signal that removes a defender and fires Territory
+  guard-death story events.
+
+Adaptive counterattack scaling is capability scaling, not a second damage implementation. A
+project-owned Gameplay Effect modifies Narrative `AttackDamage` through the canonical
+`SetByCaller.AttackDamage` tag. Runtime refuses a configured scaler when the participant has no
+Narrative ASC or the effect spec cannot be created. Editor validation rejects non-finite/negative
+magnitudes and effects without the canonical modifier. The alignment helper refuses every asset
+inside `/NarrativePro`; create a project-owned child or copy instead.
+
 State Config Entry and Exit Events remain the reusable authoring layer for state-dependent
 abilities and effects. Territory does not add a second state-profile authority. Easy example:
 the Blacksmith Claimed Entry row may apply a Narrative effect, while its Claimed Exit row removes
@@ -185,8 +210,8 @@ Territory Stealth Profile
 Editor validation rejects duplicate/empty temporary effect rows and Instant Gameplay Effects in
 `Stealth Gameplay Effects To Remove`; an Instant effect has no active handle that exposure can
 remove. Adaptive counterattack validation also rejects duplicate power-tier tags, non-positive
-power levels, inverted enemy-level ranges, and an Attack Damage magnitude without the canonical
-Narrative `SetByCaller.AttackDamage` modifier.
+power levels, inverted enemy-level ranges, non-finite/negative Attack Damage scaling, and a
+positive magnitude without the canonical Narrative `SetByCaller.AttackDamage` modifier.
 
 ## Capture and fight requirement
 

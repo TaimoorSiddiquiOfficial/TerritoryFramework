@@ -83,9 +83,16 @@ void UTerritoryCombatProgressTask::BindSubject(AActor* Subject)
 {
 	UNarrativeAbilitySystemComponent* AbilitySystem =
 		ResolveNarrativeAbilitySystem(Subject);
-	if (!Subject || !AbilitySystem
-		|| (CachedSubject.Get() == Subject
-			&& CachedAbilitySystem.Get() == AbilitySystem)) return;
+	if (!Subject || !AbilitySystem)
+	{
+		// A provider may deliberately replace its actor while a quest is active.
+		// Never keep counting the previous actor when the replacement has no live
+		// Narrative ASC yet; the normal task tick will bind it when ready.
+		UnbindSubject();
+		return;
+	}
+	if (CachedSubject.Get() == Subject
+		&& CachedAbilitySystem.Get() == AbilitySystem) return;
 
 	UnbindSubject();
 	CachedSubject = Subject;
@@ -129,6 +136,14 @@ bool UTerritoryCombatProgressTask::MatchesCounterparty(
 	const AActor* Expected = CachedCounterparty.IsValid()
 		? CachedCounterparty.Get() : ResolveCounterparty();
 	if (!Expected || !Other) return false;
+	if (const UNarrativeAbilitySystemComponent* ExpectedAbilitySystem =
+		ResolveNarrativeAbilitySystem(const_cast<AActor*>(Expected)))
+	{
+		// Providers may yield a Pawn, Controller, or PlayerState for the same
+		// Narrative combatant. ASC identity is the stable comparison across those
+		// representations and while the player possesses a vehicle.
+		return ExpectedAbilitySystem == Other;
+	}
 	const AActor* Avatar = Other->GetAvatarActor();
 	const AActor* Owner = Other->GetOwnerActor();
 	return Expected == Avatar || Expected == Owner;

@@ -18,6 +18,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 		{
 			"UnrealEd",
 			"AssetTools",
+			"AssetRegistry",
 			"ApplicationCore",
 			"Slate",
 			"SlateCore",
@@ -28,7 +29,12 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"GameplayTags",
 			"NavigationSystem",
 			"NarrativeArsenal",
+			"NarrativeDialogueEditor",
 			"NarrativeQuestEditor",
+			"LevelSequence",
+			"MovieScene",
+			"MovieSceneTracks",
+			"CinematicCamera",
 			"ZoneGraph",
 			"MassSpawner",
 			"MassEntity"

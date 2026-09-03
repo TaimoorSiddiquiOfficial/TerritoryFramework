@@ -21,8 +21,8 @@ void UTerritoryOwnerHandoverEvent::ExecuteEvent_Implementation(APawn* Target,
 	}
 
 	// A defender death is allowed to have no Narrative target. This happens for
-	// environment kills, Instakill, and some GAS effects which do not pass through
-	// AActor::TakeDamage (so the Territory cannot recover a last damaging pawn).
+	// environment kills, Instakill, and effects without a source Narrative ASC, so
+	// the Territory may legitimately have no damaging Narrative avatar to supply.
 	// The handover belongs to the Territory/spawner, not to the killer, therefore
 	// never make world resolution depend on a player context being present.
 	UWorld* World = TerritoryTales::ResolveWorld(

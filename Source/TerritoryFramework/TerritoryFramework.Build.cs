@@ -28,7 +28,9 @@ public class TerritoryFramework : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"CinematicCamera",
 			"DeveloperSettings",
+			"HairStrandsCore",
 			"ZoneGraph"
 		});
 

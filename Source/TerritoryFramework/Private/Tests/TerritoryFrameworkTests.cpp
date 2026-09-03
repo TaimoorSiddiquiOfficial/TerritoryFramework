@@ -6007,6 +6007,68 @@ bool FTFGuardExternalEndPlayCleanup::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardNarrativeDamageAttribution,
+	"TerritoryFramework.Guards.Regression.NarrativeDamageOwnsKillAttribution",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFGuardNarrativeDamageAttribution::RunTest(const FString& Parameters)
+{
+	AddExpectedError(TEXT("cant grant abilities on"),
+		EAutomationExpectedErrorFlags::Contains, 2);
+
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Narrative damage attribution world exists"), World))
+	{
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+	WorldContext.SetCurrentWorld(World);
+	World->InitializeActorsForPlay(FURL());
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryGuardCharacter* Victim = World->SpawnActor<ATerritoryGuardCharacter>(
+		ATerritoryGuardCharacter::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryGuardCharacter* Damager = World->SpawnActor<ATerritoryGuardCharacter>(
+		ATerritoryGuardCharacter::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Victim guard exists"), Victim)
+		|| !TestNotNull(TEXT("Damager guard exists"), Damager))
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+	if (!Victim->HasActorBegunPlay()) Victim->DispatchBeginPlay();
+	if (!Damager->HasActorBegunPlay()) Damager->DispatchBeginPlay();
+
+	UNarrativeAbilitySystemComponent* VictimASC =
+		Victim->GetNarrativeAbilitySystemComponent();
+	UNarrativeAbilitySystemComponent* DamagerASC =
+		Damager->GetNarrativeAbilitySystemComponent();
+	TestNotNull(TEXT("Victim uses Narrative ASC"), VictimASC);
+	TestNotNull(TEXT("Damager uses Narrative ASC"), DamagerASC);
+	if (VictimASC && DamagerASC)
+	{
+		FGameplayEffectSpec DamageSpec;
+		VictimASC->DamagedBy(DamagerASC, 17.f, DamageSpec);
+		TestEqual(TEXT("Positive Narrative damage records the source ASC avatar"),
+			Victim->LastDamagingInstigator.Get(), static_cast<AActor*>(Damager));
+
+		VictimASC->DamagedBy(DamagerASC, 0.f, DamageSpec);
+		TestEqual(TEXT("Zero Narrative damage cannot replace kill attribution"),
+			Victim->LastDamagingInstigator.Get(), static_cast<AActor*>(Damager));
+
+		VictimASC->DamagedBy(VictimASC, 5.f, DamageSpec);
+		TestNull(TEXT("Self-authored Narrative damage clears stale opponent credit"),
+			Victim->LastDamagingInstigator.Get());
+	}
+
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFEspionageDeterministicDecision,
 	"TerritoryFramework.Intelligence.EspionageDeterministicSavedSequence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

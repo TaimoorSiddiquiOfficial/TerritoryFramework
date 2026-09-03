@@ -28,8 +28,17 @@
 - The Blacksmith visible PIE fixture has completed defender death, owner spawn, dialogue,
   faction handover, and its Narrative capture task exactly once.
 - Current-source verification on 2026-09-03 built the UE 5.7 `TDAEditor` Development target and
-  passed all 197 `TerritoryFramework.*` tests. The automation log contains no failed
+  passed all 204 `TerritoryFramework.*` tests. The automation log contains no failed
   test, Blueprint Runtime Error, Accessed None, assertion, fatal, or Territory error.
+- The reusable Narrative Dialogue AAA shot pack now supplies seven project-owned Level Sequences.
+  Every Cinecam is an explicit spawnable with a Spawn track and Camera Cut, and Story Capture
+  validation rejects incomplete camera bindings before runtime.
+- The Editor Utility Blueprint HDR Scene Maker configures the Narrative Ultra Dynamic Sky bridge,
+  a tagged Lumen Post Process Volume, quality presets, tooltip guidance, and a loaded-scene memory
+  estimate without changing global scalability, OS HDR output, or Narrative vendor assets. Its
+  final read-only audit now checks 15 scene/rendering contracts, detects competing unbound volumes,
+  publishes editor notifications, and reports the loaded map ready only when no warning or error
+  remains.
 - All nested active-assault, diplomacy, strategic-directory, economy, and evaluation fields now
   participate in Unreal's `SaveGame` archive. A packaged game created an active assault, saved it,
   reloaded it once, exited, and a second independent packaged process restored the same live
@@ -65,7 +74,7 @@ These are verification jobs, not permission to invent a second gameplay authorit
    described above. Still manual after the next package refresh: capture a Place, recruit one guard,
    patrol, resolve the assault, and observe exact-once capture/XP presentation on both clients.
 2. **Live save slot — passed.** A finite active assault survived save/reload once in-process and
-   restored once again after a complete packaged-process restart. The 197-test suite also covers
+   restored once again after a complete packaged-process restart. The 200-test suite also covers
    the nested archive contract.
 3. **World Partition map — fixture still required.** Stable identity and stream-safe actor cleanup
    are automated, but `HopDistrictTest` is not World Partition-enabled. A physical stream-out and

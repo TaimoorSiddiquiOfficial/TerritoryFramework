@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayEffect.h"
 #include "GameplayTagContainer.h"
 #include "Navigation/TerritoryRoadTypes.h"
 #include "UnrealFramework/NarrativeGameUserSettings.h"
@@ -9,7 +10,6 @@
 class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
-class UGameplayEffect;
 class ANarrativeVehicleBase;
 
 UENUM(BlueprintType)

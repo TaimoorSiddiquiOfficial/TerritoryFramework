@@ -5,6 +5,7 @@
 #include "Components/Border.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/TextBlock.h"
+#include "Cinematics/TerritoryCinematicPresentationSubsystem.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryInterfaces.h"
@@ -37,6 +38,14 @@ void UTerritoryHUDWidget::NativeConstruct()
 		FLinearColor(0.94f, 0.93f, 0.89f, 1.f));
 	if (APlayerController* PlayerController = GetOwningPlayer())
 	{
+		CinematicPresentation =
+			UTerritoryCinematicPresentationSubsystem::GetForPlayerController(
+				PlayerController);
+		if (CinematicPresentation.IsValid())
+		{
+			CinematicPresentation->OnPresentationChanged.AddUniqueDynamic(
+				this, &UTerritoryHUDWidget::HandleCinematicPresentationChanged);
+		}
 		ManagementComponent = UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);
 		if (ManagementComponent.IsValid())
 		{
@@ -51,10 +60,17 @@ void UTerritoryHUDWidget::NativeConstruct()
 	{
 		PlayAnimation(CaptureSignalIn);
 	}
+	// Apply Narrative suppression immediately even if no pawn/territory is bound yet.
+	RefreshTerritoryDisplay();
 }
 
 void UTerritoryHUDWidget::NativeDestruct()
 {
+	if (CinematicPresentation.IsValid())
+	{
+		CinematicPresentation->OnPresentationChanged.RemoveDynamic(
+			this, &UTerritoryHUDWidget::HandleCinematicPresentationChanged);
+	}
 	if (ManagementComponent.IsValid())
 	{
 		ManagementComponent->OnAssaultNotification.RemoveDynamic(
@@ -69,7 +85,7 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 {
 	// The capture card is passive gameplay information. Narrative Menu and Modal
 	// layers own full-screen interaction, so they always suppress it.
-	if (IsNarrativeMenuBlockingHUD())
+	if (IsNarrativePresentationBlockingHUD())
 	{
 		SetVisibility(ESlateVisibility::Collapsed);
 		return;
@@ -177,8 +193,20 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	LastObservedContestingFaction = ContestingFaction;
 }
 
-bool UTerritoryHUDWidget::IsNarrativeMenuBlockingHUD() const
+bool UTerritoryHUDWidget::IsNarrativePresentationBlockingHUD() const
 {
+	const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+	const UTerritoryCinematicPresentationSubsystem* Presentation =
+		CinematicPresentation.IsValid() ? CinematicPresentation.Get()
+		: UTerritoryCinematicPresentationSubsystem::GetForPlayerController(
+			GetOwningPlayer());
+	if (Settings && Settings->bHideTerritoryHUDDuringNarrativeDialogue
+		&& Presentation && Presentation->IsNarrativeCinematicActive())
+	{
+		return true;
+	}
+
 	const ANarrativePlayerController* NarrativeController =
 		Cast<ANarrativePlayerController>(GetOwningPlayer());
 	UNarrativeGameplayHUD* HUD = NarrativeController
@@ -192,6 +220,12 @@ bool UTerritoryHUDWidget::IsNarrativeMenuBlockingHUD() const
 		if (Layer && IsValid(Layer->GetActiveWidget())) return true;
 	}
 	return false;
+}
+
+void UTerritoryHUDWidget::HandleCinematicPresentationChanged(bool bIsActive)
+{
+	(void)bIsActive;
+	RefreshTerritoryDisplay();
 }
 
 void UTerritoryHUDWidget::HandleAssaultNotification(const FTerritoryAssaultRecord& Assault)

@@ -2028,24 +2028,41 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 	}
 	if (OverrideNarrativeLevel > 0 && ForceConfig.PowerScalingEffect)
 	{
-		if (UAbilitySystemComponent* ASC = Participant->GetAbilitySystemComponent())
+		UNarrativeAbilitySystemComponent* ASC =
+			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Participant);
+		if (!ASC)
 		{
-			FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
-			Context.AddSourceObject(this);
-			const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(
-				ForceConfig.PowerScalingEffect, OverrideNarrativeLevel, Context);
-			if (Spec.IsValid())
-			{
-				if (ForceConfig.PowerScalingMagnitudePerEnemyLevel > 0.f)
-				{
-					Spec.Data->SetSetByCallerMagnitude(
-						FNarrativeGameplayTags::Get().SetByCaller_AttackDamage,
-						static_cast<float>(FMath::Max(0, OverrideNarrativeLevel - 1))
-							* ForceConfig.PowerScalingMagnitudePerEnemyLevel);
-				}
-				ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
-			}
+			UE_LOG(LogTerritory, Error,
+				TEXT("Counterattack participant %s has no Narrative ASC for its configured power-scaling effect"),
+				*GetNameSafe(Participant));
+			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
+			Participant->Destroy();
+			return nullptr;
 		}
+
+		FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
+		Context.AddSourceObject(this);
+		const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(
+			ForceConfig.PowerScalingEffect, OverrideNarrativeLevel, Context);
+		if (!Spec.IsValid())
+		{
+			UE_LOG(LogTerritory, Error,
+				TEXT("Counterattack participant %s could not create configured Narrative power-scaling effect %s"),
+				*GetNameSafe(Participant),
+				*GetNameSafe(ForceConfig.PowerScalingEffect));
+			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
+			Participant->Destroy();
+			return nullptr;
+		}
+		if (FMath::IsFinite(ForceConfig.PowerScalingMagnitudePerEnemyLevel)
+			&& ForceConfig.PowerScalingMagnitudePerEnemyLevel > 0.f)
+		{
+			Spec.Data->SetSetByCallerMagnitude(
+				FNarrativeGameplayTags::Get().SetByCaller_AttackDamage,
+				static_cast<float>(FMath::Max(0, OverrideNarrativeLevel - 1))
+					* ForceConfig.PowerScalingMagnitudePerEnemyLevel);
+		}
+		ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
 	}
 
 	LiveParticipants.FindOrAdd(Assault.AssaultID).Add(Participant);

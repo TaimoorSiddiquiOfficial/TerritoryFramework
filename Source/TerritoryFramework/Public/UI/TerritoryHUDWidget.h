@@ -65,6 +65,7 @@ protected:
 
 private:
 	TWeakObjectPtr<class UTerritoryPlayerManagementComponent> ManagementComponent;
+	TWeakObjectPtr<class UTerritoryCinematicPresentationSubsystem> CinematicPresentation;
 	bool bHasObservedState = false;
 	ETerritoryState LastObservedState = ETerritoryState::Unclaimed;
 	FGameplayTag LastObservedContestingFaction;
@@ -75,6 +76,8 @@ private:
 	void HandleAssaultNotification(const FTerritoryAssaultRecord& Assault);
 	UFUNCTION()
 	void HandleCounterHappened(const FTerritoryCounterAttackStateEvent& Event);
+	UFUNCTION()
+	void HandleCinematicPresentationChanged(bool bIsActive);
 	void PresentCounterAttackAlert(const FText& AlertText, float Duration);
-	bool IsNarrativeMenuBlockingHUD() const;
+	bool IsNarrativePresentationBlockingHUD() const;
 };

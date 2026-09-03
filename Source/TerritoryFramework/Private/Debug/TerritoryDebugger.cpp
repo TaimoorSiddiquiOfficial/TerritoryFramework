@@ -10,6 +10,7 @@
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 
 namespace TerritoryDebugPrivate
 {

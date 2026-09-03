@@ -354,25 +354,37 @@ bool ATerritoryGuardCharacter::ShouldRespawn_Implementation() const
 	return false;
 }
 
-float ATerritoryGuardCharacter::TakeDamage(float Damage, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+void ATerritoryGuardCharacter::HandleNarrativeDamagedBy(
+	UNarrativeAbilitySystemComponent* DamageCauserASC, const float Damage,
+	const FGameplayEffectSpec& DamageEffectSpec)
 {
-	// P1-N14: Only update LastDamagingInstigator when actual damage is applied (> 0).
-	// When damage is fully absorbed (e.g. shield, invulnerability), we don't want
-	// to attribute a "last damager" that had zero effect.
-	const float ActualDamage = Super::TakeDamage(Damage, DamageEvent, EventInstigator, DamageCauser);
-	if (ActualDamage > 0.f)
+	if (!HasAuthority() || Damage <= 0.f || !DamageCauserASC)
 	{
-		if (EventInstigator && EventInstigator->GetPawn())
-		{
-			LastDamagingInstigator = EventInstigator->GetPawn();
-		}
-		else if (DamageCauser)
-		{
-			APawn* InstigatorPawn = DamageCauser->GetInstigator();
-			LastDamagingInstigator = InstigatorPawn ? InstigatorPawn : DamageCauser;
-		}
+		return;
 	}
-	return ActualDamage;
+
+	// Narrative's damage delegate is emitted only after its Damage meta-attribute
+	// passes invulnerability and removes real Health. Prefer the ASC avatar so a
+	// projectile, controller, PlayerState, or possessed vehicle still resolves to
+	// the gameplay character that owns the attack.
+	AActor* DamageInstigator = DamageCauserASC->GetAvatarActor();
+	if (!IsValid(DamageInstigator) || DamageInstigator->IsActorBeingDestroyed())
+	{
+		DamageInstigator = DamageCauserASC->GetOwnerActor();
+	}
+
+	// Fall damage and other self-authored Narrative effects must not preserve an
+	// earlier opponent as the killer.
+	if (!IsValid(DamageInstigator) || DamageInstigator == this
+		|| DamageCauserASC == GetNarrativeAbilitySystemComponent())
+	{
+		LastDamagingInstigator.Reset();
+	}
+	else
+	{
+		LastDamagingInstigator = DamageInstigator;
+	}
+	(void)DamageEffectSpec;
 }
 
 void ATerritoryGuardCharacter::BeginPlay()
@@ -382,6 +394,13 @@ void ATerritoryGuardCharacter::BeginPlay()
 
 	if (HasAuthority())
 	{
+		if (UNarrativeAbilitySystemComponent* AbilitySystem =
+			GetNarrativeAbilitySystemComponent())
+		{
+			AbilitySystem->OnDamagedBy.AddUniqueDynamic(
+				this, &ATerritoryGuardCharacter::HandleNarrativeDamagedBy);
+		}
+
 		ApplyGuardBehaviorFromTerritoryDefinition();
 		RefreshPatrolCrowdAvoidance();
 		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]()
@@ -410,6 +429,12 @@ void ATerritoryGuardCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 	GetWorldTimerManager().ClearTimer(CombatPriorityTimer);
 	RestoreClosestHostilePlayerPriority(false);
+	if (UNarrativeAbilitySystemComponent* AbilitySystem =
+		GetNarrativeAbilitySystemComponent())
+	{
+		AbilitySystem->OnDamagedBy.RemoveDynamic(
+			this, &ATerritoryGuardCharacter::HandleNarrativeDamagedBy);
+	}
 
 	// A guard can leave play without travelling through the Narrative death path
 	// (World Partition stream-out, a story script, or direct actor destruction).
