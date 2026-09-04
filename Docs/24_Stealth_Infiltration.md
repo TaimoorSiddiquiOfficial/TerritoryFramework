@@ -105,10 +105,16 @@ the guard cannot stage a natural investigation even when the evidence is valid.
 
 ## Throwable distractions
 
-Duplicate `BP_TerritoryDistractionProjectile`, or create a Blueprint child of
-`Territory Distraction Projectile`. The native base already provides a swept sphere collision root,
-projectile movement, bounce, replication, and the `Territory Distraction` component. Set the Visual
-mesh and tune the inherited components for a stone, bottle, or other prop.
+Grant `GA_TerritoryDistraction` to the Narrative character. The checked project gives it through
+the Blacksmith's first owned-Property benefit tier. It is a server-authoritative Narrative
+Gameplay Ability bound to `Narrative.Input.Throw`; the ability commits cost/cooldown, traces from
+the player's view (or AI aim), and spawns `BP_TerritoryDistractionProjectile` on the server.
+
+The projectile deliberately remains an Actor rather than pretending to be a Gameplay Ability. It
+is the replicated physical payload and provides swept sphere collision, projectile movement,
+bounce, owner/instigator collision filtering, and the `Territory Distraction` component. Duplicate
+the Blueprint or change `Projectile Class` on a child ability to create a stone, bottle, or other
+prop.
 
 For an existing Narrative projectile child that already has a valid swept collision root, add
 `Territory Distraction` directly. The component reports one tagged Narrative hearing stimulus on
@@ -121,6 +127,11 @@ its first blocking hit. Configure:
 For a quest-controlled distraction, call `Report Distraction At Location` on the server or use the
 `Report Territory Distraction` Narrative Event. A distraction raises suspicion but does not expose
 the player by itself.
+
+The ability sends `GameplayEvent.Distraction.Thrown` to its Narrative Ability System after a
+successful spawn. The projectile sends `GameplayEvent.Distraction.Impact` to its instigator after
+the first blocking hit, with loudness as the event magnitude. Those hooks let Narrative quests,
+effects, and conditions react without duplicating the physical throw or hearing logic.
 
 ## Quest conditions and events
 

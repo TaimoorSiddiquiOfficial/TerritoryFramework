@@ -16,3 +16,10 @@ FPrimaryAssetId UTerritoryStealthProfile::GetPrimaryAssetId() const
 {
 	return FPrimaryAssetId(TEXT("TerritoryStealthProfile"), GetFName());
 }
+
+FGameplayTag UTerritoryStealthProfile::GetEffectiveBreakStealthGameplayEventTag() const
+{
+	return BreakStealthGameplayEventTag.IsValid()
+		? BreakStealthGameplayEventTag
+		: TerritoryStealthTags::Exposed.GetTag();
+}

@@ -83,14 +83,18 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryHDRSceneOptions
 	float WhiteBalanceTemperature = 6500.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="04 Cinematic Look",
-		meta=(ClampMin="0.0", ClampMax="2.0", UIMin="0.75", UIMax="1.25",
-			ToolTip="Global saturation multiplier. Recommended 1.0; keep broad saturation neutral and grade individual shots with a project-owned color pipeline."))
+		meta=(ToolTip="Disabled by default so the level-wide HDR setup preserves the authored sky and sunlight colors. Enable only for a deliberately reviewed global grade; prefer Cine Camera or Level Sequence post-process tracks for shot-specific color."))
+	bool bApplyGlobalColorGrading = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="04 Cinematic Look",
+		meta=(EditCondition="bApplyGlobalColorGrading", ClampMin="0.75", ClampMax="1.25", UIMin="0.85", UIMax="1.15",
+			ToolTip="Global saturation multiplier used only when Apply Global Color Grading is enabled. Keep at 1.0 for neutral color; prefer shot-specific grading."))
 	float GlobalSaturation = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="04 Cinematic Look",
-		meta=(ClampMin="0.5", ClampMax="2.0", UIMin="0.85", UIMax="1.25",
-			ToolTip="Global contrast multiplier. Recommended 1.03 for restrained separation without crushing MetaHuman skin or shadow detail."))
-	float GlobalContrast = 1.03f;
+		meta=(EditCondition="bApplyGlobalColorGrading", ClampMin="0.75", ClampMax="1.25", UIMin="0.85", UIMax="1.15",
+			ToolTip="Global contrast multiplier used only when Apply Global Color Grading is enabled. Keep at 1.0 for neutral color; add contrast per Cine Camera or Level Sequence shot after skin-tone review."))
+	float GlobalContrast = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="04 Cinematic Look",
 		meta=(ClampMin="0.0", ClampMax="1.0", UIMin="0.0", UIMax="0.1",

@@ -31,6 +31,9 @@
 #include "UI/TerritoryUITheme.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "GAS/NarrativeGameplayAbility.h"
+#include "GameplayEffect.h"
+#include "Items/WeaponItem.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 #include "Widgets/NarrativeSpinBox.h"
@@ -249,6 +252,204 @@ int32 UTerritoryJournalWidget::GetCapturedTerritoryEntryCount() const
 	return Count;
 }
 
+void UTerritoryJournalWidget::BuildPropertyBenefitsDetailTab()
+{
+	if (Btn_BenefitsDetailTab || !WidgetTree) return;
+	if (!CommandDetailSwitcher)
+	{
+		CommandDetailSwitcher = Cast<UWidgetSwitcher>(
+			WidgetTree->FindWidget(TEXT("CommandDetailSwitcher")));
+	}
+	UNarrativeCommonButtonBase* ReferenceButton = Btn_DiplomacyDetailTab
+		? Btn_DiplomacyDetailTab.Get() : Btn_ProductionDetailTab.Get();
+	UPanelWidget* TabHost = ReferenceButton
+		? Cast<UPanelWidget>(ReferenceButton->GetParent()) : nullptr;
+	if (!CommandDetailSwitcher || !TabHost || !ReferenceButton) return;
+
+	Btn_BenefitsDetailTab = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+		ReferenceButton->GetClass(), TEXT("Btn_BenefitsDetailTab"));
+	if (!Btn_BenefitsDetailTab) return;
+	TabHost->AddChild(Btn_BenefitsDetailTab);
+
+	UScrollBox* BenefitsScroll = WidgetTree->ConstructWidget<UScrollBox>(
+		UScrollBox::StaticClass(), TEXT("PropertyBenefitsScroll"));
+	PropertyBenefitsList = WidgetTree->ConstructWidget<UVerticalBox>(
+		UVerticalBox::StaticClass(), TEXT("PropertyBenefitsList"));
+	BenefitsScroll->AddChild(PropertyBenefitsList);
+	PropertyBenefitsDetailTabIndex = CommandDetailSwitcher->GetChildrenCount();
+	CommandDetailSwitcher->AddChild(BenefitsScroll);
+}
+
+void UTerritoryJournalWidget::RefreshPropertyBenefitsDetailTab(
+	const FTerritoryDistrictOperationsView& View)
+{
+	if (!PropertyBenefitsList || !WidgetTree) return;
+	PropertyBenefitsList->ClearChildren();
+	if (!View.District)
+	{
+		return;
+	}
+
+	const TArray<FTerritoryPropertyBenefitOperationsView> Benefits =
+		UTerritoryUIBlueprintLibrary::GetPropertyBenefitOperationsViews(
+			this, View.District, GetOwningPlayer());
+	if (Benefits.IsEmpty())
+	{
+		UTextBlock* Empty = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+			UNarrativeCommonTextBlock::StaticClass(), TEXT("NoPropertyBenefits"));
+		Empty->SetText(NSLOCTEXT("TerritoryJournal", "NoPropertyBenefits",
+			"No Property benefits are authored for this District. Add Gameplay Benefits to a Territory Place Definition."));
+		StyleGeneratedTerritoryText(Empty, 12,
+			FLinearColor(0.62f, 0.66f, 0.65f, 1.f),
+			ETerritoryGeneratedTextRole::Muted);
+		PropertyBenefitsList->AddChild(Empty);
+		return;
+	}
+
+	TSet<TWeakObjectPtr<ATerritoryProperty>> UpgradeButtonsAdded;
+	for (int32 Index = 0; Index < Benefits.Num(); ++Index)
+	{
+		const FTerritoryPropertyBenefitOperationsView& Benefit = Benefits[Index];
+		UBorder* Card = WidgetTree->ConstructWidget<UBorder>(
+			UBorder::StaticClass(), *FString::Printf(TEXT("PropertyBenefitCard_%d"), Index));
+		StyleGeneratedTerritorySurface(Card,
+			Benefit.bActive
+				? FLinearColor(0.035f, 0.10f, 0.08f, 0.94f)
+				: FLinearColor(0.05f, 0.06f, 0.07f, 0.88f),
+			Benefit.bActive
+				? FLinearColor(0.24f, 0.74f, 0.52f, 0.7f)
+				: FLinearColor(0.25f, 0.28f, 0.29f, 0.5f), 7.f);
+		UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(
+			UVerticalBox::StaticClass(), *FString::Printf(TEXT("PropertyBenefitStack_%d"), Index));
+		Card->SetContent(Stack);
+
+		UTextBlock* Heading = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+			UNarrativeCommonTextBlock::StaticClass(),
+			*FString::Printf(TEXT("PropertyBenefitHeading_%d"), Index));
+		Heading->SetText(FText::Format(
+			NSLOCTEXT("TerritoryJournal", "PropertyBenefitHeading", "{0}  //  {1}"),
+			Benefit.PropertyName, Benefit.DisplayName));
+		StyleGeneratedTerritoryText(Heading, 14,
+			Benefit.bActive ? FLinearColor(0.42f, 0.86f, 0.68f, 1.f)
+				: FLinearColor(0.68f, 0.69f, 0.66f, 1.f),
+			ETerritoryGeneratedTextRole::Heading);
+		Stack->AddChild(Heading);
+
+		UTextBlock* Status = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+			UNarrativeCommonTextBlock::StaticClass(),
+			*FString::Printf(TEXT("PropertyBenefitStatus_%d"), Index));
+		const FText StatusText = Benefit.bActive
+			? NSLOCTEXT("TerritoryJournal", "PropertyBenefitActive", "ACTIVE — GRANTED THROUGH NARRATIVE GAS")
+			: !Benefit.bOwnedByViewer
+				? NSLOCTEXT("TerritoryJournal", "PropertyBenefitCaptureRequired", "LOCKED — CAPTURE THIS PROPERTY")
+				: FText::Format(NSLOCTEXT("TerritoryJournal", "PropertyBenefitLevelRequired",
+					"LOCKED — UPGRADE LEVEL {0} REQUIRED (CURRENT {1})"),
+					FText::AsNumber(Benefit.RequiredUpgradeLevel),
+					FText::AsNumber(Benefit.CurrentUpgradeLevel));
+		Status->SetText(StatusText);
+		StyleGeneratedTerritoryText(Status, 10,
+			Benefit.bActive ? FLinearColor(0.42f, 0.86f, 0.68f, 1.f)
+				: FLinearColor(0.92f, 0.70f, 0.24f, 1.f),
+			ETerritoryGeneratedTextRole::Heading);
+		Stack->AddChild(Status);
+
+		TArray<FString> CapabilityLines;
+		if (!Benefit.Description.IsEmpty())
+		{
+			CapabilityLines.Add(Benefit.Description.ToString());
+		}
+		if (Benefit.BenefitTag.IsValid())
+		{
+			CapabilityLines.Add(FString::Printf(TEXT("Tag: %s"),
+				*Benefit.BenefitTag.ToString()));
+		}
+		for (const TSubclassOf<UNarrativeGameplayAbility> Ability : Benefit.GrantedAbilities)
+		{
+			if (Ability) CapabilityLines.Add(FString::Printf(TEXT("Ability: %s"),
+				*FName::NameToDisplayString(Ability->GetName(), false)));
+		}
+		for (const TSubclassOf<UGameplayEffect> Effect : Benefit.GrantedGameplayEffects)
+		{
+			if (Effect) CapabilityLines.Add(FString::Printf(TEXT("Effect: %s"),
+				*FName::NameToDisplayString(Effect->GetName(), false)));
+		}
+		for (const TSubclassOf<UWeaponItem> Weapon : Benefit.UnlockedWeaponItems)
+		{
+			if (Weapon) CapabilityLines.Add(FString::Printf(TEXT("Weapon unlock: %s"),
+				*FName::NameToDisplayString(Weapon->GetName(), false)));
+		}
+		UTextBlock* Detail = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
+			UNarrativeCommonTextBlock::StaticClass(),
+			*FString::Printf(TEXT("PropertyBenefitDetail_%d"), Index));
+		Detail->SetText(FText::FromString(CapabilityLines.IsEmpty()
+			? FString(TEXT("Benefit tier is present but has no configured capability."))
+			: FString::Join(CapabilityLines, TEXT("\n"))));
+		StyleGeneratedTerritoryText(Detail, 11,
+			FLinearColor(0.90f, 0.89f, 0.85f, 1.f));
+		Stack->AddChild(Detail);
+
+		if (Benefit.Property && !UpgradeButtonsAdded.Contains(Benefit.Property)
+			&& Btn_BenefitsDetailTab)
+		{
+			UpgradeButtonsAdded.Add(Benefit.Property);
+			UNarrativeCommonButtonBase* UpgradeButton =
+				WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+					Btn_BenefitsDetailTab->GetClass(),
+					*FString::Printf(TEXT("UpgradeProperty_%d"), Index));
+			if (UpgradeButton)
+			{
+				FText ButtonText;
+				if (Benefit.CurrentUpgradeLevel >= Benefit.MaximumUpgradeLevel)
+				{
+					ButtonText = NSLOCTEXT("TerritoryJournal", "PropertyMaximumLevel",
+						"MAXIMUM UPGRADE LEVEL");
+				}
+				else if (!Benefit.bOwnedByViewer)
+				{
+					ButtonText = NSLOCTEXT("TerritoryJournal", "CapturePropertyToUpgrade",
+						"CAPTURE PROPERTY TO UPGRADE");
+				}
+				else
+				{
+					ButtonText = FText::Format(NSLOCTEXT("TerritoryJournal",
+						"UpgradePropertyButton", "UPGRADE TO LEVEL {0}  //  {1}"),
+						FText::AsNumber(Benefit.CurrentUpgradeLevel + 1),
+						FText::AsNumber(Benefit.NextUpgradeCost));
+				}
+				UpgradeButton->SetButtonText(ButtonText);
+				UpgradeButton->SetIsEnabled(Benefit.bCanRequestUpgrade);
+				UpgradeButton->SetToolTipText(NSLOCTEXT("TerritoryJournal",
+					"UpgradePropertyButtonTip",
+					"Requests one server-authoritative Property upgrade. Territory validates ownership and Narrative-backed faction currency before changing the level."));
+				const TWeakObjectPtr<ATerritoryProperty> WeakProperty(Benefit.Property);
+				UpgradeButton->OnClicked().AddWeakLambda(this,
+					[this, WeakProperty]()
+					{
+						if (WeakProperty.IsValid())
+						{
+							RequestPropertyUpgrade(WeakProperty.Get());
+						}
+					});
+				Stack->AddChild(UpgradeButton);
+			}
+		}
+		PropertyBenefitsList->AddChild(Card);
+	}
+}
+
+void UTerritoryJournalWidget::RequestPropertyUpgrade(ATerritoryProperty* Property)
+{
+	BindManagementComponent();
+	if (!ManagementComponent.IsValid() || !Property) return;
+	if (Text_CommandStatus)
+	{
+		Text_CommandStatus->SetText(FText::Format(NSLOCTEXT("TerritoryJournal",
+			"SubmittingPropertyUpgrade", "Requesting upgrade for {0}..."),
+			Property->GetTerritoryDisplayName()));
+	}
+	ManagementComponent->RequestUpgradeProperty(Property);
+}
+
 void UTerritoryJournalWidget::RefreshEntrySelection()
 {
 	for (UTerritoryDistrictRowWidget* Entry : TerritoryEntryWidgets)
@@ -421,6 +622,7 @@ void UTerritoryJournalWidget::NativeConstruct()
 		UE_LOG(LogTerritory, Error,
 			TEXT("Territory Journal cannot populate Active/Claimed lists: authored panel bindings are missing."));
 	}
+	BuildPropertyBenefitsDetailTab();
 
 	// Narrative's Skills screen gives page selectors and command buttons different
 	// visual weight. Keep that same readable contract in every authored Territory
@@ -430,7 +632,7 @@ void UTerritoryJournalWidget::NativeConstruct()
 		Btn_OverviewDetailTab.Get(), Btn_PlacesDetailTab.Get(),
 		Btn_GarrisonDetailTab.Get(), Btn_EconomyDetailTab.Get(),
 		Btn_ProductionDetailTab.Get(), Btn_ThreatsDetailTab.Get(),
-		Btn_DiplomacyDetailTab.Get(), Btn_IntelligenceAll.Get(),
+		Btn_DiplomacyDetailTab.Get(), Btn_BenefitsDetailTab.Get(), Btn_IntelligenceAll.Get(),
 		Btn_IntelligenceConflict.Get(), Btn_IntelligenceControl.Get(),
 		Btn_IntelligenceEconomy.Get(), Btn_IntelligenceCommand.Get(),
 		Btn_IntelligenceProduction.Get(), Btn_IntelligenceDiplomacy.Get() })
@@ -503,6 +705,16 @@ void UTerritoryJournalWidget::NativeConstruct()
 	{
 		Btn_DiplomacyDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleDiplomacyDetailTabClicked);
 		Btn_DiplomacyDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "DiplomacyDetailTab", "DIPLOMACY"));
+	}
+	if (Btn_BenefitsDetailTab)
+	{
+		Btn_BenefitsDetailTab->OnClicked().AddUObject(this,
+			&UTerritoryJournalWidget::HandleBenefitsDetailTabClicked);
+		Btn_BenefitsDetailTab->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "BenefitsDetailTab", "BENEFITS"));
+		Btn_BenefitsDetailTab->SetToolTipText(NSLOCTEXT(
+			"TerritoryJournal", "BenefitsDetailTabTip",
+			"Owned Property abilities, Gameplay Effects, weapon unlocks, and upgrade requirements."));
 	}
 	if (Btn_CommandAddGuard)
 	{
@@ -599,6 +811,7 @@ void UTerritoryJournalWidget::NativeDestruct()
 	if (Btn_ProductionDetailTab) Btn_ProductionDetailTab->OnClicked().RemoveAll(this);
 	if (Btn_ThreatsDetailTab) Btn_ThreatsDetailTab->OnClicked().RemoveAll(this);
 	if (Btn_DiplomacyDetailTab) Btn_DiplomacyDetailTab->OnClicked().RemoveAll(this);
+	if (Btn_BenefitsDetailTab) Btn_BenefitsDetailTab->OnClicked().RemoveAll(this);
 	if (Btn_CommandAddGuard) Btn_CommandAddGuard->OnClicked().RemoveAll(this);
 	if (Btn_CommandRemoveGuard) Btn_CommandRemoveGuard->OnClicked().RemoveAll(this);
 	if (Btn_CommandAddFiveGuards) Btn_CommandAddFiveGuards->OnClicked().RemoveAll(this);
@@ -649,6 +862,8 @@ void UTerritoryJournalWidget::NativeDestruct()
 	{
 		ManagementComponent->OnGuardPurchaseResult.RemoveDynamic(
 			this, &UTerritoryJournalWidget::HandleGuardManagementResult);
+		ManagementComponent->OnPropertyUpgradeResult.RemoveDynamic(
+			this, &UTerritoryJournalWidget::HandlePropertyUpgradeResult);
 		ManagementComponent->OnLiveEventsChanged.RemoveDynamic(
 			this, &UTerritoryJournalWidget::HandleLiveEventsChanged);
 	}
@@ -731,6 +946,8 @@ void UTerritoryJournalWidget::BindManagementComponent()
 	{
 		ManagementComponent->OnGuardPurchaseResult.RemoveDynamic(
 			this, &UTerritoryJournalWidget::HandleGuardManagementResult);
+		ManagementComponent->OnPropertyUpgradeResult.RemoveDynamic(
+			this, &UTerritoryJournalWidget::HandlePropertyUpgradeResult);
 		ManagementComponent->OnLiveEventsChanged.RemoveDynamic(
 			this, &UTerritoryJournalWidget::HandleLiveEventsChanged);
 	}
@@ -740,6 +957,8 @@ void UTerritoryJournalWidget::BindManagementComponent()
 	{
 		ManagementComponent->OnGuardPurchaseResult.AddUniqueDynamic(
 			this, &UTerritoryJournalWidget::HandleGuardManagementResult);
+		ManagementComponent->OnPropertyUpgradeResult.AddUniqueDynamic(
+			this, &UTerritoryJournalWidget::HandlePropertyUpgradeResult);
 		ManagementComponent->OnLiveEventsChanged.AddUniqueDynamic(
 			this, &UTerritoryJournalWidget::HandleLiveEventsChanged);
 	}
@@ -1981,6 +2200,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 		if (GuardTargetSpinBox) GuardTargetSpinBox->SetIsEnabled(false);
 		if (PlaceHierarchyList) PlaceHierarchyList->ClearChildren();
 		if (ProductionHierarchyList) ProductionHierarchyList->ClearChildren();
+		RefreshPropertyBenefitsDetailTab(View);
 		if (Text_CommandHierarchy) Text_CommandHierarchy->SetText(FText::GetEmpty());
 		if (Text_CommandOverview) Text_CommandOverview->SetText(FText::GetEmpty());
 		if (Text_CommandDiplomacy) Text_CommandDiplomacy->SetText(FText::GetEmpty());
@@ -2002,6 +2222,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 	}
 	RefreshGarrisonManagementControls(View);
 	RefreshSelectedHierarchyPanels(View);
+	RefreshPropertyBenefitsDetailTab(View);
 
 	if (Text_EmptySelection)
 	{
@@ -2521,7 +2742,9 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 
 void UTerritoryJournalWidget::SetSelectedDetailTab(int32 TabIndex)
 {
-	SelectedDetailTab = FMath::Clamp(TabIndex, 0, 6);
+	const int32 MaximumTab = PropertyBenefitsDetailTabIndex != INDEX_NONE
+		? PropertyBenefitsDetailTabIndex : 6;
+	SelectedDetailTab = FMath::Clamp(TabIndex, 0, MaximumTab);
 	if (CommandDetailSwitcher)
 	{
 		CommandDetailSwitcher->SetActiveWidgetIndex(SelectedDetailTab);
@@ -2541,6 +2764,11 @@ void UTerritoryJournalWidget::SetSelectedDetailTab(int32 TabIndex)
 		{
 			Buttons[Index]->SetIsSelected(Index == SelectedDetailTab);
 		}
+	}
+	if (Btn_BenefitsDetailTab)
+	{
+		Btn_BenefitsDetailTab->SetIsSelected(
+			SelectedDetailTab == PropertyBenefitsDetailTabIndex);
 	}
 }
 
@@ -2742,6 +2970,14 @@ void UTerritoryJournalWidget::HandleMaxGuardTargetClicked()
 	}
 }
 
+void UTerritoryJournalWidget::HandleBenefitsDetailTabClicked()
+{
+	if (PropertyBenefitsDetailTabIndex != INDEX_NONE)
+	{
+		SetSelectedDetailTab(PropertyBenefitsDetailTabIndex);
+	}
+}
+
 void UTerritoryJournalWidget::HandleSendReinforcementClicked()
 {
 	if (!SelectedGarrisonTarget.IsValid())
@@ -2846,6 +3082,23 @@ void UTerritoryJournalWidget::HandleGuardManagementResult(
 	if (Territory && (Territory == SelectedDistrict.Get() || Territory == SelectedGarrisonTarget.Get()))
 	{
 		UpdateSelectedDistrict(SelectedDistrict.Get());
+	}
+}
+
+void UTerritoryJournalWidget::HandlePropertyUpgradeResult(
+	ATerritoryProperty* Property, bool bSuccess, FText Message, int32 RequestId)
+{
+	(void)bSuccess;
+	(void)RequestId;
+	if (Text_CommandStatus)
+	{
+		Text_CommandStatus->SetText(Message);
+	}
+	RefreshDistrictList();
+	ATerritoryDistrict* District = SelectedDistrict.Get();
+	if (District && Property && District->GetProperties().Contains(Property))
+	{
+		UpdateSelectedDistrict(District);
 	}
 }
 

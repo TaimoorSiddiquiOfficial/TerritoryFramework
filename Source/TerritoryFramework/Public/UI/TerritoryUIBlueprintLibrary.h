@@ -15,6 +15,9 @@ class ATerritoryCity;
 class ATerritoryDistrict;
 class ATerritoryVolume;
 class UTerritoryActivatableWidget;
+class UGameplayEffect;
+class UNarrativeGameplayAbility;
+class UWeaponItem;
 
 /** Viewer-relative operational scopes used by Territory menus and Blueprint lists. */
 UENUM(BlueprintType)
@@ -145,6 +148,31 @@ struct TERRITORYFRAMEWORK_API FTerritoryGarrisonOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText IncreaseFailureReason;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText DecreaseFailureReason;
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") FText ReinforcementFailureReason;
+};
+
+/** One ownership/upgrade benefit row for the Territory Command Center. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryPropertyBenefitOperationsView
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") TObjectPtr<class ATerritoryProperty> Property = nullptr;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") FGameplayTag PropertyTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") FText PropertyName;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") FGameplayTag PropertyRoleTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") FGameplayTag BenefitTag;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") FText DisplayName;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") FText Description;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") int32 CurrentUpgradeLevel = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") int32 RequiredUpgradeLevel = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") int32 MaximumUpgradeLevel = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") int32 NextUpgradeCost = 0;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") bool bOwnedByViewer = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") bool bActive = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") bool bCanRequestUpgrade = false;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") TArray<TSubclassOf<UNarrativeGameplayAbility>> GrantedAbilities;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") TArray<TSubclassOf<UGameplayEffect>> GrantedGameplayEffects;
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Benefits") TArray<TSubclassOf<UWeaponItem>> UnlockedWeaponItems;
 };
 
 /** One player-facing strategic control and the currently held sources that grant it. */
@@ -499,6 +527,13 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Production")
 	static FText GetProductionStatusText(ETerritoryProductionStatus Status);
+
+	/** Returns authored active and locked benefit tiers for loaded Places in one District. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Benefits",
+		meta=(WorldContext="WorldContextObject"))
+	static TArray<FTerritoryPropertyBenefitOperationsView>
+	GetPropertyBenefitOperationsViews(const UObject* WorldContextObject,
+		ATerritoryDistrict* District, APlayerController* Viewer);
 
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static FText GetThreatLevelText(ETerritoryThreatLevel ThreatLevel);

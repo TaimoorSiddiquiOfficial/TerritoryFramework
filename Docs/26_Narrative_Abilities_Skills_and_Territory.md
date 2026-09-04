@@ -83,6 +83,35 @@ The live `BP_TerritoryPlayerCharacter` Ability System starts with these nine abi
 Equipment and interactable actors can grant more abilities at runtime. Therefore, this list is the
 starting loadout, not a limit on the character.
 
+Owned Territory Properties are now another authoritative grant source. Every Place Definition can
+declare a Property Role tag and ordered Gameplay Benefit tiers. A tier becomes active when the
+Property is Claimed by the player's current Narrative faction and its upgrade level meets the
+required level. It can grant:
+
+- project-owned `UNarrativeGameplayAbility` classes;
+- persistent, removable Narrative Gameplay Effects;
+- aggregated `Territory.Property.Benefit.*` state tags; and
+- Narrative `UWeaponItem` classes shown as shop/unlock information.
+
+The Player Management Component reconciles grants on the server and revokes them after ownership,
+faction, pawn, or upgrade changes. The journal's **BENEFITS** tab shows active and locked tiers,
+requirements, abilities, effects, and weapon unlocks. An owned Property also shows its next level
+and cost. Pressing Upgrade sends a validated request to the owning player's server component,
+which calls the existing `ATerritoryProperty::TryUpgrade`; that path rechecks faction ownership
+and debits authoritative faction/Narrative-backed currency before changing the replicated level.
+The Blacksmith is authored as
+`Territory.Property.Role.ArmsShop`; its first owned tier grants `GA_TerritoryDistraction`, which is
+bound to Narrative's `Narrative.Input.Throw` input.
+
+`Unlocked Weapon Items` is presentation/unlock metadata, not an automatic inventory mutation. Use
+the existing Narrative inventory/shop transaction as the authority that actually purchases or
+adds a weapon. Prefer Property-granted abilities that are standalone/passive. A weapon's own
+`WeaponAbilities`, `MainhandWeaponAbilities`, and `OffhandWeaponAbilities` must remain sourced by
+that `UWeaponItem`, because Narrative grants and removes those handles as the weapon is wielded.
+
+Author only Duration or Infinite benefit effects. Instant Gameplay Effects cannot be revoked when
+the Property is lost and are rejected by Territory validation.
+
 The verified baseline values were 100 Health, 100 Stamina, 2 Stamina regeneration, 122 Attack
 Rating, about 58.6 Armor, and 40 Stealth Rating. Narrative crouch applies `GE_CrouchStealth`, which
 temporarily raises Stealth Rating from 40 to 90 in this setup.

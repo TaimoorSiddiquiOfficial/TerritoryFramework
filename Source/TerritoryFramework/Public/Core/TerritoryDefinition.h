@@ -20,6 +20,9 @@ class UDialogue;
 class UNarrativeEvent;
 class UNPCDefinition;
 class UNPCActivityConfiguration;
+class UNarrativeGameplayAbility;
+class UGameplayEffect;
+class UWeaponItem;
 class UTerritoryCounterAttackProfile;
 class UTerritoryDistrictManagementWidget;
 class UTerritoryGuardPostDefinition;
@@ -27,6 +30,48 @@ class UTerritoryPatrolGoal;
 class UTerritoryProductionProfile;
 class UTerritoryStealthProfile;
 class UTriggerSet;
+
+/**
+ * One ownership benefit unlocked by a Place/Property upgrade level.
+ * Narrative remains authoritative for abilities, effects, weapons, and input.
+ */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryPropertyGameplayBenefit
+{
+	GENERATED_BODY()
+
+	/** Zero grants this tier as soon as the viewer's faction owns the claimed Property. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Property Benefit",
+		meta=(ClampMin="0", ToolTip="Minimum Property upgrade level required. Use zero for an ownership benefit and one or higher for a purchased upgrade."))
+	int32 RequiredUpgradeLevel = 0;
+
+	/** Replicated through Narrative GAS while this tier is active; use it in abilities, effects, conditions, and UI. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Property Benefit",
+		meta=(Categories="Territory.Property.Benefit", ToolTip="Stable capability tag granted by Narrative's Ability System while this Property benefit is active."))
+	FGameplayTag BenefitTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Property Benefit")
+	FText DisplayName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Property Benefit",
+		meta=(MultiLine="true", ToolTip="Player-facing explanation shown in the Territory BENEFITS tab."))
+	FText Description;
+
+	/** Narrative abilities are granted once even if several owned Properties provide the same class. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Property Benefit|Narrative GAS",
+		meta=(ToolTip="Narrative Gameplay Abilities granted to the owning player's character. Use each ability's Input Tag (for example Narrative.Input.Throw) for input binding."))
+	TArray<TSubclassOf<UNarrativeGameplayAbility>> GrantedAbilities;
+
+	/** Use Infinite effects for persistent upgrades. Instant effects cannot be revoked when ownership is lost. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Property Benefit|Narrative GAS",
+		meta=(ToolTip="Persistent Narrative Gameplay Effects applied while the Property remains owned. Infinite effects are recommended so Territory can remove them on loss."))
+	TArray<TSubclassOf<UGameplayEffect>> GrantedGameplayEffects;
+
+	/** Catalog entries shown in the Territory tab; Narrative inventory/vendor logic still owns purchase and equipment. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Property Benefit|Weapons",
+		meta=(ToolTip="Weapon item classes unlocked or serviced by this tier. Territory exposes them in UI; Narrative inventory/vendor assets remain purchase authority."))
+	TArray<TSubclassOf<UWeaponItem>> UnlockedWeaponItems;
+};
 
 /** A patrol instruction stored relative to its guard-post actor. */
 USTRUCT(BlueprintType)
@@ -480,6 +525,16 @@ class TERRITORYFRAMEWORK_API UTerritoryPlaceDefinition : public UTerritoryDefini
 
 public:
 	UTerritoryPlaceDefinition();
+
+	/** Optional semantic role used by Territory/Narrative tags, filters, conditions, and UI. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Benefits",
+		meta=(Categories="Territory.Property.Role", ToolTip="What this Property provides. Example: Territory.Property.Role.ArmsShop for a blacksmith or gunsmith."))
+	FGameplayTag PropertyRoleTag;
+
+	/** Ownership and upgrade-level benefits reconciled onto each owning Narrative character. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Benefits",
+		meta=(TitleProperty="DisplayName", ToolTip="Abilities, persistent Gameplay Effects, benefit tags, and weapon catalog entries unlocked by owning and upgrading this Property."))
+	TArray<FTerritoryPropertyGameplayBenefit> GameplayBenefits;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Production")
 	TObjectPtr<UTerritoryProductionProfile> ProductionProfile;

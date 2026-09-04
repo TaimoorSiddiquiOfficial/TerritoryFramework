@@ -168,6 +168,14 @@ public:
 };
 
 UCLASS(hidecategories=Object)
+class UTerritoryWorldStateBlueprintFactory : public UTerritoryBlueprintFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryWorldStateBlueprintFactory();
+};
+
+UCLASS(hidecategories=Object)
 class UTerritoryCapturePointBlueprintFactory : public UTerritoryBlueprintFactoryBase
 {
 	GENERATED_BODY()

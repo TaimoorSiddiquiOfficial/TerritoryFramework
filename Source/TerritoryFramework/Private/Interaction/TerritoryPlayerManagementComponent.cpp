@@ -1,6 +1,8 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
+#include "AbilitySystemComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
@@ -12,7 +14,11 @@
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
+#include "GAS/NarrativeGameplayAbility.h"
+#include "GameplayEffect.h"
 #include "Net/UnrealNetwork.h"
+#include "UnrealFramework/NarrativeCharacter.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "Navigation/NarrativeNavigationComponent.h"
 #include "Widgets/NarrativeGameplayHUD.h"
@@ -80,6 +86,14 @@ void UTerritoryPlayerManagementComponent::BeginPlay()
 			&UTerritoryPlayerManagementComponent::PollTerritoryPOIDiscovery,
 			FMath::Max(0.10f, PlaceDiscoveryInterval), true);
 	}
+	if (PlayerController && PlayerController->HasAuthority() && GetWorld())
+	{
+		RefreshOwnedPropertyBenefits();
+		GetWorld()->GetTimerManager().SetTimer(
+			PropertyBenefitRefreshTimer, this,
+			&UTerritoryPlayerManagementComponent::RefreshOwnedPropertyBenefits,
+			FMath::Max(0.25f, PropertyBenefitRefreshInterval), true);
+	}
 }
 
 void UTerritoryPlayerManagementComponent::EndPlay(
@@ -88,10 +102,161 @@ void UTerritoryPlayerManagementComponent::EndPlay(
 	if (GetWorld())
 	{
 		GetWorld()->GetTimerManager().ClearTimer(PlaceDiscoveryTimer);
+		GetWorld()->GetTimerManager().ClearTimer(PropertyBenefitRefreshTimer);
 	}
+	ClearOwnedPropertyBenefits();
 	LastPlayerPlace = nullptr;
 	UnbindLiveEventSources();
 	Super::EndPlay(EndPlayReason);
+}
+
+void UTerritoryPlayerManagementComponent::ClearOwnedPropertyBenefits()
+{
+	ANarrativeCharacter* Character = PropertyBenefitCharacter.Get();
+	UNarrativeAbilitySystemComponent* ASC = Character
+		? Cast<UNarrativeAbilitySystemComponent>(Character->GetAbilitySystemComponent())
+		: nullptr;
+	if (ASC)
+	{
+		for (const TPair<TSubclassOf<UNarrativeGameplayAbility>,
+			FGameplayAbilitySpecHandle>& Entry : GrantedPropertyAbilityHandles)
+		{
+			if (Entry.Value.IsValid()) ASC->ClearAbility(Entry.Value);
+		}
+		for (const TPair<TSubclassOf<UGameplayEffect>,
+			FActiveGameplayEffectHandle>& Entry : GrantedPropertyEffectHandles)
+		{
+			if (Entry.Value.IsValid()) ASC->RemoveActiveGameplayEffect(Entry.Value);
+		}
+		if (GrantedPropertyTagEffectHandle.IsValid())
+		{
+			ASC->RemoveActiveGameplayEffect(GrantedPropertyTagEffectHandle);
+		}
+	}
+	GrantedPropertyAbilityHandles.Reset();
+	GrantedPropertyEffectHandles.Reset();
+	GrantedPropertyTagEffectHandle.Invalidate();
+	GrantedPropertyBenefitTags.Reset();
+	PropertyBenefitCharacter = nullptr;
+}
+
+void UTerritoryPlayerManagementComponent::RefreshOwnedPropertyBenefits()
+{
+	APlayerController* Controller = Cast<APlayerController>(GetOwner());
+	if (!Controller || !Controller->HasAuthority()) return;
+
+	ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(GetManagingPawn());
+	if (PropertyBenefitCharacter.Get() != Character)
+	{
+		ClearOwnedPropertyBenefits();
+		PropertyBenefitCharacter = Character;
+	}
+	UNarrativeAbilitySystemComponent* ASC = Character
+		? Cast<UNarrativeAbilitySystemComponent>(Character->GetAbilitySystemComponent())
+		: nullptr;
+	UTerritoryRegistrySubsystem* Registry = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	const FGameplayTag ViewerFaction = GetManagedFaction();
+	if (!Character || !ASC || !Registry || !ViewerFaction.IsValid())
+	{
+		ClearOwnedPropertyBenefits();
+		return;
+	}
+
+	TSet<TSubclassOf<UNarrativeGameplayAbility>> DesiredAbilities;
+	TSet<TSubclassOf<UGameplayEffect>> DesiredEffects;
+	FGameplayTagContainer DesiredTags;
+	for (ATerritoryVolume* Territory : Registry->GetTerritoriesOwnedByFaction(ViewerFaction))
+	{
+		const ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory);
+		const UTerritoryPlaceDefinition* Definition = Property
+			? Cast<UTerritoryPlaceDefinition>(Property->GetTerritoryDefinition()) : nullptr;
+		if (!Property || !Definition || !Property->IsAvailableForGameplay()
+			|| Property->GetTerritoryState() != ETerritoryState::Claimed)
+		{
+			continue;
+		}
+		for (const FTerritoryPropertyGameplayBenefit& Benefit : Definition->GameplayBenefits)
+		{
+			if (Property->GetUpgradeLevel()
+				< FMath::Max(0, Benefit.RequiredUpgradeLevel)) continue;
+			if (Benefit.BenefitTag.IsValid()) DesiredTags.AddTag(Benefit.BenefitTag);
+			for (const TSubclassOf<UNarrativeGameplayAbility> Ability : Benefit.GrantedAbilities)
+			{
+				if (Ability) DesiredAbilities.Add(Ability);
+			}
+			for (const TSubclassOf<UGameplayEffect> Effect : Benefit.GrantedGameplayEffects)
+			{
+				if (Effect) DesiredEffects.Add(Effect);
+			}
+		}
+	}
+
+	TArray<TSubclassOf<UNarrativeGameplayAbility>> AbilitiesToRemove;
+	for (const TPair<TSubclassOf<UNarrativeGameplayAbility>,
+		FGameplayAbilitySpecHandle>& Entry : GrantedPropertyAbilityHandles)
+	{
+		if (!DesiredAbilities.Contains(Entry.Key)) AbilitiesToRemove.Add(Entry.Key);
+	}
+	for (const TSubclassOf<UNarrativeGameplayAbility> Ability : AbilitiesToRemove)
+	{
+		const FGameplayAbilitySpecHandle Handle = GrantedPropertyAbilityHandles.FindRef(Ability);
+		if (Handle.IsValid()) ASC->ClearAbility(Handle);
+		GrantedPropertyAbilityHandles.Remove(Ability);
+	}
+	for (const TSubclassOf<UNarrativeGameplayAbility> Ability : DesiredAbilities)
+	{
+		if (GrantedPropertyAbilityHandles.Contains(Ability)) continue;
+		const bool bAlreadyGranted = ASC->GetActivatableAbilities().ContainsByPredicate(
+			[Ability](const FGameplayAbilitySpec& Spec)
+			{
+				return Spec.Ability && Spec.Ability->GetClass() == Ability;
+			});
+		if (!bAlreadyGranted)
+		{
+			const FGameplayAbilitySpecHandle Handle = Character->AddAbility(Ability, this);
+			if (Handle.IsValid()) GrantedPropertyAbilityHandles.Add(Ability, Handle);
+		}
+	}
+
+	TArray<TSubclassOf<UGameplayEffect>> EffectsToRemove;
+	for (const TPair<TSubclassOf<UGameplayEffect>, FActiveGameplayEffectHandle>& Entry :
+		GrantedPropertyEffectHandles)
+	{
+		if (!DesiredEffects.Contains(Entry.Key)) EffectsToRemove.Add(Entry.Key);
+	}
+	for (const TSubclassOf<UGameplayEffect> Effect : EffectsToRemove)
+	{
+		const FActiveGameplayEffectHandle Handle = GrantedPropertyEffectHandles.FindRef(Effect);
+		if (Handle.IsValid()) ASC->RemoveActiveGameplayEffect(Handle);
+		GrantedPropertyEffectHandles.Remove(Effect);
+	}
+	for (const TSubclassOf<UGameplayEffect> Effect : DesiredEffects)
+	{
+		if (GrantedPropertyEffectHandles.Contains(Effect)) continue;
+		const UGameplayEffect* EffectCDO = Effect
+			? Effect->GetDefaultObject<UGameplayEffect>() : nullptr;
+		if (!EffectCDO) continue;
+		FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
+		Context.AddSourceObject(this);
+		const FActiveGameplayEffectHandle Handle = ASC->ApplyGameplayEffectToSelf(
+			EffectCDO, 1.f, Context);
+		if (Handle.IsValid()) GrantedPropertyEffectHandles.Add(Effect, Handle);
+	}
+
+	if (!(DesiredTags == GrantedPropertyBenefitTags))
+	{
+		if (GrantedPropertyTagEffectHandle.IsValid())
+		{
+			ASC->RemoveActiveGameplayEffect(GrantedPropertyTagEffectHandle);
+			GrantedPropertyTagEffectHandle.Invalidate();
+		}
+		GrantedPropertyBenefitTags = DesiredTags;
+		if (!DesiredTags.IsEmpty())
+		{
+			GrantedPropertyTagEffectHandle = ASC->AddDynamicTagsGameplayEffect(DesiredTags);
+		}
+	}
 }
 
 void UTerritoryPlayerManagementComponent::PollTerritoryPOIDiscovery()
@@ -753,6 +918,7 @@ void UTerritoryPlayerManagementComponent::AddCommandCapabilityChanges(
 void UTerritoryPlayerManagementComponent::HandleTerritoryOwnershipChanged(
 	ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	RefreshOwnedPropertyBenefits();
 	if (!Territory || !Territory->IsAvailableForGameplay()) return;
 	const FGameplayTag ViewerFaction = ResolveViewerFaction();
 	const FText Name = Territory->GetTerritoryDisplayName();
@@ -1148,6 +1314,40 @@ void UTerritoryPlayerManagementComponent::RequestEspionage(
 	else
 	{
 		ServerRequestEspionage(District, RequestId);
+	}
+}
+
+void UTerritoryPlayerManagementComponent::RequestUpgradeProperty(
+	ATerritoryProperty* Property)
+{
+	const int32 RequestId = ++NextRequestId;
+	if (!IsValid(Property))
+	{
+		OnPropertyUpgradeResult.Broadcast(Property, false,
+			NSLOCTEXT("TerritoryManagement", "InvalidPropertyUpgrade",
+				"Property upgrade request is invalid."), RequestId);
+		return;
+	}
+	if (UWorld* World = GetWorld())
+	{
+		const float Now = World->GetTimeSeconds();
+		if (Now - LastPropertyUpgradeRequestTime < PurchaseCooldown)
+		{
+			OnPropertyUpgradeResult.Broadcast(Property, false,
+				NSLOCTEXT("TerritoryManagement", "PropertyUpgradeCooldown",
+					"Please wait before requesting another Property upgrade."),
+				RequestId);
+			return;
+		}
+		LastPropertyUpgradeRequestTime = Now;
+	}
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		PerformUpgradeProperty(Property, RequestId);
+	}
+	else
+	{
+		ServerRequestUpgradeProperty(Property, RequestId);
 	}
 }
 
@@ -1591,6 +1791,30 @@ bool UTerritoryPlayerManagementComponent::ServerRequestEspionage_Validate(
 	return District != nullptr && RequestId > LastServerEspionageRequestId;
 }
 
+bool UTerritoryPlayerManagementComponent::ServerRequestUpgradeProperty_Validate(
+	ATerritoryProperty* Property, int32 RequestId)
+{
+	return Property != nullptr && RequestId > LastServerRequestId;
+}
+
+void UTerritoryPlayerManagementComponent::ServerRequestUpgradeProperty_Implementation(
+	ATerritoryProperty* Property, int32 RequestId)
+{
+	if (!GetWorld() || RequestId <= LastServerRequestId) return;
+	LastServerRequestId = RequestId;
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now - LastPropertyUpgradeRequestTime < PurchaseCooldown)
+	{
+		ClientReceivePropertyUpgradeResult(Property, false,
+			NSLOCTEXT("TerritoryManagement", "ServerPropertyUpgradeCooldown",
+				"Please wait before requesting another Property upgrade."),
+			RequestId);
+		return;
+	}
+	LastPropertyUpgradeRequestTime = Now;
+	PerformUpgradeProperty(Property, RequestId);
+}
+
 void UTerritoryPlayerManagementComponent::ServerRequestEspionage_Implementation(
 	ATerritoryDistrict* District, int32 RequestId)
 {
@@ -1803,6 +2027,50 @@ void UTerritoryPlayerManagementComponent::PerformSendReinforcements(
 	}
 }
 
+void UTerritoryPlayerManagementComponent::PerformUpgradeProperty(
+	ATerritoryProperty* Property, int32 RequestId)
+{
+	APawn* Pawn = GetManagingPawn();
+	FText FailureReason;
+	if (!Property || !Pawn)
+	{
+		ClientReceivePropertyUpgradeResult(Property, false,
+			NSLOCTEXT("TerritoryManagement", "MissingPropertyUpgradeContext",
+				"Property upgrade context is unavailable."), RequestId);
+		return;
+	}
+	if (!CanManageTerritory(Property, Pawn, FailureReason))
+	{
+		ClientReceivePropertyUpgradeResult(Property, false, FailureReason, RequestId);
+		return;
+	}
+	if (!Property->CanUpgrade())
+	{
+		ClientReceivePropertyUpgradeResult(Property, false,
+			NSLOCTEXT("TerritoryManagement", "PropertyAtMaximumLevel",
+				"This Property is already at its maximum upgrade level."), RequestId);
+		return;
+	}
+
+	const int32 Cost = Property->GetUpgradeCost();
+	if (!Property->TryUpgrade(Pawn))
+	{
+		ClientReceivePropertyUpgradeResult(Property, false,
+			FText::Format(NSLOCTEXT("TerritoryManagement", "PropertyUpgradePaymentFailed",
+				"Upgrade rejected. The owning faction needs {0} available currency."),
+				FText::AsNumber(Cost)), RequestId);
+		return;
+	}
+
+	RefreshOwnedPropertyBenefits();
+	ClientReceivePropertyUpgradeResult(Property, true,
+		FText::Format(NSLOCTEXT("TerritoryManagement", "PropertyUpgradeSucceeded",
+			"{0} upgraded to level {1} for {2}. Property benefits were refreshed."),
+			Property->GetTerritoryDisplayName(),
+			FText::AsNumber(Property->GetUpgradeLevel()), FText::AsNumber(Cost)),
+		RequestId);
+}
+
 void UTerritoryPlayerManagementComponent::PerformPurchaseForDistrict(
 	ATerritoryDistrict* District, int32 Count, int32 RequestId)
 	{
@@ -1951,6 +2219,12 @@ void UTerritoryPlayerManagementComponent::ClientReceiveGuardPurchaseResult_Imple
 	ATerritoryVolume* Territory, bool bSuccess, const FText& Message, int32 RequestId)
 {
 	OnGuardPurchaseResult.Broadcast(Territory, bSuccess, Message, RequestId);
+}
+
+void UTerritoryPlayerManagementComponent::ClientReceivePropertyUpgradeResult_Implementation(
+	ATerritoryProperty* Property, bool bSuccess, const FText& Message, int32 RequestId)
+{
+	OnPropertyUpgradeResult.Broadcast(Property, bSuccess, Message, RequestId);
 }
 
 void UTerritoryPlayerManagementComponent::ClientReceiveManagementIntelligence_Implementation(

@@ -1967,6 +1967,67 @@ FText UTerritoryUIBlueprintLibrary::GetThreatLevelText(ETerritoryThreatLevel Thr
 	}
 }
 
+TArray<FTerritoryPropertyBenefitOperationsView>
+UTerritoryUIBlueprintLibrary::GetPropertyBenefitOperationsViews(
+	const UObject* WorldContextObject, ATerritoryDistrict* District,
+	APlayerController* Viewer)
+{
+	TArray<FTerritoryPropertyBenefitOperationsView> Result;
+	if (!WorldContextObject || !District) return Result;
+	const FGameplayTag ViewerFaction =
+		UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
+			WorldContextObject, ResolveViewerActor(Viewer));
+
+	for (ATerritoryVolume* Child : District->GetProperties())
+	{
+		ATerritoryProperty* Property = Cast<ATerritoryProperty>(Child);
+		const UTerritoryPlaceDefinition* Definition = Property
+			? Cast<UTerritoryPlaceDefinition>(Property->GetTerritoryDefinition()) : nullptr;
+		if (!Property || !Definition) continue;
+
+		const bool bOwned = ViewerFaction.IsValid()
+			&& Property->GetTerritoryState() == ETerritoryState::Claimed
+			&& Property->GetOwningFaction() == ViewerFaction;
+		for (const FTerritoryPropertyGameplayBenefit& Benefit : Definition->GameplayBenefits)
+		{
+			FTerritoryPropertyBenefitOperationsView View;
+			View.Property = Property;
+			View.PropertyTag = Property->GetTerritoryTag();
+			View.PropertyName = Property->GetTerritoryDisplayName();
+			View.PropertyRoleTag = Definition->PropertyRoleTag;
+			View.BenefitTag = Benefit.BenefitTag;
+			View.DisplayName = Benefit.DisplayName.IsEmpty()
+				? UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Benefit.BenefitTag)
+				: Benefit.DisplayName;
+			View.Description = Benefit.Description;
+			View.CurrentUpgradeLevel = Property->GetUpgradeLevel();
+			View.RequiredUpgradeLevel = FMath::Max(0, Benefit.RequiredUpgradeLevel);
+			View.MaximumUpgradeLevel = FMath::Max(0, Property->MaxUpgradeLevel);
+			View.NextUpgradeCost = Property->GetUpgradeCost();
+			View.bOwnedByViewer = bOwned;
+			View.bActive = bOwned && Property->IsAvailableForGameplay()
+				&& View.CurrentUpgradeLevel >= View.RequiredUpgradeLevel;
+			View.bCanRequestUpgrade = bOwned && Property->IsAvailableForGameplay()
+				&& Property->CanUpgrade();
+			View.GrantedAbilities = Benefit.GrantedAbilities;
+			View.GrantedGameplayEffects = Benefit.GrantedGameplayEffects;
+			View.UnlockedWeaponItems = Benefit.UnlockedWeaponItems;
+			Result.Add(MoveTemp(View));
+		}
+	}
+	Result.Sort([](const FTerritoryPropertyBenefitOperationsView& A,
+		const FTerritoryPropertyBenefitOperationsView& B)
+	{
+		if (A.bActive != B.bActive) return A.bActive;
+		if (A.PropertyName.EqualTo(B.PropertyName))
+		{
+			return A.RequiredUpgradeLevel < B.RequiredUpgradeLevel;
+		}
+		return A.PropertyName.ToString() < B.PropertyName.ToString();
+	});
+	return Result;
+}
+
 FText UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
 	ETerritoryAvailability Availability, ETerritoryState PoliticalState)
 {

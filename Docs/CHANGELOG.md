@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased — 2026-09-04 (Narrative tags, distraction ability, and Property benefits)
+
+- Converted the Territory distraction throw into a real server-authoritative Narrative Gameplay
+  Ability bound to `Narrative.Input.Throw`. The replicated projectile remains the physical payload;
+  the ability owns commit, aim, spawn, and `GameplayEvent.Distraction.Thrown`, while impact emits
+  `GameplayEvent.Distraction.Impact` after the Narrative hearing stimulus.
+- Repaired the rescue stealth profile's missing break event with
+  `Territory.Event.Stealth.Exposed`, and added a runtime fallback for legacy profiles whose
+  serialized tag is still empty.
+- Added upgrade-tier Property benefits: an owned loaded Property can grant Narrative Gameplay
+  Abilities, persistent Gameplay Effects, benefit tags, and displayable Narrative weapon unlocks.
+  Benefits reconcile on authority and are revoked when ownership, faction, pawn, or tier changes.
+- Added a runtime **BENEFITS** detail tab to the Territory journal. It shows each selected
+  Property's active/locked upgrade tiers, requirements, tags, abilities, effects, and weapon items.
+  Its Upgrade button uses a validated owning-client/server request and the existing
+  `ATerritoryProperty::TryUpgrade` currency transaction; UI never writes level or currency.
+- Authored the Blacksmith as `Territory.Property.Role.ArmsShop`; its first benefit tier grants the
+  new distraction ability and exposes its configured Territory sword unlock in the journal.
+- Added the missing Territory World State factory to the Territory Content Browser creation menu.
+- Added validation and automation coverage for Property tags, levels, duplicate/null benefits,
+  non-revocable Instant effects, the Narrative ability contract, UI exposure, World State factory,
+  and distraction input/events.
+- Re-audited Narrative Pro's complete native Gameplay Tag registration surface and recorded the
+  integration matrix, project-owned boundaries, remaining World Partition durability work, and a
+  vendor typo that assigns the Magic Attack tag to `Ability_MeleeAttack` a second time.
+- Passed UE 5.7 Game and Editor Development builds with UHT warnings-as-errors, all 206
+  `TerritoryFramework.*` automation tests (200 clean and 6 expected warning fixtures), targeted
+  asset validation, and cold authored-asset verification.
+
 ## Unreleased — 2026-09-03 (AAA dialogue shots, retaliation repair, and HDR scene maker)
 
 - Fixed Claimed-entry retaliation authoring so a `Wave of Enemies` row establishes owner-versus-
@@ -21,6 +50,16 @@
 - Extended the HDR Scene Maker with neutral white balance, restrained global saturation/contrast,
   grain, chromatic-aberration and motion-blur controls; every option has safe ranges and production
   guidance. Existing Editor Utility Blueprints remain source-compatible.
+- Corrected the saturation/contrast color-vector construction that populated only the red channel
+  and could tint the entire level green/red. Level-wide saturation and contrast are now opt-in,
+  default to neutral `1.0`, use explicit equal RGBA channels, and clear stale overrides when the
+  scene maker runs. Creative grading belongs on the Cine Camera or Level Sequence shot.
+- Added dual gameplay/cinematic look ownership. The level-wide Territory post process remains a
+  neutral gameplay Lumen baseline, while each `UTerritoryDialogueShot` can apply Neutral, Warm
+  Dusty Day, Moonlit Blue Night, or Custom studio settings only to its spawned Cine Camera. The
+  camera-local profiles include safe white balance, exposure compensation, uniform RGBA grading,
+  bilateral local exposure, restrained lens effects, and no chromatic aberration, so Narrative
+  cinematics no longer require changing or restoring the gameplay world's color grade.
 - Added the read-only `Audit Territory AAA HDR Scene` node and automatic post-build audit. It
   returns structured pass/advisory/warning/error items for Narrative UDS uniqueness, tagged and
   competing unbound post processes, Lumen, Mesh Distance Fields, Virtual Shadow Maps, extended

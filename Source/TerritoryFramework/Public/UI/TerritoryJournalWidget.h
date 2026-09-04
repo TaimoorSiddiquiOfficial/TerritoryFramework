@@ -255,6 +255,13 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_DiplomacyDetailTab;
 
+	/** Runtime extension so existing UISpec/Blueprint assets gain the new tab without destructive reauthoring. */
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_BenefitsDetailTab;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UVerticalBox> PropertyBenefitsList;
+
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> Text_CommandHierarchy;
 
@@ -420,6 +427,7 @@ private:
 	bool bResponsiveLayoutApplied = false;
 	bool bSelectedTerritoryInfoRequested = false;
 	int32 SelectedDetailTab = 0;
+	int32 PropertyBenefitsDetailTabIndex = INDEX_NONE;
 	int32 LastOperationsRevision = INDEX_NONE;
 	int32 LastLiveEventRevision = INDEX_NONE;
 	FTimerHandle RefreshTimerHandle;
@@ -439,6 +447,9 @@ private:
 	void UpdateSelectedDistrictView(const FTerritoryDistrictOperationsView& View);
 	void RefreshSelectedHierarchyPanels(const FTerritoryDistrictOperationsView& View);
 	void SetSelectedDetailTab(int32 TabIndex);
+	void BuildPropertyBenefitsDetailTab();
+	void RefreshPropertyBenefitsDetailTab(const FTerritoryDistrictOperationsView& View);
+	void RequestPropertyUpgrade(ATerritoryProperty* Property);
 	void SetSelectedTerritoryInfoOpen(bool bOpen);
 	UPanelWidget* GetActiveTerritoriesPanel() const;
 	UPanelWidget* GetCapturedTerritoriesPanel() const;
@@ -486,6 +497,7 @@ private:
 
 	UFUNCTION()
 	void HandleDiplomacyDetailTabClicked();
+	void HandleBenefitsDetailTabClicked();
 
 	UFUNCTION()
 	void HandleSearchChanged(const FText& Text);
@@ -585,4 +597,8 @@ private:
 
 	UFUNCTION()
 	void HandleGuardManagementResult(ATerritoryVolume* Territory, bool bSuccess, FText Message, int32 RequestId);
+
+	UFUNCTION()
+	void HandlePropertyUpgradeResult(ATerritoryProperty* Property, bool bSuccess,
+		FText Message, int32 RequestId);
 };

@@ -23,6 +23,7 @@ class TERRITORYFRAMEWORK_API ATerritoryDistractionProjectile
 
 public:
 	ATerritoryDistractionProjectile();
+	virtual void BeginPlay() override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Distraction")
 	TObjectPtr<USphereComponent> Collision;

@@ -104,6 +104,12 @@ bool FTerritoryHDRSceneMakerMetadataContract::RunTest(const FString& Parameters)
 		Options.MinimumRayTracingGeometryPoolMB > 0.f);
 	TestTrue(TEXT("Default cinematic look uses restrained film grain"),
 		Options.FilmGrainIntensity >= 0.f && Options.FilmGrainIntensity <= 0.1f);
+	TestFalse(TEXT("Level-wide saturation and contrast grading is opt-in"),
+		Options.bApplyGlobalColorGrading);
+	TestTrue(TEXT("Default saturation is neutral"),
+		FMath::IsNearlyEqual(Options.GlobalSaturation, 1.f));
+	TestTrue(TEXT("Default contrast is neutral"),
+		FMath::IsNearlyEqual(Options.GlobalContrast, 1.f));
 	TestTrue(TEXT("Default global chromatic aberration remains disabled"),
 		FMath::IsNearlyZero(Options.ChromaticAberrationIntensity));
 

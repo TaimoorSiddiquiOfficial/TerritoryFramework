@@ -11,6 +11,7 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryWorldState.h"
 #include "Engine/Blueprint.h"
 #include "Engine/DataAsset.h"
 #include "Economy/TerritoryProductionProfile.h"
@@ -180,6 +181,16 @@ UTerritoryCityActorBlueprintFactory::UTerritoryCityActorBlueprintFactory()
 		LOCTEXT("TerritoryCityActorBlueprint", "Territory City Actor Blueprint"),
 		LOCTEXT("TerritoryCityActorBlueprintTip",
 			"Creates the level actor for a City whose control is calculated from its Districts."),
+		LOCTEXT("TerritoryWorldActorSubMenu", "World Actors"));
+}
+
+UTerritoryWorldStateBlueprintFactory::UTerritoryWorldStateBlueprintFactory()
+{
+	InitializeBlueprintFor(
+		ATerritoryWorldState::StaticClass(),
+		LOCTEXT("TerritoryWorldStateBlueprint", "Territory World State Blueprint"),
+		LOCTEXT("TerritoryWorldStateBlueprintTip",
+			"Creates the single replicated Narrative-save-compatible World State actor for economy, diplomacy, production, capture summaries, and World Partition continuity. Place exactly one in the persistent level."),
 		LOCTEXT("TerritoryWorldActorSubMenu", "World Actors"));
 }
 

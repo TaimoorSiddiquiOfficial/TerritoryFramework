@@ -78,10 +78,20 @@ namespace TerritoryHDRSceneEditor
 		PP.MotionBlurMax = 20.f;
 		PP.bOverride_WhiteTemp = true;
 		PP.WhiteTemp = FMath::Clamp(Options.WhiteBalanceTemperature, 1500.f, 15000.f);
-		PP.bOverride_ColorSaturation = true;
-		PP.ColorSaturation = FVector4(FMath::Clamp(Options.GlobalSaturation, 0.f, 2.f));
-		PP.bOverride_ColorContrast = true;
-		PP.ColorContrast = FVector4(FMath::Clamp(Options.GlobalContrast, 0.5f, 2.f));
+		// A level-wide saturation/contrast override can fight UDS time-of-day color
+		// and shot-specific grading. Keep the tool-owned volume neutral unless an
+		// artist explicitly opts into a reviewed global grade. Assigning neutral
+		// values while clearing the overrides also repairs stale settings from an
+		// earlier run of the scene maker.
+		PP.bOverride_ColorSaturation = Options.bApplyGlobalColorGrading;
+		const float Saturation = FMath::Clamp(
+			Options.GlobalSaturation, 0.75f, 1.25f);
+		PP.ColorSaturation = FVector4(
+			Saturation, Saturation, Saturation, Saturation);
+		PP.bOverride_ColorContrast = Options.bApplyGlobalColorGrading;
+		const float Contrast = FMath::Clamp(
+			Options.GlobalContrast, 0.75f, 1.25f);
+		PP.ColorContrast = FVector4(Contrast, Contrast, Contrast, Contrast);
 		PP.bOverride_FilmGrainIntensity = true;
 		PP.FilmGrainIntensity = FMath::Clamp(Options.FilmGrainIntensity, 0.f, 1.f);
 		PP.bOverride_SceneFringeIntensity = true;
@@ -334,6 +344,32 @@ namespace TerritoryHDRSceneEditor
 						"One or more global lens effects exceed the recommended cinematic range."),
 				LOCTEXT("RestrainedLensFix",
 					"Reduce the global effect and use shot-specific camera or post-process tracks for deliberate stylization."));
+			const auto IsUniformGradeVector = [](const FVector4& Value)
+			{
+				return FMath::IsNearlyEqual(Value.X, Value.Y)
+					&& FMath::IsNearlyEqual(Value.X, Value.Z)
+					&& FMath::IsNearlyEqual(Value.X, Value.W);
+			};
+			const bool bGlobalGradeDisabled = !PP.bOverride_ColorSaturation
+				&& !PP.bOverride_ColorContrast;
+			const bool bGlobalGradeUniform =
+				PP.bOverride_ColorSaturation == PP.bOverride_ColorContrast
+				&& IsUniformGradeVector(PP.ColorSaturation)
+				&& IsUniformGradeVector(PP.ColorContrast);
+			AddAuditItem(Report, TEXT("GlobalColorGrade"),
+				bGlobalGradeDisabled || bGlobalGradeUniform
+					? ETerritoryHDRSceneAuditSeverity::Pass
+					: ETerritoryHDRSceneAuditSeverity::Warning,
+				bGlobalGradeDisabled
+					? LOCTEXT("GlobalGradeDisabled",
+						"Level-wide saturation and contrast overrides are disabled; Narrative UDS and shot grades retain color authority.")
+					: (bGlobalGradeUniform
+						? LOCTEXT("GlobalGradeUniform",
+							"The explicitly enabled global saturation and contrast grade uses equal RGBA channels.")
+						: LOCTEXT("GlobalGradeSkewed",
+							"The global saturation or contrast grade has unequal color channels or only one override enabled, which can tint the level green/red.")),
+				LOCTEXT("GlobalGradeFix",
+					"Run the scene maker with Apply Global Color Grading disabled, or set every RGBA saturation and contrast channel to the same reviewed value."));
 		}
 		else
 		{

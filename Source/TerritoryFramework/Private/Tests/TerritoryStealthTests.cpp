@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 
+#include "Abilities/TerritoryDistractionAbility.h"
 #include "AI/TerritoryInvestigationActivity.h"
 #include "AI/TerritoryInvestigationGoal.h"
 #include "AI/TerritoryStealthObserverComponent.h"
@@ -167,6 +168,22 @@ bool FTFStealthNarrativeIntegrationContract::RunTest(const FString& Parameters)
 		Projectile ? Projectile->ProjectileMovement.Get() : nullptr);
 	TestNotNull(TEXT("Reusable Narrative distraction projectile reports one hearing stimulus"),
 		Projectile ? Projectile->Distraction.Get() : nullptr);
+	const UTerritoryDistractionAbility* Ability =
+		GetDefault<UTerritoryDistractionAbility>();
+	TestNotNull(TEXT("Distraction projectile is owned by a Narrative Gameplay Ability"),
+		Ability);
+	TestTrue(TEXT("Distraction ability uses Narrative's Throw input tag"),
+		Ability && Ability->InputTag == FGameplayTag::RequestGameplayTag(
+			TEXT("Narrative.Input.Throw"), false));
+	TestTrue(TEXT("Distraction ability exposes the Narrative-compatible ability tag"),
+		Ability && Ability->GetAssetTags().HasTagExact(
+			TerritoryStealthTags::DistractionAbility));
+	TestNotNull(TEXT("Distraction ability has a safe native projectile fallback"),
+		Ability ? Ability->ProjectileClass.Get() : nullptr);
+	TestTrue(TEXT("Distraction thrown Gameplay Event tag exists"),
+		TerritoryStealthTags::DistractionThrownEvent.GetTag().IsValid());
+	TestTrue(TEXT("Distraction impact Gameplay Event tag exists"),
+		TerritoryStealthTags::DistractionImpactEvent.GetTag().IsValid());
 
 	const UTerritoryInvestigationGoal* Goal =
 		GetDefault<UTerritoryInvestigationGoal>();

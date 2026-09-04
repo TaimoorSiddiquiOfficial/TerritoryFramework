@@ -1,5 +1,6 @@
 #include "Interaction/TerritoryDistractionComponent.h"
 
+#include "AbilitySystemBlueprintLibrary.h"
 #include "Core/TerritoryStealthTags.h"
 #include "Perception/AISense_Hearing.h"
 
@@ -49,6 +50,20 @@ bool UTerritoryDistractionComponent::ReportDistractionAtLocation(
 	UAISense_Hearing::ReportNoiseEvent(World, WorldLocation,
 		FMath::Max(0.f, Loudness), Source, FMath::Max(0.f, MaximumRange),
 		TerritoryStealthTags::DistractionThrowable.GetTag().GetTagName());
+
+	// Publish the same impact into Narrative GAS. Quests, abilities, Gameplay
+	// Effects, and analytics may listen without polling AI Perception.
+	FGameplayEventData Payload;
+	Payload.EventTag = TerritoryStealthTags::DistractionImpactEvent;
+	Payload.Instigator = Source;
+	Payload.Target = Owner;
+	Payload.OptionalObject = Owner;
+	Payload.EventMagnitude = FMath::Max(0.f, Loudness);
+	if (Source != Owner)
+	{
+		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
+			Source, Payload.EventTag, Payload);
+	}
 	bHasReported = true;
 	return true;
 }

@@ -6,6 +6,12 @@ namespace TerritoryStealthTags
 {
 	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Exposed);
 	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(StealthAbility);
+	/** Narrative-compatible GAS asset tag used by the distraction throw ability. */
+	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(DistractionAbility);
+	/** Gameplay Event emitted after the server commits and spawns a distraction. */
+	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(DistractionThrownEvent);
+	/** Gameplay Event emitted when the projectile reports its first impact noise. */
+	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(DistractionImpactEvent);
 	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(DistractionThrowable);
 	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(InvestigationActive);
 	TERRITORYFRAMEWORK_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(DisguiseActive);

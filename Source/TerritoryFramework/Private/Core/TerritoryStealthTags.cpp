@@ -10,6 +10,18 @@ namespace TerritoryStealthTags
 		"Territory.Ability.Stealth",
 		"Ability tag for Territory-aware stealth abilities that end when an infiltrator is exposed.");
 
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(DistractionAbility,
+		"Abilities.Distraction.Throw",
+		"Narrative Gameplay Ability tag for a non-damaging Territory distraction throw.");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(DistractionThrownEvent,
+		"GameplayEvent.Distraction.Thrown",
+		"Sent to the thrower's Ability System after a distraction projectile is committed and spawned.");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(DistractionImpactEvent,
+		"GameplayEvent.Distraction.Impact",
+		"Sent to the thrower's Ability System when its distraction projectile produces the first hearing stimulus.");
+
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(DistractionThrowable,
 		"Territory.Distraction.Throwable",
 		"Hearing stimulus produced by a nonlethal Territory distraction throwable.");

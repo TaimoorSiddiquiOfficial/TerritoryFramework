@@ -1016,16 +1016,18 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 			}
 		}
 
+		const FGameplayTag BreakStealthEvent =
+			Profile->GetEffectiveBreakStealthGameplayEventTag();
 		if (Profile->bSendBreakStealthGameplayEvent
-			&& Profile->BreakStealthGameplayEventTag.IsValid())
+			&& BreakStealthEvent.IsValid())
 		{
 			FGameplayEventData Payload;
-			Payload.EventTag = Profile->BreakStealthGameplayEventTag;
+			Payload.EventTag = BreakStealthEvent;
 			Payload.Instigator = Observer;
 			Payload.Target = Target;
 			Payload.EventMagnitude = Runtime.Snapshot.Suspicion;
 			FTerritoryNarrativeProAdapter::SendGameplayEvent(
-				Target, Profile->BreakStealthGameplayEventTag, Payload);
+				Target, BreakStealthEvent, Payload);
 		}
 
 		if (Profile->EscalationScope != ETerritoryStealthEscalationScope::LocalAlarm)

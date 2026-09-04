@@ -39,3 +39,13 @@ ATerritoryDistractionProjectile::ATerritoryDistractionProjectile()
 		TEXT("Distraction"));
 }
 
+void ATerritoryDistractionProjectile::BeginPlay()
+{
+	Super::BeginPlay();
+	if (Collision)
+	{
+		Collision->IgnoreActorWhenMoving(GetOwner(), true);
+		Collision->IgnoreActorWhenMoving(GetInstigator(), true);
+	}
+}
+

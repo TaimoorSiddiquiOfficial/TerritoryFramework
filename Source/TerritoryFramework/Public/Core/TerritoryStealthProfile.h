@@ -199,6 +199,10 @@ public:
 			ToolTip="Sent to the exposed player's Ability System. A temporary stealth ability may listen for this event and cancel itself; passive equipment is not removed."))
 	FGameplayTag BreakStealthGameplayEventTag;
 
+	/** Runtime-safe event tag. Legacy assets that serialized an empty value fall back to Territory.Event.Stealth.Exposed. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth|Ability Integration")
+	FGameplayTag GetEffectiveBreakStealthGameplayEventTag() const;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 Ability Integration")
 	bool bSendBreakStealthGameplayEvent = true;
 

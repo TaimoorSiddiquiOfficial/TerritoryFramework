@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Abilities/GameplayAbilityTypes.h"
+#include "GameplayEffectTypes.h"
 #include "GameplayTagContainer.h"
 #include "NarrativeSavableComponent.h"
 #include "Core/TerritoryDiplomacyTypes.h"
@@ -16,9 +18,14 @@ class ATerritoryDistrict;
 class ATerritoryProperty;
 class ATerritoryVolume;
 class APlayerController;
+class ANarrativeCharacter;
+class UGameplayEffect;
+class UNarrativeGameplayAbility;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnTerritoryGuardPurchaseResult,
 	ATerritoryVolume*, Territory, bool, bSuccess, FText, Message, int32, RequestId);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnTerritoryPropertyUpgradeResult,
+	ATerritoryProperty*, Property, bool, bSuccess, FText, Message, int32, RequestId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryAssaultNotification,
 	const FTerritoryAssaultRecord&, Assault);
 
@@ -41,6 +48,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Management")
 	FOnTerritoryGuardPurchaseResult OnGuardPurchaseResult;
+
+	UPROPERTY(BlueprintAssignable, Category="Territory|Property Benefits")
+	FOnTerritoryPropertyUpgradeResult OnPropertyUpgradeResult;
 
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryAssaultNotification OnAssaultNotification;
@@ -155,6 +165,27 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	FGameplayTag GetManagedFaction() const;
 
+	/** Reconciles owned Property tiers with Narrative GAS. Authority performs mutations; clients read replicated tags/effects. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Property Benefits",
+		meta=(DisplayName="Refresh Owned Property Benefits"))
+	void RefreshOwnedPropertyBenefits();
+
+	/** Requests one paid upgrade through the existing authoritative Property economy path. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Property Benefits",
+		meta=(DisplayName="Request Upgrade Territory Property"))
+	void RequestUpgradeProperty(ATerritoryProperty* Property);
+
+	/** Aggregate benefit tags currently granted by owned, claimed Properties. */
+	UFUNCTION(BlueprintPure, Category="Territory|Property Benefits")
+	FGameplayTagContainer GetGrantedPropertyBenefitTags() const
+	{
+		return GrantedPropertyBenefitTags;
+	}
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Property Benefits",
+		meta=(ClampMin="0.25", Units="s", ToolTip="Server reconciliation interval. It catches Property upgrade, ownership, streaming, faction, and pawn changes without requiring Blueprint event wiring."))
+	float PropertyBenefitRefreshInterval = 1.f;
+
 	/**
 	 * Asks the server to scout one visible non-owned District. A successful report
 	 * reveals the defending faction and current active guard count in the Command
@@ -208,9 +239,19 @@ private:
 	TMap<TWeakObjectPtr<ATerritoryVolume>, FGameplayTagContainer> ObservedTerritoryCapabilities;
 	TWeakObjectPtr<ATerritoryProperty> LastPlayerPlace;
 	FTimerHandle PlaceDiscoveryTimer;
+	FTimerHandle PropertyBenefitRefreshTimer;
 	int32 NextIntelligenceSequence = 0;
 
+	TWeakObjectPtr<ANarrativeCharacter> PropertyBenefitCharacter;
+	TMap<TSubclassOf<UNarrativeGameplayAbility>, FGameplayAbilitySpecHandle>
+		GrantedPropertyAbilityHandles;
+	TMap<TSubclassOf<UGameplayEffect>, FActiveGameplayEffectHandle>
+		GrantedPropertyEffectHandles;
+	FActiveGameplayEffectHandle GrantedPropertyTagEffectHandle;
+	FGameplayTagContainer GrantedPropertyBenefitTags;
+
 	void PollTerritoryPOIDiscovery();
+	void ClearOwnedPropertyBenefits();
 
 	void BindLiveEventSources();
 	void UnbindLiveEventSources();
@@ -303,6 +344,11 @@ private:
 	void ServerRequestEspionage(ATerritoryDistrict* District, int32 RequestId);
 	bool ServerRequestEspionage_Validate(ATerritoryDistrict* District, int32 RequestId);
 
+	UFUNCTION(Server, Reliable, WithValidation)
+	void ServerRequestUpgradeProperty(ATerritoryProperty* Property, int32 RequestId);
+	bool ServerRequestUpgradeProperty_Validate(ATerritoryProperty* Property,
+		int32 RequestId);
+
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveGuardPurchaseResult(ATerritoryVolume* Territory, bool bSuccess, const FText& Message, int32 RequestId);
 
@@ -320,12 +366,17 @@ private:
 	void ClientReceiveEspionageResult(FGameplayTag TerritoryTag, bool bSuccess,
 		FGameplayTag DefendingFaction, int32 ActiveDefenders);
 
+	UFUNCTION(Client, Reliable)
+	void ClientReceivePropertyUpgradeResult(ATerritoryProperty* Property,
+		bool bSuccess, const FText& Message, int32 RequestId);
+
 	void PerformPurchase(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	void PerformPurchaseForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
 	void PerformRemove(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count, int32 RequestId);
 	void PerformRemoveForDistrict(ATerritoryDistrict* District, int32 Count, int32 RequestId);
 	void PerformSetGuardTarget(ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);
 	void PerformSendReinforcements(ATerritoryVolume* Territory, int32 Count, int32 RequestId);
+	void PerformUpgradeProperty(ATerritoryProperty* Property, int32 RequestId);
 	void PerformSetGuardTargetAtManagementPoint(ATerritoryDistrictManagementPoint* ManagementPoint,
 		ATerritoryVolume* Territory, int32 NewDesiredGuardCount, int32 RequestId);
 	bool CanManageDistrict(ATerritoryDistrict* District, APawn* Pawn, FText& OutFailureReason) const;
@@ -339,6 +390,7 @@ private:
 	APawn* GetManagingPawn() const;
 
 	float LastPurchaseRequestTime = -BIG_NUMBER;
+	float LastPropertyUpgradeRequestTime = -BIG_NUMBER;
 	float LastEspionageRequestTime = -BIG_NUMBER;
 	int32 NextRequestId = 0;
 	int32 LastServerRequestId = 0;

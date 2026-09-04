@@ -14,6 +14,7 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryWorldState.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "Factories/BlueprintFactory.h"
 #include "IAssetTools.h"
@@ -164,6 +165,9 @@ bool FTerritoryAssetCreationMenuTest::RunTest(const FString& Parameters)
 		{ ATerritoryCity::StaticClass(),
 			UTerritoryCityActorBlueprintFactory::StaticClass(),
 			TEXT("Territory City Actor Blueprint"), TEXT("World Actors") },
+		{ ATerritoryWorldState::StaticClass(),
+			UTerritoryWorldStateBlueprintFactory::StaticClass(),
+			TEXT("Territory World State Blueprint"), TEXT("World Actors") },
 		{ ATerritoryCapturePoint::StaticClass(),
 			UTerritoryCapturePointBlueprintFactory::StaticClass(),
 			TEXT("Territory Capture Point Blueprint"), TEXT("Interaction & Navigation Actors") },

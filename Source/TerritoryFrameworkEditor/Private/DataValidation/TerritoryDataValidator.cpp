@@ -35,6 +35,8 @@
 #include "LevelSequence.h"
 #include "MovieScene.h"
 #include "GAS/NarrativeAttributeSetBase.h"
+#include "GAS/NarrativeGameplayAbility.h"
+#include "Items/WeaponItem.h"
 #include "Misc/DataValidation.h"
 #include "NarrativeGameplayTags.h"
 #include "NavigationSystem.h"
@@ -1467,6 +1469,76 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 			Warning(FString::Printf(
 				TEXT("State %d enables the departure cue but has no State Exited Sound"),
 				static_cast<int32>(Pair.Key)));
+		}
+	}
+	if (UTerritoryPlaceDefinition* Place = Cast<UTerritoryPlaceDefinition>(Definition))
+	{
+		const FGameplayTag RoleRoot = FGameplayTag::RequestGameplayTag(
+			TEXT("Territory.Property.Role"), false);
+		const FGameplayTag BenefitRoot = FGameplayTag::RequestGameplayTag(
+			TEXT("Territory.Property.Benefit"), false);
+		if (Place->PropertyRoleTag.IsValid() && RoleRoot.IsValid()
+			&& !Place->PropertyRoleTag.MatchesTag(RoleRoot))
+		{
+			Error(TEXT("Property Role Tag must be under Territory.Property.Role"));
+		}
+		TSet<FGameplayTag> SeenBenefits;
+		for (int32 Index = 0; Index < Place->GameplayBenefits.Num(); ++Index)
+		{
+			const FTerritoryPropertyGameplayBenefit& Benefit =
+				Place->GameplayBenefits[Index];
+			const FString Prefix = FString::Printf(TEXT("Gameplay Benefit %d"), Index);
+			if (Benefit.RequiredUpgradeLevel < 0
+				|| Benefit.RequiredUpgradeLevel > Place->MaxUpgradeLevel)
+			{
+				Error(Prefix + TEXT(" requires an upgrade level outside this Place's supported range"));
+			}
+			if (!Benefit.BenefitTag.IsValid())
+			{
+				Error(Prefix + TEXT(" requires a stable Benefit Tag"));
+			}
+			else
+			{
+				if (BenefitRoot.IsValid() && !Benefit.BenefitTag.MatchesTag(BenefitRoot))
+				{
+					Error(Prefix + TEXT(" Benefit Tag must be under Territory.Property.Benefit"));
+				}
+				if (SeenBenefits.Contains(Benefit.BenefitTag))
+				{
+					Error(Prefix + TEXT(" repeats a Benefit Tag; combine its payload into one tier"));
+				}
+				SeenBenefits.Add(Benefit.BenefitTag);
+			}
+			if (Benefit.DisplayName.IsEmpty())
+			{
+				Warning(Prefix + TEXT(" has no player-facing Display Name"));
+			}
+			TSet<UClass*> SeenPayloadClasses;
+			for (const TSubclassOf<UNarrativeGameplayAbility> Ability : Benefit.GrantedAbilities)
+			{
+				if (!Ability) Error(Prefix + TEXT(" contains an empty Narrative ability"));
+				else if (SeenPayloadClasses.Contains(Ability))
+					Error(Prefix + TEXT(" repeats a Narrative ability"));
+				else SeenPayloadClasses.Add(Ability);
+			}
+			for (const TSubclassOf<UGameplayEffect> EffectClass : Benefit.GrantedGameplayEffects)
+			{
+				const UGameplayEffect* Effect = EffectClass
+					? EffectClass->GetDefaultObject<UGameplayEffect>() : nullptr;
+				if (!Effect) Error(Prefix + TEXT(" contains an empty Gameplay Effect"));
+				else if (Effect->DurationPolicy == EGameplayEffectDurationType::Instant)
+					Error(Prefix + TEXT(" uses an Instant Gameplay Effect; use Infinite so ownership loss can revoke it"));
+				else if (SeenPayloadClasses.Contains(EffectClass))
+					Error(Prefix + TEXT(" repeats a Gameplay Effect"));
+				else SeenPayloadClasses.Add(EffectClass);
+			}
+			for (const TSubclassOf<UWeaponItem> Weapon : Benefit.UnlockedWeaponItems)
+			{
+				if (!Weapon) Error(Prefix + TEXT(" contains an empty weapon unlock"));
+				else if (SeenPayloadClasses.Contains(Weapon))
+					Error(Prefix + TEXT(" repeats a weapon unlock"));
+				else SeenPayloadClasses.Add(Weapon);
+			}
 		}
 	}
 	ValidateStealthProfile(Definition->DefaultStealthProfile,
