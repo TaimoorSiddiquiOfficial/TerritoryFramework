@@ -13,12 +13,14 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Interaction/InteractionComponent.h"
 #include "Navigation/TerritoryRoadGuide.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativePlayerController.h"
+#include "UnrealFramework/NarrativePlayerCharacter.h"
 #include "UnrealFramework/NarrativePlayerState.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/Activities/NPCActivityComponent.h"
@@ -50,6 +52,39 @@
 
 namespace
 {
+	bool HasPlayerVehicleOccupant(const ANarrativeVehicleBase* Vehicle)
+	{
+		if (!IsValid(Vehicle)) return false;
+		if (Cast<APlayerController>(Vehicle->GetController())) return true;
+		const UMountComponent* Mount = Vehicle->FindComponentByClass<UMountComponent>();
+		if (!Mount) return false;
+		for (const FActiveInteractionSlot& Slot : Mount->SlotStatuses)
+		{
+			if (Slot.SlotStatus == EInteractionSlotStatus::ISS_Free || !IsValid(Slot.SlotUser)) continue;
+			// Narrative's player interaction component lives on the controller.
+			if (Cast<APlayerController>(Slot.SlotUser->GetOwner())) return true;
+			const APawn* Occupant = Cast<APawn>(Slot.SlotUser->GetOwner());
+			// A mounted Narrative player can be temporarily unpossessed. The native
+			// slot still owns the relationship, including passengers and entry transitions.
+			if (IsValid(Occupant) && (Cast<ANarrativePlayerCharacter>(Occupant)
+				|| Occupant->IsPlayerControlled())) return true;
+		}
+		return false;
+	}
+
+	void RemoveVehicleForCampaignRestore(ANarrativeVehicleBase* Vehicle)
+	{
+		if (!IsValid(Vehicle) || Vehicle->IsActorBeingDestroyed()
+			|| !Vehicle->HasAuthority() || HasPlayerVehicleOccupant(Vehicle)) return;
+		// A new campaign snapshot reconstructs surviving forces at authored spawn pads.
+		// Clear the old car immediately; retain the actor briefly for Narrative's
+		// latent mount/dismount callbacks, as with retired assault NPCs.
+		Vehicle->SetActorEnableCollision(false);
+		Vehicle->SetActorHiddenInGame(true);
+		Vehicle->SetLifeSpan(0.75f);
+		Vehicle->ForceNetUpdate();
+	}
+
 	ENarrativeGameplayDifficulty GetCurrentNarrativeDifficulty()
 	{
 		UNarrativeGameUserSettings* Settings =
@@ -1242,10 +1277,18 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 	bRestoringState = true;
 	if (bAuthority)
 	{
+		// Terminal assaults can already have cars awaiting ordinary scenic cleanup.
+		// They must not obstruct the replacement campaign's physical reconstruction.
+		const TArray<FRetiringVehicle> PreviousRetiringVehicles = MoveTemp(RetiringVehicles);
+		RetiringVehicles.Reset();
+		for (const FRetiringVehicle& Entry : PreviousRetiringVehicles)
+		{
+			RemoveVehicleForCampaignRestore(Entry.Vehicle.Get());
+		}
 		for (auto& Pair : Assaults)
 		{
 			RetireLiveParticipants(Pair.Value, true);
-			RetireLiveVehicles(Pair.Key, true);
+			RetireLiveVehicles(Pair.Key, true, true);
 		}
 	}
 	LiveParticipants.Empty();
@@ -2771,17 +2814,24 @@ void UTerritoryCounterAttackSubsystem::RetireLiveParticipants(
 }
 
 void UTerritoryCounterAttackSubsystem::RetireLiveVehicles(
-	const FGuid& AssaultID, bool bDestroyActors)
+	const FGuid& AssaultID, bool bDestroyActors, bool bForCampaignRestore)
 {
-	const TSet<TWeakObjectPtr<ANarrativeVehicleBase>> Vehicles =
-		LiveAssaultVehicles.FindRef(AssaultID);
+	TSet<TWeakObjectPtr<ANarrativeVehicleBase>> Vehicles;
+	LiveAssaultVehicles.RemoveAndCopyValue(AssaultID, Vehicles);
+	TSet<TWeakObjectPtr<ATerritoryRoadGuide>> Guides;
+	LiveAssaultRoadGuides.RemoveAndCopyValue(AssaultID, Guides);
 	for (const TWeakObjectPtr<ANarrativeVehicleBase>& WeakVehicle : Vehicles)
 	{
+		FTerritoryVehicleRetirementSettings Rules;
+		LiveVehicleRetirementRules.RemoveAndCopyValue(WeakVehicle, Rules);
 		if (ANarrativeVehicleBase* Vehicle = WeakVehicle.Get();
 			bDestroyActors && IsValid(Vehicle))
 		{
-			const FTerritoryVehicleRetirementSettings Rules =
-				LiveVehicleRetirementRules.FindRef(Vehicle);
+			if (bForCampaignRestore)
+			{
+				RemoveVehicleForCampaignRestore(Vehicle);
+				continue;
+			}
 			const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 			FRetiringVehicle Retiring;
 			Retiring.Vehicle = Vehicle;
@@ -2794,16 +2844,11 @@ void UTerritoryCounterAttackSubsystem::RetireLiveVehicles(
 				Rules.PlayerKeepAliveDistance);
 			RetiringVehicles.Add(MoveTemp(Retiring));
 		}
-		LiveVehicleRetirementRules.Remove(WeakVehicle);
 	}
-	LiveAssaultVehicles.Remove(AssaultID);
-	const TSet<TWeakObjectPtr<ATerritoryRoadGuide>> Guides =
-		LiveAssaultRoadGuides.FindRef(AssaultID);
 	for (const TWeakObjectPtr<ATerritoryRoadGuide>& WeakGuide : Guides)
 	{
 		if (ATerritoryRoadGuide* Guide = WeakGuide.Get()) Guide->EndMissionTraffic();
 	}
-	LiveAssaultRoadGuides.Remove(AssaultID);
 }
 
 void UTerritoryCounterAttackSubsystem::UpdateRetiringVehicles()
@@ -2822,7 +2867,7 @@ void UTerritoryCounterAttackSubsystem::UpdateRetiringVehicles()
 		}
 		// A player who kept or carjacked the mission vehicle owns it now. Territory
 		// releases cleanup authority instead of destroying a car under that player.
-		if (Cast<APlayerController>(Vehicle->GetController()))
+		if (HasPlayerVehicleOccupant(Vehicle))
 		{
 			if (Now >= Entry.HardRetirementTime)
 			{

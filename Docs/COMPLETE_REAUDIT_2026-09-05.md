@@ -301,7 +301,47 @@ Narrative's abstract base; the final fixture uses the existing concrete sedan as
 No Narrative files, durable fields or Blueprint signatures changed. This batch verifies callback
 lifetime, not complete in-spawn casualty accounting or full physical road ingress. Force counts still
 commit in the enclosing wave after participant construction; that callback timing and restoration
-during retirement cleanup remain under review. Current packaged multiplayer/road gates remain pending.
+during retirement cleanup remain under review.
+
+Additional batch-20 release evidence: Development Game build succeeded; HopDistrictTest cooked 6,888
+packages with zero errors and five pre-existing vendor/config warnings; Windows staging, pak and archive
+succeeded. The packaged game in server mode accepted two clients, including the later join. Its immediate
+assault gate deployed four real Narrative occupants. Native save/reload preserved exactly one live
+assault ID, but physical reconstruction repeatedly failed collision at the old sedan's spawn pad. The
+record-only gate therefore did not prove physical restoration. Evidence: `Batch20_GameBuild.log`,
+`Cook_Batch20.log`, `Package_Batch20.log`, `Server_Batch20.log`, `Client1_Batch20.log`, `Client2_Batch20.log`.
+
+### Batch 21: campaign reload vehicle retirement
+
+The packaged failure was caused by applying the ordinary 20-second vehicle retirement delay during
+campaign restoration. Superseded empty assault cars now lose collision and visibility immediately on
+the server, with a 0.75-second actor lifetime for Narrative latent mount/dismount cleanup. Previously
+retired terminal-assault cars are cleared too. Ordinary assault resolution retains its authored delay.
+Player drivers and passengers are preserved using Narrative's actual mount `SlotStatuses`; Narrative's
+player interaction component belongs to the player controller. The same check prevents ordinary hard
+retirement from destroying a passenger's car. Vehicle/guide tracking is detached before cleanup callbacks.
+
+CounterAttack remains the transient mission-vehicle cleanup authority; Narrative owns occupancy. No
+durable fields, Blueprint signatures or vendor files changed. Actor visibility/destruction is replicated
+through the existing actor lifecycle. Native restored survivor/casualty accounting remains unchanged.
+
+Editor/UHT and all 241 automation tests passed (233 clean, eight warning-bearing fixtures, zero failures
+or skips). The new regression uses the real Narrative sedan and checks immediate collision removal,
+latent lifetime, terminal-car cleanup, finite survivor preservation, ordinary retirement policy,
+player driver/passenger protection, and non-authoritative actor rejection. The first test run exposed
+an incorrect test assumption that player interaction lived on the character; both the adapter and
+fixture were corrected to use the native controller component. Evidence: `Batch21_FinalBuild.log`,
+`Batch21_FinalTests`. Game build and Windows staging/pak also succeeded, reusing batch-20's unchanged
+cooked assets. The packaged server-mode run deployed four attackers, passed Native disk save/reload
+with the same live ID, then reconstructed four attackers in a replacement sedan at the same pad; the
+driver claimed the vehicle and began the ten-waypoint road route. No collision failure recurred.
+Two NullRHI clients joined, but each emitted the same SKM_Manny bone-visibility ensure during the intro.
+A third client with actual offscreen rendering completed the intro and reached the gameplay HUD without
+the ensure. This distinguishes a headless presentation failure from the fixed physical reconstruction;
+it does not certify the full two-client gameplay or visual release gates. Evidence: `Batch21_GameBuild.log`,
+`Package_Batch21.log`, `Server_Batch21.log`, `Client1_Batch21.log`, `Client2_Batch21.log`,
+`ClientRendered_Batch21.log`. The installed-engine TDAServer target limitation and missing physical
+World Partition fixture remain unresolved.
 
 ### Authored asset validation after batch 15
 

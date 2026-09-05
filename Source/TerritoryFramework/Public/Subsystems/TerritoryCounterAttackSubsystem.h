@@ -378,7 +378,8 @@ private:
 	void ResolveAssault(FTerritoryAssaultRecord& Assault, ETerritoryAssaultState FinalState,
 		ETerritoryAssaultResolution Reason);
 	void RetireLiveParticipants(FTerritoryAssaultRecord& Assault, bool bDestroyActors);
-	void RetireLiveVehicles(const FGuid& AssaultID, bool bDestroyActors);
+	void RetireLiveVehicles(const FGuid& AssaultID, bool bDestroyActors,
+		bool bForCampaignRestore = false);
 	void UpdateRetiringVehicles();
 	void BroadcastChanged(const FTerritoryAssaultRecord& Assault);
 	void BroadcastStateTransition(const FTerritoryAssaultRecord& Assault,
@@ -472,4 +473,5 @@ private:
 	friend class FTFAssaultWarningCallback;
 	friend class FTFAssaultEvaluationResume;
 	friend class FTFAssaultSpawnCallbacks;
+	friend class FTFAssaultVehicleRestoreCleanup;
 };
