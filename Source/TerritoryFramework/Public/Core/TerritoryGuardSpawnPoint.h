@@ -501,6 +501,7 @@ private:
 	friend class FTFGuardReserveReconciliation;
 	friend class FTFGuardRetirementCallbacks;
 	friend class FTFGuardSpawnAdmissionCallbacks;
+	friend class FTFGuardReserveTotals;
 #endif
 
 	/** Hidden serialized binding maintained by the Definition synchronizer. */

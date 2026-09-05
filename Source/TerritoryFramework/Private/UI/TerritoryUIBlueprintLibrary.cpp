@@ -1022,7 +1022,8 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		OutView.ActiveGuards += Garrison.ActiveGuards;
 		OutView.DesiredGuards += Garrison.DesiredGuards;
 		OutView.MaximumGuards += Garrison.MaximumGuards;
-		OutView.ReserveGuards += Garrison.ReserveGuards;
+		OutView.ReserveGuards = static_cast<int32>(FMath::Min<int64>(MAX_int32,
+			static_cast<int64>(OutView.ReserveGuards) + FMath::Max(0, Garrison.ReserveGuards)));
 		OutView.PeriodicIncome += Garrison.PeriodicIncome;
 		OutView.GuardUpkeep += Garrison.GuardUpkeep;
 		OutView.bCanAddGuard = OutView.bCanAddGuard || Garrison.bCanIncreaseTarget;

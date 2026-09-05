@@ -785,6 +785,7 @@ private:
 	friend class FTFVolumeRuleCallbacks;
 	friend class FTFGuardRetirementCallbacks;
 	friend class FTFGuardSpawnAdmissionCallbacks;
+	friend class FTFGuardReserveTotals;
 	friend class FTFTerritoryDefinitionRuntimeNarrative;
 #endif
 

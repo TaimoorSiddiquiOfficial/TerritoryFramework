@@ -2595,12 +2595,17 @@ void ATerritoryVolume::RefreshGarrisonSnapshot()
 	NewSnapshot.ActiveGuards = GetSpawnedGuardCount();
 	NewSnapshot.DesiredGuards = GetDesiredGuardCount();
 	NewSnapshot.MaximumGuards = GetMaxGuardCount();
+	int64 ReserveGuards = 0;
+	int64 PendingDeployments = 0;
 	for (const ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
 	{
 		if (!SpawnPoint) continue;
-		NewSnapshot.ReserveGuards += SpawnPoint->GetReserveCount();
-		NewSnapshot.PendingDeployments += SpawnPoint->GetPendingReserveCount();
+		ReserveGuards += SpawnPoint->GetReserveCount();
+		PendingDeployments += SpawnPoint->GetPendingReserveCount();
 	}
+	// Posts retain exact saved counts; the replicated int32 read model saturates.
+	NewSnapshot.ReserveGuards = static_cast<int32>(FMath::Min<int64>(ReserveGuards, MAX_int32));
+	NewSnapshot.PendingDeployments = static_cast<int32>(FMath::Min<int64>(PendingDeployments, MAX_int32));
 
 	if (NewSnapshot != GarrisonSnapshot)
 	{

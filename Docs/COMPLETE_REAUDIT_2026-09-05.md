@@ -2,6 +2,14 @@
 
 Status: **in progress**. Findings below distinguish confirmed defects from candidates.
 
+Latest verification: batch 30, 250 passing automation tests (238 clean, 12 warning-bearing fixtures;
+zero failed/skipped), Editor/UHT and Development Game builds, and stage/pak. Latest full cook is
+batch 20; unchanged assets/Blueprints were revalidated in batch 25. These are not proof of complete
+framework release readiness. Vehicle restoration, the rendered Manny ensure, purchase/recipe
+transaction review and the physical multiplayer/World Partition gates remain open. The installed
+Epic UE 5.7 distribution rejects the dedicated-server target; a source-built engine path has been
+requested from the user. No broad completion claim is made.
+
 Baseline: host `d3db8b7`, plugin `79af71e`, UE 5.7. Work is isolated on
 `hoptrendy/territory-complete-audit` in both repositories. The prior 213-test build,
 Blueprint validation and cook are baseline evidence, not proof of the new changes.
@@ -10,7 +18,7 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 
 | Area | Current coverage |
 |---|---|
-| Inventory | 255 C++ headers/implementations, 84,644 lines including tests |
+| Baseline inventory | 255 C++ headers/implementations, 84,644 lines including tests; subsequent added regressions are recorded below |
 | Stub/unsafe context sweep | No production TODO/FIXME/stub markers or gameplay first-player lookup found |
 | Management requests | Nine server RPC paths inspected; count/sequence/cooldown checks traced into mutations |
 | Economy/production | Currency routing, finite arithmetic, recipe transactions, checkpoints and callback boundaries under review |
@@ -58,6 +66,12 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | GUARD-01 | Reconciliation refills exhausted reserves, bypasses the preserve policy and ignores zero reserve definitions. | Fixed; one-time authoritative initialization and explicit ownership refills tested |
 | SAVE-05 | Default delta fields do not replace populated live state on Narrative reload: zero reserve/upgrade/cost/sequence and empty treaty/assault/history arrays remain stale. | Fixed; shared plugin serialization adapter, full and legacy Narrative actor/component records tested |
 | SAVE-06 | Deprecated persistence actor dereferences a missing world, mutates subsystem/save state on client actors and invents runtime persistence GUIDs. | World/authority guards and missing-GUID rejection added; empty legacy save, client and detached actor tests pass |
+| GUARD-02 | Native activity deactivation can reload and replace a garrison while cleanup iterates it. | Fixed in batch 27; original runtime crashed, replacement/save/authority regression passes |
+| GUARD-03 | Native spawn callbacks can change owner or remove the post before a stale guard is admitted. | Fixed in batch 28; ownership/post/death/client/save regressions pass |
+| GUARD-04 | Reserve aggregation wraps negative, erases effective defence and increases attack priority after loading more reserves. | Fixed in batch 30; real post records, Volume snapshot, CounterAttack deterrence and district UI tested |
+| ASSAULT-05 | Extreme power reduces selected approaches; authored vehicle counts expand before the existing eight-car budget applies. | Fixed in batch 29; bounded conversion/allocation, monotonicity and equivalence regressions pass |
+| ASSAULT-06 | Reload reconstruction consumes another vehicle deployment slot, preventing remaining road-only reserves from deploying. | Open; reproduced in packaged batch 23 with one saved assault, four killed and four withdrawn |
+| VISUAL-01 | Rendered clients reproduce a SKM_Manny bone-visibility/component-space-transform ensure during the intro. | Open; batch 23 proves this is not limited to NullRHI |
 
 ## Architecture constraints
 
@@ -565,6 +579,30 @@ replication layout, launch modes or physical capture flow changed. No migration 
 out-of-range authored counts now obey their existing editor limits. Existing save/authority/finite
 force suites remain green. This bounded calculation test does not replace physical deployment,
 late-join or World Partition release gates, or fix the separately reproduced vehicle restore defect.
+
+## Batch 30 — preserve guard reserve totals and deterrence under overflow
+
+Actual Native post records reproduced a server/UI/strategy inconsistency: loading additional valid
+per-post reserves made each replicated Volume total -2, changed four effective reserve defenders to
+zero, increased attack priority, and displayed -4 reserves in the district UI (`Batch30_RedTests`).
+The post count itself loaded correctly; three derived aggregations used unchecked int32 addition.
+
+Posts remain the exact durable reserve authority. Volume totals and CounterAttack raw aggregation
+now use int64 intermediates, and the existing int32 replicated/UI read models saturate at MAX_int32.
+CounterAttack still caps useful reserve defence by authorized desired staffing. The UI also saturates
+across multiple Place snapshots. Pending deployment aggregation uses the same widened intermediate.
+No Native code, save schema, Blueprint signature or replicated field layout changed; no migration is
+needed and no post reserve is consumed or truncated by these derived calculations.
+
+The regression builds a real authored two-Place district through the Registry, reloads real Native
+post records, compares the actual CounterAttack inputs/calculator before and after additional reserves,
+reads the public district operations UI, and rejects client-side snapshot mutation. The unchanged
+physical capture authority and finite-force suites run with it. Physical two-client/late-join and
+actual World Partition streaming are still release gates; the role fixture is not that proof.
+
+Verification: `Batch30_Build.log`, `Batch30_Tests` (250 passed: 238 clean, 12 warning-bearing;
+zero failed/skipped), `Batch30_GameBuild.log`, `Package_Batch30.log`, `Stage_Batch30` all pass.
+The stage uses unchanged batch-20 cooked assets. Latest asset/Blueprint validation remains batch 25.
 
 ## Counterattack lifecycle preflight
 

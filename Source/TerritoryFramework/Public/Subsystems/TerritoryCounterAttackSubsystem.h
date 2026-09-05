@@ -486,4 +486,5 @@ private:
 	friend class FTFAssaultRetirementCallbacks;
 	friend class FTFAssaultSpawnCasualties;
 	friend class FTFAssaultPlayerPower;
+	friend class FTFGuardReserveTotals;
 };

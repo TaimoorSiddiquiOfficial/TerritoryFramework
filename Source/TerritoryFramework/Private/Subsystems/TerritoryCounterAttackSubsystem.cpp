@@ -3765,7 +3765,7 @@ FTerritoryAssaultEvaluationInput UTerritoryCounterAttackSubsystem::BuildEvaluati
 		}
 		const int32 Active = FMath::Max(0, Defence->GetSpawnedGuardCount());
 		const int32 Desired = FMath::Max(0, Defence->GetDesiredGuardCount());
-		int32 RawReserve = 0;
+		int64 RawReserve = 0;
 		for (const ATerritoryGuardSpawnPoint* SpawnPoint : Defence->GetGuardSpawnPoints())
 		{
 			if (SpawnPoint) RawReserve += FMath::Max(0, SpawnPoint->GetReserveCount());
@@ -3774,7 +3774,7 @@ FTerritoryAssaultEvaluationInput UTerritoryCounterAttackSubsystem::BuildEvaluati
 		// target, not a hidden defender. Posts outside DesiredGuardCount cannot create
 		// capture pressure, so they must not inflate an empty/player-unstaffed District.
 		const int32 EffectiveReserve = CalculateEffectiveReserveGuards(
-			RawReserve, Desired);
+			static_cast<int32>(FMath::Min<int64>(RawReserve, MAX_int32)), Desired);
 		Input.ActiveGuards += Active;
 		Input.DesiredGuards += Desired;
 		Input.MaximumGuards += FMath::Max(0, Defence->GetMaxGuardCount());
