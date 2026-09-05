@@ -1,4 +1,5 @@
 #include "Interaction/TerritoryDistrictManagementPoint.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Core/TerritoryDefinition.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
@@ -506,7 +507,7 @@ void ATerritoryDistrictManagementPoint::OpenManagementWidget(APlayerController* 
 {
 	if (!PlayerController || !PlayerController->IsLocalController() || !ManagementWidgetClass) return;
 	FText FailureReason;
-	if (!CanManage(PlayerController->GetPawn(), FailureReason)) return;
+	if (!CanManage(FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController), FailureReason)) return;
 	UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);
 
 	if (UTerritoryDistrictManagementWidget* Widget = Cast<UTerritoryDistrictManagementWidget>(

@@ -1,6 +1,7 @@
 #include "UI/TerritoryEconomyWidget.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Engine/World.h"
@@ -16,10 +17,9 @@ void UTerritoryEconomyWidget::NativeConstruct()
 	if (!DisplayFaction.IsValid())
 	{
 		APlayerController* PlayerController = GetOwningPlayer();
+		APawn* Character = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController);
 		DisplayFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
-			this, PlayerController && PlayerController->GetPawn()
-				? static_cast<AActor*>(PlayerController->GetPawn())
-				: PlayerController);
+			this, Character ? static_cast<AActor*>(Character) : PlayerController);
 	}
 	TerritoryUITheme::ApplyText(EconomyFactionText, TerritoryTypography::CardTitle,
 		FLinearColor(0.94f, 0.93f, 0.89f, 1.f), ETerritoryTextRole::Heading, false);
@@ -61,10 +61,7 @@ void UTerritoryEconomyWidget::SetDisplayFaction(const FGameplayTag& Faction)
 		{
 			FTerritoryEconomySnapshot Snapshot;
 			APlayerController* PlayerController = GetOwningPlayer();
-			Snapshot.Treasury = Economy->GetActorCurrency(
-				PlayerController && PlayerController->GetPawn()
-					? static_cast<AActor*>(PlayerController->GetPawn())
-					: PlayerController);
+			Snapshot.Treasury = Economy->GetActorCurrency(PlayerController);
 			Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
 			Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
 			Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
@@ -83,10 +80,7 @@ int32 UTerritoryEconomyWidget::GetCurrentGold() const
 {
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
 	APlayerController* PlayerController = GetOwningPlayer();
-	AActor* AccountActor = PlayerController && PlayerController->GetPawn()
-		? static_cast<AActor*>(PlayerController->GetPawn())
-		: PlayerController;
-	return Economy ? Economy->GetActorCurrency(AccountActor) : 0;
+	return Economy ? Economy->GetActorCurrency(PlayerController) : 0;
 }
 
 int32 UTerritoryEconomyWidget::GetCurrentIncome() const
@@ -171,10 +165,7 @@ void UTerritoryEconomyWidget::ClientPollRefresh()
 
 	FTerritoryEconomySnapshot Snapshot;
 	APlayerController* PlayerController = GetOwningPlayer();
-	Snapshot.Treasury = Economy->GetActorCurrency(
-		PlayerController && PlayerController->GetPawn()
-			? static_cast<AActor*>(PlayerController->GetPawn())
-			: PlayerController);
+	Snapshot.Treasury = Economy->GetActorCurrency(PlayerController);
 	Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
 	Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
 	Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;

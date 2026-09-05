@@ -19,7 +19,7 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | Guards and assault | Counterattack lifecycle traced; finite guard reserve, warning/activation and callback fixes tested; physical spawn internals remain under review |
 | Save/replication/streaming | WorldState cache/identity and all plugin-owned save interfaces inspected; real Narrative record/default reload tests pass; live streaming/replication gates pending |
 | AI/stealth/Tales/navigation | Stealth and Tales callback/party fixes tested; remaining AI/navigation review pending |
-| UI/editor/CI/packaging | Detailed review pending |
+| UI/editor/CI/packaging | Driving player identity corrected in UI read models/widgets; remaining presentation/editor review pending; 72 Blueprints and 113 assets revalidated in batch 25 |
 
 ## Findings register
 
@@ -422,6 +422,37 @@ discarded; no runtime change is justified by this test. Editor/UHT and all 244 a
 `Batch24_FinalTests`. Game/package/runtime evidence remains batch 23 because runtime is unchanged.
 The vehicle-budget restoration defect remains open; passing identity registration alone does not
 prove deployed survivor/vehicle persistence.
+
+## Batch 25 — retain Narrative player identity in driving UI
+
+Economy widgets, district management, the journal's five-guard previews and hierarchy/garrison/
+district read models queried the possessed pawn. While driving, that pawn is the car, which does
+not own the player's Narrative inventory or faction. Native widget and view tests reproduce zero
+funds and incorrect ownership while the retained character has 1,379 currency. Early test fixture
+failures (missing UMG link dependency, unregistered Territory, missing controller world registration)
+were corrected independently; `Batch25_RedFixtureTests` contains the driving failures plus the
+then-unregistered hierarchy fixture. Final tests use the registered Territory.
+
+The existing management/economy character lookup now lives in
+`FTerritoryNarrativeProAdapter::ResolvePlayerCharacter`. It uses Narrative's `GetOwnedCharacter`
+and preserves the ordinary controller pawn fallback. The UI shares that lookup; actual balances
+still come from Narrative inventory and factions from Narrative PlayerState. The waypoint query
+deliberately measures distance from the currently possessed pawn. The management-point opening
+check now agrees with server management validation. No Blueprint signature, RPC or durable schema
+changed; no Blueprint/save migration is required. Editor-only widget tests add the UMG dependency.
+
+Verification: Editor/UHT, Development Game and stage/pak pass; 245 automation tests pass (235 clean,
+10 warning-bearing fixtures; zero failed/skipped). The exact regression covers real widget
+construction, faction-before-character join order, driving, possession gaps, authority/proxy actor
+roles, Native inventory save/load, independent later viewers, null inputs and plain controllers.
+Actor-role and later-viewer fixtures are not a physical network replication test. Existing Native
+save/default, authority, read-model/load-order and Blueprint contract suites remain green. Asset
+validation compiled 72 Blueprints and checked 113 assets with zero errors/invalid assets and four
+unchanged presentation warnings. Music mapping remains Unity in the Ashes / Horns of War.
+Evidence: `Batch25_FinalBuild.log`, `Batch25_FinalTests`, `Batch25_GameBuild.log`,
+`AssetValidation_Batch25.json`, `Package_Batch25.log`, `Stage_Batch25` (unchanged batch-20 cooked assets).
+Physical runtime evidence remains batch 23; the vehicle-budget restoration defect and rendered
+Manny ensure are unresolved. No overall release completion is claimed.
 
 ## Counterattack lifecycle preflight
 

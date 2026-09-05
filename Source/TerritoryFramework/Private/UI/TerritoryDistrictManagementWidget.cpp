@@ -2,6 +2,7 @@
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Blueprint/WidgetTree.h"
@@ -34,7 +35,8 @@ void UTerritoryDistrictManagementWidget::InitializeManagement(
 	ManagementPoint = InManagementPoint;
 	if (APlayerController* PlayerController = GetOwningPlayer())
 	{
-		ManagedFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, PlayerController->GetPawn());
+		ManagedFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this,
+			FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController));
 	}
 	BindManagementComponent();
 	RefreshManagementDisplay();
@@ -293,17 +295,18 @@ bool UTerritoryDistrictManagementWidget::CanPurchaseGuard(FText& OutFailureReaso
 {
 	const ATerritoryVolume* Target = SelectedGarrisonTarget.Get();
 	APlayerController* PlayerController = GetOwningPlayer();
+	APawn* ManagingCharacter = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController);
 	if (!ManagementComponent.IsValid())
 	{
 		OutFailureReason = FText::FromString(TEXT("Territory management is not installed on this PlayerController."));
 		return false;
 	}
 	if (!ManagementPoint.IsValid() || !PlayerController
-		|| !ManagementPoint->CanManage(PlayerController->GetPawn(), OutFailureReason))
+		|| !ManagementPoint->CanManage(ManagingCharacter, OutFailureReason))
 	{
 		return false;
 	}
-	if (!ManagementPoint->IsInteractorInRange(PlayerController->GetPawn()))
+	if (!ManagementPoint->IsInteractorInRange(ManagingCharacter))
 	{
 		OutFailureReason = FText::FromString(TEXT("Move closer to the district management point."));
 		return false;
@@ -314,7 +317,7 @@ bool UTerritoryDistrictManagementWidget::CanPurchaseGuard(FText& OutFailureReaso
 		return false;
 	}
 	int32 RecruitmentCost = 0;
-	return Target->CanSetDesiredGuardCount(PlayerController->GetPawn(),
+	return Target->CanSetDesiredGuardCount(ManagingCharacter,
 		Target->GetDesiredGuardCount() + 1, OutFailureReason, RecruitmentCost);
 }
 
@@ -322,16 +325,17 @@ bool UTerritoryDistrictManagementWidget::CanRemoveGuard(FText& OutFailureReason)
 {
 	const ATerritoryVolume* Target = SelectedGarrisonTarget.Get();
 	APlayerController* PlayerController = GetOwningPlayer();
+	APawn* ManagingCharacter = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController);
 	if (!ManagementComponent.IsValid())
 	{
 		OutFailureReason = FText::FromString(TEXT("Territory management is not installed on this PlayerController."));
 		return false;
 	}
-	if (!ManagementPoint.IsValid() || !PlayerController || !ManagementPoint->CanManage(PlayerController->GetPawn(), OutFailureReason))
+	if (!ManagementPoint.IsValid() || !PlayerController || !ManagementPoint->CanManage(ManagingCharacter, OutFailureReason))
 	{
 		return false;
 	}
-	if (!ManagementPoint->IsInteractorInRange(PlayerController->GetPawn()))
+	if (!ManagementPoint->IsInteractorInRange(ManagingCharacter))
 	{
 		OutFailureReason = FText::FromString(TEXT("Move closer to the district management point."));
 		return false;
@@ -342,7 +346,7 @@ bool UTerritoryDistrictManagementWidget::CanRemoveGuard(FText& OutFailureReason)
 		return false;
 	}
 	int32 RecruitmentCost = 0;
-	return Target->CanSetDesiredGuardCount(PlayerController->GetPawn(),
+	return Target->CanSetDesiredGuardCount(ManagingCharacter,
 		Target->GetDesiredGuardCount() - 1, OutFailureReason, RecruitmentCost);
 }
 

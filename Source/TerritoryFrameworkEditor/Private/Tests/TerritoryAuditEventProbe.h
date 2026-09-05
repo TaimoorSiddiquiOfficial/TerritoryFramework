@@ -11,7 +11,17 @@
 #include "Economy/TerritoryProductionProfile.h"
 #include "AI/NPCDefinition.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "UI/TerritoryEconomyWidget.h"
 #include "TerritoryAuditEventProbe.generated.h"
+
+UCLASS(Transient)
+class UTerritoryAuditEconomyWidget final : public UTerritoryEconomyWidget
+{
+	GENERATED_BODY()
+public:
+	void ConstructForAudit() { NativeConstruct(); }
+	void DestructForAudit() { NativeDestruct(); }
+};
 
 /** Editor-only receiver for real Blueprint-compatible callback regression tests. */
 UCLASS(Transient)

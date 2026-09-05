@@ -22,6 +22,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"ApplicationCore",
 			"Slate",
 			"SlateCore",
+			"UMG",
 			"PropertyEditor",
 			"BlueprintGraph",
 			"DataValidation",

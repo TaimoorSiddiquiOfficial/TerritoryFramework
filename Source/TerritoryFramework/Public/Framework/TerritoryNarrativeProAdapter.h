@@ -6,6 +6,8 @@
 
 class ANarrativeGameState;
 class AActor;
+class APawn;
+class APlayerController;
 class UNarrativeAbilitySystemComponent;
 struct FGameplayEventData;
 
@@ -18,13 +20,19 @@ struct TERRITORYFRAMEWORK_API FTerritoryNarrativeAttitudeSnapshot
 };
 
 /**
- * Narrow, Territory-owned compatibility seam around Narrative Pro faction APIs.
+ * Narrow, Territory-owned compatibility seam around Narrative Pro context, ability and faction APIs.
  * Vendor representation access is intentionally isolated here so monthly Narrative
  * upgrades cannot leak implementation coupling throughout TerritoryFramework.
  */
 class TERRITORYFRAMEWORK_API FTerritoryNarrativeProAdapter final
 {
 public:
+	/** Narrative retains the player's character while a vehicle is possessed.
+	 * Use it for identity, inventory and management checks; use the current pawn
+	 * explicitly for vehicle position. Plain player controllers retain pawn fallback.
+	 */
+	static APawn* ResolvePlayerCharacter(const APlayerController* Controller);
+
 	/**
 	 * Resolve Narrative Pro's authoritative Ability System from a gameplay subject.
 	 *

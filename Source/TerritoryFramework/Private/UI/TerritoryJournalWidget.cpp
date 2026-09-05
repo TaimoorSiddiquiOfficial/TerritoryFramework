@@ -1,4 +1,5 @@
 #include "UI/TerritoryJournalWidget.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 
 #include "Animation/WidgetAnimation.h"
 #include "Blueprint/WidgetTree.h"
@@ -2621,9 +2622,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 		this, SelectedGarrisonTarget.Get(), GetOwningPlayer(), SelectedGarrison);
 	FText AddFiveFailure;
 	FText RemoveFiveFailure;
-	AActor* ViewerActor = GetOwningPlayerPawn()
-		? static_cast<AActor*>(GetOwningPlayerPawn())
-		: static_cast<AActor*>(GetOwningPlayer());
+	AActor* ViewerActor = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(GetOwningPlayer());
 	int32 PreviewCost = 0;
 	const bool bCanAddFive = bHasSelectedGarrison && SelectedGarrison.bManageable
 		&& SelectedGarrison.DesiredGuards + 5 <= SelectedGarrison.MaximumGuards

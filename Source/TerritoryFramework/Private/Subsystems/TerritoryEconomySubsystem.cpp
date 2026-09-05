@@ -4,6 +4,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryWorldState.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativePlayerState.h"
@@ -23,11 +24,8 @@ namespace
 {
 const AActor* ResolveNarrativeAccountActor(const AActor* Actor)
 {
-	if (const ANarrativePlayerController* Controller = Cast<ANarrativePlayerController>(Actor))
-	{
-		if (IsValid(Controller->GetOwnedCharacter())) return Controller->GetOwnedCharacter();
-	}
-	if (const APlayerController* Controller = Cast<APlayerController>(Actor)) return Controller->GetPawn();
+	if (const APlayerController* Controller = Cast<APlayerController>(Actor))
+		return FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(Controller);
 	return Actor;
 }
 

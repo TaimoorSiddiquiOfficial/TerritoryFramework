@@ -1,4 +1,5 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Core/TerritorySaveSerialization.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "AbilitySystemComponent.h"
@@ -2452,14 +2453,9 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 
 APawn* UTerritoryPlayerManagementComponent::GetManagingPawn() const
 {
-	if (const ANarrativePlayerController* Controller = Cast<ANarrativePlayerController>(GetOwner()))
-	{
-		// Narrative retains player identity/inventory/GAS while possessing a vehicle.
-		if (IsValid(Controller->GetOwnedCharacter())) return Controller->GetOwnedCharacter();
-	}
 	if (const APlayerController* Controller = Cast<APlayerController>(GetOwner()))
 	{
-		return Controller->GetPawn();
+		return FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(Controller);
 	}
 	return Cast<APawn>(GetOwner());
 }

@@ -7,6 +7,8 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "UnrealFramework/NarrativeGameState.h"
+#include "UnrealFramework/NarrativePlayerCharacter.h"
+#include "UnrealFramework/NarrativePlayerController.h"
 
 namespace
 {
@@ -18,6 +20,15 @@ namespace
 			? Cast<UNarrativeAbilitySystemComponent>(AbilityOwner->GetAbilitySystemComponent())
 			: nullptr;
 	}
+}
+
+APawn* FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(const APlayerController* Controller)
+{
+	if (const ANarrativePlayerController* NarrativeController = Cast<ANarrativePlayerController>(Controller))
+	{
+		if (IsValid(NarrativeController->GetOwnedCharacter())) return NarrativeController->GetOwnedCharacter();
+	}
+	return Controller ? Controller->GetPawn() : nullptr;
 }
 
 UNarrativeAbilitySystemComponent* FTerritoryNarrativeProAdapter::ResolveAbilitySystem(

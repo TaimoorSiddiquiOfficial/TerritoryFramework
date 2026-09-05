@@ -7,6 +7,7 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryWorldState.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "UI/TerritoryActivatableWidget.h"
@@ -75,7 +76,8 @@ namespace
 
 	AActor* ResolveViewerActor(APlayerController* Viewer)
 	{
-		return Viewer && Viewer->GetPawn() ? static_cast<AActor*>(Viewer->GetPawn()) : Viewer;
+		APawn* Character = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(Viewer);
+		return Character ? static_cast<AActor*>(Character) : Viewer;
 	}
 
 	void GatherVisibleWaypointLeaves(
@@ -478,8 +480,9 @@ ATerritoryVolume* UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
 	if (Candidates.IsEmpty()) return nullptr;
 
 	const AActor* ViewerActor = ResolveViewerActor(PlayerController);
-	const FVector ViewerLocation = ViewerActor
-		? ViewerActor->GetActorLocation() : FVector::ZeroVector;
+	const APawn* SpatialPawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+	const FVector ViewerLocation = SpatialPawn
+		? SpatialPawn->GetActorLocation() : ViewerActor ? ViewerActor->GetActorLocation() : FVector::ZeroVector;
 	const FGameplayTag ViewerFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
 		PlayerController, const_cast<AActor*>(ViewerActor));
 	Candidates.Sort([ViewerFaction, ViewerLocation](
