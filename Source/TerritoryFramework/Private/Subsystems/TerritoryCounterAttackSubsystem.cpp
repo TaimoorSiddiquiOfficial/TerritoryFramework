@@ -128,14 +128,15 @@ int32 UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(
 
 	TArray<int32> SortedCapacities = VehicleDeploymentCapacities;
 	SortedCapacities.Sort(TGreater<int32>());
-	int32 AvailableSeats = 0;
+	int64 AvailableSeats = 0;
 	const int32 DeploymentCount = FMath::Min(
 		MaximumVehicleDeployments, SortedCapacities.Num());
 	for (int32 Index = 0; Index < DeploymentCount; ++Index)
 	{
 		AvailableSeats += FMath::Max(0, SortedCapacities[Index]);
+		if (AvailableSeats >= RequestedForce) return RequestedForce;
 	}
-	return FMath::Clamp(RequestedForce, 0, AvailableSeats);
+	return static_cast<int32>(AvailableSeats);
 }
 
 void UTerritoryCounterAttackSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -940,7 +941,10 @@ bool UTerritoryCounterAttackSubsystem::CancelAssault(
 	FTerritoryAssaultRecord* Assault = Assaults.Find(AssaultID);
 	if (!Assault || Assault->IsTerminal()) return false;
 	ResolveAssault(*Assault, ETerritoryAssaultState::Cancelled, Reason);
-	return true;
+	// A synchronous story/load callback may supersede the cancellation.
+	const FTerritoryAssaultRecord* Final = Assaults.Find(AssaultID);
+	return Final && Final->State == ETerritoryAssaultState::Cancelled
+		&& Final->Resolution == Reason;
 }
 
 bool UTerritoryCounterAttackSubsystem::GetAssault(
@@ -2609,16 +2613,23 @@ void UTerritoryCounterAttackSubsystem::ResolveAssault(
 	Assault.Resolution = Reason;
 	Assault.ResolvedGameTime = GetCampaignGameTime();
 	Assault.RecaptureEndsGameTime = 0.0;
-	RetireLiveParticipants(Assault, true);
-	RetireLiveVehicles(Assault.AssaultID, true);
 	const int32 UnaccountedForce = FMath::Max(0,
 		Assault.PlannedForce - Assault.KilledForce - Assault.WithdrawnForce);
 	Assault.WithdrawnForce += FMath::Min(UnaccountedForce,
 		Assault.AliveForce + Assault.PendingReserveForce);
 	Assault.AliveForce = 0;
 	Assault.PendingReserveForce = 0;
+	// Commit the complete terminal record before Narrative removal callbacks run.
+	// Cleanup receives a value snapshot, so a callback cannot invalidate its map reference.
+	FTerritoryAssaultRecord Snapshot = Assault;
+	RetireLiveParticipants(Snapshot, true);
+	RetireLiveVehicles(Snapshot.AssaultID, true);
 	bRestoringState = bWasRestoring;
-	BroadcastStateTransition(Assault, PreviousState);
+	const FTerritoryAssaultRecord* Final = Assaults.Find(Snapshot.AssaultID);
+	if (Final && Final->State == Snapshot.State && Final->Resolution == Snapshot.Resolution)
+	{
+		BroadcastStateTransition(*Final, PreviousState);
+	}
 }
 
 void UTerritoryCounterAttackSubsystem::RetireLiveParticipants(
@@ -2733,30 +2744,41 @@ void UTerritoryCounterAttackSubsystem::UpdateRetiringVehicles()
 
 void UTerritoryCounterAttackSubsystem::BroadcastChanged(const FTerritoryAssaultRecord& Assault)
 {
-	if (!bRestoringState) OnAssaultChanged.Broadcast(Assault);
+	if (!bRestoringState)
+	{
+		const FTerritoryAssaultRecord Snapshot = Assault;
+		OnAssaultChanged.Broadcast(Snapshot);
+	}
 }
 
 void UTerritoryCounterAttackSubsystem::BroadcastStateTransition(
 	const FTerritoryAssaultRecord& Assault, ETerritoryAssaultState PreviousState)
 {
-	BroadcastChanged(Assault);
-	if (!ShouldEmitCounterHappened(PreviousState, Assault.State, bRestoringState)) return;
+	const FTerritoryAssaultRecord Snapshot = Assault;
+	BroadcastChanged(Snapshot);
+	const FTerritoryAssaultRecord* Final = Assaults.Find(Snapshot.AssaultID);
+	if (!Final || Final->State != Snapshot.State || Final->Resolution != Snapshot.Resolution
+		|| !ShouldEmitCounterHappened(PreviousState, Snapshot.State, bRestoringState)) return;
 	if (const UTerritoryDeveloperSettings* Settings =
 		GetDefault<UTerritoryDeveloperSettings>();
 		Settings && Settings->ShouldDebugCounterAttacks())
 	{
 		UE_LOG(LogTerritory, Log,
 			TEXT("[CounterAttack] %s target=%s state %d -> %d resolution=%d alive=%d reserve=%d killed=%d withdrawn=%d"),
-			*Assault.AssaultID.ToString(), *Assault.TargetTerritory.ToString(),
-			static_cast<int32>(PreviousState), static_cast<int32>(Assault.State),
-			static_cast<int32>(Assault.Resolution), Assault.AliveForce,
-			Assault.PendingReserveForce, Assault.KilledForce, Assault.WithdrawnForce);
+			*Snapshot.AssaultID.ToString(), *Snapshot.TargetTerritory.ToString(),
+			static_cast<int32>(PreviousState), static_cast<int32>(Snapshot.State),
+			static_cast<int32>(Snapshot.Resolution), Snapshot.AliveForce,
+			Snapshot.PendingReserveForce, Snapshot.KilledForce, Snapshot.WithdrawnForce);
 	}
 
 	const FTerritoryCounterAttackStateEvent Event = MakeCounterHappenedEvent(
-		Assault, PreviousState, GetCampaignGameTime());
+		Snapshot, PreviousState, GetCampaignGameTime());
 	OnCounterHappened.Broadcast(Event);
-	NotifyRelevantPlayersOfState(Event, ResolveTerritory(Assault));
+	Final = Assaults.Find(Snapshot.AssaultID);
+	if (Final && Final->State == Snapshot.State && Final->Resolution == Snapshot.Resolution)
+	{
+		NotifyRelevantPlayersOfState(Event, ResolveTerritory(Snapshot));
+	}
 }
 
 void UTerritoryCounterAttackSubsystem::NotifyRelevantPlayers(
@@ -3720,6 +3742,8 @@ void UTerritoryCounterAttackSubsystem::HandleDiplomacyChanged(
 {
 	(void)NewState;
 	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
+	const UTerritoryDiplomacySubsystem* Diplomacy =
+		GetWorld()->GetSubsystem<UTerritoryDiplomacySubsystem>();
 	TArray<FGuid> ToCancel;
 	for (const auto& Pair : Assaults)
 	{
@@ -3732,6 +3756,11 @@ void UTerritoryCounterAttackSubsystem::HandleDiplomacyChanged(
 			if (ATerritoryVolume* Territory = ResolveTerritory(Assault))
 			{
 				if (IsDiplomacyBlocked(Assault, Territory)) ToCancel.Add(Pair.Key);
+			}
+			else if (!Diplomacy || !Diplomacy->IsAtWar(Assault.AttackingFaction, Assault.DefendingFaction))
+			{
+				// Durable faction identity remains available while the target is streamed out.
+				ToCancel.Add(Pair.Key);
 			}
 		}
 	}
@@ -3748,7 +3777,9 @@ void UTerritoryCounterAttackSubsystem::HandleDiplomacyChanged(
 			ResolveAssault(*Assault, ETerritoryAssaultState::Succeeded,
 				ETerritoryAssaultResolution::CaptureCompleted);
 		}
-		else
+		else if (Assault && !Assault->IsTerminal()
+			&& (Territory ? IsDiplomacyBlocked(*Assault, Territory)
+				: (!Diplomacy || !Diplomacy->IsAtWar(Assault->AttackingFaction, Assault->DefendingFaction))))
 		{
 			CancelAssault(ID, ETerritoryAssaultResolution::DiplomacyBlocked);
 		}
@@ -3760,12 +3791,21 @@ void UTerritoryCounterAttackSubsystem::HandleTerritoryRegistered(
 {
 	(void)bIsNew;
 	if (!Territory || !GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
-	for (auto& Pair : Assaults)
+	TArray<FGuid> TargetAssaults;
+	for (const auto& Pair : Assaults)
 	{
 		if (!Pair.Value.IsTerminal()
 			&& DoesAssaultTargetTerritory(Pair.Value, Territory))
 		{
-			AdvanceAssault(Pair.Value);
+			TargetAssaults.Add(Pair.Key);
+		}
+	}
+	for (const FGuid& ID : TargetAssaults)
+	{
+		if (FTerritoryAssaultRecord* Assault = Assaults.Find(ID);
+			Assault && !Assault->IsTerminal() && DoesAssaultTargetTerritory(*Assault, Territory))
+		{
+			AdvanceAssault(*Assault);
 		}
 	}
 }

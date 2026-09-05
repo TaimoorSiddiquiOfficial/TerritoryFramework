@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "TerritoryDiplomacyTypes.generated.h"
 
 UENUM(BlueprintType)
@@ -66,11 +67,9 @@ struct FTreatyRecord
 
 	FGuid GetCanonicalKey() const
 	{
-		const uint32 HashA = GetTypeHash(FactionA);
-		const uint32 HashB = GetTypeHash(FactionB);
-		const uint32 MinHash = FMath::Min(HashA, HashB);
-		const uint32 MaxHash = FMath::Max(HashA, HashB);
-		return FGuid(MinHash, MaxHash, 0, 0);
+		if (!IsValid() || FactionA == FactionB) return FGuid();
+		return FGuid::NewDeterministicGuid(TEXT("TerritoryFramework.Treaty|")
+			+ FTerritoryNarrativeProAdapter::MakeCanonicalFactionPairKey(FactionA, FactionB));
 	}
 };
 

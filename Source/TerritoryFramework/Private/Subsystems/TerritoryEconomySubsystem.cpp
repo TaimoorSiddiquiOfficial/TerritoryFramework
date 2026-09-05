@@ -667,7 +667,7 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 	}
 
 	// Trim ledger once after all factions processed (not per-faction)
-	const int32 Excess = TransactionLedger.Num() - MaxTransactionHistory;
+	const int32 Excess = TransactionLedger.Num() - FMath::Max(0, MaxTransactionHistory);
 	if (Excess > 0)
 	{
 		TransactionLedger.RemoveAt(0, Excess);
@@ -1719,7 +1719,7 @@ void UTerritoryEconomySubsystem::RestoreTransactionHistory(const TArray<FTerrito
 
 	TransactionLedger = Transactions;
 	// Trim on restore to cap loaded data
-	const int32 RestoreExcess = TransactionLedger.Num() - MaxTransactionHistory;
+	const int32 RestoreExcess = TransactionLedger.Num() - FMath::Max(0, MaxTransactionHistory);
 	if (RestoreExcess > 0)
 	{
 		TransactionLedger.RemoveAt(0, RestoreExcess);

@@ -18,6 +18,19 @@
 
 namespace
 {
+	FReplicatedTreaty MakeReplicatedTreaty(const FTreatyRecord& Treaty)
+	{
+		FReplicatedTreaty Result;
+		Result.TreatyID = Treaty.GetCanonicalKey();
+		Result.FactionA = Treaty.FactionA;
+		Result.FactionB = Treaty.FactionB;
+		Result.State = Treaty.State;
+		Result.SignedGameTime = Treaty.SignedGameTime;
+		Result.ExpiryGameTime = Treaty.ExpiryGameTime;
+		Result.bPermanent = Treaty.bPermanent;
+		return Result;
+	}
+
 	ETerritoryHierarchyLevel GetDefinitionHierarchyLevel(
 		const UTerritoryDefinition* Definition)
 	{
@@ -296,12 +309,13 @@ void ATerritoryWorldState::RecordTransaction(const FReplicatedTransaction& Trans
 	ReplicatedTransactions.Add(Transaction);
 
 	// Use MaxTransactionHistory from EconomySubsystem (default 500)
-	const UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
-	int32 MaxHistory = Economy ? Economy->MaxTransactionHistory : 500;
-
-	while (ReplicatedTransactions.Num() > MaxHistory)
+	const UTerritoryEconomySubsystem* Economy = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
+	const int32 MaxHistory = FMath::Max(0, Economy ? Economy->MaxTransactionHistory : 500);
+	const int32 Excess = ReplicatedTransactions.Num() - MaxHistory;
+	if (Excess > 0)
 	{
-		ReplicatedTransactions.RemoveAt(0);
+		ReplicatedTransactions.RemoveAt(0, Excess);
 	}
 
 	// Convert to FTerritoryTransaction for the delegate
@@ -683,19 +697,16 @@ int32 ATerritoryWorldState::CountClaimedDistrictsForFaction(
 
 		// The live directory is already unique, but defensive identity filtering
 		// prevents a malformed migration cache from inflating a story condition.
+		if ((Summary.TerritoryTag.IsValid() && CountedTags.Contains(Summary.TerritoryTag))
+			|| (Summary.TerritoryGUID.IsValid() && CountedGuids.Contains(Summary.TerritoryGUID))) continue;
+		if (!Summary.TerritoryTag.IsValid() && !Summary.TerritoryGUID.IsValid()) continue;
 		if (Summary.TerritoryTag.IsValid())
 		{
-			if (CountedTags.Contains(Summary.TerritoryTag)) continue;
 			CountedTags.Add(Summary.TerritoryTag);
 		}
-		else if (Summary.TerritoryGUID.IsValid())
+		if (Summary.TerritoryGUID.IsValid())
 		{
-			if (CountedGuids.Contains(Summary.TerritoryGUID)) continue;
 			CountedGuids.Add(Summary.TerritoryGUID);
-		}
-		else
-		{
-			continue;
 		}
 		++Count;
 	}
@@ -781,15 +792,7 @@ void ATerritoryWorldState::ExportPersistentState()
 			ReplicatedTreaties.Empty();
 			for (const FTreatyRecord& Treaty : Diplomacy->GetAllTreaties())
 			{
-				FReplicatedTreaty RepTreaty;
-				RepTreaty.TreatyID = Treaty.GetCanonicalKey();
-				RepTreaty.FactionA = Treaty.FactionA;
-				RepTreaty.FactionB = Treaty.FactionB;
-				RepTreaty.State = Treaty.State;
-				RepTreaty.SignedGameTime = Treaty.SignedGameTime;
-				RepTreaty.ExpiryGameTime = Treaty.ExpiryGameTime;
-				RepTreaty.bPermanent = Treaty.bPermanent;
-				ReplicatedTreaties.Add(RepTreaty);
+				ReplicatedTreaties.Add(MakeReplicatedTreaty(Treaty));
 			}
 
 			ReplicatedReputation.Empty();
@@ -960,6 +963,17 @@ void ATerritoryWorldState::SyncDiplomacySubsystemFromReplicatedState()
 			Reputation.Add(Entry.Faction, Entry.Reputation);
 		}
 		Diplomacy->RestorePersistentState(Treaties, Reputation, ReplicatedDiplomacyHistory);
+		if (HasAuthority())
+		{
+			// Publish the normalized authoritative rows after migration, including
+			// stable IDs, so late joiners cannot observe the original malformed cache.
+			ReplicatedTreaties.Reset();
+			for (const FTreatyRecord& Treaty : Diplomacy->GetAllTreaties())
+			{
+				ReplicatedTreaties.Add(MakeReplicatedTreaty(Treaty));
+			}
+			ForceNetUpdate();
+		}
 	}
 }
 
@@ -1068,7 +1082,7 @@ void ATerritoryWorldState::OnAssaultChangedLive(const FTerritoryAssaultRecord& A
 		ReplicatedAssaults.Add(Assault);
 	}
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
-	const int32 MaximumRecords = Settings ? Settings->MaxRetainedAssaultRecords : 100;
+	const int32 MaximumRecords = FMath::Max(0, Settings ? Settings->MaxRetainedAssaultRecords : 100);
 	if (ReplicatedAssaults.Num() > MaximumRecords)
 	{
 		ReplicatedAssaults.Sort([](const FTerritoryAssaultRecord& A, const FTerritoryAssaultRecord& B)
@@ -1131,7 +1145,9 @@ void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction
 
 	// P0-N1: Cap replicated transactions to prevent unbounded array growth.
 	// Mirrors EconomySubsystem's MaxTransactionHistory cap.
-	const int32 MaxReplicatedTransactions = 200;
+	const UTerritoryEconomySubsystem* Economy = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
+	const int32 MaxReplicatedTransactions = FMath::Max(0, Economy ? Economy->MaxTransactionHistory : 500);
 	const int32 Excess = ReplicatedTransactions.Num() - MaxReplicatedTransactions;
 	if (Excess > 0)
 	{
@@ -1171,13 +1187,7 @@ void ATerritoryWorldState::OnDiplomacyChangedLive(FGameplayTag FactionA, FGamepl
 				if ((Record.FactionA == FactionA && Record.FactionB == FactionB)
 					|| (Record.FactionA == FactionB && Record.FactionB == FactionA))
 				{
-					Snapshot.TreatyID = Record.GetCanonicalKey();
-					Snapshot.FactionA = Record.FactionA;
-					Snapshot.FactionB = Record.FactionB;
-					Snapshot.State = Record.State;
-					Snapshot.SignedGameTime = Record.SignedGameTime;
-					Snapshot.ExpiryGameTime = Record.ExpiryGameTime;
-					Snapshot.bPermanent = Record.bPermanent;
+					Snapshot = MakeReplicatedTreaty(Record);
 					bHasAuthoritativeSnapshot = true;
 					break;
 				}
@@ -1209,10 +1219,7 @@ void ATerritoryWorldState::OnDiplomacyChangedLive(FGameplayTag FactionA, FGamepl
 		Fallback.FactionA = FactionA;
 		Fallback.FactionB = FactionB;
 		Fallback.State = NewState;
-		Snapshot.TreatyID = Fallback.GetCanonicalKey();
-		Snapshot.FactionA = FactionA;
-		Snapshot.FactionB = FactionB;
-		Snapshot.State = NewState;
+		Snapshot = MakeReplicatedTreaty(Fallback);
 	}
 	ReplicatedTreaties.Add(Snapshot);
 	ForceNetUpdate();

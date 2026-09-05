@@ -46,7 +46,8 @@ public:
 	 * Returns Success if registered, or a failure reason if rejected (duplicate tag/GUID, null).
 	 *
 	 * Binds the volume's ownership + state delegates and adds it to the spatial index.
-	 * Emits OnTerritoryRegistered delegate only on success.
+	 * Repeated registration with the same identity refreshes bounds without replaying events.
+	 * Remove an actor before changing its identity. Admission events may withdraw it again.
 	 */
 	UFUNCTION(BlueprintCallable, Category="Territory|Registry", meta=(DisplayName="Register Territory"))
 	ETerritoryRegistrationResult RegisterTerritory(ATerritoryVolume* Territory);
@@ -85,10 +86,8 @@ public:
 	 * If multiple territories overlap, returns the highest-priority one.
 	 */
 	/**
-	 * P2-04: Client spatial index is populated at BeginPlay but NOT updated for
-	 * runtime bounds changes (PollBoundsChanges is server-only). For static
-	 * level-placed territories this is correct. For dynamic territories, call
-	 * UpdateTerritoryBounds explicitly on the server.
+	 * Every world maintains its own spatial cache. Replicated movement is reindexed
+	 * by the periodic local bounds check; call UpdateTerritoryBounds for immediate refresh.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Registry", meta=(DisplayName="Get Territory At Location"))
 	ATerritoryVolume* GetTerritoryAtLocation(const FVector& WorldLocation) const;

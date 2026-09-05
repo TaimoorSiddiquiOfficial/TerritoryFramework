@@ -4,6 +4,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryStealthProfile.h"
 #include "Core/TerritoryDiplomacyTypes.h"
+#include "Combat/TerritoryCounterAttackTypes.h"
 #include "TerritoryAuditEventProbe.generated.h"
 
 /** Editor-only receiver for real Blueprint-compatible callback regression tests. */
@@ -16,6 +17,27 @@ public:
 	TFunction<void(ATerritoryVolume*, AActor*)> EvidenceCallback;
 	TFunction<void(ATerritoryVolume*, AActor*, ETerritoryExposureState)> ExposureCallback;
 	TFunction<void(FGameplayTag, FGameplayTag, EDiplomacyState)> DiplomacyCallback;
+	TFunction<void(ATerritoryVolume*, bool)> RegistryCallback;
+	TFunction<void(const FTerritoryAssaultRecord&)> AssaultCallback;
+	TFunction<void(const FTerritoryCounterAttackStateEvent&)> CounterEventCallback;
+
+	UFUNCTION()
+	void AssaultChanged(const FTerritoryAssaultRecord& Assault)
+	{
+		if (AssaultCallback) AssaultCallback(Assault);
+	}
+
+	UFUNCTION()
+	void CounterEvent(const FTerritoryCounterAttackStateEvent& Event)
+	{
+		if (CounterEventCallback) CounterEventCallback(Event);
+	}
+
+	UFUNCTION()
+	void RegistryChanged(ATerritoryVolume* Territory, bool bUnregistered)
+	{
+		if (RegistryCallback) RegistryCallback(Territory, bUnregistered);
+	}
 
 	UFUNCTION()
 	void DiplomacyChanged(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState State)

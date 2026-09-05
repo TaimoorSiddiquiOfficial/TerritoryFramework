@@ -9,8 +9,8 @@ class ATerritoryVolume;
 /**
  * Grid-based spatial hash for O(1) territory location lookups.
  * Divides world space into cells of CellSize. Each territory is inserted
- * into every cell its bounding box overlaps. Point queries check only
- * the cell containing the point, then do precise ContainsPoint on candidates.
+ * into a bounded number of overlapping cells. Oversized volumes use a small
+ * fallback set; oversized box queries scan registered bounds instead of empty space.
  */
 USTRUCT()
 struct FTerritorySpatialIndex
@@ -49,7 +49,8 @@ private:
 
 	// Reverse map: territory → set of cell keys it occupies (for O(k) Remove)
 	TMap<TWeakObjectPtr<ATerritoryVolume>, TArray<FIntVector>> TerritoryToCells;
+	TSet<TWeakObjectPtr<ATerritoryVolume>> OversizedTerritories;
 
-	FIntVector WorldToCell(const FVector& Location) const;
-	void GetCellRange(const FBox& Bounds, FIntVector& OutMin, FIntVector& OutMax) const;
+	bool WorldToCell(const FVector& Location, FIntVector& OutCell) const;
+	bool GetBoundedCellRange(const FBox& Bounds, FIntVector& OutMin, FIntVector& OutMax) const;
 };

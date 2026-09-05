@@ -41,9 +41,15 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | ATOMIC-01 | Upgrade, garrison purchase and production hold mutable state across Narrative inventory or Territory delegate callbacks. | Candidate; re-entry/failure reproductions pending |
 | ECON-04 | Member income split can lose a remainder when later accounts are full although earlier accounts have room; ceiling division can overflow at MAX_int32. | Fixed; full/partial/reversed capacity and maximum payout tests use real Narrative inventories |
 | ECON-05 | Controller currency requests lose the retained player identity during vehicle possession; debit can claim success when the inventory's owner lacks authority. | Fixed; vehicle, role rejection and Narrative inventory load tests |
-| SAVE-01 | WorldState district counting filters duplicate tags but misses duplicate valid GUIDs when both rows also have tags. | Confirmed; regression pending |
-| SAVE-02 | Negative history limits can cause invalid removals in Economy restore/tick and WorldState transactions; WorldState RecordTransaction dereferences a missing world. | Confirmed; boundary tests pending |
-| SAVE-03 | Negative retained-assault limits can remove the final row and then index the empty array. | Confirmed; full assault lifecycle audit required before changing this path |
+| SAVE-01 | WorldState district counting filters duplicate tags but misses duplicate valid GUIDs when both rows also have tags. | Fixed; duplicate-tag/GUID and GUID-only behavioral tests |
+| SAVE-02 | Negative history limits can cause invalid removals in Economy restore/tick and WorldState transactions; WorldState RecordTransaction dereferences a missing world. | Fixed; detached world, negative/configured limits and client callback tests |
+| SAVE-03 | Negative retained-assault limits can remove the final row and then index the empty array. | Fixed; real reflected WorldState event retains active records and safely removes the last terminal row |
+| SAVE-04 | Treaty IDs use process-local FName hashes; normalized restored treaties are not copied back to the server late-join cache. | Fixed; stable faction-name IDs and authoritative cache migration/round-trip tests |
+| SPACE-01 | Spatial insertion/query can enumerate an unbounded 3D grid; rejected actors can enter through bounds updates. | Fixed; bounded enumeration with oversized-volume fallback, registered-actor admission tests |
+| SPACE-02 | Repeated registration emits duplicate events, and client local spatial caches do not reindex moved volumes. | Fixed; idempotent registration tested; live client movement gate remains pending |
+| ASSAULT-01 | Blocking diplomacy does not cancel a pending assault while its target is streamed out. | Fixed; all five non-War states cancel immediately and remain cancelled through reload |
+| ASSAULT-02 | Assault callbacks can supersede records while state events and calling functions continue through retained map references. | Terminal record committed before cleanup; stable event values and verified cancellation return fixed; activation/spawn callback review continues |
+| ASSAULT-03 | Vehicle-only force planner sums valid seat capacities in int32 and can wrap. | Fixed; int64 bounded by requested force, MAX_int32 tests |
 
 ## Architecture constraints
 
@@ -76,15 +82,52 @@ its behavioral tests, save/replication effects, migration requirements and remai
   Treaty migration has no schema change: valid rows are sorted by canonical faction pair, newest
   signed time, then state/permanence/expiry tie-breaks; invalid/self/None/nonfinite rows are ignored.
   Development Game build also passed (`Batch5_GameBuild.log`, 38 seconds).
+- **Batches 6–7:** Editor build/UHT passed. Full suite: 225 tests, 219 clean, six expected-warning
+  tests, zero failures/skips. Spatial tests cover oversized bounds, enormous queries, invalid
+  inputs, relocation/removal, rejected duplicate registration and idempotence. Persistence tests
+  cover district identity deduplication, canonical treaty migration, save/reload, and bounded
+  transaction history. The treaty/district regressions failed against the pre-fix implementation.
+  The transaction event fixture explicitly permits native actor callbacks in its unstarted world.
+  No save schema or Blueprint signature changes. Old treaty IDs are recomputed on authoritative
+  load; consumers should resolve by faction pair and refresh cached IDs. Client spatial reindexing
+  changes only a local derived cache, with no new replicated authority. Live streaming/client and
+  package gates remain pending. Evidence: `Batch6_*`, `Batch7_*`.
+- **Batch 8:** Editor build/UHT passed. Full suite: 228 tests, 222 clean, six expected-warning
+  tests, zero failures/skips. Pre-fix tests reproduced cancellation success after callback restore
+  and persistent unloaded-target warnings despite all five blocking diplomacy states. Added
+  seat-overflow and last-row replicated-history tests. Terminal force is committed before cleanup;
+  delegate payloads are value snapshots. No save schema, Blueprint signature or new authority.
+  Live callback-heavy spawning and multiplayer gates remain pending. Evidence: `Batch8_*`.
+  Development Game build also passed (`Batch8_GameBuild.log`, 32 seconds).
+
+## Counterattack lifecycle preflight
+
+Source trace completed before the first counterattack fix in this audit. CounterAttack owns the
+finite assault record and scheduling; Narrative owns NPC spawning, definition initialization,
+activities/goals, death/GAS and vehicles. Control owns capture and Volume owns territory state.
+
+| Transition | Source ownership and behavior | Persistence / replication / presentation / tests |
+|---|---|---|
+| Captured → grace | `HandleTerritoryControlChanged`, `ScheduleAssault`: admission, durable target GUID, faction rules, finite profile, budgets and deterministic cycle | Assault record and cycle high-water exported by WorldState; state event/read model; staging/admission/cycle tests |
+| Grace → evaluation → warning | `AdvanceAssault`, `EvaluateAssault`: campaign clock, treaties, force, route, seeded launch decision | Seed/roll/deadlines/approaches saved; `OnAssaultChanged` feeds WorldState; evaluation monotonicity, determinism and warning tests |
+| Warning → proximity → activation | `NotifyRelevantPlayers`, `ShouldActivateWaitingAssault`, `ActivateAssault`: one committed Active transition before spawning | Notification/read model through player management; activation and restore tests. User confirmed 2026-09-05: preserve autonomous attacks and explicit immediate story waves; proximity gating remains an authored option |
+| Activation → physical force | `SpawnNextWave`, `SpawnParticipant`, `SpawnNarrativeVehicleParticipants`: finite reserves, route/seats/budgets; Narrative `SpawnNPC` and scoped spawn-info adapter | Counts/vehicle budgets saved; live pointers transient; controller/definition/activity contracts, finite-wave and vehicle tests |
+| Registration → combat/casualties | Participant `UpdateParticipation`, Narrative activity/goal and Control registration; Narrative ASC death delegate → `Retire` → unregister pressure → exact-once removal | Live registration transient; force counts/read model durable; death, targeting, activation/casualty and integration tests |
+| Capture / exhaustion → recovery | Existing Control force-capture path only after physical defence checks, or `ResolveAssault` defeated/cancelled; retire goals, slots, pressure and vehicles | Final reason/counts/timestamp saved and notified; recapture decisions, finite removal and persistence tests |
+| Load / streaming / late join | `RestorePersistentState`, GUID-first `ResolveTerritory`, registration callback; WorldState save interface and replicated arrays | Survivors become finite pending reconstruction on server; clients retain read models; Narrative archive round-trip and GUID-preserving unload/rebind tests |
+
+The current automation includes pure policy and reflection contracts as well as native integration
+tests. These do not replace the outstanding physical multiplayer and World Partition release gates.
+
+**Current product decision:** The user explicitly chose “Preserve autonomous attacks and explicit
+immediate story waves” during this audit. This supersedes the older universal first-wave proximity
+restriction in root AGENTS.md. Finite force, server authority, valid physical routes, Narrative NPCs,
+and the existing capture authority remain mandatory in every activation mode.
 
 ## Pending audit follow-up
 
 - Complete the upgrade/garrison/production callback transaction review; existing debit callbacks
   occur before final gameplay commits. No atomicity completion is claimed for those paths yet.
-- Reconcile migrated treaties back into the server WorldState replicated cache. Audit all save
-  and streaming identity boundaries, including duplicate district GUIDs and negative history caps.
-- Registry/spatial review found unbounded 3D cell enumeration for enormous bounds, repeated
-  registration broadcasts, and `UpdateTerritoryBounds` accepting unregistered actors. Reproduction
-  tests and minimum compatible fixes are pending. Client movement/reindex behavior needs validation.
-- Trace the full physical assault lifecycle before editing counterattack code, then complete
-  guard/AI/Tales/navigation/UI/editor review and the live release gates.
+- Finish assault callback/restore boundaries, malformed retained-history limits, unloaded-target
+  diplomacy, and client movement/reindex validation.
+- Complete guard/AI/Tales/navigation/UI/editor review and the live release gates.

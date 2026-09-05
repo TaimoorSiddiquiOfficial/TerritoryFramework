@@ -16,8 +16,8 @@ void UTerritoryRegistrySubsystem::Initialize(FSubsystemCollectionBase& Collectio
 	SpatialIndex.Initialize(CellSize);
 
 	// Periodically check if any territory has moved/resized (every 2s — cheap bounds compare).
-	// Server-only — spatial index mutations on clients would conflict with replication.
-	if (UWorld* World = GetWorld(); World && World->GetNetMode() != NM_Client)
+	// Each world owns a local query cache. Clients must reindex replicated movement too.
+	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
 			BoundsCheckTimerHandle,
@@ -48,11 +48,9 @@ void UTerritoryRegistrySubsystem::Deinitialize()
 
 void UTerritoryRegistrySubsystem::PollBoundsChanges()
 {
-	// P2-08: Spatial index is server-authoritative. Clients use their own local actor bounds
-	// for GetTerritoryAtLocation queries, which is correct for static level-placed territories.
-	// For runtime-moved/resized territories, call UpdateTerritoryBounds explicitly on the server
-	// and replicate the new transform via the volume's ReplicatedMovement or a custom RepNotify.
-	// P2-N06: RegisteredTerritories uses weak refs — null check handles stale entries
+	// Reindex local bounds after server edits or replicated movement. This mutates
+	// only the per-world spatial cache, never territory ownership or replicated data.
+	RegisteredTerritories.RemoveAll([](const TWeakObjectPtr<ATerritoryVolume>& Territory) { return !Territory.IsValid(); });
 	for (const TWeakObjectPtr<ATerritoryVolume>& TerritoryPtr : RegisteredTerritories)
 	{
 		if (ATerritoryVolume* Territory = TerritoryPtr.Get())
@@ -77,7 +75,8 @@ void UTerritoryRegistrySubsystem::PollBoundsChanges()
 
 ETerritoryRegistrationResult UTerritoryRegistrySubsystem::RegisterTerritory(ATerritoryVolume* Territory)
 {
-	if (!Territory) return ETerritoryRegistrationResult::InvalidTerritory;
+	if (!IsValid(Territory) || Territory->IsActorBeingDestroyed()
+		|| Territory->GetWorld() != GetWorld()) return ETerritoryRegistrationResult::InvalidTerritory;
 
 	// P2-01: Reject territories with no usable identity
 	FGameplayTag Tag = Territory->GetTerritoryTag();
@@ -94,6 +93,17 @@ ETerritoryRegistrationResult UTerritoryRegistrySubsystem::RegisterTerritory(ATer
 		UE_LOG(LogTerritory, Error, TEXT("[Registry] Rejecting %s — invalid TerritoryGUID"),
 			*Territory->GetName());
 		return ETerritoryRegistrationResult::InvalidTerritory;
+	}
+	if (RegisteredTerritories.Contains(Territory))
+	{
+		// Identity changes require explicit removal before re-admission. Repeating
+		// admission with the same identity refreshes bounds without replaying events.
+		if (GetTerritoryByTag(Tag) != Territory || GetTerritoryByGUID(GUID) != Territory)
+		{
+			return ETerritoryRegistrationResult::InvalidTerritory;
+		}
+		SpatialIndex.Update(Territory);
+		return ETerritoryRegistrationResult::Success;
 	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -147,6 +157,8 @@ ETerritoryRegistrationResult UTerritoryRegistrySubsystem::RegisterTerritory(ATer
 	SpatialIndex.Insert(Territory);
 
 	OnTerritoryRegistered.Broadcast(Territory, false);
+	if (!RegisteredTerritories.Contains(Territory) || GetTerritoryByTag(Tag) != Territory
+		|| GetTerritoryByGUID(GUID) != Territory) return ETerritoryRegistrationResult::InvalidTerritory;
 	if (bDebug)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("[Registry] Registered territory: %s (tag: %s, GUID: %s, cells: %d)"),
@@ -161,32 +173,18 @@ void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territor
 {
 	if (!Territory) return;
 
-	RegisteredTerritories.Remove(Territory);
+	if (RegisteredTerritories.Remove(Territory) == 0) return;
 
-	// CRITICAL FIX: Only remove tag/GUID mappings if they still point to THIS actor.
-	// A rejected duplicate actor could otherwise remove the valid actor's mappings.
-	FGameplayTag Tag = Territory->GetTerritoryTag();
-	if (Tag.IsValid())
+	// Remove this actor's admitted keys even if a load/migration changed its fields.
+	// Never let a rejected duplicate remove another actor's registered identity.
+	for (auto It = TagToTerritoryMap.CreateIterator(); It; ++It)
 	{
-		if (const TWeakObjectPtr<ATerritoryVolume>* Existing = TagToTerritoryMap.Find(Tag))
-		{
-			if (Existing->Get() == Territory)
-			{
-				TagToTerritoryMap.Remove(Tag);
-			}
-		}
+		if (It->Value.Get() == Territory) It.RemoveCurrent();
 	}
 
-	FGuid GUID = Territory->GetActorGUID_Implementation();
-	if (GUID.IsValid())
+	for (auto It = GUIDToTerritoryMap.CreateIterator(); It; ++It)
 	{
-		if (const TWeakObjectPtr<ATerritoryVolume>* Existing = GUIDToTerritoryMap.Find(GUID))
-		{
-			if (Existing->Get() == Territory)
-			{
-				GUIDToTerritoryMap.Remove(GUID);
-			}
-		}
+		if (It->Value.Get() == Territory) It.RemoveCurrent();
 	}
 
 	// Remove from spatial index
@@ -197,7 +195,7 @@ void UTerritoryRegistrySubsystem::UnregisterTerritory(ATerritoryVolume* Territor
 
 void UTerritoryRegistrySubsystem::UpdateTerritoryBounds(ATerritoryVolume* Territory)
 {
-	if (!Territory) return;
+	if (!IsValid(Territory) || !RegisteredTerritories.Contains(Territory)) return;
 	SpatialIndex.Update(Territory);
 }
 
