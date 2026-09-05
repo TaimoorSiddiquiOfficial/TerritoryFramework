@@ -260,6 +260,7 @@ private:
 	friend class FTerritoryProductionInventoryTransactionTest;
 	friend class FTerritoryProductionResourceRoutingTest;
 	friend class FTFEconomyCallbackReentry;
+	friend class FTFProductionRestoreCallbacks;
 #endif
 
 	UPROPERTY(SaveGame)
@@ -273,6 +274,9 @@ private:
 	int64 LastObservedProductionCycle = INDEX_NONE;
 	bool bProcessingEconomyTick = false;
 	bool bProcessingResourceProduction = false;
+	/** Invalidates active calculations when restore or actor refresh replaces their inputs. */
+	uint64 ProductionStateRevision = 0;
+	uint64 ProductionRestoreGeneration = 0;
 
 	/** Factions whose income needs recalculation — processed once per economy tick. */
 	TSet<FGameplayTag> DirtyFactions;

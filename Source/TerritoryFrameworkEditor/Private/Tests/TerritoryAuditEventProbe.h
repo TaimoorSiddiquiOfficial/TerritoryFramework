@@ -8,6 +8,7 @@
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
 #include "Items/InventoryComponent.h"
+#include "Economy/TerritoryProductionProfile.h"
 #include "TerritoryAuditEventProbe.generated.h"
 
 /** Editor-only receiver for real Blueprint-compatible callback regression tests. */
@@ -26,6 +27,13 @@ public:
 	TFunction<void(APlayerController*, const FTerritoryAssaultRecord&)> WarningCallback;
 	TFunction<void()> CurrencyCallback;
 	TFunction<void()> ItemCallback;
+	TFunction<void()> ProductionCallback;
+
+	UFUNCTION()
+	void ProductionSettled(const FTerritoryProductionResult& Result)
+	{
+		if (ProductionCallback) ProductionCallback();
+	}
 
 	UFUNCTION()
 	void CurrencyChanged(int32 OldCurrency, int32 NewCurrency)

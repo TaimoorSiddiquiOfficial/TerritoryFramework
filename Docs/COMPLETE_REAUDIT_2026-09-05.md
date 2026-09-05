@@ -238,6 +238,32 @@ Evidence: `Batch17_RedTests` (ten failed assertions), `Batch17_Build.log`, `Batc
 This does not claim full garrison placement/refund or multi-item recipe atomicity. A campaign reload
 or destroyed actor that supersedes a purchase prevents stale upgrade-success publication.
 
+### Batch 18: production callback lifetime and cycle bounds
+
+Source inspection confirmed that production retained pointers/references into the site, checkpoint and
+profile arrays across Narrative inventory and settlement callbacks. Evaluations now copy site/rule data
+and check transient revisions after callbacks. Campaign restore supersedes the old calculation, even
+when the same GUID is restored into the same map slot. Actor refresh preserves the completed checkpoint
+for items already awarded so the next tick cannot duplicate that cycle; it does not overwrite refreshed
+ownership/upgrade inputs. Settlement observers retain access to the current per-rule read model.
+
+Malformed negative/nonfinite clocks, nonfinite/overflowing cycle durations and negative saved cycle
+indexes are rejected before conversion/subtraction. Runtime catch-up honors the existing authored
+365-cycle ceiling. Narrative remains inventory/time authority; Economy owns scheduling/checkpoints and
+WorldState publishes their read models. No durable field or Blueprint signature changes. Old malformed
+negative checkpoints no longer produce catch-up; valid saved cycles keep their existing behavior.
+
+Editor/UHT and all 238 tests passed (231 clean, seven expected-warning, zero failures/skips).
+Real Narrative callbacks cover same-ID restore, full clearing from a settlement callback, profile-array
+replacement, actor refresh without duplicate production, finite clock conversion and extreme catch-up.
+Evidence: `Batch18_FinalBuild.log`, `Batch18_FinalTests`. Full multi-item inventory transaction rollback
+and saves taken halfway through a multi-item recipe remain separate, unresolved audit items.
+
+The dedicated TDAServer target was attempted after batch 17. This installed UE distribution rejects it
+with "Server targets are not currently supported from this engine distribution." Evidence:
+`DedicatedServerBuild_Batch17.log`. A Game build running with `-server` can exercise networking but is
+not claimed as a compiled dedicated-server target. That release gate requires a server-capable engine.
+
 ### Authored asset validation after batch 15
 
 Validation passed for 113 assets and compilation passed for 72 included Blueprints: zero errors or

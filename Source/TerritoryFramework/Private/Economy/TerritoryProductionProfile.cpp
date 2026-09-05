@@ -124,13 +124,13 @@ bool UTerritoryProductionProfile::CanRuleRunForState(
 int32 UTerritoryProductionProfile::CalculatePendingCycleCount(
 	int64 LastProcessedCycle, int64 CurrentCycle, int32 MaximumCatchupCycles)
 {
-	if (LastProcessedCycle == INDEX_NONE || CurrentCycle <= LastProcessedCycle
+	if (LastProcessedCycle < 0 || CurrentCycle <= LastProcessedCycle
 		|| MaximumCatchupCycles <= 0)
 	{
 		return 0;
 	}
 	return static_cast<int32>(FMath::Min<int64>(
-		CurrentCycle - LastProcessedCycle, MaximumCatchupCycles));
+		CurrentCycle - LastProcessedCycle, FMath::Min(MaximumCatchupCycles, 365)));
 }
 
 bool UTerritoryProductionProfile::ValidateProfile(FText& OutFailureReason) const

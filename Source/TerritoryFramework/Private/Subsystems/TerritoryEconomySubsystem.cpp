@@ -378,6 +378,8 @@ void UTerritoryEconomySubsystem::Deinitialize()
 	SharedFactionAccounts.Empty();
 	FactionLeaderAccounts.Empty();
 	FactionResourceAccounts.Empty();
+	++ProductionStateRevision;
+	++ProductionRestoreGeneration;
 	ProductionCheckpoints.Empty();
 	ProductionSites.Empty();
 	ResourceSnapshots.Empty();
@@ -996,13 +998,15 @@ UNarrativeInventoryComponent* UTerritoryEconomySubsystem::ResolveResourceInvento
 
 int64 UTerritoryEconomySubsystem::GetCurrentProductionCycle() const
 {
-	if (ProductionCycleLength <= 0.f) return INDEX_NONE;
+	if (!FMath::IsFinite(ProductionCycleLength) || ProductionCycleLength <= 0.f) return INDEX_NONE;
 	const UWorld* World = GetWorld();
 	const ANarrativeGameState* GameState = World
 		? Cast<ANarrativeGameState>(World->GetGameState()) : nullptr;
-	return GameState
-		? FMath::FloorToInt64(GameState->GetAccumulatedTime() / ProductionCycleLength)
-		: INDEX_NONE;
+	if (!GameState) return INDEX_NONE;
+	const double Cycle = static_cast<double>(GameState->GetAccumulatedTime()) / ProductionCycleLength;
+	// Reserve space for the next-cycle sentinel used by the bounded catch-up loop.
+	return FMath::IsFinite(Cycle) && Cycle >= 0.0 && Cycle < static_cast<double>(MAX_int64)
+		? FMath::FloorToInt64(Cycle) : INDEX_NONE;
 }
 
 FString UTerritoryEconomySubsystem::MakeProductionCheckpointKey(
@@ -1168,6 +1172,7 @@ void UTerritoryEconomySubsystem::RefreshProductionSite(ATerritoryProperty* Prope
 		return;
 	}
 
+	++ProductionStateRevision;
 	FTerritoryProductionSiteRecord& Site = ProductionSites.FindOrAdd(TerritoryGUID);
 	const FGameplayTag PreviousOwner = Site.OwnerFaction;
 	const bool bProfileChanged = Site.ProductionProfile.Get() != Property->GetProductionProfile();
@@ -1221,7 +1226,10 @@ void UTerritoryEconomySubsystem::RefreshProductionSite(ATerritoryProperty* Prope
 void UTerritoryEconomySubsystem::EvaluateProductionSite(
 	FTerritoryProductionSiteRecord& Site, int64 CurrentCycle)
 {
+	const uint64 EvaluationRevision = ProductionStateRevision;
+	const uint64 EvaluationRestoreGeneration = ProductionRestoreGeneration;
 	UTerritoryProductionProfile* Profile = Site.ProductionProfile.LoadSynchronous();
+	if (EvaluationRevision != ProductionStateRevision) return;
 	if (!Profile)
 	{
 		Site.LastStatus = ETerritoryProductionStatus::Inactive;
@@ -1240,8 +1248,8 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 		return;
 	}
 
-	TArray<const FTerritoryProductionRule*> Rules;
-	for (const FTerritoryProductionRule& Rule : Profile->Rules) Rules.Add(&Rule);
+	// Profiles can be edited by Narrative callbacks; one evaluation keeps its own rules.
+	TArray<FTerritoryProductionRule> Rules = Profile->Rules;
 	Rules.Sort([](const FTerritoryProductionRule& A, const FTerritoryProductionRule& B)
 	{
 		return A.Priority == B.Priority
@@ -1258,9 +1266,9 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 
 	TMap<FGameplayTag, int64> FirstPendingCycles;
 	int64 EarliestCycle = CurrentCycle + 1;
-	for (const FTerritoryProductionRule* Rule : Rules)
+	for (const FTerritoryProductionRule& RuleValue : Rules)
 	{
-		if (!Rule) continue;
+		const FTerritoryProductionRule* Rule = &RuleValue;
 		FTerritoryProductionRuleState& RuleState = Site.RuleStates.AddDefaulted_GetRef();
 		if (const FTerritoryProductionRuleState* Previous = PreviousStates.Find(Rule->RuleTag))
 		{
@@ -1315,7 +1323,7 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 	{
 		for (int32 RuleIndex = 0; RuleIndex < Rules.Num(); ++RuleIndex)
 		{
-			const FTerritoryProductionRule* Rule = Rules[RuleIndex];
+			const FTerritoryProductionRule* Rule = &Rules[RuleIndex];
 			if (!Rule || DeferredRules.Contains(Rule->RuleTag)) continue;
 			const int64* FirstCycle = FirstPendingCycles.Find(Rule->RuleTag);
 			if (!FirstCycle || EvaluationCycle < *FirstCycle) continue;
@@ -1355,6 +1363,23 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 			{
 				ExecuteResourceRecipeOnInventory(Inventory, Site.OwnerFaction, *Rule,
 					Site.UpgradeLevel, 1, Result);
+				// Never dereference a checkpoint from before a synchronous campaign restore.
+				if (EvaluationRestoreGeneration != ProductionRestoreGeneration) return;
+				if (EvaluationRevision != ProductionStateRevision)
+				{
+					// An actor refresh can relocate maps without undoing the items just
+					// produced. Retain that completed cycle through a fresh identity lookup.
+					if (Result.Status != ETerritoryProductionStatus::StorageUnavailable
+						&& Result.Status != ETerritoryProductionStatus::StorageFull)
+					{
+						if (FTerritoryProductionCheckpoint* Current = ProductionCheckpoints.Find(Key);
+							Current && Current->OwnerFaction == Site.OwnerFaction)
+						{
+							Current->LastProcessedCycle = FMath::Max(Current->LastProcessedCycle, EvaluationCycle);
+						}
+					}
+					return;
+				}
 				if (Result.Status == ETerritoryProductionStatus::StorageUnavailable
 					|| Result.Status == ETerritoryProductionStatus::StorageFull)
 				{
@@ -1390,7 +1415,9 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 					static_cast<int32>(Result.Status), Result.InputsConsumed.Num(),
 					Result.OutputsProduced.Num(), *Result.FailureReason.ToString());
 			}
+			ProductionSites.FindChecked(Site.TerritoryGUID) = Site;
 			OnProductionSettled.Broadcast(Result);
+			if (EvaluationRevision != ProductionStateRevision) return;
 		}
 	}
 
@@ -1462,8 +1489,18 @@ void UTerritoryEconomySubsystem::ProcessResourceProduction()
 	{
 		if (FTerritoryProductionSiteRecord* Site = ProductionSites.Find(SiteID))
 		{
-			EvaluateProductionSite(*Site, CurrentCycle);
-			if (Site->OwnerFaction.IsValid()) AffectedFactions.Add(Site->OwnerFaction);
+			const uint64 EvaluationRevision = ProductionStateRevision;
+			FTerritoryProductionSiteRecord EvaluatedSite = *Site;
+			EvaluateProductionSite(EvaluatedSite, CurrentCycle);
+			// Map growth, ownership refresh or restore can replace the original site.
+			if (EvaluationRevision != ProductionStateRevision)
+			{
+				PublishProductionState();
+				return;
+			}
+			ProductionSites.FindChecked(SiteID) = MoveTemp(EvaluatedSite);
+			const FGameplayTag Faction = ProductionSites.FindChecked(SiteID).OwnerFaction;
+			if (Faction.IsValid()) AffectedFactions.Add(Faction);
 		}
 	}
 	for (const FGameplayTag& Faction : AffectedFactions)
@@ -1607,6 +1644,8 @@ void UTerritoryEconomySubsystem::RestoreProductionState(
 	const TArray<FTerritoryProductionSiteRecord>& Sites,
 	const TArray<FTerritoryFactionResourceSnapshot>& InResourceSnapshots)
 {
+	++ProductionStateRevision;
+	++ProductionRestoreGeneration;
 	ProductionCheckpoints.Empty();
 	for (const FTerritoryProductionCheckpoint& Checkpoint : Checkpoints)
 	{

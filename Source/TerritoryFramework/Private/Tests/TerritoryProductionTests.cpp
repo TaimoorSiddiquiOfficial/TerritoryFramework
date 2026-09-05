@@ -80,6 +80,10 @@ bool FTerritoryProductionCycleBehaviorTest::RunTest(const FString& Parameters)
 		UTerritoryProductionProfile::CalculatePendingCycleCount(50, 51, 7), 1);
 	TestEqual(TEXT("Save catch-up is bounded"),
 		UTerritoryProductionProfile::CalculatePendingCycleCount(10, 50, 7), 7);
+	TestEqual(TEXT("Malformed negative saved cycles cannot overflow subtraction"),
+		UTerritoryProductionProfile::CalculatePendingCycleCount(MIN_int64, MAX_int64, 7), 0);
+	TestEqual(TEXT("Runtime catch-up cannot bypass the authored 365-cycle ceiling"),
+		UTerritoryProductionProfile::CalculatePendingCycleCount(0, MAX_int64, MAX_int32), 365);
 
 	FTerritoryProductionRule Rule;
 	Rule.RuleTag = TerritoryProductionTags::FarmLivestock;
