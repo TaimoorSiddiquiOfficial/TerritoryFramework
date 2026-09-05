@@ -604,6 +604,122 @@ Verification: `Batch30_Build.log`, `Batch30_Tests` (250 passed: 238 clean, 12 wa
 zero failed/skipped), `Batch30_GameBuild.log`, `Package_Batch30.log`, `Stage_Batch30` all pass.
 The stage uses unchanged batch-20 cooked assets. Latest asset/Blueprint validation remains batch 25.
 
+## Batch 31 — verified counterattack fixes; full framework audit remains open
+
+User-reported scope: guards and assailants must fight before the player enters Place bounds;
+attackers must respond to a distant damaging player; wave timing must be configurable; following
+cars must not strand their occupants behind the first parked reinforcement car. The confirmed
+autonomous/immediate-story decision remains in force. The full lifecycle below was re-traced
+against the current source before editing. Root/plugin preflight: `7c73a84` / `9188d0f`, branch
+`hoptrendy/territory-complete-audit`; only the three previously reported untracked audio assets.
+
+Confirmed defects and changes:
+
+- `ATerritoryGuardCharacter::CanEngageTerritoryTarget` required Contested before engaging
+  any hostile. Guards now recognize a living, active assailant targeting their physical defence
+  front before that state transition. Ordinary visitors retain the existing Contested policy;
+  Narrative faction identity and Territory War/treaty checks still govern hostility.
+- The project perception safety adapter checked activity owner against the pawn. Narrative's
+  constructor owns that component on `ANarrativeNPCController`, so valid refreshes were rejected.
+  The check now follows the actual owner and retains inactive/unpossessed teardown guards.
+- Takeover scoring suppressed every non-local player attack goal, including a real damaging
+  shooter. The existing Narrative ASC `OnDamagedBy` delegate now records at most eight transient
+  damage sources, for an authored 1–120 seconds (20 default). Living, currently hostile sources
+  receive temporary priority outside the local bounds; expiration, death, cancellation and treaties
+  restore the local defender objective. Live GAS damage proved that eligibility alone left the
+  4.0-score guard selected over the 3.5-score shooter, so only the damaged NPC temporarily suppresses
+  unrelated combat goals. A second live trace exposed an older damaging guard remaining preferred;
+  the most recent valid damage source now receives this temporary priority. The project NPC already
+  reports Native AI damage perception; no duplicate damage
+  report or combat system was added.
+- The project `GoalGenerator_Hop_Attack` EQS loop used item zero for every target. Its loop index
+  now feeds `GetItemScore`; the project Blueprint compiled and saved without warnings.
+- Goal readiness now checks Narrative's actual goal membership, repairing a removed goal rather
+  than treating a cached UObject as proof that it is still registered. Controller `SetPawn` itself
+  was inspected and does not remove goals: vehicle possession causing removal is **not proven**.
+- Vehicle dismount clears stale pairwise defender/assailant perception and requests Native sense
+  updates. A blocked ordinary assault car may brake and use Native Mount exits after its authored
+  blocked timeout, only with a complete navigation route to the walking objective. No teleport,
+  vehicle collision bypass, or story-outcome event is used for this ordinary handoff. A stationary
+  chassis can miss the forward obstacle probe, so ordinary arrival also accumulates its bounded
+  wait while speed remains below one tenth of intended speed (capped at 175 cm/s).
+- New profile `WaveStrategy`: Legacy; All Waves Together; Back to Back After Arrival; After
+  Previous Wave Defeated. The selected enum is saved in the existing assault record at scheduling.
+  Together uses available finite/global/route budgets, permits concurrent ingress and waits for
+  physical staging clearance at shared road entrances. Back to Back waits for the preceding car's
+  complete dismount but does not wait for its survivors to die. After Defeated waits for zero living
+  attackers. Optional proximity policy, finite casualties, route checks and vehicle limits remain.
+  Vehicle staging occupancy has a saved bounded wait before the existing spawn-failure path.
+
+Authority: CounterAttack owns scheduling and finite deployment; Participant only adapts NPC goals,
+damage context and ingress; Narrative owns activities/perception/Mount/GAS; Control owns capture;
+Volume owns ownership; WorldState saves/replicates the existing record. Added record fields migrate
+old saves to Legacy/zero traffic wait. No renamed Blueprint API, new tag/GUID authority or vendor
+source change. Damage memory and live actors remain transient. Loaded/streamed target lookup stays
+GUID-first. Mixed old/new binaries are not a supported multiplayer protocol.
+
+Tests added/extended: native guard/assault combat without a player, Narrative damage delegate and
+actual attack-goal score restoration, threat expiry/zero-damage/client/treaty rejection, authored
+wave modes and save archive preservation, positive controller-owned perception plus teardown paths.
+Initial harness attempts exposed a bare Narrative actor missing its stable-GUID implementation
+and an abstract goal-generator fixture; those fixtures were corrected, not production contracts.
+Runtime/editor compilation and UHT pass. All 252 automation tests pass (240 clean, 12 with existing
+warnings), and 114 assets / 73 Blueprints validate with zero errors and four existing warnings.
+`DA_CounterAttack` now selects Back to Back After Arrival, retaining autonomous activation.
+
+Live verification in listen-server PIE (initial two-player runs, final server plus two clients):
+
+- Both players at (-3500,10000): a finite 8-person/2-car assault recaptured an undefended Place
+  through the physical handover flow. Server and client WorldState records matched.
+- Three real defending guards, both players far away: guards selected Native attack goals while
+  the Place remained Claimed; three attackers died, leaving 5 alive/0 reserve/3 killed with the
+  second squad already deployed. Snapshot: `Live_Batch31_ThreeGuards_FarPlayers.json`.
+- The second car could not find a walking route because HopDistrictTest's NavMeshBoundsVolume
+  ended at X=-3990, while the blocked car stopped near X=-4386. Extended only its west coverage
+  to X=-6190 (east boundary unchanged), rebuilt navigation and saved the map. Both the blocked
+  car location and the road staging area now have complete paths to Blacksmith. A subsequent live
+  run verified the second car braking and completing normal Native dismount for all four occupants
+  (`Live_Batch31_BlockedCarDismount.json`, log 09:02:23). No teleport or nav-check bypass was introduced.
+  Final three-player PIE recorded real distant-player damage at 31.61 seconds (120 → 115 health),
+  Native attack-goal switch to that shooter by 32.62, and return to the guard at 52.38 after the
+  20-second memory expired. Both cars completed ordinary Native dismount, including the stationary
+  chassis case and the following car blocked near its predecessor. Snapshot:
+  `Live_Batch31_FinalCombatAndPresence.json`. Seat diagnostics disproved a suspected
+  independent dismount: the affected NPCs still occupied their Native seats. No speculative external
+  mount-completion adapter is retained.
+- Rapid cancellation during diagnostic setup exposed Native `Goal_Attack` references to removed
+  pawns. This is tracked separately; that reset attempt is not clean combat evidence.
+- All Waves Together deployed eight attackers in two concurrently arriving cars by 6.08 seconds;
+  After Defeated preserved four reserves while the first wave fell from four survivors to one.
+  The native strategy test covers deployment at zero survivors. These live recordings do not by
+  themselves prove the later After Defeated deployment, which occurred after that recording ended.
+- In the final run, a player at (-3220,1500), 410 cm outside Blacksmith's bounds, became an actual
+  Native attack target. Moving that player to (-3220,590) kept it eligible inside the Place; the
+  squad continued fighting the surviving registered guard. At 137 seconds all three WorldState
+  read models matched: Active, planned 8, alive 7, reserve 0, killed 1, withdrawn 0, two cars.
+  No vehicle-ingress timeout occurred in this final run. Initial map guard-placement rejection
+  diagnostics remain separate from the explicitly spawned defending-guard fixture.
+
+Latest validation: Editor/runtime/UHT and game builds pass; all 253 automation tests pass
+(241 clean, 12 existing warnings); 114 assets / 73 Blueprints validate with zero errors and four
+existing warnings. Original one-client PIE and background-throttle preferences were restored.
+Fresh batch 31 cook completed with zero errors and five existing vendor tag warnings;
+BuildCookRun packaged and staged successfully (`Package_Batch31.log`, `Stage_Batch31`).
+The first packaged run deployed/dismounted both cars but exposed a shutdown ensure: participant
+`EndPlay(Quit)` consumed survivors, resolved the assault, and emitted `OnCounterHappened`, whose
+project listener created a Native notification widget during world teardown. EndPlay now counts
+only actual destruction/stream removal in a live world; the scheduler rejects removal callbacks
+during teardown. Native tests compare all five EndPlay reasons and verify live/reserve preservation.
+The final packaged run completed both four-person vehicle squads, including the blocked second
+car's normal exits, and shut down cleanly with no Error/Ensure/Assertion diagnostics in
+`PackagedSmoke_Batch31.log`. This is the packaged game executable in headless server mode;
+it does not replace the unavailable standalone TDAServer target or rendered skeletal verification.
+No Native HUD/widget/vendor source was modified. All owned runtime/editor processes are stopped.
+
+The prior deployed-survivor/vehicle-history reload defect and rendered SKM_Manny ensure remain
+open. Standalone dedicated-server and real World Partition release gates remain blocked/unproven
+as documented above.
+
 ## Counterattack lifecycle preflight
 
 

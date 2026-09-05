@@ -1340,6 +1340,15 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 		}
 		Record.ScheduleOccurrence = FMath::Max(1, Record.ScheduleOccurrence);
 		Record.PlannedForce = FMath::Max(0, Record.PlannedForce);
+		Record.WaveSize = FMath::Clamp(Record.WaveSize, 1, FMath::Max(1, Record.PlannedForce));
+		if (static_cast<uint8>(Record.WaveStrategy) > static_cast<uint8>(ETerritoryAssaultWaveStrategy::AfterDefeated))
+		{
+			Record.WaveStrategy = ETerritoryAssaultWaveStrategy::Legacy;
+		}
+		if (!FMath::IsFinite(Record.VehicleStagingBlockedSince) || Record.VehicleStagingBlockedSince < 0.0)
+		{
+			Record.VehicleStagingBlockedSince = 0.0;
+		}
 		Record.ConsecutiveSpawnFailures = FMath::Max(0, Record.ConsecutiveSpawnFailures);
 		Record.KilledForce = FMath::Clamp(Record.KilledForce, 0, Record.PlannedForce);
 		Record.WithdrawnForce = FMath::Clamp(
@@ -1629,7 +1638,8 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 			const bool bVehicleOnlyForce =
 				UsesOnlyNarrativeVehicleApproaches(Assault, Territory);
 			if (ShouldDeployActiveReserveWave(Assault, bRelevantPlayerNearby,
-				Profile->bContinueFiniteWavesAfterActivation, bVehicleOnlyForce))
+				Profile->bContinueFiniteWavesAfterActivation, bVehicleOnlyForce,
+				HasPendingVehicleIngress(Assault.AssaultID)))
 			{
 				SpawnNextWave(Assault, Territory);
 				if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active) || !IsValid(Territory)) return;
@@ -1880,6 +1890,8 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 	Assault.WithdrawnForce = 0;
 	Assault.WaveSize = ResolveAssaultWaveSize(
 		Assault, *ForceConfig, Assault.PlannedForce);
+	Assault.WaveStrategy = Profile->WaveStrategy;
+	Assault.VehicleStagingBlockedSince = 0.0;
 	Assault.VehicleDeploymentsUsed = 0;
 	Assault.VehicleDeploymentsByApproach.Reset();
 	Assault.ScheduledGameTime = GetCampaignGameTime();
@@ -1947,7 +1959,8 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	// One Narrative vehicle squad owns ingress until its driver and passengers mount,
 	// drive, park and dismount. Do not pop later reserves into the scene or let them
 	// overtake the active reinforcement car.
-	if (HasPendingVehicleIngress(Assault.AssaultID)) return;
+	if (Assault.WaveStrategy != ETerritoryAssaultWaveStrategy::Simultaneous
+		&& HasPendingVehicleIngress(Assault.AssaultID)) return;
 	const int32 MaximumSpawnFailures = FMath::Max(1, Profile->MaxConsecutiveSpawnFailures);
 	if (Assault.SelectedApproaches.IsEmpty())
 	{
@@ -1961,7 +1974,11 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 		? FMath::Max(0, Settings->MaxLiveCounterAttackNPCs - CountLiveParticipants())
 		: Assault.PendingReserveForce;
 	int32 ToSpawn = FMath::Min3(Assault.PendingReserveForce,
-		FMath::Max(0, Assault.WaveSize - Assault.AliveForce), GlobalAvailable);
+		Assault.WaveStrategy == ETerritoryAssaultWaveStrategy::Simultaneous
+			? Assault.PendingReserveForce
+			: Assault.WaveStrategy == ETerritoryAssaultWaveStrategy::Legacy
+				? FMath::Max(0, Assault.WaveSize - Assault.AliveForce)
+				: FMath::Max(1, Assault.WaveSize), GlobalAvailable);
 	if (ToSpawn <= 0) return;
 
 	const int32 AlreadyDeployed = Assault.PlannedForce - Assault.PendingReserveForce;
@@ -2005,6 +2022,7 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	const int32 OverrideNarrativeLevel = ResolveScaledEnemyLevel(
 		Assault, Territory, *ForceConfig);
 	int32 Spawned = 0;
+	bool bVehicleStagingOccupied = false;
 	TMap<FName, int32> SpawnedPerApproach;
 	const int32 PlacementAttempts = FMath::Clamp(
 		Profile->SpawnPlacementAttemptsPerParticipant, 1, 16);
@@ -2061,6 +2079,21 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			? VehicleDropOffTransform : ApproachTransform;
 		const FTransform EffectiveDropOffTransform = bReverseStoryEscape
 			? ApproachTransform : VehicleDropOffTransform;
+		if (bUseNarrativeVehicle)
+		{
+			bool bOccupied = false;
+			for (TActorIterator<ANarrativeVehicleBase> It(GetWorld()); It; ++It)
+			{
+				if (!It->IsActorBeingDestroyed() && It->GetComponentsBoundingBox(true)
+					.ExpandBy(FVector(350.f, 350.f, 200.f))
+					.IsInsideOrOn(VehicleSpawnTransform.GetLocation()))
+				{
+					bOccupied = true;
+					break;
+				}
+			}
+			if (bOccupied) { bVehicleStagingOccupied = true; continue; }
+		}
 		if (bReverseStoryEscape)
 		{
 			FText GuideFailure;
@@ -2173,16 +2206,31 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			const int32 ParticipantCount = SpawnedParticipants.Num();
 			SpawnedPerApproach.FindOrAdd(ApproachID) += ParticipantCount;
 			Spawned += ParticipantCount;
-			if (bUseNarrativeVehicle) break;
+			if (bUseNarrativeVehicle
+				&& Assault.WaveStrategy != ETerritoryAssaultWaveStrategy::Simultaneous) break;
 		}
 	}
 	if (Spawned > 0)
 	{
+		Assault.VehicleStagingBlockedSince = 0.0;
 		Assault.ConsecutiveSpawnFailures = 0;
 		BroadcastChanged(Assault);
 	}
 	else
 	{
+		if (bVehicleStagingOccupied)
+		{
+			const double Now = GetCampaignGameTime();
+			if (Assault.VehicleStagingBlockedSince <= 0.0)
+			{
+				Assault.VehicleStagingBlockedSince = FMath::Max(UE_SMALL_NUMBER, Now);
+				BroadcastChanged(Assault);
+				return;
+			}
+			// A moving preceding car is a temporary reservation, not a failed spawn.
+			// A permanently blocked entrance still reaches the ordinary failure path.
+			if (Now - Assault.VehicleStagingBlockedSince < 120.0) return;
+		}
 		++Assault.ConsecutiveSpawnFailures;
 		BroadcastChanged(Assault);
 		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active)) return;
@@ -2586,7 +2634,7 @@ float UTerritoryCounterAttackSubsystem::CalculatePlayerRelativeApproachScore(
 void UTerritoryCounterAttackSubsystem::NotifyParticipantRemoved(
 	FGuid AssaultID, ATerritoryAssaultCharacter* Participant, bool bKilled)
 {
-	if (bRestoringState || !GetWorld() || GetWorld()->GetNetMode() == NM_Client
+	if (bRestoringState || !GetWorld() || GetWorld()->bIsTearingDown || GetWorld()->GetNetMode() == NM_Client
 		|| !IsValid(Participant) || !Participant->HasAuthority()
 		|| Participant->GetWorld() != GetWorld()) return;
 	FTerritoryAssaultRecord* Assault = Assaults.Find(AssaultID);
@@ -2746,13 +2794,24 @@ bool UTerritoryCounterAttackSubsystem::ApplyParticipantRemoval(
 
 bool UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(
 	const FTerritoryAssaultRecord& Assault, bool bRelevantPlayerNearby,
-	bool bContinueAfterActivation, bool bWaitForCurrentWaveToEnd)
+	bool bContinueAfterActivation, bool bWaitForCurrentWaveToEnd, bool bVehicleIngressPending)
 {
-	return Assault.State == ETerritoryAssaultState::Active
-		&& Assault.PendingReserveForce > 0
-		&& Assault.AliveForce < FMath::Max(1, Assault.WaveSize)
-		&& (!bWaitForCurrentWaveToEnd || Assault.AliveForce == 0)
-		&& (bContinueAfterActivation || bRelevantPlayerNearby);
+	if (Assault.State != ETerritoryAssaultState::Active || Assault.PendingReserveForce <= 0
+		|| (!bContinueAfterActivation && !bRelevantPlayerNearby)) return false;
+	switch (Assault.WaveStrategy)
+	{
+	case ETerritoryAssaultWaveStrategy::Simultaneous:
+		return true;
+	case ETerritoryAssaultWaveStrategy::BackToBack:
+		return !bVehicleIngressPending;
+	case ETerritoryAssaultWaveStrategy::AfterDefeated:
+		return !bVehicleIngressPending && Assault.AliveForce == 0;
+	case ETerritoryAssaultWaveStrategy::Legacy:
+		return !bVehicleIngressPending && Assault.AliveForce < FMath::Max(1, Assault.WaveSize)
+			&& (!bWaitForCurrentWaveToEnd || Assault.AliveForce == 0);
+	default:
+		return false;
+	}
 }
 
 UTerritoryCounterAttackSubsystem::ERecaptureDecision

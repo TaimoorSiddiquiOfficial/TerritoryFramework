@@ -201,7 +201,7 @@ public:
 	 */
 	static bool ShouldDeployActiveReserveWave(const FTerritoryAssaultRecord& Assault,
 		bool bRelevantPlayerNearby, bool bContinueAfterActivation,
-		bool bWaitForCurrentWaveToEnd = false);
+		bool bWaitForCurrentWaveToEnd = false, bool bVehicleIngressPending = false);
 
 	/** Pure recapture decision shared by runtime and regression tests. */
 	enum class ERecaptureDecision : uint8
@@ -487,4 +487,5 @@ private:
 	friend class FTFAssaultSpawnCasualties;
 	friend class FTFAssaultPlayerPower;
 	friend class FTFGuardReserveTotals;
+	friend class FTFAssaultTeardownAccounting;
 };

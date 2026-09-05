@@ -24,6 +24,16 @@ enum class ETerritoryAttackApproachType : uint8
 	Custom UMETA(ToolTip="Project-defined approach whose meaning is explained by its Approach ID and assets.")
 };
 
+/** Saved with each decision so profile edits cannot change an assault already underway. */
+UENUM(BlueprintType)
+enum class ETerritoryAssaultWaveStrategy : uint8
+{
+	Legacy UMETA(DisplayName="Legacy (Road: After Defeat, Foot: Refill Casualties)"),
+	Simultaneous UMETA(DisplayName="All Waves Together", ToolTip="Deploy the finite force as soon as routes, clear staging space and performance budgets permit. Shared road entrances stagger cars until the preceding car clears."),
+	BackToBack UMETA(DisplayName="Back to Back After Arrival", ToolTip="Send the next wave once the previous vehicle squad has dismounted; surviving attackers keep fighting."),
+	AfterDefeated UMETA(DisplayName="After Previous Wave Defeated", ToolTip="Wait until no attackers from the current wave remain before sending the next finite wave.")
+};
+
 UENUM(BlueprintType)
 enum class ETerritoryAssaultState : uint8
 {
@@ -617,6 +627,9 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 KilledForce = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WithdrawnForce = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WaveSize = 1;
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultWaveStrategy WaveStrategy = ETerritoryAssaultWaveStrategy::Legacy;
+	/** Bounded wait for an occupied vehicle staging area; zero means no current wait. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") double VehicleStagingBlockedSince = 0.0;
 	/** Narrative difficulty is snapshotted so loading cannot silently change this assault's car budget. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") ENarrativeGameplayDifficulty NarrativeDifficultyAtLaunch = ENarrativeGameplayDifficulty::Medium;
 	/** Maximum signature/fallback cars across every road approach in this finite assault. */

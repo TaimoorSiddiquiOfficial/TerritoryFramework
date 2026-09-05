@@ -29,6 +29,9 @@
 #include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "Navigation/PathFollowingComponent.h"
+#include "NavigationSystem.h"
+#include "NavigationPath.h"
+#include "Perception/AIPerceptionComponent.h"
 #include "TimerManager.h"
 #include "UObject/UnrealType.h"
 
@@ -150,12 +153,18 @@ void UTerritoryAssaultParticipantComponent::EndPlay(const EEndPlayReason::Type E
 	}
 	if (UNarrativeAbilitySystemComponent* ASC = BoundASC.Get())
 	{
+		ASC->OnDamagedBy.RemoveDynamic(this,
+			&UTerritoryAssaultParticipantComponent::HandleNarrativeDamagedBy);
 		ASC->OnDeathStateChanged.RemoveDynamic(
 			this, &UTerritoryAssaultParticipantComponent::HandleOwnerDied);
 	}
 	if (GetOwner() && GetOwner()->HasAuthority() && !bRemovalReported
-		&& EndPlayReason != EEndPlayReason::EndPlayInEditor)
+		&& GetWorld() && !GetWorld()->bIsTearingDown
+		&& (EndPlayReason == EEndPlayReason::Destroyed
+			|| EndPlayReason == EEndPlayReason::RemovedFromWorld))
 	{
+		// Streaming/destruction is a real withdrawal. Closing or travelling away
+		// from the campaign is not a casualty or an outcome notification.
 		Retire(false);
 	}
 	Super::EndPlay(EndPlayReason);
@@ -313,7 +322,6 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeActivityAndGoal()
 	{
 		return false;
 	}
-	if (AssaultGoal) return true;
 	UNPCActivityComponent* ActivityComponent = NPC ? NPC->GetActivityComponent() : nullptr;
 	ANarrativeNPCController* Controller = NPC ? NPC->GetNPCController() : nullptr;
 	if (!ActivityComponent || !Controller)
@@ -321,6 +329,11 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeActivityAndGoal()
 		return false;
 	}
 
+	// Narrative owns membership: a cached UObject may survive goal removal.
+	bool bFoundGoal = false;
+	AssaultGoal = Cast<UTerritoryAssaultGoal>(ActivityComponent->GetGoalByKey(
+		UTerritoryAssaultGoal::StaticClass(), this, bFoundGoal));
+	if (bFoundGoal && AssaultGoal) return true;
 	UNPCActivity* Activity = ActivityComponent->GetActivity(UTerritoryAssaultActivity::StaticClass());
 	if (!Activity)
 	{
@@ -357,10 +370,14 @@ bool UTerritoryAssaultParticipantComponent::BindNarrativeDeathAfterSpawnReady()
 	{
 		if (UNarrativeAbilitySystemComponent* Previous = BoundASC.Get())
 		{
+			Previous->OnDamagedBy.RemoveDynamic(this,
+				&UTerritoryAssaultParticipantComponent::HandleNarrativeDamagedBy);
 			Previous->OnDeathStateChanged.RemoveDynamic(
 				this, &UTerritoryAssaultParticipantComponent::HandleOwnerDied);
 		}
 		BoundASC = ASC;
+		ASC->OnDamagedBy.AddUniqueDynamic(this,
+			&UTerritoryAssaultParticipantComponent::HandleNarrativeDamagedBy);
 		ASC->OnDeathStateChanged.AddUniqueDynamic(
 			this, &UTerritoryAssaultParticipantComponent::HandleOwnerDied);
 	}
@@ -371,6 +388,42 @@ bool UTerritoryAssaultParticipantComponent::BindNarrativeDeathAfterSpawnReady()
 		return false;
 	}
 	return true;
+}
+
+void UTerritoryAssaultParticipantComponent::HandleNarrativeDamagedBy(
+	UNarrativeAbilitySystemComponent* DamageCauserASC, const float Damage,
+	const FGameplayEffectSpec& Spec)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || bRemovalReported
+		|| !GetWorld() || !FMath::IsFinite(Damage) || Damage <= 0.f
+		|| !IsValid(DamageCauserASC) || DamageCauserASC == BoundASC.Get()) return;
+	AActor* Instigator = DamageCauserASC->GetAvatarActor();
+	if (!IsValid(Instigator)) Instigator = DamageCauserASC->GetOwnerActor();
+	if (!IsValid(Instigator) || Instigator == GetOwner()
+		|| Instigator->GetWorld() != GetWorld() || Instigator->IsActorBeingDestroyed()) return;
+	const double Now = GetWorld()->GetTimeSeconds();
+	for (auto It = DamagingEnemies.CreateIterator(); It; ++It)
+	{
+		if (!It.Key().IsValid() || It.Value() <= Now) It.RemoveCurrent();
+	}
+	if (!DamagingEnemies.Contains(Instigator) && DamagingEnemies.Num() >= 8)
+	{
+		TWeakObjectPtr<AActor> Oldest;
+		double Earliest = TNumericLimits<double>::Max();
+		for (const auto& Entry : DamagingEnemies)
+		{
+			if (Entry.Value < Earliest) { Earliest = Entry.Value; Oldest = Entry.Key; }
+		}
+		DamagingEnemies.Remove(Oldest);
+	}
+	const ATerritoryVolume* Territory = ResolveTargetTerritory();
+	const UTerritoryCounterAttackProfile* Profile = Territory ? Territory->GetCounterAttackProfile() : nullptr;
+	const float AuthoredMemory = Profile ? Profile->DamagingEnemyMemorySeconds : 20.f;
+	DamagingEnemies.Add(Instigator, Now + (FMath::IsFinite(AuthoredMemory)
+		? FMath::Clamp(AuthoredMemory, 1.f, 120.f) : 20.f));
+	// The configured Narrative BP reports AI damage perception. Keep its attack
+	// goal eligible; do not duplicate perception, attack activities or GAS combat.
+	(void)Spec;
 }
 
 void UTerritoryAssaultParticipantComponent::UpdateParticipation()
@@ -779,6 +832,27 @@ TArray<AActor*> UTerritoryAssaultParticipantComponent::CollectTakeoverCombatants
 		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Territory);
 	const UWorld* World = GetWorld();
 	if (!Territory || !World) return Result;
+	const ATerritoryAssaultCharacter* OwnerNPC = Cast<ATerritoryAssaultCharacter>(GetOwner());
+	AActor* MostRecentThreat = nullptr;
+	double MostRecentExpiry = 0.0;
+	for (const auto& Entry : DamagingEnemies)
+	{
+		const ANarrativeCharacter* Enemy = Cast<ANarrativeCharacter>(Entry.Key.Get());
+		if (Enemy && Enemy->IsAlive() && Entry.Value > World->GetTimeSeconds()
+			&& OwnerNPC && OwnerNPC->CanEngageAssaultTarget(Enemy))
+		{
+			if (Entry.Value > MostRecentExpiry)
+			{
+				MostRecentExpiry = Entry.Value;
+				MostRecentThreat = Entry.Key.Get();
+			}
+		}
+	}
+	// Only the NPC taking damage temporarily prioritizes its attackers. Merely
+	// admitting a distant shooter's 3.5-score goal leaves a local 4-score guard
+	// selected forever, which still ignores the damage. Restore local defence
+	// priorities when this bounded threat expires, dies, or becomes non-hostile.
+	if (MostRecentThreat) return {MostRecentThreat};
 	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
 	if (!DefendingFaction.IsValid()) return Result;
 
@@ -814,6 +888,31 @@ TArray<AActor*> UTerritoryAssaultParticipantComponent::CollectTakeoverCombatants
 		if (bInsideLocalFight) Result.AddUnique(Pawn);
 	}
 	return Result;
+}
+
+FString UTerritoryAssaultParticipantComponent::GetCombatDebugString() const
+{
+	const ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(GetOwner());
+	const UNPCActivityComponent* Activities = NPC ? NPC->GetActivityComponent() : nullptr;
+	const UNPCGoalItem* Goal = Activities ? Activities->GetCurrentActivityGoal() : nullptr;
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	TArray<FString> Threats;
+	for (const auto& Entry : DamagingEnemies)
+	{
+		if (Entry.Key.IsValid()) Threats.Add(FString::Printf(TEXT("%s:%.2fs"),
+			*Entry.Key->GetName(), FMath::Max(0.0, Entry.Value - Now)));
+	}
+	TArray<FString> Targets;
+	for (const AActor* Target : CollectTakeoverCombatants(ResolveTargetTerritory()))
+	{
+		Targets.Add(GetNameSafe(Target));
+	}
+	return FString::Printf(TEXT("Takeover=%d Ingress=%d Retired=%d AssaultGoal=%s CurrentGoal=%s Target=%s AttackClass=%s DamageBound=%d Threats=[%s] Eligible=[%s]"),
+		bPrioritizeTerritoryTakeover, IsVehicleIngressPending(), bRemovalReported,
+		*GetNameSafe(AssaultGoal), *GetNameSafe(Goal), *GetNameSafe(Goal ? Goal->GetGoalKey() : nullptr),
+		*GetNameSafe(NarrativeAttackGoalClass.Get()), BoundASC.IsValid() && BoundASC->OnDamagedBy.Contains(
+			this, GET_FUNCTION_NAME_CHECKED(UTerritoryAssaultParticipantComponent, HandleNarrativeDamagedBy)),
+		*FString::Join(Threats, TEXT(",")), *FString::Join(Targets, TEXT(",")));
 }
 
 void UTerritoryAssaultParticipantComponent::PlayMissionDialogue(
@@ -941,7 +1040,11 @@ void UTerritoryAssaultParticipantComponent::UpdateVehicleDriving(const float Del
 		? CalculateObstacleSpeedFactor(CentreObstacleDistance,
 			VehicleAwareness.EmergencyStopDistance,
 			VehicleAwareness.BrakingDistance) : 1.f;
-	if (bCentreBlocked && ObstacleSpeedFactor <= 0.05f && Speed < 175.f)
+	// A car can be pinned on its side or chassis without the forward probe hitting
+	// anything. Ordinary arrival must also detect sustained failure to move.
+	const bool bArrivalStalled = !bEscapeOnVehicleArrival
+		&& Speed < FMath::Min(175.f, DesiredSpeed * 0.1f);
+	if (bArrivalStalled || (bCentreBlocked && ObstacleSpeedFactor <= 0.05f && Speed < 175.f))
 	{
 		VehicleBlockedSeconds += FMath::Max(0.f, DeltaTime);
 	}
@@ -949,6 +1052,32 @@ void UTerritoryAssaultParticipantComponent::UpdateVehicleDriving(const float Del
 	{
 		VehicleBlockedSeconds = FMath::Max(0.f,
 			VehicleBlockedSeconds - FMath::Max(0.f, DeltaTime) * 2.f);
+	}
+
+	// A preceding reinforcement car can permanently occupy the same authored
+	// parking point. After a bounded wait, let this squad finish on foot only when
+	// a complete navigation route exists. Native Mount still owns physical exits.
+	if (!bEscapeOnVehicleArrival && VehicleAwareness.AbandonAfterBlockedSeconds > 0.f
+		&& VehicleBlockedSeconds >= VehicleAwareness.AbandonAfterBlockedSeconds)
+	{
+		UNavigationSystemV1* Navigation = UNavigationSystemV1::GetCurrent(GetWorld());
+		FNavLocation Start;
+		const ATerritoryVolume* Territory = ResolveTargetTerritory();
+		const FVector WalkTarget = bUseVehicleWalkDestination
+			? VehicleWalkDestination.GetLocation()
+			: Territory ? Territory->GetTerritoryBounds().GetCenter() : VehicleLocation;
+		if (Territory && Navigation && Navigation->ProjectPointToNavigation(
+			VehicleLocation, Start, FVector(300.f, 300.f, 500.f)))
+		{
+			UNavigationPath* Path = UNavigationSystemV1::FindPathToLocationSynchronously(
+				this, Start.Location, WalkTarget, GetOwner());
+			if (Path && Path->IsValid() && !Path->IsPartial())
+			{
+				BeginVehicleAbandonment(TEXT("blocked arrival; valid on-foot route"));
+				TryBeginVehicleDismount();
+				return;
+			}
+		}
 	}
 
 	float AvoidanceSteering = 0.f;
@@ -1117,10 +1246,11 @@ void UTerritoryAssaultParticipantComponent::BeginVehicleAbandonment(
 	const TCHAR* Reason)
 {
 	if (bVehicleAbandonmentRequested) return;
+	const bool bWasStoryEscape = bEscapeOnVehicleArrival;
 	bVehicleAbandonmentRequested = true;
 	bEscapeOnVehicleArrival = false;
 	StopVehicleInputs();
-	if (UTerritoryCounterAttackSubsystem* Counterattacks = GetWorld()
+	if (UTerritoryCounterAttackSubsystem* Counterattacks = bWasStoryEscape && GetWorld()
 		? GetWorld()->GetSubsystem<UTerritoryCounterAttackSubsystem>() : nullptr)
 	{
 		Counterattacks->NotifyVehicleStoryTargetAbandoned(
@@ -1128,7 +1258,7 @@ void UTerritoryAssaultParticipantComponent::BeginVehicleAbandonment(
 	}
 	PlayMissionDialogue(FinalFightDialogueTag);
 	UE_LOG(LogTerritory, Display,
-		TEXT("[CounterAttack] story target %s is abandoning %s for the final fight: %s"),
+		TEXT("[CounterAttack] %s is leaving %s to continue on foot: %s"),
 		*GetNameSafe(GetOwner()), *GetNameSafe(NarrativeIngressVehicle.Get()),
 		Reason ? Reason : TEXT("mission rule"));
 }
@@ -1152,6 +1282,24 @@ void UTerritoryAssaultParticipantComponent::CompleteVehicleIngress()
 	bVehicleIngressComplete = true;
 	bVehicleIngressFailed = false;
 	SetComponentTickEnabled(false);
+	// These pairs were neutral while mounted. Discard only their stale pairwise
+	// perception so Narrative's configured senses reacquire and author combat goals.
+	// Never synthesize sight of an unseen actor or touch another faction's state.
+	ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(GetOwner());
+	ANarrativeNPCController* Controller = NPC ? NPC->GetNPCController() : nullptr;
+	UAIPerceptionComponent* OwnPerception = Controller ? Controller->GetAIPerceptionComponent() : nullptr;
+	for (AActor* Defender : TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(ResolveTargetTerritory()))
+	{
+		if (OwnPerception) OwnPerception->ForgetActor(Defender);
+		ANarrativeNPCCharacter* Guard = Cast<ANarrativeNPCCharacter>(Defender);
+		ANarrativeNPCController* GuardController = Guard ? Guard->GetNPCController() : nullptr;
+		if (UAIPerceptionComponent* Perception = GuardController ? GuardController->GetAIPerceptionComponent() : nullptr)
+		{
+			Perception->ForgetActor(GetOwner());
+			Perception->RequestStimuliListenerUpdate();
+		}
+	}
+	if (OwnPerception) OwnPerception->RequestStimuliListenerUpdate();
 	UE_LOG(LogTerritory, Display,
 		TEXT("[CounterAttack] Narrative vehicle pursuit completed for %s assault=%s"),
 		*GetNameSafe(GetOwner()), *AssaultID.ToString());

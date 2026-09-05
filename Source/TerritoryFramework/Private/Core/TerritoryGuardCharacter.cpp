@@ -1,4 +1,6 @@
 #include "Core/TerritoryGuardCharacter.h"
+#include "Combat/TerritoryAssaultCharacter.h"
+#include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -271,9 +273,24 @@ ETeamAttitude::Type ATerritoryGuardCharacter::GetTeamAttitudeTowards(
 bool ATerritoryGuardCharacter::CanEngageTerritoryTarget(const AActor* Target) const
 {
 	if (!IsValid(Target) || Target == this || !IsValid(OwningTerritory)
-		|| OwningTerritory->GetTerritoryState() != ETerritoryState::Contested)
+		|| Target->GetWorld() != GetWorld() || Target->IsActorBeingDestroyed())
 	{
 		return false;
+	}
+	if (OwningTerritory->GetTerritoryState() != ETerritoryState::Contested)
+	{
+		// A physical hostile assault is already a threat before capture pressure
+		// changes the Place state. Waiting for Contested makes defence circular.
+		const ATerritoryAssaultCharacter* Attacker = Cast<ATerritoryAssaultCharacter>(Target);
+		const UTerritoryAssaultParticipantComponent* Participant = Attacker
+			? Attacker->AssaultParticipant : nullptr;
+		if (!Participant || Participant->HasRetired() || !Attacker->IsAlive()
+			|| !Attacker->CanEngageAssaultTarget(this)
+			|| !TerritoryAssaultTargetPolicy::BuildDefenceFront(
+				Participant->GetTargetTerritory()).Contains(OwningTerritory.Get()))
+		{
+			return false;
+		}
 	}
 
 	const INarrativeTeamAgentInterface* TargetTeam =

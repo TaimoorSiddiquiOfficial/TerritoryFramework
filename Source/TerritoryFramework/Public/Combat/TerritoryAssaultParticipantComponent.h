@@ -15,6 +15,7 @@ class UNPCActivity;
 class UNPCActivityComponent;
 class UNPCGoalItem;
 class UTerritoryAssaultGoal;
+struct FGameplayEffectSpec;
 
 /** Runtime bridge from one physical Narrative NPC to one durable assault record. */
 UCLASS(ClassGroup=(Territory), BlueprintType, meta=(BlueprintSpawnableComponent))
@@ -84,7 +85,14 @@ public:
 	/** Stable GUID is authoritative; tag matching is only a bounded legacy fallback. */
 	bool MatchesTargetTerritory(const ATerritoryVolume* Territory) const;
 
+	/** Read-only diagnostics for the Native combat bridge, including expiring damage threats. */
+	UFUNCTION(BlueprintPure, Category="Territory|Assault|Diagnostics")
+	FString GetCombatDebugString() const;
+
 private:
+	friend class FTFAssaultCombatAutonomy;
+	// Bounded transient perception context, never campaign state or client input.
+	TMap<TWeakObjectPtr<AActor>, double> DamagingEnemies;
 	UPROPERTY(Replicated) FGuid AssaultID;
 	UPROPERTY(Replicated) FGuid TargetTerritoryGUID;
 	UPROPERTY(Replicated) FGameplayTag TargetTerritory;
@@ -163,4 +171,8 @@ private:
 	UFUNCTION()
 	void HandleOwnerDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC,
 		const bool bIsDead);
+
+	UFUNCTION()
+	void HandleNarrativeDamagedBy(UNarrativeAbilitySystemComponent* DamageCauserASC,
+		float Damage, const FGameplayEffectSpec& Spec);
 };

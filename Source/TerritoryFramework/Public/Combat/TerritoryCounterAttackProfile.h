@@ -127,6 +127,10 @@ public:
 		meta=(ToolTip="Recommended. After activation, finite reserve waves continue without the player. Disable to pause reserve deployment until a relevant player returns."))
 	bool bContinueFiniteWavesAfterActivation = true;
 
+	/** Applied when the finite assault decision is scheduled. Old saves retain Legacy. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Waves")
+	ETerritoryAssaultWaveStrategy WaveStrategy = ETerritoryAssaultWaveStrategy::Legacy;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling", meta=(ClampMin="1", ClampMax="8"))
 	int32 MaximumApproaches = 3;
 
@@ -242,6 +246,11 @@ public:
 			DisplayName="Defending Player Engagement Padding",
 			ToolTip="How far outside a Place bound a defending player may stand and still be treated as part of the fight. Easy example: 800 lets guards fight a player just outside the gate, but not chase them across the city."))
 	float DefendingPlayerEngagementPadding = 800.f;
+
+	/** Real Narrative damage temporarily makes a distant hostile shooter part of the fight. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement|Takeover",
+		meta=(ClampMin="1.0", ClampMax="120.0", Units="s"))
+	float DamagingEnemyMemorySeconds = 20.f;
 
 	/** Delay before retrying an idle assault move that stopped outside the target. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement",

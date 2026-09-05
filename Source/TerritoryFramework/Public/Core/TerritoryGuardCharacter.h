@@ -63,16 +63,16 @@ public:
 
 	/**
 	 * Contextual Narrative attitude for a stationary Territory defender.
-	 * A target is Hostile only while this guard's Territory is Contested AND
-	 * at least one exact faction pair is explicitly at War. Seeing a neutral
+	 * A target is Hostile during Contested defence or an active physical assault
+	 * against its defence front, with an exact faction pair at War. Seeing a neutral
 	 * player walking through a Claimed Place therefore never starts combat.
 	 */
 	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
 
 	/**
 	 * Readable version of the Territory guard combat gate for Blueprint/debug UI.
-	 * Easy example: Claimed + War = false; Contested + Neutral = false;
-	 * Contested + War = true.
+	 * Active hostile assailants can be engaged before capture becomes Contested.
+	 * Ordinary visitors still require Contested + War.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Guard|Combat",
 		meta=(DisplayName="Can Engage Territory Target"))

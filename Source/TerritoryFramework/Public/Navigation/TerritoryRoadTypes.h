@@ -51,7 +51,7 @@ struct FTerritoryVehicleAwarenessSettings
 	float MaximumAvoidanceSteering = 0.22f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road|Awareness",
-		meta=(ClampMin="0.0", ToolTip="A player-chased target may abandon a blocked vehicle after this many seconds and continue to the Road Guide final-fight point. Zero disables the blocked-vehicle handoff."))
+		meta=(ClampMin="0.0", ToolTip="After this many blocked seconds, assault squads dismount when a complete walking route exists. Story chase targets use their authored abandonment policy. Zero disables the blocked-vehicle handoff."))
 	float AbandonAfterBlockedSeconds = 12.f;
 };
 

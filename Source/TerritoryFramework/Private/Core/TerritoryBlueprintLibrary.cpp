@@ -344,7 +344,9 @@ bool UTerritoryBlueprintLibrary::CanSafelyRefreshPerceivedActors(
 		&& Perception->GetOwner() == OwnerController
 		&& IsValid(ActivityComponent)
 		&& ActivityComponent->IsActive()
-		&& ActivityComponent->GetOwner() == ControlledPawn;
+		// Narrative owns activities on ANarrativeNPCController, including while
+		// that controller temporarily possesses a vehicle.
+		&& ActivityComponent->GetOwner() == OwnerController;
 }
 
 bool UTerritoryBlueprintLibrary::RefreshParentPerceivedActorsSafely(

@@ -43,6 +43,10 @@ A decision roll can schedule an assault; it cannot capture a territory. `LaunchP
   inside the local Territory battle area, then stand inside the Place and apply real capture
   pressure. A visible player far outside the battle area cannot lure the complete force away and
   freeze the takeover.
+- A distant player who actually damages an attacker becomes that NPC's temporary combat priority.
+  `Damaging Enemy Memory Seconds` defaults to 20 seconds. The most recent living, hostile damage
+  source takes priority; after expiry the NPC resumes defending-player/guard and takeover objectives.
+  Mere visibility at a distance does not divert the entire squad.
 - A **Story Pursuit / Boss Chase** is different. It does not capture, does not require the
   reinforcement perk, and may pursue outside Territory bounds because the quest explicitly owns
   that story encounter.
@@ -103,6 +107,26 @@ physically inside the target:
 Example: Bandits reach a Heroes-owned Blacksmith while the player is elsewhere. They defeat
 its final guard, and a 30-second report appears. If the player returns, combat is required.
 If the player stays away—or dies defending it—the Place is recaptured by Bandits.
+
+## Choosing when waves arrive
+
+Set **Wave Strategy** under **Force | Waves** on the counterattack profile. The strategy is saved
+with the assault, so changing the profile does not change an already scheduled battle.
+
+| Strategy | Behavior for two waves of four |
+|---|---|
+| All Waves Together | Deploy all eight as route, staging and performance budgets permit. Cars using the same entrance wait for the preceding car to clear the spawn area. |
+| Back to Back After Arrival | Send the second four after the first vehicle squad has dismounted, while its survivors keep fighting. This is the project's current `DA_CounterAttack` setting. |
+| After Previous Wave Defeated | Keep the second four in reserve until the first wave has no living attackers. |
+| Legacy | Preserve previous saves: road squads wait for defeat; foot forces refill casualties up to the wave size. |
+
+Every strategy consumes the same finite force and car budgets. Deaths are permanent for that
+assault. Optional player-proximity requirements still apply when explicitly enabled.
+
+A blocked or stalled arrival car waits for **Abandon After Blocked Seconds**, then uses Narrative's
+normal seat exits if a complete walking route reaches its objective. Author navigation coverage
+over the approach and potential stopping area as well as the Place. Invalid routes do not teleport
+the squad past the blockage. A permanently occupied spawn entrance reaches the bounded failure path.
 
 ## Required setup
 
