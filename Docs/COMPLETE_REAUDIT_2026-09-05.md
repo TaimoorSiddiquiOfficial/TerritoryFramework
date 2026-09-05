@@ -352,8 +352,27 @@ background is verified as Unity in the Ashes and its entry sound as Horns of War
 by this validation. Evidence: `AssetValidation_Batch15.json`, `AssetValidation_Batch15.log` and
 `CapitalDefinitions_Batch15.json`. This does not replace cook or physical multiplayer gates.
 
-## Counterattack lifecycle preflight
+### Batch 22: nested restore during retirement callbacks
 
+A regression bound the real Narrative activity component's deactivation delegate and loaded a
+replacement assault with the same ID during old-NPC cleanup. The old implementation failed nine
+assertions: it overwrote replacement phase/seed/casualties, erased replacement NPC/vehicle tracking,
+and scheduled the replacement vehicle for removal. The same test also covers cleanup from terminal
+assault resolution. Participant sets are now detached before Narrative callbacks, restore iterates
+stable ID/value snapshots, and restore/resolution abandon stale continuation when a newer restore
+generation is observed. Scoped guards preserve nested suppression and release correctly. Scheduling
+rejects requests while campaign restoration or assault cleanup is in progress; ordinary autonomous
+and immediate story scheduling remains supported after the transition.
+
+CounterAttack retains the authoritative record and transient tracking. No save schema, Blueprint
+signature or Narrative source changed. The new test verifies actual cleanup callbacks, preservation
+of the replacement state and finite casualty counts, live actors, guard release and absence of stale
+events. Editor/UHT and all 242 tests passed (234 clean, eight warning-bearing fixtures, zero failures
+or skips). Evidence: `Batch22_RedBuild.log`, `Batch22_RedTests` (nine failing assertions),
+`Batch22_Build.log`, `Batch22_Tests`. The Development Game build also passed
+(`Batch22_GameBuild.log`). Physical package evidence remains batch 21 until refreshed.
+
+## Counterattack lifecycle preflight
 
 Source trace completed before the first counterattack fix in this audit. CounterAttack owns the
 finite assault record and scheduling; Narrative owns NPC spawning, definition initialization,

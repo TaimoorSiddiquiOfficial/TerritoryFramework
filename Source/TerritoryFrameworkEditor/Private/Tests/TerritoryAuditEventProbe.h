@@ -31,6 +31,13 @@ public:
 	TFunction<void()> ItemCallback;
 	TFunction<void()> ProductionCallback;
 	TFunction<void(ANarrativeNPCCharacter*)> NPCSpawnCallback;
+	TFunction<void()> ComponentDeactivationCallback;
+
+	UFUNCTION()
+	void ComponentDeactivated(UActorComponent* Component)
+	{
+		if (ComponentDeactivationCallback) ComponentDeactivationCallback();
+	}
 
 	UFUNCTION()
 	void NPCSpawned(const UNPCDefinition* Definition, ANarrativeNPCCharacter* Character)

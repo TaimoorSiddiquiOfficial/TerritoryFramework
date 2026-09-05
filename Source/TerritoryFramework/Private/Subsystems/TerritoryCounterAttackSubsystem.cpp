@@ -724,6 +724,8 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		"The Territory Counterattack subsystem has no World."));
 	if (World->GetNetMode() == NM_Client) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "ScheduleClient", "Only the authoritative server can schedule an assault."));
+	if (bRestoringState) return Reject(NSLOCTEXT(
+		"TerritoryCounterAttack", "ScheduleDuringCleanup", "An assault cannot be scheduled during campaign restoration or assault cleanup."));
 	if (!Cast<ANarrativeGameState>(World->GetGameState())) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "MissingNarrativeGameState", "The active Game State is not a Narrative Game State."));
 	if (!IsValid(Territory) || Territory->GetWorld() != World) return Reject(NSLOCTEXT(
@@ -1271,10 +1273,10 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
-	++RestoreGeneration;
+	const uint64 ThisRestoreGeneration = ++RestoreGeneration;
 
 	const bool bAuthority = World->GetNetMode() != NM_Client;
-	bRestoringState = true;
+	TGuardValue<bool> RestoreGuard(bRestoringState, true);
 	if (bAuthority)
 	{
 		// Terminal assaults can already have cars awaiting ordinary scenic cleanup.
@@ -1285,23 +1287,34 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 		{
 			RemoveVehicleForCampaignRestore(Entry.Vehicle.Get());
 		}
-		for (auto& Pair : Assaults)
+		if (RestoreGeneration != ThisRestoreGeneration) return;
+		TArray<FGuid> PreviousAssaultIDs;
+		Assaults.GetKeys(PreviousAssaultIDs);
+		for (const FGuid& PreviousID : PreviousAssaultIDs)
 		{
-			RetireLiveParticipants(Pair.Value, true);
-			RetireLiveVehicles(Pair.Key, true, true);
+			if (const FTerritoryAssaultRecord* Previous = Assaults.Find(PreviousID))
+			{
+				FTerritoryAssaultRecord Snapshot = *Previous;
+				RetireLiveParticipants(Snapshot, true);
+				if (RestoreGeneration != ThisRestoreGeneration) return;
+				RetireLiveVehicles(PreviousID, true, true);
+				if (RestoreGeneration != ThisRestoreGeneration) return;
+			}
 		}
 	}
 	LiveParticipants.Empty();
 	LiveAssaultVehicles.Empty();
 	LiveVehicleRetirementRules.Empty();
-	for (auto& Pair : LiveAssaultRoadGuides)
+	const auto PreviousRoadGuides = MoveTemp(LiveAssaultRoadGuides);
+	LiveAssaultRoadGuides.Reset();
+	for (const auto& Pair : PreviousRoadGuides)
 	{
 		for (const TWeakObjectPtr<ATerritoryRoadGuide>& WeakGuide : Pair.Value)
 		{
 			if (ATerritoryRoadGuide* Guide = WeakGuide.Get()) Guide->EndMissionTraffic();
 		}
 	}
-	LiveAssaultRoadGuides.Empty();
+	if (RestoreGeneration != ThisRestoreGeneration) return;
 	WarnedControllers.Empty();
 	Assaults.Empty();
 	EvaluationCycleHighWater.Empty();
@@ -1367,7 +1380,6 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 			Cycle.TargetTerritoryGUID).FindOrAdd(Cycle.AttackingFaction);
 		HighWater = FMath::Max(HighWater, Cycle.HighestEvaluationCycle);
 	}
-	bRestoringState = false;
 }
 
 void UTerritoryCounterAttackSubsystem::UpdateAssaults()
@@ -2766,8 +2778,7 @@ void UTerritoryCounterAttackSubsystem::ResolveAssault(
 {
 	if (Assault.IsTerminal()) return;
 	const ETerritoryAssaultState PreviousState = Assault.State;
-	const bool bWasRestoring = bRestoringState;
-	bRestoringState = true;
+	const uint64 ResolutionGeneration = RestoreGeneration;
 	Assault.State = FinalState;
 	Assault.Resolution = Reason;
 	Assault.ResolvedGameTime = GetCampaignGameTime();
@@ -2781,9 +2792,13 @@ void UTerritoryCounterAttackSubsystem::ResolveAssault(
 	// Commit the complete terminal record before Narrative removal callbacks run.
 	// Cleanup receives a value snapshot, so a callback cannot invalidate its map reference.
 	FTerritoryAssaultRecord Snapshot = Assault;
-	RetireLiveParticipants(Snapshot, true);
-	RetireLiveVehicles(Snapshot.AssaultID, true);
-	bRestoringState = bWasRestoring;
+	{
+		TGuardValue<bool> CleanupGuard(bRestoringState, true);
+		RetireLiveParticipants(Snapshot, true);
+		if (RestoreGeneration != ResolutionGeneration) return;
+		RetireLiveVehicles(Snapshot.AssaultID, true);
+		if (RestoreGeneration != ResolutionGeneration) return;
+	}
 	const FTerritoryAssaultRecord* Final = Assaults.Find(Snapshot.AssaultID);
 	if (Final && Final->State == Snapshot.State && Final->Resolution == Snapshot.Resolution)
 	{
@@ -2794,8 +2809,10 @@ void UTerritoryCounterAttackSubsystem::ResolveAssault(
 void UTerritoryCounterAttackSubsystem::RetireLiveParticipants(
 	FTerritoryAssaultRecord& Assault, bool bDestroyActors)
 {
-	TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>> Participants =
-		LiveParticipants.FindRef(Assault.AssaultID);
+	// Detach before Narrative activity/overlap callbacks can restore a campaign
+	// with this same ID. Cleanup owns only these old actors, never the new map entry.
+	TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>> Participants;
+	LiveParticipants.RemoveAndCopyValue(Assault.AssaultID, Participants);
 	for (const TWeakObjectPtr<ATerritoryAssaultCharacter>& WeakParticipant : Participants)
 	{
 		if (ATerritoryAssaultCharacter* Participant = WeakParticipant.Get())
@@ -2810,7 +2827,6 @@ void UTerritoryCounterAttackSubsystem::RetireLiveParticipants(
 			}
 		}
 	}
-	LiveParticipants.Remove(Assault.AssaultID);
 }
 
 void UTerritoryCounterAttackSubsystem::RetireLiveVehicles(

@@ -474,4 +474,5 @@ private:
 	friend class FTFAssaultEvaluationResume;
 	friend class FTFAssaultSpawnCallbacks;
 	friend class FTFAssaultVehicleRestoreCleanup;
+	friend class FTFAssaultRetirementCallbacks;
 };
