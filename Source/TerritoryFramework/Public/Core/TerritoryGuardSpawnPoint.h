@@ -500,6 +500,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFGuardReserveReconciliation;
 	friend class FTFGuardRetirementCallbacks;
+	friend class FTFGuardSpawnAdmissionCallbacks;
 #endif
 
 	/** Hidden serialized binding maintained by the Definition synchronizer. */

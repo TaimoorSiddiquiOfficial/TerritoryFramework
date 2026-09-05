@@ -2732,7 +2732,7 @@ void ATerritoryVolume::SpawnGuards()
 
 void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 {
-	if (!HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly
+	if (!IsValid(this) || IsActorBeingDestroyed() || !HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly
 		|| !IsAvailableForGameplay()) return;
 	if (bSpawningGuards)
 	{
@@ -2744,6 +2744,17 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 
 	const FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
 	if (!OwnerFaction.IsValid() || !ResolveGuardDefinition(OwnerFaction) || !GetWorld()) return;
+	UWorld* const SpawnWorld = GetWorld();
+	const FGuid SpawnTerritoryGUID = TerritoryGUID;
+	const auto IsDeploymentCurrent = [&]()
+	{
+		return IsValid(this) && !IsActorBeingDestroyed() && HasAuthority()
+			&& GetWorld() == SpawnWorld && TerritoryGUID == SpawnTerritoryGUID
+			&& OwnershipData.OwningFaction == OwnerFaction && IsAvailableForGameplay()
+			&& ControlMode != ETerritoryControlMode::AggregateOnly
+			&& ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
+				OwnershipData.State, OwnerFaction, OwnershipData.ContestingFaction);
+	};
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugGuards();
 
@@ -2788,18 +2799,20 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 			SpawnPointActors.Num());
 	}
 
-	while (GetSpawnedGuardCount() < TargetGuardCount)
+	while (IsDeploymentCurrent() && GetSpawnedGuardCount() < TargetGuardCount)
 	{
 		bool bSpawnedAtAuthoredPoint = false;
 		for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPointActors)
 		{
-			if (SpawnPoint && SpawnPoint->HasAvailableSlot()
+			if (!IsDeploymentCurrent()) return;
+			if (IsValid(SpawnPoint) && !SpawnPoint->IsActorBeingDestroyed() && SpawnPoint->HasAvailableSlot()
 				&& TrySpawnSingleGuard(SpawnPoint, false))
 			{
 				bSpawnedAtAuthoredPoint = true;
 				break;
 			}
 		}
+		if (!IsDeploymentCurrent()) return;
 		if (!bSpawnedAtAuthoredPoint)
 		{
 			UE_LOG(LogTerritory, Warning,
@@ -2818,7 +2831,7 @@ void ATerritoryVolume::SpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint)
 
 bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint, bool bRequireConcealment)
 {
-	if (!HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly
+	if (!IsValid(this) || IsActorBeingDestroyed() || !HasAuthority() || ControlMode == ETerritoryControlMode::AggregateOnly
 		|| !IsAvailableForGameplay()
 		|| !ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
 		OwnershipData.State, OwnershipData.OwningFaction, OwnershipData.ContestingFaction))
@@ -2829,12 +2842,15 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	UWorld* World = GetWorld();
 	if (!World) return false;
 
-	FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+	const FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
+	const FGuid SpawnTerritoryGUID = TerritoryGUID;
 	if (!OwnerFaction.IsValid()) return false;
 	if (GetSpawnedGuardCount() >= GetMaxGuardCount()) return false;
 
 	const TArray<ATerritoryGuardSpawnPoint*> AuthoredSpawnPoints = GetGuardSpawnPoints();
-	if (!SpawnPoint || !AuthoredSpawnPoints.Contains(SpawnPoint)
+	if (!IsValid(SpawnPoint) || SpawnPoint->IsActorBeingDestroyed()
+		|| !SpawnPoint->HasAuthority() || SpawnPoint->GetWorld() != World
+		|| !AuthoredSpawnPoints.Contains(SpawnPoint)
 		|| SpawnPoint->GetOwningTerritory() != this || !SpawnPoint->HasAvailableSlot())
 	{
 		return false;
@@ -2887,6 +2903,28 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 	{
 		return false;
 	}
+	// Native definition, BeginPlay and OnNPCSpawned callbacks may change the owner,
+	// remove/rebind the post, or kill the NPC before this deployment is admitted.
+	const UNarrativeAbilitySystemComponent* GuardASC =
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Guard);
+	const bool bDeploymentCurrent = IsValid(this) && !IsActorBeingDestroyed() && HasAuthority()
+		&& GetWorld() == World && TerritoryGUID == SpawnTerritoryGUID
+		&& OwnershipData.OwningFaction == OwnerFaction && IsAvailableForGameplay()
+		&& ControlMode != ETerritoryControlMode::AggregateOnly
+		&& ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
+			OwnershipData.State, OwnerFaction, OwnershipData.ContestingFaction)
+		&& IsValid(SpawnPoint) && !SpawnPoint->IsActorBeingDestroyed()
+		&& SpawnPoint->HasAuthority() && SpawnPoint->GetWorld() == World
+		&& SpawnPoint->GetOwningTerritory() == this && SpawnPoint->HasAvailableSlot()
+		&& GetGuardSpawnPoints().Contains(SpawnPoint)
+		&& GetSpawnedGuardCount() < GetMaxGuardCount()
+		&& Guard->GetWorld() == World && Guard->HasAuthority()
+		&& (!GuardASC || !GuardASC->IsDead());
+	if (!bDeploymentCurrent)
+	{
+		TerritoryNarrativeDeathSupport::ScheduleRemoval(*Guard);
+		return false;
+	}
 	// Narrative's public subsystem uses AdjustIfPossibleButAlwaysSpawn and CharacterMovement
 	// may settle a capsule a few centimetres onto the floor during initialization. Preserve
 	// authored horizontal placement and facing while accepting that bounded floor snap.
@@ -2904,11 +2942,7 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 			*Guard->GetActorTransform().ToHumanReadableString(),
 			*GetNameSafe(Guard->GetNPCController()),
 			*GetNameSafe(Guard->GetActivityComponent()));
-		if (CharacterSubsystem)
-		{
-			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Guard);
-			CharacterSubsystem->DestroyNPC(Guard);
-		}
+		TerritoryNarrativeDeathSupport::ScheduleRemoval(*Guard);
 		return false;
 	}
 

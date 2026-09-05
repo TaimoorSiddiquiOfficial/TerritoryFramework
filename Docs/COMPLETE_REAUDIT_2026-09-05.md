@@ -512,6 +512,33 @@ and TriggerSet overrides are copied into `FNPCSpawnParams` before Native callbac
 spawn lock or TriggerSet-copy refactor is justified on those grounds. Post-callback owner/post/death
 validation and purchase callback ordering still require investigation.
 
+## Batch 28 — reject guard admission invalidated by Native spawn callbacks
+
+Actual Native `OnNPCSpawned` regressions proved that an owner transfer, detached post or destroyed
+post could still return spawn success and enter the old Volume's guard/defender lists. Detached-post
+and owner-transfer cases also wrote a phantom active post count into the Native save record.
+`Batch28_RedTests` contains the failing assertions against the original runtime.
+
+Volume remains the guard admission authority. `TrySpawnSingleGuard` now rechecks the original
+Territory GUID/world/owner, server authority, current political availability, live same-world post
+binding/capacity and Native ASC death state after Native spawning. Multi-post deployment stops when
+its original ownership context changes. Rejected staged NPCs use the existing bounded Native removal
+adapter, disabling collision/movement and hiding the actor until its lifespan expires. This also
+removes the failed-placement path's dependency on Native `DestroyNPC` delegating to a Blueprint-only
+`CleanUp` event, which is unimplemented on the supported base Native controller. The first fixed test
+run caught that cleanup assumption; the final runtime uses `ScheduleRemoval`.
+
+The seven-case regression covers normal admission, public forced ownership transfer, post detach,
+post destruction, multi-post owner change, client rejection, and canonical Native dead-state rejection.
+Native post save/load verifies zero phantom guards and preserved reserve. All 248 tests pass (236
+clean, 12 warning-bearing fixtures, zero failed/skipped): `Batch28_FinalTests`. Editor/UHT passes in
+`Batch28_FinalBuild.log`. Development Game and stage/pak also pass (`Batch28_GameBuild.log`,
+`Package_Batch28.log`, `Stage_Batch28`), using the unchanged batch-20 cooked assets. Latest asset and
+Blueprint validation remains batch 25. No Native source, save schema, Blueprint signature or replication layout
+changed; no migration is needed. The client-role fixture and Native record round-trip do not replace
+physical multiplayer/World Partition verification. Purchase and post-admission garrison-event callback
+atomicity remain separate audit work.
+
 ## Counterattack lifecycle preflight
 
 
