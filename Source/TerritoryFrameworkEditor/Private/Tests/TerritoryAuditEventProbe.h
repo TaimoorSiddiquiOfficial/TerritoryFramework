@@ -32,6 +32,13 @@ public:
 	TFunction<void()> ProductionCallback;
 	TFunction<void(ANarrativeNPCCharacter*)> NPCSpawnCallback;
 	TFunction<void()> ComponentDeactivationCallback;
+	TFunction<void(AActor*, FGuid)> StableSpawnCallback;
+
+	UFUNCTION()
+	void StableActorSpawned(AActor* Actor, const FGuid ActorGUID)
+	{
+		if (StableSpawnCallback) StableSpawnCallback(Actor, ActorGUID);
+	}
 
 	UFUNCTION()
 	void ComponentDeactivated(UActorComponent* Component)

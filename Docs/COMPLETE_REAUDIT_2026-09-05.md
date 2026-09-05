@@ -410,6 +410,19 @@ physical assault success is claimed. Both rendered clients joined this build; th
 SKM_Manny bone-visibility ensure during the intro, disproving a headless-only explanation. Evidence:
 `Server_Batch23.log`, `Client1Rendered_Batch23.log`, `Client2Rendered_Batch23.log`.
 
+## Batch 24 — verify Native spawn identity (false positive rejected)
+
+The new behavioral test runs actual Narrative guard and assault spawning, observes
+`OnStableActorSpawned`, resolves the final GUID, round-trips each Native actor record and checks
+independent destruction cleanup. Existing runtime behavior passes. UE 5.7 defaults
+`bDelayOnActorSpawnedUntilFinishedSpawning` to true, so Narrative's deferred spawn sets the plugin's
+metadata before the stable-actor event. The proposed earlier-registration runtime edits were
+discarded; no runtime change is justified by this test. Editor/UHT and all 244 automation tests pass
+(234 clean, 10 warning-bearing fixtures; zero failures/skips): `Batch24_FinalBuild.log` and
+`Batch24_FinalTests`. Game/package/runtime evidence remains batch 23 because runtime is unchanged.
+The vehicle-budget restoration defect remains open; passing identity registration alone does not
+prove deployed survivor/vehicle persistence.
+
 ## Counterattack lifecycle preflight
 
 
