@@ -331,6 +331,7 @@ private:
 	FTimerHandle UpdateTimer;
 	bool bRestoringState = false;
 	bool bUpdatingAssaults = false;
+	bool bSpawningAssaultWave = false;
 	uint64 RestoreGeneration = 0;
 	/** Transient access token; detects map relocation or replacement across synchronous callbacks. */
 	struct FAssaultAccess
@@ -470,4 +471,5 @@ private:
 	friend class FTFCounterAttackWorldPartitionTargetRebind;
 	friend class FTFAssaultWarningCallback;
 	friend class FTFAssaultEvaluationResume;
+	friend class FTFAssaultSpawnCallbacks;
 };

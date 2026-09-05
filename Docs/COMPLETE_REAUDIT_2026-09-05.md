@@ -279,6 +279,30 @@ unregistration, detached lookup and a foreign-world same-faction inventory recei
 Evidence: `Batch19_Build.log`, `Batch19_Tests`. The Game build also passed through batch 18
 (`Batch18_GameBuild.log`); batch 19 and subsequent changes still require a final Game refresh.
 
+### Batch 20: physical spawn callback lifetime
+
+Wave, individual Narrative NPC and Narrative vehicle deployment now verify the authoritative assault
+identity/generation after synchronous spawn, controller, GAS, dialogue and traffic callbacks. Force
+configuration is copied before callbacks can replace the profile array. Unadmitted NPCs/vehicles and
+staged occupants are retired through Narrative cleanup instead of escaping into the replacement
+campaign. Nested physical wave spawning is excluded while the current wave is being built. A vehicle
+deployment count reference is reacquired after callbacks; failed-wave notification cannot continue
+through a replaced assault record. Autonomous and explicit immediate story activation remain supported.
+
+Editor/UHT and all 240 tests passed (232 clean, eight warning-bearing fixtures, zero failures/skips).
+The new behavioral fixture calls Narrative's actual SpawnNPC API and binds its Blueprint-assignable
+OnNPCSpawned event, exercising empty and same-ID restores, cleanup, authority rejection and a later
+successful spawn. It also spawns the real Narrative BPV_Sedan and restores from the actor-spawn callback,
+proving zero occupants and no orphan vehicle. The synthetic NPC definition intentionally produces
+asset-manager warnings; it is not an authored-content validation result. Evidence: `Batch20_VehicleBuild.log`,
+`Batch20_VehicleTests`. The earlier `Batch20_FinalTests` failed because the initial vehicle fixture used
+Narrative's abstract base; the final fixture uses the existing concrete sedan asset.
+
+No Narrative files, durable fields or Blueprint signatures changed. This batch verifies callback
+lifetime, not complete in-spawn casualty accounting or full physical road ingress. Force counts still
+commit in the enclosing wave after participant construction; that callback timing and restoration
+during retirement cleanup remain under review. Current packaged multiplayer/road gates remain pending.
+
 ### Authored asset validation after batch 15
 
 Validation passed for 113 assets and compilation passed for 72 included Blueprints: zero errors or
@@ -315,9 +339,10 @@ and the existing capture authority remain mandatory in every activation mode.
 
 ## Pending audit follow-up
 
-- Complete the upgrade/garrison/production callback transaction review; existing debit callbacks
-  occur before final gameplay commits. No atomicity completion is claimed for those paths yet.
+- Complete garrison placement/refund and multi-item production transaction review. Upgrade callback
+  commit order is fixed in batch 17; no blanket purchase/recipe atomicity completion is claimed.
 - Finish assault physical spawn/restore callbacks, malformed record/arithmetic limits and client
   movement/reindex validation. Unloaded-target treaty cancellation is already covered by batch 8.
-- Review remaining hierarchy integer sums and hardcoded capital rewards against Narrative event policy.
+- Move hardcoded capital rewards to an authored Narrative event/data policy with compatible migration;
+  District income overflow and detached City lookup are fixed in batch 19.
 - Complete guard/AI/Tales/navigation/UI/editor review and the live release gates.

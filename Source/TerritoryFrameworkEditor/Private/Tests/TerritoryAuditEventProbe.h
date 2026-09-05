@@ -9,6 +9,8 @@
 #include "Tales/NarrativeEvent.h"
 #include "Items/InventoryComponent.h"
 #include "Economy/TerritoryProductionProfile.h"
+#include "AI/NPCDefinition.h"
+#include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "TerritoryAuditEventProbe.generated.h"
 
 /** Editor-only receiver for real Blueprint-compatible callback regression tests. */
@@ -28,6 +30,13 @@ public:
 	TFunction<void()> CurrencyCallback;
 	TFunction<void()> ItemCallback;
 	TFunction<void()> ProductionCallback;
+	TFunction<void(ANarrativeNPCCharacter*)> NPCSpawnCallback;
+
+	UFUNCTION()
+	void NPCSpawned(const UNPCDefinition* Definition, ANarrativeNPCCharacter* Character)
+	{
+		if (NPCSpawnCallback) NPCSpawnCallback(Character);
+	}
 
 	UFUNCTION()
 	void ProductionSettled(const FTerritoryProductionResult& Result)

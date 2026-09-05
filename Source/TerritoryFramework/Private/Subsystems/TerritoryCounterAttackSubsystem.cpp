@@ -39,6 +39,7 @@
 #include "GameFramework/GameUserSettings.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 #include "Misc/Crc.h"
+#include "Misc/ScopeExit.h"
 #include "NavigationPath.h"
 #include "NavigationSystem.h"
 #include "TimerManager.h"
@@ -1872,12 +1873,19 @@ bool UTerritoryCounterAttackSubsystem::ActivateAssault(
 void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory)
 {
-	if (Assault.State != ETerritoryAssaultState::Active || !Territory) return;
+	if (bSpawningAssaultWave || !GetWorld() || GetWorld()->GetNetMode() == NM_Client
+		|| Assault.State != ETerritoryAssaultState::Active || !IsValid(Territory) || !Territory->HasAuthority()) return;
+	TGuardValue<bool> WaveGuard(bSpawningAssaultWave, true);
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
 	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
-	const FTerritoryFactionAssaultConfig* ForceConfig = Profile
+	const FTerritoryFactionAssaultConfig* AuthoredForce = Profile
 		? Profile->FindFactionForce(Assault.AttackingFaction) : nullptr;
+	const FTerritoryFactionAssaultConfig ForceSnapshot = AuthoredForce
+		? *AuthoredForce : FTerritoryFactionAssaultConfig();
+	const FTerritoryFactionAssaultConfig* ForceConfig = AuthoredForce ? &ForceSnapshot : nullptr;
 	UNPCDefinition* AttackerDefinition = ForceConfig
 		? ResolveAssaultDefinition(Assault, *ForceConfig) : nullptr;
+	if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active) || !IsValid(Territory)) return;
 	if (!ForceConfig || !AttackerDefinition)
 	{
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
@@ -1888,6 +1896,7 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	// drive, park and dismount. Do not pop later reserves into the scene or let them
 	// overtake the active reinforcement car.
 	if (HasPendingVehicleIngress(Assault.AssaultID)) return;
+	const int32 MaximumSpawnFailures = FMath::Max(1, Profile->MaxConsecutiveSpawnFailures);
 	if (Assault.SelectedApproaches.IsEmpty())
 	{
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
@@ -1977,7 +1986,7 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			VehicleDeployment = &Assault.VehicleDeploymentsByApproach.AddDefaulted_GetRef();
 			VehicleDeployment->ApproachID = ApproachID;
 		}
-		int32& VehicleDeploymentCount = VehicleDeployment->Count;
+		const int32 VehicleDeploymentCount = VehicleDeployment->Count;
 		const bool bUseNarrativeVehicle =
 			Approach.EntryType == ETerritoryAssaultEntryType::NarrativeVehicle
 			&& Assault.VehicleDeploymentsUsed
@@ -2084,11 +2093,16 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 		{
 			SpawnedParticipants.Add(Participant);
 		}
+		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active) || !IsValid(Territory)) return;
 		if (!SpawnedParticipants.IsEmpty())
 		{
 			if (bUseNarrativeVehicle)
 			{
-				++VehicleDeploymentCount;
+				FTerritoryVehicleDeploymentCount* CurrentDeployment =
+					Assault.VehicleDeploymentsByApproach.FindByPredicate(
+						[ApproachID](const FTerritoryVehicleDeploymentCount& Entry) { return Entry.ApproachID == ApproachID; });
+				if (!CurrentDeployment) return;
+				++CurrentDeployment->Count;
 				++Assault.VehicleDeploymentsUsed;
 			}
 			if (Spawned == 0 && PresentationPlayer
@@ -2096,6 +2110,7 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			{
 				SpawnedParticipants[0]->PlayTaggedDialogue(
 					ForceConfig->ReserveWaveAlertDialogueTag, PresentationPlayer);
+				if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active) || !IsValid(Territory)) return;
 			}
 			const int32 ParticipantCount = SpawnedParticipants.Num();
 			SpawnedPerApproach.FindOrAdd(ApproachID) += ParticipantCount;
@@ -2114,7 +2129,8 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	{
 		++Assault.ConsecutiveSpawnFailures;
 		BroadcastChanged(Assault);
-		if (Assault.ConsecutiveSpawnFailures >= FMath::Max(1, Profile->MaxConsecutiveSpawnFailures))
+		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active)) return;
+		if (Assault.ConsecutiveSpawnFailures >= MaximumSpawnFailures)
 		{
 			ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
 				ETerritoryAssaultResolution::SpawnFailed);
@@ -2124,14 +2140,25 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 
 ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory,
-	const FTerritoryFactionAssaultConfig& ForceConfig,
+	const FTerritoryFactionAssaultConfig& InForceConfig,
 	UNPCDefinition* AttackerDefinition,
 	const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform,
 	int32 OverrideNarrativeLevel)
 {
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
+	const FTerritoryAssaultRecord SpawnRecord = Assault;
+	const FTerritoryFactionAssaultConfig ForceConfig = InForceConfig;
+	const auto IsSpawnCurrent = [this, &Access, Territory]()
+	{
+		return GetWorld() && GetWorld()->GetNetMode() != NM_Client
+			&& IsAssaultCurrent(Access, ETerritoryAssaultState::Active)
+			&& IsValid(Territory) && Territory->HasAuthority() && !Territory->IsActorBeingDestroyed()
+			&& Territory->GetWorld() == GetWorld();
+	};
+	if (!IsSpawnCurrent()) return nullptr;
 	FText SpawnClassFailure;
 	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
-		AttackerDefinition, Assault.PlannedForce, SpawnClassFailure))
+		AttackerDefinition, SpawnRecord.PlannedForce, SpawnClassFailure))
 	{
 		UE_LOG(LogTerritory, Error,
 			TEXT("Counterattack definition %s is not physically spawn-ready: %s"),
@@ -2141,12 +2168,25 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 
 	UNarrativeCharacterSubsystem* CharacterSubsystem =
 		GetWorld() ? GetWorld()->GetSubsystem<UNarrativeCharacterSubsystem>() : nullptr;
+	if (!IsSpawnCurrent()) return nullptr;
 	ATerritoryAssaultCharacter* Participant = ATerritoryAssaultCharacter::SpawnThroughNarrative(
-		CharacterSubsystem, AttackerDefinition, Assault.AttackingFaction,
+		CharacterSubsystem, AttackerDefinition, SpawnRecord.AttackingFaction,
 		Territory->GetTerritoryGUID(), FGuid::NewGuid(), SpawnTransform, Approach.ApproachID,
 		ForceConfig.ActivityConfigurationOverride, ForceConfig.TriggerSetOverrides,
-		Assault.AssaultID, Assault.TargetTerritory, OverrideNarrativeLevel);
+		SpawnRecord.AssaultID, SpawnRecord.TargetTerritory, OverrideNarrativeLevel);
+	bool bAdmitted = false;
+	ON_SCOPE_EXIT
+	{
+		if (!bAdmitted && IsValid(Participant) && !Participant->IsActorBeingDestroyed())
+		{
+			if (Participant->AssaultParticipant) Participant->AssaultParticipant->Retire(false);
+			if (IsValid(Participant)) TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
+			if (IsValid(Participant)) Participant->Destroy();
+		}
+	};
+	if (!IsSpawnCurrent()) return nullptr;
 	if (!IsValid(Participant) || Participant->IsActorBeingDestroyed()) return nullptr;
+	if (!Participant->AssaultParticipant) return nullptr;
 	const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
 	const float MinimumSpacing = FMath::Max(
 		100.f, Profile ? Profile->ParticipantSpacing * 0.7f : 154.f);
@@ -2155,18 +2195,16 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 		UE_LOG(LogTerritory, Warning,
 			TEXT("Counterattack participant %s was collision-adjusted into an occupied deployment slot"),
 			*GetNameSafe(Participant));
-		TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
-		Participant->Destroy();
 		return nullptr;
 	}
 	if (Participant->AssaultParticipant)
 	{
-		const bool bTakeoverPriority = Assault.LaunchMode ==
+		const bool bTakeoverPriority = SpawnRecord.LaunchMode ==
 			ETerritoryAssaultLaunchMode::StrategicCounterattack
-			&& Assault.bAllowsTerritoryCapture
+			&& SpawnRecord.bAllowsTerritoryCapture
 			&& (!Profile || Profile->bPrioritizeTerritoryTakeover);
 		Participant->AssaultParticipant->ConfigureAssaultRules(
-			Assault.bAllowsTerritoryCapture, bTakeoverPriority,
+			SpawnRecord.bAllowsTerritoryCapture, bTakeoverPriority,
 			Profile ? Profile->DefendingPlayerEngagementPadding : 800.f,
 			ForceConfig.TakeoverStartedDialogueTag,
 			ForceConfig.FinalFightDialogueTag);
@@ -2176,10 +2214,9 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 		UE_LOG(LogTerritory, Error,
 			TEXT("Counterattack participant %s failed the verified Narrative controller/activity contract"),
 			*GetNameSafe(Participant));
-		TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
-		Participant->Destroy();
 		return nullptr;
 	}
+	if (!IsSpawnCurrent() || !IsValid(Participant) || Participant->IsActorBeingDestroyed()) return nullptr;
 	if (OverrideNarrativeLevel > 0 && ForceConfig.PowerScalingEffect)
 	{
 		UNarrativeAbilitySystemComponent* ASC =
@@ -2189,8 +2226,6 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 			UE_LOG(LogTerritory, Error,
 				TEXT("Counterattack participant %s has no Narrative ASC for its configured power-scaling effect"),
 				*GetNameSafe(Participant));
-			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
-			Participant->Destroy();
 			return nullptr;
 		}
 
@@ -2204,8 +2239,6 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 				TEXT("Counterattack participant %s could not create configured Narrative power-scaling effect %s"),
 				*GetNameSafe(Participant),
 				*GetNameSafe(ForceConfig.PowerScalingEffect));
-			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
-			Participant->Destroy();
 			return nullptr;
 		}
 		if (FMath::IsFinite(ForceConfig.PowerScalingMagnitudePerEnemyLevel)
@@ -2219,14 +2252,16 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 		ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
 	}
 
-	LiveParticipants.FindOrAdd(Assault.AssaultID).Add(Participant);
+	if (!IsSpawnCurrent() || !IsValid(Participant) || Participant->IsActorBeingDestroyed()) return nullptr;
+	LiveParticipants.FindOrAdd(Access.ID).Add(Participant);
+	bAdmitted = true;
 	return Participant;
 }
 
 TArray<ATerritoryAssaultCharacter*>
 UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory,
-	const FTerritoryFactionAssaultConfig& ForceConfig,
+	const FTerritoryFactionAssaultConfig& InForceConfig,
 	UNPCDefinition* AttackerDefinition,
 	const FTerritoryAssaultApproach& Approach,
 	const FTransform& VehicleSpawnTransform,
@@ -2235,9 +2270,20 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 	const int32 RequestedOccupants, const int32 OverrideNarrativeLevel)
 {
 	TArray<ATerritoryAssaultCharacter*> Participants;
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
+	const FTerritoryFactionAssaultConfig ForceConfig = InForceConfig;
+	const auto IsDeploymentCurrent = [this, &Access, Territory]()
+	{
+		return GetWorld() && GetWorld()->GetNetMode() != NM_Client
+			&& IsAssaultCurrent(Access, ETerritoryAssaultState::Active)
+			&& IsValid(Territory) && Territory->HasAuthority() && !Territory->IsActorBeingDestroyed()
+			&& Territory->GetWorld() == GetWorld();
+	};
+	if (!IsDeploymentCurrent()) return Participants;
 	UWorld* World = GetWorld();
 	UClass* VehicleClass = UTerritoryCounterAttackProfile::ResolveVehicleClass(
 		ForceConfig, Approach).LoadSynchronous();
+	if (!IsDeploymentCurrent()) return Participants;
 	if (!World || !VehicleClass
 		|| !VehicleClass->IsChildOf(ANarrativeVehicleBase::StaticClass()))
 	{
@@ -2253,6 +2299,24 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 	VehicleSpawnParameters.ObjectFlags |= RF_Transient;
 	ANarrativeVehicleBase* Vehicle = World->SpawnActor<ANarrativeVehicleBase>(
 		VehicleClass, VehicleSpawnTransform, VehicleSpawnParameters);
+	TArray<TWeakObjectPtr<ATerritoryAssaultCharacter>> StagedParticipants;
+	bool bVehicleAdmitted = false;
+	ON_SCOPE_EXIT
+	{
+		if (!bVehicleAdmitted)
+		{
+			for (const TWeakObjectPtr<ATerritoryAssaultCharacter>& Staged : StagedParticipants)
+			{
+				if (ATerritoryAssaultCharacter* NPC = Staged.Get())
+				{
+					if (NPC->AssaultParticipant) NPC->AssaultParticipant->Retire(false);
+					if (IsValid(NPC)) TerritoryNarrativeDeathSupport::ScheduleRemoval(*NPC);
+				}
+			}
+			if (IsValid(Vehicle) && !Vehicle->IsActorBeingDestroyed()) Vehicle->Destroy();
+		}
+	};
+	if (!IsDeploymentCurrent()) return Participants;
 	if (!IsValid(Vehicle) || Vehicle->IsActorBeingDestroyed())
 	{
 		UE_LOG(LogTerritory, Warning,
@@ -2326,6 +2390,8 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 	ATerritoryAssaultCharacter* Participant = SpawnParticipant(
 		Assault, Territory, ForceConfig, AttackerDefinition, Approach,
 		BuildSeatStagingTransform(0), OverrideNarrativeLevel);
+	if (IsValid(Participant)) StagedParticipants.Add(Participant);
+	if (!IsDeploymentCurrent() || !IsValid(Vehicle) || Vehicle->IsActorBeingDestroyed()) return {};
 	if (!Participant || !Participant->AssaultParticipant)
 	{
 		Vehicle->Destroy();
@@ -2354,6 +2420,8 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 		ATerritoryAssaultCharacter* Passenger = SpawnParticipant(
 			Assault, Territory, ForceConfig, AttackerDefinition, Approach,
 			BuildSeatStagingTransform(SeatIndex), OverrideNarrativeLevel);
+		if (IsValid(Passenger)) StagedParticipants.Add(Passenger);
+		if (!IsDeploymentCurrent() || !IsValid(Vehicle) || Vehicle->IsActorBeingDestroyed()) return {};
 		if (!Passenger || !Passenger->AssaultParticipant)
 		{
 			UE_LOG(LogTerritory, Warning,
@@ -2370,6 +2438,7 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 
 	LiveAssaultVehicles.FindOrAdd(Assault.AssaultID).Add(Vehicle);
 	LiveVehicleRetirementRules.Add(Vehicle, Approach.VehicleRetirement);
+	bVehicleAdmitted = true;
 	if (RoadGuide && Assault.bStoryActivateRoadMissionTraffic)
 	{
 		TSet<TWeakObjectPtr<ATerritoryRoadGuide>>& Guides =
@@ -2379,6 +2448,7 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 			Guides.Add(RoadGuide);
 			RoadGuide->BeginMissionTraffic(
 				Assault.StoryMissionTrafficVehicleCountOverride);
+			if (!IsDeploymentCurrent()) return {};
 		}
 	}
 	UE_LOG(LogTerritory, Display,
