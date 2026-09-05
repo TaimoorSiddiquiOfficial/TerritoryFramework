@@ -1029,6 +1029,7 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipe(
 
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client || BatchCount <= 0
+		|| !IsValid(RequestingActor) || RequestingActor->GetWorld() != World
 		|| !DoesAccountBelongToFaction(RequestingActor, Faction))
 	{
 		OutResult.Status = ETerritoryProductionStatus::AuthorityRejected;
@@ -1038,6 +1039,13 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipe(
 	}
 
 	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(RequestingActor);
+	if (!IsValid(Inventory) || Inventory->GetWorld() != World)
+	{
+		OutResult.Status = ETerritoryProductionStatus::AuthorityRejected;
+		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "ForeignInventory",
+			"The resource inventory must belong to the requesting campaign world.");
+		return false;
+	}
 	const bool bSuccess = ExecuteResourceRecipeOnInventory(Inventory, Faction, Recipe,
 		UpgradeLevel, BatchCount, OutResult);
 	if (bSuccess)

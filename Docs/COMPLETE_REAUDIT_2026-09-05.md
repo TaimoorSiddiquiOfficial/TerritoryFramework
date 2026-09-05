@@ -264,6 +264,21 @@ with "Server targets are not currently supported from this engine distribution."
 `DedicatedServerBuild_Batch17.log`. A Game build running with `-server` can exercise networking but is
 not claimed as a compiled dedicated-server target. That release gate requires a server-capable engine.
 
+### Batch 19: District income and recipe world admission
+
+District's derived income summed individually valid int32 Property rates in int32, allowing two large
+rates to wrap negative. The reducer now accumulates in int64 and saturates at the public int32 limit.
+A detached District's City lookup also handles the missing world. Public resource recipes now reject
+a requester or resolved Narrative inventory belonging to another campaign world before any item change.
+These reuse the existing hierarchy registry and Narrative inventory authorities; no fields, replication
+formats, Blueprint signatures or save migration are introduced.
+
+Editor/UHT and all 239 tests passed (232 clean, seven expected-warning, zero failures/skips).
+Coverage includes two authored Places, real Narrative actor-record reload of the maximum rate, child
+unregistration, detached lookup and a foreign-world same-faction inventory receiving zero items.
+Evidence: `Batch19_Build.log`, `Batch19_Tests`. The Game build also passed through batch 18
+(`Batch18_GameBuild.log`); batch 19 and subsequent changes still require a final Game refresh.
+
 ### Authored asset validation after batch 15
 
 Validation passed for 113 assets and compilation passed for 72 included Blueprints: zero errors or

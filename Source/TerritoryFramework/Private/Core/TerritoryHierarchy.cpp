@@ -649,7 +649,8 @@ void ATerritoryDistrict::OnDistrictFullyCaptured_Implementation(FGameplayTag Cap
 
 ATerritoryCity* ATerritoryDistrict::GetOwningCity() const
 {
-	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+	UTerritoryRegistrySubsystem* Registry = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	if (!Registry) return nullptr;
 
 	FGameplayTag ParentTag = GetParentTerritoryTag();
@@ -707,7 +708,7 @@ int32 ATerritoryDistrict::GetEffectiveIncome() const
 	const FGameplayTag DistrictOwner = GetOwningFaction();
 	if (!DistrictOwner.IsValid()) return 0;
 
-	int32 TotalIncome = 0;
+	int64 TotalIncome = 0;
 	for (ATerritoryVolume* Volume : GetProperties())
 	{
 		if (const ATerritoryProperty* Property = Cast<ATerritoryProperty>(Volume);
@@ -716,7 +717,7 @@ int32 ATerritoryDistrict::GetEffectiveIncome() const
 			TotalIncome += Property->GetEffectiveIncome();
 		}
 	}
-	return TotalIncome;
+	return static_cast<int32>(FMath::Min<int64>(TotalIncome, MAX_int32));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

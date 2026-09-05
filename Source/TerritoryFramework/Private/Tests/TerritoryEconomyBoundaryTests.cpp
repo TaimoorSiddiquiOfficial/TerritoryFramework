@@ -7,6 +7,11 @@
 #include "Economy/TerritoryProductionProfile.h"
 #include "Engine/World.h"
 #include "Items/NarrativeItem.h"
+#include "Items/InventoryComponent.h"
+#include "NarrativeSave.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
+#include "Subsystems/TerritoryEconomySubsystem.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProductionInt64OverflowRegression,
@@ -86,6 +91,7 @@ bool FTFPropertyEconomyBoundaryRegression::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Invalid upgrade caps cannot create negative saved levels"), Property->GetUpgradeLevel(), 0);
 	ATerritoryProperty* Detached = NewObject<ATerritoryProperty>();
 	TestNull(TEXT("Detached Property can query its missing District safely"), Detached->GetOwningDistrict());
+	TestNull(TEXT("Detached District can query its missing City safely"), NewObject<ATerritoryDistrict>()->GetOwningCity());
 	World->DestroyWorld(false);
 	return true;
 }
@@ -123,8 +129,80 @@ bool FTFGarrisonAdmissionBoundaries::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Locked garrison rejects the actual mutation"),
 		Territory->TrySetDesiredGuardCount(Requester, 0).bSuccess);
 	TestEqual(TEXT("Rejected staffing preserves the durable target"), Territory->GetDesiredGuardCount(), 1);
+	FTerritoryProductionRule Recipe;
+	Recipe.RuleTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	FTerritoryResourceRate Output;
+	Output.ItemClass = UNarrativeItem::StaticClass();
+	Output.QuantityPerCycle = 1;
+	Recipe.Outputs.Add(Output);
+	ForeignRequester->GetInventoryComponent()->SetCapacity(8);
+	ForeignRequester->GetInventoryComponent()->SetWeightCapacity(100.f);
+	FTerritoryProductionResult RecipeResult;
+	TestFalse(TEXT("A recipe cannot mutate a Narrative inventory in another campaign world"),
+		World->GetSubsystem<UTerritoryEconomySubsystem>()->ExecuteResourceRecipe(
+			ForeignRequester, Heroes, Recipe, 0, 1, FGameplayTag(), RecipeResult));
+	TestEqual(TEXT("Foreign inventory rejection occurs before adding items"),
+		ForeignRequester->GetInventoryComponent()->GetTotalQuantityOfItemExact(
+			TSoftClassPtr<UNarrativeItem>(UNarrativeItem::StaticClass()), false), 0);
 	World->DestroyWorld(false);
 	OtherWorld->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDistrictIncomeBoundaries,
+	"TerritoryFramework.Economy.Regression.DistrictIncomeBoundaries",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDistrictIncomeBoundaries::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("District income world exists"), World)) return false;
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	UTerritoryDistrictDefinition* Definition = NewObject<UTerritoryDistrictDefinition>();
+	Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare"));
+	Definition->StableTerritoryGUID = FGuid(191, 192, 193, 194);
+	Definition->TerritoryActorClass = ATerritoryDistrict::StaticClass();
+	ATerritoryDistrict* District = World->SpawnActor<ATerritoryDistrict>();
+	TArray<ATerritoryProperty*> Properties;
+	for (const TCHAR* Tag : {TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), TEXT("Territory.HavenReach.CastleHill.Farm")})
+	{
+		UTerritoryPlaceDefinition* PlaceDefinition = NewObject<UTerritoryPlaceDefinition>();
+		PlaceDefinition->TerritoryTag = FGameplayTag::RequestGameplayTag(Tag);
+		PlaceDefinition->StableTerritoryGUID = FGuid(191, 192, 193, 195 + Properties.Num());
+		PlaceDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+		PlaceDefinition->DerivedParentTerritoryTag = Definition->TerritoryTag;
+		Definition->Places.Add(PlaceDefinition);
+		ATerritoryProperty* Property = World->SpawnActor<ATerritoryProperty>();
+		PlaceDefinition->ApplyToTerritory(Property);
+		World->GetSubsystem<UTerritoryRegistrySubsystem>()->RegisterTerritory(Property);
+		FTerritoryOwnershipData State = Property->GetOwnershipData();
+		State.OwningFaction = Heroes;
+		State.State = ETerritoryState::Claimed;
+		State.ControlProgress = 1.f;
+		State.DesiredGuardCount = 0;
+		State.PeriodicIncome = MAX_int32;
+		Property->CommitOwnershipData(State);
+		Properties.Add(Property);
+	}
+	Definition->ApplyToTerritory(District);
+	World->GetSubsystem<UTerritoryRegistrySubsystem>()->RegisterTerritory(District);
+	District->SetDerivedControl(Heroes, ETerritoryState::Claimed);
+	TestEqual(TEXT("The authored District resolves both loaded Places"), District->GetProperties().Num(), 2);
+	TestEqual(TEXT("Two maximum property incomes saturate instead of wrapping negative"), District->GetEffectiveIncome(), MAX_int32);
+	UNarrativeSaveSubsystem* Save = World->GetSubsystem<UNarrativeSaveSubsystem>();
+	FNarrativeActorRecord Record;
+	TestTrue(TEXT("Narrative saves the large income"), Save->CreateActorRecord(Properties[0], Record));
+	FTerritoryOwnershipData Changed = Properties[0]->GetOwnershipData();
+	Changed.PeriodicIncome = 0;
+	Properties[0]->CommitOwnershipData(Changed);
+	Save->LoadActorFromRecord(Properties[0], Record);
+	TestEqual(TEXT("Narrative restores the original property rate"), Properties[0]->GetPeriodicIncome(), MAX_int32);
+	TestEqual(TEXT("Reloaded rates preserve the bounded District sum"), District->GetEffectiveIncome(), MAX_int32);
+	World->GetSubsystem<UTerritoryRegistrySubsystem>()->UnregisterTerritory(Properties[1]);
+	TestEqual(TEXT("One remaining loaded Place retains its valid maximum income"), District->GetEffectiveIncome(), MAX_int32);
+	World->GetSubsystem<UTerritoryRegistrySubsystem>()->UnregisterTerritory(Properties[0]);
+	TestEqual(TEXT("An unloaded District has no phantom loaded income"), District->GetEffectiveIncome(), 0);
+	World->DestroyWorld(false);
 	return true;
 }
 
