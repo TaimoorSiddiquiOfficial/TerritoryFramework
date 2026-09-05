@@ -55,6 +55,9 @@ bool TerritoryTales::DoEventConditionsPass(const UNarrativeEvent* Event, APawn* 
 	if (OutFailedCondition) OutFailedCondition->Reset();
 	if (!Event) return false;
 	if (GPrevalidatedTerritoryEvents.Contains(Event)) return true;
+	// Conditions are Blueprint callbacks and may edit the owning event's array.
+	// One evaluation uses the requirements that existed when it began.
+	const TArray<UNarrativeCondition*> Conditions = Event->Conditions;
 	if (IsValid(NarrativeComponent))
 	{
 		// UNarrativeEvent owns Conditions but Narrative's Quest event dispatcher does
@@ -64,7 +67,7 @@ bool TerritoryTales::DoEventConditionsPass(const UNarrativeEvent* Event, APawn* 
 			GetTransientPackage(), NAME_None, RF_Transient);
 		if (Probe)
 		{
-			for (UNarrativeCondition* Condition : Event->Conditions)
+			for (UNarrativeCondition* Condition : Conditions)
 			{
 				if (!IsValid(Condition)) continue;
 				// Evaluate one row at a time. Narrative's party-policy path returns
@@ -85,7 +88,7 @@ bool TerritoryTales::DoEventConditionsPass(const UNarrativeEvent* Event, APawn* 
 	}
 	// Detached definition/state tests may intentionally have no Tales component.
 	// Preserve the direct single-target fallback while still honoring Narrative Not.
-	for (UNarrativeCondition* Condition : Event->Conditions)
+	for (UNarrativeCondition* Condition : Conditions)
 	{
 		if (Condition && !DoesConditionPass(Condition, Target, Controller, NarrativeComponent))
 		{

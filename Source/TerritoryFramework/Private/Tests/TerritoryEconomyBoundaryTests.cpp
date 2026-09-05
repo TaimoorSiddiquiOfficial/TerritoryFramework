@@ -81,7 +81,50 @@ bool FTFPropertyEconomyBoundaryRegression::RunTest(const FString& Parameters)
 	Property->IncomeBonusPerLevel = MAX_int32;
 	TestEqual(TEXT("Upgrade income saturates instead of wrapping negative"),
 		Property->GetEffectiveIncome(), MAX_int32);
+	Property->MaxUpgradeLevel = -3;
+	Property->SetUpgradeLevel(2);
+	TestEqual(TEXT("Invalid upgrade caps cannot create negative saved levels"), Property->GetUpgradeLevel(), 0);
+	ATerritoryProperty* Detached = NewObject<ATerritoryProperty>();
+	TestNull(TEXT("Detached Property can query its missing District safely"), Detached->GetOwningDistrict());
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGarrisonAdmissionBoundaries,
+	"TerritoryFramework.Guards.Regression.AvailabilityAndWorldAdmission",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFGarrisonAdmissionBoundaries::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UWorld* OtherWorld = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!World || !OtherWorld) return false;
+	ATerritoryProperty* Territory = World->SpawnActor<ATerritoryProperty>();
+	ATerritoryGuardCharacter* Requester = World->SpawnActor<ATerritoryGuardCharacter>();
+	ATerritoryGuardCharacter* ForeignRequester = OtherWorld->SpawnActor<ATerritoryGuardCharacter>();
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	Cast<INarrativeTeamAgentInterface>(Requester)->AddFaction(Heroes);
+	Cast<INarrativeTeamAgentInterface>(ForeignRequester)->AddFaction(Heroes);
+	FTerritoryOwnershipData State = Territory->GetOwnershipData();
+	State.OwningFaction = Heroes;
+	State.State = ETerritoryState::Claimed;
+	State.DesiredGuardCount = 1;
+	Territory->CommitOwnershipData(State);
+	FText Reason;
+	int32 Cost = 0;
+	TestTrue(TEXT("An unlocked owner may reduce a saved target with missing guard posts"),
+		Territory->CanSetDesiredGuardCount(Requester, 0, Reason, Cost));
+	TestFalse(TEXT("A same-faction actor in another world cannot manage this garrison"),
+		Territory->CanSetDesiredGuardCount(ForeignRequester, 0, Reason, Cost));
+	State.Availability = ETerritoryAvailability::Locked;
+	Territory->CommitOwnershipData(State);
+	TestFalse(TEXT("Locked garrison rejects a staffing query"),
+		Territory->CanSetDesiredGuardCount(Requester, 0, Reason, Cost));
+	TestFalse(TEXT("Locked garrison rejects the actual mutation"),
+		Territory->TrySetDesiredGuardCount(Requester, 0).bSuccess);
+	TestEqual(TEXT("Rejected staffing preserves the durable target"), Territory->GetDesiredGuardCount(), 1);
+	World->DestroyWorld(false);
+	OtherWorld->DestroyWorld(false);
 	return true;
 }
 

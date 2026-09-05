@@ -4,10 +4,17 @@
 #include "TerritoryAuditEventProbe.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryWorldState.h"
+#include "Core/TerritoryHierarchy.h"
+#include "Combat/TerritoryCounterAttackProfile.h"
+#include "Combat/TerritoryAssaultCharacter.h"
+#include "AI/NPCDefinition.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
+#include "UObject/UnrealType.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 
 namespace
 {
@@ -113,6 +120,109 @@ bool FTFAssaultHistoryAndSeatBounds::RunTest(const FString& Parameters)
 	Record.State = ETerritoryAssaultState::Cancelled;
 	Counter->OnAssaultChanged.Broadcast(Record);
 	TestEqual(TEXT("Negative terminal history limit safely removes the last row"), State->GetAllAssaultSummaries().Num(), 0);
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFAssaultWarningCallback,
+	"TerritoryFramework.CounterAttack.Regression.WarningCallbackCancelsRemainingRecipients",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFAssaultWarningCallback::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Warning callback world exists"), World)) return false;
+	UTerritoryCounterAttackSubsystem* Counter = World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
+	FTerritoryAssaultRecord Waiting = MakeWaitingAssault();
+	UTerritoryCounterAttackProfile* Profile = NewObject<UTerritoryCounterAttackProfile>();
+	Profile->bNotifyDefendingFactionOnly = false;
+	ATerritoryProperty* Territory = NewObject<ATerritoryProperty>(World->PersistentLevel);
+	FObjectProperty* ProfileProperty = FindFProperty<FObjectProperty>(ATerritoryVolume::StaticClass(), TEXT("CounterAttackProfile"));
+	ProfileProperty->SetObjectPropertyValue_InContainer(Territory, Profile);
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		APlayerController* Controller = NewObject<APlayerController>(World->PersistentLevel);
+		APawn* Pawn = NewObject<APawn>(World->PersistentLevel);
+		Controller->SetPawn(Pawn);
+		World->AddController(Controller);
+	}
+	Counter->RestorePersistentState({Waiting});
+	UTerritoryAuditEventProbe* Probe = NewObject<UTerritoryAuditEventProbe>();
+	int32 Warnings = 0;
+	Probe->WarningCallback = [Counter, &Warnings](APlayerController*, const FTerritoryAssaultRecord& Record)
+	{
+		++Warnings;
+		Counter->CancelAssault(Record.AssaultID);
+	};
+	Counter->OnAssaultWarning.AddDynamic(Probe, &UTerritoryAuditEventProbe::AssaultWarning);
+	Counter->NotifyRelevantPlayers(*Counter->Assaults.Find(Waiting.AssaultID), Territory);
+	TestEqual(TEXT("The first recipient's cancellation prevents stale warnings to the next player"), Warnings, 1);
+	FTerritoryAssaultRecord Result;
+	Counter->GetAssault(Waiting.AssaultID, Result);
+	TestEqual(TEXT("Warning callback cancellation stays terminal"), Result.State, ETerritoryAssaultState::Cancelled);
+	Counter->RestorePersistentState({Waiting});
+	Warnings = 0;
+	Probe->WarningCallback = [Counter, Waiting, &Warnings](APlayerController*, const FTerritoryAssaultRecord&)
+	{
+		++Warnings;
+		Counter->RestorePersistentState({Waiting});
+	};
+	Counter->NotifyRelevantPlayers(*Counter->Assaults.Find(Waiting.AssaultID), Territory);
+	TestEqual(TEXT("Reloading the same ID and state stops the old warning dispatch"), Warnings, 1);
+	Counter->GetAssault(Waiting.AssaultID, Result);
+	TestFalse(TEXT("The old dispatch cannot mark the reloaded record as notified"), Result.bNotificationSent);
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFAssaultEvaluationResume,
+	"TerritoryFramework.CounterAttack.SaveLoad.InterruptedEvaluationResumes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFAssaultEvaluationResume::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Interrupted evaluation world exists"), World)) return false;
+	UTerritoryCounterAttackSubsystem* Counter = World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
+	FTerritoryAssaultRecord Evaluating = MakeWaitingAssault();
+	Evaluating.State = ETerritoryAssaultState::Evaluating;
+	UTerritoryCounterAttackProfile* Profile = NewObject<UTerritoryCounterAttackProfile>();
+	Profile->bRequireReinforcementCapabilityForStrategicCounterattacks = false;
+	UNPCDefinition* Definition = NewObject<UNPCDefinition>(Profile);
+	Definition->CharacterID = TEXT("TF_Evaluation_Resume_Character");
+	Definition->NPCID = TEXT("TF_Evaluation_Resume_NPC");
+	Definition->NPCClassPath = ATerritoryAssaultCharacter::StaticClass();
+	Definition->bAllowMultipleInstances = true;
+	FTerritoryFactionAssaultConfig& Force = Profile->FactionForces.AddDefaulted_GetRef();
+	Force.Faction = Evaluating.AttackingFaction;
+	Force.AttackerDefinition = Definition;
+	Force.PlannedForce = 5;
+	Force.WaveSize = 5;
+	Force.StagingRequirement = ETerritoryAssaultStagingRequirement::None;
+	ATerritoryProperty* Territory = World->SpawnActor<ATerritoryProperty>();
+	*FindFProperty<FStructProperty>(ATerritoryVolume::StaticClass(), TEXT("TerritoryGUID"))
+		->ContainerPtrToValuePtr<FGuid>(Territory) = Evaluating.TargetTerritoryGUID;
+	*FindFProperty<FStructProperty>(ATerritoryVolume::StaticClass(), TEXT("TerritoryTag"))
+		->ContainerPtrToValuePtr<FGameplayTag>(Territory) = Evaluating.TargetTerritory;
+	FindFProperty<FObjectProperty>(ATerritoryVolume::StaticClass(), TEXT("CounterAttackProfile"))
+		->SetObjectPropertyValue_InContainer(Territory, Profile);
+	FTerritoryOwnershipData Claimed;
+	Claimed.OwningFaction = Evaluating.DefendingFaction;
+	Claimed.State = ETerritoryState::Claimed;
+	Territory->CommitOwnershipData(Claimed);
+	World->GetSubsystem<UTerritoryDiplomacySubsystem>()->SetDiplomacyState(
+		Evaluating.AttackingFaction, Evaluating.DefendingFaction, EDiplomacyState::War);
+	World->GetSubsystem<UTerritoryRegistrySubsystem>()->RegisterTerritory(Territory);
+	Counter->RestorePersistentState({Evaluating});
+	Counter->AdvanceAssault(*Counter->Assaults.Find(Evaluating.AssaultID));
+	FTerritoryAssaultRecord Result;
+	Counter->GetAssault(Evaluating.AssaultID, Result);
+	TestEqual(TEXT("Reloaded evaluation reaches real route validation"), Result.Resolution,
+		ETerritoryAssaultResolution::InvalidApproachOrRoute);
+	TestEqual(TEXT("An unroutable restored evaluation resolves instead of remaining stuck"), Result.State,
+		ETerritoryAssaultState::Cancelled);
+	TestEqual(TEXT("Interrupted evaluation keeps the same decision seed"), Result.DecisionSeed, Evaluating.DecisionSeed);
+	TestEqual(TEXT("Missing route never creates physical force"), Result.AliveForce, 0);
 	World->DestroyWorld(false);
 	return true;
 }

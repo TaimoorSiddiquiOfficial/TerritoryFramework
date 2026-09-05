@@ -62,6 +62,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/Level.h"
 #include "UObject/UObjectIterator.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
@@ -1899,14 +1900,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFFunctional_PlayerManagedGarrisonPolicy,
 
 bool FTFFunctional_PlayerManagedGarrisonPolicy::RunTest(const FString& Parameters)
 {
-	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>();
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Garrison policy world exists"), World)) return false;
+	ATerritoryVolume* Territory = NewObject<ATerritoryVolume>(World->PersistentLevel);
 	TestNotNull(TEXT("Test territory exists"), Territory);
 	if (!Territory) return false;
 	// Capacity is physical: this policy fixture authors three distinct combat slots
 	// instead of relying on the removed random/no-post fallback.
-	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>());
-	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>());
-	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>());
+	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>(World->PersistentLevel));
+	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>(World->PersistentLevel));
+	Territory->GuardSpawnPoints.Add(NewObject<ATerritoryGuardSpawnPoint>(World->PersistentLevel));
 	TestEqual(TEXT("Three authored markers provide three active slots"),
 		Territory->GetMaxGuardCount(), 3);
 	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
@@ -1916,8 +1919,8 @@ bool FTFFunctional_PlayerManagedGarrisonPolicy::RunTest(const FString& Parameter
 	TestEqual(TEXT("Script/AI ownership keeps the authored three-guard target"),
 		Territory->GetPostCaptureGuardCount(ScriptContext), 3);
 	FTerritoryTransitionContext PlayerContext;
-	PlayerContext.PlayerController = NewObject<APlayerController>();
-	ATerritoryGuardCharacter* PlayerFactionPawn = NewObject<ATerritoryGuardCharacter>();
+	PlayerContext.PlayerController = NewObject<APlayerController>(World->PersistentLevel);
+	ATerritoryGuardCharacter* PlayerFactionPawn = NewObject<ATerritoryGuardCharacter>(World->PersistentLevel);
 	INarrativeTeamAgentInterface* PlayerTeamAgent =
 		Cast<INarrativeTeamAgentInterface>(PlayerFactionPawn);
 	TestNotNull(TEXT("Player context pawn exposes Narrative faction authority"), PlayerTeamAgent);
@@ -1947,7 +1950,7 @@ bool FTFFunctional_PlayerManagedGarrisonPolicy::RunTest(const FString& Parameter
 	Claimed.GuardRecruitmentCost = 50;
 	TestTrue(TEXT("Claimed test state commits atomically"), Territory->CommitOwnershipData(Claimed));
 
-	ATerritoryGuardCharacter* Requester = NewObject<ATerritoryGuardCharacter>();
+	ATerritoryGuardCharacter* Requester = NewObject<ATerritoryGuardCharacter>(World->PersistentLevel);
 	INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Requester);
 	TestNotNull(TEXT("Requester exposes Narrative faction authority"), TeamAgent);
 	if (TeamAgent) TeamAgent->AddFaction(Heroes);
@@ -1964,6 +1967,7 @@ bool FTFFunctional_PlayerManagedGarrisonPolicy::RunTest(const FString& Parameter
 
 	const FTerritoryGarrisonMutationResult Invalid = Territory->TrySetDesiredGuardCount(nullptr, 1);
 	TestFalse(TEXT("Server mutation rejects a missing exact requester"), Invalid.bSuccess);
+	World->DestroyWorld(false);
 	return true;
 }
 

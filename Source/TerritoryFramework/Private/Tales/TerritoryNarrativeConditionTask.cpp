@@ -2,6 +2,7 @@
 
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeNodeBase.h"
+#include "Tales/TalesComponent.h"
 
 #define LOCTEXT_NAMESPACE "TerritoryNarrativeConditionTask"
 
@@ -45,23 +46,29 @@ void UTerritoryNarrativeConditionTask::EndTask()
 bool UTerritoryNarrativeConditionTask::AreGateConditionsMet() const
 {
 	if (Conditions.IsEmpty() || !IsValid(ConditionProbe)
-		|| !IsValid(OwningComp))
+		|| !IsValid(OwningComp) || bEvaluatingConditions)
 	{
 		return false;
 	}
-	for (UNarrativeCondition* Condition : Conditions)
+	TGuardValue<bool> EvaluationGuard(bEvaluatingConditions, true);
+	UNarrativeNodeBase* Probe = ConditionProbe;
+	UTalesComponent* Component = OwningComp;
+	const TArray<TObjectPtr<UNarrativeCondition>> Requirements = Conditions;
+	for (UNarrativeCondition* Condition : Requirements)
 	{
 		if (!IsValid(Condition)) return false;
 		// Narrative's party-policy evaluator returns after one condition. Run each
 		// row separately so every authored State + Branch requirement still uses
 		// Narrative semantics while retaining the recipe's documented AND logic.
-		ConditionProbe->Conditions.Reset();
-		ConditionProbe->Conditions.Add(Condition);
-		if (!ConditionProbe->AreConditionsMet(
+		Probe->Conditions.Reset();
+		Probe->Conditions.Add(Condition);
+		if (!Probe->AreConditionsMet(
 			OwningPawn, OwningController, OwningComp))
 		{
 			return false;
 		}
+		// A condition can transition the quest and end this task synchronously.
+		if (ConditionProbe != Probe || OwningComp != Component || !IsValid(Component)) return false;
 	}
 	return true;
 }

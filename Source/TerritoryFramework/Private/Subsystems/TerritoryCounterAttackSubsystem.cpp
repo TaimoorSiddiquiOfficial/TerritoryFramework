@@ -181,6 +181,7 @@ void UTerritoryCounterAttackSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UTerritoryCounterAttackSubsystem::Deinitialize()
 {
+	++RestoreGeneration;
 	bRestoringState = true;
 	if (UWorld* World = GetWorld())
 	{
@@ -872,6 +873,12 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 			RequestedForce);
 	}
 	BroadcastChanged(Record);
+	const FTerritoryAssaultRecord* Scheduled = Assaults.Find(Record.AssaultID);
+	if (!Scheduled || Scheduled->IsTerminal())
+	{
+		return Reject(NSLOCTEXT("TerritoryCounterAttack", "ScheduleSuperseded",
+			"The assault was cancelled or replaced by a scheduling callback."));
+	}
 	if (bStartImmediately)
 	{
 		FTerritoryAssaultRecord* Added = Assaults.Find(Record.AssaultID);
@@ -894,12 +901,15 @@ bool UTerritoryCounterAttackSubsystem::StartAssaultImmediately(
 	FText* OutFailureReason)
 {
 	if (!Territory || Assault.IsTerminal()) return false;
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
 	if (Assault.State == ETerritoryAssaultState::Grace)
 	{
 		const ETerritoryAssaultState PreviousState = Assault.State;
 		Assault.State = ETerritoryAssaultState::Evaluating;
 		BroadcastStateTransition(Assault, PreviousState);
+		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Evaluating) || !IsValid(Territory)) return false;
 		EvaluateAssault(Assault, Territory);
+		if (!IsAssaultCurrent(Access)) return false;
 	}
 	if (Assault.IsTerminal())
 	{
@@ -915,9 +925,11 @@ bool UTerritoryCounterAttackSubsystem::StartAssaultImmediately(
 	if (Assault.State == ETerritoryAssaultState::ScheduledWarning)
 	{
 		NotifyRelevantPlayers(Assault, Territory);
+		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::ScheduledWarning) || !IsValid(Territory)) return false;
 		const ETerritoryAssaultState PreviousState = Assault.State;
 		Assault.State = ETerritoryAssaultState::WaitingForPlayerProximity;
 		BroadcastStateTransition(Assault, PreviousState);
+		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::WaitingForPlayerProximity) || !IsValid(Territory)) return false;
 	}
 	if (Assault.State == ETerritoryAssaultState::WaitingForPlayerProximity
 		&& ActivateAssault(Assault, Territory))
@@ -1223,6 +1235,7 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	++RestoreGeneration;
 
 	const bool bAuthority = World->GetNetMode() != NM_Client;
 	bRestoringState = true;
@@ -1316,7 +1329,8 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 void UTerritoryCounterAttackSubsystem::UpdateAssaults()
 {
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client || bRestoringState) return;
+	if (!World || World->GetNetMode() == NM_Client || bRestoringState || bUpdatingAssaults) return;
+	TGuardValue<bool> UpdatingGuard(bUpdatingAssaults, true);
 
 	UpdateRetiringVehicles();
 	TArray<FGuid> IDs;
@@ -1374,9 +1388,28 @@ void UTerritoryCounterAttackSubsystem::TryScheduleRecurringStrategicAssaults()
 	}
 }
 
+UTerritoryCounterAttackSubsystem::FAssaultAccess
+UTerritoryCounterAttackSubsystem::CaptureAssaultAccess(const FTerritoryAssaultRecord& Assault) const
+{
+	return {Assault.AssaultID, &Assault, RestoreGeneration};
+}
+
+bool UTerritoryCounterAttackSubsystem::IsAssaultCurrent(const FAssaultAccess& Access) const
+{
+	return Access.Generation == RestoreGeneration && Assaults.Find(Access.ID) == Access.Address;
+}
+
+bool UTerritoryCounterAttackSubsystem::IsAssaultCurrent(
+	const FAssaultAccess& Access, ETerritoryAssaultState ExpectedState) const
+{
+	return IsAssaultCurrent(Access) && Access.Address->State == ExpectedState;
+}
+
 void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& Assault)
 {
 	if (Assault.IsTerminal()) return;
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
+	const ETerritoryAssaultState InitialState = Assault.State;
 	ATerritoryVolume* Territory = ResolveTerritory(Assault);
 	if (!Territory) return; // World Partition: wait for authoritative actor registration.
 	if (Territory->GetControlMode() != ETerritoryControlMode::Independent
@@ -1390,6 +1423,7 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	{
 		// Publish the bounded save migration before any later validation can resolve the assault.
 		BroadcastChanged(Assault);
+		if (!IsAssaultCurrent(Access, InitialState) || !IsValid(Territory)) return;
 	}
 	const FGameplayTag ContestingFaction =
 		Territory->GetOwnershipData().ContestingFaction;
@@ -1482,6 +1516,11 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 
 	switch (Assault.State)
 	{
+	case ETerritoryAssaultState::Evaluating:
+		// A save or a callback that relocates the map may interrupt the Grace transition.
+		// Resume the same seeded evaluation instead of leaving a durable record stuck.
+		EvaluateAssault(Assault, Territory);
+		break;
 	case ETerritoryAssaultState::Grace:
 		if (GetCampaignGameTime() >= Assault.GraceEndsGameTime
 			&& (Assault.LaunchMode != ETerritoryAssaultLaunchMode::StrategicCounterattack
@@ -1490,11 +1529,13 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 			const ETerritoryAssaultState PreviousState = Assault.State;
 			Assault.State = ETerritoryAssaultState::Evaluating;
 			BroadcastStateTransition(Assault, PreviousState);
+			if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Evaluating) || !IsValid(Territory)) return;
 			EvaluateAssault(Assault, Territory);
 		}
 		break;
 	case ETerritoryAssaultState::ScheduledWarning:
 		NotifyRelevantPlayers(Assault, Territory);
+		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::ScheduledWarning) || !IsValid(Territory)) return;
 		{
 			const ETerritoryAssaultState PreviousState = Assault.State;
 			Assault.State = ETerritoryAssaultState::WaitingForPlayerProximity;
@@ -1503,6 +1544,7 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		break;
 	case ETerritoryAssaultState::WaitingForPlayerProximity:
 		NotifyRelevantPlayers(Assault, Territory);
+		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::WaitingForPlayerProximity) || !IsValid(Territory)) return;
 		if (Profile)
 		{
 			const bool bRelevantPlayerNearby = !Profile->bRequirePlayerProximityForActivation
@@ -1533,6 +1575,7 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 				Profile->bContinueFiniteWavesAfterActivation, bVehicleOnlyForce))
 			{
 				SpawnNextWave(Assault, Territory);
+				if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active) || !IsValid(Territory)) return;
 			}
 		}
 
@@ -1818,10 +1861,12 @@ bool UTerritoryCounterAttackSubsystem::ActivateAssault(
 	// Commit activation before spawning. Multiple players entering during this frame
 	// cannot activate or duplicate the force a second time.
 	const ETerritoryAssaultState PreviousState = Assault.State;
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
 	if (!TryCommitProximityActivation(Assault, GetCampaignGameTime())) return false;
 	BroadcastStateTransition(Assault, PreviousState);
+	if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active) || !IsValid(Territory)) return false;
 	SpawnNextWave(Assault, Territory);
-	return true;
+	return IsAssaultCurrent(Access, ETerritoryAssaultState::Active);
 }
 
 void UTerritoryCounterAttackSubsystem::SpawnNextWave(
@@ -2422,9 +2467,10 @@ void UTerritoryCounterAttackSubsystem::NotifyParticipantRemoved(
 
 	bool bForceExhausted = false;
 	if (!ApplyParticipantRemoval(*Assault, bKilled, bForceExhausted)) return;
+	const FAssaultAccess Access = CaptureAssaultAccess(*Assault);
 	BroadcastChanged(*Assault);
 
-	if (bForceExhausted)
+	if (bForceExhausted && IsAssaultCurrent(Access) && !Assault->IsTerminal())
 	{
 		ResolveAssault(*Assault, ETerritoryAssaultState::Defeated,
 			ETerritoryAssaultResolution::AllAttackersRemoved);
@@ -2755,9 +2801,11 @@ void UTerritoryCounterAttackSubsystem::BroadcastStateTransition(
 	const FTerritoryAssaultRecord& Assault, ETerritoryAssaultState PreviousState)
 {
 	const FTerritoryAssaultRecord Snapshot = Assault;
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
 	BroadcastChanged(Snapshot);
 	const FTerritoryAssaultRecord* Final = Assaults.Find(Snapshot.AssaultID);
-	if (!Final || Final->State != Snapshot.State || Final->Resolution != Snapshot.Resolution
+	if (Access.Generation != RestoreGeneration || !Final || Final->State != Snapshot.State
+		|| Final->Resolution != Snapshot.Resolution
 		|| !ShouldEmitCounterHappened(PreviousState, Snapshot.State, bRestoringState)) return;
 	if (const UTerritoryDeveloperSettings* Settings =
 		GetDefault<UTerritoryDeveloperSettings>();
@@ -2775,7 +2823,8 @@ void UTerritoryCounterAttackSubsystem::BroadcastStateTransition(
 		Snapshot, PreviousState, GetCampaignGameTime());
 	OnCounterHappened.Broadcast(Event);
 	Final = Assaults.Find(Snapshot.AssaultID);
-	if (Final && Final->State == Snapshot.State && Final->Resolution == Snapshot.Resolution)
+	if (Access.Generation == RestoreGeneration && Final && Final->State == Snapshot.State
+		&& Final->Resolution == Snapshot.Resolution)
 	{
 		NotifyRelevantPlayersOfState(Event, ResolveTerritory(Snapshot));
 	}
@@ -2786,28 +2835,38 @@ void UTerritoryCounterAttackSubsystem::NotifyRelevantPlayers(
 {
 	UWorld* World = GetWorld();
 	UTerritoryCounterAttackProfile* Profile = Territory ? Territory->GetCounterAttackProfile() : nullptr;
-	if (!World || !Profile) return;
+	if (!World || !Profile || Assault.IsTerminal()) return;
 
-	TSet<TWeakObjectPtr<APlayerController>>& AlreadyWarned = WarnedControllers.FindOrAdd(Assault.AssaultID);
-	bool bWarnedSomeone = false;
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
+	const ETerritoryAssaultState InitialState = Assault.State;
+	TArray<TWeakObjectPtr<APlayerController>> Controllers;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
-		APlayerController* Controller = It->Get();
+		Controllers.Add(It->Get());
+	}
+	bool bWarnedSomeone = false;
+	for (const TWeakObjectPtr<APlayerController>& WeakController : Controllers)
+	{
+		if (!IsAssaultCurrent(Access, InitialState) || !IsValid(Territory)) return;
+		APlayerController* Controller = WeakController.Get();
 		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
-		if (!Controller || !Pawn || AlreadyWarned.Contains(Controller)
+		if (!Controller || !Pawn || WarnedControllers.FindOrAdd(Access.ID).Contains(Controller)
 			|| !IsRelevantPlayer(Controller, Assault, Profile)
 			|| FVector::DistSquared(Pawn->GetActorLocation(), Territory->GetActorLocation())
 				> FMath::Square(Profile->NotificationRadius))
 		{
 			continue;
 		}
-		AlreadyWarned.Add(Controller);
+		WarnedControllers.FindOrAdd(Access.ID).Add(Controller);
+		const FTerritoryAssaultRecord Snapshot = Assault;
 		if (UTerritoryPlayerManagementComponent* Management =
 			UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(Controller))
 		{
-			Management->SendAssaultNotification(Assault);
+			Management->SendAssaultNotification(Snapshot);
 		}
-		OnAssaultWarning.Broadcast(Controller, Assault);
+		if (!IsAssaultCurrent(Access, InitialState)) return;
+		OnAssaultWarning.Broadcast(Controller, Snapshot);
+		if (!IsAssaultCurrent(Access, InitialState)) return;
 		bWarnedSomeone = true;
 	}
 	if (bWarnedSomeone && !Assault.bNotificationSent)

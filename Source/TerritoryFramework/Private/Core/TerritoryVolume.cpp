@@ -3105,14 +3105,15 @@ bool ATerritoryVolume::CanSetDesiredGuardCount(const AActor* Requester,
 {
 	OutFailureReason = FText::GetEmpty();
 	OutRecruitmentCost = 0;
-	if (!Requester || NewDesiredGuardCount < 0 || NewDesiredGuardCount > GetMaxGuardCount())
+	if (!IsValid(Requester) || !GetWorld() || Requester->GetWorld() != GetWorld()
+		|| NewDesiredGuardCount < 0 || NewDesiredGuardCount > GetMaxGuardCount())
 	{
 		OutFailureReason = FText::FromString(TEXT("The requested garrison target is invalid."));
 		return false;
 	}
-	if (OwnershipData.State != ETerritoryState::Claimed)
+	if (!IsAvailableForGameplay() || OwnershipData.State != ETerritoryState::Claimed)
 	{
-		OutFailureReason = FText::FromString(TEXT("The territory must be claimed."));
+		OutFailureReason = FText::FromString(TEXT("The territory must be unlocked and claimed."));
 		return false;
 	}
 	if (!UTerritoryBlueprintLibrary::IsActorInFaction(

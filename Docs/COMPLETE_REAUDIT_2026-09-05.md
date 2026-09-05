@@ -37,7 +37,7 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | DIP-02 | Reputation increments can overflow int32. | Fixed; both int32 boundaries tested |
 | DIP-03 | Timed trade agreements created without the Narrative clock never receive a usable expiry. | Fixed; reject missing clock/nonfinite timing |
 | DIP-04 | Duplicate reversed treaty pairs survive restore and make the chosen state depend on array order. | Fixed in subsystem; newest signed row and stable tie-breaks, expiry preserved; WorldState cache review ongoing |
-| AUTH-01 | Upgrade and garrison staffing eligibility do not consistently enforce availability or registered world identity. | Candidate; caller/authority audit ongoing |
+| AUTH-01 | Upgrade and garrison staffing eligibility do not consistently enforce availability or world identity. | Garrison/upgrade admission fixed; locked and cross-world requests tested; callback transaction audit remains open |
 | ATOMIC-01 | Upgrade, garrison purchase and production hold mutable state across Narrative inventory or Territory delegate callbacks. | Candidate; re-entry/failure reproductions pending |
 | ECON-04 | Member income split can lose a remainder when later accounts are full although earlier accounts have room; ceiling division can overflow at MAX_int32. | Fixed; full/partial/reversed capacity and maximum payout tests use real Narrative inventories |
 | ECON-05 | Controller currency requests lose the retained player identity during vehicle possession; debit can claim success when the inventory's owner lacks authority. | Fixed; vehicle, role rejection and Narrative inventory load tests |
@@ -50,6 +50,10 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | ASSAULT-01 | Blocking diplomacy does not cancel a pending assault while its target is streamed out. | Fixed; all five non-War states cancel immediately and remain cancelled through reload |
 | ASSAULT-02 | Assault callbacks can supersede records while state events and calling functions continue through retained map references. | Terminal record committed before cleanup; stable event values and verified cancellation return fixed; activation/spawn callback review continues |
 | ASSAULT-03 | Vehicle-only force planner sums valid seat capacities in int32 and can wrap. | Fixed; int64 bounded by requested force, MAX_int32 tests |
+| ASSAULT-04 | Restored `Evaluating` records have no switch case and can remain stuck indefinitely. | Fixed; resumed evaluation reaches route validation using the same seed and creates no unroutable force |
+| PROP-01 | Detached Property District lookup dereferences a missing world; negative upgrade caps write negative saved levels. | Fixed; query and level-boundary tests |
+| TALES-01 | A condition can mutate the iterated event/gate requirement list or end the owning task, invalidating the shared probe. | Fixed; both direct/Narrative-node AND paths, task-end and recursive-gate tests |
+| TALES-02 | Narrative's AnyPlayerPasses node path returns true even if every member fails, and its PartyLeaderPasses path dereferences an absent leader. | Vendor source confirmed; Territory adapter mitigation and behavioral proof pending; no vendor changes authorized |
 
 ## Architecture constraints
 
@@ -99,6 +103,22 @@ its behavioral tests, save/replication effects, migration requirements and remai
   delegate payloads are value snapshots. No save schema, Blueprint signature or new authority.
   Live callback-heavy spawning and multiplayer gates remain pending. Evidence: `Batch8_*`.
   Development Game build also passed (`Batch8_GameBuild.log`, 32 seconds).
+- **Batch 9:** Editor/UHT passed. Full suite: 230 tests, 224 clean, six expected-warning tests,
+  zero failures/skips. The old warning dispatcher sent a second player a stale warning after the
+  first recipient cancelled. Cancellation and same-ID reload now stop the old dispatch. Transient
+  access checks protect grace/warning/activation/casualty continuations from replaced or relocated
+  map entries; nested ticks are suppressed. Interrupted evaluation resumes with its original seed.
+  Physical spawn internals and transaction callbacks remain under review. Evidence: `Batch9_*`.
+- **Batch 10:** Editor/UHT passed. Full suite: 231 tests, 225 clean, six expected-warning tests,
+  zero failures/skips. Locked/cross-world garrison requests are rejected while valid reductions
+  with missing posts remain allowed. An older detached garrison policy fixture now uses a real
+  shared world. Detached District queries and negative upgrade caps are safe. No save schema,
+  replicated property or Blueprint signature changes. Evidence: `Batch10_*`.
+- **Batch 11:** Editor/UHT and Game Development builds passed. Full suite: 232 tests, 226 clean,
+  six expected-warning tests, zero failures/skips. Narrative condition integration tests prove
+  original AND requirements survive callback edits, ending a task stops remaining checks, and
+  recursive gate queries terminate safely. No vendor, save schema, replication or Blueprint
+  signature changes. Evidence: `Batch11_*`.
 
 ## Counterattack lifecycle preflight
 

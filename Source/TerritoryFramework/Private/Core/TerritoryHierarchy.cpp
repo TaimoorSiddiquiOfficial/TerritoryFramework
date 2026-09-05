@@ -750,7 +750,8 @@ void ATerritoryProperty::OnRep_UpgradeLevel()
 
 ATerritoryDistrict* ATerritoryProperty::GetOwningDistrict() const
 {
-	UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>();
+	UTerritoryRegistrySubsystem* Registry = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	if (!Registry) return nullptr;
 
 	FGameplayTag ParentTag = GetParentTerritoryTag();
@@ -870,7 +871,7 @@ void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 {
 	if (!HasAuthority()) return;
 	int32 OldLevel = UpgradeLevel;
-	UpgradeLevel = FMath::Clamp(NewLevel, 0, MaxUpgradeLevel);
+	UpgradeLevel = FMath::Clamp(NewLevel, 0, FMath::Max(0, MaxUpgradeLevel));
 
 	if (OldLevel != UpgradeLevel)
 	{

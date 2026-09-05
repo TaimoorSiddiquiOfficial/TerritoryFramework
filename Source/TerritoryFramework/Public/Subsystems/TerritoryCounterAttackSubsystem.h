@@ -330,6 +330,18 @@ private:
 	TMap<FGuid, TSet<TWeakObjectPtr<APlayerController>>> WarnedControllers;
 	FTimerHandle UpdateTimer;
 	bool bRestoringState = false;
+	bool bUpdatingAssaults = false;
+	uint64 RestoreGeneration = 0;
+	/** Transient access token; detects map relocation or replacement across synchronous callbacks. */
+	struct FAssaultAccess
+	{
+		FGuid ID;
+		const FTerritoryAssaultRecord* Address = nullptr;
+		uint64 Generation = 0;
+	};
+	FAssaultAccess CaptureAssaultAccess(const FTerritoryAssaultRecord& Assault) const;
+	bool IsAssaultCurrent(const FAssaultAccess& Access) const;
+	bool IsAssaultCurrent(const FAssaultAccess& Access, ETerritoryAssaultState ExpectedState) const;
 
 	UFUNCTION()
 	void HandleTerritoryControlChanged(ATerritoryVolume* Territory,
@@ -456,4 +468,6 @@ private:
 	friend class FTFCounterAttackCycleHighWater;
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
 	friend class FTFCounterAttackWorldPartitionTargetRebind;
+	friend class FTFAssaultWarningCallback;
+	friend class FTFAssaultEvaluationResume;
 };

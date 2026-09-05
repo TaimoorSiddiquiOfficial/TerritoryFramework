@@ -63,4 +63,6 @@ private:
 	TObjectPtr<UNarrativeNodeBase> ConditionProbe;
 
 	bool bHasLatched = false;
+	mutable bool bEvaluatingConditions = false;
+	friend class FTFTalesConditionCallbacks;
 };
