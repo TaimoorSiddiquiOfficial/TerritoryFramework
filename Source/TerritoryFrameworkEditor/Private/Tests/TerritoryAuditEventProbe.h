@@ -6,6 +6,7 @@
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Tales/NarrativeCondition.h"
+#include "Items/InventoryComponent.h"
 #include "TerritoryAuditEventProbe.generated.h"
 
 /** Editor-only receiver for real Blueprint-compatible callback regression tests. */
@@ -22,6 +23,20 @@ public:
 	TFunction<void(const FTerritoryAssaultRecord&)> AssaultCallback;
 	TFunction<void(const FTerritoryCounterAttackStateEvent&)> CounterEventCallback;
 	TFunction<void(APlayerController*, const FTerritoryAssaultRecord&)> WarningCallback;
+	TFunction<void()> CurrencyCallback;
+	TFunction<void()> ItemCallback;
+
+	UFUNCTION()
+	void CurrencyChanged(int32 OldCurrency, int32 NewCurrency)
+	{
+		if (CurrencyCallback) CurrencyCallback();
+	}
+
+	UFUNCTION()
+	void ItemAdded(const FItemAddResult& Result)
+	{
+		if (ItemCallback) ItemCallback();
+	}
 
 	UFUNCTION()
 	void AssaultWarning(APlayerController* Controller, const FTerritoryAssaultRecord& Assault)

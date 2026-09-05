@@ -165,6 +165,21 @@ and the existing capture authority remain mandatory in every activation mode.
 
 ## Pending audit follow-up
 
+### Batch 13: recursive economy and production settlement
+
+Real Narrative `OnCurrencyChanged` and `OnItemAdded` callbacks reproduced duplicate currency and
+resource awards: one timer tick credited twice, and one production cycle generated two outputs.
+Transient scheduler guards now reject recursive settlement while allowing later timer/campaign
+cycles. The private economy tick also rejects client worlds explicitly. Narrative retains currency,
+item and inventory-save authority; Economy retains rates, recipe scheduling and cycle checkpoints.
+No schema or Blueprint signature changes. This does not claim atomic purchase/refund behavior or
+protection against a callback restoring/replacing production maps; those remain under review.
+
+Editor/UHT and all 233 automation tests passed: 227 clean, six expected-warning tests, zero failures
+or skips. The regression uses real Narrative inventories, checks subsequent independent cycles,
+Narrative currency save/load and production checkpoint restore. Evidence: `Batch13_RedTests`
+(six assertions caused by the two duplicate awards), `Batch13_Build.log`, `Batch13_Tests`.
+
 - Complete the upgrade/garrison/production callback transaction review; existing debit callbacks
   occur before final gameplay commits. No atomicity completion is claimed for those paths yet.
 - Finish assault callback/restore boundaries, malformed retained-history limits, unloaded-target

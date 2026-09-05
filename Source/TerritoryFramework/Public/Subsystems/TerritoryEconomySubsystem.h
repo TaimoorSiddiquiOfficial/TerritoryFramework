@@ -259,6 +259,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTerritoryProductionInventoryTransactionTest;
 	friend class FTerritoryProductionResourceRoutingTest;
+	friend class FTFEconomyCallbackReentry;
 #endif
 
 	UPROPERTY(SaveGame)
@@ -270,6 +271,8 @@ private:
 	FTimerHandle EconomyTickTimerHandle;
 	FTimerHandle ProductionCycleObservationTimerHandle;
 	int64 LastObservedProductionCycle = INDEX_NONE;
+	bool bProcessingEconomyTick = false;
+	bool bProcessingResourceProduction = false;
 
 	/** Factions whose income needs recalculation — processed once per economy tick. */
 	TSet<FGameplayTag> DirtyFactions;

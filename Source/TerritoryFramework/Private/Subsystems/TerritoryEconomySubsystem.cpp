@@ -552,6 +552,11 @@ void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 
 void UTerritoryEconomySubsystem::OnEconomyTick()
 {
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client
+		|| bProcessingEconomyTick || bProcessingResourceProduction) return;
+	// Narrative currency/item delegates run synchronously inside settlement. A
+	// callback must not turn the current timer event into another full payout.
+	TGuardValue<bool> TickGuard(bProcessingEconomyTick, true);
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebugTicks = Settings && Settings->ShouldDebugEconomy();
 
@@ -684,8 +689,8 @@ void UTerritoryEconomySubsystem::ObserveNarrativeProductionCycle()
 	const int64 CurrentCycle = GetCurrentProductionCycle();
 	if (!HasProductionCycleAdvanced(LastObservedProductionCycle, CurrentCycle)) return;
 
-	// ProcessResourceProduction records each Territory/rule/cycle checkpoint before
-	// this observer or the slower economy tick can award it again.
+	// ProcessResourceProduction prevents callback reentry and records each completed
+	// Territory/rule/cycle before a later observer or economy tick can award it again.
 	ProcessResourceProduction();
 }
 
@@ -1427,7 +1432,10 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 void UTerritoryEconomySubsystem::ProcessResourceProduction()
 {
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client) return;
+	if (!World || World->GetNetMode() == NM_Client || bProcessingResourceProduction) return;
+	// Item callbacks occur before ExecuteResourceRecipeOnInventory returns and
+	// before its checkpoint commits. Block recursive settlement of that same cycle.
+	TGuardValue<bool> ProductionGuard(bProcessingResourceProduction, true);
 	const int64 CurrentCycle = GetCurrentProductionCycle();
 	if (CurrentCycle == INDEX_NONE) return;
 	LastObservedProductionCycle = CurrentCycle;
