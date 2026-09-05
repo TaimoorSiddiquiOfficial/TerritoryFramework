@@ -185,3 +185,25 @@ Narrative currency save/load and production checkpoint restore. Evidence: `Batch
 - Finish assault callback/restore boundaries, malformed retained-history limits, unloaded-target
   diplomacy, and client movement/reindex validation.
 - Complete guard/AI/Tales/navigation/UI/editor review and the live release gates.
+
+### Batch 14: finite guard reserves and zero-value reload
+
+The post remains the authority for finite reserve counts. Reconciliation previously refilled an
+exhausted post, bypassed PersistWithPost after ownership change, ignored zero-valued reusable reserve
+definitions, and provisioned reserves on client actors. Initialization now provisions once; explicit
+ownership policies still own refills. A guard registered before post initialization no longer suppresses
+initial reserve provisioning. Counts loaded from Narrative remain initialized, including zero.
+
+The real Narrative actor-record regression also proved that its default delta archive can omit a
+saved zero and leave an already initialized post's current count untouched. The plugin post now writes
+complete SaveGame values and resets its count defaults before reading legacy delta records. No vendor
+change or new save field/schema is required. Old zero-valued records now restore zero in either load
+order. Actor GUIDs remain authored and are preserved by Narrative's record API.
+
+Editor/UHT and all 234 tests passed (228 clean, six expected-warning, zero failures/skips).
+Tests exercise Narrative CreateActorRecord/LoadActorFromRecord, legacy delta bytes, initialization
+before/after load, client rejection, preserve/refill policies and zero-capacity definitions. The seven
+initial failures and the isolated remaining zero-reload failure are retained in `Batch14_RedTests`
+and `Batch14_Tests`. Passing evidence: `Batch14_SaveBuild.log`, `Batch14_SaveTests`. Physical reserve
+deployment and real World Partition streaming remain release gates; the load-order fixture does not
+claim to replace them. Other plugin actor types are being checked for the same delta-archive boundary.

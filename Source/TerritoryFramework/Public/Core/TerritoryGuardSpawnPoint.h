@@ -125,6 +125,7 @@ class TERRITORYFRAMEWORK_API ATerritoryGuardSpawnPoint : public AActor, public I
 
 public:
 	ATerritoryGuardSpawnPoint();
+	virtual void Serialize(FArchive& Ar) override;
 
 	// ─── INarrativeSavableActor (P0-06) ───
 	virtual FGuid GetActorGUID_Implementation() const override;
@@ -488,14 +489,17 @@ protected:
 	UPROPERTY(SaveGame)
 	FGuid SpawnPointGUID;
 
-	/** Whether reserve state was loaded from save (prevents reset on reconcile). */
-	bool bLoadedFromSave = false;
+	/** Set by initial provisioning or Narrative load; zero then means exhausted. */
+	bool bReserveStateInitialized = false;
 
 	/** Ensure GUID is baked at editor time. */
 	void EnsurePersistentSpawnPointGUID();
 
 private:
 	friend class ATerritoryVolume;
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FTFGuardReserveReconciliation;
+#endif
 
 	/** Hidden serialized binding maintained by the Definition synchronizer. */
 	UPROPERTY()
@@ -524,6 +528,6 @@ private:
 	 */
 	void HandleOwnershipTransition(EOwnershipTransitionReason Reason);
 
-	/** Reset reserves to initial state — called during BeginPlay/load reconcile only. */
+	/** Reconcile registrations without refilling an already initialized reserve. */
 	void ResetReserveState();
 };

@@ -54,6 +54,28 @@ ATerritoryGuardSpawnPoint::ATerritoryGuardSpawnPoint()
 // P0-06: INarrativeSavableActor — persist reserve state across save/load
 // ═══════════════════════════════════════════════════════════════════════════════
 
+void ATerritoryGuardSpawnPoint::Serialize(FArchive& Ar)
+{
+	if (!Ar.IsSaveGame())
+	{
+		Super::Serialize(Ar);
+		return;
+	}
+	if (Ar.IsLoading())
+	{
+		// Narrative's older delta archives omit default-valued fields. Loading a
+		// saved zero into an already provisioned actor must clear the live balance.
+		const ATerritoryGuardSpawnPoint* Defaults = GetClass()->GetDefaultObject<ATerritoryGuardSpawnPoint>();
+		CurrentReserveCount = Defaults->CurrentReserveCount;
+		PendingReserveSpawns = Defaults->PendingReserveSpawns;
+		SavedActiveGuardCount = Defaults->SavedActiveGuardCount;
+	}
+	const bool bPreviousNoDelta = Ar.ArNoDelta;
+	Ar.ArNoDelta = true;
+	Super::Serialize(Ar);
+	Ar.ArNoDelta = bPreviousNoDelta;
+}
+
 FGuid ATerritoryGuardSpawnPoint::GetActorGUID_Implementation() const
 {
 	return SpawnPointGUID;
@@ -66,6 +88,7 @@ void ATerritoryGuardSpawnPoint::SetActorGUID_Implementation(const FGuid& InGUID)
 
 void ATerritoryGuardSpawnPoint::PrepareForSave_Implementation()
 {
+	if (!HasAuthority()) return;
 	// SaveGame UPROPERTYs auto-serialized: CurrentReserveCount, PendingReserveSpawns, SavedActiveGuardCount
 	SavedActiveGuardCount = FMath::Clamp(GetActiveGuardCount(), 0, 1);
 	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
@@ -73,6 +96,7 @@ void ATerritoryGuardSpawnPoint::PrepareForSave_Implementation()
 
 void ATerritoryGuardSpawnPoint::Load_Implementation()
 {
+	if (!HasAuthority()) return;
 	if (SavedActiveGuardCount > 1 || PendingReserveSpawns > 1)
 	{
 		if (ShouldLogGuardSaveLoad())
@@ -84,8 +108,10 @@ void ATerritoryGuardSpawnPoint::Load_Implementation()
 	}
 	SavedActiveGuardCount = FMath::Clamp(SavedActiveGuardCount, 0, 1);
 	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
-	// Mark that we loaded from save — prevents InitializeReserves from resetting to full
-	bLoadedFromSave = true;
+	CurrentReserveCount = FMath::Max(0, CurrentReserveCount);
+	PendingReserveSpawns = FMath::Min(PendingReserveSpawns, CurrentReserveCount);
+	// Loaded zero is an exhausted reserve, never a request for fresh provisioning.
+	bReserveStateInitialized = true;
 }
 
 bool ATerritoryGuardSpawnPoint::ShouldRespawn_Implementation() const
@@ -448,30 +474,24 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 
 void ATerritoryGuardSpawnPoint::InitializeReserves()
 {
+	if (!HasAuthority()) return;
 	// P1-02: Clear old timer FIRST, before any scheduling
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(ReserveSpawnTimer);
 	}
 
-	// P0-06: If loaded from save, preserve the saved reserve state.
-	// Only initialize to full on fresh (non-save) start.
-	if (bLoadedFromSave)
+	if (!bReserveStateInitialized)
 	{
-		// P1-08: Resume pending reserve deployment timer if reserves were pending at save time
-		if (bAutoSpawnReserves && PendingReserveSpawns > 0 && CurrentReserveCount > 0)
-		{
-			ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
-		}
+		CurrentReserveCount = FMath::Max(0, GetEffectiveReserveSlots());
+		bReserveStateInitialized = true;
 	}
-	else if (CurrentReserveCount <= 0 && SavedActiveGuardCount <= 0)
+	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0,
+		FMath::Min(1, FMath::Max(0, CurrentReserveCount)));
+	if (bAutoSpawnReserves && PendingReserveSpawns > 0)
 	{
-		// P2-N15: Read GuardPostDefinition overrides if assigned
-		const int32 EffectiveReserveSlots = (GuardPostDefinition && GuardPostDefinition->ReserveSlots > 0)
-			? GuardPostDefinition->ReserveSlots : ReserveSlots;
-		CurrentReserveCount = EffectiveReserveSlots;
+		ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
 	}
-	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
 }
 
 FTransform ATerritoryGuardSpawnPoint::GetSpawnTransform() const
@@ -760,6 +780,7 @@ void ATerritoryGuardSpawnPoint::CancelPendingReserveSpawns()
 
 void ATerritoryGuardSpawnPoint::HandleOwnershipTransition(EOwnershipTransitionReason Reason)
 {
+	if (!HasAuthority()) return;
 	// P1-03: Only apply reserve ownership policy when ownership actually changes.
 	// InitialSpawn and AdminOverride do not trigger the policy.
 	if (Reason != EOwnershipTransitionReason::OwnerChanged
@@ -768,6 +789,9 @@ void ATerritoryGuardSpawnPoint::HandleOwnershipTransition(EOwnershipTransitionRe
 		return;
 	}
 
+	// Territory ownership can initialize before the post's BeginPlay. Provision
+	// once before applying the explicit policy so that load order cannot refill it.
+	InitializeReserves();
 	switch (ReserveOwnershipPolicy)
 	{
 	case EReserveOwnershipPolicy::PersistWithPost:
@@ -788,7 +812,8 @@ void ATerritoryGuardSpawnPoint::HandleOwnershipTransition(EOwnershipTransitionRe
 
 void ATerritoryGuardSpawnPoint::ResetReserveState()
 {
-	// Initial spawn / load reconcile — always reinitialize reserves to full
+	if (!HasAuthority()) return;
+	// The post owns the finite reserve. Rebuilding live registrations is not a refill.
 	InitializeReserves();
 	ActiveGuards.Reset();
 }
