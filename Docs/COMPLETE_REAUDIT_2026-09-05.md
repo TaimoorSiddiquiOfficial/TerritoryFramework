@@ -454,6 +454,33 @@ Evidence: `Batch25_FinalBuild.log`, `Batch25_FinalTests`, `Batch25_GameBuild.log
 Physical runtime evidence remains batch 23; the vehicle-budget restoration defect and rendered
 Manny ensure are unresolved. No overall release completion is claimed.
 
+## Batch 26 — adaptive assault level uses Native player power while driving
+
+`ResolveScaledEnemyLevel` read the current pawn's Narrative character level and ability system.
+Possessing a Native sedan therefore substituted the car's tags for the player's perks/XP. The red
+test produced level 100 from the car instead of the expected player-derived 19. Separately, adding
+an offset to `MAX_int32` player power wrapped and selected level 1 instead of the configured maximum.
+The isolated XP fixture initially lacked Native possession's attribute-set binding; that setup was
+corrected before final verification, independently of the two demonstrated runtime defects.
+
+CounterAttack continues to own adaptive spawn planning. It now resolves the retained player character
+through the existing adapter and queries the controller's authoritative Narrative PlayerState ASC.
+Relevance/range checks still use the physical pawn. The offset sum uses int64 before the final clamp.
+No schedule/probability policy, force budget, Blueprint signature, RPC or save field changed. Native
+XP/save/replication remains authoritative and no migration is required. Autonomous/immediate story
+deployment is preserved.
+
+The new behavior test uses an actual Native sedan with a distinct power tag, PlayerState ASC, perk
+tiers and Native XP attribute save/load. It covers on-foot/driving, large positive/negative offsets,
+proxy actor roles, physical range, absent pawn and disabled scaling. These isolated actor-role checks
+do not replace the outstanding physical multiplayer gate. All 246 automation tests pass (236 clean,
+10 warning-bearing fixtures; zero failures/skips), including existing determinism, force, authority,
+Native save/load, streaming-order and Blueprint contract suites. Editor/UHT, Development Game and
+stage/pak pass: `Batch26_Build.log`, `Batch26_Tests`, `Batch26_GameBuild.log`, `Package_Batch26.log`,
+`Stage_Batch26`. Cooked assets remain batch 20; asset/Blueprint validation remains batch 25, since this
+batch changes no asset or reflected contract. Physical runtime evidence remains batch 23 and its
+vehicle-budget restore and Manny animation defects remain open.
+
 ## Counterattack lifecycle preflight
 
 

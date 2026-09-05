@@ -485,4 +485,5 @@ private:
 	friend class FTFAssaultVehicleRestoreCleanup;
 	friend class FTFAssaultRetirementCallbacks;
 	friend class FTFAssaultSpawnCasualties;
+	friend class FTFAssaultPlayerPower;
 };

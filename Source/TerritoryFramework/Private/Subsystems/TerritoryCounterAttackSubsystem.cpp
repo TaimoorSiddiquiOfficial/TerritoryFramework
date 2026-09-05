@@ -3274,7 +3274,7 @@ int32 UTerritoryCounterAttackSubsystem::ResolveScaledEnemyLevel(
 		Profile->NotificationRadius, Profile->ReserveMaximumPlayerDistance));
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
-		const APlayerController* Controller = It->Get();
+		APlayerController* Controller = It->Get();
 		APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
 		if (!Pawn || !IsRelevantPlayer(Controller, Assault, Profile)
 			|| FVector::DistSquared(Pawn->GetActorLocation(), Territory->GetActorLocation())
@@ -3283,13 +3283,14 @@ int32 UTerritoryCounterAttackSubsystem::ResolveScaledEnemyLevel(
 			continue;
 		}
 
-		if (const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(Pawn))
+		if (const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(
+			FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(Controller)))
 		{
 			StrongestPlayerPower = FMath::Max(
 				StrongestPlayerPower, Character->GetCharacterLevel());
 		}
 		if (const UAbilitySystemComponent* ASC =
-			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Pawn))
+			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Controller))
 		{
 			for (const FTerritoryPlayerPowerTier& Tier : ForceConfig.PlayerPowerTiers)
 			{
@@ -3305,8 +3306,9 @@ int32 UTerritoryCounterAttackSubsystem::ResolveScaledEnemyLevel(
 	if (StrongestPlayerPower <= 0) return INDEX_NONE;
 	const int32 Minimum = FMath::Max(1, ForceConfig.MinimumScaledEnemyLevel);
 	const int32 Maximum = FMath::Max(Minimum, ForceConfig.MaximumScaledEnemyLevel);
-	return FMath::Clamp(StrongestPlayerPower + ForceConfig.EnemyLevelOffset,
-		Minimum, Maximum);
+	return static_cast<int32>(FMath::Clamp<int64>(
+		static_cast<int64>(StrongestPlayerPower) + ForceConfig.EnemyLevelOffset,
+		Minimum, Maximum));
 }
 
 bool UTerritoryCounterAttackSubsystem::IsRelevantPlayer(
