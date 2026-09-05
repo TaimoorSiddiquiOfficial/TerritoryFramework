@@ -1,4 +1,5 @@
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Combat/TerritoryAssaultPlanningLimits.h"
 
 const FTerritoryFactionAssaultConfig* UTerritoryCounterAttackProfile::FindFactionForce(
 	const FGameplayTag& Faction) const
@@ -23,7 +24,7 @@ int32 UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
 	int32 FiniteForce)
 {
 	const int32 SafeMaximum = FMath::Clamp(
-		FMath::Min(AuthoredRoadMaximum, FiniteForce), 0, 8);
+		FMath::Min(AuthoredRoadMaximum, FiniteForce), 0, TerritoryAssaultPlanning::MaximumVehicles);
 	if (!Force.bScaleVehicleCountByNarrativeDifficulty)
 	{
 		return SafeMaximum;

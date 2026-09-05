@@ -4,6 +4,7 @@
 #include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Combat/TerritoryAssaultPlanningLimits.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryCommandTags.h"
@@ -1837,15 +1838,11 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 		if (Approach && Approach->EntryType ==
 			ETerritoryAssaultEntryType::NarrativeVehicle)
 		{
-			const int32 AuthoredDeployments = FMath::Max(0,
-				Approach->MaximumVehicleDeployments);
-			AuthoredRoadMaximum += AuthoredDeployments;
 			const int32 Capacity = FMath::Max(0, FMath::Min(
 				Approach->MaxWaveSize, Approach->VehicleOccupantCapacity));
-			for (int32 Index = 0; Index < AuthoredDeployments; ++Index)
-			{
-				VehicleDeploymentCapacities.Add(Capacity);
-			}
+			TerritoryAssaultPlanning::AccumulateVehicleCapacity(
+				Approach->MaximumVehicleDeployments, Capacity,
+				AuthoredRoadMaximum, VehicleDeploymentCapacities);
 		}
 		else if (Approach)
 		{
@@ -3373,8 +3370,8 @@ TArray<FName> UTerritoryCounterAttackSubsystem::SelectValidApproaches(
 			Valid.AddUnique(Approach.ApproachID);
 		}
 	}
-	const int32 DesiredApproaches = FMath::Clamp(
-		1 + FMath::FloorToInt(FMath::Max(0.f, PowerRatio - 1.f)), 1, Profile->MaximumApproaches);
+	const int32 DesiredApproaches = TerritoryAssaultPlanning::ResolveApproachCount(
+		PowerRatio, Profile->MaximumApproaches);
 	if (Valid.Num() > DesiredApproaches)
 	{
 		TArray<FName> Selected;

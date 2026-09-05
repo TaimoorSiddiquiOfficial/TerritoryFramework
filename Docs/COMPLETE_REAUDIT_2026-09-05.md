@@ -539,6 +539,33 @@ changed; no migration is needed. The client-role fixture and Native record round
 physical multiplayer/World Partition verification. Purchase and post-admission garrison-event callback
 atomicity remain separate audit work.
 
+## Batch 29 — bound assault approach and vehicle-capacity planning
+
+The unchanged planning calculations were extracted into a private pure helper used by the production
+call sites, then exercised by behavioral tests. Red regressions show maximum finite power selected one approach,
+an invalid configured approach limit selected 100, and 1,000 authored cars expanded to 1,000 capacity
+entries before the existing eight-car difficulty budget applied (`Batch29_RedTests`). The red test
+uses a safe 1,000-entry reproduction; it deliberately does not allocate MAX_int32 entries.
+
+CounterAttack remains the planning/scheduling authority and Narrative difficulty remains the car
+budget input. The helper clamps before float-to-integer conversion, handles NaN explicitly, and
+enforces the existing authored maximum of eight approaches. Capacity accumulation bounds car counts
+before allocation, saturates the road total to the existing eight-car budget and retains only the
+eight largest capacities. Profile difficulty resolution shares the same native constant. All legal
+car budgets and finite force values in the regression produce the same result as the prior complete
+capacity list. Tests also cover approach-count monotonicity, reorder determinism, negative and maximum
+integers, NaN, both infinities and actual Narrative difficulty enum handling. The initial fixed build
+exposed NaN comparison behavior; explicit engine `IsNaN` handling fixed it.
+
+All 249 tests pass (237 clean, 12 warning-bearing fixtures, zero failed/skipped): `Batch29_FinalTests`.
+Editor/UHT passes in `Batch29_VerifiedBuild.log`; Development Game and stage/pak pass in
+`Batch29_GameBuild.log`, `Package_Batch29.log`, `Stage_Batch29`, using the unchanged batch-20 cooked
+assets. No Native source, save schema, Blueprint signatures,
+replication layout, launch modes or physical capture flow changed. No migration is required; invalid
+out-of-range authored counts now obey their existing editor limits. Existing save/authority/finite
+force suites remain green. This bounded calculation test does not replace physical deployment,
+late-join or World Partition release gates, or fix the separately reproduced vehicle restore defect.
+
 ## Counterattack lifecycle preflight
 
 
