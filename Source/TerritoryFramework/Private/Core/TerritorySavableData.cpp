@@ -1,4 +1,5 @@
 #include "Core/TerritorySavableData.h"
+#include "Core/TerritorySaveSerialization.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "SaveSystemStatics.h"
@@ -26,7 +27,10 @@ void ATerritorySavableData::BeginPlay()
 		}
 		if (!SavableDataGUID.IsValid())
 		{
-			SavableDataGUID = FGuid::NewGuid();
+			UE_LOG(LogTerritory, Error,
+				TEXT("TerritorySavableData %s has no authored GUID; save/load is disabled. Migrate to TerritoryWorldState."),
+				*GetPathName());
+			return;
 		}
 
 		USaveSystemStatics::LoadSingleActor(this);
@@ -57,6 +61,12 @@ void ATerritorySavableData::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 }
 #endif
 
+void ATerritorySavableData::Serialize(FArchive& Ar)
+{
+	FTerritorySaveSerializationScope SaveScope(*this, Ar);
+	Super::Serialize(Ar);
+}
+
 FGuid ATerritorySavableData::GetActorGUID_Implementation() const { return SavableDataGUID; }
 void ATerritorySavableData::SetActorGUID_Implementation(const FGuid& NewGUID) { SavableDataGUID = NewGUID; }
 bool ATerritorySavableData::ShouldRespawn_Implementation() const { return false; }
@@ -80,7 +90,7 @@ bool ATerritorySavableData::IsSuppressedByWorldState() const
 
 void ATerritorySavableData::SaveToSelf()
 {
-	if (IsSuppressedByWorldState()) return;
+	if (!HasAuthority() || !GetWorld() || IsSuppressedByWorldState()) return;
 	// ─── Save Economy ───
 	SavedTreasuries.Empty();
 	if (UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
@@ -105,7 +115,7 @@ void ATerritorySavableData::SaveToSelf()
 
 void ATerritorySavableData::LoadFromSelf()
 {
-	if (IsSuppressedByWorldState()) return;
+	if (!HasAuthority() || !GetWorld() || IsSuppressedByWorldState()) return;
 	// ─── Load Economy ───
 	if (UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
 	{

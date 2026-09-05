@@ -62,6 +62,7 @@ class TERRITORYFRAMEWORK_API ATerritoryVolume : public AActor, public INarrative
 
 public:
 	ATerritoryVolume();
+	virtual void Serialize(FArchive& Ar) override;
 
 	// ─── INarrativeSavableActor ───
 	virtual FGuid GetActorGUID_Implementation() const override;

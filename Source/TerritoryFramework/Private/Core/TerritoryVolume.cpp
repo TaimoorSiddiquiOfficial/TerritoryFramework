@@ -1,4 +1,5 @@
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritorySaveSerialization.h"
 
 #include "Core/TerritoryGuardLifecyclePolicy.h"
 #include "Core/TerritoryGuardSpawnValidation.h"
@@ -788,6 +789,12 @@ void ATerritoryVolume::EnsurePersistentTerritoryGUID()
 		MarkPackageDirty();
 #endif
 	}
+}
+
+void ATerritoryVolume::Serialize(FArchive& Ar)
+{
+	FTerritorySaveSerializationScope SaveScope(*this, Ar);
+	Super::Serialize(Ar);
 }
 
 FGuid ATerritoryVolume::GetActorGUID_Implementation() const { return TerritoryGUID; }

@@ -19,6 +19,7 @@ class TERRITORYFRAMEWORK_API ATerritorySavableData : public AActor, public INarr
 
 public:
 	ATerritorySavableData();
+	virtual void Serialize(FArchive& Ar) override;
 
 	virtual FGuid GetActorGUID_Implementation() const override;
 	virtual void SetActorGUID_Implementation(const FGuid& NewGUID) override;
@@ -54,6 +55,9 @@ protected:
 	TArray<FDiplomacyEvent> SavedDiplomacyHistory;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FTFSaveDefaultReload;
+#endif
 	bool IsSuppressedByWorldState() const;
 	void SaveToSelf();
 	void LoadFromSelf();

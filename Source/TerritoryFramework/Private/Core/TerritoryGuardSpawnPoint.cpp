@@ -1,4 +1,5 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Core/TerritorySaveSerialization.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryGuardCharacter.h"
@@ -56,24 +57,8 @@ ATerritoryGuardSpawnPoint::ATerritoryGuardSpawnPoint()
 
 void ATerritoryGuardSpawnPoint::Serialize(FArchive& Ar)
 {
-	if (!Ar.IsSaveGame())
-	{
-		Super::Serialize(Ar);
-		return;
-	}
-	if (Ar.IsLoading())
-	{
-		// Narrative's older delta archives omit default-valued fields. Loading a
-		// saved zero into an already provisioned actor must clear the live balance.
-		const ATerritoryGuardSpawnPoint* Defaults = GetClass()->GetDefaultObject<ATerritoryGuardSpawnPoint>();
-		CurrentReserveCount = Defaults->CurrentReserveCount;
-		PendingReserveSpawns = Defaults->PendingReserveSpawns;
-		SavedActiveGuardCount = Defaults->SavedActiveGuardCount;
-	}
-	const bool bPreviousNoDelta = Ar.ArNoDelta;
-	Ar.ArNoDelta = true;
+	FTerritorySaveSerializationScope SaveScope(*this, Ar);
 	Super::Serialize(Ar);
-	Ar.ArNoDelta = bPreviousNoDelta;
 }
 
 FGuid ATerritoryGuardSpawnPoint::GetActorGUID_Implementation() const

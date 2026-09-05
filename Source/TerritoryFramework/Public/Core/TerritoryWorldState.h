@@ -181,6 +181,7 @@ class TERRITORYFRAMEWORK_API ATerritoryWorldState : public AActor, public INarra
 
 public:
 	ATerritoryWorldState();
+	virtual void Serialize(FArchive& Ar) override;
 
 	/** Resolve the single strategic read-model actor for this world. */
 	UFUNCTION(BlueprintPure, Category="Territory|World State",
@@ -438,6 +439,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDiplomacyWorldStateLiveBridge;
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
+	friend class FTFSaveDefaultReload;
 	friend class FTFSavedStrategicDirectoryProjectionRoundTrip;
 #endif
 	void SyncSubsystemsFromReplicatedState();

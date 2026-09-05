@@ -1,4 +1,5 @@
 #include "Core/TerritoryWorldState.h"
+#include "Core/TerritorySaveSerialization.h"
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
@@ -198,6 +199,12 @@ void ATerritoryWorldState::PostDuplicate(EDuplicateMode::Type DuplicateMode)
 #endif
 
 // ─── INarrativeSavableActor ───
+
+void ATerritoryWorldState::Serialize(FArchive& Ar)
+{
+	FTerritorySaveSerializationScope SaveScope(*this, Ar);
+	Super::Serialize(Ar);
+}
 
 FGuid ATerritoryWorldState::GetActorGUID_Implementation() const { return WorldStateGUID; }
 void ATerritoryWorldState::SetActorGUID_Implementation(const FGuid& NewGUID) { WorldStateGUID = NewGUID; }

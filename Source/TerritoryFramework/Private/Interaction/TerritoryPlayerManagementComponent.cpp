@@ -1,4 +1,5 @@
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Core/TerritorySaveSerialization.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "AbilitySystemComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
@@ -317,6 +318,12 @@ bool UTerritoryPlayerManagementComponent::RefreshTerritoryPOIDiscovery()
 
 	NavigationComponent->DiscoverPOI(POITag);
 	return NavigationComponent->HasDiscoveredPOI(POITag);
+}
+
+void UTerritoryPlayerManagementComponent::Serialize(FArchive& Ar)
+{
+	FTerritorySaveSerializationScope SaveScope(*this, Ar);
+	Super::Serialize(Ar);
 }
 
 void UTerritoryPlayerManagementComponent::PrepareForSave_Implementation()

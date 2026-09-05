@@ -16,9 +16,9 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | Economy/production | Currency routing, finite arithmetic, recipe transactions, checkpoints and callback boundaries under review |
 | Property benefits | Definition payload, runtime GAS grant/revoke and existing tests inspected; regressions being added |
 | Capture and hierarchy | Authoritative state transitions, availability and upgrade paths under review |
-| Guards and assault | Full lifecycle trace pending; garrison purchase/deployment entry points inspected |
-| Save/replication/streaming | WorldState and restoration review pending |
-| AI/stealth/Tales/navigation | Detailed review pending |
+| Guards and assault | Counterattack lifecycle traced; finite guard reserve, warning/activation and callback fixes tested; physical spawn internals remain under review |
+| Save/replication/streaming | WorldState cache/identity and all plugin-owned save interfaces inspected; real Narrative record/default reload tests pass; live streaming/replication gates pending |
+| AI/stealth/Tales/navigation | Stealth and Tales callback/party fixes tested; remaining AI/navigation review pending |
 | UI/editor/CI/packaging | Detailed review pending |
 
 ## Findings register
@@ -38,7 +38,7 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | DIP-03 | Timed trade agreements created without the Narrative clock never receive a usable expiry. | Fixed; reject missing clock/nonfinite timing |
 | DIP-04 | Duplicate reversed treaty pairs survive restore and make the chosen state depend on array order. | Fixed in subsystem; newest signed row and stable tie-breaks, expiry preserved; WorldState cache review ongoing |
 | AUTH-01 | Upgrade and garrison staffing eligibility do not consistently enforce availability or world identity. | Garrison/upgrade admission fixed; locked and cross-world requests tested; callback transaction audit remains open |
-| ATOMIC-01 | Upgrade, garrison purchase and production hold mutable state across Narrative inventory or Territory delegate callbacks. | Candidate; re-entry/failure reproductions pending |
+| ATOMIC-01 | Upgrade, garrison purchase and production hold mutable state across Narrative inventory or Territory delegate callbacks. | Recursive payouts confirmed and fixed; purchase staging/refund and restore-during-callback paths remain open |
 | ECON-04 | Member income split can lose a remainder when later accounts are full although earlier accounts have room; ceiling division can overflow at MAX_int32. | Fixed; full/partial/reversed capacity and maximum payout tests use real Narrative inventories |
 | ECON-05 | Controller currency requests lose the retained player identity during vehicle possession; debit can claim success when the inventory's owner lacks authority. | Fixed; vehicle, role rejection and Narrative inventory load tests |
 | SAVE-01 | WorldState district counting filters duplicate tags but misses duplicate valid GUIDs when both rows also have tags. | Fixed; duplicate-tag/GUID and GUID-only behavioral tests |
@@ -53,7 +53,11 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | ASSAULT-04 | Restored `Evaluating` records have no switch case and can remain stuck indefinitely. | Fixed; resumed evaluation reaches route validation using the same seed and creates no unroutable force |
 | PROP-01 | Detached Property District lookup dereferences a missing world; negative upgrade caps write negative saved levels. | Fixed; query and level-boundary tests |
 | TALES-01 | A condition can mutate the iterated event/gate requirement list or end the owning task, invalidating the shared probe. | Fixed; both direct/Narrative-node AND paths, task-end and recursive-gate tests |
-| TALES-02 | Narrative's AnyPlayerPasses node path returns true even if every member fails, and its PartyLeaderPasses path dereferences an absent leader. | Vendor source confirmed; Territory adapter mitigation and behavioral proof pending; no vendor changes authorized |
+| TALES-02 | Narrative's AnyPlayerPasses node path returns true even if every member fails, and its PartyLeaderPasses path dereferences an absent leader. | Fixed in Territory's adapter; member/leader/Not/AND behavior tested through public Narrative APIs |
+| ECON-06 | Synchronous currency/item callbacks can reenter a scheduler and award a timer/campaign cycle twice. | Fixed; real Narrative inventory red/green regressions, later cycles and checkpoint reload tested |
+| GUARD-01 | Reconciliation refills exhausted reserves, bypasses the preserve policy and ignores zero reserve definitions. | Fixed; one-time authoritative initialization and explicit ownership refills tested |
+| SAVE-05 | Default delta fields do not replace populated live state on Narrative reload: zero reserve/upgrade/cost/sequence and empty treaty/assault/history arrays remain stale. | Fixed; shared plugin serialization adapter, full and legacy Narrative actor/component records tested |
+| SAVE-06 | Deprecated persistence actor dereferences a missing world, mutates subsystem/save state on client actors and invents runtime persistence GUIDs. | World/authority guards and missing-GUID rejection added; empty legacy save, client and detached actor tests pass |
 
 ## Architecture constraints
 
@@ -120,8 +124,6 @@ its behavioral tests, save/replication effects, migration requirements and remai
   recursive gate queries terminate safely. No vendor, save schema, replication or Blueprint
   signature changes. Evidence: `Batch11_*`.
 
-## Counterattack lifecycle preflight
-
 ### Batch 12: Narrative party condition admission
 
 Source inspection and a failing native regression proved that the supported Narrative node's
@@ -140,6 +142,70 @@ two-client test. No save schema, replicated property, or Blueprint signature cha
 
 Existing Territory event/task assets using these policies now require an actual eligible member;
 quests that accidentally relied on the old unconditional pass need their authored conditions corrected.
+
+### Batch 13: recursive economy and production settlement
+
+Real Narrative `OnCurrencyChanged` and `OnItemAdded` callbacks reproduced duplicate currency and
+resource awards: one timer tick credited twice, and one production cycle generated two outputs.
+Transient scheduler guards now reject recursive settlement while allowing later timer/campaign
+cycles. The private economy tick also rejects client worlds explicitly. Narrative retains currency,
+item and inventory-save authority; Economy retains rates, recipe scheduling and cycle checkpoints.
+No schema or Blueprint signature changes. This does not claim atomic purchase/refund behavior or
+protection against a callback restoring/replacing production maps; those remain under review.
+
+Editor/UHT and all 233 automation tests passed: 227 clean, six expected-warning tests, zero failures
+or skips. The regression uses real Narrative inventories, checks subsequent independent cycles,
+Narrative currency save/load and production checkpoint restore. Evidence: `Batch13_RedTests`
+(six assertions caused by the two duplicate awards), `Batch13_Build.log`, `Batch13_Tests`.
+
+### Batch 14: finite guard reserves and zero-value reload
+
+The post remains the authority for finite reserve counts. Reconciliation previously refilled an
+exhausted post, bypassed PersistWithPost after ownership change, ignored zero-valued reusable reserve
+definitions, and provisioned reserves on client actors. Initialization now provisions once; explicit
+ownership policies still own refills. A guard registered before post initialization no longer suppresses
+initial reserve provisioning. Counts loaded from Narrative remain initialized, including zero.
+
+The real Narrative actor-record regression also proved that its default delta archive can omit a
+saved zero and leave an already initialized post's current count untouched. The plugin post now writes
+complete SaveGame values and resets its count defaults before reading legacy delta records. No vendor
+change or new save field/schema is required. Old zero-valued records now restore zero in either load
+order. Actor GUIDs remain authored and are preserved by Narrative's record API.
+
+Editor/UHT and all 234 tests passed (228 clean, six expected-warning, zero failures/skips).
+Tests exercise Narrative CreateActorRecord/LoadActorFromRecord, legacy delta bytes, initialization
+before/after load, client rejection, preserve/refill policies and zero-capacity definitions. The seven
+initial failures and the isolated remaining zero-reload failure are retained in `Batch14_RedTests`
+and `Batch14_Tests`. Passing evidence: `Batch14_SaveBuild.log`, `Batch14_SaveTests`. Physical reserve
+deployment and real World Partition streaming remain release gates; the load-order fixture does not
+claim to replace them. Other plugin actor types are being checked for the same delta-archive boundary.
+
+### Batch 15: complete and legacy Narrative save records
+
+Sixteen pre-fix assertions reproduced stale wars, assault history, upgrade levels, nested guard costs,
+player intelligence events and espionage sequence after a supposedly empty/zero-valued reload.
+`FTerritorySaveSerializationScope` now adapts Narrative's tagged archive for Volume (including
+Property), WorldState, GuardSpawnPoint, PlayerManagementComponent and the deprecated SavableData actor.
+It restores SaveGame fields to the archive's archetype baseline before reading legacy deltas and
+disables delta omission for new saves. Asset serialization and network replication are unchanged;
+all effects are confined to `ArIsSaveGame`. No additional durable authority or vendor edit is added.
+
+Native actor/component save interfaces and `CreateActorRecord`/`LoadActorFromRecord` are reused.
+Existing scalar, nested-struct, array and map field formats remain compatible; no field names or
+Blueprint signatures change. Old omitted values use the current archetype defaults, as Unreal's
+delta format requires; an old save cannot reconstruct a historical default that was never stored.
+New records explicitly store defaults and avoid that ambiguity. The deprecated actor still defers to
+WorldState, rejects client/detached mutations and no longer invents a new identity at runtime.
+
+Editor/UHT and Game Development builds passed. All 235 automation tests passed: 229 clean, six
+expected-warning tests, zero failures/skips. Coverage includes new and legacy actor/component bytes,
+empty authoritative diplomacy and late-join read models, zero upgrade/cost/sequence values, empty
+player history, deprecated save maps, client rejection and detached legacy calls. Evidence:
+`Batch15_RedTests`, `Batch15_FinalBuild.log`, `Batch15_FinalTests`, `Batch15_GameBuild.log`.
+Physical multiplayer, asset/cook and streaming gates remain pending for this audit.
+
+## Counterattack lifecycle preflight
+
 
 Source trace completed before the first counterattack fix in this audit. CounterAttack owns the
 finite assault record and scheduling; Narrative owns NPC spawning, definition initialization,
@@ -165,45 +231,9 @@ and the existing capture authority remain mandatory in every activation mode.
 
 ## Pending audit follow-up
 
-### Batch 13: recursive economy and production settlement
-
-Real Narrative `OnCurrencyChanged` and `OnItemAdded` callbacks reproduced duplicate currency and
-resource awards: one timer tick credited twice, and one production cycle generated two outputs.
-Transient scheduler guards now reject recursive settlement while allowing later timer/campaign
-cycles. The private economy tick also rejects client worlds explicitly. Narrative retains currency,
-item and inventory-save authority; Economy retains rates, recipe scheduling and cycle checkpoints.
-No schema or Blueprint signature changes. This does not claim atomic purchase/refund behavior or
-protection against a callback restoring/replacing production maps; those remain under review.
-
-Editor/UHT and all 233 automation tests passed: 227 clean, six expected-warning tests, zero failures
-or skips. The regression uses real Narrative inventories, checks subsequent independent cycles,
-Narrative currency save/load and production checkpoint restore. Evidence: `Batch13_RedTests`
-(six assertions caused by the two duplicate awards), `Batch13_Build.log`, `Batch13_Tests`.
-
 - Complete the upgrade/garrison/production callback transaction review; existing debit callbacks
   occur before final gameplay commits. No atomicity completion is claimed for those paths yet.
-- Finish assault callback/restore boundaries, malformed retained-history limits, unloaded-target
-  diplomacy, and client movement/reindex validation.
+- Finish assault physical spawn/restore callbacks, malformed record/arithmetic limits and client
+  movement/reindex validation. Unloaded-target treaty cancellation is already covered by batch 8.
+- Review remaining hierarchy integer sums and hardcoded capital rewards against Narrative event policy.
 - Complete guard/AI/Tales/navigation/UI/editor review and the live release gates.
-
-### Batch 14: finite guard reserves and zero-value reload
-
-The post remains the authority for finite reserve counts. Reconciliation previously refilled an
-exhausted post, bypassed PersistWithPost after ownership change, ignored zero-valued reusable reserve
-definitions, and provisioned reserves on client actors. Initialization now provisions once; explicit
-ownership policies still own refills. A guard registered before post initialization no longer suppresses
-initial reserve provisioning. Counts loaded from Narrative remain initialized, including zero.
-
-The real Narrative actor-record regression also proved that its default delta archive can omit a
-saved zero and leave an already initialized post's current count untouched. The plugin post now writes
-complete SaveGame values and resets its count defaults before reading legacy delta records. No vendor
-change or new save field/schema is required. Old zero-valued records now restore zero in either load
-order. Actor GUIDs remain authored and are preserved by Narrative's record API.
-
-Editor/UHT and all 234 tests passed (228 clean, six expected-warning, zero failures/skips).
-Tests exercise Narrative CreateActorRecord/LoadActorFromRecord, legacy delta bytes, initialization
-before/after load, client rejection, preserve/refill policies and zero-capacity definitions. The seven
-initial failures and the isolated remaining zero-reload failure are retained in `Batch14_RedTests`
-and `Batch14_Tests`. Passing evidence: `Batch14_SaveBuild.log`, `Batch14_SaveTests`. Physical reserve
-deployment and real World Partition streaming remain release gates; the load-order fixture does not
-claim to replace them. Other plugin actor types are being checked for the same delta-archive boundary.

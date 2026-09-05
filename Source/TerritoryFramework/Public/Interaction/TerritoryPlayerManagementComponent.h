@@ -39,6 +39,7 @@ class TERRITORYFRAMEWORK_API UTerritoryPlayerManagementComponent : public UActor
 
 public:
 	UTerritoryPlayerManagementComponent();
+	virtual void Serialize(FArchive& Ar) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void PrepareForSave_Implementation() override;
@@ -227,6 +228,9 @@ public:
 	int32 EspionageDecisionSeed = 21991;
 
 private:
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FTFSaveDefaultReload;
+#endif
 	/** Narrative Save System persists the bounded campaign archive on a savable player controller. */
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryLiveEvent> LiveEvents;
