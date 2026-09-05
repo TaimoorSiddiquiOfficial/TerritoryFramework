@@ -1174,22 +1174,11 @@ void UTerritoryAssaultParticipantComponent::WithdrawForVehicleIngressFailure(
 
 void UTerritoryAssaultParticipantComponent::Retire(bool bKilled)
 {
-	if (bRemovalReported) return;
+	if (bRemovalReported || !GetOwner() || !GetOwner()->HasAuthority()) return;
 	bRemovalReported = true;
-	RestoreNarrativeDefenderTargeting(false);
 	UnregisterCapturePressure();
-	StopVehicleInputs();
-	bVehicleDriveActive = false;
-	SetComponentTickEnabled(false);
-
-	if (ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(GetOwner()))
-	{
-		if (UNPCActivityComponent* ActivityComponent = NPC->GetActivityComponent())
-		{
-			if (AssaultGoal) ActivityComponent->RemoveGoal(AssaultGoal);
-			ActivityComponent->RemoveActivity(UTerritoryAssaultActivity::StaticClass());
-		}
-	}
+	// Record finite loss after capture removal and before Narrative activity-end
+	// callbacks can save or restore a campaign.
 	if (UWorld* World = GetWorld())
 	{
 		if (UTerritoryCounterAttackSubsystem* Counterattacks =
@@ -1197,6 +1186,19 @@ void UTerritoryAssaultParticipantComponent::Retire(bool bKilled)
 		{
 			Counterattacks->NotifyParticipantRemoved(
 				AssaultID, Cast<ATerritoryAssaultCharacter>(GetOwner()), bKilled);
+		}
+	}
+	if (!IsValid(GetOwner()) || GetOwner()->IsActorBeingDestroyed()) return;
+	RestoreNarrativeDefenderTargeting(false);
+	StopVehicleInputs();
+	bVehicleDriveActive = false;
+	SetComponentTickEnabled(false);
+	if (ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(GetOwner()))
+	{
+		if (UNPCActivityComponent* ActivityComponent = NPC->GetActivityComponent())
+		{
+			if (AssaultGoal) ActivityComponent->RemoveGoal(AssaultGoal);
+			ActivityComponent->RemoveActivity(UTerritoryAssaultActivity::StaticClass());
 		}
 	}
 }

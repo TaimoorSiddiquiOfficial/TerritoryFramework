@@ -2160,18 +2160,22 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 				++CurrentDeployment->Count;
 				++Assault.VehicleDeploymentsUsed;
 			}
-			if (Spawned == 0 && PresentationPlayer
+			ATerritoryAssaultCharacter** Speaker = SpawnedParticipants.FindByPredicate(
+				[](const ATerritoryAssaultCharacter* NPC)
+				{
+					return IsValid(NPC) && !NPC->IsActorBeingDestroyed()
+						&& NPC->AssaultParticipant && !NPC->AssaultParticipant->HasRetired();
+				});
+			if (Spawned == 0 && Speaker && IsValid(PresentationPlayer)
 				&& ForceConfig->ReserveWaveAlertDialogueTag.IsValid())
 			{
-				SpawnedParticipants[0]->PlayTaggedDialogue(
+				(*Speaker)->PlayTaggedDialogue(
 					ForceConfig->ReserveWaveAlertDialogueTag, PresentationPlayer);
 				if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active) || !IsValid(Territory)) return;
 			}
 			const int32 ParticipantCount = SpawnedParticipants.Num();
 			SpawnedPerApproach.FindOrAdd(ApproachID) += ParticipantCount;
 			Spawned += ParticipantCount;
-			Assault.PendingReserveForce -= ParticipantCount;
-			Assault.AliveForce += ParticipantCount;
 			if (bUseNarrativeVehicle) break;
 		}
 	}
@@ -2210,7 +2214,7 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 			&& IsValid(Territory) && Territory->HasAuthority() && !Territory->IsActorBeingDestroyed()
 			&& Territory->GetWorld() == GetWorld();
 	};
-	if (!IsSpawnCurrent()) return nullptr;
+	if (!IsSpawnCurrent() || ConstructingParticipant || Assault.PendingReserveForce <= 0) return nullptr;
 	FText SpawnClassFailure;
 	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
 		AttackerDefinition, SpawnRecord.PlannedForce, SpawnClassFailure))
@@ -2221,17 +2225,23 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 		return nullptr;
 	}
 
+	FConstructingParticipant Construction;
+	Construction.Access = Access;
+	Construction.SpawnGUID = FGuid::NewGuid();
+	TGuardValue<FConstructingParticipant*> ConstructionGuard(ConstructingParticipant, &Construction);
 	UNarrativeCharacterSubsystem* CharacterSubsystem =
 		GetWorld() ? GetWorld()->GetSubsystem<UNarrativeCharacterSubsystem>() : nullptr;
 	if (!IsSpawnCurrent()) return nullptr;
 	ATerritoryAssaultCharacter* Participant = ATerritoryAssaultCharacter::SpawnThroughNarrative(
 		CharacterSubsystem, AttackerDefinition, SpawnRecord.AttackingFaction,
-		Territory->GetTerritoryGUID(), FGuid::NewGuid(), SpawnTransform, Approach.ApproachID,
+		Territory->GetTerritoryGUID(), Construction.SpawnGUID, SpawnTransform, Approach.ApproachID,
 		ForceConfig.ActivityConfigurationOverride, ForceConfig.TriggerSetOverrides,
 		SpawnRecord.AssaultID, SpawnRecord.TargetTerritory, OverrideNarrativeLevel);
 	bool bAdmitted = false;
 	ON_SCOPE_EXIT
 	{
+		// Validation cleanup must not consume reserve as a real withdrawal.
+		Construction.bAcceptRemoval = false;
 		if (!bAdmitted && IsValid(Participant) && !Participant->IsActorBeingDestroyed())
 		{
 			if (Participant->AssaultParticipant) Participant->AssaultParticipant->Retire(false);
@@ -2241,7 +2251,7 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 	};
 	if (!IsSpawnCurrent()) return nullptr;
 	if (!IsValid(Participant) || Participant->IsActorBeingDestroyed()) return nullptr;
-	if (!Participant->AssaultParticipant) return nullptr;
+	if (!Participant->AssaultParticipant || Participant->AssaultParticipant->HasRetired()) return nullptr;
 	const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
 	const float MinimumSpacing = FMath::Max(
 		100.f, Profile ? Profile->ParticipantSpacing * 0.7f : 154.f);
@@ -2307,7 +2317,12 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 		ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
 	}
 
-	if (!IsSpawnCurrent() || !IsValid(Participant) || Participant->IsActorBeingDestroyed()) return nullptr;
+	if (!IsSpawnCurrent() || !IsValid(Participant) || Participant->IsActorBeingDestroyed()
+		|| Participant->AssaultParticipant->HasRetired() || Assault.PendingReserveForce <= 0) return nullptr;
+	// Commit admission before another NPC's construction or wave dialogue can
+	// synchronously remove this participant.
+	--Assault.PendingReserveForce;
+	++Assault.AliveForce;
 	LiveParticipants.FindOrAdd(Access.ID).Add(Participant);
 	bAdmitted = true;
 	return Participant;
@@ -2451,7 +2466,7 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 	{
 		Vehicle->Destroy();
 		UE_LOG(LogTerritory, Error,
-			TEXT("[CounterAttack] approach '%s' could not create its Narrative vehicle driver; the finite force was not consumed"),
+			TEXT("[CounterAttack] approach '%s' could not admit a living Narrative vehicle driver"),
 			*Approach.ApproachID.ToString());
 		return Participants;
 	}
@@ -2574,20 +2589,32 @@ float UTerritoryCounterAttackSubsystem::CalculatePlayerRelativeApproachScore(
 void UTerritoryCounterAttackSubsystem::NotifyParticipantRemoved(
 	FGuid AssaultID, ATerritoryAssaultCharacter* Participant, bool bKilled)
 {
-	if (bRestoringState) return;
+	if (bRestoringState || !GetWorld() || GetWorld()->GetNetMode() == NM_Client
+		|| !IsValid(Participant) || !Participant->HasAuthority()
+		|| Participant->GetWorld() != GetWorld()) return;
 	FTerritoryAssaultRecord* Assault = Assaults.Find(AssaultID);
-	if (!Assault) return;
+	if (!Assault || Assault->IsTerminal()) return;
 
 	TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>>* Participants = LiveParticipants.Find(AssaultID);
-	if (Participants)
+	const bool bRemovedLive = Participants && Participants->Remove(Participant) > 0;
+	if (bRemovedLive)
 	{
-		const int32 Removed = Participants->Remove(Participant);
-		if (Removed == 0) return; // exact-once accounting
 		if (Participants->IsEmpty()) LiveParticipants.Remove(AssaultID);
 	}
 	else
 	{
-		return;
+		// Narrative can report removal before SpawnNPC returns. Only this exact
+		// construction may consume reserve; an arbitrary same-assault NPC cannot.
+		if (!ConstructingParticipant || !ConstructingParticipant->bAcceptRemoval
+			|| ConstructingParticipant->bRemovalReported
+			|| ConstructingParticipant->Access.ID != AssaultID
+			|| !IsAssaultCurrent(ConstructingParticipant->Access, ETerritoryAssaultState::Active)
+			|| Participant->GetActorGUID_Implementation() != ConstructingParticipant->SpawnGUID
+			|| Assault->PendingReserveForce <= 0) return;
+		ConstructingParticipant->bRemovalReported = true;
+		// One native commit, with no callback exposing an intermediate living count.
+		--Assault->PendingReserveForce;
+		++Assault->AliveForce;
 	}
 
 	bool bForceExhausted = false;

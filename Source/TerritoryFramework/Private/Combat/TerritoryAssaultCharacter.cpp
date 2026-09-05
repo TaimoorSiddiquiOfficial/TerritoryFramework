@@ -249,6 +249,16 @@ bool ATerritoryAssaultCharacter::HasValidDeathRagdollSetup() const
 
 void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 {
+	// Narrative normally binds this handler when asynchronous definition/attribute
+	// initialization finishes. Finite attackers must account deaths even during
+	// definition application or the earlier OnNPCSpawned callback.
+	if (HasAuthority())
+	{
+		if (UNarrativeAbilitySystemComponent* ASC = GetNarrativeAbilitySystemComponent())
+		{
+			ASC->OnDeathStateChanged.AddUniqueDynamic(this, &ATerritoryAssaultCharacter::HandleDeath);
+		}
+	}
 	if (GPendingTerritoryAssaultSpawn
 		&& GPendingTerritoryAssaultSpawn->Definition == Definition
 		&& !GPendingTerritoryAssaultSpawn->bApplied)
@@ -341,6 +351,10 @@ void ATerritoryAssaultCharacter::HandleDeath_Implementation(
 		KilledActorASC, bIsDead);
 	if (bResolvedIsDead)
 	{
+		// Narrative's character death delegate can fire before the participant's
+		// readiness timer binds its own listener. Account the loss before activity
+		// cleanup or Narrative death callbacks can save the campaign.
+		if (AssaultParticipant) AssaultParticipant->Retire(true);
 		TerritoryNarrativeDeathSupport::PrepareForRemoval(*this);
 	}
 	Super::HandleDeath_Implementation(KilledActor, KilledActorASC, bResolvedIsDead);

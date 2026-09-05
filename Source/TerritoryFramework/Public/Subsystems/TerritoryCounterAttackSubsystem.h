@@ -340,6 +340,15 @@ private:
 		const FTerritoryAssaultRecord* Address = nullptr;
 		uint64 Generation = 0;
 	};
+	/** One synchronous Narrative spawn; identifies removals before live admission. */
+	struct FConstructingParticipant
+	{
+		FAssaultAccess Access;
+		FGuid SpawnGUID;
+		bool bRemovalReported = false;
+		bool bAcceptRemoval = true;
+	};
+	FConstructingParticipant* ConstructingParticipant = nullptr;
 	FAssaultAccess CaptureAssaultAccess(const FTerritoryAssaultRecord& Assault) const;
 	bool IsAssaultCurrent(const FAssaultAccess& Access) const;
 	bool IsAssaultCurrent(const FAssaultAccess& Access, ETerritoryAssaultState ExpectedState) const;
@@ -475,4 +484,5 @@ private:
 	friend class FTFAssaultSpawnCallbacks;
 	friend class FTFAssaultVehicleRestoreCleanup;
 	friend class FTFAssaultRetirementCallbacks;
+	friend class FTFAssaultSpawnCasualties;
 };

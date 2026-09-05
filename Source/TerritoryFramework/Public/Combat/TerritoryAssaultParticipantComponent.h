@@ -64,6 +64,7 @@ public:
 
 	/** Permanently retire this finite participant exactly once. */
 	void Retire(bool bKilled);
+	bool HasRetired() const { return bRemovalReported; }
 
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") FGuid GetAssaultID() const { return AssaultID; }
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") FGuid GetTargetTerritoryGUID() const { return TargetTerritoryGUID; }

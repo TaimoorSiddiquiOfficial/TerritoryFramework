@@ -372,7 +372,46 @@ or skips). Evidence: `Batch22_RedBuild.log`, `Batch22_RedTests` (nine failing as
 `Batch22_Build.log`, `Batch22_Tests`. The Development Game build also passed
 (`Batch22_GameBuild.log`). Physical package evidence remains batch 21 until refreshed.
 
+### Batch 23: finite force during Native spawn and death callbacks
+
+The real Narrative SpawnNPC callback regression initially failed 22 assertions: living/reserve counts
+lagged admission, callbacks could remove an earlier NPC without recording a casualty, a retired NPC
+could be admitted after its own callback, and a client actor could poison its retirement flag. Admission
+now commits living/reserve counts with live tracking. A scoped construction token matches the exact
+spawn GUID and assault generation so a death or withdrawal before SpawnNPC returns consumes one pending
+unit exactly once. Failed placement/controller validation disables that path during cleanup, preserving
+unspent reserve; unrelated NPCs cannot consume another construction's force. Wave dialogue selects a
+living speaker, and the enclosing wave no longer repeats the admission count update.
+
+Retirement removes capture pressure and records finite loss before Narrative activity cleanup callbacks.
+The character's existing Native HandleDeath delegate is bound in SetNPCDefinition, before asynchronous
+attribute initialization would normally bind it. AddUniqueDynamic preserves the later Native binding.
+The character death handler retires the participant before cleanup, including deaths before its readiness
+timer binds a separate listener. Both paths converge on the same exact-once accounting. Narrative owns
+ASC death/ragdoll and NPC construction; CounterAttack owns finite force; Control owns capture pressure.
+
+Editor/UHT and all 243 tests passed (234 clean, nine warning-bearing fixtures, zero failures/skips).
+The regression checks an earlier attacker dying in a later spawn callback, own-construction death and
+withdrawal, Native ASC death delegation, duplicate reports, reserve exhaustion, persisted casualties,
+unrelated-NPC rejection, invalid-placement rollback and server authority. The synthetic definition uses
+a minimal ability configuration; its missing ragdoll asset diagnostic is explicitly expected. During
+test development a delegate API mismatch and the discovery that Native attribute initialization had
+not bound the character handler were corrected; only `Batch23_EarlyDeathBuild.log` and
+`Batch23_EarlyDeathTests` are final Editor evidence. `Batch23_RedTests` preserves the initial failures.
+No durable schema, Blueprint signature or vendor source changed. Full Native archive/default, client,
+load-order and contract suites remain green. The Development Game build and Windows stage/pak passed
+(`Batch23_GameBuild.log`, `Package_Batch23.log`; unchanged batch-20 cooked assets). The packaged run
+deployed four occupants, saved/reloaded the same assault, reconstructed four occupants, mounted them,
+ran the road route and began authored dismount. Four actual Native deaths were recorded as KilledForce=4.
+It then exposed a separate vehicle-budget restoration defect: reconstructing living survivors spends
+another saved deployment, so four remaining reserves cannot deploy and the assault cancels with
+SpawnFailed (state 4 -> 7, resolution 11, killed=4, withdrawn=4). That defect remains open. No complete
+physical assault success is claimed. Both rendered clients joined this build; the first reproduced the
+SKM_Manny bone-visibility ensure during the intro, disproving a headless-only explanation. Evidence:
+`Server_Batch23.log`, `Client1Rendered_Batch23.log`, `Client2Rendered_Batch23.log`.
+
 ## Counterattack lifecycle preflight
+
 
 Source trace completed before the first counterattack fix in this audit. CounterAttack owns the
 finite assault record and scheduling; Narrative owns NPC spawning, definition initialization,
@@ -402,6 +441,10 @@ and the existing capture authority remain mandatory in every activation mode.
   commit order is fixed in batch 17; no blanket purchase/recipe atomicity completion is claimed.
 - Finish assault physical spawn/restore callbacks, malformed record/arithmetic limits and client
   movement/reindex validation. Unloaded-target treaty cancellation is already covered by batch 8.
+- Preserve deployed survivors and their vehicle history on reload without spending fresh deployment
+  slots or introducing repeat-load car duplication. Batch 23's packaged run proves the current failure.
+- Trace the intermittent SKM_Manny bone-visibility ensure in rendered clients; batch 21's clean rendered
+  run did not establish that this was a NullRHI-only issue.
 - Move hardcoded capital rewards to an authored Narrative event/data policy with compatible migration;
   District income overflow and detached City lookup are fixed in batch 19.
 - Complete guard/AI/Tales/navigation/UI/editor review and the live release gates.
