@@ -1,5 +1,6 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritorySaveSerialization.h"
+#include "Misc/ScopeExit.h"
 
 #include "Core/TerritoryGuardLifecyclePolicy.h"
 #include "Core/TerritoryGuardSpawnValidation.h"
@@ -1670,7 +1671,10 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	// Prevent reentrant commits during the synchronous event bundle.
 	// A delegate listener that calls back into CommitOwnershipData mid-broadcast
 	// would overwrite OwnershipData while the outer call is still firing events.
-	if (bTransitionInProgress) return false;
+	if (bTransitionInProgress || bValidatingOwnershipData) return false;
+	// Conditions are callbacks too. The final ownership candidate must not be
+	// validated across a second commit that the outer call would then overwrite.
+	TGuardValue<bool> ValidationGuard(bValidatingOwnershipData, true);
 
 	const FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	const ETerritoryState OldState = OwnershipData.State;
@@ -1707,6 +1711,9 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 			return false;
 		}
 	}
+
+	// A Narrative condition may destroy its target synchronously.
+	if (!IsValid(this) || IsActorBeingDestroyed()) return false;
 
 	// P2-N01: Compare all ownership data fields, not just owner/state/contest/progress
 	if (OldOwner == NewOwner && OldState == NewState
@@ -1903,6 +1910,15 @@ void ATerritoryVolume::ForceSetTerritoryState(ETerritoryState NewState)
 
 bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext) const
 {
+	const int32 EvaluationKey = static_cast<int32>(State) * 2;
+	if (EvaluatingStateConditionKeys.Contains(EvaluationKey))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryVolume", "RecursiveEntryCondition",
+			"An entry condition recursively requested the same state evaluation.");
+		return false;
+	}
+	EvaluatingStateConditionKeys.Add(EvaluationKey);
+	ON_SCOPE_EXIT { EvaluatingStateConditionKeys.Remove(EvaluationKey); };
 	if (IsPrimaryRuntimeRuleSuspendedWithContext(
 		ETerritoryQuestOverrideEffect::StateRules,
 		TransitionContext.TalesComponent, &OutFailureReason))
@@ -1926,7 +1942,8 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 	// conditions requiring a pawn/controller will evaluate against null and fail.
 	// Callers must provide explicit TransitionContext for player-dependent conditions.
 
-	for (const TObjectPtr<UNarrativeCondition>& Cond : Config->EntryConditions)
+	const TArray<TObjectPtr<UNarrativeCondition>> Conditions = Config->EntryConditions;
+	for (const TObjectPtr<UNarrativeCondition>& Cond : Conditions)
 	{
 		if (!Cond) continue;
 		// P0-02: Pass TalesComponent from transition context for full Narrative condition evaluation
@@ -1946,6 +1963,15 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason,
 	const FTerritoryTransitionContext& TransitionContext) const
 {
+	const int32 EvaluationKey = static_cast<int32>(State) * 2 + 1;
+	if (EvaluatingStateConditionKeys.Contains(EvaluationKey))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryVolume", "RecursiveExitCondition",
+			"An exit condition recursively requested the same state evaluation.");
+		return false;
+	}
+	EvaluatingStateConditionKeys.Add(EvaluationKey);
+	ON_SCOPE_EXIT { EvaluatingStateConditionKeys.Remove(EvaluationKey); };
 	if (IsPrimaryRuntimeRuleSuspendedWithContext(
 		ETerritoryQuestOverrideEffect::StateRules,
 		TransitionContext.TalesComponent, &OutFailureReason))
@@ -1954,16 +1980,14 @@ bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& Ou
 		return true;
 	}
 	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
-	const TArray<TObjectPtr<UNarrativeCondition>>* Conditions = Config
-		? &Config->ExitConditions : nullptr;
-
-	if (!Conditions || Conditions->IsEmpty())
+	if (!Config || Config->ExitConditions.IsEmpty())
 	{
 		OutFailureReason = FText::GetEmpty();
 		return true;
 	}
 
-	for (const TObjectPtr<UNarrativeCondition>& Cond : *Conditions)
+	const TArray<TObjectPtr<UNarrativeCondition>> Conditions = Config->ExitConditions;
+	for (const TObjectPtr<UNarrativeCondition>& Cond : Conditions)
 	{
 		if (!Cond) continue;
 		if (!TerritoryTales::DoesConditionPass(Cond, TransitionContext.TargetPawn,
@@ -2005,8 +2029,8 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
 	if (!Config) return;
 
-	const TArray<TObjectPtr<UNarrativeEvent>>* Events = bEntering ? &Config->EntryEvents : &Config->ExitEvents;
-	if (!Events || Events->IsEmpty()) return;
+	const TArray<TObjectPtr<UNarrativeEvent>> Events = bEntering ? Config->EntryEvents : Config->ExitEvents;
+	if (Events.IsEmpty()) return;
 
 	// Use explicit transition context
 	APlayerController* ContextPC = TransitionContext.PlayerController;
@@ -2018,7 +2042,7 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 	// State-config arrays contain one-shot Narrative events. Narrative's own quest and
 	// dialogue Start/End paths both call ExecuteEvent; base OnDeactivate is empty.
 	// Execute both arrays the same way so Exit Events cannot silently do nothing.
-	for (const TObjectPtr<UNarrativeEvent>& Event : *Events)
+	for (const TObjectPtr<UNarrativeEvent>& Event : Events)
 	{
 		if (!Event) continue;
 		FString FailedCondition;
@@ -2366,7 +2390,8 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	auto FireDefenderEvents = [this, &DefenderEventContext](
 		const TArray<TObjectPtr<UNarrativeEvent>>& Events, const TCHAR* HookName)
 	{
-		for (UNarrativeEvent* Event : Events)
+		const TArray<TObjectPtr<UNarrativeEvent>> EventSnapshot = Events;
+		for (UNarrativeEvent* Event : EventSnapshot)
 		{
 			if (!Event) continue;
 			FString FailedCondition;

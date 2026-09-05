@@ -29,6 +29,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"GameplayTags",
 			"NavigationSystem",
 			"NarrativeArsenal",
+			"NarrativeSaveSystem",
 			"NarrativeDialogueEditor",
 			"NarrativeQuestEditor",
 			"LevelSequence",

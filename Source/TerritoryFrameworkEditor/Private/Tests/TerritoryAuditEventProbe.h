@@ -6,6 +6,7 @@
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Tales/NarrativeCondition.h"
+#include "Tales/NarrativeEvent.h"
 #include "Items/InventoryComponent.h"
 #include "TerritoryAuditEventProbe.generated.h"
 
@@ -100,5 +101,19 @@ public:
 		UTalesComponent* NarrativeComponent) override
 	{
 		return Callback ? Callback() : false;
+	}
+};
+
+/** Native Narrative event used to verify synchronous callback ordering. */
+UCLASS(Transient)
+class UTerritoryAuditNarrativeEvent final : public UNarrativeEvent
+{
+	GENERATED_BODY()
+public:
+	TFunction<void()> Callback;
+	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
+		UTalesComponent* NarrativeComponent) override
+	{
+		if (Callback) Callback();
 	}
 };

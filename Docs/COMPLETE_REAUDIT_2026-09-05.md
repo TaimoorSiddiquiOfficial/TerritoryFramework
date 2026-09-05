@@ -204,6 +204,31 @@ player history, deprecated save maps, client rejection and detached legacy calls
 `Batch15_RedTests`, `Batch15_FinalBuild.log`, `Batch15_FinalTests`, `Batch15_GameBuild.log`.
 Physical multiplayer, asset/cook and streaming gates remain pending for this audit.
 
+### Batch 16: state validation and callback-list consistency
+
+Seven pre-fix assertions demonstrated nested ownership commits during entry validation and callbacks
+replacing later requirements or events in an active list. Volume now rejects competing commits while
+conditions are running, rejects a target destroyed by a condition, guards recursive evaluation of the
+same state/phase, and evaluates copied entry, exit and defender-death callback lists. Validation remains
+separate from the actual transition flag so existing previous-owner semantics are preserved.
+
+Editor/UHT and all 236 tests passed: 229 clean, seven expected-warning tests, zero failures/skips.
+The native Narrative condition/event fixture covers mutation, recursive queries, failure recovery,
+destroyed targets, client rejection and real Narrative actor-record restore. Editor tests now declare
+their direct NarrativeSaveSystem dependency. No SaveGame fields, replicated fields or Blueprint
+signatures changed. Evidence: `Batch16_RedTests`, `Batch16_FinalBuild.log`, `Batch16_FinalTests`.
+The separate exit and entry lists are captured when each phase starts; cross-phase authoring changes
+remain under review. This batch does not claim transaction safety for unrelated purchase paths.
+
+### Authored asset validation after batch 15
+
+Validation passed for 113 assets and compilation passed for 72 included Blueprints: zero errors or
+invalid assets. Four presentation warnings remain: the two story NPCs use prototype Narrative Manny
+appearances, and FarmHandover has no authored camera shot and a zero blend-out. Blacksmith's Claimed
+background is verified as Unity in the Ashes and its entry sound as Horns of War. No assets were saved
+by this validation. Evidence: `AssetValidation_Batch15.json`, `AssetValidation_Batch15.log` and
+`CapitalDefinitions_Batch15.json`. This does not replace cook or physical multiplayer gates.
+
 ## Counterattack lifecycle preflight
 
 

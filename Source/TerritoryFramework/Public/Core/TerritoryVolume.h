@@ -774,6 +774,7 @@ private:
 	friend class ATerritoryGuardSpawnPoint;
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDefenderNarrativeEventConditions;
+	friend class FTFVolumeRuleCallbacks;
 	friend class FTFTerritoryDefinitionRuntimeNarrative;
 #endif
 
@@ -807,6 +808,8 @@ private:
 	bool bLoadedFromSave = false;
 	bool bGuardsReconciled = false;
 	bool bTransitionInProgress = false;
+	bool bValidatingOwnershipData = false;
+	mutable TSet<int32> EvaluatingStateConditionKeys;
 	/** True after OnRep_OwnershipData has fired at least once. Suppresses synthetic
 	 *  ownership/state change events on initial replication (late join). */
 	bool bReplicationInitialized = false;
