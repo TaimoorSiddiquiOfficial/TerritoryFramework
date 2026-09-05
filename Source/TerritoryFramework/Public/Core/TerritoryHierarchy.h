@@ -268,4 +268,9 @@ protected:
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|Property")
 	void OnUpgradeLevelChanged(int32 NewLevel);
+
+private:
+	/** Update plugin state without invoking Blueprint or inventory callbacks. */
+	void ApplyUpgradeLevel(int32 NewLevel);
+	void PublishUpgradeLevelChange(int32 OldLevel);
 };

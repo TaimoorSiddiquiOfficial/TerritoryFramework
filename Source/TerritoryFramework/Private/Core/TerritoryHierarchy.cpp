@@ -829,7 +829,7 @@ int32 ATerritoryProperty::GetEffectiveIncome() const
 
 bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 {
-	if (!HasAuthority() || !CanUpgrade() || !IsValid(Requester)
+	if (!HasAuthority() || IsGameplayMutationInProgress() || !CanUpgrade() || !IsValid(Requester)
 		|| !GetWorld() || Requester->GetWorld() != GetWorld()
 		|| !IsAvailableForGameplay() || GetTerritoryState() != ETerritoryState::Claimed) return false;
 
@@ -845,18 +845,31 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 	// Check if faction can afford the upgrade
 	if (!Economy->CanActorAfford(Requester, Cost)) return false;
 
-	// Debit Narrative's authoritative currency account.
+	TGuardValue<bool> PurchaseGuard(bPurchaseInProgress, true);
+	const int32 OldLevel = UpgradeLevel;
+	const int32 PurchasedLevel = OldLevel + 1;
+	// Commit the plugin-owned fields silently before Narrative publishes its debit.
+	// No callbacks run between this write and the wallet's final validation/write;
+	// a rejected debit can therefore restore the unobserved staged level safely.
 	FString Reason = FString::Printf(TEXT("Property upgrade %s level %d→%d"),
-		*GetTerritoryTag().ToString(), UpgradeLevel, UpgradeLevel + 1);
+		*GetTerritoryTag().ToString(), OldLevel, PurchasedLevel);
+	ApplyUpgradeLevel(PurchasedLevel);
 	if (Cost > 0 && !Economy->TryDebitCurrency(Requester, Cost, OwnerFaction,
 		Reason, ETerritoryTransactionType::UpgradeCost))
 	{
+		ApplyUpgradeLevel(OldLevel);
 		return false;
 	}
 
-	// Use the single internal level writer so production, income, replication, and
-	// Blueprint presentation receive the same update as restore/reset paths.
-	SetUpgradeLevel(UpgradeLevel + 1);
+	// A campaign reload or actor destruction can supersede the transaction from a
+	// callback. Do not publish stale upgrade success into that replacement state.
+	if (!IsValid(this) || IsActorBeingDestroyed() || UpgradeLevel != PurchasedLevel
+		|| GetOwningFaction() != OwnerFaction || GetTerritoryState() != ETerritoryState::Claimed)
+	{
+		return false;
+	}
+	PublishUpgradeLevelChange(OldLevel);
+	if (!IsValid(this) || IsActorBeingDestroyed() || UpgradeLevel != PurchasedLevel) return false;
 
 	if (ShouldLogPropertyEconomy())
 	{
@@ -869,8 +882,15 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 
 void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 {
-	if (!HasAuthority()) return;
-	int32 OldLevel = UpgradeLevel;
+	if (!HasAuthority() || bPurchaseInProgress) return;
+	const int32 OldLevel = UpgradeLevel;
+	ApplyUpgradeLevel(NewLevel);
+	PublishUpgradeLevelChange(OldLevel);
+}
+
+void ATerritoryProperty::ApplyUpgradeLevel(int32 NewLevel)
+{
+	const int32 OldLevel = UpgradeLevel;
 	UpgradeLevel = FMath::Clamp(NewLevel, 0, FMath::Max(0, MaxUpgradeLevel));
 
 	if (OldLevel != UpgradeLevel)
@@ -889,7 +909,14 @@ void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 		{
 			Economy->RefreshProductionSite(this);
 		}
+		ForceNetUpdate();
+	}
+}
 
+void ATerritoryProperty::PublishUpgradeLevelChange(int32 OldLevel)
+{
+	if (OldLevel != UpgradeLevel)
+	{
 		if (ShouldLogPropertyEconomy())
 		{
 			UE_LOG(LogTerritory, Log, TEXT("[PropertyUpgrade] %s set to level %d (was %d)"),
@@ -897,6 +924,5 @@ void ATerritoryProperty::SetUpgradeLevel(int32 NewLevel)
 		}
 
 		OnUpgradeLevelChanged(UpgradeLevel);
-		ForceNetUpdate();
 	}
 }

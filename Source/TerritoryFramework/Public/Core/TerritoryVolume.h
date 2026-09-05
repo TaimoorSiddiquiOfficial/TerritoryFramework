@@ -620,6 +620,14 @@ public:
 	bool CheckStateTransitionConditions(ETerritoryState OldState, ETerritoryState NewState, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 protected:
+	/** Serializes plugin purchases with state validation and garrison reconciliation. */
+	bool bPurchaseInProgress = false;
+	bool IsGameplayMutationInProgress() const
+	{
+		return bPurchaseInProgress || bTransitionInProgress
+			|| bValidatingOwnershipData || bGarrisonMutationInProgress;
+	}
+
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

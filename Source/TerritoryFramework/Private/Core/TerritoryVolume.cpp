@@ -1671,7 +1671,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	// Prevent reentrant commits during the synchronous event bundle.
 	// A delegate listener that calls back into CommitOwnershipData mid-broadcast
 	// would overwrite OwnershipData while the outer call is still firing events.
-	if (bTransitionInProgress || bValidatingOwnershipData) return false;
+	if (IsGameplayMutationInProgress()) return false;
 	// Conditions are callbacks too. The final ownership candidate must not be
 	// validated across a second commit that the outer call would then overwrite.
 	TGuardValue<bool> ValidationGuard(bValidatingOwnershipData, true);
@@ -3137,6 +3137,11 @@ bool ATerritoryVolume::CanSetDesiredGuardCount(const AActor* Requester,
 {
 	OutFailureReason = FText::GetEmpty();
 	OutRecruitmentCost = 0;
+	if (IsGameplayMutationInProgress())
+	{
+		OutFailureReason = FText::FromString(TEXT("A territory mutation is already being committed."));
+		return false;
+	}
 	if (!IsValid(Requester) || !GetWorld() || Requester->GetWorld() != GetWorld()
 		|| NewDesiredGuardCount < 0 || NewDesiredGuardCount > GetMaxGuardCount())
 	{

@@ -220,6 +220,24 @@ signatures changed. Evidence: `Batch16_RedTests`, `Batch16_FinalBuild.log`, `Bat
 The separate exit and entry lists are captured when each phase starts; cross-phase authoring changes
 remain under review. This batch does not claim transaction safety for unrelated purchase paths.
 
+### Batch 17: upgrade purchase callback boundary
+
+The real Narrative currency callback reproduced an old-price nested upgrade and a save containing a
+paid wallet but the previous upgrade level. Property now applies its level and production read model
+without callbacks immediately before Narrative validates/writes the debit. A rejected debit restores
+the unobserved staged level; a successful debit exposes the matching level to currency/save observers.
+Blueprint upgrade notification follows settlement. A transient purchase guard excludes competing
+upgrades, state commits and garrison commands until publication completes. Narrative remains the wallet
+authority; Property remains the level authority. Internal reset/restore calls retain the same writer.
+
+Editor/UHT and all 237 tests passed (230 clean, seven expected-warning, zero failures/skips).
+The regression covers exact price/level, callback-time real Narrative actor and inventory save/load,
+competing mutations, subsequent higher-price upgrades, insufficient funds, free upgrades and clients.
+No save schema or Blueprint signature changes; currency observers now see the committed level.
+Evidence: `Batch17_RedTests` (ten failed assertions), `Batch17_Build.log`, `Batch17_Tests`.
+This does not claim full garrison placement/refund or multi-item recipe atomicity. A campaign reload
+or destroyed actor that supersedes a purchase prevents stale upgrade-success publication.
+
 ### Authored asset validation after batch 15
 
 Validation passed for 113 assets and compilation passed for 72 included Blueprints: zero errors or
