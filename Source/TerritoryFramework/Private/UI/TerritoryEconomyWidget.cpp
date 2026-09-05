@@ -8,6 +8,7 @@
 #include "TimerManager.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "UI/TerritoryProductionWidgets.h"
+#include "UI/TerritoryUITheme.h"
 
 void UTerritoryEconomyWidget::NativeConstruct()
 {
@@ -19,6 +20,24 @@ void UTerritoryEconomyWidget::NativeConstruct()
 			this, PlayerController && PlayerController->GetPawn()
 				? static_cast<AActor*>(PlayerController->GetPawn())
 				: PlayerController);
+	}
+	TerritoryUITheme::ApplyText(EconomyFactionText, TerritoryTypography::CardTitle,
+		FLinearColor(0.94f, 0.93f, 0.89f, 1.f), ETerritoryTextRole::Heading, false);
+	for (UTextBlock* ValueText : {
+		EconomyTreasuryText.Get(), EconomyIncomeText.Get(), EconomyCostsText.Get(),
+		EconomyTerritoryCountText.Get(), EconomyNetText.Get() })
+	{
+		TerritoryUITheme::ApplyText(ValueText, TerritoryTypography::Body,
+			FLinearColor(0.94f, 0.93f, 0.89f, 1.f), ETerritoryTextRole::Body, false);
+	}
+	TerritoryUITheme::ApplyText(EconomyHealthText, TerritoryTypography::Metadata,
+		FLinearColor(0.92f, 0.70f, 0.24f, 1.f), ETerritoryTextRole::Heading, false);
+	for (UTextBlock* MetadataText : {
+		EconomyRecentActivityText.Get(), EconomyProductionSummaryText.Get(),
+		EconomyStorageStatusText.Get() })
+	{
+		TerritoryUITheme::ApplyText(MetadataText, TerritoryTypography::Metadata,
+			FLinearColor(0.64f, 0.68f, 0.67f, 1.f), ETerritoryTextRole::Muted, false);
 	}
 	BindDelegates();
 	RefreshEconomyDisplay();
@@ -207,8 +226,8 @@ void UTerritoryEconomyWidget::RefreshEconomyDisplay()
 	if (EconomyHealthText)
 	{
 		EconomyHealthText->SetText(View.bDeficit
-			? NSLOCTEXT("TerritoryEconomy", "Deficit", "DEFICIT — reduce upkeep or increase income")
-			: NSLOCTEXT("TerritoryEconomy", "Sustainable", "SUSTAINABLE"));
+			? NSLOCTEXT("TerritoryEconomy", "Deficit", "Deficit — reduce upkeep or increase income")
+			: NSLOCTEXT("TerritoryEconomy", "Sustainable", "Sustainable"));
 	}
 	if (EconomyRecentActivityText)
 	{
@@ -226,8 +245,8 @@ void UTerritoryEconomyWidget::RefreshEconomyDisplay()
 	if (EconomyStorageStatusText)
 	{
 		EconomyStorageStatusText->SetText(View.bResourceStorageAvailable
-			? NSLOCTEXT("TerritoryEconomy", "StorageAvailable", "RESOURCE STORAGE ONLINE")
-			: NSLOCTEXT("TerritoryEconomy", "StorageUnavailable", "RESOURCE STORAGE UNAVAILABLE"));
+			? NSLOCTEXT("TerritoryEconomy", "StorageAvailable", "Resource storage online")
+			: NSLOCTEXT("TerritoryEconomy", "StorageUnavailable", "Resource storage unavailable"));
 	}
 	RefreshResourcePanels(View);
 	OnEconomyOperationsUpdated(View);

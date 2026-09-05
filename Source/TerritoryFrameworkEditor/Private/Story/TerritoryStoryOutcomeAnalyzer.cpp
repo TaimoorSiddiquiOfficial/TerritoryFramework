@@ -625,9 +625,20 @@ namespace
 			TEXT("08 Counter Attack > Scheduling > Recapture"));
 	}
 
-	void AddManagementScenario(FTerritoryStoryOutcomeReport& Report,
+	void AddPresentationScenarios(FTerritoryStoryOutcomeReport& Report,
 		const UTerritoryDefinition* Definition)
 	{
+		AddScenario(Report, TEXT("Presentation"), TEXT("Passive gameplay HUD card"),
+			ETerritoryStoryOutcomeCertainty::Configured,
+			TEXT("The local player stands inside this exact loaded and unlocked Territory."),
+			TEXT("Narrative's Gameplay HUD is visible and no Menu, Modal, or Territory cinematic is suppressing passive HUD content."),
+			Definition->bShowGameplayHUD
+				? TEXT("The compact Territory location, owner, state, and capture card may appear.")
+				: TEXT("The passive Territory card stays hidden for this Territory."),
+			TEXT("Locked/unloaded Territories and higher-priority Narrative presentation remain silent regardless of this option."),
+			TEXT("Live notifications, POIs, map/compass markers, Command Center, and management access are unaffected."),
+			TEXT("09 Presentation > Show Passive Gameplay HUD Card"));
+
 		if (!Definition->ManagementPoint.bEnabled) return;
 		AddScenario(Report, TEXT("Presentation"), TEXT("Open Territory management"),
 			ETerritoryStoryOutcomeCertainty::RuntimeConditional,
@@ -744,7 +755,7 @@ FTerritoryStoryOutcomeReport FTerritoryStoryOutcomeAnalyzer::Analyze(
 	AddNewCampaignScenario(Report, Definition);
 	AddAvailabilityScenario(Report, Definition);
 	AddStateRuleScenarios(Report, Definition);
-	AddManagementScenario(Report, Definition);
+	AddPresentationScenarios(Report, Definition);
 
 	if (const UTerritoryPlaceDefinition* Place =
 		Cast<UTerritoryPlaceDefinition>(Definition))

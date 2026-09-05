@@ -8,6 +8,7 @@
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Economy/TerritoryProductionProfile.h"
+#include "Engine/LatentActionManager.h"
 #include "TerritoryUIBlueprintLibrary.generated.h"
 
 class APlayerController;
@@ -349,6 +350,20 @@ class TERRITORYFRAMEWORK_API UTerritoryUIBlueprintLibrary : public UBlueprintFun
 	GENERATED_BODY()
 
 public:
+	/**
+	 * Continue only after Narrative Pro has created the local GameplayHUD through its
+	 * normal possession/PlayerState path. Use before calling a Narrative controller
+	 * parent BeginPlay graph that reads GameplayHUD or LoadingMenu.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|UI|Narrative Pro",
+		meta=(Latent, LatentInfo="LatentInfo", WorldContext="WorldContextObject",
+			DefaultToSelf="PlayerController", AdvancedDisplay="TimeoutSeconds"))
+	static void WaitForNarrativeGameplayHUD(
+		const UObject* WorldContextObject,
+		FLatentActionInfo LatentInfo,
+		APlayerController* PlayerController,
+		float TimeoutSeconds = 15.f);
+
 	/** Push a Territory Narrative-activatable screen onto a Narrative HUD layer. Leave Layer Tag empty to use Narrative's standard Menu layer. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI|CommonUI",
 		meta=(DeterminesOutputType="WidgetClass", AdvancedDisplay="LayerTag"))
@@ -551,6 +566,15 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static FText GetAssaultStateText(ETerritoryAssaultState AssaultState);
 
+	/** Localizable player-facing outcome; never returns the C++ enum identifier. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
+	static FText GetAssaultResolutionText(
+		ETerritoryAssaultResolution AssaultResolution);
+
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Diplomacy")
 	static FText GetDiplomacyStateText(EDiplomacyState DiplomacyState);
+
+	/** Localizable player-facing diplomacy history action. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Diplomacy")
+	static FText GetDiplomacyEventTypeText(EDiplomacyEventType EventType);
 };

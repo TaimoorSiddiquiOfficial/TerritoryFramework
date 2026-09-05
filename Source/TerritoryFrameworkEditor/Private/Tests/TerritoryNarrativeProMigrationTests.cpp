@@ -235,21 +235,15 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 		ParentBeginPlay);
 	if (ParentBeginPlay)
 	{
-		const UEdGraphPin* ExecutePin = ParentBeginPlay->GetExecPin();
-		const UK2Node_CallFunction* ReadinessDelay = ExecutePin
-			&& ExecutePin->LinkedTo.Num() == 1
-			? Cast<UK2Node_CallFunction>(ExecutePin->LinkedTo[0]->GetOwningNode()) : nullptr;
-		TestTrue(TEXT("Narrative local UI initialization waits for possession to create GameplayHUD"),
-			ReadinessDelay
-			&& ReadinessDelay->FunctionReference.GetMemberName() == TEXT("Delay"));
-		if (ReadinessDelay)
-		{
-			const UEdGraphPin* DurationPin = ReadinessDelay->FindPin(TEXT("Duration"));
-			TestTrue(TEXT("GameplayHUD readiness delay is a positive bounded frame delay"),
-				DurationPin
-				&& FCString::Atof(*DurationPin->DefaultValue) > 0.f
-				&& FCString::Atof(*DurationPin->DefaultValue) <= 0.25f);
-		}
+		const UEdGraphPin* ParentExecuteInput = ParentBeginPlay->GetExecPin();
+		const UK2Node_CallFunction* ReadinessGate = ParentExecuteInput
+			&& ParentExecuteInput->LinkedTo.Num() == 1
+			? Cast<UK2Node_CallFunction>(
+				ParentExecuteInput->LinkedTo[0]->GetOwningNode()) : nullptr;
+		TestTrue(TEXT("Narrative parent BeginPlay waits for its GameplayHUD lifecycle"),
+			ReadinessGate
+			&& ReadinessGate->FunctionReference.GetMemberName()
+				== TEXT("WaitForNarrativeGameplayHUD"));
 	}
 
 	const TArray<UK2Node_CallFunction*> RegisterLayerCalls =
@@ -490,10 +484,31 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			&& FarmDefinition->StoryOwner.bEnabled);
 	}
 
+	const UTerritoryCounterAttackProfile* BlacksmithCounterProfile =
+		Blacksmith->GetCounterAttackProfile();
 	TestNotNull(TEXT("Blacksmith has a physical counterattack profile"),
-		Blacksmith->GetCounterAttackProfile());
+		BlacksmithCounterProfile);
 	TestNotNull(TEXT("Farm has a physical counterattack profile"),
 		Farm->GetCounterAttackProfile());
+	if (BlacksmithCounterProfile)
+	{
+		const FTerritoryFactionAssaultConfig* BanditForce =
+			BlacksmithCounterProfile->FactionForces.FindByPredicate(
+				[](const FTerritoryFactionAssaultConfig& Force)
+				{
+					return Force.Faction.ToString()
+						== TEXT("Narrative.Factions.Bandits");
+				});
+		TestNotNull(TEXT("Blacksmith profile has the Bandit vehicle force"),
+			BanditForce);
+		if (BanditForce)
+		{
+			TestEqual(TEXT("Blacksmith profile plans two four-person cars"),
+				BanditForce->PlannedForce, 8);
+			TestEqual(TEXT("Each Blacksmith reserve wave fills one car"),
+				BanditForce->WaveSize, 4);
+		}
+	}
 
 	const FTerritoryAssaultApproach* BlacksmithRoute =
 		Blacksmith->GetCounterAttackApproaches().FindByPredicate(
@@ -521,8 +536,8 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		TestTrue(TEXT("Blacksmith vehicle route references the project Sedan"),
 			BlacksmithRoute->VehicleClass.ToSoftObjectPath().ToString()
 				.Contains(TEXT("BPV_Sedan_Mass")));
-		TestEqual(TEXT("Blacksmith permits one vehicle deployment per assault route"),
-			BlacksmithRoute->MaximumVehicleDeployments, 1);
+		TestEqual(TEXT("Blacksmith permits two vehicle deployments per assault route"),
+			BlacksmithRoute->MaximumVehicleDeployments, 2);
 
 		const FVector WorldDropOff =
 			(BlacksmithRoute->RelativeVehicleDropOffTransform

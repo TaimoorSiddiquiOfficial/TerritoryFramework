@@ -19,10 +19,13 @@ ATerritoryDistractionProjectile::ATerritoryDistractionProjectile()
 	Collision->SetCollisionProfileName(UCollisionProfile::BlockAllDynamic_ProfileName);
 	Collision->SetGenerateOverlapEvents(false);
 	Collision->SetNotifyRigidBodyCollision(true);
+	Collision->SetCanEverAffectNavigation(false);
+	Collision->CanCharacterStepUpOn = ECB_No;
 
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Visual"));
 	Visual->SetupAttachment(Collision);
 	Visual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Visual->SetCanEverAffectNavigation(false);
 
 	ProjectileMovement = CreateDefaultSubobject<UProjectileMovementComponent>(
 		TEXT("ProjectileMovement"));

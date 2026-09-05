@@ -25,6 +25,7 @@
 #include "AI/NPCDefinition.h"
 #include "DialogueBlueprint.h"
 #include "AI/Activities/NPCGoalItem.h"
+#include "Vehicles/MountComponent.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 #include "Components/ShapeComponent.h"
 #include "Engine/Level.h"
@@ -1941,8 +1942,31 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 						*Label, *Approach.ApproachID.ToString(),
 						*Force.Faction.ToString()));
 				}
+				else
+				{
+					// Narrative vehicles can author their seats in Blueprint. Include
+					// SCS templates and inherited overrides without spawning a vehicle.
+					const UMountComponent* Mount =
+						AActor::GetActorClassDefaultComponent<UMountComponent>(VehicleClass);
+					if (!Mount || Mount->InteractionSlots.IsEmpty())
+					{
+						OutErrors.Add(FString::Printf(
+							TEXT("%s: vehicle approach '%s' resolves %s for faction %s, but it has no authored Narrative mount seats"),
+							*Label, *Approach.ApproachID.ToString(),
+							*GetNameSafe(VehicleClass), *Force.Faction.ToString()));
+					}
+					else if (Mount->InteractionSlots.Num() < Approach.VehicleOccupantCapacity)
+					{
+						OutWarnings.Add(FString::Printf(
+							TEXT("%s: vehicle approach '%s' requests %d occupants, but %s has only %d Narrative mount seats; runtime will preserve the remaining finite force for a later deployment"),
+							*Label, *Approach.ApproachID.ToString(),
+							Approach.VehicleOccupantCapacity, *GetNameSafe(VehicleClass),
+							Mount->InteractionSlots.Num()));
+					}
+				}
 			}
 			if (Approach.MaximumVehicleDeployments <= 0
+				|| Approach.VehicleOccupantCapacity <= 0
 				|| !FMath::IsFinite(Approach.VehicleMaximumDriveSpeed)
 				|| Approach.VehicleMaximumDriveSpeed < 0.f
 				|| Approach.VehicleAwareness.BrakingDistance

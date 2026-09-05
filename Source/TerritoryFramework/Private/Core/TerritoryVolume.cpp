@@ -1187,6 +1187,13 @@ UTerritoryStealthProfile* ATerritoryVolume::GetActiveStealthProfile() const
 	return TerritoryDefinition ? TerritoryDefinition->DefaultStealthProfile : nullptr;
 }
 
+bool ATerritoryVolume::ShouldShowGameplayHUD() const
+{
+	// Missing Definitions are invalid authoring, but preserving the historical
+	// visible behavior makes the failure diagnosable instead of silently hiding it.
+	return !TerritoryDefinition || TerritoryDefinition->bShowGameplayHUD;
+}
+
 bool ATerritoryVolume::GetActiveTerritoryAudioConfig(
 	FTerritoryStateAudioConfig& OutConfig) const
 {

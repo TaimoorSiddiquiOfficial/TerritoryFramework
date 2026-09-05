@@ -79,7 +79,8 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 	StatusDot = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("LiveEventStatusDot"));
 	StatusDot->SetText(FText::FromString(TEXT("●")));
-	SetLiveEventText(StatusDot, 12, FLinearColor(0.08f, 0.88f, 0.62f, 1.f));
+	SetLiveEventText(StatusDot, TerritoryTypography::Body,
+		FLinearColor(0.08f, 0.88f, 0.62f, 1.f));
 	if (UHorizontalBoxSlot* DotSlot = Row->AddChildToHorizontalBox(StatusDot))
 	{
 		DotSlot->SetPadding(FMargin(0.f, 1.f, 9.f, 0.f));
@@ -118,7 +119,7 @@ void UTerritoryLiveEventRowWidget::BuildNativeLayout()
 		TerritoryUITheme::ApplyButton(WaypointButton);
 		WaypointButton->SetMinDimensions(0, 0);
 		WaypointButton->SetButtonText(NSLOCTEXT(
-			"TerritoryLiveEvents", "SetWaypoint", "TRACK"));
+			"TerritoryLiveEvents", "SetWaypoint", "Track"));
 		ButtonSize->SetContent(WaypointButton);
 		if (UHorizontalBoxSlot* ButtonSlot = Row->AddChildToHorizontalBox(ButtonSize))
 		{
@@ -161,7 +162,7 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 	if (HeadlineText)
 	{
 		HeadlineText->SetText(LiveEvent.Headline);
-		SetLiveEventText(HeadlineText, 13,
+		SetLiveEventText(HeadlineText, TerritoryTypography::Body,
 			LiveEvent.bExpired ? Muted : FLinearColor(0.96f, 0.95f, 0.91f, 1.f));
 	}
 	if (DetailText)
@@ -169,7 +170,7 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 		DetailText->SetText(LiveEvent.Detail);
 		DetailText->SetVisibility(LiveEvent.Detail.IsEmpty()
 			? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
-		SetLiveEventText(DetailText, 10,
+		SetLiveEventText(DetailText, TerritoryTypography::Metadata,
 			LiveEvent.bExpired ? Muted : FLinearColor(0.66f, 0.65f, 0.61f, 1.f));
 	}
 	if (ImpactText)
@@ -177,17 +178,17 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 		TArray<FString> Impacts;
 		if (LiveEvent.IncomeDelta != 0)
 		{
-			Impacts.Add(FString::Printf(TEXT("INCOME %+lld / CYCLE"),
+			Impacts.Add(FString::Printf(TEXT("Income %+lld / cycle"),
 				static_cast<long long>(LiveEvent.IncomeDelta)));
 		}
 		if (LiveEvent.UpkeepDelta != 0)
 		{
-			Impacts.Add(FString::Printf(TEXT("UPKEEP %+lld / CYCLE"),
+			Impacts.Add(FString::Printf(TEXT("Upkeep %+lld / cycle"),
 				static_cast<long long>(LiveEvent.UpkeepDelta)));
 		}
 		if (LiveEvent.CurrencyDelta != 0)
 		{
-			Impacts.Add(FString::Printf(TEXT("FUNDS %+lld"),
+			Impacts.Add(FString::Printf(TEXT("Funds %+lld"),
 				static_cast<long long>(LiveEvent.CurrencyDelta)));
 		}
 		TArray<FGameplayTag> CapabilityTags;
@@ -199,7 +200,8 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 		ImpactText->SetText(FText::FromString(FString::Join(Impacts, TEXT("  •  "))));
 		ImpactText->SetVisibility(Impacts.IsEmpty()
 			? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
-		SetLiveEventText(ImpactText, 9, LiveEvent.bExpired ? Muted : Active);
+		SetLiveEventText(ImpactText, TerritoryTypography::Caption,
+			LiveEvent.bExpired ? Muted : Active);
 	}
 	if (WaypointButton)
 	{
@@ -214,9 +216,9 @@ void UTerritoryLiveEventRowWidget::RefreshEvent()
 			&& UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
 				GetOwningPlayer(), Territory);
 		WaypointButton->SetButtonText(bTracked
-			? NSLOCTEXT("TerritoryLiveEvents", "WaypointTracked", "TRACKED  ✓")
-			: NSLOCTEXT("TerritoryLiveEvents", "SetWaypoint", "TRACK"));
-		WaypointButton->SetIsSelected(bTracked);
+			? NSLOCTEXT("TerritoryLiveEvents", "WaypointTracked", "Tracked  ✓")
+			: NSLOCTEXT("TerritoryLiveEvents", "SetWaypoint", "Track"));
+		TerritoryUITheme::SetTabSelected(WaypointButton, bTracked);
 		WaypointButton->SetIsEnabled(bEnabled);
 		WaypointButton->SetVisibility(bEnabled
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);

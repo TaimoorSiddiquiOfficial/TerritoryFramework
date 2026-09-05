@@ -8,6 +8,7 @@
 class UNarrativeCommonButtonBase;
 class UCommonButtonStyle;
 class UCommonTextStyle;
+class UFont;
 class UTexture2D;
 class ATerritoryRoadGuide;
 class ATerritoryRoadTrafficControls;
@@ -314,6 +315,17 @@ public:
 	/** Quiet explanatory/empty-state style. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
 	TSoftClassPtr<UCommonTextStyle> TerritoryMutedTextStyle;
+
+	/**
+	 * Readable interface font used for headings, body copy, metadata, and generated
+	 * Territory rows. Display titles may still use the configured Narrative title
+	 * style, but paragraphs should not inherit a large decorative font.
+	 * Easy example: keep Narrative's Roboto Condensed font here so a Benefits
+	 * description remains easy to scan while the District title keeps its theme.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Territory Interface Font"))
+	TSoftObjectPtr<UFont> TerritoryInterfaceFont;
 
 	/**
 	 * Multiplies Territory text sizes after the Narrative CommonUI style is applied.

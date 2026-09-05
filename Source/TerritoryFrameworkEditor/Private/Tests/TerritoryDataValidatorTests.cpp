@@ -33,6 +33,8 @@
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "Vehicles/MountComponent.h"
+#include "Vehicles/NarrativeVehicleBase.h"
 #include "ZoneShapeActor.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectNPCDefinitionIdentityRegression,
@@ -635,6 +637,92 @@ bool FTFNarrativeDialogueCinematicValidation::RunTest(const FString& Parameters)
 		{
 			return Error.Contains(TEXT("no Level Sequence"));
 		}));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFBlueprintVehicleSeatsValidation,
+	"TerritoryFramework.Editor.DataValidation.BlueprintVehicleMountSeats",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFBlueprintVehicleSeatsValidation::RunTest(const FString& Parameters)
+{
+	UClass* SedanClass = LoadClass<ANarrativeVehicleBase>(nullptr,
+		TEXT("/NarrativePro/Pro/Core/BP/Vehicles/Demo/vehicle03_Car/BPV_Sedan.BPV_Sedan_C"));
+	if (!TestNotNull(TEXT("Narrative sedan integration fixture exists"), SedanClass)) return false;
+	TestNull(TEXT("The regression fixture authors its mount outside the native CDO"),
+		SedanClass->GetDefaultObject<ANarrativeVehicleBase>()->FindComponentByClass<UMountComponent>());
+	const UMountComponent* Mount = AActor::GetActorClassDefaultComponent<UMountComponent>(SedanClass);
+	if (!TestNotNull(TEXT("Unreal resolves the authored Blueprint mount template"), Mount)) return false;
+	TestEqual(TEXT("Narrative sedan authors four seats"), Mount->InteractionSlots.Num(), 4);
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::EditorPreview, false);
+	if (!TestNotNull(TEXT("Vehicle validation world exists"), World)) return false;
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryProperty* Territory = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Vehicle validation Territory exists"), Territory))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	UTerritoryPlaceDefinition* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Definition->StableTerritoryGUID = FGuid(11, 12, 13, 14);
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	UTerritoryCounterAttackProfile* Profile = NewObject<UTerritoryCounterAttackProfile>(Definition);
+	UNPCDefinition* Attacker = NewObject<UNPCDefinition>(Profile);
+	Attacker->NPCClassPath = ATerritoryAssaultCharacter::StaticClass();
+	Attacker->bAllowMultipleInstances = true;
+	FTerritoryFactionAssaultConfig Force;
+	Force.Faction = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Bandits"), false);
+	Force.AttackerDefinition = Attacker;
+	Profile->FactionForces = {Force};
+	Definition->CounterAttackProfile = Profile;
+	FTerritoryAssaultApproach Approach;
+	Approach.ApproachID = TEXT("BlueprintSeats");
+	Approach.EntryType = ETerritoryAssaultEntryType::NarrativeVehicle;
+	Approach.VehicleClass = SedanClass;
+	Approach.VehicleOccupantCapacity = 4;
+	Definition->CounterAttackApproaches = {Approach};
+	TestTrue(TEXT("Vehicle validation Definition applies"), Definition->ApplyToTerritory(Territory));
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	TestTrue(TEXT("Blueprint-authored Narrative seats pass Territory validation"),
+		UTerritoryDataValidator::ValidateTerritory(Territory, Errors, Warnings));
+	for (const FString& Error : Errors) AddError(Error);
+
+	Approach.VehicleOccupantCapacity = 6;
+	Definition->CounterAttackApproaches = {Approach};
+	Definition->ApplyToTerritory(Territory);
+	Errors.Reset();
+	Warnings.Reset();
+	TestTrue(TEXT("A smaller authored seat count remains valid for finite later deployment"),
+		UTerritoryDataValidator::ValidateTerritory(Territory, Errors, Warnings));
+	TestTrue(TEXT("Capacity warning uses the Blueprint's actual four seats"),
+		Warnings.ContainsByPredicate([](const FString& Warning)
+		{
+			return Warning.Contains(TEXT("requests 6 occupants"))
+				&& Warning.Contains(TEXT("only 4 Narrative mount seats"));
+		}));
+
+	Approach.VehicleClass = ANarrativeVehicleBase::StaticClass();
+	Definition->CounterAttackApproaches = {Approach};
+	Definition->ApplyToTerritory(Territory);
+	Errors.Reset();
+	Warnings.Reset();
+	TestFalse(TEXT("A vehicle without any mount remains invalid"),
+		UTerritoryDataValidator::ValidateTerritory(Territory, Errors, Warnings));
+	TestTrue(TEXT("Missing mount reports the actionable seat error"),
+		Errors.ContainsByPredicate([](const FString& Error)
+		{
+			return Error.Contains(TEXT("no authored Narrative mount seats"));
+		}));
+	int32 SpawnedVehicles = 0;
+	for (TActorIterator<ANarrativeVehicleBase> It(World); It; ++It) ++SpawnedVehicles;
+	TestEqual(TEXT("Seat validation never spawns a live vehicle"), SpawnedVehicles, 0);
+	World->DestroyWorld(false);
 	return true;
 }
 

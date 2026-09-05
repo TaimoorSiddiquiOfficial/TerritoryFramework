@@ -18,14 +18,14 @@ enum class EDiplomacyState : uint8
 UENUM(BlueprintType)
 enum class EDiplomacyEventType : uint8
 {
-	DeclaredWar,
-	DeclaredPeace,
-	FormedAlliance,
-	BrokeAlliance,
-	SignedTradeAgreement,
-	ExpiredTreaty,
-	BrokeCeasefire,
-	SignedNonAggression
+	DeclaredWar UMETA(DisplayName="War Declared"),
+	DeclaredPeace UMETA(DisplayName="Peace Declared"),
+	FormedAlliance UMETA(DisplayName="Alliance Formed"),
+	BrokeAlliance UMETA(DisplayName="Alliance Ended"),
+	SignedTradeAgreement UMETA(DisplayName="Trade Agreement Signed"),
+	ExpiredTreaty UMETA(DisplayName="Treaty Expired"),
+	BrokeCeasefire UMETA(DisplayName="Ceasefire Broken"),
+	SignedNonAggression UMETA(DisplayName="Non-Aggression Pact Signed")
 };
 
 USTRUCT(BlueprintType)

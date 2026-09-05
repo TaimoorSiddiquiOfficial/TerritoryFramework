@@ -9,6 +9,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryWorldState.h"
 #include "AIController.h"
+#include "ArsenalSettings.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "NarrativeGameplayTags.h"
@@ -286,6 +287,22 @@ FText UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(const FGameplayTag& 
 	if (!Tag.IsValid())
 	{
 		return FText::GetEmpty();
+	}
+
+	// Narrative Pro owns project-wide player-facing Gameplay Tag names through
+	// Project Settings > Narrative Pro > GAS > Tag Friendly Display Names.
+	// Territory respects that authoring first so the same faction, capability,
+	// equipment, and input tag is named consistently in every Narrative screen.
+	if (const UArsenalSettings* NarrativeSettings = GetDefault<UArsenalSettings>())
+	{
+		if (const FText* NarrativeDisplayName =
+			NarrativeSettings->TagFriendlyDisplayNames.Find(Tag))
+		{
+			if (!NarrativeDisplayName->IsEmpty())
+			{
+				return *NarrativeDisplayName;
+			}
+		}
 	}
 
 	FString FriendlyName = Tag.ToString();

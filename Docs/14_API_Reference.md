@@ -127,6 +127,7 @@ values for runtime queries; it is not a supported Blueprint authoring fallback.
 | GuardSpawnPoints | TArray<ATerritoryGuardSpawnPoint*> | Territory\|Guards | — | — | Explicit post references; the unique resolved union is active capacity, one guard per point |
 | ControlMode | ETerritoryControlMode | Definition asset | — | — | Class-fixed: Place Independent; City/District AggregateOnly |
 | StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Definition asset | — | — | Per-state entry/exit conditions/events, cloned privately into each live actor |
+| bShowGameplayHUD | bool | Definition asset, `09 Presentation` | — | — | Shows only the passive Territory HUD card for this exact Territory; City defaults false, District/Place true |
 
 Legacy `bStartsLocked`, `LockConditions`, actor-side `StateConfigs`, and migration functions are
 removed. Definitions use `InitialAvailability` and the Locked row's Exit Conditions.
@@ -169,6 +170,7 @@ removed. Definitions use `InitialAvailability` and the Locked row's Exit Conditi
 | GetSpawnedGuardCount | int32 | Territory\|Guards |
 | HasGuardsAlive | bool | Territory\|Guards |
 | GetGuardSpawnPoints | Array<TerritoryGuardSpawnPoint*> | Territory\|Guards |
+| ShouldShowGameplayHUD | bool | Territory\|UI |
 | GetActiveTerritoryAudioConfig(OutConfig) | bool | Territory\|Audio |
 | GetDesiredGuardCount | int32 | Territory\|Guards |
 | GetMaxGuardCount | int32 | Territory\|Guards (unique loaded spawn-point count) |
@@ -868,6 +870,7 @@ Shared read-model and Narrative CommonUI bridge. It owns no gameplay state.
 
 | Function | Returns | Description |
 |---|---|---|
+| WaitForNarrativeGameplayHUD | latent void | Continue after Narrative's local possession/PlayerState path creates GameplayHUD; non-local server controllers bypass immediately |
 | OpenTerritoryMenu | UTerritoryActivatableWidget* | Push a Territory screen into a registered Narrative HUD layer |
 | BuildDistrictOperationsView | bool + OutView | Build one viewer-relative district projection |
 | BuildHierarchyOperationsView | bool + OutView | Build one City, District, or Place projection |
@@ -883,6 +886,8 @@ Shared read-model and Narrative CommonUI bridge. It owns no gameplay state.
 | GetProductionStatusText | FText | Localizable production-state label |
 | GetThreatLevelText | FText | Localizable threat label |
 | GetAssaultStateText | FText | Localizable assault-state label |
+| GetAssaultResolutionText | FText | Localizable player-facing assault outcome |
+| GetDiplomacyEventTypeText | FText | Localizable diplomacy-event label |
 | GetDiplomacyStateText | FText | Localizable diplomacy-state label |
 
 `ETerritoryOperationsFilter` values are All, Unlocked, Available, Owned, Manageable, UnderAttack, Contested, Locked, FinancialRisk, Producing, ProductionBlocked, MissingInputs, and StorageFull. `ETerritoryThreatLevel` values are None, Watch, Warning, and Critical.
@@ -1205,6 +1210,9 @@ Server-authoritative scheduler for deterministic, finite physical assaults. It n
 
 `UTerritoryDefinitionEditorLibrary` also exposes:
 
+- **Migrate Narrative Controller HUD Readiness** — idempotently replaces the old fixed Delay
+  before a project controller's parent BeginPlay call with Territory's Narrative HUD lifecycle
+  gate; it refuses unexpected graph layouts instead of overwriting authored logic.
 - **Align Attack Damage Effect With Narrative Pro** — rewrites a project Gameplay Effect's
   Narrative `AttackDamage` SetByCaller modifier to `SetByCaller.AttackDamage`.
 - **Ensure Straight Vehicle Approach Road** — creates or updates a stable two-point ZoneShape
@@ -1604,9 +1612,14 @@ it returns the actor's real Narrative factions. It never mutates `ANarrativePlay
 | Counterattack | `CounterAttackCampaignSeed=1337`, `CounterAttackUpdateInterval=2`, `MaxConcurrentScheduledAssaults=8`, `MaxConcurrentAssaultsPerFaction=2`, `MaxLiveCounterAttackNPCs=24`, `MaxRetainedAssaultRecords=100` |
 | Spatial | `SpatialCellSize=2000` Unreal units |
 | Guards | `DefaultPatrolArrivalThreshold=100`, `DefaultPatrolAcceptanceRadius=50`, `DefaultPatrolWaitTime=2`, `MaxPatrolRouteNodes=32` |
-| Identity/UI | `DefaultPlayerFaction`, `DefaultNarrativeButtonClass` |
+| Identity/UI | `DefaultPlayerFaction`, `DefaultNarrativeButtonClass`, `DefaultTerritoryButtonStyle`, `DefaultTerritoryTextStyle`, `TerritoryTitleTextStyle`, `TerritoryHeadingTextStyle`, `TerritoryMutedTextStyle`, `TerritoryInterfaceFont` (Narrative Roboto Condensed by default) |
 
 `EconomyStartingGold` and `MaxCaptureHistory` are deprecated, unused compatibility properties scheduled for removal in v0.3.0.
+
+`TerritoryInterfaceFont` controls the readable face used by generated Command Center headings,
+body text, metadata, list rows, and controls. The configured CommonText styles still supply theme
+identity and state colors; generated text detaches from the style before final synchronization so
+the style cannot overwrite the Territory type scale.
 
 ### Debug Settings
 

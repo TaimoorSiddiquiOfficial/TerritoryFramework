@@ -20,10 +20,11 @@
 
 namespace
 {
-	void StyleGeneratedManagementText(UTextBlock* Text, int32 FontSize, const FLinearColor& Color)
+	void StyleGeneratedManagementText(UTextBlock* Text, int32 FontSize,
+		const FLinearColor& Color,
+		ETerritoryTextRole Role = ETerritoryTextRole::Body)
 	{
-		TerritoryUITheme::ApplyText(Text, FontSize, Color,
-			FontSize >= 16 ? ETerritoryTextRole::Heading : ETerritoryTextRole::Muted);
+		TerritoryUITheme::ApplyText(Text, FontSize, Color, Role);
 	}
 }
 
@@ -42,20 +43,81 @@ void UTerritoryDistrictManagementWidget::InitializeManagement(
 void UTerritoryDistrictManagementWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	const FLinearColor PrimaryText(0.94f, 0.93f, 0.89f, 1.f);
+	const FLinearColor MutedText(0.62f, 0.66f, 0.65f, 1.f);
+	const FLinearColor AccentText(0.92f, 0.70f, 0.24f, 1.f);
+	auto ThemeTextByName = [this](const FName Name, int32 FontSize,
+		const FLinearColor& Color, ETerritoryTextRole Role,
+		const FText& Replacement = FText::GetEmpty())
+	{
+		if (!WidgetTree) return;
+		if (UTextBlock* Text = Cast<UTextBlock>(WidgetTree->FindWidget(Name)))
+		{
+			if (!Replacement.IsEmpty()) Text->SetText(Replacement);
+			TerritoryUITheme::ApplyText(Text, FontSize, Color, Role);
+		}
+	};
+
+	ThemeTextByName(TEXT("CommandLabel"), TerritoryTypography::Caption,
+		AccentText, ETerritoryTextRole::Heading,
+		NSLOCTEXT("TerritoryManagement", "CommandEyebrow", "District command"));
+	ThemeTextByName(TEXT("DistrictNameText"), TerritoryTypography::PanelTitle,
+		PrimaryText, ETerritoryTextRole::Title);
+	ThemeTextByName(TEXT("StatusText"), TerritoryTypography::Metadata,
+		MutedText, ETerritoryTextRole::Muted);
+	ThemeTextByName(TEXT("SecurityHeading"), TerritoryTypography::SectionTitle,
+		PrimaryText, ETerritoryTextRole::Heading,
+		NSLOCTEXT("TerritoryManagement", "SecurityHeading", "Security and garrison"));
+	ThemeTextByName(TEXT("EconomyHeading"), TerritoryTypography::SectionTitle,
+		PrimaryText, ETerritoryTextRole::Heading,
+		NSLOCTEXT("TerritoryManagement", "EconomyHeading", "Local economy"));
+	for (const TPair<FName, FText>& Label : {
+		TPair<FName, FText>(TEXT("OwnerRowLabel"),
+			NSLOCTEXT("TerritoryManagement", "OwnerLabel", "Owner")),
+		TPair<FName, FText>(TEXT("StateRowLabel"),
+			NSLOCTEXT("TerritoryManagement", "StatusLabel", "Status")),
+		TPair<FName, FText>(TEXT("TreasuryRowLabel"),
+			NSLOCTEXT("TerritoryManagement", "FundsLabel", "Available funds")),
+		TPair<FName, FText>(TEXT("EarningsRowLabel"),
+			NSLOCTEXT("TerritoryManagement", "IncomeLabel", "Income / cycle")),
+		TPair<FName, FText>(TEXT("GuardCostRowLabel"),
+			NSLOCTEXT("TerritoryManagement", "GuardCostLabel", "Recruit / upkeep")) })
+	{
+		ThemeTextByName(Label.Key, TerritoryTypography::Metadata,
+			AccentText, ETerritoryTextRole::Heading, Label.Value);
+	}
+	for (const FName ValueName : { FName(TEXT("OwnerText")), FName(TEXT("StateText")),
+		FName(TEXT("TreasuryText")), FName(TEXT("EarningsText")),
+		FName(TEXT("GuardCostText")) })
+	{
+		ThemeTextByName(ValueName, TerritoryTypography::Body,
+			PrimaryText, ETerritoryTextRole::Body);
+	}
+	for (const FName DetailName : { FName(TEXT("GuardCountText")),
+		FName(TEXT("ReserveGuardText")), FName(TEXT("ThreatText")),
+		FName(TEXT("AvailabilityText")), FName(TEXT("NetIncomeText")),
+		FName(TEXT("ProductionText")) })
+	{
+		ThemeTextByName(DetailName, TerritoryTypography::Metadata,
+			MutedText, ETerritoryTextRole::Muted);
+	}
 	if (AddGuardButton)
 	{
+		TerritoryUITheme::ApplyButton(AddGuardButton);
 		AddGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictManagementWidget::HandleAddGuardClicked);
-		AddGuardButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "AddGuard", "ADD GUARD"));
+		AddGuardButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "AddGuard", "Add guard"));
 	}
 	if (RemoveGuardButton)
 	{
+		TerritoryUITheme::ApplyButton(RemoveGuardButton);
 		RemoveGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictManagementWidget::HandleRemoveGuardClicked);
-		RemoveGuardButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "RemoveGuard", "REMOVE GUARD"));
+		RemoveGuardButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "RemoveGuard", "Remove guard"));
 	}
 	if (CloseButton)
 	{
+		TerritoryUITheme::ApplyButton(CloseButton);
 		CloseButton->OnClicked().AddUObject(this, &UTerritoryDistrictManagementWidget::HandleCloseClicked);
-		CloseButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "Close", "CLOSE"));
+		CloseButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "Close", "Close"));
 	}
 	BuildGarrisonControls();
 	BindManagementComponent();
@@ -142,8 +204,9 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	UTextBlock* Heading = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LocalGarrisonHeading"));
 	Heading->SetText(NSLOCTEXT("TerritoryManagement", "LocalGarrisonHeading",
-		"GARRISON TARGET & LOCAL PROFIT / LOSS"));
-	StyleGeneratedManagementText(Heading, 16, FLinearColor(0.95f, 0.96f, 0.95f, 1.f));
+		"Garrison staffing plan"));
+	StyleGeneratedManagementText(Heading, TerritoryTypography::SectionTitle,
+		FLinearColor(0.95f, 0.96f, 0.95f, 1.f), ETerritoryTextRole::Heading);
 	Host->AddChild(Heading);
 	GarrisonTargetSelector = WidgetTree->ConstructWidget<UNarrativeComboBoxString>(
 		UNarrativeComboBoxString::StaticClass(), TEXT("LocalGarrisonTargetSelector"));
@@ -166,7 +229,8 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	Host->AddChild(GuardTargetSpinBox);
 	GarrisonTargetPreview = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LocalGarrisonPreview"));
-	StyleGeneratedManagementText(GarrisonTargetPreview, 14, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
+	StyleGeneratedManagementText(GarrisonTargetPreview, TerritoryTypography::Body,
+		FLinearColor(0.90f, 0.89f, 0.85f, 1.f));
 	Host->AddChild(GarrisonTargetPreview);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -183,7 +247,7 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	ApplyGuardTargetButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("ApplyLocalGuardTargetButton"));
 	ApplyTerritoryStyle(ApplyGuardTargetButton);
-	ApplyGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "ApplyLocalTarget", "APPLY"));
+	ApplyGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "ApplyLocalTarget", "Apply plan"));
 	ApplyGuardTargetButton->SetToolTipText(NSLOCTEXT("TerritoryManagement", "ApplyLocalTargetTip",
 		"Submit this exact staffing target to the authoritative server."));
 	ApplyGuardTargetButton->OnClicked().AddUObject(this,
@@ -192,7 +256,7 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	ZeroGuardTargetButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("ZeroLocalGuardTargetButton"));
 	ApplyTerritoryStyle(ZeroGuardTargetButton);
-	ZeroGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "ZeroLocalTarget", "SET 0"));
+	ZeroGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "ZeroLocalTarget", "Empty post"));
 	ZeroGuardTargetButton->SetToolTipText(NSLOCTEXT("TerritoryManagement", "ZeroLocalTargetTip",
 		"Withdraw this garrison and reduce its future upkeep to zero."));
 	ZeroGuardTargetButton->OnClicked().AddUObject(this,
@@ -201,7 +265,7 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 	MaxGuardTargetButton = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("MaxLocalGuardTargetButton"));
 	ApplyTerritoryStyle(MaxGuardTargetButton);
-	MaxGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "MaxLocalTarget", "SET MAX"));
+	MaxGuardTargetButton->SetButtonText(NSLOCTEXT("TerritoryManagement", "MaxLocalTarget", "Full capacity"));
 	MaxGuardTargetButton->SetToolTipText(NSLOCTEXT("TerritoryManagement", "MaxLocalTargetTip",
 		"Set this garrison to its authored physical capacity."));
 	MaxGuardTargetButton->OnClicked().AddUObject(this,
@@ -291,10 +355,9 @@ void UTerritoryDistrictManagementWidget::RefreshGarrisonControls()
 	for (const FTerritoryGarrisonOperationsView& Garrison : OperationsView.GarrisonTargets)
 	{
 		if (!Garrison.Territory) continue;
-		const FString Option = FString::Printf(TEXT("%s — %s [%s]"),
+		const FString Option = FString::Printf(TEXT("%s — %s"),
 			*Garrison.DisplayName.ToString(),
-			Garrison.bDistrictGarrison ? TEXT("District") : TEXT("Property"),
-			*Garrison.TerritoryTag.ToString());
+			Garrison.bDistrictGarrison ? TEXT("District command") : TEXT("Property post"));
 		NewOptions.Add(Option, Garrison.Territory);
 		NewOptionOrder.Add(Option);
 		if (Preferred.Get() == Garrison.Territory) SelectedGarrisonTarget = Garrison.Territory;
@@ -380,8 +443,9 @@ void UTerritoryDistrictManagementWidget::UpdateGarrisonPreview()
 			const int64 Upkeep = static_cast<int64>(Proposed) * View.UpkeepPerGuard;
 			GarrisonTargetPreview->SetText(FText::Format(
 				NSLOCTEXT("TerritoryManagement", "LocalGarrisonPreview",
-					"{0}: active {1}, target {2} -> {3}, max {4}, reserve {5}, pending {6}\n"
-					"Recruitment {7}; upkeep {8}/cycle; income {9}; net {10}"),
+					"{0}\nActive {1}  •  Assigned {2} -> {3}  •  Capacity {4}\n"
+					"Reserve {5}  •  Deploying {6}  •  Recruitment {7}\n"
+					"Income {9} / cycle  •  Upkeep {8} / cycle  •  Projected net {10}"),
 				View.DisplayName, FText::AsNumber(View.ActiveGuards), FText::AsNumber(View.DesiredGuards),
 				FText::AsNumber(Proposed), FText::AsNumber(View.MaximumGuards),
 				FText::AsNumber(View.ReserveGuards), FText::AsNumber(View.PendingDeployments),
@@ -429,7 +493,8 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	{
 		GuardCountText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryManagement", "GuardCounts",
-				"District total: active {0} / target {1} / capacity {2}\nSelected {3}: active {4} / target {5} / capacity {6}"),
+				"District defence  •  {0} active / {1} assigned / {2} capacity\n"
+				"{3}  •  {4} active / {5} assigned / {6} capacity"),
 			FText::AsNumber(OperationsView.ActiveGuards), FText::AsNumber(OperationsView.DesiredGuards),
 			FText::AsNumber(OperationsView.MaximumGuards),
 			bHasSelectedGarrison ? SelectedGarrison.DisplayName : FText::GetEmpty(),
@@ -440,7 +505,7 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	{
 		GuardCostText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryManagement", "GuardCosts",
-				"Recruit {0} each | Upkeep {1} each / cycle"),
+				"Recruit {0} per guard  •  Upkeep {1} per guard / cycle"),
 			FText::AsNumber(SelectedGarrison.RecruitmentCostPerGuard),
 			FText::AsNumber(SelectedGarrison.UpkeepPerGuard)));
 	}
@@ -449,13 +514,13 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	if (NetIncomeText)
 	{
 		NetIncomeText->SetText(FText::Format(
-			NSLOCTEXT("TerritoryManagement", "NetIncome", "Net per cycle: {0}"),
+			NSLOCTEXT("TerritoryManagement", "NetIncome", "Net {0} / cycle"),
 			FText::AsNumber(OperationsView.NetIncome)));
 	}
 	if (ReserveGuardText)
 	{
 		ReserveGuardText->SetText(FText::Format(
-			NSLOCTEXT("TerritoryManagement", "ReserveCount", "Reserve: {0} | Pending: {1}"),
+			NSLOCTEXT("TerritoryManagement", "ReserveCount", "Reserve {0}  •  Deploying {1}"),
 			FText::AsNumber(SelectedGarrison.ReserveGuards),
 			FText::AsNumber(SelectedGarrison.PendingDeployments)));
 	}
@@ -465,7 +530,7 @@ void UTerritoryDistrictManagementWidget::RefreshManagementDisplay()
 	{
 		ProductionText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryManagement", "ProductionSummary",
-				"Production: {0} active | {1} blocked | {2} resources"),
+				"Production  •  {0} active  •  {1} blocked  •  {2} resource flows"),
 			FText::AsNumber(OperationsView.ProducingSiteCount),
 			FText::AsNumber(OperationsView.BlockedProductionSiteCount),
 			FText::AsNumber(OperationsView.ResourceFlows.Num())));

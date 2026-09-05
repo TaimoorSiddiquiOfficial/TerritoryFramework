@@ -68,6 +68,8 @@ reached states, and branch task progress; this event supplies the explicit disk-
 | `BuildProductionSiteOperationsView(Context, TerritoryTag, OutView)` | bool | Server/client read model for one production Property |
 | `GetThreatLevelText(Level)` | Text | Localizable threat label |
 | `GetAssaultStateText(State)` | Text | Localizable assault-state label |
+| `GetAssaultResolutionText(Resolution)` | Text | Localizable player-facing assault outcome; never exposes the C++ enum identifier |
+| `GetDiplomacyEventTypeText(EventType)` | Text | Localizable diplomacy-event label |
 | `GetDiplomacyStateText(State)` | Text | Localizable Territory diplomacy label |
 
 ### UI enums
@@ -113,8 +115,13 @@ Currency is read from the owning pawn's Narrative inventory/account. Guard mutat
 | GetGuardSpawnPoints() | Array<GuardSpawnPoint*> | Territory\|Guards |
 | GetRegisteredDefenders() | Array<Actor*> | Territory |
 | GetMapMarkerComponent() | TerritoryNavigationMarkerComponent* | Territory\|Visual |
+| ShouldShowGameplayHUD() | bool | Territory\|UI |
 
 `GetOwningFaction()` returns the incumbent defending faction while a claimed territory is contested. `IsOwnedByFaction()` returns true only in the `Claimed` state, so it is false while Contested, Locked, or Unclaimed.
+
+`ShouldShowGameplayHUD()` reads **Show Passive Gameplay HUD Card** from the assigned Definition.
+It controls only the compact in-world Territory card. It does not hide live notifications, POIs,
+map/compass markers, the Command Center, or management screens.
 
 ### BlueprintCallable (AuthorityOnly) Functions
 

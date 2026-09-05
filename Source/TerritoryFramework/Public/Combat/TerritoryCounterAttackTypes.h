@@ -27,14 +27,14 @@ enum class ETerritoryAttackApproachType : uint8
 UENUM(BlueprintType)
 enum class ETerritoryAssaultState : uint8
 {
-	Grace,
-	Evaluating,
-	ScheduledWarning,
-	WaitingForPlayerProximity,
-	Active,
-	Succeeded,
-	Defeated,
-	Cancelled,
+	Grace UMETA(DisplayName="Preparing"),
+	Evaluating UMETA(DisplayName="Planning Route"),
+	ScheduledWarning UMETA(DisplayName="Warning Issued"),
+	WaitingForPlayerProximity UMETA(DisplayName="Forces Approaching"),
+	Active UMETA(DisplayName="Battle Active"),
+	Succeeded UMETA(DisplayName="Territory Taken"),
+	Defeated UMETA(DisplayName="Attack Defeated"),
+	Cancelled UMETA(DisplayName="Cancelled"),
 	/**
 	 * Physical attackers hold the cleared Place while no living defending player is
 	 * present. Ownership changes only when the saved deadline expires. Appended to
@@ -46,18 +46,18 @@ enum class ETerritoryAssaultState : uint8
 UENUM(BlueprintType)
 enum class ETerritoryAssaultResolution : uint8
 {
-	None,
-	DecisionRollFailed,
-	DiplomacyBlocked,
-	InvalidTerritory,
-	InvalidApproachOrRoute,
-	BudgetBlocked,
-	ConfigurationInvalid,
-	OwnershipChanged,
-	AllAttackersRemoved,
-	CaptureCompleted,
-	ManuallyCancelled,
-	SpawnFailed,
+	None UMETA(DisplayName="Pending"),
+	DecisionRollFailed UMETA(DisplayName="Command Chose Not to Attack"),
+	DiplomacyBlocked UMETA(DisplayName="Diplomacy Prevented the Attack"),
+	InvalidTerritory UMETA(DisplayName="Territory Unavailable"),
+	InvalidApproachOrRoute UMETA(DisplayName="No Valid Approach Route"),
+	BudgetBlocked UMETA(DisplayName="Faction Resources Unavailable"),
+	ConfigurationInvalid UMETA(DisplayName="Assault Setup Incomplete"),
+	OwnershipChanged UMETA(DisplayName="Territory Ownership Changed"),
+	AllAttackersRemoved UMETA(DisplayName="Attacking Force Defeated"),
+	CaptureCompleted UMETA(DisplayName="Territory Captured"),
+	ManuallyCancelled UMETA(DisplayName="Cancelled by Story or Command"),
+	SpawnFailed UMETA(DisplayName="Reinforcement Deployment Failed"),
 	QuestRuleBlocked UMETA(DisplayName="Narrative Quest Rule Blocked",
 		ToolTip="A pending strategic counterattack was cancelled because its Narrative quest rules no longer passed."),
 	StagingDistrictUnavailable UMETA(DisplayName="No Secure Staging District",
@@ -200,6 +200,13 @@ struct FTerritoryAssaultApproach
 			EditConditionHides, ClampMin="1", ClampMax="8",
 			ToolTip="Maximum Narrative vehicles deployed by this approach during one assault. Later finite attackers use the drop-off as an on-foot entry."))
 	int32 MaximumVehicleDeployments = 1;
+
+	/** Total Territory assault NPCs carried by each reinforcement vehicle, including the driver. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Entry",
+		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",
+			EditConditionHides, ClampMin="1", ClampMax="8",
+			ToolTip="Maximum Territory assault participants assigned to one vehicle, including its driver. The actual team is capped by the vehicle's authored Narrative mount seats, the remaining finite force, and this approach's wave limit. Example: 4 creates one driver and up to three passengers."))
+	int32 VehicleOccupantCapacity = 4;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Counter Attack|Entry",
 		meta=(EditCondition="EntryType == ETerritoryAssaultEntryType::NarrativeVehicle",

@@ -105,16 +105,29 @@ the guard cannot stage a natural investigation even when the evidence is valid.
 
 ## Throwable distractions
 
-Grant `GA_TerritoryDistraction` to the Narrative character. The checked project gives it through
-the Blacksmith's first owned-Property benefit tier. It is a server-authoritative Narrative
-Gameplay Ability bound to `Narrative.Input.Throw`; the ability commits cost/cooldown, traces from
-the player's view (or AI aim), and spawns `BP_TerritoryDistractionProjectile` on the server.
+Create a Narrative `UEquippableItem` for the throwable and grant `GA_TerritoryDistraction` from
+that item's `Equipment Abilities`. The supplied **Throwable Rock** is the easy example. It uses
+Narrative's `Narrative.Equipment.Slot.Mesh.Throwable` slot, so equipping and unequipping the item
+grant and remove one ability spec with the rock as its source object.
+
+The checked project uses the Blacksmith's `Territory.Property.Benefit.WeaponUpgrades` tag as an
+optional capability gate through the ability's built-in `Activation Required Tags`. The
+Blacksmith grants only that revocable tag; it does **not** grant a second copy of the ability.
+This distinction prevents one `Narrative.Input.Throw` press from launching two projectiles. Losing
+the Blacksmith removes the capability, while the rock remains a normal Narrative inventory item.
+
+The ability is server-authoritative: it validates the equipped source item and capability, commits
+cost/cooldown, traces from the player's view (or AI aim), and spawns
+`BP_TerritoryDistractionProjectile` on the server. Exactly one rock is consumed only after the
+projectile finishes spawning. Missing capability, empty inventory, failed aim, failed commit, or
+failed spawn consumes nothing.
 
 The projectile deliberately remains an Actor rather than pretending to be a Gameplay Ability. It
 is the replicated physical payload and provides swept sphere collision, projectile movement,
 bounce, owner/instigator collision filtering, and the `Territory Distraction` component. Duplicate
 the Blueprint or change `Projectile Class` on a child ability to create a stone, bottle, or other
-prop.
+prop. The supplied rock uses the same authored mesh for its Narrative pickup and projectile
+instead of the Engine sphere placeholder.
 
 For an existing Narrative projectile child that already has a valid swept collision root, add
 `Territory Distraction` directly. The component reports one tagged Narrative hearing stimulus on

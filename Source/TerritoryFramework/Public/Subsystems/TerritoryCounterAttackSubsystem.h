@@ -194,9 +194,14 @@ public:
 	static bool ApplyParticipantRemoval(FTerritoryAssaultRecord& Assault,
 		bool bKilled, bool& bOutForceExhausted);
 
-	/** Pure policy used by runtime and regression tests for post-activation reserve waves. */
+	/**
+	 * Pure policy used by runtime and regression tests for post-activation reserve waves.
+	 * Vehicle-only forces set bWaitForCurrentWaveToEnd so one casualty cannot consume
+	 * the next authored car as a one-seat top-up.
+	 */
 	static bool ShouldDeployActiveReserveWave(const FTerritoryAssaultRecord& Assault,
-		bool bRelevantPlayerNearby, bool bContinueAfterActivation);
+		bool bRelevantPlayerNearby, bool bContinueAfterActivation,
+		bool bWaitForCurrentWaveToEnd = false);
 
 	/** Pure recapture decision shared by runtime and regression tests. */
 	enum class ERecaptureDecision : uint8
@@ -258,6 +263,19 @@ public:
 	static bool BuildNarrativeVehicleRoute(UWorld* World, const FVector& Start,
 		const FVector& End, TArray<FVector>& OutRoutePoints,
 		FString* OutFailureReason = nullptr);
+
+	/** Pure finite-force planner: returns the number of Territory participants one car may carry. */
+	static int32 ResolveVehicleOccupantCount(int32 RemainingWaveSlots,
+		int32 ApproachWaveLimit, int32 ConfiguredVehicleCapacity,
+		int32 NarrativeMountSeatCount);
+
+	/**
+	 * Caps a vehicle-only finite force to the seats that the current Narrative
+	 * difficulty is allowed to deliver. Each entry represents one authored car.
+	 */
+	static int32 ResolveVehicleOnlyPlannedForce(int32 RequestedForce,
+		int32 MaximumVehicleDeployments,
+		const TArray<int32>& VehicleDeploymentCapacities);
 
 	/** Global persistence/replication bridge owned by ATerritoryWorldState. */
 	TArray<FTerritoryAssaultRecord> GetPersistentState() const;
@@ -335,7 +353,7 @@ private:
 		UNPCDefinition* AttackerDefinition,
 		const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform,
 		int32 OverrideNarrativeLevel);
-	ATerritoryAssaultCharacter* SpawnNarrativeVehicleParticipant(
+	TArray<ATerritoryAssaultCharacter*> SpawnNarrativeVehicleParticipants(
 		FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory,
 		const FTerritoryFactionAssaultConfig& ForceConfig,
 		UNPCDefinition* AttackerDefinition,
@@ -343,7 +361,7 @@ private:
 		const FTransform& VehicleSpawnTransform,
 		const FTransform& DriverSpawnTransform,
 		const FTransform& DropOffTransform, const FVector& WalkDestination,
-		int32 OverrideNarrativeLevel);
+		int32 RequestedOccupants, int32 OverrideNarrativeLevel);
 	void ResolveAssault(FTerritoryAssaultRecord& Assault, ETerritoryAssaultState FinalState,
 		ETerritoryAssaultResolution Reason);
 	void RetireLiveParticipants(FTerritoryAssaultRecord& Assault, bool bDestroyActors);

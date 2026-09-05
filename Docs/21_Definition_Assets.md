@@ -67,6 +67,23 @@ Example: the asset says a Blacksmith starts owned by Bandits. After Heroes captu
 placed Property actor and save data say Heroes own it. Reapplying the asset does **not** erase
 that campaign result.
 
+## Decide where the gameplay HUD card appears
+
+Use **09 Presentation > Show Passive Gameplay HUD Card** on any City, District, or Place
+Definition.
+
+Easy example:
+
+```text
+Haven Reach City:       Off  — no card during normal travel through the broad city volume
+Market Square District: Off  — keep the shopping district quiet
+Blacksmith Place:       On   — show owner, state, pressure, and capture progress near the objective
+```
+
+New City Definitions default to off. New District and Place Definitions default to on. This is a
+presentation choice only: disabling the card does not disable capture, notifications, intelligence,
+POIs, map/compass markers, Command Center entries, or management.
+
 ## Create a new hierarchy
 
 1. In the Content Browser, create a Data Asset and choose `Territory City Definition`.

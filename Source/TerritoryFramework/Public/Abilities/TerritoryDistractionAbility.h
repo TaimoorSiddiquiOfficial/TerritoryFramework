@@ -6,6 +6,7 @@
 #include "TerritoryDistractionAbility.generated.h"
 
 class ATerritoryDistractionProjectile;
+class UNarrativeItem;
 
 /**
  * Narrative Gameplay Ability that owns a Territory distraction throw.
@@ -54,15 +55,43 @@ public:
 		meta=(ClampMin="0.0", Units="cm/s", ToolTip="Optional launch-speed override. Leave zero to use the projectile's authored Initial Speed (1200 by default)."))
 	float LaunchSpeedOverride = 0.f;
 
+	/**
+	 * Require this ability to have been granted by the equipped Narrative item.
+	 * This prevents a second Property-granted ability spec from throwing a second
+	 * projectile for the same Narrative.Input.Throw press.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Distraction|Inventory",
+		meta=(ToolTip="Requires the Gameplay Ability source object to be a valid Narrative item in an inventory even when consumption is disabled. Consumption always requires an item source. Keep enabled for rocks, bottles, and other equipped throwables."))
+	bool bRequireEquippedNarrativeItemSource = true;
+
+	/** Consume one source-item unit only after the authoritative projectile finishes spawning. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Distraction|Inventory",
+		meta=(ToolTip="Consumes exactly one unit from the Narrative inventory after a successful server spawn. Enabling this also requires a valid item source. A failed activation or spawn consumes nothing."))
+	bool bConsumeSourceItemOnSuccessfulThrow = true;
+
 	/** Returns the server launch transform after camera/AI aim-point resolution. */
 	UFUNCTION(BlueprintPure, Category="Territory|Distraction")
 	bool GetDistractionLaunchTransform(FTransform& OutTransform) const;
 
+	/** Pure inventory contract used by activation validation and automation tests. */
+	UFUNCTION(BlueprintPure, Category="Territory|Distraction|Inventory")
+	bool IsThrowableSourceItemReady(const UNarrativeItem* SourceItem) const;
+
 protected:
+	virtual bool CanActivateAbility(const FGameplayAbilitySpecHandle Handle,
+		const FGameplayAbilityActorInfo* ActorInfo,
+		const FGameplayTagContainer* SourceTags = nullptr,
+		const FGameplayTagContainer* TargetTags = nullptr,
+		OUT FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
+
 	virtual void ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 		const FGameplayAbilityActorInfo* ActorInfo,
 		const FGameplayAbilityActivationInfo ActivationInfo,
 		const FGameplayEventData* TriggerEventData) override;
+
+	UNarrativeItem* GetThrowableSourceItem(
+		const FGameplayAbilitySpecHandle Handle,
+		const FGameplayAbilityActorInfo* ActorInfo) const;
 
 	/** Presentation hook. Gameplay has already committed and the replicated actor exists. */
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|Distraction",

@@ -23,7 +23,48 @@ Do not call `AddToViewport`, manually change input mode, or create a second acti
 
 The project controller selects `WBP_TerritoryGameplayHUD_Modular`. This asset is a project-owned duplicate of Narrative Pro's current `WBP_DefaultGameplayHUD`, with `WBP_TerritoryCaptureHUD` composed as a passive overlay. Its inherited template graph must retain the initialized registrations for `UI.Layer.Game -> GameStack`, `UI.Layer.Menu -> MenuStack`, and `UI.Layer.Modal -> ModalStack`. Rebuilding only the widget tree is invalid: `OpenMenu` then returns null, radial-menu close paths can dereference an unset menu, and CommonUI input routing no longer has a destination.
 
+On packaged network clients, Narrative can receive the controller Blueprint's BeginPlay before its
+possession/PlayerState path creates `GameplayHUD`. The project controller therefore runs **Wait For
+Narrative Gameplay HUD** before calling its parent BeginPlay graph. Do not replace this with a fixed
+Delay and do not create the HUD manually: an early duplicate constructs Narrative attribute widgets
+before their ASC exists. For an older project controller, run **Migrate Narrative Controller HUD
+Readiness** once, compile, save, and keep the generated gate directly before the parent BeginPlay
+call. Remote server controllers bypass the local-HUD wait automatically.
+
 Narrative Pro's current `UNarrativeMenu` constructor is private, so it cannot be used as a native C++ parent without modifying vendor source. Territory native screens therefore use `UNarrativeActivatableWidget`. Project Blueprint menus reuse `WBP_TerritoryMenuBase`, the project-owned Narrative menu behavior template; both `W_TerritoryPlayerMenu` and `WBP_MainHopTerritoryJornal` inherit it. This keeps the monthly vendor plugin read-only.
+
+### Professional typography hierarchy
+
+The Command Center keeps the project's Narrative frame, colors, display typeface, CommonUI focus,
+and button states, but it uses one predictable scale for information:
+
+| Role | Size | Typical use |
+|---|---:|---|
+| Screen title | 30 | Command Center title |
+| Panel title | 22 | Selected District or Place |
+| Section title | 18 | Garrison staffing plan |
+| Card title | 16 | Territory, benefit, and control names |
+| Body | 14 | Player-facing descriptions and values |
+| Metadata | 12 | Owner, state, hierarchy, costs, and requirements |
+| Caption | 11 | Eyebrows, compact status, and secondary hints |
+
+The screen title may retain the configured Narrative display face. Generated headings, body copy,
+metadata, list rows, and controls use `Territory Interface Font`, which defaults to Narrative Pro's
+Roboto Condensed font and can be changed in Project Settings. Territory copies useful font data
+from the configured CommonText style and then detaches the generated text from that style. This is
+required because `UCommonTextBlock` synchronizes its style after construction and would otherwise
+restore the source style's decorative 26-48 px size.
+
+Buttons and tabs use title case (`Apply plan`, `Set waypoint`) rather than forced all-caps. Player
+copy never exposes internal Gameplay Tags or Blueprint class prefixes. A tabbed Command Center also
+hides the old Quest-template summary fields so Overview, Garrison, Economy, Production, Threats,
+Diplomacy, and Benefits each own their information once.
+
+Tabs have four intentional CommonUI states. Normal tabs use the dark surface and light label;
+hovered tabs receive a warm-gold surface response; the one selected tab uses the solid selection
+surface; and selected-hovered is brighter again. Territory clears the old selection explicitly
+when another tab is clicked. Do not replace that group update with `SetIsSelected(false)`: CommonUI
+ignores that call for a selectable, non-toggleable button and every visited tab will appear selected.
 
 ## Read models
 
@@ -79,6 +120,11 @@ The struct is a read-only projection. Pointer fields are transient UI references
 
 `GetDistrictOperationsRevision` hashes every displayed authority used by the supplied list. The journal rebuilds when guards, capture, finance, lock state, or assault state changes, fixing the former stale-row bug where only item count and filter text invalidated the list.
 
+District rows use their named text widgets for the territory name and details. The overlaid
+`SelectDistrictButton` provides Narrative/CommonUI interaction and focus; its own caption is cleared
+in shared initialization for both native and Blueprint-authored layouts. This prevents Narrative's
+default "Button Text" from appearing behind an authored row's content.
+
 `DoesDistrictMatchSearch` applies case-insensitive AND-token matching across the complete player-facing projection: City, District, visible Place, stable Territory tags, owner, state, availability, diplomacy, threat/attacker data, and visible child-garrison names/tags. The search field therefore filters the same rows that the directory actually renders rather than a separate count-only model.
 
 ## District Command Center
@@ -97,6 +143,10 @@ not a dashboard that only borrows Quest names:
    unselects the others, updates this pane, and immediately exposes Overview, Places, Garrison,
    Economy, Production, Threats, and Diplomacy tabs. Longer ownership and capture explanations
    live inside the scrollable Overview page so they cannot push the controls off-screen.
+
+The Territory Intelligence filters follow the same exclusive tab contract. All, Conflict,
+Control, Economy, Command, Production, and Diplomacy update both their visual selection and the
+records queried for the feed.
 
 The Territory classes do not inherit from Quest data classes. They reuse the Quest Journal's
 presentation contract: two lists, one reusable entry template, one selected-item controller,
@@ -179,6 +229,20 @@ staffing changes remain in the selected information pane.
 | `WBP_TerritoryProductionSiteRow` | Reusable production-site module that composes resource rows |
 | `BP_TerritoryDebugWidget` | Scrollable live territory/counterattack diagnostic output |
 
+### Per-Territory passive HUD policy
+
+Every City, District, and Place Definition exposes **09 Presentation > Show Passive Gameplay HUD
+Card**. It controls the compact `WBP_TerritoryCaptureHUD` only for that exact Territory.
+
+- City defaults to **off**, because a broad city volume can surround the player for a long time.
+- District and Place default to **on**, because entering a more specific operational area is useful
+  feedback.
+- Turn the option off on any individual District or Place that should stay visually quiet.
+
+The option does not disable Territory gameplay and does not hide live notifications, POIs,
+map/compass markers, Command Center records, or management access. Narrative Menu/Modal layers and
+Territory cinematics still suppress the passive card at higher priority.
+
 Project styling should replace `TerritoryEntryWidgetClass`; `DistrictRowWidgetClass` remains a
 migration fallback for widgets authored before this refactor. The native fallback uses
 Narrative CommonUI controls and the same delegates.
@@ -193,11 +257,31 @@ The supplied Economy widget constrains both dynamic row collections in scrolling
 
 `UTerritoryDeveloperSettings::DefaultNarrativeButtonClass`, `DefaultTerritoryButtonStyle`,
 `DefaultTerritoryTextStyle`, `TerritoryTitleTextStyle`, `TerritoryHeadingTextStyle`, and
-`TerritoryMutedTextStyle` are soft runtime defaults for C++-generated controls. Community
+`TerritoryMutedTextStyle` are soft runtime defaults for C++-generated controls.
+`TerritoryInterfaceFont` is the readable face used by generated headings, body copy, metadata,
+and rows after the selected CommonText style supplies its weight and fallback data. Community
 projects work with Narrative Pro's base styles; a game can override them in Project Settings
 without changing Territory Framework source. Static buttons in the journal, management panel,
 and command rows use the same project template. This keeps styling modular without duplicating
 CommonUI navigation or button behavior.
+
+The Command Center and District Management panel share the same compact 11-30 px type scale,
+sentence/title case, action-button style, and explicit normal, hovered, pressed, selected, and
+selected-hovered states. Player-facing selectors show readable roles such as `Property post`
+instead of raw Gameplay Tag paths.
+
+### Player-facing names
+
+Territory uses Narrative Pro's **Project Settings > Narrative Pro > GAS > Tag Friendly Display
+Names** as the authoring authority for Gameplay Tag names. If a name is not authored there,
+Territory falls back to a readable version of the tag leaf. Example: a developer can name
+`Territory.Capability.GuardStaffing` **Garrison Command**; every Territory screen using the shared
+helper then shows that name.
+
+Assault states and outcomes are enums rather than Gameplay Tags, so they use Territory's
+localizable display helpers. Runtime reports show **Preparing** and **Pending**, never
+`ETerritoryAssaultState::Grace` or `ETerritoryAssaultResolution::None`. Debug-only reports may
+still include technical identifiers when that information is useful to a developer.
 
 ## Guard commands and authority
 

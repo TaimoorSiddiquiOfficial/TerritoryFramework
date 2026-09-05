@@ -32,6 +32,10 @@ A decision roll can schedule an assault; it cannot capture a territory. `LaunchP
 - The faction's **Signature Vehicle** is the recognizable car Blueprint used on every vehicle
   approach. Example: Bandits use a rusty pickup; the Regime uses a black sedan. An Approach car
   is only the fallback when the faction has no signature car.
+- Seat validation includes Narrative mount components authored in Blueprint and inherited
+  component overrides, without spawning a car. A vehicle with no authored seats is invalid;
+  requesting more seats than the car provides warns that the remaining finite force must wait
+  for a later deployment.
 - Narrative Pro difficulty chooses the total car budget when **Scale Car Count With Narrative
   Difficulty** is enabled. Defaults are Easy 1, Medium 1, Hard 2, Insane 3. The result is always
   clamped by the finite force and the authored road limits.
@@ -285,12 +289,13 @@ Vehicle entry composes Narrative Pro with Territory's ZoneGraph road driver:
 ```text
 Territory vehicle approach
   -> spawn the configured ANarrativeVehicleBase (server only, runtime-only)
-  -> spawn one finite ATerritoryAssaultCharacter beside it
+  -> spawn one finite Territory squad beside it (driver plus passengers)
   -> wait until Narrative finishes the NPC Definition and visual spawn
-  -> Narrative claims the seat, runs its mount ability, animation and controller possession
+  -> Territory assigns distinct authored mount seats
+  -> Narrative runs each seat's mount ability and animation; the driver receives possession
   -> Territory follows sampled ZoneGraph road points through the vehicle's Chaos movement
   -> at the drop-off, Territory calls Narrative's public StopInteractBehavior API
-     so the authored mount ability performs its normal dismount and cleanup
+     for every occupant so the authored abilities perform normal dismount and cleanup
   -> only now allow Territory hostility, reserve waves and capture pressure
   -> Territory assault movement/combat continues from the roadside drop-off
 ```
@@ -298,18 +303,30 @@ Territory vehicle approach
 Easy Blacksmith example:
 
 - `Blacksmith_WestRoad`: Narrative Vehicle; Sedan at the west road; drop-off beside
-  the market entrance; Maximum Vehicle Deployments = 1. The first tracked attacker is the
-  driver; later members of the same finite force enter on foot from that drop-off.
+  the market entrance; Vehicle Occupant Capacity = 4. One finite group is one driver plus
+  up to three passengers. An eight-person, two-wave force therefore uses two four-person cars
+  when the approach and difficulty budgets permit two vehicle deployments.
 - Optionally add `Blacksmith_Alley_Foot`: On Foot; guards run through the alley.
 - Set Maximum Approaches to at least 2 when a strong assault should select one valid route of
   each entry type. The selector preserves vehicle/on-foot variety when both are available.
 
 The vehicle route must have a complete ZoneGraph path from car spawn to drop-off. The drop-off
 must then have a complete NavMesh path into the Place. The same tests run in editor validation
-and at runtime. After the bounded number of cars has deployed, remaining finite attackers may
-enter on foot from the drop-off, but they wait until the current vehicle finishes ingress. The
-driver is neutral to combat and cannot contest the Place while mount/drive/park/dismount is active.
-A failed car, invalid route, driver spawn, or bounded ingress timeout withdraws cleanly.
+and at runtime. `VehicleOccupantCapacity` includes the driver and is capped by the remaining
+finite wave, `MaxWaveSize`, and the vehicle Blueprint's real Narrative mount-seat count. A car
+never invents occupants or overfills seats. For a vehicle-only assault, the finite force is capped
+to the seats available in the car count authorized by Narrative difficulty: Easy/Medium normally
+allow one car, Hard two, and Insane three. This makes a four-person wave one full car and an
+eight-person/two-wave Hard assault two full cars. A vehicle route never silently turns later
+reserves into foot soldiers at its destination. If mixed entry is desired, author a separate
+On Foot approach; those participants use that approach's real spawn and navigation route. All
+vehicle-only reserves wait until every living member of the current car squad has resolved before
+requesting the next car. Losing one passenger therefore does not waste a second vehicle on a
+one-person top-up. Mixed and on-foot forces may still reinforce up to their authored wave target.
+All
+occupants are neutral to combat and cannot contest the Place
+while mounting, driving, parking, or dismounting. A failed car, invalid route, driver spawn,
+passenger mount, or bounded ingress timeout withdraws only the affected finite participants.
 Terminal cleanup stops all vehicle inputs before giving the transient car a short retirement delay.
 This avoids Narrative's stock `BTS_ClaimInteractableSlot` null-target error without modifying
 Narrative Pro content. Assault

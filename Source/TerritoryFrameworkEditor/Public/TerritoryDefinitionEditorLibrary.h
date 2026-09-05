@@ -9,6 +9,7 @@ class UTerritoryDefinition;
 class UGameplayEffect;
 class ATerritoryVolume;
 class UWorld;
+class UBlueprint;
 
 USTRUCT(BlueprintType)
 struct TERRITORYFRAMEWORKEDITOR_API FTerritoryDefinitionSyncReport
@@ -39,6 +40,13 @@ class TERRITORYFRAMEWORKEDITOR_API UTerritoryDefinitionEditorLibrary final
 	GENERATED_BODY()
 
 public:
+	/** Replace a fixed BeginPlay delay with a lifecycle-safe Narrative GameplayHUD gate. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Pro|Editor",
+		meta=(DisplayName="Migrate Narrative Controller HUD Readiness"))
+	static bool MigrateNarrativeControllerHUDReadiness(
+		UBlueprint* ControllerBlueprint,
+		FText& OutFailureReason);
+
 	/**
 	 * Updates actors already linked by definition/tag and optionally creates missing
 	 * Blueprint actors from each template. Runtime state is not changed in PIE.

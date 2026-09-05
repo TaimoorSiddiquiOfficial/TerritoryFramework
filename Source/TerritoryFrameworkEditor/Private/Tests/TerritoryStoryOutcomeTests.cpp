@@ -244,6 +244,17 @@ bool FTFTerritoryStoryOutcomeValidationIsReadOnly::RunTest(
 
 	const FTerritoryStoryOutcomeReport Report =
 		FTerritoryStoryOutcomeAnalyzer::Analyze(City, true);
+	const FTerritoryStoryOutcomeScenario* HUD =
+		TerritoryStoryOutcomeTests::FindScenario(
+			Report, TEXT("Passive gameplay HUD card"));
+	TestNotNull(TEXT("Every Definition report explains passive HUD presentation"), HUD);
+	if (HUD)
+	{
+		TestTrue(TEXT("A City report explains its quiet default"),
+			HUD->Then.Contains(TEXT("stays hidden")));
+		TestTrue(TEXT("Disabling the card preserves strategic UI"),
+			HUD->AlsoAffects.Contains(TEXT("Command Center")));
+	}
 	TestTrue(TEXT("Existing Data Validation findings appear in setup health"),
 		!Report.ValidationErrors.IsEmpty() || !Report.ValidationWarnings.IsEmpty());
 	TestFalse(TEXT("Full validation plus report generation does not dirty the package"),

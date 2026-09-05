@@ -214,6 +214,11 @@ public:
 		meta=(DisplayName="Get Territory Definition"))
 	UTerritoryDefinition* GetTerritoryDefinition() const { return TerritoryDefinition; }
 
+	/** Definition-owned policy for the passive Narrative gameplay-HUD card. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI",
+		meta=(DisplayName="Should Show Territory Gameplay HUD"))
+	bool ShouldShowGameplayHUD() const;
+
 	/** Runtime Narrative instances cloned from the assigned Definition asset. */
 	const TMap<ETerritoryState, FTerritoryStateConfig>& GetStateConfigs() const;
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetDefenderDiedEvents() const;

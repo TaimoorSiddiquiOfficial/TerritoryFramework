@@ -23,7 +23,8 @@ namespace
 	void StyleDistrictRowText(UTextBlock* Text, int32 FontSize, const FLinearColor& Color)
 	{
 		TerritoryUITheme::ApplyText(Text, FontSize, Color,
-			FontSize >= 17 ? ETerritoryTextRole::Heading : ETerritoryTextRole::Body);
+			FontSize >= TerritoryTypography::CardTitle
+				? ETerritoryTextRole::Heading : ETerritoryTextRole::Body);
 	}
 
 	void SetRoundedSurface(UBorder* Border, const FLinearColor& Fill,
@@ -228,31 +229,34 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 	}
 	if (SelectDistrictButton)
 	{
+		// The row's named text widgets own its label. Authored Blueprint rows also
+		// need to clear Narrative's default button caption behind that content.
+		SelectDistrictButton->SetButtonText(FText::GetEmpty());
 		SelectDistrictButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleSelected);
 	}
 	if (AddGuardButton)
 	{
 		AddGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleAddGuard);
-		AddGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "AddGuard", "+ GUARD"));
+		AddGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "AddGuard", "+1 Guard"));
 		AddGuardButton->SetVisibility(bShowInlineGuardActions
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (RemoveGuardButton)
 	{
 		RemoveGuardButton->OnClicked().AddUObject(this, &UTerritoryDistrictRowWidget::HandleRemoveGuard);
-		RemoveGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "RemoveGuard", "- GUARD"));
+		RemoveGuardButton->SetButtonText(NSLOCTEXT("TerritoryDistrictRow", "RemoveGuard", "-1 Guard"));
 		RemoveGuardButton->SetVisibility(bShowInlineGuardActions
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
-	StyleDistrictRowText(DistrictName, 15,
+	StyleDistrictRowText(DistrictName, TerritoryTypography::CardTitle,
 		FLinearColor(0.96f, 0.95f, 0.91f, 1.f));
-	StyleDistrictRowText(DistrictSummary, 10,
+	StyleDistrictRowText(DistrictSummary, TerritoryTypography::Metadata,
 		FLinearColor(0.68f, 0.67f, 0.63f, 1.f));
-	StyleDistrictRowText(DistrictStatus, 9,
+	StyleDistrictRowText(DistrictStatus, TerritoryTypography::Caption,
 		FLinearColor(0.31f, 0.82f, 0.63f, 1.f));
-	StyleDistrictRowText(PlaceProgressText, 10,
+	StyleDistrictRowText(PlaceProgressText, TerritoryTypography::Metadata,
 		FLinearColor(0.96f, 0.84f, 0.18f, 1.f));
-	StyleDistrictRowText(ExpandHintText, 9,
+	StyleDistrictRowText(ExpandHintText, TerritoryTypography::Caption,
 		FLinearColor(0.72f, 0.70f, 0.64f, 1.f));
 	if (DistrictName) DistrictName->SetAutoWrapText(false);
 	if (DistrictSummary) DistrictSummary->SetAutoWrapText(false);
@@ -269,7 +273,7 @@ void UTerritoryDistrictRowWidget::NativeConstruct()
 	{
 		EspionageButton->SetMinDimensions(0, 0);
 		EspionageButton->SetButtonText(NSLOCTEXT(
-			"TerritoryDistrictRow", "Espionage", "ESPIONAGE"));
+			"TerritoryDistrictRow", "Espionage", "Espionage"));
 		EspionageButton->OnClicked().AddUObject(
 			this, &UTerritoryDistrictRowWidget::HandleEspionage);
 	}
@@ -499,42 +503,42 @@ void UTerritoryDistrictRowWidget::InitializeOperationsView(
 	if (!InView.bOwnedByViewer && InView.bUnlocked && InView.bHierarchyVisible)
 	{
 		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "ReconAvailable",
-			"UNSCOUTED");
+			"Unscouted");
 	}
 	else if (InView.bUnderAttack)
 	{
 		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "UnderAttackStatus",
-			"UNDER ATTACK");
+			"Under attack");
 	}
 	else if (InView.bAttackScheduled)
 	{
 		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "InboundStatus",
-			"COUNTERATTACK INBOUND");
+			"Counterattack inbound");
 	}
 	else if (InView.bThreatPreviewAvailable)
 	{
 		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "ProjectedThreatStatus",
-			"THREAT PROJECTED");
+			"Threat projected");
 	}
 	else if (!InView.bUnlocked)
 	{
-		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "LockedStatus", "LOCKED");
+		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "LockedStatus", "Locked");
 	}
 	else if (InView.bAvailableForCapture)
 	{
-		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "AvailableStatus", "AVAILABLE FOR CAPTURE");
+		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "AvailableStatus", "Available for capture");
 	}
 	else if (InView.bOwnedByViewer)
 	{
 		ActionStatus = InView.bManageable
-			? NSLOCTEXT("TerritoryDistrictRow", "ManageableStatus", "CONTROLLED")
+			? NSLOCTEXT("TerritoryDistrictRow", "ManageableStatus", "Controlled")
 			: NSLOCTEXT("TerritoryDistrictRow", "ManagementUnavailableStatus",
-				"COMMAND LOCKED");
+				"Command locked");
 	}
 	else
 	{
 		ActionStatus = NSLOCTEXT("TerritoryDistrictRow", "UnavailableStatus",
-			"UNAVAILABLE");
+			"Unavailable");
 	}
 	RefreshRow();
 }
@@ -573,7 +577,7 @@ void UTerritoryDistrictRowWidget::SetSelected(bool bInSelected)
 	bSelected = bInSelected;
 	if (SelectDistrictButton)
 	{
-		SelectDistrictButton->SetIsSelected(bSelected);
+		TerritoryUITheme::SetTabSelected(SelectDistrictButton, bSelected);
 	}
 	RefreshRow();
 }
@@ -622,7 +626,7 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
 					OperationsView.OwnerFaction), StateText)
 			: FText::Format(NSLOCTEXT("TerritoryDistrictRow", "UnlockedCompactSummary",
-				"{0}  •  UNLOCKED"), CityName));
+				"{0}  •  Unlocked"), CityName));
 	}
 	if (AddGuardButton)
 	{
@@ -634,7 +638,7 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 	}
 	if (SelectDistrictButton)
 	{
-		SelectDistrictButton->SetIsSelected(bSelected);
+		TerritoryUITheme::SetTabSelected(SelectDistrictButton, bSelected);
 	}
 	if (SetWaypointButton)
 	{
@@ -649,9 +653,9 @@ void UTerritoryDistrictRowWidget::RefreshRow()
 			&& UTerritoryUIBlueprintLibrary::IsTerritoryWaypointTracked(
 				GetOwningPlayer(), CurrentDistrict);
 		SetWaypointButton->SetButtonText(bTracked
-			? NSLOCTEXT("TerritoryDistrictRow", "WaypointTracked", "TRACKED  ✓")
-			: NSLOCTEXT("TerritoryDistrictRow", "SetWaypoint", "WAYPOINT"));
-		SetWaypointButton->SetIsSelected(bTracked);
+			? NSLOCTEXT("TerritoryDistrictRow", "WaypointTracked", "Tracked ✓")
+			: NSLOCTEXT("TerritoryDistrictRow", "SetWaypoint", "Set waypoint"));
+		TerritoryUITheme::SetTabSelected(SetWaypointButton, bTracked);
 		SetWaypointButton->SetIsEnabled(bCanTrack);
 		SetWaypointButton->SetVisibility(bCanTrack
 			? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -699,30 +703,30 @@ void UTerritoryDistrictRowWidget::RefreshPlaceProgress()
 		PlaceProgressText->SetText(Total > 0
 			? OperationsView.bOwnedByViewer
 				? FText::Format(NSLOCTEXT("TerritoryDistrictRow", "PlaceControlProgress",
-					"{0} / {1} PLACES"), FText::AsNumber(Owned), FText::AsNumber(Total))
+					"{0} / {1} places"), FText::AsNumber(Owned), FText::AsNumber(Total))
 				: FText::Format(NSLOCTEXT("TerritoryDistrictRow", "PlaceDirectoryProgress",
-					"{0} OPEN / {1} LOCKED"), FText::AsNumber(Known),
+					"{0} open / {1} locked"), FText::AsNumber(Known),
 					FText::AsNumber(Hidden))
-			: NSLOCTEXT("TerritoryDistrictRow", "NoConfiguredPlaces", "NO PLACES"));
+			: NSLOCTEXT("TerritoryDistrictRow", "NoConfiguredPlaces", "No places"));
 	}
 	if (ExpandHintText)
 	{
 		if (bExpanded)
 		{
 			ExpandHintText->SetText(NSLOCTEXT(
-				"TerritoryDistrictRow", "HideKnownPlaces", "HIDE PLACES"));
+				"TerritoryDistrictRow", "HideKnownPlaces", "Hide places"));
 		}
 		else if (Hidden > 0)
 		{
 			ExpandHintText->SetText(FText::Format(
 				NSLOCTEXT("TerritoryDistrictRow", "KnownAndHiddenPlaces",
-					"{0} DISCOVERED  •  {1} HIDDEN  >"),
+					"{0} discovered  •  {1} hidden  >"),
 				FText::AsNumber(Known), FText::AsNumber(Hidden)));
 		}
 		else
 		{
 			ExpandHintText->SetText(FText::Format(
-				NSLOCTEXT("TerritoryDistrictRow", "KnownPlaces", "{0} DISCOVERED  >"),
+				NSLOCTEXT("TerritoryDistrictRow", "KnownPlaces", "{0} discovered  >"),
 				FText::AsNumber(Known)));
 		}
 	}
@@ -815,9 +819,9 @@ void UTerritoryDistrictRowWidget::RebuildPlaceList()
 		HiddenText->SetText(FText::Format(
 			OperationsView.bOwnedByViewer
 				? NSLOCTEXT("TerritoryDistrictRow", "HiddenPlaceSummary",
-					"{0} LOCATIONS REMAIN HIDDEN\nNames and objectives stay hidden until the story unlocks them.")
+					"{0} locations remain hidden\nNames and objectives stay hidden until the story unlocks them.")
 				: NSLOCTEXT("TerritoryDistrictRow", "LockedPlaceCount",
-					"{0} PLACES LOCKED BY STORY"),
+					"{0} places locked by story"),
 			FText::AsNumber(OperationsView.HiddenProperties)));
 		StyleDistrictRowText(HiddenText, 11, FLinearColor(0.58f, 0.57f, 0.54f, 1.f));
 		HiddenSurface->SetContent(HiddenText);

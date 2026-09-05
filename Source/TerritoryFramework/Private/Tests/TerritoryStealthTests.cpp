@@ -15,6 +15,8 @@
 #include "GAS/NarrativeAttributeSetBase.h"
 #include "Interaction/TerritoryDistractionComponent.h"
 #include "Interaction/TerritoryDistractionProjectile.h"
+#include "Items/InventoryComponent.h"
+#include "Items/NarrativeItem.h"
 #include "Items/TerritoryDisguiseClothingItem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
@@ -180,6 +182,25 @@ bool FTFStealthNarrativeIntegrationContract::RunTest(const FString& Parameters)
 			TerritoryStealthTags::DistractionAbility));
 	TestNotNull(TEXT("Distraction ability has a safe native projectile fallback"),
 		Ability ? Ability->ProjectileClass.Get() : nullptr);
+	TestTrue(TEXT("Equipped Narrative item is the single distraction ability source"),
+		Ability && Ability->bRequireEquippedNarrativeItemSource);
+	TestTrue(TEXT("A successful distraction throw consumes one source item"),
+		Ability && Ability->bConsumeSourceItemOnSuccessfulThrow);
+	TestTrue(TEXT("Missing source item fails the inventory contract"),
+		Ability && !Ability->IsThrowableSourceItemReady(nullptr));
+	if (Ability)
+	{
+		UNarrativeItem* SourceItem = NewObject<UNarrativeItem>(GetTransientPackage());
+		TestFalse(TEXT("An item outside Narrative inventory cannot activate the throw"),
+			Ability->IsThrowableSourceItemReady(SourceItem));
+		SourceItem->OwningInventory = NewObject<UNarrativeInventoryComponent>(
+			GetTransientPackage());
+		TestTrue(TEXT("One removable inventory item satisfies the throw contract"),
+			Ability->IsThrowableSourceItemReady(SourceItem));
+		SourceItem->SetQuantity(0);
+		TestFalse(TEXT("An empty item stack cannot activate the throw"),
+			Ability->IsThrowableSourceItemReady(SourceItem));
+	}
 	TestTrue(TEXT("Distraction thrown Gameplay Event tag exists"),
 		TerritoryStealthTags::DistractionThrownEvent.GetTag().IsValid());
 	TestTrue(TEXT("Distraction impact Gameplay Event tag exists"),

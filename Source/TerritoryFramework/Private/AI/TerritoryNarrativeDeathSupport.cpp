@@ -37,6 +37,24 @@ namespace TerritoryNarrativeDeathSupport
 		return true;
 	}
 
+	void ScheduleRemoval(ANarrativeNPCCharacter& Character,
+		const float LatentCleanupGraceSeconds)
+	{
+		PrepareForRemoval(Character);
+		Character.SetActorEnableCollision(false);
+		Character.SetActorHiddenInGame(true);
+		if (UCharacterMovementComponent* Movement = Character.GetCharacterMovement())
+		{
+			Movement->StopMovementImmediately();
+			Movement->DisableMovement();
+		}
+
+		// Narrative goal-generator Blueprints may still own short Delay nodes. Keeping
+		// the actor/component valid for one bounded grace window lets those continuations
+		// query the now-empty goal set instead of dereferencing a pending-kill component.
+		Character.SetLifeSpan(FMath::Max(0.1f, LatentCleanupGraceSeconds));
+	}
+
 	void FinalizePhysicalDeath(ANarrativeNPCCharacter& Character)
 	{
 		if (Character.HasAuthority())

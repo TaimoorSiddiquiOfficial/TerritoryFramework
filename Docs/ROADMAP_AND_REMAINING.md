@@ -1,6 +1,6 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-03
+> **Reviewed:** 2026-09-05
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
@@ -27,8 +27,8 @@
   kills never choose an arbitrary first player in multiplayer.
 - The Blacksmith visible PIE fixture has completed defender death, owner spawn, dialogue,
   faction handover, and its Narrative capture task exactly once.
-- Current-source verification on 2026-09-03 built the UE 5.7 `TDAEditor` Development target and
-  passed all 204 `TerritoryFramework.*` tests. The automation log contains no failed
+- Current-source verification on 2026-09-05 built the UE 5.7 Game and `TDAEditor` Development
+  targets and passed all 213 `TerritoryFramework.*` tests. The automation log contains no failed
   test, Blueprint Runtime Error, Accessed None, assertion, fatal, or Territory error.
 - The reusable Narrative Dialogue AAA shot pack now supplies seven project-owned Level Sequences.
   Every Cinecam is an explicit spawnable with a Spawn track and Camera Cut, and Story Capture
@@ -46,20 +46,43 @@
 - A packaged dedicated-listener process admitted two independent clients while a real immediate
   Bandit-versus-Heroes assault was live. Both clients were welcomed and created their own server
   pawn. Three authored PlayerStarts now remove the previous second-client origin-spawn failure.
-- A later rendered two-client pass showed both clients in the world, the contested Territory HUD,
+- A later two-client pass showed both clients in the world, the contested Territory HUD,
   the remote player, and the vehicle assault. It also exposed two project Blueprint timing defects
   hidden by the shorter gate: duplicate assault activity cleanup after death and Narrative local UI
-  initialization before possession created `GameplayHUD`. Both project graphs are now corrected and
-  compile cleanly; targeted PIE startup and forced assault-death smokes contain zero Blueprint
-  runtime or `Accessed None` errors.
+  initialization before possession created `GameplayHUD`. The controller now waits on Narrative's
+  real HUD lifecycle instead of a fixed delay. The refreshed package admitted both clients with no
+  HUD/LoadingMenu None errors, early null-ASC/divide-by-zero warnings, or server-side readiness
+  timeout.
+- Hard difficulty now produces two complete sedan squads for the authored eight-person assault:
+  each car has one driver and three passengers, and car two waits until every member of car one has
+  resolved. A single casualty never consumes a new vehicle as a partial top-up.
 - A no-asset-registry-cache cook of `HopDistrictTest` and a fresh stage/package/archive completed
   with zero errors. The invalid Fire cue, missing mobile touch interface, missing player appearance
   materials, and project-owned Narrative demo loadout leaks were repaired.
-- Scoped editor verification compiled all 69 Territory Blueprints and validated 101 assets under
-  the project/plugin Territory paths plus `HopDistrictTest`, with zero errors or warnings.
+- Latest scoped editor verification compiled 72 Territory Blueprints and validated 113 assets
+  under the project/plugin Territory paths plus `HopDistrictTest` and the selected soundtrack,
+  with zero errors. Four explicit authoring warnings remain: two prototype NPC appearances,
+  Farm dialogue's missing cinematic shot, and its zero blend-out time. See the
+  [rendered follow-up](RENDERED_FOLLOWUP_2026-09-05.md).
 - A current `/Game/HopDistrictTest` headless runtime smoke loaded the map and player/HUD, then
   exited normally with no Blueprint runtime, Accessed None, assertion, ensure, fatal, or Territory
   warning/error.
+- Command Center typography now uses one tested 11-30 px hierarchy. Generated text survives
+  CommonUI's final synchronization at its requested size, tab/button labels use title case, and
+  player-facing Benefits no longer expose raw Gameplay Tags or Blueprint class prefixes.
+- Command Center tabs now maintain exactly one selected item after any number of clicks. Normal,
+  hover, selected, and selected-hover states are visually distinct, and Intelligence filters use
+  the same state contract while filtering the real report query.
+- Player counterattack reports now use localizable status/outcome labels instead of C++ enum
+  identifiers, Gameplay Tag names follow Narrative Pro's friendly-name settings, and the District
+  Management panel shares the Command Center's compact typography and interaction states.
+- Every Definition now controls its exact passive gameplay HUD card without muting notifications,
+  POIs, map/compass markers, Command Center intelligence, or management. Cities default quiet;
+  Districts and Places default visible.
+- A rendered follow-up verified the HUD policy and the Command Center inside the real player
+  menu, removed the authored row's default button caption, and corrected Blueprint vehicle-seat
+  discovery in data validation. Blacksmith's Claimed soundtrack uses the selected Unity in the
+  Ashes track through a project-owned Narrative music set.
 - The documentation learning path is uniquely numbered from 00 to 34. Reports and tutorials
   are separate appendices.
 
@@ -67,14 +90,15 @@
 
 These are verification jobs, not permission to invent a second gameplay authority.
 
-1. **Dedicated topology — rendered admission passed.** A packaged Game executable ran as a real
-   dedicated listener with two separate rendered client processes and a live immediate assault.
+1. **Dedicated topology — admission and live Hard assault passed.** A packaged Game executable ran
+   as a real listener with two separate client processes and a live immediate assault.
    Both joins, pawn spawns, Territory HUDs, remote-player presentation, forward road ingress, and
-   dismount were visible. The rendered pass found and drove the project Blueprint timing fixes
-   described above. Still manual after the next package refresh: capture a Place, recruit one guard,
+   dismount were verified. The refreshed package also proved the lifecycle fixes and two complete
+   four-seat waves. Still manual: capture a Place, recruit one guard,
    patrol, resolve the assault, and observe exact-once capture/XP presentation on both clients.
 2. **Live save slot — passed.** A finite active assault survived save/reload once in-process and
-   restored once again after a complete packaged-process restart. The 200-test suite also covers
+   restored once again after a complete packaged-process restart. Both strict gates reported the
+   exact one-item live set with zero unexpected or duplicate IDs. The 211-test suite also covers
    the nested archive contract.
 3. **World Partition map — fixture still required.** Stable identity and stream-safe actor cleanup
    are automated, but `HopDistrictTest` is not World Partition-enabled. A physical stream-out and

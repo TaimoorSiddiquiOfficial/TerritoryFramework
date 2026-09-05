@@ -1,8 +1,11 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "CommonButtonBase.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
+#include "ArsenalSettings.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
@@ -25,6 +28,9 @@
 #include "UI/TerritoryLiveEventTypes.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "UI/TerritoryUITheme.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Overlay.h"
+#include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
 
 namespace TerritoryUITest
@@ -94,6 +100,15 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Community projects can scale compact Territory typography"),
 		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
 			TEXT("TerritoryTextScale")));
+	TestNotNull(TEXT("Community projects can select a readable Territory interface font"),
+		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
+			TEXT("TerritoryInterfaceFont")));
+	TestNotNull(TEXT("Every Definition exposes passive gameplay-HUD visibility"),
+		UTerritoryDefinition::StaticClass()->FindPropertyByName(
+			TEXT("bShowGameplayHUD")));
+	TestTrue(TEXT("Territory actors expose Definition-owned gameplay-HUD visibility"),
+		TerritoryUITest::IsBlueprintPure(
+			ATerritoryVolume::StaticClass(), TEXT("ShouldShowGameplayHUD")));
 	const UScriptStruct* NotificationStruct = FTerritoryNotificationSettings::StaticStruct();
 	TestNotNull(TEXT("Money/resource notification policy is reflected"), NotificationStruct);
 	if (NotificationStruct)
@@ -320,6 +335,214 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIAuthoredRowCaptionTest,
+	"TerritoryFramework.UI.Regression.AuthoredRowClearsButtonCaption",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIAuthoredRowCaptionTest::RunTest(const FString& Parameters)
+{
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	UClass* ButtonClass = Settings->DefaultNarrativeButtonClass.LoadSynchronous();
+	TestNotNull(TEXT("Authored row uses the configured Narrative button template"), ButtonClass);
+	if (!ButtonClass) return false;
+
+	UTerritoryDistrictRowWidget* Row = NewObject<UTerritoryDistrictRowWidget>();
+	Row->Initialize();
+	TestNotNull(TEXT("Authored row has a widget tree"), Row->WidgetTree.Get());
+	if (!Row->WidgetTree) return false;
+
+	// Reproduce a Blueprint-authored tree. A pre-existing root skips BuildNativeLayout,
+	// so its selection button must receive the same caption cleanup as native rows.
+	UOverlay* Root = Row->WidgetTree->ConstructWidget<UOverlay>();
+	Row->WidgetTree->RootWidget = Root;
+	UNarrativeCommonButtonBase* SelectButton =
+		Row->WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
+			ButtonClass, TEXT("SelectDistrictButton"));
+	Root->AddChild(SelectButton);
+	SelectButton->SetButtonText(FText::FromString(TEXT("Button Text")));
+	SelectButton->TakeWidget();
+	UTextBlock* Caption = Cast<UTextBlock>(
+		SelectButton->GetWidgetFromName(TEXT("ButtonTextBlock")));
+	TestNotNull(TEXT("Narrative's template supplies the visible caption"), Caption);
+	if (!Caption) return false;
+	TestFalse(TEXT("Fixture starts with the unwanted template caption"), Caption->GetText().IsEmpty());
+
+	Row->TakeWidget();
+	TestTrue(TEXT("Constructing an authored row clears the overlaid default caption"),
+		Caption->GetText().IsEmpty());
+	TestTrue(TEXT("The row retains the Narrative button as its focus target"),
+		Row->GetEntryFocusTarget() == SelectButton);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIReadableTypographyTest,
+	"TerritoryFramework.UI.ReadableTypography",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIReadableTypographyTest::RunTest(const FString& Parameters)
+{
+	UNarrativeCommonTextBlock* Body = NewObject<UNarrativeCommonTextBlock>();
+	TestNotNull(TEXT("Readable body test creates a Narrative CommonText block"), Body);
+	if (!Body)
+	{
+		return false;
+	}
+
+	Body->SetTextTransformPolicy(ETextTransformPolicy::ToUpper);
+	TerritoryUITheme::ApplyText(Body, TerritoryTypography::Body,
+		FLinearColor::White, ETerritoryTextRole::Body);
+	Body->TakeWidget();
+
+	TestEqual(TEXT("Body copy keeps the compact Territory size after Slate synchronization"),
+		Body->GetFont().Size, static_cast<float>(TerritoryTypography::Body));
+	TestEqual(TEXT("Body copy does not inherit the Narrative template's forced all-caps transform"),
+		Body->GetTextTransformPolicy(), ETextTransformPolicy::None);
+	TestNotNull(TEXT("Body copy uses the configured readable interface font"),
+		Body->GetFont().FontObject.Get());
+
+	TestEqual(TEXT("Screen title follows the shared Territory hierarchy"),
+		TerritoryTypography::ScreenTitle, 30);
+	TestEqual(TEXT("Panel title follows the shared Territory hierarchy"),
+		TerritoryTypography::PanelTitle, 22);
+	TestEqual(TEXT("Section title follows the shared Territory hierarchy"),
+		TerritoryTypography::SectionTitle, 18);
+	TestEqual(TEXT("Card title follows the shared Territory hierarchy"),
+		TerritoryTypography::CardTitle, 16);
+	TestEqual(TEXT("Metadata follows the shared Territory hierarchy"),
+		TerritoryTypography::Metadata, 12);
+	TestEqual(TEXT("Caption follows the shared Territory hierarchy"),
+		TerritoryTypography::Caption, 11);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIExclusiveTabSelectionTest,
+	"TerritoryFramework.UI.ExclusiveTabSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIExclusiveTabSelectionTest::RunTest(const FString& Parameters)
+{
+	const UTerritoryDeveloperSettings* Settings =
+		GetDefault<UTerritoryDeveloperSettings>();
+	UClass* ButtonClass = Settings
+		? Settings->DefaultNarrativeButtonClass.LoadSynchronous() : nullptr;
+	TestNotNull(TEXT("Tab selection test has a concrete Narrative button class"),
+		ButtonClass);
+	if (!ButtonClass)
+	{
+		return false;
+	}
+
+	UNarrativeCommonButtonBase* First =
+		NewObject<UNarrativeCommonButtonBase>(GetTransientPackage(), ButtonClass);
+	UNarrativeCommonButtonBase* Second =
+		NewObject<UNarrativeCommonButtonBase>(GetTransientPackage(), ButtonClass);
+	TestNotNull(TEXT("First tab is created from the configured concrete class"), First);
+	TestNotNull(TEXT("Second tab is created from the configured concrete class"), Second);
+	if (!First || !Second)
+	{
+		return false;
+	}
+
+	First->SetIsSelectable(true);
+	Second->SetIsSelectable(true);
+	TerritoryUITheme::SetTabSelected(First, true);
+	TerritoryUITheme::SetTabSelected(Second, false);
+	TestTrue(TEXT("The clicked first tab is selected"), First->GetSelected());
+	TestFalse(TEXT("The unclicked second tab is not selected"), Second->GetSelected());
+
+	TerritoryUITheme::SetTabSelected(First, false);
+	TerritoryUITheme::SetTabSelected(Second, true);
+	TestFalse(TEXT("The previously clicked tab clears its selected state"),
+		First->GetSelected());
+	TestTrue(TEXT("Only the newly clicked tab remains selected"),
+		Second->GetSelected());
+
+	UClass* TabStyleClass = Settings
+		? Settings->TerritoryTabButtonStyle.LoadSynchronous() : nullptr;
+	const UCommonButtonStyle* TabStyle = TabStyleClass
+		? Cast<UCommonButtonStyle>(TabStyleClass->GetDefaultObject()) : nullptr;
+	TestNotNull(TEXT("Territory tabs have a configured CommonUI style"), TabStyle);
+	if (TabStyle)
+	{
+		FSlateBrush NormalBrush;
+		FSlateBrush HoveredBrush;
+		FSlateBrush SelectedBrush;
+		FSlateBrush SelectedHoveredBrush;
+		TabStyle->GetNormalBaseBrush(NormalBrush);
+		TabStyle->GetNormalHoveredBrush(HoveredBrush);
+		TabStyle->GetSelectedBaseBrush(SelectedBrush);
+		TabStyle->GetSelectedHoveredBrush(SelectedHoveredBrush);
+		TestFalse(TEXT("An unselected tab has a visible hover treatment"),
+			NormalBrush.TintColor.GetSpecifiedColor().Equals(
+				HoveredBrush.TintColor.GetSpecifiedColor()));
+		TestFalse(TEXT("A selected tab has a visible hover treatment"),
+			SelectedBrush.TintColor.GetSpecifiedColor().Equals(
+				SelectedHoveredBrush.TintColor.GetSpecifiedColor()));
+		TestNotNull(TEXT("Unselected tabs have a normal text style"),
+			TabStyle->GetNormalTextStyle());
+		TestNotNull(TEXT("Selected tabs have a selected text style"),
+			TabStyle->GetSelectedTextStyle());
+	}
+
+	UClass* ActionStyleClass = Settings
+		? Settings->TerritoryActionButtonStyle.LoadSynchronous() : nullptr;
+	const UCommonButtonStyle* ActionStyle = ActionStyleClass
+		? Cast<UCommonButtonStyle>(ActionStyleClass->GetDefaultObject()) : nullptr;
+	TestNotNull(TEXT("Territory management actions have a configured CommonUI style"),
+		ActionStyle);
+	if (ActionStyle)
+	{
+		FSlateBrush NormalActionBrush;
+		FSlateBrush HoveredActionBrush;
+		ActionStyle->GetNormalBaseBrush(NormalActionBrush);
+		ActionStyle->GetNormalHoveredBrush(HoveredActionBrush);
+		TestFalse(TEXT("District management actions have a visible hover treatment"),
+			NormalActionBrush.TintColor.GetSpecifiedColor().Equals(
+				HoveredActionBrush.TintColor.GetSpecifiedColor()));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIPlayerFacingNamesTest,
+	"TerritoryFramework.UI.PlayerFacingNames",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIPlayerFacingNamesTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("A grace-period assault uses a player-facing status"),
+		UTerritoryUIBlueprintLibrary::GetAssaultStateText(
+			ETerritoryAssaultState::Grace).ToString(), FString(TEXT("Preparing")));
+	TestEqual(TEXT("An unresolved assault explains that its outcome is pending"),
+		UTerritoryUIBlueprintLibrary::GetAssaultResolutionText(
+			ETerritoryAssaultResolution::None).ToString(), FString(TEXT("Pending")));
+	TestEqual(TEXT("Diplomacy history uses a readable action"),
+		UTerritoryUIBlueprintLibrary::GetDiplomacyEventTypeText(
+			EDiplomacyEventType::DeclaredWar).ToString(),
+		FString(TEXT("War declared")));
+
+	const FGameplayTag Capability = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.Capability.GuardStaffing"), false);
+	TestTrue(TEXT("The Guard Staffing capability tag exists"), Capability.IsValid());
+	if (Capability.IsValid())
+	{
+		UArsenalSettings* NarrativeSettings = GetMutableDefault<UArsenalSettings>();
+		TestNotNull(TEXT("Narrative Pro tag display settings are available"),
+			NarrativeSettings);
+		if (NarrativeSettings)
+		{
+			const TMap<FGameplayTag, FText> OriginalNames =
+				NarrativeSettings->TagFriendlyDisplayNames;
+			NarrativeSettings->TagFriendlyDisplayNames.Add(Capability,
+				FText::FromString(TEXT("Garrison Command")));
+			TestEqual(TEXT("Territory respects Narrative Pro's authored tag name"),
+				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
+					Capability).ToString(), FString(TEXT("Garrison Command")));
+			NarrativeSettings->TagFriendlyDisplayNames = OriginalNames;
+		}
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIAvailabilityStatusTest,
 	"TerritoryFramework.UI.Status.AvailabilityPrecedesPoliticalState",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -478,6 +701,14 @@ bool FTerritoryUIPlayerLocationDistrictTest::RunTest(const FString& Parameters)
 		NewObject<UTerritoryDistrictDefinition>();
 	UTerritoryPlaceDefinition* PlaceDefinition =
 		NewObject<UTerritoryPlaceDefinition>();
+	UTerritoryCityDefinition* CityDefinition =
+		NewObject<UTerritoryCityDefinition>();
+	TestFalse(TEXT("Broad City Definitions hide the passive gameplay HUD by default"),
+		CityDefinition->bShowGameplayHUD);
+	TestTrue(TEXT("District Definitions preserve the passive gameplay HUD by default"),
+		DistrictDefinition->bShowGameplayHUD);
+	TestTrue(TEXT("Place Definitions show the passive gameplay HUD by default"),
+		PlaceDefinition->bShowGameplayHUD);
 	DistrictDefinition->TerritoryTag = DistrictTag;
 	DistrictDefinition->StableTerritoryGUID = FGuid::NewGuid();
 	DistrictDefinition->TerritoryActorClass = ATerritoryDistrict::StaticClass();
@@ -490,6 +721,12 @@ bool FTerritoryUIPlayerLocationDistrictTest::RunTest(const FString& Parameters)
 		DistrictDefinition->ApplyToTerritory(District));
 	TestTrue(TEXT("Place Definition applies to the Place"),
 		PlaceDefinition->ApplyToTerritory(Property));
+	TestTrue(TEXT("A Place actor reads its Definition gameplay-HUD policy"),
+		Property->ShouldShowGameplayHUD());
+	PlaceDefinition->bShowGameplayHUD = false;
+	TestFalse(TEXT("Disabling one Place Definition hides only its passive gameplay HUD"),
+		Property->ShouldShowGameplayHUD());
+	PlaceDefinition->bShowGameplayHUD = true;
 	UTerritoryRegistrySubsystem* Registry =
 		World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	TestNotNull(TEXT("Registry created"), Registry);

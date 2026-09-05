@@ -6,6 +6,7 @@
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
+#include "UnrealFramework/NarrativeGameUserSettings.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
@@ -20,6 +21,32 @@
 #if !UE_BUILD_SHIPPING
 namespace
 {
+	bool TryParseDebugDifficulty(const FString& Value,
+		ENarrativeGameplayDifficulty& OutDifficulty)
+	{
+		if (Value.Equals(TEXT("Easy"), ESearchCase::IgnoreCase))
+		{
+			OutDifficulty = ENarrativeGameplayDifficulty::Easy;
+			return true;
+		}
+		if (Value.Equals(TEXT("Medium"), ESearchCase::IgnoreCase))
+		{
+			OutDifficulty = ENarrativeGameplayDifficulty::Medium;
+			return true;
+		}
+		if (Value.Equals(TEXT("Hard"), ESearchCase::IgnoreCase))
+		{
+			OutDifficulty = ENarrativeGameplayDifficulty::Hard;
+			return true;
+		}
+		if (Value.Equals(TEXT("Insane"), ESearchCase::IgnoreCase))
+		{
+			OutDifficulty = ENarrativeGameplayDifficulty::Insane;
+			return true;
+		}
+		return false;
+	}
+
 	UWorld* ResolveAuthoritativeGameWorld(UWorld* RequestedWorld)
 	{
 		if (RequestedWorld && RequestedWorld->IsGameWorld()
@@ -129,7 +156,7 @@ namespace
 		if (Args.Num() < 3)
 		{
 			UE_LOG(LogTemp, Error,
-				TEXT("Usage: Territory.Debug.StartAssaultGate <Territory.Tag> <Narrative.Factions.Attacker> <Narrative.Factions.Defender> [Immediate]"));
+				TEXT("Usage: Territory.Debug.StartAssaultGate <Territory.Tag> <Narrative.Factions.Attacker> <Narrative.Factions.Defender> [Immediate] [Easy|Medium|Hard|Insane]"));
 			return;
 		}
 
@@ -207,21 +234,42 @@ namespace
 			&& (Args[3].Equals(TEXT("Immediate"), ESearchCase::IgnoreCase)
 				|| Args[3].Equals(TEXT("true"), ESearchCase::IgnoreCase)
 				|| Args[3] == TEXT("1"));
+		UNarrativeGameUserSettings* UserSettings = GEngine
+			? Cast<UNarrativeGameUserSettings>(GEngine->GetGameUserSettings()) : nullptr;
+		if (Args.Num() > 4)
+		{
+			ENarrativeGameplayDifficulty RequestedDifficulty;
+			if (!TryParseDebugDifficulty(Args[4], RequestedDifficulty)
+				|| !UserSettings)
+			{
+				UE_LOG(LogTemp, Error,
+					TEXT("[TerritoryAssaultGate] Difficulty must be Easy, Medium, Hard, or Insane and Narrative Game User Settings must be active."));
+				return;
+			}
+			// Development-only and deliberately transient. Do not save or apply the
+			// setting: this gate must not change the player's authored preference.
+			UserSettings->SetGameplayDifficulty(RequestedDifficulty);
+		}
+		const ENarrativeGameplayDifficulty ActiveDifficulty = UserSettings
+			? UserSettings->GetGameplayDifficulty()
+			: ENarrativeGameplayDifficulty::Easy;
 		FText FailureReason;
 		const bool bScheduled = Counterattacks->TryScheduleAssaultAdvancedWithReason(
 			Target, AttackingFaction, ETerritoryAssaultLaunchMode::StoryPursuit,
 			StoryOptions, bStartImmediately, FailureReason);
 		UE_LOG(LogTemp, Display,
-			TEXT("[TerritoryAssaultGate] result=%s target=%s attacker=%s defender=%s immediate=%s preparationAssaultsCancelled=%d reason=\"%s\" world=%s"),
+			TEXT("[TerritoryAssaultGate] result=%s target=%s attacker=%s defender=%s immediate=%s difficulty=%s preparationAssaultsCancelled=%d reason=\"%s\" world=%s"),
 			bScheduled ? TEXT("Scheduled") : TEXT("Rejected"), *Args[0], *Args[1],
 			*Args[2], bStartImmediately ? TEXT("true") : TEXT("false"),
+			*StaticEnum<ENarrativeGameplayDifficulty>()->GetNameStringByValue(
+				static_cast<int64>(ActiveDifficulty)),
 			CancelledPreparationAssaults,
 			bScheduled ? TEXT("") : *FailureReason.ToString(), *World->GetName());
 	}
 
 	FAutoConsoleCommandWithWorldAndArgs GTerritoryStartAssaultGateCommand(
 		TEXT("Territory.Debug.StartAssaultGate"),
-		TEXT("Development-only: prepare a claimed defender/War pair and start a deterministic assault persistence gate. Args: <Territory.Tag> <Attacker> <Defender> [Immediate]."),
+		TEXT("Development-only: prepare a claimed defender/War pair and start a deterministic assault persistence gate. Args: <Territory.Tag> <Attacker> <Defender> [Immediate] [Easy|Medium|Hard|Insane]."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
 			&PrepareAndStartDebugAssaultGate));
 
@@ -267,33 +315,49 @@ namespace
 		const bool bLoaded = bSaved && SaveSubsystem->Load(SaveName, SaveSlot);
 		const TArray<FTerritoryAssaultRecord> After =
 			Counterattacks->GetAllAssaults();
+		TSet<FGuid> LiveAssaultIDsAfter;
+		int32 LiveRecordsAfter = 0;
 		int32 RestoredCount = 0;
 		for (const FTerritoryAssaultRecord& Assault : After)
 		{
-			if (LiveAssaultIDs.Contains(Assault.AssaultID) && !Assault.IsTerminal())
+			if (!Assault.IsTerminal())
 			{
-				++RestoredCount;
+				++LiveRecordsAfter;
+				LiveAssaultIDsAfter.Add(Assault.AssaultID);
+				if (LiveAssaultIDs.Contains(Assault.AssaultID))
+				{
+					++RestoredCount;
+				}
 			}
 		}
 
 		const bool bPassed = bSaved && bLoaded
-			&& RestoredCount == LiveAssaultIDs.Num();
+			&& RestoredCount == LiveAssaultIDs.Num()
+			&& LiveRecordsAfter == LiveAssaultIDs.Num()
+			&& LiveAssaultIDsAfter.Num() == LiveAssaultIDs.Num();
 		const TCHAR* Result = bPassed ? TEXT("PASS") : TEXT("FAIL");
 		const TCHAR* Saved = bSaved ? TEXT("true") : TEXT("false");
 		const TCHAR* Loaded = bLoaded ? TEXT("true") : TEXT("false");
+		const int32 HistoryAfter = After.Num() - LiveRecordsAfter;
+		const int32 UnexpectedLive = FMath::Max(0,
+			LiveAssaultIDsAfter.Num() - RestoredCount);
+		const int32 DuplicateLiveIDs = FMath::Max(0,
+			LiveRecordsAfter - LiveAssaultIDsAfter.Num());
 		if (bPassed)
 		{
 			UE_LOG(LogTemp, Display,
-				TEXT("[TerritorySaveReloadGate] result=%s save=%s load=%s saveName=%s slot=%d liveBefore=%d liveRestored=%d totalAfter=%d world=%s"),
+				TEXT("[TerritorySaveReloadGate] result=%s save=%s load=%s saveName=%s slot=%d liveBefore=%d liveRestored=%d liveAfter=%d historyAfter=%d totalAfter=%d unexpectedLive=%d duplicateLiveIDs=%d world=%s"),
 				Result, Saved, Loaded, *SaveName, SaveSlot,
-				LiveAssaultIDs.Num(), RestoredCount, After.Num(), *World->GetName());
+				LiveAssaultIDs.Num(), RestoredCount, LiveRecordsAfter, HistoryAfter,
+				After.Num(), UnexpectedLive, DuplicateLiveIDs, *World->GetName());
 		}
 		else
 		{
 			UE_LOG(LogTemp, Error,
-				TEXT("[TerritorySaveReloadGate] result=%s save=%s load=%s saveName=%s slot=%d liveBefore=%d liveRestored=%d totalAfter=%d world=%s"),
+				TEXT("[TerritorySaveReloadGate] result=%s save=%s load=%s saveName=%s slot=%d liveBefore=%d liveRestored=%d liveAfter=%d historyAfter=%d totalAfter=%d unexpectedLive=%d duplicateLiveIDs=%d world=%s"),
 				Result, Saved, Loaded, *SaveName, SaveSlot,
-				LiveAssaultIDs.Num(), RestoredCount, After.Num(), *World->GetName());
+				LiveAssaultIDs.Num(), RestoredCount, LiveRecordsAfter, HistoryAfter,
+				After.Num(), UnexpectedLive, DuplicateLiveIDs, *World->GetName());
 		}
 	}
 

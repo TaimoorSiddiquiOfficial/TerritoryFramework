@@ -25,16 +25,16 @@ void UTerritoryHUDWidget::NativeConstruct()
 		FLinearColor(0.025f, 0.04f, 0.055f, 0.94f),
 		FLinearColor(0.18f, 0.52f, 0.48f, 0.5f), 5.f);
 	TerritoryUITheme::ApplyProgress(ProgressBar_Capture, false);
-	TerritoryUITheme::ApplyText(Text_DistrictName, 16,
+	TerritoryUITheme::ApplyText(Text_DistrictName, TerritoryTypography::CardTitle,
 		FLinearColor(0.94f, 0.93f, 0.89f, 1.f),
 		ETerritoryTextRole::Heading, false);
-	TerritoryUITheme::ApplyText(DistrictOwnerText, 11,
+	TerritoryUITheme::ApplyText(DistrictOwnerText, TerritoryTypography::Caption,
 		FLinearColor(0.64f, 0.68f, 0.67f, 1.f),
 		ETerritoryTextRole::Muted, false);
-	TerritoryUITheme::ApplyText(Text_CaptureState, 10,
+	TerritoryUITheme::ApplyText(Text_CaptureState, TerritoryTypography::Metadata,
 		FLinearColor(0.92f, 0.70f, 0.24f, 1.f),
 		ETerritoryTextRole::Heading, false);
-	TerritoryUITheme::ApplyText(DistrictDescriptionText, 10,
+	TerritoryUITheme::ApplyText(DistrictDescriptionText, TerritoryTypography::Metadata,
 		FLinearColor(0.94f, 0.93f, 0.89f, 1.f));
 	if (APlayerController* PlayerController = GetOwningPlayer())
 	{
@@ -94,17 +94,30 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	// Always re-query territory at player location — handles player moving between territories
 	BindToTerritoryAtPlayer();
 
-	Super::RefreshTerritoryDisplay();
-
 	ATerritoryVolume* Territory = GetBoundTerritory();
 	if (!Territory)
 	{
+		Super::RefreshTerritoryDisplay();
 		if (bCollapseWhenOutsideTerritory)
 		{
 			SetVisibility(ESlateVisibility::Collapsed);
 		}
 		return;
 	}
+	if (!Territory->ShouldShowGameplayHUD())
+	{
+		// This is a Definition presentation policy, not story availability. Keep
+		// the Territory fully playable and visible to POI/menu systems while only
+		// removing this passive on-screen card.
+		SetVisibility(ESlateVisibility::Collapsed);
+		bHasObservedState = false;
+		LastObservedContestingFaction = FGameplayTag();
+		ActiveCounterAttackAlert = FText::GetEmpty();
+		CounterAttackAlertExpiresAtRealTime = 0.0;
+		return;
+	}
+
+	Super::RefreshTerritoryDisplay();
 	if (bCollapseWhenOutsideTerritory && GetVisibility() == ESlateVisibility::Collapsed)
 	{
 		SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -150,7 +163,7 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 	{
 		const FText DistrictName = Territory->GetTerritoryDisplayName();
 		PresentCounterAttackAlert(FText::Format(
-			NSLOCTEXT("TerritoryHUD", "AttackAlert", "ATTACK ALERT: {0} is under attack by {1}."),
+			NSLOCTEXT("TerritoryHUD", "AttackAlert", "Attack alert: {0} is under attack by {1}."),
 			DistrictName,
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(ContestingFaction)), 6.f);
 	}
@@ -231,7 +244,7 @@ void UTerritoryHUDWidget::HandleCinematicPresentationChanged(bool bIsActive)
 void UTerritoryHUDWidget::HandleAssaultNotification(const FTerritoryAssaultRecord& Assault)
 {
 	PresentCounterAttackAlert(FText::Format(
-		NSLOCTEXT("TerritoryHUD", "CounterAttackWarning", "COUNTERATTACK: {0} is moving on {1}."),
+		NSLOCTEXT("TerritoryHUD", "CounterAttackWarning", "Counterattack: {0} is moving on {1}."),
 		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.AttackingFaction),
 		UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Assault.TargetTerritory)), 8.f);
 	RefreshTerritoryDisplay();

@@ -22,9 +22,57 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Items/NarrativeItem.h"
 #include "NarrativeGameplayTags.h"
+#include "Engine/Engine.h"
+#include "LatentActions.h"
 
 namespace
 {
+	class FWaitForNarrativeGameplayHUDAction final : public FPendingLatentAction
+	{
+	public:
+		FWaitForNarrativeGameplayHUDAction(
+			ANarrativePlayerController* InController,
+			const float InTimeoutSeconds,
+			const FLatentActionInfo& LatentInfo)
+			: Controller(InController)
+			, RemainingSeconds(FMath::Max(0.f, InTimeoutSeconds))
+			, ExecutionFunction(LatentInfo.ExecutionFunction)
+			, OutputLink(LatentInfo.Linkage)
+			, CallbackTarget(LatentInfo.CallbackTarget)
+		{
+		}
+
+		virtual void UpdateOperation(FLatentResponse& Response) override
+		{
+			ANarrativePlayerController* NarrativeController = Controller.Get();
+			// Dedicated/listen servers never create a HUD for remote controllers.
+			// Their non-local Blueprint path must continue immediately.
+			const bool bReady = NarrativeController
+				&& (!NarrativeController->IsLocalPlayerController()
+					|| IsValid(NarrativeController->GetNarrativeGameplayHUD()));
+			RemainingSeconds -= Response.ElapsedTime();
+			const bool bTimedOut = !bReady && RemainingSeconds <= 0.f;
+			if (bTimedOut && !bReportedTimeout)
+			{
+				bReportedTimeout = true;
+				UE_LOG(LogTemp, Warning,
+					TEXT("[TerritoryUIReadiness] Timed out waiting for Narrative GameplayHUD on %s."),
+					*GetNameSafe(NarrativeController));
+			}
+			Response.FinishAndTriggerIf(
+				bReady || bTimedOut || !NarrativeController,
+				ExecutionFunction, OutputLink, CallbackTarget);
+		}
+
+	private:
+		TWeakObjectPtr<ANarrativePlayerController> Controller;
+		float RemainingSeconds = 0.f;
+		FName ExecutionFunction;
+		int32 OutputLink = INDEX_NONE;
+		FWeakObjectPtr CallbackTarget;
+		bool bReportedTimeout = false;
+	};
+
 	AActor* ResolveViewerActor(APlayerController* Viewer)
 	{
 		return Viewer && Viewer->GetPawn() ? static_cast<AActor*>(Viewer->GetPawn()) : Viewer;
@@ -310,7 +358,7 @@ namespace
 		if (View.bUnderAttack)
 		{
 			return FText::Format(
-				NSLOCTEXT("TerritoryOperations", "ActiveThreat", "UNDER ATTACK — {0} alive, {1} reserve"),
+				NSLOCTEXT("TerritoryOperations", "ActiveThreat", "Under attack — {0} alive, {1} reserve"),
 				FText::AsNumber(View.AliveAttackers),
 				FText::AsNumber(View.PendingReserveAttackers));
 		}
@@ -329,7 +377,7 @@ namespace
 		{
 			return FText::Format(
 				NSLOCTEXT("TerritoryOperations", "ProjectedThreat",
-					"PROJECTED — {0} can attack {1}: launch {2}, estimated success {3}, defence {4}, power ratio {5}"),
+					"Projected — {0} can attack {1}: launch {2}, estimated success {3}, defence {4}, power ratio {5}"),
 				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.AttackingFaction),
 				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.ThreatTargetTerritory),
 				FText::AsPercent(FMath::Clamp(View.LaunchProbability, 0.f, 1.f)),
@@ -379,6 +427,36 @@ UTerritoryActivatableWidget* UTerritoryUIBlueprintLibrary::OpenTerritoryMenu(
 		}
 	}
 	return Layer->AddWidget<UTerritoryActivatableWidget>(WidgetClass);
+}
+
+void UTerritoryUIBlueprintLibrary::WaitForNarrativeGameplayHUD(
+	const UObject* WorldContextObject,
+	FLatentActionInfo LatentInfo,
+	APlayerController* PlayerController,
+	const float TimeoutSeconds)
+{
+	UWorld* World = GEngine
+		? GEngine->GetWorldFromContextObject(
+			WorldContextObject, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
+	if (!World || !LatentInfo.CallbackTarget)
+	{
+		return;
+	}
+
+	FLatentActionManager& LatentManager = World->GetLatentActionManager();
+	if (LatentManager.FindExistingAction<FWaitForNarrativeGameplayHUDAction>(
+		LatentInfo.CallbackTarget, LatentInfo.UUID))
+	{
+		return;
+	}
+
+	LatentManager.AddNewAction(
+		LatentInfo.CallbackTarget,
+		LatentInfo.UUID,
+		new FWaitForNarrativeGameplayHUDAction(
+			Cast<ANarrativePlayerController>(PlayerController),
+			TimeoutSeconds,
+			LatentInfo));
 }
 
 ATerritoryVolume* UTerritoryUIBlueprintLibrary::ResolveTerritoryWaypointTarget(
@@ -1959,11 +2037,11 @@ FText UTerritoryUIBlueprintLibrary::GetThreatLevelText(ETerritoryThreatLevel Thr
 {
 	switch (ThreatLevel)
 	{
-	case ETerritoryThreatLevel::Critical: return NSLOCTEXT("TerritoryOperations", "ThreatCritical", "CRITICAL");
-	case ETerritoryThreatLevel::Warning: return NSLOCTEXT("TerritoryOperations", "ThreatWarning", "WARNING");
-	case ETerritoryThreatLevel::Watch: return NSLOCTEXT("TerritoryOperations", "ThreatWatch", "WATCH");
+	case ETerritoryThreatLevel::Critical: return NSLOCTEXT("TerritoryOperations", "ThreatCritical", "Critical");
+	case ETerritoryThreatLevel::Warning: return NSLOCTEXT("TerritoryOperations", "ThreatWarning", "Warning");
+	case ETerritoryThreatLevel::Watch: return NSLOCTEXT("TerritoryOperations", "ThreatWatch", "Watch");
 	case ETerritoryThreatLevel::None:
-	default: return NSLOCTEXT("TerritoryOperations", "ThreatNone", "SECURE");
+	default: return NSLOCTEXT("TerritoryOperations", "ThreatNone", "Secure");
 	}
 }
 
@@ -2044,10 +2122,73 @@ FText UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
 
 FText UTerritoryUIBlueprintLibrary::GetAssaultStateText(ETerritoryAssaultState AssaultState)
 {
-	const UEnum* Enum = StaticEnum<ETerritoryAssaultState>();
-	return Enum
-		? Enum->GetDisplayNameTextByValue(static_cast<int64>(AssaultState))
-		: FText::GetEmpty();
+	switch (AssaultState)
+	{
+	case ETerritoryAssaultState::Grace:
+		return NSLOCTEXT("TerritoryOperations", "AssaultPreparing", "Preparing");
+	case ETerritoryAssaultState::Evaluating:
+		return NSLOCTEXT("TerritoryOperations", "AssaultPlanningRoute", "Planning route");
+	case ETerritoryAssaultState::ScheduledWarning:
+		return NSLOCTEXT("TerritoryOperations", "AssaultWarningIssued", "Warning issued");
+	case ETerritoryAssaultState::WaitingForPlayerProximity:
+		return NSLOCTEXT("TerritoryOperations", "AssaultForcesApproaching", "Forces approaching");
+	case ETerritoryAssaultState::Active:
+		return NSLOCTEXT("TerritoryOperations", "AssaultBattleActive", "Battle active");
+	case ETerritoryAssaultState::Succeeded:
+		return NSLOCTEXT("TerritoryOperations", "AssaultTerritoryTaken", "Territory taken");
+	case ETerritoryAssaultState::Defeated:
+		return NSLOCTEXT("TerritoryOperations", "AssaultAttackDefeated", "Attack defeated");
+	case ETerritoryAssaultState::Cancelled:
+		return NSLOCTEXT("TerritoryOperations", "AssaultCancelled", "Cancelled");
+	case ETerritoryAssaultState::RecaptureCountdown:
+		return NSLOCTEXT("TerritoryOperations", "AssaultRecaptureInProgress", "Recapture in progress");
+	default:
+		return NSLOCTEXT("TerritoryOperations", "UnknownAssaultState", "Unknown status");
+	}
+}
+
+FText UTerritoryUIBlueprintLibrary::GetAssaultResolutionText(
+	ETerritoryAssaultResolution AssaultResolution)
+{
+	switch (AssaultResolution)
+	{
+	case ETerritoryAssaultResolution::None:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionPending", "Pending");
+	case ETerritoryAssaultResolution::DecisionRollFailed:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionDecisionFailed", "Command chose not to attack");
+	case ETerritoryAssaultResolution::DiplomacyBlocked:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionDiplomacy", "Diplomacy prevented the attack");
+	case ETerritoryAssaultResolution::InvalidTerritory:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionTerritoryUnavailable", "Territory unavailable");
+	case ETerritoryAssaultResolution::InvalidApproachOrRoute:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionNoRoute", "No valid approach route");
+	case ETerritoryAssaultResolution::BudgetBlocked:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionBudget", "Faction resources unavailable");
+	case ETerritoryAssaultResolution::ConfigurationInvalid:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionSetup", "Assault setup incomplete");
+	case ETerritoryAssaultResolution::OwnershipChanged:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionOwnership", "Territory ownership changed");
+	case ETerritoryAssaultResolution::AllAttackersRemoved:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionDefeated", "Attacking force defeated");
+	case ETerritoryAssaultResolution::CaptureCompleted:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionCaptured", "Territory captured");
+	case ETerritoryAssaultResolution::ManuallyCancelled:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionManual", "Cancelled by story or command");
+	case ETerritoryAssaultResolution::SpawnFailed:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionDeployFailed", "Reinforcement deployment failed");
+	case ETerritoryAssaultResolution::QuestRuleBlocked:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionQuest", "Blocked by active quest");
+	case ETerritoryAssaultResolution::StagingDistrictUnavailable:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionStaging", "No secure staging district");
+	case ETerritoryAssaultResolution::TargetEscaped:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionEscaped", "Target escaped");
+	case ETerritoryAssaultResolution::ChaseDistanceLost:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionDistance", "Pursuit distance lost");
+	case ETerritoryAssaultResolution::ReinforcementCapabilityLost:
+		return NSLOCTEXT("TerritoryOperations", "AssaultResolutionCommandLost", "Reinforcement command lost");
+	default:
+		return NSLOCTEXT("TerritoryOperations", "UnknownAssaultResolution", "Unknown outcome");
+	}
 }
 
 FText UTerritoryUIBlueprintLibrary::GetDiplomacyStateText(EDiplomacyState DiplomacyState)
@@ -2056,4 +2197,30 @@ FText UTerritoryUIBlueprintLibrary::GetDiplomacyStateText(EDiplomacyState Diplom
 	return Enum
 		? Enum->GetDisplayNameTextByValue(static_cast<int64>(DiplomacyState))
 		: NSLOCTEXT("TerritoryOperations", "UnknownDiplomacyState", "Unknown relationship");
+}
+
+FText UTerritoryUIBlueprintLibrary::GetDiplomacyEventTypeText(
+	EDiplomacyEventType EventType)
+{
+	switch (EventType)
+	{
+	case EDiplomacyEventType::DeclaredWar:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyWarDeclared", "War declared");
+	case EDiplomacyEventType::DeclaredPeace:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyPeaceDeclared", "Peace declared");
+	case EDiplomacyEventType::FormedAlliance:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyAllianceFormed", "Alliance formed");
+	case EDiplomacyEventType::BrokeAlliance:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyAllianceEnded", "Alliance ended");
+	case EDiplomacyEventType::SignedTradeAgreement:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyTradeSigned", "Trade agreement signed");
+	case EDiplomacyEventType::ExpiredTreaty:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyTreatyExpired", "Treaty expired");
+	case EDiplomacyEventType::BrokeCeasefire:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyCeasefireBroken", "Ceasefire broken");
+	case EDiplomacyEventType::SignedNonAggression:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyNonAggressionSigned", "Non-aggression pact signed");
+	default:
+		return NSLOCTEXT("TerritoryOperations", "UnknownDiplomacyEvent", "Diplomacy updated");
+	}
 }

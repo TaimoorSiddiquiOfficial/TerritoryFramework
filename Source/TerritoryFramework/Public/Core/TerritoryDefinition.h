@@ -486,6 +486,16 @@ public:
 		meta=(ClampMin="0.0"))
 	float StrategicValue = 1.f;
 
+	/**
+	 * Controls only the compact passive Territory card inside Narrative's gameplay
+	 * HUD. Notifications, POIs, map/compass markers, menus, and management remain
+	 * available. Broad City volumes default to off; Places and Districts default on.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="09 Presentation",
+		meta=(DisplayName="Show Passive Gameplay HUD Card",
+			ToolTip="Show the compact Territory location/capture card while the player is inside this exact Territory. Turn this off for broad ambient City or District volumes. Live notifications, POIs, map markers, Command Center, and management are not hidden."))
+	bool bShowGameplayHUD = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="09 Management")
 	FTerritoryManagementPointTemplate ManagementPoint;
 

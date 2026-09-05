@@ -387,6 +387,9 @@ bool UTerritoryDistrictDefinition::IsDefinitionCompatible(
 
 UTerritoryCityDefinition::UTerritoryCityDefinition()
 {
+	// A City is a broad ambient region. Keep the compact capture/location card for
+	// its more specific Districts and Places unless a designer deliberately opts in.
+	bShowGameplayHUD = false;
 	NormalizeAggregateDefinition(this);
 }
 

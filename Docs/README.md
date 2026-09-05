@@ -89,6 +89,8 @@ audits are kept outside this learning path so they cannot be mistaken for curren
 These reports explain what was found and tested on their stated dates. Use the numbered guides
 above for current setup; use reports for traceability.
 
+- [Rendered HUD and authoring follow-up — 2026-09-05](RENDERED_FOLLOWUP_2026-09-05.md)
+- [Territory Framework + Narrative Pro deep audit — 2026-09-05](TERRITORY_NARRATIVE_PRO_DEEP_AUDIT_2026-09-05.md)
 - [Narrative damage and dual-target re-audit — 2026-09-03](NARRATIVE_DAMAGE_REAUDIT_2026-09-03.md)
 - [Complete system re-audit — 2026-09-01](COMPLETE_SYSTEM_REAUDIT_2026-09-01.md)
 - [Vision and complete re-audit — 2026-08-25](VISION_AND_COMPLETE_REAUDIT_2026-08-25.md)

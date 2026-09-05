@@ -60,12 +60,17 @@ were headless-only. It exposed two project-owned Blueprint timing defects:
 - the project Narrative controller entered the vendor Local Init graph before possession had
   created `GameplayHUD`.
 
-The redundant assault cleanup node was removed while preserving weapon-drop presentation. The
-controller now defers its parent Blueprint BeginPlay graph by 0.05 seconds so Narrative's native
-possession path creates the HUD first. Both assets compile without warnings. A 45-second PIE assault
-startup and a second targeted PIE session that invoked assault death reported zero Blueprint
-runtime, `Accessed None`, pending-kill, or activity-component errors. A refreshed packaged render is
-still required because the existing package predates these asset fixes.
+The redundant assault cleanup node was removed while preserving weapon-drop presentation. A later
+packaged two-client audit proved a fixed startup delay was not a lifecycle contract. The project
+controller now calls Territory's latent `Wait For Narrative Gameplay HUD` before its parent
+BeginPlay graph. Narrative's normal possession/PlayerState path creates the HUD and initializes its
+ASC; Territory neither creates a duplicate HUD nor modifies vendor content. Remote server
+controllers bypass the local-HUD gate immediately.
+
+A refreshed packaged listener admitted two clients with zero `GameplayHUD`, `LoadingMenu`,
+`Accessed None`, Blueprint runtime, divide-by-zero, null-ASC, or Territory readiness warnings in
+the server and client logs. The headless clients still report an engine skeletal-mesh visibility
+ensure under NullRHI; it is not emitted by Territory or the HUD lifecycle graph.
 
 ## Cook and package
 
@@ -89,9 +94,11 @@ owning plugin/project, not copied into Territory Framework.
 
 ## Road and reinforcement evidence
 
-The current authored runtime proved the forward reinforcement path: a Narrative driver claimed the
-faction sedan, travelled ten ZoneGraph route points, stopped, dismounted, and allowed the takeover
-flow to finish. The following still need a hands-on authored mission pass:
+The current authored runtime proved the forward reinforcement path and complete car-wave policy.
+On Narrative Hard difficulty, the first sedan carried one driver plus three passengers, travelled
+ten ZoneGraph route points, stopped, and dismounted. Two members died without spawning a partial
+replacement car. After all four members resolved, a second sedan arrived with another driver plus
+three passengers. The following still need a hands-on authored mission pass:
 
 - reverse boss pursuit;
 - slow or blocked traffic;
@@ -122,3 +129,16 @@ firearm `GameplayCue.Weapon.Fire` on every melee swing. That tag is now empty, a
 muzzle-fire cue RPCs and per-net-update cue-budget warnings from Territory sword attacks. The two
 generic Narrative cue graphs remain vendor-owned and should be fixed by a Narrative Pro update or a
 project-level vendor override, never by changing Territory's gameplay authority.
+
+## 2026-09-04 final regression refresh
+
+- UE 5.7 Game and Editor Development targets: **passed**.
+- Full Territory automation: **208/208 passed** (202 clean, 6 intentional warning fixtures).
+- Fresh full cook: **6,906 discovered packages / 6,722 runtime packages, zero cook errors**.
+- Windows stage/package/archive: **passed**.
+- Active-assault in-process save/reload: **passed** with `liveBefore=1`, `liveRestored=1`,
+  `liveAfter=1`, `unexpectedLive=0`, and `duplicateLiveIDs=0`.
+- Independent packaged-process restart from the same slot: **passed** with the same exact live set.
+- Packaged two-client HUD lifecycle gate: **passed** with both joins and no Territory/UI runtime
+  errors.
+- Hard vehicle-wave playtest: **passed** for two full four-seat cars and no partial-car top-up.

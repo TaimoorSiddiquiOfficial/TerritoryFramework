@@ -43,6 +43,10 @@ The label on the right explains certainty:
 The collapsed **Setup Health** section uses the existing Territory Definition validator. Fix errors
 before testing the story. Warnings describe an authoring risk but may be intentional.
 
+The **Presentation > Passive gameplay HUD card** row explains the Definition's exact HUD policy.
+It also states what remains available, so hiding a broad City card cannot be mistaken for disabling
+notifications, POIs, the map, Command Center intelligence, or management.
+
 ## Blacksmith unlocks Castle Hill Farm
 
 Example setup:

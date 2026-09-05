@@ -350,6 +350,10 @@ bool FTFCounterAttackPlayerRelativeReserveStaging::RunTest(const FString& Parame
 		ApproachStruct->FindPropertyByName(TEXT("RelativeVehicleDropOffTransform")));
 	TestNotNull(TEXT("A vehicle approach bounds Narrative ingress time"),
 		ApproachStruct->FindPropertyByName(TEXT("VehicleIngressTimeoutSeconds")));
+	TestNotNull(TEXT("A vehicle approach authors a total squad capacity"),
+		ApproachStruct->FindPropertyByName(TEXT("VehicleOccupantCapacity")));
+	TestEqual(TEXT("One reinforcement car carries a four-person squad by default"),
+		FTerritoryAssaultApproach().VehicleOccupantCapacity, 4);
 	TestTrue(TEXT("Vehicle ingress timeout is safely bounded by default"),
 		FTerritoryAssaultApproach().VehicleIngressTimeoutSeconds >= 5.f);
 	const UTerritoryCounterAttackProfile* Profile =
@@ -393,6 +397,39 @@ bool FTFCounterAttackNarrativeDifficultyVehicleBudget::RunTest(
 	TestEqual(TEXT("Disabled scaling uses the authored road/force limit"),
 		UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
 			Force, ENarrativeGameplayDifficulty::Easy, 5, 4), 4);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackVehicleSquadCapacity,
+	"TerritoryFramework.CounterAttack.Vehicle.SquadCapacity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackVehicleSquadCapacity::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("One authored four-seat car deploys one driver and three passengers"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOccupantCount(4, 4, 4, 4), 4);
+	TestEqual(TEXT("A finite eight-person force is split into four-person vehicle waves"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOccupantCount(8, 4, 4, 4), 4);
+	TestEqual(TEXT("Narrative mount seats are the physical capacity authority"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOccupantCount(4, 4, 4, 2), 2);
+	TestEqual(TEXT("The remaining wave budget can reduce a later car"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOccupantCount(2, 4, 4, 4), 2);
+	TestEqual(TEXT("No remaining finite force creates no vehicle occupants"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOccupantCount(0, 4, 4, 4), 0);
+
+	const TArray<int32> TwoFourSeatCars = { 4, 4 };
+	TestEqual(TEXT("Medium difficulty authorizes one complete four-person vehicle wave"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(
+			8, 1, TwoFourSeatCars), 4);
+	TestEqual(TEXT("Hard difficulty authorizes two complete four-person vehicle waves"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(
+			8, 2, TwoFourSeatCars), 8);
+	TestEqual(TEXT("Finite force remains authoritative when it is smaller than all seats"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(
+			6, 2, TwoFourSeatCars), 6);
+	TestEqual(TEXT("No authorized car cannot create a destination-spawned force"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(
+			8, 0, TwoFourSeatCars), 0);
 	return true;
 }
 
@@ -1836,6 +1873,19 @@ bool FTFStrategicStagingRecurringAndOffscreenWavePolicy::RunTest(const FString& 
 	TestFalse(TEXT("The initial player activation gate is never bypassed"),
 		UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(
 			Active, false, true));
+	Active.State = ETerritoryAssaultState::Active;
+	Active.AliveForce = 1;
+	Active.PendingReserveForce = 2;
+	TestFalse(TEXT("One vehicle-wave casualty does not consume the next car as a one-seat top-up"),
+		UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(
+			Active, true, true, true));
+	TestTrue(TEXT("Mixed or on-foot reserves retain the configured casualty top-up policy"),
+		UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(
+			Active, true, true, false));
+	Active.AliveForce = 0;
+	TestTrue(TEXT("A vehicle-only reserve car becomes ready at complete wave exhaustion"),
+		UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(
+			Active, true, true, true));
 
 	FTerritoryAssaultRecord Previous;
 	Previous.State = ETerritoryAssaultState::Defeated;

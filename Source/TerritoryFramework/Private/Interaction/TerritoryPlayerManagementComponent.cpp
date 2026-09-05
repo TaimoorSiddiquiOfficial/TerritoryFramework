@@ -715,16 +715,40 @@ UTerritoryPlayerManagementComponent::GetTerritoryIntelligence(
 							Event.TerritoryName);
 						break;
 					}
-					Event.Detail = FText::Format(NSLOCTEXT("TerritoryIntelligence",
-						"ArchivedCounterDetail",
-						"State: {0}. Planned: {1}; alive: {2}; reserve: {3}; killed: {4}; withdrawn: {5}. Resolution: {6}."),
-						FText::FromString(UEnum::GetValueAsString(Assault.State)),
-						FText::AsNumber(Assault.PlannedForce),
-						FText::AsNumber(Assault.AliveForce),
-						FText::AsNumber(Assault.PendingReserveForce),
-						FText::AsNumber(Assault.KilledForce),
-						FText::AsNumber(Assault.WithdrawnForce),
-						FText::FromString(UEnum::GetValueAsString(Assault.Resolution)));
+					if (Assault.State == ETerritoryAssaultState::Grace
+						|| Assault.State == ETerritoryAssaultState::Evaluating)
+					{
+						Event.Detail = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+							"ArchivedCounterPreparingDetail",
+							"Status: {0}. {1} is evaluating its force and approach; confirmed numbers will appear when planning completes."),
+							UTerritoryUIBlueprintLibrary::GetAssaultStateText(Assault.State),
+							UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
+								Assault.AttackingFaction));
+					}
+					else if (Assault.IsTerminal())
+					{
+						Event.Detail = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+							"ArchivedCounterResolvedDetail",
+							"Status: {0}. Planned force: {1}; defeated: {2}; withdrawn: {3}. Outcome: {4}."),
+							UTerritoryUIBlueprintLibrary::GetAssaultStateText(Assault.State),
+							FText::AsNumber(Assault.PlannedForce),
+							FText::AsNumber(Assault.KilledForce),
+							FText::AsNumber(Assault.WithdrawnForce),
+							UTerritoryUIBlueprintLibrary::GetAssaultResolutionText(
+								Assault.Resolution));
+					}
+					else
+					{
+						Event.Detail = FText::Format(NSLOCTEXT("TerritoryIntelligence",
+							"ArchivedCounterActiveDetail",
+							"Status: {0}. Planned force: {1}; active: {2}; reserve: {3}; defeated: {4}; withdrawn: {5}."),
+							UTerritoryUIBlueprintLibrary::GetAssaultStateText(Assault.State),
+							FText::AsNumber(Assault.PlannedForce),
+							FText::AsNumber(Assault.AliveForce),
+							FText::AsNumber(Assault.PendingReserveForce),
+							FText::AsNumber(Assault.KilledForce),
+							FText::AsNumber(Assault.WithdrawnForce));
+					}
 					Events.Add(MoveTemp(Event));
 				}
 			}
@@ -771,7 +795,8 @@ UTerritoryPlayerManagementComponent::GetTerritoryIntelligence(
 						: ETerritoryIntelligenceSeverity::Positive;
 					Event.Headline = FText::Format(NSLOCTEXT("TerritoryIntelligence",
 						"ArchivedDiplomacyHeadline", "Diplomacy archive: {0}"),
-						FText::FromString(UEnum::GetValueAsString(DiplomacyEvent.EventType)));
+						UTerritoryUIBlueprintLibrary::GetDiplomacyEventTypeText(
+							DiplomacyEvent.EventType));
 					Event.Detail = FText::Format(NSLOCTEXT("TerritoryIntelligence",
 						"ArchivedDiplomacyDetail", "{0} / {1}. Territory hostility, capture, and counterattack rules use this relationship."),
 						UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(DiplomacyEvent.FactionA),
@@ -2384,8 +2409,9 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterCancelledHeadline",
 				"Attack on {0} cancelled"), Name),
 			FText::Format(NSLOCTEXT("TerritoryLiveEvents", "CounterCancelledDetail",
-				"The response ended before capture. Resolution: {0}."),
-				FText::FromString(UEnum::GetValueAsString(Event.Resolution))), true, 20.f,
+				"The response ended before capture. Outcome: {0}."),
+				UTerritoryUIBlueprintLibrary::GetAssaultResolutionText(
+					Event.Resolution)), true, 20.f,
 			ETerritoryIntelligenceCategory::Conflict,
 			ETerritoryIntelligenceSeverity::Information,
 			Event.Assault.AttackingFaction, Event.Assault.DefendingFaction,

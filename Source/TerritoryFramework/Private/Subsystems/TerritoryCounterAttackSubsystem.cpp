@@ -27,6 +27,7 @@
 #include "NarrativeGameplayTags.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryQuestRules.h"
+#include "Vehicles/MountComponent.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 #include "AbilitySystemComponent.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
@@ -83,6 +84,58 @@ namespace
 			? Assault.StoryWaveSizeOverride : ForceConfig.WaveSize;
 		return FMath::Clamp(Requested, 1, FMath::Max(1, PlannedForce));
 	}
+
+	bool UsesOnlyNarrativeVehicleApproaches(const FTerritoryAssaultRecord& Assault,
+		const ATerritoryVolume* Territory)
+	{
+		if (!Territory || Assault.SelectedApproaches.IsEmpty()) return false;
+		for (const FName ApproachID : Assault.SelectedApproaches)
+		{
+			const FTerritoryAssaultApproach* Approach =
+				Territory->GetCounterAttackApproaches().FindByPredicate(
+					[ApproachID](const FTerritoryAssaultApproach& Candidate)
+					{
+						return Candidate.ApproachID == ApproachID;
+					});
+			if (!Approach || Approach->EntryType !=
+				ETerritoryAssaultEntryType::NarrativeVehicle)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+}
+
+int32 UTerritoryCounterAttackSubsystem::ResolveVehicleOccupantCount(
+	const int32 RemainingWaveSlots, const int32 ApproachWaveLimit,
+	const int32 ConfiguredVehicleCapacity, const int32 NarrativeMountSeatCount)
+{
+	return FMath::Max(0, FMath::Min(
+		FMath::Min(RemainingWaveSlots, ApproachWaveLimit),
+		FMath::Min(ConfiguredVehicleCapacity, NarrativeMountSeatCount)));
+}
+
+int32 UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(
+	const int32 RequestedForce, const int32 MaximumVehicleDeployments,
+	const TArray<int32>& VehicleDeploymentCapacities)
+{
+	if (RequestedForce <= 0 || MaximumVehicleDeployments <= 0
+		|| VehicleDeploymentCapacities.IsEmpty())
+	{
+		return 0;
+	}
+
+	TArray<int32> SortedCapacities = VehicleDeploymentCapacities;
+	SortedCapacities.Sort(TGreater<int32>());
+	int32 AvailableSeats = 0;
+	const int32 DeploymentCount = FMath::Min(
+		MaximumVehicleDeployments, SortedCapacities.Num());
+	for (int32 Index = 0; Index < DeploymentCount; ++Index)
+	{
+		AvailableSeats += FMath::Max(0, SortedCapacities[Index]);
+	}
+	return FMath::Clamp(RequestedForce, 0, AvailableSeats);
 }
 
 void UTerritoryCounterAttackSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -649,7 +702,7 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		"TerritoryCounterAttack", "MissingTargetTag", "The target Territory has no valid Territory gameplay tag."));
 	if (Territory->GetTerritoryState() != ETerritoryState::Claimed) return Reject(FText::Format(
 		NSLOCTEXT("TerritoryCounterAttack", "TargetNotClaimed", "The target Territory must be Claimed before an assault can be scheduled. Current state: {0}."),
-		FText::FromString(UEnum::GetValueAsString(Territory->GetTerritoryState()))));
+		UEnum::GetDisplayValueAsText(Territory->GetTerritoryState())));
 	if (!AttackingFaction.IsValid()) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "MissingAttackerFaction", "No valid attacking faction was supplied."));
 	if (!Territory->GetOwningFaction().IsValid()) return Reject(NSLOCTEXT(
@@ -853,7 +906,7 @@ bool UTerritoryCounterAttackSubsystem::StartAssaultImmediately(
 		{
 			*OutFailureReason = FText::Format(NSLOCTEXT(
 				"TerritoryCounterAttack", "ImmediateEvaluationFailed",
-				"The immediate assault failed during route/force evaluation. Resolution: {0}."),
+				"The immediate assault failed during route/force evaluation. Outcome: {0}."),
 				UEnum::GetDisplayValueAsText(Assault.Resolution));
 		}
 		return false;
@@ -1470,8 +1523,10 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		{
 			const bool bRelevantPlayerNearby = HasRelevantPlayerNearby(
 				Assault, Territory, Profile->ActivationRadius);
+			const bool bVehicleOnlyForce =
+				UsesOnlyNarrativeVehicleApproaches(Assault, Territory);
 			if (ShouldDeployActiveReserveWave(Assault, bRelevantPlayerNearby,
-				Profile->bContinueFiniteWavesAfterActivation))
+				Profile->bContinueFiniteWavesAfterActivation, bVehicleOnlyForce))
 			{
 				SpawnNextWave(Assault, Territory);
 			}
@@ -1664,15 +1719,10 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 		return;
 	}
 
-	Assault.PlannedForce = FMath::Max(1, PlannedForce);
-	Assault.AliveForce = 0;
-	Assault.PendingReserveForce = Assault.PlannedForce;
-	Assault.KilledForce = 0;
-	Assault.WithdrawnForce = 0;
-	Assault.WaveSize = ResolveAssaultWaveSize(
-		Assault, *ForceConfig, Assault.PlannedForce);
 	Assault.NarrativeDifficultyAtLaunch = GetCurrentNarrativeDifficulty();
 	int32 AuthoredRoadMaximum = 0;
+	bool bHasOnFootApproach = false;
+	TArray<int32> VehicleDeploymentCapacities;
 	for (const FName ApproachID : Assault.SelectedApproaches)
 	{
 		const FTerritoryAssaultApproach* Approach =
@@ -1684,14 +1734,52 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 		if (Approach && Approach->EntryType ==
 			ETerritoryAssaultEntryType::NarrativeVehicle)
 		{
-			AuthoredRoadMaximum += FMath::Max(0,
+			const int32 AuthoredDeployments = FMath::Max(0,
 				Approach->MaximumVehicleDeployments);
+			AuthoredRoadMaximum += AuthoredDeployments;
+			const int32 Capacity = FMath::Max(0, FMath::Min(
+				Approach->MaxWaveSize, Approach->VehicleOccupantCapacity));
+			for (int32 Index = 0; Index < AuthoredDeployments; ++Index)
+			{
+				VehicleDeploymentCapacities.Add(Capacity);
+			}
+		}
+		else if (Approach)
+		{
+			bHasOnFootApproach = true;
 		}
 	}
 	Assault.MaximumVehicleDeployments =
 		UTerritoryCounterAttackProfile::ResolveVehicleCountForDifficulty(
 			*ForceConfig, Assault.NarrativeDifficultyAtLaunch,
-			AuthoredRoadMaximum, Assault.PlannedForce);
+			AuthoredRoadMaximum, PlannedForce);
+	Assault.PlannedForce = FMath::Max(1, PlannedForce);
+	if (!bHasOnFootApproach && !VehicleDeploymentCapacities.IsEmpty())
+	{
+		const int32 TransportedForce = ResolveVehicleOnlyPlannedForce(
+			Assault.PlannedForce, Assault.MaximumVehicleDeployments,
+			VehicleDeploymentCapacities);
+		if (TransportedForce <= 0)
+		{
+			ResolveAssault(Assault, ETerritoryAssaultState::Cancelled,
+				ETerritoryAssaultResolution::ConfigurationInvalid);
+			return;
+		}
+		if (TransportedForce < Assault.PlannedForce)
+		{
+			UE_LOG(LogTerritory, Display,
+				TEXT("[CounterAttack] %s finite force reduced from %d to %d so every attacker arrives in one of the %d difficulty-authorized Narrative vehicles"),
+				*Territory->GetTerritoryTag().ToString(), Assault.PlannedForce,
+				TransportedForce, Assault.MaximumVehicleDeployments);
+			Assault.PlannedForce = TransportedForce;
+		}
+	}
+	Assault.AliveForce = 0;
+	Assault.PendingReserveForce = Assault.PlannedForce;
+	Assault.KilledForce = 0;
+	Assault.WithdrawnForce = 0;
+	Assault.WaveSize = ResolveAssaultWaveSize(
+		Assault, *ForceConfig, Assault.PlannedForce);
 	Assault.VehicleDeploymentsUsed = 0;
 	Assault.VehicleDeploymentsByApproach.Reset();
 	Assault.ScheduledGameTime = GetCampaignGameTime();
@@ -1747,8 +1835,9 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			ETerritoryAssaultResolution::ConfigurationInvalid);
 		return;
 	}
-	// One Narrative driver owns ingress until mount, drive, park and dismount complete.
-	// Do not pop reserve attackers into the scene or let them overtake the car.
+	// One Narrative vehicle squad owns ingress until its driver and passengers mount,
+	// drive, park and dismount. Do not pop later reserves into the scene or let them
+	// overtake the active reinforcement car.
 	if (HasPendingVehicleIngress(Assault.AssaultID)) return;
 	if (Assault.SelectedApproaches.IsEmpty())
 	{
@@ -1846,6 +1935,14 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 				< FMath::Max(0, Assault.MaximumVehicleDeployments)
 			&& VehicleDeploymentCount
 				< FMath::Max(1, Approach.MaximumVehicleDeployments);
+		// A road-only reinforcement must physically arrive in its authored car.
+		// Exhausting the difficulty/car budget must never teleport later attackers
+		// to the drop-off as if this were an on-foot approach.
+		if (Approach.EntryType == ETerritoryAssaultEntryType::NarrativeVehicle
+			&& !bUseNarrativeVehicle)
+		{
+			continue;
+		}
 		const bool bReverseStoryEscape = bUseNarrativeVehicle
 			&& Assault.LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
 			&& Assault.StoryPursuitDirection ==
@@ -1924,14 +2021,21 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			}
 		}
 
-		ATerritoryAssaultCharacter* Participant = bUseNarrativeVehicle
-			? SpawnNarrativeVehicleParticipant(Assault, Territory, *ForceConfig,
-				AttackerDefinition, Approach, VehicleSpawnTransform, SpawnTransform,
-				EffectiveDropOffTransform, VehicleWalkDestination,
-				OverrideNarrativeLevel)
-			: SpawnParticipant(Assault, Territory, *ForceConfig, AttackerDefinition, Approach,
-				SpawnTransform, OverrideNarrativeLevel);
-		if (Participant)
+		TArray<ATerritoryAssaultCharacter*> SpawnedParticipants;
+		if (bUseNarrativeVehicle)
+		{
+			SpawnedParticipants = SpawnNarrativeVehicleParticipants(
+				Assault, Territory, *ForceConfig, AttackerDefinition, Approach,
+				VehicleSpawnTransform, SpawnTransform, EffectiveDropOffTransform,
+				VehicleWalkDestination, ToSpawn - Spawned, OverrideNarrativeLevel);
+		}
+		else if (ATerritoryAssaultCharacter* Participant = SpawnParticipant(
+			Assault, Territory, *ForceConfig, AttackerDefinition, Approach,
+			SpawnTransform, OverrideNarrativeLevel))
+		{
+			SpawnedParticipants.Add(Participant);
+		}
+		if (!SpawnedParticipants.IsEmpty())
 		{
 			if (bUseNarrativeVehicle)
 			{
@@ -1941,13 +2045,14 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			if (Spawned == 0 && PresentationPlayer
 				&& ForceConfig->ReserveWaveAlertDialogueTag.IsValid())
 			{
-				Participant->PlayTaggedDialogue(
+				SpawnedParticipants[0]->PlayTaggedDialogue(
 					ForceConfig->ReserveWaveAlertDialogueTag, PresentationPlayer);
 			}
-			++SpawnedPerApproach.FindOrAdd(ApproachID);
-			++Spawned;
-			--Assault.PendingReserveForce;
-			++Assault.AliveForce;
+			const int32 ParticipantCount = SpawnedParticipants.Num();
+			SpawnedPerApproach.FindOrAdd(ApproachID) += ParticipantCount;
+			Spawned += ParticipantCount;
+			Assault.PendingReserveForce -= ParticipantCount;
+			Assault.AliveForce += ParticipantCount;
 			if (bUseNarrativeVehicle) break;
 		}
 	}
@@ -2069,8 +2174,8 @@ ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::SpawnParticipant(
 	return Participant;
 }
 
-ATerritoryAssaultCharacter*
-UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipant(
+TArray<ATerritoryAssaultCharacter*>
+UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory,
 	const FTerritoryFactionAssaultConfig& ForceConfig,
 	UNPCDefinition* AttackerDefinition,
@@ -2078,8 +2183,9 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipant(
 	const FTransform& VehicleSpawnTransform,
 	const FTransform& DriverSpawnTransform,
 	const FTransform& DropOffTransform, const FVector& WalkDestination,
-	int32 OverrideNarrativeLevel)
+	const int32 RequestedOccupants, const int32 OverrideNarrativeLevel)
 {
+	TArray<ATerritoryAssaultCharacter*> Participants;
 	UWorld* World = GetWorld();
 	UClass* VehicleClass = UTerritoryCounterAttackProfile::ResolveVehicleClass(
 		ForceConfig, Approach).LoadSynchronous();
@@ -2089,7 +2195,7 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipant(
 		UE_LOG(LogTerritory, Error,
 			TEXT("[CounterAttack] vehicle approach '%s' has no valid Narrative vehicle class"),
 			*Approach.ApproachID.ToString());
-		return nullptr;
+		return Participants;
 	}
 
 	FActorSpawnParameters VehicleSpawnParameters;
@@ -2103,14 +2209,24 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipant(
 		UE_LOG(LogTerritory, Warning,
 			TEXT("[CounterAttack] Narrative vehicle could not spawn at approach '%s'"),
 			*Approach.ApproachID.ToString());
-		return nullptr;
+		return Participants;
 	}
 	// Assault cars are runtime deployment actors, not independent campaign vehicles.
 	Vehicle->SetVehicleSaveGuid(FGuid());
 
-	ATerritoryAssaultCharacter* Participant = SpawnParticipant(
-		Assault, Territory, ForceConfig, AttackerDefinition, Approach, DriverSpawnTransform,
-		OverrideNarrativeLevel);
+	UMountComponent* Mount = Vehicle->FindComponentByClass<UMountComponent>();
+	const int32 OccupantCount = ResolveVehicleOccupantCount(
+		RequestedOccupants, Approach.MaxWaveSize, Approach.VehicleOccupantCapacity,
+		Mount ? Mount->InteractionSlots.Num() : 0);
+	if (!Mount || OccupantCount <= 0)
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("[CounterAttack] vehicle approach '%s' requested %d occupants but %s exposes no usable Narrative mount seats"),
+			*Approach.ApproachID.ToString(), RequestedOccupants, *GetNameSafe(Vehicle));
+		Vehicle->Destroy();
+		return Participants;
+	}
+
 	const bool bReverseStoryEscape = Assault.LaunchMode ==
 		ETerritoryAssaultLaunchMode::StoryPursuit
 		&& Assault.StoryPursuitDirection ==
@@ -2132,23 +2248,42 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipant(
 			VehicleSpawnTransform.GetLocation(), DropOffTransform.GetLocation(),
 			VehicleRoutePoints, &VehicleRouteFailure);
 	}
-	if (!Participant || !Participant->AssaultParticipant || !bHasVehicleRoute)
+	if (!bHasVehicleRoute)
 	{
-		if (Participant)
-		{
-			LiveParticipants.FindOrAdd(Assault.AssaultID).Remove(Participant);
-			if (Participant->AssaultParticipant)
-			{
-				Participant->AssaultParticipant->Retire(false);
-			}
-			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
-			Participant->Destroy();
-		}
 		Vehicle->Destroy();
 		UE_LOG(LogTerritory, Error,
 			TEXT("[CounterAttack] approach '%s' could not build its ZoneGraph driving route (%s); the finite force was not consumed"),
 			*Approach.ApproachID.ToString(), *VehicleRouteFailure);
-		return nullptr;
+		return Participants;
+	}
+	const UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
+	const float PassengerRadius = FMath::Max(350.f,
+		Profile ? Profile->ParticipantSpacing : 220.f);
+	auto BuildSeatStagingTransform = [&VehicleSpawnTransform, &DriverSpawnTransform,
+		PassengerRadius, OccupantCount](const int32 SeatIndex)
+	{
+		const float Angle = PI * 0.5f + 2.f * PI
+			* static_cast<float>(SeatIndex) / static_cast<float>(OccupantCount);
+		const FVector Radial = VehicleSpawnTransform.GetRotation().GetForwardVector()
+			* FMath::Cos(Angle) + VehicleSpawnTransform.GetRotation().GetRightVector()
+			* FMath::Sin(Angle);
+		FTransform Result = DriverSpawnTransform;
+		Result.SetLocation(VehicleSpawnTransform.GetLocation()
+			+ Radial.GetSafeNormal2D() * PassengerRadius);
+		Result.SetRotation((VehicleSpawnTransform.GetLocation()
+			- Result.GetLocation()).Rotation().Quaternion());
+		return Result;
+	};
+	ATerritoryAssaultCharacter* Participant = SpawnParticipant(
+		Assault, Territory, ForceConfig, AttackerDefinition, Approach,
+		BuildSeatStagingTransform(0), OverrideNarrativeLevel);
+	if (!Participant || !Participant->AssaultParticipant)
+	{
+		Vehicle->Destroy();
+		UE_LOG(LogTerritory, Error,
+			TEXT("[CounterAttack] approach '%s' could not create its Narrative vehicle driver; the finite force was not consumed"),
+			*Approach.ApproachID.ToString());
+		return Participants;
 	}
 	const bool bEscapeOnArrival = bReverseStoryEscape;
 	const FTransform WalkTransform = WalkDestination.IsNearlyZero()
@@ -2163,6 +2298,26 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipant(
 		bEscapeOnArrival ? Assault.StoryChaseDistanceGraceSeconds : 0.f,
 		bEscapeOnArrival && Assault.bStoryAbandonDamagedVehicleForFinalFight,
 		Assault.StoryVehicleAbandonHealthFraction);
+	Participants.Add(Participant);
+
+	for (int32 SeatIndex = 1; SeatIndex < OccupantCount; ++SeatIndex)
+	{
+		ATerritoryAssaultCharacter* Passenger = SpawnParticipant(
+			Assault, Territory, ForceConfig, AttackerDefinition, Approach,
+			BuildSeatStagingTransform(SeatIndex), OverrideNarrativeLevel);
+		if (!Passenger || !Passenger->AssaultParticipant)
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("[CounterAttack] %s could not fill Narrative vehicle seat %d; the unspawned finite force remains in reserve"),
+				*Approach.ApproachID.ToString(), SeatIndex);
+			continue;
+		}
+		Passenger->AssaultParticipant->ConfigureNarrativeVehiclePassenger(
+			Participant->AssaultParticipant, Vehicle, SeatIndex, VehicleRoutePoints,
+			DropOffTransform, WalkTransform, Approach.VehicleIngressTimeoutSeconds,
+			bEscapeOnArrival);
+		Participants.Add(Passenger);
+	}
 
 	LiveAssaultVehicles.FindOrAdd(Assault.AssaultID).Add(Vehicle);
 	LiveVehicleRetirementRules.Add(Vehicle, Approach.VehicleRetirement);
@@ -2177,7 +2332,10 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipant(
 				Assault.StoryMissionTrafficVehicleCountOverride);
 		}
 	}
-	return Participant;
+	UE_LOG(LogTerritory, Display,
+		TEXT("[CounterAttack] deployed %d/%d finite assault participants in %s (driver included)"),
+		Participants.Num(), OccupantCount, *GetNameSafe(Vehicle));
+	return Participants;
 }
 
 FTransform UTerritoryCounterAttackSubsystem::CalculateParticipantDeploymentTransform(
@@ -2389,11 +2547,12 @@ bool UTerritoryCounterAttackSubsystem::ApplyParticipantRemoval(
 
 bool UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(
 	const FTerritoryAssaultRecord& Assault, bool bRelevantPlayerNearby,
-	bool bContinueAfterActivation)
+	bool bContinueAfterActivation, bool bWaitForCurrentWaveToEnd)
 {
 	return Assault.State == ETerritoryAssaultState::Active
 		&& Assault.PendingReserveForce > 0
 		&& Assault.AliveForce < FMath::Max(1, Assault.WaveSize)
+		&& (!bWaitForCurrentWaveToEnd || Assault.AliveForce == 0)
 		&& (bContinueAfterActivation || bRelevantPlayerNearby);
 }
 
@@ -2477,8 +2636,7 @@ void UTerritoryCounterAttackSubsystem::RetireLiveParticipants(
 			}
 			if (bDestroyActors && IsValid(Participant))
 			{
-				TerritoryNarrativeDeathSupport::PrepareForRemoval(*Participant);
-				Participant->Destroy();
+				TerritoryNarrativeDeathSupport::ScheduleRemoval(*Participant);
 			}
 		}
 	}

@@ -1,13 +1,19 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Misc/PackageName.h"
 
 #include "Abilities/TerritoryDistractionAbility.h"
+#include "Components/StaticMeshComponent.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryPropertyTags.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Interaction/TerritoryDistractionProjectile.h"
+#include "Items/EquippableItem.h"
+#include "NarrativeGameplayTags.h"
 #include "UI/TerritoryUIBlueprintLibrary.h"
 #include "UI/TerritoryJournalWidget.h"
+#include "UObject/UnrealType.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFPropertyBenefitAuthoringContract,
 	"TerritoryFramework.PropertyBenefits.AuthoringContract",
@@ -80,6 +86,120 @@ bool FTFPropertyBenefitNarrativeRuntimeContract::RunTest(const FString& Paramete
 	TestTrue(TEXT("Distraction throw is a Narrative Gameplay Ability available to benefit tiers"),
 		UTerritoryDistractionAbility::StaticClass()->IsChildOf(
 			UNarrativeGameplayAbility::StaticClass()));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectDistractionAssetWiring,
+	"TerritoryFramework.ProjectFixtures.DistractionAssetWiring",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFProjectDistractionAssetWiring::RunTest(const FString& Parameters)
+{
+	(void)Parameters;
+	const FString RockPackage =
+		TEXT("/Game/TerritoryFramework/Stealth/Equippable_Throwable_Rock");
+	const FString BlacksmithPackage =
+		TEXT("/Game/TerritoryFramework/Definitions/DA_Place_Blacksmith");
+	if (!FPackageName::DoesPackageExist(RockPackage)
+		|| !FPackageName::DoesPackageExist(BlacksmithPackage))
+	{
+		AddInfo(TEXT("Project distraction fixtures are not installed; core plugin remains independent."));
+		return true;
+	}
+
+	UClass* RockClass = LoadClass<UEquippableItem>(nullptr,
+		TEXT("/Game/TerritoryFramework/Stealth/Equippable_Throwable_Rock.Equippable_Throwable_Rock_C"));
+	UClass* AbilityClass = LoadClass<UTerritoryDistractionAbility>(nullptr,
+		TEXT("/Game/TerritoryFramework/Stealth/GA_TerritoryDistraction.GA_TerritoryDistraction_C"));
+	const UEquippableItem* Rock = RockClass
+		? Cast<UEquippableItem>(RockClass->GetDefaultObject()) : nullptr;
+	const UTerritoryDistractionAbility* Ability = AbilityClass
+		? Cast<UTerritoryDistractionAbility>(AbilityClass->GetDefaultObject()) : nullptr;
+	const UTerritoryPlaceDefinition* Blacksmith =
+		LoadObject<UTerritoryPlaceDefinition>(nullptr,
+			TEXT("/Game/TerritoryFramework/Definitions/DA_Place_Blacksmith.DA_Place_Blacksmith"));
+
+	TestNotNull(TEXT("Throwable Rock class loads"), RockClass);
+	TestNotNull(TEXT("Territory distraction ability class loads"), AbilityClass);
+	TestNotNull(TEXT("Blacksmith Definition loads"), Blacksmith);
+	if (!Rock || !Ability || !Blacksmith) return false;
+
+	TestTrue(TEXT("Rock directly inherits the Narrative Equippable Item base"),
+		RockClass->GetSuperClass() == UEquippableItem::StaticClass());
+	const FArrayProperty* AbilitiesProperty = FindFProperty<FArrayProperty>(
+		RockClass, TEXT("EquipmentAbilities"));
+	TestNotNull(TEXT("Narrative Equippable Item still exposes Equipment Abilities"),
+		AbilitiesProperty);
+	if (!AbilitiesProperty) return false;
+	FScriptArrayHelper AbilityArray(AbilitiesProperty,
+		AbilitiesProperty->ContainerPtrToValuePtr<void>(Rock));
+	const FClassProperty* AbilityClassProperty =
+		CastField<FClassProperty>(AbilitiesProperty->Inner);
+	TestNotNull(TEXT("Equipment Abilities remains an array of ability classes"),
+		AbilityClassProperty);
+	if (!AbilityClassProperty) return false;
+	const UClass* GrantedAbilityClass = AbilityArray.Num() > 0
+		? Cast<UClass>(AbilityClassProperty->GetObjectPropertyValue(
+			AbilityArray.GetRawPtr(0))) : nullptr;
+	TestEqual(TEXT("Rock grants exactly one throw ability"),
+		AbilityArray.Num(), 1);
+	TestTrue(TEXT("Rock grants the configured Territory Blueprint ability"),
+		AbilityArray.Num() == 1 && GrantedAbilityClass == AbilityClass);
+	const FStructProperty* SlotsProperty = FindFProperty<FStructProperty>(
+		RockClass, TEXT("EquippableSlots"));
+	const FGameplayTagContainer* EquippableSlots = SlotsProperty
+		? SlotsProperty->ContainerPtrToValuePtr<FGameplayTagContainer>(Rock)
+		: nullptr;
+	TestTrue(TEXT("Rock uses Narrative's canonical throwable mesh slot"),
+		EquippableSlots && EquippableSlots->HasTagExact(
+			FNarrativeGameplayTags::Get().Equipment_Slot_Throwable));
+	const FClassProperty* EquipmentEffectProperty = FindFProperty<FClassProperty>(
+		RockClass, TEXT("EquipmentEffect"));
+	TestNull(TEXT("Rock does not apply a meaningless zero-value equipment effect"),
+		EquipmentEffectProperty
+			? Cast<UClass>(EquipmentEffectProperty->GetObjectPropertyValue_InContainer(Rock))
+			: nullptr);
+	const FFloatProperty* StealthProperty = FindFProperty<FFloatProperty>(
+		RockClass, TEXT("StealthRating"));
+	TestEqual(TEXT("Rock does not inherit the demo throwable's stealth bonus"),
+		StealthProperty ? StealthProperty->GetPropertyValue_InContainer(Rock) : -1.f,
+		0.f);
+
+	const FStructProperty* RequiredTagsProperty = FindFProperty<FStructProperty>(
+		AbilityClass, TEXT("ActivationRequiredTags"));
+	const FGameplayTagContainer* RequiredTags = RequiredTagsProperty
+		? RequiredTagsProperty->ContainerPtrToValuePtr<FGameplayTagContainer>(Ability)
+		: nullptr;
+	TestTrue(TEXT("Blacksmith capability gates the equipped throw ability"),
+		RequiredTags && RequiredTags->HasTagExact(
+			TerritoryPropertyTags::WeaponUpgradesBenefit));
+	TestTrue(TEXT("Ability requires its equipped Narrative item source"),
+		Ability->bRequireEquippedNarrativeItemSource);
+	TestTrue(TEXT("Ability consumes its source only after a successful throw"),
+		Ability->bConsumeSourceItemOnSuccessfulThrow);
+	TestFalse(TEXT("Blacksmith no longer grants a duplicate throw ability spec"),
+		Blacksmith->GameplayBenefits.ContainsByPredicate(
+			[AbilityClass](const FTerritoryPropertyGameplayBenefit& Benefit)
+			{
+				return Benefit.GrantedAbilities.Contains(AbilityClass);
+			}));
+	TestTrue(TEXT("Blacksmith still grants the revocable capability tag"),
+		Blacksmith->GameplayBenefits.ContainsByPredicate(
+			[](const FTerritoryPropertyGameplayBenefit& Benefit)
+			{
+				return Benefit.BenefitTag
+					== TerritoryPropertyTags::WeaponUpgradesBenefit;
+			}));
+
+	const ATerritoryDistractionProjectile* Projectile = Ability->ProjectileClass
+		? Ability->ProjectileClass->GetDefaultObject<ATerritoryDistractionProjectile>()
+		: nullptr;
+	const UStaticMesh* PickupMesh = Rock->GetPickupMeshData(1).PickupMesh.LoadSynchronous();
+	TestNotNull(TEXT("Configured distraction projectile loads"), Projectile);
+	TestNotNull(TEXT("Rock pickup mesh loads"), PickupMesh);
+	TestTrue(TEXT("Pickup and projectile use the same authored rock mesh"),
+		Projectile && Projectile->Visual
+		&& Projectile->Visual->GetStaticMesh() == PickupMesh);
 	return true;
 }
 

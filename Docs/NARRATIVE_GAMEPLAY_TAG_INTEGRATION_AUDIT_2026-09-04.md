@@ -81,7 +81,9 @@ The journal dynamically adds **BENEFITS** to its existing detail tabs. For the s
 shows active/locked state, required upgrade, benefit tag, abilities, effects, and weapon items. One
 upgrade control per Property shows the next level/cost and sends a validated server request to the
 existing `ATerritoryProperty::TryUpgrade` economy transaction. The Blacksmith is authored as an
-Arms Shop and its first tier grants the Territory distraction ability.
+Arms Shop and its first tier grants the revocable Weapon Upgrades capability tag. The equipped
+Throwable Rock owns the Territory distraction ability spec and uses that tag as a GAS activation
+requirement, so Property benefits never duplicate an equipment-owned ability.
 
 Weapon-item rows are unlock/catalog information. Narrative inventory/shop code must perform the
 actual purchase or item grant. Weapon-specific attack/block/aim abilities must continue to live in

@@ -7,7 +7,7 @@
 	"Category": "Gameplay",
 	"CreatedBy": "HopDistrict",
 	"CanContainContent": true,
-	"Installed": false,
+	"Installed": true,
 	"Modules": [
 		{
 			"Name": "TerritoryFramework",

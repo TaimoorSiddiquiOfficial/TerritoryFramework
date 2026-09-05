@@ -99,9 +99,11 @@ requirements, abilities, effects, and weapon unlocks. An owned Property also sho
 and cost. Pressing Upgrade sends a validated request to the owning player's server component,
 which calls the existing `ATerritoryProperty::TryUpgrade`; that path rechecks faction ownership
 and debits authoritative faction/Narrative-backed currency before changing the replicated level.
-The Blacksmith is authored as
-`Territory.Property.Role.ArmsShop`; its first owned tier grants `GA_TerritoryDistraction`, which is
-bound to Narrative's `Narrative.Input.Throw` input.
+The Blacksmith is authored as `Territory.Property.Role.ArmsShop`; its first owned tier grants the
+revocable `Territory.Property.Benefit.WeaponUpgrades` capability tag. The equipped Throwable Rock
+owns the single `GA_TerritoryDistraction` ability spec, and that ability requires the Blacksmith
+tag through GAS `Activation Required Tags`. One input therefore launches one projectile, losing
+the Blacksmith disables the throw, and a successful server throw consumes one rock.
 
 `Unlocked Weapon Items` is presentation/unlock metadata, not an automatic inventory mutation. Use
 the existing Narrative inventory/shop transaction as the authority that actually purchases or

@@ -21,6 +21,14 @@
 #include "ZoneGraphDelegates.h"
 #include "ZoneShapeActor.h"
 #include "ZoneShapeComponent.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphSchema.h"
+#include "Engine/Blueprint.h"
+#include "K2Node_CallFunction.h"
+#include "K2Node_CallParentFunction.h"
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "Kismet2/KismetEditorUtilities.h"
 
 namespace
 {
@@ -247,6 +255,141 @@ namespace
 			}
 		}
 	}
+}
+
+bool UTerritoryDefinitionEditorLibrary::MigrateNarrativeControllerHUDReadiness(
+	UBlueprint* ControllerBlueprint,
+	FText& OutFailureReason)
+{
+	OutFailureReason = FText::GetEmpty();
+	if (!ControllerBlueprint)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "HUDMigrationNoBlueprint",
+			"Select a project-owned Narrative PlayerController Blueprint.");
+		return false;
+	}
+
+	UK2Node_CallParentFunction* ParentBeginPlay = nullptr;
+	UEdGraph* EventGraph = nullptr;
+	for (UEdGraph* Graph : ControllerBlueprint->UbergraphPages)
+	{
+		if (!Graph) continue;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			UK2Node_CallParentFunction* ParentCall = Cast<UK2Node_CallParentFunction>(Node);
+			if (ParentCall
+				&& ParentCall->FunctionReference.GetMemberName() == TEXT("ReceiveBeginPlay"))
+			{
+				ParentBeginPlay = ParentCall;
+				EventGraph = Graph;
+				break;
+			}
+		}
+		if (ParentBeginPlay) break;
+	}
+
+	UEdGraphPin* ParentExecuteInput = ParentBeginPlay
+		? ParentBeginPlay->GetExecPin() : nullptr;
+	UK2Node_CallFunction* ExistingGate = ParentExecuteInput
+		&& ParentExecuteInput->LinkedTo.Num() == 1
+		? Cast<UK2Node_CallFunction>(
+			ParentExecuteInput->LinkedTo[0]->GetOwningNode()) : nullptr;
+	if (!EventGraph || !ParentExecuteInput || !ExistingGate)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "HUDMigrationMissingChain",
+			"The controller needs one execution node directly before its parent BeginPlay call.");
+		return false;
+	}
+
+	if (ExistingGate->FunctionReference.GetMemberName()
+		== GET_FUNCTION_NAME_CHECKED(
+			UTerritoryUIBlueprintLibrary, WaitForNarrativeGameplayHUD))
+	{
+		return true;
+	}
+	if (ExistingGate->FunctionReference.GetMemberName() != TEXT("Delay"))
+	{
+		OutFailureReason = FText::Format(
+			NSLOCTEXT("TerritoryEditor", "HUDMigrationUnexpectedNode",
+				"Expected Delay before parent BeginPlay, but found {0}. Migration stopped without changing the graph."),
+			FText::FromName(ExistingGate->FunctionReference.GetMemberName()));
+		return false;
+	}
+
+	UEdGraphPin* ExistingExecuteInput = ExistingGate->GetExecPin();
+	UEdGraphPin* ExistingThenOutput = ExistingGate->GetThenPin();
+	UEdGraphPin* UpstreamOutput = ExistingExecuteInput
+		&& ExistingExecuteInput->LinkedTo.Num() == 1
+		? ExistingExecuteInput->LinkedTo[0] : nullptr;
+	if (!ExistingExecuteInput || !ExistingThenOutput || !UpstreamOutput
+		|| ExistingThenOutput->LinkedTo.Num() != 1
+		|| ExistingThenOutput->LinkedTo[0] != ParentExecuteInput)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "HUDMigrationUnsafeLinks",
+			"The existing readiness delay has unexpected links. Migration stopped to preserve authored logic.");
+		return false;
+	}
+
+	UFunction* WaitFunction = UTerritoryUIBlueprintLibrary::StaticClass()->FindFunctionByName(
+		GET_FUNCTION_NAME_CHECKED(
+			UTerritoryUIBlueprintLibrary, WaitForNarrativeGameplayHUD));
+	if (!WaitFunction)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "HUDMigrationMissingFunction",
+			"Territory's Narrative GameplayHUD readiness function is unavailable.");
+		return false;
+	}
+
+	const FScopedTransaction Transaction(
+		NSLOCTEXT("TerritoryEditor", "MigrateNarrativeHUDReadinessTransaction",
+			"Migrate Narrative Controller HUD Readiness"));
+	ControllerBlueprint->Modify();
+	EventGraph->Modify();
+	FGraphNodeCreator<UK2Node_CallFunction> NodeCreator(*EventGraph);
+	UK2Node_CallFunction* ReadinessGate = NodeCreator.CreateNode(false);
+	ReadinessGate->SetFromFunction(WaitFunction);
+	ReadinessGate->NodePosX = ExistingGate->NodePosX;
+	ReadinessGate->NodePosY = ExistingGate->NodePosY;
+	NodeCreator.Finalize();
+
+	UEdGraphPin* GateExecuteInput = ReadinessGate->GetExecPin();
+	UEdGraphPin* GateThenOutput = ReadinessGate->GetThenPin();
+	if (UEdGraphPin* TimeoutPin = ReadinessGate->FindPin(TEXT("TimeoutSeconds")))
+	{
+		TimeoutPin->DefaultValue = TEXT("15.0");
+	}
+
+	ExistingExecuteInput->BreakAllPinLinks();
+	ExistingThenOutput->BreakAllPinLinks();
+	const UEdGraphSchema* Schema = EventGraph->GetSchema();
+	const bool bConnected = Schema && GateExecuteInput && GateThenOutput
+		&& Schema->TryCreateConnection(UpstreamOutput, GateExecuteInput)
+		&& Schema->TryCreateConnection(GateThenOutput, ParentExecuteInput);
+	if (!bConnected)
+	{
+		if (GateExecuteInput) GateExecuteInput->BreakAllPinLinks();
+		if (GateThenOutput) GateThenOutput->BreakAllPinLinks();
+		if (Schema)
+		{
+			Schema->TryCreateConnection(UpstreamOutput, ExistingExecuteInput);
+			Schema->TryCreateConnection(ExistingThenOutput, ParentExecuteInput);
+		}
+		FBlueprintEditorUtils::RemoveNode(ControllerBlueprint, ReadinessGate, true);
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "HUDMigrationConnectionFailed",
+			"Could not connect the Narrative GameplayHUD readiness gate. The original delay was restored.");
+		return false;
+	}
+
+	FBlueprintEditorUtils::RemoveNode(ControllerBlueprint, ExistingGate, true);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(ControllerBlueprint);
+	FKismetEditorUtilities::CompileBlueprint(ControllerBlueprint);
+	if (ControllerBlueprint->Status == BS_Error)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryEditor", "HUDMigrationCompileFailed",
+			"The controller did not compile after migration. Review the compiler results before saving.");
+		return false;
+	}
+	return true;
 }
 
 bool UTerritoryDefinitionEditorLibrary::AlignAttackDamageEffectWithNarrativePro(

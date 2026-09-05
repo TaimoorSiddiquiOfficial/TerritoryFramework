@@ -68,6 +68,30 @@ namespace
 		TerritoryUITheme::ApplyText(Text, FontSize, Color, ThemeRole);
 	}
 
+	FString GetPlayerFacingClassName(const UClass* Class)
+	{
+		if (!Class)
+		{
+			return FString();
+		}
+		FString Name = Class->GetName();
+		Name.RemoveFromEnd(TEXT("_C"));
+		for (const TCHAR* Prefix : { TEXT("Default__"), TEXT("REINST_"),
+			TEXT("SKEL_"), TEXT("GA_"), TEXT("GE_"), TEXT("BP_"), TEXT("BPA_") })
+		{
+			Name.RemoveFromStart(Prefix);
+		}
+		return FName::NameToDisplayString(Name, false);
+	}
+
+	bool IsTechnicalPlayerCopy(const FString& Text)
+	{
+		return Text.Contains(TEXT("Narrative."), ESearchCase::IgnoreCase)
+			|| Text.Contains(TEXT("Territory."), ESearchCase::IgnoreCase)
+			|| Text.Contains(TEXT("GameplayTag"), ESearchCase::IgnoreCase)
+			|| Text.Contains(TEXT("_C"), ESearchCase::CaseSensitive);
+	}
+
 	void StyleGeneratedTerritorySurface(UBorder* Border, const FLinearColor& Fill,
 		const FLinearColor& Outline, float Radius = 10.f)
 	{
@@ -299,7 +323,7 @@ void UTerritoryJournalWidget::RefreshPropertyBenefitsDetailTab(
 			UNarrativeCommonTextBlock::StaticClass(), TEXT("NoPropertyBenefits"));
 		Empty->SetText(NSLOCTEXT("TerritoryJournal", "NoPropertyBenefits",
 			"No Property benefits are authored for this District. Add Gameplay Benefits to a Territory Place Definition."));
-		StyleGeneratedTerritoryText(Empty, 12,
+		StyleGeneratedTerritoryText(Empty, TerritoryTypography::Metadata,
 			FLinearColor(0.62f, 0.66f, 0.65f, 1.f),
 			ETerritoryGeneratedTextRole::Muted);
 		PropertyBenefitsList->AddChild(Empty);
@@ -326,10 +350,8 @@ void UTerritoryJournalWidget::RefreshPropertyBenefitsDetailTab(
 		UTextBlock* Heading = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 			UNarrativeCommonTextBlock::StaticClass(),
 			*FString::Printf(TEXT("PropertyBenefitHeading_%d"), Index));
-		Heading->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "PropertyBenefitHeading", "{0}  //  {1}"),
-			Benefit.PropertyName, Benefit.DisplayName));
-		StyleGeneratedTerritoryText(Heading, 14,
+		Heading->SetText(Benefit.DisplayName);
+		StyleGeneratedTerritoryText(Heading, TerritoryTypography::CardTitle,
 			Benefit.bActive ? FLinearColor(0.42f, 0.86f, 0.68f, 1.f)
 				: FLinearColor(0.68f, 0.69f, 0.66f, 1.f),
 			ETerritoryGeneratedTextRole::Heading);
@@ -339,44 +361,49 @@ void UTerritoryJournalWidget::RefreshPropertyBenefitsDetailTab(
 			UNarrativeCommonTextBlock::StaticClass(),
 			*FString::Printf(TEXT("PropertyBenefitStatus_%d"), Index));
 		const FText StatusText = Benefit.bActive
-			? NSLOCTEXT("TerritoryJournal", "PropertyBenefitActive", "ACTIVE — GRANTED THROUGH NARRATIVE GAS")
+			? FText::Format(NSLOCTEXT("TerritoryJournal", "PropertyBenefitActive",
+				"{0}  •  Unlocked"), Benefit.PropertyName)
 			: !Benefit.bOwnedByViewer
-				? NSLOCTEXT("TerritoryJournal", "PropertyBenefitCaptureRequired", "LOCKED — CAPTURE THIS PROPERTY")
+				? FText::Format(NSLOCTEXT("TerritoryJournal", "PropertyBenefitCaptureRequired",
+					"{0}  •  Capture required"), Benefit.PropertyName)
 				: FText::Format(NSLOCTEXT("TerritoryJournal", "PropertyBenefitLevelRequired",
-					"LOCKED — UPGRADE LEVEL {0} REQUIRED (CURRENT {1})"),
+					"{0}  •  Requires level {1} (currently {2})"),
+					Benefit.PropertyName,
 					FText::AsNumber(Benefit.RequiredUpgradeLevel),
 					FText::AsNumber(Benefit.CurrentUpgradeLevel));
 		Status->SetText(StatusText);
-		StyleGeneratedTerritoryText(Status, 10,
+		StyleGeneratedTerritoryText(Status, TerritoryTypography::Metadata,
 			Benefit.bActive ? FLinearColor(0.42f, 0.86f, 0.68f, 1.f)
 				: FLinearColor(0.92f, 0.70f, 0.24f, 1.f),
 			ETerritoryGeneratedTextRole::Heading);
 		Stack->AddChild(Status);
 
 		TArray<FString> CapabilityLines;
-		if (!Benefit.Description.IsEmpty())
+		const FString AuthoredDescription = Benefit.Description.ToString();
+		if (!AuthoredDescription.IsEmpty() && !IsTechnicalPlayerCopy(AuthoredDescription))
 		{
-			CapabilityLines.Add(Benefit.Description.ToString());
+			CapabilityLines.Add(AuthoredDescription);
 		}
-		if (Benefit.BenefitTag.IsValid())
+		else
 		{
-			CapabilityLines.Add(FString::Printf(TEXT("Tag: %s"),
-				*Benefit.BenefitTag.ToString()));
+			CapabilityLines.Add(FString::Printf(
+				TEXT("Provides %s while your faction controls %s."),
+				*Benefit.DisplayName.ToString(), *Benefit.PropertyName.ToString()));
 		}
 		for (const TSubclassOf<UNarrativeGameplayAbility> Ability : Benefit.GrantedAbilities)
 		{
 			if (Ability) CapabilityLines.Add(FString::Printf(TEXT("Ability: %s"),
-				*FName::NameToDisplayString(Ability->GetName(), false)));
+				*GetPlayerFacingClassName(Ability)));
 		}
 		for (const TSubclassOf<UGameplayEffect> Effect : Benefit.GrantedGameplayEffects)
 		{
 			if (Effect) CapabilityLines.Add(FString::Printf(TEXT("Effect: %s"),
-				*FName::NameToDisplayString(Effect->GetName(), false)));
+				*GetPlayerFacingClassName(Effect)));
 		}
 		for (const TSubclassOf<UWeaponItem> Weapon : Benefit.UnlockedWeaponItems)
 		{
 			if (Weapon) CapabilityLines.Add(FString::Printf(TEXT("Weapon unlock: %s"),
-				*FName::NameToDisplayString(Weapon->GetName(), false)));
+				*GetPlayerFacingClassName(Weapon)));
 		}
 		UTextBlock* Detail = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 			UNarrativeCommonTextBlock::StaticClass(),
@@ -384,7 +411,7 @@ void UTerritoryJournalWidget::RefreshPropertyBenefitsDetailTab(
 		Detail->SetText(FText::FromString(CapabilityLines.IsEmpty()
 			? FString(TEXT("Benefit tier is present but has no configured capability."))
 			: FString::Join(CapabilityLines, TEXT("\n"))));
-		StyleGeneratedTerritoryText(Detail, 11,
+		StyleGeneratedTerritoryText(Detail, TerritoryTypography::Body,
 			FLinearColor(0.90f, 0.89f, 0.85f, 1.f));
 		Stack->AddChild(Detail);
 
@@ -402,17 +429,17 @@ void UTerritoryJournalWidget::RefreshPropertyBenefitsDetailTab(
 				if (Benefit.CurrentUpgradeLevel >= Benefit.MaximumUpgradeLevel)
 				{
 					ButtonText = NSLOCTEXT("TerritoryJournal", "PropertyMaximumLevel",
-						"MAXIMUM UPGRADE LEVEL");
+						"Maximum upgrade level");
 				}
 				else if (!Benefit.bOwnedByViewer)
 				{
 					ButtonText = NSLOCTEXT("TerritoryJournal", "CapturePropertyToUpgrade",
-						"CAPTURE PROPERTY TO UPGRADE");
+						"Capture property to upgrade");
 				}
 				else
 				{
 					ButtonText = FText::Format(NSLOCTEXT("TerritoryJournal",
-						"UpgradePropertyButton", "UPGRADE TO LEVEL {0}  //  {1}"),
+						"UpgradePropertyButton", "Upgrade to level {0}  //  {1}"),
 						FText::AsNumber(Benefit.CurrentUpgradeLevel + 1),
 						FText::AsNumber(Benefit.NextUpgradeCost));
 				}
@@ -583,24 +610,40 @@ void UTerritoryJournalWidget::NativeConstruct()
 		const FLinearColor PrimaryText(0.94f, 0.93f, 0.89f, 1.f);
 		const FLinearColor MutedText(0.62f, 0.66f, 0.65f, 1.f);
 		const FLinearColor AccentText(0.92f, 0.70f, 0.24f, 1.f);
-		ThemeTextByName(TEXT("Text_JournalEyebrow"), 9, AccentText,
+		ThemeTextByName(TEXT("Text_JournalEyebrow"), TerritoryTypography::Caption, AccentText,
 			ETerritoryTextRole::Heading, false);
-		ThemeTextByName(TEXT("Text_JournalTitle"), 30, PrimaryText,
+		ThemeTextByName(TEXT("Text_JournalTitle"), TerritoryTypography::ScreenTitle, PrimaryText,
 			ETerritoryTextRole::Title, false);
-		ThemeTextByName(TEXT("Text_JournalSubtitle"), 10, MutedText,
+		ThemeTextByName(TEXT("Text_JournalSubtitle"), TerritoryTypography::Metadata, MutedText,
 			ETerritoryTextRole::Muted, false);
-		ThemeTextByName(TEXT("Text_HeaderStatus"), 9,
+		ThemeTextByName(TEXT("Text_HeaderStatus"), TerritoryTypography::Caption,
 			FLinearColor(0.42f, 0.86f, 0.68f, 1.f),
 			ETerritoryTextRole::Heading, false);
-		ThemeTextByName(TEXT("Text_ActiveTerritoryCount"), 13, AccentText,
+		ThemeTextByName(TEXT("Text_LiveEventCount"), TerritoryTypography::Body, AccentText,
 			ETerritoryTextRole::Heading, false);
-		ThemeTextByName(TEXT("Text_CapturedTerritoryCount"), 13,
+		ThemeTextByName(TEXT("Text_ActiveTerritoryCount"), TerritoryTypography::Body, AccentText,
+			ETerritoryTextRole::Heading, false);
+		ThemeTextByName(TEXT("Text_ActiveQuestCount"), TerritoryTypography::Body, AccentText,
+			ETerritoryTextRole::Heading, false);
+		ThemeTextByName(TEXT("Text_CapturedTerritoryCount"), TerritoryTypography::Body,
 			FLinearColor(0.42f, 0.86f, 0.68f, 1.f),
 			ETerritoryTextRole::Heading, false);
-		ThemeTextByName(TEXT("Text_SelectedEyebrow"), 9, AccentText,
+		ThemeTextByName(TEXT("Text_FinishedQuestCount"), TerritoryTypography::Body,
+			FLinearColor(0.42f, 0.86f, 0.68f, 1.f),
 			ETerritoryTextRole::Heading, false);
-		ThemeTextByName(TEXT("Text_SelectedTerritoryTitle"), 20, PrimaryText,
+		ThemeTextByName(TEXT("Text_SelectedEyebrow"), TerritoryTypography::Caption, AccentText,
+			ETerritoryTextRole::Heading, false);
+		ThemeTextByName(TEXT("Text_SelectedTerritoryTitle"), TerritoryTypography::PanelTitle, PrimaryText,
 			ETerritoryTextRole::Title, false);
+		ThemeTextByName(TEXT("QuestTitle"), TerritoryTypography::PanelTitle, PrimaryText,
+			ETerritoryTextRole::Title, false);
+		for (const TCHAR* KpiName : {
+			TEXT("Text_TotalWeeklyEarnings"), TEXT("Text_TotalGuardCost"),
+			TEXT("Text_NetProfit"), TEXT("Text_TotalEarningsLost") })
+		{
+			ThemeTextByName(KpiName, TerritoryTypography::Body, PrimaryText,
+				ETerritoryTextRole::Heading, false);
+		}
 		for (const TCHAR* BodyName : {
 			TEXT("Text_IntelligenceSummary"), TEXT("Text_FilterSummary"),
 			TEXT("Text_CommandHierarchy"), TEXT("Text_CommandOverview"),
@@ -612,9 +655,10 @@ void UTerritoryJournalWidget::NativeConstruct()
 			TEXT("Text_OperationalSummary"), TEXT("Text_SecuritySummary"),
 			TEXT("Text_FinanceSummary"), TEXT("Text_AssaultSummary") })
 		{
-			ThemeTextByName(BodyName, 11, PrimaryText, ETerritoryTextRole::Body);
+			ThemeTextByName(BodyName, TerritoryTypography::Body, PrimaryText,
+				ETerritoryTextRole::Body);
 		}
-		ThemeTextByName(TEXT("Text_EmptySelection"), 11, MutedText,
+		ThemeTextByName(TEXT("Text_EmptySelection"), TerritoryTypography::Body, MutedText,
 			ETerritoryTextRole::Muted);
 	}
 	if (!GetActiveTerritoriesPanel() || !GetCapturedTerritoriesPanel())
@@ -650,17 +694,17 @@ void UTerritoryJournalWidget::NativeConstruct()
 	if (Btn_TerritoryTab)
 	{
 		Btn_TerritoryTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleTerritoryTabClicked);
-		Btn_TerritoryTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "TerritoryTab", "OPERATIONS"));
+		Btn_TerritoryTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "TerritoryTab", "Operations"));
 	}
 	if (Btn_EarningsTab)
 	{
 		Btn_EarningsTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleEarningsTabClicked);
-		Btn_EarningsTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "EarningsTab", "CONTROLLED"));
+		Btn_EarningsTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "EarningsTab", "Controlled"));
 	}
 	if (Btn_LossTab)
 	{
 		Btn_LossTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleLossTabClicked);
-		Btn_LossTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "LossTab", "ACTIVITY"));
+		Btn_LossTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "LossTab", "Activity"));
 	}
 	UNarrativeCommonButtonBase* CloseSelectedButton = Btn_CloseSelectedTerritory
 		? Btn_CloseSelectedTerritory : Btn_CloseCommandDrawer;
@@ -669,74 +713,142 @@ void UTerritoryJournalWidget::NativeConstruct()
 		CloseSelectedButton->OnClicked().AddUObject(
 			this, &UTerritoryJournalWidget::HandleCloseSelectedTerritoryClicked);
 		CloseSelectedButton->SetButtonText(NSLOCTEXT(
-			"TerritoryJournal", "CloseSelectedTerritory", "CLOSE"));
+			"TerritoryJournal", "CloseSelectedTerritory", "Close"));
 	}
 	if (Btn_OverviewDetailTab)
 	{
 		Btn_OverviewDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleOverviewDetailTabClicked);
-		Btn_OverviewDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "OverviewDetailTab", "OVERVIEW"));
+		Btn_OverviewDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "OverviewDetailTab", "Overview"));
 	}
 	if (Btn_PlacesDetailTab)
 	{
 		Btn_PlacesDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandlePlacesDetailTabClicked);
-		Btn_PlacesDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "PlacesDetailTab", "PLACES"));
+		Btn_PlacesDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "PlacesDetailTab", "Places"));
 	}
 	if (Btn_GarrisonDetailTab)
 	{
 		Btn_GarrisonDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleGarrisonDetailTabClicked);
-		Btn_GarrisonDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "GarrisonDetailTab", "GARRISON"));
+		Btn_GarrisonDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "GarrisonDetailTab", "Garrison"));
 	}
 	if (Btn_EconomyDetailTab)
 	{
 		Btn_EconomyDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleEconomyDetailTabClicked);
-		Btn_EconomyDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "EconomyDetailTab", "ECONOMY"));
+		Btn_EconomyDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "EconomyDetailTab", "Economy"));
 	}
 	if (Btn_ProductionDetailTab)
 	{
 		Btn_ProductionDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleProductionDetailTabClicked);
-		Btn_ProductionDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "ProductionDetailTab", "PRODUCTION"));
+		Btn_ProductionDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "ProductionDetailTab", "Production"));
 	}
 	if (Btn_ThreatsDetailTab)
 	{
 		Btn_ThreatsDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleThreatsDetailTabClicked);
-		Btn_ThreatsDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "ThreatsDetailTab", "THREATS"));
+		Btn_ThreatsDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "ThreatsDetailTab", "Threats"));
 	}
 	if (Btn_DiplomacyDetailTab)
 	{
 		Btn_DiplomacyDetailTab->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleDiplomacyDetailTabClicked);
-		Btn_DiplomacyDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "DiplomacyDetailTab", "DIPLOMACY"));
+		Btn_DiplomacyDetailTab->SetButtonText(NSLOCTEXT("TerritoryJournal", "DiplomacyDetailTab", "Diplomacy"));
 	}
 	if (Btn_BenefitsDetailTab)
 	{
 		Btn_BenefitsDetailTab->OnClicked().AddUObject(this,
 			&UTerritoryJournalWidget::HandleBenefitsDetailTabClicked);
 		Btn_BenefitsDetailTab->SetButtonText(NSLOCTEXT(
-			"TerritoryJournal", "BenefitsDetailTab", "BENEFITS"));
+			"TerritoryJournal", "BenefitsDetailTab", "Benefits"));
 		Btn_BenefitsDetailTab->SetToolTipText(NSLOCTEXT(
 			"TerritoryJournal", "BenefitsDetailTabTip",
 			"Owned Property abilities, Gameplay Effects, weapon unlocks, and upgrade requirements."));
 	}
+	if (Btn_IntelligenceAll)
+	{
+		Btn_IntelligenceAll->OnClicked().AddUObject(
+			this, &UTerritoryJournalWidget::HandleIntelligenceAllClicked);
+		Btn_IntelligenceAll->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "IntelligenceAll", "All"));
+	}
+	if (Btn_IntelligenceConflict)
+	{
+		Btn_IntelligenceConflict->OnClicked().AddUObject(
+			this, &UTerritoryJournalWidget::HandleIntelligenceConflictClicked);
+		Btn_IntelligenceConflict->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "IntelligenceConflict", "Conflict"));
+	}
+	if (Btn_IntelligenceControl)
+	{
+		Btn_IntelligenceControl->OnClicked().AddUObject(
+			this, &UTerritoryJournalWidget::HandleIntelligenceControlClicked);
+		Btn_IntelligenceControl->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "IntelligenceControl", "Control"));
+	}
+	if (Btn_IntelligenceEconomy)
+	{
+		Btn_IntelligenceEconomy->OnClicked().AddUObject(
+			this, &UTerritoryJournalWidget::HandleIntelligenceEconomyClicked);
+		Btn_IntelligenceEconomy->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "IntelligenceEconomy", "Economy"));
+	}
+	if (Btn_IntelligenceCommand)
+	{
+		Btn_IntelligenceCommand->OnClicked().AddUObject(
+			this, &UTerritoryJournalWidget::HandleIntelligenceCommandClicked);
+		Btn_IntelligenceCommand->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "IntelligenceCommand", "Command"));
+	}
+	if (Btn_IntelligenceProduction)
+	{
+		Btn_IntelligenceProduction->OnClicked().AddUObject(
+			this, &UTerritoryJournalWidget::HandleIntelligenceProductionClicked);
+		Btn_IntelligenceProduction->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "IntelligenceProduction", "Production"));
+	}
+	if (Btn_IntelligenceDiplomacy)
+	{
+		Btn_IntelligenceDiplomacy->OnClicked().AddUObject(
+			this, &UTerritoryJournalWidget::HandleIntelligenceDiplomacyClicked);
+		Btn_IntelligenceDiplomacy->SetButtonText(NSLOCTEXT(
+			"TerritoryJournal", "IntelligenceDiplomacy", "Diplomacy"));
+	}
 	if (Btn_CommandAddGuard)
 	{
 		Btn_CommandAddGuard->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleCommandAddGuardClicked);
-		Btn_CommandAddGuard->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandAddGuard", "+ 1 GUARD"));
+		Btn_CommandAddGuard->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandAddGuard", "+1 Guard"));
 	}
 	if (Btn_CommandRemoveGuard)
 	{
 		Btn_CommandRemoveGuard->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleCommandRemoveGuardClicked);
-		Btn_CommandRemoveGuard->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandRemoveGuard", "- 1 GUARD"));
+		Btn_CommandRemoveGuard->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandRemoveGuard", "-1 Guard"));
 	}
 	if (Btn_CommandAddFiveGuards)
 	{
 		Btn_CommandAddFiveGuards->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleCommandAddFiveGuardsClicked);
-		Btn_CommandAddFiveGuards->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandAddFiveGuards", "+ 5 GUARDS"));
+		Btn_CommandAddFiveGuards->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandAddFiveGuards", "+5 Guards"));
 	}
 	if (Btn_CommandRemoveFiveGuards)
 	{
 		Btn_CommandRemoveFiveGuards->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleCommandRemoveFiveGuardsClicked);
-		Btn_CommandRemoveFiveGuards->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandRemoveFiveGuards", "- 5 GUARDS"));
+		Btn_CommandRemoveFiveGuards->SetButtonText(NSLOCTEXT("TerritoryJournal", "CommandRemoveFiveGuards", "-5 Guards"));
 	}
 	BuildGarrisonManagementControls();
+	if (CommandDetailSwitcher)
+	{
+		// These Quest-template readouts were useful before the tabbed Command Center
+		// existed, but now repeat Overview/Garrison data above every page. Keep them
+		// only as compatibility fallbacks for older widgets without the switcher.
+		for (UWidget* LegacySummary : {
+			static_cast<UWidget*>(RichText_TerritoryDescription.Get()),
+			static_cast<UWidget*>(RichText_QuestDescription.Get()),
+			static_cast<UWidget*>(RichText_CurrentStateDescription.Get()),
+			static_cast<UWidget*>(Text_CaptureLabel.Get()),
+			static_cast<UWidget*>(CaptureProgressBar.Get()),
+			static_cast<UWidget*>(Text_GarrisonTargetPreview.Get()) })
+		{
+			if (LegacySummary)
+			{
+				LegacySummary->SetVisibility(ESlateVisibility::Collapsed);
+			}
+		}
+	}
 	if (DistrictSearchBox)
 	{
 		DistrictSearchBox->OnTextChanged.AddUniqueDynamic(this, &UTerritoryJournalWidget::HandleSearchChanged);
@@ -763,9 +875,10 @@ void UTerritoryJournalWidget::NativeConstruct()
 	RefreshDistrictList();
 	bSelectedTerritoryInfoRequested = SelectedDistrictTag.IsValid();
 	SetSelectedTerritoryInfoOpen(bSelectedTerritoryInfoRequested);
-	if (Btn_TerritoryTab) Btn_TerritoryTab->SetIsSelected(true);
-	if (Btn_EarningsTab) Btn_EarningsTab->SetIsSelected(false);
-	if (Btn_LossTab) Btn_LossTab->SetIsSelected(false);
+	TerritoryUITheme::SetTabSelected(Btn_TerritoryTab, true);
+	TerritoryUITheme::SetTabSelected(Btn_EarningsTab, false);
+	TerritoryUITheme::SetTabSelected(Btn_LossTab, false);
+	SetIntelligenceFilter(SelectedIntelligenceFilter);
 	if (TerritoryReveal)
 	{
 		PlayAnimation(TerritoryReveal);
@@ -986,7 +1099,7 @@ void UTerritoryJournalWidget::BuildLiveEventPanel()
 	FeedSurface->SetContent(FeedStack);
 	Text_LiveEventCount = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LiveEventCount"));
-	StyleGeneratedTerritoryText(Text_LiveEventCount, 13,
+	StyleGeneratedTerritoryText(Text_LiveEventCount, TerritoryTypography::Body,
 		FLinearColor(1.f, 0.84f, 0.f, 1.f),
 		ETerritoryGeneratedTextRole::Heading);
 	FeedStack->AddChildToVerticalBox(Text_LiveEventCount);
@@ -1004,7 +1117,14 @@ void UTerritoryJournalWidget::RefreshLiveEvents()
 		? ManagementComponent->GetTerritoryIntelligence(
 			ETerritoryIntelligenceFilter::All, true)
 		: TArray<FTerritoryLiveEvent>();
-	const TArray<FTerritoryLiveEvent>& Events = AllEvents;
+	const TArray<FTerritoryLiveEvent> FilteredEvents = ManagementComponent.IsValid()
+		&& SelectedIntelligenceFilter != ETerritoryIntelligenceFilter::All
+		? ManagementComponent->GetTerritoryIntelligence(
+			SelectedIntelligenceFilter, true)
+		: TArray<FTerritoryLiveEvent>();
+	const TArray<FTerritoryLiveEvent>& Events =
+		SelectedIntelligenceFilter == ETerritoryIntelligenceFilter::All
+			? AllEvents : FilteredEvents;
 	const int32 Revision = GetLiveEventListRevision(Events);
 	if (LastLiveEventRevision == Revision)
 	{
@@ -1042,7 +1162,7 @@ void UTerritoryJournalWidget::RefreshLiveEvents()
 	{
 		Text_LiveEventCount->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "LiveEventCount",
-				"LIVE NOTIFICATIONS  //  {0}"), FText::AsNumber(Events.Num())));
+				"Live notifications  //  {0}"), FText::AsNumber(Events.Num())));
 	}
 	if (Events.IsEmpty())
 	{
@@ -1053,7 +1173,7 @@ void UTerritoryJournalWidget::RefreshLiveEvents()
 				"No Territory notifications have been recorded yet.")
 			: NSLOCTEXT("TerritoryJournal", "NoFilteredIntelligence",
 				"No reports match this intelligence category."));
-		StyleGeneratedTerritoryText(Empty, 12,
+		StyleGeneratedTerritoryText(Empty, TerritoryTypography::Metadata,
 			FLinearColor(0.48f, 0.54f, 0.53f, 1.f),
 			ETerritoryGeneratedTextRole::Muted);
 		LiveEventsBox->AddChild(Empty);
@@ -1085,15 +1205,19 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	UTextBlock* Heading = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonPlannerHeading"));
 	Heading->SetText(NSLOCTEXT("TerritoryJournal", "GarrisonPlannerHeading",
-		"GARRISON STAFFING PLAN"));
-	StyleGeneratedTerritoryText(Heading, 16, FLinearColor(0.95f, 0.96f, 0.95f, 1.f));
+		"Garrison staffing"));
+	StyleGeneratedTerritoryText(Heading, TerritoryTypography::SectionTitle,
+		FLinearColor(0.95f, 0.96f, 0.95f, 1.f),
+		ETerritoryGeneratedTextRole::Heading);
 	PlannerStack->AddChild(Heading);
 
 	Text_GarrisonTargetName = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonTargetName"));
 	Text_GarrisonTargetName->SetText(NSLOCTEXT(
-		"TerritoryJournal", "NoPlannerTargetName", "SELECT A GARRISON TARGET"));
-	StyleGeneratedTerritoryText(Text_GarrisonTargetName, 18, FLinearColor(1.f, 0.84f, 0.f, 1.f));
+		"TerritoryJournal", "NoPlannerTargetName", "Select a garrison target"));
+	StyleGeneratedTerritoryText(Text_GarrisonTargetName,
+		TerritoryTypography::CardTitle, FLinearColor(1.f, 0.84f, 0.f, 1.f),
+		ETerritoryGeneratedTextRole::Heading);
 	PlannerStack->AddChild(Text_GarrisonTargetName);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -1112,7 +1236,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 			ButtonClass, TEXT("Btn_PreviousGarrisonTarget"));
 		ApplyTerritoryStyle(Btn_PreviousGarrisonTarget);
 		Btn_PreviousGarrisonTarget->SetButtonText(NSLOCTEXT(
-			"TerritoryJournal", "PreviousGarrisonTarget", "PREVIOUS POST"));
+			"TerritoryJournal", "PreviousGarrisonTarget", "Previous post"));
 		Btn_PreviousGarrisonTarget->SetToolTipText(NSLOCTEXT(
 			"TerritoryJournal", "PreviousGarrisonTargetTip", "Select the previous District or Property garrison."));
 		Btn_PreviousGarrisonTarget->OnClicked().AddUObject(
@@ -1122,7 +1246,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 			ButtonClass, TEXT("Btn_NextGarrisonTarget"));
 		ApplyTerritoryStyle(Btn_NextGarrisonTarget);
 		Btn_NextGarrisonTarget->SetButtonText(NSLOCTEXT(
-			"TerritoryJournal", "NextGarrisonTarget", "NEXT POST"));
+			"TerritoryJournal", "NextGarrisonTarget", "Next post"));
 		Btn_NextGarrisonTarget->SetToolTipText(NSLOCTEXT(
 			"TerritoryJournal", "NextGarrisonTargetTip", "Select the next District or Property garrison."));
 		Btn_NextGarrisonTarget->OnClicked().AddUObject(
@@ -1133,8 +1257,10 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	UTextBlock* TargetHeading = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_AssignedGuardTargetHeading"));
 	TargetHeading->SetText(NSLOCTEXT(
-		"TerritoryJournal", "AssignedGuardTargetHeading", "PROPOSED ASSIGNED GUARDS"));
-	StyleGeneratedTerritoryText(TargetHeading, 12, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
+		"TerritoryJournal", "AssignedGuardTargetHeading", "Assigned guard target"));
+	StyleGeneratedTerritoryText(TargetHeading, TerritoryTypography::Metadata,
+		FLinearColor(0.65f, 0.69f, 0.68f, 1.f),
+		ETerritoryGeneratedTextRole::Muted);
 	PlannerStack->AddChild(TargetHeading);
 
 	GuardTargetSpinBox = WidgetTree->ConstructWidget<UNarrativeSpinBox>(
@@ -1160,17 +1286,25 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 
 	Text_GarrisonStaffing = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonStaffing"));
-	StyleGeneratedTerritoryText(Text_GarrisonStaffing, 14, FLinearColor(0.95f, 0.96f, 0.95f, 1.f));
+	StyleGeneratedTerritoryText(Text_GarrisonStaffing, TerritoryTypography::Body,
+		FLinearColor(0.95f, 0.96f, 0.95f, 1.f));
 	PlannerStack->AddChild(Text_GarrisonStaffing);
 	Text_GarrisonFinance = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_GarrisonFinance"));
-	StyleGeneratedTerritoryText(Text_GarrisonFinance, 14, FLinearColor(0.96f, 0.72f, 0.38f, 1.f));
+	StyleGeneratedTerritoryText(Text_GarrisonFinance, TerritoryTypography::Body,
+		FLinearColor(0.96f, 0.72f, 0.38f, 1.f));
 	PlannerStack->AddChild(Text_GarrisonFinance);
 	Text_CommandCapabilities = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_CommandCapabilities"));
-	StyleGeneratedTerritoryText(Text_CommandCapabilities, 12,
+	StyleGeneratedTerritoryText(Text_CommandCapabilities, TerritoryTypography::Metadata,
 		FLinearColor(0.74f, 0.78f, 0.76f, 1.f), ETerritoryGeneratedTextRole::Muted);
 	PlannerStack->AddChild(Text_CommandCapabilities);
+	if (Text_CommandSecurity)
+	{
+		// The planner below is the actionable Garrison readout. Hiding the old
+		// diagnostic paragraph prevents the same counts appearing twice.
+		Text_CommandSecurity->SetVisibility(ESlateVisibility::Collapsed);
+	}
 
 	if (!ButtonClass) return;
 
@@ -1180,7 +1314,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	Btn_ApplyGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("Btn_ApplyGuardTarget"));
 	ApplyTerritoryStyle(Btn_ApplyGuardTarget);
-	Btn_ApplyGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "ApplyGuardTarget", "APPLY PLAN"));
+	Btn_ApplyGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "ApplyGuardTarget", "Apply plan"));
 	Btn_ApplyGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "ApplyGuardTargetTip",
 		"Submit the exact target to the authoritative server."));
 	Btn_ApplyGuardTarget->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleApplyGuardTargetClicked);
@@ -1188,7 +1322,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	Btn_ZeroGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("Btn_ZeroGuardTarget"));
 	ApplyTerritoryStyle(Btn_ZeroGuardTarget);
-	Btn_ZeroGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "ZeroGuardTarget", "EMPTY POST"));
+	Btn_ZeroGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "ZeroGuardTarget", "Empty post"));
 	Btn_ZeroGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "ZeroGuardTargetTip",
 		"Withdraw this garrison and reduce its future upkeep to zero."));
 	Btn_ZeroGuardTarget->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleZeroGuardTargetClicked);
@@ -1196,7 +1330,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	Btn_MaxGuardTarget = WidgetTree->ConstructWidget<UNarrativeCommonButtonBase>(
 		ButtonClass, TEXT("Btn_MaxGuardTarget"));
 	ApplyTerritoryStyle(Btn_MaxGuardTarget);
-	Btn_MaxGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "MaxGuardTarget", "FULL CAPACITY"));
+	Btn_MaxGuardTarget->SetButtonText(NSLOCTEXT("TerritoryJournal", "MaxGuardTarget", "Full capacity"));
 	Btn_MaxGuardTarget->SetToolTipText(NSLOCTEXT("TerritoryJournal", "MaxGuardTargetTip",
 		"Set this garrison to its authored physical capacity."));
 	Btn_MaxGuardTarget->OnClicked().AddUObject(this, &UTerritoryJournalWidget::HandleMaxGuardTargetClicked);
@@ -1209,7 +1343,7 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 		ButtonClass, TEXT("Btn_SendReinforcement"));
 	ApplyTerritoryStyle(Btn_SendReinforcement);
 	Btn_SendReinforcement->SetButtonText(NSLOCTEXT(
-		"TerritoryJournal", "SendReinforcement", "SEND 1 RESERVE"));
+		"TerritoryJournal", "SendReinforcement", "Send 1 reserve"));
 	Btn_SendReinforcement->SetToolTipText(NSLOCTEXT(
 		"TerritoryJournal", "SendReinforcementTip",
 		"Immediately fill one empty assigned post using an existing reserve. This does not recruit a new guard."));
@@ -1230,9 +1364,10 @@ void UTerritoryJournalWidget::RefreshGarrisonManagementControls(
 	for (const FTerritoryGarrisonOperationsView& Garrison : View.GarrisonTargets)
 	{
 		if (!Garrison.Territory) continue;
-		const FString TypeLabel = Garrison.bDistrictGarrison ? TEXT("District") : TEXT("Property");
-		const FString Option = FString::Printf(TEXT("%s — %s [%s]"),
-			*Garrison.DisplayName.ToString(), *TypeLabel, *Garrison.TerritoryTag.ToString());
+		const FString TypeLabel = Garrison.bDistrictGarrison
+			? TEXT("District command") : TEXT("Property post");
+		const FString Option = FString::Printf(TEXT("%s — %s"),
+			*Garrison.DisplayName.ToString(), *TypeLabel);
 		NewOptions.Add(Option, Garrison.Territory);
 		NewOptionOrder.Add(Option);
 		GarrisonTargetOrder.Add(Garrison.Territory);
@@ -1304,11 +1439,11 @@ void UTerritoryJournalWidget::RefreshGarrisonManagementControls(
 	if (Text_CommandCapabilities)
 	{
 		TArray<FString> CapabilityLines;
-		CapabilityLines.Add(TEXT("STRATEGIC CONTROLS"));
+		CapabilityLines.Add(TEXT("Strategic controls"));
 		for (const FTerritoryCommandCapabilityView& Capability : View.CommandCapabilities)
 		{
 			CapabilityLines.Add(FString::Printf(TEXT("[%s] %s — %s"),
-				Capability.bGranted ? TEXT("ONLINE") : TEXT("LOCKED"),
+				Capability.bGranted ? TEXT("Online") : TEXT("Locked"),
 				*Capability.DisplayName.ToString(),
 				*Capability.AvailabilityReason.ToString()));
 		}
@@ -1330,7 +1465,7 @@ void UTerritoryJournalWidget::UpdateGarrisonTargetPreview()
 		const FText Missing = NSLOCTEXT("TerritoryJournal", "NoGarrisonTarget",
 			"No loaded garrison is available for this district.");
 		if (Text_GarrisonTargetName) Text_GarrisonTargetName->SetText(
-			NSLOCTEXT("TerritoryJournal", "MissingGarrisonTargetName", "NO GARRISON TARGET"));
+			NSLOCTEXT("TerritoryJournal", "MissingGarrisonTargetName", "No garrison target"));
 		if (Text_GarrisonStaffing) Text_GarrisonStaffing->SetText(Missing);
 		if (Text_GarrisonFinance) Text_GarrisonFinance->SetText(FText::GetEmpty());
 		if (Text_GarrisonTargetPreview) Text_GarrisonTargetPreview->SetText(Missing);
@@ -1348,18 +1483,18 @@ void UTerritoryJournalWidget::UpdateGarrisonTargetPreview()
 				NSLOCTEXT("TerritoryJournal", "GarrisonTargetName", "{0}  |  {1}"),
 				View.DisplayName,
 				View.bDistrictGarrison
-					? NSLOCTEXT("TerritoryJournal", "DistrictPostType", "DISTRICT POST")
-					: NSLOCTEXT("TerritoryJournal", "PropertyPostType", "PROPERTY POST")));
+					? NSLOCTEXT("TerritoryJournal", "DistrictPostType", "District post")
+					: NSLOCTEXT("TerritoryJournal", "PropertyPostType", "Property post")));
 		}
 		const FText Staffing = FText::Format(
 			NSLOCTEXT("TerritoryJournal", "GarrisonStaffingReadout",
-				"ACTIVE  {0}    ASSIGNED  {1} -> {2}    CAPACITY  {3}\nRESERVE  {4}    DEPLOYING  {5}"),
+				"Active  {0}    Assigned  {1} → {2}    Capacity  {3}\nReserve  {4}    Deploying  {5}"),
 			FText::AsNumber(View.ActiveGuards), FText::AsNumber(View.DesiredGuards),
 			FText::AsNumber(Proposed), FText::AsNumber(View.MaximumGuards),
 			FText::AsNumber(View.ReserveGuards), FText::AsNumber(View.PendingDeployments));
 		const FText Finance = FText::Format(
 			NSLOCTEXT("TerritoryJournal", "GarrisonFinanceReadout",
-				"RECRUIT NOW  {0}    INCOME  {1}/CYCLE\nUPKEEP  {2}/CYCLE    PROJECTED NET  {3}/CYCLE"),
+				"Recruit now  {0}    Income  {1}/cycle\nUpkeep  {2}/cycle    Projected net  {3}/cycle"),
 			FText::AsNumber(Recruitment), FText::AsNumber(View.PeriodicIncome),
 			FText::AsNumber(ProposedUpkeep), FText::AsNumber(ProposedNet));
 		if (Text_GarrisonStaffing) Text_GarrisonStaffing->SetText(Staffing);
@@ -1625,10 +1760,10 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 			if (!bHasDirectoryHeading || View.CityTag != LastDirectoryCity)
 			{
 				const FText CityName = View.CityDisplayName.IsEmpty()
-					? NSLOCTEXT("TerritoryJournal", "IndependentDistricts", "INDEPENDENT DISTRICTS")
+					? NSLOCTEXT("TerritoryJournal", "IndependentDistricts", "Independent districts")
 					: View.CityDisplayName;
 				if (UTextBlock* Heading = CreateHierarchyTextRow(
-					FText::Format(NSLOCTEXT("TerritoryJournal", "CityDirectoryHeading", "CITY  /  {0}"), CityName),
+					FText::Format(NSLOCTEXT("TerritoryJournal", "CityDirectoryHeading", "City  /  {0}"), CityName),
 					FName(*FString::Printf(TEXT("DirectoryCity_%u"), GetTypeHash(View.CityTag))), true))
 				{
 					DistrictList->AddChild(Heading);
@@ -1718,18 +1853,18 @@ void UTerritoryJournalWidget::RefreshCommandCenterIdentity(
 	if (Text_JournalEyebrow)
 	{
 		Text_JournalEyebrow->SetText(Cities.Num() > 1
-			? NSLOCTEXT("TerritoryJournal", "RegionalNetworkEyebrow", "REGIONAL TERRITORY NETWORK")
-			: NSLOCTEXT("TerritoryJournal", "CityNetworkEyebrow", "CITY TERRITORY NETWORK"));
+			? NSLOCTEXT("TerritoryJournal", "RegionalNetworkEyebrow", "Regional territory network")
+			: NSLOCTEXT("TerritoryJournal", "CityNetworkEyebrow", "City territory network"));
 	}
 	if (Text_JournalTitle)
 	{
-		FText Title = NSLOCTEXT("TerritoryJournal", "GenericCommandCenter", "TERRITORY COMMAND CENTER");
+		FText Title = NSLOCTEXT("TerritoryJournal", "GenericCommandCenter", "Territory Command Center");
 		if (Cities.Num() == 1)
 		{
 			for (const TPair<FString, FText>& Pair : Cities)
 			{
 				Title = FText::Format(NSLOCTEXT("TerritoryJournal", "NamedCommandCenter",
-					"{0} COMMAND CENTER"), Pair.Value);
+					"{0} Command Center"), Pair.Value);
 				break;
 			}
 		}
@@ -1866,6 +2001,20 @@ void UTerritoryJournalWidget::SetIntelligenceFilter(
 	ETerritoryIntelligenceFilter Filter)
 {
 	SelectedIntelligenceFilter = Filter;
+	const TArray<TPair<UNarrativeCommonButtonBase*, ETerritoryIntelligenceFilter>> Buttons = {
+		{ Btn_IntelligenceAll, ETerritoryIntelligenceFilter::All },
+		{ Btn_IntelligenceConflict, ETerritoryIntelligenceFilter::Conflict },
+		{ Btn_IntelligenceControl, ETerritoryIntelligenceFilter::Control },
+		{ Btn_IntelligenceEconomy, ETerritoryIntelligenceFilter::Economy },
+		{ Btn_IntelligenceCommand, ETerritoryIntelligenceFilter::Command },
+		{ Btn_IntelligenceProduction, ETerritoryIntelligenceFilter::Production },
+		{ Btn_IntelligenceDiplomacy, ETerritoryIntelligenceFilter::Diplomacy }
+	};
+	for (const TPair<UNarrativeCommonButtonBase*, ETerritoryIntelligenceFilter>& Entry : Buttons)
+	{
+		TerritoryUITheme::SetTabSelected(Entry.Key, Entry.Value == Filter);
+	}
+	LastLiveEventRevision = INDEX_NONE;
 	RefreshLiveEvents();
 }
 
@@ -1914,7 +2063,8 @@ UTextBlock* UTerritoryJournalWidget::CreateHierarchyTextRow(
 	UNarrativeCommonTextBlock* Row = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), WidgetName);
 	Row->SetText(Text);
-	StyleGeneratedTerritoryText(Row, bHeading ? 15 : 13,
+	StyleGeneratedTerritoryText(Row,
+		bHeading ? TerritoryTypography::CardTitle : TerritoryTypography::Body,
 		bHeading ? FLinearColor(0.96f, 0.72f, 0.38f, 1.f)
 			: FLinearColor(0.88f, 0.9f, 0.88f, 1.f),
 		bHeading ? ETerritoryGeneratedTextRole::Heading
@@ -1965,9 +2115,9 @@ UWidget* UTerritoryJournalWidget::CreatePlaceCommandCard(
 		UNarrativeCommonTextBlock::StaticClass(),
 		FName(*FString::Printf(TEXT("PlaceEyebrow_%u"), StableHash)));
 	Eyebrow->SetText(FText::Format(NSLOCTEXT("TerritoryJournal", "PlaceCardEyebrow",
-		"PLACE  //  {0}"), UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+		"Place  //  {0}"), UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
 			Place.Availability, Place.TerritoryState)));
-	StyleGeneratedTerritoryText(Eyebrow, 9, Accent,
+	StyleGeneratedTerritoryText(Eyebrow, TerritoryTypography::Caption, Accent,
 		ETerritoryGeneratedTextRole::Heading);
 	Eyebrow->SetAutoWrapText(false);
 	Identity->AddChildToVerticalBox(Eyebrow);
@@ -1976,7 +2126,7 @@ UWidget* UTerritoryJournalWidget::CreatePlaceCommandCard(
 		UNarrativeCommonTextBlock::StaticClass(),
 		FName(*FString::Printf(TEXT("PlaceName_%u"), StableHash)));
 	Name->SetText(Place.DisplayName);
-	StyleGeneratedTerritoryText(Name, 15,
+	StyleGeneratedTerritoryText(Name, TerritoryTypography::CardTitle,
 		FLinearColor(0.96f, 0.95f, 0.91f, 1.f),
 		ETerritoryGeneratedTextRole::Heading);
 	Name->SetAutoWrapText(false);
@@ -1992,13 +2142,13 @@ UWidget* UTerritoryJournalWidget::CreatePlaceCommandCard(
 		UNarrativeCommonTextBlock::StaticClass(),
 		FName(*FString::Printf(TEXT("PlaceChipText_%u"), StableHash)));
 	ChipText->SetText(Place.bOwnedByViewer && bClaimed
-		? NSLOCTEXT("TerritoryJournal", "PlaceCommandReady", "COMMAND READY")
+		? NSLOCTEXT("TerritoryJournal", "PlaceCommandReady", "Command ready")
 		: bContested
-			? NSLOCTEXT("TerritoryJournal", "PlaceContestedNow", "CONTESTED")
+			? NSLOCTEXT("TerritoryJournal", "PlaceContestedNow", "Contested")
 			: Place.bAvailableForCapture
-				? NSLOCTEXT("TerritoryJournal", "PlaceReadyToContest", "READY TO CONTEST")
-				: NSLOCTEXT("TerritoryJournal", "PlaceIntelligenceOnly", "INTELLIGENCE"));
-	StyleGeneratedTerritoryText(ChipText, 9, Accent,
+				? NSLOCTEXT("TerritoryJournal", "PlaceReadyToContest", "Ready to contest")
+				: NSLOCTEXT("TerritoryJournal", "PlaceIntelligenceOnly", "Intelligence"));
+	StyleGeneratedTerritoryText(ChipText, TerritoryTypography::Caption, Accent,
 		ETerritoryGeneratedTextRole::Heading);
 	ChipText->SetAutoWrapText(false);
 	StatusChip->SetContent(ChipText);
@@ -2013,17 +2163,17 @@ UWidget* UTerritoryJournalWidget::CreatePlaceCommandCard(
 		: NSLOCTEXT("TerritoryJournal", "PlaceNoOwner", "No faction");
 	const FText Security = Place.bOwnedByViewer
 		? FText::Format(NSLOCTEXT("TerritoryJournal", "PlaceKnownSecurity",
-			"GARRISON  {0} ACTIVE  /  {1} ASSIGNED  /  {2} CAPACITY"),
+			"Garrison  {0} active  /  {1} assigned  /  {2} capacity"),
 			FText::AsNumber(Place.ActiveGuards), FText::AsNumber(Place.DesiredGuards),
 			FText::AsNumber(Place.MaximumGuards))
 		: NSLOCTEXT("TerritoryJournal", "PlaceUnknownSecurity",
-			"GARRISON  UNKNOWN  //  USE ESPIONAGE FOR DEFENDER INTELLIGENCE");
+			"Garrison unknown  //  use espionage for defender intelligence");
 	UNarrativeCommonTextBlock* SecurityText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(),
 		FName(*FString::Printf(TEXT("PlaceSecurity_%u"), StableHash)));
 	SecurityText->SetText(FText::Format(NSLOCTEXT("TerritoryJournal", "PlaceSecurityLine",
-		"OWNER  {0}   •   {1}"), Owner, Security));
-	StyleGeneratedTerritoryText(SecurityText, 10,
+		"Owner  {0}   •   {1}"), Owner, Security));
+	StyleGeneratedTerritoryText(SecurityText, TerritoryTypography::Metadata,
 		FLinearColor(0.72f, 0.74f, 0.71f, 1.f));
 	if (UVerticalBoxSlot* SecuritySlot = Stack->AddChildToVerticalBox(SecurityText))
 	{
@@ -2032,18 +2182,18 @@ UWidget* UTerritoryJournalWidget::CreatePlaceCommandCard(
 
 	const FText Economy = Place.bOwnedByViewer
 		? FText::Format(NSLOCTEXT("TerritoryJournal", "PlaceEconomyKnown",
-			"NET  {0} / CYCLE   •   PRODUCTION  {1}"),
+			"Net  {0} / cycle   •   Production  {1}"),
 			FText::AsNumber(Place.NetIncome),
 			Place.bHasProductionProfile
-				? NSLOCTEXT("TerritoryJournal", "PlaceProductionConfigured", "CONFIGURED")
-				: NSLOCTEXT("TerritoryJournal", "PlaceNoProduction", "NONE"))
+				? NSLOCTEXT("TerritoryJournal", "PlaceProductionConfigured", "Configured")
+				: NSLOCTEXT("TerritoryJournal", "PlaceNoProduction", "None"))
 		: NSLOCTEXT("TerritoryJournal", "PlaceEconomyUnknown",
-			"ECONOMY  UNKNOWN UNTIL CLAIMED");
+			"Economy unknown until claimed");
 	UNarrativeCommonTextBlock* EconomyText = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(),
 		FName(*FString::Printf(TEXT("PlaceEconomy_%u"), StableHash)));
 	EconomyText->SetText(Economy);
-	StyleGeneratedTerritoryText(EconomyText, 10,
+	StyleGeneratedTerritoryText(EconomyText, TerritoryTypography::Metadata,
 		Place.bOwnedByViewer ? Accent : FLinearColor(0.56f, 0.60f, 0.59f, 1.f),
 		Place.bOwnedByViewer ? ETerritoryGeneratedTextRole::Body
 			: ETerritoryGeneratedTextRole::Muted);
@@ -2060,7 +2210,7 @@ void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
 	if (Text_CommandHierarchy)
 	{
 		Text_CommandHierarchy->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "SelectedHierarchy", "CITY  {0}   >   DISTRICT  {1}"),
+			NSLOCTEXT("TerritoryJournal", "SelectedHierarchy", "City  {0}   >   District  {1}"),
 			CityName, View.DisplayName));
 	}
 	if (Text_CommandOverview)
@@ -2123,7 +2273,7 @@ void UTerritoryJournalWidget::RefreshSelectedHierarchyPanels(
 		{
 			if (UTextBlock* Hidden = CreateHierarchyTextRow(
 				FText::Format(NSLOCTEXT("TerritoryJournal", "HiddenPlacesAggregate",
-					"{0} LOCATIONS REMAIN HIDDEN\nNames and objectives will appear only after their story conditions unlock."),
+					"{0} locations remain hidden\nNames and objectives appear after their story conditions unlock."),
 					FText::AsNumber(View.HiddenProperties)),
 				TEXT("HiddenPlacesAggregate")))
 			{
@@ -2212,7 +2362,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 		if (Text_CommandDistrictName)
 		{
 			Text_CommandDistrictName->SetText(NSLOCTEXT(
-				"TerritoryJournal", "NoCommandSelection", "SELECT A DISTRICT"));
+				"TerritoryJournal", "NoCommandSelection", "Select a district"));
 		}
 		if (Btn_CommandAddGuard) Btn_CommandAddGuard->SetIsEnabled(false);
 		if (Btn_CommandRemoveGuard) Btn_CommandRemoveGuard->SetIsEnabled(false);
@@ -2230,7 +2380,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 	}
 	if (Text_SelectedEyebrow)
 	{
-		Text_SelectedEyebrow->SetText(NSLOCTEXT("TerritoryJournal", "SelectedEyebrow", "LIVE TERRITORY INTELLIGENCE"));
+		Text_SelectedEyebrow->SetText(NSLOCTEXT("TerritoryJournal", "SelectedEyebrow", "Live territory intelligence"));
 	}
 	UTextBlock* SelectedTitle = Text_SelectedTerritoryTitle
 		? Text_SelectedTerritoryTitle.Get() : QuestTitle.Get();
@@ -2338,7 +2488,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 	if (Text_CommandOwnerState)
 	{
 		Text_CommandOwnerState->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "CommandOwnerState", "OWNER  {0}    |    STATE  {1}    |    VIEWER  {2}"),
+			NSLOCTEXT("TerritoryJournal", "CommandOwnerState",
+				"Owner  {0}    •    Status  {1}    •    Player faction  {2}"),
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.OwnerFaction),
 			StateText,
 			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.ViewerFaction)));
@@ -2368,8 +2519,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 			FText::AsNumber(View.ManageableGarrisonTargets),
 			FText::AsNumber(View.UnguardedGarrisonTargets),
 			View.bUnguarded
-				? NSLOCTEXT("TerritoryJournal", "DistrictUnguarded", "UNGUARDED")
-				: NSLOCTEXT("TerritoryJournal", "DistrictGuarded", "DEFENDED")));
+				? NSLOCTEXT("TerritoryJournal", "DistrictUnguarded", "Unguarded")
+				: NSLOCTEXT("TerritoryJournal", "DistrictGuarded", "Defended")));
 	}
 	if (Text_CommandFinance)
 	{
@@ -2380,8 +2531,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 			FText::AsNumber(View.PeriodicIncome), FText::AsNumber(View.GuardUpkeep),
 			FText::AsNumber(View.NetIncome),
 			View.bFinancialRisk
-				? NSLOCTEXT("TerritoryJournal", "FinanceAtRisk", "AT RISK")
-				: NSLOCTEXT("TerritoryJournal", "FinanceStable", "STABLE")));
+				? NSLOCTEXT("TerritoryJournal", "FinanceAtRisk", "At risk")
+				: NSLOCTEXT("TerritoryJournal", "FinanceStable", "Stable")));
 	}
 	if (Text_CommandThreat)
 	{
@@ -2419,7 +2570,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 		{
 			AssaultText = FText::Format(
 				NSLOCTEXT("TerritoryJournal", "ProjectedCommandAssault",
-					"PROJECTED — NOT YET SCHEDULED\nTarget {0}  |  Strongest eligible faction {1}\n"
+				"Projected — not yet scheduled\nTarget {0}  |  Strongest eligible faction {1}\n"
 					"Launch {2}  |  Estimated success {3}  |  Defence {4}  |  Power ratio {5}  |  Priority {6}"),
 				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.ThreatTargetTerritory),
 				UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(View.AttackingFaction),
@@ -2452,7 +2603,7 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 	{
 		Text_CommandCaptureProgress->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "CommandCaptureProgress",
-				"DISTRICT CONTROL  {0} / {1} PLACES  •  {2} DISCOVERED  •  {3} HIDDEN"),
+				"District control  {0} / {1} places  •  {2} discovered  •  {3} hidden"),
 			FText::AsNumber(View.OwnedProperties), FText::AsNumber(View.TotalProperties),
 			FText::AsNumber(View.KnownProperties), FText::AsNumber(View.HiddenProperties)));
 		Text_CommandCaptureProgress->SetColorAndOpacity(FSlateColor(SelectedAccent));
@@ -2608,7 +2759,8 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		}
 		UTextBlock* EmptyText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), WidgetName);
 		EmptyText->SetText(Message);
-		StyleGeneratedTerritoryText(EmptyText, 14, FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
+		StyleGeneratedTerritoryText(EmptyText, TerritoryTypography::Body,
+			FLinearColor(0.65f, 0.69f, 0.68f, 1.f));
 		Box->AddChild(EmptyText);
 	};
 	if (ActiveRowsAdded == 0)
@@ -2662,7 +2814,7 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	{
 		ActiveCountText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryJournal", "ActiveDistrictCount",
-				"ACTIVE TERRITORIES  //  {0}"),
+				"Active territories  //  {0}"),
 			FText::AsNumber(ActiveRowsAdded)));
 	}
 	UTextBlock* CapturedCountText = Text_CapturedTerritoryCount
@@ -2670,13 +2822,13 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	if (CapturedCountText)
 	{
 		CapturedCountText->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "ClaimedDistrictCount", "CLAIMED TERRITORIES  //  {0}"),
+			NSLOCTEXT("TerritoryJournal", "ClaimedDistrictCount", "Claimed territories  //  {0}"),
 			FText::AsNumber(OwnedCount)));
 	}
 	if (Text_HeaderStatus)
 	{
 		Text_HeaderStatus->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "HeaderStatus", "LIVE MAP  //  {0} OPEN  •  {1} HELD  •  {2} THREATS  •  {3} FUNDS"),
+			NSLOCTEXT("TerritoryJournal", "HeaderStatus", "Live map  //  {0} open  •  {1} held  •  {2} threats  •  {3} funds"),
 			FText::AsNumber(AvailableUnlockedCount), FText::AsNumber(OwnedCount), FText::AsNumber(ThreatCount),
 			FText::AsNumber(Economy.AvailableFunds)));
 	}
@@ -2699,19 +2851,19 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	if (Text_TotalWeeklyEarnings)
 	{
 		Text_TotalWeeklyEarnings->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "GrossIncomeKPI", "GROSS  {0} / CYCLE"),
+			NSLOCTEXT("TerritoryJournal", "GrossIncomeKPI", "Gross {0} / cycle"),
 			FText::AsNumber(Economy.IncomePerTick)));
 	}
 	if (Text_TotalGuardCost)
 	{
 		Text_TotalGuardCost->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "GuardUpkeepKPI", "GUARDS  {0} / CYCLE"),
+			NSLOCTEXT("TerritoryJournal", "GuardUpkeepKPI", "Guards {0} / cycle"),
 			FText::AsNumber(Economy.CostsPerTick)));
 	}
 	if (Text_NetProfit)
 	{
 		Text_NetProfit->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "NetIncomeKPI", "NET  {0} / CYCLE"),
+			NSLOCTEXT("TerritoryJournal", "NetIncomeKPI", "Net {0} / cycle"),
 			FText::AsNumber(Economy.NetPerTick)));
 	}
 	if (Text_TotalEarningsLost)
@@ -2760,16 +2912,11 @@ void UTerritoryJournalWidget::SetSelectedDetailTab(int32 TabIndex)
 	};
 	for (int32 Index = 0; Index < Buttons.Num(); ++Index)
 	{
-		if (Buttons[Index])
-		{
-			Buttons[Index]->SetIsSelected(Index == SelectedDetailTab);
-		}
+		TerritoryUITheme::SetTabSelected(
+			Buttons[Index], Index == SelectedDetailTab);
 	}
-	if (Btn_BenefitsDetailTab)
-	{
-		Btn_BenefitsDetailTab->SetIsSelected(
-			SelectedDetailTab == PropertyBenefitsDetailTabIndex);
-	}
+	TerritoryUITheme::SetTabSelected(Btn_BenefitsDetailTab,
+		SelectedDetailTab == PropertyBenefitsDetailTabIndex);
 }
 
 void UTerritoryJournalWidget::SetSelectedTerritoryInfoOpen(bool bOpen)
@@ -2834,9 +2981,9 @@ void UTerritoryJournalWidget::HandleTerritoryTabClicked()
 	{
 		TabSwitcher->SetActiveWidgetIndex(0);
 	}
-	if (Btn_TerritoryTab) Btn_TerritoryTab->SetIsSelected(true);
-	if (Btn_EarningsTab) Btn_EarningsTab->SetIsSelected(false);
-	if (Btn_LossTab) Btn_LossTab->SetIsSelected(false);
+	TerritoryUITheme::SetTabSelected(Btn_TerritoryTab, true);
+	TerritoryUITheme::SetTabSelected(Btn_EarningsTab, false);
+	TerritoryUITheme::SetTabSelected(Btn_LossTab, false);
 }
 
 void UTerritoryJournalWidget::HandleEarningsTabClicked()
@@ -2847,9 +2994,9 @@ void UTerritoryJournalWidget::HandleEarningsTabClicked()
 	{
 		TabSwitcher->SetActiveWidgetIndex(1);
 	}
-	if (Btn_TerritoryTab) Btn_TerritoryTab->SetIsSelected(false);
-	if (Btn_EarningsTab) Btn_EarningsTab->SetIsSelected(true);
-	if (Btn_LossTab) Btn_LossTab->SetIsSelected(false);
+	TerritoryUITheme::SetTabSelected(Btn_TerritoryTab, false);
+	TerritoryUITheme::SetTabSelected(Btn_EarningsTab, true);
+	TerritoryUITheme::SetTabSelected(Btn_LossTab, false);
 }
 
 void UTerritoryJournalWidget::HandleLossTabClicked()
@@ -2860,9 +3007,9 @@ void UTerritoryJournalWidget::HandleLossTabClicked()
 	{
 		TabSwitcher->SetActiveWidgetIndex(2);
 	}
-	if (Btn_TerritoryTab) Btn_TerritoryTab->SetIsSelected(false);
-	if (Btn_EarningsTab) Btn_EarningsTab->SetIsSelected(false);
-	if (Btn_LossTab) Btn_LossTab->SetIsSelected(true);
+	TerritoryUITheme::SetTabSelected(Btn_TerritoryTab, false);
+	TerritoryUITheme::SetTabSelected(Btn_EarningsTab, false);
+	TerritoryUITheme::SetTabSelected(Btn_LossTab, true);
 }
 
 void UTerritoryJournalWidget::HandleCloseSelectedTerritoryClicked()

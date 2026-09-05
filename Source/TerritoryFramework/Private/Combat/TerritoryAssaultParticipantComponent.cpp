@@ -86,6 +86,10 @@ void UTerritoryAssaultParticipantComponent::ConfigureNarrativeVehicleIngress(
 	bVehicleIngressFailed = !IsValid(InVehicle) || VehicleRoutePoints.IsEmpty();
 	bVehicleMountRequested = false;
 	bVehiclePossessionConfirmed = false;
+	bNarrativeVehicleDriver = true;
+	bReportsVehicleStoryOutcome = true;
+	NarrativeVehicleSeatIndex = 0;
+	NarrativeVehicleDriver.Reset();
 	bVehicleDriveActive = false;
 	bVehicleDismountRequested = false;
 	VehicleRoutePointIndex = 0;
@@ -105,6 +109,22 @@ void UTerritoryAssaultParticipantComponent::ConfigureNarrativeVehicleIngress(
 	VehicleIngressDeadline = GetWorld()
 		? GetWorld()->GetTimeSeconds() + VehicleIngressTimeoutSeconds : 0.0;
 	SetComponentTickEnabled(false);
+}
+
+void UTerritoryAssaultParticipantComponent::ConfigureNarrativeVehiclePassenger(
+	UTerritoryAssaultParticipantComponent* InDriver,
+	ANarrativeVehicleBase* InVehicle, const int32 InSeatIndex,
+	const TArray<FVector>& InRoutePoints,
+	const FTransform& InParkDestination, const FTransform& InWalkDestination,
+	const float InTimeoutSeconds, const bool bInEscapeOnArrival)
+{
+	ConfigureNarrativeVehicleIngress(InVehicle, InRoutePoints,
+		InParkDestination, InWalkDestination, 0.f, InTimeoutSeconds,
+		bInEscapeOnArrival, FTerritoryVehicleAwarenessSettings());
+	bNarrativeVehicleDriver = false;
+	bReportsVehicleStoryOutcome = false;
+	NarrativeVehicleSeatIndex = FMath::Max(1, InSeatIndex);
+	NarrativeVehicleDriver = InDriver;
 }
 
 void UTerritoryAssaultParticipantComponent::BeginPlay()
@@ -189,7 +209,8 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 
 	if (bVehicleDismountRequested)
 	{
-		if (Vehicle->GetController() != Controller)
+		if (!Interaction->HasOccupiedInteractable()
+			&& (!bNarrativeVehicleDriver || Vehicle->GetController() != Controller))
 		{
 			CompleteVehicleIngress();
 		}
@@ -197,22 +218,60 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 	}
 
 	// Narrative remains authoritative for the seat, ability, animation and possession.
-	// Territory only supplies road steering after that authored interaction completes.
+	// Territory supplies the explicit seat assignment and only the driver steers.
 	if (!bVehicleMountRequested)
 	{
-		if (!Interaction->TargetBestInteractionSlot(Mount, false)
+		if (!Interaction->TargetInteractionSlot(
+			Mount, NarrativeVehicleSeatIndex, false)
 			|| !Interaction->RunInteractBehavior(false))
 		{
 			UE_LOG(LogTerritory, Error,
-				TEXT("[CounterAttack] Narrative mount interaction rejected driver %s for vehicle %s"),
-				*GetNameSafe(NPC), *GetNameSafe(Vehicle));
+				TEXT("[CounterAttack] Narrative mount interaction rejected %s %s seat=%d vehicle=%s"),
+				bNarrativeVehicleDriver ? TEXT("driver") : TEXT("passenger"),
+				*GetNameSafe(NPC), NarrativeVehicleSeatIndex, *GetNameSafe(Vehicle));
 			bVehicleIngressFailed = true;
 			return false;
 		}
 		bVehicleMountRequested = true;
 		UE_LOG(LogTerritory, Display,
-			TEXT("[CounterAttack] Narrative driver %s claimed a mount seat in %s"),
-			*GetNameSafe(NPC), *GetNameSafe(Vehicle));
+			TEXT("[CounterAttack] Narrative %s %s claimed seat %d in %s"),
+			bNarrativeVehicleDriver ? TEXT("driver") : TEXT("passenger"),
+			*GetNameSafe(NPC), NarrativeVehicleSeatIndex, *GetNameSafe(Vehicle));
+		return true;
+	}
+
+	if (!bNarrativeVehicleDriver)
+	{
+		UTerritoryAssaultParticipantComponent* Driver = NarrativeVehicleDriver.Get();
+		if (!Driver || Driver->bVehicleIngressFailed)
+		{
+			bVehicleIngressFailed = true;
+			return false;
+		}
+		bVehiclePossessionConfirmed = Interaction->HasOccupiedInteractable();
+		const bool bDriverLeaving = Driver->bVehicleDismountRequested
+			|| Driver->bVehicleAbandonmentRequested;
+		if (bDriverLeaving && Vehicle->GetVelocity().Size2D() <= 250.f)
+		{
+			if (!Interaction->HasOccupiedInteractable()
+				|| Interaction->StopInteractBehavior(false))
+			{
+				bVehicleDismountRequested = true;
+			}
+		}
+		else if (Driver->bVehicleIngressComplete)
+		{
+			if (bEscapeOnVehicleArrival)
+			{
+				CompleteVehicleIngress();
+			}
+			else if (Vehicle->GetVelocity().Size2D() <= 250.f
+				&& (!Interaction->HasOccupiedInteractable()
+					|| Interaction->StopInteractBehavior(false)))
+			{
+				bVehicleDismountRequested = true;
+			}
+		}
 		return true;
 	}
 
@@ -357,7 +416,8 @@ void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 		return;
 	}
 
-	if (bEscapeOnVehicleArrival && bVehicleIngressComplete
+	if (bEscapeOnVehicleArrival && bReportsVehicleStoryOutcome
+		&& bVehicleIngressComplete
 		&& !bEscapeCompletionReported)
 	{
 		bEscapeCompletionReported = true;
@@ -1000,6 +1060,21 @@ bool UTerritoryAssaultParticipantComponent::QueryVehicleObstacleDistance(
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(TerritoryVehicleAwareness), false);
 	Params.AddIgnoredActor(Vehicle);
 	Params.AddIgnoredActor(GetOwner());
+	// Mounted Territory participants are part of this vehicle, not road hazards. Narrative's
+	// mount ability can leave their Pawn collision queryable while attached to a seat; without
+	// this exclusion the driver's forward probe sees its own passengers and holds the brake until
+	// every occupant reaches the bounded ingress timeout.
+	for (TActorIterator<ATerritoryAssaultCharacter> It(World); It; ++It)
+	{
+		const ATerritoryAssaultCharacter* Candidate = *It;
+		const UTerritoryAssaultParticipantComponent* CandidateParticipant = Candidate
+			? Candidate->AssaultParticipant : nullptr;
+		if (CandidateParticipant
+			&& CandidateParticipant->NarrativeIngressVehicle.Get() == Vehicle)
+		{
+			Params.AddIgnoredActor(Candidate);
+		}
+	}
 	FHitResult Hit;
 	const FCollisionShape Box = FCollisionShape::MakeBox(FVector(
 		FMath::Max(50.f, VehicleAwareness.ProbeHalfWidth),

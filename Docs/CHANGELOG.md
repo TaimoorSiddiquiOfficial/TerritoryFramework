@@ -1,11 +1,118 @@
 # Changelog
 
+## Unreleased — 2026-09-05 (Rendered HUD follow-up)
+
+- Verified the Definition HUD policy in `HopDistrictTest` PIE: City travel hides the passive
+  card, Blacksmith shows it, disabling Blacksmith does not reveal a parent card, and restoring
+  the policy restores the card. Narrative's Menu layer suppresses the passive card while open.
+- Fixed the default "Button Text" caption appearing behind Blueprint-authored District rows.
+  Both authored and native rows now clear their selection button's caption during construction;
+  the separate district text and Narrative focus target remain intact.
+- Added a behavioural regression that builds an authored widget tree with the real configured
+  Narrative button template, reproduces the unwanted caption, and verifies construction clears it.
+- Vehicle seat validation now uses Unreal's default-component lookup, which includes Blueprint
+  construction templates and inherited overrides. A real Narrative sedan regression verifies
+  four authored seats, a bounded-capacity warning, rejection of a seatless vehicle, and no spawn.
+- Blacksmith's Claimed music now maps to the user's selected **Unity in the Ashes** track through
+  project-owned `DA_BlacksmithMusic`. Its separate **Horns of War** entry sound is preserved.
+- Passed UE 5.7 Editor and Game Development builds and all 213 `TerritoryFramework.*` tests
+  (207 clean, 6 intentional warning fixtures, no failed or skipped tests).
+- Compiled 72 Blueprints, validated 113 scoped assets with zero errors and four documented
+  authoring warnings, and cooked `HopDistrictTest` with zero errors and five cook warnings.
+  The cooked output includes the new music set and selected track.
+
+## Unreleased — 2026-09-05 (Definition-owned passive gameplay HUD)
+
+- Added **Show Passive Gameplay HUD Card** to every City, District, and Place Definition. Broad
+  Cities default to hidden; Districts and Places preserve the existing visible behavior.
+- The runtime Territory actor exposes the policy as a read-only Blueprint query, and the passive
+  capture/location widget collapses before building detailed content when the selected Territory
+  disables it.
+- Kept live notifications, POIs, map/compass markers, Command Center intelligence, management,
+  availability, ownership, save data, and replication independent from this presentation option.
+- Added UI and Story Outcome regression coverage plus an easy-English preview row that explains
+  the configured result and unaffected systems.
+- Passed UE 5.7 Editor and Game Development builds, 17 focused UI tests, 6 focused Story Outcome
+  tests, and all 211 `TerritoryFramework.*` tests with no failure or skipped test.
+
+## Unreleased — 2026-09-05 (Player-facing naming and management UI)
+
+- Replaced raw counterattack and diplomacy enum identifiers in player notifications with
+  localizable state, outcome, and event labels. Early planning reports now explain that force and
+  route numbers are not confirmed instead of displaying a misleading row of zeroes.
+- Integrated Territory's friendly Gameplay Tag labels with Narrative Pro's existing **Tag Friendly
+  Display Names** map while retaining a readable tag-leaf fallback for unconfigured community
+  projects.
+- Modernized the District Management panel and selectors with the shared Territory type scale,
+  title/sentence case, readable post roles, and the same action-button hover/pressed treatment as
+  the Command Center.
+- Fixed stale selection visuals on District rows, District waypoint controls, and live-event
+  waypoint controls by using CommonUI's explicit deselection path.
+- Passed UE 5.7 Editor and Game Development builds plus all 211
+  `TerritoryFramework.*` automation tests (205 clean and 6 expected warning fixtures), including
+  the expanded 17-test UI suite, with no failures or skipped tests.
+
 ## Unreleased — 2026-09-04 (Narrative tags, distraction ability, and Property benefits)
 
+- Fixed the packaged multiplayer Narrative HUD race without changing Marketplace content. The
+  project controller now uses `Wait For Narrative Gameplay HUD` before its parent BeginPlay graph,
+  allowing Narrative's normal possession/PlayerState path to create the HUD and initialize its ASC
+  first. A reusable editor migration replaces the old fixed delay safely and idempotently.
+- Vehicle-only reserve waves now wait until every living member of the current car squad has
+  resolved. They no longer consume a second car as a one-person casualty top-up; mixed/on-foot
+  assaults retain their earlier reinforcement behavior.
+- Added Hard-difficulty and strict save diagnostics. A packaged listen server admitted two clients,
+  delivered two successive four-person sedan waves (driver plus three passengers), and produced no
+  Territory/UI Blueprint runtime errors. Active-assault reload now rejects unexpected or duplicate
+  live IDs instead of checking only that expected IDs returned.
+- Vehicle-only counterattacks now cap their finite force to the real car-seat budget authorized
+  by Narrative difficulty. A road approach whose car budget is exhausted no longer degrades into
+  attackers spawning directly at the destination: one four-seat wave arrives in one car, while
+  two authorized waves arrive in two cars.
+- Resolved assault NPCs now leave gameplay immediately but retain their deactivated Narrative
+  activity component for a short bounded cleanup grace. This prevents latent custom attack-goal
+  Blueprint continuations from reading `OwnerActivityComponent` after the pawn becomes pending kill.
+- Changed Narrative vehicle reinforcement entry from one driver plus later pop-in foot soldiers
+  to one finite Territory squad per car. Each vehicle now carries a configurable total capacity
+  (default four: one driver and up to three passengers), assigns distinct Narrative mount seats,
+  drives as one group, and dismounts every occupant before combat/capture begins. A later wave
+  receives its own car when vehicle and difficulty budgets allow it.
+- Added vehicle-seat validation and deterministic capacity tests. Authored capacity is capped by
+  the real Narrative mount slots, the approach wave limit, and remaining finite force; unused
+  members remain available for a later deployment.
+- Fixed the vehicle-awareness probe treating its own Narrative-mounted passenger Pawns as road
+  hazards. The driver now ignores every Territory participant assigned to the same car, preventing
+  a fully mounted reinforcement squad from braking in place until ingress timeout.
+- Standardized Command Center headings, tabs, status labels, buttons, and generated detail text to
+  professional title/sentence case. Territory now detaches generated text from CommonUI styles
+  after copying their font data, preventing a later CommonUI synchronization from silently
+  restoring 26-48 px decorative sizes. A shared 11-30 px hierarchy keeps the Narrative visual
+  identity while making Benefits, Garrison, Overview, notifications, and Territory rows readable.
+- Fixed visited Command Center tabs remaining selected. CommonUI ignores
+  `SetIsSelected(false)` on non-toggleable buttons, so Territory tab groups now use the supported
+  explicit clear path and always retain exactly one selected tab. The selected tab stays
+  interactable so its selected-hover treatment can be displayed.
+- Re-authored the Territory tab style with four readable, visibly different states: normal,
+  hovered, selected, and selected-hovered. Intelligence filter tabs are now fully bound, display
+  the same exclusive selection behavior, and filter the event feed instead of changing only their
+  labels.
+- Removed the obsolete Quest-template summary block from tabbed Command Centers and removed raw
+  Gameplay Tags/Blueprint class names from player-facing Benefit copy. Each operational fact now
+  appears in its relevant tab instead of being repeated above every page.
+- Marked the plugin as installed so a clean external-plugin build can legally depend on the
+  installed Narrative Pro plugin. A fresh 154-action UE 5.7 editor build now succeeds instead of
+  failing UnrealBuildTool's module-hierarchy check.
 - Converted the Territory distraction throw into a real server-authoritative Narrative Gameplay
   Ability bound to `Narrative.Input.Throw`. The replicated projectile remains the physical payload;
   the ability owns commit, aim, spawn, and `GameplayEvent.Distraction.Thrown`, while impact emits
   `GameplayEvent.Distraction.Impact` after the Narrative hearing stimulus.
+- Replaced the duplicate distraction grant with one equipment-owned ability path. The direct
+  Narrative `UEquippableItem` rock grants `GA_TerritoryDistraction`; the Blacksmith grants only its
+  revocable Weapon Upgrades capability tag through GAS `ActivationRequiredTags`.
+- Added authoritative source-item validation and one-rock consumption after successful projectile
+  spawn. Failed activation, missing capability, missing inventory, and failed spawn consume nothing.
+- Removed the rock's Narrative Demo Blueprint parent, wrong grenade slot, inherited 50 Stealth
+  bonus, and zero-value equipment effect. Pickup and projectile now share the authored rock mesh.
 - Repaired the rescue stealth profile's missing break event with
   `Territory.Event.Stealth.Exposed`, and added a runtime fallback for legacy profiles whose
   serialized tag is still empty.
@@ -17,7 +124,7 @@
   Its Upgrade button uses a validated owning-client/server request and the existing
   `ATerritoryProperty::TryUpgrade` currency transaction; UI never writes level or currency.
 - Authored the Blacksmith as `Territory.Property.Role.ArmsShop`; its first benefit tier grants the
-  new distraction ability and exposes its configured Territory sword unlock in the journal.
+  Weapon Upgrades capability and exposes its configured Territory sword unlock in the journal.
 - Added the missing Territory World State factory to the Territory Content Browser creation menu.
 - Added validation and automation coverage for Property tags, levels, duplicate/null benefits,
   non-revocable Instant effects, the Narrative ability contract, UI exposure, World State factory,
@@ -25,9 +132,10 @@
 - Re-audited Narrative Pro's complete native Gameplay Tag registration surface and recorded the
   integration matrix, project-owned boundaries, remaining World Partition durability work, and a
   vendor typo that assigns the Magic Attack tag to `Ability_MeleeAttack` a second time.
-- Passed UE 5.7 Game and Editor Development builds with UHT warnings-as-errors, all 206
-  `TerritoryFramework.*` automation tests (200 clean and 6 expected warning fixtures), targeted
-  asset validation, and cold authored-asset verification.
+- Passed a clean 154-action UE 5.7 Editor Development build plus the incremental verification
+  build, all 210 `TerritoryFramework.*` automation tests (204 clean and 6 expected warning
+  fixtures), the focused 32-test CounterAttack suite, the 16-test UI suite, and the repaired
+  distraction asset-wiring test with zero failures or skipped tests.
 
 ## Unreleased — 2026-09-03 (AAA dialogue shots, retaliation repair, and HDR scene maker)
 
@@ -134,8 +242,8 @@
 - Removed the assault guard Blueprint's duplicate post-parent `RemoveAllGoals` call, which could
   dereference a missing Narrative activity component during replicated death while preserving its
   weapon-drop presentation.
-- Deferred the project Narrative controller's parent Blueprint BeginPlay graph by a bounded
-  startup delay so native possession creates `GameplayHUD` before Narrative Local Init opens LoadingMenu.
+- Deferred the project Narrative controller's parent Blueprint BeginPlay graph while investigating
+  packaged HUD readiness. The later 2026-09-04 lifecycle gate above replaces this fixed-delay fix.
 - Cleared the inherited firearm `GameplayCue.Weapon.Fire` from the Territory melee sword ability.
   Added integration regressions for the death graph, HUD-readiness ordering, and melee cue contract.
 - Passed a 45-second PIE assault startup plus a targeted forced assault-death smoke with zero

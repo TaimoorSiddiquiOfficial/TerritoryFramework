@@ -47,6 +47,12 @@ public:
 		float InChaseDistanceGraceSeconds = 0.f,
 		bool bInAbandonDamagedVehicleForFinalFight = false,
 		float InVehicleAbandonHealthFraction = 0.35f);
+	void ConfigureNarrativeVehiclePassenger(
+		UTerritoryAssaultParticipantComponent* InDriver,
+		ANarrativeVehicleBase* InVehicle, int32 InSeatIndex,
+		const TArray<FVector>& InRoutePoints,
+		const FTransform& InParkDestination, const FTransform& InWalkDestination,
+		float InTimeoutSeconds, bool bInEscapeOnArrival);
 
 	/** Pure mission rules exposed for automation tests and Blueprint-independent tuning. */
 	static float CalculateObstacleSpeedFactor(float ObstacleDistance,
@@ -103,6 +109,10 @@ private:
 	bool bVehicleIngressFailed = false;
 	bool bVehicleMountRequested = false;
 	bool bVehiclePossessionConfirmed = false;
+	bool bNarrativeVehicleDriver = true;
+	bool bReportsVehicleStoryOutcome = true;
+	int32 NarrativeVehicleSeatIndex = 0;
+	TWeakObjectPtr<UTerritoryAssaultParticipantComponent> NarrativeVehicleDriver;
 	bool bVehicleDriveActive = false;
 	bool bVehicleDismountRequested = false;
 	int32 VehicleRoutePointIndex = 0;

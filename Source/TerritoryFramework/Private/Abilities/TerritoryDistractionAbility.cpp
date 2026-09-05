@@ -6,6 +6,8 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Interaction/TerritoryDistractionProjectile.h"
+#include "Items/InventoryComponent.h"
+#include "Items/NarrativeItem.h"
 #include "NarrativeGameplayTags.h"
 
 UTerritoryDistractionAbility::UTerritoryDistractionAbility()
@@ -19,11 +21,54 @@ UTerritoryDistractionAbility::UTerritoryDistractionAbility()
 	AssetTags.AddTag(TerritoryStealthTags::DistractionAbility);
 	SetAssetTags(AssetTags);
 
-	// Throwing during death, dialogue, or a sequencer camera cut produces invisible
-	// projectiles and breaks Narrative's input-lock contract.
+	// Match Narrative's combat-input locks. Throwing while these states are active
+	// produces invisible projectiles, animation conflicts, or mounted/falling exploits.
 	ActivationBlockedTags.AddTag(FNarrativeGameplayTags::Get().State_IsDead);
 	ActivationBlockedTags.AddTag(FNarrativeGameplayTags::Get().State_DialogueControlled);
 	ActivationBlockedTags.AddTag(FNarrativeGameplayTags::Get().State_SequencerControlled);
+	ActivationBlockedTags.AddTag(FNarrativeGameplayTags::Get().State_Busy);
+	ActivationBlockedTags.AddTag(FNarrativeGameplayTags::Get().State_OnMount);
+	ActivationBlockedTags.AddTag(FNarrativeGameplayTags::Get().State_Movement_Falling);
+	ActivationBlockedTags.AddTag(FNarrativeGameplayTags::Get().State_Movement_Climbing);
+	ActivationBlockedTags.AddTag(FNarrativeGameplayTags::Get().State_Weapon_BlockFiring);
+}
+
+UNarrativeItem* UTerritoryDistractionAbility::GetThrowableSourceItem(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo) const
+{
+	return Cast<UNarrativeItem>(GetSourceObject(Handle, ActorInfo));
+}
+
+bool UTerritoryDistractionAbility::IsThrowableSourceItemReady(
+	const UNarrativeItem* SourceItem) const
+{
+	if (!SourceItem || !SourceItem->OwningInventory
+		|| SourceItem->GetQuantity() < 1)
+	{
+		return false;
+	}
+
+	return !bConsumeSourceItemOnSuccessfulThrow || SourceItem->CanBeRemoved();
+}
+
+bool UTerritoryDistractionAbility::CanActivateAbility(
+	const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo,
+	const FGameplayTagContainer* SourceTags,
+	const FGameplayTagContainer* TargetTags,
+	FGameplayTagContainer* OptionalRelevantTags) const
+{
+	if (!Super::CanActivateAbility(Handle, ActorInfo, SourceTags, TargetTags,
+		OptionalRelevantTags))
+	{
+		return false;
+	}
+
+	const bool bNeedsSourceItem = bRequireEquippedNarrativeItemSource
+		|| bConsumeSourceItemOnSuccessfulThrow;
+	return !bNeedsSourceItem
+		|| IsThrowableSourceItemReady(GetThrowableSourceItem(Handle, ActorInfo));
 }
 
 bool UTerritoryDistractionAbility::GetDistractionLaunchTransform(
@@ -84,8 +129,13 @@ void UTerritoryDistractionAbility::ActivateAbility(
 	(void)TriggerEventData;
 	AActor* Avatar = ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr;
 	UWorld* World = Avatar ? Avatar->GetWorld() : nullptr;
+	UNarrativeItem* SourceItem = GetThrowableSourceItem(Handle, ActorInfo);
+	const bool bNeedsSourceItem = bRequireEquippedNarrativeItemSource
+		|| bConsumeSourceItemOnSuccessfulThrow;
 	FTransform LaunchTransform;
 	if (!Avatar || !Avatar->HasAuthority() || !World || !ProjectileClass
+		|| (bNeedsSourceItem
+			&& !IsThrowableSourceItemReady(SourceItem))
 		|| !GetDistractionLaunchTransform(LaunchTransform)
 		|| !CommitAbility(Handle, ActorInfo, ActivationInfo))
 	{
@@ -113,6 +163,19 @@ void UTerritoryDistractionAbility::ActivateAbility(
 			LaunchTransform.GetRotation().GetForwardVector() * FMath::Max(0.f, Speed);
 	}
 	Projectile->FinishSpawning(LaunchTransform);
+
+	if (bConsumeSourceItemOnSuccessfulThrow)
+	{
+		UNarrativeInventoryComponent* Inventory = SourceItem
+			? SourceItem->OwningInventory : nullptr;
+		if (!Inventory || Inventory->ConsumeItem(SourceItem, 1) != 1)
+		{
+			// An inventory race must not create a free replicated distraction.
+			Projectile->Destroy();
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
+	}
 
 	FGameplayEventData Payload;
 	Payload.EventTag = TerritoryStealthTags::DistractionThrownEvent;
