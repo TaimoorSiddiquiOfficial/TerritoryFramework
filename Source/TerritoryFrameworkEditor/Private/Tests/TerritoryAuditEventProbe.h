@@ -1,0 +1,45 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Core/TerritoryTypes.h"
+#include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryDiplomacyTypes.h"
+#include "TerritoryAuditEventProbe.generated.h"
+
+/** Editor-only receiver for real Blueprint-compatible callback regression tests. */
+UCLASS(Transient)
+class UTerritoryAuditEventProbe final : public UObject
+{
+	GENERATED_BODY()
+public:
+	TFunction<void(ATerritoryVolume*, ETerritoryState)> StateCallback;
+	TFunction<void(ATerritoryVolume*, AActor*)> EvidenceCallback;
+	TFunction<void(ATerritoryVolume*, AActor*, ETerritoryExposureState)> ExposureCallback;
+	TFunction<void(FGameplayTag, FGameplayTag, EDiplomacyState)> DiplomacyCallback;
+
+	UFUNCTION()
+	void DiplomacyChanged(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState State)
+	{
+		if (DiplomacyCallback) DiplomacyCallback(FactionA, FactionB, State);
+	}
+
+	UFUNCTION()
+	void StateChanged(ATerritoryVolume* Territory, ETerritoryState State)
+	{
+		if (StateCallback) StateCallback(Territory, State);
+	}
+
+	UFUNCTION()
+	void EvidenceReported(ATerritoryVolume* Territory, AActor* Target,
+		ETerritoryStealthEvidence Evidence, const FTerritoryInfiltrationSnapshot& Snapshot)
+	{
+		if (EvidenceCallback) EvidenceCallback(Territory, Target);
+	}
+
+	UFUNCTION()
+	void ExposureChanged(ATerritoryVolume* Territory, AActor* Target,
+		ETerritoryExposureState OldState, ETerritoryExposureState NewState)
+	{
+		if (ExposureCallback) ExposureCallback(Territory, Target, NewState);
+	}
+};

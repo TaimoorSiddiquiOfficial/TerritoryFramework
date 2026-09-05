@@ -21,6 +21,16 @@
 
 namespace
 {
+const AActor* ResolveNarrativeAccountActor(const AActor* Actor)
+{
+	if (const ANarrativePlayerController* Controller = Cast<ANarrativePlayerController>(Actor))
+	{
+		if (IsValid(Controller->GetOwnedCharacter())) return Controller->GetOwnedCharacter();
+	}
+	if (const APlayerController* Controller = Cast<APlayerController>(Actor)) return Controller->GetPawn();
+	return Actor;
+}
+
 bool IsProductionSiteAvailable(UWorld* World,
 	const FTerritoryProductionSiteRecord& Site)
 {
@@ -472,13 +482,8 @@ UNarrativeInventoryComponent* UTerritoryEconomySubsystem::ResolveCurrencyAccount
 {
 	if (!RequestingActor) return nullptr;
 
-	const AActor* AccountActor = RequestingActor;
-	if (const APlayerController* Controller = Cast<APlayerController>(RequestingActor))
-	{
-		AccountActor = Controller->GetPawn();
-	}
-
-	if (!AccountActor) return nullptr;
+	const AActor* AccountActor = ResolveNarrativeAccountActor(RequestingActor);
+	if (!IsValid(AccountActor)) return nullptr;
 	if (const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(AccountActor))
 	{
 		return Character->GetInventoryComponent();
@@ -491,10 +496,8 @@ bool UTerritoryEconomySubsystem::DoesAccountBelongToFaction(
 	const AActor* AccountActor, const FGameplayTag& Faction) const
 {
 	if (!AccountActor || !Faction.IsValid()) return false;
-	if (const APlayerController* Controller = Cast<APlayerController>(AccountActor))
-	{
-		AccountActor = Controller->GetPawn();
-	}
+	AccountActor = ResolveNarrativeAccountActor(AccountActor);
+	if (!IsValid(AccountActor)) return false;
 	const INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(AccountActor);
 	return TeamAgent && TeamAgent->GetFactions().HasTagExact(Faction);
 }
@@ -749,10 +752,12 @@ bool UTerritoryEconomySubsystem::TryDebitCurrency(
 	const FString& Reason, ETerritoryTransactionType Type)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0
+		|| !IsValid(RequestingActor) || RequestingActor->GetWorld() != GetWorld()
 		|| !DoesAccountBelongToFaction(RequestingActor, Faction)) return false;
 
 	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(RequestingActor);
-	if (!Inventory || Inventory->GetCurrency() < PositiveAmount) return false;
+	if (!Inventory || !IsValid(Inventory->GetOwner()) || !Inventory->GetOwner()->HasAuthority()
+		|| Inventory->GetWorld() != GetWorld() || Inventory->GetCurrency() < PositiveAmount) return false;
 
 	Inventory->AddCurrency(-PositiveAmount);
 	RecordCurrencyTransaction(Faction, -PositiveAmount, Inventory->GetCurrency(), Reason, Type, RequestingActor);
@@ -764,10 +769,12 @@ bool UTerritoryEconomySubsystem::CreditCurrency(
 	const FString& Reason, ETerritoryTransactionType Type)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0
+		|| !IsValid(Beneficiary) || Beneficiary->GetWorld() != GetWorld()
 		|| !DoesAccountBelongToFaction(Beneficiary, Faction)) return false;
 
 	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Beneficiary);
-	if (!Inventory) return false;
+	if (!Inventory || !IsValid(Inventory->GetOwner()) || !Inventory->GetOwner()->HasAuthority()
+		|| Inventory->GetWorld() != GetWorld()) return false;
 	const int64 FinalBalance = static_cast<int64>(Inventory->GetCurrency()) + PositiveAmount;
 	if (FinalBalance > MAX_int32) return false;
 
@@ -824,26 +831,38 @@ int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
 
 	int32 Remaining = PositiveAmount;
 	int32 Paid = 0;
-	for (int32 Index = 0; Index < Players.Num(); ++Index)
+	TArray<ANarrativePlayerCharacter*> EligiblePlayers = Players;
+	// Each ordinary redistribution fills at least one constrained account. Bound
+	// retries by the original account count even when currency callbacks change it.
+	for (int32 Pass = 0; Pass < Players.Num() && Remaining > 0; ++Pass)
 	{
-		UNarrativeInventoryComponent* Inventory = Players[Index]->GetInventoryComponent();
-		const int64 Capacity = Inventory
-			? static_cast<int64>(MAX_int32) - FMath::Max(0, Inventory->GetCurrency())
-			: 0;
-		const int32 AccountsRemaining = Players.Num() - Index;
-		const int32 FairShare = AccountsRemaining > 0
-			? FMath::DivideAndRoundUp(Remaining, AccountsRemaining) : 0;
-		const int32 Share = static_cast<int32>(FMath::Min<int64>(FairShare, Capacity));
-		if (Share > 0 && CreditCurrency(Players[Index], Share, Faction, Reason, Type))
+		EligiblePlayers.RemoveAll([](const ANarrativePlayerCharacter* Player)
 		{
-			Paid += Share;
-			Remaining -= Share;
+			return !IsValid(Player) || !Player->GetInventoryComponent()
+				|| Player->GetInventoryComponent()->GetCurrency() >= MAX_int32;
+		});
+		int32 AccountsRemaining = EligiblePlayers.Num();
+		if (AccountsRemaining == 0) break;
+		const int32 PaidBeforePass = Paid;
+		for (ANarrativePlayerCharacter* Player : EligiblePlayers)
+		{
+			const int64 FairShare = FMath::DivideAndRoundUp<int64>(Remaining, AccountsRemaining--);
+			UNarrativeInventoryComponent* Inventory = IsValid(Player) ? Player->GetInventoryComponent() : nullptr;
+			const int64 Capacity = Inventory
+				? static_cast<int64>(MAX_int32) - FMath::Max(0, Inventory->GetCurrency()) : 0;
+			const int32 Share = static_cast<int32>(FMath::Min(FairShare, Capacity));
+			if (Share > 0 && CreditCurrency(Player, Share, Faction, Reason, Type))
+			{
+				Paid += Share;
+				Remaining -= Share;
+			}
 		}
+		if (Paid == PaidBeforePass) break;
 	}
 	if (Remaining > 0)
 	{
 		UE_LOG(LogTerritory, Warning,
-			TEXT("CreditCurrencyToFaction: %d currency could not be stored because every online Narrative player account is at capacity for %s"),
+			TEXT("CreditCurrencyToFaction: %d currency remains unpaid after bounded settlement; Narrative accounts are full, unavailable, or rejected the credit for %s"),
 			Remaining, *Faction.ToString());
 	}
 	return Paid;

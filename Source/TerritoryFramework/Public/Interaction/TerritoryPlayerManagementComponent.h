@@ -21,6 +21,7 @@ class APlayerController;
 class ANarrativeCharacter;
 class UGameplayEffect;
 class UNarrativeGameplayAbility;
+class UNarrativeAbilitySystemComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnTerritoryGuardPurchaseResult,
 	ATerritoryVolume*, Territory, bool, bSuccess, FText, Message, int32, RequestId);
@@ -243,6 +244,8 @@ private:
 	int32 NextIntelligenceSequence = 0;
 
 	TWeakObjectPtr<ANarrativeCharacter> PropertyBenefitCharacter;
+	TWeakObjectPtr<UNarrativeAbilitySystemComponent> PropertyBenefitAbilitySystem;
+	bool bRefreshingPropertyBenefits = false;
 	TMap<TSubclassOf<UNarrativeGameplayAbility>, FGameplayAbilitySpecHandle>
 		GrantedPropertyAbilityHandles;
 	TMap<TSubclassOf<UGameplayEffect>, FActiveGameplayEffectHandle>

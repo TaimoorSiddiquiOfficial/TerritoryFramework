@@ -809,21 +809,28 @@ int32 ATerritoryProperty::GetUpgradeCost() const
 
 int32 ATerritoryProperty::GetEffectiveIncome() const
 {
-	int32 BaseIncome = GetPeriodicIncome();
+	int64 BaseIncome = FMath::Max(0, GetPeriodicIncome());
 
 	// Capital district income multiplier
 	ATerritoryDistrict* District = GetOwningDistrict();
 	if (District && District->IsCapitalDistrict())
 	{
-		BaseIncome = static_cast<int32>(BaseIncome * District->CapitalIncomeMultiplier);
+		const double Multiplier = FMath::IsFinite(District->CapitalIncomeMultiplier)
+			? FMath::Max(0.0, static_cast<double>(District->CapitalIncomeMultiplier)) : 0.0;
+		BaseIncome = static_cast<int64>(FMath::Clamp(
+			static_cast<double>(BaseIncome) * Multiplier, 0.0, static_cast<double>(MAX_int32)));
 	}
 
-	return BaseIncome + (UpgradeLevel * IncomeBonusPerLevel);
+	const int64 UpgradeIncome = static_cast<int64>(FMath::Max(0, UpgradeLevel))
+		* FMath::Max(0, IncomeBonusPerLevel);
+	return static_cast<int32>(FMath::Min<int64>(BaseIncome + UpgradeIncome, MAX_int32));
 }
 
 bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 {
-	if (!HasAuthority() || !CanUpgrade() || !Requester) return false;
+	if (!HasAuthority() || !CanUpgrade() || !IsValid(Requester)
+		|| !GetWorld() || Requester->GetWorld() != GetWorld()
+		|| !IsAvailableForGameplay() || GetTerritoryState() != ETerritoryState::Claimed) return false;
 
 	FGameplayTag OwnerFaction = GetOwningFaction();
 	if (!OwnerFaction.IsValid()) return false;
@@ -840,7 +847,8 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 	// Debit Narrative's authoritative currency account.
 	FString Reason = FString::Printf(TEXT("Property upgrade %s level %d→%d"),
 		*GetTerritoryTag().ToString(), UpgradeLevel, UpgradeLevel + 1);
-	if (!Economy->TryDebitCurrency(Requester, Cost, OwnerFaction, Reason, ETerritoryTransactionType::UpgradeCost))
+	if (Cost > 0 && !Economy->TryDebitCurrency(Requester, Cost, OwnerFaction,
+		Reason, ETerritoryTransactionType::UpgradeCost))
 	{
 		return false;
 	}

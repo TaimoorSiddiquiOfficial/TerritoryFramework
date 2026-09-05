@@ -120,7 +120,8 @@ void UTerritoryDiplomacySubsystem::DeclareWar(FGameplayTag FactionA, FGameplayTa
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::War);
-	if (OldState != EDiplomacyState::War) RecordEvent(EDiplomacyEventType::DeclaredWar, FactionA, FactionB);
+	if (OldState != EDiplomacyState::War && GetDiplomacyState(FactionA, FactionB) == EDiplomacyState::War)
+		RecordEvent(EDiplomacyEventType::DeclaredWar, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::DeclarePeace(FGameplayTag FactionA, FGameplayTag FactionB)
@@ -128,7 +129,8 @@ void UTerritoryDiplomacySubsystem::DeclarePeace(FGameplayTag FactionA, FGameplay
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::Ceasefire);
-	if (OldState != EDiplomacyState::Ceasefire) RecordEvent(EDiplomacyEventType::DeclaredPeace, FactionA, FactionB);
+	if (OldState != EDiplomacyState::Ceasefire && GetDiplomacyState(FactionA, FactionB) == EDiplomacyState::Ceasefire)
+		RecordEvent(EDiplomacyEventType::DeclaredPeace, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::BreakCeasefire(FGameplayTag FactionA, FGameplayTag FactionB)
@@ -139,7 +141,8 @@ void UTerritoryDiplomacySubsystem::BreakCeasefire(FGameplayTag FactionA, FGamepl
 	// Breaking a ceasefire is a hostile act — escalate to War so the action has
 	// gameplay consequences (capture remains valid, faction attitudes reflect hostility).
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::War);
-	RecordEvent(EDiplomacyEventType::BrokeCeasefire, FactionA, FactionB);
+	if (GetDiplomacyState(FactionA, FactionB) == EDiplomacyState::War)
+		RecordEvent(EDiplomacyEventType::BrokeCeasefire, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
@@ -147,7 +150,8 @@ void UTerritoryDiplomacySubsystem::FormAlliance(FGameplayTag FactionA, FGameplay
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::Alliance);
-	if (OldState != EDiplomacyState::Alliance) RecordEvent(EDiplomacyEventType::FormedAlliance, FactionA, FactionB);
+	if (OldState != EDiplomacyState::Alliance && GetDiplomacyState(FactionA, FactionB) == EDiplomacyState::Alliance)
+		RecordEvent(EDiplomacyEventType::FormedAlliance, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::SignNonAggression(FGameplayTag FactionA, FGameplayTag FactionB)
@@ -155,7 +159,8 @@ void UTerritoryDiplomacySubsystem::SignNonAggression(FGameplayTag FactionA, FGam
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	const EDiplomacyState OldState = GetDiplomacyState(FactionA, FactionB);
 	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::NonAggression);
-	if (OldState != EDiplomacyState::NonAggression) RecordEvent(EDiplomacyEventType::SignedNonAggression, FactionA, FactionB);
+	if (OldState != EDiplomacyState::NonAggression && GetDiplomacyState(FactionA, FactionB) == EDiplomacyState::NonAggression)
+		RecordEvent(EDiplomacyEventType::SignedNonAggression, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGameplayTag FactionB)
@@ -163,17 +168,21 @@ void UTerritoryDiplomacySubsystem::BreakAlliance(FGameplayTag FactionA, FGamepla
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (GetDiplomacyState(FactionA, FactionB) != EDiplomacyState::Alliance) return;
 
-	// Remove treaty metadata, then reset Narrative attitude to Neutral
-	RemoveTreaty(FactionA, FactionB);
-	SyncNarrativeAttitudeForTreaty(FactionA, FactionB);
-	OnDiplomacyStateChanged.Broadcast(FactionA, FactionB, EDiplomacyState::None);
-	RecordEvent(EDiplomacyEventType::BrokeAlliance, FactionA, FactionB);
+	SetDiplomacyState(FactionA, FactionB, EDiplomacyState::None);
+	if (GetDiplomacyState(FactionA, FactionB) == EDiplomacyState::None)
+		RecordEvent(EDiplomacyEventType::BrokeAlliance, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGameplayTag FactionB, float DurationGameTime)
 {
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
+	ANarrativeGameState* GS = GetNarrativeGameState();
+	// A timed treaty needs the same durable clock used by save/load and expiry.
+	if (!FMath::IsFinite(DurationGameTime) || (DurationGameTime > 0.f && !GS)) return;
+	const float SignedTime = GS ? GS->GetAccumulatedTime() : 0.f;
+	const float ExpiryTime = DurationGameTime > 0.f ? SignedTime + DurationGameTime : -1.f;
+	if (!FMath::IsFinite(SignedTime) || !FMath::IsFinite(ExpiryTime)) return;
 	// FIX: Don't call SetDiplomacyState after adding the treaty — it would
 	// see the treaty already exists and early-return without syncing Narrative.
 	RemoveTreaty(FactionA, FactionB);
@@ -184,27 +193,24 @@ void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGa
 	Treaty.State = EDiplomacyState::TradeAgreement;
 	Treaty.bPermanent = (DurationGameTime <= 0.f);
 
-	if (ANarrativeGameState* GS = GetNarrativeGameState())
-	{
-		Treaty.SignedGameTime = GS->GetAccumulatedTime();
-		if (!Treaty.bPermanent)
-		{
-			Treaty.ExpiryGameTime = Treaty.SignedGameTime + DurationGameTime;
-		}
-	}
+	Treaty.SignedGameTime = SignedTime;
+	Treaty.ExpiryGameTime = ExpiryTime;
 
 	ActiveTreaties.Add(Treaty);
 
 	// Explicitly sync Narrative attitude for this treaty
 	SyncNarrativeAttitudeForTreaty(FactionA, FactionB);
+	if (GetDiplomacyState(FactionA, FactionB) != EDiplomacyState::TradeAgreement) return;
 	OnDiplomacyStateChanged.Broadcast(FactionA, FactionB, EDiplomacyState::TradeAgreement);
-	RecordEvent(EDiplomacyEventType::SignedTradeAgreement, FactionA, FactionB);
+	if (GetDiplomacyState(FactionA, FactionB) == EDiplomacyState::TradeAgreement)
+		RecordEvent(EDiplomacyEventType::SignedTradeAgreement, FactionA, FactionB);
 }
 
 void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)
 {
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
+	if (!StaticEnum<EDiplomacyState>()->IsValidEnumValue(static_cast<int64>(NewState))) return;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugDiplomacy();
@@ -267,7 +273,11 @@ void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGam
 		SyncNarrativeAttitudeForTreaty(FactionA, FactionB);
 	}
 
-	OnDiplomacyStateChanged.Broadcast(FactionA, FactionB, NewState);
+	// Narrative attitude listeners may have authored a different final treaty.
+	if (GetDiplomacyState(FactionA, FactionB) == NewState)
+	{
+		OnDiplomacyStateChanged.Broadcast(FactionA, FactionB, NewState);
+	}
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -322,7 +332,7 @@ void UTerritoryDiplomacySubsystem::AddReputation(FGameplayTag Faction, int32 Amo
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (!Faction.IsValid()) return;
 	int32& Rep = FactionReputation.FindOrAdd(Faction);
-	Rep += Amount;
+	Rep = static_cast<int32>(FMath::Clamp<int64>(static_cast<int64>(Rep) + Amount, MIN_int32, MAX_int32));
 	OnReputationChanged.Broadcast(Faction, Rep);
 }
 
@@ -395,12 +405,38 @@ void UTerritoryDiplomacySubsystem::RestorePersistentState(
 
 	const TArray<FTreatyRecord> PreviousTreaties = ActiveTreaties;
 	ActiveTreaties.Reset();
-	for (const FTreatyRecord& Treaty : Treaties)
+	TArray<FTreatyRecord> Candidates = Treaties;
+	Candidates.RemoveAll([](const FTreatyRecord& Treaty)
 	{
-		if (Treaty.IsValid() && Treaty.FactionA != Treaty.FactionB)
-		{
-			ActiveTreaties.Add(Treaty);
-		}
+		return !Treaty.IsValid() || Treaty.FactionA == Treaty.FactionB
+			|| Treaty.State == EDiplomacyState::None
+			|| !StaticEnum<EDiplomacyState>()->IsValidEnumValue(static_cast<int64>(Treaty.State))
+			|| !FMath::IsFinite(Treaty.SignedGameTime) || !FMath::IsFinite(Treaty.ExpiryGameTime)
+			|| (!Treaty.bPermanent && Treaty.ExpiryGameTime <= 0.f);
+	});
+	for (FTreatyRecord& Treaty : Candidates)
+	{
+		if (Treaty.FactionA.ToString() > Treaty.FactionB.ToString()) Swap(Treaty.FactionA, Treaty.FactionB);
+	}
+	// Bounded migration of duplicate rows: latest signed record wins, followed by
+	// stable payload tie-breaks. Reverse pair order must not create a second authority.
+	Candidates.Sort([](const FTreatyRecord& A, const FTreatyRecord& B)
+	{
+		const FString KeyA = FTerritoryNarrativeProAdapter::MakeCanonicalFactionPairKey(A.FactionA, A.FactionB);
+		const FString KeyB = FTerritoryNarrativeProAdapter::MakeCanonicalFactionPairKey(B.FactionA, B.FactionB);
+		if (KeyA != KeyB) return KeyA < KeyB;
+		if (A.SignedGameTime != B.SignedGameTime) return A.SignedGameTime > B.SignedGameTime;
+		if (A.State != B.State) return static_cast<uint8>(A.State) > static_cast<uint8>(B.State);
+		if (A.bPermanent != B.bPermanent) return A.bPermanent;
+		return A.ExpiryGameTime > B.ExpiryGameTime;
+	});
+	FString PreviousKey;
+	for (const FTreatyRecord& Treaty : Candidates)
+	{
+		const FString Key = FTerritoryNarrativeProAdapter::MakeCanonicalFactionPairKey(Treaty.FactionA, Treaty.FactionB);
+		if (Key == PreviousKey) continue;
+		PreviousKey = Key;
+		ActiveTreaties.Add(Treaty);
 	}
 
 	// Relations removed by the save must not remain stale in Narrative's map.
@@ -527,6 +563,7 @@ void UTerritoryDiplomacySubsystem::OnFactionAttitudeChanged(FGameplayTag Faction
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client) return;
+	if (!Faction.IsValid() || !OtherFaction.IsValid() || Faction == OtherFaction) return;
 	// Reentrancy guard — prevent recursive mutation from delegate listeners
 	if (bSuppressSync) return;
 	bSuppressSync = true;
@@ -697,11 +734,13 @@ void UTerritoryDiplomacySubsystem::CheckTreatyExpirations()
 		if (!CurrentTreaty || !CurrentTreaty->IsExpired(CurrentTime)) continue;
 
 		SetDiplomacyState(ExpiredTreaty.FactionA, ExpiredTreaty.FactionB, EDiplomacyState::None);
+		if (GetDiplomacyState(ExpiredTreaty.FactionA, ExpiredTreaty.FactionB) != EDiplomacyState::None) continue;
 		RecordEvent(EDiplomacyEventType::ExpiredTreaty, ExpiredTreaty.FactionA, ExpiredTreaty.FactionB);
 
 		// Broadcast dedicated delegate so Blueprint can react without
 		// filtering the generic OnDiplomacyEvent by event type.
-		OnTreatyExpired.Broadcast(ExpiredTreaty.FactionA, ExpiredTreaty.FactionB, EDiplomacyState::None);
+		if (GetDiplomacyState(ExpiredTreaty.FactionA, ExpiredTreaty.FactionB) == EDiplomacyState::None)
+			OnTreatyExpired.Broadcast(ExpiredTreaty.FactionA, ExpiredTreaty.FactionB, EDiplomacyState::None);
 	}
 }
 

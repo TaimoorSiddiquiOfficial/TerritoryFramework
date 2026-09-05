@@ -20,6 +20,7 @@
 #include "Net/UnrealNetwork.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 #include "UnrealFramework/NarrativePlayerController.h"
+#include "UnrealFramework/NarrativePlayerCharacter.h"
 #include "Navigation/NarrativeNavigationComponent.h"
 #include "Widgets/NarrativeGameplayHUD.h"
 #include "TimerManager.h"
@@ -112,48 +113,52 @@ void UTerritoryPlayerManagementComponent::EndPlay(
 
 void UTerritoryPlayerManagementComponent::ClearOwnedPropertyBenefits()
 {
-	ANarrativeCharacter* Character = PropertyBenefitCharacter.Get();
-	UNarrativeAbilitySystemComponent* ASC = Character
-		? Cast<UNarrativeAbilitySystemComponent>(Character->GetAbilitySystemComponent())
-		: nullptr;
+	TGuardValue<bool> RefreshGuard(bRefreshingPropertyBenefits, true);
+	UNarrativeAbilitySystemComponent* ASC = PropertyBenefitAbilitySystem.Get();
+	// Removal invokes GAS callbacks. Detach our bookkeeping before notifying them,
+	// and remove from the ASC that originally received these handles.
+	const auto AbilityHandles = MoveTemp(GrantedPropertyAbilityHandles);
+	const auto EffectHandles = MoveTemp(GrantedPropertyEffectHandles);
+	const FActiveGameplayEffectHandle TagHandle = GrantedPropertyTagEffectHandle;
+	GrantedPropertyTagEffectHandle.Invalidate();
+	GrantedPropertyBenefitTags.Reset();
+	PropertyBenefitCharacter.Reset();
+	PropertyBenefitAbilitySystem.Reset();
 	if (ASC)
 	{
 		for (const TPair<TSubclassOf<UNarrativeGameplayAbility>,
-			FGameplayAbilitySpecHandle>& Entry : GrantedPropertyAbilityHandles)
+			FGameplayAbilitySpecHandle>& Entry : AbilityHandles)
 		{
 			if (Entry.Value.IsValid()) ASC->ClearAbility(Entry.Value);
 		}
 		for (const TPair<TSubclassOf<UGameplayEffect>,
-			FActiveGameplayEffectHandle>& Entry : GrantedPropertyEffectHandles)
+			FActiveGameplayEffectHandle>& Entry : EffectHandles)
 		{
 			if (Entry.Value.IsValid()) ASC->RemoveActiveGameplayEffect(Entry.Value);
 		}
-		if (GrantedPropertyTagEffectHandle.IsValid())
+		if (TagHandle.IsValid())
 		{
-			ASC->RemoveActiveGameplayEffect(GrantedPropertyTagEffectHandle);
+			ASC->RemoveActiveGameplayEffect(TagHandle);
 		}
 	}
-	GrantedPropertyAbilityHandles.Reset();
-	GrantedPropertyEffectHandles.Reset();
-	GrantedPropertyTagEffectHandle.Invalidate();
-	GrantedPropertyBenefitTags.Reset();
-	PropertyBenefitCharacter = nullptr;
 }
 
 void UTerritoryPlayerManagementComponent::RefreshOwnedPropertyBenefits()
 {
 	APlayerController* Controller = Cast<APlayerController>(GetOwner());
-	if (!Controller || !Controller->HasAuthority()) return;
+	if (!Controller || !Controller->HasAuthority() || bRefreshingPropertyBenefits) return;
+	TGuardValue<bool> RefreshGuard(bRefreshingPropertyBenefits, true);
 
 	ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(GetManagingPawn());
-	if (PropertyBenefitCharacter.Get() != Character)
-	{
-		ClearOwnedPropertyBenefits();
-		PropertyBenefitCharacter = Character;
-	}
 	UNarrativeAbilitySystemComponent* ASC = Character
 		? Cast<UNarrativeAbilitySystemComponent>(Character->GetAbilitySystemComponent())
 		: nullptr;
+	if (PropertyBenefitCharacter.Get() != Character || PropertyBenefitAbilitySystem.Get() != ASC)
+	{
+		ClearOwnedPropertyBenefits();
+		PropertyBenefitCharacter = Character;
+		PropertyBenefitAbilitySystem = ASC;
+	}
 	UTerritoryRegistrySubsystem* Registry = GetWorld()
 		? GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	const FGameplayTag ViewerFaction = GetManagedFaction();
@@ -187,7 +192,12 @@ void UTerritoryPlayerManagementComponent::RefreshOwnedPropertyBenefits()
 			}
 			for (const TSubclassOf<UGameplayEffect> Effect : Benefit.GrantedGameplayEffects)
 			{
-				if (Effect) DesiredEffects.Add(Effect);
+				const UGameplayEffect* EffectCDO = Effect ? Effect->GetDefaultObject<UGameplayEffect>() : nullptr;
+				// Invalid or migrated content must not repeat irreversible Instant modifiers.
+				if (EffectCDO && EffectCDO->DurationPolicy != EGameplayEffectDurationType::Instant)
+				{
+					DesiredEffects.Add(Effect);
+				}
 			}
 		}
 	}
@@ -196,13 +206,16 @@ void UTerritoryPlayerManagementComponent::RefreshOwnedPropertyBenefits()
 	for (const TPair<TSubclassOf<UNarrativeGameplayAbility>,
 		FGameplayAbilitySpecHandle>& Entry : GrantedPropertyAbilityHandles)
 	{
-		if (!DesiredAbilities.Contains(Entry.Key)) AbilitiesToRemove.Add(Entry.Key);
+		if (!DesiredAbilities.Contains(Entry.Key) || !ASC->FindAbilitySpecFromHandle(Entry.Value))
+		{
+			AbilitiesToRemove.Add(Entry.Key);
+		}
 	}
 	for (const TSubclassOf<UNarrativeGameplayAbility> Ability : AbilitiesToRemove)
 	{
 		const FGameplayAbilitySpecHandle Handle = GrantedPropertyAbilityHandles.FindRef(Ability);
-		if (Handle.IsValid()) ASC->ClearAbility(Handle);
 		GrantedPropertyAbilityHandles.Remove(Ability);
+		if (Handle.IsValid()) ASC->ClearAbility(Handle);
 	}
 	for (const TSubclassOf<UNarrativeGameplayAbility> Ability : DesiredAbilities)
 	{
@@ -223,13 +236,16 @@ void UTerritoryPlayerManagementComponent::RefreshOwnedPropertyBenefits()
 	for (const TPair<TSubclassOf<UGameplayEffect>, FActiveGameplayEffectHandle>& Entry :
 		GrantedPropertyEffectHandles)
 	{
-		if (!DesiredEffects.Contains(Entry.Key)) EffectsToRemove.Add(Entry.Key);
+		if (!DesiredEffects.Contains(Entry.Key) || !ASC->GetActiveGameplayEffect(Entry.Value))
+		{
+			EffectsToRemove.Add(Entry.Key);
+		}
 	}
 	for (const TSubclassOf<UGameplayEffect> Effect : EffectsToRemove)
 	{
 		const FActiveGameplayEffectHandle Handle = GrantedPropertyEffectHandles.FindRef(Effect);
-		if (Handle.IsValid()) ASC->RemoveActiveGameplayEffect(Handle);
 		GrantedPropertyEffectHandles.Remove(Effect);
+		if (Handle.IsValid()) ASC->RemoveActiveGameplayEffect(Handle);
 	}
 	for (const TSubclassOf<UGameplayEffect> Effect : DesiredEffects)
 	{
@@ -244,17 +260,22 @@ void UTerritoryPlayerManagementComponent::RefreshOwnedPropertyBenefits()
 		if (Handle.IsValid()) GrantedPropertyEffectHandles.Add(Effect, Handle);
 	}
 
-	if (!(DesiredTags == GrantedPropertyBenefitTags))
+	if (!(DesiredTags == GrantedPropertyBenefitTags)
+		|| (!DesiredTags.IsEmpty() && !ASC->GetActiveGameplayEffect(GrantedPropertyTagEffectHandle)))
 	{
 		if (GrantedPropertyTagEffectHandle.IsValid())
 		{
 			ASC->RemoveActiveGameplayEffect(GrantedPropertyTagEffectHandle);
 			GrantedPropertyTagEffectHandle.Invalidate();
 		}
-		GrantedPropertyBenefitTags = DesiredTags;
+		GrantedPropertyBenefitTags.Reset();
 		if (!DesiredTags.IsEmpty())
 		{
 			GrantedPropertyTagEffectHandle = ASC->AddDynamicTagsGameplayEffect(DesiredTags);
+			if (ASC->GetActiveGameplayEffect(GrantedPropertyTagEffectHandle))
+			{
+				GrantedPropertyBenefitTags = DesiredTags;
+			}
 		}
 	}
 }
@@ -2424,6 +2445,11 @@ void UTerritoryPlayerManagementComponent::ClientReceiveCounterHappened_Implement
 
 APawn* UTerritoryPlayerManagementComponent::GetManagingPawn() const
 {
+	if (const ANarrativePlayerController* Controller = Cast<ANarrativePlayerController>(GetOwner()))
+	{
+		// Narrative retains player identity/inventory/GAS while possessing a vehicle.
+		if (IsValid(Controller->GetOwnedCharacter())) return Controller->GetOwnedCharacter();
+	}
 	if (const APlayerController* Controller = Cast<APlayerController>(GetOwner()))
 	{
 		return Controller->GetPawn();

@@ -20,13 +20,14 @@ bool UTerritoryProductionProfile::CalculateScaledQuantity(
 
 	const int64 PerCycle = static_cast<int64>(Rate.QuantityPerCycle)
 		+ static_cast<int64>(Rate.QuantityPerUpgradeLevel) * UpgradeLevel;
-	const int64 Total = PerCycle * CycleCount;
-	if (PerCycle < 0 || Total <= 0 || Total > MAX_int32)
+	// Bound the product before multiplying: valid int32 inputs can still overflow
+	// int64 here and wrap an impossible batch into an apparently small quantity.
+	if (PerCycle <= 0 || PerCycle > static_cast<int64>(MAX_int32) / CycleCount)
 	{
 		return false;
 	}
 
-	OutQuantity = static_cast<int32>(Total);
+	OutQuantity = static_cast<int32>(PerCycle * CycleCount);
 	return true;
 }
 

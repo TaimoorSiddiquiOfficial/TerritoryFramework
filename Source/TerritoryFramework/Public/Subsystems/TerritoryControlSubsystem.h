@@ -258,6 +258,7 @@ private:
 	TArray<FDeferredCommand> DeferredCommands;
 
 	FTimerHandle CaptureTickTimerHandle;
+	bool bCaptureTickInProgress = false;
 
 	UFUNCTION()
 	void OnCaptureTick();

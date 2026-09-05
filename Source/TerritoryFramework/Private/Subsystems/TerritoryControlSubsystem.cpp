@@ -554,6 +554,8 @@ FTerritoryTransitionContext UTerritoryControlSubsystem::ResolveFactionPlayerCont
 
 void UTerritoryControlSubsystem::OnCaptureTick()
 {
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || bCaptureTickInProgress) return;
+	TGuardValue<bool> TickGuard(bCaptureTickInProgress, true);
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebug = Settings && Settings->ShouldDebugCapture()
 		&& Settings->IsDebugLevelEnabled(6);
@@ -562,15 +564,17 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 	DeferredCommands.Empty();
 	EvaluateInfiltrationState(DeltaTime);
 
-	// Phase 1: Evaluate all territories WITHOUT mutating the map
+	// State events can unregister territories or register another conflict. Iterate
+	// stable keys rather than holding TMap iterators across those callbacks.
 	TArray<TWeakObjectPtr<ATerritoryVolume>> InvalidKeys;
-
-	for (auto& Pair : TerritoryCaptureState)
+	TArray<TWeakObjectPtr<ATerritoryVolume>> CaptureKeys;
+	TerritoryCaptureState.GetKeys(CaptureKeys);
+	for (const TWeakObjectPtr<ATerritoryVolume>& Key : CaptureKeys)
 	{
-		ATerritoryVolume* Territory = Pair.Key.Get();
+		ATerritoryVolume* Territory = Key.Get();
 		if (!Territory)
 		{
-			InvalidKeys.Add(Pair.Key);
+			InvalidKeys.Add(Key);
 			continue;
 		}
 
@@ -584,7 +588,8 @@ void UTerritoryControlSubsystem::OnCaptureTick()
 	}
 
 	// Phase 2: Apply deferred commands (safe to mutate now)
-	for (const FDeferredCommand& Cmd : DeferredCommands)
+	const TArray<FDeferredCommand> Commands = MoveTemp(DeferredCommands);
+	for (const FDeferredCommand& Cmd : Commands)
 	{
 		if (Cmd.Type == FDeferredCommand::Complete)
 		{
@@ -683,6 +688,7 @@ bool UTerritoryControlSubsystem::RegisterInfiltrator(ATerritoryVolume* Territory
 	AActor* Target, const FGameplayTag& Faction)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Target
+		|| Territory->GetWorld() != GetWorld() || Target->GetWorld() != GetWorld()
 		|| !Faction.IsValid() || !IsStealthInfiltrationEnabled(Territory))
 	{
 		return false;
@@ -954,25 +960,32 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 			static_cast<int32>(Runtime.Snapshot.ExposureState),
 			bConfirmedIdentity ? 1 : 0, Runtime.Snapshot.ConfirmingObserverCount);
 	}
-	OnStealthEvidenceReported.Broadcast(Territory, Target, Evidence, Runtime.Snapshot);
+	// Delegates may remove or replace this entry. Never expose a reference into the
+	// map to a broadcast or retain it after a callback boundary.
+	FTerritoryInfiltrationSnapshot Snapshot = Runtime.Snapshot;
+	const FGameplayTag EvidenceFaction = Runtime.Faction;
+	OnStealthEvidenceReported.Broadcast(Territory, Target, Evidence, Snapshot);
+	if (!GetInfiltrationSnapshot(Territory, Target, Snapshot)) return true;
 
-	if (Runtime.Snapshot.ExposureState != ETerritoryExposureState::Exposed
+	if (Snapshot.ExposureState != ETerritoryExposureState::Exposed
 		&& (Evidence != ETerritoryStealthEvidence::Sight
 			|| OldState == ETerritoryExposureState::Undetected
-				&& Runtime.Snapshot.ExposureState == ETerritoryExposureState::Suspicious))
+				&& Snapshot.ExposureState == ETerritoryExposureState::Suspicious))
 	{
 		AssignClosestInvestigators(Territory, Target, Evidence, EvidenceLocation,
 			EstimatedSourceDirection, false, *Profile);
 	}
 
-	if (OldState != Runtime.Snapshot.ExposureState)
+	if (!GetInfiltrationSnapshot(Territory, Target, Snapshot)) return true;
+	if (OldState != Snapshot.ExposureState)
 	{
 		OnExposureChanged.Broadcast(Territory, Target, OldState,
-			Runtime.Snapshot.ExposureState);
+			Snapshot.ExposureState);
 	}
 
+	if (!GetInfiltrationSnapshot(Territory, Target, Snapshot)) return true;
 	if (OldState != ETerritoryExposureState::Exposed
-		&& Runtime.Snapshot.ExposureState == ETerritoryExposureState::Exposed)
+		&& Snapshot.ExposureState == ETerritoryExposureState::Exposed)
 	{
 		// Reaching confirmed exposure through accumulated anonymous evidence also
 		// burns the current uniform for this Territory's faction. Otherwise the
@@ -1025,14 +1038,16 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 			Payload.EventTag = BreakStealthEvent;
 			Payload.Instigator = Observer;
 			Payload.Target = Target;
-			Payload.EventMagnitude = Runtime.Snapshot.Suspicion;
+			Payload.EventMagnitude = Snapshot.Suspicion;
 			FTerritoryNarrativeProAdapter::SendGameplayEvent(
 				Target, BreakStealthEvent, Payload);
 		}
 
-		if (Profile->EscalationScope != ETerritoryStealthEscalationScope::LocalAlarm)
+		if (Profile->EscalationScope != ETerritoryStealthEscalationScope::LocalAlarm
+			&& GetInfiltrationSnapshot(Territory, Target, Snapshot)
+			&& Snapshot.ExposureState == ETerritoryExposureState::Exposed)
 		{
-			TryRegisterContester(Territory, Target, Runtime.Faction);
+			TryRegisterContester(Territory, Target, EvidenceFaction);
 		}
 	}
 	return true;
@@ -1040,6 +1055,13 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 
 void UTerritoryControlSubsystem::EvaluateInfiltrationState(float DeltaTime)
 {
+	struct FExposureNotification
+	{
+		TWeakObjectPtr<ATerritoryVolume> Territory;
+		TWeakObjectPtr<AActor> Target;
+		ETerritoryExposureState OldState;
+	};
+	TArray<FExposureNotification> Notifications;
 	TArray<TWeakObjectPtr<ATerritoryVolume>> InvalidTerritories;
 	for (auto& TerritoryPair : TerritoryInfiltrationState)
 	{
@@ -1073,8 +1095,7 @@ void UTerritoryControlSubsystem::EvaluateInfiltrationState(float DeltaTime)
 				{
 					const ETerritoryExposureState OldState = Runtime.Snapshot.ExposureState;
 					Runtime.Snapshot.ExposureState = ETerritoryExposureState::Undetected;
-					OnExposureChanged.Broadcast(Territory, Target, OldState,
-						Runtime.Snapshot.ExposureState);
+					Notifications.Add({Territory, Target, OldState});
 				}
 			}
 			Runtime.Snapshot.ConfirmingObserverCount = Runtime.CurrentSightObservers.Num();
@@ -1090,6 +1111,18 @@ void UTerritoryControlSubsystem::EvaluateInfiltrationState(float DeltaTime)
 	{
 		TerritoryInfiltrationState.Remove(Territory);
 		StealthInfiltrationOverrides.Remove(Territory);
+	}
+	// All map iteration has finished before notifying external listeners.
+	for (const FExposureNotification& Notification : Notifications)
+	{
+		FTerritoryInfiltrationSnapshot Snapshot;
+		if (Notification.Territory.IsValid() && Notification.Target.IsValid()
+			&& GetInfiltrationSnapshot(Notification.Territory.Get(), Notification.Target.Get(), Snapshot)
+			&& Snapshot.ExposureState == ETerritoryExposureState::Undetected)
+		{
+			OnExposureChanged.Broadcast(Notification.Territory.Get(), Notification.Target.Get(),
+				Notification.OldState, Snapshot.ExposureState);
+		}
 	}
 }
 
@@ -1201,6 +1234,7 @@ ECaptureResult UTerritoryControlSubsystem::ValidateAndBeginCapture(
 {
 	UWorld* World = GetWorld();
 	if (!World || !World->GetAuthGameMode()) return ECaptureResult::InvalidTerritory;
+	if (!IsValid(Territory) || Territory->GetWorld() != World) return ECaptureResult::InvalidTerritory;
 
 	const FGameplayTag DefendingFaction = Territory ? Territory->GetOwningFaction() : FGameplayTag();
 	auto FinishAttempt = [this, Territory, AttackingFaction, DefendingFaction](ECaptureResult Result)
@@ -1387,6 +1421,7 @@ void UTerritoryControlSubsystem::ClearCaptureTrackingOnly(ATerritoryVolume* Terr
 void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction, float ProgressDelta)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !AttackingFaction.IsValid()) return;
+	if (!FMath::IsFinite(ProgressDelta)) return;
 	if (Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
 		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr)) return;
 
@@ -1401,7 +1436,11 @@ void UTerritoryControlSubsystem::AddCaptureProgress(ATerritoryVolume* Territory,
 		Territory->GetOwnershipData().ContestingFaction, Progress,
 		ResolveCaptureContext(Territory, AttackingFaction));
 
-	if (Progress >= 1.f)
+	// Commit listeners can clear the map or change its leading faction.
+	const FPerTerritoryState* CommittedState = TerritoryCaptureState.Find(Territory);
+	const float* CommittedProgress = CommittedState
+		? CommittedState->CaptureProgressByFaction.Find(AttackingFaction) : nullptr;
+	if (CommittedProgress && *CommittedProgress >= 1.f)
 	{
 		CompleteCapture(Territory, AttackingFaction);
 	}
@@ -1470,10 +1509,10 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	}
 
 	ATerritoryVolume* Territory = Request.Territory;
-	if (!Territory)
+	if (!IsValid(Territory) || Territory->GetWorld() != World || !Territory->HasAuthority())
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_NullTerritory;
-		Response.Explanation = FText::FromString(TEXT("Null territory"));
+		Response.Explanation = FText::FromString(TEXT("Territory is invalid or belongs to another world"));
 		return Response;
 	}
 
@@ -1706,6 +1745,7 @@ bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 	const bool bContributesCaptureProgress)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Attacker || !Faction.IsValid()) return false;
+	if (Territory->GetWorld() != GetWorld() || Attacker->GetWorld() != GetWorld()) return false;
 	if (Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
 		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr)) return false;
 	if (const UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Attacker))
@@ -1801,18 +1841,23 @@ bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 	const FGameplayTag CommittedFaction = ExistingContestingFaction.IsValid()
 		? ExistingContestingFaction : Faction;
 	const float ContestProgress = State.CaptureProgressByFaction.FindRef(CommittedFaction);
-	if (!CommitCaptureReadModel(Territory, ETerritoryState::Contested,
+	const bool bCommitted = CommitCaptureReadModel(Territory, ETerritoryState::Contested,
 		CommittedFaction, ContestProgress,
-		BuildTransitionContext(Attacker, Faction)))
+		BuildTransitionContext(Attacker, Faction));
+	FPerTerritoryState* CommittedState = TerritoryCaptureState.Find(Territory);
+	TSet<TWeakObjectPtr<AActor>>* CommittedActors = CommittedState
+		? CommittedState->AttackersByFaction.Find(Faction) : nullptr;
+	if (!CommittedActors || !CommittedActors->Contains(Attacker)) return false;
+	if (!bCommitted)
 	{
-		ActorSet.Remove(Attacker);
+		CommittedActors->Remove(Attacker);
 		if (TSet<TWeakObjectPtr<AActor>>* NonCapturing =
-			State.NonCapturingAttackersByFaction.Find(Faction))
+			CommittedState->NonCapturingAttackersByFaction.Find(Faction))
 		{
 			NonCapturing->Remove(Attacker);
 			if (NonCapturing->IsEmpty())
 			{
-				State.NonCapturingAttackersByFaction.Remove(Faction);
+				CommittedState->NonCapturingAttackersByFaction.Remove(Faction);
 			}
 		}
 		ReleaseAttackerRegistration(Attacker);
@@ -1821,11 +1866,11 @@ bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 		// registration so the capture can continue with remaining attackers.
 		if (bSeededProgress)
 		{
-			State.CaptureProgressByFaction.Remove(Faction);
+			CommittedState->CaptureProgressByFaction.Remove(Faction);
 		}
 		return false;
 	}
-	return ActorSet.Contains(Attacker);
+	return true;
 }
 
 void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
@@ -2084,6 +2129,8 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	// together so UI, assault scheduling, and save listeners never see a mixed frame.
 	CommitCaptureReadModel(Territory, ETerritoryState::Contested,
 		BestFaction, BestProgress);
+	State = TerritoryCaptureState.Find(Territory);
+	if (!State) return;
 
 	// DEFER completion — don't mutate map during iteration (P0-01)
 	if (BestProgress >= 1.f && BestFaction.IsValid())
