@@ -122,6 +122,25 @@ its behavioral tests, save/replication effects, migration requirements and remai
 
 ## Counterattack lifecycle preflight
 
+### Batch 12: Narrative party condition admission
+
+Source inspection and a failing native regression proved that the supported Narrative node's
+`AnyPlayerPasses` branch returns true with no passing members. Its leader branch also dereferences
+an absent leader. Territory now composes the existing Narrative party and condition APIs for these
+two policies; ordinary node/character-target policies remain delegated to Narrative. Each authored
+event/task condition still participates in the complete AND gate. Narrative remains the authority
+for party membership and condition execution; no vendor source or assets were changed.
+
+Editor/UHT passed. Full suite: 232 tests, 226 clean, six expected-warning tests, no failures/skips.
+The regression covers both event/task rejection, a later passing member, inherited Not, member-to-party
+resolution, later AND requirements, native AllPlayers behavior, and an empty party/leader. The party
+fixture exercises the multiplayer policy in a listen-mode world without sockets; it is not a live
+two-client test. No save schema, replicated property, or Blueprint signature changes. Evidence:
+`Batch12_RedTests` (two pre-fix assertion failures) and `Batch12_*` (passing build/full suite).
+
+Existing Territory event/task assets using these policies now require an actual eligible member;
+quests that accidentally relied on the old unconditional pass need their authored conditions corrected.
+
 Source trace completed before the first counterattack fix in this audit. CounterAttack owns the
 finite assault record and scheduling; Narrative owns NPC spawning, definition initialization,
 activities/goals, death/GAS and vehicles. Control owns capture and Volume owns territory state.

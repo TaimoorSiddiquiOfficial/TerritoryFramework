@@ -3,6 +3,7 @@
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
 #include "Tales/NarrativeNodeBase.h"
+#include "Tales/NarrativePartyComponent.h"
 #include "Tales/TalesComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -48,6 +49,42 @@ bool TerritoryTales::DoesConditionPass(UNarrativeCondition* Condition, APawn* Ta
 	return Condition && Condition->CheckCondition(Target, Controller, NarrativeComponent) != Condition->bNot;
 }
 
+bool TerritoryTales::EvaluateConditionWithNarrative(UNarrativeNodeBase* Probe,
+	UNarrativeCondition* Condition, APawn* Target, APlayerController* Controller,
+	UTalesComponent* NarrativeComponent)
+{
+	if (!IsValid(Probe) || !IsValid(Condition) || !IsValid(NarrativeComponent)) return false;
+	UNarrativePartyComponent* Party = Cast<UNarrativePartyComponent>(NarrativeComponent);
+	if (!Party) Party = NarrativeComponent->GetParty();
+	if (IsValid(Party) && NarrativeComponent->GetNetMode() != NM_Standalone)
+	{
+		// Narrative owns membership and condition execution. Its node evaluator in
+		// the supported version accepts an Any policy with zero passing members,
+		// and dereferences an absent leader. Correct only these two boundaries here.
+		if (Condition->PartyConditionPolicy == EPartyConditionPolicy::AnyPlayerPasses)
+		{
+			const TArray<UTalesComponent*> Members = Party->GetPartyMembers();
+			for (UTalesComponent* Member : Members)
+			{
+				if (IsValid(Member) && DoesConditionPass(Condition,
+					Member->GetOwningPawn(), Member->GetOwningController(), Member)) return true;
+			}
+			return false;
+		}
+		if (Condition->PartyConditionPolicy == EPartyConditionPolicy::PartyLeaderPasses)
+		{
+			UTalesComponent* Leader = Party->GetPartyLeader();
+			return IsValid(Leader) && DoesConditionPass(Condition,
+				Leader->GetOwningPawn(), Leader->GetOwningController(), Leader);
+		}
+	}
+	// One row per probe also avoids Narrative's early return after a party row
+	// skipping the later AND requirements of the Territory event or task.
+	Probe->Conditions.Reset();
+	Probe->Conditions.Add(Condition);
+	return Probe->AreConditionsMet(Target, Controller, NarrativeComponent);
+}
+
 bool TerritoryTales::DoEventConditionsPass(const UNarrativeEvent* Event, APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent,
 	FString* OutFailedCondition)
@@ -62,7 +99,7 @@ bool TerritoryTales::DoEventConditionsPass(const UNarrativeEvent* Event, APawn* 
 	{
 		// UNarrativeEvent owns Conditions but Narrative's Quest event dispatcher does
 		// not evaluate them. Reuse the real node evaluator so Not, character targets,
-		// and multiplayer party policies have exactly Narrative's normal semantics.
+		// and ordinary party policies keep Narrative's semantics.
 		UNarrativeNodeBase* Probe = NewObject<UNarrativeNodeBase>(
 			GetTransientPackage(), NAME_None, RF_Transient);
 		if (Probe)
@@ -70,11 +107,7 @@ bool TerritoryTales::DoEventConditionsPass(const UNarrativeEvent* Event, APawn* 
 			for (UNarrativeCondition* Condition : Conditions)
 			{
 				if (!IsValid(Condition)) continue;
-				// Evaluate one row at a time. Narrative's party-policy path returns
-				// after one condition, so a multi-row probe would skip later AND rows.
-				Probe->Conditions.Reset();
-				Probe->Conditions.Add(Condition);
-				if (!Probe->AreConditionsMet(Target, Controller, NarrativeComponent))
+				if (!EvaluateConditionWithNarrative(Probe, Condition, Target, Controller, NarrativeComponent))
 				{
 					if (OutFailedCondition)
 					{

@@ -6,6 +6,7 @@ class APlayerController;
 class APawn;
 class UNarrativeCondition;
 class UNarrativeEvent;
+class UNarrativeNodeBase;
 class UTalesComponent;
 class UWorld;
 
@@ -43,6 +44,11 @@ namespace TerritoryTales
 	/** Evaluates CheckCondition and correctly applies Narrative's inherited Not option. */
 	TERRITORYFRAMEWORK_API bool DoesConditionPass(UNarrativeCondition* Condition,
 		APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent);
+
+	/** Evaluates one node condition, including fail-closed Any/Leader party admission. */
+	TERRITORYFRAMEWORK_API bool EvaluateConditionWithNarrative(UNarrativeNodeBase* Probe,
+		UNarrativeCondition* Condition, APawn* Target, APlayerController* Controller,
+		UTalesComponent* NarrativeComponent);
 
 	/** All inherited event conditions must pass. Empty condition arrays pass. */
 	TERRITORYFRAMEWORK_API bool DoEventConditionsPass(const UNarrativeEvent* Event,

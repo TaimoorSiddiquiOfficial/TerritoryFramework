@@ -3,6 +3,7 @@
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeNodeBase.h"
 #include "Tales/TalesComponent.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 #define LOCTEXT_NAMESPACE "TerritoryNarrativeConditionTask"
 
@@ -57,13 +58,8 @@ bool UTerritoryNarrativeConditionTask::AreGateConditionsMet() const
 	for (UNarrativeCondition* Condition : Requirements)
 	{
 		if (!IsValid(Condition)) return false;
-		// Narrative's party-policy evaluator returns after one condition. Run each
-		// row separately so every authored State + Branch requirement still uses
-		// Narrative semantics while retaining the recipe's documented AND logic.
-		Probe->Conditions.Reset();
-		Probe->Conditions.Add(Condition);
-		if (!Probe->AreConditionsMet(
-			OwningPawn, OwningController, OwningComp))
+		if (!TerritoryTales::EvaluateConditionWithNarrative(Probe, Condition,
+			OwningPawn, OwningController, Component))
 		{
 			return false;
 		}
