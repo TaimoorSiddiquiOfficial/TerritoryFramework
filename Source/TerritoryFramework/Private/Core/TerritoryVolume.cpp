@@ -3484,6 +3484,7 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySendReinforcements(
 
 void ATerritoryVolume::DespawnGuards()
 {
+	if (!HasAuthority()) return;
 	TArray<ATerritoryGuardSpawnPoint*> CachedSpawnPoints = GetGuardSpawnPoints();
 	for (ATerritoryGuardSpawnPoint* SpawnPoint : CachedSpawnPoints)
 	{
@@ -3493,17 +3494,34 @@ void ATerritoryVolume::DespawnGuards()
 		}
 	}
 
-	for (TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
+	// Native activity deactivation can synchronously load another campaign or
+	// spawn replacement guards. Detach only the old cohort before any callbacks.
+	const TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> GuardsToRetire = MoveTemp(SpawnedGuards);
+	SpawnedGuards.Reset();
+	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : GuardsToRetire)
 	{
-		if (GuardPtr.IsValid())
+		if (ATerritoryGuardCharacter* Guard = GuardPtr.Get())
 		{
-			UnbindDefenderDeath(GuardPtr.Get());
+			UnbindDefenderDeath(Guard);
+			PendingDefenderDeathBindAttempts.Remove(Guard);
 			RegisteredDefenders.Remove(GuardPtr);
-			TerritoryNarrativeDeathSupport::PrepareForRemoval(*GuardPtr.Get());
-			GuardPtr->Destroy();
+			if (IsValid(Guard->OwningTerritorySpawnPoint))
+			{
+				Guard->OwningTerritorySpawnPoint->UnregisterGuard(Guard, EGuardRemovalReason::ManualRemoval);
+			}
 		}
 	}
-	SpawnedGuards.Empty();
+	CleanupInvalidDefenders();
+	OwnershipData.DefenderCount = RegisteredDefenders.Num();
+	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : GuardsToRetire)
+	{
+		if (ATerritoryGuardCharacter* Guard = GuardPtr.Get())
+		{
+			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Guard);
+			if (IsValid(Guard) && !Guard->IsActorBeingDestroyed()) Guard->Destroy();
+		}
+	}
+	if (IsActorBeingDestroyed()) return;
 	CleanupInvalidDefenders();
 	OwnershipData.DefenderCount = RegisteredDefenders.Num();
 	RefreshGarrisonSnapshot();
@@ -3512,8 +3530,8 @@ void ATerritoryVolume::DespawnGuards()
 		GetDefault<UTerritoryDeveloperSettings>();
 		Settings && Settings->ShouldDebugGuards())
 	{
-		UE_LOG(LogTerritory, Log, TEXT("Despawned all guards for %s"),
-			*GetTerritoryTag().ToString());
+		UE_LOG(LogTerritory, Log, TEXT("Retired %d previous guard registrations for %s"),
+			GuardsToRetire.Num(), *GetTerritoryTag().ToString());
 	}
 }
 

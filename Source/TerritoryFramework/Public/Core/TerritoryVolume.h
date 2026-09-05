@@ -783,6 +783,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDefenderNarrativeEventConditions;
 	friend class FTFVolumeRuleCallbacks;
+	friend class FTFGuardRetirementCallbacks;
 	friend class FTFTerritoryDefinitionRuntimeNarrative;
 #endif
 

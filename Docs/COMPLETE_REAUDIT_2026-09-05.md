@@ -481,6 +481,37 @@ stage/pak pass: `Batch26_Build.log`, `Batch26_Tests`, `Batch26_GameBuild.log`, `
 batch changes no asset or reflected contract. Physical runtime evidence remains batch 23 and its
 vehicle-budget restore and Manny animation defects remain open.
 
+## Batch 27 — guard cleanup survives a synchronous Native reload
+
+A real Narrative activity-deactivation callback that loads a Territory actor record reproduced an
+access violation in `ATerritoryVolume::DespawnGuards` at the old line 3503. The method held a reference
+into `SpawnedGuards` across the callback; nested cleanup destroyed that actor and replacement spawning
+changed the same array. Its final `Empty()` could also erase the replacement garrison. The original
+method additionally lacked a runtime server-authority check.
+
+Volume remains the guard/defender authority. Cleanup now detaches the old cohort, removes its defender
+bindings/retries and releases its post slots before Native activity callbacks. It validates each old
+actor after callbacks and leaves newly populated registrations intact. Manual retirement consumes no
+reserve and does not queue replacements. The shared Native removal helper checks callback-invalidated
+components/controllers and avoids scheduling an already-destroyed actor. Debug text describes the
+retired cohort instead of falsely claiming every guard is gone. No Native source, save schema,
+Blueprint signature or replication layout changed; no migration is required.
+
+The red commandlet crashed with `EXCEPTION_ACCESS_VIOLATION` in the production cleanup method:
+`Batch27_RedTests.log`. The fixed regression uses actual Narrative spawning/deactivation, a real
+Native nested actor-record load, replacement post occupancy, Native post save/load, preserved reserve,
+client authority rejection and a subsequent server cleanup. All 247 automation tests pass (236 clean,
+11 warning-bearing fixtures; zero failed/skipped). Editor/UHT, Development Game and stage/pak pass:
+`Batch27_Build.log`, `Batch27_Tests`, `Batch27_GameBuild.log`, `Package_Batch27.log`, `Stage_Batch27`.
+Cooked assets and latest asset/Blueprint validation remain batches 20 and 25. Physical multiplayer
+and actual World Partition streaming remain outstanding release gates.
+
+Further source inspection rejected two provisional spawn concerns: the existing
+`GPendingTerritoryGuardSpawn` guard already rejects nested guard creation during Native `SpawnNPC`,
+and TriggerSet overrides are copied into `FNPCSpawnParams` before Native callbacks. No additional
+spawn lock or TriggerSet-copy refactor is justified on those grounds. Post-callback owner/post/death
+validation and purchase callback ordering still require investigation.
+
 ## Counterattack lifecycle preflight
 
 

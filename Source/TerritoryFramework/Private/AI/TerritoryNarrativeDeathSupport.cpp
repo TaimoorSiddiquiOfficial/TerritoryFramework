@@ -32,8 +32,8 @@ namespace TerritoryNarrativeDeathSupport
 		// can still safely run K2_EndActivity, then remove goals so target-death
 		// delegates cannot rescore through that pending-kill controller later.
 		ActivityComponent->Deactivate();
-		ActivityComponent->RemoveAllGoals();
-		Controller->StopMovement();
+		if (IsValid(ActivityComponent)) ActivityComponent->RemoveAllGoals();
+		if (IsValid(Controller) && !Controller->IsActorBeingDestroyed()) Controller->StopMovement();
 		return true;
 	}
 
@@ -41,6 +41,7 @@ namespace TerritoryNarrativeDeathSupport
 		const float LatentCleanupGraceSeconds)
 	{
 		PrepareForRemoval(Character);
+		if (!IsValid(&Character) || Character.IsActorBeingDestroyed()) return;
 		Character.SetActorEnableCollision(false);
 		Character.SetActorHiddenInGame(true);
 		if (UCharacterMovementComponent* Movement = Character.GetCharacterMovement())
