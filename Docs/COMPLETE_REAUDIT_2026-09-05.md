@@ -2,16 +2,19 @@
 
 Status: **in progress**. Findings below distinguish confirmed defects from candidates.
 
-Latest focused update: [batch 40 — weapon melee, vehicle departure and UDS lighting](MELEE_VEHICLE_LIGHTING_2026-09-07.md).
-UE 5.8.2 Editor/runtime/UHT and Game builds pass; 274 automation tests pass.
-Weapon execution and interruption, mounted controller preservation, and both car
-arrivals have live coverage including a server and two clients. HopDistrictTest and
-AlMalik environment actors were updated. The earlier behavior-tree crash after
-attacker casualties, city/interior visual review, and broader audit gates remain open.
-The untracked `DA_QC_NewMission` draft also needs Objective/Success states and journal text.
+Latest focused update: [batch 41 — passenger recovery after driver loss](CASUALTY_DRIVER_LOSS_2026-09-07.md).
+UE 5.8.2 Editor/runtime/UHT and Game builds pass; **275 automation tests pass**.
+Mounted driver death now lets surviving passengers leave through Narrative's mount
+system without forfeiting their finite force slots. A rendered server and two clients
+agree on all eight casualties, zero withdrawal and finite defeat; a real save/reload
+after driver death reaches the same result. Batch 40's weapon execution, vehicle
+departure and UDS work remains covered by the full suite. The earlier behavior-tree
+crash after attacker casualties, city/interior visual review and broader audit gates
+remain open. The previously untracked `DA_QC_NewMission` draft is no longer present;
+the current 123-asset validation has zero errors and four existing warnings.
 The batch 36 figures below are historical; they are not the latest build receipt.
 
-Latest code verification: batch 36, **265 passing automation tests** (252 clean,
+Historical code verification: batch 36, **265 passing automation tests** (252 clean,
 13 with fixture warnings; zero failed/skipped), Editor/runtime/UHT and
 Development Game builds. Repeated live save/load preserved survivor GUIDs, saved
 health, exhausted car budgets and four pending reserves; both clients received the
@@ -30,7 +33,7 @@ runtime release gate.
 These checks are not proof of complete framework release readiness. Remaining physical
 spawn callback/malformed-save cases, the intermittent rendered Manny ensure, remaining
 purchase/recipe and AI/UI/Tales review, dedicated-server testing and the documented
-AlMalik decorative/empty-vehicle errors remain open. The installed Epic UE 5.7 build
+AlMalik decorative/empty-vehicle errors remain open. The installed Epic UE build
 rejects TDAServer; this gate needs a server-capable engine. No overall completion claim
 is made.
 
@@ -97,6 +100,7 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | ASSAULT-06 | Reload reconstruction consumes another vehicle deployment slot, preventing remaining road-only reserves from deploying. | Fixed in batch 36; native save/vehicle regression and repeated server/two-client reload pass |
 | ASSAULT-07 | One blocked vehicle approach repeats the identical spawn attempt for every NPC placement slot; restoring a blocked saved car repeats per occupant. | Fixed in batch 36; bounded road/physical obstruction tests and live second-wave deployment pass |
 | ASSAULT-08 | Cached Native appearance loading can restore saved health before Native BeginPlay resets default attributes. | Fixed in batch 36; live survivor retains exactly 82 health after repeated reload |
+| ASSAULT-09 | A retired driver remains a valid corpse reference, so surviving passengers wait until timeout and withdraw; missing/failed drivers also incorrectly fail the passengers. | Fixed in batch 41; Native exit/failure regression, server plus two clients, and real save/reload reach finite defeat with eight killed and zero withdrawn |
 | VISUAL-01 | Rendered clients reproduce a SKM_Manny bone-visibility/component-space-transform ensure during the intro. | Open; batch 23 proves this is not limited to NullRHI |
 
 ## Architecture constraints
@@ -1264,6 +1268,9 @@ The full audit and compiled dedicated-server gate remain open.
 
 ### Remaining confirmed work
 
+- Reproduce and symbolize the batch 40 behavior-tree decorator-search crash after
+  clustered casualties. Batch 41 fixes a separately reproduced passenger defect;
+  its successful actual-death runs do not establish the crash's root cause.
 - Continue multi-item production save-only callback and per-instance metadata review. Batch 39
   covers reentry, reload supersession and verified compensation; it does not make arbitrary
   external Native inventory callbacks globally atomic. Upgrade callback order is fixed in
@@ -1279,3 +1286,6 @@ The full audit and compiled dedicated-server gate remain open.
   currency callback/settlement audit; this does not prove every payout transaction atomic.
   District income overflow and detached City lookup are fixed in batch 19.
 - Complete guard/AI/Tales/navigation/UI/editor review and the live release gates.
+- Finish room-by-room AlMalik lighting review, authored interior light placement,
+  cinematic GPU measurement and target-display HDR calibration. Batch 40 configures
+  UDS/Lumen/exposure authorities but does not establish perfect lighting.

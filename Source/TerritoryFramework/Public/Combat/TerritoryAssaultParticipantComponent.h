@@ -95,6 +95,7 @@ public:
 	void UpdateVehicleCheckpoint(FTerritoryAssaultVehicleCheckpoint& Checkpoint) const;
 
 private:
+	friend class FTFAssaultPassengerDriverLoss;
 	friend class FTFAssaultSurvivorRestore;
 	friend class FTFAssaultCombatAutonomy;
 	friend class FTFRoadSteeringObstacle;

@@ -1,10 +1,45 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-05
+> **Reviewed:** 2026-09-07 (batch 41)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
-## What is complete in this branch
+## Current checkpoint
+
+TDA is on UE 5.8.2 with the local, unmodified Narrative Pro 2.4.2 package.
+[Batch 41](CASUALTY_DRIVER_LOSS_2026-09-07.md) records the latest builds, **275
+passing tests**, 75 Blueprint compilations and 123-asset validation (zero errors,
+four existing warnings). A server plus two clients agree on finite defeat after
+a mounted driver casualty and seven later actual ASC deaths. Real save/reload
+after driver loss also preserves the finite force without duplicate assaults.
+The earlier weapon-melee, vehicle-departure and UDS fixes are in
+[batch 40](MELEE_VEHICLE_LIGHTING_2026-09-07.md).
+
+The immediate remaining work, in order:
+
+1. Reproduce and symbolize the earlier behavior-tree decorator-search crash after
+   clustered casualties. Passenger recovery is a separately confirmed fix; it
+   does not establish that crash's cause.
+2. Complete assault spawn/save callback and malformed-record arithmetic review,
+   including recurrence-counter limits. Then exercise physical stream-out/in on
+   AlMalik with a live assault, posts, routes and returning clients.
+3. Finish production save-only callback and refunded item-instance metadata
+   handling, and the broader payout/currency settlement review.
+4. Resolve the intermittent Manny bone-visibility and city empty-vehicle Chaos
+   ensures, and outstanding city powerline/catenary/content warnings.
+5. Review AlMalik interiors, dusk/night, authored local lights and cinematic GPU
+   costs; calibrate HDR on the target display. Configuration checks alone do not
+   certify the final image.
+6. Complete the remaining AI/Tales/navigation/UI/editor audit and release tests.
+   A compiled TDAServer target still needs a server-capable engine. Existing
+   packaged Game server-mode and listen-server tests do not replace that gate.
+
+The full findings register is the
+[complete re-audit](COMPLETE_REAUDIT_2026-09-05.md). Earlier figures and topology
+descriptions below are historical evidence from the September 5 baseline, not
+current build receipts or a claim that all release gates are closed.
+
+## Implemented baseline and prior verification
 
 - City, District, and Place authoring is Definition-first. A Place owns physical gameplay;
   Districts and Cities aggregate their children and provide higher-level policy.

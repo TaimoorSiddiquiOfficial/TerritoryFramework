@@ -206,6 +206,7 @@ void UTerritoryAssaultParticipantComponent::GetLifetimeReplicatedProps(
 
 bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 {
+	if (!GetOwner() || !GetOwner()->HasAuthority() || bRemovalReported) return false;
 	if (!IsVehicleIngressPending()) return true;
 	ATerritoryAssaultCharacter* NPC = Cast<ATerritoryAssaultCharacter>(GetOwner());
 	if (!NPC || !NPC->IsNarrativeSpawnReady()) return false;
@@ -263,13 +264,19 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 	if (!bNarrativeVehicleDriver)
 	{
 		UTerritoryAssaultParticipantComponent* Driver = NarrativeVehicleDriver.Get();
-		if (!Driver || Driver->bVehicleIngressFailed)
+		const bool bDriverLost = !Driver || Driver->HasRetired() || Driver->bVehicleIngressFailed;
+		if (bDriverLost)
 		{
-			bVehicleIngressFailed = true;
-			return false;
+			// A driver casualty consumes only that driver. Living passengers retain
+			// their finite slots and ask Narrative to leave the car once it stops.
+			// Do not brake a car that a player or another controller has taken over.
+			if (!Vehicle->GetController()) StopVehicleInputs();
+			if (bEscapeOnVehicleArrival) BeginVehicleAbandonment(TEXT("assault driver unavailable"));
+			if (bRemovalReported || !IsValid(GetOwner()) || GetOwner()->IsActorBeingDestroyed()
+				|| !IsValid(Vehicle) || Vehicle->IsActorBeingDestroyed()) return false;
 		}
 		bVehiclePossessionConfirmed = Interaction->HasOccupiedInteractable();
-		const bool bDriverLeaving = Driver->bVehicleDismountRequested
+		const bool bDriverLeaving = bDriverLost || Driver->bVehicleDismountRequested
 			|| Driver->bVehicleAbandonmentRequested;
 		if (bDriverLeaving && Vehicle->GetVelocity().Size2D() <= 250.f)
 		{
@@ -279,7 +286,7 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 				bVehicleDismountRequested = true;
 			}
 		}
-		else if (Driver->bVehicleIngressComplete)
+		else if (Driver && Driver->bVehicleIngressComplete)
 		{
 			if (bEscapeOnVehicleArrival)
 			{
@@ -1330,6 +1337,14 @@ void UTerritoryAssaultParticipantComponent::BeginVehicleAbandonment(
 void UTerritoryAssaultParticipantComponent::StopVehicleInputs()
 {
 	ANarrativeVehicleBase* Vehicle = NarrativeIngressVehicle.Get();
+	if (Vehicle && Vehicle->GetController())
+	{
+		const ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(GetOwner());
+		// A passenger death/exit cannot override a living driver's inputs, nor can
+		// an old driver brake the car after Narrative hands it to another controller.
+		if (!bNarrativeVehicleDriver || !NPC
+			|| Vehicle->GetController() != NPC->GetNPCController()) return;
+	}
 	if (UChaosWheeledVehicleMovementComponent* Movement = Vehicle
 		? Vehicle->FindComponentByClass<UChaosWheeledVehicleMovementComponent>() : nullptr)
 	{
