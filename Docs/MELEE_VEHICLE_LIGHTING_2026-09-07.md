@@ -57,6 +57,13 @@ project's `Saved/Verification/20260907_MeleeRoadLighting` directory.
 
 - Editor/runtime/UHT and Development Game builds pass. The final full automation
   report contains **274 passed** (257 clean, 17 with warnings), zero failed/not run.
+- The fresh HopDistrictTest/dependency cook, stage and package pass with zero errors
+  and ten warnings. The matching Development Game executable completes a 90-second
+  fresh-user-directory localhost smoke with zero errors/ensures/assertions, two
+  four-person squads and seven ingress completions. It logs real casualties,
+  including a driver death, and no blocked-arrival fallback. This is a Game executable
+  in server mode, not a compiled dedicated server. Its terminal capture/casualty
+  records were not asserted; that full assault release gate remains open.
 - HopDistrictTest's existing sky and tagged volume were updated and saved. A noon
   preview is stored in the map; Narrative still controls time in gameplay. The setup
   audit reports 17 passes and one interior-review advisory. Corrected running-game
