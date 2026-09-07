@@ -1992,6 +1992,12 @@ bool UTerritoryCounterAttackSubsystem::ActivateAssault(
 	return IsAssaultCurrent(Access, ETerritoryAssaultState::Active);
 }
 
+void UTerritoryCounterAttackSubsystem::IncrementSpawnFailureCount(FTerritoryAssaultRecord& Assault)
+{
+	Assault.ConsecutiveSpawnFailures =
+		FMath::Clamp(Assault.ConsecutiveSpawnFailures, 0, MAX_int32 - 1) + 1;
+}
+
 void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory)
 {
@@ -2333,7 +2339,7 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			// A permanently blocked entrance still reaches the ordinary failure path.
 			if (Now - Assault.VehicleStagingBlockedSince < 120.0) return;
 		}
-		++Assault.ConsecutiveSpawnFailures;
+		IncrementSpawnFailureCount(Assault);
 		BroadcastChanged(Assault);
 		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Active)) return;
 		if (Assault.ConsecutiveSpawnFailures >= MaximumSpawnFailures)

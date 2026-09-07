@@ -1,12 +1,26 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-07 (batch 42)
+> **Reviewed:** 2026-09-07 (batch 43)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
 
 TDA is on UE 5.8.2 with the local, unmodified Narrative Pro 2.4.2 package.
+[Batch 43](ASSAULT_RETRY_BUDGET_2026-09-07.md) fixes saved spawn-failure counts
+wrapping negative and bypassing finite cancellation. New-wave, physical survivor
+and legacy failure paths share a saturating counter. Editor/runtime/UHT and Game
+builds pass, with **280 passing tests**, 77 Blueprint compilations and 128-asset
+validation (zero errors, four existing warnings). A 150-second server/two-client
+probe agrees on eight killed, zero living/reserve/withdrawn and finite defeat,
+with immediate capture removal for every injected death. It does not establish
+the cause of the older combat behavior-tree crash. The batch report distinguishes
+the successful gameplay probe from later Python reload and editor shutdown faults.
+A distinct cook/stage/package passes with zero cook errors and 30 existing
+content/tooling warnings; the staged executable matches the verified Game build
+and completes a 90-second Game server-mode smoke with exit zero. This does not
+replace the compiled TDAServer gate.
+
 [Batch 42](CONDITIONAL_RETAKE_DIALOGUE_2026-09-07.md) adds modular Native planning
 and handover examples, saved former ownership, and live diplomacy/power/Place
 majority conditions. Multiplayer keeps flag-based automatic capture; the new
@@ -31,10 +45,13 @@ The immediate remaining work, in order:
 
 1. Reproduce and symbolize the earlier behavior-tree decorator-search crash after
    clustered casualties. Passenger recovery is a separately confirmed fix; it
-   does not establish that crash's cause.
+   does not establish that crash's cause. Batch 43's dismounted casualty probe
+   passes but does not reproduce the combat/decorator stack. Matching AIModule
+   symbols are still absent. A separate UnrealEd/Slate shutdown crash also needs
+   attribution; a later clean editor shutdown does not establish its cause.
 2. Complete assault spawn/save callback and remaining malformed-record arithmetic
    review. Batch 42 closed recurrence-counter overflow and stale ownership-directory
-   reload. Then exercise physical stream-out/in on
+   reload; batch 43 closed spawn-failure retry overflow. Then exercise physical stream-out/in on
    AlMalik with a live assault, posts, routes and returning clients.
 3. Finish production save-only callback and refunded item-instance metadata
    handling, and the broader payout/currency settlement review.

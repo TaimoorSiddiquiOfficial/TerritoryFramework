@@ -341,7 +341,7 @@ TArray<ATerritoryAssaultCharacter*> UTerritoryCounterAttackSubsystem::Reconstruc
 	}
 	if (!Current()) return Spawned;
 	if (!Spawned.IsEmpty()) Assault.ConsecutiveSpawnFailures = 0;
-	else if (bAttempted && !bWaitingForOldActors) ++Assault.ConsecutiveSpawnFailures;
+	else if (bAttempted && !bWaitingForOldActors) IncrementSpawnFailureCount(Assault);
 	if (Assault.ConsecutiveSpawnFailures >= FMath::Max(1, Profile->MaxConsecutiveSpawnFailures))
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::SpawnFailed);
 	else if (bAttempted) BroadcastChanged(Assault);
@@ -377,9 +377,12 @@ bool UTerritoryCounterAttackSubsystem::MigrateLegacySurvivors(FTerritoryAssaultR
 			SpawnNarrativeVehicleParticipants(Assault, Territory, Force, Definition, Approach, Start, Start,
 				DropOff, Objective, Assault.LegacySurvivorsToRestore, ResolveScaledEnemyLevel(Assault, Territory, Force), true);
 			if (!IsAssaultCurrent(Access)) return false;
-			if (Assault.LegacySurvivorsToRestore == PreviousLegacyCount
-				&& ++Assault.ConsecutiveSpawnFailures >= FMath::Max(1, Profile->MaxConsecutiveSpawnFailures))
-				ResolveAssault(Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::SpawnFailed);
+			if (Assault.LegacySurvivorsToRestore == PreviousLegacyCount)
+			{
+				IncrementSpawnFailureCount(Assault);
+				if (Assault.ConsecutiveSpawnFailures >= FMath::Max(1, Profile->MaxConsecutiveSpawnFailures))
+					ResolveAssault(Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::SpawnFailed);
+			}
 			return IsAssaultCurrent(Access) && !Assault.IsTerminal();
 		}
 		for (int32 Index = 0; Index < Assault.LegacySurvivorsToRestore; ++Index)
@@ -394,7 +397,8 @@ bool UTerritoryCounterAttackSubsystem::MigrateLegacySurvivors(FTerritoryAssaultR
 	}
 	// An old save has no positions or identities. If its authored deployment has gone,
 	// fail finitely; do not turn that missing history into new cars or endless reserve.
-	if (++Assault.ConsecutiveSpawnFailures >= FMath::Max(1, Profile->MaxConsecutiveSpawnFailures))
+	IncrementSpawnFailureCount(Assault);
+	if (Assault.ConsecutiveSpawnFailures >= FMath::Max(1, Profile->MaxConsecutiveSpawnFailures))
 		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::InvalidApproachOrRoute);
 	return false;
 }

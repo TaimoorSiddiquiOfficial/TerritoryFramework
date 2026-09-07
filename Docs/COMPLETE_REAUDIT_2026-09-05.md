@@ -2,8 +2,18 @@
 
 Status: **in progress**. Findings below distinguish confirmed defects from candidates.
 
-Latest focused update: [batch 42 — conditional retake dialogues](CONDITIONAL_RETAKE_DIALOGUE_2026-09-07.md).
-UE 5.8.2 Editor/runtime/UHT and Game builds pass; **279 automation tests pass**.
+Latest focused update: [batch 43 — finite assault retry budget](ASSAULT_RETRY_BUDGET_2026-09-07.md).
+UE 5.8.2 Editor/runtime/UHT and Game builds pass; **280 automation tests pass**.
+Restored MAX_int32 spawn-failure counts no longer wrap negative and bypass finite
+cancellation. The new SaveGame regression covers new-wave, physical-survivor and
+legacy retries, authority rejection, unchanged decisions and WorldState terminal
+projection. A 150-second server/two-client casualty run agrees on eight killed,
+zero alive/reserve/withdrawn and finite defeat. Validation covers 77 Blueprints
+and 128 assets with zero errors and four existing warnings. Old behavior-tree and
+separate editor shutdown crash investigations remain open; the report also records
+a Python-held package reference that caused a later cleanup-only reload fatal.
+
+[Batch 42 — conditional retake dialogues](CONDITIONAL_RETAKE_DIALOGUE_2026-09-07.md):
 The modular Native examples use saved former ownership and current diplomacy,
 district power and Place-based majority. New handovers require explicit story
 capture; multiplayer flag capture remains automatic. Seven live scenarios verify
@@ -111,6 +121,7 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | ASSAULT-07 | One blocked vehicle approach repeats the identical spawn attempt for every NPC placement slot; restoring a blocked saved car repeats per occupant. | Fixed in batch 36; bounded road/physical obstruction tests and live second-wave deployment pass |
 | ASSAULT-08 | Cached Native appearance loading can restore saved health before Native BeginPlay resets default attributes. | Fixed in batch 36; live survivor retains exactly 82 health after repeated reload |
 | ASSAULT-09 | A retired driver remains a valid corpse reference, so surviving passengers wait until timeout and withdraw; missing/failed drivers also incorrectly fail the passengers. | Fixed in batch 41; Native exit/failure regression, server plus two clients, and real save/reload reach finite defeat with eight killed and zero withdrawn |
+| ASSAULT-10 | Saved MAX_int32 consecutive spawn failures wrap negative on the next failed wave/reconstruction, bypassing the finite retry limit. | Fixed in batch 43; saturated shared increment at all four sites, red/green SaveGame failure tests for three deployment paths and existing terminal projection |
 | VISUAL-01 | Rendered clients reproduce a SKM_Manny bone-visibility/component-space-transform ensure during the intro. | Open; batch 23 proves this is not limited to NullRHI |
 
 ## Architecture constraints

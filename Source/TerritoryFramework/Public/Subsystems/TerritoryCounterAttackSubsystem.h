@@ -318,6 +318,7 @@ public:
 private:
 	friend class FTFAssaultSurvivorRestore;
 	friend class FTFAssaultCheckpointValidation;
+	friend class FTFAssaultSpawnFailureBudget;
 	/** Kept weakly across campaign loads so a player-retained car cannot be cloned. */
 	TMap<FGuid, TWeakObjectPtr<ANarrativeVehicleBase>> PhysicalVehicles;
 	bool bReconstructingParticipants = false;
@@ -384,6 +385,8 @@ private:
 	void EvaluateAssault(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
 	bool ActivateAssault(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
 	void SpawnNextWave(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
+	/** Saved retry counts must saturate so exhausted deployments cannot wrap and retry forever. */
+	static void IncrementSpawnFailureCount(FTerritoryAssaultRecord& Assault);
 	ATerritoryAssaultCharacter* SpawnParticipant(FTerritoryAssaultRecord& Assault,
 		ATerritoryVolume* Territory, const FTerritoryFactionAssaultConfig& ForceConfig,
 		UNPCDefinition* AttackerDefinition,
