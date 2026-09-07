@@ -8,6 +8,7 @@
 #include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Character/NarrativeCharacterVisual.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
@@ -1242,10 +1243,18 @@ bool UTerritoryAssaultParticipantComponent::QueryVehicleObstacleDistance(
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(TerritoryVehicleAwareness), false);
 	Params.AddIgnoredActor(Vehicle);
 	Params.AddIgnoredActor(GetOwner());
-	// Mounted Territory participants are part of this vehicle, not road hazards. Narrative's
-	// mount ability can leave their Pawn collision queryable while attached to a seat; without
-	// this exclusion the driver's forward probe sees its own passengers and holds the brake until
-	// every occupant reaches the bounded ingress timeout.
+	// Narrative mounts retain queryable pawn/weapon collision. Ignore each assigned
+	// occupant and its attached visual actors; ignoring the pawn alone still hits the
+	// separate sword's MeleeCollider and holds the brake at the spawn point. Resolve
+	// attachments on every query so asynchronous weapon creation and dismount are safe.
+	auto IgnoreActorAndAttachments = [&Params](const AActor* Actor)
+	{
+		if (!IsValid(Actor)) return;
+		Params.AddIgnoredActor(Actor);
+		TArray<AActor*> Attachments;
+		Actor->GetAttachedActors(Attachments, true, true);
+		Params.AddIgnoredActors(Attachments);
+	};
 	for (TActorIterator<ATerritoryAssaultCharacter> It(World); It; ++It)
 	{
 		const ATerritoryAssaultCharacter* Candidate = *It;
@@ -1254,7 +1263,9 @@ bool UTerritoryAssaultParticipantComponent::QueryVehicleObstacleDistance(
 		if (CandidateParticipant
 			&& CandidateParticipant->NarrativeIngressVehicle.Get() == Vehicle)
 		{
-			Params.AddIgnoredActor(Candidate);
+			IgnoreActorAndAttachments(Candidate);
+			// The visual may be available before its root attaches to the character.
+			IgnoreActorAndAttachments(Candidate->GetCharacterVisual());
 		}
 	}
 	FHitResult Hit;

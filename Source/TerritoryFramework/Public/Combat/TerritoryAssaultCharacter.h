@@ -52,6 +52,8 @@ public:
 
 	/** Ensures this finished server spawn has its configured Narrative controller/activity. */
 	bool EnsureNarrativeControllerReady();
+	/** Native load/definition callbacks must retain the controller driving this NPC's mount. */
+	virtual void SpawnDefaultController() override;
 	FName GetAssaultApproachID() const { return SpawnInfo.SpawnName; }
 	/** Keep an asynchronous Native load aligned with the engine-validated placement. */
 	void UpdateRestoredDeploymentTransform(const FTransform& Transform) { RestoredDeploymentTransform = Transform; }

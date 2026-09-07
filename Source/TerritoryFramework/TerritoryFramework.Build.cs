@@ -19,6 +19,7 @@ public class TerritoryFramework : ModuleRules
 			"EnhancedInput",
 			"NavigationSystem",
 			"ChaosVehicles",
+			"ContextualAnimation",
 			"NarrativeArsenal",
 			"NarrativeCommonUI",
 			"NarrativeSaveSystem",

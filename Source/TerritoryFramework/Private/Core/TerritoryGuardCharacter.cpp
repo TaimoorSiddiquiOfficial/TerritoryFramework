@@ -12,6 +12,7 @@
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
+#include "AI/TerritoryContextualAnimComponent.h"
 #include "AI/TerritoryInvestigationActivity.h"
 #include "AI/TerritoryInvestigationGoal.h"
 #include "AI/TerritoryStealthObserverComponent.h"
@@ -80,6 +81,7 @@ ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& Obj
 		TEXT("NPCInteractable")))
 {
 	PatrolGoalClass = UTerritoryPatrolGoal::StaticClass();
+	CreateDefaultSubobject<UTerritoryContextualAnimComponent>(TEXT("TerritoryContextualAnimation"));
 	DiplomacyDialogue = CreateDefaultSubobject<UTerritoryDiplomacyDialogueComponent>(
 		TEXT("TerritoryDiplomacyDialogue"));
 	StealthObserver = CreateDefaultSubobject<UTerritoryStealthObserverComponent>(

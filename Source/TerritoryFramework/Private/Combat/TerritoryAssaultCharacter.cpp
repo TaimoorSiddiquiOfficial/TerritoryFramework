@@ -3,6 +3,7 @@
 #include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "AI/TerritoryDiplomacyDialogue.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
+#include "AI/TerritoryContextualAnimComponent.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NarrativeNPCController.h"
 #include "AI/NPCDefinition.h"
@@ -69,6 +70,7 @@ ATerritoryAssaultCharacter::ATerritoryAssaultCharacter(const FObjectInitializer&
 		TEXT("NPCInteractable")))
 {
 	AssaultParticipant = CreateDefaultSubobject<UTerritoryAssaultParticipantComponent>(TEXT("TerritoryAssaultParticipant"));
+	CreateDefaultSubobject<UTerritoryContextualAnimComponent>(TEXT("TerritoryContextualAnimation"));
 	DiplomacyDialogue = CreateDefaultSubobject<UTerritoryDiplomacyDialogueComponent>(
 		TEXT("TerritoryDiplomacyDialogue"));
 
@@ -218,6 +220,19 @@ ATerritoryAssaultCharacter* ATerritoryAssaultCharacter::SpawnThroughNarrative(
 		return nullptr;
 	}
 	return AssaultCharacter;
+}
+
+void ATerritoryAssaultCharacter::SpawnDefaultController()
+{
+	if (!HasAuthority()) return;
+	// Narrative keeps its owning NPC/controller relationship while the controller
+	// possesses a vehicle (or is temporarily unpossessed for an execution). Native
+	// definition and save callbacks call this virtual even after that handoff. The
+	// engine only checks this pawn's current Controller, so spawning again would
+	// overwrite Narrative's cache and strand the car with the original controller.
+	ANarrativeNPCController* Existing = GetNPCController();
+	if (IsValid(Existing) && Existing->GetOwnedNPC() == this) return;
+	Super::SpawnDefaultController();
 }
 
 bool ATerritoryAssaultCharacter::EnsureNarrativeControllerReady()

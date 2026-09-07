@@ -20,6 +20,9 @@
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Combat/TerritoryAssaultParticipantComponent.h"
+#include "Combat/TerritoryAssaultCharacter.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Weapons/WeaponVisual.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 
@@ -338,6 +341,32 @@ bool FTFRoadSteeringObstacle::RunTest(const FString& Parameters)
 		Obstacle->SetActorEnableCollision(false);
 		TestFalse(TEXT("A cleared merge becomes traversable"),
 			Participant->QueryVehicleObstacleDistance(FVector::ZeroVector, Distance, FVector(750,550,0)));
+		auto* Occupant = World->SpawnActor<ATerritoryAssaultCharacter>();
+		Occupant->AssaultParticipant->NarrativeIngressVehicle = Vehicle;
+		auto* Sword = World->SpawnActor<AWeaponVisual>();
+		Sword->SetOwner(Occupant);
+		Sword->AttachToComponent(Occupant->GetMesh(), FAttachmentTransformRules::KeepWorldTransform);
+		auto* MeleeCollider = NewObject<UBoxComponent>(Sword, TEXT("MeleeCollider"));
+		MeleeCollider->SetupAttachment(Sword->GetRootComponent());
+		MeleeCollider->SetBoxExtent(FVector(30.f));
+		MeleeCollider->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+		MeleeCollider->RegisterComponent();
+		Sword->SetActorLocation(FVector(175.f, 0.f, 90.f));
+		TestFalse(TEXT("A mounted occupant's separate sword collider cannot hold its own car's brake"),
+			Participant->QueryVehicleObstacleDistance(FVector::ZeroVector, Distance));
+		Obstacle->SetActorLocation(FVector(600.f, 0.f, 100.f));
+		Obstacle->SetActorEnableCollision(true);
+		TestTrue(TEXT("Ignoring the occupant's sword still detects a real obstacle behind it"),
+			Participant->QueryVehicleObstacleDistance(FVector::ZeroVector, Distance));
+		Obstacle->SetActorEnableCollision(false);
+		Occupant->SetActorEnableCollision(false);
+		Occupant->AssaultParticipant->NarrativeIngressVehicle.Reset();
+		TestTrue(TEXT("A departed occupant's weapon is once again a real road obstacle"),
+			Participant->QueryVehicleObstacleDistance(FVector::ZeroVector, Distance));
+		Occupant->AssaultParticipant->NarrativeIngressVehicle = World->SpawnActor<ANarrativeVehicleBase>(VehicleClass,
+			FVector(0.f, 5000.f, 0.f), FRotator::ZeroRotator);
+		TestTrue(TEXT("Another squad's weapon is never excluded by the first vehicle"),
+			Participant->QueryVehicleObstacleDistance(FVector::ZeroVector, Distance));
 	}
 	World->DestroyWorld(false);
 	GEngine->DestroyWorldContext(World);
