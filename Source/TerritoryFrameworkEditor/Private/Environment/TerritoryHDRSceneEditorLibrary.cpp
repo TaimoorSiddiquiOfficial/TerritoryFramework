@@ -10,6 +10,7 @@
 #include "Misc/ScopedSlowTask.h"
 #include "ScopedTransaction.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UnrealType.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 #define LOCTEXT_NAMESPACE "TerritoryHDRSceneEditorLibrary"
@@ -22,7 +23,7 @@ namespace TerritoryHDRSceneEditor
 	UWorld* GetEditorWorld(FText& OutError)
 	{
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-		if (!World || World->IsGameWorld())
+		if (!World || World->IsGameWorld() || GEditor->PlayWorld)
 		{
 			OutError = LOCTEXT("EditorWorldRequired",
 				"Open a level in the editor and stop PIE before running the AAA HDR Scene Maker.");
@@ -31,12 +32,104 @@ namespace TerritoryHDRSceneEditor
 		return World;
 	}
 
+	bool SkyOwnsExposure(const AActor* Sky)
+	{
+		const FBoolProperty* Property = Sky ? FindFProperty<FBoolProperty>(
+			Sky->GetClass(), TEXT("Apply Exposure Settings")) : nullptr;
+		return Property && Property->GetPropertyValue_InContainer(Sky);
+	}
+
+	bool ConfigureSky(AActor* Sky, const FTerritoryHDRSceneOptions& Options,
+		FTerritoryHDRSceneBuildReport& Report, bool bApply = true)
+	{
+		if (!Sky || !Options.bConfigureSkyLighting) return true;
+		const bool bCinematic = Options.Quality == ETerritoryHDRSceneQuality::AAACinematic;
+		const bool bPerformance = Options.Quality == ETerritoryHDRSceneQuality::Performance;
+		const TArray<TPair<FName, double>> Numbers = {
+			{TEXT("Sun Light Intensity"), FMath::Clamp(Options.SunLightIntensity, 0.f, 200000.f)},
+			{TEXT("Moon Light Intensity"), FMath::Clamp(Options.MoonLightIntensity, 0.f, 10.f)},
+			{TEXT("Sky Light Intensity"), FMath::Clamp(Options.SkyLightIntensity, 0.f, 10.f)},
+			{TEXT("Base Fog Density"), FMath::Clamp(Options.BaseFogDensity, 0.f, 0.1f)},
+			{TEXT("Volumetric Fog Distance"), bCinematic ? 24000. : 16000.},
+			{TEXT("Volumetric Fog Extinction"), 1.},
+			{TEXT("Fog Density Multiplier in Interior"), FMath::Clamp(Options.InteriorFogMultiplier, 0.f, 1.f)},
+			{TEXT("Exposure Bias in Interior"), FMath::Clamp(Options.InteriorExposureBias, -2.f, 2.f)},
+			{TEXT("Exposure Bias Day"), FMath::Clamp(Options.ExposureCompensation, -5.f, 5.f)},
+			{TEXT("Exposure Bias Dawn/Dusk"), FMath::Clamp(Options.ExposureCompensation, -5.f, 5.f)},
+			{TEXT("Exposure Bias Night"), FMath::Clamp(Options.ExposureCompensation, -5.f, 5.f)},
+			{TEXT("View Sample Scale (Day)"), bCinematic ? 3. : (bPerformance ? 1. : 2.2)},
+			{TEXT("View Sample Scale (Night)"), bCinematic ? 2.2 : (bPerformance ? 0.8 : 1.7)},
+			{TEXT("Shadow Sample Scale"), bCinematic ? 0.6 : 0.4}
+		};
+		const TArray<TPair<FName, bool>> Bools = {
+			{TEXT("Apply Exposure Settings"), true},
+			{TEXT("Apply Interior Adjustments"), Options.bApplyInteriorAdjustments},
+			{TEXT("Use Volumetric Fog"), !bPerformance},
+			{TEXT("Render Exponential Height Fog"), true},
+			{TEXT("Render Sky Light"), true},
+			{TEXT("Render Sun Directional Light"), true},
+			{TEXT("Render Moon Directional Light"), true},
+			{TEXT("Sun Casts Shadows"), true},
+			{TEXT("Moon Casts Shadows"), true},
+			{TEXT("Use Cloud Shadows"), true},
+			{TEXT("Real Time Capture"), true},
+			{TEXT("Real Time Capture Uses Time Slicing"), true}
+		};
+		const TArray<FName> Mobilities = {TEXT("Sun Mobility"), TEXT("Moon Mobility"), TEXT("Sky Light Mobility")};
+		UClass* Class = Sky->GetClass();
+		TArray<FString> Missing;
+		for (const auto& Entry : Numbers)
+		{
+			if (!FindFProperty<FDoubleProperty>(Class, Entry.Key) || !FMath::IsFinite(Entry.Value)) Missing.Add(Entry.Key.ToString());
+		}
+		for (const auto& Entry : Bools)
+		{
+			if (!FindFProperty<FBoolProperty>(Class, Entry.Key)) Missing.Add(Entry.Key.ToString());
+		}
+		for (FName Name : Mobilities)
+		{
+			const FByteProperty* Property = FindFProperty<FByteProperty>(Class, Name);
+			if (!Property || !Property->Enum || Property->Enum->GetFName() != TEXT("EComponentMobility")) Missing.Add(Name.ToString());
+		}
+		FByteProperty* Metering = FindFProperty<FByteProperty>(Class, TEXT("Exposure Metering Mode"));
+		FStructProperty* Range = FindFProperty<FStructProperty>(Class, TEXT("Exposure Brightness Range"));
+		if (!Metering || !Metering->Enum || Metering->Enum->GetFName() != TEXT("EAutoExposureMethod")) Missing.Add(TEXT("Exposure Metering Mode"));
+		if (!Range || Range->Struct->GetFName() != TEXT("FloatRange")) Missing.Add(TEXT("Exposure Brightness Range"));
+		if (!FMath::IsFinite(Options.MinimumEV100) || !FMath::IsFinite(Options.MaximumEV100)) Missing.Add(TEXT("Finite EV100 range"));
+		if (!Missing.IsEmpty())
+		{
+			Report.Errors.Add(FText::FromString(FString::Printf(
+				TEXT("UDS lighting was not changed: incompatible properties or values: %s. Review the installed UDS version."), *FString::Join(Missing, TEXT(", ")))));
+			return false;
+		}
+		if (!bApply) return true;
+		// Validate the entire optional Blueprint contract before making any writes.
+		// UDS remains the owner of components, time-dependent colors and exposure.
+		Sky->Modify();
+		for (const auto& Entry : Numbers) FindFProperty<FDoubleProperty>(Class, Entry.Key)->SetPropertyValue_InContainer(Sky, Entry.Value);
+		for (const auto& Entry : Bools) FindFProperty<FBoolProperty>(Class, Entry.Key)->SetPropertyValue_InContainer(Sky, Entry.Value);
+		for (FName Name : Mobilities) FindFProperty<FByteProperty>(Class, Name)->SetPropertyValue_InContainer(Sky, EComponentMobility::Movable);
+		Metering->SetPropertyValue_InContainer(Sky, AEM_Histogram);
+		*Range->ContainerPtrToValuePtr<FFloatRange>(Sky) = FFloatRange(
+			FMath::Clamp(FMath::Min(Options.MinimumEV100, Options.MaximumEV100), -10.f, 20.f),
+			FMath::Clamp(FMath::Max(Options.MinimumEV100, Options.MaximumEV100), -10.f, 20.f));
+		// Construction applies UDS's static controls and resets its derived caches.
+		Sky->RerunConstructionScripts();
+		if (Sky->CanChangeIsSpatiallyLoadedFlag()) Sky->SetIsSpatiallyLoaded(false);
+		Sky->MarkPackageDirty();
+		return true;
+	}
+
 	void ConfigurePostProcess(APostProcessVolume* Volume,
-		const FTerritoryHDRSceneOptions& Options)
+		const FTerritoryHDRSceneOptions& Options, bool bSkyExposure)
 	{
 		if (!Volume) return;
 		Volume->Modify();
 		Volume->bEnabled = true;
+		// Existing unbound volumes lock this flag even when legacy serialized data
+		// still has it set. Clear it while bound, then apply the final global mode.
+		Volume->bUnbound = false;
+		if (Volume->CanChangeIsSpatiallyLoadedFlag()) Volume->SetIsSpatiallyLoaded(false);
 		Volume->bUnbound = true;
 		Volume->BlendWeight = 1.f;
 		Volume->Priority = 90.f;
@@ -46,14 +139,16 @@ namespace TerritoryHDRSceneEditor
 		PP.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
 		PP.bOverride_ReflectionMethod = true;
 		PP.ReflectionMethod = EReflectionMethod::Lumen;
-		PP.bOverride_AutoExposureMethod = true;
+		PP.bOverride_AutoExposureMethod = !bSkyExposure;
 		PP.AutoExposureMethod = EAutoExposureMethod::AEM_Histogram;
-		PP.bOverride_AutoExposureMinBrightness = true;
+		PP.bOverride_AutoExposureMinBrightness = !bSkyExposure;
 		PP.AutoExposureMinBrightness = FMath::Min(Options.MinimumEV100, Options.MaximumEV100);
-		PP.bOverride_AutoExposureMaxBrightness = true;
+		PP.bOverride_AutoExposureMaxBrightness = !bSkyExposure;
 		PP.AutoExposureMaxBrightness = FMath::Max(Options.MinimumEV100, Options.MaximumEV100);
-		PP.bOverride_AutoExposureBias = true;
+		PP.bOverride_AutoExposureBias = !bSkyExposure;
 		PP.AutoExposureBias = Options.ExposureCompensation;
+		PP.bOverride_AutoExposureBiasCurve = !bSkyExposure;
+		PP.AutoExposureBiasCurve = nullptr;
 		PP.bOverride_AutoExposureLowPercent = true;
 		PP.AutoExposureLowPercent = 70.f;
 		PP.bOverride_AutoExposureHighPercent = true;
@@ -116,6 +211,10 @@ namespace TerritoryHDRSceneEditor
 		PP.LumenReflectionsScreenTraces = true;
 		PP.bOverride_LumenFinalGatherScreenTraces = true;
 		PP.LumenFinalGatherScreenTraces = true;
+		PP.bOverride_LumenSceneLightingUpdateSpeed = true;
+		PP.LumenSceneLightingUpdateSpeed = bAAA ? 2.f : 1.f;
+		PP.bOverride_LumenFinalGatherLightingUpdateSpeed = true;
+		PP.LumenFinalGatherLightingUpdateSpeed = bAAA ? 2.f : 1.f;
 		Volume->MarkPackageDirty();
 	}
 
@@ -426,6 +525,36 @@ namespace TerritoryHDRSceneEditor
 					FText::AsNumber(SkyCount)),
 				LOCTEXT("NarrativeUDSCountFix",
 					"Enable the Narrative UDS integration and keep exactly one Narrative_UDS_Sky authority in the persistent level."));
+			if (bExactlyOneSky)
+			{
+				const AActor* Sky = Report.NarrativeUltraDynamicSkyActor;
+				const bool bSkyExposure = SkyOwnsExposure(Sky);
+				const FPostProcessSettings* PP = Report.PostProcessVolume ? &Report.PostProcessVolume->Settings : nullptr;
+				const bool bExposureConflict = bSkyExposure && PP &&
+					(PP->bOverride_AutoExposureMethod || PP->bOverride_AutoExposureMinBrightness
+					|| PP->bOverride_AutoExposureMaxBrightness || PP->bOverride_AutoExposureBias
+					|| PP->bOverride_AutoExposureBiasCurve);
+				AddAuditItem(Report, TEXT("UDSExposureOwnership"),
+					bExposureConflict ? ETerritoryHDRSceneAuditSeverity::Error : ETerritoryHDRSceneAuditSeverity::Pass,
+					FText::FromString(bExposureConflict ? TEXT("Territory post process overrides exposure fields owned by UDS.")
+						: (bSkyExposure ? TEXT("UDS owns metering, EV100 range, exposure bias and its day/night curve.")
+							: TEXT("UDS exposure is disabled; the scene post process owns exposure."))),
+					LOCTEXT("ExposureOwnershipFix", "Run scene setup to clear competing Territory exposure overrides."));
+				bool bMovableLights = true;
+				for (FName Name : {FName(TEXT("Sun Mobility")), FName(TEXT("Moon Mobility")), FName(TEXT("Sky Light Mobility"))})
+				{
+					const FByteProperty* Property = FindFProperty<FByteProperty>(Sky->GetClass(), Name);
+					bMovableLights &= Property && Property->GetPropertyValue_InContainer(Sky) == EComponentMobility::Movable;
+				}
+				AddAuditItem(Report, TEXT("UDSDynamicLights"),
+					bMovableLights ? ETerritoryHDRSceneAuditSeverity::Pass : ETerritoryHDRSceneAuditSeverity::Error,
+					FText::FromString(bMovableLights ? TEXT("UDS sun, moon and skylight support dynamic day/night lighting.")
+						: TEXT("A UDS light is not movable or its mobility contract is missing.")),
+					LOCTEXT("UDSMobilityFix", "Configure mobility through the UDS actor controls."));
+				AddAuditItem(Report, TEXT("InteriorVisualReview"), ETerritoryHDRSceneAuditSeverity::Advisory,
+					LOCTEXT("InteriorVisualReviewFinding", "Interior adaptation uses UDS occlusion and Lumen sky shadowing. Settings alone cannot verify room lighting."),
+					LOCTEXT("InteriorVisualReviewFix", "Review doors, windows and enclosed rooms at noon, dusk and night. Use UDS Occlusion Volumes for collision gaps and authored local lights where rooms need illumination."));
+			}
 		}
 		else
 		{
@@ -601,6 +730,48 @@ UTerritoryHDRSceneEditorLibrary::CreateOrUpdateAAAHDRScene(
 		return Report;
 	}
 
+	const float Values[] = {Options.SunLightIntensity, Options.MoonLightIntensity,
+		Options.SkyLightIntensity, Options.BaseFogDensity, Options.InteriorFogMultiplier,
+		Options.InteriorExposureBias, Options.ExposureCompensation, Options.MinimumEV100,
+		Options.MaximumEV100, Options.BloomIntensity, Options.VignetteIntensity,
+		Options.MotionBlurAmount, Options.WhiteBalanceTemperature, Options.GlobalSaturation,
+		Options.GlobalContrast, Options.FilmGrainIntensity, Options.ChromaticAberrationIntensity};
+	for (float Value : Values)
+	{
+		if (!FMath::IsFinite(Value))
+		{
+			Report.Errors.Add(LOCTEXT("FiniteLightingOptionsRequired", "Lighting options must contain finite numbers. No scene actors were changed."));
+			return Report;
+		}
+	}
+	// Refuse ambiguous existing authorities before changing either actor.
+	UClass* ExistingSkyClass = Options.NarrativeUltraDynamicSkyClass.LoadSynchronous();
+	if (Options.bEnsureNarrativeUltraDynamicSky && ExistingSkyClass
+		&& ExistingSkyClass->IsChildOf(AActor::StaticClass())
+		&& !ConfigureSky(Cast<AActor>(ExistingSkyClass->GetDefaultObject()), Options, Report, false))
+	{
+		return Report;
+	}
+	int32 ExistingSkyCount = 0;
+	int32 ExistingPostProcessCount = 0;
+	if (ExistingSkyClass && ExistingSkyClass->IsChildOf(AActor::StaticClass()))
+	{
+		for (TActorIterator<AActor> It(World, ExistingSkyClass); It; ++It)
+		{
+			Report.NarrativeUltraDynamicSkyActor = *It;
+			++ExistingSkyCount;
+		}
+	}
+	for (TActorIterator<APostProcessVolume> It(World); It; ++It)
+	{
+		if (It->Tags.Contains(PostProcessTag)) ++ExistingPostProcessCount;
+	}
+	if (ExistingSkyCount > 1 || ExistingPostProcessCount > 1)
+	{
+		Report.Errors.Add(LOCTEXT("AmbiguousEnvironmentAuthorities", "Multiple configured skies or tagged Territory post processes exist. Resolve the duplicate authorities before applying a preset."));
+		PublishReport(TEXT("Build"), Report);
+		return Report;
+	}
 	const FScopedTransaction Transaction(LOCTEXT("CreateAAAHDRScene",
 		"Create Or Update Territory AAA HDR Scene"));
 	if (Options.bEnsureNarrativeUltraDynamicSky)
@@ -608,8 +779,10 @@ UTerritoryHDRSceneEditorLibrary::CreateOrUpdateAAAHDRScene(
 		UClass* SkyClass = Options.NarrativeUltraDynamicSkyClass.LoadSynchronous();
 		if (!SkyClass || !SkyClass->IsChildOf(AActor::StaticClass()))
 		{
-			Report.Warnings.Add(LOCTEXT("NarrativeUDSUnavailable",
-				"Narrative UDS class could not load. Enable NP_UltraDynamicSky and its Ultra Dynamic Sky dependency, or choose the Narrative_UDS_Sky class. Lumen setup and memory analysis still ran."));
+			Report.Errors.Add(LOCTEXT("NarrativeUDSUnavailable",
+				"Narrative UDS class could not load. Enable NP_UltraDynamicSky and its Ultra Dynamic Sky dependency, or choose the Narrative_UDS_Sky class."));
+			PublishReport(TEXT("Build"), Report);
+			return Report;
 		}
 		else
 		{
@@ -628,6 +801,11 @@ UTerritoryHDRSceneEditorLibrary::CreateOrUpdateAAAHDRScene(
 			}
 			if (Report.NarrativeUltraDynamicSkyActor)
 			{
+				if (!ConfigureSky(Report.NarrativeUltraDynamicSkyActor, Options, Report))
+				{
+					PublishReport(TEXT("Build"), Report);
+					return Report;
+				}
 				Report.NarrativeUltraDynamicSkyActor->Modify();
 				Report.NarrativeUltraDynamicSkyActor->Tags.AddUnique(NarrativeUDSTag);
 				Report.NarrativeUltraDynamicSkyActor->SetActorLabel(
@@ -665,7 +843,8 @@ UTerritoryHDRSceneEditorLibrary::CreateOrUpdateAAAHDRScene(
 			Report.PostProcessVolume->Tags.AddUnique(PostProcessTag);
 			Report.PostProcessVolume->SetActorLabel(
 				TEXT("Territory AAA HDR - Lumen Post Process"), true);
-			ConfigurePostProcess(Report.PostProcessVolume, Options);
+			ConfigurePostProcess(Report.PostProcessVolume, Options,
+				SkyOwnsExposure(Report.NarrativeUltraDynamicSkyActor));
 		}
 		else
 		{

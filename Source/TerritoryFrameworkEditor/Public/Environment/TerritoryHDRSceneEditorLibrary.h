@@ -48,6 +48,38 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryHDRSceneOptions
 			ToolTip="Narrative-aligned UDS actor class. Recommended: /NP_UltraDynamicSky/Narrative_UDS_Sky. Enable the Narrative Pro - Ultra Dynamic Sky integration and its Ultra Dynamic Sky dependency before running."))
 	TSoftClassPtr<AActor> NarrativeUltraDynamicSkyClass;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
+		meta=(ToolTip="Configure the existing UDS light, fog, interior and exposure controls. Narrative retains time authority; weather and cloud coverage remain authored by UDS/UDW."))
+	bool bConfigureSkyLighting = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
+		meta=(ClampMin="0.0", ClampMax="200000.0", ToolTip="UDS sun intensity. 10 preserves TDA's existing artistic daylight scale. Physical lux lighting requires reviewing every interior light and the UDS exposure curve together."))
+	float SunLightIntensity = 10.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
+		meta=(ClampMin="0.0", ClampMax="10.0", ToolTip="UDS moon intensity. Start at 0.15 and review night visibility with gameplay exposure."))
+	float MoonLightIntensity = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
+		meta=(ClampMin="0.0", ClampMax="10.0", ToolTip="UDS skylight multiplier. Use 1 for sky-derived ambient light; add local interior lights for enclosed rooms."))
+	float SkyLightIntensity = 1.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
+		meta=(ClampMin="0.0", ClampMax="0.1", ToolTip="Clear-weather height fog density. Weather remains additive. Start at 0.003 to retain distant depth without washing out nearby architecture."))
+	float BaseFogDensity = 0.003f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
+		meta=(ToolTip="Enable UDS camera-occlusion-based interior adjustments. Scene collision or authored UDS Occlusion Volumes must identify interiors."))
+	bool bApplyInteriorAdjustments = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
+		meta=(ClampMin="0.0", ClampMax="1.0", ToolTip="Fog density multiplier when fully indoors. 0.25 reduces indoor haze without adding light through walls."))
+	float InteriorFogMultiplier = 0.25f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
+		meta=(ClampMin="-2.0", ClampMax="2.0", ToolTip="Extra UDS exposure bias when fully indoors. 0.35 provides modest adaptation while keeping window highlights readable."))
+	float InteriorExposureBias = 0.35f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="03 Post Process",
 		meta=(ToolTip="Reuse the actor tagged Territory.AAA.PostProcess. If absent, the tool creates one unbound Post Process Volume in the persistent level."))
 	bool bCreateOrUpdatePostProcessVolume = true;

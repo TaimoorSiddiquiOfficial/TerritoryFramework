@@ -2,6 +2,15 @@
 
 Status: **in progress**. Findings below distinguish confirmed defects from candidates.
 
+Latest focused update: [batch 40 — weapon melee, vehicle departure and UDS lighting](MELEE_VEHICLE_LIGHTING_2026-09-07.md).
+UE 5.8.2 Editor/runtime/UHT and Game builds pass; 274 automation tests pass.
+Weapon execution and interruption, mounted controller preservation, and both car
+arrivals have live coverage including a server and two clients. HopDistrictTest and
+AlMalik environment actors were updated. The earlier behavior-tree crash after
+attacker casualties, city/interior visual review, and broader audit gates remain open.
+The untracked `DA_QC_NewMission` draft also needs Objective/Success states and journal text.
+The batch 36 figures below are historical; they are not the latest build receipt.
+
 Latest code verification: batch 36, **265 passing automation tests** (252 clean,
 13 with fixture warnings; zero failed/skipped), Editor/runtime/UHT and
 Development Game builds. Repeated live save/load preserved survivor GUIDs, saved
