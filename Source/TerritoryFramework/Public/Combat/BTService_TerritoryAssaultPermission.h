@@ -21,7 +21,7 @@ public:
 
 	virtual void InitializeFromAsset(UBehaviorTree& Asset) override;
 
-	/** Territory or target Actor whose current Territory owns the assault limit. */
+	/** Fallback for ordinary NPCs. Physical assault participants always use their durable target. */
 	UPROPERTY(EditAnywhere, Category="Blackboard")
 	FBlackboardKeySelector TerritoryKey;
 
@@ -37,6 +37,7 @@ protected:
 	virtual void OnCeaseRelevant(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
 
 private:
+	friend class FTFAssaultPermissionTargetIdentity;
 	TWeakObjectPtr<ATerritoryVolume> GrantedTerritory;
 	TWeakObjectPtr<ANarrativeNPCController> GrantedController;
 

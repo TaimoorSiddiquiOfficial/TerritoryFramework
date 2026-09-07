@@ -222,6 +222,15 @@ public:
 
 	/** Runtime Narrative instances cloned from the assigned Definition asset. */
 	const TMap<ETerritoryState, FTerritoryStateConfig>& GetStateConfigs() const;
+	const FTerritoryStateGameplayRules* GetStateGameplayRules(ETerritoryState State, const FGameplayTag& OwnerFaction) const;
+
+	UFUNCTION(BlueprintPure, Category="Territory|State Rules")
+	FTerritoryStateGameplayRules GetActiveStateGameplayRules() const;
+
+	/** Read-only authoring gate. The CounterAttack subsystem still owns full admission. */
+	UFUNCTION(BlueprintPure, Category="Territory|State Rules")
+	bool DoStateRulesAllowAssault(FGameplayTag AttackingFaction, bool bExplicitNarrativeRequest) const;
+
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetDefenderDiedEvents() const;
 	const TArray<TObjectPtr<class UNarrativeEvent>>& GetAllDefendersDefeatedEvents() const;
 
@@ -613,9 +622,9 @@ public:
 
 public:
 	/** Check if all Entry Conditions for the given state pass. Public for atomic mutation validation. */
-	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
+	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext(), const FGameplayTag* RuleOwner = nullptr) const;
 	/** Check if all Definition-owned Exit Conditions for the given state pass. */
-	bool CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
+	bool CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext(), const FGameplayTag* RuleOwner = nullptr) const;
 	/** Validate the complete old-state exit and new-state entry rule set. */
 	bool CheckStateTransitionConditions(ETerritoryState OldState, ETerritoryState NewState, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
@@ -711,7 +720,7 @@ protected:
 	float StrategicValue = 1.f;
 
 	/** Fire EntryEvents (bEntering=true) or ExitEvents (bEntering=false) for the given state. Uses TransitionContext for instigator. */
-	void FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
+	void FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext(), const FGameplayTag* RuleOwner = nullptr);
 
 	UPROPERTY(Transient)
 	FGameplayTag ParentTerritoryTag;
@@ -783,6 +792,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDefenderNarrativeEventConditions;
 	friend class FTFVolumeRuleCallbacks;
+	friend class FTFFactionStateRulesIntegration;
 	friend class FTFGuardRetirementCallbacks;
 	friend class FTFGuardSpawnAdmissionCallbacks;
 	friend class FTFGuardReserveTotals;

@@ -424,35 +424,46 @@ struct FCaptureAttempt
 	int32 DefendersPresent = 0;
 };
 
-/**
- * Per-state configuration for Narrative conditions and events.
- * Entry conditions must pass before entering. Exit conditions must pass before leaving.
- * Claimed is the stable ownership state after capture. Contested Entry Events fire once per real transition,
- * not continuously while capture progress changes.
- * Example: put a quest-complete condition in Locked -> Exit Conditions to unlock a city.
- */
+/** Admission policy; none of these modes bypass diplomacy or physical capture. */
+UENUM(BlueprintType)
+enum class ETerritoryStateCounterAttackPolicy : uint8
+{
+	CaptureTriggered UMETA(DisplayName="After Capture (Profile Schedule)", ToolTip="Preserves existing ownership-change and recurring profile behavior. Explicit Narrative Waves are also allowed."),
+	WhileAtWar UMETA(DisplayName="Automatic While At War", ToolTip="May begin a finite schedule against an already-owned Place while at War. Quest gates, grace, profile repeat limits, cooldowns and all strategic calculations still apply."),
+	QuestOnly UMETA(DisplayName="Quest / Explicit Waves Only", ToolTip="Automatic scheduling is disabled. Explicit Narrative Wave events may launch after normal hard validation."),
+	Disabled UMETA(DisplayName="No New Assaults", ToolTip="Reject automatic and explicit new waves. An already physical battle continues; peace still cancels it.")
+};
+
+/** Gameplay rules selected by exact territory-owner faction. Narrative owns their execution. */
 USTRUCT(BlueprintType)
-struct FTerritoryStateConfig
+struct TERRITORYFRAMEWORK_API FTerritoryStateGameplayRules
 {
 	GENERATED_BODY()
 
-	/**
-	 * Local music and one-shot effects for this state. Narrative Music owns the
-	 * soundtrack; this row only selects its tagged set/theme for a player inside.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Audio",
-		meta=(DisplayName="Narrative Music And State Effects",
-			ToolTip="Optional local audio for this state. Easy example: Contested selects Music.Combat and plays an alarm; Claimed selects Music.Ambient and plays a short victory cue. Empty keeps the parent Territory or current world music."))
-	FTerritoryStateAudioConfig Audio;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Counterattacks")
+	ETerritoryStateCounterAttackPolicy CounterAttackPolicy = ETerritoryStateCounterAttackPolicy::CaptureTriggered;
 
-	/**
-	 * Optional stealth policy for this state. Empty uses the Territory Definition's
-	 * default profile. This keeps quest infiltration beside the other modular state rules.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Stealth",
-		meta=(DisplayName="Stealth Profile Override",
-			ToolTip="Optional stealth rules while this state is active. Easy example: assign Rescue Mission Stealth to the Claimed row so entering the enemy Place does not start War until a guard confirms the player."))
-	TObjectPtr<UTerritoryStealthProfile> StealthProfileOverride;
+	/** Empty permits any otherwise eligible hostile faction; tags match exactly. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Counterattacks", meta=(Categories="Narrative.Factions"))
+	FGameplayTagContainer AllowedAttackingFactions;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Economy", meta=(ToolTip="Allows this state's current owner to earn periodic currency from this Place. Guard upkeep remains payable."))
+	bool bAllowPeriodicIncome = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Economy", meta=(ToolTip="Allows this state's current owner to run Property resource recipes. Blocked cycles expire without later backpay."))
+	bool bAllowResourceProduction = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Economy", meta=(ToolTip="Allows the authored capital capture bonus. Other rewards belong in this faction's Narrative Entry Events."))
+	bool bAllowCapitalCaptureReward = true;
+
+	bool AllowsAssault(const FGameplayTag& AttackingFaction, bool bExplicitNarrativeRequest) const
+	{
+		const bool bModeAllows = CounterAttackPolicy == ETerritoryStateCounterAttackPolicy::CaptureTriggered
+			|| CounterAttackPolicy == ETerritoryStateCounterAttackPolicy::WhileAtWar
+			|| (CounterAttackPolicy == ETerritoryStateCounterAttackPolicy::QuestOnly && bExplicitNarrativeRequest);
+		return bModeAllows && AttackingFaction.IsValid()
+			&& (AllowedAttackingFactions.IsEmpty() || AllowedAttackingFactions.HasTagExact(AttackingFaction));
+	}
 
 	/**
 	 * Strategic controls supplied to the current owning faction while this state
@@ -484,6 +495,41 @@ struct FTerritoryStateConfig
 		meta=(DisplayName="Exit Events",
 			ToolTip="Narrative events fired after this state ends. Every inherited condition inside each event must pass. Example: advance the quest when the District unlocks, but only while reputation is at least 50."))
 	TArray<TObjectPtr<class UNarrativeEvent>> ExitEvents;
+};
+
+/** Common rules retain existing property names. An exact owner override replaces gameplay rules only. */
+USTRUCT(BlueprintType)
+struct FTerritoryStateConfig : public FTerritoryStateGameplayRules
+{
+	GENERATED_BODY()
+
+	/**
+	 * Local music and one-shot effects for this state. Narrative Music owns the
+	 * soundtrack; this row only selects its tagged set/theme for a player inside.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Audio",
+		meta=(DisplayName="Narrative Music And State Effects",
+			ToolTip="Optional local audio for this state. Easy example: Contested selects Music.Combat and plays an alarm; Claimed selects Music.Ambient and plays a short victory cue. Empty keeps the parent Territory or current world music."))
+	FTerritoryStateAudioConfig Audio;
+
+	/**
+	 * Optional stealth policy for this state. Empty uses the Territory Definition's
+	 * default profile. This keeps quest infiltration beside the other modular state rules.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Stealth",
+		meta=(DisplayName="Stealth Profile Override",
+			ToolTip="Optional stealth rules while this state is active. Easy example: assign Rescue Mission Stealth to the Claimed row so entering the enemy Place does not start War until a guard confirms the player."))
+	TObjectPtr<UTerritoryStealthProfile> StealthProfileOverride;
+
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Faction Rules", meta=(ForceInlineRow, ToolTip="Exact Narrative owner faction overrides. A matching row replaces common conditions, events, capabilities, income and counterattack policy. Entry uses the incoming owner; exit uses the outgoing owner. Unlisted factions use common rules. Audio and stealth stay on the state row."))
+	TMap<FGameplayTag, FTerritoryStateGameplayRules> FactionOverrides;
+
+	const FTerritoryStateGameplayRules& ForFaction(const FGameplayTag& OwnerFaction) const
+	{
+		if (const FTerritoryStateGameplayRules* Override = FactionOverrides.Find(OwnerFaction)) return *Override;
+		return *this;
+	}
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

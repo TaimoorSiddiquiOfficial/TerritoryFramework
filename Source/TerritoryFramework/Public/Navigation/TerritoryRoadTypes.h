@@ -53,6 +53,18 @@ struct FTerritoryVehicleAwarenessSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road|Awareness",
 		meta=(ClampMin="0.0", ToolTip="After this many blocked seconds, assault squads dismount when a complete walking route exists. Story chase targets use their authored abandonment policy. Zero disables the blocked-vehicle handoff."))
 	float AbandonAfterBlockedSeconds = 12.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road|Arrival",
+		meta=(ClampMin="0.0", ClampMax="10000.0", ToolTip="Search backwards along the existing route for a free drop-off with a complete walking path. Zero uses only the authored endpoint."))
+	float ArrivalSearchDistance = 2500.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road|Arrival",
+		meta=(ClampMin="600.0", ClampMax="2000.0"))
+	float ArrivalSpacing = 1000.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road|Awareness",
+		meta=(ToolTip="Obey Narrative's closed-lane annotations. Waiting at a traffic light does not count as a blocked arrival."))
+	bool bObeyNarrativeTrafficLights = true;
 };
 
 /** Cleanup policy for temporary reinforcement and story vehicles. */

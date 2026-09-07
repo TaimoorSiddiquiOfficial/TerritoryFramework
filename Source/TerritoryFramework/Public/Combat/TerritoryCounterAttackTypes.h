@@ -77,7 +77,8 @@ enum class ETerritoryAssaultResolution : uint8
 	ChaseDistanceLost UMETA(DisplayName="Story Chase Distance Lost",
 		ToolTip="Every player remained beyond the configured chase distance for the full grace period, so the finite story target escaped."),
 	ReinforcementCapabilityLost UMETA(DisplayName="Reinforcement Capability Lost",
-		ToolTip="The faction lost the Territory.Capability.Reinforcements perk before its physical counterattack deployed. Already deployed attackers are never erased by this rule.")
+		ToolTip="The faction lost the Territory.Capability.Reinforcements perk before its physical counterattack deployed. Already deployed attackers are never erased by this rule."),
+	StateRuleBlocked UMETA(DisplayName="Owner / State Policy Blocked")
 };
 
 /** Why an assault was admitted. Story pursuit is explicit and never selected by normal strategy. */
@@ -569,6 +570,34 @@ struct FTerritoryVehicleDeploymentCount
 	int32 Count = 0;
 };
 
+/** A finite participant awaiting physical reconstruction. Narrative owns its GUID-keyed NPC save. */
+USTRUCT()
+struct FTerritoryAssaultSurvivor
+{
+	GENERATED_BODY()
+	UPROPERTY(SaveGame) FGuid SpawnGUID;
+	UPROPERTY(SaveGame) FName ApproachID;
+	UPROPERTY(SaveGame) FTransform Transform;
+	/** Invalid once the NPC has dismounted; parked cars do not buy another deployment. */
+	UPROPERTY(SaveGame) FGuid VehicleID;
+	UPROPERTY(SaveGame) int32 SeatIndex = 0;
+};
+
+/** Value checkpoint for one already charged Narrative vehicle deployment. */
+USTRUCT()
+struct FTerritoryAssaultVehicleCheckpoint
+{
+	GENERATED_BODY()
+	UPROPERTY(SaveGame) FGuid VehicleID;
+	UPROPERTY(SaveGame) FName ApproachID;
+	UPROPERTY(SaveGame) FTransform Transform;
+	UPROPERTY(SaveGame) TSoftClassPtr<ANarrativeVehicleBase> VehicleClass;
+	UPROPERTY(SaveGame) TArray<FVector> RoutePoints;
+	UPROPERTY(SaveGame) FTransform ParkDestination;
+	UPROPERTY(SaveGame) FTransform WalkDestination;
+	UPROPERTY(SaveGame) float HealthFraction = 1.f;
+};
+
 /** Durable decision/casualty record. Contains no live UObject pointers. */
 USTRUCT(BlueprintType)
 struct FTerritoryAssaultRecord
@@ -637,6 +666,13 @@ struct FTerritoryAssaultRecord
 	/** Durable total and per-road usage prevent save/load from creating extra cars. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") int32 VehicleDeploymentsUsed = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") TArray<FTerritoryVehicleDeploymentCount> VehicleDeploymentsByApproach;
+	/** Server save details; clients continue to receive the existing finite-force read model. */
+	UPROPERTY(SaveGame, NotReplicated) int32 PhysicalStateVersion = 0;
+	UPROPERTY(SaveGame, NotReplicated) TArray<FTerritoryAssaultSurvivor> PendingSurvivors;
+	UPROPERTY(SaveGame, NotReplicated) TArray<FTerritoryAssaultVehicleCheckpoint> VehicleCheckpoints;
+	/** Bounded migration of pre-checkpoint saves. These are survivors, never fresh reserve. */
+	UPROPERTY(SaveGame, NotReplicated) int32 LegacySurvivorsToRestore = 0;
+	UPROPERTY(SaveGame, NotReplicated) TArray<FTerritoryVehicleDeploymentCount> LegacyVehicleRestoreCredits;
 	/** Bounded physical deployment failure count; reset after any successful spawn. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 ConsecutiveSpawnFailures = 0;
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") TArray<FName> SelectedApproaches;

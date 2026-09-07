@@ -1361,7 +1361,8 @@ bool UTerritoryControlSubsystem::CommitCaptureReadModel(
 	if (Territory->GetTerritoryState() != NewState)
 	{
 		FText ConditionFailure;
-		if (!Territory->CheckStateConditions(NewState, ConditionFailure, TransitionContext))
+		const FGameplayTag CurrentOwner = Territory->GetOwningFaction();
+		if (!Territory->CheckStateConditions(NewState, ConditionFailure, TransitionContext, &CurrentOwner))
 		{
 			UE_LOG(LogTerritory, Warning,
 				TEXT("[Capture] %s atomic state transition to %d rejected: %s"),
@@ -1610,7 +1611,7 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	if (!Request.bBypassConditions)
 	{
 		FText ConditionFailure;
-		if (!Territory->CheckStateConditions(Request.DesiredState, ConditionFailure, Request.TransitionContext))
+		if (!Territory->CheckStateConditions(Request.DesiredState, ConditionFailure, Request.TransitionContext, &Request.NewOwner))
 		{
 			Response.Result = ETerritoryMutationResult::Rejected_ConditionsFailed;
 			Response.Explanation = ConditionFailure.IsEmpty()

@@ -16,6 +16,7 @@ class UNPCActivityComponent;
 class UNPCGoalItem;
 class UTerritoryAssaultGoal;
 struct FGameplayEffectSpec;
+struct FTerritoryAssaultVehicleCheckpoint;
 
 /** Runtime bridge from one physical Narrative NPC to one durable assault record. */
 UCLASS(ClassGroup=(Territory), BlueprintType, meta=(BlueprintSpawnableComponent))
@@ -88,9 +89,15 @@ public:
 	/** Read-only diagnostics for the Native combat bridge, including expiring damage threats. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault|Diagnostics")
 	FString GetCombatDebugString() const;
+	/** Read-only server persistence projection; mounting remains owned by Narrative. */
+	ANarrativeVehicleBase* GetPendingIngressVehicle() const;
+	int32 GetIngressSeatIndex() const { return NarrativeVehicleSeatIndex; }
+	void UpdateVehicleCheckpoint(FTerritoryAssaultVehicleCheckpoint& Checkpoint) const;
 
 private:
+	friend class FTFAssaultSurvivorRestore;
 	friend class FTFAssaultCombatAutonomy;
+	friend class FTFRoadSteeringObstacle;
 	// Bounded transient perception context, never campaign state or client input.
 	TMap<TWeakObjectPtr<AActor>, double> DamagingEnemies;
 	UPROPERTY(Replicated) FGuid AssaultID;
@@ -133,6 +140,10 @@ private:
 	float SecondsOutsideChaseRange = 0.f;
 	float VehicleAbandonHealthFraction = 0.35f;
 	float VehicleBlockedSeconds = 0.f;
+	bool bArrivalReservationAttempted = false;
+	double NextTrafficSignalCheck = 0.0;
+	bool bTrafficSignalAhead = false;
+	float TrafficSignalDistance = 0.f;
 	bool bAbandonDamagedVehicleForFinalFight = false;
 	bool bVehicleAbandonmentRequested = false;
 	bool bUseVehicleWalkDestination = false;
@@ -161,7 +172,7 @@ private:
 	float GetClosestPlayerDistanceToVehicle() const;
 	float GetNarrativeVehicleHealthFraction() const;
 	bool QueryVehicleObstacleDistance(const FVector& LateralOffset,
-		float& OutDistance) const;
+		float& OutDistance, const FVector& ProbeDirection = FVector::ZeroVector) const;
 	bool TryBeginVehicleDismount();
 	void BeginVehicleAbandonment(const TCHAR* Reason);
 	void StopVehicleInputs();

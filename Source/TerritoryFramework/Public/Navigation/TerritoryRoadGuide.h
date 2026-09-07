@@ -23,6 +23,7 @@ class TERRITORYFRAMEWORK_API ATerritoryRoadGuide : public AActor
 
 public:
 	ATerritoryRoadGuide();
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintPure, Category="Territory|Road")
 	FName GetRoadGuideID() const { return RoadGuideID; }
@@ -98,6 +99,8 @@ public:
 #endif
 
 private:
+	TWeakObjectPtr<AQuestRoadControls> LeasedTrafficControls;
+	int32 LocalTrafficUsers = 0;
 	FTransform GetRouteTransformAtDistance(float Distance, bool bReverseDirection,
 		ETerritoryRoadLaneSide LaneSide) const;
 	float GetSignedLaneOffset(bool bReverseDirection,

@@ -1,5 +1,6 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -1188,6 +1189,8 @@ void UTerritoryEconomySubsystem::RefreshProductionSite(ATerritoryProperty* Prope
 	Site.DisplayName = Property->GetTerritoryDisplayName();
 	Site.OwnerFaction = Property->GetOwningFaction();
 	Site.ProductionProfile = Property->GetProductionProfile();
+	Site.TerritoryDefinition = Property->GetTerritoryDefinition();
+	Site.StateRulesVersion = 1;
 	Site.UpgradeLevel = FMath::Max(0, Property->UpgradeLevel);
 	Site.TerritoryState = Property->GetTerritoryState();
 	Site.Availability = Property->GetTerritoryAvailability();
@@ -1253,6 +1256,14 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 		Site.RuleStates.Empty();
 		return;
 	}
+
+	const UTerritoryDefinition* Definition = Site.TerritoryDefinition.LoadSynchronous();
+	if (EvaluationRevision != ProductionStateRevision) return;
+	const FTerritoryStateConfig* StateConfig = Definition ? Definition->StateConfigs.Find(Site.TerritoryState) : nullptr;
+	const bool bPolicyKnown = Site.StateRulesVersion >= 1
+		&& (Site.TerritoryDefinition.IsNull() || Definition);
+	const bool bProductionAllowed = bPolicyKnown
+		&& (!StateConfig || StateConfig->ForFaction(Site.OwnerFaction).bAllowResourceProduction);
 
 	// Profiles can be edited by Narrative callbacks; one evaluation keeps its own rules.
 	TArray<FTerritoryProductionRule> Rules = Profile->Rules;
@@ -1347,7 +1358,15 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 			Result.CycleIndex = EvaluationCycle;
 
 			FText StateFailure;
-			if (!IsProductionSiteAvailable(GetWorld(), Site))
+			if (!bProductionAllowed)
+			{
+				Result.Status = ETerritoryProductionStatus::Inactive;
+				Result.FailureReason = bPolicyKnown
+					? NSLOCTEXT("TerritoryProduction", "FactionStateDisabled", "The current owner's state rules disable resource production.")
+					: NSLOCTEXT("TerritoryProduction", "StatePolicyUnknown", "Production is waiting for the Place to restore its authored state rules.");
+				Checkpoint.LastProcessedCycle = EvaluationCycle;
+			}
+			else if (!IsProductionSiteAvailable(GetWorld(), Site))
 			{
 				Result.Status = ETerritoryProductionStatus::Inactive;
 				Result.FailureReason = NSLOCTEXT("TerritoryProduction", "TerritoryLocked",

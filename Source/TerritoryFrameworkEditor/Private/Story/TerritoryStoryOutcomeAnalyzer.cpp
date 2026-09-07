@@ -166,6 +166,9 @@ namespace
 	FString DescribeStateEffects(const FTerritoryStateConfig& Config)
 	{
 		TArray<FString> Effects;
+		Effects.Add(FString::Printf(TEXT("Counter policy: %s; cash income: %s; production: %s"),
+			*EnumDisplayName(Config.CounterAttackPolicy), Config.bAllowPeriodicIncome ? TEXT("allowed") : TEXT("disabled"),
+			Config.bAllowResourceProduction ? TEXT("allowed") : TEXT("disabled")));
 		if (!Config.GrantedCommandCapabilities.IsEmpty())
 		{
 			Effects.Add(FString::Printf(
@@ -314,59 +317,73 @@ namespace
 		for (const ETerritoryState State : { ETerritoryState::Unclaimed,
 			ETerritoryState::Contested, ETerritoryState::Claimed })
 		{
-			const FTerritoryStateConfig* Config = Definition->StateConfigs.Find(State);
-			if (!Config) continue;
-
-			const FString EntryConditions = DescribeConditions(Config->EntryConditions);
-			const FString ExitConditions = DescribeConditions(Config->ExitConditions);
-			const FString EntryEvents = DescribeEvents(Config->EntryEvents);
-			const FString ExitEvents = DescribeEvents(Config->ExitEvents);
-			const FString Effects = DescribeStateEffects(*Config);
-
-			const bool bHasContent = !EntryConditions.IsEmpty() || !ExitConditions.IsEmpty()
-				|| !EntryEvents.IsEmpty() || !ExitEvents.IsEmpty() || !Effects.IsEmpty();
-			if (!bHasContent) continue;
-
-			const bool bParentPoliticalConditionsIgnored = bAggregate
-				&& State != ETerritoryState::Locked
-				&& (!Config->EntryConditions.IsEmpty() || !Config->ExitConditions.IsEmpty());
-			const bool bContainsCustomBlueprint =
-				ContainsCustomBlueprintObject(Config->EntryConditions)
-				|| ContainsCustomBlueprintObject(Config->ExitConditions)
-				|| ContainsCustomBlueprintObject(Config->EntryEvents)
-				|| ContainsCustomBlueprintObject(Config->ExitEvents);
-			const FString When = State == ETerritoryState::Locked
-				? TEXT("Availability enters or leaves Locked.")
-				: FString::Printf(TEXT("Political control enters or leaves %s."),
-					*EnumDisplayName(State));
-			FString Then = EntryEvents.IsEmpty()
-				? TEXT("No entry event is authored.")
-				: FString::Printf(TEXT("On entry: %s."), *EntryEvents);
-			if (!ExitEvents.IsEmpty())
+			const FTerritoryStateConfig* AuthoredConfig = Definition->StateConfigs.Find(State);
+			if (!AuthoredConfig) continue;
+			TArray<FGameplayTag> Owners;
+			AuthoredConfig->FactionOverrides.GetKeys(Owners);
+			Owners.Sort([](const FGameplayTag& A, const FGameplayTag& B) { return A.ToString() < B.ToString(); });
+			Owners.Insert(FGameplayTag(), 0);
+			for (const FGameplayTag& RuleOwner : Owners)
 			{
-				Then += FString::Printf(TEXT(" On exit: %s."), *ExitEvents);
-			}
+				FTerritoryStateConfig Effective = *AuthoredConfig;
+				static_cast<FTerritoryStateGameplayRules&>(Effective) = AuthoredConfig->ForFaction(RuleOwner);
+				Effective.FactionOverrides.Reset();
+				const FTerritoryStateConfig* Config = &Effective;
 
-			AddScenario(Report, TEXT("State Rules"),
-				FString::Printf(TEXT("%s lifecycle"), *EnumDisplayName(State)),
-				bParentPoliticalConditionsIgnored
-					? ETerritoryStoryOutcomeCertainty::Warning
-					: (bContainsCustomBlueprint
-						? ETerritoryStoryOutcomeCertainty::CustomBlueprint
-					: (!EntryConditions.IsEmpty() || !ExitConditions.IsEmpty()
-						? ETerritoryStoryOutcomeCertainty::RuntimeConditional
-						: ETerritoryStoryOutcomeCertainty::Configured)),
-				When,
-				JoinNonEmpty({ EntryConditions.IsEmpty() ? FString()
-					: FString::Printf(TEXT("Enter: %s"), *EntryConditions),
-					ExitConditions.IsEmpty() ? FString()
-					: FString::Printf(TEXT("Leave: %s"), *ExitConditions) }, TEXT("; ")),
-				Then,
-				bParentPoliticalConditionsIgnored
-					? TEXT("City/District political state conditions cannot block the hierarchy reducer. Move a story gate to Locked Exit Conditions or to child Place rules. The parent events still run after the derived state changes.")
-					: TEXT("A failed condition blocks that independent state transition or skips an event whose own inherited conditions fail."),
-				Effects,
-				FString::Printf(TEXT("05 State Rules > %s"), *EnumDisplayName(State)));
+				const FString EntryConditions = DescribeConditions(Config->EntryConditions);
+				const FString ExitConditions = DescribeConditions(Config->ExitConditions);
+				const FString EntryEvents = DescribeEvents(Config->EntryEvents);
+				const FString ExitEvents = DescribeEvents(Config->ExitEvents);
+				const FString Effects = DescribeStateEffects(*Config);
+
+				const bool bHasContent = !EntryConditions.IsEmpty() || !ExitConditions.IsEmpty()
+					|| !EntryEvents.IsEmpty() || !ExitEvents.IsEmpty() || !Effects.IsEmpty();
+				if (!bHasContent) continue;
+
+				const bool bParentPoliticalConditionsIgnored = bAggregate
+					&& State != ETerritoryState::Locked
+					&& (!Config->EntryConditions.IsEmpty() || !Config->ExitConditions.IsEmpty());
+				const bool bContainsCustomBlueprint =
+					ContainsCustomBlueprintObject(Config->EntryConditions)
+					|| ContainsCustomBlueprintObject(Config->ExitConditions)
+					|| ContainsCustomBlueprintObject(Config->EntryEvents)
+					|| ContainsCustomBlueprintObject(Config->ExitEvents);
+				const FString When = State == ETerritoryState::Locked
+					? TEXT("Availability enters or leaves Locked.")
+					: FString::Printf(TEXT("Political control enters or leaves %s."),
+						*EnumDisplayName(State));
+				FString Then = EntryEvents.IsEmpty()
+					? TEXT("No entry event is authored.")
+					: FString::Printf(TEXT("On entry: %s."), *EntryEvents);
+				if (!ExitEvents.IsEmpty())
+				{
+					Then += FString::Printf(TEXT(" On exit: %s."), *ExitEvents);
+				}
+
+				AddScenario(Report, TEXT("State Rules"),
+					RuleOwner.IsValid()
+						? FString::Printf(TEXT("%s lifecycle (%s)"), *EnumDisplayName(State), *RuleOwner.ToString())
+						: FString::Printf(TEXT("%s lifecycle"), *EnumDisplayName(State)),
+					bParentPoliticalConditionsIgnored
+						? ETerritoryStoryOutcomeCertainty::Warning
+						: (bContainsCustomBlueprint
+							? ETerritoryStoryOutcomeCertainty::CustomBlueprint
+						: (!EntryConditions.IsEmpty() || !ExitConditions.IsEmpty()
+							? ETerritoryStoryOutcomeCertainty::RuntimeConditional
+							: ETerritoryStoryOutcomeCertainty::Configured)),
+					When,
+					JoinNonEmpty({ EntryConditions.IsEmpty() ? FString()
+						: FString::Printf(TEXT("Enter: %s"), *EntryConditions),
+						ExitConditions.IsEmpty() ? FString()
+						: FString::Printf(TEXT("Leave: %s"), *ExitConditions) }, TEXT("; ")),
+					Then,
+					bParentPoliticalConditionsIgnored
+						? TEXT("City/District political state conditions cannot block the hierarchy reducer. Move a story gate to Locked Exit Conditions or to child Place rules. The parent events still run after the derived state changes.")
+						: TEXT("A failed condition blocks that independent state transition or skips an event whose own inherited conditions fail."),
+					Effects,
+					FString::Printf(TEXT("05 State Rules > %s%s"), *EnumDisplayName(State),
+						RuleOwner.IsValid() ? *FString::Printf(TEXT(" > Faction Overrides > %s"), *RuleOwner.ToString()) : TEXT("")));
+			}
 		}
 	}
 

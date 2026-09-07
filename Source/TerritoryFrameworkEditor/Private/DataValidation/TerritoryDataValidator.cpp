@@ -1350,61 +1350,90 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 					static_cast<int32>(Pair.Key), Label, Index));
 			}
 		};
-		CheckObjects(Pair.Value.EntryConditions, TEXT("Entry Conditions"));
-		CheckObjects(Pair.Value.ExitConditions, TEXT("Exit Conditions"));
-		CheckObjects(Pair.Value.EntryEvents, TEXT("Entry Events"));
-		CheckObjects(Pair.Value.ExitEvents, TEXT("Exit Events"));
-		bool bSchedulesEnemyWave = false;
-		bool bEndsWar = false;
-		bool bWarEstablishedBeforeWave = false;
-		for (const UNarrativeEvent* Event : Pair.Value.EntryEvents)
+		auto CheckFaction = [&Error](const FGameplayTag& Faction)
 		{
-			if (const UTerritorySetDiplomacyEvent* DiplomacyEvent =
-				Cast<UTerritorySetDiplomacyEvent>(Event))
+			const FGameplayTag Root = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions"));
+			if (!Faction.IsValid() || Faction == Root || !Faction.MatchesTag(Root))
+				Error(TEXT("Faction state rules must use an exact Narrative faction tag below Narrative.Factions"));
+		};
+		auto CheckGameplayRules = [&CheckObjects, &CheckFaction, &Error](const FTerritoryStateGameplayRules& Rules)
+		{
+			CheckObjects(Rules.EntryConditions, TEXT("Entry Conditions"));
+			CheckObjects(Rules.ExitConditions, TEXT("Exit Conditions"));
+			CheckObjects(Rules.EntryEvents, TEXT("Entry Events"));
+			CheckObjects(Rules.ExitEvents, TEXT("Exit Events"));
+			if (!StaticEnum<ETerritoryStateCounterAttackPolicy>()->IsValidEnumValue(static_cast<int64>(Rules.CounterAttackPolicy)))
+				Error(TEXT("Invalid state counterattack policy"));
+			for (const FGameplayTag& Attacker : Rules.AllowedAttackingFactions) CheckFaction(Attacker);
+		};
+		CheckGameplayRules(Pair.Value);
+		for (const auto& Override : Pair.Value.FactionOverrides)
+		{
+			CheckFaction(Override.Key);
+			CheckGameplayRules(Override.Value);
+		}
+		auto CheckWaveEvents = [&](const TArray<TObjectPtr<UNarrativeEvent>>& Events)
+		{
+			bool bSchedulesEnemyWave = false;
+			bool bEndsWar = false;
+			bool bWarEstablishedBeforeWave = false;
+			for (const UNarrativeEvent* Event : Events)
 			{
-				bEndsWar |= DiplomacyEvent->NewState != EDiplomacyState::War;
-				bWarEstablishedBeforeWave |=
-					DiplomacyEvent->NewState == EDiplomacyState::War;
-			}
-
-			const UTerritoryScheduleEnemyWaveEvent* WaveEvent =
-				Cast<UTerritoryScheduleEnemyWaveEvent>(Event);
-			if (!WaveEvent) continue;
-			bSchedulesEnemyWave = true;
-			if (!WaveEvent->TargetTerritory.IsValid())
-			{
-				Error(FString::Printf(
-					TEXT("State %d contains a Wave of Enemies event without a target Territory"),
-					static_cast<int32>(Pair.Key)));
-			}
-			if (!WaveEvent->bChooseBestEligibleAttacker
-				&& !WaveEvent->AttackingFaction.IsValid())
-			{
-				Error(FString::Printf(
-					TEXT("State %d contains a Wave of Enemies event without an attacking faction; choose an attacker or enable Best Eligible Attacker"),
-					static_cast<int32>(Pair.Key)));
-			}
-
-			const bool bHasWarCondition = WaveEvent->Conditions.ContainsByPredicate(
-				[](const UNarrativeCondition* Condition)
+				if (const UTerritorySetDiplomacyEvent* DiplomacyEvent =
+					Cast<UTerritorySetDiplomacyEvent>(Event))
 				{
-					const UTerritoryDiplomacyCondition* DiplomacyCondition =
-						Cast<UTerritoryDiplomacyCondition>(Condition);
-					return DiplomacyCondition
-						&& DiplomacyCondition->RequiredState == EDiplomacyState::War;
-				});
-			if (!bWarEstablishedBeforeWave && !bHasWarCondition)
+					bEndsWar |= DiplomacyEvent->NewState != EDiplomacyState::War;
+					bWarEstablishedBeforeWave |=
+						DiplomacyEvent->NewState == EDiplomacyState::War;
+				}
+
+				const UTerritoryScheduleEnemyWaveEvent* WaveEvent =
+					Cast<UTerritoryScheduleEnemyWaveEvent>(Event);
+				if (!WaveEvent) continue;
+				bSchedulesEnemyWave = true;
+				if (!WaveEvent->TargetTerritory.IsValid())
+				{
+					Error(FString::Printf(
+						TEXT("State %d contains a Wave of Enemies event without a target Territory"),
+						static_cast<int32>(Pair.Key)));
+				}
+				if (!WaveEvent->bChooseBestEligibleAttacker
+					&& !WaveEvent->AttackingFaction.IsValid())
+				{
+					Error(FString::Printf(
+						TEXT("State %d contains a Wave of Enemies event without an attacking faction; choose an attacker or enable Best Eligible Attacker"),
+						static_cast<int32>(Pair.Key)));
+				}
+
+				const bool bHasWarCondition = WaveEvent->Conditions.ContainsByPredicate(
+					[](const UNarrativeCondition* Condition)
+					{
+						const UTerritoryDiplomacyCondition* DiplomacyCondition =
+							Cast<UTerritoryDiplomacyCondition>(Condition);
+						return DiplomacyCondition
+							&& DiplomacyCondition->RequiredState == EDiplomacyState::War;
+					});
+				if (!bWarEstablishedBeforeWave && !bHasWarCondition)
+				{
+					Warning(FString::Printf(
+						TEXT("State %d schedules a Wave of Enemies without an earlier Set Territory Diplomacy = War event or an inherited Territory Diplomacy Condition requiring War. The runtime will reject the Wave while the attacker and defender are Neutral, allied, under ceasefire, trading, or non-aggressive."),
+						static_cast<int32>(Pair.Key)));
+				}
+			}
+			if (bSchedulesEnemyWave && bEndsWar)
 			{
 				Warning(FString::Printf(
-					TEXT("State %d schedules a Wave of Enemies without an earlier Set Territory Diplomacy = War event or an inherited Territory Diplomacy Condition requiring War. The runtime will reject the Wave while the attacker and defender are Neutral, allied, under ceasefire, trading, or non-aggressive."),
+					TEXT("State %d schedules an enemy Wave and also ends War in the same event bundle. Territory assaults require War during admission and deployment, so the peace-like event will cancel the Wave. Move peace to the Quest/assault-resolution path."),
 					static_cast<int32>(Pair.Key)));
 			}
-		}
-		if (bSchedulesEnemyWave && bEndsWar)
+
+		};
+		CheckWaveEvents(Pair.Value.EntryEvents);
+		CheckWaveEvents(Pair.Value.ExitEvents);
+		for (const auto& Override : Pair.Value.FactionOverrides)
 		{
-			Warning(FString::Printf(
-				TEXT("State %d schedules an enemy Wave and also ends War in the same Entry Events row. Territory assaults require War during admission and deployment, so the peace-like event will cancel the Wave. Move peace to the Quest/assault-resolution path."),
-				static_cast<int32>(Pair.Key)));
+			CheckWaveEvents(Override.Value.EntryEvents);
+			CheckWaveEvents(Override.Value.ExitEvents);
 		}
 		ValidateStealthProfile(Pair.Value.StealthProfileOverride,
 			FString::Printf(TEXT("%s state %d stealth override"), *Context,

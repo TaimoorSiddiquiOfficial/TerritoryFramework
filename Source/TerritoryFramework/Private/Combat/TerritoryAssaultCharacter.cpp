@@ -9,6 +9,7 @@
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "Character/NarrativeCharacterVisual.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
+#include "GAS/NarrativeAttributeSetBase.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
@@ -17,6 +18,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "NarrativeArsenal.h"
+#include "NarrativeSavableComponent.h"
 #include "Tales/TriggerSet.h"
 
 namespace
@@ -32,6 +34,7 @@ namespace
 		FGuid AssaultID;
 		FGameplayTag TargetTerritory;
 		bool bApplied = false;
+		bool bRestoringPhysicalState = false;
 	};
 
 	// Narrative's SpawnNPC call is synchronous and server/game-thread only. Keeping
@@ -159,7 +162,7 @@ ATerritoryAssaultCharacter* ATerritoryAssaultCharacter::SpawnThroughNarrative(
 	UNPCActivityConfiguration* OptionalActivityOverride,
 	const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
 	const FGuid& AssaultID, const FGameplayTag& TargetTerritory,
-	int32 OverrideNarrativeLevel)
+	int32 OverrideNarrativeLevel, bool bRestoringPhysicalState)
 {
 	if (!IsInGameThread() || !CharacterSubsystem || !Definition || !ExactFaction.IsValid()
 		|| !TerritoryGuid.IsValid() || !SpawnGuid.IsValid() || !AssaultID.IsValid()
@@ -197,6 +200,7 @@ ATerritoryAssaultCharacter* ATerritoryAssaultCharacter::SpawnThroughNarrative(
 	Context.SpawnName = SpawnName;
 	Context.AssaultID = AssaultID;
 	Context.TargetTerritory = TargetTerritory;
+	Context.bRestoringPhysicalState = bRestoringPhysicalState;
 	TGuardValue<FPendingTerritoryAssaultSpawn*> PendingGuard(
 		GPendingTerritoryAssaultSpawn, &Context);
 
@@ -256,6 +260,10 @@ void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 	{
 		if (UNarrativeAbilitySystemComponent* ASC = GetNarrativeAbilitySystemComponent())
 		{
+			// Narrative's native ASC leaves its save-attribute list empty by default.
+			// Finite survivors must retain damage through that existing save authority.
+			ASC->AttributesToSave.AddUnique(UNarrativeAttributeSetBase::GetMaxHealthAttribute());
+			ASC->AttributesToSave.AddUnique(UNarrativeAttributeSetBase::GetHealthAttribute());
 			ASC->OnDeathStateChanged.AddUniqueDynamic(this, &ATerritoryAssaultCharacter::HandleDeath);
 		}
 	}
@@ -267,6 +275,8 @@ void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 		SpawnInfo.SpawnAssignedSaveGUID = GPendingTerritoryAssaultSpawn->SpawnGuid;
 		SpawnInfo.SpawnTransform = GPendingTerritoryAssaultSpawn->SpawnTransform;
 		SpawnInfo.SpawnName = GPendingTerritoryAssaultSpawn->SpawnName;
+		bRestoreDeploymentTransformAfterNativeLoad = GPendingTerritoryAssaultSpawn->bRestoringPhysicalState;
+		RestoredDeploymentTransform = GPendingTerritoryAssaultSpawn->SpawnTransform;
 		if (AssaultParticipant)
 		{
 			AssaultParticipant->Configure(
@@ -278,6 +288,25 @@ void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 		GPendingTerritoryAssaultSpawn->bApplied = true;
 	}
 	Super::SetNPCDefinition(Definition);
+}
+
+void ATerritoryAssaultCharacter::OnCharacterVisualInitialized()
+{
+	// Narrative restores inventory, attributes and controller state by the original GUID.
+	// A mounted save transform is inside the old car; use the validated remount position.
+	Super::OnCharacterVisualInitialized();
+	if (HasAuthority() && bRestoreDeploymentTransformAfterNativeLoad)
+	{
+		// Cached appearance data can complete Native loading during deferred spawn,
+		// before Native BeginPlay reapplies default attributes. Replay only the ASC's
+		// already-loaded attribute record after that initialization, not inventory/goals.
+		bReloadSavedAttributesAfterBeginPlay = !HasActorBegunPlay();
+		bRestoreDeploymentTransformAfterNativeLoad = false;
+		if (AssaultParticipant && !AssaultParticipant->HasRetired())
+		{
+			SetActorTransform(RestoredDeploymentTransform, false, nullptr, ETeleportType::TeleportPhysics);
+		}
+	}
 }
 
 ETeamAttitude::Type ATerritoryAssaultCharacter::GetTeamAttitudeTowards(
@@ -338,6 +367,14 @@ bool ATerritoryAssaultCharacter::CanEngageAssaultTarget(const AActor* Target) co
 void ATerritoryAssaultCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	if (HasAuthority() && bReloadSavedAttributesAfterBeginPlay)
+	{
+		bReloadSavedAttributesAfterBeginPlay = false;
+		if (UNarrativeAbilitySystemComponent* ASC = GetNarrativeAbilitySystemComponent())
+		{
+			INarrativeSavableComponent::Execute_Load(ASC);
+		}
+	}
 	ApplyNarrativeCollisionOverrides(*this);
 }
 

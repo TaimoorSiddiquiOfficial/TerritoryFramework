@@ -48,10 +48,13 @@ public:
 		UNPCActivityConfiguration* OptionalActivityOverride,
 		const TArray<TSoftObjectPtr<UTriggerSet>>& OptionalTriggerOverrides,
 		const FGuid& AssaultID, const FGameplayTag& TargetTerritory,
-		int32 OverrideNarrativeLevel = INDEX_NONE);
+		int32 OverrideNarrativeLevel = INDEX_NONE, bool bRestoringPhysicalState = false);
 
 	/** Ensures this finished server spawn has its configured Narrative controller/activity. */
 	bool EnsureNarrativeControllerReady();
+	FName GetAssaultApproachID() const { return SpawnInfo.SpawnName; }
+	/** Keep an asynchronous Native load aligned with the engine-validated placement. */
+	void UpdateRestoredDeploymentTransform(const FTransform& Transform) { RestoredDeploymentTransform = Transform; }
 
 	/** True once Narrative's definition, appearance, controller, and activity are usable. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault")
@@ -92,6 +95,10 @@ public:
 	TObjectPtr<UTerritoryDiplomacyDialogueComponent> DiplomacyDialogue;
 
 protected:
+	virtual void OnCharacterVisualInitialized() override;
+	bool bRestoreDeploymentTransformAfterNativeLoad = false;
+	bool bReloadSavedAttributesAfterBeginPlay = false;
+	FTransform RestoredDeploymentTransform;
 	virtual void BeginPlay() override;
 	virtual void HandleDeath_Implementation(AActor* KilledActor,
 		UNarrativeAbilitySystemComponent* KilledActorASC, const bool bIsDead) override;

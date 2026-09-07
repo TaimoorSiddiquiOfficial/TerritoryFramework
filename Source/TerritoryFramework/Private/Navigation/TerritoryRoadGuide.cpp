@@ -21,8 +21,8 @@ float ATerritoryRoadGuide::GetSignedLaneOffset(const bool bReverseDirection,
 	const ETerritoryRoadLaneSide LaneSide) const
 {
 	float Offset = 0.f;
-	if (LaneSide == ETerritoryRoadLaneSide::Left) Offset = LaneCenterOffset;
-	else if (LaneSide == ETerritoryRoadLaneSide::Right) Offset = -LaneCenterOffset;
+	if (LaneSide == ETerritoryRoadLaneSide::Left) Offset = -LaneCenterOffset;
+	else if (LaneSide == ETerritoryRoadLaneSide::Right) Offset = LaneCenterOffset;
 	return bReverseDirection ? -Offset : Offset;
 }
 
@@ -168,7 +168,8 @@ bool ATerritoryRoadGuide::ValidateRoadGuide(FText& OutFailureReason) const
 void ATerritoryRoadGuide::BeginMissionTraffic(const int32 DesiredVehicleCount)
 {
 	if (!HasAuthority()) return;
-	AQuestRoadControls* Controls = NarrativeTrafficControls.LoadSynchronous();
+	AQuestRoadControls* Controls = LocalTrafficUsers > 0
+		? LeasedTrafficControls.Get() : NarrativeTrafficControls.LoadSynchronous();
 	if (!IsValid(Controls)) return;
 	if (UTerritoryRoadTrafficSubsystem* Traffic = GetWorld()
 		? GetWorld()->GetSubsystem<UTerritoryRoadTrafficSubsystem>() : nullptr)
@@ -181,19 +182,37 @@ void ATerritoryRoadGuide::BeginMissionTraffic(const int32 DesiredVehicleCount)
 				TEXT("[RoadTraffic] Road Guide %s continues without mission traffic because its Narrative controller could not acquire the shared lease."),
 				*RoadGuideID.ToString());
 		}
+		else
+		{
+			LeasedTrafficControls = Controls;
+			++LocalTrafficUsers;
+		}
 	}
 }
 
 void ATerritoryRoadGuide::EndMissionTraffic()
 {
 	if (!HasAuthority()) return;
-	AQuestRoadControls* Controls = NarrativeTrafficControls.LoadSynchronous();
-	if (!IsValid(Controls)) return;
+	if (LocalTrafficUsers <= 0) return;
+	AQuestRoadControls* Controls = LeasedTrafficControls.Get();
+	--LocalTrafficUsers;
 	if (UTerritoryRoadTrafficSubsystem* Traffic = GetWorld()
 		? GetWorld()->GetSubsystem<UTerritoryRoadTrafficSubsystem>() : nullptr)
 	{
 		Traffic->ReleaseMissionTraffic(Controls);
 	}
+	if (LocalTrafficUsers == 0) LeasedTrafficControls.Reset();
+}
+
+void ATerritoryRoadGuide::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Releasing a streamed guide must not keep a controller leased forever, or load
+	// a different soft target just to release the controller used at activation.
+	const int32 UsersToRelease = LocalTrafficUsers;
+	for (int32 Index = 0; Index < UsersToRelease; ++Index) EndMissionTraffic();
+	LocalTrafficUsers = 0;
+	LeasedTrafficControls.Reset();
+	Super::EndPlay(EndPlayReason);
 }
 
 #if WITH_EDITOR

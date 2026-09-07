@@ -1,4 +1,5 @@
 #include "Combat/TerritoryAssaultParticipantComponent.h"
+#include "Combat/TerritoryCounterAttackTypes.h"
 
 #include "AI/TerritoryAssaultActivity.h"
 #include "AI/TerritoryAssaultGoal.h"
@@ -31,6 +32,7 @@
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
 #include "NavigationPath.h"
+#include "Navigation/TerritoryRoadTrafficSubsystem.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "TimerManager.h"
 #include "UObject/UnrealType.h"
@@ -105,6 +107,9 @@ void UTerritoryAssaultParticipantComponent::ConfigureNarrativeVehicleIngress(
 	VehicleAbandonHealthFraction = FMath::Clamp(
 		InVehicleAbandonHealthFraction, 0.01f, 0.95f);
 	VehicleBlockedSeconds = 0.f;
+	bArrivalReservationAttempted = false;
+	NextTrafficSignalCheck = 0.0;
+	bTrafficSignalAhead = false;
 	bAbandonDamagedVehicleForFinalFight =
 		bInAbandonDamagedVehicleForFinalFight;
 	bVehicleAbandonmentRequested = false;
@@ -145,6 +150,11 @@ void UTerritoryAssaultParticipantComponent::BeginPlay()
 
 void UTerritoryAssaultParticipantComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (bNarrativeVehicleDriver && GetWorld())
+	{
+		if (auto* Traffic = GetWorld()->GetSubsystem<UTerritoryRoadTrafficSubsystem>())
+			Traffic->ReleaseArrival(NarrativeIngressVehicle.Get());
+	}
 	StopVehicleInputs();
 	RestoreNarrativeDefenderTargeting(false);
 	if (UWorld* World = GetWorld())
@@ -993,6 +1003,20 @@ void UTerritoryAssaultParticipantComponent::UpdateVehicleDriving(const float Del
 	}
 
 	const FVector VehicleLocation = Vehicle->GetActorLocation();
+	UTerritoryRoadTrafficSubsystem* Traffic = GetWorld()->GetSubsystem<UTerritoryRoadTrafficSubsystem>();
+	if (!bEscapeOnVehicleArrival && !bArrivalReservationAttempted && Traffic)
+	{
+		bArrivalReservationAttempted = true;
+		const ATerritoryVolume* Territory = ResolveTargetTerritory();
+		const FVector WalkTarget = bUseVehicleWalkDestination ? VehicleWalkDestination.GetLocation()
+			: Territory ? Territory->GetTerritoryBounds().GetCenter() : VehicleLocation;
+		if (Territory && Traffic->ReserveArrival(Vehicle, AssaultID, VehicleRoutePoints,
+			WalkTarget, GetOwner(), VehicleAwareness.ArrivalSearchDistance, VehicleAwareness.ArrivalSpacing))
+		{
+			UE_LOG(LogTerritory, Display, TEXT("[RoadTraffic] %s reserved drop-off %s"),
+				*Vehicle->GetName(), *VehicleRoutePoints.Last().ToCompactString());
+		}
+	}
 	constexpr float WaypointAcceptanceRadius = 300.f;
 	while (VehicleRoutePointIndex < VehicleRoutePoints.Num() - 1
 		&& FVector::DistSquared2D(VehicleLocation,
@@ -1036,15 +1060,37 @@ void UTerritoryAssaultParticipantComponent::UpdateVehicleDriving(const float Del
 	float CentreObstacleDistance = TNumericLimits<float>::Max();
 	const bool bCentreBlocked = QueryVehicleObstacleDistance(
 		FVector::ZeroVector, CentreObstacleDistance);
-	const float ObstacleSpeedFactor = bCentreBlocked
+	if (Traffic && VehicleAwareness.bObeyNarrativeTrafficLights
+		&& GetWorld()->GetTimeSeconds() >= NextTrafficSignalCheck)
+	{
+		NextTrafficSignalCheck = GetWorld()->GetTimeSeconds() + 0.25;
+		bTrafficSignalAhead = Traffic->FindClosedRoadAhead(VehicleLocation, VehicleRoutePoints,
+			VehicleRoutePointIndex, VehicleAwareness.ForwardProbeDistance, TrafficSignalDistance);
+	}
+	float ObstacleSpeedFactor = bCentreBlocked
 		? CalculateObstacleSpeedFactor(CentreObstacleDistance,
 			VehicleAwareness.EmergencyStopDistance,
 			VehicleAwareness.BrakingDistance) : 1.f;
+	// A route can merge or turn before the chassis is facing that direction.
+	// Check the intended corridor as well as straight ahead, so a clear current
+	// lane never authorizes steering into a car alongside the next waypoint.
+	float SteeringObstacleDistance = TNumericLimits<float>::Max();
+	if (ForwardAlignment < 0.99f && QueryVehicleObstacleDistance(
+		FVector::ZeroVector, SteeringObstacleDistance, ToTarget))
+	{
+		ObstacleSpeedFactor = FMath::Min(ObstacleSpeedFactor, CalculateObstacleSpeedFactor(
+			SteeringObstacleDistance, VehicleAwareness.EmergencyStopDistance, VehicleAwareness.BrakingDistance));
+	}
+	if (bTrafficSignalAhead)
+	{
+		ObstacleSpeedFactor = FMath::Min(ObstacleSpeedFactor, CalculateObstacleSpeedFactor(
+			TrafficSignalDistance, VehicleAwareness.EmergencyStopDistance, VehicleAwareness.BrakingDistance));
+	}
 	// A car can be pinned on its side or chassis without the forward probe hitting
 	// anything. Ordinary arrival must also detect sustained failure to move.
 	const bool bArrivalStalled = !bEscapeOnVehicleArrival
 		&& Speed < FMath::Min(175.f, DesiredSpeed * 0.1f);
-	if (bArrivalStalled || (bCentreBlocked && ObstacleSpeedFactor <= 0.05f && Speed < 175.f))
+	if (!bTrafficSignalAhead && (bArrivalStalled || (bCentreBlocked && ObstacleSpeedFactor <= 0.05f && Speed < 175.f)))
 	{
 		VehicleBlockedSeconds += FMath::Max(0.f, DeltaTime);
 	}
@@ -1081,7 +1127,7 @@ void UTerritoryAssaultParticipantComponent::UpdateVehicleDriving(const float Del
 	}
 
 	float AvoidanceSteering = 0.f;
-	if (bCentreBlocked && VehicleAwareness.bAllowSideAvoidance)
+	if (bCentreBlocked && !bTrafficSignalAhead && VehicleAwareness.bAllowSideAvoidance && Traffic)
 	{
 		float LeftDistance = TNumericLimits<float>::Max();
 		float RightDistance = TNumericLimits<float>::Max();
@@ -1089,8 +1135,13 @@ void UTerritoryAssaultParticipantComponent::UpdateVehicleDriving(const float Del
 			* VehicleAwareness.SideProbeOffset;
 		const bool bLeftBlocked = QueryVehicleObstacleDistance(-Side, LeftDistance);
 		const bool bRightBlocked = QueryVehicleObstacleDistance(Side, RightDistance);
-		const float LeftClearance = bLeftBlocked ? LeftDistance : VehicleAwareness.ForwardProbeDistance;
-		const float RightClearance = bRightBlocked ? RightDistance : VehicleAwareness.ForwardProbeDistance;
+		const FVector Ahead = VehicleLocation + Forward * VehicleAwareness.ForwardProbeDistance;
+		const bool bLeftRoad = Traffic->IsSafeRoadOffset(VehicleLocation - Side, Forward, VehicleAwareness.ProbeHalfWidth)
+			&& Traffic->IsSafeRoadOffset(Ahead - Side, Forward, VehicleAwareness.ProbeHalfWidth);
+		const bool bRightRoad = Traffic->IsSafeRoadOffset(VehicleLocation + Side, Forward, VehicleAwareness.ProbeHalfWidth)
+			&& Traffic->IsSafeRoadOffset(Ahead + Side, Forward, VehicleAwareness.ProbeHalfWidth);
+		const float LeftClearance = bLeftRoad ? (bLeftBlocked ? LeftDistance : VehicleAwareness.ForwardProbeDistance) : 0.f;
+		const float RightClearance = bRightRoad ? (bRightBlocked ? RightDistance : VehicleAwareness.ForwardProbeDistance) : 0.f;
 		if (!FMath::IsNearlyEqual(LeftClearance, RightClearance, 100.f))
 		{
 			AvoidanceSteering = LeftClearance > RightClearance
@@ -1170,15 +1221,17 @@ float UTerritoryAssaultParticipantComponent::GetNarrativeVehicleHealthFraction()
 }
 
 bool UTerritoryAssaultParticipantComponent::QueryVehicleObstacleDistance(
-	const FVector& LateralOffset, float& OutDistance) const
+	const FVector& LateralOffset, float& OutDistance, const FVector& ProbeDirection) const
 {
 	const ANarrativeVehicleBase* Vehicle = NarrativeIngressVehicle.Get();
 	const UWorld* World = GetWorld();
 	if (!Vehicle || !World) return false;
 	const FVector Forward = Vehicle->GetActorForwardVector().GetSafeNormal2D();
+	const FVector QueryDirection = ProbeDirection.IsNearlyZero()
+		? Forward : ProbeDirection.GetSafeNormal2D();
 	const FVector Start = Vehicle->GetActorLocation() + LateralOffset
 		+ Forward * 150.f + FVector::UpVector * VehicleAwareness.ProbeHalfHeight;
-	const FVector End = Start + Forward * FMath::Max(200.f,
+	const FVector End = Start + QueryDirection * FMath::Max(200.f,
 		VehicleAwareness.ForwardProbeDistance);
 	FCollisionObjectQueryParams Objects;
 	Objects.AddObjectTypesToQuery(ECC_WorldStatic);
@@ -1210,7 +1263,7 @@ bool UTerritoryAssaultParticipantComponent::QueryVehicleObstacleDistance(
 		FMath::Max(50.f, VehicleAwareness.ProbeHalfWidth),
 		FMath::Max(25.f, VehicleAwareness.ProbeHalfHeight)));
 	if (!World->SweepSingleByObjectType(Hit, Start, End,
-		Vehicle->GetActorQuat(), Objects, Box, Params))
+		QueryDirection.Rotation().Quaternion(), Objects, Box, Params))
 	{
 		return false;
 	}
@@ -1275,8 +1328,33 @@ void UTerritoryAssaultParticipantComponent::StopVehicleInputs()
 	}
 }
 
+ANarrativeVehicleBase* UTerritoryAssaultParticipantComponent::GetPendingIngressVehicle() const
+{
+	return IsVehicleIngressPending() ? NarrativeIngressVehicle.Get() : nullptr;
+}
+
+void UTerritoryAssaultParticipantComponent::UpdateVehicleCheckpoint(
+	FTerritoryAssaultVehicleCheckpoint& Checkpoint) const
+{
+	if (!IsVehicleIngressPending()) return;
+	Checkpoint.ParkDestination = VehicleParkDestination;
+	Checkpoint.WalkDestination = VehicleWalkDestination;
+	// Start just behind the current segment so restoring cannot rewind the city route.
+	const int32 Start = FMath::Clamp(VehicleRoutePointIndex - 1, 0, VehicleRoutePoints.Num());
+	Checkpoint.RoutePoints.Reset();
+	for (int32 Index = Start; Index < VehicleRoutePoints.Num(); ++Index)
+	{
+		Checkpoint.RoutePoints.Add(VehicleRoutePoints[Index]);
+	}
+}
+
 void UTerritoryAssaultParticipantComponent::CompleteVehicleIngress()
 {
+	if (bNarrativeVehicleDriver && GetWorld())
+	{
+		if (auto* Traffic = GetWorld()->GetSubsystem<UTerritoryRoadTrafficSubsystem>())
+			Traffic->ReleaseArrival(NarrativeIngressVehicle.Get());
+	}
 	StopVehicleInputs();
 	bVehicleDriveActive = false;
 	bVehicleIngressComplete = true;
@@ -1323,6 +1401,11 @@ void UTerritoryAssaultParticipantComponent::WithdrawForVehicleIngressFailure(
 void UTerritoryAssaultParticipantComponent::Retire(bool bKilled)
 {
 	if (bRemovalReported || !GetOwner() || !GetOwner()->HasAuthority()) return;
+	if (bNarrativeVehicleDriver && GetWorld())
+	{
+		if (auto* Traffic = GetWorld()->GetSubsystem<UTerritoryRoadTrafficSubsystem>())
+			Traffic->ReleaseArrival(NarrativeIngressVehicle.Get());
+	}
 	bRemovalReported = true;
 	UnregisterCapturePressure();
 	// Record finite loss after capture removal and before Narrative activity-end

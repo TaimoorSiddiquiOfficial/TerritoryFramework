@@ -31,7 +31,8 @@ public class TerritoryFramework : ModuleRules
 			"CinematicCamera",
 			"DeveloperSettings",
 			"HairStrandsCore",
-			"ZoneGraph"
+			"ZoneGraph",
+			"ZoneGraphAnnotations"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

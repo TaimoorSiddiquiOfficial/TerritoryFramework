@@ -166,6 +166,14 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionSiteRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	TSoftObjectPtr<class UTerritoryProductionProfile> ProductionProfile;
 
+	/** Authored state rules remain readable while the physical Place is streamed out. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
+	TSoftObjectPtr<class UTerritoryDefinition> TerritoryDefinition;
+
+	/** Zero is a legacy record. It must rebind to its Place before paying under new rules. */
+	UPROPERTY(SaveGame)
+	int32 StateRulesVersion = 0;
+
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	int32 UpgradeLevel = 0;
 

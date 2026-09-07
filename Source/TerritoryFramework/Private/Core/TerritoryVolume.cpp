@@ -62,21 +62,26 @@ namespace
 		return Result;
 	}
 
+	FTerritoryStateGameplayRules CloneGameplayRulesForTerritory(
+		const FTerritoryStateGameplayRules& Template, ATerritoryVolume* Territory)
+	{
+		FTerritoryStateGameplayRules Result = Template;
+		Result.EntryConditions = CloneNarrativeArrayForTerritory(Template.EntryConditions, Territory);
+		Result.ExitConditions = CloneNarrativeArrayForTerritory(Template.ExitConditions, Territory);
+		Result.EntryEvents = CloneNarrativeArrayForTerritory(Template.EntryEvents, Territory);
+		Result.ExitEvents = CloneNarrativeArrayForTerritory(Template.ExitEvents, Territory);
+		return Result;
+	}
+
 	FTerritoryStateConfig CloneStateConfigForTerritory(
 		const FTerritoryStateConfig& Template, ATerritoryVolume* Territory)
 	{
-		FTerritoryStateConfig Result;
-		Result.Audio = Template.Audio;
-		Result.StealthProfileOverride = Template.StealthProfileOverride;
-		Result.GrantedCommandCapabilities = Template.GrantedCommandCapabilities;
-		Result.EntryConditions = CloneNarrativeArrayForTerritory(
-			Template.EntryConditions, Territory);
-		Result.ExitConditions = CloneNarrativeArrayForTerritory(
-			Template.ExitConditions, Territory);
-		Result.EntryEvents = CloneNarrativeArrayForTerritory(
-			Template.EntryEvents, Territory);
-		Result.ExitEvents = CloneNarrativeArrayForTerritory(
-			Template.ExitEvents, Territory);
+		FTerritoryStateConfig Result = Template;
+		static_cast<FTerritoryStateGameplayRules&>(Result) = CloneGameplayRulesForTerritory(Template, Territory);
+		for (auto& Pair : Result.FactionOverrides)
+		{
+			Pair.Value = CloneGameplayRulesForTerritory(Pair.Value, Territory);
+		}
 		return Result;
 	}
 }
@@ -1000,7 +1005,7 @@ bool ATerritoryVolume::IsAvailableForGameplay() const
 FGameplayTagContainer ATerritoryVolume::GetActiveCommandCapabilities() const
 {
 	if (!IsAvailableForGameplay()) return FGameplayTagContainer();
-	const FTerritoryStateConfig* Config = GetStateConfigs().Find(OwnershipData.State);
+	const FTerritoryStateGameplayRules* Config = GetStateGameplayRules(OwnershipData.State, OwnershipData.OwningFaction);
 	return Config ? Config->GrantedCommandCapabilities : FGameplayTagContainer();
 }
 
@@ -1012,6 +1017,10 @@ bool ATerritoryVolume::IsCommandCapabilityConfigured(const FGameplayTag& Capabil
 	}
 	for (const TPair<ETerritoryState, FTerritoryStateConfig>& Pair : GetStateConfigs())
 	{
+		for (const auto& Override : Pair.Value.FactionOverrides)
+		{
+			if (Override.Value.GrantedCommandCapabilities.HasTagExact(Capability)) return true;
+		}
 		if (Pair.Value.GrantedCommandCapabilities.HasTagExact(Capability))
 		{
 			return true;
@@ -1162,6 +1171,26 @@ FGameplayTag ATerritoryVolume::GetInitialOwningFaction() const
 ETerritoryControlMode ATerritoryVolume::GetControlMode() const
 {
 	return ControlMode;
+}
+
+const FTerritoryStateGameplayRules* ATerritoryVolume::GetStateGameplayRules(
+	ETerritoryState State, const FGameplayTag& OwnerFaction) const
+{
+	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
+	return Config ? &Config->ForFaction(OwnerFaction) : nullptr;
+}
+
+FTerritoryStateGameplayRules ATerritoryVolume::GetActiveStateGameplayRules() const
+{
+	const FTerritoryStateGameplayRules* Rules = GetStateGameplayRules(
+		IsLocked() ? ETerritoryState::Locked : GetTerritoryState(), GetOwningFaction());
+	return Rules ? *Rules : FTerritoryStateGameplayRules();
+}
+
+bool ATerritoryVolume::DoStateRulesAllowAssault(FGameplayTag AttackingFaction,
+	bool bExplicitNarrativeRequest) const
+{
+	return GetActiveStateGameplayRules().AllowsAssault(AttackingFaction, bExplicitNarrativeRequest);
 }
 
 const TMap<ETerritoryState, FTerritoryStateConfig>&
@@ -1691,13 +1720,9 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		&& !bBypassTransitionConditions)
 	{
 		FText ConditionFailure;
-		const bool bConditionsPass = OldState != NewState
-			? CheckStateTransitionConditions(OldState, NewState,
-				ConditionFailure, TransitionContext)
-			: CheckStateExitConditions(ETerritoryState::Claimed,
-				ConditionFailure, TransitionContext)
-				&& CheckStateConditions(ETerritoryState::Claimed,
-					ConditionFailure, TransitionContext);
+		const bool bConditionsPass = CheckStateExitConditions(OldState,
+			ConditionFailure, TransitionContext, &OldOwner)
+			&& CheckStateConditions(NewState, ConditionFailure, TransitionContext, &NewOwner);
 		if (!bConditionsPass)
 		{
 			if (const UTerritoryDeveloperSettings* Settings =
@@ -1798,8 +1823,8 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	// ─── ONE ordered event bundle ───
 	if (OldState != NewState)
 	{
-		FireStateEvents(OldState, false, TransitionContext);
-		FireStateEvents(NewState, true, TransitionContext);
+		FireStateEvents(OldState, false, TransitionContext, &OldOwner);
+		FireStateEvents(NewState, true, TransitionContext, &NewOwner);
 	}
 	else if (bCapturedByDifferentOwner)
 	{
@@ -1809,8 +1834,8 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		// started. Run both Claimed lifecycle sides exactly once so
 		// designers can author On Lost and On Captured behavior in the same row.
 		// Same-owner resets are excluded by the owner comparison above.
-		FireStateEvents(ETerritoryState::Claimed, false, TransitionContext);
-		FireStateEvents(ETerritoryState::Claimed, true, TransitionContext);
+		FireStateEvents(ETerritoryState::Claimed, false, TransitionContext, &OldOwner);
+		FireStateEvents(ETerritoryState::Claimed, true, TransitionContext, &NewOwner);
 	}
 	if (OldAvailability != NewAvailability)
 	{
@@ -1908,7 +1933,7 @@ void ATerritoryVolume::ForceSetTerritoryState(ETerritoryState NewState)
 	bBypassTransitionConditions = bWasBypassing;
 }
 
-bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext) const
+bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext, const FGameplayTag* RuleOwner) const
 {
 	const int32 EvaluationKey = static_cast<int32>(State) * 2;
 	if (EvaluatingStateConditionKeys.Contains(EvaluationKey))
@@ -1928,7 +1953,8 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 		OutFailureReason = FText::GetEmpty();
 		return true;
 	}
-	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
+	const FTerritoryStateGameplayRules* Config = GetStateGameplayRules(State,
+		RuleOwner ? *RuleOwner : ((State == ETerritoryState::Claimed && TransitionContext.RequestingFaction.IsValid()) ? TransitionContext.RequestingFaction : GetOwningFaction()));
 	if (!Config || Config->EntryConditions.IsEmpty())
 	{
 		OutFailureReason = FText::GetEmpty();
@@ -1961,7 +1987,7 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 }
 
 bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason,
-	const FTerritoryTransitionContext& TransitionContext) const
+	const FTerritoryTransitionContext& TransitionContext, const FGameplayTag* RuleOwner) const
 {
 	const int32 EvaluationKey = static_cast<int32>(State) * 2 + 1;
 	if (EvaluatingStateConditionKeys.Contains(EvaluationKey))
@@ -1979,7 +2005,8 @@ bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& Ou
 		OutFailureReason = FText::GetEmpty();
 		return true;
 	}
-	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
+	const FTerritoryStateGameplayRules* Config = GetStateGameplayRules(State,
+		RuleOwner ? *RuleOwner : GetOwningFaction());
 	if (!Config || Config->ExitConditions.IsEmpty())
 	{
 		OutFailureReason = FText::GetEmpty();
@@ -2016,8 +2043,9 @@ bool ATerritoryVolume::CheckStateTransitionConditions(ETerritoryState OldState,
 		&& CheckStateConditions(NewState, OutFailureReason, TransitionContext);
 }
 
-void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext)
+void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext, const FGameplayTag* RuleOwner)
 {
+	if (!HasAuthority()) return;
 	if (IsPrimaryRuntimeRuleSuspendedWithContext(
 		ETerritoryQuestOverrideEffect::StateRules,
 		TransitionContext.TalesComponent))
@@ -2026,7 +2054,8 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 		// transitions continue from the live state produced by the Quest.
 		return;
 	}
-	const FTerritoryStateConfig* Config = GetStateConfigs().Find(State);
+	const FTerritoryStateGameplayRules* Config = GetStateGameplayRules(State,
+		RuleOwner ? *RuleOwner : GetOwningFaction());
 	if (!Config) return;
 
 	const TArray<TObjectPtr<UNarrativeEvent>> Events = bEntering ? Config->EntryEvents : Config->ExitEvents;

@@ -80,6 +80,7 @@ bool FTFEconomyCallbackReentry::RunTest(const FString& Parameters)
 	Output.ItemClass = UNarrativeItem::StaticClass();
 	Output.QuantityPerCycle = 1;
 	FTerritoryProductionSiteRecord Site;
+	Site.StateRulesVersion = 1; // Current-format detached fixture; legacy rebinding has its own regression.
 	Site.TerritoryGUID = FGuid(131, 132, 133, 134);
 	Site.OwnerFaction = Heroes;
 	Site.TerritoryState = ETerritoryState::Claimed;

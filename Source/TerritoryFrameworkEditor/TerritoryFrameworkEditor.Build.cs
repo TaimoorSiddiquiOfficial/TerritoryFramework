@@ -38,6 +38,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"MovieSceneTracks",
 			"CinematicCamera",
 			"ZoneGraph",
+			"PhysicsCore",
 			"MassSpawner",
 			"MassEntity"
 		});

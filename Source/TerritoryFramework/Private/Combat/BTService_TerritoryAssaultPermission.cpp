@@ -1,5 +1,6 @@
 #include "Combat/BTService_TerritoryAssaultPermission.h"
 #include "Combat/TerritoryCombatDirector.h"
+#include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -58,6 +59,17 @@ void UBTService_TerritoryAssaultPermission::OnCeaseRelevant(UBehaviorTreeCompone
 
 ATerritoryVolume* UBTService_TerritoryAssaultPermission::ResolveTerritory(UBehaviorTreeComponent& OwnerComp) const
 {
+	ANarrativeNPCController* Controller = Cast<ANarrativeNPCController>(OwnerComp.GetAIOwner());
+	APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+	if (const UTerritoryAssaultParticipantComponent* Participant = Pawn
+		? Pawn->FindComponentByClass<UTerritoryAssaultParticipantComponent>() : nullptr)
+	{
+		// Strategic capacity belongs to this durable assault target, even when a
+		// defender pursues the squad outside its Place or a distant shooter attacks.
+		// Never substitute the actor's current District/City for a missing streamed
+		// target: the participant's GUID resolver deliberately fails closed.
+		return Participant->IsConfigured() ? Participant->GetTargetTerritory() : nullptr;
+	}
 	UBlackboardComponent* Blackboard = OwnerComp.GetBlackboardComponent();
 	if (Blackboard && TerritoryKey.IsSet())
 	{
@@ -78,8 +90,6 @@ ATerritoryVolume* UBTService_TerritoryAssaultPermission::ResolveTerritory(UBehav
 		}
 	}
 
-	ANarrativeNPCController* Controller = Cast<ANarrativeNPCController>(OwnerComp.GetAIOwner());
-	APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
 	if (bPreferGuardOwningTerritory)
 	{
 		if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(Pawn))

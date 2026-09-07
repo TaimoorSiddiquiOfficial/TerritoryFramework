@@ -583,6 +583,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 District|Economy")
 	bool bIsCapital = false;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 District|Economy", meta=(ClampMin="0"))
+	int32 CapitalCaptureReward = 500;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 District|Economy",
 		meta=(ClampMin="1.0"))
 	float CapitalIncomeMultiplier = 2.f;
@@ -600,6 +603,9 @@ class TERRITORYFRAMEWORK_API UTerritoryCityDefinition : public UTerritoryDefinit
 
 public:
 	UTerritoryCityDefinition();
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 City|Economy", meta=(ClampMin="0"))
+	int32 CapitalCaptureReward = 1000;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 City|Hierarchy")
 	TArray<TObjectPtr<UTerritoryDistrictDefinition>> Districts;

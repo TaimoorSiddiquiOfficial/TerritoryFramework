@@ -2,13 +2,28 @@
 
 Status: **in progress**. Findings below distinguish confirmed defects from candidates.
 
-Latest verification: batch 30, 250 passing automation tests (238 clean, 12 warning-bearing fixtures;
-zero failed/skipped), Editor/UHT and Development Game builds, and stage/pak. Latest full cook is
-batch 20; unchanged assets/Blueprints were revalidated in batch 25. These are not proof of complete
-framework release readiness. Vehicle restoration, the rendered Manny ensure, purchase/recipe
-transaction review and the physical multiplayer/World Partition gates remain open. The installed
-Epic UE 5.7 distribution rejects the dedicated-server target; a source-built engine path has been
-requested from the user. No broad completion claim is made.
+Latest code verification: batch 36, **265 passing automation tests** (252 clean,
+13 with fixture warnings; zero failed/skipped), Editor/runtime/UHT and
+Development Game builds. Repeated live save/load preserved survivor GUIDs, saved
+health, exhausted car budgets and four pending reserves; both clients received the
+same final force counts and physical NPCs on return. Batch 36 validated 75 Blueprints
+and 123 assets (zero errors/invalid, four presentation warnings). Its fresh package
+verification is recorded below. Earlier rendered server plus two clients verified physical
+counterattack combat, finite simultaneous vehicle squads, autonomous recapture with
+players 250 meters away and ownership refresh on returning clients. Batch 35 added
+Native ambient traffic to AlMalik and observed moving cars. The fresh HopDistrictTest
+plus AlMalik cook/stage/package succeeded (zero errors, 591 asset warnings). Both
+packaged smoke processes exited zero; counterattack squads completed ingress, and
+the city retained its Native graph/spawner and registered driver bundle. The city
+still reports the documented empty-vehicle Chaos ensure; zero exit is not a clean
+runtime release gate.
+
+These checks are not proof of complete framework release readiness. Remaining physical
+spawn callback/malformed-save cases, the intermittent rendered Manny ensure, remaining
+purchase/recipe and AI/UI/Tales review, dedicated-server testing and the documented
+AlMalik decorative/empty-vehicle errors remain open. The installed Epic UE 5.7 build
+rejects TDAServer; this gate needs a server-capable engine. No overall completion claim
+is made.
 
 Baseline: host `d3db8b7`, plugin `79af71e`, UE 5.7. Work is isolated on
 `hoptrendy/territory-complete-audit` in both repositories. The prior 213-test build,
@@ -70,7 +85,9 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | GUARD-03 | Native spawn callbacks can change owner or remove the post before a stale guard is admitted. | Fixed in batch 28; ownership/post/death/client/save regressions pass |
 | GUARD-04 | Reserve aggregation wraps negative, erases effective defence and increases attack priority after loading more reserves. | Fixed in batch 30; real post records, Volume snapshot, CounterAttack deterrence and district UI tested |
 | ASSAULT-05 | Extreme power reduces selected approaches; authored vehicle counts expand before the existing eight-car budget applies. | Fixed in batch 29; bounded conversion/allocation, monotonicity and equivalence regressions pass |
-| ASSAULT-06 | Reload reconstruction consumes another vehicle deployment slot, preventing remaining road-only reserves from deploying. | Open; reproduced in packaged batch 23 with one saved assault, four killed and four withdrawn |
+| ASSAULT-06 | Reload reconstruction consumes another vehicle deployment slot, preventing remaining road-only reserves from deploying. | Fixed in batch 36; native save/vehicle regression and repeated server/two-client reload pass |
+| ASSAULT-07 | One blocked vehicle approach repeats the identical spawn attempt for every NPC placement slot; restoring a blocked saved car repeats per occupant. | Fixed in batch 36; bounded road/physical obstruction tests and live second-wave deployment pass |
+| ASSAULT-08 | Cached Native appearance loading can restore saved health before Native BeginPlay resets default attributes. | Fixed in batch 36; live survivor retains exactly 82 health after repeated reload |
 | VISUAL-01 | Rendered clients reproduce a SKM_Manny bone-visibility/component-space-transform ensure during the intro. | Open; batch 23 proves this is not limited to NullRHI |
 
 ## Architecture constraints
@@ -720,6 +737,286 @@ The prior deployed-survivor/vehicle-history reload defect and rendered SKM_Manny
 open. Standalone dedicated-server and real World Partition release gates remain blocked/unproven
 as documented above.
 
+## Batch 32 — surface roads, city routing and shared arrivals
+
+User confirmed keep-right traffic and `/Game/HOPTRENDY/Map/L_AlMalik` as the
+World Partition story map. Native ZoneGraph remains the road authority; Narrative
+Mass/annotations own ambient traffic and lights, Mount owns physical vehicle exits,
+CounterAttack owns finite waves, and Control/Volume still own capture and ownership.
+
+Confirmed defects: Right road-guide offsets were inverted; independently acquired
+traffic leases could be released through a different soft controller; mission cars
+shared one occupied destination; the default Native A* wrapper only considered
+adjacent lanes at the journey start. Initial generated junctions additionally imposed
+OneLanePerDestination, which removed valid exits during Native overlap pruning.
+The adapter now uses Native's default junction connections and admits gradual forward
+changes to same-direction lanes with sufficient road length. Tests cover every exit
+of both three- and four-mouth junctions, an intermediate turn-lane requirement, and
+an obstacle in the intended steering corridor while straight ahead remains clear.
+
+The editor adapter imports existing generator curves/sockets or derives Native
+ZoneShapes from bounded road physical-surface collision samples, including the
+Landscape physical-material result. No additional hand-drawn road spline is needed.
+It rejects unloaded World Partition coverage, wrong/default surfaces, narrow paths,
+invalid geometry and oversized samples; failed extraction preserves the old lanes.
+Generated shapes are editor-only/nonspatial with editor GUIDs/source lineage, and
+Native ZoneGraphData persists the network. Existing PM_Road (SurfaceType9) is reused
+on five Ghost Town road mesh collision bodies. Generator and Narrative source/assets
+are unchanged. Source map/mesh backups are under Saved/RoadNetworkBackups.
+
+AlMalik has 60 roads, 25 junctions and 632 Native road lanes. Bidirectional hub
+journeys pass for all 56 sampled roads in the main group. Three sampled roads,
+including BP_Road_Generator8, form a separate island. Sixteen unmatched shape mouths
+remain; no road across missing geometry is fabricated. Reloaded commandlet inspection
+repeats the 56 passes with zero road-generator actors loaded, proving routing uses
+the saved graph independently of World Partition's authoring actors.
+
+Server-only transient arrival claims search back along the existing route for a free
+drop-off with a complete Native walking path. Claims release at completion/retirement/
+teardown; physically parked cars continue to occupy space. Native closed-lane lights
+pause the blocked timer. Obstacle probes cover current and intended steering corridors;
+safe side avoidance requires a same-direction Native lane. The prior bounded on-foot
+dismount fallback remains in effect. No assault save schema or enum value changed;
+existing missions compensating for the old Right/Left inversion need their offsets
+reviewed. The separate survivor/car-history reload defect remains open.
+
+Executed: Editor/runtime/UHT and game builds pass; all 260 automation tests pass
+(248 clean, 12 with existing warnings). Commandlet asset validation checked 182 assets
+and compiled 66 Blueprints with zero errors and four warnings. These results include
+the map, road meshes/generators and existing Blacksmith music mapping. Later batches
+33–35 below record rendered multiplayer/city verification and remaining cook/package gates.
+See ROAD_SURFACE_NETWORK.md for actual APIs, migration and authoring limits.
+
+## Batch 33 — actual weapon eligibility and durable combat permission
+
+Rendered batch-32 verification exposed two additional causes of stationary assault
+combat. Sword-only NPCs selected the project ranged activity because its inherited
+score had no available-weapon gate and outranked melee. Both project attack activities
+now query Narrative's existing GetWeaponsToAttackWith using their inherited Weapon
+Types before scoring. No weapon returns zero; existing alert/hidden/reachability and
+combat scores remain intact. Only the two project BPA_TerritoryAttack assets changed;
+Narrative vendor graphs/source were inspected but not modified.
+
+BTService_TerritoryAssaultPermission previously resolved the territory under the
+AttackTarget or moving pawn. Combat outside the Place therefore requested a District,
+City or no target, and CombatDirector correctly rejected that different identity.
+Physical participants now resolve their existing saved target GUID first. Missing or
+unconfigured targets fail closed, releasing prior capacity; ordinary guard fallback
+behavior is unchanged. No second target authority, new save field or replication
+schema was introduced.
+
+Editor/runtime/UHT and Game builds pass. All 262 automation tests pass (250 clean,
+12 with prior warnings). Two new native behavioral regressions execute the actual
+project Blueprint scorers against Narrative inventory and exercise the actual BT
+service/director/blackboard across boundary movement, repeated ticks, target unload,
+wrong-GUID tag reuse, reload and invalid participant identity. Both are warning-free.
+Live asset validation checked 123 loaded-registry assets, compiled 75 Blueprints and
+reported zero errors/four warnings; commandlet registry totals differ from live totals.
+
+Rendered server plus two clients: simultaneous eight attackers/two cars fought and
+killed the defender outside the Place, completed ingress and recaptured Blacksmith.
+All three worlds reported Bandits/Claimed and identical finite terminal records.
+One driver withdrew after eight failed movement restarts; seven continued. The real
+5-point distant damage applied, but this specific driver's retaliation was not proven
+before its movement failure. The prior batch-32 recording proves another attacker
+selected the damaging player; neither recording certifies every vehicle-driver case.
+Evidence: Batch33_AllTests, Batch33_Play_Final.log, Live_Batch33_Final.json and
+Batch33_Live_Final_Ownership.json. The log also includes explicitly identifiable
+Python harness attribute errors, not production Blueprint errors.
+
+A separate run with all players 250 meters away and two guards proved autonomous
+combat and finite casualties, but exposed blocked departure staging: the first squad
+left its car on the spawn pad, so the four pending reserves eventually cancelled
+with SpawnFailed. This is a failed full-wave case, tracked in batch 34 below.
+
+## Batch 34 — occupied departure staging and autonomous multiplayer verification
+
+The existing RoadTraffic adapter can choose a free point 9–20 meters forward on the
+same validated guide/Native route when a previous car occupies the entrance, preserving
+at least 15 meters of driving distance. Normal Native spawn collision remains the final
+admission check. The guide is trimmed to that departure so the new driver cannot turn
+back into the occupied pad. Fully occupied or too-short routes retain the bounded
+failure path; force and vehicle deployment budgets are unchanged. The candidate is
+transient and recalculated from current collision after loading.
+
+A native test uses the actual Narrative Sedan to verify blocked-entrance recovery,
+bounded/same-lane placement, deterministic reconstruction, no path rewind, unchanged
+destination, and safe rejection of short, off-road and fully occupied alternatives.
+Editor/runtime/UHT and Game builds pass. All 263 automation tests pass (251 clean,
+12 with existing warnings); the new departure regression is warning-free.
+Rendered server plus two clients repeated the exact failed batch-33 setup: players
+250 meters away, simultaneous eight attackers/two cars, two guards. Both squads
+spawned, fought without player proximity, killed both guards and completed physical
+recapture. Two attackers died exactly once; six surviving members retired on success.
+All three replicated assault summaries agreed on Success/CaptureCompleted, planned8,
+killed2, withdrawn6, pending0, deployments2. Offscreen client Volume actors retained
+their previous owner while outside network relevance; returning both clients near
+Blacksmith refreshed both actors to Bandits/Claimed, matching the server. The log has
+no Error/Ensure/Assertion messages. Evidence: Batch34_AllTests, Batch34_Play.log,
+Live_Batch34.json, Batch34_Live_Ownership.json and Batch34_Live_Returned_Ownership.json.
+Batch 35 below records city ambient traffic and fresh cook/package verification.
+
+## Batch 35 — AlMalik Native ambient traffic
+
+All 19,610 World Partition actor descriptors were checked: AlMalik had a saved
+ZoneGraph but no Mass traffic spawner. Added one nonspatial Narrative MassVehicleSpawner,
+configured for 48 ambient entities using existing DA_Vehicle and Native intersection
+annotations. The existing project BP_TerritoryRoadTrafficSpawner was inspected: it is
+a data-only child of the same Native class. No competing traffic authority or AI was
+created. Scripts/Territory/configure_almalik_traffic.py repeats this configuration and
+rejects duplicate/unloaded spawners. Map backup: Batch35_TrafficBackup/L_AlMalik.umap.
+
+Rendered AlMalik PIE produced moving BPV_Sedan_Mass cars at approximately 600 cm/s on
+the generated road network. The count48 is the configured Mass budget; only nearby
+high-detail actor representations were counted. Evidence snapshots are
+Batch35_CityTraffic_Live.json and Batch35_CityTraffic_Live_Later.json. This is a
+single-player city smoke test, not a dedicated-server or full-city traffic soak.
+
+The run identified a missing AssetManager scan for Native mass-driver NPC definitions.
+DefaultGame.ini now includes only /NarrativePro/Pro/Core/AI/Mass/Vehicles alongside the
+existing /Game NPCDefinition scan; Native identities/spawn definitions remain authoritative.
+The fresh packaged city successfully dumps this NPC's SpawnedData bundle with its
+Native activity configuration and appearance, and spawns Native driver NPCs. The
+previous invalid-primary-asset warning is absent from that run.
+
+Separate pre-existing map issues prevent a clean city PIE result: BP_SplineCatenary
+tries to destroy a pending-kill Arrow component on streamed BP_Bulb actors; the placed
+BP_VehicleBase at (7180,4480,9) has no VehicleMesh or ImpactMesh skeletal asset and
+triggers Chaos LocateBoneOffset's Mesh->GetSkinnedAsset ensure on cell registration.
+These are outside the changed Territory/Narrative traffic implementation and are not
+claimed fixed. Do not attribute that placed-actor ensure to the spawned Mass sedans.
+Fresh cook/stage/package explicitly includes HopDistrictTest and AlMalik and completed
+with AutomationTool exit zero after 92 minutes. Cook reports zero errors and 591 warnings.
+Reviewed warnings include unconfigured vehicle wheel sockets, the road generator's
+Landscape Deformation missing actor during World Partition cooking, powerline
+construction references, optional Native character-creator tags and a deprecated
+style redirect. These warnings remain visible in Package_Batch35.log; cook success
+does not certify those assets. The final package is Stage_Batch35/Windows.
+
+Both packaged tests use isolated UserDir folders to protect the normal campaign saves.
+PackagedSmoke_Batch35_Counter.log records a listening Development Game executable on
+port 7835, back-to-back four-person squads in two cars, both blocked-arrival walking
+fallbacks and all eight completed ingresses. The 75-second process exits zero with no
+Error/Ensure/Assertion, but does not establish terminal recapture in that time window.
+It is not a compiled TDAServer result. PackagedSmoke_Batch35_City.log records exactly
+one saved ZoneGraphData and one MassVehicleSpawner plus the resolved driver bundle.
+Its 45-second process exits zero, but reproduces the empty-vehicle Mesh->GetSkinnedAsset
+ensure and NullRHI canvas-render warnings; it is therefore not a clean city runtime pass.
+The earlier rendered city recording remains the evidence for visible moving cars.
+
+Final editor restoration reopened AlMalik with PIE stopped, 632 Native lanes, two
+road groups, one count48 spawner and no dirty packages. All 19,611 World Partition
+descriptors were inspected: there are no Territory volume actors in this map. The
+two descriptor matches for "Territory" are labels on sky/post-process actors. City
+story capture requires authored territory boundaries and approaches; the physical
+counterattack verification above belongs to HopDistrictTest. No mission boundaries
+were invented. Evidence: Batch35_EditorRestored.json. The rendered editor reload
+also emitted a D3D12PoolAllocator backing-resource reference-count ensure after
+asset tabs restored; the editor remained responsive. Rendering settings were preserved.
+
+Older generated Stage_Batch20/21/23/25–30
+folders were archived to C:/Users/Taimoor/.codex/artifacts/TDA/20260905/PreviousPackages
+to leave cook/staging space. Their original project paths remain working directory
+junctions; verification logs and the batch31 package were retained in the project.
+
+## Batch 36 — deployed survivor and vehicle reconstruction
+
+`TerritoryAssaultPersistence.cpp` separates committed survivor manifests from fresh
+reserves. `FTerritoryAssaultRecord` now saves original Native NPC GUIDs, approach IDs,
+physical transforms and optional vehicle/seat identities. Vehicle checkpoints retain
+the Native vehicle class, logical vehicle GUID, remaining route, parking/walking
+destinations and health fraction. These nested fields are SaveGame-only and excluded
+from replicated/RPC read models; existing replicated force counts remain compatible.
+No live actor pointers enter the campaign record.
+
+CounterAttack still owns finite force and deployment counts. Narrative `SpawnNPC`,
+save records, ASC, mount seats, controllers and activities own physical NPC behavior.
+Native NPC health/MaxHealth are opted into `AttributesToSave`; inventory and attributes
+are restored using the original GUID. Cached visual initialization can precede Native
+BeginPlay; the adapter reapplies the loaded ASC record after default initialization
+without loading inventory or controller goals twice. A saved mounted transform is
+replaced by a validated staging transform for the existing remount flow.
+
+Reconstruction runs before fresh wave scheduling, including `AfterDefeated` and
+recapture countdown. It waits for old same-GUID actors to finish retirement, elects a
+living passenger when the driver died, preserves occupied player cars, and restores
+already-dismounted survivors on foot. New vehicle squads commit their finite car slot
+and occupant manifest before Native spawn callbacks. Partial construction cannot spend
+another car for the same pending seats. Restored close-combat NPC positions use actual
+engine collision clearance rather than the wider spacing required for fresh formations.
+
+Version-zero records migrate saved living counts into bounded reconstruction credits;
+these credits never reset charged car counters and cannot refill on repeated migration.
+Old saves do not contain per-survivor GUID/transform/health history, so migration cannot
+recover information that was never written. Invalid/duplicate manifests withdraw finite
+slots instead of converting them to new reserve. Route, vehicle and roster bounds are
+validated. Broader malformed-record arithmetic review remains open.
+
+Live server/two-client reload testing exposed blocked departure retries. RoadTraffic
+checks physical geometry as well as Native car bounds and searches only an existing
+route, within 20 meters of its start while retaining at least 15 meters of driving.
+Fresh waves retry a failed car once at a clear alternative and skip that failed approach
+for the rest of the update. Saved cars use the same bounded recovery on their remaining
+route and retain their logical identity, damage and already-charged deployment slot.
+No alternative invents a spline, off-road shortcut, fresh car allowance or capture roll.
+
+Evidence is under `Saved/Verification/20260906_SurvivorRestore`. Final
+`HealthOrderAllTests/index.json` passes 265 tests (252 clean, 13 warnings, zero
+failures/skips); `HealthOrderEditorBuild.log` and `HealthOrderGameBuild.log` succeed.
+The native regression includes real Narrative save archives, original GUID/health,
+driver death, exhausted car budgets, repeated reload before old-actor retirement,
+missing-target GUID/client rejection, close-combat placement, and physically blocked
+saved-car recovery. The road test checks real prop collisions, a fully blocking box,
+road-surface clearance, bounded alternatives and failure preserving the input transform.
+`TrafficAllTests` and `RecoveryAllTests` retain intermediate failed regressions; the
+resized static-mesh fixture was replaced with an explicit blocking collision volume.
+
+`LiveRestore.json` completes on a rendered listen server plus two clients with all
+players initially 250 meters away. At 17.38 seconds, save/load/load preserved one
+first-wave survivor; at 19.88 seconds the original GUID and exact 82 health were
+verified with one spent car and four untouched reserves. After the four first-wave
+casualties, wave two deployed. Save/load/load at 21.50 seconds, with both car slots
+spent, restored all four original survivor GUIDs by 24.97 seconds. At 42.38 seconds
+all four completed ingress, and both clients matched planned8/alive4/killed4/pending0/
+withdrawn0/used2. `ClientsReturned.json` then verifies that each returning client
+received the four physical NPCs with matching positions and health. This controlled
+story encounter disabled territory capture to keep the reload target active; strategic
+autonomous recapture remains demonstrated by batch 34. `HealthOrderEditor.log` has no
+Error/Ensure/Assertion from this run.
+
+`AssetValidation_Batch36.json`: 75 Blueprints compiled, 123 assets checked, zero
+errors/invalid and four existing presentation warnings (two mannequin story appearances,
+missing Farm dialogue shot and zero camera blend-out). Music mappings were rechecked.
+No Blueprint graph migration or Narrative source modification is required. World
+Partition target identity/load readiness remain server-side gates; live actor streaming
+is not fully certified by the native missing-GUID fixture. Old save migration cannot
+recreate individual health/GUID history absent from legacy records.
+
+`Package_Batch36.log` records a fresh iterative cook/stage/pak with AutomationTool
+exit zero in 5 minutes 42 seconds: zero cook errors and 588 asset warnings. Although
+HopDistrictTest was requested explicitly, project cook settings also included AlMalik.
+The package is `C:/Users/Taimoor/.codex/artifacts/TDA/20260906/Stage_Batch36/Windows`;
+placing generated staging output on C preserves space on the project drive. The
+remaining warnings include road-generator and decorative construction issues already
+documented above. Package success does not clear those content warnings or establish
+a dedicated-server build.
+
+`PackagedSmoke_Batch36.log` and `PackagedSmoke_Result.json` record a 75-second
+Development Game listen-server smoke on localhost, using an isolated generated
+UserDir and transient Hard difficulty. The process exits zero with no Error/Ensure/
+Assertion, deploys two four-person Native vehicle squads, and takes both validated
+blocked-arrival walking fallbacks. Seven individual ingress completions and physical
+combat deaths are logged; this time window does not prove terminal recapture or
+completion by every original attacker. The explicit repeated-load and client-state
+proof is the rendered PIE sequence above, not this packaged smoke.
+
+Final editor restoration: `EditorRestored.json` confirms AlMalik open, PIE stopped,
+the original one-client setting restored, no dirty maps/content, 60 roads, 25 junctions,
+632 Native lanes, two physical road groups and one count48 Native traffic spawner.
+The same 16 unmatched mouths remain visible in the inspection report; no disconnected
+physical road geometry was silently joined. Existing BackToBack profile and editor CPU
+throttling were restored after the controlled multiplayer test.
+
 ## Counterattack lifecycle preflight
 
 
@@ -747,14 +1044,118 @@ and the existing capture authority remain mandatory in every activation mode.
 
 ## Pending audit follow-up
 
+### Batch 37 — owner-specific state rules and war-driven scheduling (2026-09-07)
+
+User requested per-Territory automatic/quest-driven attacks and faction-specific story
+rules, rewards and earnings. Preflight checked the existing dirty branch, actual Volume,
+Control, CounterAttack, Diplomacy, Economy, Definition, state-rule and editor sources,
+plus Narrative event, faction/attitude, inventory and save APIs. Existing user changes,
+including the modified `Content/HopDistrictTest.umap`, were preserved. No Narrative Pro
+source was changed.
+
+Confirmed gaps and changes:
+
+- Existing state conditions/events/capabilities applied identically to all owners.
+  `FTerritoryStateGameplayRules` now holds these existing named properties and the new
+  economy/admission permissions. `FTerritoryStateConfig` preserves its common fields
+  through this base and adds exact-tag `FactionOverrides`. Matching overrides replace
+  common gameplay rules. Music/stealth remain state-level settings. Every override's
+  Narrative objects are cloned per actor, using the existing duplication adapter.
+- Volume validates incoming-owner entry rules and outgoing-owner exit rules, including
+  Claimed→Claimed handovers. Control's validation passes the actual candidate owner;
+  capture-pressure read-model updates retain the existing owner. Native state-event
+  execution remains server-only and uses explicit Tales/player context.
+- `CaptureTriggered` preserves legacy behavior; `WhileAtWar` also permits an initial
+  finite schedule against an already-owned Place. `QuestOnly` admits explicit Narrative
+  Waves only; `Disabled` admits neither kind. Exact attacker allowlists apply to both.
+  Preview, direct admission, evaluation, physical activation and undeployed continuation
+  use the same state gate. Activation rechecks after warning callbacks, including the
+  explicit immediate path that does not wait for another scheduler tick.
+- While-at-war initiation uses the existing deterministic cycle high-water, preventing
+  a new initial roll after load or terminal-history trimming. Existing repeat policy,
+  cooldown, quest requirements, grace, strategic calculations, treaty checks, physical
+  routes, finite budgets and capture authority remain in use. Pending policy cancellation
+  appends `StateRuleBlocked`; existing serialized enum values remain intact.
+- Explicit immediate story events keep the user's previously approved exception to an
+  automatic launch roll/staging/quest-perk gate. They cannot bypass state policy,
+  attacker allowlists, diplomacy, finite forces, routes or physical capture.
+- Place effective income now respects the selected owner's state permission, including
+  upgrades and capital multipliers. Guard upkeep is unchanged. Production saves a soft
+  Definition reference and format version so unloaded sites read authored policy.
+  Version-zero legacy records wait for actor rebinding; blocked cycles expire without
+  later backpay. Manual crafting remains separate from daily Place earnings.
+- City/District capital amounts are authored Definition fields (compatible 1000/500
+  defaults), with selected-owner reward permission and the existing quest state-rule
+  pause respected. Custom rewards continue to use Narrative events. City payout logging
+  reports the actual credited amount instead of claiming the requested amount succeeded.
+- The validator checks override faction tags, policy enums and nested Narrative objects,
+  including Wave/diplomacy diagnostics. The story outcome analyzer exposes a separate
+  effective scenario per faction while preserving existing default scenario titles.
+
+Authority/migration: no new state, faction, wallet, capture, GUID or save authority.
+Volume owner/state and WorldState snapshots select rules; CounterAttack owns finite
+decisions; Economy owns rates/production; Narrative owns quests and real balances.
+Existing assets retain previous defaults without an asset rewrite. See
+`FACTION_STATE_RULES.md` for concrete Heroes-only earnings/reward and quest-only setups.
+No faction-to-story-Territory mapping was invented or saved into project assets.
+
+Verified evidence in `Saved/Verification/20260907_FactionStateRules`:
+
+- `EditorBuild_Release.log` and `GameBuild.log`: Editor/runtime/UHT and Development Game
+  builds succeeded. `BoundaryTests/index.json`: **269 passed (256 clean, 13 fixture-warning
+  tests), zero failures/skips**. Added behavioral coverage includes owner-specific
+  Narrative transition events/conditions, no-op/reload reward suppression, original GUID
+  rebinding, client mutation rejection, war/quest/allowlist admission, deterministic
+  saved schedule reuse, production reference archive/migration and real Native capital
+  inventory credits. Monotonicity and existing failure-path tests remain in the full suite.
+- `LivePolicy.json`: completed rendered listen server + two clients. Heroes ownership
+  enabled income 600 and explicit-only waves on all three worlds; Bandits ownership
+  disabled income and both attack kinds. Both client-side force-capture attempts were
+  rejected. Native save/load restored Heroes and the selected policy; always-relevant
+  snapshots matched while players were distant, and local actors matched after returning.
+- `LivePolicy_Attempt1_OutOfRelevance.json` is a **test false positive**, not a confirmed
+  replication defect: the first harness demanded an up-to-date local actor 250m away,
+  beyond its authored/default 150m network relevancy radius. The corrected harness checks
+  WorldState at distance and physical actors on return. No global always-relevant actor
+  override or speculative save-system modification was introduced.
+- `AssetValidation_Batch37.json`: 75 Blueprints compiled, 123 assets checked, zero invalid
+  assets/errors and four existing presentation warnings. A cold CommonInput dependency
+  load during the first widget compile produced an engine compilation-queue ensure;
+  the verification script now preloads controller-data Blueprints before widget compilation.
+  `FinalValidation.log` confirms the clean rerun completed without Error/Ensure/Assertion.
+  `Package.log`: cook/stage/pak succeeded in 5m17s with **0 errors / 560 existing content
+  warnings**, including AlMalik through the project's existing cook settings. The final
+  C++ activation-only check does not change reflected
+  defaults or cooked assets; `FinalStage.log` restages the rebuilt Game executable with
+  that verified cook; final staging succeeded in 1m7s. `StagedBinaryHash.json` proves the
+  staged executable matches the rebuilt source executable.
+- `PackagedSmoke_Result.json` / `PackagedSmoke.log`: 75-second localhost Development Game
+  listen smoke exited 0, with **no Error/Ensure/Assertion**, two four-NPC vehicle squads,
+  two blocked-arrival foot fallbacks and all eight explicit ingress completions. Combat
+  and casualties occurred; this receipt does not assert terminal recapture from inference.
+- `Batch37_Receipt.json`: temporary live-test Definition edits were restored without
+  saving assets, PIE stopped, PlayNumberOfClients restored to 1, editor returned to its
+  initially closed state, no background verification process retained. Root/plugin
+  whitespace checks passed; all prior uncommitted work is preserved.
+
+The full framework audit remains open. This batch does not prove every World Partition
+streaming arrangement, mid-spawn save callback, transaction rollback or dedicated-server
+case. The installed Epic engine still cannot build TDAServer. AlMalik still requires its
+actual story TerritoryVolumes/approaches and has the previously documented content issues.
+
 - Complete garrison placement/refund and multi-item production transaction review. Upgrade callback
   commit order is fixed in batch 17; no blanket purchase/recipe atomicity completion is claimed.
+  Next concrete regression: `TrySetDesiredGuardCount` calls Native currency debit before setting
+  `bGarrisonMutationInProgress`, so its currency callback can re-enter the same garrison mutation.
+  Also verify every rollback operation instead of reporting rollback success after unchecked returns.
 - Finish assault physical spawn/restore callbacks, malformed record/arithmetic limits and client
   movement/reindex validation. Unloaded-target treaty cancellation is already covered by batch 8.
-- Preserve deployed survivors and their vehicle history on reload without spending fresh deployment
-  slots or introducing repeat-load car duplication. Batch 23's packaged run proves the current failure.
+- Batch 36 verifies survivor identity/damage and vehicle history across repeated reload. Continue
+  the broader mid-initialization spawn/save callback and actual World Partition streaming cases;
+  no universal physical-restoration completion claim follows from the covered scenarios.
 - Trace the intermittent SKM_Manny bone-visibility ensure in rendered clients; batch 21's clean rendered
   run did not establish that this was a NullRHI-only issue.
-- Move hardcoded capital rewards to an authored Narrative event/data policy with compatible migration;
+- Capital reward authoring and faction/quest policy are covered by batch 37. Continue the wider
+  currency callback/settlement audit; this does not prove every payout transaction atomic.
   District income overflow and detached City lookup are fixed in batch 19.
 - Complete guard/AI/Tales/navigation/UI/editor review and the live release gates.

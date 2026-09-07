@@ -423,20 +423,24 @@ void ATerritoryCity::OnCityFullyCaptured_Implementation(FGameplayTag CapturingFa
 	}
 
 	// Economy bonus for capturing a city with a capital district
-	if (HasCapitalDistrict())
+	if (HasAuthority() && HasCapitalDistrict() && GetActiveStateGameplayRules().bAllowCapitalCaptureReward
+		&& !IsPrimaryRuntimeRuleSuspendedWithContext(ETerritoryQuestOverrideEffect::StateRules,
+			GetActiveTransitionContext().TalesComponent))
 	{
 		if (Economy)
 		{
 			AActor* PreferredBeneficiary = Economy->IncomePayoutPolicy ==
 				ETerritoryIncomePayoutPolicy::CapturingPlayer
 				? GetActiveTransitionContext().Instigator.Get() : nullptr;
-			Economy->CreditCurrencyToFaction(CapturingFaction, 1000,
+			const UTerritoryCityDefinition* Definition = Cast<UTerritoryCityDefinition>(GetTerritoryDefinition());
+			const int32 Reward = Definition ? FMath::Max(0, Definition->CapitalCaptureReward) : 1000;
+			const int32 Paid = Economy->CreditCurrencyToFaction(CapturingFaction, Reward,
 				Economy->IncomePayoutPolicy, TEXT("Capital city captured"),
 				ETerritoryTransactionType::Reward, PreferredBeneficiary);
 			if (ShouldLogPropertyEconomy())
 			{
-				UE_LOG(LogTerritory, Log, TEXT("[CityCapture] Capital bonus: 1000 gold to %s"),
-					*CapturingFaction.ToString());
+				UE_LOG(LogTerritory, Log, TEXT("[CityCapture] Capital bonus paid: %d of %d to %s"),
+					Paid, Reward, *CapturingFaction.ToString());
 			}
 		}
 	}
@@ -631,8 +635,10 @@ void ATerritoryDistrict::OnDistrictFullyCaptured_Implementation(FGameplayTag Cap
 			*GetTerritoryTag().ToString(), *CapturingFaction.ToString());
 	}
 
-	// Capital district bonus
-	if (bIsCapital)
+	// Authored capital reward; Narrative inventory owns the actual payout.
+	if (HasAuthority() && bIsCapital && GetActiveStateGameplayRules().bAllowCapitalCaptureReward
+		&& !IsPrimaryRuntimeRuleSuspendedWithContext(ETerritoryQuestOverrideEffect::StateRules,
+			GetActiveTransitionContext().TalesComponent))
 	{
 		UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>();
 		if (Economy)
@@ -640,7 +646,9 @@ void ATerritoryDistrict::OnDistrictFullyCaptured_Implementation(FGameplayTag Cap
 			AActor* PreferredBeneficiary = Economy->IncomePayoutPolicy ==
 				ETerritoryIncomePayoutPolicy::CapturingPlayer
 				? GetActiveTransitionContext().Instigator.Get() : nullptr;
-			Economy->CreditCurrencyToFaction(CapturingFaction, 500,
+			const UTerritoryDistrictDefinition* Definition = Cast<UTerritoryDistrictDefinition>(GetTerritoryDefinition());
+			const int32 Reward = Definition ? FMath::Max(0, Definition->CapitalCaptureReward) : 500;
+			Economy->CreditCurrencyToFaction(CapturingFaction, Reward,
 				Economy->IncomePayoutPolicy, TEXT("Capital district captured"),
 				ETerritoryTransactionType::Reward, PreferredBeneficiary);
 		}
@@ -811,6 +819,7 @@ int32 ATerritoryProperty::GetUpgradeCost() const
 
 int32 ATerritoryProperty::GetEffectiveIncome() const
 {
+	if (!GetActiveStateGameplayRules().bAllowPeriodicIncome) return 0;
 	int64 BaseIncome = FMath::Max(0, GetPeriodicIncome());
 
 	// Capital district income multiplier

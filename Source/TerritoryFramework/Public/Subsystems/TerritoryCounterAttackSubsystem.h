@@ -268,6 +268,8 @@ public:
 	static int32 ResolveVehicleOccupantCount(int32 RemainingWaveSlots,
 		int32 ApproachWaveLimit, int32 ConfiguredVehicleCapacity,
 		int32 NarrativeMountSeatCount);
+	/** Includes player passengers whose pawn is unpossessed during Native mounting. */
+	static bool HasPlayerVehicleOccupant(const ANarrativeVehicleBase* Vehicle);
 
 	/**
 	 * Caps a vehicle-only finite force to the seats that the current Narrative
@@ -311,6 +313,15 @@ public:
 	FOnTerritoryCounterHappened OnCounterHappened;
 
 private:
+	friend class FTFAssaultSurvivorRestore;
+	friend class FTFAssaultCheckpointValidation;
+	/** Kept weakly across campaign loads so a player-retained car cannot be cloned. */
+	TMap<FGuid, TWeakObjectPtr<ANarrativeVehicleBase>> PhysicalVehicles;
+	bool bReconstructingParticipants = false;
+	TArray<ATerritoryAssaultCharacter*> ReconstructParticipants(
+		FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
+	bool MigrateLegacySurvivors(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
+	static void NormalizePhysicalCheckpoint(FTerritoryAssaultRecord& Record);
 	TMap<FGuid, FTerritoryAssaultRecord> Assaults;
 	TMap<FGuid, TMap<FGameplayTag, int32>> EvaluationCycleHighWater;
 	TMap<FGuid, TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>>> LiveParticipants;
@@ -374,7 +385,7 @@ private:
 		ATerritoryVolume* Territory, const FTerritoryFactionAssaultConfig& ForceConfig,
 		UNPCDefinition* AttackerDefinition,
 		const FTerritoryAssaultApproach& Approach, const FTransform& SpawnTransform,
-		int32 OverrideNarrativeLevel);
+		int32 OverrideNarrativeLevel, FGuid RestoreSpawnGUID = FGuid());
 	TArray<ATerritoryAssaultCharacter*> SpawnNarrativeVehicleParticipants(
 		FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory,
 		const FTerritoryFactionAssaultConfig& ForceConfig,
@@ -383,7 +394,8 @@ private:
 		const FTransform& VehicleSpawnTransform,
 		const FTransform& DriverSpawnTransform,
 		const FTransform& DropOffTransform, const FVector& WalkDestination,
-		int32 RequestedOccupants, int32 OverrideNarrativeLevel);
+		int32 RequestedOccupants, int32 OverrideNarrativeLevel,
+		bool bLegacyRestoration = false);
 	void ResolveAssault(FTerritoryAssaultRecord& Assault, ETerritoryAssaultState FinalState,
 		ETerritoryAssaultResolution Reason);
 	void RetireLiveParticipants(FTerritoryAssaultRecord& Assault, bool bDestroyActors);
@@ -477,6 +489,7 @@ private:
 	void TrimTerminalHistory();
 
 	friend class FTFCounterAttackCycleHighWater;
+	friend class FTFFactionCounterPolicyIntegration;
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
 	friend class FTFCounterAttackWorldPartitionTargetRebind;
 	friend class FTFAssaultWarningCallback;

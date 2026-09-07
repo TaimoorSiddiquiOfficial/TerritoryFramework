@@ -53,6 +53,7 @@ bool FTFProductionRestoreCallbacks::RunTest(const FString& Parameters)
 	Rule.Outputs.Add(Output);
 	Profile->Rules.Add(Rule);
 	FTerritoryProductionSiteRecord Site;
+	Site.StateRulesVersion = 1; // Current-format detached fixture; legacy rebinding has its own regression.
 	Site.TerritoryGUID = FGuid(181, 182, 183, 184);
 	Site.OwnerFaction = Heroes;
 	Site.TerritoryState = ETerritoryState::Claimed;

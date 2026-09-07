@@ -140,6 +140,10 @@ bool FTFTerritoryStoryOutcomeParentHierarchy::RunTest(const FString& Parameters)
 	FTerritoryStateConfig& Claimed =
 		District->StateConfigs.FindOrAdd(ETerritoryState::Claimed);
 	Claimed.EntryConditions.Add(NewObject<UTerritoryOwnershipCondition>(District));
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	FTerritoryStateGameplayRules& HeroRules = Claimed.FactionOverrides.Add(Heroes);
+	HeroRules.CounterAttackPolicy = ETerritoryStateCounterAttackPolicy::QuestOnly;
+	HeroRules.bAllowPeriodicIncome = false;
 
 	const FTerritoryStoryOutcomeReport Report =
 		FTerritoryStoryOutcomeAnalyzer::Analyze(District, false);
@@ -159,6 +163,14 @@ bool FTFTerritoryStoryOutcomeParentHierarchy::RunTest(const FString& Parameters)
 		TerritoryStoryOutcomeTests::FindScenario(
 			Report, TEXT("Claimed lifecycle"));
 	TestNotNull(TEXT("Claimed parent lifecycle branch exists"), ClaimedLifecycle);
+	const FTerritoryStoryOutcomeScenario* HeroLifecycle = TerritoryStoryOutcomeTests::FindScenario(
+		Report, TEXT("Claimed lifecycle (Narrative.Factions.Heroes)"));
+	TestNotNull(TEXT("Faction-specific lifecycle is separately reviewable"), HeroLifecycle);
+	if (HeroLifecycle)
+	{
+		TestEqual(TEXT("Replacement faction rules do not inherit the default blocked condition"),
+			HeroLifecycle->Certainty, ETerritoryStoryOutcomeCertainty::Configured);
+	}
 	if (ClaimedLifecycle)
 	{
 		TestEqual(TEXT("Parent political conditions are reported as an authoring warning"),
