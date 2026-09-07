@@ -34,6 +34,7 @@
 #include "Tales/TerritoryAssaultTask.h"
 #include "Tales/TerritoryCaptureEvent.h"
 #include "Tales/TerritoryCaptureEligibilityCondition.h"
+#include "Tales/TerritorySituationCondition.h"
 #include "Tales/TerritoryOwnerHandoverEvent.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "Tales/TerritoryLockEvent.h"
@@ -4979,6 +4980,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTalesCompleteConditionEventAudit,
 bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 {
 	const TArray<UClass*> ExpectedConditions = {
+		UTerritorySituationCondition::StaticClass(),
 		UTerritoryCaptureEligibilityCondition::StaticClass(),
 		UTerritoryDiplomacyCondition::StaticClass(),
 		UTerritoryGarrisonCondition::StaticClass(),

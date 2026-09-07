@@ -1,4 +1,5 @@
 #include "Tales/TerritoryCaptureEvent.h"
+#include "Tales/TerritorySituationCondition.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -19,7 +20,8 @@ UTerritoryCaptureEvent::UTerritoryCaptureEvent(const FObjectInitializer& ObjectI
 void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
-	if (!TargetTerritoryTag.IsValid()) return;
+	const FGameplayTag EffectiveTerritory = SituationProfile ? SituationProfile->Territory : TargetTerritoryTag;
+	if (!EffectiveTerritory.IsValid()) return;
 
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -31,18 +33,22 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return;
 
-	ATerritoryVolume* Territory = Registry->GetTerritoryByTag(TargetTerritoryTag);
+	ATerritoryVolume* Territory = Registry->GetTerritoryByTag(EffectiveTerritory);
 	if (!Territory) return;
 
 	if (!Territory->IsAvailableForGameplay() && !bForceCapture)
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("TerritoryCaptureEvent: %s is locked, skipping (bForceCapture=false)"),
-			*TargetTerritoryTag.ToString());
+			*EffectiveTerritory.ToString());
 		return;
 	}
 
 	FGameplayTag ResolvedCapturingFaction = CapturingFaction;
-	if (CapturingFactionSource == ETerritoryCaptureFactionSource::NarrativeTargetFaction)
+	if (SituationProfile)
+	{
+		ResolvedCapturingFaction = SituationProfile->ResolveRequestingFaction(Target, Controller, NarrativeComponent);
+	}
+	else if (CapturingFactionSource == ETerritoryCaptureFactionSource::NarrativeTargetFaction)
 	{
 		ResolvedCapturingFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
 			this, Target);
@@ -57,7 +63,7 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	{
 		UE_LOG(LogTerritory, Warning,
 			TEXT("TerritoryCaptureEvent: no exact capturing faction resolved for %s (source=%d)"),
-			*TargetTerritoryTag.ToString(), static_cast<int32>(CapturingFactionSource));
+			*EffectiveTerritory.ToString(), static_cast<int32>(SituationProfile ? SituationProfile->FactionSource : CapturingFactionSource));
 		return;
 	}
 
@@ -70,7 +76,7 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	{
 		UE_LOG(LogTerritory, Warning,
 			TEXT("[TalesCaptureEvent] ControlSubsystem unavailable for %s — capture skipped"),
-			*TargetTerritoryTag.ToString());
+			*EffectiveTerritory.ToString());
 		return;
 	}
 
@@ -101,7 +107,7 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	if (Response.Result != ETerritoryMutationResult::Success)
 	{
 		UE_LOG(LogTerritory, Warning, TEXT("[TalesCaptureEvent] Mutation rejected for %s: %s (result=%d)"),
-			*TargetTerritoryTag.ToString(),
+			*EffectiveTerritory.ToString(),
 			*Response.Explanation.ToString(),
 			static_cast<int32>(Response.Result));
 		return;
@@ -113,9 +119,9 @@ void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerC
 	if (bDebug)
 	{
 		UE_LOG(LogTerritory, Log, TEXT("TerritoryCaptureEvent: %s captured by %s via event"),
-			*TargetTerritoryTag.ToString(), *ResolvedCapturingFaction.ToString());
+			*EffectiveTerritory.ToString(), *ResolvedCapturingFaction.ToString());
 		UE_LOG(LogTerritory, Log, TEXT("[TalesCaptureEvent] ForceCapture %s → %s (force=%s)"),
-			*TargetTerritoryTag.ToString(), *ResolvedCapturingFaction.ToString(),
+			*EffectiveTerritory.ToString(), *ResolvedCapturingFaction.ToString(),
 			bForceCapture ? TEXT("true") : TEXT("false"));
 	}
 }

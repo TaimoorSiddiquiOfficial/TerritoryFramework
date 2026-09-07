@@ -514,6 +514,7 @@ void ATerritoryWorldState::PublishTerritorySummary(
 	Summary.ParentTerritoryTag = Territory->GetParentTerritoryTag();
 	Summary.DisplayName = Territory->GetTerritoryDisplayName();
 	Summary.CurrentOwner = Territory->GetOwningFaction();
+	Summary.FormerOwningFactions = Territory->GetOwnershipData().FormerOwningFactions;
 	Summary.ContestingFaction = Territory->GetContestingFaction_Implementation();
 	Summary.ControlProgress = Territory->GetControlProgress();
 	Summary.State = Territory->GetTerritoryState();

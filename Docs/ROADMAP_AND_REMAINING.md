@@ -1,15 +1,27 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-07 (batch 41)
+> **Reviewed:** 2026-09-07 (batch 42)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
 
 TDA is on UE 5.8.2 with the local, unmodified Narrative Pro 2.4.2 package.
-[Batch 41](CASUALTY_DRIVER_LOSS_2026-09-07.md) records the latest builds, **275
-passing tests**, 75 Blueprint compilations and 123-asset validation (zero errors,
-four existing warnings). A server plus two clients agree on finite defeat after
+[Batch 42](CONDITIONAL_RETAKE_DIALOGUE_2026-09-07.md) adds modular Native planning
+and handover examples, saved former ownership, and live diplomacy/power/Place
+majority conditions. Multiplayer keeps flag-based automatic capture; the new
+handover example requires explicit story capture and otherwise only reacts after
+recapture. Editor/runtime/UHT and Game builds pass, with **279 passing tests**,
+77 Blueprint compilations and 128-asset validation (zero errors, four existing
+warnings). Seven live dialogue scenarios matched between a listen server and the
+requesting client, including cached-offer ceasefire rejection and verified retake;
+both clients received ownership/history and the unrelated client remained outside
+the conversation. New examples are ready to assign; the custom existing Blacksmith
+dialogue and Act 1 content are preserved. A fresh cook/stage included all five
+new assets, and the matching packaged Game completed a 90-second server-mode
+assault smoke with exit zero. Full release gates remain below.
+
+[Batch 41](CASUALTY_DRIVER_LOSS_2026-09-07.md) remains the evidence for finite defeat after
 a mounted driver casualty and seven later actual ASC deaths. Real save/reload
 after driver loss also preserves the finite force without duplicate assaults.
 The earlier weapon-melee, vehicle-departure and UDS fixes are in
@@ -20,8 +32,9 @@ The immediate remaining work, in order:
 1. Reproduce and symbolize the earlier behavior-tree decorator-search crash after
    clustered casualties. Passenger recovery is a separately confirmed fix; it
    does not establish that crash's cause.
-2. Complete assault spawn/save callback and malformed-record arithmetic review,
-   including recurrence-counter limits. Then exercise physical stream-out/in on
+2. Complete assault spawn/save callback and remaining malformed-record arithmetic
+   review. Batch 42 closed recurrence-counter overflow and stale ownership-directory
+   reload. Then exercise physical stream-out/in on
    AlMalik with a live assault, posts, routes and returning clients.
 3. Finish production save-only callback and refunded item-instance metadata
    handling, and the broader payout/currency settlement review.

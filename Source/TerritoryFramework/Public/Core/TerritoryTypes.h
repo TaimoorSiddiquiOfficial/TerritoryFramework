@@ -190,6 +190,10 @@ struct FTerritoryOwnershipData
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	FGameplayTag OwningFaction;
 
+	/** Verified former owners, recorded only by successful ownership commits. Old saves start empty. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|History")
+	FGameplayTagContainer FormerOwningFactions;
+
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	ETerritoryState State = ETerritoryState::Unclaimed;
 

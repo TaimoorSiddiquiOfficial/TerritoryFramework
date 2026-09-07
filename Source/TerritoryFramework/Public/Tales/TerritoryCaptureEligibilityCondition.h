@@ -24,6 +24,10 @@ class TERRITORYFRAMEWORK_API UTerritoryCaptureEligibilityCondition
 public:
 	UTerritoryCaptureEligibilityCondition();
 
+	/** Optional shared Place/faction binding; empty preserves existing authored fields. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
+	TObjectPtr<class UTerritorySituationProfile> SituationProfile;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(Categories="Territory", ToolTip="Independent Place that the owner NPC may hand over."))
 	FGameplayTag TerritoryToCheck;
@@ -39,6 +43,11 @@ public:
 	/** Recommended for a defeat-then-dialogue handover. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	bool bRequireNoLivingDefenders = true;
+
+	/** Restrict a story handover to Places that explicitly disable automatic flag capture.
+	 * False preserves existing authored conditions; new story examples enable this. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
+	bool bRequireStoryCaptureFlow = false;
 
 	/** Enable when the conversation is only valid during active contesting. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")

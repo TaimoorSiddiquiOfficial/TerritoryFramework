@@ -822,6 +822,10 @@ void ATerritoryVolume::Load_Implementation()
 		{
 			Control->RestoreCaptureState(this, OwnershipData.ContestingFaction, OwnershipData.ControlProgress);
 		}
+		// Loading an actor in place may leave its garrison counts unchanged. The
+		// campaign directory must still replace later ownership/history immediately,
+		// including before this actor streams out or a client joins.
+		PublishCaptureSummary();
 	}
 
 	const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
@@ -1766,7 +1770,16 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	PreviousAvailability = OldAvailability;
 
 	// ─── Atomic struct write ───
-	OwnershipData = NewData;
+	FTerritoryOwnershipData CommittedData = NewData;
+	// History belongs to this authority, not the caller's proposed read model.
+	// Conditions/failed commits cannot invent a tenure; Native save loading restores
+	// this field directly with the rest of OwnershipData.
+	CommittedData.FormerOwningFactions = OwnershipData.FormerOwningFactions;
+	if (OldOwner.IsValid() && OldOwner != NewOwner)
+	{
+		CommittedData.FormerOwningFactions.AddTag(OldOwner);
+	}
+	OwnershipData = MoveTemp(CommittedData);
 	// Keep the replicated World Partition read model current before state events
 	// evaluate cross-territory conflict protection.
 	PublishCaptureSummary();

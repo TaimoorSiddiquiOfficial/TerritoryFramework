@@ -152,6 +152,9 @@ public:
 		const FTerritoryAssaultEvaluationInput& Input,
 		const UTerritoryCounterAttackProfile* Profile);
 
+	/** Read-only server assessment using the same loaded defence front as assault planning. */
+	bool TryGetDefenceFrontPower(const ATerritoryVolume* Territory, float& OutPower) const;
+
 	/** Raw post reserves only defend staffing slots the owner has authorized. */
 	static int32 CalculateEffectiveReserveGuards(int32 RawReserveGuards,
 		int32 DesiredGuardCount);

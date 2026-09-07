@@ -2,7 +2,7 @@
 
 > **Plugin:** TerritoryFramework (v0.2.7)
 > **Depends on:** Narrative Pro 2.4.2 public APIs
-> **Engine:** UE 5.7
+> **Current TDA engine:** UE 5.8.2
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
 > **Vendor rule:** Narrative Pro source/assets are read-only; all compatibility code lives in TerritoryFramework.
 
@@ -14,6 +14,11 @@ example, DataAsset versus saved runtime state, hierarchy, capture, guards, diplo
 counterattacks, production, stealth, UI, events, conditions, multiplayer, and debugging.
 
 The numbered documents below are the advanced reference.
+
+For reusable planning and post-combat conversations, see the
+[conditional retake dialogue guide](CONDITIONAL_RETAKE_DIALOGUE_2026-09-07.md).
+The [current roadmap](ROADMAP_AND_REMAINING.md) distinguishes verified batches
+from the remaining release gates.
 
 ## Current Implementation Limits
 

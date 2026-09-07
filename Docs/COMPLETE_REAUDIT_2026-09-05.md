@@ -2,8 +2,18 @@
 
 Status: **in progress**. Findings below distinguish confirmed defects from candidates.
 
-Latest focused update: [batch 41 — passenger recovery after driver loss](CASUALTY_DRIVER_LOSS_2026-09-07.md).
-UE 5.8.2 Editor/runtime/UHT and Game builds pass; **275 automation tests pass**.
+Latest focused update: [batch 42 — conditional retake dialogues](CONDITIONAL_RETAKE_DIALOGUE_2026-09-07.md).
+UE 5.8.2 Editor/runtime/UHT and Game builds pass; **279 automation tests pass**.
+The modular Native examples use saved former ownership and current diplomacy,
+district power and Place-based majority. New handovers require explicit story
+capture; multiplayer flag capture remains automatic. Seven live scenarios verify
+Native dialogue delivery to the requesting client, both-client ownership/history,
+cached-offer rejection and real retake. In-place actor reload now republishes the
+ownership directory even with unchanged garrison counts, and recurrence counters
+cannot wrap at MAX_int32. Validation covers 77 Blueprints and 128 assets with zero
+errors and four existing warnings. Broader release gates remain open.
+
+[Batch 41 — passenger recovery after driver loss](CASUALTY_DRIVER_LOSS_2026-09-07.md):
 Mounted driver death now lets surviving passengers leave through Narrative's mount
 system without forfeiting their finite force slots. A rendered server and two clients
 agree on all eight casualties, zero withdrawal and finite defeat; a real save/reload
@@ -11,7 +21,7 @@ after driver death reaches the same result. Batch 40's weapon execution, vehicle
 departure and UDS work remains covered by the full suite. The earlier behavior-tree
 crash after attacker casualties, city/interior visual review and broader audit gates
 remain open. The previously untracked `DA_QC_NewMission` draft is no longer present;
-the current 123-asset validation has zero errors and four existing warnings.
+its 123-asset validation had zero errors and four existing warnings.
 The batch 36 figures below are historical; they are not the latest build receipt.
 
 Historical code verification: batch 36, **265 passing automation tests** (252 clean,

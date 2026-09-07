@@ -329,6 +329,7 @@ bool UTerritoryCounterAttackSubsystem::CanContinueSchedule(
 	int32 MaximumScheduledAssaults)
 {
 	const int32 SafePreviousOccurrence = FMath::Max(1, PreviousOccurrence);
+	if (SafePreviousOccurrence >= MAX_int32) return false;
 	switch (ScheduleMode)
 	{
 	case ETerritoryCounterScheduleMode::FiniteSeries:
@@ -853,6 +854,11 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 			bContinueExistingSchedule = false;
 		}
 	}
+
+	// A malformed or exhausted saved series must not wrap or consume another roll.
+	if (PreviousSchedule && PreviousSchedule->ScheduleOccurrence >= MAX_int32)
+		return Reject(NSLOCTEXT("TerritoryCounterAttack", "ScheduleOccurrenceExhausted",
+			"The saved assault series has reached its supported occurrence limit."));
 
 	const int32 EvaluationCycle = ReserveNextEvaluationCycle(
 		Territory->GetTerritoryGUID(), AttackingFaction);
@@ -4011,6 +4017,19 @@ bool UTerritoryCounterAttackSubsystem::BuildNarrativeVehicleRoute(
 	}
 	if (OutFailureReason) OutFailureReason->Reset();
 	return true;
+}
+
+bool UTerritoryCounterAttackSubsystem::TryGetDefenceFrontPower(
+	const ATerritoryVolume* Territory, float& OutPower) const
+{
+	OutPower = 0.f;
+	if (!IsValid(Territory) || Territory->GetWorld() != GetWorld()
+		|| !Territory->HasAuthority() || !Territory->GetOwningFaction().IsValid()
+		|| Territory->GetControlMode() != ETerritoryControlMode::Independent) return false;
+	const FTerritoryAssaultEvaluationInput Input = BuildEvaluationInput(
+		Territory, FTerritoryFactionAssaultConfig());
+	OutPower = CalculateEvaluation(Input, GetDefault<UTerritoryCounterAttackProfile>()).DistrictDefencePower;
+	return FMath::IsFinite(OutPower) && OutPower >= 0.f;
 }
 
 FTerritoryAssaultEvaluationInput UTerritoryCounterAttackSubsystem::BuildEvaluationInput(

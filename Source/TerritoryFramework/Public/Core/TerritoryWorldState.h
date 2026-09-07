@@ -138,6 +138,10 @@ struct FReplicatedCaptureSummary
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag CurrentOwner;
 
+	/** Read projection only; the Territory's OwnershipData owns the durable history. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Capture|History")
+	FGameplayTagContainer FormerOwningFactions;
+
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag ContestingFaction;
 

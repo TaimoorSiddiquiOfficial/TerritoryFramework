@@ -25,6 +25,10 @@ class TERRITORYFRAMEWORK_API UTerritoryCaptureEvent : public UNarrativeEvent
 public:
 	UTerritoryCaptureEvent(const FObjectInitializer& ObjectInitializer);
 
+	/** Optional shared Place/faction binding for reusable conditional dialogue recipes. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
+	TObjectPtr<class UTerritorySituationProfile> SituationProfile;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event",
 		meta = (Categories = "Territory"))
 	FGameplayTag TargetTerritoryTag;

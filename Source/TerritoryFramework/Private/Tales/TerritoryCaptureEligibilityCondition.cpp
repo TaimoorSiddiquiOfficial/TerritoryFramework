@@ -1,4 +1,5 @@
 #include "Tales/TerritoryCaptureEligibilityCondition.h"
+#include "Tales/TerritorySituationCondition.h"
 
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryVolume.h"
@@ -21,11 +22,13 @@ bool UTerritoryCaptureEligibilityCondition::CheckCondition_Implementation(
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	UTerritoryControlSubsystem* Control = World
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
-	ATerritoryVolume* Territory = Registry && TerritoryToCheck.IsValid()
-		? Registry->GetTerritoryByTag(TerritoryToCheck) : nullptr;
+	const FGameplayTag EffectiveTerritory = SituationProfile ? SituationProfile->Territory : TerritoryToCheck;
+	ATerritoryVolume* Territory = Registry && EffectiveTerritory.IsValid()
+		? Registry->GetTerritoryByTag(EffectiveTerritory) : nullptr;
 	if (!Territory || !Control
 		|| Territory->GetControlMode() != ETerritoryControlMode::Independent
 		|| !Territory->IsAvailableForGameplay()
+		|| (bRequireStoryCaptureFlow && !Territory->UsesStoryCaptureFromBounds())
 		|| (bRequireNoLivingDefenders && Territory->GetDefenderCount() > 0)
 		|| (bRequireContestedState
 			&& Territory->GetTerritoryState() != ETerritoryState::Contested))
@@ -34,7 +37,11 @@ bool UTerritoryCaptureEligibilityCondition::CheckCondition_Implementation(
 	}
 
 	FGameplayTag Faction = ExplicitCapturingFaction;
-	if (CapturingFactionSource == ETerritoryCaptureFactionSource::NarrativeTargetFaction)
+	if (SituationProfile)
+	{
+		Faction = SituationProfile->ResolveRequestingFaction(Target, Controller, NarrativeComponent);
+	}
+	else if (CapturingFactionSource == ETerritoryCaptureFactionSource::NarrativeTargetFaction)
 	{
 		Faction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Target);
 	}
@@ -43,14 +50,24 @@ bool UTerritoryCaptureEligibilityCondition::CheckCondition_Implementation(
 		Faction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
 			this, Controller ? Controller->GetPawn() : nullptr);
 	}
-	return Faction.IsValid()
-		&& Control->GetCaptureEligibility(Territory, Faction) == ECaptureResult::Success;
+	if (!Faction.IsValid()
+		|| Control->GetCaptureEligibility(Territory, Faction) != ECaptureResult::Success) return false;
+	FTerritoryTransitionContext Context;
+	Context.Instigator = Target;
+	Context.TargetPawn = Target;
+	Context.PlayerController = Controller;
+	Context.TalesComponent = NarrativeComponent;
+	Context.RequestingFaction = Faction;
+	FText Failure;
+	return Territory->CheckStateExitConditions(Territory->GetTerritoryState(), Failure, Context)
+		&& Territory->CheckStateConditions(ETerritoryState::Claimed, Failure, Context, &Faction);
 }
 
 FString UTerritoryCaptureEligibilityCondition::GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Can hand over %s%s%s"),
-		*TerritoryToCheck.ToString(),
+	return FString::Printf(TEXT("Can hand over %s%s%s%s"),
+		*(SituationProfile ? SituationProfile->Territory : TerritoryToCheck).ToString(),
 		bRequireNoLivingDefenders ? TEXT(" after defenders are defeated") : TEXT(""),
-		bRequireContestedState ? TEXT(" while contested") : TEXT(""));
+		bRequireContestedState ? TEXT(" while contested") : TEXT(""),
+		bRequireStoryCaptureFlow ? TEXT(" using story capture") : TEXT(""));
 }
