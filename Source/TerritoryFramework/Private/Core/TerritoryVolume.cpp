@@ -799,6 +799,7 @@ void ATerritoryVolume::EnsurePersistentTerritoryGUID()
 
 void ATerritoryVolume::Serialize(FArchive& Ar)
 {
+	if (Ar.IsSaveGame() && Ar.IsLoading()) ++GarrisonLoadGeneration;
 	FTerritorySaveSerializationScope SaveScope(*this, Ar);
 	Super::Serialize(Ar);
 }
@@ -2620,6 +2621,17 @@ void ATerritoryVolume::RefreshGarrisonSnapshot()
 		return;
 	}
 
+	const FTerritoryGarrisonSnapshot NewSnapshot = BuildGarrisonSnapshot();
+	if (NewSnapshot != GarrisonSnapshot)
+	{
+		GarrisonSnapshot = NewSnapshot;
+		OnGarrisonChanged.Broadcast(this, GarrisonSnapshot);
+		ForceNetUpdate();
+	}
+}
+
+FTerritoryGarrisonSnapshot ATerritoryVolume::BuildGarrisonSnapshot() const
+{
 	FTerritoryGarrisonSnapshot NewSnapshot;
 	NewSnapshot.ActiveGuards = GetSpawnedGuardCount();
 	NewSnapshot.DesiredGuards = GetDesiredGuardCount();
@@ -2636,12 +2648,7 @@ void ATerritoryVolume::RefreshGarrisonSnapshot()
 	NewSnapshot.ReserveGuards = static_cast<int32>(FMath::Min<int64>(ReserveGuards, MAX_int32));
 	NewSnapshot.PendingDeployments = static_cast<int32>(FMath::Min<int64>(PendingDeployments, MAX_int32));
 
-	if (NewSnapshot != GarrisonSnapshot)
-	{
-		GarrisonSnapshot = NewSnapshot;
-		OnGarrisonChanged.Broadcast(this, GarrisonSnapshot);
-		ForceNetUpdate();
-	}
+	return NewSnapshot;
 }
 
 void ATerritoryVolume::RemoveGuardWithoutReplacement(ATerritoryGuardCharacter* Guard)
@@ -2878,6 +2885,7 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 
 	const FGameplayTag OwnerFaction = OwnershipData.OwningFaction;
 	const FGuid SpawnTerritoryGUID = TerritoryGUID;
+	const uint64 SpawnLoadGeneration = GarrisonLoadGeneration;
 	if (!OwnerFaction.IsValid()) return false;
 	if (GetSpawnedGuardCount() >= GetMaxGuardCount()) return false;
 
@@ -2943,6 +2951,7 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Guard);
 	const bool bDeploymentCurrent = IsValid(this) && !IsActorBeingDestroyed() && HasAuthority()
 		&& GetWorld() == World && TerritoryGUID == SpawnTerritoryGUID
+		&& GarrisonLoadGeneration == SpawnLoadGeneration
 		&& OwnershipData.OwningFaction == OwnerFaction && IsAvailableForGameplay()
 		&& ControlMode != ETerritoryControlMode::AggregateOnly
 		&& ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
@@ -3297,6 +3306,46 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 		return Result;
 	}
 
+	// Narrative NPC, inventory and UI delegates execute synchronously. Serialize the
+	// entire request, including placement, payment and publication, against reentry.
+	TGuardValue<bool> MutationGuard(bGarrisonMutationInProgress, true);
+	const FGameplayTag OwnerFaction = GetOwningFaction();
+	const FGuid OriginalGUID = TerritoryGUID;
+	const uint64 OriginalLoadGeneration = GarrisonLoadGeneration;
+	const FTerritoryGarrisonSnapshot OriginalSnapshot = GarrisonSnapshot;
+	const auto IsCurrent = [&]()
+	{
+		return IsValid(this) && !IsActorBeingDestroyed() && HasAuthority()
+			&& TerritoryGUID == OriginalGUID && GarrisonLoadGeneration == OriginalLoadGeneration
+			&& GetOwningFaction() == OwnerFaction && IsAvailableForGameplay()
+			&& GetTerritoryState() == ETerritoryState::Claimed;
+	};
+	const auto Finish = [&](bool bSuccess, const FText& Message)
+	{
+		Result.bSuccess = bSuccess && IsCurrent();
+		Result.Message = Message;
+		if (IsValid(this) && !IsActorBeingDestroyed())
+		{
+			GarrisonSnapshot = BuildGarrisonSnapshot();
+			if (GarrisonSnapshot != OriginalSnapshot)
+			{
+				// The lock remains held until all observers finish. A reload may still
+				// supersede us; expose its final read model without writing old fields back.
+				OnGarrisonChanged.Broadcast(this, GarrisonSnapshot);
+				GarrisonSnapshot = BuildGarrisonSnapshot();
+			}
+			ForceNetUpdate();
+		}
+		if (!IsCurrent())
+		{
+			Result.bSuccess = false;
+			Result.Message = FText::FromString(TEXT("The garrison request was superseded by a load or territory change."));
+		}
+		Result.NewDesiredGuards = GetDesiredGuardCount();
+		Result.NewActiveGuards = GetSpawnedGuardCount();
+		return Result;
+	};
+
 	const int32 Increase = FMath::Max(0, NewDesiredGuardCount - Result.OldDesiredGuards);
 	const int32 GuardsToDeploy = FMath::Min(Increase,
 		FMath::Max(0, NewDesiredGuardCount - Result.OldActiveGuards));
@@ -3320,24 +3369,12 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 
 	UTerritoryEconomySubsystem* Economy = GetWorld()
 		? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
-	if (Result.RecruitmentCost > 0)
-	{
-		const FString Reason = FString::Printf(TEXT("Raised garrison target for %s from %d to %d"),
-			*GetTerritoryTag().ToString(), Result.OldDesiredGuards, NewDesiredGuardCount);
-		if (!Economy || !Economy->TryDebitCurrency(Requester, Result.RecruitmentCost,
-			OwnershipData.OwningFaction, Reason, ETerritoryTransactionType::Purchase))
-		{
-			Result.Message = FText::FromString(TEXT("The Narrative inventory balance changed before recruitment committed."));
-			return Result;
-		}
-	}
 
 	TSet<ATerritoryGuardCharacter*> GuardsBeforeDeployment;
 	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
 	{
 		if (GuardPtr.IsValid()) GuardsBeforeDeployment.Add(GuardPtr.Get());
 	}
-	bGarrisonMutationInProgress = true;
 
 	TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
 	SpawnPoints.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
@@ -3348,12 +3385,15 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 	});
 	for (int32 Index = 0; Index < GuardsToDeploy; ++Index)
 	{
+		if (!IsCurrent()) return Finish(false, FText::GetEmpty());
 		bool bDeployed = false;
 		for (ATerritoryGuardSpawnPoint* Point : SpawnPoints)
 		{
+			if (!IsCurrent()) return Finish(false, FText::GetEmpty());
 			if (Point && Point->HasAvailableSlot()
 				&& TrySpawnSingleGuard(Point, false))
 			{
+				if (!IsCurrent()) return Finish(false, FText::GetEmpty());
 				++Result.GuardsDeployed;
 				bDeployed = true;
 				break;
@@ -3365,7 +3405,8 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 		}
 	}
 
-	if (Result.GuardsDeployed != GuardsToDeploy)
+	if (!IsCurrent()) return Finish(false, FText::GetEmpty());
+	const auto RollbackDeployment = [&]()
 	{
 		TArray<ATerritoryGuardCharacter*> RollbackGuards;
 		for (const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
@@ -3377,20 +3418,15 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 		}
 		for (ATerritoryGuardCharacter* Guard : RollbackGuards)
 		{
+			if (!IsCurrent()) break;
 			RemoveGuardWithoutReplacement(Guard);
 		}
-		if (Economy && Result.RecruitmentCost > 0)
-		{
-			Economy->CreditCurrency(Requester, Result.RecruitmentCost, OwnershipData.OwningFaction,
-				FString::Printf(TEXT("Rolled back failed garrison target for %s"), *GetTerritoryTag().ToString()),
-				ETerritoryTransactionType::Purchase);
-		}
 		Result.GuardsDeployed = 0;
-		Result.NewActiveGuards = GetSpawnedGuardCount();
-		Result.Message = FText::FromString(TEXT("The complete garrison deployment could not be placed; no staffing change was committed."));
-		bGarrisonMutationInProgress = false;
-		RefreshGarrisonSnapshot();
-		return Result;
+	};
+	if (Result.GuardsDeployed != GuardsToDeploy || NewDesiredGuardCount > GetMaxGuardCount())
+	{
+		RollbackDeployment();
+		return Finish(false, FText::FromString(TEXT("The complete garrison deployment could not be placed; no recruitment payment was taken.")));
 	}
 
 	if (NewDesiredGuardCount < Result.OldDesiredGuards)
@@ -3399,20 +3435,43 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 	}
 	for (ATerritoryGuardCharacter* Guard : WithdrawalPlan)
 	{
+		if (!IsCurrent()) return Finish(false, FText::GetEmpty());
 		RemoveGuardWithoutReplacement(Guard);
 		++Result.GuardsWithdrawn;
 	}
 
+	if (!IsCurrent()) return Finish(false, FText::GetEmpty());
 	OwnershipData.DesiredGuardCount = NewDesiredGuardCount;
 	CleanupInvalidDefenders();
 	OwnershipData.DefenderCount = RegisteredDefenders.Num();
+	// Publishable fields are staged before Native AddCurrency invokes observers.
+	// A rejected debit runs no currency callback, so only our uncharged deployment
+	// is rolled back. Placement failure never needs a fallible faction-based refund.
+	GarrisonSnapshot = BuildGarrisonSnapshot();
+	if (Result.RecruitmentCost > 0)
+	{
+		const FString Reason = FString::Printf(TEXT("Raised garrison target for %s from %d to %d"),
+			*GetTerritoryTag().ToString(), Result.OldDesiredGuards, NewDesiredGuardCount);
+		if (!Economy || !Economy->TryDebitCurrency(Requester, Result.RecruitmentCost,
+			OwnerFaction, Reason, ETerritoryTransactionType::Purchase))
+		{
+			if (IsCurrent())
+			{
+				OwnershipData.DesiredGuardCount = Result.OldDesiredGuards;
+				RollbackDeployment();
+				if (IsCurrent()) OwnershipData.DefenderCount = RegisteredDefenders.Num();
+			}
+			return Finish(false, FText::FromString(TEXT("The Narrative account could not pay the recruitment cost; the unpaid deployment was cancelled.")));
+		}
+	}
+	if (!IsCurrent() || GetDesiredGuardCount() != NewDesiredGuardCount)
+	{
+		return Finish(false, FText::FromString(TEXT("The paid garrison request was superseded by a subsequent state change.")));
+	}
 	if (Economy)
 	{
 		Economy->RecalculateIncome(OwnershipData.OwningFaction);
 	}
-	bGarrisonMutationInProgress = false;
-	RefreshGarrisonSnapshot();
-	ForceNetUpdate();
 
 	Result.bSuccess = true;
 	Result.NewDesiredGuards = NewDesiredGuardCount;
@@ -3425,7 +3484,7 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 		FText::AsNumber(Result.NewActiveGuards),
 		FText::AsNumber(Result.RecruitmentCost),
 		FText::AsNumber(static_cast<int64>(FMath::Max(0, OwnershipData.GuardCost)) * NewDesiredGuardCount));
-	return Result;
+	return Finish(true, Result.Message);
 }
 
 bool ATerritoryVolume::CanSendReinforcements(const AActor* Requester, int32 Count,

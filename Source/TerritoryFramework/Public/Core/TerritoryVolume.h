@@ -619,6 +619,7 @@ public:
 	void ReconcileGuardsAfterLoad();
 	void SpawnGuardsToCount(int32 TargetGuardCount);
 	void RefreshGarrisonSnapshot();
+	FTerritoryGarrisonSnapshot BuildGarrisonSnapshot() const;
 
 public:
 	/** Check if all Entry Conditions for the given state pass. Public for atomic mutation validation. */
@@ -795,6 +796,7 @@ private:
 	friend class FTFFactionStateRulesIntegration;
 	friend class FTFGuardRetirementCallbacks;
 	friend class FTFGuardSpawnAdmissionCallbacks;
+	friend class FTFGarrisonPurchaseCallbacks;
 	friend class FTFGuardReserveTotals;
 	friend class FTFTerritoryDefinitionRuntimeNarrative;
 #endif
@@ -840,6 +842,8 @@ private:
 	bool bBypassTransitionConditions = false;
 	bool bSpawningGuards = false;
 	bool bGarrisonMutationInProgress = false;
+	/** Invalidates an in-flight purchase when Narrative restores even identical saved values. */
+	uint64 GarrisonLoadGeneration = 0;
 
 	/** Narrative may create its ASC after the pawn is registered as a defender. */
 	TMap<TWeakObjectPtr<AActor>, TWeakObjectPtr<UNarrativeAbilitySystemComponent>> BoundDefenderASCs;

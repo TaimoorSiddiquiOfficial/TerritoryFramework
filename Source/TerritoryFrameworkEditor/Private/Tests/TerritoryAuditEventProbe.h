@@ -43,6 +43,13 @@ public:
 	TFunction<void(ANarrativeNPCCharacter*)> NPCSpawnCallback;
 	TFunction<void()> ComponentDeactivationCallback;
 	TFunction<void(AActor*, FGuid)> StableSpawnCallback;
+	TFunction<void()> GarrisonCallback;
+
+	UFUNCTION()
+	void GarrisonChanged(ATerritoryVolume* Territory, FTerritoryGarrisonSnapshot Snapshot)
+	{
+		if (GarrisonCallback) GarrisonCallback();
+	}
 
 	UFUNCTION()
 	void StableActorSpawned(AActor* Actor, const FGuid ActorGUID)

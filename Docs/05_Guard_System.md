@@ -119,7 +119,13 @@ quest or custom script that already has the exact instigator, prefer
 `ForceCaptureWithContext`. Use `ConfiguredForEveryOwner` when an authored player faction
 should deliberately receive the automatic target.
 
-Use `TrySetDesiredGuardCount(Requester, NewTarget)` for an absolute target. Increasing it debits the requester's Narrative inventory using `GuardRecruitmentCost`; decreasing it reduces future upkeep and works even when assigned guards are dead. Multi-guard placement is all-or-nothing: incomplete placement removes the guards created by that request and refunds the debit.
+Use `TrySetDesiredGuardCount(Requester, NewTarget)` for an absolute target. Increasing it debits the requester's Narrative inventory using `GuardRecruitmentCost`; decreasing it reduces future upkeep and works even when assigned guards are dead. The request places the complete new deployment before charging. Incomplete placement removes that request's admitted guards without taking payment. The account is validated again before debit; failed payment cancels the unpaid deployment.
+
+NPC, currency and garrison-notification callbacks cannot nest another staffing request.
+Currency observers see the complete staffing target, live guards and garrison snapshot.
+A Narrative save load supersedes the in-flight request, even if owner and Territory GUID
+remain identical; the stale request cannot admit its guard or overwrite the loaded campaign.
+This does not promise atomic saves from every intermediate multi-NPC initialization callback.
 
 ## Guard Post Definitions (Data-Driven Configuration)
 

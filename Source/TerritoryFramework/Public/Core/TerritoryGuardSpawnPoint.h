@@ -501,6 +501,7 @@ private:
 	friend class FTFGuardReserveReconciliation;
 	friend class FTFGuardRetirementCallbacks;
 	friend class FTFGuardSpawnAdmissionCallbacks;
+	friend class FTFGarrisonPurchaseCallbacks;
 	friend class FTFGuardReserveTotals;
 #endif
 

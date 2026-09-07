@@ -1143,11 +1143,71 @@ streaming arrangement, mid-spawn save callback, transaction rollback or dedicate
 case. The installed Epic engine still cannot build TDAServer. AlMalik still requires its
 actual story TerritoryVolumes/approaches and has the previously documented content issues.
 
-- Complete garrison placement/refund and multi-item production transaction review. Upgrade callback
-  commit order is fixed in batch 17; no blanket purchase/recipe atomicity completion is claimed.
-  Next concrete regression: `TrySetDesiredGuardCount` calls Native currency debit before setting
-  `bGarrisonMutationInProgress`, so its currency callback can re-enter the same garrison mutation.
-  Also verify every rollback operation instead of reporting rollback success after unchecked returns.
+### Batch 38 — garrison purchase callbacks and reload supersession (2026-09-07)
+
+Confirmed defects: recruitment debited Narrative currency before holding the garrison mutation
+lock, allowing a synchronous currency callback to re-enter a purchase against the old target.
+Failed placement then depended on an unchecked faction-based refund. Separately, an NPC spawn
+callback could load the same Territory GUID and owner and still admit the old request's guard.
+The new native behavioral test reproduced that last defect before the final admission fix.
+
+`ATerritoryVolume` remains the authority for desired staffing, guard admission and its replicated
+snapshot. Narrative owns the wallet, NPC creation, definition/activity initialization and save
+archives. The existing Economy debit API is reused. No Narrative source was modified.
+
+The existing mutation lock now spans placement, debit and notification. Complete placement
+precedes payment; placement failure takes no money, and failed final payment removes the unpaid
+deployment. The final target and snapshot are staged before Native currency callbacks execute.
+A transient native load generation invalidates work superseded by Narrative deserialization,
+including identical-owner/GUID reloads during NPC initialization. Rollback stops when a new
+campaign supersedes it. Final success is checked after publication callbacks.
+
+Changed production files are `TerritoryVolume.cpp/.h`; `TerritoryGuardSpawnPoint.h` adds only
+a test friend. `TerritoryAuditEventProbe.h` and `TerritoryGarrisonPurchaseTests.cpp` provide
+real Native NPC, inventory and save callbacks. `05_Guard_System.md` documents the actual order.
+There is no new save schema, replicated property or Blueprint node; existing Blueprint callers
+keep the structured mutation result. Client mutations remain rejected. The load generation is
+not persisted and does not introduce another durable identity or World Partition authority.
+
+Verified evidence in `Saved/Verification/20260907_GarrisonPurchase`:
+
+- `EditorBuild_Final.log` and `GameBuild.log`: runtime/editor/UHT and Development Game builds
+  succeeded. `AllTests/index.json`: **270 passed (256 clean, 14 fixture-warning tests), zero
+  failures/skips**. The new test covers callback reentry, failed placement, changed wallet,
+  same-owner/GUID reload during spawn, reload during payment, Native callback save restoration,
+  reserve preservation and rejected client mutation. `FocusedTests/index.json` preserves the
+  initial failing reproduction: one stale guard survived the spawn-time reload before the fix.
+- `LiveGarrison.json`: completed rendered listen server plus two clients. Buying two guards
+  charged 100 once (50000 to 49900); all three worlds agreed on desired/active 2, withdrawal to
+  0, and Native save/load restoration to 2 with reserve 7. Both client mutation attempts were
+  rejected. Final balance remained 49900. Temporary state-rule edits were restored without
+  saving the Definition; the editor was closed and its original one-client setting restored.
+- `AssetValidation_Batch38.json`: 75 Blueprints compiled, 123 assets checked, zero errors or
+  invalid assets and four existing warnings. `Package.log`: cook/stage/pak succeeded in 5m49s,
+  including AlMalik, with **0 errors / 563 warnings**. Compared with batch 37, the three newly
+  logged warnings are invalid Native Character Creator tags (`Narrative.Equipment.Slot.Mesh.BaseBody`
+  in the visualizer Blueprint/map and `Narrative.CharacterCreator.Scalars.SkinHue` in its option).
+  Those vendor assets and the previously reported road/catenary/powerline warnings remain open.
+- `PackagedSmoke_Result.json`: the 75-second localhost Development Game listen smoke exited 0
+  without Error/Ensure/Assertion. Two four-NPC squads used two blocked-arrival dismounts and
+  all eight vehicle ingress completions were logged. This does not assert terminal recapture.
+  `StagedBinaryHash.json` proves the staged executable matches the verified Game build.
+- `Preservation.json` and `Batch38_Receipt.json`: all 741 Native source files and seven protected
+  project/instruction/user-content files match the rollback checkpoint. No user map or audio
+  changes were overwritten. PIE and verification processes are stopped, the editor is closed,
+  and the original client count and background CPU throttling settings are restored.
+
+This batch does not establish atomic saves from every intermediate multi-NPC initialization
+or withdrawal callback. The compiled TDAServer gate remains blocked by the installed engine;
+listen-server testing is not a substitute for that target. The full audit remains open.
+
+### Remaining confirmed work
+
+- Complete multi-item production transaction review. `ExecuteResourceRecipeOnInventory`
+  currently ignores input-refund and output-removal results on some rollback paths, and its
+  failure text can claim rollback even when restoring inputs failed. Direct recipe calls also
+  need a callback reentry regression. Upgrade callback order is fixed in batch 17 and garrison
+  recruitment is covered above; no blanket purchase/recipe atomicity completion is claimed.
 - Finish assault physical spawn/restore callbacks, malformed record/arithmetic limits and client
   movement/reindex validation. Unloaded-target treaty cancellation is already covered by batch 8.
 - Batch 36 verifies survivor identity/damage and vehicle history across repeated reload. Continue
