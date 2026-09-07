@@ -1,12 +1,27 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-07 (batch 43)
+> **Reviewed:** 2026-09-08 (batch 44)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
 
 TDA is on UE 5.8.2 with the local, unmodified Narrative Pro 2.4.2 package.
+[Batch 44](ASSAULT_TARGET_STREAMING_2026-09-08.md) fixes living attackers being
+withdrawn after exhausting AI initialization retries against an unloaded target.
+The existing registry wait now precedes goal initialization and preserves the
+finite survivor and retry budget. Editor/runtime/UHT and Game builds pass, with
+**281 passing tests**, 77 Blueprint compilations and 128-asset validation (zero
+errors, four existing warnings). A listen-server/two-client probe preserves all
+eight attackers during a 30-second target-registry absence, then recreates the
+four tested Native goals for the same target. The native SaveGame regression
+preserves the survivor GUID and decision. This is registry-boundary verification;
+physical AlMalik cell streaming remains open. Its 19,726-descriptor inventory
+contains no Territory actors, so that gate first needs an isolated authored fixture.
+A distinct cook/stage succeeds with zero cook errors and 30 existing warnings;
+the matching packaged Game completes a 90-second server-mode assault smoke with
+exit zero and no fatal, assertion, ensure or Blueprint runtime error.
+
 [Batch 43](ASSAULT_RETRY_BUDGET_2026-09-07.md) fixes saved spawn-failure counts
 wrapping negative and bypassing finite cancellation. New-wave, physical survivor
 and legacy failure paths share a saturating counter. Editor/runtime/UHT and Game
@@ -51,8 +66,10 @@ The immediate remaining work, in order:
    attribution; a later clean editor shutdown does not establish its cause.
 2. Complete assault spawn/save callback and remaining malformed-record arithmetic
    review. Batch 42 closed recurrence-counter overflow and stale ownership-directory
-   reload; batch 43 closed spawn-failure retry overflow. Then exercise physical stream-out/in on
-   AlMalik with a live assault, posts, routes and returning clients.
+   reload; batch 43 closed spawn-failure retry overflow; batch 44 closed target
+   streaming being charged as AI initialization failure. Prepare an isolated
+   AlMalik assault fixture (the city inventory currently has no Territory actors),
+   then exercise physical stream-out/in with posts, routes and returning clients.
 3. Finish production save-only callback and refunded item-instance metadata
    handling, and the broader payout/currency settlement review.
 4. Resolve the intermittent Manny bone-visibility and city empty-vehicle Chaos

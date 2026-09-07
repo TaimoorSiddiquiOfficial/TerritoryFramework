@@ -497,27 +497,11 @@ void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 		return;
 	}
 
-	if (!EnsureNarrativeActivityAndGoal())
-	{
-		if (++GoalInitializationAttempts >= 40)
-		{
-			UE_LOG(LogTerritory, Error,
-				TEXT("Assault participant %s could not initialize its Narrative goal/activity"),
-				*GetNameSafe(Owner));
-			Retire(false);
-			if (ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(Owner))
-			{
-				TerritoryNarrativeDeathSupport::PrepareForRemoval(*NPC);
-			}
-			Owner->Destroy();
-		}
-		return;
-	}
-	GoalInitializationAttempts = 0;
-
 	ATerritoryVolume* Territory = ResolveTargetTerritory();
 	if (!Territory)
 	{
+		// A missing streamed target is not an AI initialization failure. Wait
+		// before creating its goal, preserving both the survivor and retry budget.
 		// The old weak-keyed capture state is pruned by the control subsystem when
 		// a World Partition actor unloads. Clear our local read model so this NPC
 		// can register against the replacement actor when it streams back in.
@@ -536,6 +520,24 @@ void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 		bCaptureRegistered = false;
 		return;
 	}
+
+	if (!EnsureNarrativeActivityAndGoal())
+	{
+		if (++GoalInitializationAttempts >= 40)
+		{
+			UE_LOG(LogTerritory, Error,
+				TEXT("Assault participant %s could not initialize its Narrative goal/activity"),
+				*GetNameSafe(Owner));
+			Retire(false);
+			if (ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(Owner))
+			{
+				TerritoryNarrativeDeathSupport::PrepareForRemoval(*NPC);
+			}
+			Owner->Destroy();
+		}
+		return;
+	}
+	GoalInitializationAttempts = 0;
 
 	const bool bInsideTarget = Territory->ContainsPoint(Owner->GetActorLocation());
 	// Keep closing on a registered hostile defender after crossing the boundary.

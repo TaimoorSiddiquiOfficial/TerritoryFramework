@@ -2,7 +2,17 @@
 
 Status: **in progress**. Findings below distinguish confirmed defects from candidates.
 
-Latest focused update: [batch 43 — finite assault retry budget](ASSAULT_RETRY_BUDGET_2026-09-07.md).
+Latest focused update: [batch 44 — assault target streaming wait](ASSAULT_TARGET_STREAMING_2026-09-08.md).
+Living attackers no longer consume their AI initialization budget while their
+target GUID cannot resolve. The SaveGame regression covers finite survivors,
+wrong-GUID rejection, authority and genuine initialization failures. All **281
+automation tests pass**; Editor/runtime/UHT and Game builds pass. The server and
+two clients preserve eight living attackers through registry absence and target
+return. Validation covers 77 Blueprints and 128 assets with zero errors and four
+existing warnings. This is not physical World Partition cell verification;
+AlMalik's descriptor inventory contains no Territory actors yet.
+
+[Batch 43 — finite assault retry budget](ASSAULT_RETRY_BUDGET_2026-09-07.md):
 UE 5.8.2 Editor/runtime/UHT and Game builds pass; **280 automation tests pass**.
 Restored MAX_int32 spawn-failure counts no longer wrap negative and bypass finite
 cancellation. The new SaveGame regression covers new-wave, physical-survivor and
@@ -122,6 +132,7 @@ Blueprint validation and cook are baseline evidence, not proof of the new change
 | ASSAULT-08 | Cached Native appearance loading can restore saved health before Native BeginPlay resets default attributes. | Fixed in batch 36; live survivor retains exactly 82 health after repeated reload |
 | ASSAULT-09 | A retired driver remains a valid corpse reference, so surviving passengers wait until timeout and withdraw; missing/failed drivers also incorrectly fail the passengers. | Fixed in batch 41; Native exit/failure regression, server plus two clients, and real save/reload reach finite defeat with eight killed and zero withdrawn |
 | ASSAULT-10 | Saved MAX_int32 consecutive spawn failures wrap negative on the next failed wave/reconstruction, bypassing the finite retry limit. | Fixed in batch 43; saturated shared increment at all four sites, red/green SaveGame failure tests for three deployment paths and existing terminal projection |
+| ASSAULT-11 | A living attacker without an initialized goal exhausts 40 AI retries while its target is unavailable, withdrawing and losing its saved survivor entry. | Fixed in batch 44; resolve/wait before goal initialization, native red/green SaveGame and wrong-GUID/authority/failure tests, plus server/two-client target-return probe; physical city streaming remains open |
 | VISUAL-01 | Rendered clients reproduce a SKM_Manny bone-visibility/component-space-transform ensure during the intro. | Open; batch 23 proves this is not limited to NullRHI |
 
 ## Architecture constraints

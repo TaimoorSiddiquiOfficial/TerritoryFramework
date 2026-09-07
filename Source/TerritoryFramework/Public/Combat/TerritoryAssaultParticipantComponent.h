@@ -97,6 +97,7 @@ public:
 private:
 	friend class FTFAssaultPassengerDriverLoss;
 	friend class FTFAssaultSurvivorRestore;
+	friend class FTFAssaultTargetStreamingWait;
 	friend class FTFAssaultCombatAutonomy;
 	friend class FTFRoadSteeringObstacle;
 	// Bounded transient perception context, never campaign state or client input.
