@@ -19,6 +19,7 @@
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "TimerManager.h"
+#include "Misc/ScopeExit.h"
 #include "GameFramework/PlayerController.h"
 
 namespace
@@ -110,21 +111,22 @@ bool BuildScaledAmounts(const TArray<FTerritoryResourceRate>& Rates,
 }
 
 int32 ConsumeExactItems(UNarrativeInventoryComponent* Inventory,
-	TSubclassOf<UNarrativeItem> ItemClass, int32 Quantity)
+	TSubclassOf<UNarrativeItem> ItemClass, int32 Quantity, TFunctionRef<bool()> IsCurrent)
 {
 	if (!Inventory || !ItemClass || Quantity <= 0) return 0;
 	int32 Remaining = Quantity;
 	for (UNarrativeItem* Item : Inventory->FindItemsByClass(
 		TSoftClassPtr<UNarrativeItem>(ItemClass), false))
 	{
-		if (!Item || Remaining <= 0) continue;
+		if (!IsCurrent()) break;
+		if (!IsValid(Item) || Remaining <= 0 || !Inventory->GetItems().Contains(Item)) continue;
 		Remaining -= Inventory->ConsumeItem(Item, Remaining);
 	}
 	return Quantity - Remaining;
 }
 
 int32 AddExactItems(UNarrativeInventoryComponent* Inventory,
-	TSubclassOf<UNarrativeItem> ItemClass, int32 Quantity)
+	TSubclassOf<UNarrativeItem> ItemClass, int32 Quantity, TFunctionRef<bool()> IsCurrent)
 {
 	if (!Inventory || !ItemClass || Quantity <= 0) return 0;
 
@@ -135,7 +137,8 @@ int32 AddExactItems(UNarrativeInventoryComponent* Inventory,
 	for (UNarrativeItem* Item : Inventory->FindItemsByClass(
 		TSoftClassPtr<UNarrativeItem>(ItemClass), false))
 	{
-		if (!Item || Remaining <= 0) continue;
+		if (!IsCurrent()) break;
+		if (!IsValid(Item) || Remaining <= 0 || !Inventory->GetItems().Contains(Item)) continue;
 		const int32 Added = FMath::Min(Remaining, Item->GetStackSpace());
 		if (Added > 0)
 		{
@@ -144,7 +147,7 @@ int32 AddExactItems(UNarrativeInventoryComponent* Inventory,
 		}
 	}
 
-	if (Remaining > 0)
+	if (Remaining > 0 && IsCurrent())
 	{
 		const FItemAddResult AddResult = Inventory->TryAddItemFromClass(
 			ItemClass, Remaining, false);
@@ -1045,15 +1048,36 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipe(
 			"The resource inventory must belong to the requesting campaign world.");
 		return false;
 	}
-	const bool bSuccess = ExecuteResourceRecipeOnInventory(Inventory, Faction, Recipe,
-		UpgradeLevel, BatchCount, OutResult);
-	if (bSuccess)
+	if (bExecutingResourceRecipe || bProcessingResourceProduction)
 	{
-		UpdateResourceSnapshot(Faction, GetCurrentProductionCycle());
-		PublishProductionState();
+		OutResult.Status = ETerritoryProductionStatus::SettlementInProgress;
+		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "RecipeBusy", "Another resource settlement is in progress.");
+		return false; // A rejected nested request must not recursively publish another event.
 	}
+	const uint64 RestoreGeneration = ProductionRestoreGeneration;
+	ExecuteResourceRecipeOnInventory(Inventory, Faction, Recipe, UpgradeLevel, BatchCount, OutResult);
+	if (RestoreGeneration != ProductionRestoreGeneration || OutResult.Status == ETerritoryProductionStatus::Superseded) return false;
+	TGuardValue<bool> PublicationGuard(bExecutingResourceRecipe, true);
+	TGuardValue<TWeakObjectPtr<UNarrativeInventoryComponent>> InventoryGuard(ActiveRecipeInventory, Inventory);
+	TGuardValue<bool> ReloadGuard(bRecipeInventoryReloaded, false);
+	Inventory->OnCurrencyChanged.AddUniqueDynamic(this, &UTerritoryEconomySubsystem::OnRecipeInventoryCurrencyChanged);
+	ON_SCOPE_EXIT { if (IsValid(Inventory)) Inventory->OnCurrencyChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnRecipeInventoryCurrencyChanged); };
+	// Failed compensation can change real stock too; clients must receive its current read model.
+	UpdateResourceSnapshot(Faction, GetCurrentProductionCycle());
+	PublishProductionState();
 	OnProductionSettled.Broadcast(OutResult);
-	return bSuccess;
+	if (RestoreGeneration != ProductionRestoreGeneration || bRecipeInventoryReloaded)
+	{
+		OutResult.bSuccess = false;
+		OutResult.Status = ETerritoryProductionStatus::Superseded;
+		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "RecipeSuperseded", "A campaign or inventory load superseded this resource request.");
+	}
+	return OutResult.bSuccess;
+}
+
+void UTerritoryEconomySubsystem::OnRecipeInventoryCurrencyChanged(int32 OldCurrency, int32 NewCurrency)
+{
+	if (ActiveRecipeInventory.IsValid() && ActiveRecipeInventory->IsLoading()) bRecipeInventoryReloaded = true;
 }
 
 bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
@@ -1064,100 +1088,127 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 	if (!OutResult.BatchID.IsValid()) OutResult.BatchID = FGuid::NewGuid();
 	OutResult.Faction = Faction;
 	OutResult.RuleTag = Recipe.RuleTag;
-
+	OutResult.bSuccess = false;
+	OutResult.InputsConsumed.Reset();
+	OutResult.OutputsProduced.Reset();
+	OutResult.FailureReason = FText::GetEmpty();
+	if (bExecutingResourceRecipe)
+	{
+		OutResult.Status = ETerritoryProductionStatus::SettlementInProgress;
+		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "RecipeBusy", "Another resource settlement is in progress.");
+		return false;
+	}
+	if (!IsValid(Inventory) || !IsValid(Inventory->GetOwner()) || !Inventory->GetOwner()->HasAuthority())
+	{
+		OutResult.Status = ETerritoryProductionStatus::StorageUnavailable;
+		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "NoAuthoritativeStorage", "No authoritative Narrative resource inventory is available.");
+		return false;
+	}
+	TGuardValue<bool> RecipeGuard(bExecutingResourceRecipe, true);
+	TGuardValue<TWeakObjectPtr<UNarrativeInventoryComponent>> InventoryGuard(ActiveRecipeInventory, Inventory);
+	TGuardValue<bool> ReloadGuard(bRecipeInventoryReloaded, false);
+	const uint64 RestoreGeneration = ProductionRestoreGeneration;
+	Inventory->OnCurrencyChanged.AddUniqueDynamic(this, &UTerritoryEconomySubsystem::OnRecipeInventoryCurrencyChanged);
+	ON_SCOPE_EXIT { if (IsValid(Inventory)) Inventory->OnCurrencyChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnRecipeInventoryCurrencyChanged); };
+	const auto IsCurrent = [&]()
+	{
+		return IsValid(Inventory) && IsValid(Inventory->GetOwner())
+			&& Inventory->GetOwner()->HasAuthority() && !Inventory->GetOwner()->IsActorBeingDestroyed()
+			&& !Inventory->IsLoading() && !bRecipeInventoryReloaded && RestoreGeneration == ProductionRestoreGeneration;
+	};
+	const auto Superseded = [&]()
+	{
+		OutResult.Status = ETerritoryProductionStatus::Superseded;
+		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "RecipeSuperseded", "A campaign or inventory load superseded this resource request.");
+		return false;
+	};
 	FText FailureReason;
-	if (!UTerritoryProductionProfile::IsRuleConfigurationValid(Recipe, FailureReason)
-		|| UpgradeLevel < 0 || BatchCount <= 0)
+	if (!UTerritoryProductionProfile::IsRuleConfigurationValid(Recipe, FailureReason) || UpgradeLevel < 0 || BatchCount <= 0)
 	{
 		OutResult.Status = ETerritoryProductionStatus::InvalidProfile;
 		OutResult.FailureReason = FailureReason.IsEmpty()
-			? NSLOCTEXT("TerritoryProduction", "InvalidRecipe", "The production recipe is invalid.")
-			: FailureReason;
+			? NSLOCTEXT("TerritoryProduction", "InvalidRecipe", "The production recipe is invalid.") : FailureReason;
 		return false;
 	}
-	if (!Inventory || !Inventory->GetOwner() || !Inventory->GetOwner()->HasAuthority())
-	{
-		OutResult.Status = ETerritoryProductionStatus::StorageUnavailable;
-		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "NoAuthoritativeStorage",
-			"No authoritative Narrative resource inventory is available.");
-		return false;
-	}
-
-	if (!BuildScaledAmounts(Recipe.Inputs, UpgradeLevel, BatchCount,
-		OutResult.InputsConsumed, OutResult.FailureReason)
-		|| !BuildScaledAmounts(Recipe.Outputs, UpgradeLevel, BatchCount,
-			OutResult.OutputsProduced, OutResult.FailureReason))
+	TArray<FTerritoryResourceAmount> Inputs, Outputs;
+	if (!BuildScaledAmounts(Recipe.Inputs, UpgradeLevel, BatchCount, Inputs, OutResult.FailureReason)
+		|| !BuildScaledAmounts(Recipe.Outputs, UpgradeLevel, BatchCount, Outputs, OutResult.FailureReason))
 	{
 		OutResult.Status = ETerritoryProductionStatus::InvalidProfile;
-		OutResult.InputsConsumed.Empty();
-		OutResult.OutputsProduced.Empty();
 		return false;
 	}
-
-	if (!CanApplyResourceTransaction(Inventory, OutResult.InputsConsumed,
-		OutResult.OutputsProduced, OutResult.Status, OutResult.FailureReason))
+	if (!CanApplyResourceTransaction(Inventory, Inputs, Outputs, OutResult.Status, OutResult.FailureReason)) return false;
+	if (!IsCurrent()) return Superseded();
+	const auto Count = [&](UClass* Class)
 	{
+		int64 Total = 0;
+		for (const UNarrativeItem* Item : Inventory->GetItems())
+			if (IsValid(Item) && Item->GetClass() == Class) Total += FMath::Max(0, Item->GetQuantity());
+		return Total;
+	};
+	TMap<UClass*, int64> Initial, Expected;
+	for (const FTerritoryResourceAmount& Amount : Inputs) Initial.Add(Amount.ItemClass.Get(), Count(Amount.ItemClass.Get()));
+	for (const FTerritoryResourceAmount& Amount : Outputs) Initial.Add(Amount.ItemClass.Get(), Count(Amount.ItemClass.Get()));
+	Expected = Initial;
+	const auto Matches = [&](const TMap<UClass*, int64>& Quantities)
+	{
+		for (const auto& Entry : Quantities) if (Count(Entry.Key) != Entry.Value) return false;
+		return true;
+	};
+	TArray<FTerritoryResourceAmount> AppliedInputs, AppliedOutputs;
+	const auto Compensate = [&](ETerritoryProductionStatus Failure)
+	{
+		// Bound each inverse to this request and the current stock. Never remove pre-existing
+		// output or add input above the starting quantity after an external callback changed it.
+		for (int32 Index = AppliedOutputs.Num() - 1; Index >= 0; --Index)
+		{
+			if (!IsCurrent()) return Superseded();
+			FTerritoryResourceAmount& Amount = AppliedOutputs[Index];
+			const int32 Excess = static_cast<int32>(FMath::Clamp<int64>(Count(Amount.ItemClass.Get()) - Initial.FindChecked(Amount.ItemClass.Get()), 0, Amount.Quantity));
+			Amount.Quantity = Excess - ConsumeExactItems(Inventory, Amount.ItemClass, Excess, IsCurrent);
+		}
+		for (int32 Index = AppliedInputs.Num() - 1; Index >= 0; --Index)
+		{
+			if (!IsCurrent()) return Superseded();
+			FTerritoryResourceAmount& Amount = AppliedInputs[Index];
+			const int32 Missing = static_cast<int32>(FMath::Clamp<int64>(Initial.FindChecked(Amount.ItemClass.Get()) - Count(Amount.ItemClass.Get()), 0, Amount.Quantity));
+			Amount.Quantity = Missing - AddExactItems(Inventory, Amount.ItemClass, Missing, IsCurrent);
+		}
+		if (!IsCurrent()) return Superseded();
+		for (const FTerritoryResourceAmount& Amount : AppliedInputs) if (Amount.Quantity > 0) OutResult.InputsConsumed.Add(Amount);
+		for (const FTerritoryResourceAmount& Amount : AppliedOutputs) if (Amount.Quantity > 0) OutResult.OutputsProduced.Add(Amount);
+		const bool bRestored = OutResult.InputsConsumed.IsEmpty() && OutResult.OutputsProduced.IsEmpty() && Matches(Initial);
+		OutResult.Status = bRestored ? Failure : ETerritoryProductionStatus::RollbackIncomplete;
+		OutResult.FailureReason = bRestored
+			? NSLOCTEXT("TerritoryProduction", "RecipeCompensated", "The inventory changed during settlement; the recipe was cancelled and its item quantities restored.")
+			: NSLOCTEXT("TerritoryProduction", "RecipeCompensationIncomplete", "The inventory changed during settlement and some item quantities could not be restored. Check the resource account before retrying.");
 		return false;
-	}
-
-	TArray<FTerritoryResourceAmount> AppliedInputs;
-	for (const FTerritoryResourceAmount& Input : OutResult.InputsConsumed)
+	};
+	for (const FTerritoryResourceAmount& Input : Inputs)
 	{
-		const int32 Consumed = ConsumeExactItems(Inventory, Input.ItemClass, Input.Quantity);
-		FTerritoryResourceAmount& Applied = AppliedInputs.AddDefaulted_GetRef();
-		Applied.ItemClass = Input.ItemClass;
-		Applied.Quantity = Consumed;
-		if (Consumed != Input.Quantity)
-		{
-			for (const FTerritoryResourceAmount& Rollback : AppliedInputs)
-			{
-				if (Rollback.Quantity > 0)
-				{
-					AddExactItems(Inventory, Rollback.ItemClass, Rollback.Quantity);
-				}
-			}
-			OutResult.Status = ETerritoryProductionStatus::MissingInput;
-			OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "InputChangedDuringCommit",
-				"A required resource changed during settlement; the transaction was rolled back.");
-			return false;
-		}
+		if (!IsCurrent()) return Superseded();
+		const int32 Consumed = ConsumeExactItems(Inventory, Input.ItemClass, Input.Quantity, IsCurrent);
+		FTerritoryResourceAmount Applied = Input; Applied.Quantity = Consumed; AppliedInputs.Add(Applied);
+		Expected.FindChecked(Input.ItemClass.Get()) -= Consumed;
+		if (!IsCurrent()) return Superseded();
+		if (Consumed != Input.Quantity) return Compensate(ETerritoryProductionStatus::MissingInput);
+		if (!Matches(Expected)) return Compensate(ETerritoryProductionStatus::SettlementChanged);
 	}
-
-	TArray<FTerritoryResourceAmount> AppliedOutputs;
-	for (const FTerritoryResourceAmount& Output : OutResult.OutputsProduced)
+	for (const FTerritoryResourceAmount& Output : Outputs)
 	{
-		const int32 Added = AddExactItems(Inventory, Output.ItemClass, Output.Quantity);
-		FTerritoryResourceAmount& Applied = AppliedOutputs.AddDefaulted_GetRef();
-		Applied.ItemClass = Output.ItemClass;
-		Applied.Quantity = Added;
-		if (Added != Output.Quantity)
-		{
-			for (const FTerritoryResourceAmount& Rollback : AppliedOutputs)
-			{
-				if (Rollback.Quantity > 0)
-				{
-					ConsumeExactItems(Inventory, Rollback.ItemClass, Rollback.Quantity);
-				}
-			}
-			bool bRollbackComplete = true;
-			for (const FTerritoryResourceAmount& Rollback : AppliedInputs)
-			{
-				bRollbackComplete &= AddExactItems(Inventory, Rollback.ItemClass,
-					Rollback.Quantity) == Rollback.Quantity;
-			}
-			OutResult.Status = ETerritoryProductionStatus::StorageFull;
-			OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "OutputChangedDuringCommit",
-				"Resource storage changed during settlement; the transaction was rolled back.");
-			if (!bRollbackComplete)
-			{
-				UE_LOG(LogTerritory, Error,
-					TEXT("Resource transaction %s could not fully restore inputs after an unexpected Narrative inventory mutation."),
-					*OutResult.BatchID.ToString());
-			}
-			return false;
-		}
+		if (!IsCurrent()) return Superseded();
+		// A preceding callback may have changed capacity or weight since the initial preflight.
+		if (!CanApplyResourceTransaction(Inventory, {}, {Output}, OutResult.Status, OutResult.FailureReason))
+			return Compensate(ETerritoryProductionStatus::StorageFull);
+		const int32 Added = AddExactItems(Inventory, Output.ItemClass, Output.Quantity, IsCurrent);
+		FTerritoryResourceAmount Applied = Output; Applied.Quantity = Added; AppliedOutputs.Add(Applied);
+		Expected.FindChecked(Output.ItemClass.Get()) += Added;
+		if (!IsCurrent()) return Superseded();
+		if (Added != Output.Quantity) return Compensate(ETerritoryProductionStatus::StorageFull);
+		if (!Matches(Expected)) return Compensate(ETerritoryProductionStatus::SettlementChanged);
 	}
-
+	OutResult.InputsConsumed = MoveTemp(AppliedInputs);
+	OutResult.OutputsProduced = MoveTemp(AppliedOutputs);
 	OutResult.bSuccess = true;
 	OutResult.Status = ETerritoryProductionStatus::Produced;
 	OutResult.FailureReason = FText::GetEmpty();
@@ -1389,7 +1440,8 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 				ExecuteResourceRecipeOnInventory(Inventory, Site.OwnerFaction, *Rule,
 					Site.UpgradeLevel, 1, Result);
 				// Never dereference a checkpoint from before a synchronous campaign restore.
-				if (EvaluationRestoreGeneration != ProductionRestoreGeneration) return;
+				if (EvaluationRestoreGeneration != ProductionRestoreGeneration
+					|| Result.Status == ETerritoryProductionStatus::Superseded) return;
 				if (EvaluationRevision != ProductionStateRevision)
 				{
 					// An actor refresh can relocate maps without undoing the items just
@@ -1450,6 +1502,8 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 	{
 		switch (Status)
 		{
+		case ETerritoryProductionStatus::RollbackIncomplete: return 120;
+		case ETerritoryProductionStatus::SettlementChanged: return 110;
 		case ETerritoryProductionStatus::InvalidProfile: return 100;
 		case ETerritoryProductionStatus::StorageUnavailable: return 90;
 		case ETerritoryProductionStatus::StorageFull: return 80;
@@ -1484,7 +1538,7 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 void UTerritoryEconomySubsystem::ProcessResourceProduction()
 {
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client || bProcessingResourceProduction) return;
+	if (!World || World->GetNetMode() == NM_Client || bProcessingResourceProduction || bExecutingResourceRecipe) return;
 	// Item callbacks occur before ExecuteResourceRecipeOnInventory returns and
 	// before its checkpoint commits. Block recursive settlement of that same cycle.
 	TGuardValue<bool> ProductionGuard(bProcessingResourceProduction, true);

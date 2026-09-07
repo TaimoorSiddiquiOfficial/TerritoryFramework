@@ -233,7 +233,9 @@ namespace
 		View.bBlocked = Record.LastStatus == ETerritoryProductionStatus::MissingInput
 			|| Record.LastStatus == ETerritoryProductionStatus::StorageUnavailable
 			|| Record.LastStatus == ETerritoryProductionStatus::StorageFull
-			|| Record.LastStatus == ETerritoryProductionStatus::InvalidProfile;
+			|| Record.LastStatus == ETerritoryProductionStatus::InvalidProfile
+			|| Record.LastStatus == ETerritoryProductionStatus::SettlementChanged
+			|| Record.LastStatus == ETerritoryProductionStatus::RollbackIncomplete;
 
 		const UTerritoryProductionProfile* Profile = Record.ProductionProfile.LoadSynchronous();
 		if (Profile)
@@ -2031,6 +2033,14 @@ FText UTerritoryUIBlueprintLibrary::GetProductionStatusText(
 		return NSLOCTEXT("TerritoryOperations", "ProductionWaiting", "Next cycle");
 	case ETerritoryProductionStatus::AuthorityRejected:
 		return NSLOCTEXT("TerritoryOperations", "ProductionRejected", "Request rejected");
+	case ETerritoryProductionStatus::SettlementInProgress:
+		return NSLOCTEXT("TerritoryOperations", "ProductionBusy", "Settlement in progress");
+	case ETerritoryProductionStatus::SettlementChanged:
+		return NSLOCTEXT("TerritoryOperations", "ProductionChanged", "Inventory changed");
+	case ETerritoryProductionStatus::RollbackIncomplete:
+		return NSLOCTEXT("TerritoryOperations", "ProductionIncomplete", "Inventory needs attention");
+	case ETerritoryProductionStatus::Superseded:
+		return NSLOCTEXT("TerritoryOperations", "ProductionSuperseded", "Campaign reloaded");
 	case ETerritoryProductionStatus::NeverEvaluated:
 	default:
 		return NSLOCTEXT("TerritoryOperations", "ProductionNotEvaluated", "Not evaluated");

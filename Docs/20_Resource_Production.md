@@ -61,7 +61,7 @@ The default cycle length is `2400` Narrative accumulated-time units, matching on
 The subsystem observes Narrative's accumulated campaign clock every
 `ProductionCycleObservationIntervalSeconds` (default: 1 real second). The observer does not
 create its own time or pay partial days; it only notices that one or more complete Narrative
-cycles have passed and asks the existing atomic production authority to settle them. Currency's
+cycles have passed and asks the existing production authority to settle them. Currency's
 `EconomyTickInterval` is separate. Designers therefore do not need to wait for the default
 five-minute currency tick before a completed item-production cycle reaches inventory.
 
@@ -75,7 +75,7 @@ For each pending day:
 2. Sort site rules by Priority, then RuleTag.
 3. Validate owner, claimed/contested policy, upgrade level, profile, and account.
 4. Simulate exact input removal, output stacks, inventory slots, and weight.
-5. Debit every input and credit every output as one transaction.
+5. Hold the recipe mutation guard, debit inputs, credit outputs, and verify the complete quantities.
 6. Update the per-rule checkpoint and outcome.
 7. Publish WorldState site and stockpile projections.
 
@@ -86,13 +86,31 @@ An output-only rule is valid. For example, a test Blacksmith rule with no inputs
 complete campaign cycle. If it does not, inspect the published production-site status:
 
 - `StorageUnavailable` means no explicit account and not exactly one online player in the owner faction;
-- `StorageFull` means Narrative inventory slots or weight rejected the atomic output;
+- `StorageFull` means Narrative inventory slots or weight rejected the output and any applied quantities were restored;
 - `Inactive` means owner/state/upgrade/profile policy did not permit that cycle;
 - `Produced` with the expected quantity confirms that Narrative inventory accepted the item.
+- `RollbackIncomplete` means a callback prevented full compensation; the UI shows **Inventory needs attention**. That scheduled cycle is consumed so it cannot replay the same partial conversion.
+- `SettlementChanged` means a callback changed stock and the cancelled recipe's affected quantities were restored.
 
 ## Crafting bridge
 
-`ExecuteResourceRecipe` exposes the same server-authoritative atomic transaction for crafting or scripted conversions. The requester must be an authoritative actor with the exact Narrative faction and inventory. The call returns `FTerritoryProductionResult` with status, stable batch ID, source, planned/settled item amounts, and failure reason.
+`ExecuteResourceRecipe` exposes the same server-authoritative settlement for crafting or scripted conversions. The requester must be an authoritative actor with the exact Narrative faction and inventory. The call returns `FTerritoryProductionResult` with status, stable batch ID, source, actual item amounts, and failure reason. Preflight rejection and fully compensated failure return empty consumed/produced arrays. An incomplete compensation returns the input/output amounts that its inverse operations could not restore/remove.
+
+Item and settlement callbacks cannot execute a nested recipe or recursively run the daily scheduler.
+Rejected nested calls return `SettlementInProgress` without publishing another settlement event.
+To deliberately chain recipes from `OnProductionSettled`, defer the next request until that callback
+has returned. A campaign or Native inventory load supersedes an in-flight recipe: its remaining
+outputs, old compensation and stale publication are discarded.
+
+Compensation uses Narrative's existing item API and verifies both operation returns and affected
+class totals. It is bounded by the request and current stock; it cannot remove pre-existing output
+or refund input beyond its starting quantity. Arbitrary callbacks can still change Native capacity,
+removal permissions or stock directly. Such interference is reported instead of claiming atomic
+restoration. This API does not promise atomic saves from every intermediate Native item callback,
+nor restoration of custom per-instance item metadata when a consumed stack must be recreated.
+
+New status values are appended to the enum; existing save/Blueprint values retain their numbers.
+WorldState continues to persist and replicate the same site/rule records and stock projections.
 
 Do not call inventory debit and output nodes separately from Blueprint. That can lose inputs when output storage changes.
 

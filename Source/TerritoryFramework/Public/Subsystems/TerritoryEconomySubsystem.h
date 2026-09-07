@@ -274,6 +274,10 @@ private:
 	int64 LastObservedProductionCycle = INDEX_NONE;
 	bool bProcessingEconomyTick = false;
 	bool bProcessingResourceProduction = false;
+	/** Serializes recipe item callbacks and settlement publication in this campaign. */
+	bool bExecutingResourceRecipe = false;
+	TWeakObjectPtr<UNarrativeInventoryComponent> ActiveRecipeInventory;
+	bool bRecipeInventoryReloaded = false;
 	/** Invalidates active calculations when restore or actor refresh replaces their inputs. */
 	uint64 ProductionStateRevision = 0;
 	uint64 ProductionRestoreGeneration = 0;
@@ -297,6 +301,10 @@ private:
 	/** Settle resource recipes promptly when Narrative accumulated time enters a new cycle. */
 	UFUNCTION()
 	void ObserveNarrativeProductionCycle();
+
+	/** Narrative Load sets IsLoading before broadcasting even an unchanged currency value. */
+	UFUNCTION()
+	void OnRecipeInventoryCurrencyChanged(int32 OldCurrency, int32 NewCurrency);
 
 	UFUNCTION()
 	void OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);

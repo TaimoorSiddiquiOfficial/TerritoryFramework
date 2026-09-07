@@ -1201,13 +1201,64 @@ This batch does not establish atomic saves from every intermediate multi-NPC ini
 or withdrawal callback. The compiled TDAServer gate remains blocked by the installed engine;
 listen-server testing is not a substitute for that target. The full audit remains open.
 
+### Batch 39 — production callbacks and verified compensation (2026-09-07)
+
+The next audit reproduced four real Native inventory defects: nested recipes could charge
+and produce twice; failed input refunds/output removal still claimed a complete rollback;
+an inventory reload inside an output callback allowed the old request to keep producing;
+and a callback could consume an earlier output while the recipe still reported success.
+
+Narrative inventory remains the authority for items and player saves. Economy owns recipe
+scheduling, verification and compensation; WorldState persists/replicates the existing
+production read models. No Narrative source is modified. The fix guards settlement through
+inventory and publication callbacks, observes Native inventory loading, verifies exact
+quantities after each operation, and checks every bounded compensation result. A failed
+refund is reported as `RollbackIncomplete`; a reload supersedes the old request. Current
+stock snapshots are published after failed compensation as well as success. A partially
+settled daily cycle is consumed rather than replaying the same conversion.
+
+The appended status values preserve the previous enum ordinals and existing save records.
+There are no new replicated properties or durable pointers. Blueprint callers chaining a
+recipe synchronously from `OnProductionSettled` must defer the next request until the
+callback returns. The UI exposes an inventory-attention message for incomplete settlement.
+Documentation is updated in `07_Economy_System.md` and `20_Resource_Production.md`.
+
+Validation against the updated, unchanged Marketplace Narrative Pro 2.4.2 on UE 5.8.2:
+
+- A failing regression was captured before the fix. The new native transaction test uses
+  real Narrative items, removal/addition delegates, inventory loading and failure policies.
+  It covers nested requests, complete/incomplete compensation, replaced inventory state,
+  client rejection, output removal by a callback and save serialization of result records.
+- Editor/runtime/UHT compilation passes. Rendered automation: **271 passed**, zero failed
+  or skipped (15 tests emit expected fixture warnings).
+- All **75 included Blueprints** compile and **123 assets** validate with zero errors and
+  four existing warnings. UE 5.8 invalidated the test map's old navigation tiles; rebuilding,
+  saving and reloading navigation restored both configured assault routes. The pre-rebuild
+  user-modified map is backed up under `20260907_UE58Final`.
+- A listen server plus two clients receive stock `[2,1,1]` after a recipe, `[4,0,0]` after
+  its reverse, and `[2,1,1]` after Native world **and player-data** restoration. Actual
+  server inventory matches; direct client recipe mutations are rejected.
+- The UE 5.8 garrison regression buys two guards for 100, withdraws them, deliberately
+  changes currency, then restores desired/active guards and the paid balance 49,900 on
+  reload. Both clients converge and reject direct client mutations.
+
+Evidence: `Saved/Verification/20260907_ProductionTransactions`, particularly `AllTests`,
+`AssetValidation_Batch39.json`, `LiveProduction.json` and `LiveGarrison.json`. The first live
+harness attempts used incorrect Python bindings and omitted Native's separate player-data
+load; the corrected full sequence passes. These were harness defects, not gameplay fixes.
+Game/cook/package migration checks are recorded separately in the tooling migration receipt.
+
+Limits: arbitrary third-party callbacks can still prevent full compensation; this is now
+reported accurately. Saving midway through every possible item callback and preservation of
+custom per-instance metadata when a consumed stack must be recreated remain separate work.
+The full audit and compiled dedicated-server gate remain open.
+
 ### Remaining confirmed work
 
-- Complete multi-item production transaction review. `ExecuteResourceRecipeOnInventory`
-  currently ignores input-refund and output-removal results on some rollback paths, and its
-  failure text can claim rollback even when restoring inputs failed. Direct recipe calls also
-  need a callback reentry regression. Upgrade callback order is fixed in batch 17 and garrison
-  recruitment is covered above; no blanket purchase/recipe atomicity completion is claimed.
+- Continue multi-item production save-only callback and per-instance metadata review. Batch 39
+  covers reentry, reload supersession and verified compensation; it does not make arbitrary
+  external Native inventory callbacks globally atomic. Upgrade callback order is fixed in
+  batch 17 and garrison recruitment is covered by batch 38 and its UE 5.8 regression.
 - Finish assault physical spawn/restore callbacks, malformed record/arithmetic limits and client
   movement/reindex validation. Unloaded-target treaty cancellation is already covered by batch 8.
 - Batch 36 verifies survivor identity/damage and vehicle history across repeated reload. Continue

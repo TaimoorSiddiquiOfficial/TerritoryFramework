@@ -8,11 +8,35 @@
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
 #include "Items/InventoryComponent.h"
+#include "Items/NarrativeItem.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "AI/NPCDefinition.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "UI/TerritoryEconomyWidget.h"
 #include "TerritoryAuditEventProbe.generated.h"
+
+/** Real Narrative item classes with a controllable removal failure for transaction tests. */
+UCLASS(Transient)
+class UTerritoryAuditResourceA : public UNarrativeItem
+{
+	GENERATED_BODY()
+public:
+	UTerritoryAuditResourceA() { bStackable = true; MaxStackSize = 100; Weight = 0.f; }
+	bool bRejectRemoval = false;
+	virtual bool CanBeRemoved_Implementation() const override { return !bRejectRemoval; }
+};
+
+UCLASS(Transient)
+class UTerritoryAuditResourceB : public UTerritoryAuditResourceA
+{
+	GENERATED_BODY()
+};
+
+UCLASS(Transient)
+class UTerritoryAuditResourceC : public UTerritoryAuditResourceA
+{
+	GENERATED_BODY()
+};
 
 UCLASS(Transient)
 class UTerritoryAuditEconomyWidget final : public UTerritoryEconomyWidget
@@ -39,6 +63,7 @@ public:
 	TFunction<void(APlayerController*, const FTerritoryAssaultRecord&)> WarningCallback;
 	TFunction<void()> CurrencyCallback;
 	TFunction<void()> ItemCallback;
+	TFunction<void(UNarrativeItem*, int32)> ItemRemovedCallback;
 	TFunction<void()> ProductionCallback;
 	TFunction<void(ANarrativeNPCCharacter*)> NPCSpawnCallback;
 	TFunction<void()> ComponentDeactivationCallback;
@@ -85,6 +110,12 @@ public:
 	void ItemAdded(const FItemAddResult& Result)
 	{
 		if (ItemCallback) ItemCallback();
+	}
+
+	UFUNCTION()
+	void ItemRemoved(UNarrativeItem* Item, const int32 Amount)
+	{
+		if (ItemRemovedCallback) ItemRemovedCallback(Item, Amount);
 	}
 
 	UFUNCTION()

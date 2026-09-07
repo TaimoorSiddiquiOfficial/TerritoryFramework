@@ -20,7 +20,7 @@ Currency income and item-resource production are independent. A captured Propert
 - do both, such as a Farm paying currency and producing Meat;
 - do neither while remaining fully capturable.
 
-TerritoryFramework never stores a second item balance. `UNarrativeInventoryComponent` owns resource quantities and Narrative save data. `UTerritoryEconomySubsystem` owns production rates, cycle scheduling, deterministic ordering, and atomic settlement. See [Resource Production](20_Resource_Production.md).
+TerritoryFramework never stores a second item balance. `UNarrativeInventoryComponent` owns resource quantities and Narrative save data. `UTerritoryEconomySubsystem` owns production rates, cycle scheduling, deterministic ordering, and verified settlement. See [Resource Production](20_Resource_Production.md) for callback and compensation limits.
 
 ## Wealth API
 

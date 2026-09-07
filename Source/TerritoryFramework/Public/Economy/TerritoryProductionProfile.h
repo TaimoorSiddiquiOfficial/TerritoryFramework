@@ -21,7 +21,15 @@ enum class ETerritoryProductionStatus : uint8
 	Inactive,
 	InvalidProfile,
 	AlreadyProcessed,
-	AuthorityRejected
+	AuthorityRejected,
+	/** A synchronous recipe or settlement callback attempted another transaction. */
+	SettlementInProgress,
+	/** A callback changed the inventory before the complete recipe was verified. */
+	SettlementChanged,
+	/** Compensation could not restore the affected item quantities. Never retry this cycle. */
+	RollbackIncomplete,
+	/** A Narrative load superseded this request; its old continuation was discarded. */
+	Superseded
 };
 
 /** An item rate authored on a production rule. */
