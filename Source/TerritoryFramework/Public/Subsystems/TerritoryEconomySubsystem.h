@@ -116,10 +116,29 @@ public:
 
 	/**
 	 * Register the Narrative inventory that stores one faction's strategic resources.
+	 * Highest priority wins; equal highest priorities block storage. Registration
+	 * order never breaks a tie. False can mean registered but not currently selected.
 	 * This map is runtime routing only; Narrative inventory owns balances and save data.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy|Resources")
-	bool RegisterFactionResourceAccount(const FGameplayTag& Faction, AActor* AccountActor);
+	bool RegisterFactionResourceAccount(const FGameplayTag& Faction, AActor* AccountActor, int32 Priority = 0);
+
+	/** True only for the one eligible explicit account selected by priority on the server. */
+	UFUNCTION(BlueprintPure, Category="Territory|Economy|Resources")
+	bool IsFactionResourceAccountSelected(const FGameplayTag& Faction, const AActor* AccountActor) const;
+
+	/** True when several eligible accounts share the highest priority. Choose one leader/depot or change priorities. */
+	UFUNCTION(BlueprintPure, Category="Territory|Economy|Resources")
+	bool HasFactionResourceAccountConflict(const FGameplayTag& Faction) const;
+
+	/** Refresh an existing faction's storage read model after external Narrative inventory or identity changes. Does not transfer any items. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Economy|Resources")
+	void RefreshFactionResourceAccount(const FGameplayTag& Faction);
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFactionResourceAccountChanged, FGameplayTag, Faction);
+	/** Server notification after account routing and its replicated stock summary have been reconciled. */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Economy|Resources")
+	FOnFactionResourceAccountChanged OnFactionResourceAccountChanged;
 
 	/** Stop using the supplied inventory as this faction's registered resource storage. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy|Resources")
@@ -312,7 +331,15 @@ private:
 	/** Runtime routing only. Narrative inventories own and persist the actual balances. */
 	TMap<FGameplayTag, TWeakObjectPtr<AActor>> SharedFactionAccounts;
 	TMap<FGameplayTag, TWeakObjectPtr<AActor>> FactionLeaderAccounts;
-	TMap<FGameplayTag, TWeakObjectPtr<AActor>> FactionResourceAccounts;
+	struct FResourceAccountCandidate
+	{
+		TWeakObjectPtr<AActor> Actor;
+		int32 Priority = 0;
+	};
+	TMap<FGameplayTag, TArray<FResourceAccountCandidate>> FactionResourceAccounts;
+	/** A listener may change the selection; it must not recursively broadcast the same faction. */
+	TSet<FGameplayTag> ResourceAccountNotificationsInProgress;
+	void PublishResourceAccountChange(const FGameplayTag& Faction);
 
 	/** Server scheduler state and client read models hydrated by TerritoryWorldState. */
 	TMap<FString, FTerritoryProductionCheckpoint> ProductionCheckpoints;
@@ -354,7 +381,7 @@ private:
 	AActor* ResolveRegisteredCurrencyAccount(const FGameplayTag& Faction,
 		ETerritoryIncomePayoutPolicy AccountRole) const;
 	AActor* ResolveFallbackFactionAccount(const FGameplayTag& Faction) const;
-	AActor* ResolveRegisteredResourceAccount(const FGameplayTag& Faction) const;
+	AActor* ResolveRegisteredResourceAccount(const FGameplayTag& Faction, bool* bOutConflict = nullptr) const;
 	static ANarrativePlayerCharacter* SelectSoleOnlineResourceAccount(
 		const TArray<ANarrativePlayerCharacter*>& Players);
 	UNarrativeInventoryComponent* ResolveResourceInventory(const FGameplayTag& Faction) const;

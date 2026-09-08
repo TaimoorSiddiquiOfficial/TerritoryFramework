@@ -10,9 +10,10 @@
 /**
  * DEPRECATED — Use ATerritoryWorldState instead. This actor provides a competing
  * persistence implementation that can conflict with TerritoryWorldState.
- * Kept for backwards compatibility — will be removed in v0.3.0.
+ * Kept to load existing classes and older saves. New maps must use WorldState.
+ * WorldState suppresses this actor when both are present.
  */
-UCLASS(BlueprintType)
+UCLASS(BlueprintType, NotPlaceable, meta = (DeprecatedNode, DeprecationMessage = "Use Territory World State for both single-player and multiplayer saves."))
 class TERRITORYFRAMEWORK_API ATerritorySavableData : public AActor, public INarrativeSavableActor
 {
 	GENERATED_BODY()

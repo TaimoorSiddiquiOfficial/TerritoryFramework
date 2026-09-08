@@ -380,8 +380,7 @@ FGameplayTagContainer UTerritoryBlueprintLibrary::GetActorFactions(const UObject
 	if (!Actor) return FGameplayTagContainer();
 	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Actor))
 	{
-		FGameplayTagContainer Factions = TeamAgent->GetFactions();
-		if (!Factions.IsEmpty()) return Factions;
+		return TeamAgent->GetFactions();
 	}
 	return GetConfiguredPlayerFactionFallback(Actor);
 }
@@ -392,13 +391,26 @@ bool UTerritoryBlueprintLibrary::IsActorInFaction(const UObject* WorldContextObj
 	return GetActorFactions(WorldContextObject, Actor).HasTag(FactionTag);
 }
 
+bool UTerritoryBlueprintLibrary::IsNarrativeFactionTag(const FGameplayTag& Tag)
+{
+	const FGameplayTag Root = FNarrativeGameplayTags::Get().Narrative_Factions;
+	return Tag.IsValid() && Tag != Root && Tag.MatchesTag(Root);
+}
+
+bool UTerritoryBlueprintLibrary::IsPoliticalFactionTag(const FGameplayTag& Tag)
+{
+	const FNarrativeGameplayTags& Tags = FNarrativeGameplayTags::Get();
+	return IsNarrativeFactionTag(Tag) && Tag != Tags.Narrative_Factions_HostileAll
+		&& Tag != Tags.Narrative_Factions_HostileOthers && Tag != Tags.Narrative_Factions_FriendlyAll;
+}
+
 FGameplayTag UTerritoryBlueprintLibrary::GetActorPrimaryFaction(const UObject* WorldContextObject, AActor* Actor)
 {
 	if (!Actor) return FGameplayTag();
 	const FGameplayTagContainer Factions = GetActorFactions(WorldContextObject, Actor);
-	if (!Factions.IsEmpty())
+	for (const FGameplayTag& Faction : Factions)
 	{
-		return Factions.GetByIndex(0);
+		if (IsPoliticalFactionTag(Faction)) return Faction;
 	}
 	return FGameplayTag();
 }

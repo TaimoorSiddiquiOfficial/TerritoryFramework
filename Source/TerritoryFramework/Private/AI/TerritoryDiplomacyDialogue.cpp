@@ -3,6 +3,7 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Tales/Dialogue.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 
@@ -27,7 +28,7 @@ TSubclassOf<UDialogue> UTerritoryDiplomacyDialogueProfile::GetDialogueForRelatio
 	EDiplomacyState Relationship, bool bSameFaction,
 	TSubclassOf<UDialogue> DefaultDialogue) const
 {
-	if (bSameFaction && SameFactionDialogue)
+	if (bSameFaction && Relationship != EDiplomacyState::War && SameFactionDialogue)
 	{
 		return SameFactionDialogue;
 	}
@@ -82,8 +83,7 @@ EDiplomacyState UTerritoryDiplomacyDialogueComponent::ResolveRelationshipForInte
 		Cast<ATerritoryGuardCharacter>(OwnerActor);
 	const ATerritoryVolume* Territory = TerritoryGuard
 		? TerritoryGuard->GetOwningTerritory() : nullptr;
-	const FGameplayTag OwnerPrimaryFaction = OwnerFactions.IsEmpty()
-		? FGameplayTag() : OwnerFactions.GetByIndex(0);
+	const FGameplayTag OwnerPrimaryFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, GetOwner());
 	const UTerritoryDisguiseSubsystem* Disguises = World
 		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
 	const FGameplayTagContainer InteractorFactions = Disguises
@@ -91,12 +91,7 @@ EDiplomacyState UTerritoryDiplomacyDialogueComponent::ResolveRelationshipForInte
 			Interactor, Territory, OwnerPrimaryFaction)
 		: InteractorTeam->GetFactions();
 	bOutSameFaction = OwnerFactions.HasAnyExact(InteractorFactions);
-	if (bOutSameFaction)
-	{
-		return EDiplomacyState::Alliance;
-	}
-
-	EDiplomacyState Strongest = EDiplomacyState::None;
+	EDiplomacyState Strongest = bOutSameFaction ? EDiplomacyState::Alliance : EDiplomacyState::None;
 	for (const FGameplayTag& OwnerFaction : OwnerFactions)
 	{
 		for (const FGameplayTag& InteractorFaction : InteractorFactions)
@@ -114,6 +109,8 @@ EDiplomacyState UTerritoryDiplomacyDialogueComponent::ResolveRelationshipForInte
 			}
 		}
 	}
+	// A shared membership must not bypass the hostile pair or select SameFactionDialogue.
+	if (Strongest == EDiplomacyState::War) bOutSameFaction = false;
 	return Strongest;
 }
 

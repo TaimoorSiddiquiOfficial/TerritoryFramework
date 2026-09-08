@@ -59,6 +59,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Tests")
 	static bool InjectNegativeVehicleUsageForPIE(ATerritoryWorldState* State, FGuid AssaultID);
 
+	/** Ask Unreal to connect one fresh PIE client after the existing session has changed state. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Tests")
+	static bool RequestLateJoinForPIE();
+
+	/** Finish engine asset work before a headless validation process shuts down. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Tests")
+	static void FinishAssetCompilationForAudit();
+
 	TFunction<void(ATerritoryVolume*, ETerritoryState)> StateCallback;
 	TFunction<void(ATerritoryVolume*, AActor*)> EvidenceCallback;
 	TFunction<void(ATerritoryVolume*, AActor*, ETerritoryExposureState)> ExposureCallback;
@@ -75,6 +83,16 @@ public:
 	TFunction<void()> ComponentDeactivationCallback;
 	TFunction<void(AActor*, FGuid)> StableSpawnCallback;
 	TFunction<void()> GarrisonCallback;
+	TFunction<void()> FactionCallback;
+	TFunction<void(FGameplayTag)> AccountCallback;
+	TFunction<void(AActor*)> DestroyedCallback;
+	UFUNCTION()
+	void ActorDestroyed(AActor* Actor) { if (DestroyedCallback) DestroyedCallback(Actor); }
+
+	UFUNCTION()
+	void FactionChanged() { if (FactionCallback) FactionCallback(); }
+	UFUNCTION()
+	void ResourceAccountChanged(FGameplayTag Faction) { if (AccountCallback) AccountCallback(Faction); }
 
 	UFUNCTION()
 	void GarrisonChanged(ATerritoryVolume* Territory, FTerritoryGarrisonSnapshot Snapshot)

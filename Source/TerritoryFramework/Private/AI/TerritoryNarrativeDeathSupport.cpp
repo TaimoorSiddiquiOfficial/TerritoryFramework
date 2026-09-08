@@ -5,10 +5,45 @@
 #include "AI/NarrativeNPCController.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Engine/World.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 
 namespace TerritoryNarrativeDeathSupport
 {
+	void DetachTargetGoals(ANarrativeNPCCharacter& Character)
+	{
+		if (!Character.HasAuthority() || !Character.GetWorld() || Character.GetWorld()->bIsTearingDown) return;
+		UNarrativeAbilitySystemComponent* ASC = Character.GetNarrativeAbilitySystemComponent();
+		// Real death already notifies these Native goals. This adapter is only for
+		// removal while alive; do not force an extra selection inside a death broadcast.
+		if (!IsValid(ASC) || ASC->IsDead()) return;
+
+		// Native Goal_Attack binds the target's death delegate and exposes the target
+		// through GetGoalKey. Retirement/stream-out is not a death, so detach those
+		// goals explicitly without fabricating an ASC death or clearing unrelated AI.
+		// Copy the binding list before RemoveGoal invokes Blueprint OnRemoved.
+		const TArray<UObject*> Listeners = ASC->OnDeathStateChanged.GetAllObjects();
+		for (UObject* Listener : Listeners)
+		{
+			UNPCGoalItem* Goal = Cast<UNPCGoalItem>(Listener);
+			if (!IsValid(Goal) || Goal->GetGoalKey() != &Character) continue;
+			ANarrativeNPCController* Owner = Goal->OwnerController;
+			if (IsValid(Owner) && Owner->HasAuthority() && Owner->GetWorld() == Character.GetWorld())
+			{
+				if (UNPCActivityComponent* Activity = Owner->GetActivityComponent(); IsValid(Activity))
+				{
+					bool bFound = false;
+					// Old removed goals can still have a weak death binding. Never let
+					// one erase the keyed entry of a newer goal for this same target.
+					if (Activity->GetGoalByKey(Goal->GetClass(), &Character, bFound) == Goal && bFound)
+						Activity->RemoveGoal(Goal);
+				}
+			}
+			// Native OnRemoved clears timers, but retains this death binding.
+			if (IsValid(ASC)) ASC->OnDeathStateChanged.RemoveAll(Goal);
+		}
+	}
+
 	bool ResolveDeathState(const UNarrativeAbilitySystemComponent* AbilitySystem,
 		const bool bReportedIsDead)
 	{
@@ -20,6 +55,7 @@ namespace TerritoryNarrativeDeathSupport
 
 	bool PrepareForRemoval(ANarrativeNPCCharacter& Character)
 	{
+		DetachTargetGoals(Character);
 		ANarrativeNPCController* Controller = Character.GetNPCController();
 		UNPCActivityComponent* ActivityComponent = Character.GetActivityComponent();
 		if (!IsValid(Controller) || !IsValid(ActivityComponent))

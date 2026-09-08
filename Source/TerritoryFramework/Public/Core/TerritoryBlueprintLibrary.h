@@ -276,8 +276,8 @@ public:
 	// ═══════════════════════════════════════════════════════════════════════════════
 
 	/**
-	 * Returns the actor's live Narrative factions. A configured player-faction
-	 * fallback is used only for a player pawn/controller whose Narrative list is empty.
+	 * Returns the actor's live Narrative factions, including an intentionally empty
+	 * membership. The optional player fallback is only for actors without Narrative's team interface.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Factions",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Actor Factions"))
@@ -288,7 +288,15 @@ public:
 		meta=(WorldContext="WorldContextObject", DisplayName="Is Actor In Faction"))
 	static bool IsActorInFaction(const UObject* WorldContextObject, AActor* Actor, const FGameplayTag& FactionTag);
 
-	/** Returns the first live Narrative faction, or the optional player-only fallback. */
+	/** True for a child of Narrative.Factions. The root tag itself is not a faction. */
+	UFUNCTION(BlueprintPure, Category="Territory|Factions")
+	static bool IsNarrativeFactionTag(const FGameplayTag& Tag);
+
+	/** True for a faction identity that can own places, excluding Narrative's universal attitude tags. */
+	UFUNCTION(BlueprintPure, Category="Territory|Factions")
+	static bool IsPoliticalFactionTag(const FGameplayTag& Tag);
+
+	/** Returns the first political Narrative membership. Set Narrative Player Factions can explicitly put the chosen Primary Faction first; Narrative saves and replicates that order. */
 	UFUNCTION(BlueprintPure, Category="Territory|Factions",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Actor Primary Faction"))
 	static FGameplayTag GetActorPrimaryFaction(const UObject* WorldContextObject, AActor* Actor);

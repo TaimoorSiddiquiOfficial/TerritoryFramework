@@ -3,6 +3,8 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
+#include "UnrealFramework/NarrativeCharacter.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Engine/World.h"
@@ -15,13 +17,6 @@
 void UTerritoryEconomyWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-	if (!DisplayFaction.IsValid())
-	{
-		APlayerController* PlayerController = GetOwningPlayer();
-		APawn* Character = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController);
-		DisplayFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(
-			this, Character ? static_cast<AActor*>(Character) : PlayerController);
-	}
 	TerritoryUITheme::ApplyText(EconomyFactionText, TerritoryTypography::CardTitle,
 		FLinearColor(0.94f, 0.93f, 0.89f, 1.f), ETerritoryTextRole::Heading, false);
 	for (UTextBlock* ValueText : {
@@ -53,9 +48,11 @@ void UTerritoryEconomyWidget::NativeDestruct()
 void UTerritoryEconomyWidget::SetDisplayFaction(const FGameplayTag& Faction)
 {
 	DisplayFaction = Faction;
+	bFollowOwningPlayerFaction = !Faction.IsValid();
 
 	// Immediately update with current data
-	if (DisplayFaction.IsValid())
+	const FGameplayTag EffectiveFaction = GetDisplayFaction();
+	if (EffectiveFaction.IsValid())
 	{
 		UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
 		if (Economy)
@@ -63,18 +60,22 @@ void UTerritoryEconomyWidget::SetDisplayFaction(const FGameplayTag& Faction)
 			FTerritoryEconomySnapshot Snapshot;
 			APlayerController* PlayerController = GetOwningPlayer();
 			Snapshot.Treasury = Economy->GetActorCurrency(PlayerController);
-			Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
-			Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
-			Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
-			OnEconomyUpdated(DisplayFaction, Snapshot);
-			RefreshEconomyDisplay();
+			Snapshot.TotalIncome = Economy->GetIncome(EffectiveFaction);
+			Snapshot.TotalCosts = Economy->GetCosts(EffectiveFaction);
+			Snapshot.TerritoryCount = Economy->GetFactionEconomy(EffectiveFaction).TerritoryCount;
+			OnEconomyUpdated(EffectiveFaction, Snapshot);
 		}
 	}
+	RefreshEconomyDisplay();
 }
 
 FGameplayTag UTerritoryEconomyWidget::GetDisplayFaction() const
 {
-	return DisplayFaction;
+	if (!bFollowOwningPlayerFaction) return DisplayFaction;
+	APlayerController* Controller = GetOwningPlayer();
+	APawn* Character = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(Controller);
+	return UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this,
+		Character ? static_cast<AActor*>(Character) : Controller);
 }
 
 int32 UTerritoryEconomyWidget::GetCurrentGold() const
@@ -87,19 +88,19 @@ int32 UTerritoryEconomyWidget::GetCurrentGold() const
 int32 UTerritoryEconomyWidget::GetCurrentIncome() const
 {
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
-	return Economy ? Economy->GetIncome(DisplayFaction) : 0;
+	return Economy ? Economy->GetIncome(GetDisplayFaction()) : 0;
 }
 
 int32 UTerritoryEconomyWidget::GetCurrentCosts() const
 {
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
-	return Economy ? Economy->GetCosts(DisplayFaction) : 0;
+	return Economy ? Economy->GetCosts(GetDisplayFaction()) : 0;
 }
 
 int32 UTerritoryEconomyWidget::GetTerritoryCount() const
 {
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
-	return Economy ? Economy->GetFactionEconomy(DisplayFaction).TerritoryCount : 0;
+	return Economy ? Economy->GetFactionEconomy(GetDisplayFaction()).TerritoryCount : 0;
 }
 
 int64 UTerritoryEconomyWidget::GetNetIncome() const
@@ -116,11 +117,44 @@ FTerritoryEconomyOperationsView UTerritoryEconomyWidget::GetEconomyOperationsVie
 	int32 MaxRecentTransactions) const
 {
 	return UTerritoryUIBlueprintLibrary::BuildEconomyOperationsView(
-		this, GetOwningPlayer(), DisplayFaction, MaxRecentTransactions);
+		this, GetOwningPlayer(), GetDisplayFaction(), MaxRecentTransactions);
+}
+
+void UTerritoryEconomyWidget::BindFactionSources()
+{
+	APlayerController* Controller = GetOwningPlayer();
+	if (Controller) Controller->OnPossessedPawnChanged.AddUniqueDynamic(
+		this, &UTerritoryEconomyWidget::HandleViewerPawnChanged);
+	ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(
+		FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(Controller));
+	if (Character != BoundFactionCharacter.Get())
+	{
+		if (BoundFactionCharacter.IsValid()) BoundFactionCharacter->OnFactionUpdated.RemoveDynamic(
+			this, &UTerritoryEconomyWidget::HandleViewerFactionChanged);
+		BoundFactionCharacter = Character;
+		if (Character) Character->OnFactionUpdated.AddUniqueDynamic(
+			this, &UTerritoryEconomyWidget::HandleViewerFactionChanged);
+	}
+	if (UWorld* World = GetWorld())
+	{
+		if (UNarrativeSaveSubsystem* Save = World->GetSubsystem<UNarrativeSaveSubsystem>())
+			Save->OnFinishedLoad.AddUniqueDynamic(this, &UTerritoryEconomyWidget::HandleViewerFactionChanged);
+	}
+}
+
+void UTerritoryEconomyWidget::HandleViewerFactionChanged()
+{
+	ClientPollRefresh();
+}
+
+void UTerritoryEconomyWidget::HandleViewerPawnChanged(APawn* OldPawn, APawn* NewPawn)
+{
+	ClientPollRefresh();
 }
 
 void UTerritoryEconomyWidget::BindDelegates()
 {
+	BindFactionSources();
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
 	if (Economy)
 	{
@@ -144,6 +178,16 @@ void UTerritoryEconomyWidget::BindDelegates()
 
 void UTerritoryEconomyWidget::UnbindDelegates()
 {
+	if (BoundFactionCharacter.IsValid()) BoundFactionCharacter->OnFactionUpdated.RemoveDynamic(
+		this, &UTerritoryEconomyWidget::HandleViewerFactionChanged);
+	BoundFactionCharacter.Reset();
+	if (APlayerController* Controller = GetOwningPlayer()) Controller->OnPossessedPawnChanged.RemoveDynamic(
+		this, &UTerritoryEconomyWidget::HandleViewerPawnChanged);
+	if (UWorld* World = GetWorld())
+	{
+		if (UNarrativeSaveSubsystem* Save = World->GetSubsystem<UNarrativeSaveSubsystem>())
+			Save->OnFinishedLoad.RemoveDynamic(this, &UTerritoryEconomyWidget::HandleViewerFactionChanged);
+	}
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
 	if (Economy)
 	{
@@ -160,23 +204,24 @@ void UTerritoryEconomyWidget::UnbindDelegates()
 
 void UTerritoryEconomyWidget::ClientPollRefresh()
 {
-	if (!DisplayFaction.IsValid()) return;
+	BindFactionSources();
+	const FGameplayTag EffectiveFaction = GetDisplayFaction();
 	UTerritoryEconomySubsystem* Economy = GetEconomySubsystem();
 	if (!Economy) return;
 
 	FTerritoryEconomySnapshot Snapshot;
 	APlayerController* PlayerController = GetOwningPlayer();
 	Snapshot.Treasury = Economy->GetActorCurrency(PlayerController);
-	Snapshot.TotalIncome = Economy->GetIncome(DisplayFaction);
-	Snapshot.TotalCosts = Economy->GetCosts(DisplayFaction);
-	Snapshot.TerritoryCount = Economy->GetFactionEconomy(DisplayFaction).TerritoryCount;
-	OnEconomyUpdated(DisplayFaction, Snapshot);
+	Snapshot.TotalIncome = Economy->GetIncome(EffectiveFaction);
+	Snapshot.TotalCosts = Economy->GetCosts(EffectiveFaction);
+	Snapshot.TerritoryCount = Economy->GetFactionEconomy(EffectiveFaction).TerritoryCount;
+	OnEconomyUpdated(EffectiveFaction, Snapshot);
 	RefreshEconomyDisplay();
 }
 
 void UTerritoryEconomyWidget::HandleEconomyTick(FGameplayTag Faction, FTerritoryEconomySnapshot Snapshot)
 {
-	if (Faction == DisplayFaction)
+	if (Faction == GetDisplayFaction())
 	{
 		OnEconomyUpdated(Faction, Snapshot);
 		RefreshEconomyDisplay();
@@ -185,7 +230,7 @@ void UTerritoryEconomyWidget::HandleEconomyTick(FGameplayTag Faction, FTerritory
 
 void UTerritoryEconomyWidget::HandleTransactionRecorded(const FTerritoryTransaction& Transaction)
 {
-	if (Transaction.Faction == DisplayFaction)
+	if (Transaction.Faction == GetDisplayFaction())
 	{
 		OnTransactionRecorded(Transaction);
 		RefreshEconomyDisplay();
@@ -195,7 +240,7 @@ void UTerritoryEconomyWidget::HandleTransactionRecorded(const FTerritoryTransact
 void UTerritoryEconomyWidget::HandleProductionSettled(
 	const FTerritoryProductionResult& Result)
 {
-	if (Result.Faction == DisplayFaction)
+	if (Result.Faction == GetDisplayFaction())
 	{
 		RefreshEconomyDisplay();
 	}
@@ -236,7 +281,9 @@ void UTerritoryEconomyWidget::RefreshEconomyDisplay()
 	}
 	if (EconomyStorageStatusText)
 	{
-		EconomyStorageStatusText->SetText(View.bResourceStorageAvailable
+		EconomyStorageStatusText->SetText(View.bResourceAccountConflict
+			? NSLOCTEXT("TerritoryEconomy", "StorageConflict", "Storage conflict: choose one faction account")
+			: View.bResourceStorageAvailable
 			? NSLOCTEXT("TerritoryEconomy", "StorageAvailable", "Resource storage online")
 			: NSLOCTEXT("TerritoryEconomy", "StorageUnavailable", "Resource storage unavailable"));
 	}

@@ -835,6 +835,7 @@ private:
 	friend class FTFVolumeRuleCallbacks;
 	friend class FTFFactionStateRulesIntegration;
 	friend class FTFGuardRetirementCallbacks;
+	friend class FTFGuardRecordLoadRetirement;
 	friend class FTFGuardSpawnAdmissionCallbacks;
 	friend class FTFGarrisonPurchaseCallbacks;
 	friend class FTFGuardReserveTotals;
@@ -870,6 +871,8 @@ private:
 	FBox LastKnownBounds;
 	bool bLoadedFromSave = false;
 	bool bGuardsReconciled = false;
+	/** Native record readers must finish before retired guard EndPlay can write new save records. */
+	bool bDeferGuardDestructionForRecordLoad = false;
 	bool bTransitionInProgress = false;
 	bool bValidatingOwnershipData = false;
 	mutable TSet<int32> EvaluatingStateConditionKeys;

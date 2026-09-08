@@ -103,21 +103,25 @@ bool UTerritorySetNarrativePlayerFactionsEvent::ApplyToPlayerState(
 		return false;
 	}
 
-	if (bReplaceExistingFactions)
+	for (const FGameplayTag& Faction : NewFactions)
 	{
-		PlayerState->SetFactions(NewFactions);
+		if (!UTerritoryBlueprintLibrary::IsNarrativeFactionTag(Faction)) return false;
 	}
-	else
+	FGameplayTagContainer FinalFactions = bReplaceExistingFactions
+		? NewFactions : PlayerState->GetFactions();
+	if (!bReplaceExistingFactions) FinalFactions.AppendTags(NewFactions);
+	if (PrimaryFaction.IsValid())
 	{
-		TArray<FGameplayTag> Factions;
-		NewFactions.GetGameplayTagArray(Factions);
-		for (const FGameplayTag& Faction : Factions)
-		{
-			PlayerState->AddFaction(Faction);
-		}
+		if (!UTerritoryBlueprintLibrary::IsPoliticalFactionTag(PrimaryFaction)
+			|| !FinalFactions.HasTagExact(PrimaryFaction)) return false;
+		FGameplayTagContainer OrderedFactions(PrimaryFaction);
+		OrderedFactions.AppendTags(FinalFactions);
+		FinalFactions = MoveTemp(OrderedFactions);
 	}
+	PlayerState->SetFactions(FinalFactions);
 	PlayerState->ForceNetUpdate();
-	return true;
+	return PlayerState->GetFactions() == FinalFactions
+		&& (!PrimaryFaction.IsValid() || PlayerState->GetFactions().GetByIndex(0) == PrimaryFaction);
 }
 
 void UTerritorySetNarrativePlayerFactionsEvent::ExecuteEvent_Implementation(
@@ -141,9 +145,10 @@ void UTerritorySetNarrativePlayerFactionsEvent::ExecuteEvent_Implementation(
 FString UTerritorySetNarrativePlayerFactionsEvent::
 	GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Player factions: %s %s"),
+	return FString::Printf(TEXT("Player factions: %s %s%s"),
 		bReplaceExistingFactions ? TEXT("replace with") : TEXT("add"),
-		*NewFactions.ToStringSimple());
+		*NewFactions.ToStringSimple(),
+		PrimaryFaction.IsValid() ? *FString::Printf(TEXT("; primary %s"), *PrimaryFaction.ToString()) : TEXT(""));
 }
 
 UTerritoryHierarchyStoryOverrideEvent::UTerritoryHierarchyStoryOverrideEvent(

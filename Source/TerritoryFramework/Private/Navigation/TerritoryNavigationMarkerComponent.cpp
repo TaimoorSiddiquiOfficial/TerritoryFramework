@@ -102,18 +102,6 @@ void UTerritoryNavigationMarkerComponent::RefreshTerritoryMarker()
 	}
 }
 
-void UTerritoryNavigationMarkerComponent::OnTerritoryControlChanged(
-	ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
-{
-	RefreshTerritoryMarker();
-}
-
-void UTerritoryNavigationMarkerComponent::OnTerritoryStateChanged(
-	ATerritoryVolume* Territory, ETerritoryState NewState)
-{
-	RefreshTerritoryMarker();
-}
-
 void UTerritoryNavigationMarkerComponent::OnRegistryTerritoryChanged(
 	ATerritoryVolume* Territory, bool bWasUnregistered)
 {

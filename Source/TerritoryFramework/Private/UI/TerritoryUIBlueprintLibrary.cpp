@@ -1943,6 +1943,7 @@ FTerritoryEconomyOperationsView UTerritoryUIBlueprintLibrary::BuildEconomyOperat
 		ResourceSnapshot = WorldState->GetFactionResourceSnapshot(View.Faction);
 	}
 	View.bResourceStorageAvailable = ResourceSnapshot.bStorageAvailable;
+	View.bResourceAccountConflict = ResourceSnapshot.bAccountConflict;
 	for (const FTerritoryProductionSiteRecord& Record : ProductionRecords)
 	{
 		FTerritoryProductionSiteOperationsView SiteView =

@@ -9,7 +9,7 @@
  * Succeeds if permission is granted. Fails if no slots available.
  * Stores the territory reference on the blackboard for release on task end.
  */
-UCLASS()
+UCLASS(meta = (DeprecatedNode, DeprecationMessage = "Use the Territory Assault Permission service on the active combat branch. It releases the strategic slot when the branch exits."))
 class TERRITORYFRAMEWORK_API UBTTask_RequestTerritoryPermission : public UBTTaskNode
 {
 	GENERATED_BODY()

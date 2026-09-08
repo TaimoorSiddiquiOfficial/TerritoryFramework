@@ -258,5 +258,5 @@ PrintAllTerritoryDebug(WorldContext, Duration)
 | `CaptureProgressDecayPerSecond` | 0.05 | Progress decay when no attacker |
 | `CaptureTickInterval` | 0.1s | Evaluation frequency |
 | `EconomyTickIntervalSeconds` | 300 | Income tick frequency |
-| `DefaultMaxConcurrentAttackers` | 3 | Max attackers per territory |
+| `MaxConcurrentAttackers` (on each Territory Definition) | 3 | Strategic attack slots for that Territory |
 | `SpatialCellSize` | 2000 | Spatial index grid size |

@@ -6,6 +6,19 @@
 
 ## Current checkpoint
 
+### Faction integration and restore correction — 2026-09-08
+
+The current implementation ledger is [Finding Resolution Plan](Finding_Resolution_Plan_2026-09-08.md).
+Live faction changes now update resource routing and open economy screens. Tied
+account priorities create a visible conflict; Native inventory remains the balance
+authority. Both example controllers follow their owner's political faction.
+Both engines pass 293 automation tests, and a server/two-client fixture plus a
+fresh late join passes. Two consecutive Native world/player restores preserve
+garrisons, reserves and faction/account state without the reproduced record-reader
+crash or stale guard attack-goal errors. The separate generic NPC client-death,
+old goal-generator migration, saved vehicle-ledger and real streaming audits remain.
+These changes are not certification of the older published preview.
+
 ### Active story preparation — 2026-09-08
 
 User decision: Blacksmith reinforcements arrive **before handover**. The owner
@@ -36,12 +49,11 @@ the existing post-capture counterattack accept the request.
 - [x] Protect Hashir's pacifist perception callback after controller destruction.
   His project activity config preserves all eight Native activities and uses a
   minimal child Blueprint with the existing Territory safety function.
-- [ ] Investigate the Native save/load crash reproduced during the Hashir probe:
-  `UNarrativeSaveSubsystem::LoadActorFromRecord`, line 788, after actor restore
-  and before its saved-component iteration. Preserve the crash and identify
-  whether the actor, saved record or components become invalid during restore
-  before choosing an adapter.
-  This is a release blocker; do not edit Narrative Pro source.
+- [x] Reproduce and correct the Native record-reader crash: retiring Blacksmith
+  guards wrote EndPlay save records while Native still held the territory record.
+  Existing deferred removal now keeps those writes outside the reader; Native
+  target goals are detached before retired guards disappear. The exact regression
+  and two real world/player restores pass. Native source is unchanged.
 - [ ] Audit Native `BP_NarrativeNPC` death on clients: Hashir's death calls
   `RemoveAllGoals` with no local AI activity component. The new perception
   override fixes a separate server callback and does not cover that path.

@@ -816,9 +816,15 @@ void ATerritoryVolume::Load_Implementation()
 	// Reconcile guards — despawn any stale BeginPlay guards, respawn for loaded owner.
 	if (HasAuthority())
 	{
+		// Native keeps a reference into RecordMap while invoking this callback.
+		// Guard EndPlay can save the retiring NPC and reallocate that map. Detach
+		// gameplay participation now, but let its existing removal grace destroy
+		// the physical actor after Native finishes reading the actor/components.
+		TGuardValue<bool> GuardRecordRead(bDeferGuardDestructionForRecordLoad, true);
 		ReconcileGuardsAfterLoad();
 		bGuardsReconciled = true;
-		if (UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
+		if (UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControlSubsystem>();
+			Control && ControlMode != ETerritoryControlMode::AggregateOnly)
 		{
 			Control->RestoreCaptureState(this, OwnershipData.ContestingFaction, OwnershipData.ControlProgress);
 		}
@@ -3657,8 +3663,15 @@ void ATerritoryVolume::DespawnGuards()
 	{
 		if (ATerritoryGuardCharacter* Guard = GuardPtr.Get())
 		{
-			TerritoryNarrativeDeathSupport::PrepareForRemoval(*Guard);
-			if (IsValid(Guard) && !Guard->IsActorBeingDestroyed()) Guard->Destroy();
+			if (bDeferGuardDestructionForRecordLoad)
+			{
+				TerritoryNarrativeDeathSupport::ScheduleRemoval(*Guard);
+			}
+			else
+			{
+				TerritoryNarrativeDeathSupport::PrepareForRemoval(*Guard);
+				if (IsValid(Guard) && !Guard->IsActorBeingDestroyed()) Guard->Destroy();
+			}
 		}
 	}
 	if (IsActorBeingDestroyed()) return;

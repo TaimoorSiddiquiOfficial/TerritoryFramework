@@ -268,6 +268,10 @@ struct TERRITORYFRAMEWORK_API FTerritoryFactionResourceSnapshot
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	bool bStorageAvailable = false;
 
+	/** Several eligible accounts have the same highest priority. Production waits for a deliberate account choice. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
+	bool bAccountConflict = false;
+
 	/** Campaign cycle represented by this saved or replicated snapshot. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	int64 SnapshotCycle = INDEX_NONE;

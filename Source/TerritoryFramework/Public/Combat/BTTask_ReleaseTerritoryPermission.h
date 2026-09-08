@@ -9,7 +9,7 @@
  * Should be paired with BTTask_RequestTerritoryPermission.
  * Always succeeds.
  */
-UCLASS()
+UCLASS(meta = (DeprecatedNode, DeprecationMessage = "Use the Territory Assault Permission service on the active combat branch. It owns both acquiring and releasing the strategic slot."))
 class TERRITORYFRAMEWORK_API UBTTask_ReleaseTerritoryPermission : public UBTTaskNode
 {
 	GENERATED_BODY()

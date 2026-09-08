@@ -137,7 +137,6 @@ protected:
 	TObjectPtr<UNarrativeCommonButtonBase> ZeroGuardTargetButton;
 	UPROPERTY(Transient)
 	TObjectPtr<UNarrativeCommonButtonBase> MaxGuardTargetButton;
-	FGameplayTag ManagedFaction;
 	FTerritoryDistrictOperationsView OperationsView;
 	FTimerHandle RefreshTimerHandle;
 

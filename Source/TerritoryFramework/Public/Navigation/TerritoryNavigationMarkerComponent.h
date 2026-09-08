@@ -45,12 +45,6 @@ protected:
 
 private:
 	UFUNCTION()
-	void OnTerritoryControlChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner);
-
-	UFUNCTION()
-	void OnTerritoryStateChanged(ATerritoryVolume* Territory, ETerritoryState NewState);
-
-	UFUNCTION()
 	void OnRegistryTerritoryChanged(ATerritoryVolume* Territory, bool bWasUnregistered);
 
 	UFUNCTION()

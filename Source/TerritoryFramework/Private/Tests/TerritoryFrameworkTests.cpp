@@ -1800,16 +1800,10 @@ bool FTFContract_DeveloperSettings::RunTest(const FString& Parameters)
 	// ─── Config properties ───
 	TestTrue(TEXT("Has EconomyTickIntervalSeconds"),
 		TFTestUtils::HasProperty(Class, TEXT("EconomyTickIntervalSeconds")));
-	TestTrue(TEXT("Has DefaultTerritoryIncome"),
-		TFTestUtils::HasProperty(Class, TEXT("DefaultTerritoryIncome")));
-	TestTrue(TEXT("Has DefaultGuardCost"),
-		TFTestUtils::HasProperty(Class, TEXT("DefaultGuardCost")));
 	TestTrue(TEXT("Has CaptureProgressPerSecond"),
 		TFTestUtils::HasProperty(Class, TEXT("CaptureProgressPerSecond")));
 	TestTrue(TEXT("Has CaptureProgressDecayPerSecond"),
 		TFTestUtils::HasProperty(Class, TEXT("CaptureProgressDecayPerSecond")));
-	TestTrue(TEXT("Has DefaultMaxConcurrentAttackers"),
-		TFTestUtils::HasProperty(Class, TEXT("DefaultMaxConcurrentAttackers")));
 	TestTrue(TEXT("Has DefaultPlayerFaction"),
 		TFTestUtils::HasProperty(Class, TEXT("DefaultPlayerFaction")));
 
@@ -1820,16 +1814,10 @@ bool FTFContract_DeveloperSettings::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("Default EconomyTickInterval is 300"),
 			Settings->EconomyTickIntervalSeconds, 300.f);
-		TestEqual(TEXT("Default TerritoryIncome is 100"),
-			Settings->DefaultTerritoryIncome, 100);
-		TestEqual(TEXT("Default GuardCost is 50"),
-			Settings->DefaultGuardCost, 50);
 		TestTrue(TEXT("Default CaptureProgressPerSecond > 0"),
 			Settings->CaptureProgressPerSecond > 0.f);
 		TestTrue(TEXT("Default CaptureProgressDecayPerSecond > 0"),
 			Settings->CaptureProgressDecayPerSecond > 0.f);
-		TestEqual(TEXT("Default MaxConcurrentAttackers is 3"),
-			Settings->DefaultMaxConcurrentAttackers, 3);
 	}
 
 	return true;
@@ -3311,11 +3299,20 @@ bool FTFContract_DeveloperSettingsExtended::RunTest(const FString& Parameters)
 	const UClass* Class = UTerritoryDeveloperSettings::StaticClass();
 	TestNotNull(TEXT("UTerritoryDeveloperSettings::StaticClass()"), Class);
 
-	// ─── New guard/patrol settings ───
-	TestTrue(TEXT("Has DefaultPatrolArrivalThreshold"), TFTestUtils::HasProperty(Class, TEXT("DefaultPatrolArrivalThreshold")));
-	TestTrue(TEXT("Has DefaultPatrolAcceptanceRadius"), TFTestUtils::HasProperty(Class, TEXT("DefaultPatrolAcceptanceRadius")));
-	TestTrue(TEXT("Has DefaultPatrolWaitTime"), TFTestUtils::HasProperty(Class, TEXT("DefaultPatrolWaitTime")));
-	TestTrue(TEXT("Has MaxPatrolRouteNodes"), TFTestUtils::HasProperty(Class, TEXT("MaxPatrolRouteNodes")));
+	// Old config values may load, but must not appear as working authoring controls.
+	for (const TCHAR* Name : { TEXT("DefaultTerritoryIncome"), TEXT("DefaultGuardCost"),
+		TEXT("DefaultMaxConcurrentAttackers"), TEXT("DefaultPatrolArrivalThreshold"),
+		TEXT("DefaultPatrolAcceptanceRadius"), TEXT("DefaultPatrolWaitTime"), TEXT("MaxPatrolRouteNodes") })
+	{
+		if (const FProperty* Property = Class->FindPropertyByName(Name))
+		{
+			TestFalse(FString::Printf(TEXT("%s is not an editable setting"), Name), Property->HasAnyPropertyFlags(CPF_Edit));
+			TestFalse(FString::Printf(TEXT("%s is not offered to new Blueprint graphs"), Name), Property->HasAnyPropertyFlags(CPF_BlueprintVisible));
+#if WITH_EDITOR
+			TestTrue(FString::Printf(TEXT("%s explains migration"), Name), Property->HasMetaData(TEXT("DeprecationMessage")));
+#endif
+		}
+	}
 	TestTrue(TEXT("Has DefaultNarrativeButtonClass"), TFTestUtils::HasProperty(Class, TEXT("DefaultNarrativeButtonClass")));
 	TestTrue(TEXT("Has DefaultTerritoryButtonStyle"), TFTestUtils::HasProperty(Class, TEXT("DefaultTerritoryButtonStyle")));
 	TestTrue(TEXT("Has TerritoryTabButtonStyle"), TFTestUtils::HasProperty(Class, TEXT("TerritoryTabButtonStyle")));

@@ -29,8 +29,13 @@ public:
 			ToolTip="Faction memberships applied to the exact Narrative target player. Easy example: replace Police with Heroes after the Regime betrays the player."))
 	FGameplayTagContainer NewFactions;
 
+	/** Optional political membership to put first in Narrative's saved faction list. Empty keeps the existing order. This must belong to the final memberships. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
-		meta=(ToolTip="True replaces every existing player faction in one Narrative Player State update. False adds the selected memberships and preserves existing ones."))
+		meta=(Categories="Narrative.Factions", ToolTip="Choose the faction the player represents when owning, capturing and managing places. Example: add Rebels and choose Rebels as Primary Faction while keeping a second membership. Leave empty to keep the current order."))
+	FGameplayTag PrimaryFaction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ToolTip="True replaces every existing player faction. False adds memberships. Both modes commit once through Narrative Player State. Use Primary Faction to deliberately choose which political membership comes first."))
 	bool bReplaceExistingFactions = true;
 
 	/** Native helper used by execution and regression tests. */

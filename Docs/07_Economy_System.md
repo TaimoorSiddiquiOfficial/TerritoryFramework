@@ -200,8 +200,9 @@ Every EconomyTickIntervalSeconds (server only):
 | Setting | Default | Range |
 |---|---|---|
 | EconomyTickIntervalSeconds | 300 (5 min) | 10-3600 |
-| DefaultTerritoryIncome | 100 | 0+ |
-| DefaultGuardCost | 50 | 0+ |
+| ProductionCycleObservationIntervalSeconds | 1 | 0.1+ |
+
+Set `PeriodicIncome` and `GuardUpkeepPerCycle` on each Territory Definition. The old project settings `DefaultTerritoryIncome` and `DefaultGuardCost` never affected gameplay; they are now hidden.
 
 ## Save/Load
 

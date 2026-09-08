@@ -446,6 +446,8 @@ void ATerritoryGuardCharacter::BeginPlay()
 
 void ATerritoryGuardCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// Catch goals created during deferred cleanup, and direct stream-out/destruction.
+	TerritoryNarrativeDeathSupport::DetachTargetGoals(*this);
 	GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
 	GetWorldTimerManager().ClearTimer(CombatPriorityTimer);
 	RestoreClosestHostilePlayerPriority(false);
@@ -871,12 +873,11 @@ FGuid ATerritoryGuardCharacter::GetActorGUID_Implementation() const
 		return SpawnInfo.SpawnAssignedSaveGUID;
 	}
 
-	// WARNING: This fallback generates a runtime GUID that differs each session.
-	// Currently safe because ShouldRespawn_Implementation returns false — guards
-	// are never saved. If a subclass overrides ShouldRespawn to return true, the
-	// GUID will not match between save and load sessions, silently breaking save/load.
-	// Override GetActorGUID in the subclass to provide a stable GUID (e.g. from
-	// SpawnAssignedSaveGUID which is set in ConfigureTerritorySpawn).
+	// Fallback identity lasts for this spawned actor only. Narrative can still save
+	// and reload a living guard in place; ShouldRespawn=false prevents independent
+	// dynamic reconstruction, not serialization. Territory and its authored posts
+	// own the durable garrison. A subclass enabling Native dynamic respawn must
+	// supply a durable identity instead of relying on this runtime fallback.
 	if (!CachedFallbackGUID.IsValid())
 	{
 		const_cast<ATerritoryGuardCharacter*>(this)->CachedFallbackGUID = FGuid::NewGuid();

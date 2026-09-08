@@ -12,6 +12,8 @@ class UTerritoryProductionSiteRowWidget;
 class UTerritoryResourceRowWidget;
 class UTextBlock;
 class UVerticalBox;
+class ANarrativeCharacter;
+class APawn;
 
 /**
  * Base widget for displaying faction economy information.
@@ -24,7 +26,7 @@ class TERRITORYFRAMEWORK_API UTerritoryEconomyWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/** Set which faction's economy to display */
+	/** Select a fixed faction view. Pass an empty tag to follow the owning player's current political faction again. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy|UI")
 	void SetDisplayFaction(const FGameplayTag& Faction);
 
@@ -126,6 +128,8 @@ protected:
 
 private:
 	FGameplayTag DisplayFaction;
+	bool bFollowOwningPlayerFaction = true;
+	TWeakObjectPtr<ANarrativeCharacter> BoundFactionCharacter;
 
 	/** Client-side polling fallback timer — refreshes data periodically in case delegate broadcasts are missed. */
 	FTimerHandle ClientPollTimerHandle;
@@ -144,6 +148,11 @@ private:
 
 	void BindDelegates();
 	void UnbindDelegates();
+	void BindFactionSources();
+	UFUNCTION()
+	void HandleViewerFactionChanged();
+	UFUNCTION()
+	void HandleViewerPawnChanged(APawn* OldPawn, APawn* NewPawn);
 
 	/** Client polling fallback — queries current data and fires OnEconomyUpdated. */
 	void ClientPollRefresh();

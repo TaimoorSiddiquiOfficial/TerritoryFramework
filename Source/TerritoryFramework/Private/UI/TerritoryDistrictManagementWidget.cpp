@@ -34,11 +34,6 @@ void UTerritoryDistrictManagementWidget::InitializeManagement(
 	ATerritoryDistrictManagementPoint* InManagementPoint)
 {
 	ManagementPoint = InManagementPoint;
-	if (APlayerController* PlayerController = GetOwningPlayer())
-	{
-		ManagedFaction = UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this,
-			FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController));
-	}
 	BindManagementComponent();
 	RefreshManagementDisplay();
 }
@@ -283,7 +278,10 @@ ATerritoryDistrict* UTerritoryDistrictManagementWidget::GetManagedDistrict() con
 
 FGameplayTag UTerritoryDistrictManagementWidget::GetManagedFaction() const
 {
-	return ManagedFaction;
+	APlayerController* Controller = GetOwningPlayer();
+	APawn* Character = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(Controller);
+	return UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this,
+		Character ? static_cast<AActor*>(Character) : Controller);
 }
 
 int32 UTerritoryDistrictManagementWidget::GetDistrictIncome() const

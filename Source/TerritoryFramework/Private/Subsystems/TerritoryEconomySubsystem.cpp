@@ -4,6 +4,7 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryWorldState.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
@@ -923,21 +924,36 @@ void UTerritoryEconomySubsystem::UnregisterFactionCurrencyAccount(
 }
 
 bool UTerritoryEconomySubsystem::RegisterFactionResourceAccount(
-	const FGameplayTag& Faction, AActor* AccountActor)
+	const FGameplayTag& Faction, AActor* AccountActor, int32 Priority)
 {
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client || !Faction.IsValid()
-		|| !AccountActor || AccountActor->GetWorld() != World
+	if (!World || World->GetNetMode() == NM_Client
+		|| !UTerritoryBlueprintLibrary::IsPoliticalFactionTag(Faction)
+		|| !IsValid(AccountActor) || !AccountActor->HasAuthority()
+		|| AccountActor->IsActorBeingDestroyed() || AccountActor->GetWorld() != World
 		|| !ResolveCurrencyAccount(AccountActor)
 		|| !DoesAccountBelongToFaction(AccountActor, Faction))
 	{
 		return false;
 	}
 
-	FactionResourceAccounts.Add(Faction, AccountActor);
-	UpdateResourceSnapshot(Faction, GetCurrentProductionCycle());
-	PublishProductionState();
-	return true;
+	TArray<FResourceAccountCandidate>& Candidates = FactionResourceAccounts.FindOrAdd(Faction);
+	Candidates.RemoveAll([](const FResourceAccountCandidate& Candidate) { return !Candidate.Actor.IsValid(); });
+	FResourceAccountCandidate* Existing = Candidates.FindByPredicate(
+		[AccountActor](const FResourceAccountCandidate& Candidate) { return Candidate.Actor.Get() == AccountActor; });
+	if (Existing)
+	{
+		Existing->Priority = Priority;
+	}
+	else
+	{
+		FResourceAccountCandidate& Candidate = Candidates.AddDefaulted_GetRef();
+		Candidate.Actor = AccountActor;
+		Candidate.Priority = Priority;
+	}
+	PublishResourceAccountChange(Faction);
+	// Callbacks can unregister an account or change membership. Report the final selection.
+	return IsFactionResourceAccountSelected(Faction, AccountActor);
 }
 
 void UTerritoryEconomySubsystem::UnregisterFactionResourceAccount(
@@ -945,30 +961,79 @@ void UTerritoryEconomySubsystem::UnregisterFactionResourceAccount(
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client || !Faction.IsValid()) return;
-	if (const TWeakObjectPtr<AActor>* Existing = FactionResourceAccounts.Find(Faction))
+	if (AccountActor && (!IsValid(AccountActor) || !AccountActor->HasAuthority() || AccountActor->GetWorld() != World)) return;
+	if (TArray<FResourceAccountCandidate>* Candidates = FactionResourceAccounts.Find(Faction))
 	{
-		if (!AccountActor || Existing->Get() == AccountActor)
+		const int32 Removed = Candidates->RemoveAll([AccountActor](const FResourceAccountCandidate& Candidate)
 		{
-			FactionResourceAccounts.Remove(Faction);
-			FTerritoryFactionResourceSnapshot& Snapshot = ResourceSnapshots.FindOrAdd(Faction);
-			Snapshot.Faction = Faction;
-			Snapshot.bStorageAvailable = false;
-			Snapshot.SnapshotCycle = GetCurrentProductionCycle();
-			PublishProductionState();
+			return !AccountActor || !Candidate.Actor.IsValid() || Candidate.Actor.Get() == AccountActor;
+		});
+		if (Removed > 0)
+		{
+			if (Candidates->IsEmpty()) FactionResourceAccounts.Remove(Faction);
+			PublishResourceAccountChange(Faction);
 		}
 	}
 }
 
 AActor* UTerritoryEconomySubsystem::ResolveRegisteredResourceAccount(
-	const FGameplayTag& Faction) const
+	const FGameplayTag& Faction, bool* bOutConflict) const
 {
-	const TWeakObjectPtr<AActor>* Entry = FactionResourceAccounts.Find(Faction);
-	AActor* Account = Entry ? Entry->Get() : nullptr;
+	if (bOutConflict) *bOutConflict = false;
 	UWorld* World = GetWorld();
-	return Account && World && Account->GetWorld() == World
-		&& ResolveCurrencyAccount(Account)
-		&& DoesAccountBelongToFaction(Account, Faction)
-		? Account : nullptr;
+	const TArray<FResourceAccountCandidate>* Candidates = FactionResourceAccounts.Find(Faction);
+	if (!World || World->GetNetMode() == NM_Client || !Candidates) return nullptr;
+	AActor* Selected = nullptr;
+	int32 HighestPriority = MIN_int32;
+	bool bConflict = false;
+	for (const FResourceAccountCandidate& Candidate : *Candidates)
+	{
+		AActor* Account = Candidate.Actor.Get();
+		if (!IsValid(Account) || !Account->HasAuthority() || Account->IsActorBeingDestroyed() || Account->GetWorld() != World
+			|| !ResolveCurrencyAccount(Account) || !DoesAccountBelongToFaction(Account, Faction)) continue;
+		if (!Selected || Candidate.Priority > HighestPriority)
+		{
+			Selected = Account;
+			HighestPriority = Candidate.Priority;
+			bConflict = false;
+		}
+		else if (Candidate.Priority == HighestPriority)
+		{
+			bConflict = true;
+		}
+	}
+	if (bOutConflict) *bOutConflict = bConflict;
+	return bConflict ? nullptr : Selected;
+}
+
+bool UTerritoryEconomySubsystem::IsFactionResourceAccountSelected(
+	const FGameplayTag& Faction, const AActor* AccountActor) const
+{
+	return IsValid(AccountActor) && ResolveRegisteredResourceAccount(Faction) == AccountActor;
+}
+
+bool UTerritoryEconomySubsystem::HasFactionResourceAccountConflict(const FGameplayTag& Faction) const
+{
+	bool bConflict = false;
+	ResolveRegisteredResourceAccount(Faction, &bConflict);
+	return bConflict;
+}
+
+void UTerritoryEconomySubsystem::RefreshFactionResourceAccount(const FGameplayTag& Faction)
+{
+	const UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || !Faction.IsValid()) return;
+	PublishResourceAccountChange(Faction);
+}
+
+void UTerritoryEconomySubsystem::PublishResourceAccountChange(const FGameplayTag& Faction)
+{
+	UpdateResourceSnapshot(Faction, GetCurrentProductionCycle());
+	PublishProductionState();
+	if (ResourceAccountNotificationsInProgress.Contains(Faction)) return;
+	ResourceAccountNotificationsInProgress.Add(Faction);
+	OnFactionResourceAccountChanged.Broadcast(Faction);
+	ResourceAccountNotificationsInProgress.Remove(Faction);
 }
 
 ANarrativePlayerCharacter* UTerritoryEconomySubsystem::SelectSoleOnlineResourceAccount(
@@ -981,11 +1046,12 @@ ANarrativePlayerCharacter* UTerritoryEconomySubsystem::SelectSoleOnlineResourceA
 AActor* UTerritoryEconomySubsystem::GetFactionResourceAccount(
 	const FGameplayTag& Faction) const
 {
-	if (AActor* Registered = ResolveRegisteredResourceAccount(Faction))
+	bool bConflict = false;
+	if (AActor* Registered = ResolveRegisteredResourceAccount(Faction, &bConflict))
 	{
 		return Registered;
 	}
-	if (!bUseSoleOnlineFactionPlayerInventory)
+	if (bConflict || !bUseSoleOnlineFactionPlayerInventory)
 	{
 		return nullptr;
 	}
@@ -1600,6 +1666,7 @@ void UTerritoryEconomySubsystem::UpdateResourceSnapshot(
 
 	UNarrativeInventoryComponent* Inventory = ResolveResourceInventory(Faction);
 	Snapshot.bStorageAvailable = Inventory != nullptr;
+	Snapshot.bAccountConflict = HasFactionResourceAccountConflict(Faction);
 	if (!Inventory) return;
 
 	TSet<UClass*> ReferencedClasses;

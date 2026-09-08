@@ -1607,14 +1607,14 @@ it returns the actor's real Narrative factions. It never mutates `ANarrativePlay
 
 | Category | Settings and defaults |
 |---|---|
-| Economy | `EconomyTickIntervalSeconds=300`, `DefaultTerritoryIncome=100`, `DefaultGuardCost=50` |
-| Capture | `CaptureProgressPerSecond=0.1`, `CaptureProgressDecayPerSecond=0.05`, `DefaultMaxConcurrentAttackers=3`, `CaptureTickInterval=0.1`, `TreatyExpirationCheckInterval=10` |
+| Economy | `EconomyTickIntervalSeconds=300`, `ProductionCycleObservationIntervalSeconds=1` |
+| Capture | `CaptureProgressPerSecond=0.1`, `CaptureProgressDecayPerSecond=0.05`, `CaptureTickInterval=0.1`, `TreatyExpirationCheckInterval=10` |
 | Counterattack | `CounterAttackCampaignSeed=1337`, `CounterAttackUpdateInterval=2`, `MaxConcurrentScheduledAssaults=8`, `MaxConcurrentAssaultsPerFaction=2`, `MaxLiveCounterAttackNPCs=24`, `MaxRetainedAssaultRecords=100` |
 | Spatial | `SpatialCellSize=2000` Unreal units |
-| Guards | `DefaultPatrolArrivalThreshold=100`, `DefaultPatrolAcceptanceRadius=50`, `DefaultPatrolWaitTime=2`, `MaxPatrolRouteNodes=32` |
+| Guards | Patrol nodes own `WaitTime`; the Narrative patrol activity owns movement acceptance. |
 | Identity/UI | `DefaultPlayerFaction`, `DefaultNarrativeButtonClass`, `DefaultTerritoryButtonStyle`, `DefaultTerritoryTextStyle`, `TerritoryTitleTextStyle`, `TerritoryHeadingTextStyle`, `TerritoryMutedTextStyle`, `TerritoryInterfaceFont` (Narrative Roboto Condensed by default) |
 
-`EconomyStartingGold` and `MaxCaptureHistory` are deprecated, unused compatibility properties scheduled for removal in v0.3.0.
+Inactive legacy controls are hidden. See [Faction integration and migration](Faction_Integration_Migration.md) for the real owners of those settings. `EconomyStartingGold` never set Native currency; `MaxCaptureHistory` never controlled the current management event history.
 
 `TerritoryInterfaceFont` controls the readable face used by generated Command Center headings,
 body text, metadata, list rows, and controls. The configured CommonText styles still supply theme

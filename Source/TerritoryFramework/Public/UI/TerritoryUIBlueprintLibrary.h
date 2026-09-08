@@ -512,6 +512,8 @@ struct TERRITORYFRAMEWORK_API FTerritoryEconomyOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") TArray<FTerritoryTransaction> RecentTransactions;
 	/** Whether an eligible Narrative resource inventory is available. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") bool bResourceStorageAvailable = false;
+	/** Resource accounts tied for highest priority; the server is waiting for a deliberate storage choice. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") bool bResourceAccountConflict = false;
 	/** Resource quantities read from the relevant Narrative storage account. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") TArray<FTerritoryResourceOperationsView> ResourceStockpile;
 	/** Production-site summaries visible in this query. */

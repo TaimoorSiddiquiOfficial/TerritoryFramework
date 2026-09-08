@@ -131,14 +131,12 @@ public:
 			DisplayName = "Campaign Production Check Interval (Seconds)"))
 	float ProductionCycleObservationIntervalSeconds = 1.f;
 
-	/** Default currency income rate used by Territories that rely on project-level economy defaults. */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy",
-		meta = (ClampMin = "0"))
+	/** Legacy config value; never read by gameplay. Set PeriodicIncome on the Territory Definition. */
+	UPROPERTY(config, meta = (DeprecatedProperty, DeprecationMessage = "Use Territory Definition: Periodic Income. This old setting has no effect."))
 	int32 DefaultTerritoryIncome = 100;
 
-	/** Project default currency cost used by guard economy configuration. */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy",
-		meta = (ClampMin = "0"))
+	/** Legacy config value; never read by gameplay. Set GuardUpkeepPerCycle on the Territory Definition. */
+	UPROPERTY(config, meta = (DeprecatedProperty, DeprecationMessage = "Use Territory Definition: Guard Upkeep Per Cycle. This old setting has no effect."))
 	int32 DefaultGuardCost = 50;
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -155,9 +153,8 @@ public:
 		meta = (ClampMin = "0.01", UIMin = "0.01", UIMax = "0.5"))
 	float CaptureProgressDecayPerSecond = 0.05f;
 
-	/** Default strategic attacker-slot limit for a Territory without a more specific value. */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Capture",
-		meta = (ClampMin = "1", UIMin = "1", UIMax = "20"))
+	/** Legacy config value; never read by gameplay. Each Territory Definition owns its strategic attack slots. */
+	UPROPERTY(config, meta = (DeprecatedProperty, DeprecationMessage = "Use Territory Definition: Max Concurrent Attackers. This old setting has no effect."))
 	int32 DefaultMaxConcurrentAttackers = 3;
 
 	/** Capture tick interval in seconds. Controls how often capture progression is evaluated. */
@@ -240,32 +237,28 @@ public:
 	// Guard / Patrol
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	/** Default arrival threshold for patrol route advancement (uu) */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Guards",
-		meta = (ClampMin = "50.0", UIMin = "50.0", UIMax = "500.0"))
+	/** Legacy config value; Narrative's patrol activity owns movement and arrival. */
+	UPROPERTY(config, meta = (DeprecatedProperty, DeprecationMessage = "Set arrival rules in the Narrative patrol activity. This old setting has no effect."))
 	float DefaultPatrolArrivalThreshold = 100.f;
 
-	/** Default acceptance radius for patrol move task (uu) */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Guards",
-		meta = (ClampMin = "10.0", UIMin = "10.0", UIMax = "200.0"))
+	/** Legacy config value; Narrative's patrol activity owns movement acceptance. */
+	UPROPERTY(config, meta = (DeprecatedProperty, DeprecationMessage = "Set the move acceptance radius in the Narrative patrol activity. This old setting has no effect."))
 	float DefaultPatrolAcceptanceRadius = 50.f;
 
-	/** Default wait time at patrol nodes (seconds) */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Guards",
-		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "30.0"))
+	/** Legacy config value; each authored patrol node owns its wait time. */
+	UPROPERTY(config, meta = (DeprecatedProperty, DeprecationMessage = "Set Wait Time on each patrol node. This old setting has no effect."))
 	float DefaultPatrolWaitTime = 2.f;
 
-	/** Max patrol route nodes per spawn point (sanity cap) */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Guards",
-		meta = (ClampMin = "0", UIMin = "0", UIMax = "100"))
+	/** Legacy config value; it never limited authored patrol arrays. */
+	UPROPERTY(config, meta = (DeprecatedProperty, DeprecationMessage = "Edit the guard post's patrol node array. This old setting has never limited its size."))
 	int32 MaxPatrolRouteNodes = 32;
 
-	/** @deprecated Unused — factions start with zero gold. Remove in v0.3.0. */
-	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Unused. Remove in v0.3.0."))
+	/** Legacy value. Narrative inventory configuration owns starting currency. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Set starting currency in Narrative inventory configuration."))
 	int32 EconomyStartingGold = 0;
 
-	/** @deprecated Unused — no capture history system exists. Remove in v0.3.0. */
-	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Unused. Remove in v0.3.0."))
+	/** Legacy value. TerritoryPlayerManagementComponent::MaxLiveEventHistory bounds current live event history. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use Max Live Event History on the Territory Player Management component."))
 	int32 MaxCaptureHistory = 50;
 
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -273,8 +266,8 @@ public:
 	// ═══════════════════════════════════════════════════════════════════════════
 
 	/**
-	 * Optional fallback used only when a player pawn/controller has no faction from
-	 * Narrative Pro's team interface. Leave empty when the game always assigns the
+	 * Optional fallback used only when a player pawn/controller has no Narrative
+	 * team interface. An empty Native membership stays empty. Leave this empty when the game assigns the
 	 * player's faction through Narrative. A real Narrative faction always wins, so
 	 * a betrayal or allegiance choice can change the player without this setting
 	 * forcing them back to an old test faction.

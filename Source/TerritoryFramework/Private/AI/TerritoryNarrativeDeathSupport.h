@@ -5,6 +5,9 @@ class UNarrativeAbilitySystemComponent;
 
 namespace TerritoryNarrativeDeathSupport
 {
+	/** Remove Native goals bound to this target's death when it leaves play alive. */
+	void DetachTargetGoals(ANarrativeNPCCharacter& Character);
+
 	bool ResolveDeathState(const UNarrativeAbilitySystemComponent* AbilitySystem,
 		bool bReportedIsDead);
 
