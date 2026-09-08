@@ -112,6 +112,22 @@ public:
 	virtual FString GetDefaultNewAssetName() const override;
 };
 
+UCLASS(hidecategories=Object)
+class UTerritorySituationProfileFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritorySituationProfileFactory();
+};
+
+UCLASS(hidecategories=Object)
+class UTerritoryDialogueRecipeFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryDialogueRecipeFactory();
+};
+
 /**
  * Creates a Blueprint with an exact Territory parent class and skips Unreal's
  * broad parent-class picker. These entries are for reusable level actors; all

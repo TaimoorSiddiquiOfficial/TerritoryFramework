@@ -8,6 +8,9 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
+#include "AI/TerritoryDiplomacyDialogue.h"
+#include "DataValidation/TerritoryDataValidator.h"
+#include "Misc/DataValidation.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDialogueRecipeBuilder,
 	"TerritoryFramework.Dialogue.Editor.NativeRecipeBuilder",
@@ -37,6 +40,14 @@ bool FTFDialogueRecipeBuilder::RunTest(const FString& Parameters)
 	Recipe->Nodes = {Entry, Offer, Leave};
 	FText Error;
 	TestTrue(TEXT("Valid Native recipe"), Recipe->ValidateRecipe(Error));
+	for (double InvalidPosition : {static_cast<double>(MAX_int32) + 1., static_cast<double>(MIN_int32) - 1.})
+	{
+		Recipe->Nodes[1].Position.X = InvalidPosition;
+		TestFalse(TEXT("Finite out-of-range graph coordinates fail before creation"), Recipe->ValidateRecipe(Error));
+	}
+	Recipe->Nodes[1].Position.X = MAX_int32;
+	TestTrue(TEXT("Exact graph coordinate boundary remains valid"), Recipe->ValidateRecipe(Error));
+	Recipe->Nodes[1].Position.X = Offer.Position.X;
 	Recipe->Nodes[2].Replies = {TEXT("Missing")};
 	TestFalse(TEXT("Missing references are rejected before asset creation"), Recipe->ValidateRecipe(Error));
 	Recipe->Nodes[2].Replies.Reset();
@@ -63,6 +74,13 @@ bool FTFDialogueRecipeBuilder::RunTest(const FString& Parameters)
 	for (const UEdGraphNode* Node : BP->DialogueGraph->Nodes)
 		for (const UEdGraphPin* Pin : Node->Pins) if (Pin->Direction == EGPD_Output) Links += Pin->LinkedTo.Num();
 	TestEqual(TEXT("Visible editor wires match runtime links"), Links, 2);
+	auto* Profile = NewObject<UTerritoryDiplomacyDialogueProfile>();
+	Profile->WarDialogue = BP->GeneratedClass;
+	auto* Validator = NewObject<UTerritoryDataValidator>();
+	const TArray<FAssetData> Associated;
+	FDataValidationContext ValidationContext(false, EDataValidationUsecase::Script, Associated);
+	TestEqual(TEXT("Diplomacy accepts the compiled Native template without requiring a CDO graph"),
+		Validator->ValidateLoadedAsset_Implementation(FAssetData(Profile), Profile, ValidationContext), EDataValidationResult::Valid);
 	TestNull(TEXT("Builder cannot overwrite a live dialogue"), UTerritoryDialogueEditorLibrary::CreateDialogueFromRecipe(Recipe, Path, Error));
 	TestNull(TEXT("Builder rejects the Narrative vendor mount"), UTerritoryDialogueEditorLibrary::CreateDialogueFromRecipe(Recipe, TEXT("/NarrativePro/ForbiddenRecipe"), Error));
 	FAssetRegistryModule::AssetDeleted(BP);

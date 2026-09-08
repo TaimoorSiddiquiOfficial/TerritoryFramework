@@ -850,8 +850,13 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 
 	TestTrue(TEXT("Blacksmith uses full-volume story contesting"),
 		Blacksmith->UsesStoryCaptureFromBounds());
-	TestTrue(TEXT("Farm uses full-volume story contesting after it unlocks"),
-		Farm->UsesStoryCaptureFromBounds());
+	if (FarmDefinition)
+	{
+		TestEqual(TEXT("Farm follows its authored capture mode after it unlocks"),
+			Farm->UsesStoryCaptureFromBounds(), FarmDefinition->bStoryCaptureFromBounds);
+		TestFalse(TEXT("Farm cannot run story bounds and automatic point capture together"),
+			FarmDefinition->bStoryCaptureFromBounds && FarmDefinition->CapturePoint.bAutomaticCapture);
+	}
 
 	TMap<FGameplayTag, ATerritoryStoryOwnerSpawner*> OwnerSpawners;
 	TMap<FGameplayTag, ATerritoryCapturePoint*> CapturePoints;
@@ -889,7 +894,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	VerifyOwner(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
 	VerifyOwner(TEXT("Territory.HavenReach.CastleHill.Farm"));
 
-	auto VerifyStoryCapturePoint = [this, &CapturePoints](const TCHAR* TerritoryTag)
+	auto VerifyAuthoredCapturePoint = [this, &CapturePoints](const TCHAR* TerritoryTag)
 	{
 		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(TerritoryTag));
 		ATerritoryCapturePoint* const* Found = CapturePoints.Find(Tag);
@@ -899,21 +904,23 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		{
 			TestNotNull(FString::Printf(TEXT("%s point links to its Place definition"),
 				TerritoryTag), (*Found)->GetPlaceDefinition());
-			TestFalse(FString::Printf(TEXT("%s point does not run automatic multiplayer capture in story mode"),
-				TerritoryTag), (*Found)->bCaptureEnabled);
-			TestFalse(FString::Printf(TEXT("%s point reports automatic capture inactive while story bounds own capture"),
-				TerritoryTag), (*Found)->IsAutomaticCaptureFlowActive());
 			if (const UTerritoryPlaceDefinition* Place = (*Found)->GetPlaceDefinition())
 			{
 				TestTrue(FString::Printf(TEXT("%s definition preserves the optional capture-point template"),
 					TerritoryTag), Place->CapturePoint.bEnabled);
-				TestFalse(FString::Printf(TEXT("%s definition selects story capture instead of automatic point progress"),
-					TerritoryTag), Place->CapturePoint.bAutomaticCapture);
+				TestEqual(FString::Printf(TEXT("%s point follows its definition's automatic capture setting"),
+					TerritoryTag), (*Found)->bCaptureEnabled,
+					Place->CapturePoint.bEnabled && Place->CapturePoint.bAutomaticCapture);
+				if (Place->bStoryCaptureFromBounds)
+				{
+					TestFalse(TEXT("Story bounds exclude automatic point progress"), Place->CapturePoint.bAutomaticCapture);
+					TestFalse(TEXT("Story capture point is inactive"), (*Found)->IsAutomaticCaptureFlowActive());
+				}
 			}
 		}
 	};
-	VerifyStoryCapturePoint(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
-	VerifyStoryCapturePoint(TEXT("Territory.HavenReach.CastleHill.Farm"));
+	VerifyAuthoredCapturePoint(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	VerifyAuthoredCapturePoint(TEXT("Territory.HavenReach.CastleHill.Farm"));
 
 	return true;
 }

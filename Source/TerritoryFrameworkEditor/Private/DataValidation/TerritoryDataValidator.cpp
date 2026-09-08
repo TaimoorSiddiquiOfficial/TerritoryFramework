@@ -1,6 +1,7 @@
 #include "DataValidation/TerritoryDataValidator.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/TerritoryInvestigationActivity.h"
+#include "AI/TerritoryDiplomacyDialogue.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritorySavableData.h"
@@ -46,6 +47,7 @@
 #include "Tales/QuestSM.h"
 #include "Tales/QuestTask.h"
 #include "Tales/Dialogue.h"
+#include "Tales/DialogueBlueprintGeneratedClass.h"
 #include "Tales/NarrativeDialogueSequence.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
@@ -55,9 +57,71 @@
 #include "WorldPartition/WorldPartitionHandle.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
 #include "Tracks/MovieSceneSpawnTrack.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
+	bool IsTerritoryDataAsset(const UObject* Asset)
+	{
+		if (!Asset || !Asset->IsA<UDataAsset>()) return false;
+		for (const UClass* Class = Asset->GetClass(); Class; Class = Class->GetSuperClass())
+			if (Class->GetOutermost()->GetFName() == TEXT("/Script/TerritoryFramework")) return true;
+		return false;
+	}
+
+	// Clamp metadata constrains the widget, not serialized/scripted values. Check
+	// value fields without following asset references or executing Narrative objects.
+	void ValidateAuthoredNumbers(const UObject* Asset, TArray<FString>& Errors)
+	{
+		TFunction<void(const FProperty*, const void*, const FString&)> ValidateValue;
+		TFunction<void(const UStruct*, const void*, const FString&)> ValidateStruct;
+		ValidateStruct = [&](const UStruct* Struct, const void* Data, const FString& Path)
+		{
+			for (TFieldIterator<FProperty> It(Struct); It; ++It)
+				if (It->HasAnyPropertyFlags(CPF_Edit))
+					ValidateValue(*It, It->ContainerPtrToValuePtr<void>(Data),
+						Path.IsEmpty() ? It->GetName() : Path + TEXT(".") + It->GetName());
+		};
+		ValidateValue = [&](const FProperty* Property, const void* Value, const FString& Path)
+		{
+			if (const auto* Number = CastField<FNumericProperty>(Property))
+			{
+				if (!Number->IsFloatingPoint()) return;
+				const double Actual = Number->GetFloatingPointPropertyValue(Value);
+				if (!FMath::IsFinite(Actual))
+				{
+					Errors.Add(Path + TEXT(" must be finite"));
+					return;
+				}
+				double Bound = 0.;
+				const auto PropertyPrecision = [Number](double Limit)
+				{
+					return Number->IsA<FFloatProperty>() ? static_cast<double>(static_cast<float>(Limit)) : Limit;
+				};
+				if (LexTryParseString(Bound, *Property->GetMetaData(TEXT("ClampMin"))) && Actual < PropertyPrecision(Bound))
+					Errors.Add(FString::Printf(TEXT("%s is below its minimum %g"), *Path, Bound));
+				if (LexTryParseString(Bound, *Property->GetMetaData(TEXT("ClampMax"))) && Actual > PropertyPrecision(Bound))
+					Errors.Add(FString::Printf(TEXT("%s exceeds its maximum %g"), *Path, Bound));
+			}
+			else if (const auto* Struct = CastField<FStructProperty>(Property))
+				ValidateStruct(Struct->Struct, Value, Path);
+			else if (const auto* Array = CastField<FArrayProperty>(Property))
+			{
+				FScriptArrayHelper Helper(Array, Value);
+				for (int32 Index = 0; Index < Helper.Num(); ++Index)
+					ValidateValue(Array->Inner, Helper.GetRawPtr(Index), FString::Printf(TEXT("%s[%d]"), *Path, Index));
+			}
+			else if (const auto* Map = CastField<FMapProperty>(Property))
+			{
+				FScriptMapHelper Helper(Map, Value);
+				for (int32 Index = 0; Index < Helper.GetMaxIndex(); ++Index)
+					if (Helper.IsValidIndex(Index))
+						ValidateValue(Map->ValueProp, Helper.GetValuePtr(Index), FString::Printf(TEXT("%s[%d]"), *Path, Index));
+			}
+		};
+		ValidateStruct(Asset->GetClass(), Asset, FString());
+	}
+
 	bool IsTerritoryStoryCaptureAsset(const FAssetData& AssetData)
 	{
 		return AssetData.PackageName.ToString().StartsWith(
@@ -517,6 +581,7 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 	(void)InAssetData;
 	(void)InContext;
 	if (!InAsset) return false;
+	if (IsTerritoryDataAsset(InAsset)) return true;
 	if (IsTerritoryStoryCaptureAsset(InAssetData)
 		&& (InAsset->IsA(UNPCDefinition::StaticClass())
 			|| InAsset->IsA(UDialogueBlueprint::StaticClass())))
@@ -580,6 +645,7 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 	(void)InAssetData;
 	TArray<FString> Errors;
 	TArray<FString> Warnings;
+	if (IsTerritoryDataAsset(InAsset)) ValidateAuthoredNumbers(InAsset, Errors);
 
 	if (ATerritoryVolume* Territory = Cast<ATerritoryVolume>(InAsset))
 	{
@@ -675,6 +741,27 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 				Errors.Add(FString::Printf(TEXT("Guard post Narrative NPC definition is not spawn-ready: %s"),
 					*FailureReason.ToString()));
 			}
+		}
+	}
+	else if (const auto* DialogueProfile = Cast<UTerritoryDiplomacyDialogueProfile>(InAsset))
+	{
+		const TPair<const TCHAR*, TSubclassOf<UDialogue>> Slots[] = {
+			{TEXT("SameFactionDialogue"), DialogueProfile->SameFactionDialogue},
+			{TEXT("NeutralDialogue"), DialogueProfile->NeutralDialogue},
+			{TEXT("CeasefireDialogue"), DialogueProfile->CeasefireDialogue},
+			{TEXT("NonAggressionDialogue"), DialogueProfile->NonAggressionDialogue},
+			{TEXT("TradeAgreementDialogue"), DialogueProfile->TradeAgreementDialogue},
+			{TEXT("AllianceDialogue"), DialogueProfile->AllianceDialogue},
+			{TEXT("WarDialogue"), DialogueProfile->WarDialogue}
+		};
+		for (const auto& Slot : Slots)
+		{
+			if (!Slot.Value) continue; // Empty slots deliberately use NPCDefinition's dialogue.
+			const auto* DialogueClass = Cast<UDialogueBlueprintGeneratedClass>(Slot.Value.Get());
+			const UDialogue* Dialogue = DialogueClass ? DialogueClass->GetDialogueTemplate() : nullptr;
+			if (Slot.Value->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists)
+				|| !Dialogue || !Dialogue->RootDialogue || Dialogue->NPCReplies.IsEmpty())
+				Errors.Add(FString::Printf(TEXT("%s must select a playable Narrative Dialogue Blueprint, or be empty to use the NPC fallback"), Slot.Key));
 		}
 	}
 	else if (UTerritoryProductionProfile* ProductionProfile = Cast<UTerritoryProductionProfile>(InAsset))

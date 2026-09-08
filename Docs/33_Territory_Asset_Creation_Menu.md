@@ -28,11 +28,25 @@ The new asset is created in the selected folder and opens for editing.
 | Economy | Territory Production Profile | Money or Narrative Item production and required inputs |
 | Stealth & Disguise | Territory Stealth Profile | Sight, evidence, gunfire, investigation, and exposure rules |
 | Stealth & Disguise | Territory Disguise Profile | Faction disguise identity and suspicion rules |
-| AI & Diplomacy | Territory Diplomacy Dialogue Profile | Friendly, neutral, suspicious, and hostile dialogue selection |
+| AI & Diplomacy | Territory Diplomacy Dialogue Profile | Same-faction, neutral, ceasefire, non-aggression, trade, alliance, and war dialogue selection |
 | Story & Quests | Territory Quest Cascade Recipe | Reusable states, branches, tasks, and events that generate a Narrative Quest |
+| Story & Quests | Territory Situation Profile | Shared Place/faction context for diplomacy, retake, power, and city holdings queries |
+| Story & Quests | Territory Conditional Dialogue Recipe | Reusable nodes, replies, conditions, and events that generate a Narrative Dialogue Blueprint |
 
 These are the authoritative reusable settings. Duplicate them when you need a new configured
 Place, District, City, force, economy, or story recipe.
+
+All 12 concrete data asset types have a named creation entry. Numbered Details
+categories follow their authored order, including inherited Definition fields:
+`01 Identity` precedes `10 Place` and `11 Place`. District and City definitions
+retain their aggregate context; physical capture and guard settings belong to Places.
+
+**Validate Assets** checks editable floating-point fields for non-finite values
+and their authored minimum/maximum limits, including nested value structs, arrays,
+and maps. Each asset's existing semantic checks still apply. Empty diplomacy
+dialogue slots intentionally fall back to the NPC Definition; assigned slots must
+reference a compiled Narrative dialogue graph. Dialogue recipe coordinates must
+fit the editor's signed 32-bit graph coordinate range.
 
 ## Blueprint templates
 

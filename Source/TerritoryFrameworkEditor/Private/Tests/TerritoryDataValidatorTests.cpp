@@ -134,8 +134,15 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		Validator->ValidateLoadedAsset_Implementation(
 			AssetData, Profile, InvalidDeploymentContext),
 		EDataValidationResult::Invalid);
-	TestEqual(TEXT("Every invalid deployment and movement recovery setting emits an error"),
-		InvalidDeploymentContext.GetNumErrors(), 4u);
+	for (const TCHAR* Field : {TEXT("ParticipantSpacing"), TEXT("SpawnPlacementAttemptsPerParticipant"),
+		TEXT("StalledMovementRetryInterval"), TEXT("MaxStalledMovementRetries")})
+	{
+		TestTrue(FString::Printf(TEXT("Invalid %s emits a specific diagnostic"), Field),
+			InvalidDeploymentContext.GetIssues().ContainsByPredicate([Field](const FDataValidationContext::FIssue& Issue)
+			{
+				return Issue.Message.ToString().Contains(Field);
+			}));
+	}
 	Profile->ParticipantSpacing = 220.f;
 	Profile->SpawnPlacementAttemptsPerParticipant = 4;
 	Profile->StalledMovementRetryInterval = 1.5f;

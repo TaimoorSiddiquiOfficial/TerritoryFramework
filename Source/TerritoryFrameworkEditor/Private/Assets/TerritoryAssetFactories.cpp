@@ -21,6 +21,8 @@
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "Navigation/TerritoryRoadGuide.h"
 #include "Tales/TerritoryQuestCascadeRecipe.h"
+#include "Tales/TerritorySituationCondition.h"
+#include "Tales/TerritoryDialogueRecipe.h"
 
 #define LOCTEXT_NAMESPACE "TerritoryAssetFactories"
 
@@ -44,7 +46,8 @@ UObject* UTerritoryAssetFactoryBase::FactoryCreateNew(
 	FFeedbackContext* Warn)
 {
 	UClass* ClassToCreate = SupportedClass;
-	if (!ClassToCreate || !ClassToCreate->IsChildOf<UDataAsset>())
+	if (!ClassToCreate || Class != ClassToCreate || !ClassToCreate->IsChildOf<UDataAsset>()
+		|| ClassToCreate->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
 	{
 		return nullptr;
 	}
@@ -104,6 +107,16 @@ UTerritoryDiplomacyDialogueProfileFactory::UTerritoryDiplomacyDialogueProfileFac
 UTerritoryQuestCascadeRecipeFactory::UTerritoryQuestCascadeRecipeFactory()
 {
 	InitializeFor(UTerritoryQuestCascadeRecipe::StaticClass());
+}
+
+UTerritorySituationProfileFactory::UTerritorySituationProfileFactory()
+{
+	InitializeFor(UTerritorySituationProfile::StaticClass());
+}
+
+UTerritoryDialogueRecipeFactory::UTerritoryDialogueRecipeFactory()
+{
+	InitializeFor(UTerritoryDialogueRecipe::StaticClass());
 }
 
 FString UTerritoryQuestCascadeRecipeFactory::GetDefaultNewAssetName() const

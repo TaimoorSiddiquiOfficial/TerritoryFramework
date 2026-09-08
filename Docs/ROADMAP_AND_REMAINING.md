@@ -1,12 +1,29 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-08 (batch 45)
+> **Reviewed:** 2026-09-08 (batch 46)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
 
 TDA is on UE 5.8.2 with the local, unmodified Narrative Pro 2.4.2 package.
+[Batch 46](DATA_ASSET_AUTHORING_AUDIT_2026-09-08.md) audits all 12 concrete
+Territory data asset types and their authoring implementations. It fixes derived
+Definition categories preceding `01`, adds the two missing Story & Quests creation
+entries, rejects incompatible factory requests, and adds numeric and Native
+dialogue-template validation. Dialogue recipe coordinates are bounded before
+editor graph creation. The registry inventory finds 15 authored data assets;
+Disguise has no project instance. **286 tests pass**, Editor/runtime/UHT and Game
+builds pass, and 77 Blueprints/128 assets validate with zero errors and four
+existing warnings. Farm's user-authored automatic capture configuration is
+preserved. No gameplay authority, save schema, replication, or vendor source
+changed. The broader implementation audit remains open; next inspect oversized
+saved assault budgets and duplicate per-approach ledgers, then production/refund
+settlement and the isolated AlMalik streaming fixture.
+Its cook/stage passes with zero errors and 30 existing warnings. The matching
+packaged Game passes the 90-second server-mode assault smoke with exit zero and
+no runtime errors; the compiled TDAServer gate remains open.
+
 [Batch 45](ASSAULT_SAVE_VEHICLE_BUDGET_2026-09-08.md) rejects negative saved
 vehicle budgets and usage before they can grant fresh deployment credit. Invalid
 nonterminal assaults cancel once, preserving deaths and withdrawing the remaining

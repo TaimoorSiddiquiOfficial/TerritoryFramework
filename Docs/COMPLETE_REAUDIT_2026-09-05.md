@@ -2,7 +2,17 @@
 
 Status: **in progress**. Findings below distinguish confirmed defects from candidates.
 
-Latest focused update: [batch 45 — saved vehicle budgets](ASSAULT_SAVE_VEHICLE_BUDGET_2026-09-08.md).
+Latest focused update: [batch 46 — data asset authoring](DATA_ASSET_AUTHORING_AUDIT_2026-09-08.md).
+All 12 concrete data asset types have ordered Details categories, named creation
+entries, and validation coverage. New checks reject non-finite/out-of-range
+authored numbers, unusable diplomacy dialogue templates and oversized editor
+graph coordinates. The 15-instance disk inventory and existing 128-asset suite
+validate with zero errors; 77 Blueprints compile. All **286 tests pass**, as do
+Editor/runtime/UHT and Game builds. Farm's saved automatic capture choice and
+Narrative Pro source are preserved. This closes the confirmed authoring defects;
+remaining runtime consumer and release gates are tracked in the roadmap.
+
+[Batch 45 — saved vehicle budgets](ASSAULT_SAVE_VEHICLE_BUDGET_2026-09-08.md).
 Negative saved car limits/usage now cancel nonterminal assaults before
 reconstruction, preserving deaths and consuming the remaining force as withdrawal
 once. Actual Native spawn-time save coverage confirms the existing committed

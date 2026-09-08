@@ -23,6 +23,13 @@ bool UTerritoryDialogueRecipe::ValidateRecipe(FText& OutError) const
 	{
 		if (Node.ID.IsNone() || ByID.Contains(Node.ID)) return Fail(TEXT("Dialogue node IDs must be nonempty and unique."));
 		if (!FMath::IsFinite(Node.Position.X) || !FMath::IsFinite(Node.Position.Y)) return Fail(TEXT("Node positions must be finite."));
+#if WITH_EDITOR
+		// Native editor graph coordinates are int32. Validate before asset creation
+		// so a finite scripted double cannot overflow the builder's conversion.
+		if (Node.Position.X < MIN_int32 || Node.Position.X > MAX_int32
+			|| Node.Position.Y < MIN_int32 || Node.Position.Y > MAX_int32)
+			return Fail(TEXT("Node positions must fit the Narrative editor graph's signed 32-bit coordinate range."));
+#endif
 		if (!Node.bPlayer && !Node.Text.IsEmpty() && !SpeakerIDs.Contains(Node.SpeakerID))
 			return Fail(TEXT("Each spoken NPC line must identify a configured speaker."));
 		ByID.Add(Node.ID, &Node);

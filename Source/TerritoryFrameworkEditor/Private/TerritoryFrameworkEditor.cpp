@@ -14,6 +14,8 @@
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "Tales/TerritoryQuestCascadeRecipe.h"
+#include "Tales/TerritoryDialogueRecipe.h"
+#include "Tales/TerritorySituationCondition.h"
 #include "Tales/TerritoryQuestCascadeEditorLibrary.h"
 #include "TerritoryDefinitionEditorLibrary.h"
 #include "Vehicles/Mass/MassVehicleSpawner.h"
@@ -43,6 +45,30 @@
 
 namespace
 {
+	void SortTerritoryDataAssetCategories(IDetailLayoutBuilder& DetailBuilder)
+	{
+		// Unreal's default order follows derived properties before their base class.
+		// Sort the generated categories, including custom rows, by their authored keys.
+		DetailBuilder.SortCategories([](const TMap<FName, IDetailCategoryBuilder*>& Categories)
+		{
+			TArray<FName> Names;
+			Categories.GenerateKeyArray(Names);
+			Names.Sort(FNameLexicalLess());
+			for (int32 Index = 0; Index < Names.Num(); ++Index)
+				Categories.FindChecked(Names[Index])->SetSortOrder(Index);
+		});
+	}
+
+	class FTerritoryDataAssetDetails final : public IDetailCustomization
+	{
+	public:
+		static TSharedRef<IDetailCustomization> MakeInstance() { return MakeShared<FTerritoryDataAssetDetails>(); }
+		virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override
+		{
+			SortTerritoryDataAssetCategories(DetailBuilder);
+		}
+	};
+
 	constexpr TCHAR TerritoryNarrativeTaskSearchPath[] =
 		TEXT("/TerritoryFramework/Tales/Tasks/");
 
@@ -162,6 +188,7 @@ namespace
 
 		virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override
 		{
+			SortTerritoryDataAssetCategories(DetailBuilder);
 			TArray<TWeakObjectPtr<UObject>> Objects;
 			DetailBuilder.GetObjectsBeingCustomized(Objects);
 			UTerritoryDefinition* SelectedDefinition = nullptr;
@@ -186,7 +213,7 @@ namespace
 			{
 				IDetailCategoryBuilder& StoryOutcome = DetailBuilder.EditCategory(
 					TEXT("00 Story Outcome (Read Only)"),
-					FText::FromString(TEXT("Story Outcome (Read Only)")),
+					FText::GetEmpty(),
 					ECategoryPriority::Important);
 				StoryOutcome.InitiallyCollapsed(false);
 				StoryOutcome.AddCustomRow(FText::FromString(TEXT("Story Outcome")))
@@ -199,7 +226,7 @@ namespace
 			if (SelectedPlace.IsValid())
 			{
 				IDetailCategoryBuilder& Capture = DetailBuilder.EditCategory(
-					TEXT("06 Capture"), FText::FromString(TEXT("Capture")));
+					TEXT("06 Capture"), FText::GetEmpty());
 				Capture.AddCustomRow(FText::FromString(TEXT("Active Capture Mode")))
 				.NameContent()
 				[
@@ -286,6 +313,7 @@ namespace
 
 		virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override
 		{
+			SortTerritoryDataAssetCategories(DetailBuilder);
 			TArray<TWeakObjectPtr<UObject>> Objects;
 			DetailBuilder.GetObjectsBeingCustomized(Objects);
 			TWeakObjectPtr<UTerritoryQuestCascadeRecipe> Recipe;
@@ -429,6 +457,15 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 		UTerritoryQuestCascadeRecipe::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(
 			&FTerritoryQuestCascadeRecipeDetails::MakeInstance));
+	for (UClass* AssetClass : {UTerritoryCounterAttackProfile::StaticClass(),
+		UTerritoryGuardPostDefinition::StaticClass(), UTerritoryProductionProfile::StaticClass(),
+		UTerritoryStealthProfile::StaticClass(), UTerritoryDisguiseProfile::StaticClass(),
+		UTerritoryDiplomacyDialogueProfile::StaticClass(), UTerritorySituationProfile::StaticClass(),
+		UTerritoryDialogueRecipe::StaticClass()})
+	{
+		PropertyEditor.RegisterCustomClassLayout(AssetClass->GetFName(),
+			FOnGetDetailCustomizationInstance::CreateStatic(&FTerritoryDataAssetDetails::MakeInstance));
+	}
 	PropertyEditor.NotifyCustomizationModuleChanged();
 	EnsureVehicleRoadsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Territory.Editor.EnsureVehicleRoads"),
@@ -484,6 +521,14 @@ void FTerritoryFrameworkEditorModule::ShutdownModule()
 			UTerritoryDefinition::StaticClass()->GetFName());
 		PropertyEditor.UnregisterCustomClassLayout(
 			UTerritoryQuestCascadeRecipe::StaticClass()->GetFName());
+		for (UClass* AssetClass : {UTerritoryCounterAttackProfile::StaticClass(),
+			UTerritoryGuardPostDefinition::StaticClass(), UTerritoryProductionProfile::StaticClass(),
+			UTerritoryStealthProfile::StaticClass(), UTerritoryDisguiseProfile::StaticClass(),
+			UTerritoryDiplomacyDialogueProfile::StaticClass(), UTerritorySituationProfile::StaticClass(),
+			UTerritoryDialogueRecipe::StaticClass()})
+		{
+			PropertyEditor.UnregisterCustomClassLayout(AssetClass->GetFName());
+		}
 	}
 	UE_LOG(LogTemp, Log, TEXT("TerritoryFrameworkEditor module unloaded"));
 }
@@ -598,6 +643,14 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 			"Builds a normal Narrative Quest from reusable states, route conditions, tasks, events, dialogue settings, and alternative endings."),
 		StoryMenu,
 		FColor(78, 171, 204));
+	Register(UTerritorySituationProfile::StaticClass(),
+		LOCTEXT("TerritorySituationProfileAsset", "Territory Situation Profile"),
+		LOCTEXT("TerritorySituationProfileDescription", "Binds a Place and requesting faction for shared diplomacy, retake, holdings and defence dialogue conditions."),
+		StoryMenu, FColor(78, 171, 204));
+	Register(UTerritoryDialogueRecipe::StaticClass(),
+		LOCTEXT("TerritoryDialogueRecipeAsset", "Territory Conditional Dialogue Recipe"),
+		LOCTEXT("TerritoryDialogueRecipeDescription", "Authors conditional dialogue nodes that generate an ordinary Narrative Dialogue Blueprint."),
+		StoryMenu, FColor(78, 171, 204));
 }
 
 void FTerritoryFrameworkEditorModule::UnregisterTerritoryAssetTypes()
