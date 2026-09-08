@@ -1,10 +1,88 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-08 (batch 47, community content and help preview)
+> **Reviewed:** 2026-09-08 (batch 48, story situations and pre-handover reinforcements)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### Active story preparation — 2026-09-08
+
+User decision: Blacksmith reinforcements arrive **before handover**. The owner
+must wait until that finite force is defeated. Do not change ownership to make
+the existing post-capture counterattack accept the request.
+
+- [x] Add an optional exact Narrative faction tag to situation conditions. Show
+  the selected faction source in graph text; document player, owner and contesting
+  faction differences. Support Place, District and City holdings.
+- [x] Add a deliberate pre-handover reinforcement mode to the existing assault
+  scheduler. Keep diplomacy, state policy, routes, finite waves, casualties,
+  server authority, persistence and streaming checks. A failed or cancelled
+  deployment must not count as defeated.
+- [x] Repair the project Blacksmith handover's disconnected "Not Now" wave node
+  and replace its defence-power test with the intended faction City-holdings
+  condition. Gate capture on the matching story encounter's verified defeat.
+- [x] Add optional faction/scenario filters to existing assault conditions and
+  use existing capture-progress/eligibility conditions for pressure and handover.
+- [x] Arrange project and plugin dialogue graphs from top to bottom and left to
+  right while preserving Narrative's position-based reply priority. Compile and
+  compare branches after saving; keep shared plugin content UE 5.7 compatible.
+- [x] Inventory and validate all authored Territory data assets and Blueprints, including the
+  user's new quest/task edits. Record confirmed defects, validation results and
+  remaining behavioral checks; do not rebuild assets merely for appearance.
+- [ ] Continue the implementation audit: oversized saved assault budgets and
+  duplicate approach ledgers, production/refund settlement, and actual AlMalik
+  streaming. Asset compilation/validation does not prove these gameplay cases.
+- [x] Protect Hashir's pacifist perception callback after controller destruction.
+  His project activity config preserves all eight Native activities and uses a
+  minimal child Blueprint with the existing Territory safety function.
+- [ ] Investigate the Native save/load crash reproduced during the Hashir probe:
+  `UNarrativeSaveSubsystem::LoadActorFromRecord`, line 788, after actor restore
+  and before its saved-component iteration. Preserve the crash and identify
+  whether the actor, saved record or components become invalid during restore
+  before choosing an adapter.
+  This is a release blocker; do not edit Narrative Pro source.
+- [ ] Audit Native `BP_NarrativeNPC` death on clients: Hashir's death calls
+  `RemoveAllGoals` with no local AI activity component. The new perception
+  override fixes a separate server callback and does not cover that path.
+- [ ] Check migration of existing Hashir saves that contain the old Native goal
+  generator. A changed NPC definition does not rewrite saved activity instances.
+- [x] Inspect Hashir for Act 1: check both NPC_Hashir and NPC_Hahsir references,
+  his greeting/dialogue assets and quest-giver setup. Hashir is the player's
+  friend and works for the system. Author story content after framework checks.
+- [ ] Author Hashir's Act 1 quest and main dialogue after story requirements are
+  agreed. `NPC_Hahsir` is a redirector; the NPC's stable ID is preserved. The
+  Native greeting tag is already valid. The main dialogue has only its root.
+- [ ] Decide whether later Blacksmith losses start a new named reinforcement
+  encounter, and whether diplomacy should offer a separate peaceful handover.
+  The current example is one finite named battle and requires its actual defeat.
+- [ ] Choose Farm's actual weapon reward when the story needs one. Its existing
+  WeaponUpgrades benefit tag and upgrade level remain; no weapon is invented.
+
+The latest HopDistrictTest server/two-client run proves the pre-handover battle,
+eight Native vehicle arrivals and dismounts, one-survivor capture blocking, normal
+Tales handover, outcome/ownership replication and repeated Native save/load.
+The separate quest's duplicate immediate wave is now gated by the same completed
+encounter. All 288 automation tests pass on both UE 5.8 and UE 5.7. See
+[story situation verification](STORY_SITUATIONS_2026-09-08.md) for the exact scope.
+
+All 10 in-scope dialogues (130 nodes) now have distinct graph positions, with
+reply order, links and text preserved by the layout operation. The two edited
+shared quest/task assets were restored through UE 5.7 editor APIs; all authored
+settings match their UE 5.8 snapshots. UE 5.7 validates 118 plugin assets and
+compiles 75 Blueprints with zero errors and four example warnings. TDA's latest
+UE 5.8 audit validates 237 assets and compiles 143 Blueprints with zero errors
+and eight presentation warnings. Narrative Pro's 741 source files match the
+installed Marketplace package exactly.
+
+The current TDA cook, stage and package pass with zero errors and 30 existing
+content/tooling warnings. The matching packaged Game passes a 90-second
+server-mode assault smoke with exit zero and no runtime errors, including the
+previous invalid-controller warning. The new Native restore crash and client death findings
+above remain release blockers even when the packaged startup/combat smoke passes.
+
+The published `0.3.0-preview.1` release remains immutable. These changes belong
+to the next verified batch; the release checks below do not certify new edits.
 
 Batch 47 adds community field help and imports 118 example asset packages into
 the plugin. The 108 original project assets retain their pre-import hashes.

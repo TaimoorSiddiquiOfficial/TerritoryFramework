@@ -331,6 +331,7 @@ private:
 	friend class FTFAssaultSpawnFailureBudget;
 	friend class FTFAssaultTargetStreamingWait;
 	friend class FTFAssaultSavedVehicleBudget;
+	friend class FTFStoryReinforcements;
 	/** Kept weakly across campaign loads so a player-retained car cannot be cloned. */
 	TMap<FGuid, TWeakObjectPtr<ANarrativeVehicleBase>> PhysicalVehicles;
 	bool bReconstructingParticipants = false;

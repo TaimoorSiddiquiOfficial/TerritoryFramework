@@ -5,6 +5,8 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryMutationTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryBlueprintLibrary.h"
+#include "Tales/TalesComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -282,12 +284,23 @@ void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target
 	}
 	FText FailureReason;
 	bool bScheduled = false;
-	if (LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit)
+	if (LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
+	{
+		FTerritoryStoryPursuitOptions Options;
+		APawn* Requester = Target ? Target : NarrativeComponent ? NarrativeComponent->GetOwningPawn() : nullptr;
+		Options.OpposingFaction = OpposingFaction.IsValid() ? OpposingFaction
+			: UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Requester);
+		Options.ScenarioID = ScenarioID;
+		bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(Territory,
+			AttackingFaction, LaunchMode, Options, bStartImmediately, FailureReason);
+	}
+	else if (LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit)
 	{
 		FTerritoryStoryPursuitOptions LegacyOptions;
 		LegacyOptions.bAllowsTerritoryCapture = true;
 		LegacyOptions.bUseStrategicDecisionRoll = true;
 		LegacyOptions.GracePeriodOverrideGameTime = -1.f;
+		LegacyOptions.ScenarioID = ScenarioID;
 		bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(Territory,
 			AttackingFaction, LaunchMode, LegacyOptions,
 			bStartImmediately, FailureReason);
@@ -324,6 +337,11 @@ void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target
 
 FString UTerritoryScheduleEnemyWaveEvent::GetGraphDisplayText_Implementation()
 {
+	if (LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
+		return FString::Printf(TEXT("Owner reinforcements%s: %s at %s against %s [story: %s]"),
+			bStartImmediately ? TEXT(" now") : TEXT(" after preparation"), *AttackingFaction.ToString(),
+			*TargetTerritory.ToString(), OpposingFaction.IsValid() ? *OpposingFaction.ToString() : TEXT("Narrative target faction"),
+			*ScenarioID.ToString());
 	const bool bStoryPursuit = LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit;
 	return FString::Printf(TEXT("Enemy wave (%s%s): schedule %s against %s"),
 		bStoryPursuit ? TEXT("one story pursuit") : TEXT("profile-governed strategic response"),

@@ -1095,11 +1095,13 @@ void ATerritoryWorldState::OnAssaultChangedLive(const FTerritoryAssaultRecord& A
 	{
 		ReplicatedAssaults.Sort([](const FTerritoryAssaultRecord& A, const FTerritoryAssaultRecord& B)
 		{
-			if (A.IsTerminal() != B.IsTerminal()) return A.IsTerminal();
+			const bool bTrimA = A.IsTerminal() && !A.IsRetainedStoryOutcome();
+			const bool bTrimB = B.IsTerminal() && !B.IsRetainedStoryOutcome();
+			if (bTrimA != bTrimB) return bTrimA;
 			return A.CapturedGameTime < B.CapturedGameTime;
 		});
 		while (ReplicatedAssaults.Num() > MaximumRecords
-			&& ReplicatedAssaults[0].IsTerminal())
+			&& ReplicatedAssaults[0].IsTerminal() && !ReplicatedAssaults[0].IsRetainedStoryOutcome())
 		{
 			ReplicatedAssaults.RemoveAt(0);
 		}

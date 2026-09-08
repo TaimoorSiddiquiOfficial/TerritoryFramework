@@ -88,7 +88,9 @@ enum class ETerritoryAssaultLaunchMode : uint8
 	StrategicCounterattack UMETA(DisplayName="Strategic Counterattack",
 		ToolTip="Normal domination response. The configured staging rule, diplomacy, budgets, route, grace, warning, and first-player activation gate all apply."),
 	StoryPursuit UMETA(DisplayName="Story Pursuit / Boss Chase",
-		ToolTip="Tales-triggered pursuit. It may bypass the staging-District rule only when the force profile also allows that exception; it never bypasses diplomacy, finite force, route, or physical capture rules.")
+		ToolTip="Tales-triggered pursuit. It may bypass the staging-District rule only when the force profile also allows that exception; it never bypasses diplomacy, finite force, route, or physical capture rules."),
+	StoryReinforcements UMETA(DisplayName="Owner Reinforcements Before Handover",
+		ToolTip="An explicit story event sends the current owner's finite force against a specified hostile faction before handover. These NPCs fight but never generate capture pressure or change ownership. Diplomacy, state rules, routes and force budgets still apply.")
 };
 
 /** Direction of one explicit Tales-driven pursuit. Normal strategic counters ignore this. */
@@ -245,6 +247,10 @@ USTRUCT(BlueprintType)
 struct FTerritoryStoryPursuitOptions
 {
 	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Reinforcements", meta=(Categories="Narrative.Factions",
+		ToolTip="Required opponent for Owner Reinforcements Before Handover. The sender must own the Place and be at war with this exact faction. Ignored by other launch modes."))
+	FGameplayTag OpposingFaction;
 
 	/** Choose whether the story pursuit chases the target or escapes from it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit")
@@ -750,6 +756,15 @@ struct FTerritoryAssaultRecord
 		return State == ETerritoryAssaultState::Succeeded
 			|| State == ETerritoryAssaultState::Defeated
 			|| State == ETerritoryAssaultState::Cancelled;
+	}
+
+	/** Named story victories remain available after ordinary battle history is trimmed. */
+	bool IsRetainedStoryOutcome() const
+	{
+		return LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements
+			&& State == ETerritoryAssaultState::Defeated
+			&& Resolution == ETerritoryAssaultResolution::AllAttackersRemoved
+			&& !StoryScenarioID.IsNone();
 	}
 
 	int32 GetAccountedForce() const

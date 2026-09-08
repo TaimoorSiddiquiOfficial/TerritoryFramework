@@ -64,6 +64,13 @@ bool FTFSituationHoldings::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Complete city directory is readable without any loaded actors"),
 		UTerritorySituationProfile::ReadPlaceHoldings(Rows, City, Heroes, Report));
 	TestEqual(TEXT("Places, not aggregate Districts, are counted"), Report.FactionPlaces, 2);
+	FTerritorySituationReport OnePlace;
+	TestTrue(TEXT("Place scope reads exactly the selected Place"),
+		UTerritorySituationProfile::ReadPlaceHoldings(Rows, Rows[3].TerritoryTag, Heroes, OnePlace));
+	TestEqual(TEXT("Place scope never includes a neighboring holding"), OnePlace.AvailablePlaces, 1);
+	TestEqual(TEXT("Place's owner matches the exact faction"), OnePlace.FactionPlaces, 1);
+	UTerritorySituationProfile::ReadPlaceHoldings(Rows, Rows[3].TerritoryTag, Bandits, OnePlace);
+	TestEqual(TEXT("Another faction owns none of this Place"), OnePlace.FactionPlaces, 0);
 	TestEqual(TEXT("Two of two is one hundred percent"), Report.FactionSharePercent, 100.f);
 	TestEqual(TEXT("Existing strict majority reducer selects Heroes"), Report.DominantFaction, Heroes);
 	Rows[4].CurrentOwner = Bandits;
@@ -71,6 +78,9 @@ bool FTFSituationHoldings::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Equal faction control invents no dominant faction"), Report.DominantFaction.IsValid());
 	TestEqual(TEXT("Split city control is fifty percent"), Report.FactionSharePercent, 50.f);
 	Rows[4].State = ETerritoryState::Contested;
+	UTerritorySituationProfile::ReadPlaceHoldings(Rows, City, Bandits, OnePlace);
+	TestEqual(TEXT("An owner keeps the contested Place until a real ownership change"), OnePlace.FactionOwnedPlaces, 1);
+	TestEqual(TEXT("The same contested Place gives no secure holding"), OnePlace.FactionPlaces, 0);
 	UTerritorySituationProfile::ReadPlaceHoldings(Rows, City, Heroes, Report);
 	TestEqual(TEXT("Contested Places remain in the denominator"), Report.AvailablePlaces, 2);
 	TestFalse(TEXT("A contested holding does not confer dominance"), Report.DominantFaction.IsValid());
@@ -247,6 +257,16 @@ bool FTFSituationHistoryAndNarrative::RunTest(const FString& Parameters)
 	Registry->UnregisterTerritory(Place);
 	TestTrue(TEXT("Retake remains readable while its actor is streamed out"), Retake->CheckCondition(Pawn, nullptr, Tales));
 	const auto Streamed = Profile->InspectSituation(Pawn, nullptr, Tales, ETerritorySituationScope::City);
+	const auto BanditView = Profile->InspectSituation(Pawn, nullptr, Tales, ETerritorySituationScope::City, Bandits);
+	TestEqual(TEXT("Optional tag changes only the faction being inspected"), BanditView.RequestingFaction, Bandits);
+	TestEqual(TEXT("The shared capture profile keeps its original faction"), Profile->ResolveRequestingFaction(Pawn, nullptr, Tales), Heroes);
+	auto* BanditHoldings = NewObject<UTerritorySituationCondition>();
+	BanditHoldings->Profile = Profile;
+	BanditHoldings->FactionOverride = Bandits;
+	BanditHoldings->Scope = ETerritorySituationScope::Place;
+	BanditHoldings->Query = ETerritorySituationQuery::FactionPlaceCount;
+	TestTrue(TEXT("Native condition uses the override while the target actor is streamed out"), BanditHoldings->CheckCondition(Pawn, nullptr, Tales));
+	TestTrue(TEXT("Graph text names the faction being checked"), BanditHoldings->GetGraphDisplayText().Contains(Bandits.ToString()));
 	TestTrue(TEXT("City holdings remain known from the directory"), Streamed.bHoldingsKnown);
 	TestFalse(TEXT("Unloaded garrison never reports zero known power"), Streamed.bDefencePowerKnown);
 	Candidate = Place->GetOwnershipData();

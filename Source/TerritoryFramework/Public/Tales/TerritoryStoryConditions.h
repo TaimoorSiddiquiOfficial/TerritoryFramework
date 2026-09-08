@@ -190,6 +190,10 @@ public:
 		meta=(Categories="Territory", ToolTip="Territory whose real capture progress is inspected."))
 	FGameplayTag TerritoryToCheck;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition", meta=(Categories="Narrative.Factions",
+		ToolTip="Optional exact faction applying capture pressure. Empty checks the Place's progress without a faction filter. A different or missing contesting faction fails this condition."))
+	FGameplayTag ContestingFaction;
+
 	/** Numeric comparison used between the live value and the authored threshold. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryFloatComparison Comparison = ETerritoryFloatComparison::AtLeast;
@@ -302,7 +306,8 @@ enum class ETerritoryAssaultConditionQuery : uint8
 	PendingReserveAttackers UMETA(DisplayName="Latest Pending Reserve Attackers"),
 	KilledAttackers UMETA(DisplayName="Latest Killed Attackers"),
 	WithdrawnAttackers UMETA(DisplayName="Latest Withdrawn Attackers"),
-	RemainingAttackers UMETA(DisplayName="Latest Living Plus Reserve Attackers")
+	RemainingAttackers UMETA(DisplayName="Latest Living Plus Reserve Attackers"),
+	AnyRecorded UMETA(DisplayName="Has A Matching Assault Record")
 };
 
 /** Reads durable counterattack records; it never schedules or resolves an assault. */
@@ -318,6 +323,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(Categories="Territory", ToolTip="Territory whose finite counterattack record is inspected."))
 	FGameplayTag TerritoryToCheck;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition", meta=(Categories="Narrative.Factions",
+		ToolTip="Optional exact faction that sends the force. Empty checks forces from every faction. This is not the speaking NPC or requesting player."))
+	FGameplayTag AttackingFaction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition", meta=(
+		ToolTip="Optional exact story encounter ID. Use the same ID on the enemy wave event so an unrelated victory cannot unlock this handover."))
+	FName ScenarioID;
 
 	/** Select the live Territory fact this condition compares; related fields become relevant for that query. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
@@ -345,6 +358,7 @@ public:
 
 	static const FTerritoryAssaultRecord* SelectLatestRecord(
 		const TArray<FTerritoryAssaultRecord>& Records);
+	bool MatchesRecord(const FTerritoryAssaultRecord& Record) const;
 
 protected:
 	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,

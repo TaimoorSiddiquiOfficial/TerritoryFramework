@@ -677,7 +677,8 @@ bool UTerritoryCounterAttackSubsystem::TryScheduleAssaultAdvancedWithReason(
 {
 	OutFailureReason = FText::GetEmpty();
 	const FTerritoryStoryPursuitOptions* Options =
-		LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
+		(LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
+			|| LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
 		? &StoryOptions : nullptr;
 	return ScheduleAssault(Territory, AttackingFaction, LaunchMode,
 		false, Options, &OutFailureReason, true, bStartImmediately);
@@ -720,6 +721,7 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	bool bStartImmediately)
 {
 	if (OutFailureReason) *OutFailureReason = FText::GetEmpty();
+	const bool bOwnerReinforcements = LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements;
 	const auto Reject = [OutFailureReason](const FText& Reason)
 	{
 		if (OutFailureReason) *OutFailureReason = Reason;
@@ -747,15 +749,36 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		"TerritoryCounterAttack", "MissingTargetGuid", "The target Territory has no stable GUID. Assign a Territory Definition and save it."));
 	if (!Territory->GetTerritoryTag().IsValid()) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "MissingTargetTag", "The target Territory has no valid Territory gameplay tag."));
-	if (Territory->GetTerritoryState() != ETerritoryState::Claimed) return Reject(FText::Format(
+	if (Territory->GetTerritoryState() != ETerritoryState::Claimed
+		&& !(bOwnerReinforcements && StoryOptions
+			&& Territory->GetTerritoryState() == ETerritoryState::Contested
+			&& Territory->GetOwnershipData().ContestingFaction == StoryOptions->OpposingFaction)) return Reject(FText::Format(
 		NSLOCTEXT("TerritoryCounterAttack", "TargetNotClaimed", "The target Territory must be Claimed before an assault can be scheduled. Current state: {0}."),
 		UEnum::GetDisplayValueAsText(Territory->GetTerritoryState())));
 	if (!AttackingFaction.IsValid()) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "MissingAttackerFaction", "No valid attacking faction was supplied."));
 	if (!Territory->GetOwningFaction().IsValid()) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "MissingDefenderFaction", "The claimed target has no valid owning/defending faction."));
-	if (Territory->GetOwningFaction() == AttackingFaction) return Reject(NSLOCTEXT(
+	if (!bOwnerReinforcements && Territory->GetOwningFaction() == AttackingFaction) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "AttackerOwnsTarget", "The attacking faction already owns the target Territory."));
+	if (bOwnerReinforcements && (!bQuestOverrideAuthorized || !StoryOptions
+		|| StoryOptions->ScenarioID.IsNone() || !StoryOptions->OpposingFaction.IsValid()
+		|| StoryOptions->OpposingFaction == AttackingFaction
+		|| Territory->GetOwningFaction() != AttackingFaction))
+		return Reject(NSLOCTEXT("TerritoryCounterAttack", "InvalidOwnerReinforcements",
+			"Owner reinforcements require an explicit story request, a Story ID, the current owner as sender, and a different opposing faction."));
+	if (bOwnerReinforcements)
+	{
+		for (const auto& Pair : Assaults)
+		{
+			const FTerritoryAssaultRecord& Previous = Pair.Value;
+			if (DoesAssaultTargetTerritory(Previous, Territory)
+				&& Previous.LaunchMode == LaunchMode && Previous.StoryScenarioID == StoryOptions->ScenarioID
+				&& Previous.State != ETerritoryAssaultState::Cancelled)
+				return Reject(NSLOCTEXT("TerritoryCounterAttack", "StoryReinforcementAlreadyStarted",
+					"This story reinforcement encounter already started or finished. Continue its existing record."));
+		}
+	}
 
 	if (!Territory->DoStateRulesAllowAssault(AttackingFaction, bQuestOverrideAuthorized))
 		return Reject(NSLOCTEXT("TerritoryCounterAttack", "ScheduleStateRuleBlocked",
@@ -810,12 +833,14 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	}
 	FTerritoryAssaultRecord AdmissionRecord;
 	AdmissionRecord.AttackingFaction = AttackingFaction;
-	AdmissionRecord.DefendingFaction = Territory->GetOwningFaction();
+	AdmissionRecord.LaunchMode = LaunchMode;
+	AdmissionRecord.bAllowsTerritoryCapture = !bOwnerReinforcements;
+	AdmissionRecord.DefendingFaction = bOwnerReinforcements ? StoryOptions->OpposingFaction : Territory->GetOwningFaction();
 	if (IsDiplomacyBlocked(AdmissionRecord, Territory)) return Reject(FText::Format(
 		NSLOCTEXT("TerritoryCounterAttack", "DiplomacyBlocksAssault",
 			"Diplomacy does not permit {0} to attack the defending faction {1}. Territory counterattacks require War."),
 		FText::FromName(AttackingFaction.GetTagName()),
-		FText::FromName(Territory->GetOwningFaction().GetTagName())));
+		FText::FromName(AdmissionRecord.DefendingFaction.GetTagName())));
 
 	if (HasNonTerminalAssaultForTerritory(Territory)) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "AssaultAlreadyPending", "This Territory already has a pending or active assault."));
@@ -871,10 +896,16 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	Record.TargetTerritoryGUID = Territory->GetTerritoryGUID();
 	Record.TargetTerritory = Territory->GetTerritoryTag();
 	Record.AttackingFaction = AttackingFaction;
-	Record.DefendingFaction = Territory->GetOwningFaction();
+	Record.DefendingFaction = AdmissionRecord.DefendingFaction;
 	Record.LaunchMode = LaunchMode;
 	Record.bQuestOverrideAuthorized = bQuestOverrideAuthorized;
 	Record.bImmediateDeployment = bStartImmediately;
+	if (bOwnerReinforcements)
+	{
+		Record.bAllowsTerritoryCapture = false;
+		Record.bUseStrategicDecisionRoll = false;
+		Record.StoryScenarioID = StoryOptions->ScenarioID;
+	}
 	if (bStartImmediately)
 	{
 		// An explicit instant Wave is deterministic after admission. Strategic chance
@@ -1380,9 +1411,13 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 				|| Record.VehicleDeploymentsUsed < 0
 				|| Record.VehicleDeploymentsByApproach.ContainsByPredicate(
 					[](const FTerritoryVehicleDeploymentCount& Entry) { return Entry.Count < 0; });
+			const bool bInvalidStory = Record.LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements
+				&& (Record.bAllowsTerritoryCapture || !Record.bQuestOverrideAuthorized
+					|| Record.StoryScenarioID.IsNone() || !Record.DefendingFaction.IsValid()
+					|| Record.DefendingFaction == Record.AttackingFaction);
 			// Clamping a negative spent count alone would grant fresh car credit.
 			// Fail the active record closed before reconstruction or wave admission.
-			if (bInvalidVehicleBudget && !Record.IsTerminal())
+			if ((bInvalidVehicleBudget || bInvalidStory) && !Record.IsTerminal())
 			{
 				Record.State = ETerritoryAssaultState::Cancelled;
 				Record.Resolution = ETerritoryAssaultResolution::ConfigurationInvalid;
@@ -1391,8 +1426,8 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 				Record.WithdrawnForce = Record.PlannedForce - Record.KilledForce;
 				Record.AliveForce = Record.PendingReserveForce = 0;
 				UE_LOG(LogTerritory, Warning,
-					TEXT("Saved assault %s cancelled: negative vehicle deployment budget or usage"),
-					*Record.AssaultID.ToString());
+					TEXT("Saved assault %s cancelled: %s"), *Record.AssaultID.ToString(),
+					bInvalidStory ? TEXT("invalid story reinforcement context") : TEXT("negative vehicle deployment budget or usage"));
 			}
 			Record.MaximumVehicleDeployments = FMath::Max(0, Record.MaximumVehicleDeployments);
 			Record.VehicleDeploymentsUsed = FMath::Max(0, Record.VehicleDeploymentsUsed);
@@ -1544,7 +1579,18 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	}
 	const FGameplayTag ContestingFaction =
 		Territory->GetOwnershipData().ContestingFaction;
-	if (!IsTerritoryControlStateValidForAssault(
+	const bool bOwnerReinforcements = Assault.LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements;
+	if (bOwnerReinforcements && (Assault.bAllowsTerritoryCapture
+		|| !Assault.bQuestOverrideAuthorized || Assault.StoryScenarioID.IsNone()
+		|| !Assault.DefendingFaction.IsValid() || Assault.DefendingFaction == Assault.AttackingFaction))
+	{
+		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::ConfigurationInvalid);
+		return;
+	}
+	if (!(bOwnerReinforcements
+		&& Territory->GetTerritoryState() == ETerritoryState::Contested
+		&& ContestingFaction == Assault.DefendingFaction)
+		&& !IsTerritoryControlStateValidForAssault(
 		Assault.State, Territory->GetTerritoryState(), ContestingFaction,
 		Assault.AttackingFaction))
 	{
@@ -1617,9 +1663,9 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		return;
 	}
 
-	if (Territory->GetOwningFaction() != Assault.DefendingFaction)
+	if (Territory->GetOwningFaction() != (bOwnerReinforcements ? Assault.AttackingFaction : Assault.DefendingFaction))
 	{
-		if (Territory->GetOwningFaction() == Assault.AttackingFaction)
+		if (!bOwnerReinforcements && Territory->GetOwningFaction() == Assault.AttackingFaction)
 		{
 			ResolveAssault(Assault, ETerritoryAssaultState::Succeeded,
 				ETerritoryAssaultResolution::CaptureCompleted);
@@ -1674,7 +1720,7 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 			const bool bRelevantPlayerNearby = !Profile->bRequirePlayerProximityForActivation
 				|| HasRelevantPlayerNearby(Assault, Territory, Profile->ActivationRadius);
 			if (ShouldActivateWaitingAssault(Assault.bAllowsTerritoryCapture,
-				Territory->GetTerritoryState(), Profile->bRequirePlayerProximityForActivation,
+				Territory->GetTerritoryState(), Profile->bRequirePlayerProximityForActivation && !Assault.bImmediateDeployment,
 				bRelevantPlayerNearby))
 			{
 				ActivateAssault(Assault, Territory);
@@ -3525,6 +3571,15 @@ bool UTerritoryCounterAttackSubsystem::IsDiplomacyBlocked(
 	const FTerritoryAssaultRecord& Assault, const ATerritoryVolume* Territory) const
 {
 	UWorld* World = GetWorld();
+	if (!Territory || !World) return true;
+	if (Assault.LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
+	{
+		const UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+		return !Diplomacy || Assault.bAllowsTerritoryCapture
+			|| Territory->GetOwningFaction() != Assault.AttackingFaction
+			|| !Assault.DefendingFaction.IsValid()
+			|| !Diplomacy->IsAtWar(Assault.AttackingFaction, Assault.DefendingFaction);
+	}
 	const UTerritoryControlSubsystem* Control = World
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	if (!Control || !Control->CanFactionCaptureTerritory(Territory, Assault.AttackingFaction))
@@ -4223,7 +4278,9 @@ void UTerritoryCounterAttackSubsystem::TrimTerminalHistory()
 	TArray<FTerritoryAssaultRecord> Terminal;
 	for (const auto& Pair : Assaults)
 	{
-		if (Pair.Value.IsTerminal()) Terminal.Add(Pair.Value);
+		// A named pre-handover victory is a durable story receipt. Ordinary history
+		// may be trimmed, but losing this receipt would relock a completed handover.
+		if (Pair.Value.IsTerminal() && !Pair.Value.IsRetainedStoryOutcome()) Terminal.Add(Pair.Value);
 	}
 	Terminal.Sort([](const FTerritoryAssaultRecord& A, const FTerritoryAssaultRecord& B)
 	{
@@ -4256,7 +4313,12 @@ void UTerritoryCounterAttackSubsystem::HandleTerritoryControlChanged(
 	{
 		if (FTerritoryAssaultRecord* Assault = Assaults.Find(ID))
 		{
-			if (NewOwner == Assault->AttackingFaction)
+			if (Assault->LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
+			{
+				if (NewOwner != Assault->AttackingFaction)
+					ResolveAssault(*Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::OwnershipChanged);
+			}
+			else if (NewOwner == Assault->AttackingFaction)
 			{
 				ResolveAssault(*Assault, ETerritoryAssaultState::Succeeded,
 					ETerritoryAssaultResolution::CaptureCompleted);
@@ -4313,7 +4375,7 @@ void UTerritoryCounterAttackSubsystem::HandleDiplomacyChanged(
 		// Claimed-state diplomacy events can broadcast before the control-change
 		// delegate. Ownership is the stronger fact: record a completed recapture
 		// instead of cancelling the same assault as diplomacy-blocked.
-		if (Assault && Territory
+		if (Assault && Territory && Assault->LaunchMode != ETerritoryAssaultLaunchMode::StoryReinforcements
 			&& Territory->GetOwningFaction() == Assault->AttackingFaction)
 		{
 			ResolveAssault(*Assault, ETerritoryAssaultState::Succeeded,

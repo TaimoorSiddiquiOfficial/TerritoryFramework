@@ -133,6 +133,15 @@ public:
 	ETerritoryAssaultLaunchMode LaunchMode =
 		ETerritoryAssaultLaunchMode::StrategicCounterattack;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(Categories="Narrative.Factions",
+		EditCondition="LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements", EditConditionHides,
+		ToolTip="Optional exact opponent. Empty uses the explicit Narrative target pawn's faction, falling back to the Tales owner. The sender must still own the Place and be at war with this faction."))
+	FGameplayTag OpposingFaction;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(
+		ToolTip="Stable story encounter ID, for example Blacksmith_BeforeHandover. Required for owner reinforcements. Use the same ID in the assault condition that unlocks handover. A completed encounter cannot spawn again; a cancelled attempt can be retried."))
+	FName ScenarioID;
+
 	/**
 	 * Special story beat: deploy now after admission. An explicit Narrative Wave
 	 * does not require the automatic strategy layer's secure District,

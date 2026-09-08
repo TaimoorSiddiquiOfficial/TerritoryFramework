@@ -19,6 +19,7 @@ bool UTerritorySituationProfile::ReadPlaceHoldings(
 {
 	Report.bHoldingsKnown = false;
 	Report.AvailablePlaces = Report.FactionPlaces = 0;
+	Report.FactionOwnedPlaces = 0;
 	Report.FactionSharePercent = 0.f;
 	Report.DominantFaction = FGameplayTag();
 	if (OutPlaces) OutPlaces->Reset();
@@ -36,7 +37,8 @@ bool UTerritorySituationProfile::ReadPlaceHoldings(
 	}
 	const auto* Found = ByTag.Find(ScopeTag);
 	if (!Found || ((*Found)->HierarchyLevel != ETerritoryHierarchyLevel::District
-		&& (*Found)->HierarchyLevel != ETerritoryHierarchyLevel::City)
+		&& (*Found)->HierarchyLevel != ETerritoryHierarchyLevel::City
+		&& (*Found)->HierarchyLevel != ETerritoryHierarchyLevel::Place)
 		|| (*Found)->Availability != ETerritoryAvailability::Unlocked) return false;
 	TArray<FReplicatedCaptureSummary> Places;
 	TFunction<bool(const FReplicatedCaptureSummary&, int32)> Visit;
@@ -57,7 +59,12 @@ bool UTerritorySituationProfile::ReadPlaceHoldings(
 		}
 		return Children == Parent.TotalChildren;
 	};
-	if (!Visit(**Found, 0)) return false;
+	if ((*Found)->HierarchyLevel == ETerritoryHierarchyLevel::Place)
+	{
+		if ((*Found)->TotalChildren != 0) return false;
+		Places.Add(**Found);
+	}
+	else if (!Visit(**Found, 0)) return false;
 	Places.Sort([](const FReplicatedCaptureSummary& A, const FReplicatedCaptureSummary& B)
 	{
 		return A.TerritoryTag.ToString() < B.TerritoryTag.ToString();
@@ -65,6 +72,8 @@ bool UTerritorySituationProfile::ReadPlaceHoldings(
 	TArray<FGameplayTag> SecureOwners;
 	for (const FReplicatedCaptureSummary& Place : Places)
 	{
+		if ((Place.State == ETerritoryState::Claimed || Place.State == ETerritoryState::Contested)
+			&& Place.CurrentOwner == Faction) ++Report.FactionOwnedPlaces;
 		const FGameplayTag Owner = Place.State == ETerritoryState::Claimed
 			? Place.CurrentOwner : FGameplayTag();
 		SecureOwners.Add(Owner);
@@ -98,15 +107,17 @@ FGameplayTag UTerritorySituationProfile::ResolveRequestingFaction(APawn* Narrati
 
 FTerritorySituationReport UTerritorySituationProfile::InspectSituation(
 	APawn* NarrativeTarget, APlayerController* Controller, UTalesComponent* Tales,
-	ETerritorySituationScope Scope) const
+	ETerritorySituationScope Scope, FGameplayTag FactionOverride) const
 {
 	FTerritorySituationReport Report;
 	UWorld* World = TerritoryTales::ResolveWorld(this, NarrativeTarget, Controller, Tales);
 	if (!World || !Territory.IsValid()
-		|| (Scope != ETerritorySituationScope::District && Scope != ETerritorySituationScope::City)
+		|| (Scope != ETerritorySituationScope::District && Scope != ETerritorySituationScope::City
+			&& Scope != ETerritorySituationScope::Place)
 		|| (IsValid(Controller) && Controller->GetWorld() != World)
 		|| (IsValid(Tales) && Tales->GetWorld() != World)) return Report;
-	Report.RequestingFaction = ResolveRequestingFaction(NarrativeTarget, Controller, Tales);
+	Report.RequestingFaction = FactionOverride.IsValid() ? FactionOverride
+		: ResolveRequestingFaction(NarrativeTarget, Controller, Tales);
 	ATerritoryWorldState* State = ATerritoryWorldState::FindTerritoryWorldState(World);
 	if (!State || !Report.RequestingFaction.IsValid()) return Report;
 	const FReplicatedCaptureSummary Target = State->GetCaptureSummary(Territory);
@@ -137,8 +148,8 @@ FTerritorySituationReport UTerritorySituationProfile::InspectSituation(
 		&& City.TerritoryTag == District.ParentTerritoryTag
 		&& City.HierarchyLevel == ETerritoryHierarchyLevel::City
 		&& City.Availability == ETerritoryAvailability::Unlocked;
-	const FGameplayTag ScopeTag = Scope == ETerritorySituationScope::District
-		? District.TerritoryTag : District.ParentTerritoryTag;
+	const FGameplayTag ScopeTag = Scope == ETerritorySituationScope::Place ? Territory
+		: Scope == ETerritorySituationScope::District ? District.TerritoryTag : District.ParentTerritoryTag;
 	const TArray<FReplicatedCaptureSummary> Rows = State->GetAllCaptureSummaries();
 	ReadPlaceHoldings(Rows, ScopeTag, Report.RequestingFaction, Report);
 	Report.bDominantRelationshipKnown = Report.bHoldingsKnown
@@ -217,6 +228,7 @@ bool UTerritorySituationCondition::MatchesReport(const FTerritorySituationReport
 	case ETerritorySituationQuery::AlreadyOwned: return Report.CurrentOwner == Report.RequestingFaction;
 	case ETerritorySituationQuery::HoldingsKnown: return Report.bHoldingsKnown;
 	case ETerritorySituationQuery::FactionPlaceCount: return Report.bHoldingsKnown && Compare(Report.FactionPlaces);
+	case ETerritorySituationQuery::FactionOwnedPlaceCount: return Report.bHoldingsKnown && Compare(Report.FactionOwnedPlaces);
 	case ETerritorySituationQuery::FactionPlaceShare: return Report.bHoldingsKnown && Compare(Report.FactionSharePercent);
 	case ETerritorySituationQuery::FactionDominant: return Report.bHoldingsKnown && Report.DominantFaction == Report.RequestingFaction;
 	case ETerritorySituationQuery::NoDominantFaction: return Report.bHoldingsKnown && !Report.DominantFaction.IsValid();
@@ -231,7 +243,7 @@ bool UTerritorySituationCondition::MatchesReport(const FTerritorySituationReport
 bool UTerritorySituationCondition::CheckCondition_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	return Profile && MatchesReport(Profile->InspectSituation(Target, Controller, NarrativeComponent, Scope));
+	return Profile && MatchesReport(Profile->InspectSituation(Target, Controller, NarrativeComponent, Scope, FactionOverride));
 }
 
 FString UTerritorySituationCondition::GetGraphDisplayText_Implementation()
@@ -239,7 +251,13 @@ FString UTerritorySituationCondition::GetGraphDisplayText_Implementation()
 	const FString QueryName = StaticEnum<ETerritorySituationQuery>()->GetDisplayNameTextByValue(static_cast<int64>(Query)).ToString();
 	FString Result = FString::Printf(TEXT("%s: %s (%s)"), Profile ? *Profile->Territory.ToString() : TEXT("Missing situation profile"),
 		*QueryName, *StaticEnum<ETerritorySituationScope>()->GetDisplayNameTextByValue(static_cast<int64>(Scope)).ToString());
-	if (Query == ETerritorySituationQuery::FactionPlaceCount || Query == ETerritorySituationQuery::FactionPlaceShare
+	const FString FactionName = FactionOverride.IsValid() ? FactionOverride.ToString()
+		: !Profile ? TEXT("unknown faction")
+		: Profile->FactionSource == ETerritoryCaptureFactionSource::ExplicitFaction ? Profile->ExplicitFaction.ToString()
+		: Profile->FactionSource == ETerritoryCaptureFactionSource::ControllerPawnFaction ? TEXT("requesting controller's pawn faction")
+		: TEXT("Narrative target pawn's faction");
+	Result += FString::Printf(TEXT(" [checks %s]"), *FactionName);
+	if (Query == ETerritorySituationQuery::FactionPlaceCount || Query == ETerritorySituationQuery::FactionOwnedPlaceCount || Query == ETerritorySituationQuery::FactionPlaceShare
 		|| Query == ETerritorySituationQuery::DistrictDefencePower)
 		Result += FString::Printf(TEXT(" %s %.3g"), *StaticEnum<ETerritoryFloatComparison>()->GetDisplayNameTextByValue(static_cast<int64>(Comparison)).ToString(), Value);
 	if (Query == ETerritorySituationQuery::RelationshipWithOwner || Query == ETerritorySituationQuery::RelationshipWithDominant)

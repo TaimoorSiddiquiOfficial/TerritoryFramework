@@ -165,15 +165,16 @@ bool UTerritoryControlProgressCondition::CheckCondition_Implementation(APawn* Ta
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
 	const ATerritoryVolume* Territory = ResolveLoadedTerritory(World, TerritoryToCheck);
-	return Territory && CompareValues(Territory->GetControlProgress() * 100.f, Comparison,
+	return Territory && (!ContestingFaction.IsValid() || Territory->GetOwnershipData().ContestingFaction == ContestingFaction)
+		&& CompareValues(Territory->GetControlProgress() * 100.f, Comparison,
 		FMath::Clamp(ProgressPercent, 0.f, 100.f), FMath::Max(0.f, EqualityTolerancePercent));
 }
 
 FString UTerritoryControlProgressCondition::GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Territory: %s control %s %.1f%%"), *TerritoryToCheck.ToString(),
+	return FString::Printf(TEXT("Territory: %s control %s %.1f%% [pressure from: %s]"), *TerritoryToCheck.ToString(),
 		*EnumDisplayName(StaticEnum<ETerritoryFloatComparison>(), static_cast<int64>(Comparison), TEXT("Compare")),
-		FMath::Clamp(ProgressPercent, 0.f, 100.f));
+		FMath::Clamp(ProgressPercent, 0.f, 100.f), ContestingFaction.IsValid() ? *ContestingFaction.ToString() : TEXT("any faction"));
 }
 
 UTerritoryReputationCondition::UTerritoryReputationCondition()
@@ -319,6 +320,12 @@ const FTerritoryAssaultRecord* UTerritoryAssaultCondition::SelectLatestRecord(
 	return Best;
 }
 
+bool UTerritoryAssaultCondition::MatchesRecord(const FTerritoryAssaultRecord& Record) const
+{
+	return (!AttackingFaction.IsValid() || Record.AttackingFaction == AttackingFaction)
+		&& (ScenarioID.IsNone() || Record.StoryScenarioID == ScenarioID);
+}
+
 bool UTerritoryAssaultCondition::CheckCondition_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
@@ -329,9 +336,11 @@ bool UTerritoryAssaultCondition::CheckCondition_Implementation(APawn* Target,
 	if (!Counter || !TerritoryToCheck.IsValid()) return false;
 
 	const ATerritoryVolume* LoadedTerritory = ResolveLoadedTerritory(World, TerritoryToCheck);
-	const TArray<FTerritoryAssaultRecord> Records = LoadedTerritory
+	TArray<FTerritoryAssaultRecord> Records = LoadedTerritory
 		? Counter->GetAssaultsForTerritoryActor(LoadedTerritory)
 		: Counter->GetAssaultsForTerritory(TerritoryToCheck);
+	Records.RemoveAll([this](const FTerritoryAssaultRecord& Record) { return !MatchesRecord(Record); });
+	if (Query == ETerritoryAssaultConditionQuery::AnyRecorded) return !Records.IsEmpty();
 	if (Query == ETerritoryAssaultConditionQuery::AnyPendingOrActive)
 	{
 		return Records.ContainsByPredicate([](const FTerritoryAssaultRecord& Record)
@@ -371,8 +380,15 @@ bool UTerritoryAssaultCondition::CheckCondition_Implementation(APawn* Target,
 
 FString UTerritoryAssaultCondition::GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Enemy wave: %s %s"), *TerritoryToCheck.ToString(),
-		*EnumDisplayName(StaticEnum<ETerritoryAssaultConditionQuery>(), static_cast<int64>(Query), TEXT("Assault query")));
+	FString Result = FString::Printf(TEXT("Enemy wave: %s %s [sender: %s; story: %s]"), *TerritoryToCheck.ToString(),
+		*EnumDisplayName(StaticEnum<ETerritoryAssaultConditionQuery>(), static_cast<int64>(Query), TEXT("Assault query")),
+		AttackingFaction.IsValid() ? *AttackingFaction.ToString() : TEXT("any faction"),
+		ScenarioID.IsNone() ? TEXT("any") : *ScenarioID.ToString());
+	if (Query == ETerritoryAssaultConditionQuery::LatestState)
+		Result += TEXT(" = ") + UEnum::GetDisplayValueAsText(RequiredState).ToString();
+	if (Query == ETerritoryAssaultConditionQuery::LatestResolution)
+		Result += TEXT(" = ") + UEnum::GetDisplayValueAsText(RequiredResolution).ToString();
+	return Result;
 }
 
 UTerritoryPresenceCondition::UTerritoryPresenceCondition()

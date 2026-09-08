@@ -4,6 +4,7 @@
 #include "Tales/TerritoryDialogueRecipe.h"
 #include "Tales/TerritorySituationCondition.h"
 #include "Tales/DialogueBlueprintGeneratedClass.h"
+#include "Tales/TalesComponent.h"
 #include "DialogueBlueprint.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EdGraph/EdGraph.h"
@@ -11,6 +12,8 @@
 #include "AI/TerritoryDiplomacyDialogue.h"
 #include "DataValidation/TerritoryDataValidator.h"
 #include "Misc/DataValidation.h"
+#include "UObject/UnrealType.h"
+#include "UObject/StrongObjectPtr.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDialogueRecipeBuilder,
 	"TerritoryFramework.Dialogue.Editor.NativeRecipeBuilder",
@@ -19,6 +22,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDialogueRecipeBuilder,
 bool FTFDialogueRecipeBuilder::RunTest(const FString& Parameters)
 {
 	auto* Recipe = NewObject<UTerritoryDialogueRecipe>();
+	const TStrongObjectPtr<UTerritoryDialogueRecipe> KeepRecipe(Recipe);
 	auto* Speaker = NewObject<UNPCDefinition>(Recipe);
 	Speaker->NPCID = TEXT("RetakeTestOwner");
 	Recipe->Speakers.Add(Speaker);
@@ -74,6 +78,42 @@ bool FTFDialogueRecipeBuilder::RunTest(const FString& Parameters)
 	for (const UEdGraphNode* Node : BP->DialogueGraph->Nodes)
 		for (const UEdGraphPin* Pin : Node->Pins) if (Pin->Direction == EGPD_Output) Links += Pin->LinkedTo.Num();
 	TestEqual(TEXT("Visible editor wires match runtime links"), Links, 2);
+	TestTrue(TEXT("A known node moves through the Native schema"),
+		UTerritoryDialogueEditorLibrary::SetDialogueNodePosition(BP, Offer.ID, FVector2D(768, 512), Error));
+	TestFalse(TEXT("Out-of-range node coordinates are rejected"),
+		UTerritoryDialogueEditorLibrary::SetDialogueNodePosition(BP, Offer.ID, FVector2D(1.e20, 512), Error));
+	TestTrue(TEXT("Existing Native graph can be arranged"), UTerritoryDialogueEditorLibrary::ArrangeDialogue(BP, Error));
+	TestEqual(TEXT("Arranging keeps every runtime node"), BP->DialogueTemplate->GetNodes().Num(), 3);
+	UDialogueNode_NPC* FirstReply = BP->DialogueTemplate->RootDialogue->GetFirstValidNPCReply(
+		nullptr, nullptr, NewObject<UTalesComponent>());
+	if (TestNotNull(TEXT("Arranged Native graph still selects a reply"), FirstReply))
+		TestEqual(TEXT("Arranging keeps the root's first valid reply"), FirstReply->GetID(), Offer.ID);
+	for (UEdGraphNode* Node : BP->DialogueGraph->Nodes)
+	{
+		const FObjectPropertyBase* Property = FindFProperty<FObjectPropertyBase>(Node->GetClass(), TEXT("DialogueNode"));
+		const UDialogueNode* Runtime = Property ? Cast<UDialogueNode>(Property->GetObjectPropertyValue_InContainer(Node)) : nullptr;
+		if (TestNotNull(TEXT("Native graph runtime node binding"), Runtime))
+			TestEqual(TEXT("Native schema persists layout in both graph and runtime"), Runtime->NodePos,
+				FVector2D(Node->NodePosX, Node->NodePosY));
+	}
+	TestFalse(TEXT("A missing reply is rejected without inventing a node"),
+		UTerritoryDialogueEditorLibrary::ConnectDialogueReply(BP, TEXT("Missing"), Offer.ID, Error));
+	FTerritoryDialogueRecipeNode NewReply = Offer;
+	NewReply.ID = TEXT("Reinforcements"); NewReply.Replies.Reset(); NewReply.Position = FVector2D(2000, 960);
+	TestFalse(TEXT("Adding a reply requires an existing parent"),
+		UTerritoryDialogueEditorLibrary::AddDialogueReply(BP, TEXT("Missing"), NewReply, Error));
+	TestTrue(TEXT("Native reply enters both graph and runtime template"),
+		UTerritoryDialogueEditorLibrary::AddDialogueReply(BP, Entry.ID, NewReply, Error));
+	TestFalse(TEXT("Repeated authoring cannot duplicate a reply ID"),
+		UTerritoryDialogueEditorLibrary::AddDialogueReply(BP, Entry.ID, NewReply, Error));
+	TestTrue(TEXT("Added reply compiles and arranges"), UTerritoryDialogueEditorLibrary::ArrangeDialogue(BP, Error));
+	const auto* UpdatedClass = Cast<UDialogueBlueprintGeneratedClass>(BP->GeneratedClass);
+	const auto* UpdatedTemplate = UpdatedClass ? UpdatedClass->GetDialogueTemplate() : nullptr;
+	if (TestNotNull(TEXT("Updated compiled Native template"), UpdatedTemplate))
+	{
+		TestEqual(TEXT("New reply survives compilation"), UpdatedTemplate->GetNodes().Num(), 4);
+		TestEqual(TEXT("New reply has a live root connection"), UpdatedTemplate->RootDialogue->NPCReplies.Num(), 2);
+	}
 	auto* Profile = NewObject<UTerritoryDiplomacyDialogueProfile>();
 	Profile->WarDialogue = BP->GeneratedClass;
 	auto* Validator = NewObject<UTerritoryDataValidator>();
