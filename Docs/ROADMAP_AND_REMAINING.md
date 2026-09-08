@@ -1,12 +1,27 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-08 (batch 44)
+> **Reviewed:** 2026-09-08 (batch 45)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
 
 TDA is on UE 5.8.2 with the local, unmodified Narrative Pro 2.4.2 package.
+[Batch 45](ASSAULT_SAVE_VEHICLE_BUDGET_2026-09-08.md) rejects negative saved
+vehicle budgets and usage before they can grant fresh deployment credit. Invalid
+nonterminal assaults cancel once, preserving deaths and withdrawing the remaining
+finite force. A real Narrative save during NPC construction also verifies the
+existing admission boundary; that suspected duplication was a false positive.
+Editor/runtime/UHT and Game builds pass, with **282 passing tests**, 77 Blueprint
+compilations and 128-asset validation (zero errors, four existing warnings).
+The server/two-client load test passes client rejection, invalid-record
+cancellation, physical NPC cleanup, unchanged decisions and repeat-load
+idempotence. Oversized positive budgets and duplicate per-approach ledgers remain
+the next malformed-record cases to inspect. A distinct cook/stage passes with
+zero errors and 30 existing warnings. Its matching packaged Game completes the
+90-second server-mode assault smoke with exit zero and no runtime errors; the
+compiled TDAServer gate remains open.
+
 [Batch 44](ASSAULT_TARGET_STREAMING_2026-09-08.md) fixes living attackers being
 withdrawn after exhausting AI initialization retries against an unloaded target.
 The existing registry wait now precedes goal initialization and preserves the
@@ -64,10 +79,13 @@ The immediate remaining work, in order:
    passes but does not reproduce the combat/decorator stack. Matching AIModule
    symbols are still absent. A separate UnrealEd/Slate shutdown crash also needs
    attribution; a later clean editor shutdown does not establish its cause.
-2. Complete assault spawn/save callback and remaining malformed-record arithmetic
-   review. Batch 42 closed recurrence-counter overflow and stale ownership-directory
-   reload; batch 43 closed spawn-failure retry overflow; batch 44 closed target
-   streaming being charged as AI initialization failure. Prepare an isolated
+2. Complete remaining assault callback and malformed-record arithmetic review,
+   next inspecting oversized positive vehicle budgets and duplicate per-approach
+   ledgers. Batch 45 rejects negative saved car counts and verifies the actual
+   Native save-only spawn callback. Batch 42 closed recurrence-counter overflow
+   and stale ownership-directory reload; batch 43 closed spawn-failure retry
+   overflow; batch 44 closed target streaming being charged as AI initialization
+   failure. Prepare an isolated
    AlMalik assault fixture (the city inventory currently has no Territory actors),
    then exercise physical stream-out/in with posts, routes and returning clients.
 3. Finish production save-only callback and refunded item-instance metadata

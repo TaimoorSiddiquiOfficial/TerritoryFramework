@@ -8,9 +8,12 @@
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryWorldState.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
+#include "NarrativeSave.h"
 #include "UObject/UnrealType.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 
@@ -108,6 +111,49 @@ bool FTFAssaultSpawnCallbacks::RunTest(const FString& Parameters)
 		Approach, FTransform(FVector(2000.f, 2000.f, 100.f)), INDEX_NONE);
 	TestNotNull(TEXT("A subsequent valid Narrative spawn can still be admitted"), ValidAttacker);
 	TestEqual(TEXT("The valid spawn is tracked once"), Counter->LiveParticipants.FindRef(Record.AssaultID).Num(), 1);
+	// A save-only callback sees the last admission commit. The constructing NPC's
+	// Native record must not independently respawn alongside the finite reserve.
+	Record.PlannedForce = Record.PendingReserveForce = 2;
+	Counter->RestorePersistentState({Record});
+	auto* WorldState = World->SpawnActor<ATerritoryWorldState>();
+	WorldState->SetActorGUID_Implementation(FGuid(450, 20, 21, 22));
+	auto* SaveSubsystem = World->GetSubsystem<UNarrativeSaveSubsystem>();
+	ATerritoryAssaultCharacter* BeforeSave = Counter->SpawnParticipant(
+		Counter->Assaults.FindChecked(Record.AssaultID), Territory, Force, NPC,
+		Approach, FTransform(FVector(4000.f, 1000.f, 100.f)), INDEX_NONE);
+	if (!TestNotNull(TEXT("One attacker is admitted before the save callback"), BeforeSave))
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+	FTerritoryAssaultRecord SavedDuringSpawn;
+	Probe->NPCSpawnCallback = [&](ANarrativeNPCCharacter* Created)
+	{
+		TestTrue(TEXT("Native can create the actual world save inside its spawn callback"), SaveSubsystem->UpdateSaveObject());
+		SavedDuringSpawn = Counter->GetPersistentState()[0];
+		TestEqual(TEXT("The in-flight NPC remains unspent reserve at the save boundary"), SavedDuringSpawn.PendingReserveForce, 1);
+		TestEqual(TEXT("The save includes only the committed living attacker"), SavedDuringSpawn.AliveForce, 1);
+		TestEqual(TEXT("The physical roster includes the committed survivor once"), SavedDuringSpawn.PendingSurvivors.Num(), 1);
+		const auto* NativeRecord = SaveSubsystem->GetSaveObject()->RecordMap.Find(
+			CastChecked<ATerritoryAssaultCharacter>(Created)->GetActorGUID_Implementation());
+		TestTrue(TEXT("Native saves the new actor without giving it independent respawn authority"), NativeRecord && !NativeRecord->bNeedsDynamicSpawn);
+		const auto Snapshot = WorldState->GetAllAssaultSummaries();
+		TestTrue(TEXT("WorldState's save callback publishes the same committed force"), Snapshot.Num() == 1 && Snapshot[0].AliveForce == 1 && Snapshot[0].PendingReserveForce == 1);
+	};
+	ATerritoryAssaultCharacter* AfterSave = Counter->SpawnParticipant(
+		Counter->Assaults.FindChecked(Record.AssaultID), Territory, Force, NPC,
+		Approach, FTransform(FVector(5000.f, 1000.f, 100.f)), INDEX_NONE);
+	Probe->NPCSpawnCallback = nullptr;
+	TestNotNull(TEXT("A save-only callback does not cancel valid admission"), AfterSave);
+	TestEqual(TEXT("Both actors are admitted once after the callback"), Counter->GetPersistentState()[0].AliveForce, 2);
+	Counter->RestorePersistentState({SavedDuringSpawn});
+	const auto ReloadedSaveBoundary = Counter->GetPersistentState()[0];
+	TestEqual(TEXT("Reload preserves the original two-person budget"), ReloadedSaveBoundary.GetAccountedForce(), 2);
+	TestEqual(TEXT("Reload reconstructs only the committed saved survivor"), ReloadedSaveBoundary.PendingSurvivors.Num(), 1);
+	if (ReloadedSaveBoundary.PendingSurvivors.Num() == 1 && SavedDuringSpawn.PendingSurvivors.Num() == 1)
+		TestEqual(TEXT("Save-only callback preserves the committed survivor GUID"), ReloadedSaveBoundary.PendingSurvivors[0].SpawnGUID, SavedDuringSpawn.PendingSurvivors[0].SpawnGUID);
+	Record.PlannedForce = Record.PendingReserveForce = 1;
 	Counter->RestorePersistentState({Record});
 	ANarrativeVehicleBase* CreatedVehicle = nullptr;
 	const FDelegateHandle VehicleSpawnCallback = World->AddOnActorSpawnedHandler(

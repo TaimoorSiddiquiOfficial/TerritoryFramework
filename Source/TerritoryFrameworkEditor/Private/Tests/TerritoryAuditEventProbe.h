@@ -15,6 +15,8 @@
 #include "UI/TerritoryEconomyWidget.h"
 #include "TerritoryAuditEventProbe.generated.h"
 
+class ATerritoryWorldState;
+
 /** Real Narrative item classes with a controllable removal failure for transaction tests. */
 UCLASS(Transient)
 class UTerritoryAuditResourceA : public UNarrativeItem
@@ -53,6 +55,10 @@ class UTerritoryAuditEventProbe final : public UObject
 {
 	GENERATED_BODY()
 public:
+	/** Editor test fixture only: corrupt one transient PIE save record before Native Load. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Tests")
+	static bool InjectNegativeVehicleUsageForPIE(ATerritoryWorldState* State, FGuid AssaultID);
+
 	TFunction<void(ATerritoryVolume*, ETerritoryState)> StateCallback;
 	TFunction<void(ATerritoryVolume*, AActor*)> EvidenceCallback;
 	TFunction<void(ATerritoryVolume*, AActor*, ETerritoryExposureState)> ExposureCallback;

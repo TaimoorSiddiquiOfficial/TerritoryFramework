@@ -1373,6 +1373,31 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 		Record.KilledForce = FMath::Clamp(Record.KilledForce, 0, Record.PlannedForce);
 		Record.WithdrawnForce = FMath::Clamp(
 			Record.WithdrawnForce, 0, Record.PlannedForce - Record.KilledForce);
+		if (bAuthority)
+		{
+			const bool bInvalidVehicleBudget = Record.MaximumVehicleDeployments < 0
+				|| Record.VehicleDeploymentsUsed < 0
+				|| Record.VehicleDeploymentsByApproach.ContainsByPredicate(
+					[](const FTerritoryVehicleDeploymentCount& Entry) { return Entry.Count < 0; });
+			// Clamping a negative spent count alone would grant fresh car credit.
+			// Fail the active record closed before reconstruction or wave admission.
+			if (bInvalidVehicleBudget && !Record.IsTerminal())
+			{
+				Record.State = ETerritoryAssaultState::Cancelled;
+				Record.Resolution = ETerritoryAssaultResolution::ConfigurationInvalid;
+				Record.ResolvedGameTime = GetCampaignGameTime();
+				Record.RecaptureEndsGameTime = 0.0;
+				Record.WithdrawnForce = Record.PlannedForce - Record.KilledForce;
+				Record.AliveForce = Record.PendingReserveForce = 0;
+				UE_LOG(LogTerritory, Warning,
+					TEXT("Saved assault %s cancelled: negative vehicle deployment budget or usage"),
+					*Record.AssaultID.ToString());
+			}
+			Record.MaximumVehicleDeployments = FMath::Max(0, Record.MaximumVehicleDeployments);
+			Record.VehicleDeploymentsUsed = FMath::Max(0, Record.VehicleDeploymentsUsed);
+			for (FTerritoryVehicleDeploymentCount& Entry : Record.VehicleDeploymentsByApproach)
+				Entry.Count = FMath::Max(0, Entry.Count);
+		}
 		if (bAuthority) NormalizePhysicalCheckpoint(Record);
 		if (bAuthority && (Record.State == ETerritoryAssaultState::Active
 			|| Record.State == ETerritoryAssaultState::RecaptureCountdown))
