@@ -1407,15 +1407,33 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 			Record.WithdrawnForce, 0, Record.PlannedForce - Record.KilledForce);
 		if (bAuthority)
 		{
-			const bool bInvalidVehicleBudget = Record.MaximumVehicleDeployments < 0
+			// Admission and difficulty planning never authorize more than eight cars.
+			// A restored ledger must describe the same per-approach charge totals that
+			// PrepareVehicleCohortCheckpoint commits. First-row lookup must not turn a
+			// duplicate or missing charge into another deployment after loading.
+			bool bInvalidVehicleBudget = Record.MaximumVehicleDeployments < 0
+				|| Record.MaximumVehicleDeployments > TerritoryAssaultPlanning::MaximumVehicles
 				|| Record.VehicleDeploymentsUsed < 0
-				|| Record.VehicleDeploymentsByApproach.ContainsByPredicate(
-					[](const FTerritoryVehicleDeploymentCount& Entry) { return Entry.Count < 0; });
+				|| Record.VehicleDeploymentsUsed > Record.MaximumVehicleDeployments
+				|| Record.VehicleDeploymentsByApproach.Num() > TerritoryAssaultPlanning::MaximumApproaches;
+			TSet<FName> ChargedApproaches;
+			int64 TotalVehicleCharges = 0;
+			const int32 EntriesToCheck = FMath::Min(Record.VehicleDeploymentsByApproach.Num(),
+				TerritoryAssaultPlanning::MaximumApproaches);
+			for (int32 Index = 0; Index < EntriesToCheck; ++Index)
+			{
+				const FTerritoryVehicleDeploymentCount& Entry = Record.VehicleDeploymentsByApproach[Index];
+				bInvalidVehicleBudget |= Entry.ApproachID.IsNone() || ChargedApproaches.Contains(Entry.ApproachID)
+					|| Entry.Count < 0 || Entry.Count > TerritoryAssaultPlanning::MaximumVehicles;
+				ChargedApproaches.Add(Entry.ApproachID);
+				TotalVehicleCharges += static_cast<int64>(Entry.Count);
+			}
+			bInvalidVehicleBudget |= TotalVehicleCharges != Record.VehicleDeploymentsUsed;
 			const bool bInvalidStory = Record.LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements
 				&& (Record.bAllowsTerritoryCapture || !Record.bQuestOverrideAuthorized
 					|| Record.StoryScenarioID.IsNone() || !Record.DefendingFaction.IsValid()
 					|| Record.DefendingFaction == Record.AttackingFaction);
-			// Clamping a negative spent count alone would grant fresh car credit.
+			// Clamping or merging an invalid spent count could grant fresh car credit.
 			// Fail the active record closed before reconstruction or wave admission.
 			if ((bInvalidVehicleBudget || bInvalidStory) && !Record.IsTerminal())
 			{
@@ -1427,12 +1445,20 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 				Record.AliveForce = Record.PendingReserveForce = 0;
 				UE_LOG(LogTerritory, Warning,
 					TEXT("Saved assault %s cancelled: %s"), *Record.AssaultID.ToString(),
-					bInvalidStory ? TEXT("invalid story reinforcement context") : TEXT("negative vehicle deployment budget or usage"));
+					bInvalidStory ? TEXT("invalid story reinforcement context") : TEXT("invalid saved vehicle budget or approach charges"));
 			}
-			Record.MaximumVehicleDeployments = FMath::Max(0, Record.MaximumVehicleDeployments);
-			Record.VehicleDeploymentsUsed = FMath::Max(0, Record.VehicleDeploymentsUsed);
+			Record.MaximumVehicleDeployments = FMath::Clamp(Record.MaximumVehicleDeployments, 0, TerritoryAssaultPlanning::MaximumVehicles);
+			Record.VehicleDeploymentsUsed = FMath::Clamp(Record.VehicleDeploymentsUsed, 0, Record.MaximumVehicleDeployments);
+			ChargedApproaches.Reset();
+			Record.VehicleDeploymentsByApproach.RemoveAll([&ChargedApproaches](const FTerritoryVehicleDeploymentCount& Entry)
+			{
+				if (Entry.ApproachID.IsNone() || ChargedApproaches.Contains(Entry.ApproachID)
+					|| ChargedApproaches.Num() >= TerritoryAssaultPlanning::MaximumApproaches) return true;
+				ChargedApproaches.Add(Entry.ApproachID);
+				return false;
+			});
 			for (FTerritoryVehicleDeploymentCount& Entry : Record.VehicleDeploymentsByApproach)
-				Entry.Count = FMath::Max(0, Entry.Count);
+				Entry.Count = FMath::Clamp(Entry.Count, 0, TerritoryAssaultPlanning::MaximumVehicles);
 		}
 		if (bAuthority) NormalizePhysicalCheckpoint(Record);
 		if (bAuthority && (Record.State == ETerritoryAssaultState::Active

@@ -17,6 +17,7 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 | No disguise profile asset | Classified as optional unconfigured feature, not dead implementation | No game behavior invented |
 | Whole-world load invalidates Native's current map record | Remove old guards from play immediately, defer their EndPlay record writes until Native's reader returns | Exact Native regression, both engines, and two real world/player restores passed |
 | Native attack goals retain guards removed alive during load | Remove target-bound Native goals using their existing key/removal API; repeat on final guard removal | Actual Native Blueprint regression and repeated live restores passed without stale-target errors |
+| Saved vehicle limits or approach charges grant extra deployments | Validate the eight-car/eight-approach limits, unique nonempty approach IDs, and matching global/per-approach spent totals before reconstruction | Both editor builds, native save regression and live server/two-client cancellation passed |
 
 ## Verified checkpoint
 
@@ -35,7 +36,7 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 
 ## Remaining work in order
 
-1. Finish the saved assault force/approach ledger and production/refund settlement audits, including corrupt data, load order and callback failure paths. The current saved vehicle checks reject negative values, but not duplicate approach rows or positive values above the planner's eight-car limit.
+1. Finish the production/refund settlement audit, including account changes during item callbacks. Saved vehicle ledger validation is implemented and verified as described below; it does not impose an invented upper limit on authored total infantry force.
 2. Fix generic Narrative NPC client death through a plugin/project adapter. Source inspection confirms that Native BP_NarrativeNPC calls RemoveAllGoals unconditionally, although its activity component lives on the server-only AI controller. Preserve Native death presentation and weapon behavior while adapting this path. Hashir's safe perception generator addresses a different defect. Test old saved goal generators deliberately.
 3. Complete actual AlMalik World Partition streaming and compiled dedicated-server certification. The live late join above does not replace either gate.
 4. Complete the deferred lighting visual/performance review, then the remaining Act 1 story authoring decisions. Do not publish fresh release artifacts before the relevant gates pass.
@@ -49,3 +50,11 @@ Verification output for this batch is under project `Saved/Verification/20260908
 ## Current build limitation
 
 The installed UE 5.8 distribution rejected `TDAServer` with “Server targets are not currently supported from this engine distribution.” This is an engine-distribution prerequisite, not a passing dedicated-server gate. A server-capable engine build is required for that certification. Game-server mode is a separate smoke test.
+
+## Saved assault ledger follow-up
+
+CounterAttackSubsystem remains the server authority for deployment charges. A nonterminal saved assault with an invalid vehicle ledger becomes `Cancelled / ConfigurationInvalid` before any physical reconstruction. Recorded deaths remain consumed; all remaining force withdraws once. Loading does not change ownership or reroll the saved seed/decision. WorldState publishes that repaired state to clients immediately. Malformed terminal history is bounded for display and remains terminal.
+
+The regression covers negative and extreme positive counts, duplicate and missing approach identities, inconsistent totals, excess rows, repeated Native-format SaveGame serialization, a client WorldState load, and a target that has been removed from the world. Valid version-zero survivor migration, zero-charge on-foot approaches and eight spent cars remain supported. There are no new Blueprint fields or required asset edits. An inconsistent older save is cancelled conservatively because its actual remaining car credit cannot be recovered safely.
+
+UE 5.7 passes all 293 tests (272 without warnings, 21 with warnings). UE 5.8 passes 292 tests in the headless Entry-map run; its map-dependent route test then passes with HopDistrictTest loaded, giving 293 verified passes. Both editor builds and UE 5.8 Development game compilation pass. `LiveLedgerCancellation58.json` proves matching cancellation, finite counts and unchanged decision data on the listen server and two clients. These checks do not replace the outstanding compiled dedicated-server gate.
