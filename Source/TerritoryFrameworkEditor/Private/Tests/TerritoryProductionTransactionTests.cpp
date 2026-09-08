@@ -30,7 +30,7 @@ bool FTFProductionTransactionCallbacks::RunTest(const FString& Parameters)
 	TGuardValue<bool> AllowActorCallbacks(GAllowActorScriptExecutionInEditor, true);
 	UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>();
 	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
-	for (int32 Scenario = 0; Scenario < 6; ++Scenario)
+	for (int32 Scenario = 0; Scenario < 8; ++Scenario)
 	{
 		ATerritoryGuardCharacter* Account = World->SpawnActor<ATerritoryGuardCharacter>();
 		Cast<INarrativeTeamAgentInterface>(Account)->AddFaction(Heroes);
@@ -62,6 +62,11 @@ bool FTFProductionTransactionCallbacks::RunTest(const FString& Parameters)
 		int32 Notifications = 0;
 		Probe->ItemRemovedCallback = [&](UNarrativeItem* Item, int32 Amount)
 		{
+			if (Scenario == 7 && !bCallbackRan)
+			{
+				bCallbackRan = true;
+				Cast<INarrativeTeamAgentInterface>(Account)->RemoveFaction(Heroes);
+			}
 			if (Scenario == 0 && !bNestedTried)
 			{
 				bNestedTried = true;
@@ -86,6 +91,7 @@ bool FTFProductionTransactionCallbacks::RunTest(const FString& Parameters)
 			if (Scenario == 4) Inventory->Load_Implementation();
 			if (Scenario == 5)
 				for (UNarrativeItem* Stack : Inventory->FindItemsByClass(TSoftClassPtr<UNarrativeItem>(UTerritoryAuditResourceB::StaticClass()), false)) Inventory->ConsumeItem(Stack, Stack->GetQuantity());
+			if (Scenario == 6) Cast<INarrativeTeamAgentInterface>(Account)->RemoveFaction(Heroes);
 		};
 		Probe->ProductionCallback = [&]()
 		{
@@ -122,8 +128,13 @@ bool FTFProductionTransactionCallbacks::RunTest(const FString& Parameters)
 		{
 			TestFalse(FString::Printf(TEXT("Scenario %d cannot claim a completed recipe"), Scenario), bSuccess || Result.bSuccess);
 			TestEqual(TEXT("A failed or superseded recipe does not add the final output"), Count(UTerritoryAuditResourceC::StaticClass()), 0);
-			if (Scenario == 1 || Scenario == 4 || Scenario == 5)
+			if (Scenario == 1 || Scenario == 4 || Scenario == 5 || Scenario == 6 || Scenario == 7)
 				TestEqual(TEXT("Compensation or load retains the input quantity"), Count(UTerritoryAuditResourceA::StaticClass()), 2);
+			if (Scenario == 6 || Scenario == 7)
+			{
+				TestEqual(TEXT("Betrayal during output removes only this recipe's output"), Count(UTerritoryAuditResourceB::StaticClass()), 0);
+				TestEqual(TEXT("Betrayal reports a cancelled settlement"), Result.Status, ETerritoryProductionStatus::SettlementChanged);
+			}
 			if (Scenario == 2 || Scenario == 3)
 			{
 				TestEqual(TEXT("Failed compensation is explicitly distinguishable"), StaticEnum<ETerritoryProductionStatus>()->GetNameStringByValue(static_cast<int64>(Result.Status)), FString(TEXT("RollbackIncomplete")));

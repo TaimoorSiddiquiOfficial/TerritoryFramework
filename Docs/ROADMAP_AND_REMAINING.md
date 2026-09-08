@@ -12,11 +12,16 @@ The current implementation ledger is [Finding Resolution Plan](Finding_Resolutio
 Live faction changes now update resource routing and open economy screens. Tied
 account priorities create a visible conflict; Native inventory remains the balance
 authority. Both example controllers follow their owner's political faction.
-Both engines pass 293 automation tests, and a server/two-client fixture plus a
+Both engines pass 294 automation tests, and a server/two-client fixture plus a
 fresh late join passes. Two consecutive Native world/player restores preserve
 garrisons, reserves and faction/account state without the reproduced record-reader
-crash or stale guard attack-goal errors. The separate generic NPC client-death,
-old goal-generator migration, saved vehicle-ledger and real streaming audits remain.
+crash or stale guard attack-goal errors. Saved vehicle ledgers now reject inflated
+budgets, duplicate approach rows and inconsistent spent totals; native save tests
+and live server/two-client cancellation checks pass. Production stops and
+compensates in the original inventory when a callback changes its faction or
+selected depot. See the implementation ledger for the latest build/test gates.
+The separate generic NPC client-death, old goal-generator migration, currency
+settlement callback and actual AlMalik streaming audits remain.
 These changes are not certification of the older published preview.
 
 ### Active story preparation — 2026-09-08
@@ -43,8 +48,12 @@ the existing post-capture counterattack accept the request.
 - [x] Inventory and validate all authored Territory data assets and Blueprints, including the
   user's new quest/task edits. Record confirmed defects, validation results and
   remaining behavioral checks; do not rebuild assets merely for appearance.
-- [ ] Continue the implementation audit: oversized saved assault budgets and
-  duplicate approach ledgers, production/refund settlement, and actual AlMalik
+- [x] Reject oversized saved assault vehicle budgets and duplicate/inconsistent
+  approach ledgers before reconstruction. Preserve casualties and decision data;
+  publish the cancelled record to server clients, including with an unloaded target.
+- [x] Stop production when its faction account changes during Native item callbacks;
+  compensate in the original inventory and preserve the consumed cycle through load.
+- [ ] Continue currency settlement/refund callback verification and actual AlMalik
   streaming. Asset compilation/validation does not prove these gameplay cases.
 - [x] Protect Hashir's pacifist perception callback after controller destruction.
   His project activity config preserves all eight Native activities and uses a

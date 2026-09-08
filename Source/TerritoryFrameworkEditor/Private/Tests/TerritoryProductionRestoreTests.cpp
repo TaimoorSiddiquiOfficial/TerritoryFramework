@@ -153,4 +153,104 @@ bool FTFProductionRestoreCallbacks::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProductionAccountChanges,
+	"TerritoryFramework.Production.Regression.AccountChangeDuringSettlement",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFProductionAccountChanges::RunTest(const FString& Parameters)
+{
+	for (int32 Scenario = 0; Scenario < 3; ++Scenario)
+	{
+		UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+		if (!TestNotNull(TEXT("Account change world"), World)) return false;
+		GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+		World->SetGameInstance(NewObject<UGameInstance>(GEngine));
+		World->GetWorldSettings()->DefaultGameMode = AGameModeBase::StaticClass();
+		World->SetGameMode(FURL());
+		ANarrativeGameState* Clock = NewObject<ANarrativeGameState>(World->PersistentLevel);
+		Clock->SetRole(ROLE_Authority);
+		World->SetGameState(Clock);
+		FFloatProperty* ClockValue = FindFProperty<FFloatProperty>(Clock->GetClass(), TEXT("AccumulatedTime"));
+		ClockValue->SetPropertyValue_InContainer(Clock, 2400.f);
+		TGuardValue<bool> ActorCallbacks(GAllowActorScriptExecutionInEditor, true);
+		auto* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>();
+		auto* Original = World->SpawnActor<ATerritoryGuardCharacter>();
+		auto* Successor = World->SpawnActor<ATerritoryGuardCharacter>();
+		const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+		for (auto* Account : {Original, Successor})
+		{
+			Cast<INarrativeTeamAgentInterface>(Account)->AddFaction(Heroes);
+			Account->GetInventoryComponent()->SetCapacity(16);
+			Account->GetInventoryComponent()->SetWeightCapacity(100.f);
+			Account->GetInventoryComponent()->TryAddItemFromClass(UTerritoryAuditResourceA::StaticClass(), 2, false);
+		}
+		TestTrue(TEXT("Original depot is selected before production"), Economy->RegisterFactionResourceAccount(Heroes, Original));
+		auto* Inventory = Original->GetInventoryComponent();
+		auto* SuccessorInventory = Successor->GetInventoryComponent();
+		const auto Count = [](UNarrativeInventoryComponent* Target, UClass* Class)
+		{ return Target->GetTotalQuantityOfItemExact(TSoftClassPtr<UNarrativeItem>(Class), false); };
+		const auto Rate = [](UClass* Class, int32 Quantity)
+		{ FTerritoryResourceRate Value; Value.ItemClass = Class; Value.QuantityPerCycle = Quantity; return Value; };
+		auto* Profile = NewObject<UTerritoryProductionProfile>();
+		FTerritoryProductionRule Recipe;
+		Recipe.RuleTag = TerritoryProductionTags::FarmLivestock;
+		Recipe.Inputs = {Rate(UTerritoryAuditResourceA::StaticClass(), 2)};
+		Recipe.Outputs = {Rate(UTerritoryAuditResourceB::StaticClass(), 1), Rate(UTerritoryAuditResourceC::StaticClass(), 1)};
+		Profile->Rules = {Recipe};
+		FTerritoryProductionSiteRecord Site;
+		Site.StateRulesVersion = 1;
+		Site.TerritoryGUID = FGuid(920, 921, 922, Scenario + 1);
+		Site.OwnerFaction = Heroes;
+		Site.TerritoryState = ETerritoryState::Claimed;
+		Site.ProductionProfile = Profile;
+		FTerritoryProductionCheckpoint Checkpoint;
+		Checkpoint.TerritoryGUID = Site.TerritoryGUID;
+		Checkpoint.OwnerFaction = Heroes;
+		Checkpoint.RuleTag = Recipe.RuleTag;
+		Checkpoint.LastProcessedCycle = 0;
+		Economy->RestoreProductionState({Checkpoint}, {Site}, {});
+		auto* Probe = NewObject<UTerritoryAuditEventProbe>();
+		Inventory->OnItemAdded.AddDynamic(Probe, &UTerritoryAuditEventProbe::ItemAdded);
+		bool bChanged = false;
+		Probe->ItemCallback = [&]()
+		{
+			if (bChanged) return;
+			bChanged = true;
+			if (Scenario < 2) Economy->RegisterFactionResourceAccount(Heroes, Successor, Scenario == 0 ? 10 : 0);
+			else
+			{
+				Cast<INarrativeTeamAgentInterface>(Original)->RemoveFaction(Heroes);
+				Economy->RefreshFactionResourceAccount(Heroes);
+			}
+		};
+		Economy->ProcessResourceProduction();
+		Probe->ItemCallback = nullptr;
+		Inventory->OnItemAdded.RemoveDynamic(Probe, &UTerritoryAuditEventProbe::ItemAdded);
+		TestTrue(TEXT("Actual Native output callback changes account selection"), bChanged);
+		TestEqual(TEXT("Changed account cannot receive a completed production batch"), Economy->GetAllProductionSites()[0].LastStatus, ETerritoryProductionStatus::SettlementChanged);
+		TestEqual(TEXT("Original input is returned to its own inventory"), Count(Inventory, UTerritoryAuditResourceA::StaticClass()), 2);
+		TestEqual(TEXT("First output is removed from the displaced account"), Count(Inventory, UTerritoryAuditResourceB::StaticClass()), 0);
+		TestEqual(TEXT("Second output never reaches the displaced account"), Count(Inventory, UTerritoryAuditResourceC::StaticClass()), 0);
+		TestEqual(TEXT("Compensation never draws from the successor"), Count(SuccessorInventory, UTerritoryAuditResourceA::StaticClass()), 2);
+		TestEqual(TEXT("An in-flight batch is not redirected to the successor"), Count(SuccessorInventory, UTerritoryAuditResourceB::StaticClass()), 0);
+		const auto SavedCheckpoints = Economy->GetProductionCheckpoints();
+		const auto SavedSites = Economy->GetAllProductionSites();
+		Inventory->PrepareForSave_Implementation();
+		Inventory->Load_Implementation();
+		Economy->RestoreProductionState(SavedCheckpoints, SavedSites, Economy->GetAllResourceSnapshots());
+		Economy->ProcessResourceProduction();
+		TestEqual(TEXT("Loading does not replay a cancelled cycle"), Count(SuccessorInventory, UTerritoryAuditResourceB::StaticClass()), 0);
+		TestEqual(TEXT("Native save retains compensated stock"), Count(Inventory, UTerritoryAuditResourceA::StaticClass()), 2);
+		// A later cycle deliberately uses the new selected depot.
+		Economy->RegisterFactionResourceAccount(Heroes, Successor, 10);
+		ClockValue->SetPropertyValue_InContainer(Clock, 4800.f);
+		Economy->ProcessResourceProduction();
+		TestEqual(TEXT("Next cycle produces in the selected successor"), Count(SuccessorInventory, UTerritoryAuditResourceC::StaticClass()), 1);
+		TestEqual(TEXT("Next cycle does not touch the former depot"), Count(Inventory, UTerritoryAuditResourceA::StaticClass()), 2);
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+	}
+	return true;
+}
+
 #endif

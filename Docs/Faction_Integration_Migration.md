@@ -31,6 +31,10 @@ The economy subsystem's old two-argument `RegisterFactionResourceAccount` call s
 
 Only derived status is replicated: selected status, faction and stockpile conflict/availability. Live candidate pointers are not campaign save data. Components rebuild routing after load, possession and streaming. Native inventory remains the save authority for actual balances.
 
+If a Native item callback changes membership or the selected depot while a production recipe is running, the recipe stops. It removes only the output from that recipe and returns its consumed input to the same original inventory. The new depot is not charged and does not receive the interrupted batch. If another callback prevents those quantities from being restored, the existing `RollbackIncomplete` status reports the remaining difference.
+
+A cancelled periodic recipe consumes that cycle and is not replayed after load. A later cycle uses the current selected depot. A manual `ExecuteResourceRecipe` request continues to use its explicit requesting actor; changing an unrelated depot does not redirect that manual request. Completed settlement events can still begin the next story action normally.
+
 ## Screens
 
 The economy and district screens resolve the current player's faction. Existing economy screens refresh after Native faction changes and loads. `SetDisplayFaction` with a valid tag deliberately fixes the economy screen to that faction; an empty tag resumes following the player.

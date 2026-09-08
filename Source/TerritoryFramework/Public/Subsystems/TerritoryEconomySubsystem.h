@@ -390,7 +390,8 @@ private:
 		const FGameplayTag& RuleTag);
 	bool ExecuteResourceRecipeOnInventory(UNarrativeInventoryComponent* Inventory,
 		const FGameplayTag& Faction, const FTerritoryProductionRule& Recipe,
-		int32 UpgradeLevel, int32 BatchCount, FTerritoryProductionResult& OutResult);
+		int32 UpgradeLevel, int32 BatchCount, FTerritoryProductionResult& OutResult,
+		TFunctionRef<bool()> IsAccountCurrent);
 	void EvaluateProductionSite(FTerritoryProductionSiteRecord& Site, int64 CurrentCycle);
 	void UpdateResourceSnapshot(const FGameplayTag& Faction, int64 CurrentCycle);
 	void PublishProductionState() const;

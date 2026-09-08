@@ -1121,7 +1121,13 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipe(
 		return false; // A rejected nested request must not recursively publish another event.
 	}
 	const uint64 RestoreGeneration = ProductionRestoreGeneration;
-	ExecuteResourceRecipeOnInventory(Inventory, Faction, Recipe, UpgradeLevel, BatchCount, OutResult);
+	ExecuteResourceRecipeOnInventory(Inventory, Faction, Recipe, UpgradeLevel, BatchCount, OutResult,
+		[&]()
+		{
+			return IsValid(RequestingActor) && !RequestingActor->IsActorBeingDestroyed()
+				&& RequestingActor->GetWorld() == World && DoesAccountBelongToFaction(RequestingActor, Faction)
+				&& ResolveCurrencyAccount(RequestingActor) == Inventory;
+		});
 	if (RestoreGeneration != ProductionRestoreGeneration || OutResult.Status == ETerritoryProductionStatus::Superseded) return false;
 	TGuardValue<bool> PublicationGuard(bExecutingResourceRecipe, true);
 	TGuardValue<TWeakObjectPtr<UNarrativeInventoryComponent>> InventoryGuard(ActiveRecipeInventory, Inventory);
@@ -1149,7 +1155,7 @@ void UTerritoryEconomySubsystem::OnRecipeInventoryCurrencyChanged(int32 OldCurre
 bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 	UNarrativeInventoryComponent* Inventory, const FGameplayTag& Faction,
 	const FTerritoryProductionRule& Recipe, int32 UpgradeLevel, int32 BatchCount,
-	FTerritoryProductionResult& OutResult)
+	FTerritoryProductionResult& OutResult, TFunctionRef<bool()> IsAccountCurrent)
 {
 	if (!OutResult.BatchID.IsValid()) OutResult.BatchID = FGuid::NewGuid();
 	OutResult.Faction = Faction;
@@ -1205,6 +1211,12 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 	}
 	if (!CanApplyResourceTransaction(Inventory, Inputs, Outputs, OutResult.Status, OutResult.FailureReason)) return false;
 	if (!IsCurrent()) return Superseded();
+	if (!IsAccountCurrent())
+	{
+		OutResult.Status = ETerritoryProductionStatus::StorageUnavailable;
+		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "AccountChangedBeforeRecipe", "The faction account changed before production could start.");
+		return false;
+	}
 	const auto Count = [&](UClass* Class)
 	{
 		int64 Total = 0;
@@ -1224,6 +1236,9 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 	TArray<FTerritoryResourceAmount> AppliedInputs, AppliedOutputs;
 	const auto Compensate = [&](ETerritoryProductionStatus Failure)
 	{
+		// Losing faction membership or depot selection stops forward production,
+		// but compensation still belongs to this original inventory. A successor
+		// must neither pay for nor receive the interrupted recipe.
 		// Bound each inverse to this request and the current stock. Never remove pre-existing
 		// output or add input above the starting quantity after an external callback changed it.
 		for (int32 Index = AppliedOutputs.Num() - 1; Index >= 0; --Index)
@@ -1246,23 +1261,26 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 		const bool bRestored = OutResult.InputsConsumed.IsEmpty() && OutResult.OutputsProduced.IsEmpty() && Matches(Initial);
 		OutResult.Status = bRestored ? Failure : ETerritoryProductionStatus::RollbackIncomplete;
 		OutResult.FailureReason = bRestored
-			? NSLOCTEXT("TerritoryProduction", "RecipeCompensated", "The inventory changed during settlement; the recipe was cancelled and its item quantities restored.")
+			? NSLOCTEXT("TerritoryProduction", "RecipeCompensated", "The faction account or inventory changed during settlement; the recipe was cancelled and its item quantities restored.")
 			: NSLOCTEXT("TerritoryProduction", "RecipeCompensationIncomplete", "The inventory changed during settlement and some item quantities could not be restored. Check the resource account before retrying.");
 		return false;
 	};
 	for (const FTerritoryResourceAmount& Input : Inputs)
 	{
 		if (!IsCurrent()) return Superseded();
+		if (!IsAccountCurrent()) return Compensate(ETerritoryProductionStatus::SettlementChanged);
 		const int32 Consumed = ConsumeExactItems(Inventory, Input.ItemClass, Input.Quantity, IsCurrent);
 		FTerritoryResourceAmount Applied = Input; Applied.Quantity = Consumed; AppliedInputs.Add(Applied);
 		Expected.FindChecked(Input.ItemClass.Get()) -= Consumed;
 		if (!IsCurrent()) return Superseded();
+		if (!IsAccountCurrent()) return Compensate(ETerritoryProductionStatus::SettlementChanged);
 		if (Consumed != Input.Quantity) return Compensate(ETerritoryProductionStatus::MissingInput);
 		if (!Matches(Expected)) return Compensate(ETerritoryProductionStatus::SettlementChanged);
 	}
 	for (const FTerritoryResourceAmount& Output : Outputs)
 	{
 		if (!IsCurrent()) return Superseded();
+		if (!IsAccountCurrent()) return Compensate(ETerritoryProductionStatus::SettlementChanged);
 		// A preceding callback may have changed capacity or weight since the initial preflight.
 		if (!CanApplyResourceTransaction(Inventory, {}, {Output}, OutResult.Status, OutResult.FailureReason))
 			return Compensate(ETerritoryProductionStatus::StorageFull);
@@ -1270,6 +1288,7 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 		FTerritoryResourceAmount Applied = Output; Applied.Quantity = Added; AppliedOutputs.Add(Applied);
 		Expected.FindChecked(Output.ItemClass.Get()) += Added;
 		if (!IsCurrent()) return Superseded();
+		if (!IsAccountCurrent()) return Compensate(ETerritoryProductionStatus::SettlementChanged);
 		if (Added != Output.Quantity) return Compensate(ETerritoryProductionStatus::StorageFull);
 		if (!Matches(Expected)) return Compensate(ETerritoryProductionStatus::SettlementChanged);
 	}
@@ -1504,7 +1523,7 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 				ResolveResourceInventory(Site.OwnerFaction))
 			{
 				ExecuteResourceRecipeOnInventory(Inventory, Site.OwnerFaction, *Rule,
-					Site.UpgradeLevel, 1, Result);
+					Site.UpgradeLevel, 1, Result, [&]() { return ResolveResourceInventory(Site.OwnerFaction) == Inventory; });
 				// Never dereference a checkpoint from before a synchronous campaign restore.
 				if (EvaluationRestoreGeneration != ProductionRestoreGeneration
 					|| Result.Status == ETerritoryProductionStatus::Superseded) return;

@@ -133,7 +133,7 @@ bool FTerritoryProductionInventoryTransactionTest::RunTest(const FString& Parame
 	UTerritoryEconomySubsystem* Economy = NewObject<UTerritoryEconomySubsystem>();
 	FTerritoryProductionResult Result;
 	const bool bSettled = Economy->ExecuteResourceRecipeOnInventory(
-		Inventory, FGameplayTag(), Recipe, 0, 1, Result);
+		Inventory, FGameplayTag(), Recipe, 0, 1, Result, []() { return true; });
 	TestTrue(TEXT("A complete recipe settles"), bSettled);
 	TestTrue(TEXT("A successful recipe returns a verified result"), Result.bSuccess);
 	TestEqual(TEXT("The input class is debited exactly"),
@@ -145,7 +145,7 @@ bool FTerritoryProductionInventoryTransactionTest::RunTest(const FString& Parame
 
 	FTerritoryProductionResult MissingInputResult;
 	const bool bRejected = Economy->ExecuteResourceRecipeOnInventory(
-		Inventory, FGameplayTag(), Recipe, 0, 2, MissingInputResult);
+		Inventory, FGameplayTag(), Recipe, 0, 2, MissingInputResult, []() { return true; });
 	TestFalse(TEXT("A recipe with insufficient input is rejected"), bRejected);
 	TestEqual(TEXT("Missing input is reported precisely"), MissingInputResult.Status,
 		ETerritoryProductionStatus::MissingInput);
