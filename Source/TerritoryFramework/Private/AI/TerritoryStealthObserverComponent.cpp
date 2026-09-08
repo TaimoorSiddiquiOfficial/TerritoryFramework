@@ -1,6 +1,7 @@
 #include "AI/TerritoryStealthObserverComponent.h"
 
 #include "AbilitySystemComponent.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
 #include "AIController.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryStealthProfile.h"

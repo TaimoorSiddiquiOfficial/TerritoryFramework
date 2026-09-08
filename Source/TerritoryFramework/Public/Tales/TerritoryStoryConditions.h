@@ -190,6 +190,7 @@ public:
 		meta=(Categories="Territory", ToolTip="Territory whose real capture progress is inspected."))
 	FGameplayTag TerritoryToCheck;
 
+	/** Numeric comparison used between the live value and the authored threshold. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryFloatComparison Comparison = ETerritoryFloatComparison::AtLeast;
 
@@ -198,6 +199,7 @@ public:
 			ToolTip="Progress percentage used by the comparison. Example: 75 means capture pressure reached seventy-five percent."))
 	float ProgressPercent = 75.f;
 
+	/** Tolerance in percentage points when comparing two percentages for equality. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(ClampMin="0.0", ClampMax="10.0", Units="Percent",
 			EditCondition="Comparison == ETerritoryFloatComparison::NearlyEqual", EditConditionHides))
@@ -226,6 +228,7 @@ public:
 		meta=(Categories="Narrative.Factions", ToolTip="Faction whose saved reputation is inspected."))
 	FGameplayTag Faction;
 
+	/** Numeric comparison used between the live value and the authored threshold. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryIntegerComparison Comparison = ETerritoryIntegerComparison::AtLeast;
 
@@ -265,6 +268,7 @@ public:
 			ToolTip="Fixed faction whose Claimed Districts are counted. Example: Narrative.Factions.Bandits."))
 	FGameplayTag Faction;
 
+	/** Numeric comparison used between the live value and the authored threshold. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryIntegerComparison Comparison = ETerritoryIntegerComparison::AtLeast;
 
@@ -315,17 +319,21 @@ public:
 		meta=(Categories="Territory", ToolTip="Territory whose finite counterattack record is inspected."))
 	FGameplayTag TerritoryToCheck;
 
+	/** Select the live Territory fact this condition compares; related fields become relevant for that query. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryAssaultConditionQuery Query = ETerritoryAssaultConditionQuery::AnyPendingOrActive;
 
+	/** Assault lifecycle state required by the selected counterattack query. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(EditCondition="Query == ETerritoryAssaultConditionQuery::LatestState", EditConditionHides))
 	ETerritoryAssaultState RequiredState = ETerritoryAssaultState::Active;
 
+	/** Terminal assault outcome required by the selected counterattack query. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(EditCondition="Query == ETerritoryAssaultConditionQuery::LatestResolution", EditConditionHides))
 	ETerritoryAssaultResolution RequiredResolution = ETerritoryAssaultResolution::AllAttackersRemoved;
 
+	/** Numeric comparison used between the live value and the authored threshold. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(EditCondition="Query >= ETerritoryAssaultConditionQuery::PlannedAttackers", EditConditionHides))
 	ETerritoryIntegerComparison Comparison = ETerritoryIntegerComparison::AtLeast;
@@ -414,6 +422,7 @@ public:
 		meta=(ToolTip="Exact Narrative item class used as the strategic resource."))
 	TSubclassOf<UNarrativeItem> ResourceItem;
 
+	/** Numeric comparison used between the live value and the authored threshold. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryIntegerComparison Comparison = ETerritoryIntegerComparison::AtLeast;
 

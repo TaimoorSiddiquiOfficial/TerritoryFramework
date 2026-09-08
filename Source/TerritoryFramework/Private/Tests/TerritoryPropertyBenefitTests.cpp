@@ -97,9 +97,9 @@ bool FTFProjectDistractionAssetWiring::RunTest(const FString& Parameters)
 {
 	(void)Parameters;
 	const FString RockPackage =
-		TEXT("/Game/TerritoryFramework/Stealth/Equippable_Throwable_Rock");
+		TEXT("/TerritoryFramework/Stealth/Equippable_Throwable_Rock");
 	const FString BlacksmithPackage =
-		TEXT("/Game/TerritoryFramework/Definitions/DA_Place_Blacksmith");
+		TEXT("/TerritoryFramework/Definitions/DA_Place_Blacksmith");
 	if (!FPackageName::DoesPackageExist(RockPackage)
 		|| !FPackageName::DoesPackageExist(BlacksmithPackage))
 	{
@@ -108,16 +108,16 @@ bool FTFProjectDistractionAssetWiring::RunTest(const FString& Parameters)
 	}
 
 	UClass* RockClass = LoadClass<UEquippableItem>(nullptr,
-		TEXT("/Game/TerritoryFramework/Stealth/Equippable_Throwable_Rock.Equippable_Throwable_Rock_C"));
+		TEXT("/TerritoryFramework/Stealth/Equippable_Throwable_Rock.Equippable_Throwable_Rock_C"));
 	UClass* AbilityClass = LoadClass<UTerritoryDistractionAbility>(nullptr,
-		TEXT("/Game/TerritoryFramework/Stealth/GA_TerritoryDistraction.GA_TerritoryDistraction_C"));
+		TEXT("/TerritoryFramework/Stealth/GA_TerritoryDistraction.GA_TerritoryDistraction_C"));
 	const UEquippableItem* Rock = RockClass
 		? Cast<UEquippableItem>(RockClass->GetDefaultObject()) : nullptr;
 	const UTerritoryDistractionAbility* Ability = AbilityClass
 		? Cast<UTerritoryDistractionAbility>(AbilityClass->GetDefaultObject()) : nullptr;
 	const UTerritoryPlaceDefinition* Blacksmith =
 		LoadObject<UTerritoryPlaceDefinition>(nullptr,
-			TEXT("/Game/TerritoryFramework/Definitions/DA_Place_Blacksmith.DA_Place_Blacksmith"));
+			TEXT("/TerritoryFramework/Definitions/DA_Place_Blacksmith.DA_Place_Blacksmith"));
 
 	TestNotNull(TEXT("Throwable Rock class loads"), RockClass);
 	TestNotNull(TEXT("Territory distraction ability class loads"), AbilityClass);

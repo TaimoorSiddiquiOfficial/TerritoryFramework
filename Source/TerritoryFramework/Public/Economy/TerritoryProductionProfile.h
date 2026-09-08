@@ -42,9 +42,11 @@ struct TERRITORYFRAMEWORK_API FTerritoryResourceRate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	TSubclassOf<UNarrativeItem> ItemClass;
 
+	/** Base quantity consumed or produced per successful recipe cycle. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production", meta=(ClampMin="0"))
 	int32 QuantityPerCycle = 0;
 
+	/** Additional item quantity per Place upgrade level, added to the base quantity for each cycle. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production", meta=(ClampMin="0"))
 	int32 QuantityPerUpgradeLevel = 0;
 };
@@ -55,9 +57,11 @@ struct TERRITORYFRAMEWORK_API FTerritoryResourceAmount
 {
 	GENERATED_BODY()
 
+	/** Narrative item class represented by this resource entry; settlement matches the exact class. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	TSubclassOf<UNarrativeItem> ItemClass;
 
+	/** Number of items represented by this resource entry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	int32 Quantity = 0;
 };
@@ -72,6 +76,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionRule
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag RuleTag;
 
+	/** Readable name shown to designers or players; stable tags and IDs still identify this entry. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	FText DisplayName;
 
@@ -79,12 +84,15 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionRule
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	int32 Priority = 0;
 
+	/** Narrative item quantities required and consumed for one successful production cycle. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceRate> Inputs;
 
+	/** Narrative item quantities credited only after the complete production transaction succeeds. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceRate> Outputs;
 
+	/** Lowest Place upgrade level at which this production rule can operate. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production", meta=(ClampMin="0"))
 	int32 MinimumUpgradeLevel = 0;
 
@@ -92,9 +100,11 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionRule
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	bool bRequiresClaimedState = true;
 
+	/** Pause this production rule while the Place is under active capture contest. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	bool bPauseWhileContested = true;
 
+	/** Allow this recipe to run when its ownership, state, upgrade and inventory requirements pass. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	bool bEnabled = true;
 };
@@ -105,15 +115,19 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionCheckpoint
 {
 	GENERATED_BODY()
 
+	/** Stable saved identity of the Territory represented by this record. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGuid TerritoryGUID;
 
+	/** Stable Territory GameplayTag used by lookups, Narrative conditions and hierarchy references. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag TerritoryTag;
 
+	/** Stable tag identifying one production rule across saves and UI queries. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag RuleTag;
 
+	/** Narrative faction owning the Territory represented by this row. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag OwnerFaction;
 
@@ -128,24 +142,31 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionRuleState
 {
 	GENERATED_BODY()
 
+	/** Stable tag identifying one production rule across saves and UI queries. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag RuleTag;
 
+	/** Readable name shown to designers or players; stable tags and IDs still identify this entry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FText DisplayName;
 
+	/** Current result or blocking state of this operation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	ETerritoryProductionStatus Status = ETerritoryProductionStatus::NeverEvaluated;
 
+	/** Most recent campaign cycle in which this entry was evaluated. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	int64 LastEvaluatedCycle = INDEX_NONE;
 
+	/** Readable explanation of the current status. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FText StatusReason;
 
+	/** Input item quantities recorded by the latest production evaluation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceAmount> LastInputs;
 
+	/** Output item quantities recorded by the latest production evaluation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceAmount> LastOutputs;
 };
@@ -156,21 +177,27 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionSiteRecord
 {
 	GENERATED_BODY()
 
+	/** Stable saved identity of the Territory represented by this record. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGuid TerritoryGUID;
 
+	/** Stable Territory GameplayTag used by lookups, Narrative conditions and hierarchy references. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag TerritoryTag;
 
+	/** Stable tag of this entry's parent District or City. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag ParentTerritoryTag;
 
+	/** Readable name shown to designers or players; stable tags and IDs still identify this entry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FText DisplayName;
 
+	/** Narrative faction owning the Territory represented by this row. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag OwnerFaction;
 
+	/** Reusable input/output recipes processed by the existing Territory economy and Narrative inventory systems. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	TSoftObjectPtr<class UTerritoryProductionProfile> ProductionProfile;
 
@@ -182,30 +209,39 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionSiteRecord
 	UPROPERTY(SaveGame)
 	int32 StateRulesVersion = 0;
 
+	/** Requested Place upgrade level used by the selected scripted operation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	int32 UpgradeLevel = 0;
 
+	/** Current political state, separate from story availability. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	ETerritoryState TerritoryState = ETerritoryState::Unclaimed;
 
+	/** Story access state, such as Locked or Unlocked; separate from who owns the Territory. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
 
+	/** Most recently recorded production outcome or blocking status. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	ETerritoryProductionStatus LastStatus = ETerritoryProductionStatus::NeverEvaluated;
 
+	/** Stable tag of the last production rule evaluated. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag LastRuleTag;
 
+	/** Most recent campaign cycle in which this entry was evaluated. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	int64 LastEvaluatedCycle = INDEX_NONE;
 
+	/** Readable explanation of the current status. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FText StatusReason;
 
+	/** Input item quantities recorded by the latest production evaluation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceAmount> LastInputs;
 
+	/** Output item quantities recorded by the latest production evaluation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceAmount> LastOutputs;
 
@@ -220,15 +256,19 @@ struct TERRITORYFRAMEWORK_API FTerritoryFactionResourceSnapshot
 {
 	GENERATED_BODY()
 
+	/** Exact Narrative faction represented by this setting or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag Faction;
 
+	/** Resource rows included in this result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceAmount> Resources;
 
+	/** Whether the required Narrative storage account can be resolved. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	bool bStorageAvailable = false;
 
+	/** Campaign cycle represented by this saved or replicated snapshot. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")
 	int64 SnapshotCycle = INDEX_NONE;
 };
@@ -239,36 +279,47 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionResult
 {
 	GENERATED_BODY()
 
+	/** Whether this result reports verified success. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	bool bSuccess = false;
 
+	/** Current result or blocking state of this operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	ETerritoryProductionStatus Status = ETerritoryProductionStatus::NeverEvaluated;
 
+	/** Unique ID grouping results from the same settlement batch. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	FGuid BatchID;
 
+	/** Stable saved identity of the Territory represented by this record. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	FGuid TerritoryGUID;
 
+	/** Stable Territory GameplayTag used by lookups, Narrative conditions and hierarchy references. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag TerritoryTag;
 
+	/** Exact Narrative faction represented by this setting or result. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag Faction;
 
+	/** Stable tag identifying one production rule across saves and UI queries. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	FGameplayTag RuleTag;
 
+	/** Campaign production cycle represented by this record. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	int64 CycleIndex = INDEX_NONE;
 
+	/** Item quantities actually consumed by this settlement result. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceAmount> InputsConsumed;
 
+	/** Item quantities actually credited by this settlement result. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryResourceAmount> OutputsProduced;
 
+	/** Explains why the requested operation did not succeed. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	FText FailureReason;
 };
@@ -280,12 +331,15 @@ class TERRITORYFRAMEWORK_API UTerritoryProductionProfile : public UPrimaryDataAs
 	GENERATED_BODY()
 
 public:
+	/** Readable name shown to designers or players; stable tags and IDs still identify this entry. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	FText DisplayName;
 
+	/** Reusable production recipes evaluated in priority and stable-tag order. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	TArray<FTerritoryProductionRule> Rules;
 
+	/** Check production recipes and quantity rules without consuming items or paying currency. */
 	UFUNCTION(BlueprintPure, Category="Territory|Production")
 	bool ValidateProfile(FText& OutFailureReason) const;
 

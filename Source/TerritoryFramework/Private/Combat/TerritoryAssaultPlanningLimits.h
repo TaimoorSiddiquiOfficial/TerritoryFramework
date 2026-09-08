@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/Greater.h"
 
 // Pure calculations used by the existing server-owned assault planner.
 namespace TerritoryAssaultPlanning

@@ -89,6 +89,7 @@ public:
 	/** NPC ragdoll mutations are authored by the server and projected by Narrative replication. */
 	virtual void SetRagdoll(bool bWantsRagdoll) override;
 
+	/** Tracks this NPC's one finite assault membership and reports its casualty or withdrawal. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Assault")
 	TObjectPtr<UTerritoryAssaultParticipantComponent> AssaultParticipant;
 

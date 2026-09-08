@@ -1,4 +1,5 @@
 #include "UI/TerritoryDistrictManagementWidget.h"
+#include "GameFramework/Pawn.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"

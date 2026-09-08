@@ -104,10 +104,12 @@ public:
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Child Territories"))
 	static TArray<ATerritoryVolume*> GetChildTerritories(const UObject* WorldContextObject, const FGameplayTag& ParentTag);
 
+	/** Return the number of Territories included in the current query. */
 	UFUNCTION(BlueprintPure, Category="Territory|Query",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Territory Count"))
 	static int32 GetTerritoryCount(const UObject* WorldContextObject);
 
+	/** Count Territories owned by the exact Narrative faction in the available Territory data. */
 	UFUNCTION(BlueprintPure, Category="Territory|Query",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction Territory Count"))
 	static int32 GetFactionTerritoryCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag);
@@ -179,10 +181,12 @@ public:
 	// Capture Shortcuts
 	// ═══════════════════════════════════════════════════════════════════════════════
 
+	/** Read whether the selected Territory is Unclaimed, Contested, or Claimed. This does not change its owner or unlock it. */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Territory State"))
 	static ETerritoryState GetTerritoryState(const UObject* WorldContextObject, const FGameplayTag& TerritoryTag);
 
+	/** Return current capture progress from 0 to 1. A value of 0.5 means half complete. */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Capture Progress"))
 	static float GetCaptureProgress(const UObject* WorldContextObject, const FGameplayTag& TerritoryTag);
@@ -199,6 +203,7 @@ public:
 	// Diplomacy Shortcuts
 	// ═══════════════════════════════════════════════════════════════════════════════
 
+	/** Read the current treaty between two Narrative factions, such as war, peace, or alliance. This does not change their relationship. */
 	UFUNCTION(BlueprintPure, Category="Territory|Diplomacy",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Treaty State"))
 	static EDiplomacyState GetTreatyState(const UObject* WorldContextObject, const FGameplayTag& FactionA, const FGameplayTag& FactionB);
@@ -320,6 +325,7 @@ public:
 		meta=(WorldContext="WorldContextObject", DisplayName="Does Faction Control City"))
 	static bool DoesFactionControlCity(const UObject* WorldContextObject, ATerritoryCity* City, const FGameplayTag& FactionTag);
 
+	/** Count Cities owned by the exact Narrative faction in the available Territory data. */
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction City Count"))
 	static int32 GetFactionCityCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag);

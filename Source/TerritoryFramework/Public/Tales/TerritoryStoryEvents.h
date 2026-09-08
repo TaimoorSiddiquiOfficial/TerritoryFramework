@@ -71,6 +71,7 @@ public:
 			ToolTip="Root City, District, or Place. Easy example: choose Haven Reach to change every currently loaded District and Place below it after a betrayal quest."))
 	FGameplayTag RootTerritory;
 
+	/** Choose the upgrade operation performed by this Narrative event. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
 	ETerritoryHierarchyStoryOperation Operation =
 		ETerritoryHierarchyStoryOperation::ClaimForFaction;
@@ -196,6 +197,7 @@ class TERRITORYFRAMEWORK_API UTerritoryCancelEnemyWavesEvent : public UNarrative
 public:
 	UTerritoryCancelEnemyWavesEvent(const FObjectInitializer& ObjectInitializer);
 
+	/** Territory targeted by this operation or result. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(Categories="Territory"))
 	FGameplayTag TargetTerritory;
 
@@ -223,6 +225,7 @@ class TERRITORYFRAMEWORK_API UTerritorySetGarrisonTargetEvent : public UNarrativ
 public:
 	UTerritorySetGarrisonTargetEvent(const FObjectInitializer& ObjectInitializer);
 
+	/** Territory targeted by this operation or result. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(Categories="Territory"))
 	FGameplayTag TargetTerritory;
 
@@ -278,6 +281,7 @@ public:
 		meta=(ToolTip="Atomic Narrative inventory inputs and outputs. Example: consume medicine supplies and produce one relief package."))
 	FTerritoryProductionRule Recipe;
 
+	/** Requested Place upgrade level used by the selected scripted operation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(ClampMin="0"))
 	int32 UpgradeLevel = 0;
 

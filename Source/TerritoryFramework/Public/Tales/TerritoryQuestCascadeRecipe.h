@@ -138,12 +138,15 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeValidation
 {
 	GENERATED_BODY()
 
+	/** Whether the report passed its required checks; read Errors for any problems. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	bool bValid = false;
 
+	/** Problems that must be fixed before this operation or asset can be considered valid. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	TArray<FText> Errors;
 
+	/** Non-blocking issues to review before relying on the result. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	TArray<FText> Warnings;
 };
@@ -154,6 +157,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeLogicSummary
 {
 	GENERATED_BODY()
 
+	/** Whether the report passed its required checks; read Errors for any problems. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	bool bValid = false;
 
@@ -161,30 +165,39 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeLogicSummary
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	FString Source;
 
+	/** Name read from the quest or recipe being inspected. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	FText InspectedQuestName;
 
+	/** Description read from the quest or recipe being inspected. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	FText InspectedQuestDescription;
 
+	/** Quest state selected as the starting point in this inspection. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	FName InspectedStartState = NAME_None;
 
+	/** Whether the inspected quest is configured to be tracked in Narrative's quest UI. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	bool bInspectedQuestTracked = false;
 
+	/** Number of normal objective states in the quest plan. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 ObjectiveStates = 0;
 
+	/** Number of success-ending states in the quest plan. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 SuccessEndings = 0;
 
+	/** Number of failure-ending states in this quest plan. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 FailureEndings = 0;
 
+	/** Number of quest routes or branches represented by this plan. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 Routes = 0;
 
+	/** Number of player tasks included in the quest plan. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 PlayerTasks = 0;
 
@@ -192,33 +205,43 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestCascadeLogicSummary
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 InternalTasks = 0;
 
+	/** Narrative conditions that must all pass before this node is eligible. Alternative reply nodes provide OR branches. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 Conditions = 0;
 
+	/** Narrative events attached to this generated dialogue node and executed by the normal dialogue flow. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 Events = 0;
 
+	/** Number of automatic save checkpoints included in the generated quest plan. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 AutomaticCheckpoints = 0;
 
+	/** Number of quest tasks marked optional. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 OptionalTasks = 0;
 
+	/** Number of quest tasks hidden from the normal player task list. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 HiddenTasks = 0;
 
+	/** Number of quest tasks configured to display a navigation marker. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	int32 NavigationMarkerTasks = 0;
 
+	/** Short readable summary of this report. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	FString Headline;
 
+	/** Readable lines describing the quest's states and possible routes. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	TArray<FString> FlowLines;
 
+	/** Problems that must be fixed before this operation or asset can be considered valid. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	TArray<FText> Errors;
 
+	/** Non-blocking issues to review before relying on the result. */
 	UPROPERTY(BlueprintReadOnly, Category="Mission Summary")
 	TArray<FText> Warnings;
 };

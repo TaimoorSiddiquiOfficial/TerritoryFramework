@@ -10,6 +10,9 @@
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
+#include "GameplayTagsManager.h"
+#include "Interfaces/IPluginManager.h"
+#include "Misc/Paths.h"
 
 #if WITH_GAMEPLAY_DEBUGGER
 #include "Debug/TerritoryGameplayDebuggerCategory.h"
@@ -371,6 +374,14 @@ namespace
 
 void FTerritoryFrameworkModule::StartupModule()
 {
+	// Register the included example identities before their Definitions are loaded.
+	// Gameplay Tags remains the single tag registry for both plugin and project data.
+	if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TerritoryFramework")))
+	{
+		UGameplayTagsManager::Get().AddTagIniSearchPath(
+			FPaths::Combine(Plugin->GetBaseDir(), TEXT("Config/Tags")));
+	}
+
 #if WITH_GAMEPLAY_DEBUGGER
 	IGameplayDebugger& GameplayDebugger = IGameplayDebugger::Get();
 	GameplayDebugger.RegisterCategory(TEXT("Territory"),

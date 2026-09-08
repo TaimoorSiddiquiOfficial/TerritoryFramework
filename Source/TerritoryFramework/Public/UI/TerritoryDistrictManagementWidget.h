@@ -22,27 +22,35 @@ class TERRITORYFRAMEWORK_API UTerritoryDistrictManagementWidget : public UTerrit
 	GENERATED_BODY()
 
 public:
+	/** Bind this management screen to a District and its explicit player context. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void InitializeManagement(ATerritoryDistrictManagementPoint* ManagementPoint);
 
+	/** Return the District currently selected for management. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	ATerritoryDistrict* GetManagedDistrict() const;
 
+	/** Return the exact Narrative faction represented by the current player's management context. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	FGameplayTag GetManagedFaction() const;
 
+	/** Return the income displayed for the currently managed District. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	int32 GetDistrictIncome() const;
 
+	/** Check whether the current viewer may request a guard purchase. The server rechecks the request before charging. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	bool CanPurchaseGuard(FText& OutFailureReason) const;
 
+	/** Check whether the current viewer may request a guard removal. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	bool CanRemoveGuard(FText& OutFailureReason) const;
 
+	/** Refresh the management screen from the existing Territory state; does not purchase or upgrade anything. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RefreshManagementDisplay();
 
+	/** Return this widget's current read-only Territory operations data. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	FTerritoryDistrictOperationsView GetOperationsView() const { return OperationsView; }
 
@@ -50,6 +58,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestAddGuards(int32 Count = 1);
 
+	/** Send a guard removal request for server validation. Use the result event to know whether it succeeded. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestRemoveGuards(int32 Count = 1);
 
@@ -107,6 +116,7 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> CloseButton;
 
+	/** Blueprint presentation hook called after management data has been refreshed. */
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|Management")
 	void OnManagementRefreshed();
 

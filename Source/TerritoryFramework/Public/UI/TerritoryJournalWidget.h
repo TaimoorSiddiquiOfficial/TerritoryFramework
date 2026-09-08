@@ -32,6 +32,7 @@ class TERRITORYFRAMEWORK_API UTerritoryJournalWidget : public UTerritoryActivata
 	GENERATED_BODY()
 
 public:
+	/** Rebuild the journal's District rows using the current viewer and filter. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void RefreshDistrictList();
 
@@ -49,9 +50,11 @@ public:
 		meta=(DisplayName="Show District Tag In Territory Journal"))
 	void SelectDistrictByTag(FGameplayTag DistrictTag);
 
+	/** Return the current journal selection's read-only District data. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	FTerritoryDistrictOperationsView GetSelectedDistrictOperationsView() const;
 
+	/** Choose which Districts the journal or operations list displays. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void SetOperationsFilter(ETerritoryOperationsFilter Filter);
 

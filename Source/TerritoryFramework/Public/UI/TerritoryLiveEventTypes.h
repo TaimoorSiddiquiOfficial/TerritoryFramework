@@ -77,6 +77,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryLiveEvent
 {
 	GENERATED_BODY()
 
+	/** Unique ID used to identify and deduplicate this event. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	FGuid EventID;
 
@@ -84,24 +85,31 @@ struct TERRITORYFRAMEWORK_API FTerritoryLiveEvent
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	FGuid SourceRecordID;
 
+	/** Kind of operation or record represented by this entry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	ETerritoryLiveEventType Type = ETerritoryLiveEventType::Contested;
 
+	/** Group used to organize this event or result in the UI. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	ETerritoryIntelligenceCategory Category = ETerritoryIntelligenceCategory::Control;
 
+	/** Importance level used to present this notification. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	ETerritoryIntelligenceSeverity Severity = ETerritoryIntelligenceSeverity::Information;
 
+	/** Stable Territory GameplayTag used by lookups, Narrative conditions and hierarchy references. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events", meta=(Categories="Territory"))
 	FGameplayTag TerritoryTag;
 
+	/** Readable Territory name displayed by this entry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	FText TerritoryName;
 
+	/** Short readable summary of this report. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	FText Headline;
 
+	/** Additional explanation of this event or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	FText Detail;
 
@@ -140,9 +148,11 @@ struct TERRITORYFRAMEWORK_API FTerritoryLiveEvent
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Live Events")
 	double CreatedRealTime = 0.0;
 
+	/** How long this notification stays active, in seconds. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Live Events")
 	float ActiveDuration = 30.f;
 
+	/** Whether a usable navigation target is available for this entry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Live Events")
 	bool bCanSetWaypoint = false;
 

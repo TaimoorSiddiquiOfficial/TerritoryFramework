@@ -22,6 +22,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Resources")
 	FGameplayTag Faction;
 
+	/** Register this faction resource account with the economy subsystem when the component begins play. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Resources")
 	bool bAutoRegister = true;
 
@@ -35,12 +36,15 @@ public:
 		meta=(ClampMin="1", EditCondition="bAutoRegister"))
 	int32 MaxRegistrationAttempts = 30;
 
+	/** Register this component's eligible Narrative inventory as the faction's resource account on the server. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Resources")
 	bool RegisterResourceAccount();
 
+	/** Remove this component's resource-account registration without deleting its inventory. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Resources")
 	void UnregisterResourceAccount();
 
+	/** Check whether this component's Narrative inventory is currently registered as faction storage. */
 	UFUNCTION(BlueprintPure, Category="Territory|Resources")
 	bool IsResourceAccountRegistered() const { return bRegistered; }
 

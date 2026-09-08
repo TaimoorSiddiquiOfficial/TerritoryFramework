@@ -16,9 +16,11 @@ class TERRITORYFRAMEWORK_API UTerritoryResourceRowWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	/** Populate this resource row from an existing resource view. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI|Resources")
 	void InitializeResourceView(const FTerritoryResourceOperationsView& InView);
 
+	/** Return the read-only resource data currently displayed by this row. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Resources")
 	FTerritoryResourceOperationsView GetResourceView() const { return ResourceView; }
 
@@ -30,6 +32,7 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UNarrativeCommonTextBlock> StoredQuantityText;
 	UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UNarrativeCommonTextBlock> ResourceFlowText;
 
+	/** Blueprint presentation hook called after the row's resource data changes. */
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|UI|Resources")
 	void OnResourceViewChanged(const FTerritoryResourceOperationsView& View);
 
@@ -46,12 +49,15 @@ class TERRITORYFRAMEWORK_API UTerritoryProductionSiteRowWidget : public UUserWid
 	GENERATED_BODY()
 
 public:
+	/** Populate this row from an existing production-site view. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI|Production")
 	void InitializeProductionSiteView(const FTerritoryProductionSiteOperationsView& InView);
 
+	/** Return the read-only production-site data currently displayed by this row. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Production")
 	FTerritoryProductionSiteOperationsView GetProductionSiteView() const { return ProductionSiteView; }
 
+	/** Widget class used to display one production resource input or output row. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|UI|Production")
 	TSubclassOf<UTerritoryResourceRowWidget> ResourceRowClass;
 
@@ -63,6 +69,7 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UNarrativeCommonTextBlock> ProductionReasonText;
 	UPROPERTY(meta=(BindWidgetOptional)) TObjectPtr<UVerticalBox> ResourceRows;
 
+	/** Blueprint presentation hook called after the production-site data changes. */
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|UI|Production")
 	void OnProductionSiteViewChanged(const FTerritoryProductionSiteOperationsView& View);
 

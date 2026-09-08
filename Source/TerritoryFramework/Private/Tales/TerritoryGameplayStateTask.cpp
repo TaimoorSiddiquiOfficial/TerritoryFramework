@@ -1,6 +1,8 @@
 #include "Tales/TerritoryGameplayStateTask.h"
+#include "GameFramework/Pawn.h"
 
 #include "AbilitySystemComponent.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 
 void UTerritoryGameplayStateTask::BeginTask()

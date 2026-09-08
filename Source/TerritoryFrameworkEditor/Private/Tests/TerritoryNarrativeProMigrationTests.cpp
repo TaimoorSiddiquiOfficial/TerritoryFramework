@@ -104,15 +104,15 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 {
 	using namespace TerritoryNarrativeMigrationTests;
 	static const TCHAR* ProjectFixturePackages[] = {
-		TEXT("/Game/TerritoryFramework/Framework/BP_TerritoryPlayerCharacter"),
-		TEXT("/Game/TerritoryFramework/Framework/BP_TerritoryGameMode"),
-		TEXT("/Game/TerritoryFramework/Framework/Controller_Reworked/BP_HopNarrativePlayerController_DemoMap"),
-		TEXT("/Game/TerritoryFramework/UI/WBP_TerritoryGameplayHUD_Modular"),
-		TEXT("/Game/TerritoryFramework/AI/BP_TerritoryGuard"),
-		TEXT("/Game/TerritoryFramework/AI/BP_TerritoryAssualtGuard1"),
-		TEXT("/Game/TerritoryFramework/AI/Combat/GA_TerritoryGuardSwordAttack"),
-		TEXT("/Game/TerritoryFramework/Blueprints/BP_Property_Blacksmith"),
-		TEXT("/Game/TerritoryFramework/AI/BPA_ReturnToTerritory")
+		TEXT("/TerritoryFramework/Framework/BP_TerritoryPlayerCharacter"),
+		TEXT("/TerritoryFramework/Framework/BP_TerritoryGameMode"),
+		TEXT("/TerritoryFramework/Framework/Controller_Reworked/BP_HopNarrativePlayerController_DemoMap"),
+		TEXT("/TerritoryFramework/UI/WBP_TerritoryGameplayHUD_Modular"),
+		TEXT("/TerritoryFramework/AI/BP_TerritoryGuard"),
+		TEXT("/TerritoryFramework/AI/BP_TerritoryAssualtGuard1"),
+		TEXT("/TerritoryFramework/AI/Combat/GA_TerritoryGuardSwordAttack"),
+		TEXT("/TerritoryFramework/Blueprints/BP_Property_Blacksmith"),
+		TEXT("/TerritoryFramework/AI/BPA_ReturnToTerritory")
 	};
 	if (!AnyProjectFixtureExists(ProjectFixturePackages))
 	{
@@ -123,13 +123,13 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 	UBlueprint* VendorPlayer = LoadBlueprint(
 		TEXT("/NarrativePro/Pro/Core/Character/BP/BP_NarrativePlayer_GASP.BP_NarrativePlayer_GASP"));
 	UBlueprint* ProjectPlayer = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/Framework/BP_TerritoryPlayerCharacter.BP_TerritoryPlayerCharacter"));
+		TEXT("/TerritoryFramework/Framework/BP_TerritoryPlayerCharacter.BP_TerritoryPlayerCharacter"));
 	UBlueprint* TerritoryGameMode = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/Framework/BP_TerritoryGameMode.BP_TerritoryGameMode"));
+		TEXT("/TerritoryFramework/Framework/BP_TerritoryGameMode.BP_TerritoryGameMode"));
 	UBlueprint* ProjectController = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/Framework/Controller_Reworked/BP_HopNarrativePlayerController_DemoMap.BP_HopNarrativePlayerController_DemoMap"));
+		TEXT("/TerritoryFramework/Framework/Controller_Reworked/BP_HopNarrativePlayerController_DemoMap.BP_HopNarrativePlayerController_DemoMap"));
 	UBlueprint* ProjectGameplayHUD = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/UI/WBP_TerritoryGameplayHUD_Modular.WBP_TerritoryGameplayHUD_Modular"));
+		TEXT("/TerritoryFramework/UI/WBP_TerritoryGameplayHUD_Modular.WBP_TerritoryGameplayHUD_Modular"));
 
 	TestNotNull(TEXT("Narrative Pro player Blueprint loads"), VendorPlayer);
 	TestNotNull(TEXT("Project-owned Territory player Blueprint loads"), ProjectPlayer);
@@ -184,8 +184,11 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 				DefinitionProperty->GetObjectPropertyValue(Definitions.GetRawPtr(Index)));
 			TestNotNull(TEXT("Every configured Player Definition resolves"), Definition);
 			if (!Definition) continue;
-			TestTrue(TEXT("Player Definition lives in project content for reliable bundles"),
-				Definition->GetPackage()->GetName().StartsWith(TEXT("/Game/")));
+			const FString DefinitionPackage = Definition->GetPackage()->GetName();
+			TestTrue(TEXT("Player Definition uses saved project or installed plugin content"),
+				DefinitionPackage.StartsWith(TEXT("/Game/"))
+				|| DefinitionPackage.StartsWith(TEXT("/TerritoryFramework/"))
+				|| DefinitionPackage.StartsWith(TEXT("/NarrativePro/")));
 			TestFalse(TEXT("Player Definition has a Default Appearance"),
 				Definition->DefaultAppearance.IsNull());
 			TestNotNull(TEXT("Player Definition Default Appearance loads"),
@@ -283,7 +286,7 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 			TEXT("TerritoryCaptureHUD")));
 
 	UBlueprint* TerritoryGuard = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/AI/BP_TerritoryGuard.BP_TerritoryGuard"));
+		TEXT("/TerritoryFramework/AI/BP_TerritoryGuard.BP_TerritoryGuard"));
 	TestNotNull(TEXT("Territory guard Blueprint loads"), TerritoryGuard);
 	if (TerritoryGuard)
 	{
@@ -323,7 +326,7 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 	}
 
 	UBlueprint* Blacksmith = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/Blueprints/BP_Property_Blacksmith.BP_Property_Blacksmith"));
+		TEXT("/TerritoryFramework/Blueprints/BP_Property_Blacksmith.BP_Property_Blacksmith"));
 	TestNotNull(TEXT("Blacksmith property Blueprint loads"), Blacksmith);
 	if (Blacksmith)
 	{
@@ -334,12 +337,12 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 	}
 
 	static const TCHAR* StrictDefinitionBlueprints[] = {
-		TEXT("/Game/TerritoryFramework/Core/BP_TerritoryVolume.BP_TerritoryVolume"),
-		TEXT("/Game/TerritoryFramework/Blueprints/BP_City_HavenReach.BP_City_HavenReach"),
-		TEXT("/Game/TerritoryFramework/Blueprints/BP_District_MarketSquare.BP_District_MarketSquare"),
-		TEXT("/Game/TerritoryFramework/Blueprints/BP_District_CastleHill.BP_District_CastleHill"),
-		TEXT("/Game/TerritoryFramework/Blueprints/BP_Property_Blacksmith.BP_Property_Blacksmith"),
-		TEXT("/Game/TerritoryFramework/Blueprints/BP_Property_Farm.BP_Property_Farm")
+		TEXT("/TerritoryFramework/Core/BP_TerritoryVolume.BP_TerritoryVolume"),
+		TEXT("/TerritoryFramework/Blueprints/BP_City_HavenReach.BP_City_HavenReach"),
+		TEXT("/TerritoryFramework/Blueprints/BP_District_MarketSquare.BP_District_MarketSquare"),
+		TEXT("/TerritoryFramework/Blueprints/BP_District_CastleHill.BP_District_CastleHill"),
+		TEXT("/TerritoryFramework/Blueprints/BP_Property_Blacksmith.BP_Property_Blacksmith"),
+		TEXT("/TerritoryFramework/Blueprints/BP_Property_Farm.BP_Property_Farm")
 	};
 	for (const TCHAR* BlueprintPath : StrictDefinitionBlueprints)
 	{
@@ -355,7 +358,7 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 	}
 
 	UBlueprint* ReturnActivity = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/AI/BPA_ReturnToTerritory.BPA_ReturnToTerritory"));
+		TEXT("/TerritoryFramework/AI/BPA_ReturnToTerritory.BPA_ReturnToTerritory"));
 	TestNotNull(TEXT("Return-to-Territory activity loads"), ReturnActivity);
 	if (ReturnActivity)
 	{
@@ -558,7 +561,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	}
 
 	UBlueprint* TerritoryAssaultGuard = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/AI/BP_TerritoryAssualtGuard1.BP_TerritoryAssualtGuard1"));
+		TEXT("/TerritoryFramework/AI/BP_TerritoryAssualtGuard1.BP_TerritoryAssualtGuard1"));
 	TestNotNull(TEXT("Territory assault guard Blueprint loads"), TerritoryAssaultGuard);
 	if (TerritoryAssaultGuard)
 	{
@@ -578,7 +581,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	}
 
 	UBlueprint* TerritorySwordAttack = LoadBlueprint(
-		TEXT("/Game/TerritoryFramework/AI/Combat/GA_TerritoryGuardSwordAttack.GA_TerritoryGuardSwordAttack"));
+		TEXT("/TerritoryFramework/AI/Combat/GA_TerritoryGuardSwordAttack.GA_TerritoryGuardSwordAttack"));
 	TestNotNull(TEXT("Territory sword attack ability loads"), TerritorySwordAttack);
 	if (TerritorySwordAttack)
 	{
@@ -603,7 +606,7 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	}
 
 	UClass* AdaptiveEffectClass = LoadClass<UGameplayEffect>(nullptr,
-		TEXT("/Game/TerritoryFramework/AI/Combat/GE_TerritoryAdaptiveEnemyPower.GE_TerritoryAdaptiveEnemyPower_C"));
+		TEXT("/TerritoryFramework/AI/Combat/GE_TerritoryAdaptiveEnemyPower.GE_TerritoryAdaptiveEnemyPower_C"));
 	const UGameplayEffect* AdaptiveEffect = AdaptiveEffectClass
 		? AdaptiveEffectClass->GetDefaultObject<UGameplayEffect>() : nullptr;
 	TestNotNull(TEXT("Adaptive Narrative Attack Damage effect loads"), AdaptiveEffect);

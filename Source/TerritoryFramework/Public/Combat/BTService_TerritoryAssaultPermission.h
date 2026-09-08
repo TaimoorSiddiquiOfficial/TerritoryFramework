@@ -25,9 +25,11 @@ public:
 	UPROPERTY(EditAnywhere, Category="Blackboard")
 	FBlackboardKeySelector TerritoryKey;
 
+	/** Boolean Blackboard key updated with the current Territory attack-slot permission. */
 	UPROPERTY(EditAnywhere, Category="Blackboard")
 	FBlackboardKeySelector PermissionGrantedKey;
 
+	/** Resolve a Territory guard's assigned Territory before the optional Blackboard target. */
 	UPROPERTY(EditAnywhere, Category="Territory")
 	bool bPreferGuardOwningTerritory = true;
 

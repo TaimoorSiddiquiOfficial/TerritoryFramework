@@ -5,6 +5,8 @@
 #include "Core/TerritoryStealthProfile.h"
 #include "DataValidation/TerritoryDataValidator.h"
 #include "Economy/TerritoryProductionProfile.h"
+#include "Items/NarrativeItem.h"
+#include "Tales/Quest.h"
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
 

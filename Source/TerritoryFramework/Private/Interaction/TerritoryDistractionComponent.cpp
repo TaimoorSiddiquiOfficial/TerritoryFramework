@@ -1,4 +1,6 @@
 #include "Interaction/TerritoryDistractionComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Core/TerritoryStealthTags.h"

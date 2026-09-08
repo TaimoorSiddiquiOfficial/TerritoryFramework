@@ -29,10 +29,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
 	TObjectPtr<class UTerritorySituationProfile> SituationProfile;
 
+	/** Stable tag of the Territory targeted by this operation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event",
 		meta = (Categories = "Territory"))
 	FGameplayTag TargetTerritoryTag;
 
+	/** Exact Narrative faction receiving capture credit when the selected source is Explicit Faction. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event",
 		meta = (Categories = "Narrative.Factions"))
 	FGameplayTag CapturingFaction;
@@ -42,6 +44,7 @@ public:
 	ETerritoryCaptureFactionSource CapturingFactionSource =
 		ETerritoryCaptureFactionSource::ExplicitFaction;
 
+	/** Request the privileged scripted capture path instead of normal capture admission. Use only for authored story transitions; the server still owns the mutation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Event")
 	bool bForceCapture = false;
 

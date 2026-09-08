@@ -20,6 +20,16 @@ namespace TerritoryHDRSceneEditor
 	const FName PostProcessTag(TEXT("Territory.AAA.PostProcess"));
 	const FName NarrativeUDSTag(TEXT("Territory.AAA.NarrativeUDS"));
 
+	UClass* LoadNarrativeSkyClass(const FTerritoryHDRSceneOptions& Options)
+	{
+		// A Blueprint saved without the optional integration can have an empty
+		// soft-class pin. Keep the same default as a newly created options struct.
+		// An explicit class, including one that cannot load, remains authoritative.
+		return (Options.NarrativeUltraDynamicSkyClass.IsNull()
+			? FTerritoryHDRSceneOptions().NarrativeUltraDynamicSkyClass
+			: Options.NarrativeUltraDynamicSkyClass).LoadSynchronous();
+	}
+
 	UWorld* GetEditorWorld(FText& OutError)
 	{
 		UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -503,7 +513,7 @@ namespace TerritoryHDRSceneEditor
 
 		if (Options.bEnsureNarrativeUltraDynamicSky)
 		{
-			UClass* SkyClass = Options.NarrativeUltraDynamicSkyClass.LoadSynchronous();
+			UClass* SkyClass = LoadNarrativeSkyClass(Options);
 			int32 SkyCount = 0;
 			if (SkyClass && SkyClass->IsChildOf(AActor::StaticClass()))
 			{
@@ -745,7 +755,7 @@ UTerritoryHDRSceneEditorLibrary::CreateOrUpdateAAAHDRScene(
 		}
 	}
 	// Refuse ambiguous existing authorities before changing either actor.
-	UClass* ExistingSkyClass = Options.NarrativeUltraDynamicSkyClass.LoadSynchronous();
+	UClass* ExistingSkyClass = LoadNarrativeSkyClass(Options);
 	if (Options.bEnsureNarrativeUltraDynamicSky && ExistingSkyClass
 		&& ExistingSkyClass->IsChildOf(AActor::StaticClass())
 		&& !ConfigureSky(Cast<AActor>(ExistingSkyClass->GetDefaultObject()), Options, Report, false))
@@ -776,7 +786,7 @@ UTerritoryHDRSceneEditorLibrary::CreateOrUpdateAAAHDRScene(
 		"Create Or Update Territory AAA HDR Scene"));
 	if (Options.bEnsureNarrativeUltraDynamicSky)
 	{
-		UClass* SkyClass = Options.NarrativeUltraDynamicSkyClass.LoadSynchronous();
+		UClass* SkyClass = LoadNarrativeSkyClass(Options);
 		if (!SkyClass || !SkyClass->IsChildOf(AActor::StaticClass()))
 		{
 			Report.Errors.Add(LOCTEXT("NarrativeUDSUnavailable",

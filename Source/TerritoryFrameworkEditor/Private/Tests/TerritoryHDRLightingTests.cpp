@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "Misc/PackageName.h"
 #include "Editor.h"
 #include "Engine/PostProcessVolume.h"
 #include "Engine/World.h"
@@ -27,6 +28,8 @@ bool FTerritoryHDRLightingPresets::RunTest(const FString& Parameters)
 	};
 	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
 	FTerritoryHDRSceneOptions Options;
+	// The included utility may be saved while its optional plugin is absent.
+	Options.NarrativeUltraDynamicSkyClass.Reset();
 	Options.bAnalyzeLoadedSceneMemory = false;
 	Options.bRunSceneReadinessAudit = false;
 	Options.ExposureCompensation = -0.4f;
@@ -39,10 +42,22 @@ bool FTerritoryHDRLightingPresets::RunTest(const FString& Parameters)
 	ExistingVolume->SetIsSpatiallyLoaded(true);
 	ExistingVolume->bUnbound = true;
 	const auto First = UTerritoryHDRSceneEditorLibrary::CreateOrUpdateAAAHDRScene(Options);
+	if (!FPackageName::DoesPackageExist(TEXT("/NP_UltraDynamicSky/Narrative_UDS_Sky")))
+	{
+		TestFalse(TEXT("Missing optional UDS integration reports failure"), First.bSucceeded);
+		TestNull(TEXT("Missing UDS integration does not create a fake sky"), First.NarrativeUltraDynamicSkyActor);
+		TestTrue(TEXT("The existing post-process volume survives the failed setup"), IsValid(ExistingVolume));
+		AddWarning(TEXT("UDS is not installed: its missing-dependency failure path was tested; live lighting checks were not run."));
+		return true;
+	}
 	if (!TestTrue(TEXT("Actual Narrative UDS setup succeeds"), First.bSucceeded)
 		|| !First.NarrativeUltraDynamicSkyActor || !First.PostProcessVolume) return false;
 	AActor* Sky = First.NarrativeUltraDynamicSkyActor;
 	APostProcessVolume* Volume = First.PostProcessVolume;
+	FTerritoryHDRSceneOptions ExplicitInvalid = Options;
+	ExplicitInvalid.NarrativeUltraDynamicSkyClass = APostProcessVolume::StaticClass();
+	TestFalse(TEXT("An explicit incompatible class is not replaced by the default sky"),
+		UTerritoryHDRSceneEditorLibrary::CreateOrUpdateAAAHDRScene(ExplicitInvalid).bSucceeded);
 	TestEqual(TEXT("Existing unbound volume is migrated in place"), Volume, ExistingVolume);
 	const auto ReadNumber = [Sky](FName Name)
 	{

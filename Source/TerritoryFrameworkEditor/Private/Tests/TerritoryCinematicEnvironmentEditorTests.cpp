@@ -27,7 +27,7 @@ bool FTerritoryAAADialogueShotAssetContract::RunTest(const FString& Parameters)
 		TEXT("LS_Territory_DLG_Reaction"),
 		TEXT("LS_Territory_DLG_Insert")
 	};
-	const FString Folder = TEXT("/Game/TerritoryFramework/Cinematics/Dialogue/Shots");
+	const FString Folder = TEXT("/TerritoryFramework/Cinematics/Dialogue/Shots");
 	if (!FPackageName::DoesPackageExist(Folder / ShotNames[0]))
 	{
 		AddInfo(TEXT("Skipped optional project shot-pack fixture; install or generate the Territory AAA dialogue shot assets first."));

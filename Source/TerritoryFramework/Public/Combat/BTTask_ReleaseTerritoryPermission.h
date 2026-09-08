@@ -22,6 +22,7 @@ public:
 	virtual FString GetStaticDescription() const override;
 
 protected:
+	/** Blackboard object key identifying the Territory whose strategic attacker slot is requested or released. */
 	UPROPERTY(EditAnywhere, Category = "Territory Combat")
 	FBlackboardKeySelector TerritoryKey;
 };

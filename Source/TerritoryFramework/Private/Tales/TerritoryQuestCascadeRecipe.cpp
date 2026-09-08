@@ -1,6 +1,7 @@
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 
 #include "Misc/DataValidation.h"
+#include "Navigation/MapMarker.h"
 #include "Tales/Quest.h"
 #include "Tales/QuestBlueprintGeneratedClass.h"
 #include "Tales/QuestSM.h"

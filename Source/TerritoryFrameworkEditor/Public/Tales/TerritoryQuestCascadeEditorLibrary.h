@@ -13,21 +13,27 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryQuestCascadeBuildReport
 {
 	GENERATED_BODY()
 
+	/** Whether the requested operation completed successfully; also inspect warnings and detailed results. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	bool bSucceeded = false;
 
+	/** Narrative Quest Blueprint created or inspected by this editor operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	TObjectPtr<UQuestBlueprint> QuestAsset = nullptr;
 
+	/** Content Browser package path of the generated Narrative Quest. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	FString QuestPackageName;
 
+	/** Narrative quest states created by the editor build operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CreatedStates = 0;
 
+	/** Narrative quest branches created by the editor build operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CreatedBranches = 0;
 
+	/** Narrative quest tasks created by the editor build operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CreatedTasks = 0;
 
@@ -35,6 +41,7 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryQuestCascadeBuildReport
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CreatedConditionGates = 0;
 
+	/** Number of Narrative conditions copied into the generated asset. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CopiedConditions = 0;
 
@@ -42,6 +49,7 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryQuestCascadeBuildReport
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 RemovedQuestNodeConditions = 0;
 
+	/** Number of Narrative events copied into the generated asset. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CopiedEvents = 0;
 
@@ -49,9 +57,11 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryQuestCascadeBuildReport
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	int32 CreatedCheckpointEvents = 0;
 
+	/** Problems that must be fixed before this operation or asset can be considered valid. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	TArray<FText> Errors;
 
+	/** Non-blocking issues to review before relying on the result. */
 	UPROPERTY(BlueprintReadOnly, Category="Quest Cascade")
 	TArray<FText> Warnings;
 };

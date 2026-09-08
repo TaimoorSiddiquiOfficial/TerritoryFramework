@@ -114,6 +114,7 @@ public:
 	// Economy
 	// ═══════════════════════════════════════════════════════════════════════════
 
+	/** Real seconds between currency income and guard cost updates. For example, 300 runs one update every five minutes. Resource production has its own check interval. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy",
 		meta = (ClampMin = "10.0", UIMin = "10.0", UIMax = "3600.0"))
 	float EconomyTickIntervalSeconds = 300.f;
@@ -130,10 +131,12 @@ public:
 			DisplayName = "Campaign Production Check Interval (Seconds)"))
 	float ProductionCycleObservationIntervalSeconds = 1.f;
 
+	/** Default currency income rate used by Territories that rely on project-level economy defaults. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy",
 		meta = (ClampMin = "0"))
 	int32 DefaultTerritoryIncome = 100;
 
+	/** Project default currency cost used by guard economy configuration. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Economy",
 		meta = (ClampMin = "0"))
 	int32 DefaultGuardCost = 50;
@@ -142,14 +145,17 @@ public:
 	// Capture
 	// ═══════════════════════════════════════════════════════════════════════════
 
+	/** Default capture progress gained each second, from 0 to 1. For example, 0.1 adds 10% per second before capture modifiers. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Capture",
 		meta = (ClampMin = "0.01", UIMin = "0.01", UIMax = "1.0"))
 	float CaptureProgressPerSecond = 0.1f;
 
+	/** Capture progress removed per second when the existing capture rules require decay. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Capture",
 		meta = (ClampMin = "0.01", UIMin = "0.01", UIMax = "0.5"))
 	float CaptureProgressDecayPerSecond = 0.05f;
 
+	/** Default strategic attacker-slot limit for a Territory without a more specific value. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Capture",
 		meta = (ClampMin = "1", UIMin = "1", UIMax = "20"))
 	int32 DefaultMaxConcurrentAttackers = 3;
@@ -168,25 +174,31 @@ public:
 	// Counterattacks
 	// ═══════════════════════════════════════════════════════════════════════════
 
+	/** Seed used for repeatable counterattack planning. The same seed and campaign inputs produce the same decision. Loading a saved decision does not roll again. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack")
 	int32 CounterAttackCampaignSeed = 1337;
 
+	/** Real-time seconds between server updates of the strategic assault scheduler. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(ClampMin="0.25", ClampMax="60.0"))
 	float CounterAttackUpdateInterval = 2.f;
 
+	/** World-wide limit on simultaneous scheduled or active assaults. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(ClampMin="1"))
 	int32 MaxConcurrentScheduledAssaults = 8;
 
+	/** Maximum simultaneous assaults charged to one attacking Narrative faction. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(ClampMin="1"))
 	int32 MaxConcurrentAssaultsPerFaction = 2;
 
+	/** Global budget for living physical counterattack NPCs; reserve troops do not bypass this limit. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(ClampMin="1"))
 	int32 MaxLiveCounterAttackNPCs = 24;
 
+	/** Maximum completed assault records retained for history and snapshots. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(ClampMin="1"))
 	int32 MaxRetainedAssaultRecords = 100;
@@ -423,6 +435,7 @@ public:
 	bool bDebugOwnershipChanges = false;
 
 	/** Log state transitions (Unclaimed→Claimed→Contested→etc) */
+	/** Log Territory state transitions for diagnosis; does not enable additional gameplay transitions. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Ownership",
 		meta = (EditCondition = "bEnableDebug"))
 	bool bDebugStateTransitions = false;
@@ -555,8 +568,10 @@ public:
 	bool ShouldDebugSpatial() const { return IsDebugLevelEnabled() && bDebugSpatialIndex; }
 	bool ShouldDebugMarkers() const { return IsDebugLevelEnabled() && bDebugMapMarkers; }
 	bool ShouldDebugTales() const { return IsDebugLevelEnabled() && bDebugTales; }
+	/** Check whether Territory behaviour-tree debug output is enabled. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Debug")
 	bool ShouldDebugBT() const { return IsDebugLevelEnabled() && bDebugBT; }
+	/** Check whether Territory combat debug output is enabled. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Debug")
 	bool ShouldDebugCombat() const { return IsDebugLevelEnabled() && bDebugCombat; }
 };

@@ -48,12 +48,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
 	int32 GetTerritoryCount() const;
 
+	/** Return displayed income after costs have been subtracted. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
 	int64 GetNetIncome() const;
 
+	/** Check whether the displayed economy is spending more than it earns. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
 	bool IsOperatingAtDeficit() const;
 
+	/** Return the current read-only economy summary used by this widget. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|UI")
 	FTerritoryEconomyOperationsView GetEconomyOperationsView(int32 MaxRecentTransactions = 10) const;
 
@@ -61,6 +64,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy|UI|Resources")
 	TSubclassOf<UTerritoryResourceRowWidget> ResourceRowClass;
 
+	/** Widget class used for each production-site row in the economy view. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Economy|UI|Resources")
 	TSubclassOf<UTerritoryProductionSiteRowWidget> ProductionSiteRowClass;
 
@@ -104,6 +108,7 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UVerticalBox> ProductionSiteRows;
 
+	/** Refresh the economy widget from existing currency and production data. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Economy|UI")
 	void RefreshEconomyDisplay();
 

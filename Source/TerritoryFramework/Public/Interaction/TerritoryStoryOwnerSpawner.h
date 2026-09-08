@@ -74,15 +74,19 @@ public:
 	bool ActivateHandover(APawn* NarrativeTarget, APlayerController* Controller,
 		UTalesComponent* NarrativeComponent, bool bBeginDialogueImmediately = true);
 
+	/** Return the currently spawned Narrative story-owner NPC, if available. */
 	UFUNCTION(BlueprintPure, Category="Territory|Story Capture")
 	ANarrativeNPCCharacter* GetStoryOwner() const;
 
+	/** Check whether the story owner has been activated for the current handover. */
 	UFUNCTION(BlueprintPure, Category="Territory|Story Capture")
 	bool IsHandoverActivated() const { return bHandoverActivated; }
 
+	/** Return this object's stable Territory GameplayTag. */
 	UFUNCTION(BlueprintPure, Category="Territory|Story Capture")
 	FGameplayTag GetTerritoryTag() const { return TerritoryTag; }
 
+	/** Return the story owner's allowed interaction distance in centimetres. */
 	UFUNCTION(BlueprintPure, Category="Territory|Story Capture")
 	float GetOwnerInteractionDistance() const { return OwnerInteractionDistance; }
 

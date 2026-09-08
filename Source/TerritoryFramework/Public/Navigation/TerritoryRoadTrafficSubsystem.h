@@ -26,6 +26,7 @@ public:
 	bool AcquireMissionTraffic(AQuestRoadControls* Controls, int32 DesiredVehicleCount);
 	void ReleaseMissionTraffic(AQuestRoadControls* Controls);
 
+	/** Return how many active operations currently hold a request on mission traffic. */
 	UFUNCTION(BlueprintPure, Category="Territory|Road|Traffic")
 	int32 GetMissionTrafficUserCount(const AQuestRoadControls* Controls) const;
 

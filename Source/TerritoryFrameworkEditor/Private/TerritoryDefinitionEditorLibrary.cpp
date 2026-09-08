@@ -1,4 +1,7 @@
 #include "TerritoryDefinitionEditorLibrary.h"
+#include "AssetToolsModule.h"
+#include "IAssetTools.h"
+#include "Misc/PackageName.h"
 
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
@@ -29,6 +32,47 @@
 #include "K2Node_CallParentFunction.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
+
+bool UTerritoryDefinitionEditorLibrary::CopyProjectContentToPlugin(
+	const TMap<FString, FString>& PackageDestinations, FText& OutFailureReason)
+{
+	OutFailureReason = FText::GetEmpty();
+	if (!GEditor || GEditor->PlayWorld || PackageDestinations.IsEmpty() || PackageDestinations.Num() > 512)
+	{
+		OutFailureReason = FText::FromString(TEXT("Stop play mode and select between 1 and 512 project packages."));
+		return false;
+	}
+	TSet<FString> Destinations;
+	for (const TPair<FString, FString>& Entry : PackageDestinations)
+	{
+		if (!Entry.Key.StartsWith(TEXT("/Game/")) || !Entry.Value.StartsWith(TEXT("/TerritoryFramework/"))
+			|| !FPackageName::IsValidLongPackageName(Entry.Key) || !FPackageName::IsValidLongPackageName(Entry.Value)
+			|| !FPackageName::DoesPackageExist(Entry.Key) || FPackageName::DoesPackageExist(Entry.Value)
+			|| FindPackage(nullptr, *Entry.Value) || Destinations.Contains(Entry.Value.ToLower()))
+		{
+			OutFailureReason = FText::FromString(FString::Printf(
+				TEXT("Cannot copy %s to %s. Use an existing project package and a unique, unused Territory plugin package."),
+				*Entry.Key, *Entry.Value));
+			return false;
+		}
+		Destinations.Add(Entry.Value.ToLower());
+	}
+	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
+	if (!AssetTools.AdvancedCopyPackages(PackageDestinations, true, false))
+	{
+		OutFailureReason = FText::FromString(TEXT("Unreal could not complete the copy. Review the log and any copied packages before retrying."));
+		return false;
+	}
+	for (const TPair<FString, FString>& Entry : PackageDestinations)
+	{
+		if (!FPackageName::DoesPackageExist(Entry.Value))
+		{
+			OutFailureReason = FText::FromString(FString::Printf(TEXT("The copied package was not saved: %s"), *Entry.Value));
+			return false;
+		}
+	}
+	return true;
+}
 
 namespace
 {

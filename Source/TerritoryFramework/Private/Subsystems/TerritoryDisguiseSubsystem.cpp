@@ -1,4 +1,5 @@
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
+#include "Engine/World.h"
 
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryStealthTags.h"

@@ -1,4 +1,5 @@
 #include "Tales/TerritoryCombatProgressTask.h"
+#include "GameFramework/Pawn.h"
 
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GAS/NarrativeAttributeSetBase.h"

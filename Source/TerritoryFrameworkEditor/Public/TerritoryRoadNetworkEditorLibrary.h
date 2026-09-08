@@ -10,14 +10,23 @@ USTRUCT(BlueprintType)
 struct TERRITORYFRAMEWORKEDITOR_API FTerritoryRoadBuildReport
 {
 	GENERATED_BODY()
+	/** Whether the requested operation completed successfully; also inspect warnings and detailed results. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") bool bSucceeded = false;
+	/** Number of road segments included in the build or inspection. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") int32 Roads = 0;
+	/** Number of road junctions included in the build or inspection. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") int32 Junctions = 0;
+	/** Road mouths that have no matching connection in the inspected network. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") int32 OpenEnds = 0;
+	/** Collision samples used to identify roads in the bounded bake area. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") int32 RoadSamples = 0;
+	/** Number of Native ZoneGraph road lanes found after building or inspecting the network. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") int32 NativeRoadLanes = 0;
+	/** Separate connected groups found in the loaded road graph. More than one can indicate disconnected routes. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") int32 ConnectedRoadGroups = 0;
+	/** Problems that must be fixed before this operation or asset can be considered valid. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") TArray<FString> Errors;
+	/** Non-blocking issues to review before relying on the result. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Road") TArray<FString> Warnings;
 };
 
@@ -27,12 +36,17 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryRoadSurfaceBakeSettings
 	GENERATED_BODY()
 	/** One loaded height band. Bake bridges and the street below separately. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road") FBox Bounds = FBox(ForceInit);
+	/** Collision-sampling grid spacing in centimetres. Smaller spacing captures narrower roads but increases work and sample count. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road", meta=(ClampMin="50", ClampMax="500")) float SampleSpacing = 200.f;
+	/** Steepest surface angle accepted as driveable road during collision sampling, in degrees. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road", meta=(ClampMin="1", ClampMax="30")) float MaximumSlopeDegrees = 15.f;
+	/** Hard cap on collision samples in this bake. Reduce the bounds or increase spacing if the required grid exceeds it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road", meta=(ClampMin="100", ClampMax="1000000")) int32 MaximumSamples = 250000;
+	/** Existing Native ZoneGraph lane-profile name used by the generated road shapes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road") FName LaneProfileName = TEXT("Road");
 	/** Stable editor-authored identity for this bake area; reuse it when rebuilding. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road") FGuid BakeID;
+	/** Physical material identifying road collision on meshes or landscape layers for this bake. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road") TObjectPtr<UPhysicalMaterial> RoadPhysicalMaterial;
 };
 

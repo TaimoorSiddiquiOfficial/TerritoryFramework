@@ -42,6 +42,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Cinematics")
 	void RegisterCinematicSubject(AActor* Subject);
 
+	/** Called when Territory's dialogue/cinematic presentation state changes. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Cinematics")
 	FOnTerritoryCinematicPresentationChanged OnPresentationChanged;
 

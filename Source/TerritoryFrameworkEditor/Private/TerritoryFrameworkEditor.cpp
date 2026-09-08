@@ -14,6 +14,7 @@
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "Tales/TerritoryQuestCascadeRecipe.h"
+#include "Tales/Quest.h"
 #include "Tales/TerritoryDialogueRecipe.h"
 #include "Tales/TerritorySituationCondition.h"
 #include "Tales/TerritoryQuestCascadeEditorLibrary.h"
@@ -232,6 +233,7 @@ namespace
 				[
 					SNew(STextBlock)
 					.Text(FText::FromString(TEXT("Active Capture Mode")))
+					.ToolTipText(FText::FromString(TEXT("Shows how players can capture this Place. Choose story handover or automatic flag capture in the settings below.")))
 					.Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.NormalFont")))
 				]
 				.ValueContent()
@@ -263,7 +265,7 @@ namespace
 					})
 					.AutoWrapText(true)
 					.ToolTipText(FText::FromString(
-						TEXT("This is the effective capture authority. Story Bounds and Physical Automatic are mutually exclusive.")))
+						TEXT("Shows which capture method this Place uses. Whole-place story capture and automatic flag capture cannot run together.")))
 				];
 			}
 			if (!bContainsNonPlace) return;

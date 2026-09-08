@@ -246,6 +246,7 @@ struct FTerritoryStoryPursuitOptions
 {
 	GENERATED_BODY()
 
+	/** Choose whether the story pursuit chases the target or escapes from it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Story Pursuit")
 	ETerritoryStoryPursuitDirection Direction =
 		ETerritoryStoryPursuitDirection::EnemyChasesPlayer;
@@ -513,18 +514,31 @@ struct FTerritoryAssaultEvaluationInput
 {
 	GENERATED_BODY()
 
+	/** Guards currently alive and assigned to this garrison. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") int32 ActiveGuards = 0;
+	/** Requested garrison size; it may exceed the currently living guards while replacements are pending. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") int32 DesiredGuards = 0;
+	/** Maximum guard capacity supported by the assigned posts and current rules. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") int32 MaximumGuards = 0;
+	/** Finite replacement guards still available beyond the active garrison. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") int32 ReserveGuards = 0;
+	/** Relative quality multiplier used when estimating garrison defence power for strategic planning. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float GuardQuality = 1.f;
+	/** Fortification strength included in the defence estimate. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float Fortification = 0.f;
+	/** Authored contribution from nearby allied support to the strategic defence estimate. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float NearbyAlliedSupport = 0.f;
+	/** Attacking strength used for planning; physical troops must still fight and capture. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float AttackingMilitaryPower = 0.f;
+	/** Attacking faction's economy readiness used by strategic planning. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float EconomyReadiness = 0.f;
+	/** Attacking faction's supply readiness used by strategic planning. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float SupplyReadiness = 0.f;
+	/** Relative importance of this Territory to strategic assault planning; higher values make it a more valuable target. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float StrategicValue = 1.f;
+	/** Recent faction wins and losses reflected in the strategic planning input. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float RecentMomentum = 0.f;
+	/** Faction influence value used by the current strategic calculation. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float FactionInfluence = 0.5f;
 };
 
@@ -533,10 +547,15 @@ struct FTerritoryAssaultEvaluationResult
 {
 	GENERATED_BODY()
 
+	/** Estimated defence strength for the target owner's District. Check whether this value is known before using it. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float DistrictDefencePower = 0.f;
+	/** Attacker power divided by estimated defence power; used for planning rather than direct capture. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float PowerRatio = 0.f;
+	/** Relative target score used to choose between eligible assaults; it is not a capture chance. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float AttackPriority = 0.f;
+	/** Chance from 0 to 1 that an eligible assault is launched. Troops must still complete physical capture. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float LaunchProbability = 0.f;
+	/** Planning estimate of attacker strength against defence. This never directly changes ownership. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float EstimatedSuccessProbability = 0.f;
 };
 
@@ -546,13 +565,16 @@ struct FTerritoryAssaultCycleRecord
 {
 	GENERATED_BODY()
 
+	/** Stable saved identity of the target Territory, used to reconnect it after streaming or loading. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack")
 	FGuid TargetTerritoryGUID;
 
+	/** Narrative faction launching or participating in this assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack",
 		meta=(Categories="Narrative.Factions"))
 	FGameplayTag AttackingFaction;
 
+	/** Highest strategic evaluation cycle already used; prevents repeating decisions after history is trimmed. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="1"))
 	int32 HighestEvaluationCycle = 0;
 };
@@ -563,9 +585,11 @@ struct FTerritoryVehicleDeploymentCount
 {
 	GENERATED_BODY()
 
+	/** Stable name identifying one authored attack entry route. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle")
 	FName ApproachID;
 
+	/** Number of matching entries represented by this row or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle")
 	int32 Count = 0;
 };
@@ -604,14 +628,23 @@ struct FTerritoryAssaultRecord
 {
 	GENERATED_BODY()
 
+	/** Unique ID linking troops, waves and saved records to the same assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") FGuid AssaultID;
+	/** Stable saved identity of the target Territory, used to reconnect it after streaming or loading. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") FGuid TargetTerritoryGUID;
+	/** Territory targeted by this operation or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(Categories="Territory")) FGameplayTag TargetTerritory;
+	/** Narrative faction launching or participating in this assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(Categories="Narrative.Factions")) FGameplayTag AttackingFaction;
+	/** Narrative faction defending the target Territory. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(Categories="Narrative.Factions")) FGameplayTag DefendingFaction;
+	/** Whether this assault comes from normal strategic scheduling or an explicit story request. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultLaunchMode LaunchMode = ETerritoryAssaultLaunchMode::StrategicCounterattack;
+	/** Whether the story force chases the target or escapes from it. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") ETerritoryStoryPursuitDirection StoryPursuitDirection = ETerritoryStoryPursuitDirection::EnemyChasesPlayer;
+	/** Whether this operation is allowed to register capture pressure and attempt Territory takeover. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bAllowsTerritoryCapture = true;
+	/** Whether this request uses the saved strategic launch roll instead of an explicit story launch. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bUseStrategicDecisionRoll = true;
 	/**
 	 * True for an explicit Narrative Event request. It may run during a Quest-owned
@@ -620,42 +653,69 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bQuestOverrideAuthorized = false;
 	/** Skips grace, time window, warning delay, and player-proximity wait after admission. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bImmediateDeployment = false;
+	/** World-space fallback focus point saved for this story assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") FVector StoryFocusLocation = FVector::ZeroVector;
+	/** Story-selected Narrative NPC Definition replacing the normal attacker definition for this assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") TSoftObjectPtr<UNPCDefinition> StoryAttackerDefinitionOverride;
+	/** Story override for this assault's finite total troop budget. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") int32 StoryPlannedForceOverride = 0;
+	/** Story override for troops deployed in one wave. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") int32 StoryWaveSizeOverride = 0;
+	/** Stable ID linking this assault to its authored story scenario. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") FName StoryScenarioID;
+	/** Maximum allowed story chase distance in centimetres. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") float StoryMaximumChaseDistance = 9000.f;
+	/** Seconds a story pursuit may exceed its chase-distance limit before resolving. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") float StoryChaseDistanceGraceSeconds = 10.f;
+	/** Whether the story force may leave a badly damaged car and continue its final fight on foot. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bStoryAbandonDamagedVehicleForFinalFight = true;
+	/** Vehicle health fraction below which the story force may abandon the car for its final fight. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") float StoryVehicleAbandonHealthFraction = 0.35f;
+	/** Whether this story assault requests the configured Native road mission traffic. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bStoryActivateRoadMissionTraffic = true;
+	/** Story override for the number of mission traffic vehicles requested. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") int32 StoryMissionTrafficVehicleCountOverride = -1;
 	/** True after the driver has left a disabled/blocked vehicle and the encounter has become a Narrative on-foot final fight. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Story") bool bStoryTargetAbandonedVehicle = false;
+	/** State represented by this record; use the field's enum choices to interpret it. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultState State = ETerritoryAssaultState::Grace;
+	/** Outcome recorded when the operation or assault ends. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultResolution Resolution = ETerritoryAssaultResolution::None;
+	/** Saved strategic evaluation cycle used to reproduce assault scheduling. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 EvaluationCycle = 0;
 	/** Groups the first response and all of its later scheduled battles. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") FGuid ScheduleSeriesID;
 	/** One-based battle number within Schedule Series ID. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack", meta=(ClampMin="1")) int32 ScheduleOccurrence = 1;
+	/** Saved random seed for reproducing the same strategic decision. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 DecisionSeed = 0;
+	/** Saved random value used for the assault launch decision; loading must not reroll it. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") float DecisionRoll = 0.f;
+	/** Campaign-clock time of the recorded capture. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double CapturedGameTime = 0.0;
+	/** Campaign-clock time when the new-capture grace period ends. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double GraceEndsGameTime = 0.0;
+	/** Campaign-clock time when this assault was scheduled. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ScheduledGameTime = 0.0;
+	/** Campaign-clock time when this assault became active. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ActivatedGameTime = 0.0;
 	/** Absolute campaign-time deadline for an unattended physical recapture. Zero means inactive. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double RecaptureEndsGameTime = 0.0;
 	/** Durable terminal timestamp used by recurring strategic cooldowns. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ResolvedGameTime = 0.0;
+	/** Total troop budget for this assault, including living, reserve and permanently lost troops. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 PlannedForce = 0;
+	/** Living members of the assault's limited troop budget. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 AliveForce = 0;
+	/** Troops still held in reserve and not yet deployed or lost. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 PendingReserveForce = 0;
+	/** Troops permanently consumed by deaths in this assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 KilledForce = 0;
+	/** Troops consumed by withdrawal and no longer available to this assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WithdrawnForce = 0;
+	/** Maximum troops in one deployment wave, within the finite force budget. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WaveSize = 1;
+	/** How finite waves are released: together, in sequence or under the selected strategy. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultWaveStrategy WaveStrategy = ETerritoryAssaultWaveStrategy::Legacy;
 	/** Bounded wait for an occupied vehicle staging area; zero means no current wait. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") double VehicleStagingBlockedSince = 0.0;
@@ -665,6 +725,7 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") int32 MaximumVehicleDeployments = 0;
 	/** Durable total and per-road usage prevent save/load from creating extra cars. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") int32 VehicleDeploymentsUsed = 0;
+	/** Saved vehicle deployment usage charged to each approach; it is part of the finite assault budget. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") TArray<FTerritoryVehicleDeploymentCount> VehicleDeploymentsByApproach;
 	/** Server save details; clients continue to receive the existing finite-force read model. */
 	UPROPERTY(SaveGame, NotReplicated) int32 PhysicalStateVersion = 0;
@@ -675,9 +736,13 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, NotReplicated) TArray<FTerritoryVehicleDeploymentCount> LegacyVehicleRestoreCredits;
 	/** Bounded physical deployment failure count; reset after any successful spawn. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 ConsecutiveSpawnFailures = 0;
+	/** Authored entry routes selected for this finite assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") TArray<FName> SelectedApproaches;
+	/** Facts supplied to the strategic assault calculation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") FTerritoryAssaultEvaluationInput EvaluationInput;
+	/** Calculated priority, chances and decision reasons for the assault. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") FTerritoryAssaultEvaluationResult EvaluationResult;
+	/** Whether the scheduled assault warning has already been sent. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") bool bNotificationSent = false;
 
 	bool IsTerminal() const
@@ -703,18 +768,23 @@ struct FTerritoryCounterAttackStateEvent
 {
 	GENERATED_BODY()
 
+	/** Current assault information used by this result or notification. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
 	FTerritoryAssaultRecord Assault;
 
+	/** State before the recorded transition. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
 	ETerritoryAssaultState PreviousState = ETerritoryAssaultState::Grace;
 
+	/** State reached by the verified transition. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
 	ETerritoryAssaultState NewState = ETerritoryAssaultState::Grace;
 
+	/** Outcome recorded when the operation or assault ends. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
 	ETerritoryAssaultResolution Resolution = ETerritoryAssaultResolution::None;
 
+	/** Campaign-clock time recorded for this event. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Counter Attack")
 	double EventGameTime = 0.0;
 };

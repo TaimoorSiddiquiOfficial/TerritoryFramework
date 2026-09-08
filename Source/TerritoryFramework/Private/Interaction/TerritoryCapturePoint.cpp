@@ -1,4 +1,5 @@
 #include "Interaction/TerritoryCapturePoint.h"
+#include "Engine/World.h"
 
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"

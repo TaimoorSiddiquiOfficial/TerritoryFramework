@@ -68,15 +68,25 @@ public:
 	void Retire(bool bKilled);
 	bool HasRetired() const { return bRemovalReported; }
 
+	/** Return the unique ID linking this participant to its one assault. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") FGuid GetAssaultID() const { return AssaultID; }
+	/** Return the target's stable saved ID, which survives actor streaming and load order. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") FGuid GetTargetTerritoryGUID() const { return TargetTerritoryGUID; }
+	/** Return the stable Territory tag identifying this target. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") FGameplayTag GetTargetTerritoryTag() const { return TargetTerritory; }
+	/** Return the Narrative faction credited for this assault participant. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") FGameplayTag GetAttackingFaction() const { return AttackingFaction; }
+	/** Return the currently loaded target Territory, or empty if it cannot be resolved yet. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") ATerritoryVolume* GetTargetTerritory() const { return ResolveTargetTerritory(); }
+	/** Check whether this participant is currently registered with the existing capture system. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") bool IsCaptureRegistered() const { return bCaptureRegistered; }
+	/** Check whether the attacker is still arriving by vehicle and has not completed its entry phase. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault|Vehicle") bool IsVehicleIngressPending() const { return bVehicleIngressRequired && !bVehicleIngressComplete; }
+	/** Check whether this participant may currently enter combat under its assault state and vehicle rules. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault|Vehicle") bool CanEngageCombat() const { return !IsVehicleIngressPending() && !bEscapeOnVehicleArrival; }
+	/** Check whether this assault participant is allowed to help capture its assigned Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") bool AllowsTerritoryCapture() const { return bAllowsTerritoryCapture; }
+	/** Check whether this participant has a valid assault configuration. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") bool IsConfigured() const
 	{
 		return AssaultID.IsValid() && TargetTerritoryGUID.IsValid()

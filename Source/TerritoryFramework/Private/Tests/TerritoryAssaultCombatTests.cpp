@@ -118,8 +118,8 @@ bool FTFAssaultWeaponActivityEligibility::RunTest(const FString& Parameters)
     if (!TestNotNull(TEXT("Inventory fixture world created"), World)) return false;
     auto* Pawn = World->SpawnActor<ATerritoryAssaultCharacter>();
     auto* Controller = World->SpawnActor<ANarrativeNPCController>();
-    UClass* RangedClass = LoadClass<UNPCActivity>(nullptr, TEXT("/Game/TerritoryFramework/AI/Combat/BPA_TerritoryAttack_Ranged_Strafe.BPA_TerritoryAttack_Ranged_Strafe_C"));
-    UClass* MeleeClass = LoadClass<UNPCActivity>(nullptr, TEXT("/Game/TerritoryFramework/AI/Combat/BPA_TerritoryAttack_Melee.BPA_TerritoryAttack_Melee_C"));
+    UClass* RangedClass = LoadClass<UNPCActivity>(nullptr, TEXT("/TerritoryFramework/AI/Combat/BPA_TerritoryAttack_Ranged_Strafe.BPA_TerritoryAttack_Ranged_Strafe_C"));
+    UClass* MeleeClass = LoadClass<UNPCActivity>(nullptr, TEXT("/TerritoryFramework/AI/Combat/BPA_TerritoryAttack_Melee.BPA_TerritoryAttack_Melee_C"));
     UClass* GoalClass = LoadClass<UNPCGoalItem>(nullptr, TEXT("/NarrativePro/Pro/Core/AI/Activities/Attacks/Goals/Goal_Attack.Goal_Attack_C"));
     if (!Pawn || !Controller || !RangedClass || !MeleeClass || !GoalClass)
     {

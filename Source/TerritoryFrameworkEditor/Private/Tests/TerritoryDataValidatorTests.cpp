@@ -44,9 +44,9 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectNPCDefinitionIdentityRegression,
 bool FTFProjectNPCDefinitionIdentityRegression::RunTest(const FString& Parameters)
 {
 	static const TCHAR* ProjectFixturePackages[] = {
-		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBandit"),
-		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryHero"),
-		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault")
+		TEXT("/TerritoryFramework/AI/NPC_TerritoryBandit"),
+		TEXT("/TerritoryFramework/AI/NPC_TerritoryHero"),
+		TEXT("/TerritoryFramework/AI/NPC_TerritoryBanditAssault")
 	};
 	bool bAnyProjectFixtureExists = false;
 	for (const TCHAR* PackageName : ProjectFixturePackages)
@@ -60,11 +60,11 @@ bool FTFProjectNPCDefinitionIdentityRegression::RunTest(const FString& Parameter
 	}
 
 	const UNPCDefinition* BanditGuard = LoadObject<UNPCDefinition>(nullptr,
-		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBandit.NPC_TerritoryBandit"));
+		TEXT("/TerritoryFramework/AI/NPC_TerritoryBandit.NPC_TerritoryBandit"));
 	const UNPCDefinition* HeroGuard = LoadObject<UNPCDefinition>(nullptr,
-		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryHero.NPC_TerritoryHero"));
+		TEXT("/TerritoryFramework/AI/NPC_TerritoryHero.NPC_TerritoryHero"));
 	const UNPCDefinition* BanditAssault = LoadObject<UNPCDefinition>(nullptr,
-		TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault.NPC_TerritoryBanditAssault"));
+		TEXT("/TerritoryFramework/AI/NPC_TerritoryBanditAssault.NPC_TerritoryBanditAssault"));
 	TestNotNull(TEXT("Bandit guard definition is available"), BanditGuard);
 	TestNotNull(TEXT("Hero guard definition is available"), HeroGuard);
 	TestNotNull(TEXT("Bandit assault definition is available"), BanditAssault);

@@ -32,10 +32,12 @@ public:
 		meta=(Categories="Territory", ToolTip="Independent Place that the owner NPC may hand over."))
 	FGameplayTag TerritoryToCheck;
 
+	/** Choose the explicit Narrative target, controller pawn, or authored faction as capture credit context. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryCaptureFactionSource CapturingFactionSource =
 		ETerritoryCaptureFactionSource::NarrativeTargetFaction;
 
+	/** Exact Narrative faction used when the faction source is Explicit Faction. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(Categories="Narrative.Factions", EditCondition="CapturingFactionSource == ETerritoryCaptureFactionSource::ExplicitFaction", EditConditionHides))
 	FGameplayTag ExplicitCapturingFaction;

@@ -40,6 +40,7 @@ public:
 		meta=(ToolTip="Actor whose Ability System Component is observed. Easy example: Find NPC watches a boss; empty watches the player pawn."))
 	TObjectPtr<UNarrativeActorProvider> SubjectProvider;
 
+	/** Choose which Territory gameplay state must be reached to complete this task. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Community Task|GAS")
 	ETerritoryGameplayStateObjective Objective =
 		ETerritoryGameplayStateObjective::AllTagsPresent;

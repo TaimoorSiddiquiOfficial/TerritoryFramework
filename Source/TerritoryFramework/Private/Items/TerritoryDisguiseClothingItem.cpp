@@ -1,4 +1,5 @@
 #include "Items/TerritoryDisguiseClothingItem.h"
+#include "Engine/World.h"
 
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Subsystems/TerritoryDisguiseSubsystem.h"

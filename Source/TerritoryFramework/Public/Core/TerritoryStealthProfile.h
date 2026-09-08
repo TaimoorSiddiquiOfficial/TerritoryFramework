@@ -54,27 +54,35 @@ struct TERRITORYFRAMEWORK_API FTerritoryInfiltrationSnapshot
 {
 	GENERATED_BODY()
 
+	/** Current hidden, suspicious or confirmed state of the target. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	ETerritoryExposureState ExposureState = ETerritoryExposureState::Undetected;
 
+	/** Most recently recorded kind of stealth evidence. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	ETerritoryStealthEvidence LastEvidence = ETerritoryStealthEvidence::None;
 
+	/** Accumulated suspicion value for the target, on the system's 0 to 1 scale. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float Suspicion = 0.f;
 
+	/** World-space location of the most recent stealth evidence. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	FVector LastEvidenceLocation = FVector::ZeroVector;
 
+	/** Estimated direction toward the source of the reported evidence. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	FVector EstimatedSourceDirection = FVector::ZeroVector;
 
+	/** World time in seconds when the most recent evidence was recorded. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	float LastEvidenceWorldTime = -1.f;
 
+	/** Observers that currently confirm the target's identity. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	int32 ConfirmingObserverCount = 0;
 
+	/** Whether the viewer is currently inside the reported Territory. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	bool bInsideTerritory = false;
 };
@@ -95,6 +103,7 @@ public:
 		meta=(ToolTip="When enabled, entering story bounds registers an undetected infiltrator instead of immediately starting Contested. Easy example: use this for a rescue quest inside an enemy Place."))
 	bool bAllowStealthInfiltration = true;
 
+	/** Choose which Territory or hierarchy scope becomes contested when the infiltrator is confirmed. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="01 Infiltration")
 	ETerritoryStealthEscalationScope EscalationScope =
 		ETerritoryStealthEscalationScope::FactionWar;
@@ -126,6 +135,7 @@ public:
 			ToolTip="Narrative Stealth Rating is interpreted on this scale. A rating of 50 on a scale of 100 halves effective sight."))
 	float MaximumStealthRating = 100.f;
 
+	/** Ignore sight-based detection while Narrative marks the target invisible; other reported evidence still follows its own rules. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Sight")
 	bool bRespectNarrativeInvisibleTag = true;
 
@@ -138,49 +148,62 @@ public:
 			ToolTip="Maximum guard-to-player distance for unavoidable direct-sight exposure. Narrative AI Perception must still have valid sight and the Narrative Invisible tag is still respected. Easy example: 300 means three metres."))
 	float PointBlankSightExposureDistance = 300.f;
 
+	/** Immediately expose an infiltrator who fires while a defender has valid sight of them. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
 	bool bFireWhileSeenExposes = true;
 
+	/** Treat unseen gunfire as investigation evidence instead of automatically identifying the shooter. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
 	bool bFireWhileUnseenStartsInvestigation = true;
 
+	/** Confirm the identified damage source as exposed when the damage evidence is reported. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
 	bool bDamageImmediatelyExposes = true;
 
+	/** Expose an infiltrator when a defender kill is witnessed. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
 	bool bSeenDefenderKillExposes = true;
 
+	/** Start an anonymous investigation when a defender dies without a confirmed visible attacker. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
 	bool bUnseenDefenderDeathStartsInvestigation = true;
 
+	/** How much a gunshot clue raises suspicion, from 0 to 1. For example, 0.35 adds 35 percent of a full suspicion meter. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
 		meta=(ClampMin="0.0", ClampMax="1.0"))
 	float GunshotSuspicion = 0.35f;
 
+	/** How much a bullet-impact clue raises suspicion, from 0 to 1. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
 		meta=(ClampMin="0.0", ClampMax="1.0"))
 	float BulletImpactSuspicion = 0.2f;
 
+	/** How much finding a corpse raises suspicion, from 0 to 1. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
 		meta=(ClampMin="0.0", ClampMax="1.0"))
 	float CorpseSuspicion = 0.5f;
 
+	/** How much a thrown distraction raises suspicion, from 0 to 1. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
 		meta=(ClampMin="0.0", ClampMax="1.0"))
 	float ThrowableDistractionSuspicion = 0.25f;
 
+	/** Maximum guards assigned to investigate one evidence response; zero prevents investigation assignments. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Investigation",
 		meta=(ClampMin="0", ClampMax="8"))
 	int32 MaximumInvestigators = 2;
 
+	/** Search radius in centimetres for selecting nearby guards to investigate evidence. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Investigation",
 		meta=(ClampMin="100.0", Units="cm"))
 	float InvestigationRadius = 5000.f;
 
+	/** Seconds an investigation goal remains valid before it expires. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Investigation",
 		meta=(ClampMin="0.5", Units="s"))
 	float InvestigationDuration = 12.f;
 
+	/** Distance in centimetres at which an investigator considers the evidence location reached. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Investigation",
 		meta=(ClampMin="10.0", Units="cm"))
 	float InvestigationAcceptanceRadius = 150.f;
@@ -203,6 +226,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Stealth|Ability Integration")
 	FGameplayTag GetEffectiveBreakStealthGameplayEventTag() const;
 
+	/** Send the configured GAS event to the exposed target so abilities can respond to detection. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 Ability Integration")
 	bool bSendBreakStealthGameplayEvent = true;
 

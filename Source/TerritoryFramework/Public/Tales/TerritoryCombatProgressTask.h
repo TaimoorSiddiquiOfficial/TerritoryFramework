@@ -49,6 +49,7 @@ public:
 		meta=(ToolTip="Optional actor filter. For Deal Damage this is the damaged target; for Take Damage it is the attacker; for Healing it is the healer."))
 	TObjectPtr<UNarrativeActorProvider> CounterpartyProvider;
 
+	/** Choose which live Territory combat progress state completes this task. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Community Task|Combat")
 	ETerritoryCombatProgressObjective Objective =
 		ETerritoryCombatProgressObjective::DealDamageAmount;

@@ -187,6 +187,7 @@ struct FTerritoryOwnershipData
 {
 	GENERATED_BODY()
 
+	/** Narrative faction that owns this Territory or account. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	FGameplayTag OwningFaction;
 
@@ -194,6 +195,7 @@ struct FTerritoryOwnershipData
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|History")
 	FGameplayTagContainer FormerOwningFactions;
 
+	/** State represented by this record; use the field's enum choices to interpret it. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	ETerritoryState State = ETerritoryState::Unclaimed;
 
@@ -201,21 +203,27 @@ struct FTerritoryOwnershipData
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
 
+	/** Control progress represented by this result; read with its current state and owner. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	float ControlProgress = 0.f;
 
+	/** Faction currently represented by this capture contest. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	FGameplayTag ContestingFaction;
 
+	/** Defenders counted by this query or evaluation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	int32 DefenderCount = 0;
 
+	/** Strategic attacker slots available for this Territory. Narrative's per-target combat tokens remain separate. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	int32 MaxConcurrentAttackers = 3;
 
+	/** Base currency income per economy cycle before state, faction, upgrade and hierarchy modifiers. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	int32 PeriodicIncome = 0;
 
+	/** Currency cost associated with the reported guard operation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
 	int32 GuardCost = 0;
 
@@ -237,12 +245,15 @@ struct FTerritoryUnlockResultRow
 {
 	GENERATED_BODY()
 
+	/** Stable Territory GameplayTag used by lookups, Narrative conditions and hierarchy references. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
 	FGameplayTag TerritoryTag;
 
+	/** Verified outcome of the reported operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
 	ETerritoryUnlockOutcome Outcome = ETerritoryUnlockOutcome::InvalidTarget;
 
+	/** Explanation of the reported decision or result. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
 	FText Reason;
 };
@@ -252,15 +263,19 @@ struct FTerritoryUnlockCascadeResult
 {
 	GENERATED_BODY()
 
+	/** Whether the target operation completed successfully in this result. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
 	bool bTargetSucceeded = false;
 
+	/** Number of entries whose story availability is Unlocked. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
 	int32 UnlockedCount = 0;
 
+	/** Number of entries currently blocked by their rules. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
 	int32 BlockedCount = 0;
 
+	/** Individual outcomes returned by this batch operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Unlock")
 	TArray<FTerritoryUnlockResultRow> Results;
 };
@@ -271,18 +286,23 @@ struct FTerritoryGarrisonSnapshot
 {
 	GENERATED_BODY()
 
+	/** Guards currently alive and assigned to this garrison. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 ActiveGuards = 0;
 
+	/** Requested garrison size; it may exceed the currently living guards while replacements are pending. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 DesiredGuards = 0;
 
+	/** Maximum guard capacity supported by the assigned posts and current rules. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 MaximumGuards = 0;
 
+	/** Finite replacement guards still available beyond the active garrison. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 ReserveGuards = 0;
 
+	/** Troops or groups still waiting for their allowed physical deployment. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 PendingDeployments = 0;
 
@@ -304,30 +324,39 @@ struct FTerritoryGarrisonMutationResult
 {
 	GENERATED_BODY()
 
+	/** Whether this result reports verified success. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	bool bSuccess = false;
 
+	/** Requested garrison size before the reported operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 OldDesiredGuards = 0;
 
+	/** Requested garrison size after the reported operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 NewDesiredGuards = 0;
 
+	/** Living guard count before the reported operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 OldActiveGuards = 0;
 
+	/** Living guard count after the reported operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 NewActiveGuards = 0;
 
+	/** Currency cost used for guard recruitment in this result. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 RecruitmentCost = 0;
 
+	/** Guards successfully deployed by this operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 GuardsDeployed = 0;
 
+	/** Guards withdrawn by this operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 GuardsWithdrawn = 0;
 
+	/** Readable information about the operation or event. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	FText Message;
 };
@@ -337,15 +366,19 @@ struct FTerritoryEconomySnapshot
 {
 	GENERATED_BODY()
 
+	/** Currency read from the relevant Narrative account; Territory does not own a separate balance. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 Treasury = 0;
 
+	/** Combined currency income included in this summary. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 TotalIncome = 0;
 
+	/** Combined currency costs included in this summary. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 TotalCosts = 0;
 
+	/** Number of Territories included in this summary. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 TerritoryCount = 0;
 };
@@ -375,27 +408,35 @@ struct FTerritoryTransaction
 {
 	GENERATED_BODY()
 
+	/** Unique ID identifying this verified economy transaction. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	FGuid TransactionID;
 
+	/** Exact Narrative faction represented by this setting or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	FGameplayTag Faction;
 
+	/** Kind of operation or record represented by this entry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	ETerritoryTransactionType Type = ETerritoryTransactionType::ManualCredit;
 
+	/** Amount involved in this resource or currency operation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	int32 Amount = 0;
 
+	/** Narrative currency balance observed after this transaction. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	int32 BalanceAfter = 0;
 
+	/** Campaign-clock timestamp for this record, rather than wall-clock time. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	double GameTime = 0.0;
 
+	/** Explanation of the reported decision or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	FString Reason;
 
+	/** Territory from which this event, effect or transfer originates. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction",
 		meta = (Categories = "Territory"))
 	FGameplayTag SourceTerritory;
@@ -409,21 +450,27 @@ struct FCaptureAttempt
 {
 	GENERATED_BODY()
 
+	/** Loaded Territory actor represented by this entry; may be empty while streamed out. */
 	UPROPERTY(BlueprintReadOnly, Category = "Territory")
 	TWeakObjectPtr<ATerritoryVolume> Territory;
 
+	/** Narrative faction launching or participating in this assault. */
 	UPROPERTY(BlueprintReadOnly, Category = "Territory")
 	FGameplayTag AttackingFaction;
 
+	/** Narrative faction defending the target Territory. */
 	UPROPERTY(BlueprintReadOnly, Category = "Territory")
 	FGameplayTag DefendingFaction;
 
+	/** Structured outcome; inspect its success and reason fields before treating the operation as complete. */
 	UPROPERTY(BlueprintReadOnly, Category = "Territory")
 	ECaptureResult Result = ECaptureResult::InvalidTerritory;
 
+	/** Attackers counted at this point in the capture evaluation. */
 	UPROPERTY(BlueprintReadOnly, Category = "Territory")
 	int32 AttackersPresent = 0;
 
+	/** Defenders included in the current capture evaluation. */
 	UPROPERTY(BlueprintReadOnly, Category = "Territory")
 	int32 DefendersPresent = 0;
 };
@@ -444,6 +491,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryStateGameplayRules
 {
 	GENERATED_BODY()
 
+	/** State-specific permission for automatic counters and explicit story waves; diplomacy and finite-force rules still apply. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Counterattacks")
 	ETerritoryStateCounterAttackPolicy CounterAttackPolicy = ETerritoryStateCounterAttackPolicy::CaptureTriggered;
 

@@ -101,9 +101,11 @@ public:
 	/** Returns a copy of the current ownership data struct (for building mutation candidates). */
 	FTerritoryOwnershipData GetOwnershipData() const { return OwnershipData; }
 
+	/** Return this Territory's current political state. */
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Territory State"))
 	ETerritoryState GetTerritoryState() const;
 
+	/** Return the current story availability, separate from political ownership. */
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Get Territory Availability"))
 	ETerritoryAvailability GetTerritoryAvailability() const { return OwnershipData.Availability; }
 
@@ -113,9 +115,11 @@ public:
 			ToolTip="Checks this Territory plus its City/District ancestor path. Missing or cyclic hierarchy data fails closed."))
 	bool IsAvailableForGameplay() const;
 
+	/** Return this Territory's current control progress from 0 to 1. */
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Control Progress"))
 	float GetControlProgress() const;
 
+	/** Check whether this Territory currently has the Contested political state. */
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Is Contested"))
 	bool IsContested() const;
 
@@ -126,9 +130,11 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Is Owned By Faction"))
 	bool IsOwnedByFaction(const FGameplayTag& Faction) const;
 
+	/** Return this object's stable Territory GameplayTag. */
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Territory Tag"))
 	FGameplayTag GetTerritoryTag() const;
 
+	/** Return the readable name displayed for this Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Display Name"))
 	FText GetTerritoryDisplayName() const;
 
@@ -145,6 +151,7 @@ public:
 		meta=(DisplayName="Is Command Capability Configured"))
 	bool IsCommandCapabilityConfigured(const FGameplayTag& Capability) const;
 
+	/** Return this Territory's authored strategic attacker-slot limit. */
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Max Attackers"))
 	int32 GetMaxConcurrentAttackers() const;
 
@@ -155,12 +162,15 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Defender Count"))
 	int32 GetDefenderCount() const;
 
+	/** Return the current periodic income rate from the relevant Territory or faction economy view. */
 	UFUNCTION(BlueprintPure, Category="Territory|Economy", meta=(DisplayName="Get Periodic Income"))
 	int32 GetPeriodicIncome() const;
 
+	/** Return the Territory's configured guard cost value. */
 	UFUNCTION(BlueprintPure, Category="Territory|Economy", meta=(DisplayName="Get Guard Cost"))
 	int32 GetGuardCost() const;
 
+	/** Return the bounds used by this Territory's spatial queries. */
 	UFUNCTION(BlueprintPure, Category="Territory|Bounds", meta=(DisplayName="Get Territory Bounds"))
 	FBox GetTerritoryBounds() const;
 
@@ -181,9 +191,11 @@ public:
 		meta=(DisplayName="Uses Story Capture From Bounds"))
 	bool UsesStoryCaptureFromBounds() const { return bStoryCaptureFromBounds; }
 
+	/** Return the derived parent District or City tag. */
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy", meta=(DisplayName="Get Parent Territory Tag"))
 	FGameplayTag GetParentTerritoryTag() const;
 
+	/** Return the owner configured for a new campaign, rather than the current saved owner. */
 	UFUNCTION(BlueprintPure, Category="Territory|Ownership", meta=(DisplayName="Get Initial Owning Faction"))
 	FGameplayTag GetInitialOwningFaction() const;
 
@@ -207,6 +219,7 @@ public:
 		meta=(DisplayName="Was Restored From Campaign Save"))
 	bool WasRestoredFromCampaignSave() const { return bLoadedFromSave; }
 
+	/** Return whether this Territory captures independently or derives control from its children. */
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy", meta=(DisplayName="Get Control Mode"))
 	ETerritoryControlMode GetControlMode() const;
 
@@ -224,6 +237,7 @@ public:
 	const TMap<ETerritoryState, FTerritoryStateConfig>& GetStateConfigs() const;
 	const FTerritoryStateGameplayRules* GetStateGameplayRules(ETerritoryState State, const FGameplayTag& OwnerFaction) const;
 
+	/** Return the effective gameplay rules for this Territory's current state and faction context. */
 	UFUNCTION(BlueprintPure, Category="Territory|State Rules")
 	FTerritoryStateGameplayRules GetActiveStateGameplayRules() const;
 
@@ -248,21 +262,27 @@ public:
 	/** Internal/editor synchronization hook. OnConstruction applies the assigned asset automatically. */
 	bool ApplyTerritoryDefinition();
 
+	/** Return this Territory's reusable counterattack configuration. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	UTerritoryCounterAttackProfile* GetCounterAttackProfile() const { return CounterAttackProfile; }
 
+	/** Return the typed entry approaches configured for this Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	const TArray<FTerritoryAssaultApproach>& GetCounterAttackApproaches() const { return CounterAttackApproaches; }
 
+	/** Return the guard-quality multiplier used for strategic defence estimates. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	float GetGuardQuality() const { return GuardQuality; }
 
+	/** Return authored fortification strength used in strategic defence planning. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	float GetFortificationStrength() const { return FortificationStrength; }
 
+	/** Return authored nearby allied support used in strategic defence estimates. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	float GetNearbyAlliedSupport() const { return NearbyAlliedSupport; }
 
+	/** Return this Territory's relative importance for strategic assault planning. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	float GetStrategicValue() const { return StrategicValue; }
 
@@ -323,9 +343,11 @@ public:
 	/** Internal authority path for explicit quest/script overrides and save restore. */
 	void ForceSetTerritoryState(ETerritoryState NewState);
 
+	/** Register a physical defender with this Territory on the server so combat, casualties and capture checks include it. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Defenders", meta=(DisplayName="Register Defender"))
 	void RegisterDefender(AActor* Defender);
 
+	/** Remove this actor from the Territory's registered defenders and reconcile its capture contribution. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Defenders", meta=(DisplayName="Unregister Defender"))
 	void UnregisterDefender(AActor* Defender);
 
@@ -363,6 +385,7 @@ public:
 	void OnOwnershipChanged(FGameplayTag OldOwner, FGameplayTag NewOwner);
 	virtual void OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner);
 
+	/** Blueprint hook called after this Territory changes state; use the supplied old and new states for presentation. */
 	UFUNCTION(BlueprintNativeEvent, Category="Territory", meta=(DisplayName="On State Changed"))
 	void OnStateChanged(ETerritoryState OldState, ETerritoryState NewState);
 	virtual void OnStateChanged_Implementation(ETerritoryState OldState, ETerritoryState NewState);
@@ -376,6 +399,7 @@ public:
 	void OnAllGuardsDefeated();
 	virtual void OnAllGuardsDefeated_Implementation();
 
+	/** Blueprint hook called when this Territory has completed its initialization. */
 	UFUNCTION(BlueprintNativeEvent, Category="Territory", meta=(DisplayName="On Territory Initialized"))
 	void OnTerritoryInitialized();
 	virtual void OnTerritoryInitialized_Implementation();
@@ -384,18 +408,23 @@ public:
 	// Blueprint Delegates (bind from Blueprint)
 	// ═══════════════════════════════════════════════════════════════════════════
 
+	/** Fires after a verified owner change. Use the old and new factions to update your game presentation or react to a completed handover. */
 	UPROPERTY(BlueprintAssignable, Category="Territory", meta=(DisplayName="On Ownership Changed"))
 	FOnTerritoryControlChanged OnTerritoryOwnershipChanged;
 
+	/** Called after this Territory changes political state. */
 	UPROPERTY(BlueprintAssignable, Category="Territory", meta=(DisplayName="On State Changed"))
 	FOnTerritoryStateChanged OnTerritoryStateChangedDelegate;
 
+	/** Called after this Territory's story availability changes. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Lock", meta=(DisplayName="On Availability Changed"))
 	FOnTerritoryAvailabilityChanged OnTerritoryAvailabilityChanged;
 
+	/** Called when all relevant defenders for this Territory have been defeated. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On All Guards Defeated"))
 	FOnAllGuardsDefeated OnAllGuardsDefeatedDelegate;
 
+	/** Called after active, desired or reserve garrison information changes. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Garrison Changed"))
 	FOnTerritoryGarrisonChanged OnGarrisonChanged;
 
@@ -442,6 +471,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Can Unlock"))
 	bool CanUnlock() const;
 
+	/** Check this Territory's unlock conditions using the supplied Narrative context, without committing the unlock. */
 	UFUNCTION(BlueprintPure, Category="Territory|Lock", meta=(DisplayName="Can Unlock With Context"))
 	bool CanUnlockWithContext(const FTerritoryTransitionContext& TransitionContext) const;
 
@@ -471,6 +501,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Spawn Single Guard"))
 	bool TrySpawnSingleGuard(class ATerritoryGuardSpawnPoint* SpawnPoint, bool bRequireConcealment = false);
 
+	/** Remove this Territory's spawned guards through its server-owned garrison lifecycle. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Despawn Guards"))
 	void DespawnGuards();
 
@@ -496,6 +527,7 @@ public:
 			? OwnershipData.DesiredGuardCount : GarrisonSnapshot.DesiredGuards);
 	}
 
+	/** Return the maximum garrison capacity supported by this Territory's posts and rules. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Maximum Guard Count"))
 	int32 GetMaxGuardCount() const;
 
@@ -507,24 +539,31 @@ public:
 	int32 GetPostCaptureGuardCountForOwner(const FTerritoryTransitionContext& TransitionContext,
 		const FGameplayTag& NewOwner) const;
 
+	/** Read active, desired, maximum and reserve guard information for this Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Garrison Snapshot"))
 	FTerritoryGarrisonSnapshot GetGarrisonSnapshot() const { return GarrisonSnapshot; }
 
+	/** Return the base cost to recruit one guard for this Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Recruitment Cost"))
 	int32 GetGuardRecruitmentCost(int32 Count = 1) const;
 
+	/** Calculate currency required for the proposed guard purchase. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Purchase Cost"))
 	int32 GetGuardPurchaseCost(int32 Count = 1) const;
 
+	/** Check whether the proposed guard purchase is currently allowed. The server repeats these checks during the actual request. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Can Purchase Guards"))
 	bool CanPurchaseGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const;
 
+	/** Attempt the validated guard purchase on the server. Inspect the returned result before reporting success. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Purchase Guards"))
 	bool TryPurchaseGuards(AActor* Requester, int32 Count, FText& OutResult);
 
+	/** Check whether the proposed guard removal is currently allowed. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Can Remove Guards"))
 	bool CanRemoveGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const;
 
+	/** Attempt the validated guard removal on the server. Inspect the returned result before reporting success. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guards", meta=(DisplayName="Try Remove Guards"))
 	bool TryRemoveGuards(AActor* Requester, int32 Count, FText& OutResult);
 
@@ -785,6 +824,7 @@ protected:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<ATerritoryGuardSpawnPoint>> GuardSpawnPoints;
 
+	/** Called when a registered Territory guard dies. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Guard Killed"))
 	FOnGuardKilled OnGuardKilled;
 

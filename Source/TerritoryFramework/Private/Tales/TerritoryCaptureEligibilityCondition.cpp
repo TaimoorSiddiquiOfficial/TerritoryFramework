@@ -1,4 +1,6 @@
 #include "Tales/TerritoryCaptureEligibilityCondition.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Tales/TerritorySituationCondition.h"
 
 #include "Core/TerritoryBlueprintLibrary.h"

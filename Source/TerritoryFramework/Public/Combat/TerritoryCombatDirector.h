@@ -36,6 +36,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
 	bool RequestAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
 
+	/** Ask the server-side Territory combat director for a strategic attacker slot. Narrative combat tokens still apply separately. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat", meta=(DisplayName="Request Slot"))
 	bool RequestSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
 	{
@@ -46,6 +47,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat")
 	void ReleaseAssaultSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller);
 
+	/** Release this controller's Territory attacker slot on the server so another eligible attacker may use it. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Combat", meta=(DisplayName="Release Slot"))
 	void ReleaseSlot(ATerritoryVolume* Territory, ANarrativeNPCController* Controller)
 	{

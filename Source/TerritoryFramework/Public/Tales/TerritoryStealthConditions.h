@@ -40,6 +40,7 @@ public:
 		meta=(Categories="Territory", ToolTip="Optional exact Territory. Empty uses the containing state-config Territory or the Territory containing the explicit target."))
 	FGameplayTag TerritoryToCheck;
 
+	/** Require infiltration to be enabled; disable this option to test for infiltration being disabled. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	bool bRequireEnabled = true;
 
@@ -84,9 +85,11 @@ class TERRITORYFRAMEWORK_API UTerritoryStealthEvidenceCondition : public UNarrat
 public:
 	UTerritoryStealthEvidenceCondition();
 
+	/** Stable tag of the Territory evaluated by this Narrative condition. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition", meta=(Categories="Territory"))
 	FGameplayTag TerritoryToCheck;
 
+	/** Kind of recorded stealth evidence required for this condition. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryStealthEvidence RequiredEvidence = ETerritoryStealthEvidence::Sight;
 
@@ -110,9 +113,11 @@ class TERRITORYFRAMEWORK_API UTerritorySuspicionCondition : public UNarrativeCon
 public:
 	UTerritorySuspicionCondition();
 
+	/** Stable tag of the Territory evaluated by this Narrative condition. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition", meta=(Categories="Territory"))
 	FGameplayTag TerritoryToCheck;
 
+	/** Minimum current suspicion required, on a scale from 0 to 100 percent. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(ClampMin="0.0", ClampMax="100.0", Units="Percent"))
 	float MinimumSuspicionPercent = 50.f;
@@ -133,6 +138,7 @@ class TERRITORYFRAMEWORK_API UTerritoryDisguiseCondition : public UNarrativeCond
 public:
 	UTerritoryDisguiseCondition();
 
+	/** Choose which active, perceived, true-faction, compromised or security-acceptance disguise state to test. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition")
 	ETerritoryDisguiseRequirement Requirement =
 		ETerritoryDisguiseRequirement::Active;

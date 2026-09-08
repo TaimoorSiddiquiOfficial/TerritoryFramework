@@ -31,15 +31,19 @@ public:
 		meta=(ToolTip="Dialogue when no treaty exists. Example: cautious but not hateful."))
 	TSubclassOf<UDialogue> NeutralDialogue;
 
+	/** Dialogue selected during a ceasefire; empty uses the NPC Definition fallback. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Dialogue")
 	TSubclassOf<UDialogue> CeasefireDialogue;
 
+	/** Dialogue selected for a non-aggression relationship; empty uses the NPC Definition fallback. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Dialogue")
 	TSubclassOf<UDialogue> NonAggressionDialogue;
 
+	/** Dialogue selected for a trade agreement; empty uses the NPC Definition fallback. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Dialogue")
 	TSubclassOf<UDialogue> TradeAgreementDialogue;
 
+	/** Dialogue selected for an alliance; empty uses the NPC Definition fallback. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Dialogue")
 	TSubclassOf<UDialogue> AllianceDialogue;
 

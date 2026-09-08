@@ -19,9 +19,11 @@ public:
 	virtual void Deinitialize() override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
+	/** Set these factions to war on the server so combat and assault rules can recognize the hostility. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void DeclareWar(FGameplayTag FactionA, FGameplayTag FactionB);
 
+	/** Set these factions to peace on the server and reconcile assault rules that depend on hostility. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void DeclarePeace(FGameplayTag FactionA, FGameplayTag FactionB);
 
@@ -29,6 +31,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void BreakCeasefire(FGameplayTag FactionA, FGameplayTag FactionB);
 
+	/** Create an alliance on the server and update the supported Narrative faction relationship. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void FormAlliance(FGameplayTag FactionA, FGameplayTag FactionB);
 
@@ -36,18 +39,23 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SignNonAggression(FGameplayTag FactionA, FGameplayTag FactionB);
 
+	/** End the alliance between these factions on the server and update Narrative's relationship view. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void BreakAlliance(FGameplayTag FactionA, FGameplayTag FactionB);
 
+	/** Create a trade relationship between these factions on the server. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SignTradeAgreement(FGameplayTag FactionA, FGameplayTag FactionB, float DurationGameTime = -1.f);
 
+	/** Request a supported faction relationship change on the server and update the existing Narrative bridge. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SetDiplomacyState(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState);
 
+	/** Return the current relationship between the two exact Narrative factions. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	EDiplomacyState GetDiplomacyState(FGameplayTag FactionA, FGameplayTag FactionB) const;
 
+	/** Check whether these factions are explicitly in the War relationship. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	bool IsAtWar(FGameplayTag FactionA, FGameplayTag FactionB) const;
 
@@ -64,18 +72,23 @@ public:
 	bool AreAnyFactionsAtWar(const FGameplayTagContainer& FactionsA,
 		const FGameplayTagContainer& FactionsB) const;
 
+	/** Check whether these factions currently have an alliance. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	bool IsAllied(FGameplayTag FactionA, FGameplayTag FactionB) const;
 
+	/** Check whether these factions currently have a trade agreement. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	bool HasTradeAgreement(FGameplayTag FactionA, FGameplayTag FactionB) const;
 
+	/** Add or subtract reputation for this faction on the server, within the supported bounds. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void AddReputation(FGameplayTag Faction, int32 Amount);
 
+	/** Set the faction's reputation on the server, clamped to the supported range. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SetReputation(FGameplayTag Faction, int32 Value);
 
+	/** Return the recorded reputation value for the selected faction. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	int32 GetReputation(FGameplayTag Faction) const;
 
@@ -83,18 +96,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	TMap<FGameplayTag, int32> GetAllReputation() const;
 
+	/** Return the treaty records currently available to this world or replicated snapshot. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	TArray<FTreatyRecord> GetAllTreaties() const;
 
+	/** Return treaties involving the selected Narrative faction. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	TArray<FTreatyRecord> GetTreatiesForFaction(FGameplayTag Faction) const;
 
+	/** Return recent retained diplomacy events for history or UI display. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	TArray<FDiplomacyEvent> GetDiplomacyHistory() const;
 
+	/** Update Narrative's faction attitudes from Territory's current treaty state on the server. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SyncToGameState();
 
+	/** Read Narrative's current faction attitudes into Territory's relationship view. Saved rich treaty data uses the persistence path. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void LoadFromGameState();
 
@@ -110,12 +128,15 @@ public:
 	/** Convert Narrative attitude back to treaty state */
 	EDiplomacyState AttitudeToDiplomacyState(ETeamAttitude::Type Attitude) const;
 
+	/** Called after a faction relationship changes. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnDiplomacyStateChanged OnDiplomacyStateChanged;
 
+	/** Reports a recorded diplomacy event for history or UI presentation. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnDiplomacyEvent OnDiplomacyEvent;
 
+	/** Called after the faction's reputation value changes. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnReputationChanged OnReputationChanged;
 

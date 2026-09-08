@@ -16,6 +16,7 @@ class TERRITORYFRAMEWORK_API UTerritoryDebugger : public UObject
 	GENERATED_BODY()
 
 public:
+	/** Build a readable Territory diagnostic report without changing gameplay state. */
 	UFUNCTION(BlueprintPure, Category="Territory|Debug",
 		meta=(WorldContext="WorldContextObject"))
 	static FText BuildTerritoryDebugSummary(const UObject* WorldContextObject,

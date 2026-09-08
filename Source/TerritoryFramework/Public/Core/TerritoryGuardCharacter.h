@@ -240,6 +240,7 @@ public:
 		meta=(DisplayName="Refresh Patrol Crowd Avoidance"))
 	void RefreshPatrolCrowdAvoidance();
 
+	/** Check whether this guard currently uses movement avoidance during patrol. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol|Crowd Avoidance",
 		meta=(DisplayName="Is Patrol Crowd Avoidance Active"))
 	bool IsPatrolCrowdAvoidanceActive() const;

@@ -48,12 +48,15 @@ public:
 	/** Ensures the owned bridge exists on a player controller for framework-only projects. */
 	static UTerritoryPlayerManagementComponent* FindOrCreateForPlayerController(APlayerController* PlayerController);
 
+	/** Returns the server's verified outcome of a guard purchase or removal request. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Management")
 	FOnTerritoryGuardPurchaseResult OnGuardPurchaseResult;
 
+	/** Returns the server's verified outcome of a Place upgrade request. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Property Benefits")
 	FOnTerritoryPropertyUpgradeResult OnPropertyUpgradeResult;
 
+	/** Delivers a relevant assault notification to this player's presentation layer. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryAssaultNotification OnAssaultNotification;
 
@@ -65,6 +68,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Live Events")
 	FOnTerritoryLiveEventAdded OnLiveEventAdded;
 
+	/** Called when the player's visible Territory event list changes. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Live Events")
 	FOnTerritoryLiveEventsChanged OnLiveEventsChanged;
 
@@ -78,6 +82,7 @@ public:
 		ETerritoryIntelligenceFilter Filter = ETerritoryIntelligenceFilter::All,
 		bool bIncludeArchived = true) const;
 
+	/** Remove expired entries from this player's active Territory notification list. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Live Events")
 	void ClearExpiredLiveEvents();
 
@@ -86,6 +91,7 @@ public:
 			ToolTip="Maximum Territory intelligence reports retained for this player during the current campaign session."))
 	int32 MaxLiveEventHistory = 200;
 
+	/** Seconds a received Territory live event remains active for notification presentation. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Live Events",
 		meta=(ClampMin="1.0"))
 	float LiveEventActiveDuration = 30.f;
@@ -123,9 +129,11 @@ public:
 	void SendAssaultNotification(const FTerritoryAssaultRecord& Assault);
 	void SendCounterHappened(const FTerritoryCounterAttackStateEvent& Event);
 
+	/** Minimum real-time seconds between this player's accepted management purchase requests. */
 	UPROPERTY(EditDefaultsOnly, Category="Territory|Management", meta=(ClampMin="0"))
 	float PurchaseCooldown = 0.5f;
 
+	/** Maximum guard count accepted in one management request; the server still checks cost, capacity and ownership. */
 	UPROPERTY(EditDefaultsOnly, Category="Territory|Management", meta=(ClampMin="1"))
 	int32 MaxGuardPurchaseCount = 10;
 
@@ -150,6 +158,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestSendReinforcements(ATerritoryVolume* Territory, int32 Count = 1);
 
+	/** Send a guard purchase request to the server. Ownership, count, capacity and price are validated there. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestPurchaseGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count = 1);
 
@@ -157,6 +166,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestPurchaseGuardsForDistrict(ATerritoryDistrict* District, int32 Count = 1);
 
+	/** Send a guard removal request for server validation. Use the result event to know whether it succeeded. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestRemoveGuards(ATerritoryDistrictManagementPoint* ManagementPoint, int32 Count = 1);
 
@@ -164,6 +174,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RequestRemoveGuardsForDistrict(ATerritoryDistrict* District, int32 Count = 1);
 
+	/** Return the exact Narrative faction represented by the current player's management context. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	FGameplayTag GetManagedFaction() const;
 

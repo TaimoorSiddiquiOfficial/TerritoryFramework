@@ -115,9 +115,11 @@ public:
 		TerritoryDefinition = NewDefinition;
 	}
 
+	/** Return the stable tag of the District managed by this interaction. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	FGameplayTag GetManagedDistrictTag() const { return DistrictTag; }
 
+	/** Return the allowed management interaction distance in centimetres. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	float GetManagementDistance() const { return ManagementDistance; }
 
@@ -134,24 +136,31 @@ public:
 	UPROPERTY(Transient)
 	float ManagementDistance = 600.f;
 
+	/** Interaction range volume for this Territory management point. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Management")
 	TObjectPtr<USphereComponent> InteractionSphere;
 
+	/** Narrative interaction component that opens the Territory management UI. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Management")
 	TObjectPtr<UTerritoryDistrictInteractableComponent> InteractableComponent;
 
+	/** Narrative navigation marker presenting this management point on supported navigation views. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Management")
 	TObjectPtr<UTerritoryDistrictNavigationMarkerComponent> DistrictMarkerComponent;
 
+	/** Find the loaded District managed by this interaction. Returns empty if it is not available. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	ATerritoryDistrict* ResolveDistrict() const;
 
+	/** Check whether this player can manage the linked District under current ownership and availability rules. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	bool CanManage(APawn* Interactor, FText& OutFailureReason) const;
 
+	/** Check whether the supplied actor is close enough to use this management point. */
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	bool IsInteractorInRange(APawn* Interactor) const;
 
+	/** Open the configured District management screen for this player through Narrative's UI stack. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void OpenManagementWidget(APlayerController* PlayerController);
 

@@ -2,6 +2,12 @@
 
 UTerritoryDeveloperSettings::UTerritoryDeveloperSettings()
 {
+	DefaultTerritoryButtonStyle = TSoftClassPtr<UCommonButtonStyle>(FSoftObjectPath(
+		TEXT("/TerritoryFramework/UI/Styles/ButtonStyle_TerritoryAction.ButtonStyle_TerritoryAction_C")));
+	TerritoryTabButtonStyle = TSoftClassPtr<UCommonButtonStyle>(FSoftObjectPath(
+		TEXT("/TerritoryFramework/UI/Styles/ButtonStyle_TerritoryTab.ButtonStyle_TerritoryTab_C")));
+	TerritoryActionButtonStyle = DefaultTerritoryButtonStyle;
+
 	DefaultNarrativeButtonClass = TSoftClassPtr<UNarrativeCommonButtonBase>(FSoftObjectPath(
 		TEXT("/NarrativePro/Pro/Core/UI/Widgets/Base/WBP_NarrativeButton_Text.WBP_NarrativeButton_Text_C")));
 	DefaultTerritoryTextStyle = TSoftClassPtr<UCommonTextStyle>(FSoftObjectPath(

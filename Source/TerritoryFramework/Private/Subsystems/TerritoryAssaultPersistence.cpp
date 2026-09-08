@@ -1,4 +1,5 @@
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
+#include "AI/NPCDefinition.h"
 
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultParticipantComponent.h"

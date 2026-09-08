@@ -39,12 +39,14 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	ECaptureResult AttemptCapture(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction);
 
+	/** Reset the Territory's active capture contest through the server's capture system. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void ResetCapture(ATerritoryVolume* Territory);
 
 	/** P0-01: Remove only the runtime capture tracking map entry — does NOT mutate territory state. */
 	void ClearCaptureTrackingOnly(ATerritoryVolume* Territory);
 
+	/** Add progress through the existing capture system on the server. Capture must still satisfy its final checks. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void AddCaptureProgress(ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction, float ProgressDelta);
 
@@ -114,6 +116,7 @@ public:
 	bool RegisterInfiltrator(ATerritoryVolume* Territory, AActor* Target,
 		const FGameplayTag& Faction);
 
+	/** Remove this actor from the Territory's tracked infiltrator state. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
 	void UnregisterInfiltrator(ATerritoryVolume* Territory, AActor* Target);
 
@@ -124,6 +127,7 @@ public:
 		const FVector& EvidenceLocation, const FVector& EstimatedSourceDirection,
 		bool bConfirmedIdentity);
 
+	/** Clear the target's confirmed exposure on the server, optionally resetting its suspicion. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
 	bool ClearInfiltratorExposure(ATerritoryVolume* Territory, AActor* Target,
 		bool bResetSuspicion = true);
@@ -133,13 +137,16 @@ public:
 	void SetStealthInfiltrationOverride(ATerritoryVolume* Territory,
 		bool bEnabled, bool bClearOverride = false);
 
+	/** Check the effective infiltration setting, including the active profile and runtime override. */
 	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
 	bool IsStealthInfiltrationEnabled(const ATerritoryVolume* Territory) const;
 
+	/** Read the target's current suspicion, evidence and exposure for this Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
 	bool GetInfiltrationSnapshot(const ATerritoryVolume* Territory,
 		const AActor* Target, FTerritoryInfiltrationSnapshot& OutSnapshot) const;
 
+	/** Check whether the target has been confirmed as exposed in this Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
 	bool IsInfiltratorExposed(const ATerritoryVolume* Territory,
 		const AActor* Target) const;
@@ -160,15 +167,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	bool IsCaptureInProgress(const ATerritoryVolume* Territory) const;
 
+	/** Return current capture progress from 0 to 1. A value of 0.5 means half complete. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	float GetCaptureProgress(const ATerritoryVolume* Territory) const;
 
+	/** Return the faction currently represented by this capture contest. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	FGameplayTag GetContestingFaction(const ATerritoryVolume* Territory) const;
 
+	/** Check whether another attacker fits the Territory's strategic attacker limit. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	bool HasAttackBudget(const ATerritoryVolume* Territory, const FGameplayTag& Faction) const;
 
+	/** Return the living attackers currently registered for this Territory's capture. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	int32 GetActiveAttackers(const ATerritoryVolume* Territory, const FGameplayTag& Faction) const;
 
@@ -201,15 +212,19 @@ public:
 	/** Single capture-admission policy used by requests, progress ticks, and completion. */
 	bool CanFactionCaptureTerritory(const ATerritoryVolume* Territory, const FGameplayTag& AttackingFaction) const;
 
+	/** Called after the Territory owner changes, with the old and new factions. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Capture")
 	FOnTerritoryControlChanged OnTerritoryControlChanged;
 
+	/** Reports the result of a capture attempt; inspect the result before showing success. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Capture")
 	FOnCaptureAttempted OnCaptureAttempted;
 
+	/** Called when Territory receives stealth evidence such as sight, sound or damage. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Stealth")
 	FOnTerritoryStealthEvidenceReported OnStealthEvidenceReported;
 
+	/** Called when the target's stealth exposure changes. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Stealth")
 	FOnTerritoryExposureChanged OnExposureChanged;
 

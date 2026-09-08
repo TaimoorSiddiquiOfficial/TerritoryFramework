@@ -107,40 +107,30 @@ jobs:
             throw "TerritoryFramework.uplugin was not found in the checkout."
           }
 
-          $runnerTemp = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
-          $packageDirectory = [System.IO.Path]::GetFullPath(
-            (Join-Path $runnerTemp "TerritoryFramework-UE$env:UE_VERSION-Win64")
-          )
-          if (-not $packageDirectory.StartsWith($runnerTemp, [System.StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing to clean a package path outside RUNNER_TEMP: $packageDirectory"
+          $buildDirectory = Join-Path $env:RUNNER_TEMP ("TF-" + [guid]::NewGuid().ToString('N'))
+          & (Join-Path $env:GITHUB_WORKSPACE 'Tools/Build-Release.ps1') `
+            -EngineRoot $env:UE_ROOT -PluginSource $env:GITHUB_WORKSPACE -OutputRoot $buildDirectory
+          $packageDirectory = Join-Path $buildDirectory 'Package/TerritoryFramework'
+          $env:TF_RELEASE_REPORT = Join-Path $packageDirectory 'CONTENT_VALIDATION.json'
+          $editor = Join-Path $env:UE_ROOT 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
+          & $editor (Join-Path $buildDirectory 'HostProject/HostProject.uproject') `
+            -run=pythonscript "-script=$env:GITHUB_WORKSPACE/Tools/Validate-Content.py" `
+            -DDC=InstalledNoZenLocalFallback -unattended -nullrhi -nosplash -nop4
+          if ($LASTEXITCODE -ne 0) { throw 'Included content failed its clean-project check.' }
+          $content = Get-Content -LiteralPath $env:TF_RELEASE_REPORT -Raw | ConvertFrom-Json
+          if ($content.errors -ne 0 -or $content.assets_checked -ne 118 -or $content.external_dependencies.Count -ne 0) {
+            throw 'The content report did not pass.'
           }
-          if (Test-Path -LiteralPath $packageDirectory) {
-            Remove-Item -LiteralPath $packageDirectory -Recurse -Force
-          }
-
-          $uat = Join-Path $env:UE_ROOT "Engine\Build\BatchFiles\RunUAT.bat"
-          & $uat BuildPlugin `
-            "-Plugin=$pluginDescriptor" `
-            "-Package=$packageDirectory" `
-            "-TargetPlatforms=Win64" `
-            -Rocket
-          if ($LASTEXITCODE -ne 0) {
-            throw "BuildPlugin failed for Unreal Engine $env:UE_VERSION with exit code $LASTEXITCODE."
-          }
-
-          $packagedDescriptor = Join-Path $packageDirectory "TerritoryFramework.uplugin"
-          if (-not (Test-Path -LiteralPath $packagedDescriptor -PathType Leaf)) {
-            throw "BuildPlugin finished without producing TerritoryFramework.uplugin."
-          }
-
-          @(
-            "Territory Framework packaged plugin"
-            "Unreal Engine: $env:UE_VERSION"
-            "Target: Win64"
-            "Commit: $env:GITHUB_SHA"
-            "Workflow run: $env:GITHUB_RUN_ID"
-          ) | Set-Content -LiteralPath (Join-Path $packageDirectory "BUILD_INFO.txt") -Encoding utf8
-
+          @{
+            plugin_version = (Get-Content -LiteralPath $pluginDescriptor -Raw | ConvertFrom-Json).VersionName
+            unreal_version = $content.engine_version
+            narrative_pro_version = '2.4.2'
+            platform = 'Win64'
+            commit = $env:GITHUB_SHA
+            workflow_run = $env:GITHUB_RUN_ID
+            builds = @('Editor Development', 'Game Development', 'Game Shipping')
+            assets_checked = $content.assets_checked
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $packageDirectory 'BUILD_INFO.json') -Encoding utf8
           "package_directory=$packageDirectory" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 

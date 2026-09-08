@@ -25,9 +25,11 @@ public:
 	ATerritoryRoadGuide();
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/** Return this road guide's stable authored identifier. */
 	UFUNCTION(BlueprintPure, Category="Territory|Road")
 	FName GetRoadGuideID() const { return RoadGuideID; }
 
+	/** Return this optional road guide's authored spline component. */
 	UFUNCTION(BlueprintPure, Category="Territory|Road")
 	USplineComponent* GetRouteSpline() const { return RouteSpline; }
 
@@ -36,14 +38,17 @@ public:
 	bool BuildRoutePoints(bool bReverseDirection, ETerritoryRoadLaneSide LaneSide,
 		TArray<FVector>& OutRoutePoints, FText& OutFailureReason) const;
 
+	/** Return the world-space position and facing at the start of this road guide. */
 	UFUNCTION(BlueprintPure, Category="Territory|Road")
 	FTransform GetRouteStartTransform(bool bReverseDirection,
 		ETerritoryRoadLaneSide LaneSide) const;
 
+	/** Return the world-space position and facing at the end of this road guide. */
 	UFUNCTION(BlueprintPure, Category="Territory|Road")
 	FTransform GetRouteEndTransform(bool bReverseDirection,
 		ETerritoryRoadLaneSide LaneSide) const;
 
+	/** Return the authored final on-foot fight location and facing for this road guide. */
 	UFUNCTION(BlueprintPure, Category="Territory|Road")
 	FTransform GetFinalFightTransform() const;
 
@@ -55,6 +60,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Road|Traffic")
 	void BeginMissionTraffic(int32 DesiredVehicleCount = -1);
 
+	/** Release this road guide's mission-traffic request so shared Native traffic can update normally. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Road|Traffic")
 	void EndMissionTraffic();
 
@@ -62,6 +68,7 @@ public:
 		meta=(ToolTip="Stable level-wide ID referenced by a Territory approach. By convention use the Approach ID, for example Blacksmith_WestRoad."))
 	FName RoadGuideID;
 
+	/** Authored route geometry used by this optional road guide and its Native road integration. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Road")
 	TObjectPtr<USplineComponent> RouteSpline;
 

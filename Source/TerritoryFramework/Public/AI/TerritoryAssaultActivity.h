@@ -13,6 +13,7 @@ class TERRITORYFRAMEWORK_API UTerritoryAssaultActivity : public UNPCActivity
 public:
 	UTerritoryAssaultActivity(const FObjectInitializer& ObjectInitializer);
 
+	/** Distance in centimetres at which movement considers the destination reached. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Assault", meta=(ClampMin="10.0"))
 	float AcceptanceRadius = 150.f;
 

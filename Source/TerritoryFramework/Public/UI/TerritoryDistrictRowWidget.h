@@ -26,18 +26,23 @@ class TERRITORYFRAMEWORK_API UTerritoryDistrictRowWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	/** Bind this row to a District and refresh the information it displays. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void InitializeDistrict(ATerritoryDistrict* InDistrict);
 
+	/** Populate this row from an existing read-only operations view. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void InitializeOperationsView(const FTerritoryDistrictOperationsView& InView);
 
+	/** Update the row's guard-action presentation and allowed-action state. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void SetGuardActionState(bool bCanAdd, bool bCanRemove, const FText& Status);
 
+	/** Return the District actor currently represented by this row. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	ATerritoryDistrict* GetDistrict() const;
 
+	/** Return this widget's current read-only Territory operations data. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	FTerritoryDistrictOperationsView GetOperationsView() const { return OperationsView; }
 
@@ -45,6 +50,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void SetExpanded(bool bInExpanded);
 
+	/** Check whether this row is currently showing its expanded details. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	bool IsExpanded() const { return bExpanded; }
 
@@ -52,6 +58,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void SetSelected(bool bInSelected);
 
+	/** Check whether this row is the current selected entry. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	bool IsSelected() const { return bSelected; }
 
@@ -59,6 +66,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	UWidget* GetEntryFocusTarget() const;
 
+	/** Called when the player selects this District row. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryDistrictRowSelected OnDistrictSelected;
 
@@ -66,12 +74,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryDistrictTagSelected OnDistrictTagSelected;
 
+	/** Reports a guard action requested from this row. The server must still validate and complete it. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryGuardActionRequested OnGuardActionRequested;
 
+	/** Reports a request to track this entry with Narrative navigation. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryWaypointRequested OnWaypointRequested;
 
+	/** Reports the player's request for the row's espionage action. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|UI")
 	FOnTerritoryEspionageRequested OnEspionageRequested;
 

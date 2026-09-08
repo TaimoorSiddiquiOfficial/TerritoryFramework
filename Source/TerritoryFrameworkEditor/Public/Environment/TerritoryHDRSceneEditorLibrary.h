@@ -45,7 +45,7 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryHDRSceneOptions
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",
 		meta=(AllowedClasses="/Script/Engine.Actor",
-			ToolTip="Narrative-aligned UDS actor class. Recommended: /NP_UltraDynamicSky/Narrative_UDS_Sky. Enable the Narrative Pro - Ultra Dynamic Sky integration and its Ultra Dynamic Sky dependency before running."))
+			ToolTip="Sky class to use. Leave empty to use /NP_UltraDynamicSky/Narrative_UDS_Sky. Install and enable Ultra Dynamic Sky and Narrative's UDS integration first."))
 	TSoftClassPtr<AActor> NarrativeUltraDynamicSkyClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="02 Narrative Ultra Dynamic Sky",

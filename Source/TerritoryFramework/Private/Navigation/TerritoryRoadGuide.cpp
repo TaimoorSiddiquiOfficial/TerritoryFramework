@@ -1,4 +1,5 @@
 #include "Navigation/TerritoryRoadGuide.h"
+#include "Engine/World.h"
 
 #include "Components/SplineComponent.h"
 #include "Core/TerritoryTypes.h"

@@ -78,17 +78,21 @@ struct FDiplomacyEvent
 {
 	GENERATED_BODY()
 
+	/** Kind of event represented by this record. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Diplomacy")
 	EDiplomacyEventType EventType = EDiplomacyEventType::DeclaredWar;
 
+	/** First Narrative faction in this relationship pair. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Diplomacy",
 		meta = (Categories = "Narrative.Factions"))
 	FGameplayTag FactionA;
 
+	/** Second Narrative faction in this relationship pair. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Diplomacy",
 		meta = (Categories = "Narrative.Factions"))
 	FGameplayTag FactionB;
 
+	/** Campaign-clock timestamp for this record, rather than wall-clock time. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Diplomacy")
 	float GameTime = 0.f;
 };

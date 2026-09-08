@@ -124,8 +124,9 @@ namespace
 
 	bool IsTerritoryStoryCaptureAsset(const FAssetData& AssetData)
 	{
-		return AssetData.PackageName.ToString().StartsWith(
-			TEXT("/Game/TerritoryFramework/StoryCapture/"));
+		const FString PackageName = AssetData.PackageName.ToString();
+		return PackageName.StartsWith(TEXT("/Game/TerritoryFramework/StoryCapture/"))
+			|| PackageName.StartsWith(TEXT("/TerritoryFramework/StoryCapture/"));
 	}
 
 	void ValidateDialogueShot(const UNarrativeDialogueSequence* Shot,

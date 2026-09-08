@@ -128,7 +128,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryNarrativeQuestCaptureFixture,
 bool FTFTerritoryNarrativeQuestCaptureFixture::RunTest(const FString& Parameters)
 {
 	static const TCHAR* QuestPackage =
-		TEXT("/Game/TerritoryFramework/NQ_CaptureBlacksmith");
+		TEXT("/TerritoryFramework/NQ_CaptureBlacksmith");
 	if (!FPackageName::DoesPackageExist(QuestPackage))
 	{
 		AddInfo(TEXT("Skipped optional TDA Capture Blacksmith quest fixture; "
@@ -137,7 +137,7 @@ bool FTFTerritoryNarrativeQuestCaptureFixture::RunTest(const FString& Parameters
 	}
 
 	UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr,
-		TEXT("/Game/TerritoryFramework/NQ_CaptureBlacksmith.NQ_CaptureBlacksmith"));
+		TEXT("/TerritoryFramework/NQ_CaptureBlacksmith.NQ_CaptureBlacksmith"));
 	TestNotNull(TEXT("Capture Blacksmith Narrative Quest loads"), Blueprint);
 	if (!Blueprint) return false;
 

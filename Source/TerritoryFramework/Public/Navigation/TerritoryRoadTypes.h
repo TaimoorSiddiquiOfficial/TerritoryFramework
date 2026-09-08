@@ -58,6 +58,7 @@ struct FTerritoryVehicleAwarenessSettings
 		meta=(ClampMin="0.0", ClampMax="10000.0", ToolTip="Search backwards along the existing route for a free drop-off with a complete walking path. Zero uses only the authored endpoint."))
 	float ArrivalSearchDistance = 2500.f;
 
+	/** Distance in centimetres between distinct vehicle arrival candidates near a destination. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Road|Arrival",
 		meta=(ClampMin="600.0", ClampMax="2000.0"))
 	float ArrivalSpacing = 1000.f;

@@ -32,6 +32,7 @@ public:
 	bool ActivateDisguise(AActor* Target, UTerritoryDisguiseProfile* Profile,
 		UObject* SourceObject = nullptr);
 
+	/** Remove the target's perceived disguise identity without changing its real Narrative faction. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Disguise")
 	bool RemoveDisguise(AActor* Target, UObject* SourceObject = nullptr);
 
@@ -46,6 +47,7 @@ public:
 	bool RestoreDisguise(AActor* Target,
 		UPARAM(meta=(Categories="Narrative.Factions")) FGameplayTag ObserverFaction);
 
+	/** Read the target's real faction, perceived faction and current disguise discovery state. */
 	UFUNCTION(BlueprintPure, Category="Territory|Disguise")
 	bool GetDisguiseSnapshot(const AActor* Target,
 		FTerritoryDisguiseSnapshot& OutSnapshot) const;
@@ -79,6 +81,7 @@ public:
 		AActor* Observer, ETerritoryStealthEvidence Evidence,
 		bool bConfirmedIdentity);
 
+	/** Called when disguise activation, discovery, removal or restoration changes the perceived identity. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Disguise")
 	FOnTerritoryDisguiseChanged OnDisguiseChanged;
 

@@ -21,10 +21,12 @@ public:
 		meta=(ToolTip="Automatically report once when the owning Narrative projectile hits an actor or surface."))
 	bool bReportOnFirstHit = true;
 
+	/** Strength passed to the distraction noise report for Narrative hearing and investigation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Distraction",
 		meta=(ClampMin="0.0"))
 	float Loudness = 1.f;
 
+	/** Maximum hearing/report range in centimetres for this distraction. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Distraction",
 		meta=(ClampMin="0.0", Units="cm"))
 	float MaximumRange = 3000.f;

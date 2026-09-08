@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0-preview.1 — Community content and field help
+
+- Added help text to 991 previously undocumented reflected properties and functions,
+  replaced six section-heading tooltips, and clarified the capture-mode label.
+- Imported the project's Territory examples into plugin content, including retake
+  dialogue, guards, Definitions, UI, production, stealth, and editor utilities.
+  References between copies now use the `/TerritoryFramework/` mount.
+- Replaced project-specific dependencies in the community copies with Engine or
+  Narrative Pro examples. The original TDA assets and music remain in the project.
+- Added an editor import helper using Unreal AssetTools. It checks source and
+  destination paths and does not overwrite existing assets.
+- Extended story NPC validation to the plugin content path.
+- Registered the five included example tags and supplied Narrative-based default
+  button styles so the content works in a fresh Narrative project.
+- Saved the shared content in UE 5.7 format, restoring current data assets and
+  both retake conversations through editor APIs. See [Included content](INCLUDED_CONTENT.md)
+  for the Farm capture normalization and portable example substitutions.
+- Fixed an empty HDR utility sky-class pin to use the existing Narrative UDS
+  default. Explicit class choices still take priority; UDS remains optional.
+- Added missing direct C++ includes found by isolated Editor and Game builds.
+  These changes do not alter gameplay, save formats, or replication.
+- Added installation, included-content, versioning, and release-check guides.
+
+See [Release checks](RELEASE_VERIFICATION.md) for measured results and open gates.
+This is a preview; historical test results below are not checks of this download.
+
 ## Unreleased — 2026-09-05 (Rendered HUD follow-up)
 
 - Verified the Definition HUD policy in `HopDistrictTest` PIE: City travel hides the passive

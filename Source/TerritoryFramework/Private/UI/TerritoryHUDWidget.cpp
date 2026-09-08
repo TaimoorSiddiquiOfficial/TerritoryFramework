@@ -1,4 +1,5 @@
 #include "UI/TerritoryHUDWidget.h"
+#include "UI/TerritoryUIBlueprintLibrary.h"
 
 #include "Animation/WidgetAnimation.h"
 #include "Components/ProgressBar.h"

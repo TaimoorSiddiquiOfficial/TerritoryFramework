@@ -19,9 +19,11 @@ class TERRITORYFRAMEWORK_API UTerritoryLiveEventRowWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	/** Populate this row from a received Territory live event. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Live Events")
 	void InitializeLiveEvent(const FTerritoryLiveEvent& InEvent);
 
+	/** Reports a request to track this entry with Narrative navigation. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Live Events")
 	FOnTerritoryLiveEventWaypointRequested OnWaypointRequested;
 

@@ -31,6 +31,7 @@ public class TerritoryFramework : ModuleRules
 		{
 			"CinematicCamera",
 			"DeveloperSettings",
+			"Projects",
 			"HairStrandsCore",
 			"ZoneGraph",
 			"ZoneGraphAnnotations"

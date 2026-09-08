@@ -35,6 +35,7 @@ protected:
 	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
 #endif
 
+	/** Stable editor-authored identity for this Narrative save-data actor. Do not reuse it for another persistent actor. */
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
 		meta = (DisplayName = "Savable Data GUID (auto-generated)"))
 	FGuid SavableDataGUID;

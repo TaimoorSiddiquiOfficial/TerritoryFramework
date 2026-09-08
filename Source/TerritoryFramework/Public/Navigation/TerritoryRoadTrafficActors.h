@@ -19,6 +19,7 @@ public:
 	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Road|Traffic")
 	void SetMissionTrafficWorldBounds(const FBox& WorldBounds);
 
+	/** Bounded area in which a story road mission controls Native traffic participation. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Road|Traffic")
 	TObjectPtr<UBoxComponent> MissionTrafficBounds;
 };

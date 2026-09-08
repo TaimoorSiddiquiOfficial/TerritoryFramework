@@ -1,4 +1,6 @@
 #include "Tales/TerritoryStealthConditions.h"
+#include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 
 #include "Core/TerritoryVolume.h"
 #include "Subsystems/TerritoryControlSubsystem.h"

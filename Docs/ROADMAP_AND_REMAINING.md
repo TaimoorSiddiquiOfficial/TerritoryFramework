@@ -1,10 +1,25 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-08 (batch 46)
+> **Reviewed:** 2026-09-08 (batch 47, community content and help preview)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+Batch 47 adds community field help and imports 118 example asset packages into
+the plugin. The 108 original project assets retain their pre-import hashes.
+Clean UE 5.7.4 and 5.8.2 compilation passes for Editor, Game Development, and
+Game Shipping, with 287 automation tests passing on each engine. Both versions
+compile 75 included Blueprints and validate 118 assets with zero errors and four
+example warnings. The shared content is saved in 5.7 format; current definitions
+and both retake conversations were restored through editor APIs and compared.
+The installed-package consuming Game builds, cooks, stages, and packages pass.
+Both packaged Entry-map startup checks exit zero without runtime errors. The
+cooks retain 48 dependency warnings each. UDS missing-dependency checks pass in
+the clean hosts; the separate functional UDS test passes in TDA. Visual quality,
+performance, and the broader gameplay gates below remain open.
+The community release is `0.3.0-preview.1`. See [release checks](RELEASE_VERIFICATION.md)
+and [included content](INCLUDED_CONTENT.md) for the exact scope and migration notes.
 
 TDA is on UE 5.8.2 with the local, unmodified Narrative Pro 2.4.2 package.
 [Batch 46](DATA_ASSET_AUTHORING_AUDIT_2026-09-08.md) audits all 12 concrete

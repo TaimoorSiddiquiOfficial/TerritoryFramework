@@ -296,6 +296,7 @@ public:
 		meta=(DisplayName="Has Pending Reserve Spawn"))
 	bool HasPendingReserveSpawn() const;
 
+	/** Return the number of reserve guards still waiting to deploy. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Reserve",
 		meta=(DisplayName="Get Pending Reserve Count"))
 	int32 GetPendingReserveCount() const { return FMath::Max(0, PendingReserveSpawns); }
@@ -412,30 +413,39 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	int32 GetEffectiveMaxGuards() const;
 
+	/** Return reserve capacity after applying the active post configuration. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	int32 GetEffectiveReserveSlots() const;
 
+	/** Return seconds before the first reserve placement attempt after applying overrides. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	float GetEffectiveReserveSpawnDelay() const;
 
+	/** Return seconds between reserve placement retries after applying overrides. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	float GetEffectiveReserveRetryInterval() const;
 
+	/** Return the effective reserve placement search radius in centimetres. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	float GetEffectiveReserveRadius() const;
 
+	/** Return the effective reserve-to-player-camera minimum distance in centimetres. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	float GetEffectiveMinimumPlayerDistance() const;
 
+	/** Return reserve placement candidates per attempt after applying the active post configuration. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	int32 GetEffectiveCandidateCount() const;
 
+	/** Return the effective guard faction override; an empty tag means use the Territory owner. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	FGameplayTag GetEffectiveFactionOverride() const;
 
+	/** Return the patrol stops after applying the assigned post and definition overrides. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	const TArray<FTerritoryPatrolNode>& GetEffectivePatrolRoute() const;
 
+	/** Return whether the effective patrol route loops back to its first stop. */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Effective")
 	bool GetEffectiveLoopPatrol() const;
 

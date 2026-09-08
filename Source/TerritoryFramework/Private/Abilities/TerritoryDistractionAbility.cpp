@@ -1,4 +1,5 @@
 #include "Abilities/TerritoryDistractionAbility.h"
+#include "Engine/World.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Core/TerritoryStealthTags.h"

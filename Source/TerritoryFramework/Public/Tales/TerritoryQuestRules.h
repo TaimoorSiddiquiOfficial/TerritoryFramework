@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/SubclassOf.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "TerritoryQuestRules.generated.h"
 
@@ -80,6 +81,7 @@ class TERRITORYFRAMEWORK_API UTerritoryQuestRulesLibrary : public UBlueprintFunc
 	GENERATED_BODY()
 
 public:
+	/** Check whether a Narrative Quest matches the selected requirement in the supplied Tales context. */
 	UFUNCTION(BlueprintPure, Category="Territory|Tales|Quest",
 		meta=(DisplayName="Does Narrative Quest State Match"))
 	static bool DoesQuestStateMatch(const UTalesComponent* TalesComponent,

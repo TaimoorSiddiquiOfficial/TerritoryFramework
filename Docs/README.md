@@ -1,12 +1,17 @@
 # Territory Framework — Complete Integration Guide
 
-> **Plugin:** TerritoryFramework (v0.2.7)
+> **Plugin:** TerritoryFramework (0.3.0-preview.1)
 > **Depends on:** Narrative Pro 2.4.2 public APIs
 > **Current TDA engine:** UE 5.8.2
 > **Docs Location:** `Plugins/TerritoryFramework/Docs/`
 > **Vendor rule:** Narrative Pro source/assets are read-only; all compatibility code lives in TerritoryFramework.
 
 ## Start Here
+
+For a community download, read [Install and update](RELEASE_INSTALL.md),
+[Included content](INCLUDED_CONTENT.md), [Field help](COMMUNITY_HELP.md),
+and [Release checks](RELEASE_VERIFICATION.md). [Version rules](VERSIONING.md)
+explain which download belongs to each Unreal version.
 
 Read [Territory Framework — Easy Complete Guide](00_Easy_Complete_Guide.md) first. It explains
 the complete system in simple English, including the Castle Hill Farm Locked-versus-Contested

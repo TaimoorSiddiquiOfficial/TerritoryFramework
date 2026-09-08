@@ -16,9 +16,11 @@ class TERRITORYFRAMEWORK_API UTerritoryActivatableWidget : public UNarrativeActi
 public:
 	UTerritoryActivatableWidget();
 
+	/** Close this Territory screen through the existing CommonUI screen stack. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	void CloseTerritoryWidget();
 
+	/** Return the player controller that owns this Territory widget. */
 	UFUNCTION(BlueprintPure, Category="Territory|UI")
 	APlayerController* GetTerritoryPlayerController() const;
 

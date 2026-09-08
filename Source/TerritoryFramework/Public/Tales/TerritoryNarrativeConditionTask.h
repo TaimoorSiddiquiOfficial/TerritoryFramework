@@ -47,6 +47,7 @@ public:
 		meta=(ToolTip="Disabled means the requirements must stay true until every task on the route completes. Enable for a one-time checkpoint such as 'the player was seen once'."))
 	bool bLatchOnceSatisfied = false;
 
+	/** Check all configured Narrative gate conditions using this task's explicit context. */
 	UFUNCTION(BlueprintPure, Category="Territory|Narrative Conditions")
 	bool AreGateConditionsMet() const;
 

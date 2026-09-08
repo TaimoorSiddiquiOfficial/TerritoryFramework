@@ -16,18 +16,23 @@ struct TERRITORYFRAMEWORKEDITOR_API FTerritoryDefinitionSyncReport
 {
 	GENERATED_BODY()
 
+	/** Existing helper actors updated by the editor build operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Definition")
 	int32 UpdatedActors = 0;
 
+	/** Helper actors created by the editor build operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Definition")
 	int32 CreatedActors = 0;
 
+	/** Problems that must be fixed before this operation or asset can be considered valid. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Definition")
 	TArray<FString> Errors;
 
+	/** Non-blocking issues to review before relying on the result. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Definition")
 	TArray<FString> Warnings;
 
+	/** Whether the requested operation completed successfully; also inspect warnings and detailed results. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Definition")
 	bool bSucceeded = false;
 };
@@ -40,6 +45,10 @@ class TERRITORYFRAMEWORKEDITOR_API UTerritoryDefinitionEditorLibrary final
 	GENERATED_BODY()
 
 public:
+	/** Copy selected project assets into new Territory plugin packages and update references between the copies. Existing destination assets are never overwritten. Source assets stay unchanged. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Content|Editor")
+	static bool CopyProjectContentToPlugin(const TMap<FString, FString>& PackageDestinations, FText& OutFailureReason);
+
 	/** Replace a fixed BeginPlay delay with a lifecycle-safe Narrative GameplayHUD gate. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Pro|Editor",
 		meta=(DisplayName="Migrate Narrative Controller HUD Readiness"))

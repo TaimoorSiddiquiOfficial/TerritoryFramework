@@ -70,6 +70,7 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> TerritoryProductionText;
 
+	/** Refresh this widget from its currently bound Territory. */
 	UFUNCTION(BlueprintCallable, Category="Territory|UI")
 	virtual void RefreshTerritoryDisplay();
 
@@ -85,6 +86,7 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|UI")
 	void OnTerritoryBound(ATerritoryVolume* Territory);
 
+	/** Blueprint presentation hook called when the widget stops following a Territory. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|UI")
 	void OnTerritoryUnbound();
 

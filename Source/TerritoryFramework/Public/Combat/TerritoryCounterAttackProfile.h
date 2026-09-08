@@ -33,6 +33,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryCounterAttackQuestRule
 		meta=(ToolTip="Narrative Quest read from each scoped player's Tales component."))
 	TSubclassOf<UQuest> QuestClass;
 
+	/** Required state of the selected Narrative Quest when evaluating this rule. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest Rule")
 	ETerritoryQuestStateRequirement QuestState =
 		ETerritoryQuestStateRequirement::InProgress;
@@ -69,12 +70,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling", meta=(ClampMin="0.0"))
 	float GracePeriodGameTime = 300.f;
 
+	/** Player activation distance in centimetres for proximity-gated assaults. Autonomous or explicit immediate activation does not wait for this radius. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling", meta=(ClampMin="100.0"))
 	float ActivationRadius = 5000.f;
 
+	/** Distance in centimetres used to select nearby recipients of assault warnings. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling", meta=(ClampMin="100.0"))
 	float NotificationRadius = 12000.f;
 
+	/** Restrict assault warnings to players belonging to the defending faction. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling")
 	bool bNotifyDefendingFactionOnly = true;
 
@@ -131,15 +135,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Waves")
 	ETerritoryAssaultWaveStrategy WaveStrategy = ETerritoryAssaultWaveStrategy::Legacy;
 
+	/** Upper limit on distinct entry approaches one planned assault may use; global, faction and force budgets still apply. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling", meta=(ClampMin="1", ClampMax="8"))
 	int32 MaximumApproaches = 3;
 
+	/** Base chance from 0 to 1 of launching an eligible assault before defence, power, value and readiness adjustments. This never rolls ownership. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float BaseLaunchProbability = 0.15f;
 
+	/** Lower clamp for an eligible strategic launch chance. Hard diplomacy, route, grace and budget gates can still block the assault. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float MinimumLaunchProbability = 0.01f;
 
+	/** Upper clamp for an eligible strategic launch chance; 1 means certainty after all hard gates pass. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float MaximumLaunchProbability = 0.95f;
 
@@ -152,15 +160,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float UnguardedLaunchProbability = 1.f;
 
+	/** Strength of the defence penalty in the strategic launch calculation. Higher values discourage attacks on well-defended targets. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0"))
 	float DefenceDeterrenceWeight = 0.45f;
 
+	/** Strength of attacking military power in the strategic launch calculation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0"))
 	float AttackerPowerWeight = 0.30f;
 
+	/** Strength of the target's strategic importance in the strategic launch calculation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0"))
 	float StrategicValueWeight = 0.15f;
 
+	/** Strength of attacker economy and supply readiness in the strategic launch calculation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Probability", meta=(ClampMin="0.0"))
 	float ReadinessWeight = 0.10f;
 
@@ -176,6 +188,7 @@ public:
 		meta=(ClampMin="0.05", ClampMax="1.0"))
 	float MinimumInfluenceTimingScale = 0.25f;
 
+	/** Finite Narrative NPC, vehicle and military-power configuration for each attacking faction. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force")
 	TArray<FTerritoryFactionAssaultConfig> FactionForces;
 

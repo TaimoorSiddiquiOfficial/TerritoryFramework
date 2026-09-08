@@ -25,9 +25,11 @@ struct FTerritoryTreasury
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 IncomePerTick = 0;
 
+	/** Currency costs projected for one economy update. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 CostsPerTick = 0;
 
+	/** Number of Territories included in this summary. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Economy")
 	int32 TerritoryCount = 0;
 };
@@ -41,6 +43,7 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
+	/** Read currency from the faction's relevant Narrative account or replicated account view. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy",
 		meta=(DeprecatedFunction, DeprecationMessage="TerritoryFramework has no faction wallet; use GetActorCurrency(Requester)."))
 	int32 GetTreasury(const FGameplayTag& Faction) const;
@@ -107,6 +110,7 @@ public:
 	bool RegisterFactionCurrencyAccount(const FGameplayTag& Faction,
 		ETerritoryIncomePayoutPolicy AccountRole, AActor* AccountActor);
 
+	/** Stop using the supplied account as this faction's registered shared currency account. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	void UnregisterFactionCurrencyAccount(const FGameplayTag& Faction, AActor* AccountActor);
 
@@ -117,6 +121,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy|Resources")
 	bool RegisterFactionResourceAccount(const FGameplayTag& Faction, AActor* AccountActor);
 
+	/** Stop using the supplied inventory as this faction's registered resource storage. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy|Resources")
 	void UnregisterFactionResourceAccount(const FGameplayTag& Faction, AActor* AccountActor);
 
@@ -140,6 +145,7 @@ public:
 		const FTerritoryProductionRule& Recipe, int32 UpgradeLevel, int32 BatchCount,
 		const FGameplayTag& SourceTerritory, FTerritoryProductionResult& OutResult);
 
+	/** Read the faction's available Narrative resource storage and item quantities. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	FTerritoryFactionResourceSnapshot GetFactionResourceSnapshot(const FGameplayTag& Faction) const;
 
@@ -152,39 +158,49 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	AActor* GetFactionResourceAccount(const FGameplayTag& Faction) const;
 
+	/** Return production-site summaries belonging to this Narrative faction. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	TArray<FTerritoryProductionSiteRecord> GetProductionSitesForFaction(const FGameplayTag& Faction) const;
 
+	/** Look up the production state for one Place. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	FTerritoryProductionSiteRecord GetProductionSite(const FGameplayTag& TerritoryTag) const;
 
 	/** Refresh the durable World Partition record for a loaded Property. */
 	void RefreshProductionSite(ATerritoryProperty* Property);
 
+	/** Return the calculated income rate for this faction. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
 	int32 GetIncome(const FGameplayTag& Faction) const;
 
+	/** Return the calculated economy costs for this faction. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
 	int32 GetCosts(const FGameplayTag& Faction) const;
 
+	/** Check whether the relevant faction account has enough Narrative currency for this cost. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy",
 		meta=(DeprecatedFunction, DeprecationMessage="Use CanActorAfford(Requester, Cost)."))
 	bool CanAfford(const FGameplayTag& Faction, int32 Cost) const;
 
+	/** Credit the faction's existing Narrative currency account on the server; does not create a separate Territory balance. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy",
 		meta=(DeprecatedFunction, DeprecationMessage="Use CreditCurrency(Beneficiary, Amount, Faction, Reason, Type)."))
 	void AddToTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason = TEXT(""), ETerritoryTransactionType Type = ETerritoryTransactionType::ManualCredit);
 
+	/** Try to deduct currency from the faction's Narrative account on the server. Check the result before granting a purchase. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy",
 		meta=(DeprecatedFunction, DeprecationMessage="Use TryDebitCurrency(Requester, Amount, Faction, Reason, Type)."))
 	bool TryDebitTreasury(const FGameplayTag& Faction, int32 PositiveAmount, const FString& Reason = TEXT(""), ETerritoryTransactionType Type = ETerritoryTransactionType::ManualDebit);
 
+	/** Read the faction's current income, costs and account information. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	FTerritoryTreasury GetFactionEconomy(const FGameplayTag& Faction) const;
 
+	/** Return factions for which the current economy view has currency account information. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	TArray<FGameplayTag> GetAllFactionsWithTreasury() const;
 
+	/** Return recent retained economy transactions. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
 	TArray<FTerritoryTransaction> GetTransactionHistory(const FGameplayTag& Faction, int32 MaxEntries = 50) const;
 
@@ -204,32 +220,40 @@ public:
 		const TArray<FTerritoryProductionSiteRecord>& Sites,
 		const TArray<FTerritoryFactionResourceSnapshot>& ResourceSnapshots);
 
+	/** Refresh calculated income and cost rates from current Territory ownership and rules on the server. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	void RecalculateIncome(const FGameplayTag& Faction);
 
 	/** Mark a faction for deferred income recalculation (processed on next economy tick). */
 	void MarkFactionDirty(const FGameplayTag& Faction) { if (Faction.IsValid()) DirtyFactions.Add(Faction); }
 
+	/** Called when a Territory economy update is processed. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
 	FOnEconomyTick OnEconomyTickFired;
 
+	/** Called after an economy transaction is recorded for history. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
 	FOnTransactionRecorded OnTransactionRecorded;
 
 	/** Broadcast when a faction cannot pay full guard upkeep. Deficit = required - paid. */
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFactionUpkeepDeficit, FGameplayTag, Faction, int32, Deficit);
+	/** Reports that a faction cannot cover the evaluated guard upkeep. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy")
 	FOnFactionUpkeepDeficit OnFactionUpkeepDeficit;
 
+	/** Reports a production settlement result, including any failure or rollback status. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy|Resources")
 	FOnTerritoryProductionSettled OnProductionSettled;
 
+	/** Seconds between economy settlement updates. Production still uses its campaign-cycle checkpoints. */
 	UPROPERTY(EditDefaultsOnly, Category = "Territory|Economy")
 	float TickIntervalSeconds = 300.f;
 
+	/** Maximum recent economy transactions retained for history queries. */
 	UPROPERTY(EditDefaultsOnly, Category = "Territory|Economy")
 	int32 MaxTransactionHistory = 500;
 
+	/** Choose how Territory income is credited through the existing Narrative currency accounts. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Territory|Economy")
 	ETerritoryIncomePayoutPolicy IncomePayoutPolicy = ETerritoryIncomePayoutPolicy::EqualSplitOnlineMembers;
 

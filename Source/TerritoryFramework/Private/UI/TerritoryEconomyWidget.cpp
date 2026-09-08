@@ -1,4 +1,5 @@
 #include "UI/TerritoryEconomyWidget.h"
+#include "GameFramework/Pawn.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"

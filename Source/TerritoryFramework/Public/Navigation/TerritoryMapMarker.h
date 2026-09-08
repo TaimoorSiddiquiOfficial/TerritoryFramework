@@ -16,18 +16,23 @@ class TERRITORYFRAMEWORK_API UTerritoryMapMarker : public UMapMarker
 public:
 	UTerritoryMapMarker(const FObjectInitializer& ObjectInitializer);
 
+	/** Bind this marker to a Territory so its owner and presentation can be refreshed. */
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	void SetTerritoryVolume(ATerritoryVolume* InTerritory);
 
+	/** Stop this marker from following a Territory actor. */
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	void ClearTerritoryBinding();
 
+	/** Return the Territory actor currently bound to this map marker. */
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	ATerritoryVolume* GetTerritoryVolume() const;
 
+	/** Set this marker's colour override for one exact Narrative faction. */
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	void SetFactionColor(FGameplayTag Faction, FLinearColor Color);
 
+	/** Remove this marker's custom faction-colour mappings and use its fallback colour. */
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker")
 	void ClearFactionColors();
 
@@ -35,6 +40,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory Marker|Waypoint")
 	void SetTracked(bool bInTracked);
 
+	/** Check whether Narrative navigation is currently tracking this marker's Territory. */
 	UFUNCTION(BlueprintPure, Category = "Territory Marker|Waypoint")
 	bool IsTracked() const { return bTracked; }
 
@@ -53,9 +59,11 @@ protected:
 	virtual void OnSelect_Implementation(UNarrativeNavigationComponent* Selector) override;
 	virtual void MarkerOnPaint_Implementation(FPaintContext& Context, FMarkerOnPaintData& OnPaintData) const override;
 
+	/** Optional Narrative faction-to-colour overrides for this Territory map marker. */
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
 	TMap<FGameplayTag, FLinearColor> FactionColorMap;
 
+	/** Fallback marker colour when the owning faction has no colour override. */
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
 	FLinearColor DefaultColor = FLinearColor(0.5f, 0.5f, 0.5f, 1.f);
 
@@ -76,9 +84,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Territory Marker|Colors")
 	FLinearColor LockedColor = FLinearColor(0.5f, 0.f, 0.5f, 1.f);
 
+	/** Draw the Territory bounds outline in supported map presentation. */
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
 	bool bDrawTerritoryOutline = true;
 
+	/** Line thickness used when drawing the Territory's map outline. */
 	UPROPERTY(EditDefaultsOnly, Category = "Territory Marker")
 	float OutlineThickness = 2.f;
 

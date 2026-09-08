@@ -48,6 +48,7 @@ public:
 	UFUNCTION(BlueprintPure, BlueprintCosmetic, Category="Territory|Audio")
 	ATerritoryVolume* GetMusicTerritory() const { return MusicTerritory.Get(); }
 
+	/** Return the Territory music theme most recently applied through Narrative's music system. */
 	UFUNCTION(BlueprintPure, BlueprintCosmetic, Category="Territory|Audio")
 	FGameplayTag GetAppliedMusicTheme() const { return AppliedMusicTheme; }
 

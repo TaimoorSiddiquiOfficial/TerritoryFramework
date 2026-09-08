@@ -16,6 +16,7 @@ class TERRITORYFRAMEWORK_API UTerritoryAssaultGoal : public UNPCGoalItem
 public:
 	UTerritoryAssaultGoal(const FObjectInitializer& ObjectInitializer);
 
+	/** Unique ID linking troops, waves and saved records to the same assault. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Assault")
 	FGuid AssaultID;
 
@@ -23,12 +24,15 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Assault")
 	FGuid TargetTerritoryGUID;
 
+	/** Stable tag of the Territory targeted by this operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Assault", meta=(Categories="Territory"))
 	FGameplayTag TargetTerritoryTag;
 
+	/** World-space location this goal or result targets, in centimetres. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Assault")
 	FVector TargetLocation = FVector::ZeroVector;
 
+	/** Territory targeted by this operation or result. */
 	UPROPERTY(Transient, BlueprintReadOnly, Category="Territory|Assault")
 	TWeakObjectPtr<ATerritoryVolume> TargetTerritory;
 

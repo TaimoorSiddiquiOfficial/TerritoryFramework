@@ -50,6 +50,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryPropertyGameplayBenefit
 		meta=(Categories="Territory.Property.Benefit", ToolTip="Stable capability tag granted by Narrative's Ability System while this Property benefit is active."))
 	FGameplayTag BenefitTag;
 
+	/** Readable name shown to designers or players; stable tags and IDs still identify this entry. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Property Benefit")
 	FText DisplayName;
 
@@ -79,13 +80,16 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPatrolTemplateNode
 {
 	GENERATED_BODY()
 
+	/** Patrol node position and facing relative to its guard-post actor. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol")
 	FTransform RelativeTransform = FTransform::Identity;
 
+	/** Seconds the guard waits after reaching this patrol node. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol",
 		meta=(ClampMin="0.0", Units="s"))
 	float WaitTime = 2.f;
 
+	/** Optional Guard.Activity tag identifying the activity requested at this patrol node. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol",
 		meta=(Categories="Guard.Activity"))
 	FGameplayTag ActivityTag;
@@ -107,10 +111,12 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Crowd Avoidance")
 	bool bEnablePatrolCrowdAvoidance = true;
 
+	/** Radius in centimetres in which a guard considers nearby agents for movement avoidance. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Crowd Avoidance",
 		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="100.0", ClampMax="2000.0", Units="cm"))
 	float PatrolAvoidanceConsiderationRadius = 500.f;
 
+	/** Relative RVO avoidance weight from 0 to 1; affects how guards share avoidance responsibility. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Crowd Avoidance",
 		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="0.0", ClampMax="1.0"))
 	float PatrolAvoidanceWeight = 0.5f;
@@ -119,6 +125,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat")
 	bool bPrioritizeClosestHostilePlayer = true;
 
+	/** Extra Narrative goal score given to the closest eligible hostile player; does not make a friendly player hostile. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat",
 		meta=(EditCondition="bPrioritizeClosestHostilePlayer", ClampMin="0.0", ClampMax="10.0"))
 	float ClosestHostilePlayerGoalScoreBonus = 0.75f;
@@ -177,45 +184,56 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
 		meta=(Categories="Narrative.Factions"))
 	FGameplayTag FactionOverride;
 
+	/** Guard-post filling priority; higher-priority posts are considered before lower-priority posts. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Guard",
 		meta=(ClampMin="0", UIMin="0", UIMax="100"))
 	int32 Priority = 50;
 
+	/** Finite replacement guards available at this post, separate from the active guard slot. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
 		meta=(ClampMin="0", UIMin="0", UIMax="10"))
 	int32 ReserveSlots = 1;
 
+	/** Allow this post to deploy its remaining reserves after a vacancy, subject to ownership and spawn checks. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve")
 	bool bAutoSpawnReserves = true;
 
+	/** Seconds to wait before attempting an automatic reserve deployment. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
 		meta=(ClampMin="0.1", Units="s"))
 	float ReserveSpawnDelay = 3.f;
 
+	/** Seconds between failed automatic reserve placement attempts. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
 		meta=(ClampMin="0.1", Units="s"))
 	float ReserveSpawnRetryInterval = 2.f;
 
+	/** Radius in centimetres around the post in which reserve placement searches for valid navigation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
 		meta=(ClampMin="100.0", Units="cm"))
 	float ReserveSpawnRadius = 600.f;
 
+	/** Minimum distance in centimetres between a reserve spawn candidate and player cameras. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
 		meta=(ClampMin="0.0", Units="cm"))
 	float ReserveMinimumPlayerDistance = 500.f;
 
+	/** Maximum navigation candidates checked during one reserve placement attempt. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
 		meta=(ClampMin="1", ClampMax="64"))
 	int32 ReserveSpawnCandidateCount = 12;
 
+	/** Failed attempts before camera avoidance may relax. The total retry limit still bounds deployment attempts. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
 		meta=(ClampMin="0", ClampMax="20"))
 	int32 ReserveCameraAvoidanceRetryLimit = 3;
 
+	/** Maximum failed automatic placement attempts before this reserve deployment stops retrying. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
 		meta=(ClampMin="1", ClampMax="100"))
 	int32 ReserveTotalRetryLimit = 10;
 
+	/** Choose whether ownership changes refill the post's reserves or preserve their remaining finite count. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve")
 	EReserveOwnershipPolicy ReserveOwnershipPolicy =
 		EReserveOwnershipPolicy::RefillOnOwnerChange;
@@ -224,6 +242,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post")
 	TArray<FTerritoryGuardPatrolTemplateNode> PatrolRoute;
 
+	/** Return to the first patrol node after the last node instead of ending the route. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post")
 	bool bLoopPatrol = true;
 };
@@ -234,17 +253,21 @@ struct TERRITORYFRAMEWORK_API FTerritoryCapturePointTemplate
 {
 	GENERATED_BODY()
 
+	/** Include a physical flag or hold-zone helper when building this Place. Automatic Capture separately controls whether it generates progress. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Capture Point")
 	bool bEnabled = false;
 
+	/** Blueprint class used by the editor builder to create this helper actor. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Capture Point",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	TSoftClassPtr<ATerritoryCapturePoint> ActorClass;
 
+	/** Position, rotation and scale relative to the owning actor or template anchor, rather than absolute world coordinates. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Capture Point",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	FTransform RelativeTransform = FTransform::Identity;
 
+	/** Radius of the physical capture zone in centimetres; 350 means 3.5 metres. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Capture Point",
 		meta=(EditCondition="bEnabled", EditConditionHides, ClampMin="100.0", Units="cm"))
 	float CaptureRadius = 350.f;
@@ -254,6 +277,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryCapturePointTemplate
 			ToolTip="Normal domination/multiplayer progress. Story Capture From Bounds disables automatic progress."))
 	bool bAutomaticCapture = true;
 
+	/** Hide this helper's presentation while its linked Territory is unavailable under story rules. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Capture Point",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	bool bHideWhileUnavailable = true;
@@ -265,13 +289,16 @@ struct TERRITORYFRAMEWORK_API FTerritoryManagementPointTemplate
 {
 	GENERATED_BODY()
 
+	/** Include a Narrative management interaction helper when building this Territory. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Management Point")
 	bool bEnabled = false;
 
+	/** Blueprint class used by the editor builder to create this helper actor. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Management Point",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	TSoftClassPtr<ATerritoryDistrictManagementPoint> ActorClass;
 
+	/** Position, rotation and scale relative to the owning actor or template anchor, rather than absolute world coordinates. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Management Point",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	FTransform RelativeTransform = FTransform::Identity;
@@ -281,14 +308,17 @@ struct TERRITORYFRAMEWORK_API FTerritoryManagementPointTemplate
 		meta=(EditCondition="bEnabled", EditConditionHides, Categories="Territory"))
 	FGameplayTag ManagedDistrictOverride;
 
+	/** Territory management widget opened by this interaction through Narrative's UI system. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Management Point",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	TSoftClassPtr<UTerritoryDistrictManagementWidget> WidgetClass;
 
+	/** Existing CommonUI layer tag where the management widget is opened. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Management Point",
 		meta=(EditCondition="bEnabled", EditConditionHides, Categories="UI.Layer"))
 	FGameplayTag WidgetLayer;
 
+	/** Maximum interaction distance in centimetres; 300 means three metres. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Management Point",
 		meta=(EditCondition="bEnabled", EditConditionHides, ClampMin="100.0", Units="cm"))
 	float InteractionDistance = 600.f;
@@ -300,13 +330,16 @@ struct TERRITORYFRAMEWORK_API FTerritoryStoryOwnerTemplate
 {
 	GENERATED_BODY()
 
+	/** Include a protected Narrative owner-spawner helper for explicit story handover. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Story Owner")
 	bool bEnabled = false;
 
+	/** Blueprint class used by the editor builder to create this helper actor. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Story Owner",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	TSoftClassPtr<ATerritoryStoryOwnerSpawner> ActorClass;
 
+	/** Position, rotation and scale relative to the owning actor or template anchor, rather than absolute world coordinates. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Story Owner",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	FTransform RelativeTransform = FTransform::Identity;
@@ -316,18 +349,22 @@ struct TERRITORYFRAMEWORK_API FTerritoryStoryOwnerTemplate
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	TObjectPtr<UNPCDefinition> NPCDefinition;
 
+	/** Attempt to begin the owner's dialogue when the handover activation supplies a valid player context. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Story Owner",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	bool bBeginDialogueOnActivation = true;
 
+	/** Optional Narrative Dialogue Blueprint replacing the NPC Definition's default handover conversation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Story Owner",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	TSoftClassPtr<UDialogue> DialogueOverride;
 
+	/** Optional Native dialogue node ID to start from. Empty starts at the dialogue root. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Story Owner",
 		meta=(EditCondition="bEnabled", EditConditionHides))
 	FName DialogueStartFromID;
 
+	/** Maximum interaction distance in centimetres; 300 means three metres. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Story Owner",
 		meta=(EditCondition="bEnabled", EditConditionHides, ClampMin="100.0", ClampMax="1000.0", Units="cm"))
 	float InteractionDistance = 300.f;
@@ -347,10 +384,12 @@ class TERRITORYFRAMEWORK_API UTerritoryDefinition : public UPrimaryDataAsset
 public:
 	UTerritoryDefinition();
 
+	/** Stable Territory GameplayTag used by lookups, Narrative conditions and hierarchy references. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="01 Identity",
 		meta=(Categories="Territory"))
 	FGameplayTag TerritoryTag;
 
+	/** Readable name shown to designers or players; stable tags and IDs still identify this entry. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="01 Identity")
 	FText DisplayName;
 
@@ -371,6 +410,7 @@ public:
 		meta=(Categories="Territory"))
 	FGameplayTag DerivedParentTerritoryTag;
 
+	/** Narrative faction that owns this Territory in a new campaign. Loading saved ownership takes precedence. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 New Campaign",
 		meta=(Categories="Narrative.Factions"))
 	FGameplayTag InitialOwningFaction;
@@ -381,6 +421,7 @@ public:
 			ToolTip="Locked keeps this Territory silent until its Narrative Locked exit conditions pass. Ownership is preserved."))
 	ETerritoryAvailability InitialAvailability = ETerritoryAvailability::Unlocked;
 
+	/** Political state used for a new campaign. Automatic derives the starting state from the initial owner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 New Campaign")
 	ETerritoryInitialState InitialState = ETerritoryInitialState::Automatic;
 
@@ -388,18 +429,22 @@ public:
 		meta=(ToolTip="Place Definitions are Independent. City and District Definitions are Aggregate Only. The class fixes this value automatically."))
 	ETerritoryControlMode ControlMode = ETerritoryControlMode::Independent;
 
+	/** Strategic attacker slots available for this Territory. Narrative's per-target combat tokens remain separate. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 New Campaign",
 		meta=(ClampMin="1"))
 	int32 MaxConcurrentAttackers = 3;
 
+	/** Base currency income per economy cycle before state, faction, upgrade and hierarchy modifiers. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Economy",
 		meta=(ClampMin="0"))
 	int32 PeriodicIncome = 100;
 
+	/** Currency upkeep rate per guard each economy cycle. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Economy",
 		meta=(ClampMin="0"))
 	int32 GuardUpkeepPerCycle = 50;
 
+	/** Base Narrative currency cost to recruit one guard before applicable modifiers. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Economy",
 		meta=(ClampMin="0"))
 	int32 GuardRecruitmentCost = 50;
@@ -434,17 +479,21 @@ public:
 		meta=(ToolTip="Optional physical point, flag, or interaction actor. Automatic progress is for domination/multiplayer mode and is automatically turned off when Story Capture From Whole Place Bounds is enabled."))
 	FTerritoryCapturePointTemplate CapturePoint;
 
+	/** Fallback Narrative NPC Definition for guards when no matching faction or post override is supplied. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards")
 	TObjectPtr<UNPCDefinition> DefaultGuardDefinition;
 
+	/** Exact owning-faction mappings to Narrative guard definitions, allowing one Place to support different occupiers. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards",
 		meta=(TitleProperty="Faction"))
 	TArray<FTerritoryFactionGuardDefinition> FactionGuardDefinitions;
 
+	/** Desired initial garrison count for a new campaign, bounded by the available guard posts. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards",
 		meta=(ClampMin="0"))
 	int32 InitialGuardCount = 3;
 
+	/** Choose how the new owner's garrison is populated after a verified capture. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards")
 	ETerritoryPostCaptureGarrisonPolicy PostCaptureGarrisonPolicy =
 		ETerritoryPostCaptureGarrisonPolicy::PlayerChooses;
@@ -453,35 +502,44 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards")
 	FTerritoryGuardBehaviorTemplate GuardBehavior;
 
+	/** Physical guard-post templates, stable identities, reserve settings and optional per-post patrol overrides. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards",
 		meta=(TitleProperty="GuardPostID"))
 	TArray<FTerritoryGuardPostTemplate> GuardPosts;
 
+	/** Narrative events executed when a registered defender dies, using the live Territory transition context. */
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="07 Guards|Narrative")
 	TArray<TObjectPtr<UNarrativeEvent>> DefenderDiedEvents;
 
+	/** Narrative events executed when the last relevant defender is defeated; useful for revealing a story owner. */
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="07 Guards|Narrative")
 	TArray<TObjectPtr<UNarrativeEvent>> AllDefendersDefeatedEvents;
 
+	/** Reusable strategic scheduling, finite-force and Narrative attacker configuration for this Territory. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Counter Attack")
 	TObjectPtr<UTerritoryCounterAttackProfile> CounterAttackProfile;
 
+	/** Typed entry routes attackers may use. Vehicle entries need a valid road route; spawning must pass approach validation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Counter Attack",
 		meta=(TitleProperty="ApproachID"))
 	TArray<FTerritoryAssaultApproach> CounterAttackApproaches;
 
+	/** Relative quality multiplier used when estimating garrison defence power for strategic planning. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Counter Attack",
 		meta=(ClampMin="0.0"))
 	float GuardQuality = 1.f;
 
+	/** Additional authored defence strength used by strategic counterattack planning. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Counter Attack",
 		meta=(ClampMin="0.0"))
 	float FortificationStrength = 0.f;
 
+	/** Authored contribution from nearby allied support to the strategic defence estimate. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Counter Attack",
 		meta=(ClampMin="0.0"))
 	float NearbyAlliedSupport = 0.f;
 
+	/** Relative importance of this Territory to strategic assault planning; higher values make it a more valuable target. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Counter Attack",
 		meta=(ClampMin="0.0"))
 	float StrategicValue = 1.f;
@@ -496,6 +554,7 @@ public:
 			ToolTip="Show the compact Territory location/capture card while the player is inside this exact Territory. Turn this off for broad ambient City or District volumes. Live notifications, POIs, map markers, Command Center, and management are not hidden."))
 	bool bShowGameplayHUD = true;
 
+	/** Optional Narrative interaction and UI helper used to manage this Place or its District. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="09 Management")
 	FTerritoryManagementPointTemplate ManagementPoint;
 
@@ -505,6 +564,7 @@ public:
 
 	const FTerritoryGuardPostTemplate* FindGuardPost(FName GuardPostID) const;
 
+	/** Find a guard-post row by its stable post ID. False means no matching row was found. */
 	UFUNCTION(BlueprintPure, Category="Territory|Definition",
 		meta=(DisplayName="Get Guard Post Template"))
 	bool GetGuardPostTemplate(FName GuardPostID,
@@ -546,21 +606,26 @@ public:
 		meta=(TitleProperty="DisplayName", ToolTip="Abilities, persistent Gameplay Effects, benefit tags, and weapon catalog entries unlocked by owning and upgrading this Property."))
 	TArray<FTerritoryPropertyGameplayBenefit> GameplayBenefits;
 
+	/** Reusable input/output recipes processed by the existing Territory economy and Narrative inventory systems. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Production")
 	TObjectPtr<UTerritoryProductionProfile> ProductionProfile;
 
+	/** Highest purchasable upgrade level for this Place; zero disables further upgrades. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Upgrades",
 		meta=(ClampMin="0"))
 	int32 MaxUpgradeLevel = 3;
 
+	/** Base currency cost used when calculating a Place upgrade purchase. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Upgrades",
 		meta=(ClampMin="0"))
 	int32 UpgradeCostPerLevel = 500;
 
+	/** Additional base income earned per purchased Place upgrade level. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Upgrades",
 		meta=(ClampMin="0"))
 	int32 IncomeBonusPerLevel = 25;
 
+	/** Optional protected Narrative NPC and dialogue configuration for explicit story handover. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="11 Place|Story")
 	FTerritoryStoryOwnerTemplate StoryOwner;
 
@@ -577,15 +642,19 @@ class TERRITORYFRAMEWORK_API UTerritoryDistrictDefinition : public UTerritoryDef
 public:
 	UTerritoryDistrictDefinition();
 
+	/** Place Definitions belonging to this District. Refreshing hierarchy links derives their parent tags from this list. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 District|Hierarchy")
 	TArray<TObjectPtr<UTerritoryPlaceDefinition>> Places;
 
+	/** Mark this District as a capital for the authored capital reward and income rules. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 District|Economy")
 	bool bIsCapital = false;
 
+	/** Authored currency reward for capturing this capital, subject to the current reward and faction rules. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 District|Economy", meta=(ClampMin="0"))
 	int32 CapitalCaptureReward = 500;
 
+	/** Multiplier applied to qualifying capital income; 2 means twice the base rate. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 District|Economy",
 		meta=(ClampMin="1.0"))
 	float CapitalIncomeMultiplier = 2.f;
@@ -604,9 +673,11 @@ class TERRITORYFRAMEWORK_API UTerritoryCityDefinition : public UTerritoryDefinit
 public:
 	UTerritoryCityDefinition();
 
+	/** Authored currency reward for capturing this capital, subject to the current reward and faction rules. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 City|Economy", meta=(ClampMin="0"))
 	int32 CapitalCaptureReward = 1000;
 
+	/** District Definitions belonging to this City. Their Place lists define the rest of the hierarchy. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 City|Hierarchy")
 	TArray<TObjectPtr<UTerritoryDistrictDefinition>> Districts;
 

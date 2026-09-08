@@ -42,9 +42,11 @@ public:
 		PlaceDefinition = NewDefinition;
 	}
 
+	/** Return the stable Territory tag identifying this target. */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture")
 	FGameplayTag GetTargetTerritoryTag() const { return TargetTerritoryTag; }
 
+	/** Return this physical capture point's radius in centimetres. */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture")
 	float GetCaptureRadius() const { return CaptureRadius; }
 
@@ -58,6 +60,7 @@ public:
 	UPROPERTY(Transient)
 	bool bCaptureEnabled = true;
 
+	/** Physical overlap volume used to register eligible participants for automatic flag or hold-zone capture. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Capture")
 	TObjectPtr<USphereComponent> CaptureZone;
 
@@ -72,15 +75,19 @@ public:
 	UPROPERTY(Transient)
 	bool bHideMarkerWhileCaptureUnavailable = true;
 
+	/** Called when this capture point adds or removes a participant. Use it to refresh nearby capture UI. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Capture")
 	FOnTerritoryCaptureParticipantChanged OnCaptureParticipantChanged;
 
+	/** Find the loaded Territory linked to this capture point. Returns empty while no matching actor is available. */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture")
 	ATerritoryVolume* ResolveTargetTerritory() const;
 
+	/** Return current capture progress from 0 to 1. A value of 0.5 means half complete. */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture")
 	float GetCaptureProgress() const;
 
+	/** Return the faction currently represented by this capture contest. */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture")
 	FGameplayTag GetContestingFaction() const;
 
@@ -88,9 +95,11 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Capture")
 	bool TryRegisterCaptureParticipant(AActor* Participant);
 
+	/** Remove this actor's participation at the capture point so it no longer contributes pressure here. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Capture")
 	void UnregisterCaptureParticipant(AActor* Participant);
 
+	/** Check whether the supplied actor is already registered at this capture point. */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture")
 	bool IsCaptureParticipantRegistered(const AActor* Participant) const;
 

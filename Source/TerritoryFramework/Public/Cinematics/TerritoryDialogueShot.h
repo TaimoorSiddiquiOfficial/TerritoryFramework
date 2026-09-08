@@ -112,9 +112,11 @@ public:
 	virtual void BeginPlaySequence(ALevelSequenceActor* InSequenceActor,
 		UDialogue* InDialogue, AActor* InSpeaker, AActor* InListener) override;
 
+	/** Return the role assigned to this reusable dialogue camera shot. */
 	UFUNCTION(BlueprintPure, Category="Territory|Cinematics")
 	ETerritoryDialogueShotRole GetShotRole() const { return ShotRole; }
 
+	/** Return the camera aspect ratio requested by this dialogue shot. */
 	UFUNCTION(BlueprintPure, Category="Territory|Cinematics")
 	float GetCinematicAspectRatio() const { return CropSettings.AspectRatio; }
 
@@ -134,6 +136,7 @@ public:
 		bool bInUse180DegreeRule = true);
 #endif
 
+	/** Dialogue camera role used by this reusable shot configuration. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look")
 	ETerritoryDialogueShotRole ShotRole = ETerritoryDialogueShotRole::MediumCloseUp;
 
@@ -141,17 +144,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look")
 	bool bApplyLensOverride = true;
 
+	/** Camera lens focal length in millimetres; larger values produce a tighter field of view. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look",
 		meta=(EditCondition="bApplyLensOverride", ClampMin="12.0", ClampMax="250.0", Units="mm"))
 	float FocalLength = 65.f;
 
+	/** Camera f-stop controlling depth of field; lower values produce shallower focus. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look",
 		meta=(EditCondition="bApplyLensOverride", ClampMin="1.0", ClampMax="22.0"))
 	float Aperture = 2.8f;
 
+	/** Interpolate camera focus distance while tracking the dialogue subject. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look|Focus")
 	bool bSmoothTrackingFocus = true;
 
+	/** Speed of focus-distance interpolation when smooth tracking focus is enabled. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look|Focus",
 		meta=(EditCondition="bSmoothTrackingFocus", ClampMin="0.1", ClampMax="30.0"))
 	float FocusSmoothingSpeed = 8.f;

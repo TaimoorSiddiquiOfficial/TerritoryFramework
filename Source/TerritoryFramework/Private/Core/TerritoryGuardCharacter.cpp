@@ -1,4 +1,5 @@
 #include "Core/TerritoryGuardCharacter.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "Core/TerritoryDefinition.h"

@@ -60,6 +60,7 @@ public:
 		meta=(ToolTip="Narrative Actor Provider for the NPC, its controller, or another observed actor. Find NPC is recommended for World Partition safe quests."))
 	TObjectPtr<UNarrativeActorProvider> TargetProvider;
 
+	/** Choose which observable Narrative AI state completes this task. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Community Task|AI")
 	ETerritoryAIObservationObjective Objective =
 		ETerritoryAIObservationObjective::ActorAvailable;
@@ -69,6 +70,7 @@ public:
 			ToolTip="Actor the observed AI must approach."))
 	TObjectPtr<UNarrativeActorProvider> DestinationProvider;
 
+	/** World-space destination, in centimetres, used by the selected movement observation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Community Task|Destination",
 		meta=(EditCondition="Objective == ETerritoryAIObservationObjective::ReachLocation", EditConditionHides))
 	FVector DestinationLocation = FVector::ZeroVector;
@@ -80,10 +82,12 @@ public:
 			ToolTip="Maximum three-dimensional distance that counts as reached."))
 	float DistanceTolerance = 150.f;
 
+	/** Narrative NPC goal class to observe when evaluating this objective. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Community Task|Narrative AI",
 		meta=(EditCondition="Objective == ETerritoryAIObservationObjective::HasGoalClass", EditConditionHides))
 	TSubclassOf<UNPCGoalItem> GoalClass;
 
+	/** Narrative NPC activity class to observe when evaluating this objective. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Community Task|Narrative AI",
 		meta=(EditCondition="Objective == ETerritoryAIObservationObjective::RunsActivityClass", EditConditionHides))
 	TSubclassOf<UNPCActivity> ActivityClass;

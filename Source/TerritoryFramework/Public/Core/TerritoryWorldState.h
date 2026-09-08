@@ -21,6 +21,7 @@ struct FReplicatedFactionEconomy
 {
 	GENERATED_BODY()
 
+	/** Exact Narrative faction represented by this setting or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	FGameplayTag Faction;
 
@@ -28,12 +29,15 @@ struct FReplicatedFactionEconomy
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	int32 Treasury = 0;
 
+	/** Currency income projected for one economy update. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	int32 IncomePerTick = 0;
 
+	/** Currency costs projected for one economy update. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	int32 CostsPerTick = 0;
 
+	/** Number of Territories included in this summary. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Economy")
 	int32 TerritoryCount = 0;
 };
@@ -46,27 +50,35 @@ struct FReplicatedTransaction
 {
 	GENERATED_BODY()
 
+	/** Unique ID identifying this verified economy transaction. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	FGuid TransactionID;
 
+	/** Exact Narrative faction represented by this setting or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	FGameplayTag Faction;
 
+	/** Kind of operation or record represented by this entry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	ETerritoryTransactionType Type = ETerritoryTransactionType::Income;
 
+	/** Amount involved in this resource or currency operation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	int32 Amount = 0;
 
+	/** Narrative currency balance observed after this transaction. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	int32 BalanceAfter = 0;
 
+	/** Campaign-clock timestamp for this record, rather than wall-clock time. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	double GameTime = 0.0;
 
+	/** Explanation of the reported decision or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	FString Reason;
 
+	/** Territory from which this event, effect or transfer originates. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Transaction")
 	FGameplayTag SourceTerritory;
 };
@@ -79,24 +91,31 @@ struct FReplicatedTreaty
 {
 	GENERATED_BODY()
 
+	/** Unique saved identity for this treaty record. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	FGuid TreatyID;
 
+	/** First Narrative faction in this relationship pair. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	FGameplayTag FactionA;
 
+	/** Second Narrative faction in this relationship pair. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	FGameplayTag FactionB;
 
+	/** State represented by this record; use the field's enum choices to interpret it. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	EDiplomacyState State = EDiplomacyState::None;
 
+	/** Campaign-clock time when this treaty was signed. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	double SignedGameTime = 0.0;
 
+	/** Campaign-clock time at which this timed record expires. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	double ExpiryGameTime = -1.0;
 
+	/** Whether this record has no timed expiry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	bool bPermanent = true;
 };
@@ -109,6 +128,7 @@ struct FReplicatedCaptureSummary
 {
 	GENERATED_BODY()
 
+	/** Stable Territory GameplayTag used by lookups, Narrative conditions and hierarchy references. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag TerritoryTag;
 
@@ -124,6 +144,7 @@ struct FReplicatedCaptureSummary
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture|Directory")
 	FText DisplayName;
 
+	/** Whether this entry represents a City, District or Place. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture|Directory")
 	ETerritoryHierarchyLevel HierarchyLevel = ETerritoryHierarchyLevel::Place;
 
@@ -135,6 +156,7 @@ struct FReplicatedCaptureSummary
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture|Directory")
 	bool bDefinitionBacked = false;
 
+	/** Narrative faction that currently owns the target Territory. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag CurrentOwner;
 
@@ -142,15 +164,19 @@ struct FReplicatedCaptureSummary
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Capture|History")
 	FGameplayTagContainer FormerOwningFactions;
 
+	/** Faction currently represented by this capture contest. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	FGameplayTag ContestingFaction;
 
+	/** Control progress represented by this result; read with its current state and owner. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	float ControlProgress = 0.f;
 
+	/** State represented by this record; use the field's enum choices to interpret it. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	ETerritoryState State = ETerritoryState::Unclaimed;
 
+	/** Story access state, such as Locked or Unlocked; separate from who owns the Territory. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
 	ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
 };
@@ -163,9 +189,11 @@ struct FReplicatedFactionReputation
 {
 	GENERATED_BODY()
 
+	/** Exact Narrative faction represented by this setting or result. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	FGameplayTag Faction;
 
+	/** Current reputation value for this faction relationship. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	int32 Reputation = 0;
 };
@@ -205,9 +233,11 @@ public:
 	/** Projection writer used by the economy authority. Blueprint must mutate the economy subsystem. */
 	void SetFactionTreasury(const FGameplayTag& Faction, const FTerritoryTreasury& Treasury);
 
+	/** Return the faction's currency value from the current replicated account snapshot. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	FTerritoryTreasury GetFactionTreasury(const FGameplayTag& Faction) const;
 
+	/** Return factions represented in the current replicated economy snapshot. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	TArray<FGameplayTag> GetAllFactionsWithEconomy() const;
 
@@ -217,12 +247,15 @@ public:
 		const TArray<FTerritoryProductionSiteRecord>& Sites,
 		const TArray<FTerritoryFactionResourceSnapshot>& ResourceSnapshots);
 
+	/** Return production-site summaries from the current world snapshot. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	TArray<FTerritoryProductionSiteRecord> GetProductionSites() const { return ReplicatedProductionSites; }
 
+	/** Return production-site summaries belonging to this Narrative faction. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	TArray<FTerritoryProductionSiteRecord> GetProductionSitesForFaction(const FGameplayTag& Faction) const;
 
+	/** Read the faction's available Narrative resource storage and item quantities. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy|Resources")
 	FTerritoryFactionResourceSnapshot GetFactionResourceSnapshot(const FGameplayTag& Faction) const;
 
@@ -231,6 +264,7 @@ public:
 	/** Projection writer used by the economy authority; not a gameplay mutation API. */
 	void RecordTransaction(const FReplicatedTransaction& Transaction);
 
+	/** Return recent retained economy transactions. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Transaction")
 	TArray<FReplicatedTransaction> GetTransactionHistory(const FGameplayTag& Faction, int32 MaxEntries = 50) const;
 
@@ -242,9 +276,11 @@ public:
 	/** Projection writer used by the diplomacy authority. Blueprint must mutate that subsystem. */
 	void RemoveTreaty(const FGuid& TreatyID);
 
+	/** Return the treaty records currently available to this world or replicated snapshot. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	TArray<FReplicatedTreaty> GetAllTreaties() const;
 
+	/** Find the treaty between the two exact Narrative factions in the current world snapshot. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	FReplicatedTreaty GetTreatyBetween(const FGameplayTag& FactionA, const FGameplayTag& FactionB) const;
 
@@ -253,6 +289,7 @@ public:
 	/** Projection writer used by the diplomacy authority. Blueprint must mutate that subsystem. */
 	void SetReputation(const FGameplayTag& Faction, int32 Value);
 
+	/** Return the recorded reputation value for the selected faction. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	int32 GetReputation(const FGameplayTag& Faction) const;
 
@@ -279,6 +316,7 @@ public:
 	/** Native projection reconciliation for configured and loaded Definitions. */
 	void RefreshStrategicDirectory();
 
+	/** Read the saved or replicated capture summary for the requested Territory. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
 	FReplicatedCaptureSummary GetCaptureSummary(const FGameplayTag& TerritoryTag) const;
 
@@ -341,6 +379,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Transaction")
 	FOnTransactionRecorded OnTransactionRecorded;
 
+	/** Called when replicated production information changes; use it to refresh client UI. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Economy|Resources")
 	FOnTerritoryProductionStateChanged OnProductionStateChanged;
 
@@ -435,6 +474,7 @@ protected:
 	UPROPERTY(SaveGame)
 	TArray<FReplicatedCaptureSummary> SavedStrategicDirectory;
 
+	/** Stable editor-authored identity for the world's Narrative persistence and replicated Territory snapshot actor. */
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
 		meta = (DisplayName = "World State GUID (auto-generated)"))
 	FGuid WorldStateGUID;

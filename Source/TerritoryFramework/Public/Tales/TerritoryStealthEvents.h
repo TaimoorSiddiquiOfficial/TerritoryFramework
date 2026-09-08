@@ -25,9 +25,11 @@ class TERRITORYFRAMEWORK_API UTerritorySetStealthOverrideEvent : public UNarrati
 public:
 	UTerritorySetStealthOverrideEvent(const FObjectInitializer& ObjectInitializer);
 
+	/** Stable tag of the Territory changed by this server-authoritative Narrative event. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(Categories="Territory"))
 	FGameplayTag TerritoryToModify;
 
+	/** Enable or disable infiltration through the runtime override; Clear Override returns control to the active profile. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
 	bool bEnableInfiltration = true;
 
@@ -51,6 +53,7 @@ class TERRITORYFRAMEWORK_API UTerritoryRevealInfiltratorEvent : public UNarrativ
 public:
 	UTerritoryRevealInfiltratorEvent(const FObjectInitializer& ObjectInitializer);
 
+	/** Stable tag of the Territory changed by this server-authoritative Narrative event. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(Categories="Territory"))
 	FGameplayTag TerritoryToModify;
 
@@ -70,9 +73,11 @@ class TERRITORYFRAMEWORK_API UTerritoryClearExposureEvent : public UNarrativeEve
 public:
 	UTerritoryClearExposureEvent(const FObjectInitializer& ObjectInitializer);
 
+	/** Stable tag of the Territory changed by this server-authoritative Narrative event. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(Categories="Territory"))
 	FGameplayTag TerritoryToModify;
 
+	/** Also reset accumulated suspicion when clearing the target's exposure. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
 	bool bResetSuspicion = true;
 
@@ -92,6 +97,7 @@ class TERRITORYFRAMEWORK_API UTerritoryReportDistractionEvent : public UNarrativ
 public:
 	UTerritoryReportDistractionEvent(const FObjectInitializer& ObjectInitializer);
 
+	/** Stable tag of the Territory changed by this server-authoritative Narrative event. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(Categories="Territory"))
 	FGameplayTag TerritoryToModify;
 
@@ -150,6 +156,7 @@ class TERRITORYFRAMEWORK_API UTerritorySetDisguiseCoverEvent : public UNarrative
 public:
 	UTerritorySetDisguiseCoverEvent(const FObjectInitializer& ObjectInitializer);
 
+	/** Compromise or restore the cover identity for the selected observing faction; does not change real faction membership. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
 	ETerritoryDisguiseEventAction Action = ETerritoryDisguiseEventAction::Compromise;
 

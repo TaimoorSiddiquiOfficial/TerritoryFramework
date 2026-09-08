@@ -14,6 +14,7 @@ class TERRITORYFRAMEWORK_API UTerritoryPatrolGoal : public UNPCGoalItem
 public:
 	UTerritoryPatrolGoal(const FObjectInitializer& ObjectInitializer);
 
+	/** Ordered patrol stops copied from the guard's assigned post; each stop provides a location, wait time and optional activity. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category="Territory|Patrol")
 	TArray<FTerritoryPatrolNode> TerritoryPatrol;
 

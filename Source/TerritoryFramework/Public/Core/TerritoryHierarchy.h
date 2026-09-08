@@ -52,9 +52,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	int32 GetDistrictCount() const;
 
+	/** Check whether all required Districts in this City are owned by the supplied exact faction. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	bool AllDistrictsOwnedBy(FGameplayTag Faction) const;
 
+	/** Return this faction's share of City control from 0 to 1. For example, 0.5 means 50%. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	float GetCityControlPercentage(FGameplayTag Faction) const;
 
@@ -70,9 +72,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	FGameplayTag GetCapturingFaction() const;
 
+	/** Count Districts marked as capitals within this City. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	int32 GetCapitalDistrictCount() const;
 
+	/** Check whether this City contains a District marked as a capital. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	bool HasCapitalDistrict() const;
 
@@ -81,18 +85,22 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Hierarchy")
 	FOnCityCaptured OnCityCapturedDelegate;
 
+	/** Called when this City loses its previous full-control state. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Hierarchy")
 	FOnCityLost OnCityLostDelegate;
 
 protected:
+	/** Blueprint hook called when the City reaches full control by a faction through its District results. */
 	UFUNCTION(BlueprintNativeEvent, Category = "Territory|Hierarchy")
 	void OnCityFullyCaptured(FGameplayTag CapturingFaction);
 	virtual void OnCityFullyCaptured_Implementation(FGameplayTag CapturingFaction);
 
+	/** Blueprint hook called when the City loses its previous full-control state. */
 	UFUNCTION(BlueprintNativeEvent, Category = "Territory|Hierarchy")
 	void OnCityLost(FGameplayTag PreviousFaction);
 	virtual void OnCityLost_Implementation(FGameplayTag PreviousFaction);
 
+	/** Blueprint hook called when a child District is captured within this City. */
 	UFUNCTION(BlueprintNativeEvent, Category = "Territory|Hierarchy")
 	void OnDistrictCapturedInCity(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
 	virtual void OnDistrictCapturedInCity_Implementation(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
@@ -129,6 +137,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/** Return this District's loaded parent City, if available. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	ATerritoryCity* GetOwningCity() const;
 
@@ -136,6 +145,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	TArray<ATerritoryVolume*> GetProperties() const;
 
+	/** Check whether this District's definition marks it as a capital. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Hierarchy")
 	bool IsCapitalDistrict() const;
 
@@ -170,6 +180,7 @@ public:
 protected:
 	virtual void OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner) override;
 
+	/** Blueprint hook called when the District reaches full control through its Place results. */
 	UFUNCTION(BlueprintNativeEvent, Category = "Territory|Hierarchy")
 	void OnDistrictFullyCaptured(FGameplayTag CapturingFaction);
 	virtual void OnDistrictFullyCaptured_Implementation(FGameplayTag CapturingFaction);
@@ -226,21 +237,27 @@ public:
 	UPROPERTY(Transient)
 	TObjectPtr<UTerritoryProductionProfile> ProductionProfile = nullptr;
 
+	/** Return the Place's current upgrade level. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	int32 GetUpgradeLevel() const { return UpgradeLevel; }
 
+	/** Return the reusable production configuration assigned to this Place. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Property|Production")
 	UTerritoryProductionProfile* GetProductionProfile() const { return ProductionProfile; }
 
+	/** Check whether the Place meets the current requirements for another upgrade. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	bool CanUpgrade() const;
 
+	/** Return the calculated cost for the next Place upgrade. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	int32 GetUpgradeCost() const;
 
+	/** Return the Place's income after its current upgrade and other applicable income modifiers. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	int32 GetEffectiveIncome() const;
 
+	/** Request a Place upgrade on the server. Check the result before showing success or granting benefits. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property")
 	bool TryUpgrade(AActor* Requester);
 
@@ -252,6 +269,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Hierarchy")
 	FOnPropertyCaptured OnPropertyCapturedDelegate;
 
+	/** Blueprint hook called after this Place completes a verified capture. */
 	UFUNCTION(BlueprintCallable, BlueprintNativeEvent, Category = "Territory|Property")
 	void OnPropertyCaptured(FGameplayTag NewOwner);
 	virtual void OnPropertyCaptured_Implementation(FGameplayTag NewOwner);
@@ -266,6 +284,7 @@ protected:
 	UFUNCTION()
 	void OnRep_UpgradeLevel();
 
+	/** Blueprint hook called after the Place's upgrade level changes. */
 	UFUNCTION(BlueprintImplementableEvent, Category = "Territory|Property")
 	void OnUpgradeLevelChanged(int32 NewLevel);
 

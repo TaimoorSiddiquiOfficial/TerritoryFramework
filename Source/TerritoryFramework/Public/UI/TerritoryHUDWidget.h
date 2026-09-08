@@ -21,6 +21,7 @@ protected:
 	virtual void NativeDestruct() override;
 	virtual void RefreshTerritoryDisplay() override;
 
+	/** Hide the passive Territory HUD card when the player is outside any relevant Territory. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|UI")
 	bool bCollapseWhenOutsideTerritory = true;
 

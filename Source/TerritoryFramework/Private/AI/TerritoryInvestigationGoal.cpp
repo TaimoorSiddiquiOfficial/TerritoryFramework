@@ -1,4 +1,5 @@
 #include "AI/TerritoryInvestigationGoal.h"
+#include "Engine/World.h"
 
 #include "Core/TerritoryStealthTags.h"
 

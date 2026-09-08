@@ -33,6 +33,7 @@ public:
 	virtual void Deinitialize() override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 
+	/** Ask the server to schedule an assault after its diplomacy, route, grace and finite-budget checks. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Counter Attack")
 	bool ScheduleCounterAttack(ATerritoryVolume* Territory, FGameplayTag AttackingFaction);
 
@@ -107,16 +108,20 @@ public:
 		FTerritoryAssaultEvaluationInput& OutInput,
 		FTerritoryAssaultEvaluationResult& OutResult, FText& OutReason) const;
 
+	/** Cancel the selected assault on the server and reconcile its remaining troops and capture participation. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Counter Attack")
 	bool CancelAssault(FGuid AssaultID,
 		ETerritoryAssaultResolution Reason = ETerritoryAssaultResolution::ManuallyCancelled);
 
+	/** Look up one retained assault by its unique ID. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	bool GetAssault(FGuid AssaultID, FTerritoryAssaultRecord& OutAssault) const;
 
+	/** Return the assault records currently retained by the scheduler. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	TArray<FTerritoryAssaultRecord> GetAllAssaults() const;
 
+	/** Return retained assaults targeting the supplied Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	TArray<FTerritoryAssaultRecord> GetAssaultsForTerritory(FGameplayTag TerritoryTag) const;
 
@@ -130,6 +135,7 @@ public:
 	TArray<FTerritoryAssaultRecord> GetAssaultsForTerritoryActor(
 		const ATerritoryVolume* Territory) const;
 
+	/** Check whether the selected assault is in its active physical stage. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	bool IsAssaultActive(FGuid AssaultID) const;
 
@@ -137,6 +143,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	bool IsAssaultPendingOrActive(FGuid AssaultID) const;
 
+	/** Build a readable diagnostic summary of the selected assault and its decision inputs. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack")
 	FString GetAssaultDebugString(FGuid AssaultID) const;
 
@@ -144,6 +151,7 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack|Staging")
 	int32 GetSecureDistrictCountForFaction(FGameplayTag Faction) const;
 
+	/** Check whether the faction currently has the capability needed to prepare an automatic counterattack. */
 	UFUNCTION(BlueprintPure, Category="Territory|Counter Attack|Staging")
 	bool CanFactionStageStrategicCounterAttack(FGameplayTag Faction) const;
 
@@ -301,9 +309,11 @@ public:
 	void NotifyVehicleStoryTargetAbandoned(FGuid AssaultID,
 		ATerritoryAssaultCharacter* Participant);
 
+	/** Called when an assault's saved state or finite force changes. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryAssaultChanged OnAssaultChanged;
 
+	/** Called when a scheduled assault warning is issued; a warning alone does not create capture progress. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryAssaultWarning OnAssaultWarning;
 

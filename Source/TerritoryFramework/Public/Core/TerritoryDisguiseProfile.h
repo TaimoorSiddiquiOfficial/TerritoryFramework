@@ -23,29 +23,37 @@ struct TERRITORYFRAMEWORK_API FTerritoryDisguiseSnapshot
 {
 	GENERATED_BODY()
 
+	/** Whether this record or feature is currently active. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Disguise")
 	bool bActive = false;
 
+	/** Whether every faction should reject the current disguise. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Disguise")
 	bool bCompromisedForEveryone = false;
 
+	/** Character's real Narrative faction, used for ownership and capture credit even while disguised. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Disguise",
 		meta=(Categories="Narrative.Factions"))
 	FGameplayTag TrueFaction;
 
+	/** Faction guards currently believe the disguised character belongs to; real faction membership is unchanged. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Disguise",
 		meta=(Categories="Narrative.Factions"))
 	FGameplayTag PerceivedFaction;
 
+	/** Narrative factions that have recognized and rejected this disguise. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Disguise")
 	TArray<FGameplayTag> CompromisedForFactions;
 
+	/** Quality value used by the current disguise or strength calculation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Disguise")
 	float Quality = 0.f;
 
+	/** Access badges or ranks supplied by the current disguise. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Disguise")
 	FGameplayTagContainer ClearanceTags;
 
+	/** Reusable configuration asset used by this result or operation. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Disguise")
 	TObjectPtr<class UTerritoryDisguiseProfile> Profile = nullptr;
 };
@@ -87,9 +95,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Exposure")
 	bool bCompromiseWhenFiringWhileSeen = true;
 
+	/** Burn the disguise when its wearer is identified as the source of damage. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Exposure")
 	bool bCompromiseWhenDealingDamage = true;
 
+	/** Burn the disguise when a defender kill is witnessed under the Territory evidence rules. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Exposure")
 	bool bCompromiseWhenDefenderKillIsSeen = true;
 
@@ -102,22 +112,27 @@ public:
 		meta=(Categories="Territory.Event.Disguise"))
 	FGameplayTag ActivatedEventTag;
 
+	/** Event sent to the wearer's Narrative Ability System when the disguise is removed. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Gameplay Events",
 		meta=(Categories="Territory.Event.Disguise"))
 	FGameplayTag RemovedEventTag;
 
+	/** Event sent to the wearer's Narrative Ability System when the disguise is discovered. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Gameplay Events",
 		meta=(Categories="Territory.Event.Disguise"))
 	FGameplayTag CompromisedEventTag;
 
+	/** Event sent to the wearer's Narrative Ability System when the disguise is trusted again. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Gameplay Events",
 		meta=(Categories="Territory.Event.Disguise"))
 	FGameplayTag RestoredEventTag;
 
+	/** Event sent to the wearer's Narrative Ability System after passing an identity check. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Gameplay Events",
 		meta=(Categories="Territory.Event.Disguise"))
 	FGameplayTag IdentityCheckPassedEventTag;
 
+	/** Event sent to the wearer's Narrative Ability System after failing an identity check. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Gameplay Events",
 		meta=(Categories="Territory.Event.Disguise"))
 	FGameplayTag IdentityCheckFailedEventTag;
