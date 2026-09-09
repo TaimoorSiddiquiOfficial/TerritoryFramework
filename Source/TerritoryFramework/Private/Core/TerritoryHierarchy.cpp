@@ -858,28 +858,37 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 	TGuardValue<bool> PurchaseGuard(bPurchaseInProgress, true);
 	const int32 OldLevel = UpgradeLevel;
 	const int32 PurchasedLevel = OldLevel + 1;
+	const uint64 LoadGeneration = GetPurchaseLoadGeneration();
 	// Commit the plugin-owned fields silently before Narrative publishes its debit.
 	// No callbacks run between this write and the wallet's final validation/write;
 	// a rejected debit can therefore restore the unobserved staged level safely.
 	FString Reason = FString::Printf(TEXT("Property upgrade %s level %d→%d"),
 		*GetTerritoryTag().ToString(), OldLevel, PurchasedLevel);
 	ApplyUpgradeLevel(PurchasedLevel);
-	if (Cost > 0 && !Economy->TryDebitCurrency(Requester, Cost, OwnerFaction,
-		Reason, ETerritoryTransactionType::UpgradeCost))
+	if (Cost > 0)
 	{
-		ApplyUpgradeLevel(OldLevel);
-		return false;
+		const FTerritoryCurrencyMutationResult Payment = Economy->DebitCurrencyWithResult(
+			Requester, Cost, OwnerFaction, Reason, ETerritoryTransactionType::UpgradeCost);
+		if (Payment.Status == ETerritoryCurrencyMutationStatus::Rejected)
+		{
+			ApplyUpgradeLevel(OldLevel);
+			return false;
+		}
+		if (Payment.Status == ETerritoryCurrencyMutationStatus::Superseded) return false;
 	}
 
 	// A campaign reload or actor destruction can supersede the transaction from a
 	// callback. Do not publish stale upgrade success into that replacement state.
 	if (!IsValid(this) || IsActorBeingDestroyed() || UpgradeLevel != PurchasedLevel
+		|| GetPurchaseLoadGeneration() != LoadGeneration
 		|| GetOwningFaction() != OwnerFaction || GetTerritoryState() != ETerritoryState::Claimed)
 	{
 		return false;
 	}
 	PublishUpgradeLevelChange(OldLevel);
-	if (!IsValid(this) || IsActorBeingDestroyed() || UpgradeLevel != PurchasedLevel) return false;
+	if (!IsValid(this) || IsActorBeingDestroyed() || UpgradeLevel != PurchasedLevel
+		|| GetPurchaseLoadGeneration() != LoadGeneration || GetOwningFaction() != OwnerFaction
+		|| GetTerritoryState() != ETerritoryState::Claimed) return false;
 
 	if (ShouldLogPropertyEconomy())
 	{

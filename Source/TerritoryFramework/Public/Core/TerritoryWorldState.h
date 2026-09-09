@@ -482,6 +482,7 @@ protected:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDiplomacyWorldStateLiveBridge;
+	friend class FTFCurrencyCallbacks;
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
 	friend class FTFSaveDefaultReload;
 	friend class FTFSavedStrategicDirectoryProjectionRoundTrip;

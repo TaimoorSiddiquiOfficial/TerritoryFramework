@@ -85,6 +85,29 @@ bool FTFPurchaseCallbacks::RunTest(const FString& Parameters)
 	Property->SetRole(ROLE_Authority);
 	TestTrue(TEXT("A free server upgrade remains supported"), Property->TryUpgrade(Account));
 	TestEqual(TEXT("Free upgrade preserves the Narrative balance"), Inventory->GetCurrency(), 500);
+
+	Property->UpgradeCostPerLevel = 500;
+	Property->SetUpgradeLevel(2);
+	Inventory->SetCurrency(4000);
+	Inventory->PrepareForSave_Implementation();
+	FNarrativeActorRecord Replacement;
+	TestTrue(TEXT("Native records a different upgrade campaign"), Save->CreateActorRecord(Property, Replacement));
+	Property->SetUpgradeLevel(0);
+	Inventory->SetCurrency(2000);
+	bCallbackRan = false;
+	Probe->CurrencyCallback = [&]()
+	{
+		if (bCallbackRan) return;
+		bCallbackRan = true;
+		Save->LoadActorFromRecord(Property, Replacement);
+		Inventory->Load_Implementation();
+	};
+	TestFalse(TEXT("A load inside the paid upgrade callback interrupts the purchase"), Property->TryUpgrade(Account));
+	TestEqual(TEXT("Interrupted purchase cannot roll back the loaded upgrade"), Property->GetUpgradeLevel(), 2);
+	TestEqual(TEXT("Interrupted purchase cannot refund into the loaded wallet"), Inventory->GetCurrency(), 4000);
+	Probe->CurrencyCallback = nullptr;
+	TestTrue(TEXT("A fresh purchase after restore remains possible"), Property->TryUpgrade(Account));
+	TestEqual(TEXT("Fresh purchase charges the restored level's price"), Inventory->GetCurrency(), 2500);
 	World->DestroyWorld(false);
 	GEngine->DestroyWorldContext(World);
 	return true;

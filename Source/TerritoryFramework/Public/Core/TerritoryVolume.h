@@ -669,6 +669,8 @@ public:
 	bool CheckStateTransitionConditions(ETerritoryState OldState, ETerritoryState NewState, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 protected:
+	/** Native SaveGame deserialization invalidates even an identical in-flight purchase. */
+	uint64 GetPurchaseLoadGeneration() const { return GarrisonLoadGeneration; }
 	/** Serializes plugin purchases with state validation and garrison reconciliation. */
 	bool bPurchaseInProgress = false;
 	bool IsGameplayMutationInProgress() const

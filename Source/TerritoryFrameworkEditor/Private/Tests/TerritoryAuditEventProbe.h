@@ -76,6 +76,18 @@ public:
 	TFunction<void(const FTerritoryCounterAttackStateEvent&)> CounterEventCallback;
 	TFunction<void(APlayerController*, const FTerritoryAssaultRecord&)> WarningCallback;
 	TFunction<void()> CurrencyCallback;
+	TFunction<void(const FTerritoryTransaction&)> TransactionCallback;
+	TFunction<void(FGameplayTag, int32)> UpkeepCallback;
+	UFUNCTION()
+	void TransactionRecorded(const FTerritoryTransaction& Transaction)
+	{
+		if (TransactionCallback) TransactionCallback(Transaction);
+	}
+	UFUNCTION()
+	void UpkeepDeficit(FGameplayTag Faction, int32 Deficit)
+	{
+		if (UpkeepCallback) UpkeepCallback(Faction, Deficit);
+	}
 	TFunction<void()> ItemCallback;
 	TFunction<void(UNarrativeItem*, int32)> ItemRemovedCallback;
 	TFunction<void()> ProductionCallback;

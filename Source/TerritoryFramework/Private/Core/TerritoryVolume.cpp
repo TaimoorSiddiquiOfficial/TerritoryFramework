@@ -3471,8 +3471,13 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 	{
 		const FString Reason = FString::Printf(TEXT("Raised garrison target for %s from %d to %d"),
 			*GetTerritoryTag().ToString(), Result.OldDesiredGuards, NewDesiredGuardCount);
-		if (!Economy || !Economy->TryDebitCurrency(Requester, Result.RecruitmentCost,
-			OwnerFaction, Reason, ETerritoryTransactionType::Purchase))
+		const FTerritoryCurrencyMutationResult Payment = Economy
+			? Economy->DebitCurrencyWithResult(Requester, Result.RecruitmentCost,
+				OwnerFaction, Reason, ETerritoryTransactionType::Purchase)
+			: FTerritoryCurrencyMutationResult();
+		if (Payment.Status == ETerritoryCurrencyMutationStatus::Superseded)
+			return Finish(false, Payment.FailureReason);
+		if (Payment.Status == ETerritoryCurrencyMutationStatus::Rejected)
 		{
 			if (IsCurrent())
 			{

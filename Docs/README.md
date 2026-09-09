@@ -88,6 +88,7 @@ audits are kept outside this learning path so they cannot be mistaken for curren
 
 ## Appendices
 
+- [Payments and Save-Load Callbacks](Currency_Callback_Migration.md) — payment results, safe purchase rollback, and interrupted payouts.
 - [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — safe subclassing and Super-call rules.
 - [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — detailed Blueprint setup walkthrough.
 - [Story Capture and Combat Staging](StoryCaptureAndCombatStaging.md) — authored owner handover and staged-fight patterns.

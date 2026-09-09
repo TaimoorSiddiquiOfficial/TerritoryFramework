@@ -1,6 +1,6 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-08 (batch 48, story situations and pre-handover reinforcements)
+> **Reviewed:** 2026-09-09 (currency callbacks and Narrative restore integration)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
@@ -12,16 +12,18 @@ The current implementation ledger is [Finding Resolution Plan](Finding_Resolutio
 Live faction changes now update resource routing and open economy screens. Tied
 account priorities create a visible conflict; Native inventory remains the balance
 authority. Both example controllers follow their owner's political faction.
-Both engines pass 294 automation tests, and a server/two-client fixture plus a
+Both engines pass 295 automation tests, and a server/two-client fixture plus a
 fresh late join passes. Two consecutive Native world/player restores preserve
 garrisons, reserves and faction/account state without the reproduced record-reader
 crash or stale guard attack-goal errors. Saved vehicle ledgers now reject inflated
 budgets, duplicate approach rows and inconsistent spent totals; native save tests
 and live server/two-client cancellation checks pass. Production stops and
 compensates in the original inventory when a callback changes its faction or
-selected depot. See the implementation ledger for the latest build/test gates.
-The separate generic NPC client-death, old goal-generator migration, currency
-settlement callback and actual AlMalik streaming audits remain.
+selected depot. Currency receipts now preserve restored purchases and stop old
+payments after a Native load; live wallet/history replication passes on two clients.
+See the implementation ledger for the latest build/test gates.
+The separate generic NPC client-death, old goal-generator migration, attack-query
+and decal warnings, and actual AlMalik streaming audits remain.
 These changes are not certification of the older published preview.
 
 ### Active story preparation — 2026-09-08
@@ -53,8 +55,10 @@ the existing post-capture counterattack accept the request.
   publish the cancelled record to server clients, including with an unloaded target.
 - [x] Stop production when its faction account changes during Native item callbacks;
   compensate in the original inventory and preserve the consumed cycle through load.
-- [ ] Continue currency settlement/refund callback verification and actual AlMalik
-  streaming. Asset compilation/validation does not prove these gameplay cases.
+- [x] Verify currency settlement/refund callbacks, partial upkeep and loaded purchases.
+  Both engine suites and a real Native world/player load with two clients pass.
+- [ ] Complete actual AlMalik streaming. Asset compilation/validation does not
+  prove this gameplay gate.
 - [x] Protect Hashir's pacifist perception callback after controller destruction.
   His project activity config preserves all eight Native activities and uses a
   minimal child Blueprint with the existing Territory safety function.
@@ -68,6 +72,10 @@ the existing post-capture counterattack accept the request.
   override fixes a separate server callback and does not cover that path.
 - [ ] Check migration of existing Hashir saves that contain the old Native goal
   generator. A changed NPC definition does not rewrite saved activity instances.
+- [ ] Resolve Native attack-target EQS/Blackboard and weapon-decal warnings from
+  the latest packaged assault smoke through compatible plugin/project adapters.
+  Reproduce the same-team shot cancellations seen after world restore and check
+  target cleanup before classifying their cause.
 - [x] Inspect Hashir for Act 1: check both NPC_Hashir and NPC_Hahsir references,
   his greeting/dialogue assets and quest-giver setup. Hashir is the player's
   friend and works for the system. Author story content after framework checks.

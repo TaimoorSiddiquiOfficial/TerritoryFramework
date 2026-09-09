@@ -19,12 +19,13 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 | Native attack goals retain guards removed alive during load | Remove target-bound Native goals using their existing key/removal API; repeat on final guard removal | Actual Native Blueprint regression and repeated live restores passed without stale-target errors |
 | Saved vehicle limits or approach charges grant extra deployments | Validate the eight-car/eight-approach limits, unique nonempty approach IDs, and matching global/per-approach spent totals before reconstruction | Both editor builds, native save regression and live server/two-client cancellation passed |
 | Production continues after an item callback changes faction or depot | Recheck the original requesting account or selected depot around Native inventory mutations; compensate only in the original inventory | Two regressions reproduced the defect before the change; all 294 tests and all three build configurations pass on both engines |
+| Currency callbacks reenter settlement, reload a wallet, or invalidate later upkeep accounts | Payment receipts distinguish rejection from load interruption; recheck each account; preserve loaded purchases and current history | All 295 tests on both engines, real Native world/player load and two-client wallet/history proof pass |
 
 ## Verified checkpoint
 
 - UE 5.8.2 and UE 5.7.4 Editor/UHT/runtime/editor-module builds pass.
 - Development and Shipping game compilation passes on both engines. TDA's current UE 5.8 cook, stage and package pass; the first cook attempt hit the open editor's tooling port, and the retry passed after closing the editor.
-- Both engines pass 293 tests. UE 5.7 reports 273 passes without warnings plus 20 passes with warnings; these are 293 passes, not 273 total.
+- The latest currency checkpoint passes 295 tests on each engine. UE 5.8 has 275 clean passes plus 20 with warnings; UE 5.7 has 273 clean passes plus 22 with warnings.
 - HopDistrictTest listen server plus two clients passes faction replacement, additive primary choice, account conflict/priority, already-open UI refresh, and rejected client mutations.
 - Two consecutive Native world restores plus Native deferred player loading preserve owners, guard counts, reserves, inventory and the host player's faction/account UI. Native world `Load` does not itself invoke player loading; the fixture uses Native's separate player-load path deliberately.
 - One fresh fourth PIE world joins after those changes and receives matching faction-resource snapshots, correct membership, selection status and inventory.
@@ -37,16 +38,33 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 
 ## Remaining work in order
 
-1. Finish currency settlement/refund callback verification. Production account-change handling is implemented and passes both engines' full suites. Currency debit/credit callbacks need their own audit because callers stage purchases before Native publishes the payment, so changing a boolean failure result alone could roll back a paid purchase incorrectly. Saved vehicle ledger validation is implemented and verified as described below; it does not impose an invented upper limit on authored total infantry force.
-2. Fix generic Narrative NPC client death through a plugin/project adapter. Source inspection confirms that Native BP_NarrativeNPC calls RemoveAllGoals unconditionally, although its activity component lives on the server-only AI controller. Preserve Native death presentation and weapon behavior while adapting this path. Hashir's safe perception generator addresses a different defect. Test old saved goal generators deliberately.
-3. Complete actual AlMalik World Partition streaming and compiled dedicated-server certification. The live late join above does not replace either gate.
-4. Complete the deferred lighting visual/performance review, then the remaining Act 1 story authoring decisions. Do not publish fresh release artifacts before the relevant gates pass.
+1. Fix generic Narrative NPC client death through a plugin/project adapter. Source inspection confirms that Native BP_NarrativeNPC calls RemoveAllGoals unconditionally, although its activity component lives on the server-only AI controller. Preserve Native death presentation and weapon behavior while adapting this path. Hashir's safe perception generator addresses a different defect. Test old saved goal generators deliberately. Include the attack-target EQS and weapon decal warnings observed in the 2026-09-09 packaged smoke, described below. Also reproduce the same-team shot cancellations observed after the live world restore and check whether old targets are cleared correctly.
+2. Complete actual AlMalik World Partition streaming and compiled dedicated-server certification. The live late join above does not replace either gate.
+3. Complete the deferred lighting visual/performance review, then the remaining Act 1 story authoring decisions. Do not publish fresh release artifacts before the relevant gates pass.
 
 ## Authority and migration
 
 Native PlayerState owns membership and Native inventory owns items/currency. Economy selects storage; the component is a registration adapter. WorldState publishes derived stockpile snapshots. Territory ownership is not changed by faction switching. No Narrative Pro source is modified. See [migration instructions](Faction_Integration_Migration.md).
 
 Verification output for this batch is under project `Saved/Verification/20260908_FactionIntegrationFix`. Update this ledger from actual results before committing or publishing.
+
+## Currency callback follow-up — 2026-09-09
+
+Native inventory remains the currency authority. Economy now returns a temporary payment receipt with `Rejected`, `Applied`, or `Superseded` status. Native inventory loads, campaign-load start, and economy restores invalidate the old operation. Territory payments cannot recursively start another Territory payment inside a currency/history callback. An independent Native expense remains valid; the ledger records the balance at its own payment, before that later expense.
+
+Built-in upgrades and garrison purchases use the receipt to cancel only unpaid staging. A load interruption preserves restored levels, guards and wallets without an invented refund. Upgrade checks also use the existing territory load generation, including when deserialization restores identical values. There are no new SaveGame fields, replicated fields or actor IDs. Existing Blueprint payment nodes remain callable; custom purchases should migrate to the result nodes as described in [payment callback guidance](Currency_Callback_Migration.md).
+
+Faction payouts observe their whole account group before the first payment and stop if a load replaces it. Upkeep keeps its selected group and rechecks each account's faction, authority and funds after earlier callbacks. The deficit reports only unpaid upkeep. Transaction history is capped immediately, and WorldState ignores a stale transaction removed from the authoritative ledger or an ID already included in its snapshot.
+
+The first regression reproduced extra nested currency, incorrect receipt balances, and stale transaction rows after inventory/history restore. The corrected tests also cover actual Native expenses, later-account reload, partial upkeep, loaded upgrade and garrison state, client-role rejection, integer boundaries, manual history limits, Blueprint flags, and save/load of completed payments. One older WorldState fixture broadcast an event without a corresponding authoritative ledger entry; it now seeds a valid unique record and separately proves that stale and repeated broadcasts are ignored.
+
+All 295 tests pass on each engine: UE 5.8 has 275 clean passes and 20 with warnings; UE 5.7 has 273 clean passes and 22 with warnings. Editor/UHT, Development game and Shipping game builds pass on both engines. `CurrencyRed58`, `CurrencyFinalTests58`, `CurrencyFinalTests57`, and `CurrencyFinalBuilds.json` contain the evidence. All 741 local Native source files still match the installed Marketplace package.
+
+The UE 5.8 cook/stage/package passes with zero errors and 30 existing cook warnings. Its 90-second packaged assault run exits zero without a fatal error or ensure. This run also exposes three Blueprint warnings: one null Blackboard in Native `EQSContext_AttackTarget.ProvideSingleLocation`, followed by an unowned-query completion warning, and two null `DecalPS` accesses in Native `BP_WeaponFXBase.Spawn Decal` from `GC_Burst_Unarmed`. They remain open for the compatible AI/presentation adapter pass. Do not describe this smoke as free of Blueprint errors or as compiled dedicated-server certification. See `CurrencyCookStage58.log`, `CurrencyPackagedSmoke58.log`, and `CurrencyPackage58.json`.
+
+`LiveCurrencyCallbacks58.json` passes on the HopDistrictTest listen server and two clients. It proves rejected nested Territory credit, a valid independent Native expense, interrupted inventory load, and an actual Native world load followed by deferred player loading inside the payment sequence. The paying client receives its restored 590 balance, the other client's 5000 balance is unchanged, and both receive the same single transaction ID and historical balance of 600. Direct client credits are rejected. The initial Python comparison used a temporary Guid object's display address; the verification now compares the Guid's exported value.
+
+Final validation checks 235 framework/Hashir assets and compiles 142 Blueprints, with zero errors and eight existing warnings. The editor is reopened on HopDistrictTest and PIE is stopped. The camera dirtied by PIE/compilation was exported to a verification backup and reloaded from disk without saving vendor content. No new release was uploaded.
 
 ## Current build limitation
 

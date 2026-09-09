@@ -628,6 +628,8 @@ The subsystem is not created on a dedicated server. See
 
 | Function | Parameters | Returns |
 |---|---|---|
+| CreditCurrencyWithResult | Beneficiary, PositiveAmount, Faction, Reason, Type | FTerritoryCurrencyMutationResult |
+| DebitCurrencyWithResult | Requester, PositiveAmount, Faction, Reason, Type | FTerritoryCurrencyMutationResult |
 | CreditCurrency | Beneficiary, Amount, Faction, Reason, Type | bool |
 | TryDebitCurrency | Requester, Amount, Faction, Reason, Type | bool |
 | CreditCurrencyToFaction | Faction, Amount, Policy, Reason, Type, PreferredBeneficiary (optional) | int32 paid |

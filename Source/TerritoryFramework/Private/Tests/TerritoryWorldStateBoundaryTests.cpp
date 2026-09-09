@@ -126,14 +126,21 @@ bool FTFWorldStateHistoryLimits::RunTest(const FString& Parameters)
 	Economy->MaxTransactionHistory = 2;
 	for (int32 Amount = 1; Amount <= 3; ++Amount)
 	{
+		Transaction.TransactionID = FGuid::NewGuid();
 		Transaction.Amount = Amount;
 		State->RecordTransaction(Transaction);
 	}
 	TestEqual(TEXT("Configured history retains exactly the newest entries"), State->GetTransactionHistory(Heroes, 10).Num(), 2);
 	NativeTransaction.Amount = 4;
+	NativeTransaction.TransactionID = FGuid::NewGuid();
+	Economy->OnTransactionRecorded.Broadcast(NativeTransaction);
+	TestEqual(TEXT("A stale broadcast outside the authoritative ledger is ignored"), State->GetTransactionHistory(Heroes, 1)[0].Amount, 3);
+	Economy->RestoreTransactionHistory({NativeTransaction});
 	Economy->OnTransactionRecorded.Broadcast(NativeTransaction);
 	TestEqual(TEXT("Live replication uses the same configured limit"), State->GetTransactionHistory(Heroes, 10).Num(), 2);
 	TestEqual(TEXT("Live history still contains the newest transaction"), State->GetTransactionHistory(Heroes, 1)[0].Amount, 4);
+	Economy->OnTransactionRecorded.Broadcast(NativeTransaction);
+	TestEqual(TEXT("Repeating a durable transaction ID cannot duplicate its projection"), State->GetTransactionHistory(Heroes, 10).Num(), 2);
 	State->SetRole(ROLE_SimulatedProxy);
 	NativeTransaction.Amount = 5;
 	Economy->OnTransactionRecorded.Broadcast(NativeTransaction);

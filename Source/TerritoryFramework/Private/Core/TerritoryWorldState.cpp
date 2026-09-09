@@ -1141,6 +1141,14 @@ void ATerritoryWorldState::OnEconomyTickLive(FGameplayTag Faction, FTerritoryEco
 void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction& Transaction)
 {
 	if (!HasAuthority()) return;
+	const UTerritoryEconomySubsystem* Economy = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
+	// An earlier listener may load a snapshot that removed or already included
+	// this transaction. Project only the current authority, once per durable ID.
+	if (!Economy || !Economy->GetAllTransactionHistory().ContainsByPredicate(
+		[&](const FTerritoryTransaction& Tx) { return Tx.TransactionID == Transaction.TransactionID; })
+		|| ReplicatedTransactions.ContainsByPredicate(
+		[&](const FReplicatedTransaction& Tx) { return Tx.TransactionID == Transaction.TransactionID; })) return;
 
 	FReplicatedTransaction RepTx;
 	RepTx.TransactionID = Transaction.TransactionID;
@@ -1155,8 +1163,6 @@ void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction
 
 	// P0-N1: Cap replicated transactions to prevent unbounded array growth.
 	// Mirrors EconomySubsystem's MaxTransactionHistory cap.
-	const UTerritoryEconomySubsystem* Economy = GetWorld()
-		? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr;
 	const int32 MaxReplicatedTransactions = FMath::Max(0, Economy ? Economy->MaxTransactionHistory : 500);
 	const int32 Excess = ReplicatedTransactions.Num() - MaxReplicatedTransactions;
 	if (Excess > 0)

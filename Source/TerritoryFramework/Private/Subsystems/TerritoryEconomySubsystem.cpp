@@ -8,6 +8,7 @@
 #include "Core/TerritoryWorldState.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativePlayerState.h"
 #include "UnrealFramework/NarrativePlayerController.h"
@@ -281,6 +282,9 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 	Super::Initialize(Collection);
 	// Production binds registration and ownership delegates immediately below.
 	Collection.InitializeDependency<UTerritoryRegistrySubsystem>();
+	Collection.InitializeDependency<UNarrativeSaveSubsystem>();
+	GetWorld()->GetSubsystem<UNarrativeSaveSubsystem>()->OnBeginLoad.AddDynamic(
+		this, &UTerritoryEconomySubsystem::OnCurrencyLoadStarted);
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings)
@@ -353,8 +357,12 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 
 void UTerritoryEconomySubsystem::Deinitialize()
 {
+	++CurrencyRestoreGeneration;
+	EndCurrencySettlement();
 	if (UWorld* World = GetWorld())
 	{
+		if (UNarrativeSaveSubsystem* Save = World->GetSubsystem<UNarrativeSaveSubsystem>())
+			Save->OnBeginLoad.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnCurrencyLoadStarted);
 		World->GetTimerManager().ClearTimer(EconomyTickTimerHandle);
 		World->GetTimerManager().ClearTimer(ProductionCycleObservationTimerHandle);
 
@@ -523,7 +531,7 @@ bool UTerritoryEconomySubsystem::CanActorAfford(const AActor* RequestingActor, i
 
 void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 	const FGameplayTag& Faction, int32 Amount, int32 BalanceAfter,
-	const FString& Reason, ETerritoryTransactionType Type, const AActor* AccountActor,
+	const FString& Reason, ETerritoryTransactionType Type, const FString& AccountName,
 	const FGameplayTag& SourceTerritory)
 {
 	FTerritoryTransaction Tx;
@@ -533,8 +541,8 @@ void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 	Tx.Amount = Amount;
 	Tx.BalanceAfter = BalanceAfter;
 	Tx.SourceTerritory = SourceTerritory;
-	Tx.Reason = AccountActor
-		? FString::Printf(TEXT("%s [Account=%s]"), *Reason, *AccountActor->GetName())
+	Tx.Reason = !AccountName.IsEmpty()
+		? FString::Printf(TEXT("%s [Account=%s]"), *Reason, *AccountName)
 		: Reason;
 
 	// P2-N12: Null guard on GetWorld to prevent crash during shutdown
@@ -547,7 +555,8 @@ void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 	}
 
 	TransactionLedger.Add(Tx);
-	// Trimming deferred to OnEconomyTick batch trim — avoids per-insert O(N) shift
+	const int32 Excess = TransactionLedger.Num() - FMath::Max(0, MaxTransactionHistory);
+	if (Excess > 0) TransactionLedger.RemoveAt(0, Excess);
 	OnTransactionRecorded.Broadcast(Tx);
 }
 
@@ -558,10 +567,11 @@ void UTerritoryEconomySubsystem::RecordCurrencyTransaction(
 void UTerritoryEconomySubsystem::OnEconomyTick()
 {
 	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client
-		|| bProcessingEconomyTick || bProcessingResourceProduction) return;
+		|| bProcessingEconomyTick || bProcessingResourceProduction || bCurrencySettlementInProgress) return;
 	// Narrative currency/item delegates run synchronously inside settlement. A
 	// callback must not turn the current timer event into another full payout.
 	TGuardValue<bool> TickGuard(bProcessingEconomyTick, true);
+	const uint64 Generation = CurrencyRestoreGeneration;
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	const bool bDebugTicks = Settings && Settings->ShouldDebugEconomy();
 
@@ -591,6 +601,7 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 			Snapshot.TotalCosts = TickTreasury.CostsPerTick;
 			Snapshot.TerritoryCount = TickTreasury.TerritoryCount;
 			OnEconomyTickFired.Broadcast(Faction, Snapshot);
+			if (Generation != CurrencyRestoreGeneration) return;
 			continue;
 		}
 
@@ -605,48 +616,17 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 				TEXT("Periodic income"), ETerritoryTransactionType::Income);
 		}
 
-		int64 AvailableForUpkeep = 0;
-		for (const AActor* Account : SettlementAccounts)
-		{
-			if (const UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Account))
-			{
-				AvailableForUpkeep += FMath::Max(0, Inventory->GetCurrency());
-			}
-		}
-		const int32 ActualUpkeep = static_cast<int32>(FMath::Min<int64>(
-			static_cast<int64>(TickTreasury.CostsPerTick), AvailableForUpkeep));
-		const bool bUpkeepFullyPaid = (ActualUpkeep >= TickTreasury.CostsPerTick);
-		bool bDeficitAlreadyBroadcast = false;
-		if (ActualUpkeep > 0)
-		{
-			const FString Reason = bUpkeepFullyPaid
-				? TEXT("Guard upkeep")
-				: FString::Printf(TEXT("Guard upkeep (partial: %d/%d)"), ActualUpkeep, TickTreasury.CostsPerTick);
-			// P1-N15: TOCTOU fix — the AvailableForUpkeep scan above is a snapshot. Between
-			// that scan and the actual debit, another system may have drained the same funds.
-			// If TryDebitFactionMembers returns false despite ActualUpkeep > 0, treat as full
-			// deficit and broadcast accordingly.
-			const bool bDebitSucceeded = TryDebitSettlementAccounts(
-				Faction, ActualUpkeep, IncomePayoutPolicy, Reason,
-				ETerritoryTransactionType::GuardUpkeep);
-			if (!bDebitSucceeded && TickTreasury.CostsPerTick > 0)
-			{
-				UE_LOG(LogTerritory, Warning, TEXT("[EconomyTick] %s TOCTOU: debit failed despite %d available — treating as full deficit"),
-					*Faction.ToString(), TickTreasury.CostsPerTick);
-				OnFactionUpkeepDeficit.Broadcast(Faction, TickTreasury.CostsPerTick);
-				bDeficitAlreadyBroadcast = true;
-			}
-		}
-
-		// Upkeep consequence: when a faction can't pay full upkeep, broadcast deficit
-		// so territories can suspend reserve respawns or reduce desired guard count.
-		// P2-06/P1-09: Only broadcast if we didn't already broadcast from TOCTOU path above.
-		if (!bUpkeepFullyPaid && TickTreasury.CostsPerTick > 0 && !bDeficitAlreadyBroadcast)
+		if (Generation != CurrencyRestoreGeneration) return;
+		const int32 ActualUpkeep = DebitSettlementAccounts(Faction, TickTreasury.CostsPerTick,
+			SettlementAccounts, TEXT("Guard upkeep"), ETerritoryTransactionType::GuardUpkeep);
+		if (Generation != CurrencyRestoreGeneration) return;
+		if (ActualUpkeep < TickTreasury.CostsPerTick)
 		{
 			const int32 Deficit = TickTreasury.CostsPerTick - ActualUpkeep;
 			UE_LOG(LogTerritory, Warning, TEXT("[EconomyTick] %s has upkeep deficit: paid %d/%d (short %d) — reserves may be suspended"),
 				*Faction.ToString(), ActualUpkeep, TickTreasury.CostsPerTick, Deficit);
 			OnFactionUpkeepDeficit.Broadcast(Faction, Deficit);
+			if (Generation != CurrencyRestoreGeneration) return;
 		}
 
 		const int32 NetIncome = TickTreasury.IncomePerTick - TickTreasury.CostsPerTick;
@@ -674,6 +654,7 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 		Snapshot.TerritoryCount = TickTreasury.TerritoryCount;
 
 		OnEconomyTickFired.Broadcast(Faction, Snapshot);
+		if (Generation != CurrencyRestoreGeneration) return;
 	}
 
 	// Trim ledger once after all factions processed (not per-faction)
@@ -761,54 +742,157 @@ bool UTerritoryEconomySubsystem::TryDebitCurrency(
 	AActor* RequestingActor, int32 PositiveAmount, const FGameplayTag& Faction,
 	const FString& Reason, ETerritoryTransactionType Type)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0
-		|| !IsValid(RequestingActor) || RequestingActor->GetWorld() != GetWorld()
-		|| !DoesAccountBelongToFaction(RequestingActor, Faction)) return false;
-
-	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(RequestingActor);
-	if (!Inventory || !IsValid(Inventory->GetOwner()) || !Inventory->GetOwner()->HasAuthority()
-		|| Inventory->GetWorld() != GetWorld() || Inventory->GetCurrency() < PositiveAmount) return false;
-
-	Inventory->AddCurrency(-PositiveAmount);
-	RecordCurrencyTransaction(Faction, -PositiveAmount, Inventory->GetCurrency(), Reason, Type, RequestingActor);
-	return true;
+	return DebitCurrencyWithResult(RequestingActor, PositiveAmount, Faction, Reason, Type).Status
+		== ETerritoryCurrencyMutationStatus::Applied;
 }
 
 bool UTerritoryEconomySubsystem::CreditCurrency(
 	AActor* Beneficiary, int32 PositiveAmount, const FGameplayTag& Faction,
 	const FString& Reason, ETerritoryTransactionType Type)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || PositiveAmount <= 0
-		|| !IsValid(Beneficiary) || Beneficiary->GetWorld() != GetWorld()
-		|| !DoesAccountBelongToFaction(Beneficiary, Faction)) return false;
+	return CreditCurrencyWithResult(Beneficiary, PositiveAmount, Faction, Reason, Type).Status
+		== ETerritoryCurrencyMutationStatus::Applied;
+}
 
-	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Beneficiary);
-	if (!Inventory || !IsValid(Inventory->GetOwner()) || !Inventory->GetOwner()->HasAuthority()
-		|| Inventory->GetWorld() != GetWorld()) return false;
-	const int64 FinalBalance = static_cast<int64>(Inventory->GetCurrency()) + PositiveAmount;
-	if (FinalBalance > MAX_int32) return false;
+FTerritoryCurrencyMutationResult UTerritoryEconomySubsystem::DebitCurrencyWithResult(
+	AActor* RequestingActor, int32 PositiveAmount, const FGameplayTag& Faction,
+	const FString& Reason, ETerritoryTransactionType Type)
+{
+	return ExecuteCurrencyMutation(RequestingActor, PositiveAmount > 0 ? -PositiveAmount : 0,
+		Faction, Reason, Type);
+}
 
-	Inventory->AddCurrency(PositiveAmount);
-	RecordCurrencyTransaction(Faction, PositiveAmount, Inventory->GetCurrency(), Reason, Type, Beneficiary);
-	return true;
+FTerritoryCurrencyMutationResult UTerritoryEconomySubsystem::CreditCurrencyWithResult(
+	AActor* Beneficiary, int32 PositiveAmount, const FGameplayTag& Faction,
+	const FString& Reason, ETerritoryTransactionType Type)
+{
+	return ExecuteCurrencyMutation(Beneficiary, FMath::Max(0, PositiveAmount), Faction, Reason, Type);
+}
+
+void UTerritoryEconomySubsystem::ObserveCurrencyAccount(const AActor* Account)
+{
+	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Account);
+	if (!IsValid(Inventory) || ObservedCurrencyInventories.Contains(Inventory)) return;
+	ObservedCurrencyInventories.Add(Inventory);
+	Inventory->OnCurrencyChanged.AddUniqueDynamic(this, &UTerritoryEconomySubsystem::OnCurrencyAccountChanged);
+}
+
+void UTerritoryEconomySubsystem::EndCurrencySettlement()
+{
+	for (const auto& WeakInventory : ObservedCurrencyInventories)
+	{
+		if (UNarrativeInventoryComponent* Inventory = WeakInventory.Get())
+			Inventory->OnCurrencyChanged.RemoveDynamic(this, &UTerritoryEconomySubsystem::OnCurrencyAccountChanged);
+	}
+	ObservedCurrencyInventories.Reset();
+}
+
+void UTerritoryEconomySubsystem::OnCurrencyLoadStarted()
+{
+	++CurrencyRestoreGeneration;
+}
+
+void UTerritoryEconomySubsystem::OnCurrencyAccountChanged(int32 OldCurrency, int32 NewCurrency)
+{
+	// Native broadcasts during Load even if saved currency has the same value.
+	// Observe the whole cohort: one account's callback can reload another account.
+	for (const auto& WeakInventory : ObservedCurrencyInventories)
+	{
+		if (const UNarrativeInventoryComponent* Inventory = WeakInventory.Get(); Inventory && Inventory->IsLoading())
+		{
+			++CurrencyRestoreGeneration;
+			break;
+		}
+	}
+}
+
+FTerritoryCurrencyMutationResult UTerritoryEconomySubsystem::ExecuteCurrencyMutation(
+	AActor* Account, int32 Amount, const FGameplayTag& Faction,
+	const FString& Reason, ETerritoryTransactionType Type)
+{
+	if (bCurrencySettlementInProgress)
+	{
+		FTerritoryCurrencyMutationResult Result;
+		Result.Amount = Amount;
+		Result.FailureReason = FText::FromString(TEXT("Another Territory payment is still running its callbacks."));
+		return Result;
+	}
+	TGuardValue<bool> SettlementGuard(bCurrencySettlementInProgress, true);
+	ON_SCOPE_EXIT { EndCurrencySettlement(); };
+	ObserveCurrencyAccount(Account);
+	return ApplyCurrencyMutation(Account, Amount, Faction, Reason, Type);
+}
+
+FTerritoryCurrencyMutationResult UTerritoryEconomySubsystem::ApplyCurrencyMutation(
+	AActor* Account, int32 Amount, const FGameplayTag& Faction,
+	const FString& Reason, ETerritoryTransactionType Type)
+{
+	FTerritoryCurrencyMutationResult Result;
+	Result.Amount = Amount;
+	Result.FailureReason = FText::FromString(TEXT("The payment needs a valid server account in the requested faction and a nonzero amount."));
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || Amount == 0
+		|| !IsValid(Account) || Account->IsActorBeingDestroyed() || Account->GetWorld() != GetWorld()
+		|| !DoesAccountBelongToFaction(Account, Faction)) return Result;
+	UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Account);
+	if (!IsValid(Inventory) || !IsValid(Inventory->GetOwner()) || Inventory->GetOwner()->IsActorBeingDestroyed()
+		|| !Inventory->GetOwner()->HasAuthority() || Inventory->GetWorld() != GetWorld()) return Result;
+	Result.BalanceBefore = Inventory->GetCurrency();
+	Result.BalanceAfter = Result.BalanceBefore;
+	Result.FailureReason = FText::FromString(TEXT("The account is loading, has too little money, or would exceed its currency limit."));
+	const int64 FinalBalance = static_cast<int64>(Result.BalanceBefore) + Amount;
+	if (Inventory->IsLoading() || FinalBalance < 0 || FinalBalance > MAX_int32) return Result;
+	ObserveCurrencyAccount(Account);
+	const uint64 Generation = CurrencyRestoreGeneration;
+	const FString AccountName = Account->GetName();
+	const FGameplayTag TransactionFaction = Faction;
+	const FString TransactionReason = Reason;
+	Result.BalanceAfter = static_cast<int32>(FinalBalance);
+	Inventory->AddCurrency(Amount);
+	// Native commits before broadcasting. A separate Native expense is valid and
+	// must not be confused with a rejected payment by comparing final balances.
+	if (Generation == CurrencyRestoreGeneration)
+		RecordCurrencyTransaction(TransactionFaction, Amount, Result.BalanceAfter, TransactionReason, Type, AccountName);
+	if (Generation != CurrencyRestoreGeneration)
+	{
+		Result.Status = ETerritoryCurrencyMutationStatus::Superseded;
+		Result.FailureReason = FText::FromString(TEXT("A load interrupted this payment. Keep restored state; do not automatically refund or retry."));
+		return Result;
+	}
+	Result.Status = ETerritoryCurrencyMutationStatus::Applied;
+	Result.FailureReason = FText::GetEmpty();
+	return Result;
 }
 
 int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
 	const FGameplayTag& Faction, int32 PositiveAmount, ETerritoryIncomePayoutPolicy Policy,
 	const FString& Reason, ETerritoryTransactionType Type, AActor* PreferredBeneficiary)
 {
-	if (!Faction.IsValid() || PositiveAmount <= 0 || !IsCurrencySettlementEnabled(Policy))
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || bCurrencySettlementInProgress
+		|| !Faction.IsValid() || PositiveAmount <= 0 || !IsCurrencySettlementEnabled(Policy))
 	{
 		return 0;
 	}
 
+	TGuardValue<bool> SettlementGuard(bCurrencySettlementInProgress, true);
+	ON_SCOPE_EXIT { EndCurrencySettlement(); };
+	const uint64 Generation = CurrencyRestoreGeneration;
+	// Observe every possible recipient before the first callback can reload one.
+	for (AActor* Account : ResolvePeriodicSettlementAccounts(Faction, Policy)) ObserveCurrencyAccount(Account);
+	ObserveCurrencyAccount(PreferredBeneficiary);
+	auto Credit = [&](AActor* Account, int32 Amount)
+	{
+		return ApplyCurrencyMutation(Account, Amount, Faction, Reason, Type).Status
+			== ETerritoryCurrencyMutationStatus::Applied;
+	};
+
 	if (Policy == ETerritoryIncomePayoutPolicy::CapturingPlayer)
 	{
 		if (PreferredBeneficiary
-			&& CreditCurrency(PreferredBeneficiary, PositiveAmount, Faction, Reason, Type))
+			&& Credit(PreferredBeneficiary, PositiveAmount))
 		{
 			return PositiveAmount;
 		}
+		if (Generation != CurrencyRestoreGeneration) return 0;
 		UE_LOG(LogTerritory, Warning,
 			TEXT("CreditCurrencyToFaction: CapturingPlayer has no valid beneficiary; falling back to deterministic member split for %s"),
 			*Faction.ToString());
@@ -818,10 +902,11 @@ int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
 	{
 		AActor* ExplicitAccount = ResolveRegisteredCurrencyAccount(Faction, Policy);
 		if (IsExplicitAccountSelectionValid(ExplicitAccount, PreferredBeneficiary)
-			&& CreditCurrency(ExplicitAccount, PositiveAmount, Faction, Reason, Type))
+			&& Credit(ExplicitAccount, PositiveAmount))
 		{
 			return PositiveAmount;
 		}
+		if (Generation != CurrencyRestoreGeneration) return 0;
 		UE_LOG(LogTerritory, Warning,
 			TEXT("CreditCurrencyToFaction: policy %d has no valid matching registered Narrative account for %s; payout rejected"),
 			static_cast<int32>(Policy), *Faction.ToString());
@@ -833,7 +918,7 @@ int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
 	{
 		if (AActor* Fallback = ResolveFallbackFactionAccount(Faction))
 		{
-			return CreditCurrency(Fallback, PositiveAmount, Faction, Reason, Type)
+			return Credit(Fallback, PositiveAmount)
 				? PositiveAmount : 0;
 		}
 		return 0;
@@ -861,11 +946,12 @@ int32 UTerritoryEconomySubsystem::CreditCurrencyToFaction(
 			const int64 Capacity = Inventory
 				? static_cast<int64>(MAX_int32) - FMath::Max(0, Inventory->GetCurrency()) : 0;
 			const int32 Share = static_cast<int32>(FMath::Min(FairShare, Capacity));
-			if (Share > 0 && CreditCurrency(Player, Share, Faction, Reason, Type))
+			if (Share > 0 && Credit(Player, Share))
 			{
 				Paid += Share;
 				Remaining -= Share;
 			}
+			if (Generation != CurrencyRestoreGeneration) return Paid;
 		}
 		if (Paid == PaidBeforePass) break;
 	}
@@ -1867,48 +1953,31 @@ AActor* UTerritoryEconomySubsystem::ResolveFallbackFactionAccount(
 		Faction, ETerritoryIncomePayoutPolicy::FactionLeader);
 }
 
-bool UTerritoryEconomySubsystem::TryDebitSettlementAccounts(
+int32 UTerritoryEconomySubsystem::DebitSettlementAccounts(
 	const FGameplayTag& Faction, int32 PositiveAmount,
-	ETerritoryIncomePayoutPolicy Policy, const FString& Reason,
+	const TArray<AActor*>& Accounts, const FString& Reason,
 	ETerritoryTransactionType Type)
 {
-	if (!Faction.IsValid() || PositiveAmount <= 0) return false;
-
-	TArray<AActor*> Accounts = ResolvePeriodicSettlementAccounts(Faction, Policy);
-	TArray<int32> Debits;
-	Debits.Init(0, Accounts.Num());
-
-	int64 TotalCurrency = 0;
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || bCurrencySettlementInProgress
+		|| !Faction.IsValid() || PositiveAmount <= 0) return 0;
+	TGuardValue<bool> SettlementGuard(bCurrencySettlementInProgress, true);
+	ON_SCOPE_EXIT { EndCurrencySettlement(); };
+	const uint64 Generation = CurrencyRestoreGeneration;
+	for (AActor* Account : Accounts) ObserveCurrencyAccount(Account);
+	int32 Paid = 0;
 	for (AActor* Account : Accounts)
 	{
-		if (const UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Account))
-		{
-			TotalCurrency += FMath::Max(0, Inventory->GetCurrency());
-		}
+		if (Paid >= PositiveAmount) break;
+		UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Account);
+		const int32 Debit = IsValid(Inventory)
+			? FMath::Min(FMath::Max(0, Inventory->GetCurrency()), PositiveAmount - Paid) : 0;
+		if (Debit <= 0) continue;
+		const FTerritoryCurrencyMutationResult Result = ApplyCurrencyMutation(
+			Account, -Debit, Faction, Reason, Type);
+		if (Result.Status == ETerritoryCurrencyMutationStatus::Applied) Paid += Debit;
+		if (Generation != CurrencyRestoreGeneration) break;
 	}
-	if (TotalCurrency < static_cast<int64>(PositiveAmount)) return false;
-
-	int32 Remaining = PositiveAmount;
-	for (int32 Index = 0; Index < Accounts.Num() && Remaining > 0; ++Index)
-	{
-		if (const UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Accounts[Index]))
-		{
-			Debits[Index] = FMath::Min(Inventory->GetCurrency(), Remaining);
-			Remaining -= Debits[Index];
-		}
-	}
-	if (Remaining > 0) return false;
-
-	for (int32 Index = 0; Index < Accounts.Num(); ++Index)
-	{
-		if (Debits[Index] <= 0) continue;
-		if (UNarrativeInventoryComponent* Inventory = ResolveCurrencyAccount(Accounts[Index]))
-		{
-			Inventory->AddCurrency(-Debits[Index]);
-			RecordCurrencyTransaction(Faction, -Debits[Index], Inventory->GetCurrency(), Reason, Type, Accounts[Index]);
-		}
-	}
-	return true;
+	return Paid;
 }
 
 TArray<FTerritoryTransaction> UTerritoryEconomySubsystem::GetTransactionHistory(const FGameplayTag& Faction, int32 MaxEntries) const
@@ -1929,6 +1998,7 @@ void UTerritoryEconomySubsystem::RestoreTransactionHistory(const TArray<FTerrito
 	UWorld* World = GetWorld();
 	if (!World) return;
 
+	++CurrencyRestoreGeneration;
 	TransactionLedger = Transactions;
 	// Trim on restore to cap loaded data
 	const int32 RestoreExcess = TransactionLedger.Num() - FMath::Max(0, MaxTransactionHistory);
@@ -1943,6 +2013,7 @@ void UTerritoryEconomySubsystem::RestoreTreasuryState(const TMap<FGameplayTag, F
 	UWorld* World = GetWorld();
 	if (!World) return;
 
+	++CurrencyRestoreGeneration;
 	FactionTreasuries = Treasuries;
 	DirtyFactions.Empty();
 }

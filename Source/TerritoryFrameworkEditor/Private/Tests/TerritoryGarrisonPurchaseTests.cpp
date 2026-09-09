@@ -47,7 +47,7 @@ bool FTFGarrisonPurchaseCallbacks::RunTest(const FString& Parameters)
 	SpawnDelegate.BindUFunction(Probe, GET_FUNCTION_NAME_CHECKED(UTerritoryAuditEventProbe, NPCSpawned));
 	SpawnEvent->AddDelegate(SpawnDelegate, Characters);
 
-	for (int32 Scenario = 0; Scenario < 5; ++Scenario)
+	for (int32 Scenario = 0; Scenario < 6; ++Scenario)
 	{
 		ATerritoryProperty* Territory = World->SpawnActor<ATerritoryProperty>();
 		Territory->SetActorGUID_Implementation(FGuid(381, Scenario + 1, 383, 384));
@@ -65,6 +65,7 @@ bool FTFGarrisonPurchaseCallbacks::RunTest(const FString& Parameters)
 		Post->InitializeReserves();
 		Territory->OnGarrisonChanged.AddDynamic(Probe, &UTerritoryAuditEventProbe::GarrisonChanged);
 		Inventory->SetCurrency(2000);
+		Inventory->PrepareForSave_Implementation();
 		FNarrativeActorRecord Before;
 		TestTrue(TEXT("Native archive captures the starting campaign"), Save->CreateActorRecord(Territory, Before));
 		FNarrativeActorRecord PaidTerritory, PaidPost;
@@ -82,6 +83,7 @@ bool FTFGarrisonPurchaseCallbacks::RunTest(const FString& Parameters)
 		Probe->CurrencyCallback = [&]()
 		{
 			++CurrencyCallbacks;
+			if (CurrencyCallbacks > 1) return; // Native inventory restore also broadcasts.
 			if (Scenario == 2) return; // External spending during NPC initialization.
 			TestEqual(TEXT("Native debit observers see the complete staffing target"), Territory->GetDesiredGuardCount(), 1);
 			TestEqual(TEXT("Native debit observers see the live purchased guard"), Territory->GetSpawnedGuardCount(), 1);
@@ -92,8 +94,13 @@ bool FTFGarrisonPurchaseCallbacks::RunTest(const FString& Parameters)
 			TestFalse(TEXT("Currency callbacks cannot change owner inside recruitment"), Territory->CommitOwnershipData(Changed));
 			TestTrue(TEXT("Native save captures paid staffing inside its currency callback"), Save->CreateActorRecord(Territory, PaidTerritory));
 			TestTrue(TEXT("Native save captures the purchased post occupant"), Save->CreateActorRecord(Post, PaidPost));
-			Inventory->PrepareForSave_Implementation();
+			if (Scenario != 5) Inventory->PrepareForSave_Implementation();
 			if (Scenario == 3) Save->LoadActorFromRecord(Territory, Before);
+			if (Scenario == 5)
+			{
+				Save->LoadActorFromRecord(Territory, Before);
+				Inventory->Load_Implementation();
+			}
 		};
 		Probe->GarrisonCallback = [&]()
 		{
@@ -136,6 +143,7 @@ bool FTFGarrisonPurchaseCallbacks::RunTest(const FString& Parameters)
 			}
 			if (Scenario == 2) TestEqual(TEXT("External spending is not overwritten by a fabricated refund"), Inventory->GetCurrency(), 0);
 			if (Scenario == 3) TestEqual(TEXT("A territory-only reload does not fabricate an inventory refund"), Inventory->GetCurrency(), 1900);
+			if (Scenario == 5) TestEqual(TEXT("A full reload keeps its wallet without a fabricated refund"), Inventory->GetCurrency(), 2000);
 		}
 		Territory->DespawnGuards();
 		Post->Destroy();

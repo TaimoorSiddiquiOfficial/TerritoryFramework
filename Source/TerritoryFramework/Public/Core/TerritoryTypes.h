@@ -399,6 +399,45 @@ struct FTerritoryFactionGuardDefinition
 	TObjectPtr<class UNPCDefinition> NPCDefinition;
 };
 
+/** Result of one payment through the existing Narrative inventory. */
+UENUM(BlueprintType)
+enum class ETerritoryCurrencyMutationStatus : uint8
+{
+	/** No payment was made. Unpaid purchase staging can be cancelled. */
+	Rejected,
+	/** Narrative applied the payment and no load interrupted its callbacks. */
+	Applied,
+	/** A load replaced the operation. Keep loaded state; do not automatically refund or retry. */
+	Superseded UMETA(DisplayName="Interrupted By Load")
+};
+
+/** Temporary payment receipt. Narrative owns and saves the actual balance. */
+USTRUCT(BlueprintType)
+struct FTerritoryCurrencyMutationResult
+{
+	GENERATED_BODY()
+
+	/** Applied means the payment completed. Interrupted By Load requires checking restored state. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Economy")
+	ETerritoryCurrencyMutationStatus Status = ETerritoryCurrencyMutationStatus::Rejected;
+
+	/** Signed requested amount: positive adds money, negative pays money. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Economy")
+	int32 Amount = 0;
+
+	/** Balance before this payment, when an eligible account was found. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Economy")
+	int32 BalanceBefore = 0;
+
+	/** Balance at the Native write, before callbacks. A later expense or load can change it. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Economy")
+	int32 BalanceAfter = 0;
+
+	/** Why the payment was rejected or interrupted. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Economy")
+	FText FailureReason;
+};
+
 /**
  * Transaction ledger entry — immutable audit trail for every economy mutations.
  * Records who, what, when, why, and how much.
@@ -424,7 +463,7 @@ struct FTerritoryTransaction
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	int32 Amount = 0;
 
-	/** Narrative currency balance observed after this transaction. */
+	/** Narrative balance at this transaction's write, before independent callback expenses. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Transaction")
 	int32 BalanceAfter = 0;
 

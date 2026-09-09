@@ -56,19 +56,31 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Economy")
 	bool CanActorAfford(const AActor* RequestingActor, int32 Cost) const;
 
-	/** Debit exactly the requesting actor's Narrative inventory account. */
+	/** Pay from a Narrative account. Use the result to distinguish rejection from an interrupting load. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	FTerritoryCurrencyMutationResult DebitCurrencyWithResult(AActor* RequestingActor, int32 PositiveAmount,
+		const FGameplayTag& Faction, const FString& Reason = TEXT(""),
+		ETerritoryTransactionType Type = ETerritoryTransactionType::ManualDebit);
+
+	/** Add money to a Narrative account. A load can interrupt callbacks; never automatically retry it. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
+	FTerritoryCurrencyMutationResult CreditCurrencyWithResult(AActor* Beneficiary, int32 PositiveAmount,
+		const FGameplayTag& Faction, const FString& Reason = TEXT(""),
+		ETerritoryTransactionType Type = ETerritoryTransactionType::ManualCredit);
+
+	/** Compatibility result: false includes an interrupting load. Use Debit Currency With Result for purchases. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	bool TryDebitCurrency(AActor* RequestingActor, int32 PositiveAmount,
 		const FGameplayTag& Faction, const FString& Reason = TEXT(""),
 		ETerritoryTransactionType Type = ETerritoryTransactionType::ManualDebit);
 
-	/** Credit exactly the beneficiary actor's Narrative inventory account. */
+	/** Compatibility result: false includes an interrupting load. Do not automatically refund or retry. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	bool CreditCurrency(AActor* Beneficiary, int32 PositiveAmount,
 		const FGameplayTag& Faction, const FString& Reason = TEXT(""),
 		ETerritoryTransactionType Type = ETerritoryTransactionType::ManualCredit);
 
-	/** Apply an explicit payout policy to territory-generated currency. */
+	/** Return confirmed payouts under this policy. Stops on load; the return value is not a retry budget. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Economy")
 	int32 CreditCurrencyToFaction(const FGameplayTag& Faction, int32 PositiveAmount,
 		ETerritoryIncomePayoutPolicy Policy, const FString& Reason = TEXT(""),
@@ -304,6 +316,7 @@ private:
 	friend class FTerritoryProductionResourceRoutingTest;
 	friend class FTFEconomyCallbackReentry;
 	friend class FTFProductionRestoreCallbacks;
+	friend class FTFCurrencyCallbacks;
 #endif
 
 	UPROPERTY(SaveGame)
@@ -316,6 +329,20 @@ private:
 	FTimerHandle ProductionCycleObservationTimerHandle;
 	int64 LastObservedProductionCycle = INDEX_NONE;
 	bool bProcessingEconomyTick = false;
+	/** Serializes Territory payments across synchronous Native currency and ledger callbacks. */
+	bool bCurrencySettlementInProgress = false;
+	uint64 CurrencyRestoreGeneration = 0;
+	TArray<TWeakObjectPtr<UNarrativeInventoryComponent>> ObservedCurrencyInventories;
+	void ObserveCurrencyAccount(const AActor* Account);
+	void EndCurrencySettlement();
+	UFUNCTION()
+	void OnCurrencyAccountChanged(int32 OldCurrency, int32 NewCurrency);
+	UFUNCTION()
+	void OnCurrencyLoadStarted();
+	FTerritoryCurrencyMutationResult ExecuteCurrencyMutation(AActor* Account, int32 Amount,
+		const FGameplayTag& Faction, const FString& Reason, ETerritoryTransactionType Type);
+	FTerritoryCurrencyMutationResult ApplyCurrencyMutation(AActor* Account, int32 Amount,
+		const FGameplayTag& Faction, const FString& Reason, ETerritoryTransactionType Type);
 	bool bProcessingResourceProduction = false;
 	/** Serializes recipe item callbacks and settlement publication in this campaign. */
 	bool bExecutingResourceRecipe = false;
@@ -397,8 +424,9 @@ private:
 	void PublishProductionState() const;
 	void RecordCurrencyTransaction(const FGameplayTag& Faction, int32 Amount,
 		int32 BalanceAfter, const FString& Reason, ETerritoryTransactionType Type,
-		const AActor* AccountActor, const FGameplayTag& SourceTerritory = FGameplayTag());
-	bool TryDebitSettlementAccounts(const FGameplayTag& Faction, int32 PositiveAmount,
-		ETerritoryIncomePayoutPolicy Policy, const FString& Reason,
+		const FString& AccountName, const FGameplayTag& SourceTerritory = FGameplayTag());
+	/** Return only paid upkeep. Revalidate every account after earlier Native callbacks. */
+	int32 DebitSettlementAccounts(const FGameplayTag& Faction, int32 PositiveAmount,
+		const TArray<AActor*>& Accounts, const FString& Reason,
 		ETerritoryTransactionType Type);
 };

@@ -46,13 +46,17 @@ Economy->RegisterFactionCurrencyAccount(Faction,
 ### Spending Currency
 
 ```cpp
-// C++ — debits only the requesting player's Narrative inventory
-if (Economy->TryDebitCurrency(Requester, 500, Faction, TEXT("Upgrade"),
-    ETerritoryTransactionType::UpgradeCost))
-{
-    // Success — deducted
-}
+// C++ — pays from this exact Narrative inventory and returns a payment receipt.
+const FTerritoryCurrencyMutationResult Payment = Economy->DebitCurrencyWithResult(
+    Requester, 500, Faction, TEXT("Manual payment"), ETerritoryTransactionType::ManualDebit);
+const bool bPaymentCompleted = Payment.Status == ETerritoryCurrencyMutationStatus::Applied;
 ```
+
+Rejected means no payment happened. `Superseded` means a load interrupted the
+operation: keep the restored state and do not automatically refund or retry.
+Use the existing property/garrison purchase functions for those purchases; they
+coordinate the Native payment with staged territory fields. See
+[payment callback guidance](Currency_Callback_Migration.md) for Blueprint migration.
 
 ### Checking Balance
 
@@ -99,7 +103,9 @@ Staffing mutations call `RecalculateIncome` immediately and publish the new rate
 
 ## Transaction Ledger
 
-Every economy mutation records a transaction:
+Each completed Territory currency payment records a transaction. Interrupted
+payments do not append stale history after a restore. Independent Native expenses
+remain owned by Narrative and are not separate Territory ledger entries.
 
 | Field | Type | Example |
 |---|---|---|
@@ -107,7 +113,7 @@ Every economy mutation records a transaction:
 | Faction | GameplayTag | Narrative.Factions.Heroes |
 | Type | ETerritoryTransactionType | Income, GuardUpkeep, UpgradeCost, Reward... |
 | Amount | int32 | +100 (credit) or -50 (debit) |
-| BalanceAfter | int32 | Narrative account balance after transaction |
+| BalanceAfter | int32 | Narrative balance at this payment, before later callback expenses |
 | GameTime | double | Accumulated game time |
 | Reason | FString | "Quest reward", "Property upgrade", "Guard upkeep" |
 | SourceTerritory | GameplayTag | Optional territory that generated the transaction |
@@ -179,14 +185,14 @@ Every EconomyTickIntervalSeconds (server only):
       a. Resolve one policy-specific settlement cohort
       b. If policy is NoCurrency, publish the rate snapshot and skip settlement
       c. Apply IncomePayoutPolicy to distribute IncomePerTick
-      d. Debit affordable upkeep from the same settlement cohort
+      d. Recheck faction, authority and funds before charging each account in that cohort
          - EqualSplitOnlineMembers: matching online player characters only
          - SharedNarrativeAccount/FactionLeader: the exact registered account only
          - Guards and other NPCs: never automatic accounts
-      e. Record the actual (possibly partial) upkeep and resulting balance
+      e. Record actual payments and broadcast the unpaid upkeep remainder
       f. Broadcast OnEconomyTickFired(Faction, Snapshot)
 
-  3. Trim TransactionLedger to MaxTransactionHistory (once, not per-faction)
+  3. Keep TransactionLedger within MaxTransactionHistory (also capped at each payment)
 
   4. Process Property resource production against the current Narrative campaign day
      - loaded Properties refresh durable site records
