@@ -7,6 +7,7 @@
 #include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Engine/World.h"
@@ -15,7 +16,13 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "AI/Activities/NPCActivityComponent.h"
+#include "AI/Activities/NPCActivity.h"
 #include "AI/Activities/NPCGoalItem.h"
+#include "AI/NarrativeNPCController.h"
+#include "Items/InventoryComponent.h"
+#include "Items/MeleeWeaponItem.h"
+#include "Items/RangedWeaponItem.h"
+#include "UObject/StructOnScope.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "UObject/UnrealType.h"
 
@@ -106,6 +113,80 @@ bool FTFAssaultCombatAutonomy::RunTest(const FString& Parameters)
 		TerritoryAssaultTargetPolicy::RestoreGoalScores(Overrides);
 	}
 	Participant->DamagingEnemies.Empty();
+	if (Target)
+	{
+		// Exercise the actual shipped scorers with a live, configured force. A
+		// pre-existing Native goal must not interrupt boarding, even after restore.
+		auto* Controller = World->SpawnActor<ANarrativeNPCController>();
+		Controller->SetPawn(Attacker);
+		auto* Goal = NewObject<UNPCGoalItem>(Controller, AttackGoalClass);
+		Goal->OwnerController = Controller;
+		Target->SetObjectPropertyValue_InContainer(Goal, Guard);
+		Goal->DefaultScore = 4.f;
+		FindFProperty<FBoolProperty>(AttackGoalClass, TEXT("IsAlert"))->SetPropertyValue_InContainer(Goal, true);
+		FindFProperty<FDoubleProperty>(AttackGoalClass, TEXT("AlertChangedTime"))->SetPropertyValue_InContainer(Goal, -10.0);
+		Attacker->GetInventoryComponent()->TryAddItemFromClass(UMeleeWeaponItem::StaticClass(), 1, false);
+		Attacker->GetInventoryComponent()->TryAddItemFromClass(URangedWeaponItem::StaticClass(), 1, false);
+		auto Allowed = [&]() { return UTerritoryBlueprintLibrary::CanScoreTerritoryCombatGoal(Controller, Goal); };
+		TestTrue(TEXT("Active on-foot assault may score its Native hostile goal"), Allowed());
+		TestFalse(TEXT("Null goal is safely rejected"), UTerritoryBlueprintLibrary::CanScoreTerritoryCombatGoal(Controller, nullptr));
+		TestFalse(TEXT("Null controller is safely rejected"), UTerritoryBlueprintLibrary::CanScoreTerritoryCombatGoal(nullptr, Goal));
+		Goal->OwnerController = nullptr;
+		TestFalse(TEXT("A goal from another controller cannot be scored"), Allowed());
+		Goal->OwnerController = Controller;
+		Controller->SetRole(ROLE_SimulatedProxy);
+		TestFalse(TEXT("Clients cannot select a server combat activity"), Allowed());
+		Controller->SetRole(ROLE_Authority);
+		World->GetSubsystem<UTerritoryRegistrySubsystem>()->UnregisterTerritory(Place);
+		TestFalse(TEXT("Streamed-out mission target pauses combat"), Allowed());
+		World->GetSubsystem<UTerritoryRegistrySubsystem>()->RegisterTerritory(Place);
+		// Registration also advances the scheduler. Restore the active record after
+		// registration, as the Native load-order fixture does; this isolated record
+		// deliberately has no physical deployment approach to advance on its own.
+		Counter->RestorePersistentState({Record});
+		TestTrue(TEXT("Restoring the active record with the same loaded target restores eligibility"), Allowed());
+		Target->SetObjectPropertyValue_InContainer(Goal, Attacker);
+		TestFalse(TEXT("Self cannot become an attack target"), Allowed());
+		Target->SetObjectPropertyValue_InContainer(Goal, Guard);
+
+		for (const TCHAR* Root : {TEXT("/TerritoryFramework"), TEXT("/Game/TerritoryFramework")})
+		{
+			for (const TCHAR* Name : {TEXT("BPA_TerritoryAttack_Melee"), TEXT("BPA_TerritoryAttack_Ranged_Strafe"), TEXT("BPA_TerritoryAttack_Grenade")})
+			{
+				const FString Path = FString::Printf(TEXT("%s/AI/Combat/%s.%s_C"), Root, Name, Name);
+				UClass* Class = LoadClass<UNPCActivity>(nullptr, *Path, nullptr, LOAD_NoWarn);
+				// Portable plugin hosts have no project-specific combat children.
+				if (!Class && FCString::Strcmp(Root, TEXT("/Game/TerritoryFramework")) == 0) continue;
+				if (!TestNotNull(*Path, Class)) continue;
+				auto* Activity = NewObject<UNPCActivity>(Controller, Class);
+				Activity->SetOwner(Controller, Controller->GetActivityComponent());
+				auto Score = [&]()
+				{
+					UFunction* Function = Activity->FindFunction(TEXT("ScoreGoalItem"));
+					FStructOnScope Params(Function);
+					FindFProperty<FObjectProperty>(Function, TEXT("Goal"))->SetObjectPropertyValue_InContainer(Params.GetStructMemory(), Goal);
+					Activity->ProcessEvent(Function, Params.GetStructMemory());
+					return FindFProperty<FFloatProperty>(Function, TEXT("ReturnValue"))->GetPropertyValue_InContainer(Params.GetStructMemory());
+				};
+				const float OnFootScore = Score();
+				if (FCString::Strcmp(Name, TEXT("BPA_TerritoryAttack_Melee")) == 0)
+					TestTrue(TEXT("An armed, alert on-foot attacker selects melee"), OnFootScore > 0.f);
+				Participant->bVehicleIngressRequired = true;
+				Participant->bVehicleIngressComplete = false;
+				TestFalse(TEXT("Existing participant rules block combat during travel"), Allowed());
+				TestEqual(*FString::Printf(TEXT("%s cannot interrupt vehicle ingress"), *Path), Score(), 0.f);
+				TestEqual(TEXT("Pausing combat preserves the Native goal score"), Goal->DefaultScore, 4.f);
+				Participant->CompleteVehicleIngress();
+				TestEqual(TEXT("Arrival resumes the same Native scorer without a replacement goal"), Score(), OnFootScore);
+				Participant->bEscapeOnVehicleArrival = true;
+				TestEqual(TEXT("An escape mission cannot switch to combat after arrival"), Score(), 0.f);
+				Participant->bEscapeOnVehicleArrival = false;
+			}
+		}
+		Controller->SetPawn(nullptr);
+		TestFalse(TEXT("Unpossession cannot select on-foot combat"), Allowed());
+		Controller->SetPawn(Attacker);
+	}
 	Attacker->GetNarrativeAbilitySystemComponent()->DamagedBy(SourceASC, 0.f, Spec);
 	TestTrue(TEXT("Zero damage cannot fabricate a threat"), Participant->DamagingEnemies.IsEmpty());
 	Attacker->SetRole(ROLE_SimulatedProxy);

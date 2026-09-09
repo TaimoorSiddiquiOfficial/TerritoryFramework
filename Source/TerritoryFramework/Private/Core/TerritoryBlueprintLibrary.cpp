@@ -4,6 +4,9 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Combat/TerritoryCombatDirector.h"
+#include "Combat/TerritoryAssaultCharacter.h"
+#include "Combat/TerritoryAssaultParticipantComponent.h"
+#include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -12,6 +15,8 @@
 #include "ArsenalSettings.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "AI/Activities/NPCActivityComponent.h"
+#include "AI/Activities/NPCGoalItem.h"
+#include "AI/NarrativeNPCController.h"
 #include "AI/NPCInteractable.h"
 #include "Character/CharacterMapMarker.h"
 #include "Components/CapsuleComponent.h"
@@ -332,6 +337,37 @@ FText UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(const FGameplayTag& 
 	}
 
 	return FText::FromString(FriendlyName);
+}
+
+bool UTerritoryBlueprintLibrary::CanScoreTerritoryCombatGoal(
+	const ANarrativeNPCController* OwnerController, const UNPCGoalItem* Goal)
+{
+	if (!IsValid(OwnerController) || !OwnerController->HasAuthority()
+		|| OwnerController->IsActorBeingDestroyed() || !IsValid(Goal)
+		|| Goal->OwnerController != OwnerController) return false;
+
+	// A controller driving a Narrative vehicle is not currently controlling an
+	// on-foot combatant. Do not use GetOwnedNPC(), which also returns the driver.
+	const ANarrativeNPCCharacter* NPC = OwnerController->GetControlledNPC();
+	const AActor* Target = Cast<AActor>(Goal->GetGoalKey());
+	if (!IsValid(NPC) || !NPC->HasAuthority() || !NPC->IsAlive()
+		|| NPC->IsActorBeingDestroyed() || !IsValid(Target) || Target == NPC
+		|| Target->IsActorBeingDestroyed() || Target->GetWorld() != NPC->GetWorld()) return false;
+	if (const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(Target);
+		Character && !Character->IsAlive()) return false;
+
+	if (const ATerritoryAssaultCharacter* Assault = Cast<ATerritoryAssaultCharacter>(NPC))
+	{
+		const UTerritoryAssaultParticipantComponent* Participant = Assault->AssaultParticipant;
+		return Participant && !Participant->HasRetired()
+			&& IsValid(Participant->GetTargetTerritory())
+			&& Assault->CanEngageAssaultTarget(Target);
+	}
+	if (const ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(NPC))
+	{
+		return Guard->CanEngageTerritoryTarget(Target);
+	}
+	return true;
 }
 
 bool UTerritoryBlueprintLibrary::CanSafelyRefreshPerceivedActors(

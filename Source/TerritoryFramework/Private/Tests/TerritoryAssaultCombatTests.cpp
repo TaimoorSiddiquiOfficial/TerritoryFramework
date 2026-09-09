@@ -116,7 +116,11 @@ bool FTFAssaultWeaponActivityEligibility::RunTest(const FString& Parameters)
 {
     UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
     if (!TestNotNull(TEXT("Inventory fixture world created"), World)) return false;
-    auto* Pawn = World->SpawnActor<ATerritoryAssaultCharacter>();
+    // This test isolates Native inventory scoring. Assault eligibility is tested
+    // with a configured, active force in the autonomy regression.
+    UClass* NPCClass = LoadClass<ANarrativeNPCCharacter>(nullptr,
+        TEXT("/TerritoryFramework/AI/BP_TerritoryStoryNPC.BP_TerritoryStoryNPC_C"));
+    auto* Pawn = NPCClass ? World->SpawnActor<ANarrativeNPCCharacter>(NPCClass) : nullptr;
     auto* Controller = World->SpawnActor<ANarrativeNPCController>();
     UClass* RangedClass = LoadClass<UNPCActivity>(nullptr, TEXT("/TerritoryFramework/AI/Combat/BPA_TerritoryAttack_Ranged_Strafe.BPA_TerritoryAttack_Ranged_Strafe_C"));
     UClass* MeleeClass = LoadClass<UNPCActivity>(nullptr, TEXT("/TerritoryFramework/AI/Combat/BPA_TerritoryAttack_Melee.BPA_TerritoryAttack_Melee_C"));

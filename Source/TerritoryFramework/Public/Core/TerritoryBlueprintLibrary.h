@@ -17,6 +17,8 @@ class ATerritoryCity;
 class ATerritoryDistrict;
 class AAIController;
 class ANarrativeNPCCharacter;
+class ANarrativeNPCController;
+class UNPCGoalItem;
 
 /**
  * Global Blueprint function library for territory queries.
@@ -260,6 +262,18 @@ public:
 		meta=(DisplayName="Can Safely Refresh Perceived Actors"))
 	static bool CanSafelyRefreshPerceivedActors(
 		const UObject* GoalGenerator, const AAIController* OwnerController);
+
+	/**
+	 * Check the current guard or assault rules before scoring a Narrative attack goal.
+	 * In ScoreGoalItem, return zero when this is false so boarding, travel, escape,
+	 * peace and unloaded targets cannot start combat. Zero keeps the goal available
+	 * for later; Narrative still scores weapons, perception and goal lifetime.
+	 * Ordinary Narrative NPCs keep their existing combat policy. Server query only.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|AI|Combat",
+		meta=(DisplayName="Can Score Territory Combat Goal"))
+	static bool CanScoreTerritoryCombatGoal(
+		const ANarrativeNPCController* OwnerController, const UNPCGoalItem* Goal);
 
 	/**
 	 * Adapter for project-owned children of Narrative's GoalGenerator_Attack.

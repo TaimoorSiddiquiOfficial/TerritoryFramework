@@ -23,12 +23,13 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 | Repeated NPC saves retain removed generators and load old values | Territory's Native activity-component subclass rebuilds snapshots, keeps the latest record, restores existing objects and filters explicitly retired classes | All 296 tests pass on both engines; portable controller cold-reopens in UE 5.7; live/package checks recorded below |
 | Generic Native NPC death accesses a missing client activity component; late join shows Talk on a corpse | Shared story NPC calls the parent only on authority; clients reconcile from the Native ASC after death, BeginPlay and visual setup | Native and actual Blueprint regressions pass on both engines; listen server, two clients and a fresh late join pass |
 | Hashir's generic controller bypasses generator save migration | Project NPC/controller children retain Native Blueprint inheritance and use the existing activity save adapter; retire only the replaced exact Native generator | Real actor/controller restore preserves GUID, currency and current generators; repeated snapshots do not grow |
+| An assault selects combat during vehicle boarding or travel | Existing participant/guard engagement rules gate the shared and project activity scorers; zero preserves the Native goal for arrival | Both engine suites pass; two-client live comparison drops ingress combat from 569 samples to zero across two restores |
 
 ## Verified checkpoint
 
 - UE 5.8.2 and UE 5.7.4 Editor/UHT/runtime/editor-module builds pass.
 - Development and Shipping game compilation passes on both engines. TDA's current UE 5.8 cook, stage and package pass; the first cook attempt hit the open editor's tooling port, and the retry passed after closing the editor.
-- The latest story NPC checkpoint passes 299 tests on each engine. UE 5.8 has 279 clean passes plus 20 with warnings; UE 5.7 has 277 clean passes plus 22 with warnings.
+- The latest combat eligibility checkpoint passes 299 tests on each engine. UE 5.8 has 279 clean passes plus 20 with warnings; UE 5.7 has 277 clean passes plus 22 with warnings.
 - HopDistrictTest listen server plus two clients passes faction replacement, additive primary choice, account conflict/priority, already-open UI refresh, and rejected client mutations.
 - Two consecutive Native world restores plus Native deferred player loading preserve owners, guard counts, reserves, inventory and the host player's faction/account UI. Native world `Load` does not itself invoke player loading; the fixture uses Native's separate player-load path deliberately.
 - One fresh fourth PIE world joins after those changes and receives matching faction-resource snapshots, correct membership, selection status and inventory.
@@ -41,7 +42,7 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 
 ## Remaining work in order
 
-1. Audit saved attack targets and the same-team shot cancellations observed after Native world restore. Include the attack-target EQS/Blackboard and weapon decal/notify warnings, and the Native activity restart warning after Hashir's death. Generic client death and Hashir's controller integration are implemented in the story NPC follow-up below; those fixes do not resolve these separate AI findings.
+1. Audit the remaining attack-target EQS/Blackboard, weapon decal/notify and repeated `GA_Weapon_Wield` execution messages, plus Native activity restart after Hashir's death. The standard attack goals are not saved, and the before/after restore observations selected no friendly targets. Vehicle-ingress combat selection is fixed in the follow-up below; Native friendly-damage protection stays enabled.
 2. Complete actual AlMalik World Partition streaming and compiled dedicated-server certification. The live late join above does not replace either gate.
 3. Complete the deferred lighting visual/performance review, then the remaining Act 1 story authoring decisions. Do not publish fresh release artifacts before the relevant gates pass.
 
@@ -230,6 +231,54 @@ Evidence is under `Saved/Verification/20260909_HashirIntegration`. Actual AlMali
 streaming, compiled dedicated server, saved attack targets, same-team shots,
 activity restart after death, EQS and weapon warnings remain separate gates.
 No new release was published.
+
+## Combat activities during vehicle travel — 2026-09-09
+
+The pre-fix live observation found 569 samples where an assault selected melee
+while its existing participant reported pending vehicle ingress and denied combat.
+Native's attack goal retained a target, and the Territory activity scorer never
+consulted the current engagement rules. This allowed combat to interrupt boarding
+or travel. Default Native attack goals/generators are not saved; two actual world
+restores selected no friendly target and saved no default attack goal.
+
+`CanScoreTerritoryCombatGoal` is a stateless server query around the existing
+assault participant, assault character and guard engagement policies. The three
+shared and three project combat activities return zero before their existing
+scorer when the query fails. Native keeps the goal for later selection and still
+owns perception, scoring, weapons, tactical tokens and damage. Mission identity,
+finite-force accounting, scheduling, ownership and diplomacy authorities do not
+change. There are no new saved or replicated fields. Shared content was authored
+in UE 5.7; custom project scorer overrides need the same check. See
+[setup and migration](Combat_Activity_Eligibility.md).
+
+The final live server/two-client run checked 3,028 samples, two Native world/player
+restores and a peace transition. It recorded zero combat selections during
+ingress, zero friendly selections, 414 assault on-foot combat samples and zero
+combat after peace. Its temporary save was deleted. Both engines pass all 299
+tests: 279 clean/20 warning passes on UE 5.8 and 277 clean/22 warning passes on
+UE 5.7. The expanded regression executes the real activity Blueprints and checks
+travel, escape, arrival, restored mission identity, invalid context and authority.
+Two mistakes in the initial test fixtures were corrected before these passing
+runs: Native NPCs require their Blueprint stable-ID implementation, and territory
+registration advances the scheduler before the test restores its active record.
+
+Editor/Development/Shipping builds pass for both engines; the final test-only
+fixture changes were recompiled and tested in both editors. UE 5.8 validates 244
+assets/147 Blueprints with zero errors and eight existing warnings; UE 5.7 checks
+121 assets/78 Blueprints with zero errors and four existing warnings. Both cooks
+pass. The UE 5.8 cook/stage/package and 90-second Development Game server-mode smoke
+exit zero, with eight vehicle arrivals and no error, ensure or stale Blueprint
+access lines. This is still not a compiled TDAServer result. The run also logs
+13 friendly-damage cancellations and 452 `GA_Weapon_Wield` execution messages;
+weapon/activity warning analysis remains open. No friendly target was selected in
+the separate instrumented live run, and Native's damage protection stays enabled.
+
+All 741 Narrative source files match the installed Marketplace package. PIE is
+stopped, the editor is on HopDistrictTest, one configured client/background
+throttling are restored, and no packages are dirty. Evidence is under
+`Saved/Verification/20260909_AttackTargetAudit`. No release was published.
+Actual AlMalik streaming, the compiled dedicated-server gate, the remaining
+Native query/weapon/activity warnings and later story authoring remain open.
 
 ## Dedicated-server prerequisite
 

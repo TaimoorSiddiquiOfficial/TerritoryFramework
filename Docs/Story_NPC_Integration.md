@@ -71,7 +71,8 @@ removes the Native actor record and gives the existing clients and a fresh late
 join matching dead/ragdoll/**Loot** presentation.
 
 This is not a complete AlMalik World Partition test or compiled dedicated-server
-certification. Saved attack targets, same-team shot cancellations, Native activity
-restart warnings after death, and the separate EQS/weapon warnings remain under
-audit. The current evidence is in TDA's
+certification. The later [combat eligibility audit](Combat_Activity_Eligibility.md)
+found no saved default attack goals or selected friendly targets and fixed combat
+selection during vehicle travel. Native activity restart after death and the
+separate EQS/weapon warnings remain under audit. The story NPC evidence is in TDA's
 `Saved/Verification/20260909_HashirIntegration`.

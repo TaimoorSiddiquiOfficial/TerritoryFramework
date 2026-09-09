@@ -1,6 +1,6 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-09 (Hashir controller saves, client death and late join)
+> **Reviewed:** 2026-09-09 (combat activity eligibility during vehicle travel)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
@@ -25,8 +25,11 @@ See the implementation ledger for the latest build/test gates.
 Territory's Native controller now rebuilds saved generator snapshots and supports
 explicitly retired classes. Hashir now selects that adapter through a project
 controller, while the shared story NPC fixes client death and late-join presentation.
-Saved attack targets, attack-query and decal warnings, and actual AlMalik streaming
-audits remain. See [story NPC setup](Story_NPC_Integration.md).
+The standard attack goals are not saved, and two live restores selected no friendly
+targets. Territory combat activities now respect boarding, travel and current
+engagement rules. See [combat eligibility](Combat_Activity_Eligibility.md).
+Attack-query, weapon and activity warnings, plus actual AlMalik streaming audits,
+remain. See also [story NPC setup](Story_NPC_Integration.md).
 These changes are not certification of the older published preview.
 
 TDA's starter sword now uses its existing Territory combo ability. The previous
@@ -94,11 +97,20 @@ the existing post-capture counterattack accept the request.
   Native Blueprint inheritance; portable and TDA guards/assaults now select it.
   Actual server/two-client snapshot checks and both cooks pass. Hashir's later
   project integration is described in the story NPC guide above.
+- [x] Stop melee, ranged and grenade activities from interrupting vehicle ingress.
+  Existing participant/guard rules gate the actual shared and project scorers.
+  Both engines pass 299 tests; the final server/two-client run records zero combat
+  selections during ingress, resumes on-foot combat after two Native restores,
+  and stops combat on peace. Both cooks and the packaged assault smoke pass.
+- [x] Classify the observed same-team damage cancellations. Native's damage
+  protection also covers melee bystanders. The before/after observations selected
+  no friendly targets and saved no default attack goals. Deliberately saved custom
+  goal subclasses still need their own restore tests; do not disable friendly fire
+  protection to suppress this log.
 - [ ] Resolve Native attack-target EQS/Blackboard and weapon-decal warnings from
   the latest packaged assault smoke through compatible plugin/project adapters.
-  Reproduce the same-team shot cancellations seen after world restore and check
-  target cleanup before classifying their cause. Include the Native activity
-  restart warning after Hashir's death and the weapon notify-state warning.
+  Include the Native activity restart warning after Hashir's death, repeated
+  `GA_Weapon_Wield` execution messages and the weapon notify-state warning.
 - [x] Inspect Hashir for Act 1: check both NPC_Hashir and NPC_Hahsir references,
   his greeting/dialogue assets and quest-giver setup. Hashir is the player's
   friend and works for the system. Author story content after framework checks.
