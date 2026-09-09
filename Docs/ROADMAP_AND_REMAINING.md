@@ -1,6 +1,6 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-09 (melee starter balance and Hashir tagged greeting)
+> **Reviewed:** 2026-09-09 (Hashir controller saves, client death and late join)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
@@ -12,7 +12,7 @@ The current implementation ledger is [Finding Resolution Plan](Finding_Resolutio
 Live faction changes now update resource routing and open economy screens. Tied
 account priorities create a visible conflict; Native inventory remains the balance
 authority. Both example controllers follow their owner's political faction.
-Both engines now pass 297 automation tests, and a server/two-client fixture plus a
+Both engines now pass 299 automation tests, and a server/two-client fixture plus a
 fresh late join passes. Two consecutive Native world/player restores preserve
 garrisons, reserves and faction/account state without the reproduced record-reader
 crash or stale guard attack-goal errors. Saved vehicle ledgers now reject inflated
@@ -23,8 +23,10 @@ selected depot. Currency receipts now preserve restored purchases and stop old
 payments after a Native load; live wallet/history replication passes on two clients.
 See the implementation ledger for the latest build/test gates.
 Territory's Native controller now rebuilds saved generator snapshots and supports
-explicitly retired classes. The separate generic NPC client-death, Hashir controller
-migration, attack-query and decal warnings, and actual AlMalik streaming audits remain.
+explicitly retired classes. Hashir now selects that adapter through a project
+controller, while the shared story NPC fixes client death and late-join presentation.
+Saved attack targets, attack-query and decal warnings, and actual AlMalik streaming
+audits remain. See [story NPC setup](Story_NPC_Integration.md).
 These changes are not certification of the older published preview.
 
 TDA's starter sword now uses its existing Territory combo ability. The previous
@@ -76,22 +78,27 @@ the existing post-capture counterattack accept the request.
   Existing deferred removal now keeps those writes outside the reader; Native
   target goals are detached before retired guards disappear. The exact regression
   and two real world/player restores pass. Native source is unchanged.
-- [ ] Audit Native `BP_NarrativeNPC` death on clients: Hashir's death calls
-  `RemoveAllGoals` with no local AI activity component. The new perception
-  override fixes a separate server callback and does not cover that path.
-- [ ] Check migration of existing Hashir saves that contain the old Native goal
-  generator. A changed NPC definition does not rewrite saved activity instances.
+- [x] Adapt Native `BP_NarrativeNPC` client death through a shared child Blueprint.
+  Keep the Native parent on authority; remote presentation reads the Native ASC
+  and waits for Native ragdoll replication. BeginPlay and visual-ready refreshes
+  cover late join. Actual server/two-client death and a fresh late join pass.
+- [x] Integrate Hashir with the existing controller save adapter. His project
+  controller retires only the old exact Native attack-generator class. Preserve
+  the safe replacement, Native Blueprint inheritance and stable definition IDs.
+  Native record regressions and a real Hashir actor/controller restore pass;
+  actual AlMalik streaming remains a separate gate.
 - [x] Fix repeated generator snapshots on Territory controllers. Keep the latest
   old record, restore existing generator objects without duplicate bindings, and
   support an explicit list of retired saved classes. Both engine suites and the
   Native actor-record recreation regression pass. The thin controller preserves
   Native Blueprint inheritance; portable and TDA guards/assaults now select it.
-  Actual server/two-client snapshot checks and both cooks pass. Hashir's generic Native
-  Blueprint controller is not silently reparented by this change.
+  Actual server/two-client snapshot checks and both cooks pass. Hashir's later
+  project integration is described in the story NPC guide above.
 - [ ] Resolve Native attack-target EQS/Blackboard and weapon-decal warnings from
   the latest packaged assault smoke through compatible plugin/project adapters.
   Reproduce the same-team shot cancellations seen after world restore and check
-  target cleanup before classifying their cause.
+  target cleanup before classifying their cause. Include the Native activity
+  restart warning after Hashir's death and the weapon notify-state warning.
 - [x] Inspect Hashir for Act 1: check both NPC_Hashir and NPC_Hahsir references,
   his greeting/dialogue assets and quest-giver setup. Hashir is the player's
   friend and works for the system. Author story content after framework checks.

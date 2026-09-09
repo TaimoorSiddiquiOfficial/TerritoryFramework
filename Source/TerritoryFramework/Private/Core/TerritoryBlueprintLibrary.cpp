@@ -12,6 +12,15 @@
 #include "ArsenalSettings.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "AI/Activities/NPCActivityComponent.h"
+#include "AI/NPCInteractable.h"
+#include "Character/CharacterMapMarker.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "GAS/NarrativeAbilitySystemComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Weapons/WeaponVisual.h"
+#include "NarrativeArsenal.h"
+#include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "NarrativeGameplayTags.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
@@ -370,6 +379,49 @@ bool UTerritoryBlueprintLibrary::RefreshParentPerceivedActorsSafely(
 	// Invoke the exact inherited Blueprint bytecode rather than ProcessEvent by name,
 	// which would dispatch back into this project-owned override and recurse.
 	GoalGenerator->ProcessEvent(ParentFunction, nullptr);
+	return true;
+}
+
+bool UTerritoryBlueprintLibrary::UpdateNarrativeNPCClientDeathPresentation(
+	ANarrativeNPCCharacter* NPC)
+{
+	if (!IsValid(NPC) || NPC->HasAuthority() || NPC->IsActorBeingDestroyed()
+		|| !NPC->GetWorld() || NPC->GetWorld()->bIsTearingDown) return false;
+	const UNarrativeAbilitySystemComponent* ASC = NPC->GetNarrativeAbilitySystemComponent();
+	if (!IsValid(ASC)) return false;
+	const bool bDead = ASC->IsDead();
+
+	// The simulated proxy has no AI controller. Do not run the Native Blueprint's
+	// RemoveAllGoals path or its C++ SetRagdoll call, which would send an unowned RPC.
+	// These are local read-model updates; the ASC and ragdoll property still replicate.
+	if (UCharacterMovementComponent* Movement = NPC->GetCharacterMovement(); bDead && Movement)
+		Movement->StopMovementImmediately();
+	if (UCapsuleComponent* Capsule = NPC->GetCapsuleComponent())
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, bDead ? ECR_Ignore : ECR_Block);
+	if (USkeletalMeshComponent* Mesh = NPC->GetMesh())
+		Mesh->SetCollisionResponseToChannel(TraceChannel_NarrativeInteraction,
+			bDead ? ECR_Block : ECR_Ignore);
+	if (UCharacterMapMarker* Marker = NPC->GetMarkerComponent())
+	{
+		if (bDead) Marker->RemoveMarker();
+		else Marker->RegisterMarker();
+	}
+	if (UNPCInteractable* Interactable = NPC->FindComponentByClass<UNPCInteractable>())
+	{
+		const UNPCInteractable* Defaults = Cast<UNPCInteractable>(Interactable->GetArchetype());
+		Interactable->SetInteractableActionText(bDead
+			? NSLOCTEXT("NPCCharacter", "LootInteractText", "Loot")
+			: (Defaults ? Defaults->GetInteractableActionText(nullptr, nullptr)
+				: NSLOCTEXT("NPCInteractable", "TalkInteractableActionText", "Talk")));
+	}
+	TArray<AActor*> ChildActors;
+	NPC->GetAllChildActors(ChildActors);
+	for (AActor* Child : ChildActors)
+		if (IsValid(Child)) Child->SetActorHiddenInGame(bDead);
+	// Native's multiplayer NPC Blueprint removes the equipped weapon visual on death.
+	// Do not drop inventory, create a pickup or simulate a second weapon on the client.
+	if (AWeaponVisual* Weapon = NPC->GetEquippedWeaponVisual(); bDead && IsValid(Weapon))
+		Weapon->Destroy();
 	return true;
 }
 

@@ -16,6 +16,7 @@ class UTerritoryDiplomacySubsystem;
 class ATerritoryCity;
 class ATerritoryDistrict;
 class AAIController;
+class ANarrativeNPCCharacter;
 
 /**
  * Global Blueprint function library for territory queries.
@@ -270,6 +271,19 @@ public:
 		meta=(DisplayName="Refresh Parent Perceived Actors Safely"))
 	static bool RefreshParentPerceivedActorsSafely(
 		UObject* GoalGenerator, AAIController* OwnerController);
+
+	/**
+	 * Update a remote NPC's death presentation from its replicated Narrative ASC.
+	 * Use on the Remote branch of a child NPC's HandleDeath override; the Authority
+	 * branch calls the Narrative parent. This never changes health, saves, AI goals
+	 * or ragdoll state. Narrative's separate ragdoll replication still owns the body.
+	 * For late join, also call next tick after BeginPlay and CharacterVisualInitialized.
+	 * BP_TerritoryStoryNPC includes these initialization paths.
+	 * Returns false for authority actors, missing ASCs or actors being removed.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|AI|Safety",
+		meta=(DisplayName="Update Narrative NPC Client Death Presentation"))
+	static bool UpdateNarrativeNPCClientDeathPresentation(ANarrativeNPCCharacter* NPC);
 
 	// ═══════════════════════════════════════════════════════════════════════════════
 	// Narrative Pro Faction Bridge

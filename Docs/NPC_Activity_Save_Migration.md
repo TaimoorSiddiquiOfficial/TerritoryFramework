@@ -41,8 +41,9 @@ For a project controller that already inherits Native Blueprint behavior, use
 the same native component class override rather than changing its parent to a
 C++ class. UE 5.7 and 5.8 enable this feature by default under
 `[Kismet] bAllowNativeComponentClassOverrides=true`. Keep it enabled when using
-this Blueprint. Hashir's generic Native controller still needs a deliberate
-project integration and old-save test; this fix does not silently change it.
+this Blueprint. Story NPCs can use `BP_TerritoryStoryNPCController`, which starts
+with an empty retirement list. Hashir now uses a project child with a deliberate
+retirement rule; see [story NPC setup](Story_NPC_Integration.md).
 
 ## Retiring an old generator
 
@@ -59,6 +60,6 @@ configuration. Migration settings are editor defaults, so an old save cannot
 overwrite them. Custom projects should list only classes they have deliberately
 retired; no global redirect changes Narrative assets.
 
-This change concerns generator records. Generic Native NPC client death, Hashir's
-controller migration, saved attack targets, and the observed EQS/decal warnings
-remain separate checks.
+This change concerns generator records. The story NPC integration covers client
+death and Hashir's controller selection. Saved attack targets and the observed
+EQS/decal warnings remain separate checks.

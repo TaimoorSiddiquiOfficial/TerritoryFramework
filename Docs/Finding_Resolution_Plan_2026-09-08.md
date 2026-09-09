@@ -21,16 +21,18 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 | Production continues after an item callback changes faction or depot | Recheck the original requesting account or selected depot around Native inventory mutations; compensate only in the original inventory | Two regressions reproduced the defect before the change; all 294 tests and all three build configurations pass on both engines |
 | Currency callbacks reenter settlement, reload a wallet, or invalidate later upkeep accounts | Payment receipts distinguish rejection from load interruption; recheck each account; preserve loaded purchases and current history | All 295 tests on both engines, real Native world/player load and two-client wallet/history proof pass |
 | Repeated NPC saves retain removed generators and load old values | Territory's Native activity-component subclass rebuilds snapshots, keeps the latest record, restores existing objects and filters explicitly retired classes | All 296 tests pass on both engines; portable controller cold-reopens in UE 5.7; live/package checks recorded below |
+| Generic Native NPC death accesses a missing client activity component; late join shows Talk on a corpse | Shared story NPC calls the parent only on authority; clients reconcile from the Native ASC after death, BeginPlay and visual setup | Native and actual Blueprint regressions pass on both engines; listen server, two clients and a fresh late join pass |
+| Hashir's generic controller bypasses generator save migration | Project NPC/controller children retain Native Blueprint inheritance and use the existing activity save adapter; retire only the replaced exact Native generator | Real actor/controller restore preserves GUID, currency and current generators; repeated snapshots do not grow |
 
 ## Verified checkpoint
 
 - UE 5.8.2 and UE 5.7.4 Editor/UHT/runtime/editor-module builds pass.
 - Development and Shipping game compilation passes on both engines. TDA's current UE 5.8 cook, stage and package pass; the first cook attempt hit the open editor's tooling port, and the retry passed after closing the editor.
-- The latest currency checkpoint passes 295 tests on each engine. UE 5.8 has 275 clean passes plus 20 with warnings; UE 5.7 has 273 clean passes plus 22 with warnings.
+- The latest story NPC checkpoint passes 299 tests on each engine. UE 5.8 has 279 clean passes plus 20 with warnings; UE 5.7 has 277 clean passes plus 22 with warnings.
 - HopDistrictTest listen server plus two clients passes faction replacement, additive primary choice, account conflict/priority, already-open UI refresh, and rejected client mutations.
 - Two consecutive Native world restores plus Native deferred player loading preserve owners, guard counts, reserves, inventory and the host player's faction/account UI. Native world `Load` does not itself invoke player loading; the fixture uses Native's separate player-load path deliberately.
 - One fresh fourth PIE world joins after those changes and receives matching faction-resource snapshots, correct membership, selection status and inventory.
-- UE 5.8 validates 235 current framework/Hashir assets with zero errors and eight presentation warnings. UE 5.7 validates 118 portable assets with zero errors and four example warnings.
+- UE 5.8 validates 244 current framework/Hashir/Taimoor assets with zero errors and eight presentation warnings. UE 5.7 validates 121 portable assets with zero errors and four example warnings.
 - The portable controller was saved and cold-reopened in UE 5.7 before copying it back to the plugin. Both example controllers now follow the owner's political faction. Other existing component instances keep their fixed binding until deliberately migrated.
 - Native source remains unchanged. A PIE-dirtied Native camera was exported to a verification backup before restart; it was not saved over vendor content.
 - A clean UE 5.7 host verifies zero project/theme dependencies in all 118 portable assets. TDA's RPG theme references are introduced by its own redirects, so portable dependency certification is run without those redirects.
@@ -39,7 +41,7 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 
 ## Remaining work in order
 
-1. Fix generic Narrative NPC client death through a plugin/project adapter. Source inspection confirms that Native BP_NarrativeNPC calls RemoveAllGoals unconditionally, although its activity component lives on the server-only AI controller. Preserve Native death presentation and weapon behavior while adapting this path. Hashir's safe perception generator addresses a different defect. Territory controller generator-save migration is implemented; Hashir's generic controller still needs its own integration without losing inherited Native Blueprint behavior. Include the attack-target EQS and weapon decal warnings observed in the 2026-09-09 packaged smoke, described below. Also reproduce the same-team shot cancellations observed after the live world restore and check whether old targets are cleared correctly.
+1. Audit saved attack targets and the same-team shot cancellations observed after Native world restore. Include the attack-target EQS/Blackboard and weapon decal/notify warnings, and the Native activity restart warning after Hashir's death. Generic client death and Hashir's controller integration are implemented in the story NPC follow-up below; those fixes do not resolve these separate AI findings.
 2. Complete actual AlMalik World Partition streaming and compiled dedicated-server certification. The live late join above does not replace either gate.
 3. Complete the deferred lighting visual/performance review, then the remaining Act 1 story authoring decisions. Do not publish fresh release artifacts before the relevant gates pass.
 
@@ -181,6 +183,53 @@ Native Blueprint still accesses a server-only activity component on clients. His
 controller/save migration, saved attack targets, same-team shot cancellations,
 EQS/decal warnings and actual AlMalik streaming remain open. These two fixes do
 not resolve those separate findings.
+
+## Story NPC client death and Hashir save integration — 2026-09-09
+
+`BP_TerritoryStoryNPC` inherits the Native NPC Blueprint and keeps the parent death
+event on authority. Its remote branch reads the current Narrative ASC through
+`UpdateNarrativeNPCClientDeathPresentation`. This avoids Native's unconditional
+client `RemoveAllGoals` call and unowned client ragdoll RPC. Native still owns
+health, death, inventory, actor records and ragdoll replication.
+
+The initial live late-join check found a second defect: the new client received
+health zero and the ragdoll but showed **Talk**. The final Blueprint refreshes on
+the next tick after BeginPlay and Native's `CharacterVisualInitialized` delegate,
+after Native's marker and equipment initialization. The actual Blueprint test
+executes both orders across engine frames and covers repeated visual callbacks.
+
+The shared story controller uses the existing Territory activity save component
+with an empty retirement list. Project `BP_HashirController` lists only the exact
+replaced Native `GoalGenerator_Attack`. Project `BP_Hashir` inherits the shared
+story NPC, and the NPC definition selects that project child. No Native graph is
+copied. All stable definition IDs, current activities, dialogue and factions are
+preserved. See [setup and migration](Story_NPC_Integration.md).
+
+`LiveHashir58.json` verifies both greeting lines on the listen server and two
+clients, a real Native actor/controller record restoring currency and a removed
+test generator, four saves with stable generator counts `[2,2,2,2]`, and unchanged
+GUID. After death, the Native actor record is removed. Existing clients and a
+fresh fourth PIE world all show matching dead/ragdoll/**Loot** state without a
+client AI controller. The temporary verification save was deleted.
+
+All six Editor/Development/Shipping targets compile on UE 5.8 and UE 5.7. Each
+engine passes 299 tests: UE 5.8 has 279 clean passes plus 20 with warnings; UE 5.7
+has 277 clean passes plus 22 with warnings. The final teardown regression also
+passes separately after strengthening its simulated-client fixture. UE 5.8
+validation checks 244 assets and compiles 147 Blueprints with zero errors and
+eight existing warnings. UE 5.7 checks 121 portable assets and compiles 78
+Blueprints with zero errors and four existing warnings. The portable UE 5.7 cook
+passes. TDA's UE 5.8 cook/stage/package and 90-second Development Game server-mode
+assault smoke both exit zero. Same-team shot cancellations and a ReturnToSpawn
+SetupBlackboard warning still appear; this does not pass the compiled TDAServer
+gate. All 741 Native source files match the installed Marketplace package. The
+editor is reopened on HopDistrictTest with PIE stopped, one configured client,
+background throttling restored, and zero dirty packages.
+
+Evidence is under `Saved/Verification/20260909_HashirIntegration`. Actual AlMalik
+streaming, compiled dedicated server, saved attack targets, same-team shots,
+activity restart after death, EQS and weapon warnings remain separate gates.
+No new release was published.
 
 ## Dedicated-server prerequisite
 
