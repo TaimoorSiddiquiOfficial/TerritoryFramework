@@ -130,6 +130,58 @@ Hashir's generic controller and client death path are still open. This migration
 does not globally redirect Native NPC classes or rewrite unrelated quest generators.
 The saved attack-target, EQS and decal audits also remain separate.
 
+## Melee and Hashir greeting follow-up — 2026-09-09
+
+Narrative remains the authority for combat abilities, damage, inventory and Tales
+playback. TDA's starting item collection gave the demo sword whose 55 base damage,
+combined with 122 Attack Rating from the starter clothes, made the first light hit
+lethal against a 100-health, zero-Armor guard. Its finishing execution was correct
+for those values. The starting collection now gives the existing project Territory
+sword and its 18-base-damage combo ability. Normal combos, lethal finishers and
+unaware backstabs remain enabled. Existing saves keep their saved weapons; there
+is no automatic inventory replacement. See [melee and dialogue guidance](Melee_And_Tagged_Dialogue_Checks.md).
+
+Hashir's greeting set held a Blueprint asset path in its soft dialogue-class field.
+The greeting trigger ran, but Native's async class loader could not start it. The
+reference now points to `DBP_Hahsir_Greet_C`. Text, reply, IDs and cooldown are
+unchanged. The editor validator now rejects empty configured rows, Blueprint asset
+references and classes that are not playable dialogues in project/plugin tagged
+dialogue sets. The new behavioral regression covers invalid references and a real
+generated dialogue class. There are no new runtime fields, replicated state,
+SaveGame records, actor IDs, streaming rules or Blueprint signatures.
+
+Both Editor/UHT builds pass. All 297 tests pass on each engine: UE 5.8 has 277
+clean passes and 20 with warnings; UE 5.7 has 275 clean passes and 22 with warnings.
+The UE 5.8 cook/stage/package reports zero errors and 30 existing warnings. The
+90-second packaged assault exits zero without a fatal error, ensure or null
+Blueprint access. This is Development Game server-mode evidence, not a compiled
+dedicated-server result.
+
+`NetworkGameplayFinal58.json` verifies the actual HopDistrictTest listen server
+and two clients. Hashir's greeting and reply appear in all three worlds. Queued
+Enhanced Input on a remote client plays normal sword combo montages, followed by
+`Execution_02_Seq_Montage`, against both a defender and an actual scheduled assault
+NPC after vehicle dismount. Both deaths replicate to both clients. The assault
+ledger changes from eight alive to seven alive and one killed exactly once. Target
+distance, facing and AI were controlled for this combat check; it does not certify
+all free-combat balance or every weapon. An earlier direct-spawned assault fixture
+was correctly retired for lacking an active assault record and was replaced with
+the real scheduler path. Direct client RPC calls through editor Python also proved
+unsuitable because Unreal's editor script guard forces local callspace; the final
+fixture queues Enhanced Input for normal engine processing instead.
+
+Final validation checks 240 current framework/Hashir/Taimoor assets and compiles
+143 Blueprints with zero errors and eight existing presentation warnings. All 741
+Native source files match the installed package. PIE is stopped, the original
+client-count/background-throttle settings are restored, and no packages are dirty.
+Evidence is under `Saved/Verification/20260909_MeleeHashir`. No release was published.
+
+Generic Native NPC client death was reproduced separately when Hashir died; the
+Native Blueprint still accesses a server-only activity component on clients. His
+controller/save migration, saved attack targets, same-team shot cancellations,
+EQS/decal warnings and actual AlMalik streaming remain open. These two fixes do
+not resolve those separate findings.
+
 ## Dedicated-server prerequisite
 
 The installed UE 5.8 distribution rejected `TDAServer` with “Server targets are not currently supported from this engine distribution.” This is an engine-distribution prerequisite, not a passing dedicated-server gate. A server-capable engine build is required for that certification. Game-server mode is a separate smoke test.

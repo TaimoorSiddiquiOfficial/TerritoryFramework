@@ -28,6 +28,8 @@
 #include "QuestBlueprint.h"
 #include "Tales/Quest.h"
 #include "Tales/Dialogue.h"
+#include "Tales/TaggedDialogueSet.h"
+#include "DialogueBlueprint.h"
 #include "Tales/QuestSM.h"
 #include "Tales/TerritoryCaptureTask.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
@@ -593,6 +595,43 @@ bool FTFTerritoryQuestTerminalStateValidation::RunTest(const FString& Parameters
 	Warnings.Reset();
 	TestTrue(TEXT("A Regular intermediate state followed by one final Success is valid"),
 		UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTaggedDialogueClassReferenceRegression,
+	"TerritoryFramework.Editor.DataValidation.TaggedDialogueClassReference",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTaggedDialogueClassReferenceRegression::RunTest(const FString& Parameters)
+{
+	UPackage* Package = CreatePackage(TEXT("/Game/TerritoryFramework/Tests/TaggedDialogueReference"));
+	UTaggedDialogueSet* Set = NewObject<UTaggedDialogueSet>(Package);
+	UTerritoryDataValidator* Validator = NewObject<UTerritoryDataValidator>();
+	Set->TaggedDialogues.AddDefaulted();
+	const FAssetData AssetData(Set);
+	const TConstArrayView<FAssetData> NoAssociatedAssets;
+	auto Check = [&](const TCHAR* Label, EDataValidationResult Expected)
+	{
+		FDataValidationContext Context(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		TestTrue(TEXT("Project tagged dialogue sets participate in validation"),
+			Validator->CanValidateAsset_Implementation(AssetData, Set, Context));
+		TestEqual(Label, Validator->ValidateLoadedAsset_Implementation(AssetData, Set, Context), Expected);
+		TestEqual(TEXT("Only invalid class references report an error"), Context.GetNumErrors(),
+			Expected == EDataValidationResult::Invalid ? 1u : 0u);
+	};
+	Check(TEXT("An empty configured row is rejected"), EDataValidationResult::Invalid);
+	UDialogueBlueprint* BlueprintAsset = NewObject<UDialogueBlueprint>(Package);
+	Set->TaggedDialogues[0].Dialogue = TSoftClassPtr<UDialogue>(FSoftObjectPath(BlueprintAsset));
+	Check(TEXT("The Blueprint asset instead of its class is rejected"), EDataValidationResult::Invalid);
+	Set->TaggedDialogues[0].Dialogue = TSoftClassPtr<UDialogue>(FSoftObjectPath(UNPCDefinition::StaticClass()));
+	Check(TEXT("A loaded class of the wrong type is rejected"), EDataValidationResult::Invalid);
+	UClass* DialogueClass = LoadClass<UDialogue>(nullptr,
+		TEXT("/TerritoryFramework/Dialogue/Retake/DBP_BlacksmithRetakePlanning.DBP_BlacksmithRetakePlanning_C"));
+	if (!TestNotNull(TEXT("Playable portable dialogue fixture"), DialogueClass)) return false;
+	Set->TaggedDialogues[0].Dialogue = DialogueClass;
+	Check(TEXT("A real generated dialogue class is accepted"), EDataValidationResult::Valid);
+	Set->TaggedDialogues.Reset();
+	Check(TEXT("An intentionally empty set remains valid"), EDataValidationResult::Valid);
 	return true;
 }
 

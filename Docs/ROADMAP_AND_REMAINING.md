@@ -1,6 +1,6 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-09 (NPC generator snapshots and Narrative restore integration)
+> **Reviewed:** 2026-09-09 (melee starter balance and Hashir tagged greeting)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
@@ -12,7 +12,7 @@ The current implementation ledger is [Finding Resolution Plan](Finding_Resolutio
 Live faction changes now update resource routing and open economy screens. Tied
 account priorities create a visible conflict; Native inventory remains the balance
 authority. Both example controllers follow their owner's political faction.
-Both engines now pass 296 automation tests, and a server/two-client fixture plus a
+Both engines now pass 297 automation tests, and a server/two-client fixture plus a
 fresh late join passes. Two consecutive Native world/player restores preserve
 garrisons, reserves and faction/account state without the reproduced record-reader
 crash or stale guard attack-goal errors. Saved vehicle ledgers now reject inflated
@@ -26,6 +26,14 @@ Territory's Native controller now rebuilds saved generator snapshots and support
 explicitly retired classes. The separate generic NPC client-death, Hashir controller
 migration, attack-query and decal warnings, and actual AlMalik streaming audits remain.
 These changes are not certification of the older published preview.
+
+TDA's starter sword now uses its existing Territory combo ability. The previous
+demo ability dealt enough damage with the starter clothes to execute a healthy
+100-health guard on the first hit. Normal attacks and lethal finishers remain
+owned by Narrative. Existing saves retain their saved weapons. Hashir's tagged
+greeting now references the generated dialogue class; an editor validator rejects
+the incorrect Blueprint asset reference. See [melee and dialogue guidance](Melee_And_Tagged_Dialogue_Checks.md)
+and the current verification entry in the implementation ledger.
 
 ### Active story preparation — 2026-09-08
 
@@ -87,6 +95,10 @@ the existing post-capture counterattack accept the request.
 - [x] Inspect Hashir for Act 1: check both NPC_Hashir and NPC_Hahsir references,
   his greeting/dialogue assets and quest-giver setup. Hashir is the player's
   friend and works for the system. Author story content after framework checks.
+- [x] Repair Hashir's tagged greeting class reference and validate configured
+  tagged dialogue rows. Preserve the existing text, reply, IDs and cooldown.
+- [x] Correct TDA's starting sword balance so ordinary melee can play before a
+  lethal execution. Keep Narrative's combo, backstab and finishing-blow rules.
 - [ ] Author Hashir's Act 1 quest and main dialogue after story requirements are
   agreed. `NPC_Hahsir` is a redirector; the NPC's stable ID is preserved. The
   Native greeting tag is already valid. The main dialogue has only its root.

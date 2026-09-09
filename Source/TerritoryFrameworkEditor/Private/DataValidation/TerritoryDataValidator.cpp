@@ -47,6 +47,7 @@
 #include "Tales/QuestSM.h"
 #include "Tales/QuestTask.h"
 #include "Tales/Dialogue.h"
+#include "Tales/TaggedDialogueSet.h"
 #include "Tales/DialogueBlueprintGeneratedClass.h"
 #include "Tales/NarrativeDialogueSequence.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
@@ -583,6 +584,12 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 	(void)InContext;
 	if (!InAsset) return false;
 	if (IsTerritoryDataAsset(InAsset)) return true;
+	if (InAsset->IsA<UTaggedDialogueSet>())
+	{
+		const FString Package = InAssetData.PackageName.ToString();
+		return Package.StartsWith(TEXT("/Game/"))
+			|| Package.StartsWith(TEXT("/TerritoryFramework/"));
+	}
 	if (IsTerritoryStoryCaptureAsset(InAssetData)
 		&& (InAsset->IsA(UNPCDefinition::StaticClass())
 			|| InAsset->IsA(UDialogueBlueprint::StaticClass())))
@@ -799,6 +806,22 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 		if (NPCDefinition->Dialogue.IsNull())
 		{
 			Warnings.Add(TEXT("Story NPC has no default Narrative dialogue"));
+		}
+	}
+	else if (const UTaggedDialogueSet* TaggedSet = Cast<UTaggedDialogueSet>(InAsset))
+	{
+		for (int32 Index = 0; Index < TaggedSet->TaggedDialogues.Num(); ++Index)
+		{
+			const FSoftObjectPath Path = TaggedSet->TaggedDialogues[Index].Dialogue.ToSoftObjectPath();
+			// Loading the object path deliberately distinguishes a Blueprint asset
+			// from its generated class. Narrative's async class loader needs the latter.
+			const UClass* DialogueClass = Path.IsNull() ? nullptr : Cast<UClass>(Path.TryLoad());
+			if (!DialogueClass || !DialogueClass->IsChildOf(UDialogue::StaticClass())
+				|| DialogueClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated))
+			{
+				Errors.Add(FString::Printf(TEXT("Tagged dialogue row %d does not point to a playable dialogue class (%s). Choose the Dialogue Blueprint again; a Blueprint class path ends in _C."),
+					Index + 1, *Path.ToString()));
+			}
 		}
 	}
 	else if (UQuestBlueprint* QuestBlueprint = Cast<UQuestBlueprint>(InAsset))
