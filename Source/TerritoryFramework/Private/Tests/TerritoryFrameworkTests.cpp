@@ -3,6 +3,7 @@
 #include <type_traits>
 
 #include "Misc/AutomationTest.h"
+#include "Tales/TerritoryConditionGroup.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryInterfaces.h"
@@ -4977,6 +4978,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTalesCompleteConditionEventAudit,
 bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 {
 	const TArray<UClass*> ExpectedConditions = {
+		UTerritoryConditionGroup::StaticClass(),
 		UTerritorySituationCondition::StaticClass(),
 		UTerritoryCaptureEligibilityCondition::StaticClass(),
 		UTerritoryDiplomacyCondition::StaticClass(),
@@ -5049,6 +5051,14 @@ bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 #if WITH_METADATA
 			TestFalse(*FString::Printf(TEXT("%s has a readable editor name"), *ClassName),
 				Class->GetDisplayNameText().IsEmpty());
+			TestFalse(*FString::Printf(TEXT("%s explains its use in the picker"), *ClassName),
+				Class->GetToolTipText().IsEmpty());
+			for (TFieldIterator<FProperty> Property(Class, EFieldIteratorFlags::ExcludeSuper); Property; ++Property)
+			{
+				if (Property->HasAnyPropertyFlags(CPF_Edit) && !Property->HasAnyPropertyFlags(CPF_Deprecated))
+					TestFalse(*FString::Printf(TEXT("%s.%s has authoring help"), *ClassName, *Property->GetName()),
+						Property->GetToolTipText().IsEmpty());
+			}
 #endif
 
 			if (bAreEvents)

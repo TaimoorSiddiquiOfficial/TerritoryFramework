@@ -14,7 +14,8 @@ class ANarrativePlayerState;
  * This is political identity, not a disguise and not Territory ownership.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Set Narrative Player Factions"))
+	meta=(DisplayName="Set Narrative Player Factions",
+		ToolTip="Change the exact player saved Narrative memberships. Replace removes old memberships; Add keeps them. Primary Faction selects the membership used by Territory ownership and accounts. Disguise is a separate system."))
 class TERRITORYFRAMEWORK_API UTerritorySetNarrativePlayerFactionsEvent
 	: public UNarrativeEvent
 {
@@ -63,7 +64,8 @@ enum class ETerritoryHierarchyStoryOperation : uint8
  * unanimity reducer remains the sole authority that derives District and City owner.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Apply Territory Hierarchy Story Override"))
+	meta=(DisplayName="Apply Territory Hierarchy Story Override",
+		ToolTip="Apply an explicit story decision to loaded descendants. Each Place commits through existing authority; parents are derived from their children. This is not an atomic transaction across the whole city. Unloaded descendants are not changed."))
 class TERRITORYFRAMEWORK_API UTerritoryHierarchyStoryOverrideEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -76,7 +78,7 @@ public:
 			ToolTip="Root City, District, or Place. Easy example: choose Haven Reach to change every currently loaded District and Place below it after a betrayal quest."))
 	FGameplayTag RootTerritory;
 
-	/** Choose the upgrade operation performed by this Narrative event. */
+	/** Choose whether the loaded hierarchy is claimed, cleared, locked or unlocked. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event")
 	ETerritoryHierarchyStoryOperation Operation =
 		ETerritoryHierarchyStoryOperation::ClaimForFaction;
@@ -112,7 +114,8 @@ protected:
  * route, and budget rules still pass. Story Pursuit never repeats automatically.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Wave of Enemies (Schedule Territory Assault)"))
+	meta=(DisplayName="Wave of Enemies (Schedule Territory Assault)",
+		ToolTip="Request one finite physical force through the counterattack scheduler. Choose strategic counterattack, story pursuit, or owner reinforcements before handover. Immediate removes the preparation wait; route, budget and policy checks can still reject it."))
 class TERRITORYFRAMEWORK_API UTerritoryScheduleEnemyWaveEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -172,7 +175,8 @@ protected:
  * capture policy and outcome. Use it for hunters arriving by car or a capo escaping by car.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Start Territory Boss Chase"))
+	meta=(DisplayName="Start Territory Boss Chase",
+		ToolTip="Start a finite story pursuit using the existing attack profile and Narrative NPCs. Choose who chases whom in Pursuit Options. The default is one enemy and no territory capture; route and spawn checks still apply."))
 class TERRITORYFRAMEWORK_API UTerritoryStartBossChaseEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -203,13 +207,21 @@ protected:
 
 /** Cancels matching durable assaults; active physical attackers are optional and never become a hidden ownership roll. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Cancel Territory Enemy Waves"))
+	meta=(DisplayName="Cancel Territory Enemy Waves",
+		ToolTip="Cancel matching finite assault records on the server. Optional faction and story ID narrow the selection. By default only preparing forces are cancelled. Include Active also withdraws deployed attackers from capture."))
 class TERRITORYFRAMEWORK_API UTerritoryCancelEnemyWavesEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
 
 public:
 	UTerritoryCancelEnemyWavesEvent(const FObjectInitializer& ObjectInitializer);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ToolTip="Optional exact story encounter ID from the Wave event. Example: BlacksmithRetake cancels only that encounter. Empty preserves the old behavior and allows all story IDs."))
+	FName ScenarioID;
+
+	/** Selects records only; the counterattack subsystem remains the cancellation authority. */
+	bool MatchesAssault(const FTerritoryAssaultRecord& Assault) const;
 
 	/** Territory targeted by this operation or result. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(Categories="Territory"))
@@ -231,7 +243,8 @@ protected:
 
 /** Uses the existing atomic staffing/currency mutation; it does not grant free guards. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Set Territory Guard Assignment Target"))
+	meta=(DisplayName="Set Territory Guard Assignment Target",
+		ToolTip="Request a new guard assignment target using the exact Narrative requester. Ownership, capacity and payment rules still apply. This does not grant free guards or immediately fill every post."))
 class TERRITORYFRAMEWORK_API UTerritorySetGarrisonTargetEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -255,7 +268,8 @@ protected:
 
 /** Purchases exactly one existing Property upgrade through the normal Narrative currency path. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Purchase One Territory Property Upgrade"))
+	meta=(DisplayName="Purchase One Territory Property Upgrade",
+		ToolTip="Buy one upgrade for a loaded Property using the exact Narrative requester. Requires ownership, an eligible upgrade and payment. Districts and Cities cannot be upgraded by this event."))
 class TERRITORYFRAMEWORK_API UTerritoryUpgradePropertyEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -275,7 +289,8 @@ protected:
 
 /** Executes one atomic input/output recipe against the explicit target's Narrative inventory. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Execute Territory Resource Recipe"))
+	meta=(DisplayName="Execute Territory Resource Recipe",
+		ToolTip="Execute a finite recipe batch using Narrative inventory and faction storage. Requires an explicit requester and valid resources. Recipe failures do not grant output."))
 class TERRITORYFRAMEWORK_API UTerritoryExecuteResourceRecipeEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()

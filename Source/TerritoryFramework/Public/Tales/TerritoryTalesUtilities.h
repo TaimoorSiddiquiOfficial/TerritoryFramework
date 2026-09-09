@@ -1,6 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
+
+enum class ETerritoryCaptureFactionSource : uint8;
 
 class APlayerController;
 class APawn;
@@ -13,6 +16,10 @@ class UWorld;
 /** Small adapter for Narrative condition semantics used outside a Narrative graph node. */
 namespace TerritoryTales
 {
+	/** Reuses Narrative's live primary faction. Never substitutes another player. */
+	TERRITORYFRAMEWORK_API FGameplayTag ResolveFaction(const UObject* Context,
+		ETerritoryCaptureFactionSource Source, FGameplayTag ExplicitFaction,
+		APawn* Target, APlayerController* Controller, const UTalesComponent* Tales);
 	/**
 	 * Marks one event as already condition-checked for the current synchronous call.
 	 * Territory state dispatch uses this so generic Narrative events are checked once,

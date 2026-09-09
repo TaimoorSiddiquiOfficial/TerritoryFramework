@@ -443,11 +443,7 @@ void UTerritoryCancelEnemyWavesEvent::ExecuteEvent_Implementation(APawn* Target,
 	int32 CancelledCount = 0;
 	for (const FTerritoryAssaultRecord& Assault : MatchingAssaults)
 	{
-		if (Assault.IsTerminal()) continue;
-		if (AttackingFaction.IsValid() && Assault.AttackingFaction != AttackingFaction) continue;
-		if (!bIncludePhysicallyActiveAssaults
-			&& (Assault.State == ETerritoryAssaultState::Active
-				|| Assault.State == ETerritoryAssaultState::RecaptureCountdown)) continue;
+		if (!MatchesAssault(Assault)) continue;
 		if (Counter->CancelAssault(Assault.AssaultID, ETerritoryAssaultResolution::ManuallyCancelled))
 		{
 			++CancelledCount;
@@ -466,10 +462,21 @@ void UTerritoryCancelEnemyWavesEvent::ExecuteEvent_Implementation(APawn* Target,
 	}
 }
 
+bool UTerritoryCancelEnemyWavesEvent::MatchesAssault(const FTerritoryAssaultRecord& Assault) const
+{
+	return !Assault.IsTerminal()
+		&& (!AttackingFaction.IsValid() || Assault.AttackingFaction == AttackingFaction)
+		&& (ScenarioID.IsNone() || Assault.StoryScenarioID == ScenarioID)
+		&& (bIncludePhysicallyActiveAssaults || (Assault.State != ETerritoryAssaultState::Active
+			&& Assault.State != ETerritoryAssaultState::RecaptureCountdown));
+}
+
 FString UTerritoryCancelEnemyWavesEvent::GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Enemy wave: cancel %s%s"), *TargetTerritory.ToString(),
-		bIncludePhysicallyActiveAssaults ? TEXT(" including active attackers") : TEXT(" before physical activation"));
+	return FString::Printf(TEXT("Enemy wave: cancel %s%s [faction: %s; story: %s]"), *TargetTerritory.ToString(),
+		bIncludePhysicallyActiveAssaults ? TEXT(" including active attackers") : TEXT(" before physical activation"),
+		AttackingFaction.IsValid() ? *AttackingFaction.ToString() : TEXT("any"),
+		ScenarioID.IsNone() ? TEXT("any") : *ScenarioID.ToString());
 }
 
 UTerritorySetGarrisonTargetEvent::UTerritorySetGarrisonTargetEvent(

@@ -11,7 +11,8 @@
  * when an undefended story property becomes available after a quest.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory: Begin Owner Handover"))
+	meta=(DisplayName="Territory: Begin Owner Handover",
+		ToolTip="Activate the existing owner spawner for a Place on the server. It may start dialogue or wait for interaction. This reveals the owner; the capture event still performs ownership handover. The spawner must be loaded."))
 class TERRITORYFRAMEWORK_API UTerritoryOwnerHandoverEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()

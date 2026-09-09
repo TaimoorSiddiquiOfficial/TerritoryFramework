@@ -32,12 +32,13 @@ enum class ETerritoryIntegerComparison : uint8
  * Checks one authoritative garrison value on a loaded Territory.
  *
  * Easy examples:
- * - Active Guards Equal To 0: all placed defenders have been defeated.
+ * - Living Defenders Equal To 0: no registered living defenders remain. Also check Pending Reserve Deployments for reinforcements.
  * - Active Guards At Least 1: the player has assigned a living guard.
  * - Remaining Reserve At Most 2: the finite reserve is running low.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Garrison Condition"))
+	meta=(DisplayName="Territory Garrison Condition",
+		ToolTip="Compare guards, all living defenders, capacity or finite reserves. Living Defenders includes custom registered defenders; Active Guards includes Territory guards only. Requires a loaded territory; clients read replicated counts."))
 class TERRITORYFRAMEWORK_API UTerritoryGarrisonCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()

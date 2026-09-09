@@ -241,7 +241,8 @@ waves, inventory, and other events always have valid World and transition contex
 | `UTerritoryOwnershipTransitionCondition` | Distinguish a real owner handover from same-owner recovery | Give capture XP only when Claimed was entered by a new faction |
 | `UTerritoryDiplomacyCondition` | Check the exact rich treaty between two Narrative factions | Locked exit requires Heroes and Bandits to be at War |
 | `UTerritoryGarrisonCondition` | Compare guards, every registered defender, reserve, pending replacements, or staffing shortfall | Living Defenders equals 0 means the Place is genuinely undefended |
-| `UTerritoryStateCondition` | Check Unclaimed, Claimed, Contested, or Locked | Use emergency dialogue only while a District is Contested |
+| `UTerritoryStateCondition` | Check political state, local lock, known data, or a loaded actor; optionally read the campaign directory | A Claimed Blacksmith may still be Locked; both checks can pass |
+| `UTerritoryConditionGroup` | Combine existing Narrative conditions with All or Any, including nested groups | Blacksmith is Locked AND either the player is trusted OR the enemy district is weak |
 | `UTerritoryControlProgressCondition` | Compare real capture progress as a percentage | Start the final warning after control pressure reaches 75% |
 | `UTerritoryReputationCondition` | Compare one faction's saved reputation | Regime reputation below -50 opens betrayal dialogue |
 | `UTerritoryFactionDistrictHoldingCondition` | Compare current unlocked Claimed Districts for an explicit, Narrative-target, or controller-pawn faction; World Partition rows are included | Player Faction At Least 2 can trigger a Regime diplomacy reaction; Bandits At Least 1 allows a normal counter |
@@ -271,10 +272,15 @@ waves, inventory, and other events always have valid World and transition contex
 | `UTerritoryClearExposureEvent` | Clear exposure and optionally suspicion | Changing disguise after escape resets the stealth state |
 | `UTerritoryReportDistractionEvent` | Submit an authored investigation stimulus | A thrown bottle makes the closest guard investigate its landing point |
 
-All State Config conditions must pass. Every Narrative Event also has its own inherited
-`Conditions` array; all conditions inside that event must pass before the event mutates anything.
+All State Config conditions must pass. Territory events also evaluate their inherited
+`Conditions` array. Native Narrative events dispatched directly by a quest/dialogue do not
+all evaluate that array themselves; use a node condition to gate those events.
 Narrative's inherited **Not** option is honored in both places. Territory mutation events set
 `Refire On Load` false so quest restoration cannot purchase, spawn, or reward twice.
+
+See [Territory conditions and events](35_Territory_Conditions_and_Events.md) for lock-state
+compatibility, All/Any examples, dynamic reputation factions, story-specific wave cancellation,
+and server/client boundaries.
 
 ### Change the player's real faction in a story
 

@@ -61,8 +61,19 @@ For a Quest that should begin with a level, place `Territory Narrative Quest Sta
 the generated Narrative Quest class. The starter waits for the server player's pawn and Tales
 component and for Tales save loading to finish; it never calls `Begin Quest` on Level Blueprint
 `BeginPlay`. Enable **Start For Every Player** and **Keep Polling For Late Joining Players** for
-personal multiplayer story progress. Easy example: one starter in Blacksmith safely begins
-`NQ_CaptureBlacksmith` for the host and every joining client without restarting a saved Quest.
+personal multiplayer story progress. This actor starts its configured quest automatically;
+removing a `Begin Quest` node from another Blueprint does not disable the actor.
+
+For a quest given by an NPC, use the NPC dialogue's Narrative `Begin Quest` event
+and do not place a quest starter for that quest. HopDistrictTest now follows this
+setup for `NQ_CaptureBlacksmith`: the former `QuestStarter_CaptureBlacksmith` actor
+was removed on September 9. The current authored offer checks that the quest is
+Not Started. Its start line unlocks Blacksmith and begins the quest; the current
+Blacksmith Definition starts Locked. Legacy Territory State conditions selecting
+Locked now read the real availability field. See the
+[condition guide](35_Territory_Conditions_and_Events.md) for new lock checks.
+Narrative can also restore an already-started quest from a save; disabling an
+automatic starter does not erase saved progress.
 
 ## Current player loadout in Haven Reach
 

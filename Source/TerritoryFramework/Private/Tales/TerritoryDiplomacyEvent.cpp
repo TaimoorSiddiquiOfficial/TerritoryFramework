@@ -255,28 +255,33 @@ void UTerritoryModifyReputationEvent::ExecuteEvent_Implementation(APawn* Target,
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
-	if (!World || World->GetNetMode() == NM_Client || !Faction.IsValid()) return;
+	if (!World || World->GetNetMode() == NM_Client) return;
+	const FGameplayTag ResolvedFaction = TerritoryTales::ResolveFaction(this,
+		FactionSource, Faction, Target, Controller, NarrativeComponent);
+	if (!ResolvedFaction.IsValid()) return;
 	UTerritoryDiplomacySubsystem* Diplomacy =
 		World->GetSubsystem<UTerritoryDiplomacySubsystem>();
 	if (!Diplomacy) return;
 
 	const int64 DesiredValue = Operation == ETerritoryReputationOperation::Add
-		? static_cast<int64>(Diplomacy->GetReputation(Faction)) + static_cast<int64>(Value)
+		? static_cast<int64>(Diplomacy->GetReputation(ResolvedFaction)) + static_cast<int64>(Value)
 		: static_cast<int64>(Value);
 	const int32 SafeValue = static_cast<int32>(FMath::Clamp<int64>(
 		DesiredValue, TNumericLimits<int32>::Min(), TNumericLimits<int32>::Max()));
-	Diplomacy->SetReputation(Faction, SafeValue);
-	if (Diplomacy->GetReputation(Faction) != SafeValue)
+	Diplomacy->SetReputation(ResolvedFaction, SafeValue);
+	if (Diplomacy->GetReputation(ResolvedFaction) != SafeValue)
 	{
 		UE_LOG(LogTerritory, Error,
 			TEXT("[TalesReputationEvent] Failed to commit reputation %d for %s"),
-			SafeValue, *Faction.ToString());
+			SafeValue, *ResolvedFaction.ToString());
 	}
 }
 
 FString UTerritoryModifyReputationEvent::GetGraphDisplayText_Implementation()
 {
+	const FString FactionText = FactionSource == ETerritoryCaptureFactionSource::ExplicitFaction
+		? Faction.ToString() : UEnum::GetDisplayValueAsText(FactionSource).ToString();
 	return Operation == ETerritoryReputationOperation::Add
-		? FString::Printf(TEXT("Reputation: add %d to %s"), Value, *Faction.ToString())
-		: FString::Printf(TEXT("Reputation: set %s to %d"), *Faction.ToString(), Value);
+		? FString::Printf(TEXT("Reputation: add %d to %s"), Value, *FactionText)
+		: FString::Printf(TEXT("Reputation: set %s to %d"), *FactionText, Value);
 }

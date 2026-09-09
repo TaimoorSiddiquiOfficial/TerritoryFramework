@@ -793,8 +793,10 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	}
 	if (BlacksmithDefinition)
 	{
-		TestEqual(TEXT("Blacksmith remains available so its capture can unlock Farm"),
-			BlacksmithDefinition->InitialAvailability, ETerritoryAvailability::Unlocked);
+		// Story authors may lock Blacksmith until Hashir offers the quest. Verify
+		// Definition application, not an obsolete assumption that it starts open.
+		TestEqual(TEXT("Blacksmith initial availability follows its authored Definition"),
+			Blacksmith->ResolveInitialTerritoryAvailability(), BlacksmithDefinition->InitialAvailability);
 	}
 
 	const FTerritoryStateConfig* LockedConfig =

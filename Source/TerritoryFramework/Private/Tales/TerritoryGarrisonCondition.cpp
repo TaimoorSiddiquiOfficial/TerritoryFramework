@@ -67,15 +67,27 @@ bool UTerritoryGarrisonCondition::CheckCondition_Implementation(APawn* Target,
 		ActualValue = Territory->GetMaxGuardCount();
 		break;
 	case ETerritoryGarrisonMetric::RemainingReserve:
+		if (!Territory->HasAuthority())
+		{
+			ActualValue = FMath::Max(0, Territory->GetGarrisonSnapshot().ReserveGuards);
+			break;
+		}
 		for (const ATerritoryGuardSpawnPoint* SpawnPoint : Territory->GetGuardSpawnPoints())
 		{
-			if (SpawnPoint) ActualValue += FMath::Max(0, SpawnPoint->GetReserveCount());
+			if (SpawnPoint) ActualValue = static_cast<int32>(FMath::Min<int64>(MAX_int32,
+				static_cast<int64>(ActualValue) + FMath::Max(0, SpawnPoint->GetReserveCount())));
 		}
 		break;
 	case ETerritoryGarrisonMetric::PendingReserveDeployments:
+		if (!Territory->HasAuthority())
+		{
+			ActualValue = FMath::Max(0, Territory->GetGarrisonSnapshot().PendingDeployments);
+			break;
+		}
 		for (const ATerritoryGuardSpawnPoint* SpawnPoint : Territory->GetGuardSpawnPoints())
 		{
-			if (SpawnPoint) ActualValue += FMath::Max(0, SpawnPoint->GetPendingReserveCount());
+			if (SpawnPoint) ActualValue = static_cast<int32>(FMath::Min<int64>(MAX_int32,
+				static_cast<int64>(ActualValue) + FMath::Max(0, SpawnPoint->GetPendingReserveCount())));
 		}
 		break;
 	case ETerritoryGarrisonMetric::GuardShortfall:

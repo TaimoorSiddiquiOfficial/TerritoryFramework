@@ -13,7 +13,8 @@
  * can open. Use Narrative's inherited "Not" option when the opposite result is needed.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Diplomacy Condition"))
+	meta=(DisplayName="Territory Diplomacy Condition",
+		ToolTip="Compare the rich Territory treaty between two different exact Narrative factions. War, Alliance and other treaty states are distinct. This is not a numeric reputation check."))
 class TERRITORYFRAMEWORK_API UTerritoryDiplomacyCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()

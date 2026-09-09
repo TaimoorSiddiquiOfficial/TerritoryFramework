@@ -23,7 +23,8 @@ enum class ETerritoryWaitTimeSource : uint8
 
 /** Uses the explicit Narrative event's Tales component; no second quest state is stored. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Narrative Quest State Condition"))
+	meta=(DisplayName="Narrative Quest State Condition",
+		ToolTip="Read the quest on the Tales component supplied by Narrative. This does not begin a quest. Example: Not Started shows an offer; In Progress shows a reminder."))
 class TERRITORYFRAMEWORK_API UTerritoryQuestStateCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -52,7 +53,8 @@ protected:
  * after the selected clock reaches Wait Time.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Wait Time Condition"))
+	meta=(DisplayName="Territory Wait Time Condition",
+		ToolTip="Check an elapsed clock. This does not pause a dialogue or wait after entering a node. Example: 600 campaign seconds means ten minutes since the campaign began. Use a quest condition task to poll until it passes."))
 class TERRITORYFRAMEWORK_API UTerritoryWaitTimeCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -85,7 +87,8 @@ protected:
  * Use this on events such as Give XP that require a live player Ability System.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Event Context Condition"))
+	meta=(DisplayName="Territory Event Context Condition",
+		ToolTip="Require the exact pawn, controller, Tales component or Ability System needed by the next event. Each checkbox is independent. This never selects the first player in the world."))
 class TERRITORYFRAMEWORK_API UTerritoryEventContextCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -98,11 +101,11 @@ public:
 	bool bRequireTargetPawn = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
-		meta=(EditCondition="bRequireTargetPawn", ToolTip="Require Target to be controlled by a real player. Example: an AI recapturing a Place will not receive player XP."))
+		meta=(ToolTip="Require Target to be controlled by a real player. Example: an AI recapturing a Place will not receive player XP."))
 	bool bRequirePlayerControlledTarget = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
-		meta=(EditCondition="bRequireTargetPawn", ToolTip="Require Target to expose a valid Gameplay Ability System Component. Enable this before Narrative events such as Give XP or Apply Gameplay Effect."))
+		meta=(ToolTip="Require Target to expose a valid Gameplay Ability System Component. Enable this before Narrative events such as Give XP or Apply Gameplay Effect."))
 	bool bRequireAbilitySystemComponent = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
@@ -126,7 +129,8 @@ protected:
  * when an event should run only for a state-only recovery.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Ownership Changed During Transition"))
+	meta=(DisplayName="Territory Ownership Changed During Transition",
+		ToolTip="Pass only during a Territory state callback that changes the owner. Use on capture rewards to avoid paying for same-owner recovery. Ordinary dialogue outside that callback fails."))
 class TERRITORYFRAMEWORK_API UTerritoryOwnershipTransitionCondition
 	: public UNarrativeCondition
 {
@@ -152,9 +156,19 @@ enum class ETerritoryFloatComparison : uint8
 	LessThan UMETA(DisplayName="Less Than")
 };
 
-/** Checks the authoritative enum state of one loaded Territory. */
+UENUM(BlueprintType)
+enum class ETerritoryStateConditionQuery : uint8
+{
+	PoliticalState UMETA(DisplayName="Political State", ToolTip="Check Claimed, Contested, or Unclaimed. Existing Locked selections check the separate lock field for compatibility."),
+	Availability UMETA(DisplayName="Local Lock State", ToolTip="Check whether this place itself is Locked or Unlocked. A parent may still block gameplay."),
+	Known UMETA(DisplayName="Territory State Is Known", ToolTip="Check that the territory can be read. Use this before an inverted condition so missing data cannot look like success."),
+	Loaded UMETA(DisplayName="Territory Actor Is Loaded", ToolTip="Check that the real territory actor is loaded and registered in this world.")
+};
+
+/** Reads political ownership and local story locks without changing either. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory State Condition"))
+	meta=(DisplayName="Territory State Condition",
+		ToolTip="Check political state, local lock state, or whether territory data is known. Claimed and Locked can both be true. Old Locked selections now read the real lock field. Use Known before an inverted check when missing data must fail."))
 class TERRITORYFRAMEWORK_API UTerritoryStateCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -163,12 +177,30 @@ public:
 	UTerritoryStateCondition();
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(ToolTip="Choose the fact to check. A place can be Claimed by Bandits and Locked at the same time. Use a Situation condition for gameplay availability through the whole parent hierarchy."))
+	ETerritoryStateConditionQuery Query = ETerritoryStateConditionQuery::PoliticalState;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(Categories="Territory", ToolTip="Territory to inspect. Example: Territory.HavenReach.MarketSquare."))
 	FGameplayTag TerritoryToCheck;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
-		meta=(ToolTip="State that must currently be true. Example: Contested opens battle dialogue."))
+		meta=(EditCondition="Query == ETerritoryStateConditionQuery::PoliticalState", EditConditionHides,
+			ToolTip="Political state to match. Claimed does not mean unlocked. Locked (Legacy) is supported and reads the local lock field; prefer Local Lock State for new conditions."))
 	ETerritoryState RequiredState = ETerritoryState::Claimed;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(EditCondition="Query == ETerritoryStateConditionQuery::Availability", EditConditionHides,
+			ToolTip="Locked blocks this place while keeping its owner. Unlocked checks only this place, not its parent District or City."))
+	ETerritoryAvailability RequiredAvailability = ETerritoryAvailability::Unlocked;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(EditCondition="Query != ETerritoryStateConditionQuery::Loaded", EditConditionHides,
+			ToolTip="If the actor is streamed out, read its saved or replicated campaign directory entry. This does not load the actor. Missing entries fail. Leave off when the scene requires the actor to be present."))
+	bool bAllowUnloadedTerritory = false;
+
+	/** Compares a known live or campaign snapshot. Missing data must be rejected by the caller. */
+	bool MatchesState(ETerritoryState State, ETerritoryAvailability Availability) const;
 
 protected:
 	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
@@ -178,7 +210,8 @@ protected:
 
 /** Checks Territory capture/control progress without changing capture authority. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Control Progress Condition"))
+	meta=(DisplayName="Territory Control Progress Condition",
+		ToolTip="Compare real control progress from zero to one hundred percent. Optional faction means the exact faction applying pressure. Full control may also mean a stable Claimed place; add a Contested state condition for ongoing capture. Requires a loaded territory."))
 class TERRITORYFRAMEWORK_API UTerritoryControlProgressCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -220,13 +253,18 @@ protected:
 
 /** Checks the campaign reputation stored by the Territory diplomacy authority. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Faction Reputation Condition"))
+	meta=(DisplayName="Territory Faction Reputation Condition",
+		ToolTip="Compare saved campaign reputation for one faction. Explicit uses the selected tag; dynamic sources follow the current Narrative participant. This does not compare treaties or NPC attitude."))
 class TERRITORYFRAMEWORK_API UTerritoryReputationCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
 
 public:
 	UTerritoryReputationCondition();
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(ToolTip="Explicit uses the fixed Faction below. Narrative Target or Controller Pawn follows the current real faction, including a story faction change. Missing character context fails."))
+	ETerritoryCaptureFactionSource FactionSource = ETerritoryCaptureFactionSource::ExplicitFaction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
 		meta=(Categories="Narrative.Factions", ToolTip="Faction whose saved reputation is inspected."))
@@ -252,7 +290,8 @@ protected:
  * policy from territorial power without hard-coding the Heroes faction.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Faction Claimed District Count Condition"))
+	meta=(DisplayName="Territory Faction Claimed District Count Condition",
+		ToolTip="Count complete, unlocked Districts held by one faction using the campaign directory. Partial or Contested Districts do not count. Use a Situation condition to count individual Places instead."))
 class TERRITORYFRAMEWORK_API UTerritoryFactionDistrictHoldingCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -312,7 +351,8 @@ enum class ETerritoryAssaultConditionQuery : uint8
 
 /** Reads durable counterattack records; it never schedules or resolves an assault. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Enemy Wave / Assault Condition"))
+	meta=(DisplayName="Territory Enemy Wave / Assault Condition",
+		ToolTip="Read finite enemy-wave records. Filter by territory, optional exact attacking faction and optional story ID. Latest queries prefer an unfinished matching assault over old results. Missing records fail, including a zero-count check."))
 class TERRITORYFRAMEWORK_API UTerritoryAssaultCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -348,11 +388,11 @@ public:
 
 	/** Numeric comparison used between the live value and the authored threshold. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
-		meta=(EditCondition="Query >= ETerritoryAssaultConditionQuery::PlannedAttackers", EditConditionHides))
+		meta=(EditCondition="Query >= ETerritoryAssaultConditionQuery::PlannedAttackers && Query <= ETerritoryAssaultConditionQuery::RemainingAttackers", EditConditionHides))
 	ETerritoryIntegerComparison Comparison = ETerritoryIntegerComparison::AtLeast;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
-		meta=(ClampMin="0", EditCondition="Query >= ETerritoryAssaultConditionQuery::PlannedAttackers", EditConditionHides,
+		meta=(ClampMin="0", EditCondition="Query >= ETerritoryAssaultConditionQuery::PlannedAttackers && Query <= ETerritoryAssaultConditionQuery::RemainingAttackers", EditConditionHides,
 			ToolTip="Example: Killed Attackers At Least 3 can unlock a reinforcement objective."))
 	int32 Value = 1;
 
@@ -368,7 +408,8 @@ protected:
 
 /** Checks whether the explicit Narrative target pawn is inside a Territory. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Narrative Target Is In Territory Condition"))
+	meta=(DisplayName="Narrative Target Is In Territory Condition",
+		ToolTip="Check the Narrative target position, or the explicit controller pawn if Target is empty. Child inclusion follows authored parent links. Only loaded territory bounds can be checked."))
 class TERRITORYFRAMEWORK_API UTerritoryPresenceCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -392,7 +433,8 @@ protected:
 
 /** Checks the last durable production outcome for a Property, including while it is streamed out. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Production Status Condition"))
+	meta=(DisplayName="Territory Production Status Condition",
+		ToolTip="Read the last recorded production status for a place or one recipe. This does not run production. Missing production records fail; clients use the replicated economy view."))
 class TERRITORYFRAMEWORK_API UTerritoryProductionStatusCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -420,7 +462,8 @@ protected:
 
 /** Checks one Narrative inventory resource amount from the Territory read snapshot. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Faction Resource Condition"))
+	meta=(DisplayName="Territory Faction Resource Condition",
+		ToolTip="Compare a faction storage account for one Narrative item. This is faction storage, not the speaking NPC inventory. A missing storage account fails even when checking for zero items."))
 class TERRITORYFRAMEWORK_API UTerritoryResourceCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()

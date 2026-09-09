@@ -7,7 +7,8 @@
 #include "TerritoryOwnershipCondition.generated.h"
 
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Ownership"))
+	meta=(DisplayName="Territory Ownership",
+		ToolTip="Check the current owner. The special Locked, Contested and Unclaimed options are OR exceptions and can pass without matching the owner. Empty owner follows the Narrative participant; without faction context it accepts any Claimed owner. Requires a loaded territory."))
 class TERRITORYFRAMEWORK_API UTerritoryOwnershipCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()

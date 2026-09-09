@@ -17,7 +17,7 @@ enum class ETerritoryCaptureFactionSource : uint8
 		ToolTip="Resolve the exact current Narrative faction from the controller's possessed pawn.")
 };
 
-UCLASS(BlueprintType, Blueprintable, EditInlineNew)
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, meta=(ToolTip="Give a loaded independent Place to a faction through the existing capture authority. Normal mode checks locks, defenders, diplomacy and state conditions. Force is an explicit story override. Optional Situation Profile replaces the local Place and faction fields."))
 class TERRITORYFRAMEWORK_API UTerritoryCaptureEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()

@@ -28,7 +28,8 @@ enum class ETerritoryExposureRequirement : uint8
 
 /** Checks whether the active Data Asset or quest override permits infiltration. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Stealth Policy Condition"))
+	meta=(DisplayName="Territory Stealth Policy Condition",
+		ToolTip="Server story check for the active stealth profile and its runtime override. Empty territory uses the containing state-config place, then the target location. This is not a client-side security read model."))
 class TERRITORYFRAMEWORK_API UTerritoryStealthPolicyCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -52,7 +53,8 @@ protected:
 
 /** Checks the server-owned awareness state for the explicit Narrative target. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Exposure Condition"))
+	meta=(DisplayName="Territory Exposure Condition",
+		ToolTip="Read server awareness for the exact Narrative target. Undetected, Suspicious and Exposed are separate states. Exposed Or Stealth Disabled also supports places without stealth. Missing infiltration records fail."))
 class TERRITORYFRAMEWORK_API UTerritoryExposureCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -77,7 +79,8 @@ protected:
 
 /** Checks the latest sight, shot, damage, corpse, distraction, or scripted evidence. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Stealth Evidence Condition"))
+	meta=(DisplayName="Territory Stealth Evidence Condition",
+		ToolTip="Read the latest server evidence for the exact Narrative target. Choose sight, shot, damage or another kind and an age limit. Empty territory uses the containing place or target location. This does not search all past evidence."))
 class TERRITORYFRAMEWORK_API UTerritoryStealthEvidenceCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -105,7 +108,8 @@ protected:
 
 /** Compares the explicit target's current suspicion meter. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Suspicion Condition"))
+	meta=(DisplayName="Territory Suspicion Condition",
+		ToolTip="Check the exact target suspicion on the server. Fifty means fifty percent. Empty territory uses the containing place or target location. Missing infiltration records fail."))
 class TERRITORYFRAMEWORK_API UTerritorySuspicionCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -130,7 +134,8 @@ protected:
 
 /** Dialogue/event condition for double-agent and uniform-based mission branches. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Territory Disguise Condition"))
+	meta=(DisplayName="Territory Disguise Condition",
+		ToolTip="Check the target disguise or real faction through the existing disguise system. Disguise changes perceived identity, not political ownership. Security acceptance requires a loaded place and the server security rules."))
 class TERRITORYFRAMEWORK_API UTerritoryDisguiseCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()

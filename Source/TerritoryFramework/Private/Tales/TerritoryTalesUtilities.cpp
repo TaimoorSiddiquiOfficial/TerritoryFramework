@@ -1,4 +1,6 @@
 #include "Tales/TerritoryTalesUtilities.h"
+#include "Core/TerritoryBlueprintLibrary.h"
+#include "Tales/TerritoryCaptureEvent.h"
 
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
@@ -11,6 +13,24 @@
 namespace
 {
 	thread_local TArray<const UNarrativeEvent*> GPrevalidatedTerritoryEvents;
+}
+
+FGameplayTag TerritoryTales::ResolveFaction(const UObject* Context,
+	ETerritoryCaptureFactionSource Source, FGameplayTag ExplicitFaction,
+	APawn* Target, APlayerController* Controller, const UTalesComponent* Tales)
+{
+	if (!IsValid(Target) && IsValid(Tales)) Target = Tales->GetOwningPawn();
+	if (!IsValid(Controller) && IsValid(Tales)) Controller = Tales->GetOwningController();
+	switch (Source)
+	{
+	case ETerritoryCaptureFactionSource::ExplicitFaction: return ExplicitFaction;
+	case ETerritoryCaptureFactionSource::NarrativeTargetFaction:
+		return UTerritoryBlueprintLibrary::GetActorPrimaryFaction(Context, Target);
+	case ETerritoryCaptureFactionSource::ControllerPawnFaction:
+		return UTerritoryBlueprintLibrary::GetActorPrimaryFaction(Context,
+			IsValid(Controller) ? Controller->GetPawn().Get() : nullptr);
+	default: return FGameplayTag();
+	}
 }
 
 TerritoryTales::FScopedPrevalidatedEvent::FScopedPrevalidatedEvent(

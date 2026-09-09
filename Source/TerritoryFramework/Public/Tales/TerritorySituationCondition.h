@@ -120,7 +120,8 @@ enum class ETerritorySituationQuery : uint8
 };
 
 /** Native Narrative branch condition: combine several on a node for AND; alternative nodes provide OR. */
-UCLASS(BlueprintType, Blueprintable, EditInlineNew, meta=(DisplayName="Territory Situation Condition"))
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, meta=(DisplayName="Territory Situation Condition",
+		ToolTip="Read a reusable Place and faction situation: retake history, district or city holdings, dominance, diplomacy or defence power. Empty faction override uses the profile source. Current defence power requires the relevant loaded actors on the server."))
 class TERRITORYFRAMEWORK_API UTerritorySituationCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()

@@ -17,7 +17,8 @@ enum class ETerritoryDisguiseEventAction : uint8
 
 /** Quest event that temporarily enables/disables the active Territory stealth profile. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Set Territory Stealth Infiltration Override"))
+	meta=(DisplayName="Set Territory Stealth Infiltration Override",
+		ToolTip="Set or clear the server stealth override. Clear returns control to the active profile. Empty territory uses the containing state-config place, then the target location."))
 class TERRITORYFRAMEWORK_API UTerritorySetStealthOverrideEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -45,7 +46,8 @@ protected:
 
 /** Story event that confirms the explicit target and follows the profile escalation scope. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Reveal Territory Infiltrator"))
+	meta=(DisplayName="Reveal Territory Infiltrator",
+		ToolTip="Report confirmed scripted evidence for the exact target on the server. The existing stealth profile decides escalation. Empty territory uses the containing place or target location."))
 class TERRITORYFRAMEWORK_API UTerritoryRevealInfiltratorEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -65,7 +67,8 @@ protected:
 
 /** Clears exposure after an escape, disguise, cease-search objective, or story reset. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Clear Territory Exposure"))
+	meta=(DisplayName="Clear Territory Exposure",
+		ToolTip="Clear server exposure for the exact target after escape or a story reset. Optionally reset suspicion too. Empty territory uses the containing place or target location."))
 class TERRITORYFRAMEWORK_API UTerritoryClearExposureEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -89,7 +92,8 @@ protected:
 
 /** Creates anonymous investigation evidence without exposing the target. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Report Territory Distraction"))
+	meta=(DisplayName="Report Territory Distraction",
+		ToolTip="Report an anonymous distraction near the exact Narrative target on the server. Guards investigate without this event directly exposing the player. Location Offset is added in world space."))
 class TERRITORYFRAMEWORK_API UTerritoryReportDistractionEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -113,7 +117,8 @@ protected:
 
 /** Activates a perceived identity without changing Narrative faction membership. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Activate Territory Disguise"))
+	meta=(DisplayName="Activate Territory Disguise",
+		ToolTip="Activate a disguise profile for the exact Narrative target on the server. Does not change real faction membership. For ordinary clothing, use the disguise inventory item equip flow."))
 class TERRITORYFRAMEWORK_API UTerritoryActivateDisguiseEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -132,7 +137,8 @@ protected:
 };
 
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Remove Territory Disguise"))
+	meta=(DisplayName="Remove Territory Disguise",
+		ToolTip="Remove the exact target disguise on the server. Real Narrative faction memberships remain unchanged."))
 class TERRITORYFRAMEWORK_API UTerritoryRemoveDisguiseEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -148,7 +154,8 @@ protected:
 
 /** Burns or restores the cover identity for one faction without changing diplomacy. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Set Territory Disguise Cover State"))
+	meta=(DisplayName="Set Territory Disguise Cover State",
+		ToolTip="Compromise or restore the target cover for one observing faction, or all factions when empty. This changes disguise recognition, not diplomacy."))
 class TERRITORYFRAMEWORK_API UTerritorySetDisguiseCoverEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -178,7 +185,8 @@ protected:
 
 /** Runs the current Place's deterministic quality and clearance check. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Perform Territory Disguise Identity Check"))
+	meta=(DisplayName="Perform Territory Disguise Identity Check",
+		ToolTip="Ask the current place security system to check the target disguise on the server. Empty observer faction uses the place owner. Rejection may expose the target through the existing security rules."))
 class TERRITORYFRAMEWORK_API UTerritoryDisguiseIdentityCheckEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()

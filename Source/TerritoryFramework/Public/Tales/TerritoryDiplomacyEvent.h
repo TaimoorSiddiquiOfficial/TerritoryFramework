@@ -4,6 +4,7 @@
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/TerritoryCaptureEvent.h"
 #include "TerritoryDiplomacyEvent.generated.h"
 
 UENUM(BlueprintType)
@@ -42,7 +43,8 @@ enum class ETerritoryDiplomacyFactionSource : uint8
  * become hostile and any peace-blocked Territory assaults may be evaluated again.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Set Territory Diplomacy"))
+	meta=(DisplayName="Set Territory Diplomacy",
+		ToolTip="Change the rich treaty and Narrative combat attitude on the server. Explicit tags work in global dialogue. Territory owner and transition sources require a containing state callback; read their fallback option carefully."))
 class TERRITORYFRAMEWORK_API UTerritorySetDiplomacyEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -137,13 +139,18 @@ protected:
  * This changes reputation metadata; treaty/AI attitude changes remain a separate event.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Modify Territory Faction Reputation"))
+	meta=(DisplayName="Modify Territory Faction Reputation",
+		ToolTip="Add to or set saved faction reputation on the server. Negative values can reduce it. Dynamic faction sources follow the current Narrative participant. This does not automatically change treaties or combat attitude."))
 class TERRITORYFRAMEWORK_API UTerritoryModifyReputationEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
 
 public:
 	UTerritoryModifyReputationEvent(const FObjectInitializer& ObjectInitializer);
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ToolTip="Explicit changes the fixed faction below. Narrative Target or Controller Pawn follows the current real Narrative faction. A missing dynamic faction cancels the event; it never silently changes the old faction."))
+	ETerritoryCaptureFactionSource FactionSource = ETerritoryCaptureFactionSource::ExplicitFaction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(Categories="Narrative.Factions",

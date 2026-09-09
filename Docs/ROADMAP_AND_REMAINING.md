@@ -1,10 +1,33 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-09 (combat activity eligibility during vehicle travel)
+> **Reviewed:** 2026-09-09 (Territory Narrative conditions and events)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### Narrative condition and event audit — 2026-09-09
+
+Rechecked all 23 current conditions and 23 events. Fixed the legacy Locked state
+condition, client reserve reads, reserve-count overflow, and misleading context
+checkbox and assault-query fields. Added local lock/known/loaded queries, optional
+campaign-directory state reads, All/Any groups, current-faction reputation sources,
+and exact story encounter filtering for cancellation. Existing defaults remain
+compatible. See [conditions and events](35_Territory_Conditions_and_Events.md).
+
+Both engines pass 303 automation tests. Editor, Development and Shipping builds
+pass for UE 5.8 TDA and the isolated UE 5.7 plugin host. TDA validation checked
+244 assets and compiled 147 Blueprints with zero errors and eight existing
+appearance/camera warnings. A live server, two clients and a new late join agree
+on lock conditions and seven reserve guards; client lock mutations fail, and
+Native save/load restores the same results. Both cooks pass; the UE 5.8 package
+completes a 60-second Game server-mode startup with exit zero.
+
+The packaged demo controller still logs an optional missing CutscenePlayerActor
+when its loading-screen event starts a cutscene. Track this project/controller
+setup warning separately; it was not changed in the condition audit. A compiled
+TDAServer target and actual AlMalik World Partition playthrough remain separate
+release gates. All 741 Narrative Pro source files still match the vendor copy.
 
 ### Faction integration and restore correction — 2026-09-08
 
@@ -116,11 +139,22 @@ the existing post-capture counterattack accept the request.
   friend and works for the system. Author story content after framework checks.
 - [x] Repair Hashir's tagged greeting class reference and validate configured
   tagged dialogue rows. Preserve the existing text, reply, IDs and cooldown.
+- [x] Stop `NQ_CaptureBlacksmith` starting automatically in HopDistrictTest.
+  The separate `QuestStarter_CaptureBlacksmith` level actor kept starting it after
+  the controller's quest setting was cleared. Removed that actor only. Fresh
+  server/two-client PIE has no quests; Hashir's explicit event and Native save
+  restoration still work. Current quest/dialogue Blueprints validate without errors.
+- [x] Fix the Territory State Condition's legacy Locked query. Current authored
+  Blacksmith starts Locked; the condition now agrees on server, clients and after
+  Native restore. Hashir's current offer uses Not Started and its start line unlocks
+  Blacksmith. The author's dialogue rules and map were not rewritten in this audit.
+- [ ] Guard the demo controller's optional intro cutscene when no cutscene player
+  exists; the packaged startup currently logs Accessed None in Narrative's cutscene path.
 - [x] Correct TDA's starting sword balance so ordinary melee can play before a
   lethal execution. Keep Narrative's combo, backstab and finishing-blow rules.
-- [ ] Author Hashir's Act 1 quest and main dialogue after story requirements are
-  agreed. `NPC_Hahsir` is a redirector; the NPC's stable ID is preserved. The
-  Native greeting tag is already valid. The main dialogue has only its root.
+- [ ] Finish Hashir's Act 1 quest and main dialogue after story requirements are
+  agreed. The current main dialogue now contains prototype quest-giving, follow
+  and reputation branches. Those authored branches are not a finished Act 1.
 - [ ] Decide whether later Blacksmith losses start a new named reinforcement
   encounter, and whether diplomacy should offer a separate peaceful handover.
   The current example is one finite named battle and requires its actual defeat.

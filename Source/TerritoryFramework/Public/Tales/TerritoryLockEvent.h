@@ -11,7 +11,8 @@
  * Use in quests/dialogues when story requires a territory to be inaccessible.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Lock Territory"))
+	meta=(DisplayName="Lock Territory",
+		ToolTip="Lock one loaded territory on the server while preserving its owner and political state. Add a reason for the player. The runtime change is saved; it does not edit the Definition default."))
 class TERRITORYFRAMEWORK_API UTerritoryLockEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()
@@ -40,7 +41,8 @@ protected:
  * unchanged so a future new campaign still begins with the same story gate.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
-	meta=(DisplayName="Try Unlock Territory"))
+	meta=(DisplayName="Try Unlock Territory",
+		ToolTip="Try to open the selected territory using the chosen hierarchy scope. Normal scopes respect Locked Exit Conditions. Force scopes bypass them for a deliberate story override. Definition defaults stay unchanged for the next new campaign."))
 class TERRITORYFRAMEWORK_API UTerritoryUnlockEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()

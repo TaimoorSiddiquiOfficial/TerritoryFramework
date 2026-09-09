@@ -3,6 +3,7 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryWorldState.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -130,13 +131,46 @@ bool UTerritoryStateCondition::CheckCondition_Implementation(APawn* Target,
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
 	const ATerritoryVolume* Territory = ResolveLoadedTerritory(World, TerritoryToCheck);
-	return Territory && Territory->GetTerritoryState() == RequiredState;
+	if (Query == ETerritoryStateConditionQuery::Loaded) return IsValid(Territory);
+	if (Territory)
+	{
+		return MatchesState(Territory->GetTerritoryState(), Territory->IsLocked()
+			? ETerritoryAvailability::Locked : ETerritoryAvailability::Unlocked);
+	}
+	const ATerritoryWorldState* Directory = bAllowUnloadedTerritory && World
+		? ATerritoryWorldState::FindTerritoryWorldState(World) : nullptr;
+	if (!Directory || !TerritoryToCheck.IsValid()) return false;
+	const FReplicatedCaptureSummary Row = Directory->GetCaptureSummary(TerritoryToCheck);
+	return Row.TerritoryTag == TerritoryToCheck && MatchesState(Row.State, Row.Availability);
+}
+
+bool UTerritoryStateCondition::MatchesState(ETerritoryState State,
+	ETerritoryAvailability Availability) const
+{
+	switch (Query)
+	{
+	case ETerritoryStateConditionQuery::Known: return true;
+	case ETerritoryStateConditionQuery::Availability:
+		return Availability == RequiredAvailability;
+	case ETerritoryStateConditionQuery::PoliticalState:
+		return RequiredState == ETerritoryState::Locked
+			? Availability == ETerritoryAvailability::Locked : State == RequiredState;
+	default: return false;
+	}
 }
 
 FString UTerritoryStateCondition::GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Territory: %s state is %s"), *TerritoryToCheck.ToString(),
-		*EnumDisplayName(StaticEnum<ETerritoryState>(), static_cast<int64>(RequiredState), TEXT("Unknown")));
+	FString Fact = EnumDisplayName(StaticEnum<ETerritoryStateConditionQuery>(),
+		static_cast<int64>(Query), TEXT("Unknown query"));
+	if (Query == ETerritoryStateConditionQuery::Availability)
+		Fact += TEXT(" = ") + UEnum::GetDisplayValueAsText(RequiredAvailability).ToString();
+	if (Query == ETerritoryStateConditionQuery::PoliticalState)
+		Fact = RequiredState == ETerritoryState::Locked ? TEXT("local lock = Locked")
+			: TEXT("political state = ") + UEnum::GetDisplayValueAsText(RequiredState).ToString();
+	return FString::Printf(TEXT("Territory: %s %s [%s]"), *TerritoryToCheck.ToString(), *Fact,
+		bAllowUnloadedTerritory && Query != ETerritoryStateConditionQuery::Loaded
+			? TEXT("live or campaign directory") : TEXT("loaded actor required"));
 }
 
 UTerritoryControlProgressCondition::UTerritoryControlProgressCondition()
@@ -147,6 +181,8 @@ UTerritoryControlProgressCondition::UTerritoryControlProgressCondition()
 bool UTerritoryControlProgressCondition::CompareValues(float ActualValue,
 	ETerritoryFloatComparison Operation, float RequiredValue, float Tolerance)
 {
+	if (!FMath::IsFinite(ActualValue) || !FMath::IsFinite(RequiredValue)
+		|| !FMath::IsFinite(Tolerance)) return false;
 	switch (Operation)
 	{
 	case ETerritoryFloatComparison::NearlyEqual:
@@ -189,13 +225,17 @@ bool UTerritoryReputationCondition::CheckCondition_Implementation(APawn* Target,
 		this, Target, Controller, NarrativeComponent);
 	const UTerritoryDiplomacySubsystem* Diplomacy = World
 		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
-	return Diplomacy && Faction.IsValid()
-		&& UTerritoryGarrisonCondition::CompareValues(Diplomacy->GetReputation(Faction), Comparison, Value);
+	const FGameplayTag ResolvedFaction = TerritoryTales::ResolveFaction(this,
+		FactionSource, Faction, Target, Controller, NarrativeComponent);
+	return Diplomacy && ResolvedFaction.IsValid()
+		&& UTerritoryGarrisonCondition::CompareValues(Diplomacy->GetReputation(ResolvedFaction), Comparison, Value);
 }
 
 FString UTerritoryReputationCondition::GetGraphDisplayText_Implementation()
 {
-	return FString::Printf(TEXT("Reputation: %s %s %d"), *Faction.ToString(),
+	const FString FactionText = FactionSource == ETerritoryCaptureFactionSource::ExplicitFaction
+		? Faction.ToString() : UEnum::GetDisplayValueAsText(FactionSource).ToString();
+	return FString::Printf(TEXT("Reputation: %s %s %d"), *FactionText,
 		*EnumDisplayName(StaticEnum<ETerritoryIntegerComparison>(), static_cast<int64>(Comparison), TEXT("Compare")), Value);
 }
 
