@@ -20,6 +20,7 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 | Saved vehicle limits or approach charges grant extra deployments | Validate the eight-car/eight-approach limits, unique nonempty approach IDs, and matching global/per-approach spent totals before reconstruction | Both editor builds, native save regression and live server/two-client cancellation passed |
 | Production continues after an item callback changes faction or depot | Recheck the original requesting account or selected depot around Native inventory mutations; compensate only in the original inventory | Two regressions reproduced the defect before the change; all 294 tests and all three build configurations pass on both engines |
 | Currency callbacks reenter settlement, reload a wallet, or invalidate later upkeep accounts | Payment receipts distinguish rejection from load interruption; recheck each account; preserve loaded purchases and current history | All 295 tests on both engines, real Native world/player load and two-client wallet/history proof pass |
+| Repeated NPC saves retain removed generators and load old values | Territory's Native activity-component subclass rebuilds snapshots, keeps the latest record, restores existing objects and filters explicitly retired classes | All 296 tests pass on both engines; portable controller cold-reopens in UE 5.7; live/package checks recorded below |
 
 ## Verified checkpoint
 
@@ -38,7 +39,7 @@ This ledger continues the research checkpoint at plugin commit `9670a1d`. Source
 
 ## Remaining work in order
 
-1. Fix generic Narrative NPC client death through a plugin/project adapter. Source inspection confirms that Native BP_NarrativeNPC calls RemoveAllGoals unconditionally, although its activity component lives on the server-only AI controller. Preserve Native death presentation and weapon behavior while adapting this path. Hashir's safe perception generator addresses a different defect. Test old saved goal generators deliberately. Include the attack-target EQS and weapon decal warnings observed in the 2026-09-09 packaged smoke, described below. Also reproduce the same-team shot cancellations observed after the live world restore and check whether old targets are cleared correctly.
+1. Fix generic Narrative NPC client death through a plugin/project adapter. Source inspection confirms that Native BP_NarrativeNPC calls RemoveAllGoals unconditionally, although its activity component lives on the server-only AI controller. Preserve Native death presentation and weapon behavior while adapting this path. Hashir's safe perception generator addresses a different defect. Territory controller generator-save migration is implemented; Hashir's generic controller still needs its own integration without losing inherited Native Blueprint behavior. Include the attack-target EQS and weapon decal warnings observed in the 2026-09-09 packaged smoke, described below. Also reproduce the same-team shot cancellations observed after the live world restore and check whether old targets are cleared correctly.
 2. Complete actual AlMalik World Partition streaming and compiled dedicated-server certification. The live late join above does not replace either gate.
 3. Complete the deferred lighting visual/performance review, then the remaining Act 1 story authoring decisions. Do not publish fresh release artifacts before the relevant gates pass.
 
@@ -66,7 +67,70 @@ The UE 5.8 cook/stage/package passes with zero errors and 30 existing cook warni
 
 Final validation checks 235 framework/Hashir assets and compiles 142 Blueprints, with zero errors and eight existing warnings. The editor is reopened on HopDistrictTest and PIE is stopped. The camera dirtied by PIE/compilation was exported to a verification backup and reloaded from disk without saving vendor content. No new release was uploaded.
 
-## Current build limitation
+## NPC generator save follow-up — 2026-09-09
+
+Native's activity component remains the AI authority. `UTerritoryNPCActivityComponent`
+adapts its existing save callbacks: each save replaces the generator snapshot;
+old duplicate classes keep their latest record; missing/abstract/explicitly retired
+classes are skipped. Existing configured generators receive saved values without
+being initialized or bound a second time. Native delta records are expanded on a
+temporary uninitialized object, so saved zero values and empty lists replace later
+live changes without resetting transient state. An added regression reproduced the
+incorrect `0 -> 99 -> load -> 99` result before this correction.
+
+`BP_TerritoryNPCController` inherits `BP_NarrativeNPCController` and uses Unreal's
+native component class override in its existing `NPCActivityComponent` slot.
+Native Blueprint class casts and inherited behavior remain valid. The first local
+controller attempt preserved the graph bodies but not Native Blueprint inheritance;
+that attempt was replaced before committing. The older Territory controller asset
+is unchanged. No Native source or Blueprint is copied or patched for this change.
+
+Both portable guard/assault Blueprints and their TDA counterparts now select the
+new controller. The first live check exposed that their serialized class overrides
+still selected Native's controller despite the changed C++ default. The final
+selection is deliberate and is covered by the Blueprint inheritance/component test.
+The direct C++ guard/assault defaults use the small Native C++ controller adapter.
+
+The regression uses Native `CreateActorRecord` and `LoadActorFromRecord`, including
+controller recreation with the same component name, duplicate older snapshots,
+removed generators, latest scalar state, empty lists, transient-state preservation,
+retired classes, invalid classes, pre-BeginPlay load and rejected client mutations.
+There are no new SaveGame fields, replicated state, faction records or actor IDs.
+See [NPC activity save migration](NPC_Activity_Save_Migration.md).
+
+All 296 tests pass on both engines: UE 5.8 has 276 clean passes and 20 with warnings;
+UE 5.7 has 274 clean passes and 22 with warnings. All six Editor/Development/Shipping
+build targets pass. The final Native-child controller was authored in a full UE 5.7
+editor and cold-reopened successfully. The component class authoring API requires
+an editor transaction; its commandlet attempt failed before saving the new asset.
+Final live/package evidence is recorded with the verification files prefixed `NPC`
+under `Saved/Verification/20260908_FactionIntegrationFix`.
+
+The final UE 5.8 cook/stage/package passes with zero errors and 30 existing warnings.
+The UE 5.7 incremental portable cook passes with zero errors and five warnings.
+The final 90-second packaged assault exits zero without a fatal error, ensure or
+null Blueprint access. Native combat and authored dismounts run. Same-team shot
+cancellations also occur in this fresh run, so they are not specific to save/load;
+their target and obstruction causes still need a focused audit. The earlier
+EQS/decal warnings were not reproduced here and are not declared fixed.
+
+`LiveNPCSave58.json` passes on the actual TDA guard and two clients. Its server
+controller is `BP_TerritoryNPCController`; two saved generators become three after
+adding a temporary test generator, remain three across four saves, and return to
+two after removal. Both clients receive the same faction and have no local NPC
+controller/activity authority. Native actor-record restoration and default-value
+checks are covered by the behavioral regression, separately from this live fixture.
+Final validation checks 236 assets and compiles 143 Blueprints, with zero errors
+and eight existing presentation warnings. All 741 Native source files still match
+the installed package. PIE is stopped, the prior client-count setting is restored,
+and no packages remain dirty. The Native camera was exported for verification and
+reloaded without saving vendor content. No new release was published.
+
+Hashir's generic controller and client death path are still open. This migration
+does not globally redirect Native NPC classes or rewrite unrelated quest generators.
+The saved attack-target, EQS and decal audits also remain separate.
+
+## Dedicated-server prerequisite
 
 The installed UE 5.8 distribution rejected `TDAServer` with “Server targets are not currently supported from this engine distribution.” This is an engine-distribution prerequisite, not a passing dedicated-server gate. A server-capable engine build is required for that certification. Game-server mode is a separate smoke test.
 

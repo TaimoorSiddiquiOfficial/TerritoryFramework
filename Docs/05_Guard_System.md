@@ -198,8 +198,8 @@ On save, each guard post records reserves, pending deployments, and its finite a
 
 ## Narrative attack-goal lifecycle safety
 
-Territory guard and assault activity configurations use the project-owned
-`GoalGenerator_Hop_Attack`, which is a child of Narrative Pro's attack goal generator. Its
+The portable guard and assault activity configurations use the plugin-owned
+`GoalGenerator_TerritoryAttack`, which is a child of Narrative Pro's attack goal generator. Its
 `RefreshPerceivedActors` override first validates the cached controller, possessed pawn,
 Narrative Activity Component, and AI Perception Component. It calls Narrative's inherited
 refresh only while that complete live relationship is valid.
@@ -208,6 +208,11 @@ Death, controller cleanup, World Partition removal, and PIE teardown may leave a
 or perception callback after the Narrative controller is already pending kill. The adapter
 ignores that late callback. It does not replace Narrative perception or attack selection, and no
 Narrative Pro vendor Blueprint or source file is modified.
+
+The Territory controller also uses Narrative's activity component through a save
+adapter. Repeated saves replace the generator snapshot, and old saves can ignore
+explicitly retired generator classes. See [NPC activity save migration](NPC_Activity_Save_Migration.md)
+before changing a project's controller parent or retiring a generator.
 
 ## Debug
 

@@ -3,6 +3,7 @@
 #include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "AI/TerritoryDiplomacyDialogue.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
+#include "AI/TerritoryNPCController.h"
 #include "AI/TerritoryContextualAnimComponent.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NarrativeNPCController.h"
@@ -77,7 +78,7 @@ ATerritoryAssaultCharacter::ATerritoryAssaultCharacter(const FObjectInitializer&
 	// Counterattack pawns are always created dynamically. Narrative activities and
 	// attack tokens live on ANarrativeNPCController, so the native class must be a
 	// complete usable default rather than relying on every project to create a BP child.
-	AIControllerClass = ANarrativeNPCController::StaticClass();
+	AIControllerClass = ATerritoryNPCController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 
 	// Narrative customizes individual channel responses in its base constructor,

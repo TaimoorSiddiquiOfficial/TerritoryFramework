@@ -13,6 +13,7 @@
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
+#include "AI/TerritoryNPCController.h"
 #include "AI/TerritoryContextualAnimComponent.h"
 #include "AI/TerritoryInvestigationActivity.h"
 #include "AI/TerritoryInvestigationGoal.h"
@@ -87,7 +88,7 @@ ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& Obj
 		TEXT("TerritoryDiplomacyDialogue"));
 	StealthObserver = CreateDefaultSubobject<UTerritoryStealthObserverComponent>(
 		TEXT("TerritoryStealthObserver"));
-	AIControllerClass = ANarrativeNPCController::StaticClass();
+	AIControllerClass = ATerritoryNPCController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
 	GetCapsuleComponent()->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
 	GetMesh()->SetCollisionProfileName(FName(TEXT("CharacterMesh")));

@@ -1,6 +1,6 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-09 (currency callbacks and Narrative restore integration)
+> **Reviewed:** 2026-09-09 (NPC generator snapshots and Narrative restore integration)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
@@ -12,7 +12,7 @@ The current implementation ledger is [Finding Resolution Plan](Finding_Resolutio
 Live faction changes now update resource routing and open economy screens. Tied
 account priorities create a visible conflict; Native inventory remains the balance
 authority. Both example controllers follow their owner's political faction.
-Both engines pass 295 automation tests, and a server/two-client fixture plus a
+Both engines now pass 296 automation tests, and a server/two-client fixture plus a
 fresh late join passes. Two consecutive Native world/player restores preserve
 garrisons, reserves and faction/account state without the reproduced record-reader
 crash or stale guard attack-goal errors. Saved vehicle ledgers now reject inflated
@@ -22,8 +22,9 @@ compensates in the original inventory when a callback changes its faction or
 selected depot. Currency receipts now preserve restored purchases and stop old
 payments after a Native load; live wallet/history replication passes on two clients.
 See the implementation ledger for the latest build/test gates.
-The separate generic NPC client-death, old goal-generator migration, attack-query
-and decal warnings, and actual AlMalik streaming audits remain.
+Territory's Native controller now rebuilds saved generator snapshots and supports
+explicitly retired classes. The separate generic NPC client-death, Hashir controller
+migration, attack-query and decal warnings, and actual AlMalik streaming audits remain.
 These changes are not certification of the older published preview.
 
 ### Active story preparation — 2026-09-08
@@ -72,6 +73,13 @@ the existing post-capture counterattack accept the request.
   override fixes a separate server callback and does not cover that path.
 - [ ] Check migration of existing Hashir saves that contain the old Native goal
   generator. A changed NPC definition does not rewrite saved activity instances.
+- [x] Fix repeated generator snapshots on Territory controllers. Keep the latest
+  old record, restore existing generator objects without duplicate bindings, and
+  support an explicit list of retired saved classes. Both engine suites and the
+  Native actor-record recreation regression pass. The thin controller preserves
+  Native Blueprint inheritance; portable and TDA guards/assaults now select it.
+  Actual server/two-client snapshot checks and both cooks pass. Hashir's generic Native
+  Blueprint controller is not silently reparented by this change.
 - [ ] Resolve Native attack-target EQS/Blackboard and weapon-decal warnings from
   the latest packaged assault smoke through compatible plugin/project adapters.
   Reproduce the same-team shot cancellations seen after world restore and check
