@@ -486,7 +486,10 @@ private:
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
 	friend class FTFSaveDefaultReload;
 	friend class FTFSavedStrategicDirectoryProjectionRoundTrip;
+	friend class FTFWorldPartitionActorRecords;
 #endif
+	/** Save departing Territory actors through Narrative before level cleanup changes their guard counts. */
+	void SaveStreamingLevel(ULevel* Level, UWorld* World);
 	void SyncSubsystemsFromReplicatedState();
 	void SyncEconomySubsystemFromReplicatedState();
 	void SyncDiplomacySubsystemFromReplicatedState();

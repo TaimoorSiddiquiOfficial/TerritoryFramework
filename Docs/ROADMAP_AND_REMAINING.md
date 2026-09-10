@@ -1,10 +1,41 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-10 (dead defenders, assault ragdolls and camera collision)
+> **Reviewed:** 2026-09-10 (physical AlMalik streaming and Native actor persistence)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### AlMalik actor persistence — 2026-09-10
+
+Fixed a confirmed physical World Partition regression: a changed Place returned
+with its old owner and unlocked after its cell unloaded. TerritoryWorldState now
+writes departing Territory actors and guard posts through Narrative's existing
+actor records before cleanup. It also asks Native to initialize its save system
+if the project reaches WorldState BeginPlay without a save object. No vendor
+source, saved schema, replicated fields or Blueprint mutation API changed.
+
+The real AlMalik fixture passes on a server and two clients: changed owner and
+story lock survive, old guards disappear, exactly two guards return, and all
+three garrison read models retain six reserves and zero pending replacements.
+Native tests also cover exhausted reserves and both actor restore orders.
+Editor, Development and Shipping builds pass on UE 5.7 and 5.8; both suites pass
+305 tests. Asset validation checks 244 assets and compiles 147 Blueprints with
+zero errors and eight existing warnings. All 741 Native source files still
+match the vendor. The refreshed UE 5.8 package and 60-second Game server-mode
+startup pass; the existing missing cutscene-player warning remains. See
+[evidence and limits](ALMALIK_STREAMING_2026-09-10.md).
+
+The finite-assault part remains open: the loaded fixture area has no
+NavMeshBoundsVolume or RecastNavMesh, and five navigation projections fail.
+The existing route gate correctly cancels the request. Add and build navigation
+for the test area, then test a finite assault and posts in separate cells.
+Do not bypass the route gate. AlMalik also reports existing power-line, catenary
+Arrow and cinematic-overlay Blueprint errors during multiplayer startup.
+
+The fixture was temporary. Original AlMalik and HopDistrictTest map hashes are
+unchanged. Story placement still needs a persistent TerritoryWorldState outside
+unloadable Data Layers, plus its actual City/District/Place definitions.
 
 ### Dead guard collision audit — 2026-09-10
 
@@ -44,8 +75,9 @@ still match the installed vendor copy.
 
 The next remaining work, in order:
 
-1. Run the actual AlMalik World Partition stream-out/stream-in scenario with a
-   Place, its guard posts and an active finite assault.
+1. Build AlMalik navigation for the verification area, then finish finite-assault
+   streaming and independently unloaded post cells. The Place/guard cell cycle
+   now passes on a server and two clients.
 2. Finish the full multiplayer capture, guard recruitment, assault defeat and
    exact-once reward playthrough. Separate Server binaries need an engine with
    Server target support; the packaged Game listener is already a tested topology.
@@ -149,8 +181,10 @@ the existing post-capture counterattack accept the request.
   compensate in the original inventory and preserve the consumed cycle through load.
 - [x] Verify currency settlement/refund callbacks, partial upkeep and loaded purchases.
   Both engine suites and a real Native world/player load with two clients pass.
-- [ ] Complete actual AlMalik streaming. Asset compilation/validation does not
-  prove this gameplay gate.
+- [x] Verify physical AlMalik Place/guard cell streaming with two clients and
+  fix Native actor record writes before cleanup.
+- [ ] Build navigation for the AlMalik fixture and finish active finite-assault
+  streaming, separate post cells and returning-client coverage.
 - [x] Protect Hashir's pacifist perception callback after controller destruction.
   His project activity config preserves all eight Native activities and uses a
   minimal child Blueprint with the existing Territory safety function.

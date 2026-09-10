@@ -3,6 +3,7 @@
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
@@ -12,6 +13,8 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "SaveSystemStatics.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
+#include "Engine/Level.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -112,6 +115,12 @@ void ATerritoryWorldState::BeginPlay()
 
 	if (HasAuthority())
 	{
+		// Some project GameModes reach BeginPlay without a Native save object.
+		// Let Native interpret its own save URL/new-game policy before loading us.
+		if (UNarrativeSaveSubsystem* Save = GetWorld()->GetSubsystem<UNarrativeSaveSubsystem>())
+		{
+			if (!Save->GetSaveObject()) Save->InitializeSaveSystem(*GetWorld());
+		}
 		if (!WorldStateGUID.IsValid())
 		{
 			// P1-10: Missing GUID disables save/load only — live replication still subscribes
@@ -1020,6 +1029,8 @@ void ATerritoryWorldState::SubscribeToLiveUpdates()
 
 	UWorld* World = GetWorld();
 	if (!World) return;
+	FWorldDelegates::PreLevelRemovedFromWorld.RemoveAll(this);
+	FWorldDelegates::PreLevelRemovedFromWorld.AddUObject(this, &ATerritoryWorldState::SaveStreamingLevel);
 
 	if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
 	{
@@ -1047,6 +1058,7 @@ void ATerritoryWorldState::SubscribeToLiveUpdates()
 
 void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
 {
+	FWorldDelegates::PreLevelRemovedFromWorld.RemoveAll(this);
 	UWorld* World = GetWorld();
 	if (!World) return;
 
@@ -1071,6 +1083,48 @@ void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
 		World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
 	{
 		Counterattacks->OnAssaultChanged.RemoveDynamic(this, &ATerritoryWorldState::OnAssaultChangedLive);
+	}
+}
+
+void ATerritoryWorldState::SaveStreamingLevel(ULevel* Level, UWorld* World)
+{
+	if (!HasAuthority() || !World || World != GetWorld() || !Level
+		|| Level->GetWorld() != World || !World->IsGameWorld() || World->bIsTearingDown)
+	{
+		return;
+	}
+	UNarrativeSaveSubsystem* Save = World->GetSubsystem<UNarrativeSaveSubsystem>();
+	if (!Save || Save->IsLoading()) return;
+
+	TSet<AActor*> ActorsToSave;
+	for (AActor* Actor : Level->Actors)
+	{
+		if (!IsValid(Actor) || !Actor->HasAuthority() || !Actor->HasActorBegunPlay()) continue;
+		if (ATerritoryVolume* Territory = Cast<ATerritoryVolume>(Actor))
+		{
+			ActorsToSave.Add(Territory);
+			// A Place can unload before its posts. Its EndPlay retires guards,
+			// so record those posts while their active slots still exist.
+			for (ATerritoryGuardSpawnPoint* Post : Territory->GetGuardSpawnPoints())
+			{
+				if (IsValid(Post) && Post->HasAuthority()) ActorsToSave.Add(Post);
+			}
+		}
+		else if (Actor->IsA<ATerritoryGuardSpawnPoint>()) ActorsToSave.Add(Actor);
+	}
+	if (ActorsToSave.IsEmpty()) return;
+	if (!Save->GetSaveObject())
+	{
+		UE_LOG(LogTerritory, Error, TEXT("Cannot preserve streaming Territory actors: Narrative save system is not initialized."));
+		return;
+	}
+	for (AActor* Actor : ActorsToSave)
+	{
+		const FGuid ID = INarrativeStableActor::Execute_GetActorGUID(Actor);
+		if (!ID.IsValid() || !Save->SaveSingleActor(Actor) || !Save->DoesRecordExist(ID))
+		{
+			UE_LOG(LogTerritory, Error, TEXT("Failed to preserve streaming Territory actor %s in Narrative save records."), *Actor->GetPathName());
+		}
 	}
 }
 

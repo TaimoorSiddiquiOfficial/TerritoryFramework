@@ -78,6 +78,12 @@ Each spawned Guard Post actor is one active guard slot. Add more rows for more s
 
 1. Drag `BP_TerritoryWorldState` into level. **Single-player projects: use only `BP_TerritoryWorldState`** — it handles both single-player and multiplayer.
 2. One instance is enough — it persists economy, diplomacy, and capture state.
+3. In a World Partition map, turn **Is Spatially Loaded** off on this actor. Keep it outside runtime Data Layers that can unload. It must remain present while Places and guard posts stream out.
+
+The actor uses Narrative's existing save records to remember Places and guard
+posts before their cells unload. Returning cells load those records through the
+usual Narrative API. This remembers changes during the current session; use the
+normal Narrative Save action to write the campaign to disk.
 
 > **Note:** `BP_TerritorySavableData` is **deprecated**. Do not use it for new projects. Use `BP_TerritoryWorldState` instead. If both exist in the level, an editor validator will report an error.
 
