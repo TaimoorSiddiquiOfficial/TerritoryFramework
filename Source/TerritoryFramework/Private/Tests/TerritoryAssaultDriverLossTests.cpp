@@ -39,6 +39,7 @@ bool FTFAssaultPassengerDriverLoss::RunTest(const FString& Parameters)
 		->SetObjectPropertyValue_InContainer(Passenger, NewObject<UNPCDefinition>());
 	FindFProperty<FObjectPropertyBase>(Passenger->GetClass(), TEXT("CharVisual"))
 		->SetObjectPropertyValue_InContainer(Passenger, World->SpawnActor<ANarrativeCharacterVisual>());
+	Passenger->GetCharacterVisual()->bBaseAppearanceLoaded = true;
 	TestTrue(TEXT("Passenger satisfies Native readiness"), Passenger->IsNarrativeSpawnReady());
 	auto* Part = Passenger->AssaultParticipant.Get();
 	auto* DriverPart = Driver->AssaultParticipant.Get();

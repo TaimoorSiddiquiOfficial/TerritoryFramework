@@ -252,12 +252,10 @@ bool ATerritoryAssaultCharacter::IsNarrativeSpawnReady() const
 	{
 		return false;
 	}
-	ANarrativeCharacterVisual* Visual = GetCharacterVisual();
-	if (!Visual || Visual->HasLoadHandles())
-	{
-		return false;
-	}
-	return true;
+	// A visual actor can exist before Native finishes its base appearance or
+	// definition callback. Reuse Native's complete load contract instead of
+	// treating an empty set of individual visual handles as ready.
+	return !IsCharacterPendingLoad();
 }
 
 bool ATerritoryAssaultCharacter::HasValidDeathRagdollSetup() const

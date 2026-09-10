@@ -638,8 +638,14 @@ Queries:
 - `GetAssaultDebugString`
 - `GetBestEligibleAttackerPreview` (planning only; reserves no cycle and makes no roll)
 - `ATerritoryAssaultCharacter::IsNarrativeSpawnReady` (live Blueprint/MCP diagnostic;
-  checks definition, appearance, controller, and activity readiness without treating an
+  reuses Native's completed definition/base-appearance load check, plus controller
+  and activity readiness, without treating an
   optional weapon visual as a movement prerequisite)
+
+If goal initialization reaches its existing retry limit, the error lists the NPC
+definition, visual, base-appearance state, pending visual loads, controller and
+activity. Use those values to find the missing prerequisite before changing the
+timeout. See [appearance readiness verification](ASSAULT_APPEARANCE_READINESS_2026-09-10.md).
 
 Bind `UTerritoryPlayerManagementComponent::OnAssaultNotification` for the one-time strategic
 warning. Bind its `OnCounterHappened` delegate for state-wise owning-client delivery, or

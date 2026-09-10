@@ -18,6 +18,7 @@
 #include "AI/Activities/NPCActivityComponent.h"
 #include "AI/Activities/NPCGoalItem.h"
 #include "AI/NarrativeNPCController.h"
+#include "AI/NPCDefinition.h"
 #include "Interaction/NPCInteractionComponent.h"
 #include "Vehicles/MountComponent.h"
 #include "Vehicles/NarrativeVehicleBase.h"
@@ -525,9 +526,16 @@ void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 	{
 		if (++GoalInitializationAttempts >= 40)
 		{
+			const ATerritoryAssaultCharacter* ReadinessNPC = Cast<ATerritoryAssaultCharacter>(Owner);
+			const ANarrativeCharacterVisual* Visual = ReadinessNPC ? ReadinessNPC->GetCharacterVisual() : nullptr;
 			UE_LOG(LogTerritory, Error,
-				TEXT("Assault participant %s could not initialize its Narrative goal/activity"),
-				*GetNameSafe(Owner));
+				TEXT("Assault participant %s could not initialize its Narrative goal/activity "
+					"(definition=%s, visual=%s, base appearance loaded=%d, visual loads pending=%d, controller=%s, activity=%s)"),
+				*GetNameSafe(Owner), *GetNameSafe(ReadinessNPC ? ReadinessNPC->GetNPCDefinition() : nullptr),
+				*GetNameSafe(Visual), Visual && Visual->bBaseAppearanceLoaded,
+				Visual && Visual->HasLoadHandles(),
+				*GetNameSafe(ReadinessNPC ? ReadinessNPC->GetNPCController() : nullptr),
+				*GetNameSafe(ReadinessNPC ? ReadinessNPC->GetActivityComponent() : nullptr));
 			Retire(false);
 			if (ANarrativeNPCCharacter* NPC = Cast<ANarrativeNPCCharacter>(Owner))
 			{

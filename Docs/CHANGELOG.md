@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — 2026-09-10 (Narrative appearance readiness)
+
+- Wait for Narrative's complete definition and base-appearance loading before starting an assault goal.
+- Include the definition, visual, base appearance, pending visual loads, controller and activity in initialization failure logs.
+- Add a regression for a visual actor whose base appearance is not finished.
+
+See [appearance readiness and live verification](ASSAULT_APPEARANCE_READINESS_2026-09-10.md).
+
 ## Unreleased — 2026-09-10 (Independent guard-post cells)
 
 - Keep authored guard capacity and initial staffing when a Place loads before its posts.

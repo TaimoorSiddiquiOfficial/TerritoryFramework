@@ -59,7 +59,7 @@ public:
 	/** Keep an asynchronous Native load aligned with the engine-validated placement. */
 	void UpdateRestoredDeploymentTransform(const FTransform& Transform) { RestoredDeploymentTransform = Transform; }
 
-	/** True once Narrative's definition, appearance, controller, and activity are usable. */
+	/** True after Narrative finishes loading the definition and base appearance, with a ready AI controller and activity component. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault")
 	bool IsNarrativeSpawnReady() const;
 

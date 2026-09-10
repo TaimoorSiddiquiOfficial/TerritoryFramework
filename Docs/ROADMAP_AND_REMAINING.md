@@ -1,10 +1,33 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-10 (independent guard-post cells and assault initialization gate)
+> **Reviewed:** 2026-09-10 (Native readiness correction; cold appearance load and post-load defeat blockers)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### Native appearance readiness — 2026-09-10
+
+Fixed a separate premature-ready defect: an assault visual could exist before
+Native finished its base appearance. The existing Territory readiness query now
+uses Native's complete pending-load check. Failure logs expose the missing
+initialization stage. No Narrative source, save schema, replicated property,
+Blueprint signature or initialization timeout changed.
+
+Both engine versions pass 307 automation tests and all six Editor, Development
+and Shipping builds. All 741 Native source files match the installed vendor.
+Validation checks 244 assets and compiles 147 Blueprints with zero errors and
+eight existing warnings.
+The UE 5.8 package and 60-second Development Game server-mode startup pass with
+exit zero; the optional missing cutscene-player warning remains.
+The capture-enabled AlMalik streaming/save fixture passes on a server and two
+clients when its appearance assets are already loaded. The cold failure still
+reproduces: appearance loads remain pending and all four attackers withdraw.
+The corrected post-load defeat harness also crashed in behavior-tree execution
+after the first restored wave died. These are unresolved release blockers.
+The returning-client test also remains open after a temporary memory streaming
+package disconnected one original client. See
+[evidence and reproduction](ASSAULT_APPEARANCE_READINESS_2026-09-10.md).
 
 ### Independent guard-post cells — 2026-09-10
 
@@ -22,7 +45,7 @@ eight existing warnings remain. The UE 5.8 package and 60-second Development Gam
 server-mode startup pass with exit zero. Original map hashes are unchanged, and
 temporary assets and saves were removed. See [evidence](ALMALIK_POST_CELLS_2026-09-10.md).
 
-The next blocker is the project assault NPC's missing Narrative character visual.
+At this checkpoint, the next blocker was the project assault NPC's missing Narrative character visual.
 Fresh capture-enabled attempts withdraw after the existing 20-second initialization
 limit, before streaming begins. Its definition, controller and activity component
 exist. Trace the Native definition/appearance callback and the project Blueprint;
@@ -97,9 +120,11 @@ still match the installed vendor copy.
 
 The next remaining work, in order:
 
-1. Resolve the project assault NPC's missing visual/definition initialization, then
-   repeat capture-enabled assault streaming and a returning-client check. The
-   temporary navigation path and independently streamed guard-post save tests pass.
+1. Resolve cold appearance loads remaining pending and isolate the behavior-tree
+   crash after a Native load followed by assault deaths. Repeat finite defeat,
+   then test a returning client using a persisted isolated World Partition map.
+   Capture-enabled streaming/save passes with appearance assets already loaded;
+   this does not certify cold spawning or post-load defeat.
 2. Finish the full multiplayer capture, guard recruitment, assault defeat and
    exact-once reward playthrough. Separate Server binaries need an engine with
    Server target support; the packaged Game listener is already a tested topology.
