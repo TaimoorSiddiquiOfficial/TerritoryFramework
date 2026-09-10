@@ -412,6 +412,7 @@ void ATerritoryGuardCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	ApplyNarrativeCollisionOverrides(*this);
+	ReconcileNarrativeDeathState(GetNarrativeAbilitySystemComponent(), false);
 
 	if (HasAuthority())
 	{
@@ -591,6 +592,8 @@ void ATerritoryGuardCharacter::HandleDeath_Implementation(
 		KilledActorASC, bIsDead);
 	if (bResolvedIsDead)
 	{
+		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+		DeathCollisionState.Refresh(*this);
 		TerritoryNarrativeDeathSupport::PrepareForRemoval(*this);
 	}
 	Super::HandleDeath_Implementation(KilledActor, KilledActorASC, bResolvedIsDead);
@@ -598,6 +601,7 @@ void ATerritoryGuardCharacter::HandleDeath_Implementation(
 	{
 		TerritoryNarrativeDeathSupport::FinalizePhysicalDeath(*this);
 	}
+	DeathCollisionState.Refresh(*this);
 }
 
 void ATerritoryGuardCharacter::ReconcileNarrativeDeathState(
@@ -606,8 +610,16 @@ void ATerritoryGuardCharacter::ReconcileNarrativeDeathState(
 	if (TerritoryNarrativeDeathSupport::ResolveDeathState(
 		KilledActorASC, bReportedIsDead))
 	{
+		DeathCollisionState.Refresh(*this);
 		TerritoryNarrativeDeathSupport::FinalizePhysicalDeath(*this);
 	}
+	DeathCollisionState.Refresh(*this);
+}
+
+void ATerritoryGuardCharacter::OnRep_bIsRagdoll()
+{
+	Super::OnRep_bIsRagdoll();
+	ReconcileNarrativeDeathState(GetNarrativeAbilitySystemComponent(), false);
 }
 
 void ATerritoryGuardCharacter::SetRagdoll(const bool bWantsRagdoll)
@@ -627,10 +639,16 @@ void ATerritoryGuardCharacter::OnCharacterVisualInitialized()
 	bNarrativeInitializationCompleted = true;
 	DefaultWeaponPostInitializationAttempts = 0;
 	TryWieldDefaultWeapon();
+	ReconcileNarrativeDeathState(GetNarrativeAbilitySystemComponent(), false);
 }
 
 void ATerritoryGuardCharacter::TryWieldDefaultWeapon()
 {
+	if (const auto* ASC = GetNarrativeAbilitySystemComponent(); ASC && ASC->IsDead())
+	{
+		GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
+		return;
+	}
 	++DefaultWeaponWieldAttempts;
 	ANarrativeCharacterVisual* CharacterVisual = GetCharacterVisual();
 	if (!GetNPCDefinition() || !CharacterVisual || !bNarrativeInitializationCompleted)

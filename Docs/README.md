@@ -76,6 +76,8 @@ audits are kept outside this learning path so they cannot be mistaken for curren
 | 32 | [Narrative Quest Cascade Recipes](32_Narrative_Quest_Cascade_Recipes.md) | Reusable story graphs that generate normal Narrative Quests |
 | 33 | [Territory Asset Creation Menu](33_Territory_Asset_Creation_Menu.md) | Dedicated Add/New category for every Territory Definition, profile, recipe, and core Blueprint template |
 | 34 | [Quest-Owned Runtime Rules](34_Quest_Owned_Runtime_Rules.md) | Pause primary state/capture/counter rules while a Narrative Quest owns the story flow |
+| 35 | [Territory Conditions and Events](35_Territory_Conditions_and_Events.md) | Lock checks, All/Any groups, faction context and story wave filters |
+| 36 | [Dead NPC Collision](36_Dead_NPC_Collision.md) | Keep ragdoll bodies lootable without blocking the player or camera |
 
 ## Choose by role
 

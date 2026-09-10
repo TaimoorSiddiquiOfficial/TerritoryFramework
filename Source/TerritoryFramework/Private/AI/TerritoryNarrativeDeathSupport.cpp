@@ -3,6 +3,7 @@
 #include "AIController.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "AI/NarrativeNPCController.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
@@ -94,6 +95,13 @@ namespace TerritoryNarrativeDeathSupport
 
 	void FinalizePhysicalDeath(ANarrativeNPCCharacter& Character)
 	{
+		if (!Character.HasAuthority())
+		{
+			// A late join can receive death before its visual/BeginPlay initialization.
+			// Reuse the existing controller-free Native presentation adapter after setup
+			// so collision overrides do not leave a dead guard unlootable or marked alive.
+			UTerritoryBlueprintLibrary::UpdateNarrativeNPCClientDeathPresentation(&Character);
+		}
 		if (Character.HasAuthority())
 		{
 			if (AAIController* Controller = Cast<AAIController>(Character.GetController()))

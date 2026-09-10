@@ -323,6 +323,7 @@ void ATerritoryAssaultCharacter::OnCharacterVisualInitialized()
 			SetActorTransform(RestoredDeploymentTransform, false, nullptr, ETeleportType::TeleportPhysics);
 		}
 	}
+	ReconcileNarrativeDeathState(GetNarrativeAbilitySystemComponent(), false);
 }
 
 ETeamAttitude::Type ATerritoryAssaultCharacter::GetTeamAttitudeTowards(
@@ -392,6 +393,7 @@ void ATerritoryAssaultCharacter::BeginPlay()
 		}
 	}
 	ApplyNarrativeCollisionOverrides(*this);
+	ReconcileNarrativeDeathState(GetNarrativeAbilitySystemComponent(), false);
 }
 
 void ATerritoryAssaultCharacter::HandleDeath_Implementation(
@@ -404,6 +406,7 @@ void ATerritoryAssaultCharacter::HandleDeath_Implementation(
 		KilledActorASC, bIsDead);
 	if (bResolvedIsDead)
 	{
+		DeathCollisionState.Refresh(*this);
 		// Narrative's character death delegate can fire before the participant's
 		// readiness timer binds its own listener. Account the loss before activity
 		// cleanup or Narrative death callbacks can save the campaign.
@@ -411,11 +414,13 @@ void ATerritoryAssaultCharacter::HandleDeath_Implementation(
 		TerritoryNarrativeDeathSupport::PrepareForRemoval(*this);
 	}
 	Super::HandleDeath_Implementation(KilledActor, KilledActorASC, bResolvedIsDead);
+	DeathCollisionState.Refresh(*this);
 	if (!bResolvedIsDead)
 	{
 		return;
 	}
 	TerritoryNarrativeDeathSupport::FinalizePhysicalDeath(*this);
+	DeathCollisionState.Refresh(*this);
 	if (!HasValidDeathRagdollSetup())
 	{
 		UE_LOG(LogTerritory, Error,
@@ -430,8 +435,16 @@ void ATerritoryAssaultCharacter::ReconcileNarrativeDeathState(
 	if (TerritoryNarrativeDeathSupport::ResolveDeathState(
 		KilledActorASC, bReportedIsDead))
 	{
+		DeathCollisionState.Refresh(*this);
 		TerritoryNarrativeDeathSupport::FinalizePhysicalDeath(*this);
 	}
+	DeathCollisionState.Refresh(*this);
+}
+
+void ATerritoryAssaultCharacter::OnRep_bIsRagdoll()
+{
+	Super::OnRep_bIsRagdoll();
+	ReconcileNarrativeDeathState(GetNarrativeAbilitySystemComponent(), false);
 }
 
 void ATerritoryAssaultCharacter::SetRagdoll(const bool bWantsRagdoll)

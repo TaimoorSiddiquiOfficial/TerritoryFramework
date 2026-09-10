@@ -1,10 +1,65 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-09 (Territory Narrative conditions and events)
+> **Reviewed:** 2026-09-10 (dead defenders, assault ragdolls and camera collision)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### Dead guard collision audit — 2026-09-10
+
+The reported defenders and assault NPCs were already using Native ragdoll and
+pelvis physics, but their upright capsules and meshes still blocked the Camera
+channel. Territory now ignores Pawn and Camera collision on corpses and disables
+stepping onto them. Ground collision, Native physics and loot remain enabled.
+Existing death, ragdoll, BeginPlay and visual-ready hooks apply this local policy;
+revival restores the original runtime settings. No save fields or replicated
+death authority were added. See [dead NPC collision](36_Dead_NPC_Collision.md).
+
+TDA's replacement `BP_TerritoryAssualtGuard` also had a disconnected Is Dead input
+on its parent death call. That wire is repaired. A fresh-client test found that
+late visual initialization could reset corpse loot collision. The existing Native
+client-death presentation adapter now runs after those setup hooks as well.
+
+The rebuilt UE 5.8 live check passed on a server, two connected clients and a
+fresh late join: both corpse types simulate their pelvis bodies, settle onto the
+floor, ignore player/camera collision and remain lootable. All six initial and
+eight late-join corpse observations passed. Walking across a fallen defender
+recorded 15 movement samples with zero player or camera height change. The killed
+attacker contributed no capture participation; Native corpse records were removed,
+and the temporary verification save was deleted.
+
+Both UE 5.8 TDA and the isolated UE 5.7 host pass all 304 automation tests, with
+zero failures or skipped tests. The new corpse regression has zero warnings.
+Editor, Development and Shipping builds pass on both engines. The suites include
+Native save/load, authority, casualty, streaming-order and Blueprint contracts;
+the live checks above cover the actual replicated project NPCs.
+
+TDA validation checked 244 assets and compiled 147 Blueprints with zero errors.
+Eight existing appearance and dialogue-camera warnings remain. The refreshed
+UE 5.8 cook, stage and package passed, followed by a 60-second Development Game
+server-mode startup with exit zero. This is not a separate compiled TDAServer
+binary or an AlMalik streaming certification. All 741 Narrative Pro source files
+still match the installed vendor copy.
+
+The next remaining work, in order:
+
+1. Run the actual AlMalik World Partition stream-out/stream-in scenario with a
+   Place, its guard posts and an active finite assault.
+2. Finish the full multiplayer capture, guard recruitment, assault defeat and
+   exact-once reward playthrough. Separate Server binaries need an engine with
+   Server target support; the packaged Game listener is already a tested topology.
+3. Complete authored-road obstruction, damage abandonment and carjacking checks.
+   Resolve the tracked Native attack-query, weapon, decal and activity warnings
+   through project or plugin adapters. Guard the optional demo intro cutscene.
+4. Finish UDS visual and frame-rate checks in the actual story map, including
+   daytime, night, interiors, fog and shadows.
+5. Author Hashir's Act 1 quests and dialogue. Decide later Blacksmith retake
+   encounters, peaceful handover and Farm's actual story reward as needed.
+
+The older published preview remains unchanged. These later corrections belong
+in the next verified release. Optional engineering ideas below are not claims
+that a required gameplay path is missing.
 
 ### Narrative condition and event audit — 2026-09-09
 
@@ -395,7 +450,7 @@ current build receipts or a claim that all release gates are closed.
   menu, removed the authored row's default button caption, and corrected Blueprint vehicle-seat
   discovery in data validation. Blacksmith's Claimed soundtrack uses the selected Unity in the
   Ashes track through a project-owned Narrative music set.
-- The documentation learning path is uniquely numbered from 00 to 34. Reports and tutorials
+- The documentation learning path is uniquely numbered from 00 to 36. Reports and tutorials
   are separate appendices.
 
 ## Release verification status

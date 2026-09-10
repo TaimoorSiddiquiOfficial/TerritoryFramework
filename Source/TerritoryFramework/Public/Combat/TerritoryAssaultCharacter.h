@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "AI/TerritoryDeathCollisionState.h"
 #include "TerritoryAssaultCharacter.generated.h"
 
 class UNPCDefinition;
@@ -98,6 +99,8 @@ public:
 	TObjectPtr<UTerritoryDiplomacyDialogueComponent> DiplomacyDialogue;
 
 protected:
+	FTerritoryDeathCollisionState DeathCollisionState;
+	virtual void OnRep_bIsRagdoll() override;
 	virtual void OnCharacterVisualInitialized() override;
 	bool bRestoreDeploymentTransformAfterNativeLoad = false;
 	bool bReloadSavedAttributesAfterBeginPlay = false;

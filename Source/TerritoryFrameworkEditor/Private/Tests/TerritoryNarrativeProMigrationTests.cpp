@@ -287,6 +287,22 @@ bool FTFNarrativePro242MigrationContract::RunTest(const FString& Parameters)
 
 	UBlueprint* TerritoryGuard = LoadBlueprint(
 		TEXT("/TerritoryFramework/AI/BP_TerritoryGuard.BP_TerritoryGuard"));
+	// TDA's replacement assault Blueprint must forward the Native 2.4 death flag.
+	// Portable consumers may not include this project-specific asset.
+	const TCHAR* ProjectAssaultPath = TEXT("/Game/TerritoryFramework/AI/BP_TerritoryAssualtGuard");
+	if (FPackageName::DoesPackageExist(ProjectAssaultPath))
+	{
+		UBlueprint* ProjectAssault = LoadBlueprint(ProjectAssaultPath);
+		const auto DeathCalls = FindCalls(ProjectAssault, TEXT("HandleDeath"));
+		TestEqual(TEXT("Project assault forwards death to its parent once"), DeathCalls.Num(), 1);
+		for (const UK2Node_CallFunction* Call : DeathCalls)
+		{
+			const UEdGraphPin* State = Call->FindPin(TEXT("bIsDead"));
+			TestTrue(TEXT("Project assault forwards the incoming Native death state"),
+				Cast<UK2Node_CallParentFunction>(Call) && State && State->LinkedTo.Num() == 1
+				&& State->LinkedTo[0]->PinName == TEXT("bIsDead"));
+		}
+	}
 	TestNotNull(TEXT("Territory guard Blueprint loads"), TerritoryGuard);
 	if (TerritoryGuard)
 	{

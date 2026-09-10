@@ -4,6 +4,7 @@
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "TerritoryGuardSpawnPoint.h"
 #include "Combat/TerritoryAssaultTargetPolicy.h"
+#include "AI/TerritoryDeathCollisionState.h"
 #include "TerritoryGuardCharacter.generated.h"
 
 class UNPCDefinition;
@@ -299,6 +300,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnCharacterVisualInitialized() override;
+	virtual void OnRep_bIsRagdoll() override;
 	virtual void ApplyActivityConfig_Implementation(UNPCActivityConfiguration* NPCActivityConfig) override;
 	virtual void HandleDeath_Implementation(AActor* KilledActor,
 		UNarrativeAbilitySystemComponent* KilledActorASC, const bool bIsDead) override;
@@ -316,6 +318,8 @@ public:
 	TWeakObjectPtr<AActor> LastDamagingInstigator;
 
 private:
+	FTerritoryDeathCollisionState DeathCollisionState;
+
 	UFUNCTION()
 	void HandleNarrativeDamagedBy(
 		UNarrativeAbilitySystemComponent* DamageCauserASC,
