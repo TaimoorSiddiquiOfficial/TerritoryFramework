@@ -75,13 +75,20 @@ void ATerritoryGuardSpawnPoint::PrepareForSave_Implementation()
 {
 	if (!HasAuthority()) return;
 	// SaveGame UPROPERTYs auto-serialized: CurrentReserveCount, PendingReserveSpawns, SavedActiveGuardCount
-	SavedActiveGuardCount = FMath::Clamp(GetActiveGuardCount(), 0, 1);
+	// A Place retires its physical guards when its cell leaves. Posts in other
+	// cells must keep the saved living slots until that owner returns, including
+	// when Native saves the still-loaded posts again in the meantime.
+	if (!IsWaitingForOwningTerritory())
+	{
+		SavedActiveGuardCount = FMath::Clamp(GetActiveGuardCount(), 0, 1);
+	}
 	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
 }
 
 void ATerritoryGuardSpawnPoint::Load_Implementation()
 {
 	if (!HasAuthority()) return;
+	bLoadedFromSave = true;
 	if (SavedActiveGuardCount > 1 || PendingReserveSpawns > 1)
 	{
 		if (ShouldLogGuardSaveLoad())
@@ -200,16 +207,13 @@ void ATerritoryGuardSpawnPoint::BeginPlay()
 		Territory->RefreshGarrisonSnapshot();
 	}
 
-	// Untagged points keep listening so a more-specific streamed territory can replace
-	// an earlier proximity match (for example, Property replacing City).
-	if (!OwnerTerritoryTag.IsValid() || !CachedTerritory.IsValid())
+	// Even a resolved tagged owner can unload independently and return as a new
+	// actor. Keep the registry subscription for the post's entire play lifetime.
+	if (UWorld* World = GetWorld())
 	{
-		if (UWorld* World = GetWorld())
+		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
-			if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
-			{
-				Registry->OnTerritoryRegistered.AddDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
-			}
+			Registry->OnTerritoryRegistered.AddUniqueDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
 		}
 	}
 }
@@ -238,18 +242,13 @@ void ATerritoryGuardSpawnPoint::OnTerritoryRegistered(ATerritoryVolume* Territor
 
 	if (OwnerTerritoryTag.IsValid())
 	{
-		if (!CachedTerritory.IsValid() && Territory->GetTerritoryTag() == OwnerTerritoryTag)
+		if (CachedTerritory.Get() != Territory && Territory->GetTerritoryTag() == OwnerTerritoryTag)
 		{
 			SetResolvedTerritory(Territory);
 			if (ShouldLogGuardSpawning())
 			{
 				UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s late-bound to territory %s"),
 					*GetName(), *OwnerTerritoryTag.ToString());
-			}
-
-			if (UTerritoryRegistrySubsystem* Registry = GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>())
-			{
-				Registry->OnTerritoryRegistered.RemoveDynamic(this, &ATerritoryGuardSpawnPoint::OnTerritoryRegistered);
 			}
 		}
 		return;
@@ -597,7 +596,10 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard,
 	});
 	// P1-N11: Keep saved count in sync after removal so subsequent queries
 	// (e.g. delta calculations in economy tick) see the correct active count.
-	SavedActiveGuardCount = ActiveGuards.Num();
+	if (Reason != EGuardRemovalReason::ManualRemoval || !IsWaitingForOwningTerritory())
+	{
+		SavedActiveGuardCount = ActiveGuards.Num();
+	}
 
 	// P1-04: Only queue reserve replacement when guard was killed.
 	// Manual removal, ownership change, load reconcile, and territory destruction
@@ -668,6 +670,11 @@ void ATerritoryGuardSpawnPoint::TryAutomaticReserveSpawn()
 {
 	if (!bAutoSpawnReserves || !HasPendingReserveSpawn())
 	{
+		return;
+	}
+	if (IsWaitingForOwningTerritory())
+	{
+		ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
 		return;
 	}
 
@@ -810,7 +817,17 @@ TArray<FTerritoryPatrolNode> ATerritoryGuardSpawnPoint::GetPatrolRoute() const
 
 ATerritoryVolume* ATerritoryGuardSpawnPoint::GetOwningTerritory() const
 {
-	return CachedTerritory.IsValid() ? CachedTerritory.Get() : nullptr;
+	return IsWaitingForOwningTerritory() ? nullptr : CachedTerritory.Get();
+}
+
+bool ATerritoryGuardSpawnPoint::IsWaitingForOwningTerritory() const
+{
+	const UWorld* World = GetWorld();
+	const UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!OwnerTerritoryTag.IsValid() || !Registry) return false;
+	const ATerritoryVolume* RegisteredOwner = Registry->GetTerritoryByTag(OwnerTerritoryTag);
+	return !RegisteredOwner || RegisteredOwner != CachedTerritory.Get();
 }
 
 bool ATerritoryGuardSpawnPoint::HasPatrolRoute() const

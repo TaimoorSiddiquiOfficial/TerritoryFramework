@@ -1,10 +1,33 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-10 (physical AlMalik streaming and Native actor persistence)
+> **Reviewed:** 2026-09-10 (independent guard-post cells and assault initialization gate)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### Independent guard-post cells — 2026-09-10
+
+Fixed four physical AlMalik findings: startup staffing becoming zero before posts
+load, tag-bound dead guards retaining their slots, free replacements on post
+reload, and lost garrison records/bindings when only the Place cell unloads.
+Posts retain their finite requests while waiting for their registered owner.
+No Native source, save schema, replicated field or Blueprint signature changed.
+
+Both engines pass all 306 tests and all six Editor/Development/Shipping builds.
+The server/two-client fixture verifies delayed posts, exact reserve spending,
+and a Native save while the Place is absent followed by two restored guards and
+six reserves. Validation checks 244 assets and 147 Blueprints with zero errors;
+eight existing warnings remain. The UE 5.8 package and 60-second Development Game
+server-mode startup pass with exit zero. Original map hashes are unchanged, and
+temporary assets and saves were removed. See [evidence](ALMALIK_POST_CELLS_2026-09-10.md).
+
+The next blocker is the project assault NPC's missing Narrative character visual.
+Fresh capture-enabled attempts withdraw after the existing 20-second initialization
+limit, before streaming begins. Its definition, controller and activity component
+exist. Trace the Native definition/appearance callback and the project Blueprint;
+the cause is not yet established. Do not treat force counts alone as a passed
+physical assault test. City-wide navigation and a returning client remain open.
 
 ### AlMalik actor persistence — 2026-09-10
 
@@ -26,11 +49,10 @@ match the vendor. The refreshed UE 5.8 package and 60-second Game server-mode
 startup pass; the existing missing cutscene-player warning remains. See
 [evidence and limits](ALMALIK_STREAMING_2026-09-10.md).
 
-The finite-assault part remains open: the loaded fixture area has no
-NavMeshBoundsVolume or RecastNavMesh, and five navigation projections fail.
-The existing route gate correctly cancels the request. Add and build navigation
-for the test area, then test a finite assault and posts in separate cells.
-Do not bypass the route gate. AlMalik also reports existing power-line, catenary
+At this earlier checkpoint, the fixture had no navigation and the route gate
+correctly rejected the assault. Temporary bounds and a complete entry-to-Place
+path are now built for verification; the next gate is described above.
+AlMalik also reports existing power-line, catenary
 Arrow and cinematic-overlay Blueprint errors during multiplayer startup.
 
 The fixture was temporary. Original AlMalik and HopDistrictTest map hashes are
@@ -75,9 +97,9 @@ still match the installed vendor copy.
 
 The next remaining work, in order:
 
-1. Build AlMalik navigation for the verification area, then finish finite-assault
-   streaming and independently unloaded post cells. The Place/guard cell cycle
-   now passes on a server and two clients.
+1. Resolve the project assault NPC's missing visual/definition initialization, then
+   repeat capture-enabled assault streaming and a returning-client check. The
+   temporary navigation path and independently streamed guard-post save tests pass.
 2. Finish the full multiplayer capture, guard recruitment, assault defeat and
    exact-once reward playthrough. Separate Server binaries need an engine with
    Server target support; the packaged Game listener is already a tested topology.

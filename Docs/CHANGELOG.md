@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — 2026-09-10 (Independent guard-post cells)
+
+- Keep authored guard capacity and initial staffing when a Place loads before its posts.
+- Release tag-bound guard slots immediately on Native death and queue one finite replacement.
+- Restore saved living occupants when a post returns; do not replace casualties for free.
+- Preserve post records and pending reserves when the owner cell is absent, and rebind a returning Place actor.
+- Add Native save/load, authority, delayed-post, replacement-owner and casualty regression coverage.
+
+See [AlMalik post-cell verification](ALMALIK_POST_CELLS_2026-09-10.md) for evidence and remaining limits.
+
 ## 0.3.0-preview.1 — Community content and field help
 
 - Added help text to 991 previously undocumented reflected properties and functions,

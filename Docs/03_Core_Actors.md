@@ -48,7 +48,7 @@ strategic value, management points, and command rights.
 | GuardNPCDefinition | NPCDefinition* | — | NPC template for guards |
 | FactionGuardDefinitions | Array<FTerritoryFactionGuardDefinition> | — | Per-faction NPC definition overrides |
 | GuardSpawnCount | int32 | 3 | Authored initial target for existing ownership and non-player capture |
-| GuardSpawnPoints | Array<ATerritoryGuardSpawnPoint*> | — | Explicit posts; their unique union with tag/proximity posts is the exact active capacity, one guard per point |
+| GuardSpawnPoints | Array<ATerritoryGuardSpawnPoint*> | — | Explicit loaded posts join tag/proximity posts for deployment. Definition post identities retain capacity while cells are unloaded; each slot holds one guard. |
 
 To start locked, set **Initial Availability = Locked** in the Definition, then put quest or diplomacy
 requirements in `State Configs -> Locked -> Exit Conditions`. The former `bStartsLocked`,

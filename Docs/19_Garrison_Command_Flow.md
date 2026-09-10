@@ -112,7 +112,7 @@ Dynamic option lists are rebuilt only when the District/Property set changes, so
 - `FTerritoryGarrisonSnapshot` replicates active, desired, maximum, reserve, and pending counts with one RepNotify delegate.
 - `OwnershipData` persists desired count, recurring guard cost, and recruitment price through the Narrative save interface.
 - Spawn points persist stable editor GUID, reserve, pending, and active restoration counts; invalid GUIDs are never replaced at runtime, and live actor pointers are never campaign state. Legacy per-post active/pending counts above one are bounded to the new one-slot contract on load.
-- Explicit-array and `OwnerTerritoryTag`/proximity posts form one unique runtime union. Each loaded point contributes exactly one active slot, so World Partition registration order cannot duplicate capacity or defence.
+- Explicit-array and `OwnerTerritoryTag`/proximity posts form one loaded deployment union. Definition post identities retain maximum capacity while cells are absent, without counting their returning actors twice. Actual guards still require loaded posts. Reloading a saved casualty cannot hire a free replacement.
 - `ATerritoryWorldState` is the global replicated economy/transaction snapshot and calls `ForceNetUpdate` after rate/ledger changes.
 - Registration and hierarchy resolution tolerate World Partition load order; management accepts only the selected District or a currently loaded registered child Property.
 - Old saves retain their saved desired value, including legacy 3. Missing recruitment price migrates from `InitialGuardRecruitmentCost`. The player may immediately set an owned target to zero.

@@ -81,8 +81,10 @@ or leave the route empty for an intentional static sentry.
 - Tag/proximity-resolved posts register into the same `ATerritoryVolume::GetGuardSpawnPoints()` union and therefore contribute capacity, reserves, save reconciliation, and counterattack defence; they are not a second authority
 - Every placed post requires an editor-baked `SpawnPointGUID`. Runtime play logs an error and skips that post's Narrative save load when the GUID is invalid; it never invents a campaign identity at runtime
 - Authored references support spawn points intentionally placed outside territory bounds
-- each unique spawn point is exactly one active combat slot; the Territory's loaded
-  capacity is `GetGuardSpawnPoints().Num()`
+- Each unique post is one active combat slot. `GetMaxGuardCount()` counts stable
+  Definition post identities, including unloaded cells, plus loaded legacy posts.
+  Matching actors are not counted twice. `GetGuardSpawnPoints()` supplies loaded
+  deployment locations; a missing actor cannot spawn a guard.
 - removed legacy `MaxGuards`, Territory `MaxGuardCount`, and `GuardSpawnRadius` authoring;
   add or remove Guard Post rows to change capacity
 - normal recruitment never uses a random fallback or collision-driven relocation. A
@@ -93,6 +95,11 @@ or leave the route empty for an intentional static sentry.
   defence even if posts retain saved replacement stock
 - Initial population uses `HasAvailableSlot()` only — reserves not consumed
 - When a guard dies: `UnregisterGuard()` queues one finite replacement only when active guards are below `DesiredGuardCount`
+- Reloading a post does not replace a dead guard for free. Its saved empty slot
+  stays empty until an existing reserve or recruitment action fills it.
+- When the Place unloads before its posts, those posts preserve saved living slots
+  and wait for the registered owner to return. A save during this wait does not
+  erase the garrison. Automatic reserve requests wait without spending stock.
 - Defender death delegates bind to Narrative's ASC on the server. If asynchronous NPC initialization has not exposed the ASC yet, the Territory retries every 0.25 seconds for up to 10 seconds; unregister/end-play cancels the retry and removes the exact delegate binding.
 - Lowering the desired target cancels pending reserve deployments; a delayed reserve can never raise the live garrison above the new target
 - `FTerritoryGarrisonSnapshot` replicates exact active, reserve, and pending-deployment counts without replicating live pawn pointers

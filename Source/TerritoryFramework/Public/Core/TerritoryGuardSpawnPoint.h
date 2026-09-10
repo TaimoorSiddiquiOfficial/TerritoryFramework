@@ -502,6 +502,9 @@ protected:
 	/** Set by initial provisioning or Narrative load; zero then means exhausted. */
 	bool bReserveStateInitialized = false;
 
+	/** Native loaded a durable slot record; an empty saved slot is not a fresh hire. */
+	bool bLoadedFromSave = false;
+
 	/** Ensure GUID is baked at editor time. */
 	void EnsurePersistentSpawnPointGUID();
 
@@ -513,6 +516,7 @@ private:
 	friend class FTFGuardSpawnAdmissionCallbacks;
 	friend class FTFGarrisonPurchaseCallbacks;
 	friend class FTFGuardReserveTotals;
+	friend class FTFIndependentGuardPostStreaming;
 #endif
 
 	/** Hidden serialized binding maintained by the Definition synchronizer. */
@@ -528,6 +532,8 @@ private:
 	ATerritoryVolume* FindPlacementOrPatrolTerritory(
 		class UTerritoryRegistrySubsystem* Registry) const;
 	void ResolveOwningTerritory();
+	/** Registry absence pauses a tagged post without erasing its saved occupants. */
+	bool IsWaitingForOwningTerritory() const;
 	void InitializeReserves();
 	void QueueReserveSpawn();
 	void ScheduleAutomaticReserveSpawn(float Delay);

@@ -124,7 +124,7 @@ values for runtime queries; it is not a supported Blueprint authoring fallback.
 | FactionGuardDefinitions | TArray<FTerritoryFactionGuardDefinition> | Territory\|Guards | — | — | Per-faction NPC definition overrides |
 | GuardSpawnCount | int32 | Territory\|Guards | — | — | Authored initial target for non-player captures |
 | PostCaptureGarrisonPolicy | ETerritoryPostCaptureGarrisonPolicy | Territory\|Guards | — | — | Default `PlayerChooses` starts captures by a resolved matching live Narrative player faction at zero |
-| GuardSpawnPoints | TArray<ATerritoryGuardSpawnPoint*> | Territory\|Guards | — | — | Explicit post references; the unique resolved union is active capacity, one guard per point |
+| GuardSpawnPoints | TArray<ATerritoryGuardSpawnPoint*> | Territory\|Guards | — | — | Explicit loaded deployment posts; Definition identities preserve capacity across cell unloading |
 | ControlMode | ETerritoryControlMode | Definition asset | — | — | Class-fixed: Place Independent; City/District AggregateOnly |
 | StateConfigs | TMap<ETerritoryState, FTerritoryStateConfig> | Definition asset | — | — | Per-state entry/exit conditions/events, cloned privately into each live actor |
 | bShowGameplayHUD | bool | Definition asset, `09 Presentation` | — | — | Shows only the passive Territory HUD card for this exact Territory; City defaults false, District/Place true |
@@ -173,7 +173,7 @@ removed. Definitions use `InitialAvailability` and the Locked row's Exit Conditi
 | ShouldShowGameplayHUD | bool | Territory\|UI |
 | GetActiveTerritoryAudioConfig(OutConfig) | bool | Territory\|Audio |
 | GetDesiredGuardCount | int32 | Territory\|Guards |
-| GetMaxGuardCount | int32 | Territory\|Guards (unique loaded spawn-point count) |
+| GetMaxGuardCount | int32 | Territory\|Guards (unique Definition post identities plus loaded legacy slots; one guard per slot) |
 | GetPostCaptureGuardCount | int32 | Territory\|Guards |
 | GetGarrisonSnapshot | FTerritoryGarrisonSnapshot | Territory\|Guards |
 | GetGuardRecruitmentCost | int32 | Territory\|Guards |

@@ -1059,8 +1059,28 @@ int32 ATerritoryVolume::GetMaxGuardCount() const
 		return FMath::Max(0, GarrisonSnapshot.MaximumGuards);
 	}
 
-	const TArray<ATerritoryGuardSpawnPoint*> AuthoredSpawnPoints = GetGuardSpawnPoints();
-	return AuthoredSpawnPoints.Num();
+	// The Definition owns physical slot identities even while their actors are in
+	// unloaded cells. Counting only registered actors would seed a permanent zero
+	// staffing target when the Place begins play before its posts.
+	TSet<FGuid> SlotIDs;
+	if (TerritoryDefinition)
+	{
+		for (const FTerritoryGuardPostTemplate& Post : TerritoryDefinition->GuardPosts)
+		{
+			if (!Post.GuardPostID.IsNone() && Post.StableGuardPostGUID.IsValid())
+			{
+				SlotIDs.Add(Post.StableGuardPostGUID);
+			}
+		}
+	}
+	int32 UnidentifiedLoadedSlots = 0;
+	for (ATerritoryGuardSpawnPoint* Post : GetGuardSpawnPoints())
+	{
+		const FGuid ID = Post->GetActorGUID_Implementation();
+		if (ID.IsValid()) SlotIDs.Add(ID);
+		else ++UnidentifiedLoadedSlots;
+	}
+	return SlotIDs.Num() + UnidentifiedLoadedSlots;
 }
 
 int32 ATerritoryVolume::GetPostCaptureGuardCount(
@@ -2322,7 +2342,7 @@ void ATerritoryVolume::OnTerritoryInitialized_Implementation()
 void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	UNarrativeAbilitySystemComponent* KilledASC, const bool bIsDead)
 {
-	if (!bIsDead) return;
+	if (!HasAuthority() || !bIsDead) return;
 	// Early return if nothing useful — actor already GC'd or delegate fired with null.
 	if (!KilledActor && !KilledASC) return;
 	// Death hooks describe registered Territory defenders. Reject a duplicate or
@@ -2372,9 +2392,16 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	// satisfy the same request without racing a synchronous automatic spawn.
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
 	{
-		for (const TObjectPtr<AActor>& SPActor : GuardSpawnPoints)
+		TArray<ATerritoryGuardSpawnPoint*> Posts = GetGuardSpawnPoints();
+		// The bound post may itself be streamed out. Its living pawn still carries
+		// the binding, and its finite reserve must receive this death exactly once.
+		if (IsValid(Guard->OwningTerritorySpawnPoint))
 		{
-			if (ATerritoryGuardSpawnPoint* SP = Cast<ATerritoryGuardSpawnPoint>(SPActor))
+			Posts.AddUnique(Guard->OwningTerritorySpawnPoint);
+		}
+		for (ATerritoryGuardSpawnPoint* SP : Posts)
+		{
+			if (IsValid(SP))
 			{
 				SP->UnregisterGuard(Guard);
 			}
@@ -2837,7 +2864,7 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 	if (SpawnPointActors.IsEmpty())
 	{
 		UE_LOG(LogTerritory, Warning,
-			TEXT("SpawnGuards: %s has no authored guard spawn points; capacity is zero"),
+			TEXT("SpawnGuards: %s has no loaded guard spawn points; deployment waits for its authored posts"),
 			*GetTerritoryTag().ToString());
 		return;
 	}
@@ -3752,9 +3779,14 @@ void ATerritoryVolume::RegisterResolvedGuardSpawnPoint(ATerritoryGuardSpawnPoint
 	if (HasAuthority() && HasActorBegunPlay())
 	{
 		if (OwnershipData.State == ETerritoryState::Claimed
-			&& GetSpawnedGuardCount() < GetDesiredGuardCount())
+			&& GetSpawnedGuardCount() < GetDesiredGuardCount()
+			&& (!SpawnPoint->bLoadedFromSave
+				|| SpawnPoint->GetSavedActiveGuardCount() > SpawnPoint->GetActiveGuardCount()))
 		{
-			SpawnGuardsToCount(GetDesiredGuardCount());
+			// A returning empty post is a casualty, not a new recruitment request.
+			// Restore this post only; filling the whole garrison here would also
+			// replace casualties at unrelated posts for free.
+			TrySpawnSingleGuard(SpawnPoint, false);
 		}
 		RefreshGarrisonSnapshot();
 	}
