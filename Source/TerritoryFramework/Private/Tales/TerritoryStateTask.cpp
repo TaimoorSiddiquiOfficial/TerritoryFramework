@@ -138,6 +138,10 @@ bool UTerritoryStateTask::IsObjectiveSatisfiedBy(
 		return Territory->GetTerritoryState() == ETerritoryState::Claimed;
 	case ETerritoryStateTaskObjective::AllDefendersDefeated:
 		return Territory->GetDefenderCount() == 0
+			// Initial evaluation must agree with the authoritative defeat event.
+			// A replacement delay is still part of the fight. Use the replicated
+			// garrison view so Blueprint previews also work without client-side posts.
+			&& Territory->GetGarrisonSnapshot().PendingDeployments == 0
 			&& (Territory->GetDesiredGuardCount() > 0
 				|| Territory->GetConfiguredGuardCount() > 0);
 	case ETerritoryStateTaskObjective::ReachDesiredGarrison:

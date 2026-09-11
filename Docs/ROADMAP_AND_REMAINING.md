@@ -1,10 +1,41 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-10 (Native readiness correction; cold appearance load and post-load defeat blockers)
+> **Reviewed:** 2026-09-11 (state, stealth, reserve AI and Narrative task audit)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### State, stealth and finite reserves — 2026-09-11
+
+Fixed the initial All Defenders Defeated task check accepting zero living guards
+while replacements are queued. It now uses the existing garrison snapshot.
+The regression covers Native deaths, pending-post save/load, a streamed replacement
+owner, client read models and failure paths. Verification results are recorded in
+[the current audit](STATE_STEALTH_RESERVE_AUDIT_2026-09-11.md).
+
+Open findings in this newly requested scope:
+
+- Replacement guards can perceive the player but lack Native attack goals. A manual
+  safe parent refresh restored combat; the exact missed lifecycle callback remains open.
+- Anonymous clues can expose the player without a confirming observer.
+- Quest overrides can pause the War event while the guard combat gate requires War.
+- Local Alarm skips investigation on immediate exposure; outside shooters are
+  rejected by the stealth observer's bounds gate; clearing exposure does not
+  reconcile existing contest registration.
+- Capture-versus-pending-reserve and missing-post defeat checks need further proof.
+- Add the requested reserve Narrative event through existing finite post commands.
+- Connect hand-authored quest conditions through the existing condition task, and
+  document/use Native data-task adapters instead of expecting a new Data Asset to
+  observe gameplay automatically.
+- Adapt Native data-task listener cleanup: its supplied task clears all listeners
+  when ending, and live notifications count one even for bulk record quantities.
+
+Next coherent batch: repair perception-to-goal delivery on fresh and restored
+guards, then implement the shared configurable evidence/response rules described
+in the audit. Preserve per-player stealth, Native factions, explicit story waves
+and autonomous physical assaults. The September 10 appearance, crash and returning
+client blockers below remain open. Release artifacts and Act 1 work remain gated.
 
 ### Native appearance readiness — 2026-09-10
 

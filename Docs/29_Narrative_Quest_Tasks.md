@@ -87,6 +87,10 @@ Completes from the authoritative **On All Defenders Defeated** transition. A ran
 NPC death cannot complete it. Pending replacements must also be exhausted according to the normal
 Territory defender flow.
 
+The initial **Complete If Already Satisfied** check also waits for queued reserves.
+For example, zero living guards with three replacements waiting is not a completed
+fight. Unused reserves with no queued deployment do not block completion.
+
 Easy example: use this before a neutral Blacksmith owner begins the handover dialogue.
 
 ### Assign Guards to Territory

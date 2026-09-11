@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased — 2026-09-11 (Defender task and related-system audit)
+
+- Keep the initial All Defenders Defeated task check pending while finite reserve
+  replacements are queued, matching the existing Territory defeat event.
+- Extend the Native death/save/load and streamed-post regression with quest
+  previews, client read models, reserve cancellation and invalid targets.
+- Record the related stealth, diplomacy, reserve-goal and Narrative task findings
+  and a plan for configurable evidence and responses.
+
+See [state and stealth audit](STATE_STEALTH_RESERVE_AUDIT_2026-09-11.md).
+
 ## Unreleased — 2026-09-10 (Narrative appearance readiness)
 
 - Wait for Narrative's complete definition and base-appearance loading before starting an assault goal.

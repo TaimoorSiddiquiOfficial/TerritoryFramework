@@ -13,6 +13,7 @@
 #include "NarrativeSave.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Tales/TerritoryStateTask.h"
 #include "UObject/UnrealType.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFIndependentGuardPostStreaming,
@@ -133,6 +134,61 @@ bool FTFIndependentGuardPostStreaming::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Streaming leaves the untouched reserve alone"), Posts[1]->GetReserveCount(), 3);
 	TestFalse(TEXT("Native load marker adds no Blueprint API"),
 		Posts[0]->GetClass()->FindFunctionByName(TEXT("SetLoadedFromSave")) != nullptr);
+
+	// A task reached during the replacement delay must not skip the remaining
+	// fight. Exercise real Native death and save records on the streamed owner.
+	auto* DefeatTask = NewObject<UTerritoryStateTask>();
+	DefeatTask->TargetTerritory = Definition->TerritoryTag;
+	DefeatTask->Objective = ETerritoryStateTaskObjective::AllDefendersDefeated;
+	TestFalse(TEXT("Living restored defenders block the defeat task"),
+		DefeatTask->IsObjectiveSatisfiedBy(ReturnedPlace));
+	for (ATerritoryGuardSpawnPoint* Post : Posts)
+	{
+		ATerritoryGuardCharacter* Guard = Post->ActiveGuards[0].Get();
+		UNarrativeAbilitySystemComponent* GuardASC = Guard->GetNarrativeAbilitySystemComponent();
+		FindFProperty<FBoolProperty>(GuardASC->GetClass(), TEXT("bIsDead"))
+			->SetPropertyValue_InContainer(GuardASC, true);
+		GuardASC->OnDeathStateChanged.Broadcast(Guard, GuardASC, true);
+	}
+	TestEqual(TEXT("Both restored defenders are removed by Native death"),
+		ReturnedPlace->GetDefenderCount(), 0);
+	TestEqual(TEXT("Both finite replacements remain pending"),
+		ReturnedPlace->GetGarrisonSnapshot().PendingDeployments, 2);
+	TestFalse(TEXT("Initial task evaluation waits during the reserve spawn delay"),
+		DefeatTask->IsObjectiveSatisfiedBy(ReturnedPlace));
+	TArray<FNarrativeActorRecord> PendingRecords;
+	for (ATerritoryGuardSpawnPoint* Post : Posts)
+	{
+		FNarrativeActorRecord& Record = PendingRecords.AddDefaulted_GetRef();
+		TestTrue(TEXT("Native save records the pending defence"), Save->CreateActorRecord(Post, Record));
+		Post->CancelPendingReserveSpawns();
+	}
+	ReturnedPlace->RefreshGarrisonSnapshot();
+	TestTrue(TEXT("Unused reserves alone do not block a completed fight"),
+		DefeatTask->IsObjectiveSatisfiedBy(ReturnedPlace));
+	for (int32 Index = 0; Index < Posts.Num(); ++Index)
+	{
+		Save->LoadActorFromRecord(Posts[Index], PendingRecords[Index]);
+	}
+	ReturnedPlace->RefreshGarrisonSnapshot();
+	TestEqual(TEXT("Native restore returns both queued replacements"),
+		ReturnedPlace->GetGarrisonSnapshot().PendingDeployments, 2);
+	TestFalse(TEXT("A task reached after load still waits for reserves"),
+		DefeatTask->IsObjectiveSatisfiedBy(ReturnedPlace));
+	ReturnedPlace->SetRole(ROLE_SimulatedProxy);
+	for (ATerritoryGuardSpawnPoint* Post : Posts) Post->CancelPendingReserveSpawns();
+	ReturnedPlace->RefreshGarrisonSnapshot();
+	TestFalse(TEXT("Client preview uses the server snapshot rather than local post state"),
+		DefeatTask->IsObjectiveSatisfiedBy(ReturnedPlace));
+	ReturnedPlace->SetRole(ROLE_Authority);
+	ReturnedPlace->RefreshGarrisonSnapshot();
+	TestTrue(TEXT("Server cancellation allows the read-only defeat objective"),
+		DefeatTask->IsObjectiveSatisfiedBy(ReturnedPlace));
+	TestFalse(TEXT("Missing Territory never satisfies the task"),
+		DefeatTask->IsObjectiveSatisfiedBy(nullptr));
+	DefeatTask->TargetTerritory = FGameplayTag();
+	TestFalse(TEXT("A different target cannot satisfy the task"),
+		DefeatTask->IsObjectiveSatisfiedBy(ReturnedPlace));
 	return true;
 }
 
