@@ -6,6 +6,21 @@
 
 ## Current checkpoint
 
+### Tagged guards and overheard story conversations — 2026-09-11
+
+Added the requested defender/assault story participation to the remaining plan:
+role GameplayTags, optional faction filters, current quest/district context,
+proximity while the player stays hidden, two guards talking at a patrol stop,
+combat interruption and return to their own duties. Implementation is pending.
+See [the source audit and acceptance checklist](GUARD_STORY_CONVERSATIONS.md).
+
+Native tagged dialogue is already assigned to both TDA guard definitions. The
+coordinated scene still needs exact multi-speaker binding, preserved client
+bindings and one server-owned story result. The supplied patrol Activity Tag is
+copied but not consumed by either patrol Blueprint. Add its real activity hook
+with this work. Repair the AI/stealth findings below before wiring the example;
+do not mask idle combat or make an overheard conversation reveal the player.
+
 ### State, stealth and finite reserves — 2026-09-11
 
 Fixed the initial All Defenders Defeated task check accepting zero living guards

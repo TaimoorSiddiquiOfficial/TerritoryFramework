@@ -1,5 +1,9 @@
 # Story NPC setup
 
+For the requested tagged defender/assault conversations that a hidden player can
+overhear, see [guard story conversations](GUARD_STORY_CONVERSATIONS.md). That page
+separates existing Native greetings from the still-pending multi-guard scene work.
+
 Use `BP_TerritoryStoryNPC` as the parent of a project story NPC. It inherits
 Narrative's `BP_NarrativeNPC`, including its combat, inventory, appearance and
 save behavior. It does not copy or change Narrative graphs.
