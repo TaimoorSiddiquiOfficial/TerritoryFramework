@@ -134,9 +134,9 @@ to bind the same speakers without replaying story events.
 
 ## Work order and acceptance checks
 
-- [ ] Repair the outstanding perception-to-goal and stealth response defects in
-  [the state audit](STATE_STEALTH_RESERVE_AUDIT_2026-09-11.md). A scene must not hide
-  the existing reason a guard fails to react.
+- [x] Repair the perception-to-goal and stealth response defects. The September 11
+  stored-perception adapter and [September 12 response batch](DEFENDER_RESPONSE_AND_EXPOSURE_2026-09-12.md)
+  verify reserve combat, separate quest locks, outside damage and hidden players.
 - [ ] Implement tag-based participant binding and the explicit-context Narrative
   entry point, including duplicate-definition speakers and failure reasons.
 - [ ] Implement one proximity/patrol staging path through Native activities,

@@ -207,7 +207,7 @@ void UTerritoryStealthObserverComponent::HandleTargetPerceptionUpdated(
 	if (!Guard || !Guard->HasAuthority() || !Guard->IsAlive() || !FTerritoryNarrativeProAdapter::IsCharacterReady(Guard)
 		|| !Territory || !Target || !Profile || !Control
 		|| !Control->IsStealthInfiltrationEnabled(Territory)
-		|| !Territory->ContainsPoint(Target->GetActorLocation()))
+		|| (!Territory->ContainsPoint(Target->GetActorLocation()) && !Profile->bRespondToOutsideThreats))
 	{
 		return;
 	}
@@ -216,6 +216,8 @@ void UTerritoryStealthObserverComponent::HandleTargetPerceptionUpdated(
 		UAIPerceptionSystem::GetSenseClassForStimulus(this, Stimulus);
 	if (SenseClass == UAISense_Sight::StaticClass())
 	{
+		// Seeing an owned projectile or distraction is not seeing its hidden owner.
+		if (Target != SensedActor) return;
 		// Visibility callbacks add no elapsed sight time. The timer samples Native's
 		// current store, including strength changes that do not produce another edge.
 		ReportSight(Target, Stimulus, 0.f);
@@ -312,7 +314,9 @@ void UTerritoryStealthObserverComponent::ReportSight(AActor* Target,
 		|| !IsValid(Target) || !Territory || !Profile || !Control) return;
 	ObservedTerritory = Territory;
 	const bool bValidSight = Stimulus.WasSuccessfullySensed() && !Stimulus.IsExpired()
-		&& FMath::IsFinite(Stimulus.Strength) && Territory->ContainsPoint(Target->GetActorLocation());
+		&& FMath::IsFinite(Stimulus.Strength)
+		&& (Territory->ContainsPoint(Target->GetActorLocation())
+			|| (Profile->bRespondToOutsideThreats && Control->IsInfiltratorExposed(Territory, Target)));
 	const float Strength = bValidSight ? CalculateEffectiveSightStrength(Target, Stimulus.Strength) : 0.f;
 	const bool bPointBlank = bValidSight && Stimulus.Strength > 0.f && ShouldForcePointBlankExposure(Target);
 	if (bValidSight)
@@ -356,7 +360,8 @@ void UTerritoryStealthObserverComponent::RefreshVisibleTargets()
 	for (AActor* Actor : VisibleActors)
 	{
 		if (AActor* Target = ResolvePlayerSource(Actor); Target && Target == Actor
-			&& Territory->ContainsPoint(Actor->GetActorLocation())) Targets.Add(Target);
+			&& (Territory->ContainsPoint(Actor->GetActorLocation())
+				|| (Profile->bRespondToOutsideThreats && Control->IsInfiltratorExposed(Territory, Target)))) Targets.Add(Target);
 	}
 	// Report from a copy: exposure events may remove targets or destroy this guard.
 	for (const TWeakObjectPtr<AActor>& Target : Targets)

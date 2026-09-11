@@ -1287,13 +1287,13 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
 	if (!HasAuthority() || !World || !Control || !bStoryCaptureFromBounds
 		|| ControlMode != ETerritoryControlMode::Independent
-		|| !IsAvailableForGameplay()
-		|| IsPrimaryRuntimeRuleSuspendedWithContext(
-			ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr))
+		|| !IsAvailableForGameplay())
 	{
 		ReleaseStoryBoundsContesters();
 		return;
 	}
+	const bool bCapturePaused = IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr);
 
 	TSet<TWeakObjectPtr<AActor>> SeenInside;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
@@ -1332,7 +1332,7 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 		if (const FGameplayTag* PreviousFaction = StoryBoundsContesters.Find(PawnKey);
 			PreviousFaction && *PreviousFaction != Faction)
 		{
-			Control->UnregisterAttacker(this, Pawn, *PreviousFaction);
+			Control->UnregisterStoryBoundsContester(this, Pawn, *PreviousFaction);
 			StoryBoundsContesters.Remove(PawnKey);
 		}
 
@@ -1347,6 +1347,8 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 			if (!bMayEscalateToContest
 				|| !Control->IsInfiltratorExposed(this, Pawn))
 			{
+				Control->UnregisterStoryBoundsContester(this, Pawn, Faction);
+				StoryBoundsContesters.Remove(PawnKey);
 				continue;
 			}
 		}
@@ -1355,7 +1357,13 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 			Control->UnregisterInfiltrator(this, Pawn);
 		}
 
-		if (Control->TryRegisterContester(this, Pawn, Faction))
+		if (bCapturePaused)
+		{
+			// A quest capture lock does not erase what the guards already know.
+			Control->UnregisterStoryBoundsContester(this, Pawn, Faction);
+			StoryBoundsContesters.Remove(PawnKey);
+		}
+		else if (Control->TryRegisterStoryBoundsContester(this, Pawn, Faction))
 		{
 			StoryBoundsContesters.Add(PawnKey, Faction);
 		}
@@ -1383,14 +1391,19 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 		{
 			if (const FGameplayTag* Faction = StoryBoundsContesters.Find(Participant))
 			{
-				Control->UnregisterAttacker(this, Actor, *Faction);
+				Control->UnregisterStoryBoundsContester(this, Actor, *Faction);
 			}
 		}
 		if (AActor* Actor = Participant.Get())
 		{
 			if (StoryBoundsInfiltrators.Contains(Participant))
 			{
-				Control->UnregisterInfiltrator(this, Actor);
+				const UTerritoryStealthProfile* Profile = GetActiveStealthProfile();
+				const bool bKeepOutsideExposure = !ContainsPoint(Actor->GetActorLocation())
+					&& Profile && Profile->bRespondToOutsideThreats
+					&& Control->IsStealthInfiltrationEnabled(this)
+					&& Control->IsInfiltratorExposed(this, Actor);
+				if (!bKeepOutsideExposure) Control->UnregisterInfiltrator(this, Actor);
 			}
 		}
 		StoryBoundsInfiltrators.Remove(Participant);
@@ -1409,7 +1422,7 @@ void ATerritoryVolume::ReleaseStoryBoundsContesters()
 		{
 			if (AActor* Participant = Pair.Key.Get())
 			{
-				Control->UnregisterAttacker(this, Participant, Pair.Value);
+				Control->UnregisterStoryBoundsContester(this, Participant, Pair.Value);
 			}
 		}
 		for (const TPair<TWeakObjectPtr<AActor>, FGameplayTag>& Pair : StoryBoundsInfiltrators)

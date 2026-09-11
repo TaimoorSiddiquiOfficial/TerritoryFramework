@@ -64,20 +64,24 @@ public:
 
 	/**
 	 * Contextual Narrative attitude for a stationary Territory defender.
-	 * A target is Hostile during Contested defence or an active physical assault
-	 * against its defence front, with an exact faction pair at War. Seeing a neutral
-	 * player walking through a Claimed Place therefore never starts combat.
+	 * Uses Narrative personal hostility, per-player exposure, active assaults and
+	 * Territory diplomacy. Capture/State Event quest pauses do not disable defence.
 	 */
 	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
 
 	/**
 	 * Readable version of the Territory guard combat gate for Blueprint/debug UI.
 	 * Active hostile assailants can be engaged before capture becomes Contested.
-	 * Ordinary visitors still require Contested + War.
+	 * Hidden players are not exposed by another player's contest. Treaties and the
+	 * separate Defender Combat quest override still block combat.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Guard|Combat",
 		meta=(DisplayName="Can Engage Territory Target"))
 	bool CanEngageTerritoryTarget(const AActor* Target) const;
+
+	/** Read the same server combat decision used by Narrative AI, with an easy-English reason. Clients do not own guard perception or personal-hostility records. */
+	UFUNCTION(BlueprintPure, Category="Territory|Guard|Combat")
+	bool EvaluateTerritoryTarget(const AActor* Target, FText& OutReason) const;
 
 	/**
 	 * Adds or refreshes a transient Narrative investigation goal. Combat goals keep

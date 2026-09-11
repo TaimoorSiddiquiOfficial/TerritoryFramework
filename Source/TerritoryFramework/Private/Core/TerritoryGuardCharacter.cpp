@@ -11,6 +11,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
+#include "Subsystems/TerritoryControlSubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/TerritoryNPCController.h"
@@ -276,27 +277,31 @@ ETeamAttitude::Type ATerritoryGuardCharacter::GetTeamAttitudeTowards(
 
 bool ATerritoryGuardCharacter::CanEngageTerritoryTarget(const AActor* Target) const
 {
-	if (!IsValid(Target) || Target == this || !IsValid(OwningTerritory)
-		|| Target->GetWorld() != GetWorld() || Target->IsActorBeingDestroyed())
-	{
-		return false;
-	}
-	if (OwningTerritory->GetTerritoryState() != ETerritoryState::Contested)
-	{
-		// A physical hostile assault is already a threat before capture pressure
-		// changes the Place state. Waiting for Contested makes defence circular.
-		const ATerritoryAssaultCharacter* Attacker = Cast<ATerritoryAssaultCharacter>(Target);
-		const UTerritoryAssaultParticipantComponent* Participant = Attacker
-			? Attacker->AssaultParticipant : nullptr;
-		if (!Participant || Participant->HasRetired() || !Attacker->IsAlive()
-			|| !Attacker->CanEngageAssaultTarget(this)
-			|| !TerritoryAssaultTargetPolicy::BuildDefenceFront(
-				Participant->GetTargetTerritory()).Contains(OwningTerritory.Get()))
-		{
-			return false;
-		}
-	}
+	FText Reason;
+	return EvaluateTerritoryTarget(Target, Reason);
+}
 
+bool ATerritoryGuardCharacter::EvaluateTerritoryTarget(const AActor* Target, FText& OutReason) const
+{
+	auto Result = [&OutReason](bool bAllowed, const TCHAR* Reason)
+	{
+		OutReason = FText::FromString(Reason);
+		return bAllowed;
+	};
+	if (!HasAuthority()) return Result(false, TEXT("Guard combat is decided by the server."));
+	if (!IsValid(Target) || Target == this || !IsValid(OwningTerritory)
+		|| Target->GetWorld() != GetWorld() || Target->IsActorBeingDestroyed()
+		|| IsActorBeingDestroyed() || !IsAlive())
+	{
+		return Result(false, TEXT("The guard, target or owning Place is unavailable."));
+	}
+	if (const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(Target);
+		Character && !Character->IsAlive()) return Result(false, TEXT("The target is dead."));
+	if (OwningTerritory->IsPrimaryRuntimeRuleSuspendedWithContext(
+		ETerritoryQuestOverrideEffect::DefenderCombat, nullptr))
+	{
+		return Result(false, TEXT("A matching quest explicitly pauses defender combat."));
+	}
 	const INarrativeTeamAgentInterface* TargetTeam =
 		Cast<INarrativeTeamAgentInterface>(Target);
 	const UWorld* World = GetWorld();
@@ -308,8 +313,53 @@ bool ATerritoryGuardCharacter::CanEngageTerritoryTarget(const AActor* Target) co
 		? Disguises->ResolvePerceivedFactions(
 			Target, OwningTerritory, GetGuardFaction())
 		: TargetTeam ? TargetTeam->GetFactions() : FGameplayTagContainer();
-	return TargetTeam && Diplomacy
-		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetFactions);
+	const FGameplayTagContainer GuardFactions = GetFactions();
+	if (!TargetTeam || !Diplomacy || GuardFactions.IsEmpty() || TargetFactions.IsEmpty())
+		return Result(false, TEXT("Narrative faction identity or diplomacy is missing."));
+	if (GuardFactions.HasAnyExact(TargetFactions))
+		return Result(false, TEXT("The target belongs to the guard's perceived faction."));
+	// Protective relations win across multi-faction actors. One War pair must not
+	// override another pair's alliance, peace, trade, non-aggression or ceasefire.
+	for (const FGameplayTag& GuardFaction : GuardFactions)
+		for (const FGameplayTag& TargetFaction : TargetFactions)
+		{
+			const EDiplomacyState Relation = Diplomacy->GetDiplomacyState(GuardFaction, TargetFaction);
+			if (Relation != EDiplomacyState::None && Relation != EDiplomacyState::War)
+				return Result(false, TEXT("A protective treaty blocks combat with this faction."));
+		}
+	const UTerritoryDefinition* Definition = OwningTerritory->GetTerritoryDefinition();
+	const FTerritoryGuardBehaviorTemplate* Behavior = Definition ? &Definition->GuardBehavior : nullptr;
+	if (Behavior && !Behavior->CombatTargetFactions.IsEmpty()
+		&& !TargetFactions.HasAnyExact(Behavior->CombatTargetFactions))
+		return Result(false, TEXT("The target does not match the authored combat faction filter."));
+	if ((!Behavior || Behavior->bAllowPersonalRetaliation) && ShouldBeAggressiveTowardsTarget(Target))
+		return Result(true, TEXT("Narrative personal hostility allows local self-defence. Capture and diplomacy are unchanged."));
+	if (!Diplomacy->AreAnyFactionsAtWar(GuardFactions, TargetFactions))
+		return Result(false, TEXT("There is no personal hostility or faction War."));
+
+	const ATerritoryAssaultCharacter* Attacker = Cast<ATerritoryAssaultCharacter>(Target);
+	const UTerritoryAssaultParticipantComponent* Participant = Attacker ? Attacker->AssaultParticipant : nullptr;
+	if (Participant && !Participant->HasRetired() && Attacker->CanEngageAssaultTarget(this)
+		&& TerritoryAssaultTargetPolicy::BuildDefenceFront(
+			Participant->GetTargetTerritory()).Contains(OwningTerritory.Get()))
+		return Result(true, TEXT("An active hostile assault threatens this Place's defence front."));
+
+	const UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>();
+	const APawn* TargetPawn = Cast<APawn>(Target);
+	if (Control && Control->IsStealthInfiltrationEnabled(OwningTerritory)
+		&& TargetPawn && TargetPawn->IsPlayerControlled())
+	{
+		if (!Control->IsInfiltratorExposed(OwningTerritory, Target))
+			return Result(false, TEXT("This player is still hidden, even if another player is fighting."));
+		const UTerritoryStealthProfile* Profile = OwningTerritory->GetActiveStealthProfile();
+		if (Profile && Profile->EscalationScope == ETerritoryStealthEscalationScope::LocalAlarm)
+			return Result(false, TEXT("Local Alarm allows investigation; personal hostility is required for combat."));
+		if (!Behavior || Behavior->bDefendAgainstExposedEnemies)
+			return Result(true, TEXT("This player is exposed and belongs to a faction at War."));
+	}
+	return OwningTerritory->GetTerritoryState() == ETerritoryState::Contested
+		? Result(true, TEXT("A faction at War is contesting the Place."))
+		: Result(false, TEXT("The Place is not contested and there is no confirmed local threat."));
 }
 
 bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(
@@ -379,7 +429,7 @@ void ATerritoryGuardCharacter::HandleNarrativeDamagedBy(
 	UNarrativeAbilitySystemComponent* DamageCauserASC, const float Damage,
 	const FGameplayEffectSpec& DamageEffectSpec)
 {
-	if (!HasAuthority() || Damage <= 0.f || !DamageCauserASC)
+	if (!HasAuthority() || !FMath::IsFinite(Damage) || Damage <= 0.f || !DamageCauserASC)
 	{
 		return;
 	}
@@ -404,6 +454,34 @@ void ATerritoryGuardCharacter::HandleNarrativeDamagedBy(
 	else
 	{
 		LastDamagingInstigator = DamageInstigator;
+		if (IsValid(OwningTerritory) && DamageInstigator->GetWorld() == GetWorld())
+			if (UTerritoryDisguiseSubsystem* Disguises = GetWorld()->GetSubsystem<UTerritoryDisguiseSubsystem>())
+				Disguises->ProcessStealthEvidence(DamageInstigator, OwningTerritory, this,
+					ETerritoryStealthEvidence::Damage, true);
+		// Use Native's existing personal-hostility list. This does not change any
+		// faction treaty, quest state, capture permission or territory ownership.
+		// Disguise callbacks may remove either actor while processing the evidence.
+		if (!IsValid(DamageInstigator) || DamageInstigator->IsActorBeingDestroyed()
+			|| IsActorBeingDestroyed() || !GetWorld() || GetWorld()->bIsTearingDown) return;
+		const INarrativeTeamAgentInterface* Team = Cast<INarrativeTeamAgentInterface>(DamageInstigator);
+		if (bAggressiveOnTakeDamage && DamageInstigator->GetWorld() == GetWorld()
+			&& Team && !GetFactions().HasAnyExact(Team->GetFactions()))
+		{
+			Hostiles.AddUnique(DamageInstigator);
+		}
+		// Health damage can arrive before the reserve guard's perception observer
+		// finishes binding. The real Native ASC callback already identifies its
+		// source; do not require another sight/hearing edge to record that evidence.
+		const APawn* PlayerSource = Cast<APawn>(DamageInstigator);
+		const UTerritoryStealthProfile* Profile = IsValid(OwningTerritory)
+			? OwningTerritory->GetActiveStealthProfile() : nullptr;
+		if (IsAlive() && PlayerSource && PlayerSource->IsPlayerControlled()
+			&& Profile && Profile->bDamageImmediatelyExposes)
+		{
+			if (UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControlSubsystem>())
+				Control->ReportStealthEvidence(OwningTerritory, DamageInstigator, this,
+					ETerritoryStealthEvidence::Damage, 1.f, DamageInstigator->GetActorLocation(), FVector::ZeroVector, true);
+		}
 	}
 	(void)DamageEffectSpec;
 }

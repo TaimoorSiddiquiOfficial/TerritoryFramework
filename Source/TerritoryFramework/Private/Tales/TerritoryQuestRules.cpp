@@ -14,6 +14,7 @@ bool FTerritoryQuestRuntimeOverrideRule::Pauses(
 	case ETerritoryQuestOverrideEffect::AutomaticCapture: return bPauseAutomaticCapture;
 	case ETerritoryQuestOverrideEffect::AutomaticCounterattacks:
 		return bPauseAutomaticCounterattacks;
+	case ETerritoryQuestOverrideEffect::DefenderCombat: return bPauseDefenderCombat;
 	default: return false;
 	}
 }

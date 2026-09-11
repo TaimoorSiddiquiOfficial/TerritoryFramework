@@ -1,10 +1,31 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-11 (state, stealth, reserve AI and Narrative task audit)
+> **Reviewed:** 2026-09-12 (defender retaliation, per-player stealth and participation cleanup)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### Defender response and exposure ownership — 2026-09-12
+
+Defenders can retaliate through Native personal hostility while a quest keeps
+capture and State Events paused. An explicit **Pause Defender Combat** rule now
+controls combat separately. Protective treaties, optional exact faction filters,
+per-player exposure and Local Alarm apply through the same guard policy. Existing
+Territory combat activities consume that policy and stop/resume through Native
+activity selection. Actual ASC damage also closes the early observer-binding gap.
+
+Outside threat evidence is configurable. Seeing an owned projectile does not
+expose its hidden owner. Clearing exposure removes only exposure/bounds contest
+participation, preserving explicit story and multiplayer flag capture reasons.
+Empty zero-pressure contests recover even while quest capture remains paused.
+See [implementation and verification](DEFENDER_RESPONSE_AND_EXPOSURE_2026-09-12.md).
+
+Next: reserve Narrative events through finite post commands, the pending-reserve
+capture/missing-post defeat checks, and migration of applicable authored Native
+record tasks. Then implement coordinated guard conversations, speaker binding,
+multiplayer presentation and the patrol activity hook. The AlMalik cold-appearance,
+restored-wave crash and returning-client release blockers below remain open.
 
 ### Reserve perception, evidence identity and Native record task — 2026-09-11
 
@@ -16,10 +37,9 @@ submit authoritative awareness changes. Added Wait For Narrative Data Task with
 per-listener cleanup, full quantity handling and a saved starting-count cursor.
 See [changes, migration and verification](GUARD_RESPONSE_FIXES_2026-09-11.md).
 
-The next gameplay batch is defender retaliation and contest registration sources:
-separate quest capture locks from self-defence, apply outside-shooter/treaty policy,
-and clear only the participation created by exposure. Reserve Narrative events
-and coordinated guard conversations still follow that work.
+Defender retaliation and contest registration sources were completed in the newer
+checkpoint above. Reserve Narrative events and coordinated guard conversations
+remain ahead.
 
 ### Tagged guards and overheard story conversations — 2026-09-11
 
@@ -48,10 +68,8 @@ Open findings in this newly requested scope:
 
 - Replacement-guard perception and anonymous clue exposure are fixed in the newer
   checkpoint above; the original audit remains evidence of the reproduced faults.
-- Quest overrides can pause the War event while the guard combat gate requires War.
-- Local Alarm now assigns investigation on immediate exposure. Outside shooters
-  are still rejected by the stealth observer's bounds gate; clearing exposure does not
-  reconcile existing contest registration.
+- The newer September 12 checkpoint fixes quest-blocked retaliation, outside
+  threat evidence, per-player combat gating and exposure registration cleanup.
 - Capture-versus-pending-reserve and missing-post defeat checks need further proof.
 - Add the requested reserve Narrative event through existing finite post commands.
 - Connect hand-authored quest conditions through the existing condition task, and
@@ -60,10 +78,11 @@ Open findings in this newly requested scope:
 - Migrate applicable authored record tasks to the new adapter. Vendor task assets
   remain unchanged; their old cleanup and per-notification counting remain unsafe.
 
-Next coherent batch: implement the shared configurable retaliation/response rules described
-in the audit. Preserve per-player stealth, Native factions, explicit story waves
-and autonomous physical assaults. The September 10 appearance, crash and returning
-client blockers below remain open. Release artifacts and Act 1 work remain gated.
+Next coherent batch: add finite reserve Narrative events and verify the remaining
+capture/defeat checks around delayed or unloaded posts. Preserve per-player stealth,
+Native factions, explicit story waves and autonomous physical assaults. The
+September 10 appearance, crash and returning-client blockers below remain open.
+Release artifacts and Act 1 work remain gated.
 
 ### Native appearance readiness — 2026-09-10
 

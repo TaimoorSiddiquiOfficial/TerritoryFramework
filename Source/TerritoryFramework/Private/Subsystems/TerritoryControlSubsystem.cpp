@@ -353,14 +353,13 @@ int32 UTerritoryControlSubsystem::GetActiveCapturePressure(
 	const TSet<TWeakObjectPtr<AActor>>* Attackers = State
 		? State->AttackersByFaction.Find(Faction) : nullptr;
 	if (!Attackers) return 0;
-	const TSet<TWeakObjectPtr<AActor>>* NonCapturing =
-		State->NonCapturingAttackersByFaction.Find(Faction);
+	const auto* Sources = State->ParticipationSourcesByFaction.Find(Faction);
 
 	int32 Count = 0;
 	for (const TWeakObjectPtr<AActor>& Attacker : *Attackers)
 	{
 		AActor* Actor = Attacker.Get();
-		if (!Actor || (NonCapturing && NonCapturing->Contains(Attacker))) continue;
+		if (!Actor || !Sources || !(Sources->FindRef(Attacker) & static_cast<uint8>(EParticipationSource::Capture))) continue;
 		if (const UNarrativeAbilitySystemComponent* ASC = ResolveAttackerASC(Actor))
 		{
 			if (ASC->IsDead()) continue;
@@ -407,11 +406,11 @@ void UTerritoryControlSubsystem::RemoveAttackerFromAllCaptures(AActor* Attacker)
 		for (const FGameplayTag& Faction : EmptyFactions)
 		{
 			TerritoryPair.Value.AttackersByFaction.Remove(Faction);
-			TerritoryPair.Value.NonCapturingAttackersByFaction.Remove(Faction);
+			TerritoryPair.Value.ParticipationSourcesByFaction.Remove(Faction);
 		}
-		for (auto& NonCapturingPair : TerritoryPair.Value.NonCapturingAttackersByFaction)
+		for (auto& SourcePair : TerritoryPair.Value.ParticipationSourcesByFaction)
 		{
-			NonCapturingPair.Value.Remove(WeakAttacker);
+			SourcePair.Value.Remove(WeakAttacker);
 		}
 	}
 
@@ -711,6 +710,7 @@ bool UTerritoryControlSubsystem::RegisterInfiltrator(ATerritoryVolume* Territory
 	}
 	else
 	{
+		if (Existing->Faction != Faction) ReleaseExposureParticipation(Territory, Target);
 		Existing->Faction = Faction;
 		Existing->Snapshot.bInsideTerritory = Territory->ContainsPoint(Target->GetActorLocation());
 	}
@@ -720,7 +720,8 @@ bool UTerritoryControlSubsystem::RegisterInfiltrator(ATerritoryVolume* Territory
 void UTerritoryControlSubsystem::UnregisterInfiltrator(ATerritoryVolume* Territory,
 	AActor* Target)
 {
-	if (!Territory || !Target) return;
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Target
+		|| Territory->GetWorld() != GetWorld() || Target->GetWorld() != GetWorld()) return;
 	TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>* PerTarget =
 		TerritoryInfiltrationState.Find(Territory);
 	if (!PerTarget) return;
@@ -733,6 +734,7 @@ void UTerritoryControlSubsystem::UnregisterInfiltrator(ATerritoryVolume* Territo
 	{
 		TerritoryInfiltrationState.Remove(Territory);
 	}
+	ReleaseExposureParticipation(Territory, Target);
 }
 
 void UTerritoryControlSubsystem::RemoveInfiltratorFromAllTerritories(AActor* Target)
@@ -838,10 +840,11 @@ bool UTerritoryControlSubsystem::ClearInfiltratorExposure(
 		: (Runtime->Snapshot.Suspicion > 0.f
 			? ETerritoryExposureState::Suspicious : ETerritoryExposureState::Undetected);
 	if (bResetSuspicion) Runtime->Snapshot.Suspicion = 0.f;
-	if (OldState != Runtime->Snapshot.ExposureState)
+	const ETerritoryExposureState NewState = Runtime->Snapshot.ExposureState;
+	ReleaseExposureParticipation(Territory, Target);
+	if (OldState != NewState)
 	{
-		OnExposureChanged.Broadcast(Territory, Target, OldState,
-			Runtime->Snapshot.ExposureState);
+		OnExposureChanged.Broadcast(Territory, Target, OldState, NewState);
 	}
 	return true;
 }
@@ -863,6 +866,17 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 	}
 	const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
 	if (!Profile || !IsStealthInfiltrationEnabled(Territory)) return false;
+	if (!Territory->ContainsPoint(Target->GetActorLocation()) && Evidence != ETerritoryStealthEvidence::Scripted)
+	{
+		const bool bOutsideThreat = Profile->bRespondToOutsideThreats
+			&& (Evidence == ETerritoryStealthEvidence::Damage || Evidence == ETerritoryStealthEvidence::Gunshot
+				|| Evidence == ETerritoryStealthEvidence::BulletImpact || Evidence == ETerritoryStealthEvidence::FireSeen
+				|| Evidence == ETerritoryStealthEvidence::DefenderKilledSeen
+				|| (Evidence == ETerritoryStealthEvidence::Sight && IsInfiltratorExposed(Territory, Target)));
+		// Lost sight must still remove an existing observer after the target exits.
+		const bool bSightLost = Evidence == ETerritoryStealthEvidence::Sight && Strength <= 0.f && !bConfirmedIdentity;
+		if (!bOutsideThreat && !bSightLost) return false;
+	}
 	if ((Evidence == ETerritoryStealthEvidence::Gunshot
 			|| Evidence == ETerritoryStealthEvidence::BulletImpact)
 		&& !Profile->bFireWhileUnseenStartsInvestigation && !bConfirmedIdentity) return false;
@@ -983,7 +997,6 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 	// Delegates may remove or replace this entry. Never expose a reference into the
 	// map to a broadcast or retain it after a callback boundary.
 	FTerritoryInfiltrationSnapshot Snapshot = Runtime.Snapshot;
-	const FGameplayTag EvidenceFaction = Runtime.Faction;
 	OnStealthEvidenceReported.Broadcast(Territory, Target, Evidence, Snapshot);
 	if (!GetInfiltrationSnapshot(Territory, Target, Snapshot)) return true;
 
@@ -1064,12 +1077,19 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 				Target, BreakStealthEvent, Payload);
 		}
 
-		if (Profile->EscalationScope != ETerritoryStealthEscalationScope::LocalAlarm
-			&& GetInfiltrationSnapshot(Territory, Target, Snapshot)
-			&& Snapshot.ExposureState == ETerritoryExposureState::Exposed)
-		{
-			TryRegisterContester(Territory, Target, EvidenceFaction);
-		}
+	}
+	// Reconcile from the final evidence state, including changed faction/profile
+	// and a quest pause that has ended. Exposure effects above still run once.
+	if (GetInfiltrationSnapshot(Territory, Target, Snapshot)
+		&& Snapshot.ExposureState == ETerritoryExposureState::Exposed)
+	{
+		// Story callbacks above may switch the active profile or disable stealth.
+		const UTerritoryStealthProfile* FinalProfile = Territory->GetActiveStealthProfile();
+		if (FinalProfile && IsStealthInfiltrationEnabled(Territory)
+			&& FinalProfile->EscalationScope != ETerritoryStealthEscalationScope::LocalAlarm)
+			TryRegisterAttackerInternal(Territory, Target,
+				UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Target), EParticipationSource::Exposure);
+		else ReleaseExposureParticipation(Territory, Target);
 	}
 	return true;
 }
@@ -1753,18 +1773,30 @@ void UTerritoryControlSubsystem::RegisterAttacker(ATerritoryVolume* Territory, A
 
 bool UTerritoryControlSubsystem::TryRegisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
 {
-	return TryRegisterAttackerInternal(Territory, Attacker, Faction, true);
+	return TryRegisterAttackerInternal(Territory, Attacker, Faction, EParticipationSource::Capture);
 }
 
 bool UTerritoryControlSubsystem::TryRegisterContester(ATerritoryVolume* Territory,
 	AActor* Attacker, const FGameplayTag& Faction)
 {
-	return TryRegisterAttackerInternal(Territory, Attacker, Faction, false);
+	return TryRegisterAttackerInternal(Territory, Attacker, Faction, EParticipationSource::ExplicitContest);
+}
+
+bool UTerritoryControlSubsystem::TryRegisterStoryBoundsContester(ATerritoryVolume* Territory,
+	AActor* Attacker, const FGameplayTag& Faction)
+{
+	return TryRegisterAttackerInternal(Territory, Attacker, Faction, EParticipationSource::StoryBounds);
+}
+
+void UTerritoryControlSubsystem::UnregisterStoryBoundsContester(ATerritoryVolume* Territory,
+	AActor* Attacker, const FGameplayTag& Faction)
+{
+	ReleaseParticipationSource(Territory, Attacker, Faction, EParticipationSource::StoryBounds);
 }
 
 bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 	ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction,
-	const bool bContributesCaptureProgress)
+	const EParticipationSource Source)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Attacker || !Faction.IsValid()) return false;
 	if (Territory->GetWorld() != GetWorld() || Attacker->GetWorld() != GetWorld()) return false;
@@ -1785,20 +1817,8 @@ bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 			{
 				if (Existing.Get() == Attacker)
 				{
-					// A real capture-pressure registration promotes a prior story-only
-					// contest. A contest-only request never demotes an existing attacker.
-					if (bContributesCaptureProgress)
-					{
-						if (TSet<TWeakObjectPtr<AActor>>* NonCapturing =
-							ExistingState->NonCapturingAttackersByFaction.Find(Faction))
-						{
-							NonCapturing->Remove(Attacker);
-							if (NonCapturing->IsEmpty())
-							{
-								ExistingState->NonCapturingAttackersByFaction.Remove(Faction);
-							}
-						}
-					}
+					ExistingState->ParticipationSourcesByFaction.FindOrAdd(Faction)
+						.FindOrAdd(Attacker) |= static_cast<uint8>(Source);
 					return true;
 				}
 			}
@@ -1834,10 +1854,7 @@ bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 	if (AfterCount > BeforeCount)
 	{
 		AddAttackerRegistration(Attacker);
-		if (!bContributesCaptureProgress)
-		{
-			State.NonCapturingAttackersByFaction.FindOrAdd(Faction).Add(Attacker);
-		}
+		State.ParticipationSourcesByFaction.FindOrAdd(Faction).Add(Attacker, static_cast<uint8>(Source));
 	}
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
@@ -1873,13 +1890,12 @@ bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 	if (!bCommitted)
 	{
 		CommittedActors->Remove(Attacker);
-		if (TSet<TWeakObjectPtr<AActor>>* NonCapturing =
-			CommittedState->NonCapturingAttackersByFaction.Find(Faction))
+		if (auto* Sources = CommittedState->ParticipationSourcesByFaction.Find(Faction))
 		{
-			NonCapturing->Remove(Attacker);
-			if (NonCapturing->IsEmpty())
+			Sources->Remove(Attacker);
+			if (Sources->IsEmpty())
 			{
-				CommittedState->NonCapturingAttackersByFaction.Remove(Faction);
+				CommittedState->ParticipationSourcesByFaction.Remove(Faction);
 			}
 		}
 		ReleaseAttackerRegistration(Attacker);
@@ -1895,6 +1911,34 @@ bool UTerritoryControlSubsystem::TryRegisterAttackerInternal(
 	return true;
 }
 
+void UTerritoryControlSubsystem::ReleaseParticipationSource(ATerritoryVolume* Territory,
+	AActor* Attacker, const FGameplayTag& Faction, EParticipationSource Source)
+{
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !IsValid(Territory) || !IsValid(Attacker)
+		|| Territory->GetWorld() != GetWorld() || Attacker->GetWorld() != GetWorld()) return;
+	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
+	auto* Sources = State ? State->ParticipationSourcesByFaction.Find(Faction) : nullptr;
+	uint8* Reasons = Sources ? Sources->Find(Attacker) : nullptr;
+	if (!Reasons) return;
+	*Reasons &= ~static_cast<uint8>(Source);
+	if (*Reasons == 0) UnregisterAttacker(Territory, Attacker, Faction);
+}
+
+void UTerritoryControlSubsystem::ReleaseExposureParticipation(ATerritoryVolume* Territory, AActor* Target)
+{
+	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
+	if (!State) return;
+	TArray<FGameplayTag> Factions;
+	State->ParticipationSourcesByFaction.GetKeys(Factions);
+	for (const FGameplayTag& Faction : Factions)
+	{
+		ReleaseParticipationSource(Territory, Target, Faction, EParticipationSource::Exposure);
+		ReleaseParticipationSource(Territory, Target, Faction, EParticipationSource::StoryBounds);
+	}
+	// The next control tick reconciles the read model after all source removals.
+	// Do not broadcast a state transition inside a caller's bounds/death iteration.
+}
+
 void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction)
 {
 	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Attacker || !Faction.IsValid()) return;
@@ -1908,13 +1952,12 @@ void UTerritoryControlSubsystem::UnregisterAttacker(ATerritoryVolume* Territory,
 		{
 			ReleaseAttackerRegistration(Attacker);
 		}
-		if (TSet<TWeakObjectPtr<AActor>>* NonCapturing =
-			State->NonCapturingAttackersByFaction.Find(Faction))
+		if (auto* Sources = State->ParticipationSourcesByFaction.Find(Faction))
 		{
-			NonCapturing->Remove(Attacker);
-			if (NonCapturing->IsEmpty())
+			Sources->Remove(Attacker);
+			if (Sources->IsEmpty())
 			{
-				State->NonCapturingAttackersByFaction.Remove(Faction);
+				State->ParticipationSourcesByFaction.Remove(Faction);
 			}
 		}
 		if (PruneInvalidAttackers(*ActorSet) == 0)
@@ -2050,6 +2093,17 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 {
 	FPerTerritoryState* State = TerritoryCaptureState.Find(Territory);
 	if (!State) return;
+	bool bHasParticipation = false;
+	for (const auto& Pair : State->AttackersByFaction) bHasParticipation |= !Pair.Value.IsEmpty();
+	bool bHasProgress = false;
+	for (const auto& Pair : State->CaptureProgressByFaction) bHasProgress |= Pair.Value > 0.f;
+	if (!bHasParticipation && !bHasProgress)
+	{
+		// Clearing an exposure-only contest is cleanup, even when quest capture is
+		// paused. Never discard explicit progress or another participant this way.
+		DeferredCommands.Add({FDeferredCommand::Reset, Territory, FGameplayTag()});
+		return;
+	}
 	if (Territory->IsPrimaryRuntimeRuleSuspendedWithContext(
 		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr))
 	{
@@ -2078,13 +2132,12 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	{
 		TSet<TWeakObjectPtr<AActor>>* ActorSet = State->AttackersByFaction.Find(Pair.Key);
 		int32 AttackerCount = ActorSet ? PruneInvalidAttackers(*ActorSet) : 0;
-		TSet<TWeakObjectPtr<AActor>>* NonCapturingSet =
-			State->NonCapturingAttackersByFaction.Find(Pair.Key);
-		if (NonCapturingSet)
+		auto* Sources = State->ParticipationSourcesByFaction.Find(Pair.Key);
+		if (Sources)
 		{
-			for (auto It = NonCapturingSet->CreateIterator(); It; ++It)
+			for (auto It = Sources->CreateIterator(); It; ++It)
 			{
-				if (!It->IsValid() || !ActorSet || !ActorSet->Contains(*It))
+				if (!It.Key().IsValid() || !ActorSet || !ActorSet->Contains(It.Key()))
 				{
 					It.RemoveCurrent();
 				}
@@ -2177,7 +2230,7 @@ void UTerritoryControlSubsystem::EvaluateCaptureState(ATerritoryVolume* Territor
 	{
 		State->CaptureProgressByFaction.Remove(Tag);
 		State->AttackersByFaction.Remove(Tag);
-		State->NonCapturingAttackersByFaction.Remove(Tag);
+		State->ParticipationSourcesByFaction.Remove(Tag);
 	}
 
 	// Re-fetch State pointer in case deferred commands or delegate listeners

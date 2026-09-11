@@ -106,6 +106,10 @@ public:
 	bool TryRegisterContester(ATerritoryVolume* Territory, AActor* Attacker,
 		const FGameplayTag& Faction);
 
+	/** Bounds own only this registration source; leaving bounds never removes explicit capture participation. */
+	bool TryRegisterStoryBoundsContester(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
+	void UnregisterStoryBoundsContester(ATerritoryVolume* Territory, AActor* Attacker, const FGameplayTag& Faction);
+
 	// ─── Stealth infiltration API (authority-only evidence, read-only queries) ───
 
 	/**
@@ -127,7 +131,7 @@ public:
 		const FVector& EvidenceLocation, const FVector& EstimatedSourceDirection,
 		bool bConfirmedIdentity, float SightEvidenceSeconds = 0.25f);
 
-	/** Clear the target's confirmed exposure on the server, optionally resetting its suspicion. */
+	/** Clear confirmed exposure and its exposure/bounds contest registrations. Explicit story and flag-capture registrations, Narrative personal hostility and burned disguises are retained. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
 	bool ClearInfiltratorExposure(ATerritoryVolume* Territory, AActor* Target,
 		bool bResetSuspicion = true);
@@ -231,13 +235,18 @@ public:
 private:
 	friend class FTFCaptureAtomicContestTransition;
 
+	enum class EParticipationSource : uint8
+	{
+		Capture = 1, ExplicitContest = 2, StoryBounds = 4, Exposure = 8
+	};
+
 	/** Per-faction capture state — attacker tracking is actor-based, not count-based */
 	struct FPerTerritoryState
 	{
 		/** Actor sets per faction — prevents count inflation from duplicate registrations */
 		TMap<FGameplayTag, TSet<TWeakObjectPtr<AActor>>> AttackersByFaction;
-		/** Subset of AttackersByFaction which holds Contested state but adds no pressure. */
-		TMap<FGameplayTag, TSet<TWeakObjectPtr<AActor>>> NonCapturingAttackersByFaction;
+		/** Why each identity is admitted. Only Capture adds pressure; each caller releases its own bits. Transient, like the actor registrations. */
+		TMap<FGameplayTag, TMap<TWeakObjectPtr<AActor>, uint8>> ParticipationSourcesByFaction;
 		TMap<FGameplayTag, float> CaptureProgressByFaction;
 	};
 
@@ -323,7 +332,10 @@ private:
 		const FGameplayTag& AttackingFaction) const;
 
 	bool TryRegisterAttackerInternal(ATerritoryVolume* Territory, AActor* Attacker,
-		const FGameplayTag& Faction, bool bContributesCaptureProgress);
+		const FGameplayTag& Faction, EParticipationSource Source);
+	void ReleaseParticipationSource(ATerritoryVolume* Territory, AActor* Attacker,
+		const FGameplayTag& Faction, EParticipationSource Source);
+	void ReleaseExposureParticipation(ATerritoryVolume* Territory, AActor* Target);
 
 	/**
 	 * Validate + optionally commit contested state and broadcast.

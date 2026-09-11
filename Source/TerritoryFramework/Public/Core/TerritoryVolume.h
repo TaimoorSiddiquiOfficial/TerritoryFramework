@@ -841,6 +841,7 @@ private:
 	friend class FTFGuardSpawnAdmissionCallbacks;
 	friend class FTFGarrisonPurchaseCallbacks;
 	friend class FTFGuardReserveTotals;
+	friend class FTFGuardResponsePolicy;
 	friend class FTFIndependentGuardPostStreaming;
 	friend class FTFTerritoryDefinitionRuntimeNarrative;
 #endif

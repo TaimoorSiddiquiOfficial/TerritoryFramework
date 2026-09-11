@@ -172,6 +172,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
 	bool bAnonymousEvidenceCanExpose = false;
 
+	/** Accept real damage and heard gunshots or impacts from outside the Place. Ordinary sight outside does not expose a passer-by. An exposed shooter can be followed by sight outside. Native senses still decide what a guard actually hears or sees. This controls stealth evidence; Allow Personal Retaliation controls self-defence. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence", meta=(DisplayName="Accept Outside Threat Evidence"))
+	bool bRespondToOutsideThreats = true;
+
 	/** How much a gunshot clue raises suspicion, from 0 to 1. For example, 0.35 adds 35 percent of a full suspicion meter. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
 		meta=(ClampMin="0.0", ClampMax="1.0"))

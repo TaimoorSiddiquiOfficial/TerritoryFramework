@@ -125,6 +125,18 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat")
 	bool bPrioritizeClosestHostilePlayer = true;
 
+	/** Let defenders respond to Narrative personal hostility, including real damage. Does not declare War or unlock capture. Same-faction actors and protective treaties remain protected. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat")
+	bool bAllowPersonalRetaliation = true;
+
+	/** Let a defender fight an exposed enemy faction even while a quest keeps the Place Claimed. Local Alarm and hidden players still require personal hostility. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat")
+	bool bDefendAgainstExposedEnemies = true;
+
+	/** Optional exact Narrative faction filter for combat targets. Empty allows every faction that passes diplomacy, stealth and quest rules. Uses the perceived faction while a disguise is accepted. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat", meta=(Categories="Narrative.Factions"))
+	FGameplayTagContainer CombatTargetFactions;
+
 	/** Extra Narrative goal score given to the closest eligible hostile player; does not make a friendly player hostile. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat",
 		meta=(EditCondition="bPrioritizeClosestHostilePlayer", ClampMin="0.0", ClampMax="10.0"))

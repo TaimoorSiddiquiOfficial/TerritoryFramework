@@ -30,6 +30,7 @@ protected:
 
 private:
 	friend class FTFPerceptionDelivery;
+	friend class FTFGuardResponsePolicy;
 	struct FDeliveredPerception
 	{
 		TArray<FAIStimulus> Stimuli;

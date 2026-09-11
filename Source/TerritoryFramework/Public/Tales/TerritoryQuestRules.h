@@ -27,7 +27,8 @@ enum class ETerritoryQuestOverrideEffect : uint8
 {
 	StateRules UMETA(DisplayName="State Rules and State Events"),
 	AutomaticCapture UMETA(DisplayName="Automatic Capture and Contesting"),
-	AutomaticCounterattacks UMETA(DisplayName="Automatic Counterattacks")
+	AutomaticCounterattacks UMETA(DisplayName="Automatic Counterattacks"),
+	DefenderCombat UMETA(DisplayName="Defender Combat", ToolTip="Pause stationary defender combat separately from capture and State Events. Explicit assault waves keep their own rules.")
 };
 
 /**
@@ -70,6 +71,10 @@ struct TERRITORYFRAMEWORK_API FTerritoryQuestRuntimeOverrideRule
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest Override|Pause",
 		meta=(ToolTip="Pause automatic and recurring counterattacks. A Wave of Enemies Narrative Event is explicit Quest work and may still launch."))
 	bool bPauseAutomaticCounterattacks = true;
+
+	/** Stop stationary defenders from attacking while this quest rule matches. Capture pauses alone never disable self-defence. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Quest Override|Pause")
+	bool bPauseDefenderCombat = false;
 
 	bool Pauses(ETerritoryQuestOverrideEffect Effect) const;
 };
