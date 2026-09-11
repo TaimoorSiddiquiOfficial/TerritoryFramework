@@ -29,6 +29,7 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"GameplayAbilities",
 			"GameplayTags",
 			"NavigationSystem",
+			"AIModule",
 			"NarrativeArsenal",
 			"NarrativeSaveSystem",
 			"NarrativeDialogueEditor",

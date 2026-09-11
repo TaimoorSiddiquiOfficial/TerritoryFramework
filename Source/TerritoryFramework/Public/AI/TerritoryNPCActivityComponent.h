@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AI/Activities/NPCActivityComponent.h"
+#include "Perception/AIPerceptionTypes.h"
 #include "TerritoryNPCActivityComponent.generated.h"
 
 /** Uses Narrative's activity system and save records, with bounded generator snapshots. */
@@ -22,4 +23,22 @@ public:
 
 	virtual void PrepareForSave_Implementation() override;
 	virtual void Load_Implementation() override;
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+private:
+	friend class FTFPerceptionDelivery;
+	struct FDeliveredPerception
+	{
+		TArray<FAIStimulus> Stimuli;
+		ETeamAttitude::Type Attitude = ETeamAttitude::Neutral;
+	};
+	TMap<TWeakObjectPtr<AActor>, FDeliveredPerception> DeliveredPerception;
+	TArray<TWeakObjectPtr<UNPCGoalGenerator>> DeliveryGenerators;
+	TWeakObjectPtr<APawn> DeliveryPawn;
+	bool bDeliveringPerception = false;
+	void RefreshPerceptionAndRescore();
+	void RefreshStoredPerception();
 };

@@ -5,6 +5,7 @@
 #include "GenericTeamAgentInterface.h"
 
 class ANarrativeGameState;
+class ANarrativeCharacter;
 class AActor;
 class APawn;
 class APlayerController;
@@ -27,6 +28,9 @@ struct TERRITORYFRAMEWORK_API FTerritoryNarrativeAttitudeSnapshot
 class TERRITORYFRAMEWORK_API FTerritoryNarrativeProAdapter final
 {
 public:
+	/** Read Native's published Blueprint loading query without duplicating its appearance or async-handle rules. Missing or changed contracts fail closed. */
+	static bool IsCharacterReady(ANarrativeCharacter* Character);
+
 	/** Narrative retains the player's character while a vehicle is possessed.
 	 * Use it for identity, inventory and management checks; use the current pawn
 	 * explicitly for vehicle position. Plain player controllers retain pawn fallback.

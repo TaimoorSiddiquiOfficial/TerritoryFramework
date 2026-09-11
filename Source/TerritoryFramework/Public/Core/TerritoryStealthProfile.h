@@ -168,6 +168,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
 	bool bUnseenDefenderDeathStartsInvestigation = true;
 
+	/** By default, sounds, corpses and thrown distractions raise suspicion without identifying the hidden player. Enable only when the story intentionally allows clues alone to expose them. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
+	bool bAnonymousEvidenceCanExpose = false;
+
 	/** How much a gunshot clue raises suspicion, from 0 to 1. For example, 0.35 adds 35 percent of a full suspicion meter. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
 		meta=(ClampMin="0.0", ClampMax="1.0"))

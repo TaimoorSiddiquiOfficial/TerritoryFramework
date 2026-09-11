@@ -120,12 +120,12 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
 	void UnregisterInfiltrator(ATerritoryVolume* Territory, AActor* Target);
 
-	/** Narrative perception adapters submit evidence here; only the server mutates awareness. */
+	/** Narrative perception adapters submit evidence here; only the server mutates awareness. Sight Evidence Seconds is elapsed observation time, capped at one second per report. Use zero for a visibility-change callback and elapsed time for a continuing observation. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
 	bool ReportStealthEvidence(ATerritoryVolume* Territory, AActor* Target,
 		AActor* Observer, ETerritoryStealthEvidence Evidence, float Strength,
 		const FVector& EvidenceLocation, const FVector& EstimatedSourceDirection,
-		bool bConfirmedIdentity);
+		bool bConfirmedIdentity, float SightEvidenceSeconds = 0.25f);
 
 	/** Clear the target's confirmed exposure on the server, optionally resetting its suspicion. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")

@@ -1,5 +1,9 @@
 #include "Framework/TerritoryNarrativeProAdapter.h"
 
+#include "UnrealFramework/NarrativeCharacter.h"
+#include "UObject/StructOnScope.h"
+#include "UObject/UnrealType.h"
+
 #include "AbilitySystemInterface.h"
 #include "Abilities/GameplayAbilityTypes.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
@@ -9,6 +13,18 @@
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
 #include "UnrealFramework/NarrativePlayerController.h"
+
+bool FTerritoryNarrativeProAdapter::IsCharacterReady(ANarrativeCharacter* Character)
+{
+	if (!IsValid(Character) || Character->IsActorBeingDestroyed()) return false;
+	UFunction* Query = Character->FindFunction(TEXT("IsCharacterPendingLoad"));
+	const FBoolProperty* Result = Query ? CastField<FBoolProperty>(Query->GetReturnProperty()) : nullptr;
+	if (!Query || Query->NumParms != 1 || !Result) return false;
+	FStructOnScope Parameters(Query);
+	Result->SetPropertyValue_InContainer(Parameters.GetStructMemory(), true);
+	Character->ProcessEvent(Query, Parameters.GetStructMemory());
+	return !Result->GetPropertyValue_InContainer(Parameters.GetStructMemory());
+}
 
 namespace
 {

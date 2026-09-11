@@ -706,13 +706,13 @@ bool UTerritoryControlSubsystem::RegisterInfiltrator(ATerritoryVolume* Territory
 	{
 		FInfiltrationRuntime& Added = PerTarget.Add(TargetKey);
 		Added.Faction = Faction;
-		Added.Snapshot.bInsideTerritory = true;
+		Added.Snapshot.bInsideTerritory = Territory->ContainsPoint(Target->GetActorLocation());
 		AddAttackerRegistration(Target);
 	}
 	else
 	{
 		Existing->Faction = Faction;
-		Existing->Snapshot.bInsideTerritory = true;
+		Existing->Snapshot.bInsideTerritory = Territory->ContainsPoint(Target->GetActorLocation());
 	}
 	return true;
 }
@@ -767,6 +767,7 @@ bool UTerritoryControlSubsystem::GetInfiltrationSnapshot(
 	const FInfiltrationRuntime* Runtime = PerTarget ? PerTarget->Find(Target) : nullptr;
 	if (!Runtime) return false;
 	OutSnapshot = Runtime->Snapshot;
+	OutSnapshot.bInsideTerritory = Territory->ContainsPoint(Target->GetActorLocation());
 	OutSnapshot.ConfirmingObserverCount = Runtime->CurrentSightObservers.Num();
 	return true;
 }
@@ -848,14 +849,25 @@ bool UTerritoryControlSubsystem::ClearInfiltratorExposure(
 bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territory,
 	AActor* Target, AActor* Observer, ETerritoryStealthEvidence Evidence,
 	float Strength, const FVector& EvidenceLocation,
-	const FVector& EstimatedSourceDirection, bool bConfirmedIdentity)
+	const FVector& EstimatedSourceDirection, bool bConfirmedIdentity, float SightEvidenceSeconds)
 {
-	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !Territory || !Target)
+	if (!GetWorld() || !GetWorld()->GetAuthGameMode() || !IsValid(Territory) || !IsValid(Target)
+		|| Territory->GetWorld() != GetWorld() || Target->GetWorld() != GetWorld()
+		|| Target->IsActorBeingDestroyed() || Territory->IsActorBeingDestroyed()
+		|| (Observer && (!IsValid(Observer) || Observer->GetWorld() != GetWorld()))
+		|| !FMath::IsFinite(Strength) || !FMath::IsFinite(SightEvidenceSeconds)
+		|| EvidenceLocation.ContainsNaN() || EstimatedSourceDirection.ContainsNaN()
+		|| Evidence == ETerritoryStealthEvidence::None)
 	{
 		return false;
 	}
 	const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
 	if (!Profile || !IsStealthInfiltrationEnabled(Territory)) return false;
+	if ((Evidence == ETerritoryStealthEvidence::Gunshot
+			|| Evidence == ETerritoryStealthEvidence::BulletImpact)
+		&& !Profile->bFireWhileUnseenStartsInvestigation && !bConfirmedIdentity) return false;
+	if (Evidence == ETerritoryStealthEvidence::Corpse
+		&& !Profile->bUnseenDefenderDeathStartsInvestigation && !bConfirmedIdentity) return false;
 
 	// A valid faction uniform masks ordinary visual identity, not physical presence.
 	// Hostile evidence is processed by the disguise layer first and may burn the
@@ -881,7 +893,7 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 	{
 		if (Observer)
 		{
-			if (ClampedStrength >= Profile->MinimumSightEvidence)
+			if (ClampedStrength > 0.f && ClampedStrength >= Profile->MinimumSightEvidence)
 			{
 				Runtime.CurrentSightObservers.Add(Observer);
 			}
@@ -890,11 +902,12 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 				Runtime.CurrentSightObservers.Remove(Observer);
 			}
 		}
-		if (ClampedStrength >= Profile->MinimumSightEvidence)
+		if (ClampedStrength > 0.f && ClampedStrength >= Profile->MinimumSightEvidence)
 		{
 			Runtime.Snapshot.Suspicion = FMath::Clamp(
 				Runtime.Snapshot.Suspicion + ClampedStrength
-					* Profile->SightSuspicionGainPerSecond * 0.25f, 0.f, 1.f);
+					* Profile->SightSuspicionGainPerSecond
+					* FMath::Clamp(SightEvidenceSeconds, 0.f, 1.f), 0.f, 1.f);
 		}
 	}
 	else
@@ -923,6 +936,7 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 
 	const bool bForcedExposure = bConfirmedIdentity
 		|| (Evidence == ETerritoryStealthEvidence::Sight
+			&& ClampedStrength > 0.f
 			&& ClampedStrength >= Profile->ImmediateSightExposureThreshold)
 		|| (Evidence == ETerritoryStealthEvidence::FireSeen
 			&& Profile->bFireWhileSeenExposes)
@@ -930,7 +944,13 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 			&& Profile->bDamageImmediatelyExposes)
 		|| (Evidence == ETerritoryStealthEvidence::DefenderKilledSeen
 			&& Profile->bSeenDefenderKillExposes);
-	if (bForcedExposure || Runtime.Snapshot.Suspicion >= 1.f)
+	const bool bIdentifyingSight = Evidence == ETerritoryStealthEvidence::Sight
+		&& ClampedStrength > 0.f && ClampedStrength >= Profile->MinimumSightEvidence;
+	// A full clue meter is not proof of identity. Confirmed exposure stays latched
+	// until an explicit reset, even when a later sight update is weak or lost.
+	if (OldState == ETerritoryExposureState::Exposed || bForcedExposure
+		|| (Runtime.Snapshot.Suspicion >= 1.f
+			&& (bIdentifyingSight || Profile->bAnonymousEvidenceCanExpose)))
 	{
 		Runtime.Snapshot.ExposureState = ETerritoryExposureState::Exposed;
 	}
@@ -939,7 +959,7 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 		Runtime.Snapshot.ExposureState = ETerritoryExposureState::Suspicious;
 	}
 
-	if (ClampedStrength > 0.f || Evidence != ETerritoryStealthEvidence::Sight)
+	if (bForcedExposure || ClampedStrength > 0.f || Evidence != ETerritoryStealthEvidence::Sight)
 	{
 		Runtime.Snapshot.LastEvidence = Evidence;
 		Runtime.Snapshot.LastEvidenceLocation = EvidenceLocation;
@@ -967,13 +987,17 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 	OnStealthEvidenceReported.Broadcast(Territory, Target, Evidence, Snapshot);
 	if (!GetInfiltrationSnapshot(Territory, Target, Snapshot)) return true;
 
-	if (Snapshot.ExposureState != ETerritoryExposureState::Exposed
+	if ((Snapshot.ExposureState != ETerritoryExposureState::Exposed
+			|| (Profile->EscalationScope == ETerritoryStealthEscalationScope::LocalAlarm
+				&& OldState != ETerritoryExposureState::Exposed))
 		&& (Evidence != ETerritoryStealthEvidence::Sight
+			|| Profile->EscalationScope == ETerritoryStealthEscalationScope::LocalAlarm
+				&& Snapshot.ExposureState == ETerritoryExposureState::Exposed
 			|| OldState == ETerritoryExposureState::Undetected
-				&& Snapshot.ExposureState == ETerritoryExposureState::Suspicious))
+				&& Snapshot.ExposureState != ETerritoryExposureState::Undetected))
 	{
 		AssignClosestInvestigators(Territory, Target, Evidence, EvidenceLocation,
-			EstimatedSourceDirection, false, *Profile);
+			EstimatedSourceDirection, Snapshot.ExposureState == ETerritoryExposureState::Exposed, *Profile);
 	}
 
 	if (!GetInfiltrationSnapshot(Territory, Target, Snapshot)) return true;
@@ -987,10 +1011,7 @@ bool UTerritoryControlSubsystem::ReportStealthEvidence(ATerritoryVolume* Territo
 	if (OldState != ETerritoryExposureState::Exposed
 		&& Snapshot.ExposureState == ETerritoryExposureState::Exposed)
 	{
-		// Reaching confirmed exposure through accumulated anonymous evidence also
-		// burns the current uniform for this Territory's faction. Otherwise the
-		// player could be Exposed/Contesting while guards still considered them a
-		// friendly disguised member.
+		// Burn cover only after the active policy has actually confirmed identity.
 		if (UTerritoryDisguiseSubsystem* Disguises =
 			GetWorld()->GetSubsystem<UTerritoryDisguiseSubsystem>())
 		{

@@ -6,6 +6,21 @@
 
 ## Current checkpoint
 
+### Reserve perception, evidence identity and Native record task — 2026-09-11
+
+Implemented the stored-perception adapter and corrected anonymous clue exposure,
+sight timing and immediate Local Alarm investigation. A server/two-client test
+confirms all three finite replacement guards receive Native attack goals without
+manual refresh; both clients match the server's garrison snapshot and cannot
+submit authoritative awareness changes. Added Wait For Narrative Data Task with
+per-listener cleanup, full quantity handling and a saved starting-count cursor.
+See [changes, migration and verification](GUARD_RESPONSE_FIXES_2026-09-11.md).
+
+The next gameplay batch is defender retaliation and contest registration sources:
+separate quest capture locks from self-defence, apply outside-shooter/treaty policy,
+and clear only the participation created by exposure. Reserve Narrative events
+and coordinated guard conversations still follow that work.
+
 ### Tagged guards and overheard story conversations — 2026-09-11
 
 Added the requested defender/assault story participation to the remaining plan:
@@ -31,23 +46,21 @@ owner, client read models and failure paths. Verification results are recorded i
 
 Open findings in this newly requested scope:
 
-- Replacement guards can perceive the player but lack Native attack goals. A manual
-  safe parent refresh restored combat; the exact missed lifecycle callback remains open.
-- Anonymous clues can expose the player without a confirming observer.
+- Replacement-guard perception and anonymous clue exposure are fixed in the newer
+  checkpoint above; the original audit remains evidence of the reproduced faults.
 - Quest overrides can pause the War event while the guard combat gate requires War.
-- Local Alarm skips investigation on immediate exposure; outside shooters are
-  rejected by the stealth observer's bounds gate; clearing exposure does not
+- Local Alarm now assigns investigation on immediate exposure. Outside shooters
+  are still rejected by the stealth observer's bounds gate; clearing exposure does not
   reconcile existing contest registration.
 - Capture-versus-pending-reserve and missing-post defeat checks need further proof.
 - Add the requested reserve Narrative event through existing finite post commands.
 - Connect hand-authored quest conditions through the existing condition task, and
-  document/use Native data-task adapters instead of expecting a new Data Asset to
+  use the new Native record-task adapter instead of expecting a new Data Asset to
   observe gameplay automatically.
-- Adapt Native data-task listener cleanup: its supplied task clears all listeners
-  when ending, and live notifications count one even for bulk record quantities.
+- Migrate applicable authored record tasks to the new adapter. Vendor task assets
+  remain unchanged; their old cleanup and per-notification counting remain unsafe.
 
-Next coherent batch: repair perception-to-goal delivery on fresh and restored
-guards, then implement the shared configurable evidence/response rules described
+Next coherent batch: implement the shared configurable retaliation/response rules described
 in the audit. Preserve per-player stealth, Native factions, explicit story waves
 and autonomous physical assaults. The September 10 appearance, crash and returning
 client blockers below remain open. Release artifacts and Act 1 work remain gated.

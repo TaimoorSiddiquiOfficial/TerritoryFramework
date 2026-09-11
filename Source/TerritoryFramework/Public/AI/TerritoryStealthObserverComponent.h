@@ -6,6 +6,7 @@
 #include "TerritoryStealthObserverComponent.generated.h"
 
 class ATerritoryGuardCharacter;
+class ATerritoryVolume;
 class UAIPerceptionComponent;
 class UTerritoryStealthProfile;
 
@@ -49,10 +50,12 @@ private:
 	};
 
 	TWeakObjectPtr<UAIPerceptionComponent> BoundPerception;
+	TWeakObjectPtr<ATerritoryVolume> ObservedTerritory;
 	TMap<TWeakObjectPtr<AActor>, FObservedSight> CurrentlySeenTargets;
 	TMap<TWeakObjectPtr<AActor>, FRecentGunshot> RecentGunshots;
 	FTimerHandle BindingRetryTimer;
 	FTimerHandle SightRefreshTimer;
+	double LastSightRefreshWorldTime = -1.0;
 
 	ATerritoryGuardCharacter* GetTerritoryGuard() const;
 	AActor* ResolvePlayerSource(AActor* SensedActor) const;
@@ -64,6 +67,8 @@ private:
 	void RetryPerceptionBinding();
 	void UnbindFromPerception();
 	void RefreshVisibleTargets();
+	bool ReadCurrentSight(AActor* Target, FAIStimulus& OutStimulus) const;
+	void ReportSight(AActor* Target, const FAIStimulus& Stimulus, float ElapsedSeconds);
 
 	UFUNCTION()
 	void HandleTargetPerceptionUpdated(AActor* SensedActor, FAIStimulus Stimulus);
