@@ -2042,6 +2042,8 @@ FText UTerritoryUIBlueprintLibrary::GetProductionStatusText(
 		return NSLOCTEXT("TerritoryOperations", "ProductionIncomplete", "Inventory needs attention");
 	case ETerritoryProductionStatus::Superseded:
 		return NSLOCTEXT("TerritoryOperations", "ProductionSuperseded", "Campaign reloaded");
+	case ETerritoryProductionStatus::StockLimited:
+		return NSLOCTEXT("TerritoryOperations", "ProductionStockLimited", "Stock limit reached");
 	case ETerritoryProductionStatus::NeverEvaluated:
 	default:
 		return NSLOCTEXT("TerritoryOperations", "ProductionNotEvaluated", "Not evaluated");

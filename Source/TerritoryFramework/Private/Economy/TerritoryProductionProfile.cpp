@@ -7,6 +7,13 @@
 
 #define LOCTEXT_NAMESPACE "TerritoryProductionProfile"
 
+bool FTerritoryProductionNotifications::AllowsMessage(ETerritoryProductionStatus Status, bool bSuccess) const
+{
+	if (!bEnabled) return false;
+	if (Status == ETerritoryProductionStatus::StockLimited) return bNotifyAtStockLimit;
+	return bSuccess ? bNotifyOnSuccess : bNotifyWhenBlocked;
+}
+
 bool UTerritoryProductionProfile::CalculateScaledQuantity(
 	const FTerritoryResourceRate& Rate, int32 UpgradeLevel, int32 CycleCount,
 	int32& OutQuantity)
@@ -90,6 +97,28 @@ bool UTerritoryProductionProfile::IsRuleConfigurationValid(
 			OutFailureReason = LOCTEXT("InputOutputOverlap", "The same Narrative item class cannot be both an input and output of one atomic rule.");
 			return false;
 		}
+	}
+	for (const FTerritoryProductionStockCondition& Check : Rule.InventoryStopConditions)
+	{
+		if (!Check.bEnabled) continue;
+		if (!Check.ItemClass || Check.Quantity < 0
+			|| static_cast<uint8>(Check.Comparison) > static_cast<uint8>(ETerritoryIntegerComparison::LessThan))
+		{
+			OutFailureReason = LOCTEXT("InvalidStockCheck", "Each enabled inventory check needs an item, a valid comparison and an amount of zero or more.");
+			return false;
+		}
+	}
+	TSet<UClass*> CappedClasses;
+	for (const FTerritoryProductionStockCap& Cap : Rule.OutputStockCaps)
+	{
+		if (!Cap.bEnabled) continue;
+		if (!Cap.ItemClass || Cap.MaximumQuantity < 0 || !OutputClasses.Contains(Cap.ItemClass.Get())
+			|| CappedClasses.Contains(Cap.ItemClass.Get()))
+		{
+			OutFailureReason = LOCTEXT("InvalidStockCap", "Each enabled stock cap must name a different output item and use a maximum of zero or more.");
+			return false;
+		}
+		CappedClasses.Add(Cap.ItemClass.Get());
 	}
 	return true;
 }

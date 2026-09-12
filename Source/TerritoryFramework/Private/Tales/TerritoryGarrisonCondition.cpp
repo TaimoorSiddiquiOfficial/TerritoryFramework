@@ -12,8 +12,8 @@ UTerritoryGarrisonCondition::UTerritoryGarrisonCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryGarrisonCondition::CompareValues(int32 ActualValue,
-	ETerritoryIntegerComparison Operation, int32 RequiredValue)
+bool UTerritoryGarrisonCondition::CompareValues(int64 ActualValue,
+	ETerritoryIntegerComparison Operation, int64 RequiredValue)
 {
 	switch (Operation)
 	{

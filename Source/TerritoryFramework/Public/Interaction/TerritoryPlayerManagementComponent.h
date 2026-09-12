@@ -241,6 +241,7 @@ public:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFSaveDefaultReload;
+	friend class FTFProductionStockLimits;
 #endif
 	/** Narrative Save System persists the bounded campaign archive on a savable player controller. */
 	UPROPERTY(SaveGame)
@@ -320,6 +321,10 @@ private:
 
 	UFUNCTION()
 	void HandleProductionSettled(const FTerritoryProductionResult& Result);
+
+	/** Deliver a verified server production result only to this controller's owning client. */
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveProductionResult(const FTerritoryProductionResult& Result);
 
 	UFUNCTION()
 	void HandleDiplomacyEvent(const FDiplomacyEvent& Event);

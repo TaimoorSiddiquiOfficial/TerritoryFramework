@@ -64,8 +64,8 @@ public:
 	int32 Value = 1;
 
 	/** Pure comparison shared by runtime evaluation and native behavioural tests. */
-	static bool CompareValues(int32 ActualValue, ETerritoryIntegerComparison Operation,
-		int32 RequiredValue);
+	static bool CompareValues(int64 ActualValue, ETerritoryIntegerComparison Operation,
+		int64 RequiredValue);
 
 protected:
 	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,

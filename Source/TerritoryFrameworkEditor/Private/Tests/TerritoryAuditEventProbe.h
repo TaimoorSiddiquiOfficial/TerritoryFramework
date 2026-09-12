@@ -67,6 +67,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Tests")
 	static void FinishAssetCompilationForAudit();
 
+	/** Run a real recipe on the next PIE game tick, outside Python's forced-local RPC guard. This schedules a test request, not a production success. */
+	UFUNCTION(BlueprintCallable, Category="Territory|Tests")
+	static bool ScheduleProductionRecipeForPIE(AActor* Account, FGameplayTag Faction,
+		const FTerritoryProductionRule& Recipe, int32 BatchCount, FGameplayTag SourceTerritory);
+
 	TFunction<void(ATerritoryVolume*, ETerritoryState)> StateCallback;
 	TFunction<void(ATerritoryVolume*, AActor*)> EvidenceCallback;
 	TFunction<void(ATerritoryVolume*, AActor*, ETerritoryExposureState)> ExposureCallback;

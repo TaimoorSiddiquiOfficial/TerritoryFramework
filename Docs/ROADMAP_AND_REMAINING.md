@@ -1,10 +1,29 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-12 (defender retaliation, per-player stealth and participation cleanup)
+> **Reviewed:** 2026-09-12 (per-rule production limits and notifications)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current checkpoint
+
+### Production stock limits and per-rule messages — 2026-09-12
+
+Production Profile rules now expose inventory comparisons, strict output stock
+caps and individual notification switches/text. Free refills add only missing
+stock; paid recipes wait for their whole batch to fit. Reaching a cap consumes
+no inputs and expires the stopped cycle. Native inventory, account routing and
+the existing save/checkpoint authority remain responsible for stock and progress.
+
+The TDA Blacksmith ammo rule is configured for a 1,000-round target with messages
+off. Both engines pass 314 tests, all six builds pass, and the live host/two-client
+fixture passes 19 stock, message, authority and faction-change checks. See the
+[setup guide](PRODUCTION_LIMITS_AND_NOTIFICATIONS.md) and
+[verification report](PRODUCTION_LIMITS_VERIFICATION_2026-09-12.md) for scope and
+remaining validation limits.
+
+Next framework work remains finite reserve Narrative event adapters and the
+pending-reserve capture/missing-post defeat checks, followed by authored task
+migration and coordinated guard conversations. The release blockers below remain.
 
 ### Defender response and exposure ownership — 2026-09-12
 

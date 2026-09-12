@@ -361,9 +361,14 @@ void UTerritoryPlayerManagementComponent::Load_Implementation()
 void UTerritoryPlayerManagementComponent::BindLiveEventSources()
 {
 	APlayerController* PlayerController = Cast<APlayerController>(GetOwner());
-	if (!PlayerController || !PlayerController->IsLocalController()) return;
 	UWorld* World = GetWorld();
-	if (!World) return;
+	if (!World || !PlayerController) return;
+	// Economy settles on the server. Each remote owner's existing management
+	// component forwards only its faction's allowed messages to that client.
+	if (PlayerController->HasAuthority())
+		if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
+			Economy->OnProductionSettled.AddUniqueDynamic(this, &UTerritoryPlayerManagementComponent::HandleProductionSettled);
+	if (!PlayerController->IsLocalController()) return;
 	if (UTerritoryEconomySubsystem* Economy =
 		World->GetSubsystem<UTerritoryEconomySubsystem>())
 	{
@@ -1136,12 +1141,22 @@ void UTerritoryPlayerManagementComponent::HandleProductionSettled(
 {
 	const FGameplayTag ViewerFaction = ResolveViewerFaction();
 	if (!ViewerFaction.IsValid() || Result.Faction != ViewerFaction) return;
+	if (!Result.Notifications.AllowsMessage(Result.Status, Result.bSuccess)) return;
+	APlayerController* PlayerController = Cast<APlayerController>(GetOwner());
+	if (!PlayerController) return;
+	if (PlayerController->HasAuthority() && !PlayerController->IsLocalController())
+	{
+		// A controller can exist before connection setup or during disconnect.
+		// A client RPC without an owning connection may execute locally.
+		if (PlayerController->GetNetConnection()) ClientReceiveProductionResult(Result);
+		return;
+	}
 	const UTerritoryDeveloperSettings* Settings =
 		GetDefault<UTerritoryDeveloperSettings>();
 	const FTerritoryNotificationSettings Policy = Settings
 		? Settings->Notifications : FTerritoryNotificationSettings();
-	int32 InputCount = 0;
-	int32 OutputCount = 0;
+	int64 InputCount = 0;
+	int64 OutputCount = 0;
 	for (const FTerritoryResourceAmount& Input : Result.InputsConsumed)
 	{
 		InputCount += FMath::Max(0, Input.Quantity);
@@ -1150,40 +1165,57 @@ void UTerritoryPlayerManagementComponent::HandleProductionSettled(
 	{
 		OutputCount += FMath::Max(0, Output.Quantity);
 	}
-	const FText RuleName = UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(
-		Result.RuleTag);
+	const FText RuleName = Result.RuleDisplayName.IsEmpty()
+		? UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Result.RuleTag) : Result.RuleDisplayName;
 	const FText ProducedResources = BuildProducedResourceSummary(Result.OutputsProduced);
 	const bool bShowHUD = Result.bSuccess
 		? Policy.bShowResourceEarningsOnHUD
 			&& OutputCount >= FMath::Max(1, Policy.MinimumResourceUnitsForHUDNotification)
 		: Policy.bShowBlockedProductionOnHUD;
-	if (!Policy.bRecordResourceProduction && !bShowHUD) return;
+	const bool bRecord = Policy.bRecordResourceProduction && Result.Notifications.bRecordInFeed;
+	if (!bRecord && !bShowHUD) return;
+	FFormatNamedArguments TextArguments;
+	TextArguments.Add(TEXT("Rule"), RuleName);
+	TextArguments.Add(TEXT("Resources"), ProducedResources);
+	TextArguments.Add(TEXT("Quantity"), FText::AsNumber(OutputCount));
+	TextArguments.Add(TEXT("Inputs"), FText::AsNumber(InputCount));
+	TextArguments.Add(TEXT("Cycle"), FText::AsNumber(Result.CycleIndex));
+	TextArguments.Add(TEXT("Territory"), UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(Result.TerritoryTag));
+	TextArguments.Add(TEXT("Reason"), Result.FailureReason);
+	const FText& CustomTitle = Result.bSuccess ? Result.Notifications.SuccessTitle : Result.Notifications.BlockedTitle;
+	const FText& CustomMessage = Result.bSuccess ? Result.Notifications.SuccessMessage : Result.Notifications.BlockedMessage;
+	const FText Title = !CustomTitle.IsEmpty() ? FText::Format(CustomTitle, TextArguments)
+		: FText::Format(Result.bSuccess
+			? NSLOCTEXT("TerritoryIntelligence", "ProductionCompleteHeadline", "Resources earned: {0}")
+			: NSLOCTEXT("TerritoryIntelligence", "ProductionBlockedHeadline", "Production blocked: {0}"),
+			Result.bSuccess ? ProducedResources : RuleName);
+	const FText Message = !CustomMessage.IsEmpty() ? FText::Format(CustomMessage, TextArguments)
+		: (Result.bSuccess
+			? FText::Format(NSLOCTEXT("TerritoryIntelligence", "ProductionCompleteDetail",
+				"Narrative inventory received {0}. Cycle {1} consumed {2} item units and produced {3} item units."),
+				ProducedResources, FText::AsNumber(Result.CycleIndex), FText::AsNumber(InputCount), FText::AsNumber(OutputCount))
+			: FText::Format(NSLOCTEXT("TerritoryIntelligence", "ProductionBlockedDetail",
+				"Cycle {0} produced nothing. Reason: {1}"), FText::AsNumber(Result.CycleIndex), Result.FailureReason));
 	AddLiveEvent(
 		Result.bSuccess ? ETerritoryLiveEventType::ProductionCompleted
 			: ETerritoryLiveEventType::ProductionBlocked,
 		Result.TerritoryTag,
-		FText::Format(Result.bSuccess
-			? NSLOCTEXT("TerritoryIntelligence", "ProductionCompleteHeadline",
-				"Resources earned: {0}")
-			: NSLOCTEXT("TerritoryIntelligence", "ProductionBlockedHeadline",
-				"Production blocked: {0}"),
-			Result.bSuccess ? ProducedResources : RuleName),
-		Result.bSuccess
-			? FText::Format(NSLOCTEXT("TerritoryIntelligence", "ProductionCompleteDetail",
-				"Narrative inventory received {0}. Cycle {1} consumed {2} item units and produced {3} item units."),
-				ProducedResources,
-				FText::AsNumber(Result.CycleIndex), FText::AsNumber(InputCount),
-				FText::AsNumber(OutputCount))
-			: FText::Format(NSLOCTEXT("TerritoryIntelligence", "ProductionBlockedDetail",
-				"Cycle {0} produced nothing. Reason: {1}"),
-				FText::AsNumber(Result.CycleIndex), Result.FailureReason),
+		Title, Message,
 		Result.TerritoryTag.IsValid(),
 		FMath::Max(1.f, Policy.EconomyHUDNotificationDuration),
 		ETerritoryIntelligenceCategory::Production,
 		Result.bSuccess ? ETerritoryIntelligenceSeverity::Positive
 			: ETerritoryIntelligenceSeverity::Warning,
 		ViewerFaction, FGameplayTag(), FGameplayTagContainer(), 0, 0, 0,
-		bShowHUD, Result.BatchID, Policy.bRecordResourceProduction);
+		bShowHUD, Result.BatchID, bRecord);
+}
+
+void UTerritoryPlayerManagementComponent::ClientReceiveProductionResult_Implementation(
+	const FTerritoryProductionResult& Result)
+{
+	if (const APlayerController* Controller = Cast<APlayerController>(GetOwner());
+		Controller && Controller->IsLocalController())
+		HandleProductionSettled(Result);
 }
 
 void UTerritoryPlayerManagementComponent::HandleDiplomacyEvent(

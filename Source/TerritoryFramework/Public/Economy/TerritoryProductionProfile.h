@@ -4,6 +4,7 @@
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "Tales/TerritoryGarrisonCondition.h"
 #include "TerritoryProductionProfile.generated.h"
 
 class UNarrativeItem;
@@ -29,7 +30,96 @@ enum class ETerritoryProductionStatus : uint8
 	/** Compensation could not restore the affected item quantities. Never retry this cycle. */
 	RollbackIncomplete,
 	/** A Narrative load superseded this request; its old continuation was discarded. */
-	Superseded
+	Superseded,
+	/** An authored inventory check or output cap paused this cycle. No items were consumed. */
+	StockLimited UMETA(DisplayName="Stock Limit")
+};
+
+/** Pause the whole recipe when any enabled check matches the receiving inventory. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryProductionStockCondition
+{
+	GENERATED_BODY()
+
+	/** Turn this check on or off without removing its settings. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory Check")
+	bool bEnabled = true;
+
+	/** Count all stacks of this exact Narrative item class in the receiving faction inventory. Loaded weapon magazines and other players' inventories are not counted. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory Check", meta=(EditCondition="bEnabled"))
+	TSubclassOf<UNarrativeItem> ItemClass;
+
+	/** Stop when the current count matches this comparison. At Least means >=; At Most means <=. Equal To alone can miss a count that jumps past the amount. Use an output stock cap for a strict refill target. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory Check", meta=(EditCondition="bEnabled", DisplayName="Stop When"))
+	ETerritoryIntegerComparison Comparison = ETerritoryIntegerComparison::AtLeast;
+
+	/** Amount to compare with the current inventory count. Example: At Least 300 pauses at 300 or more. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Inventory Check", meta=(EditCondition="bEnabled", ClampMin="0"))
+	int32 Quantity = 300;
+};
+
+/** An upper stock limit for one output item. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryProductionStockCap
+{
+	GENERATED_BODY()
+
+	/** Turn this output cap on or off without removing its settings. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Output Stock Cap")
+	bool bEnabled = true;
+
+	/** An exact Narrative item class from this rule's Outputs list. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Output Stock Cap", meta=(EditCondition="bEnabled"))
+	TSubclassOf<UNarrativeItem> ItemClass;
+
+	/** Highest total stock this rule may create in its receiving inventory. Free production adds only the missing amount. Recipes with inputs wait until the whole batch fits, so they never charge for a partial batch. Existing excess stock is left alone. Zero stops this output. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Output Stock Cap", meta=(EditCondition="bEnabled", ClampMin="0"))
+	int32 MaximumQuantity = 300;
+};
+
+/** Per-rule controls for the existing Territory HUD and activity feed. */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryProductionNotifications
+{
+	GENERATED_BODY()
+
+	/** Master switch for this rule's HUD messages and activity-feed entries. Production, quests and inventory updates still work when this is off. Global notification switches also apply. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications")
+	bool bEnabled = true;
+
+	/** Allow a message after this rule successfully produces items. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications", meta=(EditCondition="bEnabled"))
+	bool bNotifyOnSuccess = true;
+
+	/** Allow messages when missing inputs, storage or other requirements block this rule. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications", meta=(EditCondition="bEnabled"))
+	bool bNotifyWhenBlocked = true;
+
+	/** Allow a message when a stock check or cap pauses production. Off by default because a full refill target is normal. This is separate from other blocked messages. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications", meta=(EditCondition="bEnabled"))
+	bool bNotifyAtStockLimit = false;
+
+	/** Also keep allowed messages in the activity feed, when global recording is enabled. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications", meta=(EditCondition="bEnabled"))
+	bool bRecordInFeed = true;
+
+	/** Optional success title. Leave empty for the default. Text supports {Rule}, {Resources}, {Quantity}, {Inputs}, {Cycle}, {Territory} and {Reason}. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications", meta=(EditCondition="bEnabled && bNotifyOnSuccess", MultiLine="true"))
+	FText SuccessTitle;
+
+	/** Optional success message, with the same placeholders as Success Title. Quantity and Resources describe only the items actually added. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications", meta=(EditCondition="bEnabled && bNotifyOnSuccess", MultiLine="true"))
+	FText SuccessMessage;
+
+	/** Optional title for allowed blocked or stock-limit messages. Leave empty for the default. Supports the same placeholders as Success Title. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications", meta=(EditCondition="bEnabled && (bNotifyWhenBlocked || bNotifyAtStockLimit)", MultiLine="true"))
+	FText BlockedTitle;
+
+	/** Optional blocked message. Use {Reason} to explain why no items were produced. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Notifications", meta=(EditCondition="bEnabled && (bNotifyWhenBlocked || bNotifyAtStockLimit)", MultiLine="true"))
+	FText BlockedMessage;
+
+	bool AllowsMessage(ETerritoryProductionStatus Status, bool bSuccess) const;
 };
 
 /** An item rate authored on a production rule. */
@@ -107,6 +197,18 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionRule
 	/** Allow this recipe to run when its ownership, state, upgrade and inventory requirements pass. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production")
 	bool bEnabled = true;
+
+	/** Pause this rule if ANY enabled check matches. Checks run before inputs are consumed, using the selected faction resource inventory. Paused cycles expire; they do not build up extra production for later. An empty list adds no checks. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production|Inventory Limits")
+	TArray<FTerritoryProductionStockCondition> InventoryStopConditions;
+
+	/** Limit total stock for selected output items. Free outputs refill only the missing amount. Recipes with inputs run only if every full output fits. Caps are checked on every cycle, including catch-up and restored sites. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production|Inventory Limits")
+	TArray<FTerritoryProductionStockCap> OutputStockCaps;
+
+	/** Choose which messages this recipe may show and write its text here. Turning messages off does not disable production or its gameplay events. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Production|Notifications")
+	FTerritoryProductionNotifications Notifications;
 };
 
 /** Saved deterministic checkpoint for one Property production rule. */
@@ -326,6 +428,14 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionResult
 	/** Explains why the requested operation did not succeed. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
 	FText FailureReason;
+
+	/** Display name copied from the evaluated rule. An empty name falls back to its friendly tag name. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
+	FText RuleDisplayName;
+
+	/** Message settings copied before settlement. UI uses the exact evaluated rule, even if its Place streams out. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Production")
+	FTerritoryProductionNotifications Notifications;
 };
 
 /** Reusable production definition. Actual items always live in Narrative inventory. */

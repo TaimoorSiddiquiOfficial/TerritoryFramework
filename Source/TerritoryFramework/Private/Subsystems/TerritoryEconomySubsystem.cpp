@@ -151,6 +151,12 @@ int32 AddExactItems(UNarrativeInventoryComponent* Inventory,
 
 	if (Remaining > 0 && IsCurrent())
 	{
+		// Native TryAddItemFromClass fills child-class stacks too. Never let an
+		// exact-class recipe or its compensation silently become a different item.
+		for (const UNarrativeItem* Item : Inventory->GetItems())
+			if (IsValid(Item) && Item->GetClass() != ItemClass.Get()
+				&& Item->IsA(ItemClass.Get()) && Item->GetStackSpace() > 0)
+				return Quantity - Remaining;
 		const FItemAddResult AddResult = Inventory->TryAddItemFromClass(
 			ItemClass, Remaining, false);
 		Remaining -= AddResult.AmountGiven;
@@ -255,6 +261,20 @@ bool CanApplyResourceTransaction(UNarrativeInventoryComponent* Inventory,
 		}
 
 		const int32 MaxStackSize = FMath::Max(1, CDO->GetMaxStackSize());
+		if (Remaining > 0)
+		{
+			for (const FSimulatedStack& Stack : Stacks)
+			{
+				if (Stack.Quantity > 0 && Stack.Quantity < Stack.Maximum
+					&& Stack.ItemClass != Output.ItemClass.Get() && Stack.ItemClass->IsChildOf(Output.ItemClass.Get()))
+				{
+					OutStatus = ETerritoryProductionStatus::StorageFull;
+					OutFailureReason = NSLOCTEXT("TerritoryProduction", "ChildStackBlocksExactOutput",
+						"A different child item has stack space. Narrative would fill that stack instead of creating the exact output item. Use a concrete output item class or free that stack first.");
+					return false;
+				}
+			}
+		}
 		while (Remaining > 0)
 		{
 			if (OccupiedSlots >= Inventory->GetCapacity())
@@ -1246,6 +1266,8 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 	if (!OutResult.BatchID.IsValid()) OutResult.BatchID = FGuid::NewGuid();
 	OutResult.Faction = Faction;
 	OutResult.RuleTag = Recipe.RuleTag;
+	OutResult.RuleDisplayName = Recipe.DisplayName;
+	OutResult.Notifications = Recipe.Notifications;
 	OutResult.bSuccess = false;
 	OutResult.InputsConsumed.Reset();
 	OutResult.OutputsProduced.Reset();
@@ -1295,7 +1317,6 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 		OutResult.Status = ETerritoryProductionStatus::InvalidProfile;
 		return false;
 	}
-	if (!CanApplyResourceTransaction(Inventory, Inputs, Outputs, OutResult.Status, OutResult.FailureReason)) return false;
 	if (!IsCurrent()) return Superseded();
 	if (!IsAccountCurrent())
 	{
@@ -1303,6 +1324,49 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "AccountChangedBeforeRecipe", "The faction account changed before production could start.");
 		return false;
 	}
+	// Read Native stacks once for preflight; never keep a second stock balance.
+	// Use int64 because several valid stacks can exceed Native's int32 total helper.
+	TMap<UClass*, int64> Stock;
+	for (const UNarrativeItem* Item : Inventory->GetItems())
+		if (IsValid(Item)) Stock.FindOrAdd(Item->GetClass()) += FMath::Max(0, Item->GetQuantity());
+	const auto Limited = [&](const FText& Reason)
+	{
+		OutResult.Status = ETerritoryProductionStatus::StockLimited;
+		OutResult.FailureReason = Reason;
+		return false;
+	};
+	TMap<UClass*, int64> WatchedStock;
+	for (const FTerritoryProductionStockCondition& Check : Recipe.InventoryStopConditions)
+	{
+		if (!Check.bEnabled) continue;
+		const int64 Quantity = Stock.FindRef(Check.ItemClass.Get());
+		if (UTerritoryGarrisonCondition::CompareValues(Quantity, Check.Comparison, Check.Quantity))
+		{
+			return Limited(FText::Format(NSLOCTEXT("TerritoryProduction", "StockCheckMatched",
+				"Production is paused by an inventory check. {0}: {1} in stock; stop when {2} {3}."),
+				GetDefault<UNarrativeItem>(Check.ItemClass)->DisplayName, FText::AsNumber(Quantity),
+				StaticEnum<ETerritoryIntegerComparison>()->GetDisplayNameTextByValue(static_cast<int64>(Check.Comparison)),
+				FText::AsNumber(Check.Quantity)));
+		}
+		WatchedStock.Add(Check.ItemClass.Get(), Quantity);
+	}
+	for (const FTerritoryProductionStockCap& Cap : Recipe.OutputStockCaps)
+	{
+		if (!Cap.bEnabled) continue;
+		WatchedStock.Add(Cap.ItemClass.Get(), Stock.FindRef(Cap.ItemClass.Get()));
+		FTerritoryResourceAmount* Output = Outputs.FindByPredicate([&](const FTerritoryResourceAmount& Amount)
+			{ return Amount.ItemClass == Cap.ItemClass; });
+		check(Output); // Validated against this rule's outputs above.
+		const int64 Space = FMath::Max<int64>(0, static_cast<int64>(Cap.MaximumQuantity) - Stock.FindRef(Cap.ItemClass.Get()));
+		if (Output->Quantity > Space && !Inputs.IsEmpty())
+			return Limited(NSLOCTEXT("TerritoryProduction", "FullRecipeExceedsStockCap",
+				"Production is paused: the complete output batch would exceed a stock cap. No inputs were used."));
+		Output->Quantity = static_cast<int32>(FMath::Min<int64>(Output->Quantity, Space));
+	}
+	Outputs.RemoveAll([](const FTerritoryResourceAmount& Amount) { return Amount.Quantity == 0; });
+	if (Outputs.IsEmpty())
+		return Limited(NSLOCTEXT("TerritoryProduction", "AllOutputsAtStockCap", "Production is paused: all output stock caps are reached."));
+	if (!CanApplyResourceTransaction(Inventory, Inputs, Outputs, OutResult.Status, OutResult.FailureReason)) return false;
 	const auto Count = [&](UClass* Class)
 	{
 		int64 Total = 0;
@@ -1311,15 +1375,28 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 		return Total;
 	};
 	TMap<UClass*, int64> Initial, Expected;
-	for (const FTerritoryResourceAmount& Amount : Inputs) Initial.Add(Amount.ItemClass.Get(), Count(Amount.ItemClass.Get()));
-	for (const FTerritoryResourceAmount& Amount : Outputs) Initial.Add(Amount.ItemClass.Get(), Count(Amount.ItemClass.Get()));
+	for (const FTerritoryResourceAmount& Amount : Inputs) Initial.Add(Amount.ItemClass.Get(), Stock.FindRef(Amount.ItemClass.Get()));
+	for (const FTerritoryResourceAmount& Amount : Outputs) Initial.Add(Amount.ItemClass.Get(), Stock.FindRef(Amount.ItemClass.Get()));
 	Expected = Initial;
-	const auto Matches = [&](const TMap<UClass*, int64>& Quantities)
+	const auto Matches = [&](const TMap<UClass*, int64>& Quantities, bool bCheckWatchedStock = true)
 	{
 		for (const auto& Entry : Quantities) if (Count(Entry.Key) != Entry.Value) return false;
+		// External callback changes to check-only items cancel this recipe, but are
+		// never undone by compensation. Input/output checks follow Expected instead.
+		if (bCheckWatchedStock)
+			for (const auto& Entry : WatchedStock)
+				if (!Initial.Contains(Entry.Key) && Count(Entry.Key) != Entry.Value) return false;
 		return true;
 	};
 	TArray<FTerritoryResourceAmount> AppliedInputs, AppliedOutputs;
+	if (!IsCurrent()) return Superseded();
+	if (!IsAccountCurrent() || !Matches(Expected))
+	{
+		OutResult.Status = ETerritoryProductionStatus::SettlementChanged;
+		OutResult.FailureReason = NSLOCTEXT("TerritoryProduction", "StockChangedDuringPreflight",
+			"The account or inventory changed while checking production. No recipe items were changed.");
+		return false;
+	}
 	const auto Compensate = [&](ETerritoryProductionStatus Failure)
 	{
 		// Losing faction membership or depot selection stops forward production,
@@ -1344,7 +1421,7 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 		if (!IsCurrent()) return Superseded();
 		for (const FTerritoryResourceAmount& Amount : AppliedInputs) if (Amount.Quantity > 0) OutResult.InputsConsumed.Add(Amount);
 		for (const FTerritoryResourceAmount& Amount : AppliedOutputs) if (Amount.Quantity > 0) OutResult.OutputsProduced.Add(Amount);
-		const bool bRestored = OutResult.InputsConsumed.IsEmpty() && OutResult.OutputsProduced.IsEmpty() && Matches(Initial);
+		const bool bRestored = OutResult.InputsConsumed.IsEmpty() && OutResult.OutputsProduced.IsEmpty() && Matches(Initial, false);
 		OutResult.Status = bRestored ? Failure : ETerritoryProductionStatus::RollbackIncomplete;
 		OutResult.FailureReason = bRestored
 			? NSLOCTEXT("TerritoryProduction", "RecipeCompensated", "The faction account or inventory changed during settlement; the recipe was cancelled and its item quantities restored.")
@@ -1577,6 +1654,8 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 			Result.TerritoryTag = Site.TerritoryTag;
 			Result.Faction = Site.OwnerFaction;
 			Result.RuleTag = Rule->RuleTag;
+			Result.RuleDisplayName = Rule->DisplayName;
+			Result.Notifications = Rule->Notifications;
 			Result.CycleIndex = EvaluationCycle;
 
 			FText StateFailure;
@@ -1680,6 +1759,7 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 		case ETerritoryProductionStatus::StorageFull: return 80;
 		case ETerritoryProductionStatus::MissingInput: return 70;
 		case ETerritoryProductionStatus::AuthorityRejected: return 60;
+		case ETerritoryProductionStatus::StockLimited: return 50;
 		case ETerritoryProductionStatus::Produced: return 40;
 		case ETerritoryProductionStatus::Ready: return 30;
 		case ETerritoryProductionStatus::AlreadyProcessed: return 20;

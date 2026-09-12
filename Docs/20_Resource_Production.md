@@ -33,6 +33,12 @@ Lower `Priority` runs first. Equal priorities use `RuleTag` lexical order. This 
 
 `QuantityPerCycle + QuantityPerUpgradeLevel * UpgradeLevel` is calculated with `int64` intermediates and rejected if the final item quantity does not fit `int32`.
 
+Each rule also has optional **Inventory Stop Conditions**, **Output Stock Caps**
+and **Notifications**. See [Production limits and messages](PRODUCTION_LIMITS_AND_NOTIFICATIONS.md)
+for refill examples, all six comparisons and custom message text. Empty limits
+preserve existing production. Per-rule notification switches preserve gameplay
+delegates and work through the existing HUD/feed on the host and owning clients.
+
 ## Account registration
 
 Add `UTerritoryFactionResourceAccountComponent` to a server-owned actor that resolves to a `UNarrativeInventoryComponent` and exact Narrative faction membership. A PlayerController is supported: startup registration retries are bounded while possession is pending, and the controller resolves its current pawn after respawn. The component unregisters on EndPlay. `RegistrationRetryInterval` and `MaxRegistrationAttempts` control the startup window.
@@ -74,12 +80,17 @@ For each pending day:
 1. Sort sites by stable Territory GUID.
 2. Sort site rules by Priority, then RuleTag.
 3. Validate owner, claimed/contested policy, upgrade level, profile, and account.
-4. Simulate exact input removal, output stacks, inventory slots, and weight.
+4. Check current inventory stop conditions and apply output stock caps, then simulate exact input removal, output stacks, inventory slots, and weight.
 5. Hold the recipe mutation guard, debit inputs, credit outputs, and verify the complete quantities.
 6. Update the per-rule checkpoint and outcome.
 7. Publish WorldState site and stockpile projections.
 
 Missing input consumes that day and produces nothing. Storage unavailable or full remains pending, but only the latest `MaxProductionCatchupCycles` days can be recovered. Disabled, under-level, unclaimed, or contested rules consume the day as inactive. This prevents unlimited stockpiling of missed production.
+
+Stock-limited cycles also expire. Free production can fill only the missing amount
+up to its output cap; recipes with inputs require the whole batch to fit. A base
+output that Native would add to a different child-item stack is rejected before
+settlement. The exact-class adapter also protects compensation from that routing.
 
 An output-only rule is valid. For example, a test Blacksmith rule with no inputs and
 `BP_Item_Grain x4` in Outputs adds four Grain to the resolved owner inventory after the next
@@ -91,6 +102,7 @@ complete campaign cycle. If it does not, inspect the published production-site s
 - `Produced` with the expected quantity confirms that Narrative inventory accepted the item.
 - `RollbackIncomplete` means a callback prevented full compensation; the UI shows **Inventory needs attention**. That scheduled cycle is consumed so it cannot replay the same partial conversion.
 - `SettlementChanged` means a callback changed stock and the cancelled recipe's affected quantities were restored.
+- `StockLimited` means an authored inventory check or stock cap paused the cycle. This expected refill state is silent by default and does not consume recipe items.
 
 ## Crafting bridge
 
