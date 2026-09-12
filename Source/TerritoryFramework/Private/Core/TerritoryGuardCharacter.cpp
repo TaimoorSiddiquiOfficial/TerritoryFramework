@@ -16,6 +16,7 @@
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/TerritoryNPCController.h"
 #include "AI/TerritoryContextualAnimComponent.h"
+#include "Navigation/TerritoryMountPresentationComponent.h"
 #include "AI/TerritoryInvestigationActivity.h"
 #include "AI/TerritoryInvestigationGoal.h"
 #include "AI/TerritoryStealthObserverComponent.h"
@@ -85,6 +86,7 @@ ATerritoryGuardCharacter::ATerritoryGuardCharacter(const FObjectInitializer& Obj
 {
 	PatrolGoalClass = UTerritoryPatrolGoal::StaticClass();
 	CreateDefaultSubobject<UTerritoryContextualAnimComponent>(TEXT("TerritoryContextualAnimation"));
+	CreateDefaultSubobject<UTerritoryMountPresentationComponent>(TEXT("TerritoryMountPresentation"));
 	DiplomacyDialogue = CreateDefaultSubobject<UTerritoryDiplomacyDialogueComponent>(
 		TEXT("TerritoryDiplomacyDialogue"));
 	StealthObserver = CreateDefaultSubobject<UTerritoryStealthObserverComponent>(

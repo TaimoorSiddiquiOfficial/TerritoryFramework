@@ -94,6 +94,7 @@ audits are kept outside this learning path so they cannot be mistaken for curren
 - [Blueprint Extension Guide](Blueprint_Extension_Guide.md) — safe subclassing and Super-call rules.
 - [Blueprint Setup Tutorial](Blueprint_Setup_Tutorial.md) — detailed Blueprint setup walkthrough.
 - [Story Capture and Combat Staging](StoryCaptureAndCombatStaging.md) — authored owner handover and staged-fight patterns.
+- [Mounted Character Collision](MOUNT_CLIENT_COLLISION.md) — stop seated characters pushing their own car on remote clients.
 - [Remaining Work and Roadmap](ROADMAP_AND_REMAINING.md) — current release gates, engineering debt, and ranked gameplay ideas.
 - [Changelog](CHANGELOG.md) — chronological implementation history.
 

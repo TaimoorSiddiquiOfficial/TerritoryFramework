@@ -3,6 +3,11 @@
 This system joins Territory Framework road missions to Narrative Pro. It does not replace
 Narrative vehicles, ZoneGraph, Mass traffic, intersections, vehicle abilities, or impact damage.
 
+For multiplayer passengers and story drivers, add **Territory Mount Presentation**
+to their character Blueprint. Territory defenders and assault guards include it.
+It stops simulated seated capsules pushing their own mount on remote clients;
+Native still controls seats and travel. See [setup and behavior](MOUNT_CLIENT_COLLISION.md).
+
 ## The easy idea
 
 Use one road for both directions:

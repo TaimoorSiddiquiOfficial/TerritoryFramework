@@ -5,6 +5,7 @@
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/TerritoryNPCController.h"
 #include "AI/TerritoryContextualAnimComponent.h"
+#include "Navigation/TerritoryMountPresentationComponent.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NarrativeNPCController.h"
 #include "AI/NPCDefinition.h"
@@ -72,6 +73,7 @@ ATerritoryAssaultCharacter::ATerritoryAssaultCharacter(const FObjectInitializer&
 {
 	AssaultParticipant = CreateDefaultSubobject<UTerritoryAssaultParticipantComponent>(TEXT("TerritoryAssaultParticipant"));
 	CreateDefaultSubobject<UTerritoryContextualAnimComponent>(TEXT("TerritoryContextualAnimation"));
+	CreateDefaultSubobject<UTerritoryMountPresentationComponent>(TEXT("TerritoryMountPresentation"));
 	DiplomacyDialogue = CreateDefaultSubobject<UTerritoryDiplomacyDialogueComponent>(
 		TEXT("TerritoryDiplomacyDialogue"));
 

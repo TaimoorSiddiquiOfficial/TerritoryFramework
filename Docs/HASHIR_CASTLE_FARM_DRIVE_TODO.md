@@ -1,6 +1,6 @@
 # Hashir's Castle Hill Farm trip
 
-Updated 2026-09-12. **HopDistrictTest route fixed; complete story and multiplayer acceptance remain open.**
+Updated 2026-09-12. **HopDistrictTest route and remote boarding fixed; complete story acceptance remains open.**
 
 ## Confirmed cause and fix
 
@@ -85,16 +85,36 @@ for the player and Hashir to load, then run
 `LiveDriveRegression.json`; wait for `passed: true` before stopping PIE. Do not run
 this fixture in multiplayer or use a dialogue editor template as a live event.
 
-## Multiplayer finding — still open
+## Multiplayer boarding — fixed and verified
 
-A listen server and two clients received the dialogue and Hashir took the driver
-seat. The remote passenger's Native `GA_Mount_Vehicle` started on server/client,
-then released the passenger slot before attachment. The car remained waiting.
-Client car positions also diverged from the server's stationary car. These are
-observations, not a proven replication root cause or a passed multiplayer trip.
-`MountProbe.json` records both ability instances and occupancy before release;
-`RemoteMountAttempt.log` preserves the run. Normal client input still needs a
-controlled reproduction; a successful `RunInteractBehavior` return is insufficient.
+The first network attempt showed remote boarding releasing its slot before
+attachment and a stationary car drifting on clients. The follow-up diagnostic
+confirmed that simulated seated characters still had capsule physics enabled.
+Their capsules pushed their own car away from the server position. Changing
+only that client collision made the cars converge and Native boarding succeed.
+
+`UTerritoryMountPresentationComponent` now follows Native mount attachment on
+simulated clients. It disables the seated capsule and restores its prior mode
+on exit. Territory guards include it; the TDA player and Hashir Blueprints now
+add it. Server seating, owner-client abilities and Narrative Pro remain unchanged.
+This follow-up is a plugin C++ and project Blueprint change; the earlier route
+batch above was project-content only. No new durable state or RPC is introduced.
+
+The recorded listen-host/two-client regression passes all 16 checks, including
+a third client joining while Hashir is seated, remote passenger boarding,
+physical departure, Native arrival, stopped-car agreement, client-requested exit
+and restored collision on every client. It stages the server passenger beside
+the car and queues Native's controller `Begin Interact`/`End Interact` events on
+a native timer. It does not claim hardware keyboard focus or the preceding quest.
+See [setup](MOUNT_CLIENT_COLLISION.md) and
+[verification](MOUNT_CLIENT_COLLISION_VERIFICATION_2026-09-12.md). The old failed
+network evidence remains under `20260912_HashirDrive`; passing evidence is under
+`Saved/Verification/20260912_HashirBoarding`.
+
+For a fresh network regression, use a listen host and two clients, run
+`Scripts/Territory/verify_hashir_farm_network_pie.py`, then use a native editor call
+to begin the live drive node on the server controller printed by the script.
+Wait for `NetworkRegression.json` to report `passed: true` before stopping PIE.
 
 Two earlier test attempts crashed through invalid test invocation: executing an
 editor dialogue template without a live world, and synchronously invoking a
@@ -126,8 +146,9 @@ invalid template/client calls. The failed attempt logs are preserved.
 
 - [ ] Normal input: obtain the quest, complete Blacksmith through its intended
   stages, speak to Hashir, board, arrive, exit and continue once.
-- [ ] Remote passenger boarding, vehicle movement, exit and quest result on a
-  server and two clients; then compiled dedicated-server and returning-client gates.
+- [x] Remote passenger boarding, vehicle movement, exit and capsule restoration
+  on a listen host and two clients, plus a late third client.
+- [ ] Full quest result in multiplayer; compiled dedicated-server and returning-client gates.
 - [ ] Missing/unloaded lanes, disconnected roads, invalid car/driver and blocked
   entry recover clearly without fake completion or endless fallback retries.
 - [ ] Save/reload before departure, during the trip and after arrival; preserve

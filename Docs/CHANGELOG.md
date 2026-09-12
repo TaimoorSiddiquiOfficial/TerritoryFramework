@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased — 2026-09-12 (Remote mount collision)
+
+- Stop simulated seated characters pushing their own Native mount on clients.
+- Restore their previous capsule mode after exit without changing server seating,
+  owning-client abilities, death handling or campaign save records.
+- Include the adapter on Territory defenders and assault guards; other Narrative
+  characters can add **Territory Mount Presentation** in their Blueprint.
+- Verify both engine builds, 315 tests per engine, and a recorded multiplayer
+  boarding/travel/exit run with a late third client.
+
+See [setup](MOUNT_CLIENT_COLLISION.md) and
+[verification](MOUNT_CLIENT_COLLISION_VERIFICATION_2026-09-12.md).
+
 ## Unreleased — 2026-09-11 (Defender task and related-system audit)
 
 - Keep the initial All Defenders Defeated task check pending while finite reserve

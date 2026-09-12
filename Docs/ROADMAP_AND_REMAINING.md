@@ -1,18 +1,20 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-12 (Hashir route fix and remaining story/network gates)
+> **Reviewed:** 2026-09-12 (Hashir remote boarding and mount collision fix)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current remaining work
 
-The latest fully verified framework batch is production limits and per-rule notifications:
-314 tests pass on each engine, 19 multiplayer checks pass, and UE 5.8 packaging
-and startup pass. Those results do not close unrelated story or release gates.
+The latest framework batch fixes seated character collision on remote clients:
+315 tests pass on each engine and all 16 staged multiplayer trip checks pass,
+including late joining. See the [verification report](MOUNT_CLIENT_COLLISION_VERIFICATION_2026-09-12.md)
+for builds, packaging and the exact limits of this evidence. These results do
+not close unrelated story or release gates.
 
 | Area | Still required |
 |---|---|
-| Hashir's Farm trip — route fixed, acceptance open | HopDistrictTest now has the missing road lanes and the correct world destination; standalone travel/exit passes. Resolve remote boarding and client car drift, author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
+| Hashir's Farm trip — route and boarding fixed, story acceptance open | Standalone and remote travel/exit pass; simulated seated capsules no longer push the client car. Author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow, compiled dedicated server and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
 | Finite reserves and Narrative tasks | Add reserve events through existing finite post commands; prove capture/defeat behavior with pending reserves and missing posts; migrate applicable authored Native record tasks. |
 | Guard conversations | Bind speakers, select story context, handle multiplayer, let hidden players overhear, interrupt for combat and resume the real patrol activity. |
@@ -20,13 +22,27 @@ and startup pass. Those results do not close unrelated story or release gates.
 | Story-map presentation | Finish UDS day/night, interior, fog, shadow, HDR-display and frame-rate checks in AlMalik; retain the tracked appearance/Chaos/content warning review. |
 | Story authoring and release | Finish Act 1 after the behavior above is verified; decide later retake/peaceful-handover rules and Farm's reward. Refresh 5.7/5.8 release artifacts and documentation after the remaining release gates pass. |
 
-Next story investigation: **Hashir's remote passenger boarding and client car
-movement**, followed by durable arrival/save recovery. The ongoing framework
+Next story work: **Hashir's durable arrival/quest continuation and save recovery**.
+The ongoing framework
 batch remains finite reserve events and capture/defeat checks.
 The dated checkpoints below preserve earlier evidence; their older test counts
 and then-current task lists do not supersede this list.
 
 ## Current checkpoint
+
+### Remote mounted character collision — 2026-09-12
+
+Native mount attachment now drives a local capsule-collision adapter on simulated
+characters. Territory defenders and assault guards include it; TDA's player and
+Hashir opt in through their Blueprints. Native keeps seating, occupancy, driving,
+owning-client abilities and save authority. All six builds and 315 tests per
+engine pass. A listen host, two clients and a late third client pass 16 boarding,
+travel, arrival, exit and collision checks. See [setup](MOUNT_CLIENT_COLLISION.md)
+and [verification](MOUNT_CLIENT_COLLISION_VERIFICATION_2026-09-12.md).
+
+The fixture starts the real drive dialogue node and stages the passenger. The
+complete Blacksmith quest, durable arrival, mid-trip recovery and city streaming
+are still open. No Narrative Pro source was changed.
 
 ### Production stock limits and per-rule messages — 2026-09-12
 
