@@ -1,8 +1,29 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-12 (per-rule production limits and notifications)
+> **Reviewed:** 2026-09-12 (remaining-work review and Hashir's Blacksmith-to-Farm drive report)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
+
+## Current remaining work
+
+The latest completed batch is production limits and per-rule notifications:
+314 tests pass on each engine, 19 multiplayer checks pass, and UE 5.8 packaging
+and startup pass. Those results do not close unrelated story or release gates.
+
+| Area | Still required |
+|---|---|
+| Hashir's Farm trip — new story blocker | Reproduce and investigate the aborted drive after Blacksmith capture; inspect destination/segment values, Native lane lookup and Return To Spawn activity setup. [Exact report and TODO](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
+| AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
+| Finite reserves and Narrative tasks | Add reserve events through existing finite post commands; prove capture/defeat behavior with pending reserves and missing posts; migrate applicable authored Native record tasks. |
+| Guard conversations | Bind speakers, select story context, handle multiplayer, let hidden players overhear, interrupt for combat and resume the real patrol activity. |
+| Full gameplay verification | Finish the multiplayer capture/recruitment/defeat/reward playthrough and authored road obstruction, abandonment and carjacking checks. Resolve the tracked AI/weapon/cue warnings and optional intro-cutscene error through adapters. |
+| Story-map presentation | Finish UDS day/night, interior, fog, shadow, HDR-display and frame-rate checks in AlMalik; retain the tracked appearance/Chaos/content warning review. |
+| Story authoring and release | Finish Act 1 after the behavior above is verified; decide later retake/peaceful-handover rules and Farm's reward. Refresh 5.7/5.8 release artifacts and documentation after the remaining release gates pass. |
+
+Next newly reported reproduction: **Hashir's Blacksmith-to-Farm drive**. The
+ongoing framework batch remains finite reserve events and capture/defeat checks.
+The dated checkpoints below preserve earlier evidence; their older test counts
+and then-current task lists do not supersede this list.
 
 ## Current checkpoint
 
@@ -388,6 +409,10 @@ the existing post-capture counterattack accept the request.
 - [ ] Finish Hashir's Act 1 quest and main dialogue after story requirements are
   agreed. The current main dialogue now contains prototype quest-giving, follow
   and reputation branches. Those authored branches are not a finished Act 1.
+- [ ] Investigate Hashir's drive to Castle Hill Farm after successful Blacksmith
+  capture. Reported: invalid ZoneGraph start/end lane, identical logged segment
+  endpoints and Return To Spawn SetupBlackboard failure. Root cause is unverified;
+  see the [logs, investigation and acceptance TODO](HASHIR_CASTLE_FARM_DRIVE_TODO.md).
 - [ ] Decide whether later Blacksmith losses start a new named reinforcement
   encounter, and whether diplomacy should offer a separate peaceful handover.
   The current example is one finite named battle and requires its actual defeat.
@@ -645,9 +670,11 @@ These are verification jobs, not permission to invent a second gameplay authorit
    restored once again after a complete packaged-process restart. Both strict gates reported the
    exact one-item live set with zero unexpected or duplicate IDs. The 211-test suite also covers
    the nested archive contract.
-3. **World Partition map — fixture still required.** Stable identity and stream-safe actor cleanup
-   are automated, but `HopDistrictTest` is not World Partition-enabled. A physical stream-out and
-   stream-in of a Place, its posts, and a live assault remains a map-level playtest.
+3. **World Partition map — partly verified; release blockers remain.** An isolated AlMalik
+   fixture now verifies physical Place/post streaming and capture-enabled assault save/load
+   with appearance assets already loaded. Cold appearance initialization, defeat after a
+   restored wave, and a returning client still need successful verification. HopDistrictTest
+   is not World Partition-enabled. See the September 10 checkpoints above.
 4. **Packaged cook/game — passed for the installed engine.** A clean no-cache Windows cook plus
    stage, package, and archive completed with zero errors. Epic's installed UE 5.7 build cannot
    produce separate Client/Server target binaries; a source engine or installed Server support is
