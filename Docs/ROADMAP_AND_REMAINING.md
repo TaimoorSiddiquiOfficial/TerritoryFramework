@@ -1,18 +1,18 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-12 (remaining-work review and Hashir's Blacksmith-to-Farm drive report)
+> **Reviewed:** 2026-09-12 (Hashir route fix and remaining story/network gates)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current remaining work
 
-The latest completed batch is production limits and per-rule notifications:
+The latest fully verified framework batch is production limits and per-rule notifications:
 314 tests pass on each engine, 19 multiplayer checks pass, and UE 5.8 packaging
 and startup pass. Those results do not close unrelated story or release gates.
 
 | Area | Still required |
 |---|---|
-| Hashir's Farm trip — new story blocker | Reproduce and investigate the aborted drive after Blacksmith capture; inspect destination/segment values, Native lane lookup and Return To Spawn activity setup. [Exact report and TODO](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
+| Hashir's Farm trip — route fixed, acceptance open | HopDistrictTest now has the missing road lanes and the correct world destination; standalone travel/exit passes. Resolve remote boarding and client car drift, author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
 | Finite reserves and Narrative tasks | Add reserve events through existing finite post commands; prove capture/defeat behavior with pending reserves and missing posts; migrate applicable authored Native record tasks. |
 | Guard conversations | Bind speakers, select story context, handle multiplayer, let hidden players overhear, interrupt for combat and resume the real patrol activity. |
@@ -20,8 +20,9 @@ and startup pass. Those results do not close unrelated story or release gates.
 | Story-map presentation | Finish UDS day/night, interior, fog, shadow, HDR-display and frame-rate checks in AlMalik; retain the tracked appearance/Chaos/content warning review. |
 | Story authoring and release | Finish Act 1 after the behavior above is verified; decide later retake/peaceful-handover rules and Farm's reward. Refresh 5.7/5.8 release artifacts and documentation after the remaining release gates pass. |
 
-Next newly reported reproduction: **Hashir's Blacksmith-to-Farm drive**. The
-ongoing framework batch remains finite reserve events and capture/defeat checks.
+Next story investigation: **Hashir's remote passenger boarding and client car
+movement**, followed by durable arrival/save recovery. The ongoing framework
+batch remains finite reserve events and capture/defeat checks.
 The dated checkpoints below preserve earlier evidence; their older test counts
 and then-current task lists do not supersede this list.
 

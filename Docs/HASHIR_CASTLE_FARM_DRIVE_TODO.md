@@ -1,104 +1,137 @@
-# TODO: Hashir drives the player to Castle Hill Farm
+# Hashir's Castle Hill Farm trip
 
-Reported: 2026-09-12. Status: **Open — reproduce and investigate.**
+Updated 2026-09-12. **HopDistrictTest route fixed; complete story and multiplayer acceptance remain open.**
 
-After successful Blacksmith capture, Hashir should drive the player to the
-Castle Hill Farm location. The reported drive aborts. This is a story progression
-blocker to investigate before final Act 1 authoring. No gameplay fix is claimed.
+## Confirmed cause and fix
 
-## Reported evidence
+Hashir's live `BPA_DriveToDestination` reproduced the reported missing-lane abort.
+The saved ZoneGraph contained only the short assault road's two lanes. The longer
+authored `ZoneShape_1` road had not been built into it. In addition, the dialogue's
+drive goal used that shape's local endpoint `(7527,-2180,0)` as a world destination.
+The shape origin is `(-4290,3100,0)`, so its world endpoint is `(3237,920,0)`.
 
-```text
-LogArsenalStatics: Error: StartLane/EndLane not valid! Unable to calculate path on zone graph. Ensure search extents/points are near a zonegraph.
-LogNarrativeActivityComponent: Display: Failed to run activity BPA_ReturnToSpawn_C_0 as SetupBlackboard() failed.
-LogKinematicDriving: LogArrow: 'Error: COULDNT FIND PATH - NPC WILL ABORT DRIVE TO LOCATION ACTIVITY' - SegmentStart: (X=-3831.135 Y=3239.999 Z=3.065) | SegmentEnd:(X=-3831.135 Y=3239.999 Z=3.065)
-LogBlueprintUserMessages: [BTS_SimpleKinematicDrive_C_1] Error: COULDNT FIND PATH - NPC WILL ABORT DRIVE TO LOCATION ACTIVITY
-```
+The project changes are:
 
-Initial source check, not a reproduced root cause:
+- `/Game/HopDistrictTest`: rebuild the existing graph to include both roads
+  (four lanes). Set the story shape's reverse profile off for keep-right travel
+  and clear its all-tags override; its lane profile supplies the Road tag.
+  Existing road geometry and the short assault road are preserved.
+- `/Game/HOPTRENDY/Character/Hashir/DBP_Hahsir`: correct `ParkDestination` and
+  `CachedFinalDestination` in the existing `Goal_DriveToDestination_C_0` to
+  `(3237,920,0)`. Keep its car, passenger definition, dialogue IDs and event.
 
-- Native `UArsenalStatics::GetPathOnZoneGraph` finds the nearest start and end
-  lanes using the supplied search extent and Any/All/Not tag filters. It prints
-  this error if **either endpoint has no valid lane**, before graph path search.
-  Check endpoint projection first, then connectivity if both endpoints are valid.
-- The logged driving segment has identical start and end coordinates. Trace
-  whether those values are the actual requested destination, a generated segment,
-  or fallback debug values. They do not establish which point is wrong.
-- `UNPCActivity::RunActivity` prints the SetupBlackboard failure when the selected
-  activity returns false from that setup, then stops its behavior tree. The logs
-  alone do not prove that Return To Spawn belongs to Hashir or caused the drive
-  failure. Capture the exact NPC/controller and activity timeline.
+The repeated `BPA_ReturnToSpawn` setup failure follows the drive abort: Hashir's
+controller still possesses the car, so `GetControlledNPC()` cannot return an NPC
+pawn for that fallback. A successful trip avoids that abort. This change does
+**not** add failure recovery for a future missing or obstructed route.
 
-## Investigation checklist
+The failed service logs segment coordinates after removing its goal. Identical
+start/end debug values alone do not establish that the original requested goal
+had identical endpoints. The saved destination and real lane query establish the
+two authoring faults above.
 
-- [ ] Reproduce through the actual quest: obtain it from Hashir, complete the
-  intended Blacksmith capture/handover, then start the Farm trip. Record the map,
-  quest state, NPC, controller, selected car, driver seat and requesting player.
-  Use HopDistrictTest as the existing test fixture; verify which map produced the
-  report before treating it as the exact reproduction.
-- [ ] Trace the saved project `NQ_CaptureBlacksmith`, Hashir's current main dialogue
-  and their events to the exact Native drive goal/activity. Check that the trip
-  starts once after verified capture and receives the intended Farm destination.
-- [ ] Resolve the current Hashir definition (`NPC_Hashir`), controller, activity
-  configuration and spawn information. Check old `NPC_Hahsir` references without
-  rewriting unrelated user edits or treating the historical spelling as authority.
-- [ ] Inspect the actual generated driving service/task from the log, its parent
-  asset and blackboard keys. Follow start/end values from the quest through vehicle
-  ingress, route setup and every segment update. Check for an unset target, reused
-  start position, stale actor reference or a legitimately completed segment.
-- [ ] Inspect Native lane lookup at the car and Farm arrival point: world, height,
-  search extent, Any/All/Not lane filters, lane handles and loaded ZoneGraph data.
-  Verify connected travel direction and arrival access once lane lookup succeeds.
-- [ ] Use existing `InspectRoadNetwork` and `ExportRoadLaneDiagnostics` tools.
-  Compare Native's exact drive query with `PreviewVehicleRoute` only as a second
-  diagnostic: the latter uses the counterattack route helper, so its success does
-  not prove that Hashir's own activity receives valid parameters.
-- [ ] Check road build and load coverage. `BuildFromRoadActors` and
-  `BakeRoadSurfaces` already produce Native ZoneShapes/ZoneGraph from generator
-  actors or physical surfaces. A road mesh or physical-material assignment alone
-  does not establish that the required lanes were baked, connected and loaded.
-  Preserve the chosen keep-right road direction.
-- [ ] Trace Return To Spawn scoring and SetupBlackboard requirements separately.
-  Determine whether it is a normal fallback after the drive abort, an unrelated
-  NPC failure, or an activity competing with Hashir's story drive. Keep Native
-  activity/goal ownership and inspect spawn data before changing activity rules.
-- [ ] Verify passenger entry, correct driver ownership, destination streaming,
-  stopping, exit and quest continuation. Failure must not claim arrival or leave
-  the player locked in the car. Define a bounded retry or clear failure outcome
-  through the existing quest/activity APIs after the cause is proven.
+## Existing owners and impact
 
-## Ownership and implementation constraints
+Narrative Tales owns dialogue/quest state. The existing Add Goal event assigns
+Hashir's Native drive goal; Native activities, vehicles, seating and ZoneGraph
+remain responsible for travel. No Narrative source or asset was changed. There
+is no new capture, vehicle, faction, save or replication authority.
 
-Narrative Tales owns the quest and dialogue. Native NPC goals/activities own
-Hashir's behavior, Native vehicles own driving and seating, and Native ZoneGraph
-owns road routing. Territory's existing road editor adapter authors the lanes;
-Territory's existing capture flow supplies verified Blacksmith completion.
+This is a UE 5.8 **project-content** fix, not a plugin-content or C++ change.
+No API, GameplayTag, GUID or save-record migration is introduced. Existing campaign
+saves and already-running goals have not been certified against the new target.
+HopDistrictTest's successful map reload is not a World Partition streaming test.
+The AlMalik destination/road load-order gate remains open.
 
-Fix project authoring or add a minimal Territory adapter when the source evidence
-requires it. Do not patch Narrative Pro, create another road graph, teleport to
-hide a failed route, or change ownership to advance the quest.
+The pre-existing user versions of both edited assets were backed up before this
+batch in `Saved/Verification/20260912_HashirDrive`. The changes preserve their
+current authored content, rather than replacing them with older Git versions.
 
-The investigation is read-only so far. Any later change must identify server
-authority, passenger replication, stable quest/goal IDs, save/load behavior,
-World Partition destination readiness and Blueprint migration effects.
+## Verified behavior
 
-## Acceptance before closing
+- Reproduced the actual live drive activity's missing-lane failure before fixing
+  the assets. Hashir entered the driver seat, waited for the passenger, then
+  aborted on departure. `LiveBefore.json` and `LiveBefore.log` preserve this.
+- The corrected standalone trip passes nine checks: correct driver, passenger
+  wait, attachment, physical departure, Native arrival, arrival near the Farm,
+  stopped car, accepted exit and detached passenger. Arrival was about 17 seconds
+  after the fixture began; no missing-lane or ReturnToSpawn failure recurred.
+  A second run after restarting the editor also passes all nine checks through
+  the saved regression script (arrival about 25 seconds, completed exit by 39).
+- Reloading the saved map without rebuilding retains four lanes. The exact
+  Native route query returns an approximately 8,324 cm route.
+- `Scripts/Territory/verify_hashir_farm_route.py` passes 11 asset/Native API
+  checks, including rejecting the old destination and an absent destination,
+  preserving the short assault route, and validating both assets without warnings.
+- The dialogue Blueprint compiles with zero errors and zero warnings.
+- All eight existing `TerritoryFramework.Roads` automation tests pass on UE 5.8.
+  One fixture reports its existing missing skeletal-mesh socket warning.
+- UE 5.8 incremental cook/package and a 60-second packaged startup pass (exit 0).
+  Startup uses the Development Game executable in server mode, not a compiled
+  dedicated-server target. The existing optional intro-cutscene warning remains.
+- A fresh comparison of 741 Narrative source files against the installed
+  Marketplace package found no differences. All 347 framework source files match
+  the preceding verified build. This batch does not claim a new full engine build
+  or rerun of the previous 314-test suite on each engine.
 
-- [ ] The real Blacksmith-to-Farm story flow completes once with Hashir driving
-  and the requesting player riding, then exits and continues the intended quest.
-- [ ] The exact lane/segment failure is reproduced before the fix and absent
-  afterward. Zero-length/already-arrived requests have a deliberate outcome.
-- [ ] Missing lanes, disconnected routes, unloaded destination and invalid car or
-  driver fail clearly without fake quest completion or endless retries.
-- [ ] Relevant Native behavioral/Blueprint regression tests and builds pass.
-- [ ] Server and two-client play verifies seats, movement and one quest result;
-  client requests cannot advance the authoritative quest or create duplicate drives.
-- [ ] Save/reload before departure and during the trip preserves the intended
-  quest state without duplicate cars, passengers or completion. Test streamed
-  road/destination readiness in the World Partition story-map fixture.
+The live fixture starts at the real "Come with me" node deliberately and stages
+the passenger beside the car before using Native seating. It does not prove the
+whole quest or normal player input. It never teleports the car or fakes arrival.
+Evidence is under `Saved/Verification/20260912_HashirDrive` in TDA.
 
-Relevant assets to inspect include `/Game/TerritoryFramework/NQ_CaptureBlacksmith`,
-`/Game/HOPTRENDY/Character/Hashir/DBP_Hahsir`, `NPC_Hashir`, `BP_HashirController`
-and `AC_HashirPacifist`, plus the actual Native DriveToDestination and
-ReturnToSpawn assets selected at runtime. Asset references are investigation
-targets, not a claim that their current graphs caused the fault.
+For a fresh standalone regression, start one-player PIE in HopDistrictTest, wait
+for the player and Hashir to load, then run
+`Scripts/Territory/verify_hashir_farm_drive_pie.py` through editor Python. It writes
+`LiveDriveRegression.json`; wait for `passed: true` before stopping PIE. Do not run
+this fixture in multiplayer or use a dialogue editor template as a live event.
+
+## Multiplayer finding — still open
+
+A listen server and two clients received the dialogue and Hashir took the driver
+seat. The remote passenger's Native `GA_Mount_Vehicle` started on server/client,
+then released the passenger slot before attachment. The car remained waiting.
+Client car positions also diverged from the server's stationary car. These are
+observations, not a proven replication root cause or a passed multiplayer trip.
+`MountProbe.json` records both ability instances and occupancy before release;
+`RemoteMountAttempt.log` preserves the run. Normal client input still needs a
+controlled reproduction; a successful `RunInteractBehavior` return is insufficient.
+
+Two earlier test attempts crashed through invalid test invocation: executing an
+editor dialogue template without a live world, and synchronously invoking a
+client RPC path from editor Python. Unreal's actor-script guard makes those RPCs
+local and can recurse. Keep them separate from gameplay evidence. Native timer
+or input-driven calls are required for network testing; do not repeat these
+invalid template/client calls. The failed attempt logs are preserved.
+
+## Story and save/load findings — still open
+
+- The normal dialogue success branch uses `NC_IsQuestSucceeded` for
+  `NQ_CaptureBlacksmith`. The successful physical trip was tested from its drive
+  node, so the full capture/handover/garrison/wave-to-dialogue flow remains unproven.
+- "Go Capture Castle Hill Farm" is a following dialogue node with a 500 cm
+  `BPC_CheckDistance` condition. That is a condition for selecting a dialogue node,
+  not a persistent arrival listener. Author and verify a durable arrival and
+  continuation step through Tales; also prevent replaying the trip/reward after
+  its intended completion. Do not equate finishing the drive with quest success.
+- The current goal does not save itself. Native's player interaction loader
+  deliberately does not restore seat occupancy, and controlled vehicles return
+  no save GUID. Mid-trip save/resume therefore needs an explicit story checkpoint
+  or compatible adapter, with one car/driver/passenger and no duplicate completion.
+- Native's route curve omitted an intermediate turn point in the inspected query.
+  The flat test map drive arrived, but tight road-corner/obstacle clearance is not
+  certified. Investigate through the existing route adapter if the city fixture
+  reproduces corner cutting; do not patch Native or create another road graph.
+
+## Remaining acceptance
+
+- [ ] Normal input: obtain the quest, complete Blacksmith through its intended
+  stages, speak to Hashir, board, arrive, exit and continue once.
+- [ ] Remote passenger boarding, vehicle movement, exit and quest result on a
+  server and two clients; then compiled dedicated-server and returning-client gates.
+- [ ] Missing/unloaded lanes, disconnected roads, invalid car/driver and blocked
+  entry recover clearly without fake completion or endless fallback retries.
+- [ ] Save/reload before departure, during the trip and after arrival; preserve
+  intended story progress without duplicate cars, goals or rewards.
+- [ ] AlMalik World Partition road/destination readiness and physical clearance.
+
+Broader release gates remain in [the roadmap](ROADMAP_AND_REMAINING.md).
