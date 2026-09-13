@@ -69,6 +69,9 @@ Paths below are relative to each plugin's `Source` directory.
 | NP-07 | Native `UNarrativeTask::IsComplete()` also returns true for optional tasks. Territory's action, combat, GAS, disguise, AI and assault observers used it as a progress guard, preventing optional objectives from earning progress. | Use Native's `CurrentProgress >= RequiredQuantity` pattern for observer completion. Native still decides whether an optional objective blocks its quest branch. The action/GAS/combat regression now runs with optional objectives; a new regression observes real disguise and assault delegates. |
 | NP-08 | Presence, disguise, AI and condition-gate tasks still used the initially cached player. AI also kept live old providers and their death listeners. Old inside/perception/token history could satisfy a different subject's objective. | Reuse live Narrative player resolution; re-resolve Native providers at the existing bounded interval; release obsolete listeners. Reset transition evidence when player, target, destination or registered Territory changes. |
 | NP-09 | Native BeginTask ticks immediately. Enter/availability polling could therefore ignore Complete If Already Satisfied being disabled. Disguise exit history also survived lost cover and could credit a later restoration outside as an undetected exit. | Observe real state transitions and reset cover-exit evidence when cover is lost. Tests cover an already-inside start, real entry, respawn, registry unload/reload, exposure and restoration outside. |
+| NP-10 | Distraction activation trusted an item's inventory pointer and quantity. Native inventory load replaces the item array while old live source objects can retain that pointer. Equipped-source mode also did not check equipment or the throwing avatar. | Check exact membership, Native equipment state and the inventory's current owning pawn before the throw. A stale or foreign source cannot consume an item or create a projectile. |
+| NP-11 | GAS commit and deferred-spawn callbacks could cancel the ability, remove its source or destroy the projectile while activation continued. | Recheck the active invocation, avatar, source and pending ability removal after callbacks and before item payment. A transient invocation number prevents an older call from completing a newer activation. A paid projectile still survives the ability ending, including Native last-item revocation. |
+| NP-12 | The distraction component marked its impact as reported after sending the Gameplay Event. An event listener could synchronously report the same impact again. | Commit the one-shot flag before hearing/event publication. Reentrant and later impact requests return false. |
 
 ## Compatible adaptations to retain
 
@@ -255,3 +258,73 @@ reopened for the user with PIE stopped; project plugin settings were preserved.
   presentation, rebuilt from Native dialogue and replicated Territory state.
 - No counterattack rules, ownership transitions, production balances or authored
   story branches were changed by this batch.
+
+### Distraction ability and item follow-up
+
+The closest authored reference is Native `GA_Attack_ThrowGrenade`: the attack
+starts through Native's combo/animation workflow, checks activity before its
+animation event, spawns through `UAbilityTask_SpawnProjectile`, and consumes
+Native inventory. Territory's small distraction action remains instantaneous;
+its supplied Blueprint does not have an authored throw montage to wait for.
+Do not advertise this as an animated grenade/weapon combo replacement.
+
+Native `UEquippableItem::HandleEquip` grants abilities with the item as their
+source; `HandleUnequip` removes those handles. `ANarrativeCharacter::AddAbility`
+and `RemoveAbilities`, Native inventory `ConsumeItem`, and the existing
+replicated projectile remain the public extension points. Property benefit
+grants already use those Native handle APIs and retain the correct owned
+character while driving; this batch does not introduce another grant manager.
+
+NP-10 adds a necessary boundary check because Native `Load_Implementation`
+rebuilds the inventory array, while old item objects and ability source references
+can remain alive. Checking `OwningInventory` or a matching item class is not
+enough. The throw checks exact membership in `GetItems()` and the current
+inventory owner before spawning and before consuming. No Native source patch
+or separate saved item registry is needed.
+
+The existing **Require Equipped Narrative Item Source** setting now also checks
+Native `IsEquipped()`. Keep it enabled for the supplied rock. For a custom
+unequipped consumable, disable that setting and keep **Consume Source Item On
+Successful Throw** enabled. Turn both off only for an intentional ability that
+does not require an inventory item. No Blueprint field or path was renamed.
+
+GAS still owns costs and cooldowns. If a callback cancels after GAS commit,
+already committed GAS costs/cooldowns follow the normal GAS contract; the
+unspawned throw does not consume its inventory item. The ability never refunds
+unrelated effects. After one item has paid for a successful throw, the projectile
+owns its lifetime, even when consuming the last unit revokes the ability.
+
+`ActivationSerial` is transient invocation bookkeeping. It is not campaign
+state, a replicated field or an alternate ability authority. Impact reporting
+similarly uses the component's existing transient one-shot flag. Inventory
+quantity/equipment saving and replication remain Native responsibilities.
+Streaming the source actor away cancels an unfinished invocation through its
+existing lifetime; this change does not add offscreen projectiles or a new
+World Partition registration path.
+
+Evidence: `Saved/Verification/20260914_AbilityCancellation` in TDA.
+
+| Check | Result |
+|---|---|
+| UE 5.8.2 and 5.7.4 Editor, Development and Shipping builds | All six pass; same documented editor-tool exclusions as the earlier batch. |
+| Full automation suites | 322/322 per engine; zero failed/not run. UE 5.8: 299 success + 23 warning results. UE 5.7: 297 success + 25 warning results. |
+| New cancellation/restore regression | Real Native inventory save/load, stale and foreign source rejection, client authority, commit/spawn cancellation, destroyed spawn, cancel-and-reactivate, one paid throw and reentrant impact. |
+| Shipped rock regression | Native equip grants the authored Blueprint ability; last-unit consumption unequips and revokes it; the successful projectile survives. |
+| Blueprint compilation | All six plugin/project distraction ability, rock and projectile Blueprints UpToDate; zero errors/warnings. |
+| Focused validation with PIE stopped | Eight plugin/project/Native reference assets valid; zero invalid/warnings. Earlier Farm/owner authoring warnings remain open. |
+| HopDistrictTest listen server + two clients | 41 observed samples: each world sees one projectile, server and owning client consume the single rock, and the projectile expires everywhere. A later activation returns false. |
+| UE 5.8 cook/stage/package and 60-second packaged smoke | Both exit 0. Smoke uses a Development game in server mode, not a compiled dedicated-server target. |
+| Narrative source comparison | All 741 files match the installed UE 5.8 Marketplace source. |
+
+The network recorder is `Scripts/Territory/verify_distraction_network_pie.py`.
+It observes a server-initiated Native activation. It does not prove remote input
+transport, hardware throw timing, an animated throw montage, or full campaign
+and World Partition recovery. The native save/load regression exercises actual
+inventory reconstruction, not a complete campaign save. Those wider acceptance
+gates remain on the roadmap. Initial synthetic-fixture failures are retained
+under `InitialFixtureFailure`; the final reports above use corrected fixtures
+that permit Native callbacks and explicitly configure native ability instances.
+
+HopDistrictTest is reopened with PIE stopped, the previous player-count settings
+restored, and zero dirty editor packages. The user's controller Blueprint disk
+edit is excluded from this source batch.

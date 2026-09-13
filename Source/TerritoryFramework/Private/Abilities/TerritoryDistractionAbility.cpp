@@ -2,12 +2,14 @@
 #include "Engine/World.h"
 
 #include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemComponent.h"
 #include "Core/TerritoryStealthTags.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Interaction/TerritoryDistractionProjectile.h"
 #include "Items/InventoryComponent.h"
+#include "Items/EquippableItem.h"
 #include "Items/NarrativeItem.h"
 #include "NarrativeGameplayTags.h"
 
@@ -44,13 +46,28 @@ UNarrativeItem* UTerritoryDistractionAbility::GetThrowableSourceItem(
 bool UTerritoryDistractionAbility::IsThrowableSourceItemReady(
 	const UNarrativeItem* SourceItem) const
 {
-	if (!SourceItem || !SourceItem->OwningInventory
-		|| SourceItem->GetQuantity() < 1)
+	if (!IsValid(SourceItem) || !IsValid(SourceItem->OwningInventory)
+		|| SourceItem->GetQuantity() < 1
+		|| !SourceItem->OwningInventory->GetItems().Contains(SourceItem))
 	{
 		return false;
 	}
 
+	if (bRequireEquippedNarrativeItemSource)
+	{
+		const UEquippableItem* EquippedItem = Cast<UEquippableItem>(SourceItem);
+		if (!EquippedItem || !EquippedItem->IsEquipped()) return false;
+	}
+
 	return !bConsumeSourceItemOnSuccessfulThrow || SourceItem->CanBeRemoved();
+}
+
+bool UTerritoryDistractionAbility::IsThrowableSourceOwnedByAvatar(
+	const UNarrativeItem* SourceItem, const FGameplayAbilityActorInfo* ActorInfo) const
+{
+	return IsThrowableSourceItemReady(SourceItem) && ActorInfo
+		&& ActorInfo->AvatarActor.IsValid()
+		&& SourceItem->OwningInventory->GetOwningPawn() == ActorInfo->AvatarActor.Get();
 }
 
 bool UTerritoryDistractionAbility::CanActivateAbility(
@@ -69,7 +86,7 @@ bool UTerritoryDistractionAbility::CanActivateAbility(
 	const bool bNeedsSourceItem = bRequireEquippedNarrativeItemSource
 		|| bConsumeSourceItemOnSuccessfulThrow;
 	return !bNeedsSourceItem
-		|| IsThrowableSourceItemReady(GetThrowableSourceItem(Handle, ActorInfo));
+		|| IsThrowableSourceOwnedByAvatar(GetThrowableSourceItem(Handle, ActorInfo), ActorInfo);
 }
 
 bool UTerritoryDistractionAbility::GetDistractionLaunchTransform(
@@ -128,19 +145,39 @@ void UTerritoryDistractionAbility::ActivateAbility(
 	const FGameplayEventData* TriggerEventData)
 {
 	(void)TriggerEventData;
+	const uint64 ThisActivation = ++ActivationSerial;
+	// Commit, construction, inventory and event callbacks can end this activation
+	// and even start another one on the same InstancedPerActor ability.
+	const auto EndThisActivation = [&](const bool bCancelled)
+	{
+		if (ActivationSerial == ThisActivation && IsActive())
+		{
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, bCancelled);
+		}
+	};
 	AActor* Avatar = ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr;
 	UWorld* World = Avatar ? Avatar->GetWorld() : nullptr;
 	UNarrativeItem* SourceItem = GetThrowableSourceItem(Handle, ActorInfo);
 	const bool bNeedsSourceItem = bRequireEquippedNarrativeItemSource
 		|| bConsumeSourceItemOnSuccessfulThrow;
+	const auto CanFinishThrow = [&]()
+	{
+		const UAbilitySystemComponent* ASC = ActorInfo ? ActorInfo->AbilitySystemComponent.Get() : nullptr;
+		const FGameplayAbilitySpec* Spec = ASC ? ASC->FindAbilitySpecFromHandle(Handle) : nullptr;
+		return ActivationSerial == ThisActivation && IsActive()
+			&& IsValid(Avatar) && !Avatar->IsActorBeingDestroyed()
+			&& ActorInfo->AvatarActor.Get() == Avatar && Spec && !Spec->PendingRemove
+			&& (!bNeedsSourceItem || IsThrowableSourceOwnedByAvatar(SourceItem, ActorInfo));
+	};
 	FTransform LaunchTransform;
 	if (!Avatar || !Avatar->HasAuthority() || !World || !ProjectileClass
 		|| (bNeedsSourceItem
-			&& !IsThrowableSourceItemReady(SourceItem))
+			&& !IsThrowableSourceOwnedByAvatar(SourceItem, ActorInfo))
 		|| !GetDistractionLaunchTransform(LaunchTransform)
-		|| !CommitAbility(Handle, ActorInfo, ActivationInfo))
+		|| !CommitAbility(Handle, ActorInfo, ActivationInfo)
+		|| !CanFinishThrow())
 	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		EndThisActivation(true);
 		return;
 	}
 
@@ -149,9 +186,10 @@ void UTerritoryDistractionAbility::ActivateAbility(
 		World->SpawnActorDeferred<ATerritoryDistractionProjectile>(
 			ProjectileClass, LaunchTransform, Avatar, InstigatorPawn,
 			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-	if (!Projectile)
+	if (!IsValid(Projectile) || Projectile->IsActorBeingDestroyed() || !CanFinishThrow())
 	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		if (IsValid(Projectile)) Projectile->Destroy();
+		EndThisActivation(true);
 		return;
 	}
 
@@ -164,6 +202,12 @@ void UTerritoryDistractionAbility::ActivateAbility(
 			LaunchTransform.GetRotation().GetForwardVector() * FMath::Max(0.f, Speed);
 	}
 	Projectile->FinishSpawning(LaunchTransform);
+	if (!IsValid(Projectile) || Projectile->IsActorBeingDestroyed() || !CanFinishThrow())
+	{
+		if (IsValid(Projectile)) Projectile->Destroy();
+		EndThisActivation(true);
+		return;
+	}
 
 	if (bConsumeSourceItemOnSuccessfulThrow)
 	{
@@ -173,11 +217,13 @@ void UTerritoryDistractionAbility::ActivateAbility(
 		{
 			// An inventory race must not create a free replicated distraction.
 			Projectile->Destroy();
-			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			EndThisActivation(true);
 			return;
 		}
 	}
 
+	// Consuming the last equipped item may revoke/end this ability. The throw is
+	// now paid for: like Narrative's SpawnProjectile task, it owns its own lifetime.
 	FGameplayEventData Payload;
 	Payload.EventTag = TerritoryStealthTags::DistractionThrownEvent;
 	Payload.Instigator = Avatar;
@@ -186,5 +232,5 @@ void UTerritoryDistractionAbility::ActivateAbility(
 	UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
 		Avatar, Payload.EventTag, Payload);
 	K2_OnDistractionProjectileSpawned(Projectile);
-	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+	EndThisActivation(false);
 }

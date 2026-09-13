@@ -47,6 +47,9 @@ bool UTerritoryDistractionComponent::ReportDistractionAtLocation(
 	AActor* Owner = GetOwner();
 	UWorld* World = GetWorld();
 	if (!Owner || !World || !Owner->HasAuthority() || bHasReported) return false;
+	// A GAS listener may call back into this component while we publish impact.
+	// Commit the one-shot state before invoking any external listener.
+	bHasReported = true;
 	AActor* Source = Owner->GetInstigator();
 	if (!Source) Source = Owner;
 	UAISense_Hearing::ReportNoiseEvent(World, WorldLocation,
@@ -66,6 +69,5 @@ bool UTerritoryDistractionComponent::ReportDistractionAtLocation(
 		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(
 			Source, Payload.EventTag, Payload);
 	}
-	bHasReported = true;
 	return true;
 }

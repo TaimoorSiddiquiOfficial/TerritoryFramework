@@ -6,18 +6,19 @@
 
 ## Current remaining work
 
-The latest framework batch fixes arrival sounds, failed dialogue replacement
-cleanup, live player task subjects, exact GAS tag objectives, optional objective
-progress and observation history across actor changes. All six builds
-and 320 tests per engine pass. All nine shipped task Blueprints compile cleanly;
-76 assets validate, with six authoring-warning assets still open. See the
+The latest framework batch fixes distraction cancellation, stale/foreign item
+sources after inventory restore, and repeated impact callbacks. All six builds
+and 322 tests per engine pass. The shipped rock's last-unit behavior and a listen
+server with two clients pass. Six distraction Blueprints compile cleanly and
+eight focused assets validate without warnings. The earlier task/presentation
+fixes remain verified; six Farm/owner authoring-warning assets remain open. See the
 [Narrative pattern audit and usage guide](NARRATIVE_PATTERN_AUDIT_2026-09-14.md)
 for source references, tooling exclusions and the limits of this evidence.
 The broader audit and release gates remain open.
 
 | Area | Still required |
 |---|---|
-| Narrative pattern audit | Finish authored ability/item cancellation paths, audio-enabled music loading/override ownership, remote dialogue replacement, shared split-screen presentation, full cinematic playback and complete asset dependency/unused-system coverage. The targeted 30-asset check distinguishes unused story options from authoring-library assets. Resolve Farm camera and owner appearance warnings intentionally. |
+| Narrative pattern audit | Next: audio-enabled music loading/override ownership, remote dialogue replacement, shared split-screen presentation, full cinematic playback and complete asset dependency/unused-system coverage. Distraction item/cancellation regressions pass; remote input, broader authored combat/montage interruption and full campaign recovery still need gameplay acceptance. The targeted 30-asset check distinguishes unused story options from authoring-library assets. Resolve Farm camera and owner appearance warnings intentionally. |
 | Hashir's Farm trip — route and boarding fixed, story acceptance open | Standalone and remote travel/exit pass; simulated seated capsules no longer push the client car. Author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow, compiled dedicated server and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
 | Finite reserves and Narrative tasks | Add reserve events through existing finite post commands; prove capture/defeat behavior with pending reserves and missing posts; migrate applicable authored Native record tasks. |
@@ -26,15 +27,27 @@ The broader audit and release gates remain open.
 | Story-map presentation | Finish UDS day/night, interior, fog, shadow, HDR-display and frame-rate checks in AlMalik; retain the tracked appearance/Chaos/content warning review. |
 | Story authoring and release | Finish Act 1 after the behavior above is verified; decide later retake/peaceful-handover rules and Farm's reward. Refresh 5.7/5.8 release artifacts and documentation after the remaining release gates pass. |
 
-Next audit work: **authored ability and item cancellation paths**, followed by
-audio-enabled overlapping music requests and multiplayer dialogue/cinematic
-cleanup. Next story work remains **Hashir's durable arrival/quest continuation
+Next audit work: **audio-enabled overlapping music requests**, followed by
+multiplayer dialogue/cinematic cleanup and broader authored combat interruption
+acceptance. Next story work remains **Hashir's durable arrival/quest continuation
 and save recovery**. Finite reserve events and capture/defeat checks remain in
 the framework backlog.
 The dated checkpoints below preserve earlier evidence; their older test counts
 and then-current task lists do not supersede this list.
 
 ## Current checkpoint
+
+### Distraction ability and Native inventory lifecycle — 2026-09-14
+
+Throw activation now checks exact Native inventory membership, equipment and
+the current avatar before spawning/payment. Commit and spawn callbacks cannot
+continue a cancelled invocation or complete a newer invocation. Impact reporting
+commits its existing one-shot flag before publishing. Native owns ability grants,
+item consumption, save/replication and the successful projectile's lifetime.
+All six builds, 322 tests per engine, the shipped Blueprint last-unit regression,
+a listen-server/two-client check, and cook/package startup smoke pass. See the
+[audit and its limits](NARRATIVE_PATTERN_AUDIT_2026-09-14.md). No Narrative source
+or project story asset was changed.
 
 ### Narrative pattern and lifecycle audit — 2026-09-14
 

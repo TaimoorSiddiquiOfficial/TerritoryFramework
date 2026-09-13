@@ -195,7 +195,7 @@ bool FTFStealthNarrativeIntegrationContract::RunTest(const FString& Parameters)
 			Ability->IsThrowableSourceItemReady(SourceItem));
 		SourceItem->OwningInventory = NewObject<UNarrativeInventoryComponent>(
 			GetTransientPackage());
-		TestTrue(TEXT("One removable inventory item satisfies the throw contract"),
+		TestFalse(TEXT("An inventory pointer alone does not prove membership or equipment"),
 			Ability->IsThrowableSourceItemReady(SourceItem));
 		SourceItem->SetQuantity(0);
 		TestFalse(TEXT("An empty item stack cannot activate the throw"),

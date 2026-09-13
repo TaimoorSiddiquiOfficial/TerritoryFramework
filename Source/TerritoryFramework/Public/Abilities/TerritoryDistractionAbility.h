@@ -61,7 +61,7 @@ public:
 	 * projectile for the same Narrative.Input.Throw press.
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Distraction|Inventory",
-		meta=(ToolTip="Requires the Gameplay Ability source object to be a valid Narrative item in an inventory even when consumption is disabled. Consumption always requires an item source. Keep enabled for rocks, bottles, and other equipped throwables."))
+		meta=(ToolTip="Requires the source item to be equipped and still present in the throwing character's Narrative inventory. Keep enabled for equipped rocks and bottles. Disable this to use an unequipped consumable item source. Consumption still requires an item in the throwing character's inventory."))
 	bool bRequireEquippedNarrativeItemSource = true;
 
 	/** Consume one source-item unit only after the authoritative projectile finishes spawning. */
@@ -92,6 +92,12 @@ protected:
 	UNarrativeItem* GetThrowableSourceItem(
 		const FGameplayAbilitySpecHandle Handle,
 		const FGameplayAbilityActorInfo* ActorInfo) const;
+
+	bool IsThrowableSourceOwnedByAvatar(const UNarrativeItem* SourceItem,
+		const FGameplayAbilityActorInfo* ActorInfo) const;
+
+	// Transient call identity only; never saved or replicated.
+	uint64 ActivationSerial = 0;
 
 	/** Presentation hook. Gameplay has already committed and the replicated actor exists. */
 	UFUNCTION(BlueprintImplementableEvent, Category="Territory|Distraction",
