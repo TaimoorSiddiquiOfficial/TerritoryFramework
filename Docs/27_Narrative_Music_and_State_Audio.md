@@ -85,7 +85,7 @@ When the player is already inside the most-specific Territory:
 
 - `Unclaimed -> Contested` plays the old state's Exit sound, then Contested's Enter sound;
 - `Contested -> Claimed` plays Contested's Exit sound, then Claimed's Enter sound;
-- first observation after loading is silent, avoiding a false capture fanfare;
+- first observation after loading plays the arrival sound only when arrival replay is enabled;
 - walking across a boundary is silent unless the row explicitly enables arrival or departure
   replay.
 
@@ -105,12 +105,37 @@ Territory does not replace those systems.
 - reads the replicated Territory state;
 - selects the Definition state row;
 - asks `UNarrativeMusicSubsystem` to select a Tagged Music Set and theme;
-- restores the earlier Narrative set/theme after the player leaves;
-- does not continuously overwrite a later quest or cinematic theme change.
+- requests the earlier Narrative set/theme after the player leaves, if the visible selection still belongs to Territory;
+- sends a baseline theme request once, then lets Native finish its fade queue;
+- gives up restoration when a newer set/theme becomes visible or Native rejects the request.
 
 There is one Narrative soundtrack per GameInstance. In split-screen, the first valid local player
 is the soundtrack listener. State effects and music choices are not saved or replicated because
 the authoritative Territory state is already saved and replicated.
+
+## Give a quest or cinematic control of the music
+
+On the local player's **Territory Narrative Music** subsystem:
+
+1. Call **Set Automatic Territory Music Enabled** with `false` before the scene changes music.
+2. Use Native **Set Theme**, **Override Music Set**, or the Native Sequencer music track for the scene.
+3. At the end, clear the scene's Native sound override and restore the desired world music.
+4. Call **Set Automatic Territory Music Enabled** with `true` to use the current Territory row again.
+
+Disabling this switch does not stop Native playback or Territory arrival/state sounds.
+It discards Territory's pending requests and previous-music snapshot. The scene owns
+what should play next. Enabling it rechecks the current location, even if the player
+did not move. The switch is local, is not saved, and resets on a new world. Reapply
+the scene setup after loading a saved quest when needed. This is one local switch;
+coordinate overlapping scenes through the story system that owns them.
+
+Why use this explicit handoff? Native can queue a new theme while a fade is running,
+but its public **Get Active Theme** still returns the playing theme. It has no public
+pending-request owner or cancellation API. A queued quest theme that predates a
+Territory exit cannot always be detected from the active theme alone. Likewise,
+disabling Territory cannot cancel a request that Native has already accepted.
+The scene's Native selection should replace it. Use the handoff for authored story
+priority instead of relying on timing during an overlap or fade.
 
 ## Validation and common mistakes
 

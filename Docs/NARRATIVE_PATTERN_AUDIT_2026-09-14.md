@@ -72,6 +72,9 @@ Paths below are relative to each plugin's `Source` directory.
 | NP-10 | Distraction activation trusted an item's inventory pointer and quantity. Native inventory load replaces the item array while old live source objects can retain that pointer. Equipped-source mode also did not check equipment or the throwing avatar. | Check exact membership, Native equipment state and the inventory's current owning pawn before the throw. A stale or foreign source cannot consume an item or create a projectile. |
 | NP-11 | GAS commit and deferred-spawn callbacks could cancel the ability, remove its source or destroy the projectile while activation continued. | Recheck the active invocation, avatar, source and pending ability removal after callbacks and before item payment. A transient invocation number prevents an older call from completing a newer activation. A paid projectile still survives the ability ending, including Native last-item revocation. |
 | NP-12 | The distraction component marked its impact as reported after sending the Gameplay Event. An event listener could synchronously report the same impact again. | Commit the one-shot flag before hearing/event publication. Reentrant and later impact requests return false. |
+| NP-13 | A baseline theme accepted into Native's fade queue was submitted again on later Territory polls. A newer queued quest theme could be replaced before it became active. | Submit the restore once, then observe it. A visible external theme/set or a rejected request ends restoration. Real Native fade-queue regression passes on both engines. |
+| NP-14 | Territory could submit a pending state or restore request while a story wanted exclusive music control. Native exposes no public queued-request owner. | Add local `SetAutomaticMusicEnabled` / `IsAutomaticMusicEnabled` Blueprint hooks. Disable before the story requests Native music; re-enable after restoring the intended world music. This does not cancel requests Native has already accepted. |
+| NP-15 | GameInstance deinitialization could start another asynchronous baseline music load. | Clear local observation on teardown. Native retains responsibility for audio components, loads and world teardown. |
 
 ## Compatible adaptations to retain
 
@@ -162,15 +165,33 @@ flow. `ATerritoryWorldState` persists and replicates assault snapshots and the
 existing notification path presents them. Optional quest progress changes none of
 those transitions, force budgets, proximity policies or deterministic decisions.
 
-### Music ownership limitation still under review
+### Music request ownership
 
-Native SetTheme can accept a request into its fade queue before GetActiveTheme
-changes. It exposes no public pending-theme or request-generation delegate.
-Territory's baseline restoration currently retries while waiting for a music
-set/theme, so an active-theme comparison alone cannot prove that a newer queued
-quest/cinematic request still belongs to Territory. Audio-enabled overlapping
-request tests are still needed before changing this policy. Do not replace the
-Native player or read/write its private fields to mask this limitation.
+The reference authoring patterns are Native `BP_MusicTrigger`, which requests
+and restores its prior set/theme once, and `BP_MusicTrackInst`, which uses Native
+sound override/clear calls for Sequencer sections. Native owns its two fading
+tracks, queue, asynchronous set loading, MetaSound and override component.
+Territory retains only local observation and the requests it submitted.
+
+NP-13 removes the repeated baseline request. An accepted request may still be
+queued, so Territory observes completion without submitting it again. A newer
+visible theme or set ends that observation. A rejected request also yields;
+Native's false result cannot distinguish an already queued theme from a manual
+sound override or missing content.
+
+Native exposes no public pending-theme/set owner or request-generation delegate.
+A newer request queued **before** Territory exits can still be hidden behind the
+active Territory theme. A set/theme already accepted by Native cannot be cancelled
+by merely disabling Territory. Use the explicit local story handoff before a
+quest or scene requests music. This limitation is documented rather than masked
+by reading private queue fields or replacing the Native player.
+
+The new switch and restore bookkeeping are transient, local cosmetic state.
+There are no owner/capture mutations, new RPCs or campaign save fields. Loading
+a new world clears pending Territory observation and restores automatic selection
+from the local listener and replicated Territory state. Existing Blueprint assets
+require no migration; scenes needing exclusive control can opt into the new hooks.
+See [setup and example](27_Narrative_Music_and_State_Audio.md).
 
 ### Available assets versus authored story usage
 
@@ -328,3 +349,50 @@ that permit Native callbacks and explicitly configure native ability instances.
 HopDistrictTest is reopened with PIE stopped, the previous player-count settings
 restored, and zero dirty editor packages. The user's controller Blueprint disk
 edit is excluded from this source batch.
+
+### Music fade queue and local story handoff follow-up
+
+Evidence: `Saved/Verification/20260914_MusicOwnership` in TDA.
+
+| Check | Result |
+|---|---|
+| UE 5.8.2 and 5.7.4 Editor, Development and Shipping | All six builds pass with the documented editor-tool exclusions. |
+| Full automation | 323/323 per engine, zero failed/not run. UE 5.8: 300 success + 23 warning results. UE 5.7: 298 success + 25 warning results. |
+| New regression | Native's real SetTheme queue and fade timers preserve the newer quest request through repeated Territory polls. A visible external set and rejected sound-override restore yield. Story disable, re-enable, world reset and cosmetic Blueprint flags pass. |
+| Audio-enabled HopDistrictTest | 54 samples, all 11 checks pass: Territory entry, exit during fade, newer story selection, handoff, continued place observation, Native sound override, clear and automatic reacquisition. |
+| Listen host and two clients | Only the selected remote client disables automatic music and selects Music.Combat. Host and other client remain automatic with Music.Ambient. |
+| Blueprint compilation | Native BP_MusicTrigger and BP_MusicTrackInst are UpToDate, zero errors/warnings. |
+| Final focused validation with PIE stopped | Eight plugin/project/Native assets valid, zero invalid/warnings; zero dirty packages after verification. |
+| UE 5.8 cook/stage/package and 60-second smoke | Both exit 0. Startup smoke runs a Development game in server mode, not a compiled dedicated-server target. The previously tracked optional intro-cutscene warnings remain. |
+| Narrative source comparison | All 741 source files match the installed UE 5.8 Marketplace package. |
+
+The headless test supplies a non-playing audio component so it can exercise
+Native's actual queue and timers without an output device. It only seeds Native
+fixture fields inside the test; production never reads or writes private queue
+state. The separate PIE recorder uses public music calls and verifies the real
+`MS_MusicMaster` component is playing. MetaSound logs show Unity in the Ashes and
+Controlled Advance starting. It does not certify perceived loudness or mix quality.
+
+The current project Blacksmith is locked and its authored music overrides are
+disabled. The first live attempt therefore correctly selected no Territory rule;
+that report is retained. The final test copies editable settings to a transient
+Definition with fading audio enabled for all states. Derived hierarchy fields
+use fixture defaults, and the original Definition is restored afterward. This is
+an isolated audio test, not a quest/guard acceptance run. No saved asset changes
+were made. A second retained fixture report used Python struct identity instead
+of tag values; the final recorder compares exact tag names.
+
+The reusable recorder is `Scripts/Territory/verify_music_handoff_pie.py` in TDA.
+The original pending-request limitation above remains: Native does not expose a
+newer request that is still hidden in its queue. Cold asynchronous loading,
+seamless travel, World Partition restoration, split-screen ownership and remote
+Sequencer playback remain acceptance gates. Source review also found Native's
+global world-init/destroy music callbacks do not filter the owning GameInstance;
+this is a travel/late-world lifecycle concern requiring reproduction, not a
+verified Territory fix. No vendor callback or private audio state was patched.
+
+The first cook failed because an editor tool could not bind port 8000 while the
+GUI editor was open. `CookInitialEditorPortConflict.log` is retained. Closing the
+editor and rerunning the same cook/package command passes; no project setting was
+changed to hide the error. HopDistrictTest was then reopened with PIE stopped,
+the original three-player PIE setting restored, and zero dirty packages.

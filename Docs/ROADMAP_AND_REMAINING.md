@@ -6,11 +6,11 @@
 
 ## Current remaining work
 
-The latest framework batch fixes distraction cancellation, stale/foreign item
-sources after inventory restore, and repeated impact callbacks. All six builds
-and 322 tests per engine pass. The shipped rock's last-unit behavior and a listen
-server with two clients pass. Six distraction Blueprints compile cleanly and
-eight focused assets validate without warnings. The earlier task/presentation
+The latest framework batch fixes repeated music restoration requests and adds
+explicit local story music control through Narrative. All six builds and 323
+tests per engine pass. Real MetaSound playback passes 11 fade, override and
+handoff checks; a listen host and two clients keep independent music choices.
+Eight focused assets validate without warnings. The earlier task/distraction
 fixes remain verified; six Farm/owner authoring-warning assets remain open. See the
 [Narrative pattern audit and usage guide](NARRATIVE_PATTERN_AUDIT_2026-09-14.md)
 for source references, tooling exclusions and the limits of this evidence.
@@ -18,7 +18,7 @@ The broader audit and release gates remain open.
 
 | Area | Still required |
 |---|---|
-| Narrative pattern audit | Next: audio-enabled music loading/override ownership, remote dialogue replacement, shared split-screen presentation, full cinematic playback and complete asset dependency/unused-system coverage. Distraction item/cancellation regressions pass; remote input, broader authored combat/montage interruption and full campaign recovery still need gameplay acceptance. The targeted 30-asset check distinguishes unused story options from authoring-library assets. Resolve Farm camera and owner appearance warnings intentionally. |
+| Narrative pattern audit | Next: remote dialogue replacement, shared split-screen presentation, full cinematic playback and complete asset dependency/unused-system coverage. Music's repeated-restore bug and explicit handoff pass; cold set loads, seamless/world travel and Native's unexposed queued-request ownership still need acceptance. Distraction item/cancellation regressions pass; remote input, authored combat/montage interruption and full campaign recovery remain. Resolve Farm camera and owner appearance warnings intentionally. |
 | Hashir's Farm trip — route and boarding fixed, story acceptance open | Standalone and remote travel/exit pass; simulated seated capsules no longer push the client car. Author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow, compiled dedicated server and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
 | Finite reserves and Narrative tasks | Add reserve events through existing finite post commands; prove capture/defeat behavior with pending reserves and missing posts; migrate applicable authored Native record tasks. |
@@ -27,8 +27,7 @@ The broader audit and release gates remain open.
 | Story-map presentation | Finish UDS day/night, interior, fog, shadow, HDR-display and frame-rate checks in AlMalik; retain the tracked appearance/Chaos/content warning review. |
 | Story authoring and release | Finish Act 1 after the behavior above is verified; decide later retake/peaceful-handover rules and Farm's reward. Refresh 5.7/5.8 release artifacts and documentation after the remaining release gates pass. |
 
-Next audit work: **audio-enabled overlapping music requests**, followed by
-multiplayer dialogue/cinematic cleanup and broader authored combat interruption
+Next audit work: **multiplayer dialogue/cinematic cleanup**, followed by broader authored combat interruption
 acceptance. Next story work remains **Hashir's durable arrival/quest continuation
 and save recovery**. Finite reserve events and capture/defeat checks remain in
 the framework backlog.
@@ -36,6 +35,19 @@ The dated checkpoints below preserve earlier evidence; their older test counts
 and then-current task lists do not supersede this list.
 
 ## Current checkpoint
+
+### Native music request ownership — 2026-09-14
+
+Territory submits a baseline theme once and yields to a visible newer selection
+or a rejected request. Local story Blueprint hooks pause automatic Territory music
+while keeping arrival/state observation active. Native retains playback, fades,
+set loading and cinematic sound overrides; no new saved or replicated state exists.
+The 323-test suites and all six builds pass. A transient Blacksmith audio fixture
+passes 11 checks using the real Native master MetaSound; one client's handoff
+does not change the host or other client. The initial HopDistrictTest session had
+Blacksmith locked with music overrides disabled. The user's assets were preserved.
+See the [audit and limits](NARRATIVE_PATTERN_AUDIT_2026-09-14.md) and
+[story setup](27_Narrative_Music_and_State_Audio.md).
 
 ### Distraction ability and Native inventory lifecycle — 2026-09-14
 

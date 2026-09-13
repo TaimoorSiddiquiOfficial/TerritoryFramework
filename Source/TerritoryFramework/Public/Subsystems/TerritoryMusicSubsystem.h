@@ -40,6 +40,15 @@ public:
 		meta=(DisplayName="Refresh Territory Music Now"))
 	void RefreshNow();
 
+	/** Local story handoff; Native remains responsible for the scene's music. */
+	UFUNCTION(BlueprintCallable, BlueprintCosmetic, Category="Territory|Audio",
+		meta=(DisplayName="Set Automatic Territory Music Enabled", ToolTip="Disable before a quest or cinematic sets Narrative music. This stops Territory music requests without changing Native playback or arrival sounds. Restore the desired world music before enabling again. This local switch resets when a new world loads."))
+	void SetAutomaticMusicEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintPure, BlueprintCosmetic, Category="Territory|Audio",
+		meta=(DisplayName="Is Automatic Territory Music Enabled"))
+	bool IsAutomaticMusicEnabled() const { return bAutomaticMusicEnabled; }
+
 	/** Most-specific loaded Territory currently containing the soundtrack listener. */
 	UFUNCTION(BlueprintPure, BlueprintCosmetic, Category="Territory|Audio")
 	ATerritoryVolume* GetObservedTerritory() const { return ObservedTerritory.Get(); }
@@ -57,6 +66,7 @@ public:
 
 private:
 	friend class FTFTerritoryMusicObservationTransitions;
+	friend class FTFTerritoryMusicRequestLifecycle;
 
 	struct FStateSoundRequest
 	{
@@ -74,6 +84,7 @@ private:
 		const FTerritoryStateAudioConfig& Config);
 	void ReleaseMusicRule();
 	void MaintainMusicRule();
+	void ClearBaselineRestoration();
 	void PlayStateSound(const TSoftObjectPtr<class USoundBase>& Sound,
 		const FTerritoryStateAudioConfig& Config) const;
 	void ResetForWorld(UWorld* NewWorld);
@@ -114,4 +125,8 @@ private:
 	bool bThemeApplyPending = false;
 	bool bThemeAppliedByTerritory = false;
 	bool bRestoringBaseline = false;
+	bool bBaselineThemeRequested = false;
+	FGameplayTag RestoreSourceTheme;
+	TSoftObjectPtr<UTaggedMusicSet> RestoreSourceMusicSet;
+	bool bAutomaticMusicEnabled = true;
 };
