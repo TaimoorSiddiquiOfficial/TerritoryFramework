@@ -113,14 +113,21 @@ void UTerritoryMusicSubsystem::RefreshNow()
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	if (!Listener || !Registry)
 	{
-		RefreshObservedTerritory(nullptr);
+		for (const FStateSoundRequest& Request : RefreshObservedTerritory(nullptr))
+		{
+			PlayStateSound(Request.Sound, Request.Config);
+		}
 		RefreshMusicTerritory(nullptr);
 		MaintainMusicRule();
 		return;
 	}
 
 	const FVector ListenerLocation = Listener->GetActorLocation();
-	RefreshObservedTerritory(Registry->GetTerritoryAtLocation(ListenerLocation));
+	for (const FStateSoundRequest& Request : RefreshObservedTerritory(
+		Registry->GetTerritoryAtLocation(ListenerLocation)))
+	{
+		PlayStateSound(Request.Sound, Request.Config);
+	}
 	RefreshMusicTerritory(ResolveMusicTerritory(ListenerLocation));
 	MaintainMusicRule();
 }
@@ -210,9 +217,11 @@ const FTerritoryStateAudioConfig* UTerritoryMusicSubsystem::FindStateAudio(
 	return Config ? &Config->Audio : nullptr;
 }
 
-void UTerritoryMusicSubsystem::RefreshObservedTerritory(
+TArray<UTerritoryMusicSubsystem::FStateSoundRequest>
+UTerritoryMusicSubsystem::RefreshObservedTerritory(
 	ATerritoryVolume* NewTerritory)
 {
+	TArray<FStateSoundRequest> Sounds;
 	const bool bSameTerritory = NewTerritory == ObservedTerritory.Get();
 	const ETerritoryState NewState =
 		TerritoryMusicPrivate::GetPresentationState(NewTerritory);
@@ -221,23 +230,22 @@ void UTerritoryMusicSubsystem::RefreshObservedTerritory(
 	const FTerritoryStateAudioConfig NewAudio = NewAudioPtr
 		? *NewAudioPtr : FTerritoryStateAudioConfig();
 
-	if (bHasObservedState)
+	if (bHasObservedState && bSameTerritory && NewTerritory && NewState != ObservedState)
 	{
-		if (bSameTerritory && NewTerritory && NewState != ObservedState)
+		Sounds.Add({ ObservedAudio.StateExitedSound, ObservedAudio });
+		Sounds.Add({ NewAudio.StateEnteredSound, NewAudio });
+	}
+	else if (!bSameTerritory)
+	{
+		if (bHasObservedState && ObservedAudio.bPlayExitedSoundOnPlayerDeparture)
 		{
-			PlayStateSound(ObservedAudio.StateExitedSound, ObservedAudio);
-			PlayStateSound(NewAudio.StateEnteredSound, NewAudio);
+			Sounds.Add({ ObservedAudio.StateExitedSound, ObservedAudio });
 		}
-		else if (!bSameTerritory)
+		// An arrival does not require a previous Territory. This also covers a
+		// newly loaded place becoming available to the local listener.
+		if (NewTerritory && NewAudio.bPlayEnteredSoundOnPlayerArrival)
 		{
-			if (ObservedAudio.bPlayExitedSoundOnPlayerDeparture)
-			{
-				PlayStateSound(ObservedAudio.StateExitedSound, ObservedAudio);
-			}
-			if (NewTerritory && NewAudio.bPlayEnteredSoundOnPlayerArrival)
-			{
-				PlayStateSound(NewAudio.StateEnteredSound, NewAudio);
-			}
+			Sounds.Add({ NewAudio.StateEnteredSound, NewAudio });
 		}
 	}
 
@@ -245,6 +253,7 @@ void UTerritoryMusicSubsystem::RefreshObservedTerritory(
 	ObservedState = NewState;
 	ObservedAudio = NewAudio;
 	bHasObservedState = NewTerritory != nullptr;
+	return Sounds;
 }
 
 void UTerritoryMusicSubsystem::RefreshMusicTerritory(ATerritoryVolume* NewTerritory)

@@ -1,5 +1,6 @@
 #include "Tales/TerritoryTalesUtilities.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Tales/TerritoryCaptureEvent.h"
 
 #include "Tales/NarrativeCondition.h"
@@ -31,6 +32,32 @@ FGameplayTag TerritoryTales::ResolveFaction(const UObject* Context,
 			IsValid(Controller) ? Controller->GetPawn().Get() : nullptr);
 	default: return FGameplayTag();
 	}
+}
+
+APlayerController* TerritoryTales::ResolveTaskController(
+	const UTalesComponent* Tales, APlayerController* CachedController)
+{
+	if (IsValid(Tales))
+	{
+		if (APlayerController* Controller = Tales->GetOwningController()) return Controller;
+	}
+	return IsValid(CachedController) ? CachedController : nullptr;
+}
+
+APawn* TerritoryTales::ResolveTaskPawn(const UTalesComponent* Tales,
+	APawn* CachedPawn, APlayerController* CachedController)
+{
+	if (APlayerController* Controller = ResolveTaskController(Tales, CachedController))
+	{
+		// Do not fall back to the cached pawn after a player loses possession or
+		// changes character. Native's retained character also covers vehicle trips.
+		return FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(Controller);
+	}
+	if (IsValid(Tales))
+	{
+		if (APawn* Pawn = Tales->GetOwningPawn()) return Pawn;
+	}
+	return IsValid(CachedPawn) ? CachedPawn : nullptr;
 }
 
 TerritoryTales::FScopedPrevalidatedEvent::FScopedPrevalidatedEvent(

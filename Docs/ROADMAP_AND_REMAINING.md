@@ -1,19 +1,22 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-12 (Hashir remote boarding and mount collision fix)
+> **Reviewed:** 2026-09-14 (Narrative pattern and lifecycle audit)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current remaining work
 
-The latest framework batch fixes seated character collision on remote clients:
-315 tests pass on each engine and all 16 staged multiplayer trip checks pass,
-including late joining. See the [verification report](MOUNT_CLIENT_COLLISION_VERIFICATION_2026-09-12.md)
-for builds, packaging and the exact limits of this evidence. These results do
-not close unrelated story or release gates.
+The latest framework batch fixes arrival sounds, failed dialogue replacement
+cleanup, live player task subjects and exact GAS tag objectives. All six builds
+and 319 tests per engine pass. Three affected Blueprints compile cleanly;
+76 assets validate, with six authoring-warning assets still open. See the
+[Narrative pattern audit and usage guide](NARRATIVE_PATTERN_AUDIT_2026-09-14.md)
+for source references, tooling exclusions and the limits of this evidence.
+The broader audit and release gates remain open.
 
 | Area | Still required |
 |---|---|
+| Narrative pattern audit | Finish remaining task subject lifecycles, authored ability/item cancellation paths, music loading/override ownership, remote dialogue replacement, shared split-screen presentation, full cinematic playback and asset dependency/unused-system coverage. Resolve Farm camera and owner appearance authoring warnings intentionally. |
 | Hashir's Farm trip — route and boarding fixed, story acceptance open | Standalone and remote travel/exit pass; simulated seated capsules no longer push the client car. Author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow, compiled dedicated server and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
 | Finite reserves and Narrative tasks | Add reserve events through existing finite post commands; prove capture/defeat behavior with pending reserves and missing posts; migrate applicable authored Native record tasks. |
@@ -29,6 +32,17 @@ The dated checkpoints below preserve earlier evidence; their older test counts
 and then-current task lists do not supersede this list.
 
 ## Current checkpoint
+
+### Narrative pattern and lifecycle audit — 2026-09-14
+
+Native Tales retains quest progress and persistence; transient Territory listeners
+now follow the current Native player identity across character changes and driving.
+Exact tag objectives read explicit ownership and recover engine-skipped removal
+callbacks without patching GAS. Local music and dialogue presentation use Native
+playback and dialogue ownership. Four new regressions pass on UE 5.7 and 5.8.
+Cooking, staging and a packaged game server-mode smoke pass. This batch does not
+close full campaign save/load, dedicated-server or multiplayer story acceptance.
+See the [audit](NARRATIVE_PATTERN_AUDIT_2026-09-14.md). Narrative Pro is unchanged.
 
 ### Remote mounted character collision — 2026-09-12
 

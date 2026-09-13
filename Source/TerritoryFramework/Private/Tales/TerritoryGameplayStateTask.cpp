@@ -1,5 +1,7 @@
 #include "Tales/TerritoryGameplayStateTask.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 #include "AbilitySystemComponent.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
@@ -7,7 +9,8 @@
 
 void UTerritoryGameplayStateTask::BeginTask()
 {
-	if (SubjectProvider) TickInterval = 0.25f;
+	// Bounded readiness/identity retry; state changes still use GAS delegates.
+	TickInterval = 0.25f;
 	Super::BeginTask();
 	if (IsComplete()) return;
 	if (SubjectProvider)
@@ -15,12 +18,24 @@ void UTerritoryGameplayStateTask::BeginTask()
 		SubjectProvider->OnProviderActorReady.AddUniqueDynamic(
 			this, &UTerritoryGameplayStateTask::HandleProviderActorReady);
 	}
+	else if (APlayerController* Controller = TerritoryTales::ResolveTaskController(OwningComp, OwningController))
+	{
+		BoundSubjectController = Controller;
+		Controller->OnPossessedPawnChanged.AddUniqueDynamic(
+			this, &UTerritoryGameplayStateTask::HandleSubjectPawnChanged);
+	}
 	if (AActor* Subject = ResolveSubject()) BindSubject(Subject);
 	Evaluate(true);
 }
 
 void UTerritoryGameplayStateTask::EndTask()
 {
+	if (APlayerController* Controller = BoundSubjectController.Get())
+	{
+		Controller->OnPossessedPawnChanged.RemoveDynamic(
+			this, &UTerritoryGameplayStateTask::HandleSubjectPawnChanged);
+	}
+	BoundSubjectController.Reset();
 	if (SubjectProvider)
 	{
 		SubjectProvider->OnProviderActorReady.RemoveDynamic(
@@ -33,16 +48,24 @@ void UTerritoryGameplayStateTask::EndTask()
 void UTerritoryGameplayStateTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (IsComplete()) return;
-	AActor* Subject = CachedSubject.Get();
-	if (!Subject)
+	if (!bIsActive || IsComplete()) return;
+	AActor* Subject = ResolveSubject();
+	if (CachedSubject.Get() != Subject || CachedAbilitySystem.Get() != ResolveAbilitySystem(Subject))
 	{
-		Subject = ResolveSubject();
-		if (Subject)
-		{
-			BindSubject(Subject);
-			Evaluate(true);
-		}
+		BindSubject(Subject);
+		Evaluate(true);
+	}
+	else if (bExactTagMatch && CachedAbilitySystem.IsValid()
+		&& (Objective == ETerritoryGameplayStateObjective::AllTagsPresent
+			|| Objective == ETerritoryGameplayStateObjective::AnyTagPresent
+			|| Objective == ETerritoryGameplayStateObjective::AllTagsAbsent)
+		&& IsGameplayStateSatisfiedBy(Subject) != bObservedStateSatisfied)
+	{
+		// UE 5.7/5.8 UpdateTagMapSingle_Internal skips deferred removal
+		// delegates if a child keeps the aggregate parent count above zero.
+		// Reconcile only a changed predicate, so polling cannot turn an already
+		// satisfied require-new-transition task into a synthetic completion.
+		Evaluate(false);
 	}
 }
 
@@ -87,7 +110,7 @@ bool UTerritoryGameplayStateTask::IsGameplayStateSatisfiedBy(
 
 AActor* UTerritoryGameplayStateTask::ResolveSubject() const
 {
-	return SubjectProvider ? SubjectProvider->ProvideActor(this) : OwningPawn;
+	return SubjectProvider ? SubjectProvider->ProvideActor(this) : TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
 }
 
 UAbilitySystemComponent* UTerritoryGameplayStateTask::ResolveAbilitySystem(
@@ -100,12 +123,17 @@ UAbilitySystemComponent* UTerritoryGameplayStateTask::ResolveAbilitySystem(
 void UTerritoryGameplayStateTask::BindSubject(AActor* Subject)
 {
 	UAbilitySystemComponent* AbilitySystem = ResolveAbilitySystem(Subject);
-	if (!Subject || !AbilitySystem
-		|| (CachedSubject.Get() == Subject
-			&& CachedAbilitySystem.Get() == AbilitySystem)) return;
+	if (!Subject || !AbilitySystem)
+	{
+		UnbindSubject();
+		return;
+	}
+	if (CachedSubject.Get() == Subject
+		&& CachedAbilitySystem.Get() == AbilitySystem) return;
 	UnbindSubject();
 	CachedSubject = Subject;
 	CachedAbilitySystem = AbilitySystem;
+	bBoundExactTags = bExactTagMatch;
 
 	if (Objective == ETerritoryGameplayStateObjective::AttributeAtLeast
 		|| Objective == ETerritoryGameplayStateObjective::AttributeAtMost)
@@ -122,7 +150,8 @@ void UTerritoryGameplayStateTask::BindSubject(AActor* Subject)
 		for (const FGameplayTag& Tag : RequiredTags)
 		{
 			AbilitySystem->RegisterGameplayTagEvent(
-				Tag, EGameplayTagEventType::NewOrRemoved)
+				Tag, bBoundExactTags ? EGameplayTagEventType::AnyCountChange
+					: EGameplayTagEventType::NewOrRemoved)
 				.AddUObject(this,
 					&UTerritoryGameplayStateTask::HandleGameplayTagChanged);
 		}
@@ -141,31 +170,49 @@ void UTerritoryGameplayStateTask::UnbindSubject()
 		for (const FGameplayTag& Tag : RequiredTags)
 		{
 			AbilitySystem->RegisterGameplayTagEvent(
-				Tag, EGameplayTagEventType::NewOrRemoved).RemoveAll(this);
+				Tag, bBoundExactTags ? EGameplayTagEventType::AnyCountChange
+					: EGameplayTagEventType::NewOrRemoved).RemoveAll(this);
 		}
 	}
 	CachedAbilitySystem.Reset();
 	CachedSubject.Reset();
+	bObservedStateSatisfied = false;
 }
 
 void UTerritoryGameplayStateTask::Evaluate(bool bInitialEvaluation)
 {
-	if (IsComplete() || (bInitialEvaluation && !bCompleteIfAlreadySatisfied)) return;
-	if (IsGameplayStateSatisfiedBy(CachedSubject.Get())) CompleteTask();
+	if (!bIsActive || IsComplete()) return;
+	bObservedStateSatisfied = IsGameplayStateSatisfiedBy(CachedSubject.Get());
+	if (bInitialEvaluation && !bCompleteIfAlreadySatisfied) return;
+	if (bObservedStateSatisfied) CompleteTask();
 }
 
 bool UTerritoryGameplayStateTask::HasConfiguredTag(
 	const UAbilitySystemComponent* AbilitySystem, const FGameplayTag& Tag) const
 {
 	return AbilitySystem && Tag.IsValid()
-		&& (bExactTagMatch ? AbilitySystem->GetTagCount(Tag) > 0
+		// GAS counts include children. Exact checks need the explicitly owned
+		// container; its count can change while an implied parent remains present.
+		&& (bExactTagMatch ? AbilitySystem->GetOwnedGameplayTags().HasTagExact(Tag)
 			: AbilitySystem->HasMatchingGameplayTag(Tag));
 }
 
 void UTerritoryGameplayStateTask::HandleProviderActorReady(AActor* Actor)
 {
+	if (!bIsActive || IsComplete()) return;
 	BindSubject(Actor);
 	Evaluate(true);
+}
+
+void UTerritoryGameplayStateTask::HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn)
+{
+	if (!bIsActive || IsComplete()) return;
+	AActor* Subject = ResolveSubject();
+	if (CachedSubject.Get() != Subject || CachedAbilitySystem.Get() != ResolveAbilitySystem(Subject))
+	{
+		BindSubject(Subject);
+		Evaluate(true);
+	}
 }
 
 void UTerritoryGameplayStateTask::HandleGameplayTagChanged(

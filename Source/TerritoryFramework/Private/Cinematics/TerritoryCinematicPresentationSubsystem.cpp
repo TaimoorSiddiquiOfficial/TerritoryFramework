@@ -5,6 +5,7 @@
 #include "Components/SkinnedMeshComponent.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerController.h"
 #include "GroomComponent.h"
@@ -85,6 +86,7 @@ void UTerritoryCinematicPresentationSubsystem::BindToController(
 
 void UTerritoryCinematicPresentationSubsystem::UnbindFromTalesComponent()
 {
+	CancelDialogueReconciliation();
 	if (!BoundTalesComponent) return;
 	BoundTalesComponent->OnDialogueBegan.RemoveDynamic(
 		this, &UTerritoryCinematicPresentationSubsystem::HandleDialogueBegan);
@@ -101,7 +103,14 @@ void UTerritoryCinematicPresentationSubsystem::HandleDialogueBegan(
 	UDialogue* Dialogue)
 {
 	if (!Dialogue) return;
+	CancelDialogueReconciliation();
 	const bool bWasActive = ActiveDialogue != nullptr;
+	if (ActiveDialogue != Dialogue)
+	{
+		// A chained conversation may use different actors. Release the previous
+		// subjects before taking the new dialogue's temporary quality overrides.
+		RestoreComponentLODs();
+	}
 	ActiveDialogue = Dialogue;
 	RefreshDialogueSubjects(Dialogue);
 	if (!bWasActive)
@@ -114,10 +123,51 @@ void UTerritoryCinematicPresentationSubsystem::HandleDialogueFinished(
 	UDialogue* Dialogue, const bool bStartingNewDialogue,
 	const EExitDialogueReason Reason)
 {
-	(void)Dialogue;
 	(void)Reason;
-	if (bStartingNewDialogue) return;
+	if (Dialogue != ActiveDialogue) return;
+	CancelDialogueReconciliation();
+	if (bStartingNewDialogue)
+	{
+		// Tales broadcasts Finished before clearing CurrentDialogue and attempting
+		// MakeDialogueInstance. A rejected replacement has no Began/Finished event.
+		// Reconcile once after that attempt, preserving the HUD through valid chains.
+		if (UWorld* World = BoundTalesComponent ? BoundTalesComponent->GetWorld() : nullptr)
+		{
+			DialogueReconciliationWorld = World;
+			DialogueReconciliationTimer = World->GetTimerManager().SetTimerForNextTick(
+				this, &UTerritoryCinematicPresentationSubsystem::ReconcileCurrentDialogue);
+			return;
+		}
+	}
+	ClearPresentation();
+}
 
+void UTerritoryCinematicPresentationSubsystem::CancelDialogueReconciliation()
+{
+	if (UWorld* World = DialogueReconciliationWorld.Get())
+	{
+		World->GetTimerManager().ClearTimer(DialogueReconciliationTimer);
+	}
+	DialogueReconciliationTimer.Invalidate();
+	DialogueReconciliationWorld.Reset();
+}
+
+void UTerritoryCinematicPresentationSubsystem::ReconcileCurrentDialogue()
+{
+	DialogueReconciliationTimer.Invalidate();
+	DialogueReconciliationWorld.Reset();
+	if (UDialogue* Current = BoundTalesComponent ? BoundTalesComponent->GetCurrentDialogue() : nullptr)
+	{
+		HandleDialogueBegan(Current);
+	}
+	else
+	{
+		ClearPresentation();
+	}
+}
+
+void UTerritoryCinematicPresentationSubsystem::ClearPresentation()
+{
 	const bool bWasActive = ActiveDialogue != nullptr;
 	ActiveDialogue = nullptr;
 	RestoreComponentLODs();
@@ -149,7 +199,7 @@ void UTerritoryCinematicPresentationSubsystem::HandlePlayerDialogueLineStarted(
 void UTerritoryCinematicPresentationSubsystem::RefreshDialogueSubjects(
 	UDialogue* Dialogue)
 {
-	if (!Dialogue) return;
+	if (!Dialogue || Dialogue != ActiveDialogue) return;
 	RegisterCinematicSubject(Dialogue->GetPlayerAvatar());
 	RegisterCinematicSubject(Dialogue->GetCurrentSpeakerAvatar());
 	RegisterCinematicSubject(Dialogue->GetCurrentListenerAvatar());

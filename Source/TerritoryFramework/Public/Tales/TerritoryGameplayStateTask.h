@@ -35,9 +35,9 @@ class TERRITORYFRAMEWORK_API UTerritoryGameplayStateTask : public UNarrativeTask
 	GENERATED_BODY()
 
 public:
-	/** Optional provider. Empty follows the quest owner's pawn. */
+	/** Optional provider. Empty follows the live Native player character. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="Community Task|Subject",
-		meta=(ToolTip="Actor whose Ability System Component is observed. Easy example: Find NPC watches a boss; empty watches the player pawn."))
+		meta=(ToolTip="Actor whose ability system is observed. Example: Find NPC watches a boss. Empty follows the quest player's current Narrative character and keeps the player's ability system while driving."))
 	TObjectPtr<UNarrativeActorProvider> SubjectProvider;
 
 	/** Choose which Territory gameplay state must be reached to complete this task. */
@@ -86,6 +86,10 @@ protected:
 	virtual AActor* GetNavigationMarkerAttachActor_Implementation() const override;
 
 private:
+	friend class FTFTerritoryTaskSubjectLifecycle;
+	TWeakObjectPtr<APlayerController> BoundSubjectController;
+	UFUNCTION() void HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn);
+	friend class FTFTerritoryGameplayStateExactTags;
 	AActor* ResolveSubject() const;
 	UAbilitySystemComponent* ResolveAbilitySystem(const AActor* Subject) const;
 	void BindSubject(AActor* Subject);
@@ -100,4 +104,6 @@ private:
 
 	UPROPERTY() TWeakObjectPtr<AActor> CachedSubject;
 	UPROPERTY() TWeakObjectPtr<UAbilitySystemComponent> CachedAbilitySystem;
+	bool bBoundExactTags = false;
+	bool bObservedStateSatisfied = false;
 };

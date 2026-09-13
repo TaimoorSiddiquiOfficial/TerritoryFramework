@@ -45,9 +45,9 @@ class TERRITORYFRAMEWORK_API UTerritoryCharacterActionTask : public UNarrativeTa
 	GENERATED_BODY()
 
 public:
-	/** Optional Character provider. Empty follows the pawn that owns this Narrative quest. */
+	/** Optional Character provider. Empty follows the live Native player character. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="Community Task|Subject",
-		meta=(ToolTip="Optional Narrative Actor Provider for another Character. Easy example: Find NPC can watch an escort climb. Empty watches the quest player's pawn."))
+		meta=(ToolTip="Optional Narrative Actor Provider for another Character. Example: Find NPC watches an escort climb. Empty follows the quest player's current Narrative character, including after respawn and while driving."))
 	TObjectPtr<UNarrativeActorProvider> SubjectProvider;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Community Task|Movement",
@@ -73,6 +73,9 @@ protected:
 	virtual AActor* GetNavigationMarkerAttachActor_Implementation() const override;
 
 private:
+	friend class FTFTerritoryTaskSubjectLifecycle;
+	TWeakObjectPtr<APlayerController> BoundSubjectController;
+	UFUNCTION() void HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn);
 	ACharacter* ResolveCharacter() const;
 	void BindCharacter(ACharacter* Character);
 	void UnbindCharacter();

@@ -16,6 +16,13 @@ class UWorld;
 /** Small adapter for Narrative condition semantics used outside a Narrative graph node. */
 namespace TerritoryTales
 {
+	/** Live quest controller, with Native's initialized task context as a fallback. */
+	TERRITORYFRAMEWORK_API APlayerController* ResolveTaskController(
+		const UTalesComponent* Tales, APlayerController* CachedController);
+	/** Live quest character. Native retains this character while its controller drives a vehicle. */
+	TERRITORYFRAMEWORK_API APawn* ResolveTaskPawn(const UTalesComponent* Tales,
+		APawn* CachedPawn, APlayerController* CachedController);
+
 	/** Reuses Narrative's live primary faction. Never substitutes another player. */
 	TERRITORYFRAMEWORK_API FGameplayTag ResolveFaction(const UObject* Context,
 		ETerritoryCaptureFactionSource Source, FGameplayTag ExplicitFaction,

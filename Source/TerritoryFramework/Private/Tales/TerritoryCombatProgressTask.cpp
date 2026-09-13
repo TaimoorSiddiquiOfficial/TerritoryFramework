@@ -1,5 +1,7 @@
 #include "Tales/TerritoryCombatProgressTask.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GAS/NarrativeAttributeSetBase.h"
@@ -7,7 +9,7 @@
 void UTerritoryCombatProgressTask::BeginTask()
 {
 	bObservedDeadState = false;
-	if (SubjectProvider || CounterpartyProvider) TickInterval = 0.25f;
+	TickInterval = 0.25f;
 	Super::BeginTask();
 	if (IsComplete()) return;
 
@@ -15,6 +17,12 @@ void UTerritoryCombatProgressTask::BeginTask()
 	{
 		SubjectProvider->OnProviderActorReady.AddUniqueDynamic(
 			this, &UTerritoryCombatProgressTask::HandleSubjectReady);
+	}
+	else if (APlayerController* Controller = TerritoryTales::ResolveTaskController(OwningComp, OwningController))
+	{
+		BoundSubjectController = Controller;
+		Controller->OnPossessedPawnChanged.AddUniqueDynamic(
+			this, &UTerritoryCombatProgressTask::HandleSubjectPawnChanged);
 	}
 	if (CounterpartyProvider)
 	{
@@ -27,6 +35,12 @@ void UTerritoryCombatProgressTask::BeginTask()
 
 void UTerritoryCombatProgressTask::EndTask()
 {
+	if (APlayerController* Controller = BoundSubjectController.Get())
+	{
+		Controller->OnPossessedPawnChanged.RemoveDynamic(
+			this, &UTerritoryCombatProgressTask::HandleSubjectPawnChanged);
+	}
+	BoundSubjectController.Reset();
 	if (SubjectProvider)
 	{
 		SubjectProvider->OnProviderActorReady.RemoveDynamic(
@@ -46,15 +60,9 @@ void UTerritoryCombatProgressTask::EndTask()
 void UTerritoryCombatProgressTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (IsComplete()) return;
-	if (!CachedSubject.IsValid())
-	{
-		if (AActor* Subject = ResolveSubject()) BindSubject(Subject);
-	}
-	if (CounterpartyProvider && !CachedCounterparty.IsValid())
-	{
-		CachedCounterparty = ResolveCounterparty();
-	}
+	if (!bIsActive || IsComplete()) return;
+	BindSubject(ResolveSubject());
+	CachedCounterparty = ResolveCounterparty();
 }
 
 int32 UTerritoryCombatProgressTask::MagnitudeToProgress(float Magnitude)
@@ -65,7 +73,7 @@ int32 UTerritoryCombatProgressTask::MagnitudeToProgress(float Magnitude)
 
 AActor* UTerritoryCombatProgressTask::ResolveSubject() const
 {
-	return SubjectProvider ? SubjectProvider->ProvideActor(this) : OwningPawn;
+	return SubjectProvider ? SubjectProvider->ProvideActor(this) : TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
 }
 
 AActor* UTerritoryCombatProgressTask::ResolveCounterparty() const
@@ -167,11 +175,18 @@ void UTerritoryCombatProgressTask::AddMagnitudeProgress(float Magnitude)
 
 void UTerritoryCombatProgressTask::HandleSubjectReady(AActor* Actor)
 {
+	if (!bIsActive || IsComplete()) return;
 	BindSubject(Actor);
+}
+
+void UTerritoryCombatProgressTask::HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn)
+{
+	if (bIsActive && !IsComplete()) BindSubject(ResolveSubject());
 }
 
 void UTerritoryCombatProgressTask::HandleCounterpartyReady(AActor* Actor)
 {
+	if (!bIsActive || IsComplete()) return;
 	CachedCounterparty = Actor;
 }
 

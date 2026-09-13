@@ -8,6 +8,8 @@
 #include "Core/TerritoryMusicTags.h"
 #include "Core/TerritoryStealthProfile.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
+#include "Sound/SoundWave.h"
 #include "Music/NarrativeMusicSubsystem.h"
 #include "Music/TaggedMusicSet.h"
 #include "Subsystems/TerritoryMusicSubsystem.h"
@@ -179,6 +181,77 @@ bool FTFTerritoryMusicDefinitionRoundTrip::RunTest(const FString& Parameters)
 			LockedAudio.MusicTheme, TerritoryMusicTags::Locked.GetTag());
 	}
 
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryMusicObservationTransitions,
+	"TerritoryFramework.Audio.NarrativeMusic.ObservationArrivalAndStateTransitions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryMusicObservationTransitions::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::EditorPreview, false);
+	if (!TestNotNull(TEXT("Music observation world"), World)) return false;
+	UGameInstance* GameInstance = NewObject<UGameInstance>();
+	auto* Music = NewObject<UTerritoryMusicSubsystem>(GameInstance);
+	auto* Place = World->SpawnActor<ATerritoryProperty>();
+	auto* OtherPlace = World->SpawnActor<ATerritoryProperty>();
+	if (!Place || !OtherPlace) { World->DestroyWorld(false); return false; }
+	auto* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Definition->StableTerritoryGUID = FGuid::NewGuid();
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	USoundWave* Arrival = NewObject<USoundWave>();
+	USoundWave* Departure = NewObject<USoundWave>();
+	USoundWave* Locked = NewObject<USoundWave>();
+	auto& Audio = Definition->StateConfigs.FindOrAdd(ETerritoryState::Unclaimed).Audio;
+	Audio.StateEnteredSound = Arrival;
+	Audio.StateExitedSound = Departure;
+	Audio.bPlayEnteredSoundOnPlayerArrival = true;
+	Audio.bPlayExitedSoundOnPlayerDeparture = true;
+	Audio.StateEffectVolume = 0.4f;
+	Definition->StateConfigs.FindOrAdd(ETerritoryState::Locked).Audio.StateEnteredSound = Locked;
+	TestTrue(TEXT("Authored audio applies"), Definition->ApplyToTerritory(Place));
+	TestTrue(TEXT("Second place audio applies"), Definition->ApplyToTerritory(OtherPlace));
+
+	TestEqual(TEXT("Outside all bounds is silent"), Music->RefreshObservedTerritory(nullptr).Num(), 0);
+	auto Sounds = Music->RefreshObservedTerritory(Place);
+	TestEqual(TEXT("First entry from outside produces exactly one cue"), Sounds.Num(), 1);
+	if (Sounds.Num() == 1)
+	{
+		TestTrue(TEXT("Entry selects the authored arrival sound"), Sounds[0].Sound.Get() == Arrival);
+		TestEqual(TEXT("Entry preserves authored sound volume"), Sounds[0].Config.StateEffectVolume, 0.4f);
+	}
+	TestEqual(TEXT("Standing in the place does not repeat arrival"), Music->RefreshObservedTerritory(Place).Num(), 0);
+	Sounds = Music->RefreshObservedTerritory(nullptr);
+	TestEqual(TEXT("Leaving produces one departure"), Sounds.Num(), 1);
+	if (Sounds.Num() == 1) TestTrue(TEXT("Departure uses the previous row"), Sounds[0].Sound.Get() == Departure);
+	TestEqual(TEXT("Re-entry produces one arrival"), Music->RefreshObservedTerritory(Place).Num(), 1);
+	Sounds = Music->RefreshObservedTerritory(OtherPlace);
+	TestEqual(TEXT("Moving between places requests departure then arrival"), Sounds.Num(), 2);
+	if (Sounds.Num() == 2)
+	{
+		TestTrue(TEXT("Old row exits first"), Sounds[0].Sound.Get() == Departure);
+		TestTrue(TEXT("New row enters second"), Sounds[1].Sound.Get() == Arrival);
+	}
+	OtherPlace->ForceSetTerritoryState(ETerritoryState::Locked);
+	Sounds = Music->RefreshObservedTerritory(OtherPlace);
+	TestEqual(TEXT("Availability change selects exit and Locked entry"), Sounds.Num(), 2);
+	if (Sounds.Num() == 2) TestTrue(TEXT("Locked row sound selected"), Sounds[1].Sound.Get() == Locked);
+	TestEqual(TEXT("Stable Locked state does not repeat"), Music->RefreshObservedTerritory(OtherPlace).Num(), 0);
+
+	// Recreated local observation after load/travel does not carry presentation
+	// history. The opt-in arrival rule is evaluated against the loaded state.
+	Music->ResetForWorld(World);
+	TestEqual(TEXT("First observation of a loaded place respects arrival opt-in"), Music->RefreshObservedTerritory(Place).Num(), 1);
+	Music->RefreshObservedTerritory(nullptr);
+	Definition->StateConfigs.FindChecked(ETerritoryState::Unclaimed).Audio.bPlayEnteredSoundOnPlayerArrival = false;
+	TestTrue(TEXT("Silent arrival authoring applies"), Definition->ApplyToTerritory(Place));
+	TestEqual(TEXT("Arrival can be disabled without disabling state cues"), Music->RefreshObservedTerritory(Place).Num(), 0);
+	Place->ForceSetTerritoryState(ETerritoryState::Locked);
+	TestEqual(TEXT("State change still emits cues with arrival disabled"), Music->RefreshObservedTerritory(Place).Num(), 2);
 	World->DestroyWorld(false);
 	return true;
 }

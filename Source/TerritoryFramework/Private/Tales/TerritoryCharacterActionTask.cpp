@@ -3,6 +3,8 @@
 #include "Character/NarrativeCharacterMovement.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Tales/TerritoryTalesUtilities.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 
 namespace
@@ -34,7 +36,10 @@ namespace
 
 void UTerritoryCharacterActionTask::BeginTask()
 {
-	if (RequiresPolling(Objective) || SubjectProvider) TickInterval = 0.1f;
+	// Native exposes possession/provider events, but SetOwnedCharacter and late
+	// component readiness have no shared ready delegate. Retry identity at a
+	// bounded rate; the actual action is still counted from Native delegates.
+	TickInterval = RequiresPolling(Objective) ? 0.1f : 0.25f;
 	Super::BeginTask();
 	if (IsComplete()) return;
 
@@ -43,11 +48,23 @@ void UTerritoryCharacterActionTask::BeginTask()
 		SubjectProvider->OnProviderActorReady.AddUniqueDynamic(
 			this, &UTerritoryCharacterActionTask::HandleProviderActorReady);
 	}
+	else if (APlayerController* Controller = TerritoryTales::ResolveTaskController(OwningComp, OwningController))
+	{
+		BoundSubjectController = Controller;
+		Controller->OnPossessedPawnChanged.AddUniqueDynamic(
+			this, &UTerritoryCharacterActionTask::HandleSubjectPawnChanged);
+	}
 	if (ACharacter* Character = ResolveCharacter()) BindCharacter(Character);
 }
 
 void UTerritoryCharacterActionTask::EndTask()
 {
+	if (APlayerController* Controller = BoundSubjectController.Get())
+	{
+		Controller->OnPossessedPawnChanged.RemoveDynamic(
+			this, &UTerritoryCharacterActionTask::HandleSubjectPawnChanged);
+	}
+	BoundSubjectController.Reset();
 	if (SubjectProvider)
 	{
 		SubjectProvider->OnProviderActorReady.RemoveDynamic(
@@ -60,14 +77,9 @@ void UTerritoryCharacterActionTask::EndTask()
 void UTerritoryCharacterActionTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (IsComplete()) return;
-
-	ACharacter* Character = CachedCharacter.Get();
-	if (!Character)
-	{
-		Character = ResolveCharacter();
-		if (Character) BindCharacter(Character);
-	}
+	if (!bIsActive || IsComplete()) return;
+	ACharacter* Character = ResolveCharacter();
+	BindCharacter(Character);
 	if (!Character || !RequiresPolling(Objective)) return;
 
 	const bool bCrouched = Character->bIsCrouched;
@@ -153,14 +165,15 @@ bool UTerritoryCharacterActionTask::IsActionStateSatisfiedBy(
 ACharacter* UTerritoryCharacterActionTask::ResolveCharacter() const
 {
 	AActor* Subject = SubjectProvider
-		? SubjectProvider->ProvideActor(this) : OwningPawn;
+		? SubjectProvider->ProvideActor(this) : TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
 	return Cast<ACharacter>(Subject);
 }
 
 void UTerritoryCharacterActionTask::BindCharacter(ACharacter* Character)
 {
-	if (!Character || CachedCharacter.Get() == Character) return;
+	if (CachedCharacter.Get() == Character) return;
 	UnbindCharacter();
+	if (!IsValid(Character)) return;
 	CachedCharacter = Character;
 	Character->LandedDelegate.AddUniqueDynamic(
 		this, &UTerritoryCharacterActionTask::HandleLanded);
@@ -235,7 +248,13 @@ void UTerritoryCharacterActionTask::CountAction()
 
 void UTerritoryCharacterActionTask::HandleProviderActorReady(AActor* Actor)
 {
+	if (!bIsActive || IsComplete()) return;
 	BindCharacter(Cast<ACharacter>(Actor));
+}
+
+void UTerritoryCharacterActionTask::HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn)
+{
+	if (bIsActive && !IsComplete()) BindCharacter(ResolveCharacter());
 }
 
 void UTerritoryCharacterActionTask::HandleJumped()

@@ -56,11 +56,19 @@ public:
 	static bool IsMusicConfigUsable(const FTerritoryStateAudioConfig& Config);
 
 private:
+	friend class FTFTerritoryMusicObservationTransitions;
+
+	struct FStateSoundRequest
+	{
+		TSoftObjectPtr<class USoundBase> Sound;
+		FTerritoryStateAudioConfig Config;
+	};
+
 	AActor* ResolveLocalListener() const;
 	ATerritoryVolume* ResolveMusicTerritory(const FVector& ListenerLocation) const;
 	const FTerritoryStateAudioConfig* FindStateAudio(
 		const ATerritoryVolume* Territory, ETerritoryState State) const;
-	void RefreshObservedTerritory(ATerritoryVolume* NewTerritory);
+	TArray<FStateSoundRequest> RefreshObservedTerritory(ATerritoryVolume* NewTerritory);
 	void RefreshMusicTerritory(ATerritoryVolume* NewTerritory);
 	void ApplyMusicRule(ATerritoryVolume* Territory,
 		const FTerritoryStateAudioConfig& Config);

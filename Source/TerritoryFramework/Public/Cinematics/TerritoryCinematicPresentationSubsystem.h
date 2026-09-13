@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "Tales/TalesComponent.h"
+#include "TimerManager.h"
 #include "TerritoryCinematicPresentationSubsystem.generated.h"
 
 class AActor;
@@ -34,7 +35,7 @@ public:
 	static UTerritoryCinematicPresentationSubsystem* GetForPlayerController(
 		const APlayerController* PlayerController);
 
-	/** True from Narrative OnDialogueBegan through the final OnDialogueFinished. */
+	/** True while Narrative has a dialogue. A failed dialogue replacement clears this on the next tick. */
 	UFUNCTION(BlueprintPure, Category="Territory|Cinematics")
 	bool IsNarrativeCinematicActive() const { return ActiveDialogue != nullptr; }
 
@@ -47,6 +48,8 @@ public:
 	FOnTerritoryCinematicPresentationChanged OnPresentationChanged;
 
 private:
+	friend class FTFTerritoryCinematicDialogueLifecycle;
+
 	enum class EComponentOverrideType : uint8
 	{
 		LODSync,
@@ -68,9 +71,14 @@ private:
 	TObjectPtr<UDialogue> ActiveDialogue;
 
 	TArray<FComponentLODOverride> ComponentLODOverrides;
+	FTimerHandle DialogueReconciliationTimer;
+	TWeakObjectPtr<UWorld> DialogueReconciliationWorld;
 
 	void BindToController(APlayerController* PlayerController);
 	void UnbindFromTalesComponent();
+	void CancelDialogueReconciliation();
+	void ReconcileCurrentDialogue();
+	void ClearPresentation();
 	void RefreshDialogueSubjects(UDialogue* Dialogue);
 	void RestoreComponentLODs();
 	bool HasOverrideFor(const UActorComponent* Component) const;

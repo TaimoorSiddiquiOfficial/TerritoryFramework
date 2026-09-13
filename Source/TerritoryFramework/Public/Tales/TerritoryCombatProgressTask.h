@@ -39,9 +39,9 @@ class TERRITORYFRAMEWORK_API UTerritoryCombatProgressTask : public UNarrativeTas
 	GENERATED_BODY()
 
 public:
-	/** Optional combat subject. Empty follows the pawn that owns this quest. */
+	/** Optional combat subject. Empty follows the live Native player character. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="Community Task|Subject",
-		meta=(ToolTip="Actor whose Narrative combat events are counted. Empty watches the quest player. Easy example: Find NPC watches a story boss die."))
+		meta=(ToolTip="Actor whose Narrative combat events are counted. Empty follows the quest player's current character, including after respawn and while driving. Example: Find NPC watches a story boss die."))
 	TObjectPtr<UNarrativeActorProvider> SubjectProvider;
 
 	/** Optional other side of the combat event: target, damager, or healer. */
@@ -77,6 +77,9 @@ protected:
 	virtual AActor* GetNavigationMarkerAttachActor_Implementation() const override;
 
 private:
+	friend class FTFTerritoryTaskSubjectLifecycle;
+	TWeakObjectPtr<APlayerController> BoundSubjectController;
+	UFUNCTION() void HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn);
 	AActor* ResolveSubject() const;
 	AActor* ResolveCounterparty() const;
 	UNarrativeAbilitySystemComponent* ResolveNarrativeAbilitySystem(AActor* Actor) const;
