@@ -41,7 +41,7 @@ void UTerritoryCharacterActionTask::BeginTask()
 	// bounded rate; the actual action is still counted from Native delegates.
 	TickInterval = RequiresPolling(Objective) ? 0.1f : 0.25f;
 	Super::BeginTask();
-	if (IsComplete()) return;
+	if (CurrentProgress >= RequiredQuantity) return;
 
 	if (SubjectProvider)
 	{
@@ -77,7 +77,7 @@ void UTerritoryCharacterActionTask::EndTask()
 void UTerritoryCharacterActionTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	ACharacter* Character = ResolveCharacter();
 	BindCharacter(Character);
 	if (!Character || !RequiresPolling(Objective)) return;
@@ -243,18 +243,18 @@ void UTerritoryCharacterActionTask::SnapshotPolledStates(const ACharacter* Chara
 
 void UTerritoryCharacterActionTask::CountAction()
 {
-	if (!IsComplete()) AddProgress(1);
+	if (CurrentProgress < RequiredQuantity) AddProgress(1);
 }
 
 void UTerritoryCharacterActionTask::HandleProviderActorReady(AActor* Actor)
 {
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	BindCharacter(Cast<ACharacter>(Actor));
 }
 
 void UTerritoryCharacterActionTask::HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn)
 {
-	if (bIsActive && !IsComplete()) BindCharacter(ResolveCharacter());
+	if (bIsActive && CurrentProgress < RequiredQuantity) BindCharacter(ResolveCharacter());
 }
 
 void UTerritoryCharacterActionTask::HandleJumped()

@@ -11,7 +11,7 @@ void UTerritoryCombatProgressTask::BeginTask()
 	bObservedDeadState = false;
 	TickInterval = 0.25f;
 	Super::BeginTask();
-	if (IsComplete()) return;
+	if (CurrentProgress >= RequiredQuantity) return;
 
 	if (SubjectProvider)
 	{
@@ -60,7 +60,7 @@ void UTerritoryCombatProgressTask::EndTask()
 void UTerritoryCombatProgressTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	BindSubject(ResolveSubject());
 	CachedCounterparty = ResolveCounterparty();
 }
@@ -170,23 +170,23 @@ bool UTerritoryCombatProgressTask::MatchesEffect(
 void UTerritoryCombatProgressTask::AddMagnitudeProgress(float Magnitude)
 {
 	const int32 Progress = MagnitudeToProgress(Magnitude);
-	if (!IsComplete() && Progress > 0) AddProgress(Progress);
+	if (CurrentProgress < RequiredQuantity && Progress > 0) AddProgress(Progress);
 }
 
 void UTerritoryCombatProgressTask::HandleSubjectReady(AActor* Actor)
 {
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	BindSubject(Actor);
 }
 
 void UTerritoryCombatProgressTask::HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn)
 {
-	if (bIsActive && !IsComplete()) BindSubject(ResolveSubject());
+	if (bIsActive && CurrentProgress < RequiredQuantity) BindSubject(ResolveSubject());
 }
 
 void UTerritoryCombatProgressTask::HandleCounterpartyReady(AActor* Actor)
 {
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	CachedCounterparty = Actor;
 }
 
@@ -194,7 +194,7 @@ void UTerritoryCombatProgressTask::HandleDealtDamage(
 	UNarrativeAbilitySystemComponent* DamagedASC, const float Damage,
 	const FGameplayEffectSpec& Spec)
 {
-	if (IsComplete() || !MatchesCounterparty(DamagedASC)
+	if (CurrentProgress >= RequiredQuantity || !MatchesCounterparty(DamagedASC)
 		|| !MatchesEffect(Spec) || Damage <= 0.f) return;
 	if (Objective == ETerritoryCombatProgressObjective::DealDamageAmount)
 		AddMagnitudeProgress(Damage);
@@ -206,7 +206,7 @@ void UTerritoryCombatProgressTask::HandleDamagedBy(
 	UNarrativeAbilitySystemComponent* DamagerASC, const float Damage,
 	const FGameplayEffectSpec& Spec)
 {
-	if (IsComplete() || !MatchesCounterparty(DamagerASC)
+	if (CurrentProgress >= RequiredQuantity || !MatchesCounterparty(DamagerASC)
 		|| !MatchesEffect(Spec) || Damage <= 0.f) return;
 	if (Objective == ETerritoryCombatProgressObjective::TakeDamageAmount)
 		AddMagnitudeProgress(Damage);
@@ -222,7 +222,7 @@ void UTerritoryCombatProgressTask::HandleHealedBy(
 	const FGameplayEffectSpec& Spec)
 {
 	if (Objective == ETerritoryCombatProgressObjective::ReceiveHealingAmount
-		&& !IsComplete() && MatchesCounterparty(HealerASC)
+		&& CurrentProgress < RequiredQuantity && MatchesCounterparty(HealerASC)
 		&& MatchesEffect(Spec)) AddMagnitudeProgress(Amount);
 }
 
@@ -230,7 +230,7 @@ void UTerritoryCombatProgressTask::HandleDeathStateChanged(
 	AActor* ChangedActor, UNarrativeAbilitySystemComponent* ChangedASC,
 	const bool bIsDead)
 {
-	if (IsComplete() || ChangedASC != CachedAbilitySystem.Get()) return;
+	if (CurrentProgress >= RequiredQuantity || ChangedASC != CachedAbilitySystem.Get()) return;
 	const bool bWasDead = bObservedDeadState;
 	bObservedDeadState = bIsDead;
 	if (Objective == ETerritoryCombatProgressObjective::Die && bIsDead)

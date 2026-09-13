@@ -60,6 +60,7 @@ protected:
 	virtual void EndTask() override;
 
 private:
+	friend class FTFTerritoryObservationTaskLifecycle;
 	UPROPERTY(Transient)
 	TObjectPtr<UNarrativeNodeBase> ConditionProbe;
 

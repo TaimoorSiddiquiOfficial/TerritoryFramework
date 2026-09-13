@@ -21,7 +21,7 @@ enum class ETerritoryAIObservationObjective : uint8
 	NPCDead UMETA(DisplayName="NPC Dies",
 		ToolTip="Complete when the resolved Narrative NPC enters its dead state."),
 	ReachQuestOwner UMETA(DisplayName="AI Reaches Quest Player",
-		ToolTip="Complete when the AI-controlled actor reaches the quest player's pawn."),
+		ToolTip="Complete when the AI reaches the quest player's current Narrative character, including while driving."),
 	ReachActor UMETA(DisplayName="AI Reaches Actor",
 		ToolTip="Complete when the AI-controlled actor reaches the Destination Provider actor."),
 	ReachLocation UMETA(DisplayName="AI Reaches Location",
@@ -67,7 +67,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Instanced, Category="Community Task|Destination",
 		meta=(EditCondition="Objective == ETerritoryAIObservationObjective::ReachActor", EditConditionHides,
-			ToolTip="Actor the observed AI must approach."))
+			ToolTip="Actor the observed AI must approach. The task follows provider changes and waits when the destination is not loaded."))
 	TObjectPtr<UNarrativeActorProvider> DestinationProvider;
 
 	/** World-space destination, in centimetres, used by the selected movement observation. */
@@ -111,6 +111,7 @@ protected:
 	virtual AActor* GetNavigationMarkerAttachActor_Implementation() const override;
 
 private:
+	friend class FTFTerritoryObservationTaskLifecycle;
 	AActor* ResolveTarget() const;
 	AActor* ResolveDestination() const;
 	ANarrativeNPCController* ResolveController(const AActor* Target) const;
@@ -122,6 +123,7 @@ private:
 	bool HasAttackToken(const ANarrativeNPCController* Controller) const;
 	void BindTarget(AActor* Target);
 	void UnbindTarget();
+	void ResetObservation();
 	void Evaluate(bool bInitialEvaluation);
 
 	UFUNCTION() void HandleTargetReady(AActor* Actor);
@@ -132,8 +134,11 @@ private:
 	UPROPERTY() TWeakObjectPtr<AActor> CachedTarget;
 	UPROPERTY() TWeakObjectPtr<AActor> CachedDestination;
 	UPROPERTY() TWeakObjectPtr<UNarrativeAbilitySystemComponent> CachedAbilitySystem;
+	TWeakObjectPtr<ANarrativeNPCController> CachedController;
+	TWeakObjectPtr<APawn> ObservedQuestPawn;
 	bool bObservedPerception = false;
 	bool bObservedVehicle = false;
 	bool bObservedAttackToken = false;
 	bool bObservedUnsatisfiedState = false;
+	bool bObservedUnavailableTarget = false;
 };

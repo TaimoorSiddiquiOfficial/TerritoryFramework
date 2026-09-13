@@ -7,18 +7,17 @@
 #include "GameFramework/Pawn.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 void UTerritoryAIObservationTask::BeginTask()
 {
 	// Transition objectives are edge-triggered. Reset their observation latches
 	// before Super performs Narrative's immediate first tick on branch re-entry.
-	bObservedPerception = false;
-	bObservedVehicle = false;
-	bObservedAttackToken = false;
-	bObservedUnsatisfiedState = false;
+	ResetObservation();
+	bObservedUnavailableTarget = false;
 	TickInterval = 0.2f;
 	Super::BeginTask();
-	if (IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	if (TargetProvider)
 	{
 		TargetProvider->OnProviderActorReady.AddUniqueDynamic(
@@ -49,23 +48,22 @@ void UTerritoryAIObservationTask::EndTask()
 	}
 	UnbindTarget();
 	CachedDestination.Reset();
-	bObservedPerception = false;
-	bObservedVehicle = false;
-	bObservedAttackToken = false;
-	bObservedUnsatisfiedState = false;
+	ResetObservation();
+	bObservedUnavailableTarget = false;
 	Super::EndTask();
 }
 
 void UTerritoryAIObservationTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (IsComplete()) return;
-	if (!CachedTarget.IsValid())
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
+	BindTarget(ResolveTarget());
+	AActor* Destination = ResolveDestination();
+	if (CachedDestination.Get() != Destination)
 	{
-		if (AActor* Target = ResolveTarget()) BindTarget(Target);
+		CachedDestination = Destination;
+		if (Objective == ETerritoryAIObservationObjective::ReachActor) bObservedUnsatisfiedState = false;
 	}
-	if (DestinationProvider && !CachedDestination.IsValid())
-		CachedDestination = ResolveDestination();
 	Evaluate(false);
 }
 
@@ -93,12 +91,13 @@ bool UTerritoryAIObservationTask::IsAIStateSatisfiedBy(
 		return AbilitySystem && AbilitySystem->IsDead();
 	}
 	case ETerritoryAIObservationObjective::ReachQuestOwner:
-		return SpatialActor && OwningPawn
-			&& SpatialActor->GetDistanceTo(OwningPawn) <= DistanceTolerance;
+	{
+		APawn* Pawn = TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
+		return SpatialActor && Pawn && SpatialActor->GetDistanceTo(Pawn) <= DistanceTolerance;
+	}
 	case ETerritoryAIObservationObjective::ReachActor:
 	{
-		AActor* Destination = CachedDestination.IsValid()
-			? CachedDestination.Get() : ResolveDestination();
+		AActor* Destination = ResolveDestination();
 		return SpatialActor && Destination
 			&& SpatialActor->GetDistanceTo(Destination) <= DistanceTolerance;
 	}
@@ -184,12 +183,13 @@ UTerritoryAIObservationTask::ResolveNarrativeAbilitySystem(AActor* Target) const
 bool UTerritoryAIObservationTask::IsPerceivingQuestOwner(
 	const ANarrativeNPCController* Controller) const
 {
-	if (!Controller || !OwningPawn) return false;
+	APawn* Pawn = TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
+	if (!Controller || !Pawn) return false;
 	UAIPerceptionComponent* Perception =
 		const_cast<ANarrativeNPCController*>(Controller)->GetAIPerceptionComponent();
 	if (!IsValid(Perception)) return false;
 	FActorPerceptionBlueprintInfo Info;
-	if (!Perception->GetActorsPerception(OwningPawn, Info)) return false;
+	if (!Perception->GetActorsPerception(Pawn, Info)) return false;
 	for (const FAIStimulus& Stimulus : Info.LastSensedStimuli)
 	{
 		if (Stimulus.WasSuccessfullySensed()) return true;
@@ -214,9 +214,10 @@ bool UTerritoryAIObservationTask::HasReturnedToOwnedNPC(
 bool UTerritoryAIObservationTask::HasAttackToken(
 	const ANarrativeNPCController* Controller) const
 {
-	if (!Controller || !OwningPawn) return false;
+	APawn* Pawn = TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
+	if (!Controller || !Pawn) return false;
 	const UNarrativeAbilitySystemComponent* PlayerASC =
-		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(OwningPawn);
+		FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Pawn);
 	if (!PlayerASC) return false;
 	return PlayerASC->GrantedAttackTokens.ContainsByPredicate(
 		[Controller](const FAttackToken& Token)
@@ -227,12 +228,16 @@ bool UTerritoryAIObservationTask::HasAttackToken(
 
 void UTerritoryAIObservationTask::BindTarget(AActor* Target)
 {
-	if (!Target || CachedTarget.Get() == Target) return;
+	UNarrativeAbilitySystemComponent* AbilitySystem = ResolveNarrativeAbilitySystem(Target);
+	ANarrativeNPCController* Controller = ResolveController(Target);
+	if (IsValid(Target) && CachedTarget.Get() == Target
+		&& CachedAbilitySystem.Get() == AbilitySystem && CachedController.Get() == Controller) return;
 	UnbindTarget();
+	if (!IsValid(Target)) return;
 	CachedTarget = Target;
-	CachedAbilitySystem = ResolveNarrativeAbilitySystem(Target);
-	if (UNarrativeAbilitySystemComponent* AbilitySystem =
-		CachedAbilitySystem.Get())
+	CachedController = Controller;
+	CachedAbilitySystem = AbilitySystem;
+	if (AbilitySystem)
 	{
 		AbilitySystem->OnDeathStateChanged.AddUniqueDynamic(
 			this, &UTerritoryAIObservationTask::HandleDeathStateChanged);
@@ -249,13 +254,40 @@ void UTerritoryAIObservationTask::UnbindTarget()
 	}
 	CachedAbilitySystem.Reset();
 	CachedTarget.Reset();
+	CachedController.Reset();
+	ResetObservation();
+}
+
+void UTerritoryAIObservationTask::ResetObservation()
+{
+	bObservedPerception = false;
+	bObservedVehicle = false;
+	bObservedAttackToken = false;
+	bObservedUnsatisfiedState = false;
+	ObservedQuestPawn.Reset();
 }
 
 void UTerritoryAIObservationTask::Evaluate(bool bInitialEvaluation)
 {
-	if (IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
+	APawn* Pawn = TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
+	if (ObservedQuestPawn.Get() != Pawn)
+	{
+		ObservedQuestPawn = Pawn;
+		bObservedPerception = false;
+		bObservedAttackToken = false;
+		if (Objective == ETerritoryAIObservationObjective::ReachQuestOwner
+			|| Objective == ETerritoryAIObservationObjective::PerceivesQuestOwner
+			|| Objective == ETerritoryAIObservationObjective::ClaimsAttackToken) bObservedUnsatisfiedState = false;
+	}
 	AActor* Target = CachedTarget.Get();
-	if (!Target) return;
+	if (!Target)
+	{
+		bObservedUnavailableTarget = true;
+		return;
+	}
+	if (Objective == ETerritoryAIObservationObjective::ActorAvailable && bObservedUnavailableTarget)
+		bObservedUnsatisfiedState = true;
 	ANarrativeNPCController* Controller = ResolveController(Target);
 	const bool bPerceiving = IsPerceivingQuestOwner(Controller);
 	const bool bInVehicle = IsControllingVehicle(Controller);
@@ -263,23 +295,26 @@ void UTerritoryAIObservationTask::Evaluate(bool bInitialEvaluation)
 
 	if (Objective == ETerritoryAIObservationObjective::LosesQuestOwner)
 	{
-		if (!Controller || !OwningPawn) return;
-		if (bObservedPerception && !bPerceiving) CompleteTask();
+		if (!Controller || !Pawn) return;
+		const bool bLost = bObservedPerception && !bPerceiving;
 		bObservedPerception |= bPerceiving;
+		if (bLost) CompleteTask();
 		return;
 	}
 	if (Objective == ETerritoryAIObservationObjective::LeavesVehicle)
 	{
 		if (!Controller) return;
-		if (bObservedVehicle && HasReturnedToOwnedNPC(Controller)) CompleteTask();
+		const bool bLeft = bObservedVehicle && HasReturnedToOwnedNPC(Controller);
 		bObservedVehicle |= bInVehicle;
+		if (bLeft) CompleteTask();
 		return;
 	}
 	if (Objective == ETerritoryAIObservationObjective::ReleasesAttackToken)
 	{
-		if (!Controller || !OwningPawn) return;
-		if (bObservedAttackToken && !bHasToken) CompleteTask();
+		if (!Controller || !Pawn) return;
+		const bool bReleased = bObservedAttackToken && !bHasToken;
 		bObservedAttackToken |= bHasToken;
+		if (bReleased) CompleteTask();
 		return;
 	}
 	const bool bSatisfied = IsAIStateSatisfiedBy(Target);
@@ -299,12 +334,16 @@ void UTerritoryAIObservationTask::Evaluate(bool bInitialEvaluation)
 
 void UTerritoryAIObservationTask::HandleTargetReady(AActor* Actor)
 {
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	BindTarget(Actor);
 	Evaluate(true);
 }
 
 void UTerritoryAIObservationTask::HandleDestinationReady(AActor* Actor)
 {
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
+	if (CachedDestination.Get() != Actor && Objective == ETerritoryAIObservationObjective::ReachActor)
+		bObservedUnsatisfiedState = false;
 	CachedDestination = Actor;
 	Evaluate(false);
 }
@@ -313,8 +352,8 @@ void UTerritoryAIObservationTask::HandleDeathStateChanged(
 	AActor* ChangedActor, UNarrativeAbilitySystemComponent* ChangedASC,
 	const bool bIsDead)
 {
-	if (Objective == ETerritoryAIObservationObjective::NPCDead
-		&& ChangedASC == CachedAbilitySystem.Get() && bIsDead && !IsComplete())
+	if (bIsActive && Objective == ETerritoryAIObservationObjective::NPCDead
+		&& ChangedASC == CachedAbilitySystem.Get() && bIsDead && CurrentProgress < RequiredQuantity)
 	{
 		CompleteTask();
 	}

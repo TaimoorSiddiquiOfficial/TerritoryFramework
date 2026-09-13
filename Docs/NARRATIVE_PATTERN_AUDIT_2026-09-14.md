@@ -66,6 +66,9 @@ Paths below are relative to each plugin's `Source` directory.
 | NP-04 | Gameplay State Task uses `GetTagCount` for Exact Tag Match. GAS counts include implied parent tags, so a child can satisfy a supposedly exact parent check. NewOrRemoved listeners also miss an explicit parent change while a child keeps the aggregate count positive. | Implemented explicit owned-tag queries, AnyCountChange listeners and a bounded check for missed removal transitions. A missing provider subject now releases the old ASC. Exact matching, addition/removal, client authority, listener cleanup and Native load-progress replay regressions pass on both engines. |
 | NP-05 | Both Farm handover assets have no shot and zero blend-out time. | Current asset validation reports warnings. Authored handover camera/flow acceptance is still open; valid data is not the same as warning-free validation. |
 | NP-06 | Blacksmith and Farm owner definitions, in both the project and plugin, use the prototype Narrative Manny appearance. | Four assets report cinematic-appearance warnings. Keep these visible for story authoring; do not replace community sample characters merely to silence validation. |
+| NP-07 | Native `UNarrativeTask::IsComplete()` also returns true for optional tasks. Territory's action, combat, GAS, disguise, AI and assault observers used it as a progress guard, preventing optional objectives from earning progress. | Use Native's `CurrentProgress >= RequiredQuantity` pattern for observer completion. Native still decides whether an optional objective blocks its quest branch. The action/GAS/combat regression now runs with optional objectives; a new regression observes real disguise and assault delegates. |
+| NP-08 | Presence, disguise, AI and condition-gate tasks still used the initially cached player. AI also kept live old providers and their death listeners. Old inside/perception/token history could satisfy a different subject's objective. | Reuse live Narrative player resolution; re-resolve Native providers at the existing bounded interval; release obsolete listeners. Reset transition evidence when player, target, destination or registered Territory changes. |
+| NP-09 | Native BeginTask ticks immediately. Enter/availability polling could therefore ignore Complete If Already Satisfied being disabled. Disguise exit history also survived lost cover and could credit a later restoration outside as an undetected exit. | Observe real state transitions and reset cover-exit evidence when cover is lost. Tests cover an already-inside start, real entry, respawn, registry unload/reload, exposure and restoration outside. |
 
 ## Compatible adaptations to retain
 
@@ -97,7 +100,7 @@ with warnings (NP-05 and NP-06). The strict wrapper therefore reports
 The three affected task Blueprints compile UpToDate, with zero errors or
 warnings (`BlueprintCompilation.json`). No content changes were saved.
 
-Fresh automation: **319/319 pass on each engine**, zero failures and zero unrun.
+First-batch automation: **319/319 pass on each engine**, zero failures and zero unrun.
 UE 5.8 has 23 tests with warnings; UE 5.7 has 25. This does not mean the logs are
 warning-free. All six targets pass: Editor, Development and Shipping for both
 engines, including runtime/editor modules and UHT. Editor builds use the tooling
@@ -109,13 +112,84 @@ staging and a 60-second packaged Development game server-mode smoke pass
 All 741 installed Narrative Pro source files match the UE 5.8 Marketplace
 baseline (`NarrativeSourceComparison.json`).
 
-Not yet closed: the remaining state/presence, disguise and AI-observation task
-subject audit; all authored ability graphs and item source/cancellation paths;
+Not yet closed: all authored ability graphs and item source/cancellation paths;
 dialogue replacement in multiplayer;
 shared split-screen speaker LOD ownership; music override/load races; full Native
 cutscene interruption/skip/cleanup; asset dependency/unused-system coverage.
 The existing [roadmap](ROADMAP_AND_REMAINING.md) also retains Hashir arrival/save
 recovery, finite reserves, guard conversations, AlMalik streaming and release gates.
+
+### Task observation follow-up
+
+`TaskObservation` beneath the evidence folder contains the follow-up builds and
+tests for NP-07 through NP-09. All nine shipped task Blueprints passed preflight
+validation with PIE stopped. The focused Tales suite passes 29/29 on each engine.
+Final follow-up result: **320/320 tests pass on each engine** (UE 5.8: 23 tests
+with warnings; UE 5.7: 25). All six Editor/Development/Shipping builds pass.
+All nine shipped task Blueprints compile UpToDate with zero errors/warnings and
+validate with zero invalid assets or warnings. UE 5.8 cooking, packaging and the
+60-second Development game server-mode startup smoke pass. These results
+supersede the first batch's 319-test count, with the same tooling exclusions.
+
+The Native reference is `UNarrativeTask::BeginTask`, `IsComplete` and
+`SetProgressInternal` in `NarrativeArsenal/Private/Tales/QuestTask.cpp`. Native
+explicitly avoids IsComplete when checking whether an optional task has earned
+its quantity. Territory uses that same distinction and leaves Native branch
+eligibility, journal presentation, authority and progress persistence unchanged.
+
+State presence and disguise exit history are transient observations of one player
+and one registered Territory. AI loss/token history is transient evidence for one
+AI/player pair. Changing an identity, ending a task or losing the registered
+actor resets that evidence; none of those changes invents a gameplay event.
+Save/load restores Native progress and reconstructs observations from loaded
+actors. No saved or replicated field, public class or asset path was removed.
+
+The new regression uses registered Native ASCs, real disguise Gameplay Effects,
+Native condition evaluation, provider/death delegates and the existing assault
+record publisher. It also replays Native loading/progress and rejects client-side
+progress. Its registry unload/reload checks are a load-order fixture, not a full
+World Partition streaming session. Its Native token-array fixture checks task
+observation, not combat token allocation or an actual two-client fight.
+
+The assault task remains a read-only observer of `OnAssaultChanged` and durable
+records. Scheduling/activation/casualties remain in
+`UTerritoryCounterAttackSubsystem`; attacker participation remains in the combat
+participant adapter/control subsystem; capture remains the existing volume/control
+flow. `ATerritoryWorldState` persists and replicates assault snapshots and the
+existing notification path presents them. Optional quest progress changes none of
+those transitions, force budgets, proximity policies or deterministic decisions.
+
+### Music ownership limitation still under review
+
+Native SetTheme can accept a request into its fade queue before GetActiveTheme
+changes. It exposes no public pending-theme or request-generation delegate.
+Territory's baseline restoration currently retries while waiting for a music
+set/theme, so an active-theme comparison alone cannot prove that a newer queued
+quest/cinematic request still belongs to Territory. Audio-enabled overlapping
+request tests are still needed before changing this policy. Do not replace the
+Native player or read/write its private fields to mask this limitation.
+
+### Available assets versus authored story usage
+
+`TaskObservation/FeatureAssetReferences.json` checks 30 task, combat, audio and
+camera assets. `BlacksmithTaskUsage.json` reads the Native QuestTemplate's actual
+branches. Both project and plugin Blacksmith quests contain three task instances:
+one Territory Capture and two Territory State tasks. Those instances are not
+optional. They reference the shipped Capture/State Blueprint classes.
+
+Seven other shipped task Blueprints currently have no saved-asset referencers:
+AI Observation, Character Movement Action, Combat Progress, Gameplay State,
+Boss Fight, Counterattack and Disguise. These are reusable authoring choices;
+their native classes are also available as instanced tasks. Passing their tests
+does not mean they have been wired into Act 1. Choose them when the story has a
+matching objective; do not add an artificial objective merely to use a feature.
+
+Three camera sequences with no saved-asset referencers (Close Up, Insert and Over
+Shoulder) also appear in the shot editor's `GetStudioShotSpecs` authoring library.
+That is a concrete example of why registry referencer counts cannot prove that
+a reusable asset or code system does nothing. Grenade attack and the plugin's
+Blacksmith music preset also need an intentional authoring-use review; the
+project keeps its own editable copies. No unused-asset deletion was performed.
 
 ### Source-proven GAS callback limitation
 

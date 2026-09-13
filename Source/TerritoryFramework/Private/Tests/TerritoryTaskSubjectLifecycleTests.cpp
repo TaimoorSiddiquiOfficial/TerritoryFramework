@@ -39,6 +39,9 @@ bool FTFTerritoryTaskSubjectLifecycle::RunTest(const FString& Parameters)
 	{
 		Task->OwningComp = Tales;
 		Task->RequiredQuantity = 10;
+		// Native IsComplete also means optional for branch eligibility. An optional
+		// task must still listen and earn progress while its branch remains active.
+		Task->bOptional = true;
 		Task->MarkerSettings.bAddNavigationMarker = false;
 		Task->BeginTask();
 	};
@@ -101,7 +104,7 @@ bool FTFTerritoryTaskSubjectLifecycle::RunTest(const FString& Parameters)
 	SecondASC->AddLooseGameplayTag(Tag);
 	TestEqual(TEXT("New character contributes movement"), Movement->CurrentProgress, 3);
 	TestEqual(TEXT("New ASC contributes combat"), Combat->CurrentProgress, 2);
-	TestTrue(TEXT("New ASC completes state objective"), StateTask->IsComplete());
+	TestEqual(TEXT("New ASC earns optional state objective"), StateTask->CurrentProgress, StateTask->RequiredQuantity);
 
 	Movement->HandleProviderActorReady(nullptr);
 	Second->OnJumpedDelegate.Broadcast();

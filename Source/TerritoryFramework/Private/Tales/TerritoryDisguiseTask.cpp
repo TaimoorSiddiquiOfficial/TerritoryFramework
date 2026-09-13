@@ -4,36 +4,26 @@
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TalesComponent.h"
+#include "Tales/TerritoryTalesUtilities.h"
+#include "GameFramework/Pawn.h"
 
 void UTerritoryDisguiseTask::BeginTask()
 {
 	// Narrative may enter the same branch again. BeginTask immediately invokes the
 	// first tick through UNarrativeTask, so stale inside-state must be cleared first.
 	bWasInsideTarget = false;
-	if (Objective == ETerritoryDisguiseTaskObjective::EnterTerritoryAccepted
-		|| Objective == ETerritoryDisguiseTaskObjective::ExitTerritoryUndetected)
-	{
-		TickInterval = 0.25f;
-	}
+	ObservedPawn.Reset();
+	ObservedTerritory.Reset();
+	// Event objectives also need a bounded retry when the player arrives later.
+	TickInterval = 0.25f;
 	Super::BeginTask();
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	UWorld* World = OwningComp ? OwningComp->GetWorld() : nullptr;
 	UTerritoryDisguiseSubsystem* Disguises = World
 		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
-	if (!Disguises || !OwningPawn) return;
+	if (!Disguises) return;
 	Disguises->OnDisguiseChanged.AddUniqueDynamic(
 		this, &UTerritoryDisguiseTask::HandleDisguiseChanged);
-
-	FTerritoryDisguiseSnapshot Snapshot;
-	if (Disguises->GetDisguiseSnapshot(OwningPawn, Snapshot)
-		&& Objective == ETerritoryDisguiseTaskObjective::EquipDisguise
-		&& MatchesFaction(Snapshot, FGameplayTag()))
-	{
-		CompleteTask();
-		return;
-	}
-	ATerritoryVolume* Territory = ResolveTerritory();
-	bWasInsideTarget = Territory && Territory->ContainsPoint(
-		OwningPawn->GetActorLocation());
 }
 
 void UTerritoryDisguiseTask::EndTask()
@@ -48,51 +38,69 @@ void UTerritoryDisguiseTask::EndTask()
 		}
 	}
 	bWasInsideTarget = false;
+	ObservedPawn.Reset();
+	ObservedTerritory.Reset();
 	Super::EndTask();
 }
 
 void UTerritoryDisguiseTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (IsComplete() || !OwningPawn) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
+	APawn* Pawn = TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
 	ATerritoryVolume* Territory = ResolveTerritory();
-	UWorld* World = OwningPawn->GetWorld();
+	if (ObservedPawn.Get() != Pawn || ObservedTerritory.Get() != Territory || !Pawn || !Territory)
+	{
+		bWasInsideTarget = false;
+		ObservedPawn = Pawn;
+		ObservedTerritory = Territory;
+	}
+	UWorld* World = GetWorld();
 	const UTerritoryDisguiseSubsystem* Disguises = World
 		? World->GetSubsystem<UTerritoryDisguiseSubsystem>() : nullptr;
 	FTerritoryDisguiseSnapshot Snapshot;
-	if (!Territory || !Disguises
-		|| !Disguises->GetDisguiseSnapshot(OwningPawn, Snapshot)
+	if (!Pawn || !Disguises
+		|| !Disguises->GetDisguiseSnapshot(Pawn, Snapshot)
 		|| !MatchesFaction(Snapshot, FGameplayTag()))
 	{
+		bWasInsideTarget = false;
 		return;
 	}
-	const bool bInside = Territory->ContainsPoint(OwningPawn->GetActorLocation());
+	if (Objective == ETerritoryDisguiseTaskObjective::EquipDisguise)
+	{
+		CompleteTask();
+		return;
+	}
+	if (!Territory) return;
+	const bool bInside = Territory->ContainsPoint(Pawn->GetActorLocation());
 	FText Reason;
 	const bool bAccepted = Disguises->IsDisguiseAccepted(
-		OwningPawn, Territory, Faction, Reason);
-	if (Objective == ETerritoryDisguiseTaskObjective::EnterTerritoryAccepted
-		&& bInside && bAccepted)
-	{
-		CompleteTask();
-	}
-	else if (Objective == ETerritoryDisguiseTaskObjective::ExitTerritoryUndetected
-		&& bWasInsideTarget && !bInside && bAccepted)
-	{
-		CompleteTask();
-	}
-	bWasInsideTarget |= bInside;
+		Pawn, Territory, Faction, Reason);
+	const bool bEntered = bInside && bAccepted;
+	const bool bLeft = bWasInsideTarget && !bInside && bAccepted;
+	// Losing cover or the observed subject ends this inside-to-outside evidence.
+	// Restore while outside is not an undetected exit from an earlier visit.
+	bWasInsideTarget = bInside && bAccepted;
+	if ((Objective == ETerritoryDisguiseTaskObjective::EnterTerritoryAccepted && bEntered)
+		|| (Objective == ETerritoryDisguiseTaskObjective::ExitTerritoryUndetected && bLeft)) CompleteTask();
 }
 
 void UTerritoryDisguiseTask::HandleDisguiseChanged(AActor* Target,
 	ETerritoryDisguiseChange Change, FGameplayTag ObserverFaction,
 	ATerritoryVolume* Territory, const FTerritoryDisguiseSnapshot& Snapshot)
 {
-	if (Target != OwningPawn || IsComplete()
+	if (!bIsActive || !Target
+		|| Target != TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController)
+		|| CurrentProgress >= RequiredQuantity
 		|| !MatchesFaction(Snapshot, ObserverFaction)
 		|| TargetTerritory.IsValid() && Territory
 			&& Territory->GetTerritoryTag() != TargetTerritory)
 	{
 		return;
+	}
+	if (Change == ETerritoryDisguiseChange::Removed || Change == ETerritoryDisguiseChange::Compromised)
+	{
+		bWasInsideTarget = false;
 	}
 	if (Objective == ETerritoryDisguiseTaskObjective::EquipDisguise
 		&& Change == ETerritoryDisguiseChange::Activated

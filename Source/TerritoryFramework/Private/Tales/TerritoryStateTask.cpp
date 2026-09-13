@@ -5,6 +5,8 @@
 #include "Navigation/MapMarker.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TalesComponent.h"
+#include "Tales/TerritoryTalesUtilities.h"
+#include "GameFramework/Pawn.h"
 
 namespace
 {
@@ -18,6 +20,10 @@ namespace
 void UTerritoryStateTask::BeginTask()
 {
 	bWasInsideTarget = false;
+	ObservedPawn.Reset();
+	bHasPresenceObservation = false;
+	bHasObjectiveObservation = false;
+	bObservedObjectiveSatisfied = false;
 	if (IsPresenceObjective(Objective)
 		|| Objective == ETerritoryStateTaskObjective::BecomeAvailable)
 	{
@@ -27,7 +33,7 @@ void UTerritoryStateTask::BeginTask()
 	}
 
 	Super::BeginTask();
-	if (!OwningComp || CurrentProgress >= RequiredQuantity
+	if (!bIsActive || !OwningComp || CurrentProgress >= RequiredQuantity
 		|| !TargetTerritory.IsValid())
 	{
 		return;
@@ -85,7 +91,7 @@ void UTerritoryStateTask::EndTask()
 void UTerritoryStateTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (CurrentProgress >= RequiredQuantity) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 
 	ATerritoryVolume* Territory = CachedTerritory.Get();
 	if (!Territory)
@@ -100,19 +106,29 @@ void UTerritoryStateTask::TickTask_Implementation()
 		EvaluateCurrent(false);
 		return;
 	}
-	if (!IsPresenceObjective(Objective) || !OwningPawn) return;
+	if (IsPresenceObjective(Objective)) ObservePresence();
+}
 
-	const bool bInside = Territory->ContainsPoint(OwningPawn->GetActorLocation());
-	if (Objective == ETerritoryStateTaskObjective::EnterTerritory && bInside)
+void UTerritoryStateTask::ObservePresence()
+{
+	ATerritoryVolume* Territory = CachedTerritory.Get();
+	APawn* Pawn = TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
+	if (!Territory || !Pawn)
 	{
-		CompleteTask();
+		ObservedPawn.Reset();
+		bHasPresenceObservation = false;
+		bWasInsideTarget = false;
+		return;
 	}
-	else if (Objective == ETerritoryStateTaskObjective::LeaveTerritory
-		&& bWasInsideTarget && !bInside)
-	{
-		CompleteTask();
-	}
+	const bool bInside = Territory->ContainsPoint(Pawn->GetActorLocation());
+	const bool bNewObservation = !bHasPresenceObservation || ObservedPawn.Get() != Pawn;
+	const bool bEntered = bInside && (bNewObservation ? bCompleteIfAlreadySatisfied : !bWasInsideTarget);
+	const bool bLeft = !bNewObservation && bWasInsideTarget && !bInside;
+	ObservedPawn = Pawn;
+	bHasPresenceObservation = true;
 	bWasInsideTarget = bInside;
+	if ((Objective == ETerritoryStateTaskObjective::EnterTerritory && bEntered)
+		|| (Objective == ETerritoryStateTaskObjective::LeaveTerritory && bLeft)) CompleteTask();
 }
 
 bool UTerritoryStateTask::IsObjectiveSatisfiedBy(
@@ -147,11 +163,14 @@ bool UTerritoryStateTask::IsObjectiveSatisfiedBy(
 	case ETerritoryStateTaskObjective::ReachDesiredGarrison:
 		return Territory->GetDesiredGuardCount() >= FMath::Max(1, RequiredQuantity);
 	case ETerritoryStateTaskObjective::EnterTerritory:
-		return OwningPawn
-			&& Territory->ContainsPoint(OwningPawn->GetActorLocation());
 	case ETerritoryStateTaskObjective::LeaveTerritory:
-		return OwningPawn && bWasInsideTarget
-			&& !Territory->ContainsPoint(OwningPawn->GetActorLocation());
+	{
+		APawn* Pawn = TerritoryTales::ResolveTaskPawn(OwningComp, OwningPawn, OwningController);
+		if (!Pawn) return false;
+		const bool bInside = Territory->ContainsPoint(Pawn->GetActorLocation());
+		return Objective == ETerritoryStateTaskObjective::EnterTerritory ? bInside
+			: ObservedPawn.Get() == Pawn && bHasPresenceObservation && bWasInsideTarget && !bInside;
+	}
 	default:
 		return false;
 	}
@@ -172,13 +191,6 @@ void UTerritoryStateTask::BindTerritory(ATerritoryVolume* Territory)
 	Territory->OnGarrisonChanged.AddUniqueDynamic(
 		this, &UTerritoryStateTask::HandleGarrisonChanged);
 
-	if (IsPresenceObjective(Objective) && OwningPawn)
-	{
-		// Treat a World Partition replacement as a fresh observation. Streaming
-		// must never fake an inside-to-outside quest transition.
-		bWasInsideTarget = Territory->ContainsPoint(
-			OwningPawn->GetActorLocation());
-	}
 }
 
 void UTerritoryStateTask::UnbindTerritory()
@@ -195,28 +207,43 @@ void UTerritoryStateTask::UnbindTerritory()
 			this, &UTerritoryStateTask::HandleGarrisonChanged);
 	}
 	CachedTerritory.Reset();
+	ObservedPawn.Reset();
+	bHasPresenceObservation = false;
+	bWasInsideTarget = false;
+	bHasObjectiveObservation = false;
+	bObservedObjectiveSatisfied = false;
 }
 
 void UTerritoryStateTask::EvaluateCurrent(bool bInitialEvaluation)
 {
 	ATerritoryVolume* Territory = CachedTerritory.Get();
-	if (!Territory || CurrentProgress >= RequiredQuantity) return;
+	if (!bIsActive || !Territory || CurrentProgress >= RequiredQuantity) return;
+	if (IsPresenceObjective(Objective))
+	{
+		ObservePresence();
+		return;
+	}
 
-	if (bInitialEvaluation && !bCompleteIfAlreadySatisfied) return;
+	const bool bSatisfied = IsObjectiveSatisfiedBy(Territory);
+	const bool bNewObservation = bInitialEvaluation || !bHasObjectiveObservation;
+	const bool bWasSatisfied = bObservedObjectiveSatisfied;
+	bHasObjectiveObservation = true;
+	bObservedObjectiveSatisfied = bSatisfied;
+	if (!bCompleteIfAlreadySatisfied && (bNewObservation || bWasSatisfied)) return;
 	if (Objective == ETerritoryStateTaskObjective::ReachDesiredGarrison)
 	{
 		SetProgress(Territory->GetDesiredGuardCount());
 		return;
 	}
-	if (Objective == ETerritoryStateTaskObjective::LeaveTerritory) return;
-	if (IsObjectiveSatisfiedBy(Territory)) CompleteTask();
+	if (bSatisfied) CompleteTask();
 }
 
 void UTerritoryStateTask::HandleTerritoryRegistered(
 	ATerritoryVolume* Territory, bool bWasUnregistered)
 {
 	(void)bWasUnregistered;
-	if (!Territory || Territory->GetTerritoryTag() != TargetTerritory) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity
+		|| !Territory || Territory->GetTerritoryTag() != TargetTerritory) return;
 	BindTerritory(Territory);
 	EvaluateCurrent(true);
 

@@ -23,7 +23,7 @@ enum class ETerritoryDisguiseTaskObjective : uint8
 /** Narrative quest objectives for uniforms, checkpoints, and double-agent missions. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Disguise Mission Task",
-		ToolTip="Narrative Task for disguise, checkpoint, cover exposure, and double-agent objectives."))
+		ToolTip="Follows the quest player's current Narrative character for disguise, checkpoint and cover objectives, including after respawn and while driving."))
 class TERRITORYFRAMEWORK_API UTerritoryDisguiseTask : public UNarrativeTask
 {
 	GENERATED_BODY()
@@ -53,6 +53,7 @@ protected:
 	virtual AActor* GetNavigationMarkerAttachActor_Implementation() const override;
 
 private:
+	friend class FTFTerritoryObservationTaskLifecycle;
 	UFUNCTION()
 	void HandleDisguiseChanged(AActor* Target, ETerritoryDisguiseChange Change,
 		FGameplayTag ObserverFaction, ATerritoryVolume* Territory,
@@ -61,5 +62,7 @@ private:
 	ATerritoryVolume* ResolveTerritory() const;
 	bool MatchesFaction(const FTerritoryDisguiseSnapshot& Snapshot,
 		FGameplayTag ObserverFaction) const;
+	TWeakObjectPtr<APawn> ObservedPawn;
+	TWeakObjectPtr<ATerritoryVolume> ObservedTerritory;
 	bool bWasInsideTarget = false;
 };

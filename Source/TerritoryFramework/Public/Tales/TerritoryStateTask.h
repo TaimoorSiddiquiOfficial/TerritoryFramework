@@ -27,9 +27,9 @@ enum class ETerritoryStateTaskObjective : uint8
 	ReachDesiredGarrison UMETA(DisplayName="Assign Guards to Territory",
 		ToolTip="Progress equals Desired Guards and completes at Narrative Required Quantity."),
 	EnterTerritory UMETA(DisplayName="Enter Territory",
-		ToolTip="Complete when the quest owner's pawn is inside the Territory bounds."),
+		ToolTip="Complete when the quest player's current Narrative character enters the Territory. This also follows the character while driving."),
 	LeaveTerritory UMETA(DisplayName="Leave Territory",
-		ToolTip="Complete only after the quest owner's pawn was inside and then leaves the Territory bounds.")
+		ToolTip="Complete after the same player character is seen inside and then outside. Respawn and a streamed Territory replacement do not count as leaving.")
 };
 
 /**
@@ -79,6 +79,8 @@ protected:
 	virtual AActor* GetNavigationMarkerAttachActor_Implementation() const override;
 
 private:
+	friend class FTFTerritoryObservationTaskLifecycle;
+	void ObservePresence();
 	void BindTerritory(ATerritoryVolume* Territory);
 	void UnbindTerritory();
 	void EvaluateCurrent(bool bInitialEvaluation);
@@ -111,5 +113,9 @@ private:
 	UPROPERTY()
 	TWeakObjectPtr<ATerritoryVolume> CachedTerritory;
 
+	TWeakObjectPtr<APawn> ObservedPawn;
 	bool bWasInsideTarget = false;
+	bool bHasPresenceObservation = false;
+	bool bHasObjectiveObservation = false;
+	bool bObservedObjectiveSatisfied = false;
 };

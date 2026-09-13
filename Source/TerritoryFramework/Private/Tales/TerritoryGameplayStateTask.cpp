@@ -12,7 +12,7 @@ void UTerritoryGameplayStateTask::BeginTask()
 	// Bounded readiness/identity retry; state changes still use GAS delegates.
 	TickInterval = 0.25f;
 	Super::BeginTask();
-	if (IsComplete()) return;
+	if (CurrentProgress >= RequiredQuantity) return;
 	if (SubjectProvider)
 	{
 		SubjectProvider->OnProviderActorReady.AddUniqueDynamic(
@@ -48,7 +48,7 @@ void UTerritoryGameplayStateTask::EndTask()
 void UTerritoryGameplayStateTask::TickTask_Implementation()
 {
 	Super::TickTask_Implementation();
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	AActor* Subject = ResolveSubject();
 	if (CachedSubject.Get() != Subject || CachedAbilitySystem.Get() != ResolveAbilitySystem(Subject))
 	{
@@ -181,7 +181,7 @@ void UTerritoryGameplayStateTask::UnbindSubject()
 
 void UTerritoryGameplayStateTask::Evaluate(bool bInitialEvaluation)
 {
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	bObservedStateSatisfied = IsGameplayStateSatisfiedBy(CachedSubject.Get());
 	if (bInitialEvaluation && !bCompleteIfAlreadySatisfied) return;
 	if (bObservedStateSatisfied) CompleteTask();
@@ -199,14 +199,14 @@ bool UTerritoryGameplayStateTask::HasConfiguredTag(
 
 void UTerritoryGameplayStateTask::HandleProviderActorReady(AActor* Actor)
 {
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	BindSubject(Actor);
 	Evaluate(true);
 }
 
 void UTerritoryGameplayStateTask::HandleSubjectPawnChanged(APawn* PreviousPawn, APawn* NewPawn)
 {
-	if (!bIsActive || IsComplete()) return;
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	AActor* Subject = ResolveSubject();
 	if (CachedSubject.Get() != Subject || CachedAbilitySystem.Get() != ResolveAbilitySystem(Subject))
 	{

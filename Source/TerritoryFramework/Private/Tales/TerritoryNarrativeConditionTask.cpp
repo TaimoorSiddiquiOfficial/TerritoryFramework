@@ -54,12 +54,14 @@ bool UTerritoryNarrativeConditionTask::AreGateConditionsMet() const
 	TGuardValue<bool> EvaluationGuard(bEvaluatingConditions, true);
 	UNarrativeNodeBase* Probe = ConditionProbe;
 	UTalesComponent* Component = OwningComp;
+	APawn* CurrentPawn = TerritoryTales::ResolveTaskPawn(Component, OwningPawn, OwningController);
+	APlayerController* CurrentController = TerritoryTales::ResolveTaskController(Component, OwningController);
 	const TArray<TObjectPtr<UNarrativeCondition>> Requirements = Conditions;
 	for (UNarrativeCondition* Condition : Requirements)
 	{
 		if (!IsValid(Condition)) return false;
 		if (!TerritoryTales::EvaluateConditionWithNarrative(Probe, Condition,
-			OwningPawn, OwningController, Component))
+			CurrentPawn, CurrentController, Component))
 		{
 			return false;
 		}

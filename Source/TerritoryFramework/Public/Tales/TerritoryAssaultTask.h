@@ -99,6 +99,7 @@ protected:
 	virtual AActor* GetNavigationMarkerAttachActor_Implementation() const override;
 
 private:
+	friend class FTFTerritoryObservationTaskLifecycle;
 	UFUNCTION()
 	void HandleAssaultChanged(const FTerritoryAssaultRecord& Assault);
 

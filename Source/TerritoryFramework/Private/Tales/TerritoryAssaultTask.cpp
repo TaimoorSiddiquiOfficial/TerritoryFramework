@@ -8,6 +8,7 @@
 void UTerritoryAssaultTask::BeginTask()
 {
 	Super::BeginTask();
+	if (!bIsActive || CurrentProgress >= RequiredQuantity) return;
 	UWorld* World = OwningComp ? OwningComp->GetWorld() : nullptr;
 	UTerritoryCounterAttackSubsystem* Counter = World
 		? World->GetSubsystem<UTerritoryCounterAttackSubsystem>() : nullptr;
@@ -18,7 +19,7 @@ void UTerritoryAssaultTask::BeginTask()
 		Counter->GetAssaultsForTerritory(TargetTerritory))
 	{
 		EvaluateRecord(Assault);
-		if (IsComplete()) break;
+		if (CurrentProgress >= RequiredQuantity) break;
 	}
 }
 
@@ -53,7 +54,7 @@ bool UTerritoryAssaultTask::Matches(const FTerritoryAssaultRecord& Assault) cons
 
 void UTerritoryAssaultTask::EvaluateRecord(const FTerritoryAssaultRecord& Assault)
 {
-	if (!Matches(Assault) || IsComplete()) return;
+	if (!bIsActive || !Matches(Assault) || CurrentProgress >= RequiredQuantity) return;
 	const int32 RecordProgress = GetObjectiveProgressFromRecord(Assault);
 	if (RecordProgress > 0)
 	{
