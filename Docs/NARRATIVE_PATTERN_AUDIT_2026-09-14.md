@@ -818,6 +818,12 @@ Native controller's optional `CutscenePlayerActor` warning; exit 0 is not a
 claim of warning-free cinematic playback.
 All 741 Narrative Pro source files still match the installed Marketplace package.
 
+The UE 5.8 iterative cook/stage and 60-second packaged Development game server-mode
+smoke both exit 0. This is not a compiled TDAServer target. Existing content and
+optional Native CutscenePlayerActor warnings remain tracked. The editor is restored
+to HopDistrictTest, PIE stopped, Listen Server / three players / one process, with
+no dirty packages. The full framework and cinematic release gates remain open.
+
 ## Follow-up: validated Native party transfers
 
 Evidence: `Saved/Verification/20260914_PartyTransfer` in the TDA project.
@@ -978,3 +984,61 @@ The final UE 5.8 iterative cook/stage and 60-second packaged Development game
 server-mode smoke both exit 0. This is not a compiled TDAServer target. Known
 NullRHI Canvas and optional Native CutscenePlayerActor warnings remain; this
 startup smoke does not certify rendered cinematics or a complete campaign.
+
+## Follow-up: final-member dialogue exit
+
+Evidence: `Saved/Verification/20260914_PartyFinalMember` in the TDA project.
+
+The HopDistrictTest baseline reproduced zero party members with a live shared
+dialogue and tag count 2 on the original player, although only one external tag
+grant should remain. Native `RemovePartyMember` only updates membership. It never
+ends the abandoned session. The preceding adapter removed the member grant, but
+the original avatar grant still belonged to Native's eventual dialogue end.
+
+The existing Territory component now calls `UNarrativePartyComponent::ExitDialogue`
+for the final departure while Native still has its member and client route.
+Native runs `UDialogue::OnEndDialogue`, balances the remaining grants and sends
+its normal reliable client exit. Only then does removal publish Leave Party.
+The existing transition guard prevents membership re-entry during Native end;
+deferred exits remain tied to the old dialogue. The alias is re-read after end
+so a distinct personal dialogue is not blindly cleared. Repeated removal fails
+without touching a new conversation. Parties with remaining members keep the
+same session. Empty parties refuse Begin Dialogue.
+
+Authority remains the server's Native party component; tags remain on Native's
+ASC. No replicated field, RPC, save field, GameplayTag or runtime class was added.
+No Blueprint reparenting is needed. Final-member departure deliberately ends
+even a conversation whose normal Can Be Exited setting is false. Use Leave Party
+for post-departure story work; live connections are explicitly reattached after
+Native task-history load, then a new conversation may begin.
+
+The audit also confirms why live avatar migration cannot be implemented by
+changing only public OwningController/OwningPawn: `GetPlayerAvatar` first reads
+the protected SpeakerAvatars map, and Native's camera restore uses protected
+OldViewTarget. `SetPartyCurrentSpeaker` changes only the selected reply speaker.
+A compatible dialogue override or supported vendor extension is needed to migrate
+all of these together. No reflection access to protected runtime state or vendor
+patch was introduced. Continuing-party avatar/controller migration, camera/input,
+delayed blend callbacks, authored shots/voice, disconnect/destruction and travel
+remain open. This final-member fix does not certify those cases.
+
+All six Editor/Development/Shipping builds pass. Full automation passes 338/338
+per engine, with zero failed or not run (5.8: 303 success + 35 warning results;
+5.7: 301 + 37). The new behavioral test exercises Native ASC/end callbacks,
+client rejection, component re-registration, an unskippable dialogue, final
+cleanup before a personal dialogue begins inside Leave, re-entrant end requests,
+repeated departure and external-tag preservation. The save test now starts a
+fresh conversation after explicit post-load reconnection and verifies its final
+departure. The shared-local fixture explicitly retains a second member and
+models a separate client copy before its pending exit. Native warning-level
+begin/end logs remain in the reports.
+
+Listen host plus two clients and dedicated PIE server plus two clients each pass
+nine live checks. Nonleaders depart first; the original player retains the exact
+dialogue and held line. Final departure clears the server session, all client
+aliases and both Native grants. A separate personal dialogue receives only its
+own grant, survives repeated removal, then ends leaving the external count.
+Recorder: `Scripts/Territory/verify_party_final_member_pie.py`. This held-line
+fixture has no authored shot/voice and does not certify rendered camera cleanup.
+Three focused assets validate and compile without warnings with PIE stopped.
+All 741 Narrative Pro source files still match the installed Marketplace package.

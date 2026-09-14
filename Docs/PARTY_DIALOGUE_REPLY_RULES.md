@@ -141,8 +141,22 @@ active-dialogue departure behavior.
 
 Fresh leader lookup does not migrate the cached controller, pawn or speaker of
 an already-running dialogue. Do not treat reference cleanup as certification of
-leader/host departure, disconnect or final-member cleanup. These remain release
-gates along with the presentation cleanup above.
+leader/host departure while others remain, or disconnect/destruction that bypasses
+removal. These remain release gates along with the presentation cleanup above.
+
+When the final member leaves, Territory calls Native's group **Exit Dialogue**
+while that member is still registered. Native can then remove its avatar/member
+tags and send the departing client its normal exit. This happens before **Leave
+Party** callbacks, so those callbacks can begin a personal dialogue after the
+old dialogue has ended. **Can Be Exited** does not keep an empty party alive;
+that setting controls the player's normal dialogue-exit action. An empty party's
+**Begin Dialogue** returns false. Reconnect members before starting dialogue.
+Parties with remaining members continue the same conversation.
+
+This final-member cleanup does not migrate an earlier-departed avatar's cached
+camera/controller while others continue. Native's delayed blend/input cleanup
+and concurrent authored cinematics still need acceptance. Disconnect/destruction
+does not automatically call Remove Party Member and remains a separate gate.
 
 Native's immediate join/start, late remote joins, party destruction/travel and
 rendered split-screen dialogue remain acceptance gates. A successful reply test does not certify cinematic

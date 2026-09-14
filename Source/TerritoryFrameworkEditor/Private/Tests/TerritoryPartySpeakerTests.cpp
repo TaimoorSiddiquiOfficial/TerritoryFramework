@@ -198,11 +198,78 @@ bool FTFTerritoryPartySpeakerSave::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Native task history remains intact"), Restored->MasterTaskList.FindRef(TEXT("SpeakerSaveRegression")), 5);
 	TestTrue(TEXT("Post-load transfer releases the old party's member contribution"), Restored->AddPartyMember(F.Members[1]));
 	TestEqual(TEXT("Transfer leaves no old member tag"), F.Count(1), 0);
+	TestTrue(TEXT("Explicitly reconnected saved party can start a fresh conversation"), Restored->BeginDialogue(UTerritoryPartySpeakerTestDialogue::StaticClass()));
+	TestEqual(TEXT("Reconnected member receives Native avatar and member grants"), F.Count(1), 2);
+	TestTrue(TEXT("Final post-load departure succeeds"), Restored->RemovePartyMember(F.Members[1]));
+	TestNull(TEXT("Final post-load departure closes the restored party"), Restored->GetCurrentDialogue());
+	TestEqual(TEXT("Final post-load departure releases both Native grants"), F.Count(1), 0);
+	TestFalse(TEXT("Empty restored party cannot start a conversation"), Restored->BeginDialogue(UTerritoryPartySpeakerTestDialogue::StaticClass()));
 	F.Actor->RouteEndPlay(EEndPlayReason::LevelTransition);
 	TestEqual(TEXT("Level teardown lets Native clean the original avatar"), F.Count(0), 0);
 	TestEqual(TEXT("Level teardown lets Native clean the remaining member"), F.Count(2), 0);
 	Restored->ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
 	TestEqual(TEXT("New party end does not touch the old counts"), F.Count(1), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryPartyFinalMember,
+	"TerritoryFramework.Tales.PartyDeparture.FinalMemberEndsNativeBeforeLeave",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryPartyFinalMember::RunTest(const FString& Parameters)
+{
+	TGuardValue<bool> Scripts(GAllowActorScriptExecutionInEditor, true);
+	FPartySpeakerFixture F;
+	for (auto* ASC : F.ASCs) ASC->AddLooseGameplayTag(F.Tag, 2, EGameplayTagReplicationState::CountToOwner);
+	TestTrue(TEXT("Tagged group starts through Native"), F.Begin());
+	UDialogue* Shared = F.Party->GetCurrentDialogue();
+	TestTrue(TEXT("First nonleader leaves"), F.Party->RemovePartyMember(F.Members[1]));
+	TestTrue(TEXT("Second nonleader leaves"), F.Party->RemovePartyMember(F.Members[2]));
+	TestTrue(TEXT("The remaining original player keeps the exact live dialogue"), Shared == F.Party->GetCurrentDialogue() && Shared->IsInitialized());
+	F.Actor->SetRole(ROLE_SimulatedProxy);
+	TestFalse(TEXT("Client cannot trigger final-member cleanup"), F.Party->RemovePartyMember(F.Members[0]));
+	TestEqual(TEXT("Rejected client cleanup preserves all original grants"), F.Count(0), 4);
+	F.Actor->SetRole(ROLE_Authority);
+	F.Party->UnregisterComponent();
+	F.Party->RegisterComponent();
+	Shared->bCanBeExited = false;
+	int32 NativeEnds = 0;
+	bool bEndSawFinalMember = false;
+	bool bNestedJoinAccepted = true;
+	const FDelegateHandle EndHandle = FDialogueDelegates::OnDialogueEnd.AddLambda(
+		[&](UTalesComponent* Component, UDialogue* Dialogue)
+		{
+			if (Component != F.Party || Dialogue != Shared) return;
+			++NativeEnds;
+			bEndSawFinalMember = F.Party->GetPartyMembers().Contains(F.Members[0]);
+			bNestedJoinAccepted = F.Party->AddPartyMember(F.Members[1]);
+			F.Party->ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
+		});
+	bool bLeaveSawCompleteCleanup = false;
+	F.Members[0]->OnLeaveParty.AddDynamic(F.Members[0], &UTerritoryPartyReplyMemberProbe::ObserveLeave);
+	F.Members[0]->LeaveAction = [&](UNarrativePartyComponent*)
+	{
+		bLeaveSawCompleteCleanup = NativeEnds == 1 && !Shared->IsInitialized()
+			&& !F.Party->GetCurrentDialogue() && F.Count(0) == 2;
+		TestTrue(TEXT("Leave starts a personal conversation after Native cleanup"), F.Members[0]->BeginDialogue(UTerritoryPartySpeakerTestDialogue::StaticClass()));
+	};
+	TestTrue(TEXT("Final departure closes even an unskippable conversation"), F.Party->RemovePartyMember(F.Members[0]));
+	FDialogueDelegates::OnDialogueEnd.Remove(EndHandle);
+	TestEqual(TEXT("Native end is called exactly once"), NativeEnds, 1);
+	TestTrue(TEXT("Native end still sees its final member grant"), bEndSawFinalMember);
+	TestFalse(TEXT("End callback cannot join while Native is closing"), bNestedJoinAccepted);
+	TestTrue(TEXT("Leave sees tags and old dialogue fully cleaned"), bLeaveSawCompleteCleanup);
+	TestNull(TEXT("Empty party has no current conversation"), F.Party->GetCurrentDialogue());
+	TestFalse(TEXT("Empty party cannot begin another conversation"), F.Begin());
+	UDialogue* Personal = F.Members[0]->GetCurrentDialogue();
+	TestTrue(TEXT("Personal conversation survives the deferred old exit"), Personal && Personal != Shared && Personal->IsInitialized());
+	TestEqual(TEXT("Only personal and external grants remain"), F.Count(0), 3);
+	TestFalse(TEXT("Repeated final departure is inert"), F.Party->RemovePartyMember(F.Members[0]));
+	TestTrue(TEXT("Repeated final departure preserves the personal conversation"), F.Members[0]->GetCurrentDialogue() == Personal);
+	F.Party->ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
+	TestEqual(TEXT("Empty-party exit cannot remove personal grants"), F.Count(0), 3);
+	F.Members[0]->ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
+	for (int32 Index = 0; Index < 3; ++Index) TestEqual(TEXT("Only external grants remain after all Native ends"), F.Count(Index), 2);
 	return true;
 }
 #endif

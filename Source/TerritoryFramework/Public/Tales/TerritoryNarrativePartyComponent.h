@@ -20,10 +20,12 @@ public:
 	 * Story callbacks may change membership again; success means this party still owns it.
 	 */
 	virtual bool AddPartyMember(UTalesComponent* Member) override;
-	/** Clear only the departing member's shared-dialogue alias before Native publishes Leave Party.
-	 * The remaining members keep the same Native dialogue. Camera/tag and leader transfer are separate concerns.
+	/** Release the departing member's alias and party tag grant before Leave Party.
+	 * Remaining members keep the same dialogue. The final departure ends it through
+	 * Native first. Migrating a continuing dialogue's avatar/camera/leader is separate.
 	 */
 	virtual bool RemovePartyMember(UTalesComponent* Member) override;
+	/** Start a Native conversation for the current members. An empty party returns false. */
 	virtual bool BeginDialogue(TSubclassOf<UDialogue> Dialogue, const FDialoguePlayParams PlayParams = FDialoguePlayParams()) override;
 	virtual bool SetCurrentDialogue(TSubclassOf<UDialogue> Dialogue, const FDialoguePlayParams PlayParams = FDialoguePlayParams()) override;
 	virtual void ExitDialogue(EExitDialogueReason Reason) override;

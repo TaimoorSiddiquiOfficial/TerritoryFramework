@@ -53,7 +53,7 @@ void UTerritoryNarrativePartyComponent::PrepareNativeSpeakerCleanup()
 
 bool UTerritoryNarrativePartyComponent::BeginDialogue(TSubclassOf<UDialogue> Dialogue, const FDialoguePlayParams PlayParams)
 {
-	if (!HasAuthority() || DialogueMutationDepth) return false;
+	if (!HasAuthority() || DialogueMutationDepth || PartyMembers.IsEmpty()) return false;
 	bool bStarted = false;
 	{
 		TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
@@ -214,12 +214,23 @@ bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Membe
 	// Its removal clears membership but leaves that alias. A personal BeginDialogue
 	// would then deinitialize the party's live object; TryExit/Skip can also reach it.
 	// Clear before Super broadcasts Leave Party, since story callbacks can start a
-	// personal dialogue synchronously. Never deinitialize or send a group exit here.
-	UDialogue* Alias = Member->GetCurrentDialogue();
-	const bool bSharedAlias = IsValid(Alias) && Alias->OwningComp == this;
+	// personal dialogue synchronously. Remaining members keep their shared session.
 	bool bRemoved = false;
 	{
 		TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
+		if (PartyMembers.Num() == 1 && GetCurrentDialogue())
+		{
+			// Native must still see the last member when it balances speaker grants
+			// and sends its reliable client exit. Finish before Leave callbacks can
+			// start a personal conversation. No remaining member loses playback.
+			PrepareNativeSpeakerCleanup();
+			Super::ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
+			if (!IsValid(Member) || Member->GetParty() != this || !PartyMembers.Contains(Member)) return false;
+		}
+		// A Native finish callback may have started a separate personal dialogue.
+		// Only detach an alias that still belongs to this party.
+		UDialogue* Alias = Member->GetCurrentDialogue();
+		const bool bSharedAlias = IsValid(Alias) && Alias->OwningComp == this;
 		if (bSharedAlias) Member->CurrentDialogue = nullptr;
 		const TWeakObjectPtr<APlayerState> State = Controller->PlayerState.Get();
 		TWeakObjectPtr<UAbilitySystemComponent> ReleasedASC;
@@ -249,7 +260,7 @@ bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Membe
 		{
 			Member->CurrentDialogue = Alias;
 		}
-		}
+	}
 	FlushDeferredDialogueExit();
 	return bRemoved && IsValid(Member) && Member->GetParty() != this && !PartyMembers.Contains(Member);
 }

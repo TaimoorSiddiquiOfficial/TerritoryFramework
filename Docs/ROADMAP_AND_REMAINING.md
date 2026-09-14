@@ -6,7 +6,19 @@
 
 ## Current remaining work
 
-The newest follow-up releases Native's party-member speaker-tag contribution
+The newest follow-up fixes the abandoned server dialogue after the final member
+leaves. Native ends it while the member is still registered, before Leave Party
+callbacks. The original avatar/member grants are released; an empty party cannot
+start another conversation. Remaining members keep their exact session.
+All six builds and 338 tests per engine pass, including final-departure and
+save/load regressions. Listen-server and dedicated PIE each pass nine live
+checks. Three focused assets validate/compile without warnings. UE 5.8 iterative
+cook/stage and the 60-second packaged Development game server-mode smoke pass;
+this is not a compiled dedicated-server target.
+Continuing-party avatar/controller migration, camera/input and join/start timing
+remain open; this does not certify complete cinematic cleanup.
+
+The preceding follow-up releases Native's party-member speaker-tag contribution
 when a member leaves, before Leave Party callbacks. Other tag sources and the
 remaining conversation are preserved. It guards re-entrant transitions and
 refuses a late join into a tagged conversation before changing membership.
@@ -76,7 +88,7 @@ The broader audit and release gates remain open.
 
 | Area | Still required |
 |---|---|
-| Narrative pattern audit | Next: finish member-local camera/input, voice/shot and original-avatar tag cleanup; migrate active leader context; handle final-member departure and the reproduced immediate join/start race. Party-member tag contributions now clean up correctly on server and owning clients; tagged late joins fail before transfer until synchronization is implemented. Validated transfer membership and Native actor relevance pass live checks. Departed personal-reference isolation passes on server and clients. Remote-only listen-server context and playback pass. Party reply authority is verified for the opt-in Territory party class. Party replacement and local presentation regressions pass. Late remote joining, disconnect/destruction/travel, rendered split-screen/shared-camera acceptance, full cinematic playback and complete asset dependency/unused-system coverage remain. Solo remote replacement and shared LOD release-order regressions pass. Music's repeated-restore bug and explicit handoff pass; cold set loads, seamless/world travel and Native's unexposed queued-request ownership still need acceptance. Distraction item/cancellation regressions pass; remote input, authored combat/montage interruption and full campaign recovery remain. Resolve Farm camera and owner appearance warnings intentionally. |
+| Narrative pattern audit | Next: finish member-local camera/input, voice/shot and original-avatar tag cleanup; migrate active leader context; handle disconnect/destruction and the reproduced immediate join/start race. Explicit final-member removal now ends Native dialogue and releases its grants before Leave callbacks. Party-member tag contributions now clean up correctly on server and owning clients; tagged late joins fail before transfer until synchronization is implemented. Validated transfer membership and Native actor relevance pass live checks. Departed personal-reference isolation passes on server and clients. Remote-only listen-server context and playback pass. Party reply authority is verified for the opt-in Territory party class. Party replacement and local presentation regressions pass. Late remote joining, disconnect/destruction/travel, rendered split-screen/shared-camera acceptance, full cinematic playback and complete asset dependency/unused-system coverage remain. Solo remote replacement and shared LOD release-order regressions pass. Music's repeated-restore bug and explicit handoff pass; cold set loads, seamless/world travel and Native's unexposed queued-request ownership still need acceptance. Distraction item/cancellation regressions pass; remote input, authored combat/montage interruption and full campaign recovery remain. Resolve Farm camera and owner appearance warnings intentionally. |
 | Character Light Rig | Build the optional project adapter for both Territory/Native dialogue shots and full Native cutscenes. Resolve Native character visuals after readiness; author Body/FaceMesh skeleton settings; update the actual cut camera without rebuilding all light elements each frame; clean up lights and temporary channels across stop, skip, replacement, chains and travel. Keep the editor wrapper and unbound studio post process out of automatic gameplay setup. Verify rendered multiplayer, UDS/Lumen and packaged behavior. |
 | Hashir's Farm trip — route and boarding fixed, story acceptance open | Standalone and remote travel/exit pass; simulated seated capsules no longer push the client car. Author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow, compiled dedicated server and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
@@ -86,7 +98,7 @@ The broader audit and release gates remain open.
 | Story-map presentation | Finish UDS day/night, interior, fog, shadow, HDR-display and frame-rate checks in AlMalik; retain the tracked appearance/Chaos/content warning review. |
 | Story authoring and release | Finish Act 1 after the behavior above is verified; decide later retake/peaceful-handover rules and Farm's reward. Refresh 5.7/5.8 release artifacts and documentation after the remaining release gates pass. |
 
-Next audit work: **original-avatar tag cleanup, active leader context and join/start timing**,
+Next audit work: **continuing-party avatar migration, active leader context and join/start timing**,
 then full cinematic cleanup and broader authored combat interruption
 acceptance. Next story work remains **Hashir's durable arrival/quest continuation
 and save recovery**. Finite reserve events and capture/defeat checks remain in
