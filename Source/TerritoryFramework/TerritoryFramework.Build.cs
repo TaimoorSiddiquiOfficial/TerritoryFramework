@@ -30,6 +30,8 @@ public class TerritoryFramework : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"CinematicCamera",
+			"LevelSequence",
+			"MovieScene",
 			"DeveloperSettings",
 			"Projects",
 			"HairStrandsCore",

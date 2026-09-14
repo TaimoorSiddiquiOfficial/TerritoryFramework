@@ -40,6 +40,14 @@ public:
 };
 
 UCLASS(hidecategories=Object)
+class UTerritoryCinematicLightRigProfileFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryCinematicLightRigProfileFactory();
+};
+
+UCLASS(hidecategories=Object)
 class UTerritoryDistrictDefinitionFactory : public UTerritoryAssetFactoryBase
 {
 	GENERATED_BODY()

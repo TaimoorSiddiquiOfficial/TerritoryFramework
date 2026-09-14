@@ -1,6 +1,7 @@
 #include "Assets/TerritoryAssetFactories.h"
 
 #include "AI/TerritoryDiplomacyDialogue.h"
+#include "Cinematics/TerritoryCinematicLightRig.h"
 #include "AssetToolsModule.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Combat/TerritoryAssaultCharacter.h"
@@ -62,6 +63,11 @@ UObject* UTerritoryAssetFactoryBase::FactoryCreateNew(
 UTerritoryPlaceDefinitionFactory::UTerritoryPlaceDefinitionFactory()
 {
 	InitializeFor(UTerritoryPlaceDefinition::StaticClass());
+}
+
+UTerritoryCinematicLightRigProfileFactory::UTerritoryCinematicLightRigProfileFactory()
+{
+	InitializeFor(UTerritoryCinematicLightRigProfile::StaticClass());
 }
 
 UTerritoryDistrictDefinitionFactory::UTerritoryDistrictDefinitionFactory()

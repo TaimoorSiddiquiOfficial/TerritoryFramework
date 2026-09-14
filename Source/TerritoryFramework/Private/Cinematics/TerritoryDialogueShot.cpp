@@ -3,6 +3,7 @@
 #include "CineCameraActor.h"
 #include "CineCameraComponent.h"
 #include "Cinematics/TerritoryCinematicPresentationSubsystem.h"
+#include "Cinematics/TerritoryCinematicLightRig.h"
 #include "Core/TerritoryTypes.h"
 #include "GameFramework/PlayerController.h"
 #include "Tales/Dialogue.h"
@@ -178,6 +179,10 @@ void UTerritoryDialogueShot::BeginPlaySequence(
 	}
 
 	Super::BeginPlaySequence(InSequenceActor, InDialogue, InSpeaker, InListener);
+	if (LightRigProfile)
+	{
+		UTerritoryCinematicLightRigComponent::FollowDialogueSequence(InSequenceActor, InDialogue);
+	}
 
 	if (InDialogue && InDialogue->OwningController)
 	{

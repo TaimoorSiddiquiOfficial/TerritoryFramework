@@ -109,6 +109,14 @@ class TERRITORYFRAMEWORK_API UTerritoryDialogueShot
 public:
 	UTerritoryDialogueShot();
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look|Optional Lights",
+		meta=(ToolTip="Optional extra character lights for this shot. Leave empty to use normal scene lighting. The profile holds a project runtime rig and its character requirements."))
+	TObjectPtr<class UTerritoryCinematicLightRigProfile> LightRigProfile;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look|Optional Lights",
+		meta=(EditCondition="LightRigProfile != nullptr", ToolTip="Light the listener instead of the speaker. Only one subject rig is created for this shot."))
+	bool bLightRigUsesListener = false;
+
 	virtual void BeginPlaySequence(ALevelSequenceActor* InSequenceActor,
 		UDialogue* InDialogue, AActor* InSpeaker, AActor* InListener) override;
 

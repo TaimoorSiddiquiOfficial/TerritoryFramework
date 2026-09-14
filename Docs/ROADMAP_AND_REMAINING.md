@@ -6,7 +6,21 @@
 
 ## Current remaining work
 
-The newest follow-up fixes the abandoned server dialogue after the final member
+The newest batch adds the optional Character Light Rig bridge and a project child
+of `EUW_LightRig_ControlPanel`. A per-shot profile selects the runtime adapter;
+full Native cutscenes have an explicit local follow hook. The panel copies an
+approved preview look to that adapter. Narrative owns playback; transient local
+lights follow its camera and visual. Existing story shots stay disabled.
+All six builds and 339 tests per engine pass. Four project assets validate and
+both adapter/panel Blueprints compile without warnings. Listen host/two-client
+cutscene isolation, camera reuse, held frames, dialogue speaker/listener switching
+and exit cleanup pass. UE 5.8 cook/stage includes the runtime profile, adapter and
+skeleton, and excludes the editor panel/wrapper/global post process.
+Rendered quality, cold grooms/LOD, authored packaged playback, chains, streaming,
+travel and continuing-party camera ownership remain open. See
+[optional character lights](OPTIONAL_CINEMATIC_LIGHTS.md).
+
+The preceding follow-up fixes the abandoned server dialogue after the final member
 leaves. Native ends it while the member is still registered, before Leave Party
 callbacks. The original avatar/member grants are released; an empty party cannot
 start another conversation. Remaining members keep their exact session.
@@ -69,7 +83,8 @@ MetaHuman row expects `face`, while the live Narrative visual has `FaceMesh`.
 Eight core Blueprints compile and nine assets validate without warnings.
 The runtime rig/dependencies are in the staged container; its editor wrapper,
 control panel and unbound post process are excluded.
-Automatic shot/cutscene rig wiring and rendered acceptance are still required.
+The optional shot/cutscene bridge is now implemented; rendered and authored
+campaign acceptance is still required, as recorded in the implementation guide.
 
 The preceding framework batch adds server reply-policy and timing checks through
 **Territory Narrative Party**, an authored subclass of Native's party actor.
@@ -89,7 +104,7 @@ The broader audit and release gates remain open.
 | Area | Still required |
 |---|---|
 | Narrative pattern audit | Next: finish member-local camera/input, voice/shot and original-avatar tag cleanup; migrate active leader context; handle disconnect/destruction and the reproduced immediate join/start race. Explicit final-member removal now ends Native dialogue and releases its grants before Leave callbacks. Party-member tag contributions now clean up correctly on server and owning clients; tagged late joins fail before transfer until synchronization is implemented. Validated transfer membership and Native actor relevance pass live checks. Departed personal-reference isolation passes on server and clients. Remote-only listen-server context and playback pass. Party reply authority is verified for the opt-in Territory party class. Party replacement and local presentation regressions pass. Late remote joining, disconnect/destruction/travel, rendered split-screen/shared-camera acceptance, full cinematic playback and complete asset dependency/unused-system coverage remain. Solo remote replacement and shared LOD release-order regressions pass. Music's repeated-restore bug and explicit handoff pass; cold set loads, seamless/world travel and Native's unexposed queued-request ownership still need acceptance. Distraction item/cancellation regressions pass; remote input, authored combat/montage interruption and full campaign recovery remain. Resolve Farm camera and owner appearance warnings intentionally. |
-| Character Light Rig | Build the optional project adapter for both Territory/Native dialogue shots and full Native cutscenes. Resolve Native character visuals after readiness; author Body/FaceMesh skeleton settings; update the actual cut camera without rebuilding all light elements each frame; clean up lights and temporary channels across stop, skip, replacement, chains and travel. Keep the editor wrapper and unbound studio post process out of automatic gameplay setup. Verify rendered multiplayer, UDS/Lumen and packaged behavior. |
+| Character Light Rig | Optional bridge, Body/FaceMesh adapter and inherited editor panel are implemented. Finish controlled rendered checks after hair/LOD settles, cold/streamed appearance, UDS/Lumen interiors/day/night and GPU cost. Verify authored packaged dialogue/cutscene playback, chains, respawn, disconnect, travel/World Partition and continuing-party camera ownership. Keep the third-party pack out of community plugin archives. |
 | Hashir's Farm trip — route and boarding fixed, story acceptance open | Standalone and remote travel/exit pass; simulated seated capsules no longer push the client car. Author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow, compiled dedicated server and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
 | Finite reserves and Narrative tasks | Add reserve events through existing finite post commands; prove capture/defeat behavior with pending reserves and missing posts; migrate applicable authored Native record tasks. |
@@ -98,6 +113,7 @@ The broader audit and release gates remain open.
 | Story-map presentation | Finish UDS day/night, interior, fog, shadow, HDR-display and frame-rate checks in AlMalik; retain the tracked appearance/Chaos/content warning review. |
 | Story authoring and release | Finish Act 1 after the behavior above is verified; decide later retake/peaceful-handover rules and Farm's reward. Refresh 5.7/5.8 release artifacts and documentation after the remaining release gates pass. |
 
+Next priority: **optional light-rig rendered and authored packaged acceptance**.
 Next audit work: **continuing-party avatar migration, active leader context and join/start timing**,
 then full cinematic cleanup and broader authored combat interruption
 acceptance. Next story work remains **Hashir's durable arrival/quest continuation

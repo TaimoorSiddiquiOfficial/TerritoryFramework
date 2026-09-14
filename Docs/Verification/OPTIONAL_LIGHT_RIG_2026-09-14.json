@@ -1,0 +1,156 @@
+{
+  "date": "2026-09-14",
+  "scope": "Optional cinematic light rig; development snapshot",
+  "evidenceDirectory": "Saved/Verification/20260914_OptionalLightRig",
+  "editorBuilds": [
+    {
+      "version": "58",
+      "buildExit": 0
+    },
+    {
+      "version": "57",
+      "buildExit": 0
+    }
+  ],
+  "runtimeBuilds": [
+    {
+      "engine": "58",
+      "target": "TDA",
+      "configuration": "Development",
+      "exitCode": 0
+    },
+    {
+      "engine": "58",
+      "target": "TDA",
+      "configuration": "Shipping",
+      "exitCode": 0
+    },
+    {
+      "engine": "57",
+      "target": "UnrealGame",
+      "configuration": "Development",
+      "exitCode": 0
+    },
+    {
+      "engine": "57",
+      "target": "UnrealGame",
+      "configuration": "Shipping",
+      "exitCode": 0
+    }
+  ],
+  "automation": [
+    {
+      "engine": "58",
+      "passed": 339,
+      "warningResults": 35,
+      "failed": 0,
+      "notRun": 0
+    },
+    {
+      "engine": "57",
+      "passed": 339,
+      "warningResults": 37,
+      "failed": 0,
+      "notRun": 0
+    }
+  ],
+  "dataValidation": {
+    "status": "completed",
+    "passed": true,
+    "checked": 4,
+    "valid": 4,
+    "invalid": 0,
+    "warnings": 0
+  },
+  "liveChecks": [
+    {
+      "name": "ListenHeldFrameReady",
+      "passed": true,
+      "checks": 5
+    },
+    {
+      "name": "ListenFinalCameraCut",
+      "passed": true,
+      "checks": 5
+    },
+    {
+      "name": "TwoClientLocalRigs",
+      "passed": true,
+      "checks": 6
+    },
+    {
+      "name": "TwoClientStopCleanup",
+      "passed": true,
+      "checks": 4
+    },
+    {
+      "name": "DialogueSpeaker",
+      "passed": true,
+      "checks": 5
+    },
+    {
+      "name": "DialogueSameShot",
+      "passed": true,
+      "checks": 5
+    },
+    {
+      "name": "DialogueListener",
+      "passed": true,
+      "checks": 5
+    },
+    {
+      "name": "DialogueExitCleanup",
+      "passed": true,
+      "checks": 4
+    },
+    {
+      "name": "DedicatedTwoClientRigs",
+      "passed": true,
+      "checks": 6
+    },
+    {
+      "name": "DedicatedStopCleanup",
+      "passed": true,
+      "checks": 4
+    }
+  ],
+  "cameraCutReuse": {
+    "checks": {
+      "one_rig": true,
+      "same_root": true,
+      "same_children": true,
+      "changed_camera": true,
+      "children_follow_camera": true
+    },
+    "passed": true
+  },
+  "dialogueSameShot": {
+    "same_root": true,
+    "same_children": true,
+    "same_camera": true
+  },
+  "package": {
+    "durationSeconds": 60,
+    "cookExit": 0,
+    "smokeExit": 0,
+    "mode": "Development Game server mode; not compiled TDAServer"
+  },
+  "cookedDependencies": {
+    "globalPostProcessAbsent": true,
+    "runtimeAdapter": true,
+    "editorWrapperAbsent": true,
+    "profile": true,
+    "skeleton": true,
+    "editorPanelAbsent": true
+  },
+  "narrativeVendorSource": {
+    "differences": [],
+    "files": 741
+  },
+  "limitations": [
+    "UE 5.7 verifies generic source without the third-party project pack; UE 5.8 assets are not backward-compatible proof.",
+    "No authored packaged dialogue or full replicated sequence-start certification.",
+    "Rendered hair/LOD, UDS/Lumen, cold appearance, chains, travel, streaming and continuing-party ownership remain open.",
+    "Packaged smoke is Development game server mode, not a compiled TDAServer target."
+  ]
+}

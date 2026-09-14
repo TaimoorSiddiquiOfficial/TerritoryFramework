@@ -1042,3 +1042,61 @@ smoke both exit 0. This is not a compiled TDAServer target. Existing content and
 optional Native CutscenePlayerActor warnings remain tracked. The editor is restored
 to HopDistrictTest, PIE stopped, Listen Server / three players / one process, with
 no dirty packages. The full framework and cinematic release gates remain open.
+
+## Follow-up: optional Character Light Rig and control panel
+
+Evidence: `Saved/Verification/20260914_OptionalLightRig` in TDA.
+Setup and remaining acceptance: [Optional character lights](OPTIONAL_CINEMATIC_LIGHTS.md).
+
+The integration uses Native `UNarrativeDialogueSequence::BeginPlaySequence`,
+`UDialogue::PlayDialogueSequence`, `ANarrativeLevelSequenceActor`, and
+`ANarrativeCharacter::GetCharacterVisual`. Native remains the playback and speaker
+authority. An optional component on the existing sequence actor follows the
+actual displayed camera and Native's ready character visual. It creates no
+second cinematic player or gameplay authority. The pack's element Setup interface
+rebinds existing lights when the camera changes.
+
+The runtime interface, profile and component live in TerritoryFramework. The
+existing Territory dialogue shot gains an empty-by-default profile and listener
+option. The editor module provides a profile factory, details buttons and a
+control-panel bridge through `UEditorUtilitySubsystem`. TDA owns the runtime child
+Blueprint, Body/FaceMesh skeleton table, profile and child of the requested
+`EUW_LightRig_ControlPanel`. The panel copies only its configured preset fields;
+the verified rejection path rejects scene actor references before copying any
+otherwise-valid fields. No third-party pack path is hardcoded into the plugin.
+
+A live regression exposed `OnFinished` after UE pauses on the last frame.
+Cleanup now keeps lights while that held camera is displayed. Returning to
+gameplay, stopping or ending the dialogue removes them. Runtime rig and component
+are transient, non-replicated presentation; no RPC, campaign save field, tag,
+GUID or ownership authority changes. Existing shots need no migration. A host
+project selects a profile deliberately; UE 5.8 example assets are not claimed
+to load in UE 5.7. World Partition/travel acceptance remains open.
+
+All six Editor/Development/Shipping builds pass. Full automation passes 339/339
+on each engine (5.8: 304 success + 35 warning results; 5.7: 302 + 37). The new
+lifecycle test passes without warnings and checks local-viewer policy, split-screen
+rejection, missing profile/mesh/bone configuration, deferred initialization,
+camera reuse, held frames and child teardown. Four project assets validate and
+the runtime Blueprint/child panel compile with zero errors or warnings.
+
+Live listen-host/two-client and dedicated-PIE/two-client cutscene tests verify
+local rig isolation and cleanup. A held Native dialogue fixture with actual Hashir
+and player avatars verifies same-shot reuse, listener selection and Native exit.
+The existing Hashir greeting was not edited. The actual panel opens, copies an
+edited intensity and rejects a later invalid batch atomically. All 741 Narrative
+Pro source files match the installed Marketplace package.
+
+UE 5.8 cook/stage and the 60-second packaged Development game server-mode smoke
+exit 0; this is not a compiled TDAServer or rendered packaged dialogue test.
+The IoStore listing includes the runtime profile/adapter/skeleton, and excludes
+the editor panels, editor wrapper and pack global post process. A first cook
+hit a tooling HTTP-port collision with concurrent automation; the isolated retry
+passed. Known project and optional Native cutscene warnings remain.
+
+The rendered captures show a hair/LOD change between frames and cannot establish
+final lighting quality. Prepared editor previews, cold appearance/grooms, UDS
+day/night/interiors, Lumen spill, GPU cost, authored packaged playback, chains,
+respawn, disconnect, streaming/travel and continuing-party camera ownership remain
+explicit acceptance work. Community release archives must exclude the project
+adapter and third-party pack. The broader framework release gates remain open.

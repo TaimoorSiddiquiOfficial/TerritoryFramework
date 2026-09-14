@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Cinematics/TerritoryCinematicLightRig.h"
 
 #include "AI/TerritoryDiplomacyDialogue.h"
 #include "AssetToolsModule.h"
@@ -59,6 +60,9 @@ bool FTerritoryAssetCreationMenuTest::RunTest(const FString& Parameters)
 	};
 
 	const FExpectedEntry Entries[] = {
+		{ UTerritoryCinematicLightRigProfile::StaticClass(),
+			UTerritoryCinematicLightRigProfileFactory::StaticClass(),
+			TEXT("Territory Cinematic Light Rig Profile"), TEXT("Story & Quests") },
 		{ UTerritoryPlaceDefinition::StaticClass(),
 			UTerritoryPlaceDefinitionFactory::StaticClass(),
 			TEXT("Territory Place Definition"), TEXT("World & Hierarchy") },

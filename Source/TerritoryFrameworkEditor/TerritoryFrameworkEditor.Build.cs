@@ -25,6 +25,8 @@ public class TerritoryFrameworkEditor : ModuleRules
 			"UMG",
 			"PropertyEditor",
 			"BlueprintGraph",
+			"Blutility",
+			"UMGEditor",
 			"DataValidation",
 			"GameplayAbilities",
 			"GameplayTags",

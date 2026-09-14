@@ -1,8 +1,26 @@
 # Character Light Rig: Narrative and Territory compatibility
 
-Reviewed against the installed project on 2026-09-14. This is an integration
-research report, not a claim that automatic lighting is already installed.
-Evidence: `Saved/Verification/20260914_PartyDepartureLightRig` in TDA.
+Reviewed against the installed project on 2026-09-14. The research below informed
+the optional implementation described in [Optional character lights](OPTIONAL_CINEMATIC_LIGHTS.md).
+Research evidence: `Saved/Verification/20260914_PartyDepartureLightRig` in TDA.
+Implementation evidence: `Saved/Verification/20260914_OptionalLightRig`.
+
+## Implemented optional adapter
+
+`UTerritoryCinematicLightRigProfile` and the project runtime Blueprint now supply
+the Native visual, exact Body/FaceMesh skeleton configuration and current camera.
+`UTerritoryDialogueShot` opts in per shot; full Native cutscenes expose an explicit
+local `FollowNarrativeSequence` hook. The requested control panel is reused through
+a project child widget and profile buttons that copy only approved preset fields.
+All references to the third-party pack remain in TDA content. Existing shots have
+no light profile selected. The original pack and Narrative Pro remain unchanged.
+
+The runtime bridge waits for Native appearance readiness, rebinds existing child
+lights on camera cuts, retains a displayed paused final frame and removes lights
+when the session/camera ends. The project adapter filters background elements and
+creates no global post-process actor. Dedicated servers and split screen skip it.
+See the implementation guide for verified checks and remaining acceptance work;
+the original research checklist below is not a claim that every story is tested.
 
 ## Result
 

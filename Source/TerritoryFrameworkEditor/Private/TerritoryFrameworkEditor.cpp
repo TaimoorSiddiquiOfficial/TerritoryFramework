@@ -3,6 +3,9 @@
 #include "Assets/TerritoryAssetTypeActions.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Cinematics/TerritoryCinematicLightRig.h"
+#include "Cinematics/TerritoryLightRigEditorLibrary.h"
+#include "Misc/MessageDialog.h"
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryStealthProfile.h"
@@ -67,6 +70,44 @@ namespace
 		virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override
 		{
 			SortTerritoryDataAssetCategories(DetailBuilder);
+		}
+	};
+
+	class FTerritoryLightRigDetails final : public IDetailCustomization
+	{
+	public:
+		static TSharedRef<IDetailCustomization> MakeInstance() { return MakeShared<FTerritoryLightRigDetails>(); }
+		virtual void CustomizeDetails(IDetailLayoutBuilder& Builder) override
+		{
+			SortTerritoryDataAssetCategories(Builder);
+			TArray<TWeakObjectPtr<UObject>> Objects;
+			Builder.GetObjectsBeingCustomized(Objects);
+			TWeakObjectPtr<UTerritoryCinematicLightRigProfile> Profile = Objects.Num() == 1
+				? Cast<UTerritoryCinematicLightRigProfile>(Objects[0].Get()) : nullptr;
+			auto& Category = Builder.EditCategory(TEXT("03 Optional Editor Tool"));
+			Category.AddCustomRow(FText::FromString(TEXT("Open light rig control panel"))).WholeRowContent()
+			[
+				SNew(SButton).Text(FText::FromString(TEXT("Open Light Rig Control Panel")))
+				.ToolTipText(FText::FromString(TEXT("Open the optional editor tool selected below. Stop Play/Simulate before authoring a look.")))
+				.OnClicked_Lambda([Profile]()
+				{
+					if (!UTerritoryLightRigEditorLibrary::OpenControlPanel(Profile.Get()))
+						FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(TEXT("Stop Play/Simulate and assign an installed editor control panel to this profile.")));
+					return FReply::Handled();
+				})
+			];
+			Category.AddCustomRow(FText::FromString(TEXT("Save panel look"))).WholeRowContent()
+			[
+				SNew(SButton).Text(FText::FromString(TEXT("Use Panel Look in Runtime Rig")))
+				.ToolTipText(FText::FromString(TEXT("Copy the preview preset to the runtime rig Blueprint. Review and Save All afterward. Camera, character and global post process are not copied.")))
+				.OnClicked_Lambda([Profile]()
+				{
+					FString Result;
+					UTerritoryLightRigEditorLibrary::CopyPanelLook(Profile.Get(), Result);
+					FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(Result));
+					return FReply::Handled();
+				})
+			];
 		}
 	};
 
@@ -469,6 +510,8 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 			FOnGetDetailCustomizationInstance::CreateStatic(&FTerritoryDataAssetDetails::MakeInstance));
 	}
 	PropertyEditor.NotifyCustomizationModuleChanged();
+	PropertyEditor.RegisterCustomClassLayout(UTerritoryCinematicLightRigProfile::StaticClass()->GetFName(),
+		FOnGetDetailCustomizationInstance::CreateStatic(&FTerritoryLightRigDetails::MakeInstance));
 	EnsureVehicleRoadsConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
 		TEXT("Territory.Editor.EnsureVehicleRoads"),
 		TEXT("Create or update ZoneGraph roads and Blueprint Territory Road Guides for every enabled Narrative Vehicle approach in the loaded editor level."),
@@ -523,6 +566,7 @@ void FTerritoryFrameworkEditorModule::ShutdownModule()
 			UTerritoryDefinition::StaticClass()->GetFName());
 		PropertyEditor.UnregisterCustomClassLayout(
 			UTerritoryQuestCascadeRecipe::StaticClass()->GetFName());
+		PropertyEditor.UnregisterCustomClassLayout(UTerritoryCinematicLightRigProfile::StaticClass()->GetFName());
 		for (UClass* AssetClass : {UTerritoryCounterAttackProfile::StaticClass(),
 			UTerritoryGuardPostDefinition::StaticClass(), UTerritoryProductionProfile::StaticClass(),
 			UTerritoryStealthProfile::StaticClass(), UTerritoryDisguiseProfile::StaticClass(),
@@ -574,6 +618,10 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 	const FText StealthMenu = LOCTEXT("TerritoryStealthAssetSubMenu", "Stealth & Disguise");
 	const FText DiplomacyMenu = LOCTEXT("TerritoryDiplomacyAssetSubMenu", "AI & Diplomacy");
 	const FText StoryMenu = LOCTEXT("TerritoryStoryAssetSubMenu", "Story & Quests");
+	Register(UTerritoryCinematicLightRigProfile::StaticClass(),
+		LOCTEXT("TerritoryLightRigProfileAsset", "Territory Cinematic Light Rig Profile"),
+		LOCTEXT("TerritoryLightRigProfileDescription", "Optional character lights for Narrative shots and cutscenes, with a project control panel for authoring the look."),
+		StoryMenu, FColor(223, 180, 99));
 
 	Register(
 		UTerritoryPlaceDefinition::StaticClass(),
