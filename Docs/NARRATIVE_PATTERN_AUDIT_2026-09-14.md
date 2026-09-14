@@ -1100,3 +1100,36 @@ day/night/interiors, Lumen spill, GPU cost, authored packaged playback, chains,
 respawn, disconnect, streaming/travel and continuing-party camera ownership remain
 explicit acceptance work. Community release archives must exclude the project
 adapter and third-party pack. The broader framework release gates remain open.
+
+## Optional UDS day/night preset selection
+
+The project adapter now reuses the installed `Narrative_UDS_Sky` clock bridge:
+its Time of Day Animation override reads `UArsenalStatics::GetTimeOfDay` from
+`ANarrativeGameState`. UDS owns the rendered sun state. The project child uses
+UDS's public Get Ultra Dynamic Sky and Is it Daytime? functions, and the pack's
+ApplyPreset event. No vendor source, pack asset, replicated gameplay authority
+or campaign record was changed.
+
+`BP_TerritoryUDSCharacterLightRig` adds exact DayPreset/NightPreset row handles,
+bounded-frequency sky lookup and table/row change detection. Its parent exposes
+shared filtering and Narrative visual/camera preparation. Every applied row
+retains globals and character-element settings, with background elements removed.
+Missing data retains the current look. The timer is cleared at End Play. Manual
+shots still use their existing profile; the new profile is selected per shot.
+
+The original Moonlight look was too strong under the tested exposure. Project
+rows Day_Studio and Night_Moonlight set intensity to 0.25 and 0.10 respectively,
+with zero global volumetric scattering. Original pack presets remain selectable.
+The test record covers all 13 pack presets, both project rows, invalid tables,
+missing/empty/background-only rows, sky loss/reappearance, same-row time jumps,
+camera reuse, Narrative dialogue and listen/dedicated two-client isolation.
+Twenty assets validate, both Blueprints compile cleanly, and the native optional
+rig lifecycle test passes. This asset-only batch does not require a new C++ API
+or reauthor the UE 5.7 bridge. Full campaign save/load, actual AlMalik streaming
+and rendered packaged acceptance remain open.
+
+UE 5.8 cook/stage/package and a 60-second packaged Development game in server
+mode exit 0. The cooked listing includes the runtime profile, adapter and project
+preset table, and excludes the control panels, editor wrapper, global post process
+and failure-fixture table. All 741 Narrative source files match the vendor package.
+See [UDS setup](UDS_CHARACTER_LIGHT_PRESETS.md) and its verification record.

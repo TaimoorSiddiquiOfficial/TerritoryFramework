@@ -1,0 +1,120 @@
+{
+  "date": "2026-09-14",
+  "scope": "Optional TDA Character Light Rig preset selection from UDS; UE 5.8 project content",
+  "baseline": {
+    "project": "77e169f",
+    "plugin": "a970882",
+    "cpp_changed": false,
+    "engine": "5.8.2",
+    "narrative_pro": "2.4.2"
+  },
+  "authorities": {
+    "campaign_clock": "ANarrativeGameState",
+    "rendered_day_night": "Narrative_UDS_Sky / Ultra_Dynamic_Sky Is it Daytime?",
+    "playback": "Narrative dialogue and NarrativeLevelSequenceActor",
+    "lights": "existing local Territory cinematic light rig session"
+  },
+  "runtime_assets": [
+    "/Game/HOPTRENDY/Cinematics/LightRig/BP_TerritoryCharacterLightRig",
+    "/Game/HOPTRENDY/Cinematics/LightRig/BP_TerritoryUDSCharacterLightRig",
+    "/Game/HOPTRENDY/Cinematics/LightRig/DA_NarrativeCharacterLights_UDS",
+    "/Game/HOPTRENDY/Cinematics/LightRig/DT_NarrativeLightRigPresets"
+  ],
+  "test_fixture": "/Game/HOPTRENDY/Tests/LightRig/DT_InvalidLightPresets",
+  "defaults": {
+    "day": {
+      "row": "Day_Studio",
+      "source": "Studio",
+      "intensity": 0.25,
+      "volumetric": 0
+    },
+    "night": {
+      "row": "Night_Moonlight",
+      "source": "Moonlight",
+      "intensity": 0.1,
+      "volumetric": 0
+    }
+  },
+  "checks": {
+    "asset_validation": {
+      "checked": 20,
+      "valid": 20,
+      "warnings": 0,
+      "invalid": 0
+    },
+    "blueprints": {
+      "count": 2,
+      "errors": 0,
+      "warnings": 0
+    },
+    "native_lifecycle": {
+      "test": "TerritoryFramework.Presentation.Cinematics.OptionalLightRigLifecycle",
+      "passed": true,
+      "errors": 0,
+      "warnings": 0
+    },
+    "original_presets": {
+      "passed": 13,
+      "failed": 0,
+      "child_counts": {
+        "Studio": 4,
+        "Moonlight": 5,
+        "Split": 5,
+        "Portrait": 4,
+        "Thungsten": 4,
+        "Fireside": 4,
+        "TextureBooth": 2,
+        "RedLantern": 3,
+        "Drama_Golden": 6,
+        "Floral_Orchid": 6,
+        "Fashion_Curtain": 4,
+        "Nature_Overcast": 5,
+        "Sunny_Sunset": 4
+      }
+    },
+    "project_rows": {
+      "passed": 2,
+      "failed": 0
+    },
+    "exactness": "All row globals and all character-element fields compared to installed DataTable values. Background elements deliberately excluded.",
+    "failure_paths": [
+      "missing table",
+      "wrong row structure",
+      "missing row",
+      "empty row",
+      "background-only row",
+      "sky absent at start",
+      "sky removed and recreated"
+    ],
+    "reuse": [
+      "same root on changed row; child set replaced once",
+      "same row across day/night time jump creates no new elements",
+      "camera cut reuses root and elements"
+    ],
+    "narrative_dialogue": "Held test dialogue with Hashir: real Native speaker/camera lifecycle, clock changes, TryExitDialogue cleanup",
+    "listen_server": "Host plus two clients: local cutscenes, clock-driven day/night on both clients, zero host rigs when only clients view, zero roots/elements after stop",
+    "dedicated_pie": "Server plus two clients: no server local-viewer request accepted; zero server rigs; both clients select tuned day/night rows; zero roots/elements after stop",
+    "vendor_source": {
+      "compared": 741,
+      "changed": 0
+    },
+    "cook_stage": "passed, UE 5.8 BuildCookRun exit 0; runtime adapter/profile/preset table included, editor panels and failure-fixture table excluded",
+    "packaged_game_server_mode_smoke": "passed, 60 seconds, Development Game server mode exit 0; not compiled TDAServer or rendered packaged dialogue"
+  },
+  "evidence_root": "Saved/Verification/20260914_LightRigUDSPresets",
+  "recorder": "Scripts/Territory/verify_uds_light_presets.py",
+  "field_schema": "Scripts/Territory/light_rig_preset_fields.json",
+  "verification_notes": [
+    "Initial raw text equality was replaced by full JSON field comparison because Unreal omits default fields from nested array ImportText.",
+    "Python exposes trace-channel labels such as ECC_VISIBILITY while DataTable JSON serializes TraceTypeQuery1; the recorder compares its stable ordinal.",
+    "Noon.json and DedicatedFirstClient.json record these intermediate recorder failures; NoonVerified.json and DedicatedDay.json supersede them.",
+    "StartWithoutSky was sampled after the normal deferred Narrative shot/component update, not in the immediate factory call."
+  ],
+  "remaining": [
+    "AlMalik World Partition streaming and travel",
+    "Full campaign save/load and authored packaged dialogue",
+    "Cold appearance, grooms/LOD, interiors/exposure/fog/Lumen and GPU review",
+    "Existing broader party-camera and framework release gates"
+  ],
+  "compatibility": "No C++ changed; the preceding six-engine-configuration builds remain the baseline. UE 5.8 project assets are not claimed to load in UE 5.7 and must stay out of community plugin archives."
+}

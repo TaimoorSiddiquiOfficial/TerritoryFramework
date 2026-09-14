@@ -6,7 +6,23 @@
 
 ## Current remaining work
 
-The newest batch adds the optional Character Light Rig bridge and a project child
+The newest batch adds optional UDS day/night selection to the project light rig.
+It reads the rendered UDS sun state while Narrative keeps clock authority, and
+applies an exact full-preset row only when the selected table/row changes.
+All 13 original presets and two gentler project rows pass exact-setting checks.
+Twenty focused assets validate; both rig Blueprints compile without warnings.
+Missing/invalid data and a removed/late sky recover, while camera cuts and equal
+day/night rows reuse lights. Listen-server and dedicated PIE with two clients
+verify local day/night lights, server exclusion and cleanup. The existing native
+rig lifecycle test passes. No runtime/editor C++ changed in this asset batch.
+UE 5.8 cook/stage/package and the 60-second packaged Development game in server
+mode pass. Runtime preset assets are included; editor panels and test data are
+excluded. This is not a rendered packaged dialogue or compiled TDAServer test.
+AlMalik interiors/HDR quality, grooms, GPU cost, World Partition/travel, full
+campaign save/load and authored packaged playback remain open. See
+[UDS character preset setup](UDS_CHARACTER_LIGHT_PRESETS.md).
+
+The preceding batch adds the optional Character Light Rig bridge and a project child
 of `EUW_LightRig_ControlPanel`. A per-shot profile selects the runtime adapter;
 full Native cutscenes have an explicit local follow hook. The panel copies an
 approved preview look to that adapter. Narrative owns playback; transient local

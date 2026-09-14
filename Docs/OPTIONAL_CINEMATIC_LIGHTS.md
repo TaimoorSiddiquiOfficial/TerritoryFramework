@@ -17,6 +17,11 @@ The panel reference and preview-copy configuration are editor-only. The framewor
 
 ## TDA example
 
+For automatic UDS day/night row selection, use the separate project profile
+`DA_NarrativeCharacterLights_UDS`. Its rig selects exact full-preset table rows;
+the gentler example rows are `Day_Studio` and `Night_Moonlight`. See
+[UDS preset setup and verification](UDS_CHARACTER_LIGHT_PRESETS.md).
+
 TDA supplies `/Game/HOPTRENDY/Cinematics/LightRig/DA_NarrativeCharacterLights`. Its runtime Blueprint is a child of the pack's `BP_LightRig_Actor_Base`. Its editor panel is a child of the requested `EUW_LightRig_ControlPanel`, so it keeps the pack's existing preview and preset controls. Use the profile's **Open Light Rig Control Panel** button to open this configured child.
 
 The example skeleton table uses Narrative's attached MetaHuman visual: `Body` and `FaceMesh`. The runtime preset removes the pack's background element and uses four character light elements. The pack can use a main and wrap light for an element. It creates no unbound post-process actor and makes no mesh lighting-channel changes. Its starting intensity scale is 0.25, with global volumetric scattering disabled; this is a starting look for review, not an HDR or day/night quality guarantee.
