@@ -9,7 +9,8 @@ class APlayerController;
 
 /**
  * World-owned lifecycle bridge that installs the replicated district-management
- * RPC component on every authoritative player controller. It owns no gameplay state.
+ * RPC component and the Native dialogue lifecycle adapter on authoritative player
+ * controllers. It owns no gameplay state.
  */
 UCLASS()
 class TERRITORYFRAMEWORK_API UTerritoryPlayerManagementSubsystem : public UWorldSubsystem

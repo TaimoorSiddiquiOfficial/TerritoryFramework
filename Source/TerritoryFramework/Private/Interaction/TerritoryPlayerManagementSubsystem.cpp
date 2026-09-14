@@ -1,6 +1,8 @@
 #include "Interaction/TerritoryPlayerManagementSubsystem.h"
 
 #include "Interaction/TerritoryPlayerManagementComponent.h"
+#include "Tales/TerritoryDialogueLifecycleComponent.h"
+#include "UnrealFramework/NarrativePlayerController.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
@@ -35,6 +37,8 @@ void UTerritoryPlayerManagementSubsystem::EnsureManagementComponent(APlayerContr
 	if (PlayerController && PlayerController->GetWorld() == GetWorld() && PlayerController->HasAuthority())
 	{
 		UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);
+		UTerritoryDialogueLifecycleComponent::FindOrCreate(
+			Cast<ANarrativePlayerController>(PlayerController));
 	}
 }
 

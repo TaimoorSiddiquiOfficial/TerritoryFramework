@@ -75,6 +75,9 @@ Paths below are relative to each plugin's `Source` directory.
 | NP-13 | A baseline theme accepted into Native's fade queue was submitted again on later Territory polls. A newer queued quest theme could be replaced before it became active. | Submit the restore once, then observe it. A visible external theme/set or a rejected request ends restoration. Real Native fade-queue regression passes on both engines. |
 | NP-14 | Territory could submit a pending state or restore request while a story wanted exclusive music control. Native exposes no public queued-request owner. | Add local `SetAutomaticMusicEnabled` / `IsAutomaticMusicEnabled` Blueprint hooks. Disable before the story requests Native music; re-enable after restoring the intended world music. This does not cancel requests Native has already accepted. |
 | NP-15 | GameInstance deinitialization could start another asynchronous baseline music load. | Clear local observation on teardown. Native retains responsibility for audio components, loads and world teardown. |
+| NP-16 | Native `SetCurrentDialogue` ends the old dialogue before constructing its replacement. When construction fails, `BeginDialogue` sends neither a new dialogue nor an exit to the remote owner. The client can remain in the old conversation. | A transient server component observes Native's Finished/Began delegates and checks once on the next tick. If no replacement exists, it calls Native `ExitDialogue`, which already sends the reliable client cleanup even when the server session is empty. Successful replacements cancel the check. Solo dialogue only; party routing remains open. |
+| NP-17 | Two local presentation subsystems sharing a speaker recorded different original LOD values. The first exit could lower detail during the other dialogue, and the last exit could leave cinematic detail permanently enabled. | Share the original value across existing presentation instances. Only the last holder restores it, and a visible later external LOD change is preserved. No new global registry or saved presentation state. |
+| NP-18 | TDA redirects Native pause/player-info widgets into the RPG UI theme, but its asset-reference policy allowed only TerritoryFramework to follow those redirects. Native's standard controller therefore failed validation. | Extend the existing project-only reference exception to NarrativePro's plugin directory and the same theme domain. Standard restrictions remain active. No vendor asset, source or plugin dependency is changed. |
 
 ## Compatible adaptations to retain
 
@@ -396,3 +399,87 @@ GUI editor was open. `CookInitialEditorPortConflict.log` is retained. Closing th
 editor and rerunning the same cook/package command passes; no project setting was
 changed to hide the error. HopDistrictTest was then reopened with PIE stopped,
 the original three-player PIE setting restored, and zero dirty packages.
+
+### Remote solo dialogue and shared speaker detail follow-up
+
+Evidence: `Saved/Verification/20260914_DialogueLifecycle` in TDA.
+
+The Native reference is `UTalesComponent::SetCurrentDialogue`, `BeginDialogue`,
+`ExitDialogue` and `ClientExitDialogue_Implementation`, plus
+`UDialogue::Deinitialize`. Native's `UAsyncAction_BeginDialogueAndWait` shows
+the delegate-before-start pattern. Territory binds both dialogue delegates
+and removes both on unregister/end play. `UTerritoryPlayerManagementSubsystem`
+uses its existing post-login and initial-controller lifecycle to install
+`UTerritoryDialogueLifecycleComponent` on authoritative Narrative controllers.
+Designers keep using their existing Dialogue Blueprints and Tales calls; there
+is no controller reparenting or manual component setup.
+
+Native publishes Finished before trying a replacement. The observer waits one
+tick, cancels on a successful Began, and asks Native to exit only if the current
+solo session is empty. A stale finish, lower-priority rejection, lost authority
+or removed controller cannot close a newer session. The component adds no RPC,
+replicated field, saved campaign record or alternate dialogue authority. Native
+continues to route its reliable client exit and release dialogue audio/cameras.
+Party dialogues have separate Native ownership/routing and are outside this fix.
+
+Speaker LOD ownership stays in the existing local-player presentation subsystem.
+When another local presentation already holds the same component, the new holder
+copies its original baseline. Only the last holder restores it. A later visible
+external setting is preserved. Exact component identity separates independent
+PIE worlds. Lookup runs at acquisition/release, not every tick. This does not
+detect an external writer choosing the same forced value, or provide a general
+priority system for all cinematic LOD writers.
+
+No Blueprint field/path or save format changed. Controller replacement rebuilds
+the observer, and local presentation reconstructs from Native's current dialogue.
+Weak component records tolerate a removed visual. These lifecycle regressions
+do not replace full campaign or World Partition streaming acceptance.
+
+| Check | Result |
+|---|---|
+| UE 5.8.2 and 5.7.4 Editor, Development and Shipping | All six builds pass with the previously documented editor-tool exclusions. |
+| Full automation | 325/325 per engine, zero failed/not run. UE 5.8: 300 success + 25 warning results; UE 5.7: 298 success + 27 warning results. |
+| New server lifecycle regression | Real Native rejected replacement dispatches one exit; successful replacement, stale finish, lost authority, unregister/re-register and delegate cleanup pass. |
+| New shared-speaker regression | Both release orders, repeat registration, local-player removal, external LOD changes and removed visuals pass for LODSync, groom and skeletal mesh components. |
+| HopDistrictTest listen host + two clients | All 13 recorded assertions pass: authoritative installation, client cleanup/isolation, successful chaining, priority rejection, invalid authored start, normal exit and Native owner release. |
+| Focused Blueprint compilation | Project Hashir greeting, plugin Blacksmith handover and Native player controller are UpToDate, zero errors/warnings. |
+| Focused asset validation, PIE stopped | Four assets valid, zero invalid/warnings. Original three-player PIE setting retained; zero dirty editor packages. |
+| UE 5.8 cook/stage/package and 60-second smoke | Both exit 0. This is a Development game running in server mode, not a compiled dedicated-server target. The previously tracked optional intro-cutscene warnings remain. |
+| Narrative source comparison | All 741 files match the installed UE 5.8 Marketplace source. |
+
+The shared-speaker fixture uses transient render data with three LOD records;
+it does not load a rendered character or create a split-screen viewport. Its
+missing-skeleton/world-context warnings and Native's OnEndDialogue warning are
+visible in the successful test reports. The initial empty-mesh fixture failed
+because Unreal clamps forced LOD to its available render-data count. The corrected
+fixture and its rendering dependencies live only in the editor test module.
+Initial failures and missing test-library link attempts are retained under
+`InitialFixtureFailure`; runtime rendering dependencies were not expanded.
+
+The live recorder is `Scripts/Territory/verify_dialogue_lifecycle_pie.py`.
+Hashir's current greeting has one auto-selected reply, no authored shot and no
+voice track. Actions are recorded before it naturally finishes. This verifies
+actual Native client messages and Territory presentation flags, not camera
+composition or voice playback. Initial tool calls used the C++ parameter name
+`DialogueClass`; reflection calls require the header's `Dialogue` name. Those
+no-op observations are retained. A tool-deduplicated replacement and a request
+to call the unreflected `ExitDialogue` are not counted as passed actions; the
+successful chain and normal exit use separate recorded stages and Native's
+callable `TryExitDialogue` wrapper.
+
+The first asset preflight failed on Native's player-controller Blueprint because
+TDA redirects its pause/player-info widgets into `NP_RPGUITheme` but did not allow
+Native to follow that project-specific reference. TDA's `DefaultGame.ini` now
+extends the existing narrow plugin-path rule to `/NarrativePro/`, with only the
+same project/theme domains. It does not disable reference restrictions, add a
+circular plugin dependency or change vendor content. All four assets pass after
+restart. The initial failed report remains available as `PreflightAssets.json`.
+
+Party dialogue replacement, rendered split-screen/shared-camera behavior, full
+sequence skipping/interruption and complete story save/streaming recovery remain
+on the roadmap. The plugin is not ready for a release certificate based on these
+focused checks alone.
+
+HopDistrictTest is reopened after the package check, with PIE stopped and the
+three-player setting retained. The scoped commit excludes the user's existing
+controller Blueprint, map, road and other project edits.

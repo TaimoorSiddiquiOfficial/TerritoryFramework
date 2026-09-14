@@ -11,6 +11,7 @@
 #include "GroomComponent.h"
 #include "Tales/Dialogue.h"
 #include "UnrealFramework/NarrativePlayerController.h"
+#include "UObject/UObjectIterator.h"
 
 void UTerritoryCinematicPresentationSubsystem::Initialize(
 	FSubsystemCollectionBase& Collection)
@@ -238,8 +239,9 @@ void UTerritoryCinematicPresentationSubsystem::RegisterCinematicSubject(
 		for (ULODSyncComponent* Component : LODSyncComponents)
 		{
 			if (!Component || HasOverrideFor(Component)) continue;
+			const FComponentLODOverride* Shared = FindSharedOverride(Component);
 			ComponentLODOverrides.Add({ Component,
-				EComponentOverrideType::LODSync, Component->ForcedLOD });
+				EComponentOverrideType::LODSync, Shared ? Shared->PreviousLOD : Component->ForcedLOD });
 			Component->ForcedLOD = 0;
 		}
 
@@ -247,8 +249,9 @@ void UTerritoryCinematicPresentationSubsystem::RegisterCinematicSubject(
 		for (UGroomComponent* Component : GroomComponents)
 		{
 			if (!Component || HasOverrideFor(Component)) continue;
+			const FComponentLODOverride* Shared = FindSharedOverride(Component);
 			ComponentLODOverrides.Add({ Component,
-				EComponentOverrideType::Groom, Component->GetForcedLOD() });
+				EComponentOverrideType::Groom, Shared ? Shared->PreviousLOD : Component->GetForcedLOD() });
 			Component->SetForcedLOD(0);
 		}
 
@@ -256,8 +259,9 @@ void UTerritoryCinematicPresentationSubsystem::RegisterCinematicSubject(
 		for (USkinnedMeshComponent* Component : MeshComponents)
 		{
 			if (!Component || HasOverrideFor(Component)) continue;
+			const FComponentLODOverride* Shared = FindSharedOverride(Component);
 			ComponentLODOverrides.Add({ Component,
-				EComponentOverrideType::SkinnedMesh, Component->GetForcedLOD() });
+				EComponentOverrideType::SkinnedMesh, Shared ? Shared->PreviousLOD : Component->GetForcedLOD() });
 			// USkinnedMeshComponent uses 1 for render LOD 0; 0 means automatic.
 			Component->SetForcedLOD(1);
 		}
@@ -274,30 +278,48 @@ bool UTerritoryCinematicPresentationSubsystem::HasOverrideFor(
 		});
 }
 
+const UTerritoryCinematicPresentationSubsystem::FComponentLODOverride*
+UTerritoryCinematicPresentationSubsystem::FindSharedOverride(const UActorComponent* Component) const
+{
+	// Local players can share the same rendered actor. Inspect only presentation
+	// subsystem instances on acquisition/release, not world actors or every tick.
+	// Exact component identity also separates independent PIE worlds.
+	for (TObjectIterator<UTerritoryCinematicPresentationSubsystem> It; It; ++It)
+	{
+		if (*It == this || It->IsTemplate() || !IsValid(*It)) continue;
+		if (const auto* Shared = It->ComponentLODOverrides.FindByPredicate(
+			[Component](const FComponentLODOverride& Entry) { return Entry.Component.Get() == Component; }))
+		{
+			return Shared;
+		}
+	}
+	return nullptr;
+}
+
 void UTerritoryCinematicPresentationSubsystem::RestoreComponentLODs()
 {
 	for (const FComponentLODOverride& Override : ComponentLODOverrides)
 	{
 		UActorComponent* Component = Override.Component.Get();
-		if (!Component) continue;
+		if (!Component || FindSharedOverride(Component)) continue;
 		switch (Override.Type)
 		{
 		case EComponentOverrideType::LODSync:
 			if (ULODSyncComponent* LODSync = Cast<ULODSyncComponent>(Component))
 			{
-				LODSync->ForcedLOD = Override.PreviousLOD;
+				if (LODSync->ForcedLOD == 0) LODSync->ForcedLOD = Override.PreviousLOD;
 			}
 			break;
 		case EComponentOverrideType::Groom:
 			if (UGroomComponent* Groom = Cast<UGroomComponent>(Component))
 			{
-				Groom->SetForcedLOD(Override.PreviousLOD);
+				if (Groom->GetForcedLOD() == 0) Groom->SetForcedLOD(Override.PreviousLOD);
 			}
 			break;
 		case EComponentOverrideType::SkinnedMesh:
 			if (USkinnedMeshComponent* Mesh = Cast<USkinnedMeshComponent>(Component))
 			{
-				Mesh->SetForcedLOD(Override.PreviousLOD);
+				if (Mesh->GetForcedLOD() == 1) Mesh->SetForcedLOD(Override.PreviousLOD);
 			}
 			break;
 		}

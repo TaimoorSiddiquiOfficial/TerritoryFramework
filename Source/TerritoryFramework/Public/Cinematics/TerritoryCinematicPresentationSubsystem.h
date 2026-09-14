@@ -17,7 +17,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 /**
  * Local-player presentation bridge between Narrative dialogue and Territory UI.
  * It also pins participant meshes, MetaHuman LODSync, and Groom components to LOD 0
- * for the duration of a dialogue, then restores every previous value exactly.
+ * for the duration of a dialogue. Shared speakers keep the override until the
+ * last local dialogue releases them; later external LOD changes are preserved.
  */
 UCLASS(BlueprintType)
 class TERRITORYFRAMEWORK_API UTerritoryCinematicPresentationSubsystem
@@ -49,6 +50,7 @@ public:
 
 private:
 	friend class FTFTerritoryCinematicDialogueLifecycle;
+	friend class FTFTerritorySharedDialogueLOD;
 
 	enum class EComponentOverrideType : uint8
 	{
@@ -82,6 +84,7 @@ private:
 	void RefreshDialogueSubjects(UDialogue* Dialogue);
 	void RestoreComponentLODs();
 	bool HasOverrideFor(const UActorComponent* Component) const;
+	const FComponentLODOverride* FindSharedOverride(const UActorComponent* Component) const;
 
 	UFUNCTION()
 	void HandleDialogueBegan(UDialogue* Dialogue);
