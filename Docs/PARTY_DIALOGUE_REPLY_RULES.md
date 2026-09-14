@@ -10,7 +10,8 @@ members, leader, dialogue, quests, node events and client messages.
 1. Create a Blueprint with **Territory Narrative Party** as its parent, or spawn
    that native actor class from server gameplay.
 2. Use the actor's existing **Add Party Member** and **Remove Party Member** nodes.
-   These update both Native's actor relevance and its Tales membership.
+   These update both Native's actor relevance and its Tales membership. The
+   Territory component's same nodes also keep its Native party actor in sync.
 3. On `PartyTalesComponent`, choose Narrative's **Party Dialogue Control Policy**:
    **Party Leader Controlled** or **All Party Members Controlled**.
 4. Start the shared Dialogue Blueprint through that component's **Begin Dialogue**.
@@ -25,6 +26,25 @@ Reparent a project party Blueprint or change its authored component to opt in.
 No vendor Blueprint or source file needs editing.
 
 ## What the server checks
+
+A join requires a server-owned controller and matching PlayerState in the same
+world. On a Narrative player controller, use its actual **Get Tales Component**
+result. A second Tales component cannot join on that player's behalf. A Native
+party actor requires a Narrative PlayerState; custom actors using only the
+component may use another PlayerState class. If PlayerState is not ready yet,
+the join returns false without changing membership. Retry after it is ready.
+
+Adding an existing member again returns false. A transfer first asks the old
+party to remove the member. If it refuses, the new party does not add them.
+Native still publishes its normal Leave and Joined callbacks. If a story
+callback redirects the player to another party or immediately removes them,
+the outer join returns false and preserves the story's final membership.
+
+Territory parties update Native's actor member list and replication relevance
+before their membership callbacks run. Transfers from a stock Native party
+also reconcile that actor's lists after its removal returns. A custom stock
+party's own callback order remains its responsibility. Custom replicated actors
+that do not derive from Native's party actor still own their relevance policy.
 
 The selector must be a current member, with a valid authoritative controller and
 matching PlayerState in the same world. A leader-only party also requires the
@@ -51,8 +71,9 @@ and the authored policy; the server always validates the actual request.
 
 ## Compatibility and remaining limits
 
-The adapter adds no saved field or replicated property. Membership and quest
-save/load stay with Narrative; reply readiness is transient and starts empty
+The adapter adds no saved field or replicated property. Native stores quest
+history; live party membership is not a campaign save record. After loading,
+reconnect players explicitly through Add Party Member. Reply readiness is transient and starts empty
 when a component registers. An active conversation must publish a fresh Native
 replies-available event after re-registration, or be restarted. This avoids
 guessing that an in-progress NPC line has finished.
@@ -79,9 +100,11 @@ This is the first part of the chosen **continue for remaining members** policy.
 It does not finish per-member camera/input, voice/shot or player-speaker tag
 handling for a shared local viewer or departing listen host. Native's final local
 cleanup still needs rendered camera/input and rapid replacement acceptance.
-Direct cross-party transfers can also leave Native's old actor relevance cache
-out of step with component membership. Remove through the old party actor before
-adding through the new one; atomic transfer remains a separate integration gate.
+Validated transfers now reconcile Native actor/component membership and reject
+failed departures. This does not migrate an active dialogue's cached speaker,
+tags, camera or controller. Use Territory parties on both sides for the verified
+personal-dialogue reference cleanup. A stock Native source retains its own
+active-dialogue departure behavior.
 
 Fresh leader lookup does not migrate the cached controller, pawn or speaker of
 an already-running dialogue. Do not treat reference cleanup as certification of
@@ -96,6 +119,7 @@ Source references: `UNarrativePartyComponent::SelectDialogueOption`,
 `UTalesComponent::ServerSelectDialogueOption_Implementation`,
 `TrySelectDialogueOption`, `UDialogue::NPCFinishedTalking`,
 `PlayPlayerDialogueNode`, `UNarrativePartyComponent::RemovePartyMember`,
+`UNarrativePartyComponent::AddPartyMember`, `ANarrativeParty::IsNetRelevantFor`,
 `UTalesComponent::ExitDialogue`, `BeginPartyDialogue`, `OnRep_PartyComponent`,
 and `ANarrativeParty`'s `PartyTalesComponent` slot.
 Territory uses the same `SetDefaultSubobjectClass` pattern as Native's character,

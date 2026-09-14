@@ -8,6 +8,9 @@
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "TerritoryPartyReplyProbe.generated.h"
 
+// Install an editor fixture in the same personal slot used by Native RPC routing.
+void InstallTerritoryPartyMemberProbe(ANarrativePlayerController* Controller, UTalesComponent* Member);
+
 /** Models a remote connection in the native authority-context regression. */
 UCLASS()
 class ATerritoryPartyRemoteControllerProbe : public ANarrativePlayerController
@@ -42,6 +45,13 @@ class UTerritoryPartyReplyMemberProbe : public UTalesComponent
 	GENERATED_BODY()
 public:
 	int32 ReplyDispatches = 0;
+	TFunction<void(UNarrativePartyComponent*)> LeaveAction;
+	TFunction<void(UNarrativePartyComponent*)> JoinAction;
+	UFUNCTION()
+	void ObserveJoin(UNarrativePartyComponent* JoinedParty, UNarrativePartyComponent* OldParty)
+	{
+		if (JoinAction) JoinAction(JoinedParty);
+	}
 	bool bStartPersonalOnLeave = false;
 	bool bLeaveSawSharedAlias = false;
 	UFUNCTION()
@@ -49,6 +59,7 @@ public:
 	{
 		bLeaveSawSharedAlias = GetCurrentDialogue() && GetCurrentDialogue()->OwningComp == LeftParty;
 		if (bStartPersonalOnLeave) BeginDialogue(UTerritoryPartyReplyTestDialogue::StaticClass());
+		if (LeaveAction) LeaveAction(LeftParty);
 	}
 	TWeakObjectPtr<APlayerState> LastSelector;
 	virtual void ClientSelectDialogueOption_Implementation(const FName& OptionID, APlayerState* Selector) override
@@ -56,6 +67,15 @@ public:
 		++ReplyDispatches;
 		LastSelector = Selector;
 	}
+};
+
+/** A supported custom Native party may refuse to release its member. */
+UCLASS()
+class UTerritoryPartyRefusingDepartureProbe : public UNarrativePartyComponent
+{
+	GENERATED_BODY()
+public:
+	virtual bool RemovePartyMember(UTalesComponent* Member) override { return false; }
 };
 
 /** Native PIE dispatch avoids re-entering network gameplay from an editor Python stack. */
@@ -68,4 +88,6 @@ public:
 	bool ChooseReply(UTalesComponent* Member, FName OptionID);
 	UFUNCTION(BlueprintCallable, Category="Test")
 	bool SkipLine(UTalesComponent* Member);
+	UFUNCTION(BlueprintCallable, Category="Test")
+	bool JoinParty(UTalesComponent* Member, UNarrativePartyComponent* Party);
 };

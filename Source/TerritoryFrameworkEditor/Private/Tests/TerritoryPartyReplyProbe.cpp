@@ -1,4 +1,12 @@
 #include "TerritoryPartyReplyProbe.h"
+#include "UObject/UnrealType.h"
+
+void InstallTerritoryPartyMemberProbe(ANarrativePlayerController* Controller, UTalesComponent* Member)
+{
+	const auto* Property = FindFProperty<FObjectPropertyBase>(ANarrativePlayerController::StaticClass(), TEXT("TalesComponent"));
+	check(Property);
+	Property->SetObjectPropertyValue_InContainer(Controller, Member);
+}
 
 bool UTerritoryPartyReplyTestDialogue::Initialize(UTalesComponent* Component, const FDialoguePlayParams Params)
 {
@@ -45,4 +53,9 @@ bool ATerritoryPartyReplyTestDriver::ChooseReply(UTalesComponent* Member, FName 
 bool ATerritoryPartyReplyTestDriver::SkipLine(UTalesComponent* Member)
 {
 	return IsValid(Member) && Member->TrySkipCurrentDialogueLine();
+}
+
+bool ATerritoryPartyReplyTestDriver::JoinParty(UTalesComponent* Member, UNarrativePartyComponent* Party)
+{
+	return IsValid(Party) && Party->AddPartyMember(Member);
 }

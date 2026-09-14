@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "TerritoryPartyReplyProbe.h"
+#include "UnrealFramework/NarrativePlayerState.h"
 #include "Cinematics/TerritoryCinematicPresentationSubsystem.h"
 #include "Tales/TerritoryNarrativeParty.h"
 #include "Tales/TerritoryNarrativePartyComponent.h"
@@ -26,12 +27,13 @@ bool FTFTerritoryPartyDepartureAuthority::RunTest(const FString& Parameters)
 	{
 		auto* PC = NewObject<ATerritoryPartyRemoteControllerProbe>(World->PersistentLevel);
 		PC->SetRole(ROLE_Authority);
-		auto* PS = NewObject<APlayerState>(World->PersistentLevel);
+		auto* PS = NewObject<ANarrativePlayerState>(World->PersistentLevel);
 		PS->SetOwner(PC);
 		PC->PlayerState = PS;
 		auto* Member = NewObject<UTerritoryPartyReplyMemberProbe>(PC);
 		PC->AddInstanceComponent(Member);
 		Member->RegisterComponent();
+		InstallTerritoryPartyMemberProbe(PC, Member);
 		Members.Add(Member);
 		TestTrue(TEXT("Native adds the real member"), Party->AddPartyMember(Member));
 	}
@@ -98,6 +100,8 @@ bool FTFTerritoryPartyDepartureAlias::RunTest(const FString& Parameters)
 	auto* Party = CastChecked<UTerritoryNarrativePartyComponent>(Actor->PartyTalesComponent);
 	auto* PC = NewObject<ANarrativePlayerController>(World->PersistentLevel);
 	PC->SetRole(ROLE_Authority);
+	PC->PlayerState = NewObject<ANarrativePlayerState>(World->PersistentLevel);
+	PC->PlayerState->SetOwner(PC);
 	auto* Tales = PC->GetTalesComponent();
 	auto* View = NewObject<UTerritoryCinematicPresentationSubsystem>(NewObject<ULocalPlayer>(GEngine));
 	View->BindToController(PC);
@@ -115,6 +119,8 @@ bool FTFTerritoryPartyDepartureAlias::RunTest(const FString& Parameters)
 	// A second local member must retain the client's shared copy too.
 	auto* OtherPC = NewObject<ATerritoryPartyLocalControllerProbe>(World->PersistentLevel);
 	OtherPC->SetRole(ROLE_Authority);
+	OtherPC->PlayerState = NewObject<ANarrativePlayerState>(World->PersistentLevel);
+	OtherPC->PlayerState->SetOwner(OtherPC);
 	World->AddController(OtherPC);
 	auto* OtherTales = OtherPC->GetTalesComponent();
 	TestTrue(TEXT("Fixture has a remaining local viewer"), OtherPC->IsLocalController());

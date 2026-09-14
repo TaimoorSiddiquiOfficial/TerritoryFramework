@@ -817,3 +817,81 @@ The packaged NullRHI smoke retains the known render-target Canvas warnings and
 Native controller's optional `CutscenePlayerActor` warning; exit 0 is not a
 claim of warning-free cinematic playback.
 All 741 Narrative Pro source files still match the installed Marketplace package.
+
+## Follow-up: validated Native party transfers
+
+Evidence: `Saved/Verification/20260914_PartyTransfer` in the TDA project.
+
+The closest Native feature is `UNarrativePartyComponent::AddPartyMember` and
+`RemovePartyMember`, together with `ANarrativeParty`'s actor wrapper and
+`IsNetRelevantFor`. Native Add ignores the previous party's removal result.
+It can therefore return success while the old party still has the member.
+Component transfers also bypass the stock actor's member/relevance lists.
+The actor Add wrapper fills those lists even if the component rejects the join.
+
+Territory's existing component now validates the authoritative controller,
+PlayerState, world and canonical Narrative personal Tales slot. It asks the old
+party to remove the player and verifies the result before calling Native Add.
+Native remains the sole membership authority and owns its normal callbacks and
+replication. The actor fields remain derived read models of the component;
+Territory updates them before its Native membership callbacks and reconciles
+them afterward. A stock Native source's actor lists are reconciled after its
+removal returns; that source still owns its callback order and dialogue cleanup.
+The Territory actor wrapper delegates to the component instead of independently
+writing the same read models. No polling, additional RPC, replicated field or
+saved member database was added.
+
+Native callbacks may intentionally redirect a player during Leave, or remove
+them during Joined. The adapter checks the final membership and reports false
+for the superseded join; it does not undo the story's new decision. Transfers
+retain Native's separate Leave and Joined events. This is membership validation
+and cache consistency, not an atomic migration of active dialogue presentation.
+
+Migration: existing Blueprint node signatures are unchanged. Use the Narrative
+controller's actual Get Tales Component result. A missing/mismatched PlayerState,
+client, foreign world, extra personal component or duplicate identity now fails
+without adding a member. Retry an early join after PlayerState is ready. A Native
+party actor requires Narrative PlayerStates. A custom non-party actor using just
+the component may use another PlayerState type and still owns its relevance.
+Campaign task data remains Native's serialized data. Live connections are not
+saved; reattach players explicitly after load.
+
+Two new native behavioral tests cover refused source removal, actor and component
+entry points, duplicate/canonical identity, missing PlayerState and retry,
+authority, foreign world, callback read-model consistency, callback redirects,
+immediate departure during join, stock Native source compatibility, unregister /
+register, Native task-history serialization into a fresh party and explicit
+post-load reconnection. Existing party fixtures now use real Native PlayerStates
+and install their test Tales object in the real personal slot. The new tests
+pass without warnings; full suites pass 334/334 per engine (5.8: 303 success + 31
+warning results; 5.7: 301 + 33), with zero failed or not run. All six
+Editor/Development/Shipping builds pass.
+
+The listen host plus two clients and dedicated PIE server plus two clients each
+pass ten live checks. A nonleader transfers during a held shared conversation;
+the source members retain that exact session and line, both sides receive the
+new party reference, the destination starts its separate conversation, and each
+remote client's Native skip RPC advances only its own conversation. Native final
+group exits clear both. The recorder is
+`Scripts/Territory/verify_party_transfer_pie.py`; gameplay dispatch uses the
+editor-only native test driver. Membership replication is allowed to settle
+before Begin Dialogue. This does not claim that the immediate join/start race,
+late connection, host/leader transfer or authored camera/voice playback is fixed.
+Three focused assets validate and compile without warnings. All 741 Native Pro
+source files still match Marketplace.
+
+The speaker-tag audit also confirms the next defect: Native OnBegin adds a
+player-speaker contribution through the initial avatar and through each party
+member's ASC. OnEnd removes the member contribution from the then-current member
+list, so a departed member can retain a contribution. The initial avatar may
+have two contributions, and the active dialogue retains protected speaker-avatar
+bindings plus cached OwningController/OwningPawn. Removing every matching tag or
+blindly replacing those public pointers would interfere with other tag owners
+and Native's later cleanup. This batch deliberately makes no tag/context change.
+The next adapter must preserve exact contributions, authored callback data,
+remaining viewers and Native's end lifecycle before claiming leader transfer.
+
+The final UE 5.8 iterative cook/stage and 60-second packaged Development game
+server-mode smoke both exit 0. It is not a compiled TDAServer build. Known
+NullRHI Canvas and optional Native CutscenePlayerActor warnings remain; the
+smoke result does not certify rendered cinematic quality or a complete campaign.

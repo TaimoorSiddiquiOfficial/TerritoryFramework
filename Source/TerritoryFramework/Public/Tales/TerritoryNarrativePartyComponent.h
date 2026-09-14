@@ -15,6 +15,11 @@ class TERRITORYFRAMEWORK_API UTerritoryNarrativePartyComponent : public UNarrati
 public:
 	/** Keep Native's local viewing player. A server with only remote members uses the Native leader. */
 	virtual APlayerController* GetOwningController() const override;
+	/** Join through Native only after the old party confirms departure. Requires a valid
+	 * server controller and PlayerState in this world. A repeated join returns false.
+	 * Story callbacks may change membership again; success means this party still owns it.
+	 */
+	virtual bool AddPartyMember(UTalesComponent* Member) override;
 	/** Clear only the departing member's shared-dialogue alias before Native publishes Leave Party.
 	 * The remaining members keep the same Native dialogue. Camera/tag and leader transfer are separate concerns.
 	 */
@@ -34,6 +39,9 @@ public:
 	bool CanMemberChooseDialogueReply(APlayerState* Member) const;
 
 private:
+	bool CanAddMember(const UTalesComponent* Member) const;
+	// Native actor fields are a read model of the component, including inside its callbacks.
+	void RefreshActorMembership(UTalesComponent* Joining = nullptr, UTalesComponent* Leaving = nullptr);
 	// Derived from Native replies-available/start/finish events; never saved or replicated.
 	TWeakObjectPtr<UDialogue> ReadyDialogue;
 	bool bSelectingAutomaticReply = false;

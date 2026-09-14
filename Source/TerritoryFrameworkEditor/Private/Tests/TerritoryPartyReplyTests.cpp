@@ -2,6 +2,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "TerritoryPartyReplyProbe.h"
+#include "UnrealFramework/NarrativePlayerState.h"
 #include "Tales/TerritoryNarrativeParty.h"
 #include "Tales/TerritoryNarrativePartyComponent.h"
 #include "Tales/NarrativeDialogueSettings.h"
@@ -30,12 +31,13 @@ bool FTFTerritoryPartyReplyAuthority::RunTest(const FString& Parameters)
 	{
 		auto* PC = NewObject<ANarrativePlayerController>(World->PersistentLevel);
 		PC->SetRole(ROLE_Authority);
-		auto* PS = NewObject<APlayerState>(World->PersistentLevel);
+		auto* PS = NewObject<ANarrativePlayerState>(World->PersistentLevel);
 		PS->SetOwner(PC);
 		PC->PlayerState = PS;
 		auto* Member = NewObject<UTerritoryPartyReplyMemberProbe>(PC);
 		PC->AddInstanceComponent(Member);
 		Member->RegisterComponent();
+		InstallTerritoryPartyMemberProbe(PC, Member);
 		Members.Add(Member);
 		States.Add(PS);
 		if (Index < 2) TestTrue(TEXT("Native membership is established"), Party->AddPartyMember(Member));
@@ -131,12 +133,13 @@ bool FTFTerritoryPartyAutomaticReplies::RunTest(const FString& Parameters)
 	auto* Party = CastChecked<UTerritoryNarrativePartyComponent>(Actor->PartyTalesComponent);
 	auto* PC = NewObject<ANarrativePlayerController>(World->PersistentLevel);
 	PC->SetRole(ROLE_Authority);
-	auto* PS = NewObject<APlayerState>(World->PersistentLevel);
+	auto* PS = NewObject<ANarrativePlayerState>(World->PersistentLevel);
 	PS->SetOwner(PC);
 	PC->PlayerState = PS;
 	auto* Member = NewObject<UTerritoryPartyReplyMemberProbe>(PC);
 	PC->AddInstanceComponent(Member);
 	Member->RegisterComponent();
+	InstallTerritoryPartyMemberProbe(PC, Member);
 	Party->AddPartyMember(Member);
 	TestTrue(TEXT("Native can construct the held dialogue fixture"), Party->BeginDialogue(UTerritoryPartyReplyTestDialogue::StaticClass()));
 	UDialogue* Dialogue = Party->GetCurrentDialogue();
@@ -196,12 +199,13 @@ bool FTFTerritoryRemotePartyContext::RunTest(const FString& Parameters)
 	{
 		auto* PC = NewObject<ATerritoryPartyRemoteControllerProbe>(World->PersistentLevel);
 		PC->SetRole(ROLE_Authority);
-		auto* PS = NewObject<APlayerState>(World->PersistentLevel);
+		auto* PS = NewObject<ANarrativePlayerState>(World->PersistentLevel);
 		PS->SetOwner(PC);
 		PC->PlayerState = PS;
 		auto* Member = NewObject<UTerritoryPartyReplyMemberProbe>(PC);
 		PC->AddInstanceComponent(Member);
 		Member->RegisterComponent();
+		InstallTerritoryPartyMemberProbe(PC, Member);
 		Members.Add(Member);
 		TestTrue(TEXT("Remote member joins through Native"), Party->AddPartyMember(Member));
 	}
