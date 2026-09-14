@@ -71,6 +71,39 @@ and the authored policy; the server always validates the actual request.
 
 ## Compatibility and remaining limits
 
+### Player speaker tags
+
+Keep using the Dialogue Blueprint's **Player Speaker Info → Owned Tags**.
+Territory records the one contribution that Native adds for each party member.
+When that member leaves, it removes that contribution before **Leave Party**
+callbacks. Tags from a personal dialogue, an ability or another grant remain.
+An empty Owned Tags list needs no setup. Existing Dialogue Blueprints keep their
+parent class; no reparenting, tag rename or vendor edit is needed.
+
+Native also adds a separate contribution for the original player avatar. That
+contribution remains until Native ends the shared dialogue. Migrating the active
+avatar/controller and releasing its contribution early is still pending. Leaving
+the original player avatar is therefore not yet complete camera/input cleanup.
+
+Use the party component's normal **Begin Dialogue**, **Set Current Dialogue** and
+**Exit Dialogue** lifecycle. Custom C++ dialogue overrides must retain Native's
+begin/end behavior. The grant record holds weak runtime references and is never
+saved or replicated; the actual tags still replicate through Native's ASC.
+Component re-registration keeps an active record; replacement, end and level
+teardown retire it. A rejected null or lower-priority replacement preserves it.
+
+Membership edits and another begin/replacement are rejected while Native is
+inside a synchronous dialogue/tag transition. Schedule such story changes after
+the current call returns, for example on the next tick. An exit requested inside
+those callbacks is deferred until the transition finishes and applies only to
+that exact dialogue, so an old finish cannot close its replacement.
+
+**Add Party Member** rejects a join into an already-running dialogue with player
+speaker tags, before removing the player from their old party. Native does not
+yet synchronize that ongoing conversation to the joining player. End the
+conversation before adding the member. Late-join synchronization remains open;
+this rejection prevents a player receiving blocking tags without a conversation.
+
 The adapter adds no saved field or replicated property. Native stores quest
 history; live party membership is not a campaign save record. After loading,
 reconnect players explicitly through Add Party Member. Reply readiness is transient and starts empty
@@ -97,7 +130,7 @@ disappears. The server's shared dialogue and a client copy still used by another
 local member remain alive.
 
 This is the first part of the chosen **continue for remaining members** policy.
-It does not finish per-member camera/input, voice/shot or player-speaker tag
+It does not finish per-member camera/input, voice/shot or the separate avatar-tag
 handling for a shared local viewer or departing listen host. Native's final local
 cleanup still needs rendered camera/input and rapid replacement acceptance.
 Validated transfers now reconcile Native actor/component membership and reject

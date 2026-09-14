@@ -6,12 +6,122 @@
 #include "UnrealFramework/NarrativeParty.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "UnrealFramework/NarrativePlayerState.h"
+#include "AbilitySystemComponent.h"
+
+void UTerritoryNarrativePartyComponent::RecordNativePartySpeakerGrants()
+{
+	UDialogue* Dialogue = GetCurrentDialogue();
+	if (!HasAuthority() || !IsValid(Dialogue) || !Dialogue->IsInitialized() || Dialogue->OwningComp != this) return;
+	SpeakerTagDialogue = Dialogue;
+	PartySpeakerTags = Dialogue->PlayerSpeakerInfo.OwnedTags;
+	PartySpeakerGrants.Reset();
+	// Membership is stable for Native's whole Begin call. Its Play/OnBegin has
+	// applied this exact container once to each Native PlayerState ASC by now.
+	for (APlayerState* State : PartyMemberStates)
+	{
+		if (ANarrativePlayerState* NativeState = Cast<ANarrativePlayerState>(State))
+		{
+			if (UAbilitySystemComponent* ASC = NativeState->GetAbilitySystemComponent())
+			{
+				PartySpeakerGrants.Add(State, ASC);
+			}
+		}
+	}
+}
+
+void UTerritoryNarrativePartyComponent::PrepareNativeSpeakerCleanup()
+{
+	UDialogue* Tracked = SpeakerTagDialogue.Get();
+	// Native normally removes grants for current members. Only a departed entry
+	// needs our cleanup; clear the record before tag callbacks can re-enter Tales.
+	auto Grants = MoveTemp(PartySpeakerGrants);
+	const FGameplayTagContainer Tags = PartySpeakerTags;
+	SpeakerTagDialogue.Reset();
+	PartySpeakerTags.Reset();
+	if (!HasAuthority() || !IsValid(Tracked) || !Tracked->IsInitialized()) return;
+	for (const auto& Grant : Grants)
+	{
+		if (!PartyMemberStates.Contains(Grant.Key.Get()))
+		{
+			if (UAbilitySystemComponent* ASC = Grant.Value.Get())
+			{
+				ASC->RemoveLooseGameplayTags(Tags, 1, EGameplayTagReplicationState::CountToOwner);
+			}
+		}
+	}
+}
+
+bool UTerritoryNarrativePartyComponent::BeginDialogue(TSubclassOf<UDialogue> Dialogue, const FDialoguePlayParams PlayParams)
+{
+	if (!HasAuthority() || DialogueMutationDepth) return false;
+	bool bStarted = false;
+	{
+		TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
+		TGuardValue<bool> InitialSet(bAllowNativeInitialSet, true);
+		bStarted = Super::BeginDialogue(Dialogue, PlayParams);
+		if (bStarted) RecordNativePartySpeakerGrants();
+	}
+	FlushDeferredDialogueExit();
+	return bStarted;
+}
+
+bool UTerritoryNarrativePartyComponent::SetCurrentDialogue(TSubclassOf<UDialogue> Dialogue, const FDialoguePlayParams PlayParams)
+{
+	if (!HasAuthority()) return Super::SetCurrentDialogue(Dialogue, PlayParams);
+	if (DialogueMutationDepth && !bAllowNativeInitialSet) return false;
+	bAllowNativeInitialSet = false;
+	bool bSet = false;
+	{
+		TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
+		bSet = Super::SetCurrentDialogue(Dialogue, PlayParams);
+		// Null/priority rejection keeps the old session and its exact grant record.
+		// On an accepted replacement Native has already ended the old dialogue.
+		if (!SpeakerTagDialogue.IsValid() || SpeakerTagDialogue != GetCurrentDialogue() || !SpeakerTagDialogue->IsInitialized())
+		{
+			PrepareNativeSpeakerCleanup();
+		}
+	}
+	FlushDeferredDialogueExit();
+	return bSet;
+}
+
+void UTerritoryNarrativePartyComponent::ExitDialogue(EExitDialogueReason Reason)
+{
+	if (!HasAuthority()) return;
+	if (DialogueMutationDepth)
+	{
+		DeferredExitDialogue = GetCurrentDialogue();
+		DeferredExitReason = Reason;
+		return;
+	}
+	{
+		TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
+		PrepareNativeSpeakerCleanup();
+		Super::ExitDialogue(Reason);
+	}
+	FlushDeferredDialogueExit();
+}
+
+void UTerritoryNarrativePartyComponent::FlushDeferredDialogueExit()
+{
+	if (DialogueMutationDepth || !DeferredExitReason.IsSet()) return;
+	UDialogue* Requested = DeferredExitDialogue.Get();
+	const EExitDialogueReason Reason = DeferredExitReason.GetValue();
+	DeferredExitReason.Reset();
+	DeferredExitDialogue.Reset();
+	// A finish callback for an old dialogue must not close its replacement.
+	if (IsValid(Requested) && Requested == GetCurrentDialogue() && Requested->IsInitialized()) ExitDialogue(Reason);
+}
 
 bool UTerritoryNarrativePartyComponent::CanAddMember(const UTalesComponent* Member) const
 {
-	if (!HasAuthority() || !IsValid(Member) || !Member->HasAuthority()
+	if (DialogueMutationDepth || !HasAuthority() || !IsValid(Member) || !Member->HasAuthority()
 		|| Member->IsA<UNarrativePartyComponent>() || Member->GetWorld() != GetWorld()
 		|| Member->GetParty() == this || PartyMembers.Contains(Member)) return false;
+	// Native does not synchronize an in-progress conversation to a newly joined
+	// member. Reject before releasing their old party or applying unbalanced tags.
+	if (SpeakerTagDialogue == GetCurrentDialogue() && SpeakerTagDialogue.IsValid()
+		&& SpeakerTagDialogue->IsInitialized() && !PartySpeakerTags.IsEmpty()) return false;
 	const APlayerController* Controller = Member->GetOwningController();
 	const APlayerState* State = IsValid(Controller) ? Controller->PlayerState.Get() : nullptr;
 	if (!IsValid(Controller) || !Controller->HasAuthority() || Controller->GetWorld() != GetWorld()
@@ -94,7 +204,7 @@ bool UTerritoryNarrativePartyComponent::AddPartyMember(UTalesComponent* Member)
 
 bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Member)
 {
-	if (!HasAuthority() || !IsValid(Member) || !Member->HasAuthority()
+	if (DialogueMutationDepth || !HasAuthority() || !IsValid(Member) || !Member->HasAuthority()
 		|| Member->GetParty() != this || !PartyMembers.Contains(Member)
 		|| Member->GetWorld() != GetWorld()) return false;
 	APlayerController* Controller = Member->GetOwningController();
@@ -107,15 +217,40 @@ bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Membe
 	// personal dialogue synchronously. Never deinitialize or send a group exit here.
 	UDialogue* Alias = Member->GetCurrentDialogue();
 	const bool bSharedAlias = IsValid(Alias) && Alias->OwningComp == this;
-	if (bSharedAlias) Member->CurrentDialogue = nullptr;
-	RefreshActorMembership(nullptr, Member);
-	const bool bRemoved = Super::RemovePartyMember(Member);
-	RefreshActorMembership();
-	if (!bRemoved && bSharedAlias && IsValid(Member) && Member->GetParty() == this && !Member->GetCurrentDialogue()
-		&& IsValid(Alias) && Alias == GetCurrentDialogue() && Alias->IsInitialized())
+	bool bRemoved = false;
 	{
-		Member->CurrentDialogue = Alias;
-	}
+		TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
+		if (bSharedAlias) Member->CurrentDialogue = nullptr;
+		const TWeakObjectPtr<APlayerState> State = Controller->PlayerState.Get();
+		TWeakObjectPtr<UAbilitySystemComponent> ReleasedASC;
+		const FGameplayTagContainer ReleasedTags = PartySpeakerTags;
+		UDialogue* Tracked = SpeakerTagDialogue.Get();
+		if (IsValid(Tracked) && Tracked->IsInitialized() && Tracked == GetCurrentDialogue())
+		{
+			if (PartySpeakerGrants.RemoveAndCopyValue(State, ReleasedASC))
+			{
+				if (UAbilitySystemComponent* ASC = ReleasedASC.Get())
+				{
+					ASC->RemoveLooseGameplayTags(ReleasedTags, 1, EGameplayTagReplicationState::CountToOwner);
+				}
+			}
+		}
+		RefreshActorMembership(nullptr, Member);
+		bRemoved = Super::RemovePartyMember(Member);
+		RefreshActorMembership();
+		if (!bRemoved && IsValid(Member) && Member->GetParty() == this && ReleasedASC.IsValid()
+			&& Tracked == GetCurrentDialogue() && IsValid(Tracked) && Tracked->IsInitialized())
+		{
+			PartySpeakerGrants.Add(State, ReleasedASC);
+			ReleasedASC->AddLooseGameplayTags(ReleasedTags, 1, EGameplayTagReplicationState::CountToOwner);
+		}
+		if (!bRemoved && bSharedAlias && IsValid(Member) && Member->GetParty() == this && !Member->GetCurrentDialogue()
+			&& IsValid(Alias) && Alias == GetCurrentDialogue() && Alias->IsInitialized())
+		{
+			Member->CurrentDialogue = Alias;
+		}
+		}
+	FlushDeferredDialogueExit();
 	return bRemoved && IsValid(Member) && Member->GetParty() != this && !PartyMembers.Contains(Member);
 }
 
@@ -162,7 +297,11 @@ void UTerritoryNarrativePartyComponent::UnbindReplyEvents()
 void UTerritoryNarrativePartyComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UnbindReplyEvents();
+	TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
+	PrepareNativeSpeakerCleanup();
 	Super::EndPlay(EndPlayReason);
+	DeferredExitDialogue.Reset();
+	DeferredExitReason.Reset();
 }
 
 bool UTerritoryNarrativePartyComponent::CanMemberChooseDialogueReply(APlayerState* Member) const

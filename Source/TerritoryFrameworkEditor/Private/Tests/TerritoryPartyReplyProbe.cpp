@@ -1,5 +1,22 @@
 #include "TerritoryPartyReplyProbe.h"
 #include "UObject/UnrealType.h"
+#include "AbilitySystemComponent.h"
+#include "Core/TerritoryPropertyTags.h"
+#include "UnrealFramework/NarrativePlayerState.h"
+
+FGameplayTag GetTerritoryPartySpeakerTestTag() { return TerritoryPropertyTags::ArmsShopRole; }
+
+UAbilitySystemComponent* ATerritoryPartySpeakerAvatarProbe::GetAbilitySystemComponent() const { return PlayerASC.Get(); }
+
+bool UTerritoryPartySpeakerTestDialogue::Initialize(UTalesComponent* Component, const FDialoguePlayParams Params)
+{
+	if (!Super::Initialize(Component, Params)) return false;
+	PlayerSpeakerInfo.OwnedTags.AddTag(GetTerritoryPartySpeakerTestTag());
+	bShowCinematicBars = false;
+	bAdjustPlayerTransform = false;
+	DialogueBlendOutTime = 0.f;
+	return true;
+}
 
 void InstallTerritoryPartyMemberProbe(ANarrativePlayerController* Controller, UTalesComponent* Member)
 {
@@ -58,4 +75,23 @@ bool ATerritoryPartyReplyTestDriver::SkipLine(UTalesComponent* Member)
 bool ATerritoryPartyReplyTestDriver::JoinParty(UTalesComponent* Member, UNarrativePartyComponent* Party)
 {
 	return IsValid(Party) && Party->AddPartyMember(Member);
+}
+
+bool ATerritoryPartyReplyTestDriver::AddExternalSpeakerTag(APlayerState* State)
+{
+	auto* NativeState = Cast<ANarrativePlayerState>(State);
+	if (!IsValid(NativeState) || !NativeState->HasAuthority()) return false;
+	if (UAbilitySystemComponent* ASC = NativeState->GetAbilitySystemComponent())
+	{
+		ASC->AddLooseGameplayTag(GetTerritoryPartySpeakerTestTag(), 1, EGameplayTagReplicationState::CountToOwner);
+		return true;
+	}
+	return false;
+}
+
+int32 ATerritoryPartyReplyTestDriver::GetSpeakerTagCount(APlayerState* State) const
+{
+	const auto* NativeState = Cast<ANarrativePlayerState>(State);
+	const UAbilitySystemComponent* ASC = IsValid(NativeState) ? NativeState->GetAbilitySystemComponent() : nullptr;
+	return ASC ? ASC->GetTagCount(GetTerritoryPartySpeakerTestTag()) : INDEX_NONE;
 }

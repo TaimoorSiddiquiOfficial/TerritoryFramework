@@ -24,6 +24,9 @@ public:
 	 * The remaining members keep the same Native dialogue. Camera/tag and leader transfer are separate concerns.
 	 */
 	virtual bool RemovePartyMember(UTalesComponent* Member) override;
+	virtual bool BeginDialogue(TSubclassOf<UDialogue> Dialogue, const FDialoguePlayParams PlayParams = FDialoguePlayParams()) override;
+	virtual bool SetCurrentDialogue(TSubclassOf<UDialogue> Dialogue, const FDialoguePlayParams PlayParams = FDialoguePlayParams()) override;
+	virtual void ExitDialogue(EExitDialogueReason Reason) override;
 
 	virtual void OnRegister() override;
 	virtual void OnUnregister() override;
@@ -39,6 +42,18 @@ public:
 	bool CanMemberChooseDialogueReply(APlayerState* Member) const;
 
 private:
+	// Records only Native's one party-member grant, never its separate avatar grant.
+	// Connection/ASC references and the active dialogue are transient, not campaign data.
+	TWeakObjectPtr<UDialogue> SpeakerTagDialogue;
+	FGameplayTagContainer PartySpeakerTags;
+	TMap<TWeakObjectPtr<APlayerState>, TWeakObjectPtr<class UAbilitySystemComponent>> PartySpeakerGrants;
+	int32 DialogueMutationDepth = 0;
+	bool bAllowNativeInitialSet = false;
+	TWeakObjectPtr<UDialogue> DeferredExitDialogue;
+	TOptional<EExitDialogueReason> DeferredExitReason;
+	void RecordNativePartySpeakerGrants();
+	void PrepareNativeSpeakerCleanup();
+	void FlushDeferredDialogueExit();
 	bool CanAddMember(const UTalesComponent* Member) const;
 	// Native actor fields are a read model of the component, including inside its callbacks.
 	void RefreshActorMembership(UTalesComponent* Joining = nullptr, UTalesComponent* Leaving = nullptr);

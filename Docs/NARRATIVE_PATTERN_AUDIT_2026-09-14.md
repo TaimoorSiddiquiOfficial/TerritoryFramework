@@ -895,3 +895,86 @@ The final UE 5.8 iterative cook/stage and 60-second packaged Development game
 server-mode smoke both exit 0. It is not a compiled TDAServer build. Known
 NullRHI Canvas and optional Native CutscenePlayerActor warnings remain; the
 smoke result does not certify rendered cinematic quality or a complete campaign.
+
+## Follow-up: Native party-member speaker grants
+
+Evidence: `Saved/Verification/20260914_PartySpeakerCleanup` in the TDA project.
+
+The reference is Native `UDialogue::OnBeginDialogue` / `OnEndDialogue` and the
+public `UTalesComponent` begin, replacement, exit and EndPlay lifecycle. Native
+adds Player Speaker Info's Owned Tags once to each member's PlayerState ASC,
+but removes that contribution from only the current member list at dialogue end.
+A departed member therefore retains a tag. The initial player avatar has a
+separate grant, often on the same ASC, so removing every matching count would
+also remove another owner's contribution.
+
+The existing Territory party component now records Native's one member grant
+after a successful begin and removes it before that member's Leave Party
+callbacks. Native still owns the actual tags, replication, avatar grants and
+cleanup of remaining members. The record holds weak runtime references; no
+save field, replicated field, RPC, tag database or runtime dialogue subclass was added.
+Null and priority-rejected replacements preserve the current record. Successful
+replacement, end and level teardown retire it; component re-registration keeps
+an active record. Native task history still serializes through its own API.
+
+Synchronous Native tag callbacks can request another membership change or exit.
+The adapter rejects membership and begin/replacement re-entry during the
+transition, and defers exit until it commits. That exit is tied to the exact
+dialogue so an old finish cannot close a replacement. An already-running tagged
+dialogue refuses new members before releasing their previous party: Native's
+late-join conversation synchronization is not yet implemented.
+
+Migration: existing Dialogue Blueprints keep their parent and their authored
+Player Speaker Info > Owned Tags. No content migration is required. Custom C++
+dialogues must retain Native's begin/end implementation and use the component
+lifecycle. Move synchronous membership changes requested by begin/end/tag
+callbacks after the current call. End a tagged conversation before adding a
+new member. See [authoring and limitations](PARTY_DIALOGUE_REPLY_RULES.md).
+
+Three behavioral tests exercise Native's real begin/end and PlayerState ASC:
+external tag ownership, ordinary and original-avatar departure, repeated
+removal/end, personal dialogue inside Leave, rejected replacement, client
+authority rejection, re-registration, re-entrant tag callbacks, deferred exit,
+late-join refusal preserving the source party, actual replacement, Native task
+serialization into a fresh party, post-load transfer and routed level teardown.
+The first test attempts exposed fixture errors, retained in
+`InitialFixtureFailure`, `TeardownFixtureFailure` and
+`ActorInitializationFixtureFailure`: an ASC needed registration
+before actor-info initialization; an editor-module native tag was inappropriate
+after tag startup; routed teardown needed completed actor/component initialization
+and the matching BeginPlay lifecycle.
+The fixture now uses an existing runtime tag and normal actor lifecycle calls.
+
+The original avatar's separate tag contribution remains until Native ends the
+shared conversation. Cached avatar/controller, camera/input, voice/shot,
+leader/final-member departure, disconnect, immediate join/start, late-join
+synchronization, World Partition travel and rendered shared-view acceptance
+remain open. This batch does not certify those features or automatic Character
+Light Rig integration.
+
+All six Editor/Development/Shipping builds pass. Both full automation suites
+pass 337/337, with zero failed or not run (5.8: 303 success + 34 warning results;
+5.7: 301 + 36). The three new tests include Native's warning-level begin/end/tag
+logs; their warning entries are retained rather than hidden.
+
+The listen host plus two clients and dedicated PIE server plus two clients each
+pass nine live checks. One external loose-tag contribution is added before the
+dialogue. Native adds its avatar/member contributions, the nonleader leaves,
+starts a separate personal conversation, and a repeated removal returns false.
+The old group then ends without changing that personal session or its tags;
+the final personal end restores every player's external count on server and
+owning client. The remaining group keeps its exact session and held NPC line
+during departure. The read-only recorder is
+`Scripts/Territory/verify_party_speaker_tags_pie.py`; Native test-driver dispatch
+runs gameplay outside the Python stack. Membership replication settles before
+Begin Dialogue, so this is not immediate join/start certification. The fixture
+has no authored camera or voice.
+
+With PIE stopped, the Hashir greeting, Blacksmith retake handover and Native
+controller all validate and compile with zero errors or warnings. All 741
+Narrative Pro source files match the installed Marketplace package.
+
+The final UE 5.8 iterative cook/stage and 60-second packaged Development game
+server-mode smoke both exit 0. This is not a compiled TDAServer target. Known
+NullRHI Canvas and optional Native CutscenePlayerActor warnings remain; this
+startup smoke does not certify rendered cinematics or a complete campaign.

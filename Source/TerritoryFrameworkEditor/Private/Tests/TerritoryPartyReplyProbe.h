@@ -6,10 +6,12 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerState.h"
 #include "UnrealFramework/NarrativePlayerController.h"
+#include "UnrealFramework/NarrativeCharacter.h"
 #include "TerritoryPartyReplyProbe.generated.h"
 
 // Install an editor fixture in the same personal slot used by Native RPC routing.
 void InstallTerritoryPartyMemberProbe(ANarrativePlayerController* Controller, UTalesComponent* Member);
+FGameplayTag GetTerritoryPartySpeakerTestTag();
 
 /** Models a remote connection in the native authority-context regression. */
 UCLASS()
@@ -36,6 +38,25 @@ class UTerritoryPartyReplyTestDialogue : public UDialogue
 	GENERATED_BODY()
 public:
 	virtual bool Initialize(UTalesComponent* Component, const FDialoguePlayParams Params) override;
+};
+
+/** Uses Native's actual speaker-tag begin/end implementation. */
+UCLASS()
+class UTerritoryPartySpeakerTestDialogue : public UTerritoryPartyReplyTestDialogue
+{
+	GENERATED_BODY()
+public:
+	virtual bool Initialize(UTalesComponent* Component, const FDialoguePlayParams Params) override;
+};
+
+/** Models Native's player avatar sharing the persistent PlayerState ASC. */
+UCLASS()
+class ATerritoryPartySpeakerAvatarProbe : public ANarrativeCharacter
+{
+	GENERATED_BODY()
+public:
+	TWeakObjectPtr<UAbilitySystemComponent> PlayerASC;
+	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 };
 
 /** Observes Native member RPC dispatch without replaying a client line on the server fixture. */
@@ -90,4 +111,8 @@ public:
 	bool SkipLine(UTalesComponent* Member);
 	UFUNCTION(BlueprintCallable, Category="Test")
 	bool JoinParty(UTalesComponent* Member, UNarrativePartyComponent* Party);
+	UFUNCTION(BlueprintCallable, Category="Test")
+	bool AddExternalSpeakerTag(APlayerState* State);
+	UFUNCTION(BlueprintCallable, Category="Test")
+	int32 GetSpeakerTagCount(APlayerState* State) const;
 };
