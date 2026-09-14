@@ -818,12 +818,6 @@ Native controller's optional `CutscenePlayerActor` warning; exit 0 is not a
 claim of warning-free cinematic playback.
 All 741 Narrative Pro source files still match the installed Marketplace package.
 
-The UE 5.8 iterative cook/stage and 60-second packaged Development game server-mode
-smoke both exit 0. This is not a compiled TDAServer target. Existing content and
-optional Native CutscenePlayerActor warnings remain tracked. The editor is restored
-to HopDistrictTest, PIE stopped, Listen Server / three players / one process, with
-no dirty packages. The full framework and cinematic release gates remain open.
-
 ## Follow-up: validated Native party transfers
 
 Evidence: `Saved/Verification/20260914_PartyTransfer` in the TDA project.
@@ -1042,3 +1036,9 @@ Recorder: `Scripts/Territory/verify_party_final_member_pie.py`. This held-line
 fixture has no authored shot/voice and does not certify rendered camera cleanup.
 Three focused assets validate and compile without warnings with PIE stopped.
 All 741 Narrative Pro source files still match the installed Marketplace package.
+
+The UE 5.8 iterative cook/stage and 60-second packaged Development game server-mode
+smoke both exit 0. This is not a compiled TDAServer target. Existing content and
+optional Native CutscenePlayerActor warnings remain tracked. The editor is restored
+to HopDistrictTest, PIE stopped, Listen Server / three players / one process, with
+no dirty packages. The full framework and cinematic release gates remain open.
