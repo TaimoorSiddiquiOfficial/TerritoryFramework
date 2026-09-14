@@ -15,6 +15,10 @@ class TERRITORYFRAMEWORK_API UTerritoryNarrativePartyComponent : public UNarrati
 public:
 	/** Keep Native's local viewing player. A server with only remote members uses the Native leader. */
 	virtual APlayerController* GetOwningController() const override;
+	/** Clear only the departing member's shared-dialogue alias before Native publishes Leave Party.
+	 * The remaining members keep the same Native dialogue. Camera/tag and leader transfer are separate concerns.
+	 */
+	virtual bool RemovePartyMember(UTalesComponent* Member) override;
 
 	virtual void OnRegister() override;
 	virtual void OnUnregister() override;

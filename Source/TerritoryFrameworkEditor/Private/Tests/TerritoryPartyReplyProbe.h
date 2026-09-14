@@ -2,6 +2,7 @@
 
 #include "Tales/Dialogue.h"
 #include "Tales/TalesComponent.h"
+#include "Tales/NarrativePartyComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerState.h"
 #include "UnrealFramework/NarrativePlayerController.h"
@@ -14,6 +15,15 @@ class ATerritoryPartyRemoteControllerProbe : public ANarrativePlayerController
 	GENERATED_BODY()
 public:
 	virtual bool IsLocalController() const override { return false; }
+};
+
+/** Models a local viewport without constructing gameplay HUDs in a native test world. */
+UCLASS()
+class ATerritoryPartyLocalControllerProbe : public ANarrativePlayerController
+{
+	GENERATED_BODY()
+public:
+	virtual bool IsLocalController() const override { return true; }
 };
 
 /** Editor-only fixture: holds both NPC lines and the selected reply until explicitly skipped. */
@@ -32,6 +42,14 @@ class UTerritoryPartyReplyMemberProbe : public UTalesComponent
 	GENERATED_BODY()
 public:
 	int32 ReplyDispatches = 0;
+	bool bStartPersonalOnLeave = false;
+	bool bLeaveSawSharedAlias = false;
+	UFUNCTION()
+	void ObserveLeave(UNarrativePartyComponent* LeftParty)
+	{
+		bLeaveSawSharedAlias = GetCurrentDialogue() && GetCurrentDialogue()->OwningComp == LeftParty;
+		if (bStartPersonalOnLeave) BeginDialogue(UTerritoryPartyReplyTestDialogue::StaticClass());
+	}
 	TWeakObjectPtr<APlayerState> LastSelector;
 	virtual void ClientSelectDialogueOption_Implementation(const FName& OptionID, APlayerState* Selector) override
 	{

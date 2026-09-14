@@ -62,18 +62,31 @@ Narrative's actual party leader as its dialogue controller. Clients retain
 their own local viewing controller. This follows Native's dedicated-server
 pattern and avoids an empty controller/pawn context for dialogue conditions.
 
-This change does not repair Native's removal of a member during a shared
-conversation. Native can leave that member's personal dialogue alias pointing
-at the old group session. The adapter rejects replies through that stale alias;
-camera/input/session cleanup and the continuation policy need a separate change.
+When a member leaves a Territory party, the adapter clears that member's personal
+reference to the shared dialogue before Native runs **Leave Party** callbacks.
+The departing member can start a personal conversation without closing the old
+party's dialogue. The remaining members keep their current conversation and line.
+The local presentation bridge also drops the old personal reference when Native
+replicates a leave or party switch. An old leave cannot clear a new personal
+conversation or a different party's conversation.
+
+On a client with no remaining local party member, Native closes the old local
+dialogue immediately. This avoids leaving its cleanup until the old party actor
+disappears. The server's shared dialogue and a client copy still used by another
+local member remain alive.
+
+This is the first part of the chosen **continue for remaining members** policy.
+It does not finish per-member camera/input, voice/shot or player-speaker tag
+handling for a shared local viewer or departing listen host. Native's final local
+cleanup still needs rendered camera/input and rapid replacement acceptance.
 Direct cross-party transfers can also leave Native's old actor relevance cache
 out of step with component membership. Remove through the old party actor before
 adding through the new one; atomic transfer remains a separate integration gate.
 
-The chosen departure policy is to continue for remaining members. Per-member
-session, input, camera and player-speaker tag cleanup is still required; ending
-the whole Native party dialogue would violate that policy. Fresh leader lookup
-does not migrate the cached context of an already-running dialogue.
+Fresh leader lookup does not migrate the cached controller, pawn or speaker of
+an already-running dialogue. Do not treat reference cleanup as certification of
+leader/host departure, disconnect or final-member cleanup. These remain release
+gates along with the presentation cleanup above.
 
 Native's immediate join/start, late remote joins, party destruction/travel and
 rendered split-screen dialogue remain acceptance gates. A successful reply test does not certify cinematic
@@ -82,6 +95,8 @@ shots, voice playback or complete multiplayer story rewards.
 Source references: `UNarrativePartyComponent::SelectDialogueOption`,
 `UTalesComponent::ServerSelectDialogueOption_Implementation`,
 `TrySelectDialogueOption`, `UDialogue::NPCFinishedTalking`,
-`PlayPlayerDialogueNode`, and `ANarrativeParty`'s `PartyTalesComponent` slot.
+`PlayPlayerDialogueNode`, `UNarrativePartyComponent::RemovePartyMember`,
+`UTalesComponent::ExitDialogue`, `BeginPartyDialogue`, `OnRep_PartyComponent`,
+and `ANarrativeParty`'s `PartyTalesComponent` slot.
 Territory uses the same `SetDefaultSubobjectClass` pattern as Native's character,
 NPC controller and level-sequence actor adapters.

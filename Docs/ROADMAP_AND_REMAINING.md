@@ -6,7 +6,18 @@
 
 ## Current remaining work
 
-The newest follow-up fixes empty server controller context for a party containing
+The newest follow-up detaches a departing member's personal dialogue reference
+before Native runs Leave Party callbacks. A personal replacement or exit can no
+longer tear down the remaining party's shared object. Replicated leave/switch
+also clears the exact old local reference. The last local viewer closes only its
+old client copy through Native; shared local/server copies stay alive.
+Six builds and 332 tests per engine
+pass; listen-server and dedicated PIE runs each pass ten departure/isolation
+checks. Per-member camera/input, voice/shot and player-speaker tag cleanup,
+active leader context migration and atomic transfer remain open.
+The final UE 5.8 cook/stage and 60-second packaged server-mode smoke pass.
+
+The preceding follow-up fixes empty server controller context for a party containing
 only remote players. It preserves Native's local viewer and uses Native's leader
 when the server has no local member. Six builds and 330 tests per engine pass;
 the listen host plus two remote clients pass seven context/playback/exit checks.
@@ -40,7 +51,7 @@ The broader audit and release gates remain open.
 
 | Area | Still required |
 |---|---|
-| Narrative pattern audit | Next: continue for remaining members when someone leaves; clean up that member's Native session, input, camera and player-speaker tags; handle active leader departure, atomic transfer and the reproduced immediate join/start race. Remote-only listen-server context and playback now pass. Party reply authority is verified for the opt-in Territory party class. Party replacement and local presentation regressions pass. Late remote joining, destruction/travel, rendered split-screen/shared-camera acceptance, full cinematic playback and complete asset dependency/unused-system coverage remain. Solo remote replacement and shared LOD release-order regressions pass. Music's repeated-restore bug and explicit handoff pass; cold set loads, seamless/world travel and Native's unexposed queued-request ownership still need acceptance. Distraction item/cancellation regressions pass; remote input, authored combat/montage interruption and full campaign recovery remain. Resolve Farm camera and owner appearance warnings intentionally. |
+| Narrative pattern audit | Next: finish member-local camera/input, voice/shot and player-speaker tag cleanup; migrate active leader context; handle final-member departure, atomic transfer and the reproduced immediate join/start race. Departed personal-reference isolation now passes on server and clients. Remote-only listen-server context and playback pass. Party reply authority is verified for the opt-in Territory party class. Party replacement and local presentation regressions pass. Late remote joining, disconnect/destruction/travel, rendered split-screen/shared-camera acceptance, full cinematic playback and complete asset dependency/unused-system coverage remain. Solo remote replacement and shared LOD release-order regressions pass. Music's repeated-restore bug and explicit handoff pass; cold set loads, seamless/world travel and Native's unexposed queued-request ownership still need acceptance. Distraction item/cancellation regressions pass; remote input, authored combat/montage interruption and full campaign recovery remain. Resolve Farm camera and owner appearance warnings intentionally. |
 | Character Light Rig | Build the optional project adapter for both Territory/Native dialogue shots and full Native cutscenes. Resolve Native character visuals after readiness; author Body/FaceMesh skeleton settings; update the actual cut camera without rebuilding all light elements each frame; clean up lights and temporary channels across stop, skip, replacement, chains and travel. Keep the editor wrapper and unbound studio post process out of automatic gameplay setup. Verify rendered multiplayer, UDS/Lumen and packaged behavior. |
 | Hashir's Farm trip — route and boarding fixed, story acceptance open | Standalone and remote travel/exit pass; simulated seated capsules no longer push the client car. Author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow, compiled dedicated server and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |

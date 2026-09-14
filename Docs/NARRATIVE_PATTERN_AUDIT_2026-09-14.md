@@ -725,3 +725,95 @@ optional intro-cutscene null-player warning, remain tracked. All 741 Narrative
 source files match the installed Marketplace package. HopDistrictTest is reopened
 with PIE stopped, listen-server mode, three players, one process and no dirty
 packages. No user content or Native source was changed for this batch.
+
+### Departing member's personal dialogue reference
+
+Evidence: `Saved/Verification/20260914_PartyMemberLeave` in TDA.
+
+Native's `BeginPartyDialogue` aliases each server member's `CurrentDialogue` to
+the party's one `UDialogue`. `UNarrativePartyComponent::RemovePartyMember` clears
+membership and publishes `OnLeaveParty`, but does not clear that alias.
+`UTalesComponent::TryExitDialogue` can still reach the old `OwningComp`, and a
+personal `BeginDialogue`/`ExitDialogue` can deinitialize the shared object. Reply
+policy validation alone did not prevent these paths.
+
+The Territory party overrides Native's public `RemovePartyMember` hook. It checks
+server authority, exact current membership and the controller/world before
+clearing only a personal alias owned by this party. This happens before the
+Native leave broadcast so a synchronous story callback can safely start a
+personal conversation. Native still performs the membership mutation. Failed
+removal preserves a still-current alias; an unrelated/new dialogue is untouched.
+No group exit or shared deinitialization is sent for this cleanup.
+
+The existing local presentation subsystem drops the exact old personal alias
+on Native's replicated leave/switch notification, only for an opted-in Territory
+party. Current membership wins over an older leave, and a new personal or other
+party dialogue cannot be cleared by the old notification. Authority and shared
+local copies remain alive. If no other local Narrative controller is still a
+member, the exact old client copy closes through Native's local
+`ClientExitDialogue`. This sends no server/group exit. Native runs its existing
+finish/deinitialization path immediately instead of waiting for the now-irrelevant
+party actor's `EndPlay`. The initial reference-only test reports are retained in
+`InitialReferenceOnly`; final validation reruns after this cleanup improvement.
+
+Native remains the membership, dialogue and message authority. No RPC, saved
+field, replicated field, persistent identity, or Blueprint signature was added.
+The personal alias is transient; this change adds no conversation save/resume
+format. Existing Territory party authors need no migration. Plain Native parties
+still require the documented opt-in. Actor relevance/streaming and full campaign
+save recovery are not certified by the transient-reference regression.
+
+Both new native behavioral tests pass on UE 5.8.2 and 5.7.4. They cover rejected
+authority/null/outsider removals, repeat removal, departed Native skip/exit and
+queued exit requests, personal begin/finish, synchronous leave callbacks that
+start a personal conversation, remaining-member playback, exact local cleanup,
+stale/rejoined membership, shared local-viewer retention, immediate last-viewer
+client deinitialization and new-dialogue preservation. A fixture also removes
+the original leader and proves reference/playback isolation; it does not claim
+to migrate that dialogue's cached leader context.
+
+All six Editor/Development/Shipping builds pass. Full automation is 332/332 per
+engine with zero failed or not run (5.8: 301 success + 31 warning results;
+5.7: 299 + 33). Native headless fixture begin/end and missing-avatar warnings
+remain visible. Three focused assets validate and compile without warnings.
+
+The listen host plus two clients and a dedicated PIE server plus two clients
+each pass ten live checks. A nonleader leaves, loses its personal reference on
+both sides, cannot use that reference to skip/exit the old conversation, starts
+and finishes a separate personal dialogue, while the remaining remote member
+advances the original shared dialogue through Native's client RPC. Native's final
+group exit still clears the remaining aliases. The direct exit attempt is made
+on the authoritative personal component; the skip attempt/remaining-player skip
+use the actual client Tales object through the native test driver. The C++
+regression also calls Native's queued server exit implementation.
+Both final live runs additionally retain the departed client's old dialogue
+object and confirm that Native has cleared its owning component shortly after
+leave, before a new personal conversation is started. This verifies immediate
+local deinitialization rather than relying on eventual actor removal.
+
+The read-only recorder is `Scripts/Territory/verify_party_departure_pie.py`.
+Gameplay dispatch runs outside Python, and snapshots wait for network delivery.
+Initial tool attempts supplied an actor path where Monolith requires its object
+name; those were rejected before gameplay and are not counted as executed checks.
+The first shared-client cleanup fixture incorrectly treated a bare test controller
+as local; the corrected fixture explicitly models locality, like the existing
+remote-controller fixture. Those failed reports are retained in
+`ClientCleanupFixtureFailure`. An overlapping cross-engine UBT run also hit the
+shared Marketplace build-rules file lock; builds were then serialized and rerun.
+
+This is a bounded reference-isolation fix. Per-player Native camera/input,
+voice/shot and owned-tag cleanup, cached active leader/pawn/speaker migration,
+last-member removal, disconnect, atomic transfer, immediate join/start delivery,
+late join, World Partition travel and rendered split-screen remain open. The
+held-line fixture has no camera or voice asset. Starting a new personal dialogue
+is safe for the remaining party object; complete concurrent cinematic/tag behavior
+still needs the following lifecycle batch. Character Light Rig automatic wiring
+and rendered acceptance also remain open.
+
+The final UE 5.8 cook/stage and 60-second packaged Development game server-mode
+smoke both exit 0. This is not a compiled TDAServer target or a full campaign
+playthrough. The existing content/authoring warning backlog remains separate.
+The packaged NullRHI smoke retains the known render-target Canvas warnings and
+Native controller's optional `CutscenePlayerActor` warning; exit 0 is not a
+claim of warning-free cinematic playback.
+All 741 Narrative Pro source files still match the installed Marketplace package.

@@ -11,6 +11,7 @@
 #include "GroomComponent.h"
 #include "Tales/Dialogue.h"
 #include "Tales/NarrativePartyComponent.h"
+#include "Tales/TerritoryNarrativePartyComponent.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "UObject/UObjectIterator.h"
 
@@ -139,8 +140,8 @@ UDialogue* UTerritoryCinematicPresentationSubsystem::GetObservedDialogue() const
 void UTerritoryCinematicPresentationSubsystem::HandleJoinedParty(
 	UNarrativePartyComponent* NewParty, UNarrativePartyComponent* LeftParty)
 {
-	(void)LeftParty;
 	if (!BoundTalesComponent || BoundTalesComponent->GetParty() != NewParty) return;
+	DetachDepartedPartyAlias(LeftParty);
 	CancelDialogueReconciliation();
 	BindToParty(NewParty);
 	ReconcileCurrentDialogue();
@@ -152,9 +153,36 @@ void UTerritoryCinematicPresentationSubsystem::HandleLeftParty(UNarrativePartyCo
 	// current Native membership wins over the remainder of that older broadcast.
 	if (LeftParty != BoundPartyComponent || !BoundTalesComponent
 		|| BoundTalesComponent->GetParty() == LeftParty) return;
+	DetachDepartedPartyAlias(LeftParty);
 	CancelDialogueReconciliation();
 	BindToParty(nullptr);
 	ReconcileCurrentDialogue();
+}
+
+void UTerritoryCinematicPresentationSubsystem::DetachDepartedPartyAlias(UNarrativePartyComponent* LeftParty)
+{
+	// Replicated membership also needs to release the local personal alias.
+	if (!IsValid(LeftParty) || !LeftParty->IsA<UTerritoryNarrativePartyComponent>()
+		|| !BoundTalesComponent || BoundTalesComponent->GetParty() == LeftParty) return;
+	UDialogue* Alias = BoundTalesComponent->GetCurrentDialogue();
+	if (!IsValid(Alias) || Alias->OwningComp != LeftParty) return;
+	BoundTalesComponent->CurrentDialogue = nullptr;
+
+	// Native's EndPlay would otherwise clean this copy up later, potentially after
+	// a personal conversation starts. Close through Native now only on a client
+	// with no remaining local member. Never close the listen server's shared object.
+	if (LeftParty->HasAuthority() || LeftParty->GetCurrentDialogue() != Alias) return;
+	UWorld* World = LeftParty->GetWorld();
+	if (!World) return;
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		const auto* Controller = Cast<ANarrativePlayerController>(It->Get());
+		UTalesComponent* Other = Controller ? Controller->GetTalesComponent() : nullptr;
+		if (Controller && Controller->IsLocalController() && Other && Other != BoundTalesComponent
+			&& Other->GetParty() == LeftParty) return;
+	}
+	// Calling this Native client function locally sends no server/group exit.
+	LeftParty->ClientExitDialogue(EExitDialogueReason::EDR_PlayerExited);
 }
 
 void UTerritoryCinematicPresentationSubsystem::HandleDialogueBegan(

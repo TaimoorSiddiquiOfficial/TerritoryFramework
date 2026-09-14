@@ -53,6 +53,7 @@ private:
 	friend class FTFTerritoryCinematicDialogueLifecycle;
 	friend class FTFTerritorySharedDialogueLOD;
 	friend class FTFTerritoryPartyDialoguePresentation;
+	friend class FTFTerritoryPartyDepartureAlias;
 
 	enum class EComponentOverrideType : uint8
 	{
@@ -83,6 +84,7 @@ private:
 	void BindToController(APlayerController* PlayerController);
 	void UnbindFromTalesComponent();
 	void BindToParty(UNarrativePartyComponent* Party);
+	void DetachDepartedPartyAlias(UNarrativePartyComponent* LeftParty);
 	UDialogue* GetObservedDialogue() const;
 	void CancelDialogueReconciliation();
 	void ReconcileCurrentDialogue();

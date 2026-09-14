@@ -4,6 +4,31 @@
 #include "GameFramework/PlayerState.h"
 #include "Tales/NarrativeDialogueSettings.h"
 
+bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Member)
+{
+	if (!HasAuthority() || !IsValid(Member) || !Member->HasAuthority()
+		|| Member->GetParty() != this || !PartyMembers.Contains(Member)
+		|| Member->GetWorld() != GetWorld()) return false;
+	APlayerController* Controller = Member->GetOwningController();
+	if (!IsValid(Controller) || !Controller->HasAuthority() || Controller->GetWorld() != GetWorld()) return false;
+
+	// Native shares the authority's UDialogue with each personal Tales component.
+	// Its removal clears membership but leaves that alias. A personal BeginDialogue
+	// would then deinitialize the party's live object; TryExit/Skip can also reach it.
+	// Clear before Super broadcasts Leave Party, since story callbacks can start a
+	// personal dialogue synchronously. Never deinitialize or send a group exit here.
+	UDialogue* Alias = Member->GetCurrentDialogue();
+	const bool bSharedAlias = IsValid(Alias) && Alias->OwningComp == this;
+	if (bSharedAlias) Member->CurrentDialogue = nullptr;
+	const bool bRemoved = Super::RemovePartyMember(Member);
+	if (!bRemoved && bSharedAlias && Member->GetParty() == this && !Member->GetCurrentDialogue()
+		&& Alias == GetCurrentDialogue() && Alias->IsInitialized())
+	{
+		Member->CurrentDialogue = Alias;
+	}
+	return bRemoved;
+}
+
 APlayerController* UTerritoryNarrativePartyComponent::GetOwningController() const
 {
 	// Native's dedicated-server path already uses its leader. Keep Native's
