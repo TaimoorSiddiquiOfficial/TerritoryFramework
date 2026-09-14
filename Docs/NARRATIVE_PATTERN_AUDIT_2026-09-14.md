@@ -80,7 +80,9 @@ Paths below are relative to each plugin's `Source` directory.
 | NP-18 | TDA redirects Native pause/player-info widgets into the RPG UI theme, but its asset-reference policy allowed only TerritoryFramework to follow those redirects. Native's standard controller therefore failed validation. | Extend the existing project-only reference exception to NarrativePro's plugin directory and the same theme domain. Standard restrictions remain active. No vendor asset, source or plugin dependency is changed. |
 | NP-19 | Native party replacement has the same rejected-construction gap as solo dialogue. In addition to clients retaining the old session, server members retain aliases to the deinitialized party dialogue. | Extend the existing lifecycle component to observe one exact Tales authority. Native join delegates install one observer per party, even with multiple members. The existing virtual party exit clears member aliases and sends Native group exits once. No new RPC or membership authority. |
 | NP-20 | Territory presentation subscribed only to personal Tales delegates. Native party Began/Finished/line events are published by the party component, so the Territory HUD/LOD bridge missed them. | Subscribe to the current Native party and follow join/leave notifications. Recover current dialogue on local binding; unbind obsolete parties and reject deinitialized or former-party aliases during deferred reconciliation. |
-| NP-21 | Native's party reply-control policy is documented as UI-only. `UNarrativePartyComponent::SelectDialogueOption` accepts a valid option without enforcing leader identity on the server. | Confirmed source limitation, still open. A supported component override and project authoring path must enforce the configured policy and validate selectors before shared story/reward choices can be certified for multiplayer. The cleanup observer does not intercept or secure reply selection. |
+| NP-21 | Native's party reply-control policy is documented as UI-only. `UNarrativePartyComponent::SelectDialogueOption` accepts a valid option without enforcing leader identity on the server. | `UTerritoryNarrativePartyComponent` validates current Native membership, controller/PlayerState identity and the existing policy before forwarding selection. `ATerritoryNarrativeParty` installs it in Native's existing Tales slot. This is an authored opt-in; plain Native parties remain unchanged. The inherited direct-party RPC is rejected because it lacks an authenticated member identity. |
+| NP-22 | Native replies exist before NPC playback ends. An early personal-Tales request can reach `PlayPlayerDialogueNode` with a nonempty NPC chain and hit its assertion. | The party adapter waits for Native Replies Available for manual choices and consumes readiness before node events. Native's authored/global automatic choices retain their separate server callback path. Pending NPC chains, foreign options, stale sessions and repeated choices are rejected. |
+| NP-23 | Native component-level party transfer removes a member from the old Tales list without updating `ANarrativeParty`'s separate actor relevance cache. | Still open. Use old actor Remove Party Member before new actor Add Party Member. Atomic transfer, departure-session cleanup, actor destruction and connection timing require a separate membership adapter and live acceptance. |
 
 ## Compatible adaptations to retain
 
@@ -584,3 +586,81 @@ After packaging, HopDistrictTest is reopened with PIE stopped, three players and
 one process retained, and zero dirty packages. The three focused assets validate
 again without warnings. Only Territory source/tests/docs and the project recorder
 are committed; existing project and controller-Blueprint edits remain untouched.
+
+### Server reply policy and readiness follow-up
+
+Evidence: `Saved/Verification/20260914_PartyAuthority` in TDA. Setup:
+[Party dialogue reply rules](PARTY_DIALOGUE_REPLY_RULES.md).
+
+The source references are `UNarrativePartyComponent::SelectDialogueOption`,
+`UTalesComponent::ServerSelectDialogueOption_Implementation` and
+`TrySelectDialogueOption`, `UDialogue::NPCFinishedTalking`,
+`PlayPlayerDialogueNode`, and `ANarrativeParty`'s existing `PartyTalesComponent`.
+The new `ATerritoryNarrativeParty` uses the same `SetDefaultSubobjectClass` pattern
+as Native's NPC controller and level-sequence actor. Its actor membership wrappers
+also reject client-side mutations before calling Native.
+
+`UTerritoryNarrativePartyComponent` owns only the validation adapter and transient
+reply readiness derived from Native events. Native remains the single authority
+for membership, leader, policy, current dialogue, node events and group messages.
+Manual requests arrive through each player's existing personal Tales RPC; the
+server derives the selector from that component's controller. The party validates
+current membership, PlayerState/controller identity, world, policy, initialized
+session, exact offered option and finished NPC chain before forwarding. Readiness
+is consumed before Native node callbacks. Unregister/end play release delegates.
+
+Native's automatic replies run before Replies Available. The party's virtual
+Try Select hook retains that path and uses the actual Native leader as selector.
+The inherited direct-party server RPC is intentionally rejected: it lacks member
+identity, including when a custom actor supplies a network owner. This override
+is a rejection boundary, not an unfinished implementation. No new RPC, replicated
+field, saved field or competing party policy was added.
+
+The authored opt-in is deliberate. Existing plain Native parties and content
+are not replaced at runtime. Registry inheritance lookup found no project party
+Blueprints; the only derived class is the new Territory native actor. Designers
+can create a party Blueprint from that actor or use its component on a custom
+replicated party. Native's inherited property tooltip still describes its own
+UI-only enforcement; the Territory class and guide explain the added server check.
+
+| Check | Result |
+|---|---|
+| UE 5.8.2 and 5.7.4 Editor, Development and Shipping | All six builds pass with the existing tooling exclusions. |
+| Full automation | 329/329 on each engine; zero failed/not run. UE 5.8: 301 success + 28 warning results. UE 5.7: 299 success + 30 warning results. |
+| Native authority/readiness regressions | Actual Native selection and dispatch, early request, nonleader/outsider/null selector, departed alias, unknown policy, foreign option, direct-party RPC, pending NPC chain, repeat request, unregistration and fresh session pass. |
+| Native automatic selection | Single response, authored auto flag and global setting preserve Native playback and leader identity. |
+| Listen host + two clients | Eight checks pass. Plain Native baseline accepts a nonleader's client request; the Territory party rejects it, permits the leader/all-member policy and preserves cleanup. |
+| Dedicated PIE server + two clients | Eight checks pass with `IsDedicatedServer` confirmed for the server world, plus two checks for Hashir's actual automatic Salam reply and completion on all members. This is dedicated PIE, not a compiled server executable. |
+| Focused assets / Blueprints | Hashir greeting, Blacksmith handover and Native player controller validate without warnings and compile UpToDate with zero errors/warnings, PIE stopped. |
+| UE 5.8 cook/stage and 60-second packaged smoke | Both exit 0. Development game in server mode, not a compiled TDAServer executable. Existing Native content/tag and optional intro-cutscene null-player warnings remain; this is not warning-free campaign acceptance. |
+| Native source comparison | All 741 source files match the installed Marketplace package. |
+
+The editor-only held dialogue fixture has two NPC lines and two explicit replies;
+it executes Native playback and reply routing, without a camera or voice asset.
+The native test driver invokes personal Tales from the correct PIE client object,
+outside the Python script stack. The recorder reads each world's current Native
+node and local presentation. Asynchronous client calls are given time to arrive;
+an immediate snapshot is not treated as an authoritative result.
+
+Initial evidence is retained: a missing test-only PlayerState include, then an
+assertion that incorrectly assumed Native's available-reply ordering matched its
+stored node order. The corrected test captures the offered auto reply before
+selection. The recorder also corrected unsupported Python accessors; those failed
+reads are not passed checks. Warnings from headless/no-avatar fixtures and Native
+begin/end logging remain visible in successful automation reports.
+
+This live run additionally reproduced the existing join/start race: adding the
+members and starting immediately left both clients without a dialogue, although
+the server returned success. Restarting after membership was present on all worlds
+worked. This batch verifies reply authority after membership settles; it does not
+mask or certify that race. Departure alias/camera/input cleanup, actor relevance
+on atomic transfer, party destruction, late remote joins, remote-only listen-server
+controller selection and full campaign/World Partition restoration remain gates.
+No claim of rendered cinematic or full multiplayer story acceptance is made.
+
+After packaging, HopDistrictTest is reopened with no PIE worlds or dirty packages.
+The saved editor-user settings and live CDO both use listen-server mode, three
+players and one process. The live CDO restoration alone did not persist on editor
+exit, so the same saved user-settings section was restored before reopening;
+project defaults were not changed. `EditorReopenedState.json` and the live CDO
+query record the final state. The recorder's Python syntax check also passes.
