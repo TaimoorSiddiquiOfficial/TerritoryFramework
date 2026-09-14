@@ -6,11 +6,12 @@
 
 ## Current remaining work
 
-The latest framework batch repairs rejected solo-dialogue replacement for remote
-players and shares temporary speaker LOD ownership between local presentations.
-All six builds and 325 tests per engine pass. A listen host and two clients pass
-13 session cleanup, replacement, priority and isolation checks. Four focused
-assets validate without warnings after correcting TDA's UI-theme reference policy.
+The latest framework batch repairs rejected Native party-dialogue replacement
+and binds local presentation to the current party's dialogue and membership events.
+All six builds and 327 tests per engine pass. A listen host and two clients pass
+13 party session, presentation, replacement, priority and cleanup checks. Three
+focused assets validate without warnings. The earlier solo replacement, shared
+speaker LOD and TDA UI-theme reference-policy fixes remain verified.
 The previous music playback/handoff and task/distraction
 fixes remain verified; six Farm/owner authoring-warning assets remain open. See the
 [Narrative pattern audit and usage guide](NARRATIVE_PATTERN_AUDIT_2026-09-14.md)
@@ -19,7 +20,7 @@ The broader audit and release gates remain open.
 
 | Area | Still required |
 |---|---|
-| Narrative pattern audit | Next: party dialogue replacement, rendered split-screen/shared-camera acceptance, full cinematic playback and complete asset dependency/unused-system coverage. Solo remote replacement and shared LOD release-order regressions pass. Music's repeated-restore bug and explicit handoff pass; cold set loads, seamless/world travel and Native's unexposed queued-request ownership still need acceptance. Distraction item/cancellation regressions pass; remote input, authored combat/montage interruption and full campaign recovery remain. Resolve Farm camera and owner appearance warnings intentionally. |
+| Narrative pattern audit | Next: server enforcement of party reply policy and Native session cleanup when a member leaves during dialogue. Party replacement and local presentation regressions pass. Immediate join/start, late remote joining, remote-only listen-server parties, destruction/travel, rendered split-screen/shared-camera acceptance, full cinematic playback and complete asset dependency/unused-system coverage remain. Solo remote replacement and shared LOD release-order regressions pass. Music's repeated-restore bug and explicit handoff pass; cold set loads, seamless/world travel and Native's unexposed queued-request ownership still need acceptance. Distraction item/cancellation regressions pass; remote input, authored combat/montage interruption and full campaign recovery remain. Resolve Farm camera and owner appearance warnings intentionally. |
 | Hashir's Farm trip — route and boarding fixed, story acceptance open | Standalone and remote travel/exit pass; simulated seated capsules no longer push the client car. Author durable arrival/continuation and save recovery, then verify the full Blacksmith-to-Farm flow, compiled dedicated server and AlMalik streaming. [Evidence and remaining checks](HASHIR_CASTLE_FARM_DRIVE_TODO.md). |
 | AlMalik release blockers | Fix cold appearance loads that stay pending, isolate the crash after a restored assault wave dies, then finish returning-client streaming verification. |
 | Finite reserves and Narrative tasks | Add reserve events through existing finite post commands; prove capture/defeat behavior with pending reserves and missing posts; migrate applicable authored Native record tasks. |
@@ -28,7 +29,8 @@ The broader audit and release gates remain open.
 | Story-map presentation | Finish UDS day/night, interior, fog, shadow, HDR-display and frame-rate checks in AlMalik; retain the tracked appearance/Chaos/content warning review. |
 | Story authoring and release | Finish Act 1 after the behavior above is verified; decide later retake/peaceful-handover rules and Farm's reward. Refresh 5.7/5.8 release artifacts and documentation after the remaining release gates pass. |
 
-Next audit work: **party dialogue and full cinematic cleanup**, followed by broader authored combat interruption
+Next audit work: **party reply authority and active-member departure cleanup**,
+then connection timing, full cinematic cleanup and broader authored combat interruption
 acceptance. Next story work remains **Hashir's durable arrival/quest continuation
 and save recovery**. Finite reserve events and capture/defeat checks remain in
 the framework backlog.
@@ -36,6 +38,23 @@ The dated checkpoints below preserve earlier evidence; their older test counts
 and then-current task lists do not supersede this list.
 
 ## Current checkpoint
+
+### Native party dialogue replacement and presentation — 2026-09-14
+
+The existing server observer now follows one exact Native Tales component.
+Native membership events install one observer for the party. A rejected
+replacement invokes Native's group exit once, clearing member aliases and both
+clients. Each local presentation observes its current party's start, finish and
+speaker events, and unbinds on leave or switch. Stale leave/finish events cannot
+replace current membership. Native retains sessions, membership, message routing
+and persistence; no vendor source, Blueprint signature, saved field or RPC changed.
+
+The 327-test suites, all six builds and the live host/two-client regression pass.
+This verifies session state and presentation flags; Hashir's greeting has no
+authored camera shot or voice track. Native's leader-only reply setting is
+UI-only, and departing members can retain Native dialogue aliases. Those remain
+separate integration tasks before multiplayer story decisions are certified.
+See the [source evidence and verification limits](NARRATIVE_PATTERN_AUDIT_2026-09-14.md).
 
 ### Remote solo dialogue and shared speaker detail — 2026-09-14
 

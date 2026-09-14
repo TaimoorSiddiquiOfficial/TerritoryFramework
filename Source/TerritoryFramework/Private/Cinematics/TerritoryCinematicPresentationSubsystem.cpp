@@ -10,6 +10,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GroomComponent.h"
 #include "Tales/Dialogue.h"
+#include "Tales/NarrativePartyComponent.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "UObject/UObjectIterator.h"
 
@@ -71,8 +72,11 @@ void UTerritoryCinematicPresentationSubsystem::BindToController(
 			this, &UTerritoryCinematicPresentationSubsystem::HandleNPCDialogueLineStarted);
 		BoundTalesComponent->OnPlayerDialogueLineStarted.AddUniqueDynamic(
 			this, &UTerritoryCinematicPresentationSubsystem::HandlePlayerDialogueLineStarted);
+		BoundTalesComponent->OnJoinedParty.AddUniqueDynamic(this, &ThisClass::HandleJoinedParty);
+		BoundTalesComponent->OnLeaveParty.AddUniqueDynamic(this, &ThisClass::HandleLeftParty);
+		BindToParty(BoundTalesComponent->GetParty());
 
-		if (UDialogue* CurrentDialogue = BoundTalesComponent->GetCurrentDialogue())
+		if (UDialogue* CurrentDialogue = GetObservedDialogue())
 		{
 			HandleDialogueBegan(CurrentDialogue);
 			return;
@@ -88,6 +92,7 @@ void UTerritoryCinematicPresentationSubsystem::BindToController(
 void UTerritoryCinematicPresentationSubsystem::UnbindFromTalesComponent()
 {
 	CancelDialogueReconciliation();
+	BindToParty(nullptr);
 	if (!BoundTalesComponent) return;
 	BoundTalesComponent->OnDialogueBegan.RemoveDynamic(
 		this, &UTerritoryCinematicPresentationSubsystem::HandleDialogueBegan);
@@ -97,13 +102,65 @@ void UTerritoryCinematicPresentationSubsystem::UnbindFromTalesComponent()
 		this, &UTerritoryCinematicPresentationSubsystem::HandleNPCDialogueLineStarted);
 	BoundTalesComponent->OnPlayerDialogueLineStarted.RemoveDynamic(
 		this, &UTerritoryCinematicPresentationSubsystem::HandlePlayerDialogueLineStarted);
+	BoundTalesComponent->OnJoinedParty.RemoveDynamic(this, &ThisClass::HandleJoinedParty);
+	BoundTalesComponent->OnLeaveParty.RemoveDynamic(this, &ThisClass::HandleLeftParty);
 	BoundTalesComponent = nullptr;
+}
+
+void UTerritoryCinematicPresentationSubsystem::BindToParty(UNarrativePartyComponent* Party)
+{
+	if (BoundPartyComponent == Party) return;
+	if (BoundPartyComponent)
+	{
+		BoundPartyComponent->OnDialogueBegan.RemoveDynamic(this, &ThisClass::HandleDialogueBegan);
+		BoundPartyComponent->OnDialogueFinished.RemoveDynamic(this, &ThisClass::HandleDialogueFinished);
+		BoundPartyComponent->OnNPCDialogueLineStarted.RemoveDynamic(this, &ThisClass::HandleNPCDialogueLineStarted);
+		BoundPartyComponent->OnPlayerDialogueLineStarted.RemoveDynamic(this, &ThisClass::HandlePlayerDialogueLineStarted);
+	}
+	BoundPartyComponent = Party;
+	if (BoundPartyComponent)
+	{
+		BoundPartyComponent->OnDialogueBegan.AddUniqueDynamic(this, &ThisClass::HandleDialogueBegan);
+		BoundPartyComponent->OnDialogueFinished.AddUniqueDynamic(this, &ThisClass::HandleDialogueFinished);
+		BoundPartyComponent->OnNPCDialogueLineStarted.AddUniqueDynamic(this, &ThisClass::HandleNPCDialogueLineStarted);
+		BoundPartyComponent->OnPlayerDialogueLineStarted.AddUniqueDynamic(this, &ThisClass::HandlePlayerDialogueLineStarted);
+	}
+}
+
+UDialogue* UTerritoryCinematicPresentationSubsystem::GetObservedDialogue() const
+{
+	UDialogue* Current = BoundTalesComponent ? BoundTalesComponent->GetCurrentDialogue() : nullptr;
+	// Native can retain a member alias after the old party session is torn down
+	// or membership changes. Do not resurrect it during deferred reconciliation.
+	return Current && (Current->OwningComp == BoundTalesComponent
+		|| (BoundPartyComponent && Current->OwningComp == BoundPartyComponent)) ? Current : nullptr;
+}
+
+void UTerritoryCinematicPresentationSubsystem::HandleJoinedParty(
+	UNarrativePartyComponent* NewParty, UNarrativePartyComponent* LeftParty)
+{
+	(void)LeftParty;
+	if (!BoundTalesComponent || BoundTalesComponent->GetParty() != NewParty) return;
+	CancelDialogueReconciliation();
+	BindToParty(NewParty);
+	ReconcileCurrentDialogue();
+}
+
+void UTerritoryCinematicPresentationSubsystem::HandleLeftParty(UNarrativePartyComponent* LeftParty)
+{
+	// An earlier leave listener can synchronously rejoin the same party. The
+	// current Native membership wins over the remainder of that older broadcast.
+	if (LeftParty != BoundPartyComponent || !BoundTalesComponent
+		|| BoundTalesComponent->GetParty() == LeftParty) return;
+	CancelDialogueReconciliation();
+	BindToParty(nullptr);
+	ReconcileCurrentDialogue();
 }
 
 void UTerritoryCinematicPresentationSubsystem::HandleDialogueBegan(
 	UDialogue* Dialogue)
 {
-	if (!Dialogue) return;
+	if (!Dialogue || (BoundTalesComponent && Dialogue != GetObservedDialogue())) return;
 	CancelDialogueReconciliation();
 	const bool bWasActive = ActiveDialogue != nullptr;
 	if (ActiveDialogue != Dialogue)
@@ -157,7 +214,7 @@ void UTerritoryCinematicPresentationSubsystem::ReconcileCurrentDialogue()
 {
 	DialogueReconciliationTimer.Invalidate();
 	DialogueReconciliationWorld.Reset();
-	if (UDialogue* Current = BoundTalesComponent ? BoundTalesComponent->GetCurrentDialogue() : nullptr)
+	if (UDialogue* Current = GetObservedDialogue())
 	{
 		HandleDialogueBegan(Current);
 	}

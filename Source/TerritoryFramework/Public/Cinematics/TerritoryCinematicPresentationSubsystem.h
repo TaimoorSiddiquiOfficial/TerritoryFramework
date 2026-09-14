@@ -10,6 +10,7 @@ class AActor;
 class APlayerController;
 class UActorComponent;
 class UDialogue;
+class UNarrativePartyComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnTerritoryCinematicPresentationChanged, bool, bIsActive);
@@ -51,6 +52,7 @@ public:
 private:
 	friend class FTFTerritoryCinematicDialogueLifecycle;
 	friend class FTFTerritorySharedDialogueLOD;
+	friend class FTFTerritoryPartyDialoguePresentation;
 
 	enum class EComponentOverrideType : uint8
 	{
@@ -68,6 +70,8 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTalesComponent> BoundTalesComponent;
+	UPROPERTY(Transient)
+	TObjectPtr<UNarrativePartyComponent> BoundPartyComponent;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UDialogue> ActiveDialogue;
@@ -78,6 +82,8 @@ private:
 
 	void BindToController(APlayerController* PlayerController);
 	void UnbindFromTalesComponent();
+	void BindToParty(UNarrativePartyComponent* Party);
+	UDialogue* GetObservedDialogue() const;
 	void CancelDialogueReconciliation();
 	void ReconcileCurrentDialogue();
 	void ClearPresentation();
@@ -85,6 +91,11 @@ private:
 	void RestoreComponentLODs();
 	bool HasOverrideFor(const UActorComponent* Component) const;
 	const FComponentLODOverride* FindSharedOverride(const UActorComponent* Component) const;
+
+	UFUNCTION()
+	void HandleJoinedParty(UNarrativePartyComponent* NewParty, UNarrativePartyComponent* LeftParty);
+	UFUNCTION()
+	void HandleLeftParty(UNarrativePartyComponent* LeftParty);
 
 	UFUNCTION()
 	void HandleDialogueBegan(UDialogue* Dialogue);

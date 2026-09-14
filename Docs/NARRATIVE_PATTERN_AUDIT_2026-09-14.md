@@ -53,7 +53,7 @@ Paths below are relative to each plugin's `Source` directory.
 | Identity while driving | `ANarrativePlayerController::OnPossess`, `SetOwnedCharacter`, `GetOwnedCharacter` | Existing adapter keeps the Native owned character/PlayerState ASC while the controller possesses a vehicle |
 | Music | `Music/NarrativeMusicSubsystem.h/.cpp`, `TaggedMusicSet.h` | `UTerritoryMusicSubsystem`, state audio config, Definition application and music tests |
 | Tales | `Tales/QuestTask.cpp`, `TalesComponent.cpp`, `Dialogue.cpp`; Native instanced condition/event APIs | Character-action, gameplay-state and combat-progress tasks; Tales utilities; quest starter and checkpoint event |
-| Dialogue camera | `Tales/DialogueSequence.h`, `UDialogue::PlayDialogueSequence` / `StopDialogueSequence` | `UTerritoryDialogueShot`, cinematic presentation subsystem and validator |
+| Dialogue camera | `Tales/NarrativeDialogueSequence.h`, `UDialogue::PlayDialogueSequence` / `StopDialogueSequence` | `UTerritoryDialogueShot`, cinematic presentation subsystem and validator |
 | Full cinematics | `Cinematics/NarrativeLevelSequenceActor.h`, Native binding and playback settings | Ownership boundary and authoring guidance; complete staged story playback remains an acceptance gate |
 
 ## Confirmed findings
@@ -78,6 +78,9 @@ Paths below are relative to each plugin's `Source` directory.
 | NP-16 | Native `SetCurrentDialogue` ends the old dialogue before constructing its replacement. When construction fails, `BeginDialogue` sends neither a new dialogue nor an exit to the remote owner. The client can remain in the old conversation. | A transient server component observes Native's Finished/Began delegates and checks once on the next tick. If no replacement exists, it calls Native `ExitDialogue`, which already sends the reliable client cleanup even when the server session is empty. Successful replacements cancel the check. Solo dialogue only; party routing remains open. |
 | NP-17 | Two local presentation subsystems sharing a speaker recorded different original LOD values. The first exit could lower detail during the other dialogue, and the last exit could leave cinematic detail permanently enabled. | Share the original value across existing presentation instances. Only the last holder restores it, and a visible later external LOD change is preserved. No new global registry or saved presentation state. |
 | NP-18 | TDA redirects Native pause/player-info widgets into the RPG UI theme, but its asset-reference policy allowed only TerritoryFramework to follow those redirects. Native's standard controller therefore failed validation. | Extend the existing project-only reference exception to NarrativePro's plugin directory and the same theme domain. Standard restrictions remain active. No vendor asset, source or plugin dependency is changed. |
+| NP-19 | Native party replacement has the same rejected-construction gap as solo dialogue. In addition to clients retaining the old session, server members retain aliases to the deinitialized party dialogue. | Extend the existing lifecycle component to observe one exact Tales authority. Native join delegates install one observer per party, even with multiple members. The existing virtual party exit clears member aliases and sends Native group exits once. No new RPC or membership authority. |
+| NP-20 | Territory presentation subscribed only to personal Tales delegates. Native party Began/Finished/line events are published by the party component, so the Territory HUD/LOD bridge missed them. | Subscribe to the current Native party and follow join/leave notifications. Recover current dialogue on local binding; unbind obsolete parties and reject deinitialized or former-party aliases during deferred reconciliation. |
+| NP-21 | Native's party reply-control policy is documented as UI-only. `UNarrativePartyComponent::SelectDialogueOption` accepts a valid option without enforcing leader identity on the server. | Confirmed source limitation, still open. A supported component override and project authoring path must enforce the configured policy and validate selectors before shared story/reward choices can be certified for multiplayer. The cleanup observer does not intercept or secure reply selection. |
 
 ## Compatible adaptations to retain
 
@@ -483,3 +486,101 @@ focused checks alone.
 HopDistrictTest is reopened after the package check, with PIE stopped and the
 three-player setting retained. The scoped commit excludes the user's existing
 controller Blueprint, map, road and other project edits.
+
+### Native party dialogue follow-up
+
+Evidence: `Saved/Verification/20260914_PartyDialogue` in TDA.
+
+The pre-fix listen-host/two-client run reproduces both failures. After a rejected
+replacement, the server party has no dialogue, both clients retain one, and the
+server members still return the old dialogue through their personal aliases.
+During a successful party start, Territory's local presentation flag stays off
+on all three machines. `PreFixPartyReproduction.json` records that state.
+
+The reference is `UNarrativePartyComponent::BeginDialogue`, `ExitDialogue`,
+`AddPartyMember`, `RemovePartyMember` and `UTalesComponent::OnRep_PartyComponent`,
+`BeginPartyDialogue`, `ClientBeginPartyDialogue_Implementation`,
+`ClientExitPartyDialogue_Implementation` and `GetCurrentDialogue`.
+`ANarrativeParty` owns the replicated membership and member-only actor relevance.
+Its component owns shared Tales quests/dialogue and group message routing.
+
+The existing Territory observer is now attached to one exact Tales component.
+Each Native controller's join delegate requests the party observer; repeated
+members reuse it, and two party components on one actor remain independent.
+Failed replacement calls Native's virtual group exit once. Native clears server
+member aliases and sends its existing reliable group messages. The observer
+does not synthesize Finished events, clear Native private fields or replace the
+party component. Its weak source reference and timer are transient. Unregister,
+end play and lost authority stop deferred work. Native source/content is unchanged.
+
+Local presentation now follows personal and current-party delegates, including
+speaker line events. Joining an already-running local dialogue recovers from
+Native state. Leaving or changing party unbinds old callbacks and releases only
+that local presentation's LOD requests. A stale Native member alias cannot
+reactivate a former party's presentation. An older leave broadcast cannot undo
+current membership if an earlier callback already rejoined that same party.
+
+No saved field, replicated property, new RPC, asset path or Blueprint signature
+changed. Existing Narrative controllers and party assets keep their authoring
+workflow. No manual adapter installation is needed for parties joined through
+those controllers. The new `FindOrCreateForTales` C++ helper supports an explicit
+integration with other Native Tales owners; it does not create party membership.
+Controller/party lifetime and weak actor references remain the integration
+boundary. Full campaign saves and actual World Partition party restoration are
+separate acceptance gates.
+
+The two new regressions exercise Native membership events, actual failed
+replacement and group exits, per-member cleanup, duplicate installation, two
+parties on one owner, stale events, authority loss, unregister/re-register,
+late local binding, shared LOD release and membership changes. The existing solo
+regressions remain part of the full suite. A final review added the rejoin guard
+after the first full pass; that earlier evidence is under `BeforeRejoinGuard`.
+
+Remaining Native party constraints are not hidden by these fixes:
+
+- **Reply authority:** leader-only selection is UI-only in Native. A supported
+  component override must enforce it on the server before multiplayer story
+  rewards and shared decisions can be certified (NP-21).
+- **Departure while speaking:** Native removes membership without explicitly
+  clearing the departing member's dialogue alias. Territory now releases its
+  own presentation; Native input/sequence cleanup and continuation policy still
+  need a separate adapter and live acceptance.
+- **Connection timing and ownership:** starting immediately after a join,
+  joining an already-running remote conversation, remote-only parties on a
+  listen server, party destruction and seamless travel still need acceptance.
+  Native selects a local member as the listen-server dialogue controller and
+  explicitly uses the leader only in dedicated-server mode.
+- **Cinematics:** Hashir's greeting has no authored camera shot or voice track.
+  Session/presentation verification does not certify camera composition, sound,
+  full sequence interruption/skip or rendered split-screen views.
+
+| Check | Result |
+|---|---|
+| UE 5.8.2 and 5.7.4 Editor, Development and Shipping | All six builds pass, with the previously documented tooling exclusions. |
+| Full automation after the rejoin guard | 327/327 per engine; zero failed/not run. UE 5.8: 300 success + 27 warning results. UE 5.7: 298 success + 29 warning results. |
+| New Native party regressions | One observer per exact party, one group exit, per-member cleanup, unrelated party isolation, membership changes, authority loss, re-registration, stale events and local presentation cleanup pass. |
+| HopDistrictTest listen host + two clients | All 13 recorded checks pass: party replication, one server observer/no client observers, three local presentations, rejected replacement cleanup, successful replacement, priority rejection, invalid authored start and normal group exit. |
+| Focused Blueprint compilation | Project Hashir greeting, plugin Blacksmith handover and Native player controller are UpToDate with zero errors/warnings. |
+| Focused asset validation, PIE stopped | All three assets valid, zero invalid/warnings. |
+| UE 5.8 cook/stage/package and 60-second smoke | Both exit 0. Development game in server mode, not a compiled dedicated-server target. The existing optional intro-cutscene null-player warning remains tracked. |
+| Narrative source comparison | All 741 files match the installed UE 5.8 Marketplace source. |
+
+The live fixture uses a transient `ANarrativeParty`, with its public actor-level
+`AddPartyMember` so both relevance and Tales membership are populated. Gameplay
+calls use native `pie_call_function`, never Python RPC dispatch. One repeated
+lower-priority call was suppressed by the tool's duplicate-call guard. Those
+snapshots are explicitly excluded; a fresh priority-6 conversation and a real
+priority-11 rejection prove that each local instance stays unchanged. Hashir's
+short greeting is sampled immediately before it naturally finishes.
+
+The new recorder is `Scripts/Territory/verify_party_dialogue_pie.py` and writes
+only this batch's evidence path. An initial reuse of the solo recorder overwrote
+its earlier raw report. The prior 13-check result and six printed snapshots were
+recovered from `20260914_DialogueLifecycle/LiveEditorVerification.log`; the
+unprinted older snapshots were not reconstructed. The recovered file states
+this limit. Original build, automation, asset and package evidence is intact.
+
+After packaging, HopDistrictTest is reopened with PIE stopped, three players and
+one process retained, and zero dirty packages. The three focused assets validate
+again without warnings. Only Territory source/tests/docs and the project recorder
+are committed; existing project and controller-Blueprint edits remain untouched.

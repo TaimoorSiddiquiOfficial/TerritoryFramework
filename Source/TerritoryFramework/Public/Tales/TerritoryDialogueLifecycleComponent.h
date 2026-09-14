@@ -8,7 +8,7 @@
 
 class ANarrativePlayerController;
 
-/** Server-side repair for Native's rejected solo-dialogue replacement path.
+/** Server-side repair for Native's rejected personal or party dialogue replacement.
  * Uses the existing Tales session and reliable exit message; owns no saved or replicated state.
  */
 UCLASS(ClassGroup=(Territory), meta=(DisplayName="Territory Dialogue Lifecycle"))
@@ -21,9 +21,13 @@ public:
 	virtual void OnUnregister() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	static UTerritoryDialogueLifecycleComponent* FindOrCreate(ANarrativePlayerController* Controller);
+	/** One observer per Native Tales component, including multiple parties on one actor. */
+	static UTerritoryDialogueLifecycleComponent* FindOrCreateForTales(UTalesComponent* Source);
 
 private:
 	friend class FTFTerritoryRemoteDialogueLifecycle;
+	friend class FTFTerritoryPartyDialogueLifecycle;
+	TWeakObjectPtr<UTalesComponent> SourceTales;
 	UPROPERTY(Transient)
 	TObjectPtr<UTalesComponent> Tales;
 	FTimerHandle ReconcileTimer;
@@ -32,6 +36,8 @@ private:
 	void Unbind();
 	void CancelReconciliation();
 	void ReconcileReplacement();
+	UFUNCTION()
+	void HandleJoinedParty(UNarrativePartyComponent* NewParty, UNarrativePartyComponent* LeftParty);
 	UFUNCTION()
 	void HandleDialogueBegan(UDialogue* Dialogue);
 	UFUNCTION()

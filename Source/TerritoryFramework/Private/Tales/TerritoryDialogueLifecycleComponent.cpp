@@ -2,6 +2,7 @@
 
 #include "Engine/World.h"
 #include "Tales/Dialogue.h"
+#include "Tales/NarrativePartyComponent.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 
 UTerritoryDialogueLifecycleComponent::UTerritoryDialogueLifecycleComponent()
@@ -13,13 +14,23 @@ UTerritoryDialogueLifecycleComponent* UTerritoryDialogueLifecycleComponent::Find
 	ANarrativePlayerController* Controller)
 {
 	if (!IsValid(Controller) || !Controller->HasAuthority()) return nullptr;
-	if (auto* Existing = Controller->FindComponentByClass<UTerritoryDialogueLifecycleComponent>())
+	return FindOrCreateForTales(Controller->GetTalesComponent());
+}
+
+UTerritoryDialogueLifecycleComponent* UTerritoryDialogueLifecycleComponent::FindOrCreateForTales(
+	UTalesComponent* Source)
+{
+	if (!IsValid(Source) || !Source->HasAuthority() || !IsValid(Source->GetOwner())) return nullptr;
+	AActor* Owner = Source->GetOwner();
+	TInlineComponentArray<UTerritoryDialogueLifecycleComponent*> Observers(Owner);
+	for (auto* Existing : Observers)
 	{
-		return Existing;
+		if (Existing && Existing->SourceTales == Source) return Existing;
 	}
-	auto* Component = NewObject<UTerritoryDialogueLifecycleComponent>(Controller,
-		TEXT("TerritoryDialogueLifecycle"), RF_Transient);
-	Controller->AddInstanceComponent(Component);
+	auto* Component = NewObject<UTerritoryDialogueLifecycleComponent>(Owner,
+		MakeUniqueObjectName(Owner, StaticClass(), TEXT("TerritoryDialogueLifecycle")), RF_Transient);
+	Component->SourceTales = Source;
+	Owner->AddInstanceComponent(Component);
 	Component->RegisterComponent();
 	return Component;
 }
@@ -28,14 +39,17 @@ void UTerritoryDialogueLifecycleComponent::OnRegister()
 {
 	Super::OnRegister();
 	Unbind();
-	if (const auto* Controller = Cast<ANarrativePlayerController>(GetOwner()))
+	UTalesComponent* Source = SourceTales.Get();
+	if (Source && Source->GetOwner() == GetOwner() && Source->HasAuthority())
 	{
-		if (Controller->HasAuthority()) Tales = Controller->GetTalesComponent();
+		Tales = Source;
 	}
 	if (Tales)
 	{
 		Tales->OnDialogueBegan.AddUniqueDynamic(this, &ThisClass::HandleDialogueBegan);
 		Tales->OnDialogueFinished.AddUniqueDynamic(this, &ThisClass::HandleDialogueFinished);
+		Tales->OnJoinedParty.AddUniqueDynamic(this, &ThisClass::HandleJoinedParty);
+		HandleJoinedParty(Tales->GetParty(), nullptr);
 	}
 }
 
@@ -58,8 +72,21 @@ void UTerritoryDialogueLifecycleComponent::Unbind()
 	{
 		Tales->OnDialogueBegan.RemoveDynamic(this, &ThisClass::HandleDialogueBegan);
 		Tales->OnDialogueFinished.RemoveDynamic(this, &ThisClass::HandleDialogueFinished);
+		Tales->OnJoinedParty.RemoveDynamic(this, &ThisClass::HandleJoinedParty);
 	}
 	Tales = nullptr;
+}
+
+void UTerritoryDialogueLifecycleComponent::HandleJoinedParty(
+	UNarrativePartyComponent* NewParty, UNarrativePartyComponent* LeftParty)
+{
+	(void)LeftParty;
+	if (Tales && NewParty && Tales->HasAuthority() && Tales->GetParty() == NewParty)
+	{
+		// Native owns membership. All members converge on one observer attached
+		// to the party owner, so a failed replacement sends one group exit.
+		FindOrCreateForTales(NewParty);
+	}
 }
 
 void UTerritoryDialogueLifecycleComponent::CancelReconciliation()
@@ -98,8 +125,9 @@ void UTerritoryDialogueLifecycleComponent::ReconcileReplacement()
 	if (IsValid(Tales) && Tales->HasAuthority() && !Tales->GetCurrentDialogue())
 	{
 		// Native BeginDialogue only sends ClientBeginDialogue on success. Its
-		// existing ExitDialogue still sends the reliable client exit when the
-		// server's CurrentDialogue is null. Never create another RPC/session here.
+		// virtual ExitDialogue still sends client exits when CurrentDialogue is
+		// null. The party override also clears member aliases and routes its own
+		// group messages. Never create another RPC or session authority here.
 		Tales->ExitDialogue(EExitDialogueReason::EDR_NewDialogueStarted);
 	}
 }
