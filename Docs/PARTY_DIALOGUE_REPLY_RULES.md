@@ -57,6 +57,11 @@ when a component registers. An active conversation must publish a fresh Native
 replies-available event after re-registration, or be restarted. This avoids
 guessing that an in-progress NPC line has finished.
 
+For a listen-server party containing only remote players, the server uses
+Narrative's actual party leader as its dialogue controller. Clients retain
+their own local viewing controller. This follows Native's dedicated-server
+pattern and avoids an empty controller/pawn context for dialogue conditions.
+
 This change does not repair Native's removal of a member during a shared
 conversation. Native can leave that member's personal dialogue alias pointing
 at the old group session. The adapter rejects replies through that stale alias;
@@ -65,9 +70,13 @@ Direct cross-party transfers can also leave Native's old actor relevance cache
 out of step with component membership. Remove through the old party actor before
 adding through the new one; atomic transfer remains a separate integration gate.
 
-Native's remote-only listen-server controller lookup, immediate join/start,
-late remote joins, party destruction/travel and rendered split-screen dialogue
-remain acceptance gates. A successful reply test does not certify cinematic
+The chosen departure policy is to continue for remaining members. Per-member
+session, input, camera and player-speaker tag cleanup is still required; ending
+the whole Native party dialogue would violate that policy. Fresh leader lookup
+does not migrate the cached context of an already-running dialogue.
+
+Native's immediate join/start, late remote joins, party destruction/travel and
+rendered split-screen dialogue remain acceptance gates. A successful reply test does not certify cinematic
 shots, voice playback or complete multiplayer story rewards.
 
 Source references: `UNarrativePartyComponent::SelectDialogueOption`,

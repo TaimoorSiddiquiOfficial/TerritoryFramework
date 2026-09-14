@@ -4,7 +4,17 @@
 #include "Tales/TalesComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerState.h"
+#include "UnrealFramework/NarrativePlayerController.h"
 #include "TerritoryPartyReplyProbe.generated.h"
+
+/** Models a remote connection in the native authority-context regression. */
+UCLASS()
+class ATerritoryPartyRemoteControllerProbe : public ANarrativePlayerController
+{
+	GENERATED_BODY()
+public:
+	virtual bool IsLocalController() const override { return false; }
+};
 
 /** Editor-only fixture: holds both NPC lines and the selected reply until explicitly skipped. */
 UCLASS()

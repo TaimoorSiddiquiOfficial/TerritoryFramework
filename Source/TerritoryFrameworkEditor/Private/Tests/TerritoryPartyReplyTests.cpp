@@ -180,4 +180,57 @@ bool FTFTerritoryPartyAutomaticReplies::RunTest(const FString& Parameters)
 	World->DestroyWorld(false);
 	return true;
 }
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryRemotePartyContext,
+	"TerritoryFramework.Tales.PartyReplies.RemoteOnlyPartyUsesNativeLeaderContext",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryRemotePartyContext::RunTest(const FString& Parameters)
+{
+	TGuardValue<bool> Scripts(GAllowActorScriptExecutionInEditor, true);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	auto* Actor = World->SpawnActor<ATerritoryNarrativeParty>();
+	auto* Party = CastChecked<UTerritoryNarrativePartyComponent>(Actor->PartyTalesComponent);
+	TArray<UTerritoryPartyReplyMemberProbe*> Members;
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		auto* PC = NewObject<ATerritoryPartyRemoteControllerProbe>(World->PersistentLevel);
+		PC->SetRole(ROLE_Authority);
+		auto* PS = NewObject<APlayerState>(World->PersistentLevel);
+		PS->SetOwner(PC);
+		PC->PlayerState = PS;
+		auto* Member = NewObject<UTerritoryPartyReplyMemberProbe>(PC);
+		PC->AddInstanceComponent(Member);
+		Member->RegisterComponent();
+		Members.Add(Member);
+		TestTrue(TEXT("Remote member joins through Native"), Party->AddPartyMember(Member));
+	}
+	TestNull(TEXT("Native local-viewer search reproduces the remote-only gap"),
+		Party->UNarrativePartyComponent::GetOwningController());
+	TestTrue(TEXT("Server context comes from its real Native leader"),
+		Party->GetOwningController() == Members[0]->GetOwningController());
+	TestTrue(TEXT("Native begins a dialogue using that context"),
+		Party->BeginDialogue(UTerritoryPartyReplyTestDialogue::StaticClass()));
+	if (UDialogue* Dialogue = Party->GetCurrentDialogue())
+	{
+		TestTrue(TEXT("Native dialogue receives the remote leader controller"),
+			Dialogue->OwningController == Members[0]->GetOwningController());
+	}
+	else AddError(TEXT("Native dialogue was not created"));
+	Party->ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
+	Actor->SetRole(ROLE_SimulatedProxy);
+	TestNull(TEXT("A client cannot use the server fallback to choose a remote viewer"), Party->GetOwningController());
+	Actor->SetRole(ROLE_Authority);
+	Party->RemovePartyMember(Members[0]);
+	TestTrue(TEXT("Fresh lookup follows Native's next leader"),
+		Party->GetOwningController() == Members[1]->GetOwningController());
+	Members[1]->GetOwningController()->SetRole(ROLE_SimulatedProxy);
+	TestNull(TEXT("Unauthoritative controller cannot supply server context"), Party->GetOwningController());
+	Members[1]->GetOwningController()->SetRole(ROLE_Authority);
+	Party->RemovePartyMember(Members[1]);
+	TestNull(TEXT("Empty party has deliberately empty context"), Party->GetOwningController());
+	GEngine->DestroyWorldContext(World);
+	World->DestroyWorld(false);
+	return true;
+}
 #endif

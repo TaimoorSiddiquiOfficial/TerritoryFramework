@@ -664,3 +664,64 @@ players and one process. The live CDO restoration alone did not persist on edito
 exit, so the same saved user-settings section was restored before reopening;
 project defaults were not changed. `EditorReopenedState.json` and the live CDO
 query record the final state. The recorder's Python syntax check also passes.
+
+### Remote-only server context and Character Light Rig research
+
+Evidence: `Saved/Verification/20260914_PartyDepartureLightRig` in TDA.
+
+`UNarrativePartyComponent::GetOwningController` selects a local member on a
+listen server, but returns the Native leader on a dedicated server. With only
+remote members on a listen server, its local search returns null. Native
+`UDialogue::Initialize` caches the resulting controller and pawn, so conditions,
+events and initial player-avatar resolution can receive empty context.
+
+The Territory override first preserves Native's result, then uses its actual
+leader only on authority when the original result is empty. The leader must
+still belong to that party, have authority and have a valid controller in the
+same world. Clients cannot use this fallback to adopt a remote viewer. No global
+first-player lookup, new membership authority, save field, replicated property
+or Blueprint signature was added. Existing Territory party authors need no
+migration; plain Native party classes still require the documented opt-in.
+
+The native behavioral test models remote controllers and proves the original
+empty result, actual dialogue initialization, client rejection, empty-party
+failure, loss of controller authority and fresh lookup after Native changes the
+leader. It does not claim to migrate an already-active dialogue's cached context.
+All six UE 5.8.2/5.7.4 builds pass. Full automation: 330 per engine, zero failed
+or not run (301 success + 29 warning results on 5.8; 299 + 31 on 5.7).
+
+The live listen-server test has a host outside the party and two remote members.
+All seven checks pass: server leader selection, server dialogue context, each
+client's local viewer, shared NPC playback, host exclusion, a real remote leader
+reply RPC and normal group exit. Membership is allowed to settle before Begin;
+the known immediate join/start race remains open. Two direct calls to unreflected
+Native C++ methods and one unsupported Python PlayerId accessor were rejected by
+the tools; the successful run uses the existing native test driver, reflected
+TryExitDialogue and the actual PlayerId property. Failed attempts remain in the
+log and are not counted as executed gameplay.
+
+Character Light Rig research covers 95 valid asset records, eight clean core
+Blueprint compiles, nine clean validation results, runtime graph/dependency
+inspection and actual Native player/Hashir visual components. The pack is not
+automatically connected by inheritance. The runtime actor, editor-only wrapper,
+cached camera, skeleton-name mismatch, delayed visual readiness, element rebuild
+cost and unbound exposure control are documented in
+[Character Light Rig compatibility](CHARACTER_LIGHT_RIG_COMPATIBILITY.md).
+
+User decision: **continue the shared dialogue for remaining members on leave**.
+Member-local session/input/camera and owned-tag cleanup, safe active leader
+departure, atomic transfer and immediate join/start delivery remain required.
+Deinitializing the shared server dialogue to clean up one member is not compatible
+with that decision. Automatic rig playback and rendered lighting acceptance also
+remain open; the inspection is not presented as a finished lighting integration.
+
+UE 5.8 cook/stage and the 60-second Development game server-mode smoke both
+exit 0. This is not a compiled TDAServer target. The cooker explicitly includes
+the runtime light-rig asset; the staged IoStore inventory contains its runtime
+actor and element dependencies, and excludes the pack's editor wrapper, control
+panel and unbound post-process actor. That is dependency/cook evidence, not
+proof of rig playback. Existing project/Native content warnings, including the
+optional intro-cutscene null-player warning, remain tracked. All 741 Narrative
+source files match the installed Marketplace package. HopDistrictTest is reopened
+with PIE stopped, listen-server mode, three players, one process and no dirty
+packages. No user content or Native source was changed for this batch.

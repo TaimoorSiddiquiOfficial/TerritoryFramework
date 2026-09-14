@@ -13,6 +13,9 @@ class TERRITORYFRAMEWORK_API UTerritoryNarrativePartyComponent : public UNarrati
 {
 	GENERATED_BODY()
 public:
+	/** Keep Native's local viewing player. A server with only remote members uses the Native leader. */
+	virtual APlayerController* GetOwningController() const override;
+
 	virtual void OnRegister() override;
 	virtual void OnUnregister() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

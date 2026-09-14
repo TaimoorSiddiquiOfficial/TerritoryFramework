@@ -4,6 +4,19 @@
 #include "GameFramework/PlayerState.h"
 #include "Tales/NarrativeDialogueSettings.h"
 
+APlayerController* UTerritoryNarrativePartyComponent::GetOwningController() const
+{
+	// Native's dedicated-server path already uses its leader. Keep Native's
+	// local viewer on clients and listen hosts; only fill the remote-only gap.
+	if (APlayerController* Controller = Super::GetOwningController()) return Controller;
+	if (!HasAuthority()) return nullptr;
+	UTalesComponent* Leader = GetPartyLeader();
+	if (!IsValid(Leader) || Leader->GetParty() != this || !Leader->HasAuthority()) return nullptr;
+	APlayerController* Controller = Leader->GetOwningController();
+	return IsValid(Controller) && Controller->HasAuthority() && Controller->GetWorld() == GetWorld()
+		? Controller : nullptr;
+}
+
 void UTerritoryNarrativePartyComponent::OnRegister()
 {
 	Super::OnRegister();
