@@ -61,6 +61,32 @@
 		{
 			"Name": "MassAI",
 			"Enabled": true
+		},
+		{
+			"Name": "NProTutorialHints",
+			"Enabled": true,
+			"Optional": true
+		},
+		{
+			"Name": "NP_RPGUITheme",
+			"Enabled": true,
+			"Optional": true
+		},
+		{
+			"Name": "NP_3DItemInspector",
+			"Enabled": true,
+			"Optional": true
+		},
+		{
+			"Name": "NP_UltraDynamicSky",
+			"Enabled": true,
+			"Optional": true
 		}
-	]
+	],
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false
 }
