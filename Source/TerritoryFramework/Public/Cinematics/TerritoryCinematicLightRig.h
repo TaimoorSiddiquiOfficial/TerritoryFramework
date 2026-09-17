@@ -13,6 +13,7 @@ class APlayerController;
 class UCameraComponent;
 class UDialogue;
 class ULevelSequencePlayer;
+class UTerritoryCinematicLightRigAdapter;
 
 /** Implement this on a project-owned child of an optional runtime light rig. */
 UINTERFACE(BlueprintType)
@@ -55,11 +56,13 @@ class TERRITORYFRAMEWORK_API UTerritoryCinematicLightRigProfile : public UDataAs
 	GENERATED_BODY()
 public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="01 Light Rig",
-		meta=(MustImplement="/Script/TerritoryFramework.TerritoryCinematicLightRig",
-		ToolTip="Project runtime rig Blueprint implementing the Territory Cinematic Light Rig interface. Its defaults hold the look made in the optional control panel."))
+		meta=(ToolTip="Runtime actor to create: a whole rig or an individual light element. Whole rigs use the Territory Cinematic Light Rig interface. Original pack elements need the matching Element Adapter below."))
 	TSubclassOf<AActor> RigClass;
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="01 Light Rig",
+		meta=(DisplayName="Element Adapter", ToolTip="Optional setup for a pack's original element classes. Configure its element settings here. Each local cutscene gets its own temporary copy. Leave empty for an existing Territory whole-rig Blueprint."))
+	TObjectPtr<UTerritoryCinematicLightRigAdapter> ElementAdapter;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Character",
-		meta=(ToolTip="Required component names and sockets. Use the same names as the rig's skeleton configuration. At least one mesh is required."))
+		meta=(ToolTip="Required component names and sockets. Match the rig's skeleton configuration. Character lights need at least one mesh. Background-only adapters can leave this empty."))
 	TArray<FTerritoryLightRigMeshRequirement> MeshRequirements;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="02 Character", meta=(ClampMin="0.1", ClampMax="60.0",
 		ToolTip="How long to wait for a streamed character visual and its bones. A failed rig is skipped for this subject, with one warning."))
@@ -113,6 +116,7 @@ public:
 
 private:
 	friend class FTFTerritoryLightRigLifecycle;
+	friend class FTFTerritoryLightElementAdapterTest;
 	static bool CanUseLights(const APlayerController* Viewer, const UWorld* World);
 	static UTerritoryCinematicLightRigComponent* FindOrCreate(ALevelSequenceActor* Actor, APlayerController* Viewer);
 	void RefreshRig(float DeltaTime);
@@ -122,6 +126,7 @@ private:
 	UFUNCTION() void PlaybackEnded();
 	UPROPERTY(Transient) TObjectPtr<UTerritoryCinematicLightRigProfile> ActiveProfile;
 	UPROPERTY(Transient) TObjectPtr<AActor> SpawnedRig;
+	UPROPERTY(Transient) TObjectPtr<UTerritoryCinematicLightRigAdapter> RuntimeAdapter;
 	TWeakObjectPtr<APlayerController> LocalViewer;
 	TWeakObjectPtr<UDialogue> SourceDialogue;
 	TWeakObjectPtr<ULevelSequencePlayer> SequencePlayer;

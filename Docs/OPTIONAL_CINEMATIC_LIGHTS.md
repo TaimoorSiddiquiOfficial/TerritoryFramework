@@ -32,6 +32,8 @@ Use a prepared preview character with the component and bone names selected in t
 
 ## Adapter contract
 
+To select the original `BP_LightRigElement` or `BP_LightRig_Element_Background` directly in Rig Class, configure the matching **Element Adapter**. See [direct element profiles](DIRECT_LIGHT_ELEMENT_PROFILES.md) for the two ready-to-use TDA examples and background-light restoration rules. The actor-interface workflow below remains valid for whole rigs.
+
 Make a project child of the pack's runtime actor and implement **Territory Cinematic Light Rig**:
 
 - **Prepare Light Rig** assigns the provided visual and camera before construction/BeginPlay. It returns true only when those inputs can be used.

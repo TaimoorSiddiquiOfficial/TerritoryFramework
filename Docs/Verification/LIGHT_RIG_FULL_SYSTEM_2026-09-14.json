@@ -1,0 +1,149 @@
+{
+  "date": "2026-09-14",
+  "scope": "TDA optional Character_LightRig complete Core/Data/UI audit and two editor-panel repairs",
+  "environment": {
+    "engine": "UE 5.8.2",
+    "narrative_pro": "2.4.2",
+    "map": "HopDistrictTest",
+    "root_branch": "hoptrendy/territory-complete-audit",
+    "root_head_before": "4f9b88f",
+    "plugin_head_before": "ac56639"
+  },
+  "source_audit": {
+    "pack_assets": 51,
+    "pack_blueprints": 15,
+    "pack_graphs": 81,
+    "pack_nodes_before_panel_repairs": 2236,
+    "project_blueprints": 3,
+    "full_feature_render_certification": false
+  },
+  "confirmed_chain": [
+    "DA_NarrativeCharacterLights_UDS.RigClass",
+    "BP_TerritoryUDSCharacterLightRig",
+    "BP_TerritoryCharacterLightRig",
+    "BP_LightRig_Actor_Base.SyncPresetElements",
+    "ChildActorComponent",
+    "BP_LightRigElement"
+  ],
+  "repairs": [
+    {
+      "id": "PP_TABLE_REFRESH",
+      "asset": "/Game/Character_LightRig/Blueprints/EUW_LightRig_ControlPanel",
+      "status": "fixed_saved",
+      "before": "1/2/0-row fixtures all displayed five old PP rows.",
+      "after": "1/2/0 rows display exactly, leaving light-preset table unchanged."
+    },
+    {
+      "id": "SKELETON_TABLE_REFRESH",
+      "asset": "/Game/Character_LightRig/Blueprints/EUW_LightRig_ControlPanel",
+      "status": "fixed_saved",
+      "before": "Both unselected and selected custom-rig paths displayed three default rows with a foreign selected label.",
+      "after": "Both paths display the one custom row and use the correct table."
+    }
+  ],
+  "verification": {
+    "asset_validation": {
+      "passed": true,
+      "checked": 51,
+      "valid": 51,
+      "invalid": 0,
+      "warnings": 0
+    },
+    "compile": {
+      "passed": true,
+      "blueprints": 18,
+      "errors": 0,
+      "warnings": 0,
+      "final_modified_original_and_project_child_recompiled": true
+    },
+    "panel_behaviour": {
+      "passed": true,
+      "cases": 5
+    },
+    "runtime": {
+      "passed": true,
+      "factory": "ANarrativeLevelSequenceActor",
+      "subject": "BP_Hashir_C_0",
+      "day": {
+        "row": "Day_Studio",
+        "original_element_children": 4,
+        "actual_component_records_passed": 4
+      },
+      "night": {
+        "row": "Night_Moonlight",
+        "original_element_children": 5,
+        "actual_component_records_passed": 5
+      },
+      "same_root": true,
+      "parent_links_match": true,
+      "after_native_stop": {
+        "roots": 0,
+        "elements": 0
+      }
+    },
+    "editor_cleanup": {
+      "passed": true,
+      "pie_stopped": true,
+      "test_tab_closed": true,
+      "test_rigs": 0,
+      "dirty_packages": 0
+    },
+    "cpp_build": "not rerun: no C++ changed",
+    "automation_suite": "not rerun: editor Blueprint-only fixes; focused behavioral tests above",
+    "multiplayer": "not rerun in this batch",
+    "campaign_save_load": "not run in this batch; no durable state changed",
+    "world_partition": "not run",
+    "cook_package": "not rerun in this batch"
+  },
+  "remaining": [
+    {
+      "id": "CAMERA_PP",
+      "status": "not_integrated",
+      "detail": "Optional S_PostProcess rows need camera-local blending, ownership and restoration through Native camera lifecycle."
+    },
+    {
+      "id": "BACKGROUND_SCOPE",
+      "status": "source_findings_not_runtime_certified",
+      "detail": "Background elements cache tagged ALight actors on Setup; no original-value restoration or ongoing streamed-actor reconciliation. Element enabled/global ray-tracing parity is incomplete."
+    },
+    {
+      "id": "PER_SHOT_AUTHORING",
+      "status": "open",
+      "detail": "Panel copy changes shared RigClass defaults, not selected day/night table rows. Add explicit typed row authoring and better picker filtering."
+    },
+    {
+      "id": "EDITOR_FAILURE_GUARDS",
+      "status": "source_findings_require_fixtures",
+      "detail": "Spawn helper first-row and element index access need empty/invalid input tests before repair."
+    },
+    {
+      "id": "UNCONNECTED_HELPERS",
+      "status": "documented_not_deleted",
+      "assets": [
+        "BPI_LightRig",
+        "DT_LightElementPresets_Default",
+        "DT_LightElementPresets_Starter",
+        "WBP_ConfirmDialogue"
+      ],
+      "detail": "No current AssetRegistry referencers; not proof against external dynamic loading."
+    },
+    {
+      "id": "RENDER_ACCEPTANCE",
+      "status": "open",
+      "detail": "AlMalik interior/exterior exposure, Lumen, groom quality, fog and GPU cost remain separate."
+    }
+  ],
+  "delivery": {
+    "vendor_binary_ignored_by_git": true,
+    "vendor_binary_redistributed": false,
+    "narrative_source_modified": false,
+    "core_api_migration": false,
+    "save_migration": false,
+    "network_changes": false,
+    "patch_manifest": "Scripts/Territory/light_rig_panel_patch.json",
+    "regressions": "Scripts/Territory/verify_light_rig_panel.py",
+    "local_evidence": "Saved/Verification/20260914_LightRigFullSystem",
+    "original_sha256": "5DFC221C80B53711CEF8DDFB2645984A2F7CDFC50E0C26DC6392FB08319A10CB",
+    "repaired_sha256": "E0B8CEB7BD51D9D0175AAEE6E7D644E709AA78207140E265D14D5B77133F74D6"
+  }
+}

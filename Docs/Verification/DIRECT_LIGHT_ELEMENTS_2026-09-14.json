@@ -1,0 +1,249 @@
+{
+  "date": "2026-09-14",
+  "scope": "Direct original Character Light Rig element support in Territory cinematic profiles",
+  "environment": {
+    "branch": "hoptrendy/territory-complete-audit",
+    "narrativePro": "2.4.2",
+    "engine": "5.8.2",
+    "map": "HopDistrictTest",
+    "nativeCompatibilityEngine": "5.7"
+  },
+  "authority": "Narrative sequence playback and camera; transient local Territory adapter only",
+  "originalElementClasses": [
+    "/Game/Character_LightRig/Blueprints/Core/BP_LightRigElement",
+    "/Game/Character_LightRig/Blueprints/Core/BP_LightRig_Element_Background"
+  ],
+  "publicPackAPI": [
+    "BPI_LightRigElement.Setup",
+    "BPI_LightRigElement.UpdateGlobals",
+    "BPI_LightRigElement.UpdateLight"
+  ],
+  "saveLoad": {
+    "campaignRecordAdded": false,
+    "runtimeReferencesTransient": true,
+    "profilesVerifiedAfterEditorRestart": true,
+    "configurationSerialized": true
+  },
+  "replication": {
+    "twoClientsVerified": true,
+    "newRPCs": 0,
+    "dedicatedPIEServerExcluded": true,
+    "actorsReplicated": false,
+    "splitScreenSkipped": true
+  },
+  "builds": {
+    "runtime": [
+      {
+        "engine": "58",
+        "target": "TDA",
+        "configuration": "Development",
+        "exitCode": 0
+      },
+      {
+        "engine": "58",
+        "target": "TDA",
+        "configuration": "Shipping",
+        "exitCode": 0
+      },
+      {
+        "engine": "57",
+        "target": "UnrealGame",
+        "configuration": "Development",
+        "exitCode": 0
+      },
+      {
+        "engine": "57",
+        "target": "UnrealGame",
+        "configuration": "Shipping",
+        "exitCode": 0
+      }
+    ],
+    "editor": [
+      {
+        "version": "58",
+        "buildExit": 0
+      },
+      {
+        "version": "57",
+        "buildExit": 0
+      }
+    ]
+  },
+  "tests": [
+    {
+      "engine": "58",
+      "warningsInResults": 35,
+      "directElementWarnings": 0,
+      "failed": 0,
+      "directElementState": "Success",
+      "passed": 340,
+      "notRun": 0
+    },
+    {
+      "engine": "57",
+      "warningsInResults": 37,
+      "directElementWarnings": 0,
+      "failed": 0,
+      "directElementState": "Success",
+      "passed": 340,
+      "notRun": 0
+    }
+  ],
+  "profiles": {
+    "profiles": [
+      {
+        "profile": "/Game/HOPTRENDY/Cinematics/LightRig/DA_NarrativeSingleCharacterLight",
+        "class": "/Game/Character_LightRig/Blueprints/Core/BP_LightRigElement",
+        "adapter": "/Game/HOPTRENDY/Cinematics/LightRig/BP_TerritoryLightElementAdapter",
+        "owns_configuration": true,
+        "runtime_references_empty": true
+      },
+      {
+        "profile": "/Game/HOPTRENDY/Cinematics/LightRig/DA_NarrativeBackgroundLights",
+        "class": "/Game/Character_LightRig/Blueprints/Core/BP_LightRig_Element_Background",
+        "adapter": "/Game/HOPTRENDY/Cinematics/LightRig/BP_TerritoryBackgroundLightElementAdapter",
+        "owns_configuration": true,
+        "runtime_references_empty": true
+      }
+    ],
+    "validation": {
+      "status": "completed",
+      "passed": true,
+      "checked": 4,
+      "valid": 4,
+      "invalid": 0,
+      "warnings": 0
+    }
+  },
+  "liveChecks": {
+    "allActorsRemovedOnStop": true,
+    "exactOriginalClasses": true,
+    "disabledCharacterHidden": true,
+    "globalRayTracingSwitchRespected": true,
+    "disabledBackgroundLeavesSceneAlone": true,
+    "allSixScenePropertiesRestored": true,
+    "backgroundMeshlessSubject": true,
+    "clientStopIsolation": true,
+    "lateSpawnDiscovered": true,
+    "destroyedLightExcluded": true,
+    "cameraReusesActor": true,
+    "evidence": [
+      "CharacterActive",
+      "CharacterCameraCut",
+      "BackgroundBaseline",
+      "BackgroundActiveFinal",
+      "BackgroundLateSpawnFinal",
+      "BackgroundDestroyedLight",
+      "BackgroundRestoredFinal",
+      "DisabledCharacter",
+      "DisabledBackground",
+      "BackgroundRayDisabled",
+      "BackgroundControlsRestored",
+      "DedicatedTwoClientsCharacter",
+      "DedicatedClientCameraCut",
+      "DedicatedTwoClientsBackground",
+      "DedicatedOneClientStopped",
+      "DedicatedAllStopped"
+    ],
+    "characterComponentChecksPerActor": 128
+  },
+  "package": {
+    "mode": "Development Game server mode; not compiled TDAServer",
+    "durationSeconds": 60,
+    "cookExit": 0,
+    "smokeExit": 0
+  },
+  "packageDependencies": {
+    "DA_NarrativeSingleCharacterLight": true,
+    "DA_NarrativeBackgroundLights": true,
+    "BP_TerritoryLightElementAdapter": true,
+    "BP_TerritoryBackgroundLightElementAdapter": true,
+    "BP_LightRigElement": true,
+    "BP_LightRig_Element_Background": true,
+    "editorPanelsAbsent": true,
+    "editorWrapperAbsent": true,
+    "testAssetsAbsent": true,
+    "mapAuthoredPostProcessIncluded": true,
+    "directProfilesDoNotRequirePostProcess": true
+  },
+  "postProcessDependencyOrigin": {
+    "/Game/HOPTRENDY/Cinematics/LightRig/DA_NarrativeSingleCharacterLight": {
+      "hard_reaches_postprocess": false,
+      "game_packages_checked": 15
+    },
+    "/Game/HOPTRENDY/Cinematics/LightRig/DA_NarrativeBackgroundLights": {
+      "hard_reaches_postprocess": false,
+      "game_packages_checked": 16
+    },
+    "map_actors": [
+      {
+        "name": "BP_PostProcess_C_2",
+        "label": "BP_PostProcess"
+      }
+    ]
+  },
+  "narrativeSourceIntegrity": {
+    "checked": 741,
+    "mismatches": [],
+    "passed": true
+  },
+  "warnings": [
+    "Existing warning logs remain in the full automation suites. The new native regression has zero warnings.",
+    "Headless packaged smoke retains existing project canvas and Native CutscenePlayerActor warnings."
+  ],
+  "limits": [
+    "UE 5.8 project assets are not certified loadable in UE 5.7; reauthor version-compatible examples.",
+    "Packaged smoke uses a Development game in server mode, not compiled TDAServer or rendered authored dialogue.",
+    "Two-client background test uses empty target sets; scene-light mutations and restoration were checked in the single-world fixture.",
+    "Real AlMalik World Partition travel, HDR/interior appearance and GPU cost remain open.",
+    "Direct profiles have fixed element settings; UDS day/night and the full editor control panel remain on whole-rig profiles.",
+    "Only loaded ALight actors with matching Actor Tags are selected; independent external writes are not merged."
+  ],
+  "proofDirectory": "Saved/Verification/20260914_DirectLightElements",
+  "files": [
+    {
+      "sha256": "28165a4268e59a2fe4ddbe1e49ffb76336a19b471fd821139854850a8b028d24",
+      "path": "Plugins/TerritoryFramework/Source/TerritoryFramework/Public/Cinematics/TerritoryCinematicLightRig.h"
+    },
+    {
+      "sha256": "2922cc50ad6cf3347b515ee3095d4e32ab9c34240503ed14a50ba11fda88b4db",
+      "path": "Plugins/TerritoryFramework/Source/TerritoryFramework/Private/Cinematics/TerritoryCinematicLightRig.cpp"
+    },
+    {
+      "sha256": "16f9e27b2a5e49e1df9fed4d68f1b2ed6dbf7f7cd49e16cd9aaf27aff28bb6ac",
+      "path": "Plugins/TerritoryFramework/Source/TerritoryFramework/Public/Cinematics/TerritoryCinematicLightRigAdapter.h"
+    },
+    {
+      "sha256": "34b007c42095e29d8d017a871139b8e1685236f78e31c9675208465a3f7f89eb",
+      "path": "Plugins/TerritoryFramework/Source/TerritoryFramework/Private/Cinematics/TerritoryCinematicLightRigAdapter.cpp"
+    },
+    {
+      "sha256": "761dbdb525aecfd0d5beae10b52bad88a528d091d3c7802cf5be6acfcbe4ded2",
+      "path": "Plugins/TerritoryFramework/Source/TerritoryFrameworkEditor/Private/Tests/TerritoryLightElementProbe.h"
+    },
+    {
+      "sha256": "46e2a6613d24fee99ef4d3979c4fa9898b396e0ae8e93941a5dd5b74be6cbcd1",
+      "path": "Plugins/TerritoryFramework/Source/TerritoryFrameworkEditor/Private/Tests/TerritoryLightElementAdapterTests.cpp"
+    },
+    {
+      "sha256": "7bea7259cc18ed720baccabcb80d3e4b25338b207add913b60dfae7271680ba5",
+      "path": "Content/HOPTRENDY/Cinematics/LightRig/BP_TerritoryLightElementAdapter.uasset"
+    },
+    {
+      "sha256": "8e1137e4b170c3087a7b0333e22aafbe80f1a56252d1ed140d040205b3112be3",
+      "path": "Content/HOPTRENDY/Cinematics/LightRig/BP_TerritoryBackgroundLightElementAdapter.uasset"
+    },
+    {
+      "sha256": "6c83a5737b8a65a078257a3bce7d3c62fcf1bc18caaccea7f6c4491c075c3c4d",
+      "path": "Content/HOPTRENDY/Cinematics/LightRig/DA_NarrativeSingleCharacterLight.uasset"
+    },
+    {
+      "sha256": "9857064ea86c188cccfec748a03d7533cae22012e63ad07b8a70cb9d994f2a7b",
+      "path": "Content/HOPTRENDY/Cinematics/LightRig/DA_NarrativeBackgroundLights.uasset"
+    },
+    {
+      "sha256": "05beeb035c175ea5ee72de08e8628281e5b1c3c2246ebb9ca84cca07cf4ffde6",
+      "path": "Scripts/Territory/verify_direct_light_elements.py"
+    }
+  ]
+}

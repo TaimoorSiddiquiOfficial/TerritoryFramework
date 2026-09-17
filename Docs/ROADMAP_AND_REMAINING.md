@@ -6,6 +6,31 @@
 
 ## Current remaining work
 
+The [direct light element batch](DIRECT_LIGHT_ELEMENT_PROFILES.md) adds matching
+instanced adapters for original `BP_LightRigElement` and
+`BP_LightRig_Element_Background` selections in a cinematic profile. The background
+path reserves and restores scene lights, discovers loaded lights, rejects
+overlapping owners and respects enable/ray-tracing controls. Whole-rig and UDS
+profiles keep their existing workflow. See its verification record for measured
+coverage; rendered AlMalik/World Partition and authored packaged playback remain open.
+
+The latest [complete Character LightRig audit](CHARACTER_LIGHT_RIG_FULL_SYSTEM_AUDIT.md)
+confirms that the UDS rig already spawns the original BP_LightRigElement children.
+All 51 pack assets validate and 18 pack/project Blueprints compile without warnings.
+Two panel bugs are fixed: PP table changes now refresh the PP list, and the skeleton
+dropdown uses the selected rig's table. All five panel cases pass. Fresh Native
+cutscene tests verify four day/five night element children and complete cleanup.
+The next LightRig batch is per-shot row authoring and optional camera-local
+post-process integration. Direct background profiles now have scoped restoration
+and overlapping-session guards; real World Partition travel remains open. Empty-table spawn/index guards
+and the unconnected individual-element libraries remain explicit follow-ups.
+This source audit does not certify complete pack feature integration or HDR quality.
+
+The subsequent [LightRig element repair](LIGHT_RIG_ELEMENT_PRESET_REPAIR.md) fixes
+two Rect-to-Point editor visibility connections and restores valid UDS preset
+selections plus a nonempty fallback. Its 71 component cases and focused Narrative
+PIE checks pass. This does not close the broader rendering and release gates below.
+
 The newest batch adds optional UDS day/night selection to the project light rig.
 It reads the rendered UDS sun state while Narrative keeps clock authority, and
 applies an exact full-preset row only when the selected table/row changes.

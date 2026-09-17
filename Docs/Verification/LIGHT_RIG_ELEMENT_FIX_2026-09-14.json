@@ -1,0 +1,64 @@
+{
+  "date": "2026-09-14",
+  "scope": "Local Character LightRig preset application repair",
+  "asset": "/Game/Character_LightRig/Blueprints/Core/BP_LightRigElement",
+  "before_sha256": "4FE00535F8C8D053BCF1504624600E4D32F733189A082A76D1F25906F92D024D",
+  "after_sha256": "B81F49D74B3DE80FD0940B1E1283B79FA5E754DB882A6D97254A642C7B55AD70",
+  "confirmed_defects": [
+    "Rect main/wrap visibility flags remained enabled after Rect-to-Point switch in editor preview.",
+    "UDS day/night selected S_PostProcess Cinematic row; fallback had no elements."
+  ],
+  "fixes": [
+    "Two missing SetVisibility(false) Rect targets connected.",
+    "Day_Studio / Night_Moonlight full-light rows restored; nonempty Studio fallback restored; 0.35 fallback multiplier preserved."
+  ],
+  "verification": {
+    "component_cases": 71,
+    "component_cases_passed": 71,
+    "before_failures": "Two Rect-to-Point repetitions, main and wrap visibility flags",
+    "focused_asset_validation": {
+      "checked": 5,
+      "valid": 5,
+      "warnings": 0
+    },
+    "preset_asset_validation": {
+      "checked": 20,
+      "valid": 20,
+      "warnings": 0
+    },
+    "native_lifecycle_automation": {
+      "passed": 1,
+      "failed": 0,
+      "warnings": 0
+    },
+    "blueprints": "Element and UDS rig compile without errors/warnings",
+    "pie": [
+      "Day and night components match selected element and root globals",
+      "Camera cut preserves root/children and updates camera",
+      "Wrong post-process table retains last look",
+      "Valid selections recover",
+      "Hashir Native dialogue components match",
+      "Missing-sky fresh dialogue produces four fallback elements at 0.35",
+      "Dialogue exit removes all rigs and elements"
+    ],
+    "end_state": {
+      "pie": false,
+      "authored_sky_count": 1,
+      "dirty_packages": 0
+    }
+  },
+  "delivery": {
+    "third_party_binary": "Saved locally; ignored by Git. Reapply using project patch manifest after checking graph contract.",
+    "manifest": "Scripts/Territory/light_rig_element_visibility_patch.json",
+    "narrative_pro_changes": false,
+    "replication_or_save_format_changes": false
+  },
+  "not_rerun": [
+    "Full engine builds",
+    "Dedicated/two-client tests",
+    "Full campaign save/load",
+    "World Partition travel",
+    "Cook/package smoke"
+  ],
+  "rendering_limits": "Component correctness verified; global exposure/interior/groom quality remains separate."
+}

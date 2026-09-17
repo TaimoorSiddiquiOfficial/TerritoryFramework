@@ -1,4 +1,5 @@
 #include "Cinematics/TerritoryCinematicLightRig.h"
+#include "Cinematics/TerritoryCinematicLightRigAdapter.h"
 
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -24,9 +25,15 @@
 bool UTerritoryCinematicLightRigProfile::HasValidConfiguration(FString& Reason) const
 {
 	if (!RigClass || RigClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated)
-		|| !RigClass->ImplementsInterface(UTerritoryCinematicLightRig::StaticClass()))
+		|| (ElementAdapter ? !ElementAdapter->SupportsRigClass(RigClass)
+			: !RigClass->ImplementsInterface(UTerritoryCinematicLightRig::StaticClass())))
 	{
-		Reason = TEXT("Select a runtime rig Blueprint implementing Territory Cinematic Light Rig.");
+		Reason = TEXT("Select a whole rig implementing Territory Cinematic Light Rig, or select a matching Element Adapter for the original pack element class.");
+		return false;
+	}
+	if (ElementAdapter && ElementAdapter->GetClass()->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated))
+	{
+		Reason = TEXT("Select a concrete, supported Element Adapter.");
 		return false;
 	}
 	const AActor* Defaults = RigClass->GetDefaultObject<AActor>();
@@ -35,7 +42,8 @@ bool UTerritoryCinematicLightRigProfile::HasValidConfiguration(FString& Reason) 
 		Reason = TEXT("The optional rig must be a non-replicated runtime actor.");
 		return false;
 	}
-	if (MeshRequirements.IsEmpty() || !FMath::IsFinite(ReadyTimeout) || ReadyTimeout < 0.1f || ReadyTimeout > 60.f)
+	if ((MeshRequirements.IsEmpty() && (!ElementAdapter || ElementAdapter->bRequiresCharacterMeshes))
+		|| !FMath::IsFinite(ReadyTimeout) || ReadyTimeout < 0.1f || ReadyTimeout > 60.f)
 	{
 		Reason = TEXT("Add the required meshes and use a ready timeout between 0.1 and 60 seconds.");
 		return false;
@@ -57,7 +65,9 @@ bool UTerritoryCinematicLightRigProfile::HasValidConfiguration(FString& Reason) 
 
 bool UTerritoryCinematicLightRigProfile::IsVisualReady(AActor* Visual) const
 {
-	if (!IsValid(Visual) || MeshRequirements.IsEmpty()) return false;
+	if (!IsValid(Visual)) return false;
+	if (ElementAdapter && !ElementAdapter->bRequiresCharacterMeshes) return true;
+	if (MeshRequirements.IsEmpty()) return false;
 	if (const auto* NativeVisual = Cast<ANarrativeCharacterVisual>(Visual))
 		if (!NativeVisual->bBaseAppearanceLoaded) return false;
 	TInlineComponentArray<USkeletalMeshComponent*> Meshes(Visual);
@@ -223,7 +233,8 @@ void UTerritoryCinematicLightRigComponent::RefreshRig(float DeltaTime)
 	if (Viewer->GetViewTarget() != Camera && (!Viewer->PlayerCameraManager
 		|| Viewer->PlayerCameraManager->PendingViewTarget.Target != Camera)) { ClearRig(); return; }
 	AActor* Visual = SubjectActor.Get();
-	if (auto* Character = Cast<ANarrativeCharacter>(Visual)) Visual = Character->GetCharacterVisual();
+	if (!ActiveProfile->ElementAdapter || ActiveProfile->ElementAdapter->bRequiresCharacterMeshes)
+		if (auto* Character = Cast<ANarrativeCharacter>(Visual)) Visual = Character->GetCharacterVisual();
 	if (SpawnedRig && BoundVisual != Visual) ClearRig();
 	if (!ActiveProfile->IsVisualReady(Visual))
 	{
@@ -232,14 +243,19 @@ void UTerritoryCinematicLightRigComponent::RefreshRig(float DeltaTime)
 		if (WaitingTime >= ActiveProfile->ReadyTimeout) Fail(TEXT("The character visual or required bones did not become ready."));
 		return;
 	}
+	if (!IsValid(SpawnedRig) && RuntimeAdapter) ClearRig();
 	if (IsValid(SpawnedRig))
 	{
+		UTerritoryCinematicLightRigAdapter* Adapter = RuntimeAdapter;
+		if (!IsValid(Adapter)) { Fail(TEXT("The runtime light adapter was lost.")); return; }
 		if (BoundCamera != Camera)
 		{
-			if (!ITerritoryCinematicLightRig::Execute_SetLightRigCamera(SpawnedRig, Camera))
+			if (!Adapter->ChangeCamera(Camera) || RuntimeAdapter != Adapter || !IsValid(SpawnedRig))
 			{ Fail(TEXT("The runtime rig could not update its camera.")); return; }
 			BoundCamera = Camera;
 		}
+		if (!Adapter->UpdateRig(DeltaTime) || RuntimeAdapter != Adapter || !IsValid(SpawnedRig))
+			Fail(Adapter->FailureReason.IsEmpty() ? TEXT("The runtime element could not update its lights.") : Adapter->FailureReason);
 		return;
 	}
 	FActorSpawnParameters Params;
@@ -249,11 +265,20 @@ void UTerritoryCinematicLightRigComponent::RefreshRig(float DeltaTime)
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	SpawnedRig = GetWorld()->SpawnActor<AActor>(ActiveProfile->RigClass, FTransform::Identity, Params);
 	if (!IsValid(SpawnedRig)) { Fail(TEXT("The runtime rig could not be spawned.")); return; }
-	if (!ITerritoryCinematicLightRig::Execute_PrepareLightRig(SpawnedRig, Visual, Camera) || !IsValid(SpawnedRig))
-	{ Fail(TEXT("The runtime rig rejected its visual or camera.")); return; }
+	UTerritoryCinematicLightRigAdapter* Adapter = ActiveProfile->ElementAdapter
+		? DuplicateObject<UTerritoryCinematicLightRigAdapter>(ActiveProfile->ElementAdapter, this)
+		: NewObject<UTerritoryCinematicLightRigAdapter>(this);
+	RuntimeAdapter = Adapter;
+	Adapter->ClearFlags(RF_ArchetypeObject | RF_Public | RF_Standalone);
+	Adapter->SetFlags(RF_Transient);
+	SetComponentTickInterval(Adapter->bUpdateEveryFrame ? 0.f : 0.1f);
+	if (!Adapter->Initialize(SpawnedRig, Visual, Camera) || RuntimeAdapter != Adapter || !IsValid(SpawnedRig))
+	{ Fail(Adapter->FailureReason.IsEmpty() ? TEXT("The runtime rig rejected its visual or camera.") : Adapter->FailureReason); return; }
 	SpawnedRig->FinishSpawning(FTransform::Identity);
-	if (!IsValid(SpawnedRig) || !ITerritoryCinematicLightRig::Execute_IsLightRigReady(SpawnedRig))
-	{ Fail(TEXT("The runtime rig did not initialize its lights.")); return; }
+	if (!IsValid(SpawnedRig) || RuntimeAdapter != Adapter || !Adapter->ActivateRig()
+		|| RuntimeAdapter != Adapter || !IsValid(SpawnedRig) || !Adapter->IsRigReady()
+		|| RuntimeAdapter != Adapter || !IsValid(SpawnedRig))
+	{ Fail(Adapter->FailureReason.IsEmpty() ? TEXT("The runtime rig did not initialize its lights.") : Adapter->FailureReason); return; }
 	BoundVisual = Visual;
 	BoundCamera = Camera;
 	WaitingTime = 0.f;
@@ -271,10 +296,14 @@ void UTerritoryCinematicLightRigComponent::PlaybackEnded()
 void UTerritoryCinematicLightRigComponent::ClearRig()
 {
 	AActor* ReleasedRig = SpawnedRig;
+	UTerritoryCinematicLightRigAdapter* ReleasedAdapter = RuntimeAdapter;
 	SpawnedRig = nullptr;
+	RuntimeAdapter = nullptr;
 	BoundVisual.Reset();
 	BoundCamera.Reset();
+	if (IsValid(ReleasedAdapter)) ReleasedAdapter->Shutdown();
 	if (IsValid(ReleasedRig)) ReleasedRig->Destroy(); // ChildActorComponents own the individual lights.
+	SetComponentTickInterval(0.1f);
 }
 
 void UTerritoryCinematicLightRigComponent::Fail(const FString& Reason)
