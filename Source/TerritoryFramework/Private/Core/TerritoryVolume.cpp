@@ -1847,6 +1847,11 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	}
 
 	// ─── Guard lifecycle (BEFORE BP virtuals so BP sees final guard state) ───
+	// This switch owns owner-change and claim/contest garrison churn only. There is
+	// no Locked case by design: a Locked control state cannot reach here (rejected by
+	// CommitOwnershipData above), and lock/unlock garrison changes are applied by
+	// ReconcileAvailabilityDependentSystems() — DespawnGuards() on lock, spawn to
+	// desired count on unlock. See TerritoryGuardLifecyclePolicy.h.
 	switch (TerritoryGuardLifecyclePolicy::DetermineAction(
 		OldOwner, NewOwner, OldState, NewState))
 	{
@@ -1854,16 +1859,6 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		DespawnGuards();
 		if (NewOwner.IsValid() && ResolveGuardDefinition(NewOwner)
 			&& NewData.DesiredGuardCount > 0)
-		{
-			SpawnGuards();
-		}
-		break;
-	case ETerritoryGuardLifecycleAction::Retire:
-		DespawnGuards();
-		break;
-	case ETerritoryGuardLifecycleAction::Restore:
-		if (ResolveGuardDefinition(OwnershipData.OwningFaction)
-			&& NewData.DesiredGuardCount > 0 && GetSpawnedGuardCount() == 0)
 		{
 			SpawnGuards();
 		}

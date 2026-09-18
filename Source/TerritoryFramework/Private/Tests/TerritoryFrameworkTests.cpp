@@ -1529,14 +1529,19 @@ bool FTFBehavior_GuardContestLifecyclePolicy::RunTest(const FString& Parameters)
 		TerritoryGuardLifecyclePolicy::DetermineAction(
 			Heroes, Heroes, ETerritoryState::Contested, ETerritoryState::Claimed),
 		ETerritoryGuardLifecycleAction::Preserve);
-	TestEqual(TEXT("Locking retires the current garrison"),
+	// The Retire/Restore branches were deleted: no transition reaches them, because
+	// CommitOwnershipData rejects a Locked control state. Lock/unlock garrison churn
+	// belongs to ReconcileAvailabilityDependentSystems(). These two assertions pin the
+	// surviving behaviour so a reintroduced Locked branch fails here instead of
+	// silently regrowing.
+	TestEqual(TEXT("Locking no longer retires the garrison through this policy"),
 		TerritoryGuardLifecyclePolicy::DetermineAction(
 			Heroes, Heroes, ETerritoryState::Claimed, ETerritoryState::Locked),
-		ETerritoryGuardLifecycleAction::Retire);
-	TestEqual(TEXT("Unlocking may restore configured staffing"),
+		ETerritoryGuardLifecycleAction::Preserve);
+	TestEqual(TEXT("Unlocking no longer restores staffing through this policy"),
 		TerritoryGuardLifecyclePolicy::DetermineAction(
 			Heroes, Heroes, ETerritoryState::Locked, ETerritoryState::Claimed),
-		ETerritoryGuardLifecycleAction::Restore);
+		ETerritoryGuardLifecycleAction::Preserve);
 	TestEqual(TEXT("A real owner change replaces the old faction garrison"),
 		TerritoryGuardLifecyclePolicy::DetermineAction(
 			Heroes, Bandits, ETerritoryState::Claimed, ETerritoryState::Claimed),

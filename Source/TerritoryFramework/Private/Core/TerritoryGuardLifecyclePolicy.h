@@ -7,8 +7,6 @@
 enum class ETerritoryGuardLifecycleAction : uint8
 {
 	Preserve,
-	Retire,
-	Restore,
 	ReplaceForNewOwner
 };
 
@@ -28,17 +26,13 @@ namespace TerritoryGuardLifecyclePolicy
 			return ETerritoryGuardLifecycleAction::Preserve;
 		}
 
-		if (NewState == ETerritoryState::Locked)
-		{
-			return ETerritoryGuardLifecycleAction::Retire;
-		}
-
-		if (OldState == ETerritoryState::Locked
-			&& NewState == ETerritoryState::Claimed
-			&& NewOwner.IsValid())
-		{
-			return ETerritoryGuardLifecycleAction::Restore;
-		}
+		// Only two actions exist, deliberately. There is no Locked branch here:
+		// ATerritoryVolume::CommitOwnershipData rejects a Locked control state, and
+		// locking writes ETerritoryAvailability instead, so no transition can reach
+		// one. Garrison changes on lock/unlock belong to
+		// ATerritoryVolume::ReconcileAvailabilityDependentSystems(), which calls
+		// DespawnGuards() when availability becomes Locked and re-spawns to the
+		// desired count on the next unlock. Do not reintroduce a Locked branch.
 
 		// Claim/contest transitions preserve the exact surviving garrison. Capture
 		// pressure must never despawn defenders or grant free replacements.
