@@ -62,7 +62,7 @@ public:
 	 * Diagnostic scheduling path used by Narrative Events and Blueprint tools. It runs
 	 * the same authoritative admission as Schedule Counter Attack / Story Pursuit and
 	 * explains the first rejected rule instead of returning an unexplained false.
-	 * Story Options are ignored for Strategic Counterattack.
+	 * Strategic Counterattack keeps only ScenarioID from Story Options; pursuit overrides are ignored.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category="Territory|Counter Attack|Diagnostics",
@@ -483,7 +483,7 @@ private:
 		const FTerritoryStoryPursuitOptions* StoryOptions = nullptr,
 		FText* OutFailureReason = nullptr,
 		bool bQuestOverrideAuthorized = false,
-		bool bStartImmediately = false);
+		bool bStartImmediately = false, FName AuthoredScenarioID = NAME_None);
 	bool StartAssaultImmediately(FTerritoryAssaultRecord& Assault,
 		ATerritoryVolume* Territory, FText* OutFailureReason = nullptr);
 	bool HasPendingVehicleIngress(const FGuid& AssaultID) const;

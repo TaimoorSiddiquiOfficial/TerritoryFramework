@@ -20,6 +20,7 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TerritoryStoryConditions.h"
+#include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativeGameState.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFStoryReinforcements,
@@ -163,6 +164,78 @@ bool FTFStoryReinforcements::RunTest(const FString& Parameters)
 	Counter->RestorePersistentState({Record});
 	TestEqual(TEXT("Malformed saved reinforcement capture permission fails before reconstruction"),
 		Counter->Assaults.FindChecked(Record.AssaultID).Resolution, ETerritoryAssaultResolution::ConfigurationInvalid);
+
+	// Authored strategic waves use the same saved identity without becoming pursuits.
+	Counter->RestorePersistentState({});
+	Ownership.OwningFaction = Heroes;
+	Place->CommitOwnershipData(Ownership);
+	Diplomacy->SetDiplomacyState(Bandits, Heroes, EDiplomacyState::War);
+	auto* Wave = NewObject<UTerritoryScheduleEnemyWaveEvent>(Place);
+	Wave->TargetTerritory = Definition->TerritoryTag;
+	Wave->AttackingFaction = Bandits;
+	Wave->ScenarioID = TEXT("Blacksmith_PostCapture");
+	Wave->ExecuteEvent(Pawn, nullptr, nullptr);
+	auto NamedRecords = Counter->GetPersistentState();
+	if (TestEqual(TEXT("Native strategic Wave event schedules one record"), NamedRecords.Num(), 1))
+	{
+		FTerritoryAssaultRecord Named = NamedRecords[0];
+		TestEqual(TEXT("Strategic Wave keeps its exact story ID"), Named.StoryScenarioID, Wave->ScenarioID);
+		TestEqual(TEXT("Wave stays strategic"), Named.LaunchMode, ETerritoryAssaultLaunchMode::StrategicCounterattack);
+		TestTrue(TEXT("Strategic capture permission is unchanged"), Named.bAllowsTerritoryCapture);
+		TestTrue(TEXT("Non-immediate strategic probability is unchanged"), Named.bUseStrategicDecisionRoll);
+		TestEqual(TEXT("Preparation still creates zero living attackers"), Named.AliveForce, 0);
+		Place->SetRole(ROLE_SimulatedProxy);
+		FTerritoryStoryPursuitOptions Identity;
+		Identity.ScenarioID = Wave->ScenarioID;
+		TestFalse(TEXT("Named strategic request cannot mutate a client-role target"),
+			Counter->TryScheduleAssaultWithReason(Place, Bandits, Named.LaunchMode, Identity, Reason));
+		Place->SetRole(ROLE_Authority);
+		Gate->ScenarioID = Wave->ScenarioID;
+		TestFalse(TEXT("A named warning is not a victory"), Gate->CheckCondition(Pawn, nullptr, nullptr));
+		Named.State = ETerritoryAssaultState::Defeated;
+		Named.Resolution = ETerritoryAssaultResolution::AllAttackersRemoved;
+		Named.PlannedForce = Named.KilledForce = 2;
+		Named.PendingReserveForce = Named.AliveForce = 0;
+		Bytes.Reset();
+		FMemoryWriter NamedWriter(Bytes);
+		FObjectAndNameAsStringProxyArchive NamedSave(NamedWriter, false); NamedSave.ArIsSaveGame = true;
+		FTerritoryAssaultRecord::StaticStruct()->SerializeItem(NamedSave, &Named, nullptr);
+		FTerritoryAssaultRecord NamedLoaded;
+		FMemoryReader NamedReader(Bytes);
+		FObjectAndNameAsStringProxyArchive NamedLoad(NamedReader, true); NamedLoad.ArIsSaveGame = true;
+		FTerritoryAssaultRecord::StaticStruct()->SerializeItem(NamedLoad, &NamedLoaded, nullptr);
+		Counter->RestorePersistentState({NamedLoaded});
+		TestEqual(TEXT("Save keeps named strategic identity"), NamedLoaded.StoryScenarioID, Wave->ScenarioID);
+		TestEqual(TEXT("Save keeps the same strategic decision seed"), NamedLoaded.DecisionSeed, Named.DecisionSeed);
+		{
+			TGuardValue<int32> History(GetMutableDefault<UTerritoryDeveloperSettings>()->MaxRetainedAssaultRecords, 0);
+			Counter->TrimTerminalHistory();
+			Counter->OnAssaultChanged.Broadcast(NamedLoaded);
+			TestEqual(TEXT("Named strategic victory survives ordinary history trimming"), Counter->GetPersistentState().Num(), 1);
+			TestTrue(TEXT("World-state read model retains the named victory"), State->GetAllAssaultSummaries().ContainsByPredicate(
+				[&](const FTerritoryAssaultRecord& R) { return R.StoryScenarioID == Wave->ScenarioID; }));
+		}
+		Registry->UnregisterTerritory(Place);
+		TestTrue(TEXT("A streamed-out target still has its saved victory"), Gate->CheckCondition(Pawn, nullptr, nullptr));
+		Registry->RegisterTerritory(Place);
+		Counter->RestorePersistentState({});
+		Identity.PlannedForceOverride = 999;
+		Identity.bAllowsTerritoryCapture = false;
+		Identity.bUseStrategicDecisionRoll = false;
+		TestTrue(TEXT("Advanced strategic request admits identity without pursuit overrides"),
+			Counter->TryScheduleAssaultWithReason(Place, Bandits, Named.LaunchMode, Identity, Reason));
+		const auto Strategic = Counter->GetPersistentState()[0];
+		TestEqual(TEXT("Advanced request keeps identity"), Strategic.StoryScenarioID, Wave->ScenarioID);
+		TestEqual(TEXT("Pursuit force override remains ignored"), Strategic.StoryPlannedForceOverride, 0);
+		TestTrue(TEXT("Pursuit capture override remains ignored"), Strategic.bAllowsTerritoryCapture);
+		TestTrue(TEXT("Pursuit probability override remains ignored"), Strategic.bUseStrategicDecisionRoll);
+		Counter->RestorePersistentState({});
+		Wave->bChooseBestEligibleAttacker = true;
+		Wave->ExecuteEvent(Pawn, nullptr, nullptr);
+		const auto Best = Counter->GetPersistentState();
+		if (TestEqual(TEXT("Best-eligible authored Wave schedules once"), Best.Num(), 1))
+			TestEqual(TEXT("Best-eligible path also retains the story ID"), Best[0].StoryScenarioID, Wave->ScenarioID);
+	}
 	GEngine->DestroyWorldContext(World); World->DestroyWorld(false);
 	return true;
 }

@@ -16,6 +16,8 @@
 #include "Tales/DialogueBlueprintGeneratedClass.h"
 #include "Tales/DialogueSM.h"
 #include "Tales/Quest.h"
+#include "Tales/QuestSM.h"
+#include "Tales/TerritoryAssaultTask.h"
 #include "Misc/PackageName.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
@@ -29,12 +31,14 @@
 #include "GameFramework/WorldSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "NarrativeSave.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "UnrealFramework/NarrativePlayerState.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
 #include "UnrealFramework/NarrativePlayerController.h"
+#include "UnrealFramework/NarrativeGameState.h"
 #include "UObject/UnrealType.h"
 
 namespace TerritoryConditionAudit
@@ -366,15 +370,18 @@ bool FTFHashirQuestEntryLifecycle::RunTest(const FString&)
 	Dialogue->OwningController = Controller;
 	UDialogueNode* Offer = nullptr;
 	UDialogueNode* Trip = nullptr;
+	UDialogueNode* Departure = nullptr;
 	for (UDialogueNode* Node : Dialogue->GetNodes())
 	{
 		if (!Node) continue;
 		Node->OwningDialogue = Dialogue;
 		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_GoCaptureBlacksmitFirst")) Offer = Node;
 		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_ActuallyComeWithMe")) Trip = Node;
+		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_DepartForFarm")) Departure = Node;
 	}
 	if (!TestNotNull(TEXT("Original offer exists"), Offer)
 		|| !TestNotNull(TEXT("Trip line exists"), Trip)) return false;
+	if (Departure) Trip = Departure; // The original ID is now the protected routing entry.
 	auto* Registry = Fixture.World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	for (const TCHAR* Name : {TEXT("Territory.HavenReach.MarketSquare.Blacksmith"),
 		TEXT("Territory.HavenReach.CastleHill.Farm")})
@@ -412,6 +419,124 @@ bool FTFHashirQuestEntryLifecycle::RunTest(const FString&)
 		TestEqual(TEXT("There is still one quest"), Tales->GetAllQuests().Num(), 1);
 		TestTrue(TEXT("Fixture cleanup uses the public Tales lifecycle"), Tales->ForgetQuest(QuestClass));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFHashirWaitsForDefence,
+	"TerritoryFramework.ProjectStory.HashirWaitsForPostCaptureVictory",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FTFHashirWaitsForDefence::RunTest(const FString&)
+{
+	if (!FPackageName::DoesPackageExist(TEXT("/Game/HOPTRENDY/Character/Hashir/DBP_Hahsir")))
+	{
+		AddInfo(TEXT("TDA story content is absent; project integration check skipped."));
+		return true;
+	}
+	TerritoryConditionAudit::FWorldFixture Fixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	auto* Clock = NewObject<ANarrativeGameState>(Fixture.World->PersistentLevel);
+	Clock->SetRole(ROLE_Authority); Fixture.World->SetGameState(Clock);
+	const auto Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	const auto Bandits = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Bandits"));
+	auto* PlayerState = NewObject<ANarrativePlayerState>(Fixture.World->PersistentLevel);
+	PlayerState->SetRole(ROLE_Authority); PlayerState->SetFactions(FGameplayTagContainer(Heroes));
+	auto* Pawn = NewObject<ANarrativePlayerCharacter>(Fixture.World->PersistentLevel);
+	Pawn->SetRole(ROLE_Authority); Pawn->SetPlayerState(PlayerState);
+	// This minimal world has no Farm actor. Native's location provider falls back
+	// to the origin; keep the player away so the later travel task cannot auto-complete.
+	Pawn->SetActorLocation(FVector(100000.f, 100000.f, 1000.f));
+	auto* Controller = NewObject<ANarrativePlayerController>(Fixture.World->PersistentLevel);
+	Controller->SetRole(ROLE_Authority); Controller->SetPlayerState(PlayerState);
+	Controller->SetOwnedCharacter(Pawn); Controller->SetPawn(Pawn);
+	auto* Tales = Controller->FindComponentByClass<UTalesComponent>();
+	if (!TestNotNull(TEXT("Native controller owns its Tales component"), Tales)) return false;
+	auto* Registry = Fixture.World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	auto* Counter = Fixture.World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
+	ATerritoryProperty* Blacksmith = nullptr;
+	for (const TCHAR* Name : {TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), TEXT("Territory.HavenReach.CastleHill.Farm")})
+	{
+		auto* Definition = NewObject<UTerritoryPlaceDefinition>();
+		Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(Name);
+		Definition->StableTerritoryGUID = FGuid::NewGuid(); Definition->InitialGuardCount = 0;
+		auto* Place = Fixture.World->SpawnActor<ATerritoryProperty>();
+		Definition->ApplyToTerritory(Place); Registry->RegisterTerritory(Place);
+		FTerritoryOwnershipData Data = Place->GetOwnershipData();
+		Data.State = ETerritoryState::Claimed; Data.OwningFaction = Blacksmith ? Bandits : Heroes;
+		Place->CommitOwnershipData(Data);
+		if (!Blacksmith) Blacksmith = Place;
+	}
+	auto* DialogueClass = LoadClass<UDialogue>(nullptr, TEXT("/Game/HOPTRENDY/Character/Hashir/DBP_Hahsir.DBP_Hahsir_C"));
+	auto* QuestClass = LoadClass<UQuest>(nullptr, TEXT("/Game/TerritoryFramework/NQ_CaptureBlacksmith.NQ_CaptureBlacksmith_C"));
+	if (!TestNotNull(TEXT("Dialogue class"), DialogueClass) || !TestNotNull(TEXT("Quest class"), QuestClass)) return false;
+	auto* Dialogue = NewObject<UDialogue>(Tales, DialogueClass);
+	CastChecked<UDialogueBlueprintGeneratedClass>(DialogueClass)->InitializeDialogue(Dialogue);
+	Dialogue->OwningComp = Tales; Dialogue->OwningController = Controller; Dialogue->OwningPawn = Pawn;
+	UDialogueNode_NPC* Entry = nullptr;
+	UDialogueNode_NPC* Departure = nullptr;
+	UDialogueNode_NPC* Congratulations = nullptr;
+	for (UDialogueNode* Node : Dialogue->GetNodes())
+	{
+		if (!Node) continue;
+		Node->OwningDialogue = Dialogue;
+		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_ActuallyComeWithMe")) Entry = Cast<UDialogueNode_NPC>(Node);
+		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_DepartForFarm")) Departure = Cast<UDialogueNode_NPC>(Node);
+		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_WellDoneWithCapturing")) Congratulations = Cast<UDialogueNode_NPC>(Node);
+	}
+	if (!TestNotNull(TEXT("Stable trip entry"), Entry) || !TestNotNull(TEXT("Gated departure"), Departure)
+		|| !TestNotNull(TEXT("Congratulations line"), Congratulations)) return false;
+	TestTrue(TEXT("Direct trip entry cannot run a driving event"), Entry->Events.IsEmpty());
+	auto CanDepart = [&] { return Entry->GetReplyChain(Controller, Pawn, Tales).Contains(Departure); };
+	TestFalse(TEXT("No quest and no victory cannot start the trip"), CanDepart());
+	UQuest* Quest = Tales->BeginQuest(QuestClass, TEXT("QuestState_10"));
+	if (!TestNotNull(TEXT("Native quest starts at the defence checkpoint"), Quest)) return false;
+	TestFalse(TEXT("Owning the Blacksmith alone cannot unlock congratulations"), Congratulations->AreConditionsMet(Pawn, Controller, Tales));
+	FTerritoryAssaultRecord Record;
+	Record.AssaultID = FGuid::NewGuid(); Record.TargetTerritoryGUID = Blacksmith->GetTerritoryGUID();
+	Record.TargetTerritory = Blacksmith->GetTerritoryTag(); Record.AttackingFaction = Bandits;
+	Record.DefendingFaction = Heroes; Record.bQuestOverrideAuthorized = true;
+	Record.StoryScenarioID = TEXT("Blacksmith_BeforeHandover");
+	Record.State = ETerritoryAssaultState::Defeated; Record.Resolution = ETerritoryAssaultResolution::AllAttackersRemoved;
+	Record.PlannedForce = Record.KilledForce = 4;
+	Counter->RestorePersistentState({Record});
+	TestFalse(TEXT("Earlier handover victory cannot unlock the trip"), CanDepart());
+	TestFalse(TEXT("Earlier victory cannot unlock congratulations"), Congratulations->AreConditionsMet(Pawn, Controller, Tales));
+	Record.StoryScenarioID = TEXT("Blacksmith_PostCapture");
+	Record.State = ETerritoryAssaultState::Grace; Record.Resolution = ETerritoryAssaultResolution::None;
+	Record.KilledForce = 0; Record.PendingReserveForce = 4;
+	Counter->RestorePersistentState({Record});
+	Tales->PrepareForSave_Implementation();
+	TArray<uint8> Bytes;
+	FMemoryWriter Writer(Bytes); FObjectAndNameAsStringProxyArchive Save(Writer, false); Save.ArIsSaveGame = true;
+	Tales->Serialize(Save);
+	Tales->ForgetQuest(QuestClass);
+	FMemoryReader Reader(Bytes); FObjectAndNameAsStringProxyArchive Load(Reader, true); Load.ArIsSaveGame = true;
+	Tales->Serialize(Load); Tales->Load_Implementation();
+	Quest = Tales->GetQuestInstance(QuestClass);
+	if (!TestNotNull(TEXT("Native save restores the defence checkpoint"), Quest)) return false;
+	TestEqual(TEXT("Reload keeps the defence stage"), Quest->GetCurrentState()->GetID(), FName(TEXT("QuestState_10")));
+	TestFalse(TEXT("Reload while preparation is pending cannot unlock the trip"), CanDepart());
+	Record.State = ETerritoryAssaultState::Cancelled; Record.Resolution = ETerritoryAssaultResolution::InvalidApproachOrRoute;
+	Record.PendingReserveForce = 0; Record.WithdrawnForce = 4;
+	Counter->RestorePersistentState({Record});
+	TestFalse(TEXT("A failed route cannot count as victory"), Congratulations->AreConditionsMet(Pawn, Controller, Tales));
+	Record.State = ETerritoryAssaultState::Succeeded; Record.Resolution = ETerritoryAssaultResolution::CaptureCompleted;
+	Counter->RestorePersistentState({Record});
+	TestFalse(TEXT("Enemy takeover cannot unlock the trip"), CanDepart());
+	Record.State = ETerritoryAssaultState::Defeated; Record.Resolution = ETerritoryAssaultResolution::AllAttackersRemoved;
+	Record.WithdrawnForce = 0; Record.KilledForce = 4;
+	Counter->RestorePersistentState({Record}); Counter->OnAssaultChanged.Broadcast(Record);
+	TestTrue(TEXT("Exact post-capture victory unlocks congratulations"), Congratulations->AreConditionsMet(Pawn, Controller, Tales));
+	TestFalse(TEXT("Victory still requires speaking with Hashir before departure"), CanDepart());
+	Tales->OnNPCDialogueLineFinished.Broadcast(Dialogue, Congratulations, Congratulations->Line, FSpeakerInfo());
+	TestEqual(TEXT("Native dialogue task advances after victory"), Quest->GetCurrentState()->GetID(), FName(TEXT("QuestState_13")));
+	TestTrue(TEXT("Native reply routing now permits departure"), CanDepart());
+	Tales->PrepareForSave_Implementation(); Bytes.Reset();
+	FMemoryWriter WonWriter(Bytes); FObjectAndNameAsStringProxyArchive WonSave(WonWriter, false); WonSave.ArIsSaveGame = true;
+	Tales->Serialize(WonSave); Tales->ForgetQuest(QuestClass);
+	FMemoryReader WonReader(Bytes); FObjectAndNameAsStringProxyArchive WonLoad(WonReader, true); WonLoad.ArIsSaveGame = true;
+	Tales->Serialize(WonLoad); Tales->Load_Implementation();
+	TestTrue(TEXT("Native save/load after victory keeps departure available"), CanDepart());
+	Tales->ForgetQuest(QuestClass);
 	return true;
 }
 

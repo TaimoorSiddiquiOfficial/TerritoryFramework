@@ -767,7 +767,8 @@ struct FTerritoryAssaultRecord
 	/** Named story victories remain available after ordinary battle history is trimmed. */
 	bool IsRetainedStoryOutcome() const
 	{
-		return LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements
+		return (LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements
+				|| (LaunchMode == ETerritoryAssaultLaunchMode::StrategicCounterattack && bQuestOverrideAuthorized))
 			&& State == ETerritoryAssaultState::Defeated
 			&& Resolution == ETerritoryAssaultResolution::AllAttackersRemoved
 			&& !StoryScenarioID.IsNone();

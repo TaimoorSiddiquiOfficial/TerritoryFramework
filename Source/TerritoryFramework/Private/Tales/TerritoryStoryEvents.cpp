@@ -319,17 +319,19 @@ void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target
 			AttackingFaction, ChosenFaction, PreviewInput, PreviewResult,
 			FailureReason))
 		{
-			FTerritoryStoryPursuitOptions IgnoredStoryOptions;
+			FTerritoryStoryPursuitOptions IdentityOptions;
+			IdentityOptions.ScenarioID = ScenarioID;
 			bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(
-				Territory, ChosenFaction, LaunchMode, IgnoredStoryOptions,
+				Territory, ChosenFaction, LaunchMode, IdentityOptions,
 				bStartImmediately, FailureReason);
 		}
 	}
 	else
 	{
-		FTerritoryStoryPursuitOptions IgnoredStoryOptions;
+		FTerritoryStoryPursuitOptions IdentityOptions;
+		IdentityOptions.ScenarioID = ScenarioID;
 		bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(Territory,
-			AttackingFaction, LaunchMode, IgnoredStoryOptions,
+			AttackingFaction, LaunchMode, IdentityOptions,
 			bStartImmediately, FailureReason);
 	}
 	if (!bScheduled)

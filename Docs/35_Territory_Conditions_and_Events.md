@@ -58,6 +58,13 @@ Cancellation normally affects only preparing, warning or waiting forces. **Inclu
 
 An assault query with no matching record fails, even for `Remaining Attackers = 0`. For victory, prefer **Latest Resolution = Attacking Force Defeated**, with the exact story ID. Latest queries prioritize an unfinished matching record over an old completed result. A warning alone is not a physically active battle.
 
+The Wave event keeps **Scenario ID** in every launch mode, including Strategic
+Counterattack. Use the same ID on the quest's **Repel Attack** task and its
+dialogue condition. Named victories from explicit strategic Waves and owner
+reinforcements remain available after ordinary history cleanup. Strategic Waves
+can still repeat: add conditions so reopening a conversation does not launch a
+completed story battle again. See the [Hashir example](Verification/HASHIR_DEFENCE_GATE_2026-09-19.md).
+
 ## Guard and capture requirements
 
 - **Active Guards** counts Territory guard pawns.

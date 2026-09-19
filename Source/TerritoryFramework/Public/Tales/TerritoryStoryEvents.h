@@ -147,7 +147,7 @@ public:
 	FGameplayTag OpposingFaction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event", meta=(
-		ToolTip="Stable story encounter ID, for example Blacksmith_BeforeHandover. Required for owner reinforcements. Use the same ID in the assault condition that unlocks handover. A completed encounter cannot spawn again; a cancelled attempt can be retried."))
+		ToolTip="Stable story encounter ID, for example Blacksmith_PostCapture. Supported in every launch mode and required for owner reinforcements. Use the same ID in an assault condition or quest task so another battle cannot count as this one. Named strategic and owner-reinforcement victories survive history trimming. Owner reinforcements also reject a completed encounter; guard other repeatable Wave events with conditions."))
 	FName ScenarioID;
 
 	/**

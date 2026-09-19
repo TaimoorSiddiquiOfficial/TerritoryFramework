@@ -681,7 +681,7 @@ bool UTerritoryCounterAttackSubsystem::TryScheduleAssaultAdvancedWithReason(
 			|| LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
 		? &StoryOptions : nullptr;
 	return ScheduleAssault(Territory, AttackingFaction, LaunchMode,
-		false, Options, &OutFailureReason, true, bStartImmediately);
+		false, Options, &OutFailureReason, true, bStartImmediately, StoryOptions.ScenarioID);
 }
 
 bool UTerritoryCounterAttackSubsystem::ScheduleCounterAttack(
@@ -718,7 +718,7 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	ETerritoryAssaultLaunchMode LaunchMode, bool bContinueExistingSchedule,
 	const FTerritoryStoryPursuitOptions* StoryOptions,
 	FText* OutFailureReason, bool bQuestOverrideAuthorized,
-	bool bStartImmediately)
+	bool bStartImmediately, FName AuthoredScenarioID)
 {
 	if (OutFailureReason) *OutFailureReason = FText::GetEmpty();
 	const bool bOwnerReinforcements = LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements;
@@ -900,11 +900,13 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	Record.LaunchMode = LaunchMode;
 	Record.bQuestOverrideAuthorized = bQuestOverrideAuthorized;
 	Record.bImmediateDeployment = bStartImmediately;
+	// An authored strategic wave needs a durable story identity too. Keep pursuit
+	// force, route and capture overrides restricted to their existing launch modes.
+	Record.StoryScenarioID = StoryOptions ? StoryOptions->ScenarioID : AuthoredScenarioID;
 	if (bOwnerReinforcements)
 	{
 		Record.bAllowsTerritoryCapture = false;
 		Record.bUseStrategicDecisionRoll = false;
-		Record.StoryScenarioID = StoryOptions->ScenarioID;
 	}
 	if (bStartImmediately)
 	{
@@ -922,7 +924,6 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		Record.StoryAttackerDefinitionOverride = StoryOptions->AttackerDefinitionOverride;
 		Record.StoryPlannedForceOverride = FMath::Max(0, StoryOptions->PlannedForceOverride);
 		Record.StoryWaveSizeOverride = FMath::Max(0, StoryOptions->WaveSizeOverride);
-		Record.StoryScenarioID = StoryOptions->ScenarioID;
 		Record.StoryMaximumChaseDistance = FMath::Max(0.f,
 			StoryOptions->MaximumChaseDistance);
 		Record.StoryChaseDistanceGraceSeconds = FMath::Max(0.f,

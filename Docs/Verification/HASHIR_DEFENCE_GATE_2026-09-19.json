@@ -1,0 +1,421 @@
+{
+  "date": "2026-09-19",
+  "engine": "5.8",
+  "map": "HopDistrictTest",
+  "build": "Succeeded; UHT, runtime and editor modules",
+  "automation": {
+    "succeeded": 324,
+    "succeededWithWarnings": 37,
+    "failed": 0,
+    "notRun": 0
+  },
+  "focused_tests": [
+    {
+      "test": "TerritoryFramework.CounterAttack.Story.OwnerReinforcementsBeforeHandover",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Warning",
+          "message": "LogAssetManager: Invalid Primary Asset Id NPCDefinition:NPCDefinition_9: GetPrimaryAssetLoadList failed to find NameData",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "test": "TerritoryFramework.ProjectStory.HashirTripDoesNotStartOrRestartQuest",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server OnBeginDialogue DBP_Hahsir_C_0",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogNarrative: Narrative wasn't able to find the avatar for the player, as a SpeakerAvatarClass wasn't set, no actors with tag 'Player' were found, and OwningPawn was invalid.",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    },
+    {
+      "test": "TerritoryFramework.ProjectStory.HashirWaitsForPostCaptureVictory",
+      "state": "Success",
+      "events": [
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server OnBeginDialogue DBP_Hahsir_C_0",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server Added speaker Player owned tags",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server OnEndDialogue DBP_Hahsir_C_0",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server Removed speaker Player owned tags",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server OnBeginDialogue DBP_Hahsir_C_1",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server Added speaker Player owned tags",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server OnEndDialogue DBP_Hahsir_C_1",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server Removed speaker Player owned tags",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server OnBeginDialogue DBP_Hahsir_C_2",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        },
+        {
+          "type": "Warning",
+          "message": "LogTemp: Server Added speaker Player owned tags",
+          "context": "log",
+          "artifact": "00000000000000000000000000000000"
+        }
+      ]
+    }
+  ],
+  "assets": {
+    "status": "completed",
+    "passed": true,
+    "checked": 2,
+    "valid": 2,
+    "invalid": 0,
+    "warnings": 0
+  },
+  "standalone": {
+    "gate": {
+      "setup": "Fresh PIE. Begin Native quest at defence checkpoint, force-capture Blacksmith through Control API; then execute saved quest Wave. Native damage effect simulates physical attacker deaths. No fabricated victory record.",
+      "blocked_trip": true,
+      "during_attack_state": "QuestState_10",
+      "defeated": true,
+      "debug": "Target=Territory.HavenReach.MarketSquare.Blacksmith Attack=Narrative.Factions.Bandits Defend=Narrative.Factions.Heroes LaunchMode=StrategicCounterattack Schedule=42FE3433465B89537733468C3D171A06#1 SecureDistricts=0 Guards=0/0/7 Reserve=0 AttackPower=100.00 Influence=0.50 DefencePower=0.00 PowerRatio=100.000 Strategic=1.00 Priority=127.500 LaunchP=1.000 SuccessP=1.000 Force(P/A/R/K/W)=8/0/0/8/0 SpawnFailures=0 Approaches=Blacksmith_WestRoad State=Defeated Notification=sent Proximity=inside GraceEnd=1871.85 Resolved=1690.47 Roll=0.2369 Reason=AllAttackersRemoved",
+      "victory_unlocked_conversation": true,
+      "quest_after_congratulations": "QuestState_13",
+      "trip_passed": true,
+      "quest_after_trip": "QuestState_7",
+      "passed": true
+    },
+    "trip_checks": {
+      "hashir_is_driver": true,
+      "waited_for_passenger": true,
+      "passenger_attached": true,
+      "physical_departure": true,
+      "activity_reports_arrival": true,
+      "arrived_near_farm": true,
+      "car_stopped": true,
+      "passenger_exit_accepted": true,
+      "passenger_exited": true,
+      "trip_preserves_quest_list": true
+    },
+    "trip_passed": true,
+    "arrival_seconds": 62.07799999997951
+  },
+  "listen_server": {
+    "passed": true,
+    "checks": {
+      "active_replicated": true,
+      "no_early_victory": true,
+      "client_mutation_refused": true,
+      "physical_force_defeated": true,
+      "victory_replicated": true,
+      "late_join_victory": true
+    },
+    "final_snapshot": {
+      "seconds": 14.405999999988126,
+      "worlds": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+          "scenario": "Blacksmith_PostCapture",
+          "state": "DEFEATED",
+          "alive": 0,
+          "pending": 0,
+          "killed": 8,
+          "victory": true
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+          "scenario": "Blacksmith_PostCapture",
+          "state": "DEFEATED",
+          "alive": 0,
+          "pending": 0,
+          "killed": 8,
+          "victory": true
+        },
+        {
+          "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+          "scenario": "Blacksmith_PostCapture",
+          "state": "DEFEATED",
+          "alive": 0,
+          "pending": 0,
+          "killed": 8,
+          "victory": true
+        },
+        {
+          "world": "/Game/UEDPIE_3_HopDistrictTest.HopDistrictTest",
+          "scenario": "Blacksmith_PostCapture",
+          "state": "DEFEATED",
+          "alive": 0,
+          "pending": 0,
+          "killed": 8,
+          "victory": true
+        }
+      ]
+    },
+    "debug": "Target=Territory.HavenReach.MarketSquare.Blacksmith Attack=Narrative.Factions.Bandits Defend=Narrative.Factions.Heroes LaunchMode=StrategicCounterattack Schedule=82009CB943D8C432C39354BD43B68748#1 SecureDistricts=0 Guards=0/0/7 Reserve=0 AttackPower=100.00 Influence=0.50 DefencePower=0.00 PowerRatio=100.000 Strategic=1.00 Priority=127.500 LaunchP=1.000 SuccessP=1.000 Force(P/A/R/K/W)=8/0/0/8/0 SpawnFailures=0 Approaches=Blacksmith_WestRoad State=Defeated Notification=sent Proximity=inside GraceEnd=1953.41 Resolved=1775.23 Roll=0.2369 Reason=AllAttackersRemoved"
+  },
+  "dedicated_server": {
+    "passed": true,
+    "checks": {
+      "active_replicated": true,
+      "no_early_victory": true,
+      "client_mutation_refused": true,
+      "physical_force_defeated": true,
+      "victory_replicated": true,
+      "late_join_victory": true
+    },
+    "final_snapshot": {
+      "seconds": 14.23399999999674,
+      "worlds": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+          "scenario": "Blacksmith_PostCapture",
+          "state": "DEFEATED",
+          "alive": 0,
+          "pending": 0,
+          "killed": 8,
+          "victory": true
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+          "scenario": "Blacksmith_PostCapture",
+          "state": "DEFEATED",
+          "alive": 0,
+          "pending": 0,
+          "killed": 8,
+          "victory": true
+        },
+        {
+          "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+          "scenario": "Blacksmith_PostCapture",
+          "state": "DEFEATED",
+          "alive": 0,
+          "pending": 0,
+          "killed": 8,
+          "victory": true
+        },
+        {
+          "world": "/Game/UEDPIE_3_HopDistrictTest.HopDistrictTest",
+          "scenario": "Blacksmith_PostCapture",
+          "state": "DEFEATED",
+          "alive": 0,
+          "pending": 0,
+          "killed": 8,
+          "victory": true
+        }
+      ]
+    },
+    "debug": "Target=Territory.HavenReach.MarketSquare.Blacksmith Attack=Narrative.Factions.Bandits Defend=Narrative.Factions.Heroes LaunchMode=StrategicCounterattack Schedule=FADEF6E8427C7081B8545B825764C1AA#1 SecureDistricts=0 Guards=0/0/7 Reserve=0 AttackPower=100.00 Influence=0.50 DefencePower=0.00 PowerRatio=100.000 Strategic=1.00 Priority=127.500 LaunchP=1.000 SuccessP=1.000 Force(P/A/R/K/W)=8/0/0/8/0 SpawnFailures=0 Approaches=Blacksmith_WestRoad State=Defeated Notification=sent Proximity=inside GraceEnd=1944.43 Resolved=1767.21 Roll=0.2369 Reason=AllAttackersRemoved"
+  },
+  "route": {
+    "checks": {
+      "destination_uses_world_road_endpoint": true,
+      "same_authored_car": true,
+      "keep_right": true,
+      "road_has_no_all_tags_override": true,
+      "required_passenger_preserved": true,
+      "four_saved_lanes_without_rebuild": true,
+      "native_trip_has_nonzero_route": true,
+      "old_local_destination_rejected": true,
+      "missing_destination_rejected": true,
+      "existing_assault_road_still_routes": true,
+      "both_assets_validate": true
+    },
+    "passed": true,
+    "native_route_length_cm": 8323.7529296875,
+    "destination": [
+      3237.0,
+      920.0,
+      0.0
+    ],
+    "lanes": [
+      {
+        "data": 0,
+        "lane": 0,
+        "zone": 0,
+        "width": 300.0,
+        "tags": 8,
+        "points": [
+          [
+            -3952.0,
+            945.415,
+            3.072
+          ],
+          [
+            -3345.0,
+            945.415,
+            3.072
+          ]
+        ],
+        "links": [
+          [
+            1,
+            4,
+            17
+          ]
+        ]
+      },
+      {
+        "data": 0,
+        "lane": 1,
+        "zone": 0,
+        "width": 300.0,
+        "tags": 8,
+        "points": [
+          [
+            -3345.0,
+            645.415,
+            3.072
+          ],
+          [
+            -3952.0,
+            645.415,
+            3.072
+          ]
+        ],
+        "links": [
+          [
+            0,
+            4,
+            17
+          ]
+        ]
+      },
+      {
+        "data": 0,
+        "lane": 2,
+        "zone": 1,
+        "width": 300.0,
+        "tags": 8,
+        "points": [
+          [
+            -4290.0,
+            3250.0,
+            0.0
+          ],
+          [
+            516.028,
+            3250.0,
+            0.0
+          ],
+          [
+            2134.535,
+            3054.476,
+            0.0
+          ],
+          [
+            2332.491,
+            1035.322,
+            0.0
+          ],
+          [
+            3231.235,
+            1069.889,
+            0.0
+          ]
+        ],
+        "links": [
+          [
+            3,
+            4,
+            17
+          ]
+        ]
+      },
+      {
+        "data": 0,
+        "lane": 3,
+        "zone": 1,
+        "width": 300.0,
+        "tags": 8,
+        "points": [
+          [
+            3242.765,
+            770.111,
+            0.0
+          ],
+          [
+            2061.509,
+            724.678,
+            0.0
+          ],
+          [
+            1859.465,
+            2785.524,
+            0.0
+          ],
+          [
+            497.972,
+            2950.0,
+            0.0
+          ],
+          [
+            -4290.0,
+            2950.0,
+            0.0
+          ]
+        ],
+        "links": [
+          [
+            2,
+            4,
+            17
+          ]
+        ]
+      }
+    ]
+  },
+  "options_documentation": {
+    "inventory_properties": 1852,
+    "documented_options": 787,
+    "guide_options": 263,
+    "all_checks_passed": true
+  },
+  "limitations": [
+    "PIE stages the defence checkpoint and simulates damage; it is not a normal weapon playthrough.",
+    "Multiplayer checks cover assault replication and condition reads, not a full shared conversation.",
+    "Full campaign reload in the main World Partition map, packaged builds, and UE 5.7 release checks remain."
+  ]
+}
