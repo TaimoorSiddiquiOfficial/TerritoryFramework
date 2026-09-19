@@ -118,6 +118,10 @@ struct FReplicatedTreaty
 	/** Whether this record has no timed expiry. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	bool bPermanent = true;
+
+	/** True when reputation owns this treaty. False protects a quest-authored treaty. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
+	bool bReputationDerived = false;
 };
 
 /**
@@ -422,6 +426,9 @@ protected:
 	TArray<FReplicatedFactionReputation> ReplicatedReputation;
 
 	UPROPERTY(ReplicatedUsing=OnRep_DiplomacyState)
+	FGameplayTag ReplicatedReputationSubjectFaction;
+
+	UPROPERTY(ReplicatedUsing=OnRep_DiplomacyState)
 	TArray<FDiplomacyEvent> ReplicatedDiplomacyHistory;
 
 	UPROPERTY(Replicated)
@@ -455,6 +462,10 @@ protected:
 	UPROPERTY(SaveGame)
 	TArray<FReplicatedFactionReputation> SavedReputation;
 
+	/** Old saves leave this empty; the campaign must choose a subject explicitly. */
+	UPROPERTY(SaveGame)
+	FGameplayTag SavedReputationSubjectFaction;
+
 	UPROPERTY(SaveGame)
 	TArray<FDiplomacyEvent> SavedDiplomacyHistory;
 
@@ -482,6 +493,7 @@ protected:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDiplomacyWorldStateLiveBridge;
+	friend class FTFReputationPersistenceRoundTrip;
 	friend class FTFCurrencyCallbacks;
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
 	friend class FTFSaveDefaultReload;
@@ -495,6 +507,11 @@ private:
 	void SyncDiplomacySubsystemFromReplicatedState();
 	void SyncCounterAttackSubsystemFromReplicatedState();
 
+	/** Sync the replicated diplomacy read model from the authoritative subsystem.
+	 *  Shared by the save boundary and by authority BeginPlay: the live handlers keep it
+	 *  current once it changes, this seeds the relationships a session starts with. */
+	void PublishDiplomacyReadModel();
+
 	/** Hydrate the client-side economy query model after authoritative snapshots replicate. */
 	UFUNCTION()
 	void OnRep_EconomyState();
@@ -505,6 +522,9 @@ private:
 	/** Hydrate the client-side diplomacy query model after authoritative snapshots replicate. */
 	UFUNCTION()
 	void OnRep_DiplomacyState();
+
+	UFUNCTION()
+	void OnReputationSubjectChangedLive(FGameplayTag SubjectFaction);
 
 	UFUNCTION()
 	void OnRep_AssaultState();

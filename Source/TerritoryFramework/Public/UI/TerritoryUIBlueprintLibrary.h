@@ -357,7 +357,12 @@ struct TERRITORYFRAMEWORK_API FTerritoryDistrictOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float Fortification = 0.f;
 	/** Allied support included in the defence estimate. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float AlliedSupport = 0.f;
-	/** Relative importance of this Territory to strategic assault planning; higher values make it a more valuable target. */
+	/**
+	 * Relative importance of this Territory to strategic assault planning; higher values make it a
+	 * more valuable target. For a District this is the highest value across the District and its
+	 * contributing Places — not their sum — so it agrees with the rule strategic planning applies to a
+	 * defence front. See TerritoryAssaultTargetPolicy::AggregateStrategicValue.
+	 */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") float StrategicValue = 1.f;
 	/** Whether the reported garrison currently has no active guards. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Security") bool bUnguarded = false;
@@ -708,7 +713,17 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static bool IsDistrictCapturedOwned(const FTerritoryDistrictOperationsView& View);
 
-	/** Stable-enough UI revision used to avoid rebuilding an unchanged widget tree. */
+	/**
+	 * Stable-enough UI revision used to avoid rebuilding an unchanged widget tree.
+	 * Every field the panel can display is folded in, so any visible value change moves the
+	 * revision. The result is always non-negative, so `Revision > 0` is safe as a
+	 * "something changed" test, and comparing two revisions for inequality is the normal
+	 * way to detect a change.
+	 *
+	 * If you add a field to FTerritoryDistrictOperationsView, hash it here too.
+	 * `TerritoryFramework.UI.Regression.EveryDisplayedFieldInvalidatesRevision` walks this
+	 * struct by reflection and fails on any field it cannot prove invalidates the revision.
+	 */
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Operations")
 	static int32 GetDistrictOperationsRevision(const FTerritoryDistrictOperationsView& View);
 
@@ -748,6 +763,10 @@ public:
 	 * Player-facing status with the correct precedence.
 	 * Example: Locked + Contested is shown as "Locked", because the story gate
 	 * decides whether the political state is currently actionable.
+	 *
+	 * Never returns empty text and never returns a C++ enum identifier: a state byte this build
+	 * does not recognise reads as "Unknown state". Every label carries a localization key, so this
+	 * is safe to put straight into a text block.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Availability")
 	static FText GetTerritoryStatusText(
@@ -763,7 +782,11 @@ public:
 	static FText GetAssaultResolutionText(
 		ETerritoryAssaultResolution AssaultResolution);
 
-	/** Return a readable label for a faction relationship. */
+	/**
+	 * Return a readable, translatable label for a faction relationship.
+	 * Like GetTerritoryStatusText, this never returns empty text: an unrecognised value reads as
+	 * "Unknown relationship" rather than leaving a blank line in a panel.
+	 */
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Diplomacy")
 	static FText GetDiplomacyStateText(EDiplomacyState DiplomacyState);
 

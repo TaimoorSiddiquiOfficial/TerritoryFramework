@@ -3,6 +3,11 @@
 #include "Misc/AutomationTest.h"
 
 #include "Core/TerritoryWorldState.h"
+#include "Engine/Engine.h"
+#include "Engine/Level.h"
+#include "Engine/World.h"
+#include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "UnrealFramework/NarrativeGameState.h"
 #include "UObject/UnrealType.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDiplomacyWorldStateLiveBridge,
@@ -90,6 +95,120 @@ bool FTFDiplomacyWorldStateLiveBridge::RunTest(const FString& Parameters)
 		}
 	}
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDiplomacyStandingTreatyPublishesAtStartup,
+	"TerritoryFramework.Diplomacy.Replication.StandingTreatyPublishesAtWorldBeginPlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+// The test above drives OnDiplomacyChangedLive directly, so it passes whether or not the
+// live delegate is ever bound. This one runs the real world ordering instead: a standing war
+// authored in project faction data, loaded by the subsystem at OnWorldBeginPlay, with a
+// placed WorldState that subscribes immediately afterwards. It is the control for the
+// startup publication gap — the standing war is what a client currently never hears about.
+bool FTFDiplomacyStandingTreatyPublishesAtStartup::RunTest(const FString& Parameters)
+{
+	// This fixture deliberately authors no WorldStateGUID so the save path stays out of the
+	// way and live publication is the only thing under test.
+	AddExpectedError(TEXT("has no authored WorldStateGUID"),
+		EAutomationExpectedErrorFlags::Contains, 1);
+
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Heroes"), false);
+	if (!TestTrue(TEXT("Test faction tags resolve"), Bandits.IsValid() && Heroes.IsValid()))
+	{
+		return false;
+	}
+
+	FWorldContext& WorldContext = GEngine->CreateNewWorldContext(EWorldType::Game);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Startup publication world exists"), World))
+	{
+		return false;
+	}
+	WorldContext.SetCurrentWorld(World);
+
+	auto Teardown = [World]()
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+	};
+
+	// The session begins with a standing war already authored in project faction data. A
+	// live session was observed to start exactly here: the subsystem knows the war, and the
+	// replicated read model carried none of it.
+	//
+	// Created with NewObject rather than SpawnActor deliberately. SpawnActor fires the
+	// vendor save subsystem's OnActorSpawned, which calls Execute_GetActorGUID on anything
+	// implementing the stable-actor interface; ANarrativeGameState implements it without a
+	// native GetActorGUID, so the interface default asserts and takes the process down.
+	// NewObject bypasses spawn handlers, and the actor only needs to exist as the world's
+	// GameState for LoadFromGameState to read it.
+	ANarrativeGameState* GameState = NewObject<ANarrativeGameState>(World->PersistentLevel);
+	if (!TestNotNull(TEXT("Narrative GameState fixture exists"), GameState))
+	{
+		Teardown();
+		return false;
+	}
+	FFactionAttitudeData BanditView;
+	BanditView.AttitudeMap.Add(Heroes, ETeamAttitude::Hostile);
+	GameState->FactionAllianceMap.Add(Bandits, BanditView);
+	FFactionAttitudeData HeroView;
+	HeroView.AttitudeMap.Add(Bandits, ETeamAttitude::Hostile);
+	GameState->FactionAllianceMap.Add(Heroes, HeroView);
+	World->SetGameState(GameState);
+
+	UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	if (!TestNotNull(TEXT("Diplomacy subsystem exists"), Diplomacy))
+	{
+		Teardown();
+		return false;
+	}
+
+	// Same ordering as a real load: actors initialize first, then BeginPlay runs the world
+	// subsystems and only afterwards the actors. The WorldState is present the whole time,
+	// exactly as the placed TerritoryWorldState_1 is in the shipping level.
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryWorldState* WorldState = World->SpawnActor<ATerritoryWorldState>(
+		ATerritoryWorldState::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Placed Territory WorldState exists"), WorldState))
+	{
+		Teardown();
+		return false;
+	}
+	WorldState->SetRole(ROLE_Authority);
+
+	World->InitializeActorsForPlay(FURL());
+	World->BeginPlay();
+
+	// Premise control. Were the fixture failing to load a standing war, an empty replicated
+	// model below would look like the defect while actually being a broken fixture.
+	TestEqual(TEXT("Fixture loaded the standing war into the authoritative subsystem"),
+		Diplomacy->GetAllTreaties().Num(), 1);
+	// Pins the fixture's semantics, so a future change to the attitude mapping reports here
+	// rather than masquerading as a publication failure two assertions further down.
+	TestEqual(TEXT("Standing hostility reads as War, not as a treaty-free world"),
+		Diplomacy->AttitudeToDiplomacyState(ETeamAttitude::Hostile), EDiplomacyState::War);
+
+	WorldState->DispatchBeginPlay();
+	// The assertion the delegate-free test above cannot make: deleting the AddDynamic in
+	// SubscribeToLiveUpdates leaves that test green, and would turn this one red.
+	TestTrue(TEXT("Authoritative WorldState bound the live diplomacy delegate"),
+		Diplomacy->OnDiplomacyStateChanged.Contains(
+			WorldState, TEXT("OnDiplomacyChangedLive")));
+
+	// The defect this test exists for. The delegate is bound and live changes do replicate,
+	// but the standing war that predates the subscription never reaches the read model.
+	TestEqual(TEXT("A standing treaty reaches the replicated model at world begin"),
+		WorldState->GetAllTreaties().Num(), 1);
+	TestEqual(TEXT("The standing treaty replicates as War, not as a default row"),
+		WorldState->GetTreatyBetween(Bandits, Heroes).State, EDiplomacyState::War);
+
+	Teardown();
 	return true;
 }
 

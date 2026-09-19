@@ -20,3 +20,7 @@ Build/
 # OS
 Thumbs.db
 .DS_Store
+
+# Local build/test scratch files (never committed)
+_tmp_*.bat
+_tmp_*.log

@@ -92,6 +92,21 @@ public:
 			ToolTip="Disable for autonomous counterattacks. Attackers will deploy after the warning and fight Territory guards without waiting for the player."))
 	bool bRequirePlayerProximityForActivation = false;
 
+	/**
+	 * Only has an effect while "Require Player Proximity To Activate" is on. When on,
+	 * a living registered defender already holding the Place counts as the trigger, so
+	 * the force attacks the garrison instead of standing idle until the player walks in.
+	 *
+	 * Easy example: you capture a Place, then assign one guard to hold it. The
+	 * counterattack arrives and finds that guard. With this off (default) it waits for
+	 * you and then fights you. With this on it fights the guard you left behind.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling|Recapture",
+		meta=(EditCondition="bRequirePlayerProximityForActivation",
+			DisplayName="A Garrison Also Triggers Activation",
+			ToolTip="If the Place already has a living registered defender (a guard assigned to it), the counterattack starts on that guard without waiting for a player. Leave off when the attack must be staged on the player's arrival."))
+	bool bGarrisonTriggersActivation = false;
+
 	/** Begin a visible, save-safe handover countdown after attackers clear all defenders and the player is absent. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Scheduling|Recapture",
 		meta=(DisplayName="Allow Unattended Recapture Countdown",
@@ -264,6 +279,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement|Takeover",
 		meta=(ClampMin="1.0", ClampMax="120.0", Units="s"))
 	float DamagingEnemyMemorySeconds = 20.f;
+
+	/**
+	 * Let the most recent attacker outrank a living registered guard.
+	 * Off by default: a living registered guard is always fought first, and a player
+	 * becomes a target only after every registered guard is gone.
+	 * Easy example: leave this off so a counter-attack force fights the guard you
+	 * assigned before it chases you. Turn it on when enemies should immediately turn
+	 * on whoever shoots them, even while a guard is still standing.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement|Takeover",
+		meta=(EditCondition="bPrioritizeTerritoryTakeover",
+			DisplayName="Damage Retaliation Beats Guard Priority",
+			ToolTip="Off (recommended): a living registered guard is attacked before any non-guard, including a player who just shot this NPC. On: the most recent attacker outranks the guard for the damage memory window. This restores the older behaviour, where a distant shooter could pull attackers off a local guard."))
+	bool bDamageRetaliationOverridesDefenderPriority = false;
 
 	/** Delay before retrying an idle assault move that stopped outside the target. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Movement",

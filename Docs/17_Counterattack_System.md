@@ -92,6 +92,22 @@ gameplay notifications.
 `Require Player Proximity For Activation` defaults off. This lets a faction attack an
 unlocked Place and its registered guards without waiting for the player to arrive.
 
+If you *do* turn proximity on — to stage an attack on the player's arrival — the force
+would previously ignore a guard standing in the Place and wait for the player anyway, then
+chase that player past the guard. `A Garrison Also Triggers Activation` closes that gap.
+It only has an effect while proximity is required, and only when the Place has at least one
+living registered defender:
+
+| `Require Player Proximity` | `A Garrison Also Triggers Activation` | What happens |
+|---|---|---|
+| off (default) | — | Deploys on schedule; fights whatever is there, guard or player. |
+| on | off (default) | Waits for a relevant player. A garrison does **not** start it. |
+| on | on | Starts on the garrison. The player is no longer required to begin the fight. |
+
+It defaults off deliberately: silently overriding an explicit "wait for the player" request
+would break every staged ambush. Turn it on when a Place the player leaves garrisoned should
+defend itself.
+
 After the complete defence front has no living registered guard and an attacker is
 physically inside the target:
 
@@ -510,7 +526,7 @@ Defence invariants are enforced by tests:
 
 `ScheduledWarning` and `WaitingForPlayerProximity` contain zero live attackers and produce zero capture pressure. Notifications are sent only to relevant controllers inside `NotificationRadius`; `bNotifyDefendingFactionOnly` restricts them to the defending Narrative faction.
 
-The first relevant player entering `ActivationRadius` commits the record to `Active` before spawning. That state transition prevents two nearby players from duplicating the assault. Additional players do not create another force or wave. With the recommended `bContinueFiniteWavesAfterActivation`, the already-launched assault deploys its remaining finite reserve waves even after the player leaves. Disabling that policy pauses only later reserve deployment; it never removes the initial proximity gate.
+The first relevant player entering `ActivationRadius` commits the record to `Active` before spawning. That state transition prevents two nearby players from duplicating the assault. Additional players do not create another force or wave. If `bGarrisonTriggersActivation` is on, a living registered defender in the target Place activates the assault instead, so the gate is satisfied without any player present. With the recommended `bContinueFiniteWavesAfterActivation`, the already-launched assault deploys its remaining finite reserve waves even after the player leaves. Disabling that policy pauses only later reserve deployment; it never removes the initial proximity gate.
 
 Each wave uses deterministic three-column formation slots around every selected approach,
 facing the target. `ParticipantSpacing` controls slot separation and
@@ -556,6 +572,34 @@ registered defenders are gone, exact non-defender scores are restored so the pla
 hostile targets become eligible again. `StalledMovementRetryInterval` throttles recovery and
 `MaxStalledMovementRetries` converts a permanently invalid mover into one finite withdrawal,
 preventing an active assault from retaining a motionless participant forever.
+
+### Two separate target lists
+
+The participant keeps two lists, and they are deliberately not the same thing:
+
+| List | Contains | Drives |
+|---|---|---|
+| **Engagement** | registered defenders, a defending player inside the local defence area, and the attacker that most recently damaged this NPC | where the participant walks |
+| **Defender priority** | live hostile **registered defenders only** | which attack goal survives goal scoring |
+
+Conflating them caused a reported defect: a defending player merged into the priority list was
+treated as a registered defender, so the player's own attack goal was never suppressed and it
+competed with the assigned guard on equal score. A single hit from that player then replaced
+the whole list, zeroing the guard's attack goal for the damage memory window and refreshing on
+every further hit. The result was an assault that deterministically ignored the guard assigned
+to defend the Place and chased the player instead.
+
+**Damage retaliation.** By default a **living registered guard outranks every non-guard**,
+including a player who just shot this NPC. Set the profile's
+**Damage Retaliation Beats Guard Priority** to restore the older behaviour, where the most
+recent attacker outranks the guard for `DamagingEnemyMemorySeconds`. That older behaviour was
+added so a guard would not stand still while being shot, but it is also what let attackers be
+pulled off a local guard by a distant shooter, so it is off by default.
+
+`GetCombatDebugString()` prints `Defenders=[...]` and `Eligible=[...]` separately, plus
+`Retaliate=`. A scoring bug shows up as `Defenders` empty while `Eligible` still names a
+player. `AttackClass=` empty means the attack goal class was never learned, in which case
+suppression never runs at all.
 
 Global limits are configured in Project Settings:
 

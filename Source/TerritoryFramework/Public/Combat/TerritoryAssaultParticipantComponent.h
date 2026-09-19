@@ -160,6 +160,8 @@ private:
 	bool bVehicleAbandonmentRequested = false;
 	bool bUseVehicleWalkDestination = false;
 	TWeakObjectPtr<UClass> NarrativeAttackGoalClass;
+	/** One-shot so a permanently unlearnable attack goal class warns once, not per tick. */
+	bool bLoggedMissingAttackGoalClass = false;
 	TArray<FTerritoryNarrativeGoalScoreOverride> NarrativeGoalScoreOverrides;
 	TWeakObjectPtr<UNarrativeAbilitySystemComponent> BoundASC;
 	FTimerHandle ParticipationTimer;
@@ -177,6 +179,9 @@ private:
 	void ReconcileNarrativeDefenderTargeting(UNPCActivityComponent* ActivityComponent,
 		TConstArrayView<AActor*> LiveHostileDefenders);
 	TArray<AActor*> CollectTakeoverCombatants(ATerritoryVolume* Territory) const;
+
+	/** Most recent live attacker this NPC may engage, or null when none is remembered. */
+	AActor* ResolveMostRecentDamagingThreat() const;
 	void PlayMissionDialogue(const FGameplayTag& DialogueTag);
 	void RestoreNarrativeDefenderTargeting(bool bReselectActivity);
 	void UnregisterCapturePressure();

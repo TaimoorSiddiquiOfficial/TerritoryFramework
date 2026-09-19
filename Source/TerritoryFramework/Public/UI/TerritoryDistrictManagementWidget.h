@@ -46,6 +46,23 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Management")
 	bool CanRemoveGuard(FText& OutFailureReason) const;
 
+	/**
+	 * The three player-facing reasons a guard action can be refused.
+	 * Buy and remove share them, so the same situation cannot be described two different ways,
+	 * and each one carries a localization key so it can be translated. Exposed so a project's own
+	 * HUD can show exactly the sentence the widget would have shown.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	static FText GetManagementUnavailableReason();
+
+	/** Easy example: shown when the player is standing too far from the district management point. */
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	static FText GetOutOfManagementRangeReason();
+
+	/** Easy example: shown when the screen is open but no district or Place garrison is selected. */
+	UFUNCTION(BlueprintPure, Category="Territory|Management")
+	static FText GetNoGarrisonSelectedReason();
+
 	/** Refresh the management screen from the existing Territory state; does not purchase or upgrade anything. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Management")
 	void RefreshManagementDisplay();

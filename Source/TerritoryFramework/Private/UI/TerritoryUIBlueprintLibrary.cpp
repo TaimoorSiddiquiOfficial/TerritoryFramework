@@ -1,5 +1,6 @@
 #include "UI/TerritoryUIBlueprintLibrary.h"
 
+#include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryCommandTags.h"
 #include "Core/TerritoryDefinition.h"
@@ -786,7 +787,9 @@ bool UTerritoryUIBlueprintLibrary::BuildGarrisonOperationsView(
 	OutView.MaximumGuards = Territory->GetMaxGuardCount();
 	OutView.ReserveGuards = Snapshot.ReserveGuards;
 	OutView.PendingDeployments = Snapshot.PendingDeployments;
-	OutView.RecruitmentCostPerGuard = Territory->GetGuardRecruitmentCost(1);
+	// Priced for the viewer, not a flat base cost: the number the panel shows must be
+	// the number the purchase path charges, including any attitude multiplier.
+	OutView.RecruitmentCostPerGuard = Territory->GetGuardRecruitmentCostFor(ViewerActor, 1);
 	OutView.UpkeepPerGuard = FMath::Max(0, Territory->GetGuardCost());
 	if (const ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
 	{
@@ -1017,7 +1020,12 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 	OutView.GuardQuality = 0.f;
 	OutView.Fortification = 0.f;
 	OutView.AlliedSupport = 0.f;
-	OutView.StrategicValue = 0.f;
+	// The District itself is in this set. `GetDistrictGarrisonOperationsViews` walks only the
+	// District's Places, and `BuildDefenceFront` excludes the District too (a District is never a
+	// physical defender or assault objective) — so without seeding it here an authored District
+	// StrategicValue would be read by nothing at all and would be dead data.
+	TArray<ATerritoryVolume*> StrategicValueCandidates;
+	StrategicValueCandidates.Add(District);
 	for (const FTerritoryGarrisonOperationsView& Garrison : OutView.GarrisonTargets)
 	{
 		if (!Garrison.Territory || Garrison.Territory->GetOwningFaction() != OutView.OwnerFaction) continue;
@@ -1047,14 +1055,20 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		GuardQualityWeight += QualityWeight;
 		OutView.Fortification += FMath::Max(0.f, Garrison.Territory->GetFortificationStrength());
 		OutView.AlliedSupport += FMath::Max(0.f, Garrison.Territory->GetNearbyAlliedSupport());
-		OutView.StrategicValue += FMath::Max(0.f, Garrison.Territory->GetStrategicValue());
+		StrategicValueCandidates.Add(Garrison.Territory);
 	}
+	// Relative importance is intensive — the highest value in the District, not the total — so the
+	// Command Center agrees with strategic planning, which uses the same rule over a defence front.
+	// Fortification and Allied support above stay summed on purpose: those two are documented as
+	// *contributions* to a defence estimate, and unlike importance they really do add up.
+	OutView.StrategicValue =
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(StrategicValueCandidates);
 	OutView.GuardQuality = GuardQualityWeight > KINDA_SMALL_NUMBER
 		? WeightedGuardQuality / GuardQualityWeight : FMath::Max(0.f, District->GetGuardQuality());
 	OutView.bUnguarded = OutView.ActiveGuards <= 0;
 	OutView.bReserveCountKnown = true;
 
-	OutView.GuardPurchaseCost = District->GetGuardRecruitmentCost(1);
+	OutView.GuardPurchaseCost = District->GetGuardRecruitmentCostFor(ViewerActor, 1);
 	OutView.NetIncome = OutView.PeriodicIncome - OutView.GuardUpkeep;
 	if (const UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
 	{
@@ -1748,11 +1762,85 @@ bool UTerritoryUIBlueprintLibrary::IsDistrictCapturedOwned(
 		&& View.TerritoryState != ETerritoryState::Unclaimed;
 }
 
+namespace
+{
+	/** Round a displayed float to the precision a widget can actually show. */
+	FORCEINLINE uint32 HashDisplayedFloat(uint32 Hash, float Value, float Scale)
+	{
+		return HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(Value * Scale)));
+	}
+
+	FORCEINLINE uint32 HashDisplayedText(uint32 Hash, const FText& Value)
+	{
+		return HashCombineFast(Hash, GetTypeHash(Value.ToString()));
+	}
+
+	/**
+	 * Fold one Place/City/selected-District hierarchy row into the revision.
+	 * Every field a widget can render belongs here. This function hashes the whole row
+	 * rather than a hand-picked subset: the earlier subset silently omitted
+	 * `DisplayName`, `AvailabilityReason`, `ParentTerritoryTag` and `bVisibleToPlayer`,
+	 * so those could change on screen without the panel rebuilding.
+	 */
+	uint32 HashHierarchyRow(uint32 Hash, const FTerritoryHierarchyOperationsView& Row)
+	{
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.TerritoryTag));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.ParentTerritoryTag));
+		Hash = HashDisplayedText(Hash, Row.DisplayName);
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Row.HierarchyLevel)));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Row.Availability)));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Row.TerritoryState)));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.OwnerFaction));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.ViewerFaction));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.bRegistered));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.bVisibleToPlayer));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.bOwnedByViewer));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.bAvailableForCapture));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Row.CaptureEligibility)));
+		Hash = HashDisplayedText(Hash, Row.AvailabilityReason);
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.ActiveGuards));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.DesiredGuards));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.MaximumGuards));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.PeriodicIncome));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.GuardUpkeep));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.NetIncome));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.bHasProductionProfile));
+		return Hash;
+	}
+
+	/** Fold one resource row into the revision, including its icon and its per-cycle numbers. */
+	uint32 HashResourceRow(uint32 Hash, const FTerritoryResourceOperationsView& Resource)
+	{
+		Hash = HashCombineFast(Hash, GetTypeHash(Resource.ItemClass));
+		Hash = HashDisplayedText(Hash, Resource.DisplayName);
+		Hash = HashCombineFast(Hash, GetTypeHash(Resource.Thumbnail.ToString()));
+		Hash = HashCombineFast(Hash, GetTypeHash(Resource.StoredQuantity));
+		Hash = HashCombineFast(Hash, GetTypeHash(Resource.InputPerCycle));
+		Hash = HashCombineFast(Hash, GetTypeHash(Resource.OutputPerCycle));
+		Hash = HashCombineFast(Hash, GetTypeHash(Resource.NetPerCycle));
+		Hash = HashCombineFast(Hash, GetTypeHash(Resource.bSufficientForNextCycle));
+		return Hash;
+	}
+}
+
 int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 	const FTerritoryDistrictOperationsView& View)
 {
+	// Contract: this is the invalidation key for the whole Command Center panel, so it must
+	// fold in every field the panel can display. A field missing here means a value visibly
+	// changes while the widget tree keeps its old text. That is exactly the bug this
+	// function used to have: `PlannedAttackers`, `AssaultResolution`, `ThreatSummary`, the
+	// guard-strength floats and all four failure-reason texts were omitted.
+	//
+	// The raw actor pointers (`District`, `City`, and the nested `Territory`) are
+	// deliberately not hashed. They are handles, not displayed content, and their addresses
+	// change on streaming and GC in ways that would force needless rebuilds. What those
+	// widgets actually render about load state is already covered by `bRegistered`,
+	// `bRuntimeLoaded` and the stable tags.
 	uint32 Hash = GetTypeHash(View.DistrictTag);
 	Hash = HashCombineFast(Hash, GetTypeHash(View.CityTag));
+	Hash = HashDisplayedText(Hash, View.DisplayName);
+	Hash = HashDisplayedText(Hash, View.CityDisplayName);
 	Hash = HashCombineFast(Hash, GetTypeHash(View.OwnerFaction));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ViewerFaction));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ContestingFaction));
@@ -1764,32 +1852,26 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bRuntimeLoaded));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bHierarchyVisible));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bAvailable));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bOwnedByViewer));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bManageable));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.bUnderAttack));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.bAttackScheduled));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.bThreatPreviewAvailable));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.bUnguarded));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.bFinancialRisk));
-	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(View.CaptureProgress * 1000.f)));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bAvailableForCapture));
+	Hash = HashDisplayedText(Hash, View.AvailabilityReason);
+	Hash = HashDisplayedText(Hash, View.ManagementFailureReason);
+	Hash = HashDisplayedText(Hash, View.LockReason);
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bCaptureInProgress));
+	Hash = HashDisplayedFloat(Hash, View.CaptureProgress, 1000.f);
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ActiveAttackers));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bAttackerCountKnown));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ActiveGuards));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.DesiredGuards));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.MaximumGuards));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ReserveGuards));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.AvailableFunds));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.NetIncome));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.GuardPurchaseCost));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.AssaultID));
-	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.AssaultState)));
-	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.ThreatLevel)));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.AliveAttackers));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.PendingReserveAttackers));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.KilledAttackers));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.WithdrawnAttackers));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.ThreatTargetTerritory));
-	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(View.LaunchProbability * 1000.f)));
-	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(View.EstimatedSuccessProbability * 1000.f)));
-	Hash = HashCombineFast(Hash, GetTypeHash(FMath::RoundToInt(View.AttackPriority * 10.f)));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bReserveCountKnown));
+	Hash = HashDisplayedFloat(Hash, View.GuardQuality, 1000.f);
+	Hash = HashDisplayedFloat(Hash, View.Fortification, 1000.f);
+	Hash = HashDisplayedFloat(Hash, View.AlliedSupport, 1000.f);
+	Hash = HashDisplayedFloat(Hash, View.StrategicValue, 1000.f);
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bUnguarded));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.TotalProperties));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.KnownProperties));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.HiddenProperties));
@@ -1798,62 +1880,144 @@ int32 UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bAllPlacesDiscovered));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.ManageableGarrisonTargets));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.UnguardedGarrisonTargets));
+	for (const FTerritoryHierarchyOperationsView& Row : View.Hierarchy)
+	{
+		Hash = HashHierarchyRow(Hash, Row);
+	}
+	for (const FTerritoryHierarchyOperationsView& Row : View.VisiblePlaces)
+	{
+		Hash = HashHierarchyRow(Hash, Row);
+	}
+	Hash = HashCombineFast(Hash, GetTypeHash(View.AvailableFunds));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.PeriodicIncome));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.GuardUpkeep));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.NetIncome));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.GuardPurchaseCost));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bFinancialRisk));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanAddGuard));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanRemoveGuard));
 	Hash = HashCombineFast(Hash, GetTypeHash(View.bCanSendReinforcements));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.ProducingSiteCount));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.BlockedProductionSiteCount));
-	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.ViewerOwnerDiplomacy)));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.OwnerReputation));
-	for (const FTerritoryHierarchyOperationsView& Place : View.VisiblePlaces)
+	Hash = HashDisplayedText(Hash, View.AddGuardFailureReason);
+	Hash = HashDisplayedText(Hash, View.RemoveGuardFailureReason);
+	Hash = HashDisplayedText(Hash, View.ReinforcementFailureReason);
+	for (const FTerritoryCommandCapabilityView& Capability : View.CommandCapabilities)
 	{
-		Hash = HashCombineFast(Hash, GetTypeHash(Place.TerritoryTag));
-		Hash = HashCombineFast(Hash, GetTypeHash(Place.OwnerFaction));
-		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Place.Availability)));
-		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Place.TerritoryState)));
-		Hash = HashCombineFast(Hash, GetTypeHash(Place.ActiveGuards));
-		Hash = HashCombineFast(Hash, GetTypeHash(Place.DesiredGuards));
-		Hash = HashCombineFast(Hash, GetTypeHash(Place.NetIncome));
+		Hash = HashCombineFast(Hash, GetTypeHash(Capability.Capability));
+		Hash = HashDisplayedText(Hash, Capability.DisplayName);
+		Hash = HashDisplayedText(Hash, Capability.Description);
+		Hash = HashCombineFast(Hash, GetTypeHash(Capability.bConfigured));
+		Hash = HashCombineFast(Hash, GetTypeHash(Capability.bGranted));
+		Hash = HashDisplayedText(Hash, Capability.AvailabilityReason);
+		for (const FText& SourceName : Capability.ActiveSourceNames)
+		{
+			Hash = HashDisplayedText(Hash, SourceName);
+		}
 	}
 	for (const FTerritoryGarrisonOperationsView& Garrison : View.GarrisonTargets)
 	{
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.TerritoryTag));
+		Hash = HashDisplayedText(Hash, Garrison.DisplayName);
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.bDistrictGarrison));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.bOwnedByViewer));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.bManageable));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.ActiveGuards));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.DesiredGuards));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.MaximumGuards));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.ReserveGuards));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.PendingDeployments));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.RecruitmentCostPerGuard));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.UpkeepPerGuard));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.PeriodicIncome));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.GuardUpkeep));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.NetIncome));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.bCanIncreaseTarget));
+		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.bCanDecreaseTarget));
 		Hash = HashCombineFast(Hash, GetTypeHash(Garrison.bCanSendReinforcements));
-	}
-	for (const FTerritoryCommandCapabilityView& Capability : View.CommandCapabilities)
-	{
-		Hash = HashCombineFast(Hash, GetTypeHash(Capability.Capability));
-		Hash = HashCombineFast(Hash, GetTypeHash(Capability.bConfigured));
-		Hash = HashCombineFast(Hash, GetTypeHash(Capability.bGranted));
-		for (const FText& SourceName : Capability.ActiveSourceNames)
-		{
-			Hash = HashCombineFast(Hash, GetTypeHash(SourceName.ToString()));
-		}
+		Hash = HashDisplayedText(Hash, Garrison.IncreaseFailureReason);
+		Hash = HashDisplayedText(Hash, Garrison.DecreaseFailureReason);
+		Hash = HashDisplayedText(Hash, Garrison.ReinforcementFailureReason);
 	}
 	for (const FTerritoryProductionSiteOperationsView& Site : View.ProductionSites)
 	{
 		Hash = HashCombineFast(Hash, GetTypeHash(Site.TerritoryTag));
+		Hash = HashCombineFast(Hash, GetTypeHash(Site.ParentTerritoryTag));
+		Hash = HashDisplayedText(Hash, Site.DisplayName);
+		Hash = HashCombineFast(Hash, GetTypeHash(Site.OwnerFaction));
 		Hash = HashCombineFast(Hash, GetTypeHash(Site.ActiveRuleTag));
 		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Site.Status)));
+		Hash = HashDisplayedText(Hash, Site.StatusReason);
 		Hash = HashCombineFast(Hash, GetTypeHash(Site.LastEvaluatedCycle));
+		Hash = HashCombineFast(Hash, GetTypeHash(Site.bHasProductionProfile));
+		Hash = HashCombineFast(Hash, GetTypeHash(Site.bProducing));
+		Hash = HashCombineFast(Hash, GetTypeHash(Site.bBlocked));
+		for (const FTerritoryProductionRuleState& Rule : Site.RuleStates)
+		{
+			Hash = HashCombineFast(Hash, GetTypeHash(Rule.RuleTag));
+			Hash = HashDisplayedText(Hash, Rule.DisplayName);
+			Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Rule.Status)));
+			Hash = HashCombineFast(Hash, GetTypeHash(Rule.LastEvaluatedCycle));
+			Hash = HashDisplayedText(Hash, Rule.StatusReason);
+			for (const FTerritoryResourceAmount& Input : Rule.LastInputs)
+			{
+				Hash = HashCombineFast(Hash, GetTypeHash(Input.ItemClass));
+				Hash = HashCombineFast(Hash, GetTypeHash(Input.Quantity));
+			}
+			for (const FTerritoryResourceAmount& Output : Rule.LastOutputs)
+			{
+				Hash = HashCombineFast(Hash, GetTypeHash(Output.ItemClass));
+				Hash = HashCombineFast(Hash, GetTypeHash(Output.Quantity));
+			}
+		}
 		for (const FTerritoryResourceOperationsView& Resource : Site.Resources)
 		{
-			Hash = HashCombineFast(Hash, GetTypeHash(Resource.ItemClass));
-			Hash = HashCombineFast(Hash, GetTypeHash(Resource.StoredQuantity));
-			Hash = HashCombineFast(Hash, GetTypeHash(Resource.NetPerCycle));
+			Hash = HashResourceRow(Hash, Resource);
 		}
 	}
-	Hash = HashCombineFast(Hash, GetTypeHash(View.LockReason.ToString()));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.AvailabilityReason.ToString()));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.ThreatEvaluationReason.ToString()));
-	Hash = HashCombineFast(Hash, GetTypeHash(View.DiplomacySummary.ToString()));
-	return static_cast<int32>(Hash);
+	for (const FTerritoryResourceOperationsView& Resource : View.ResourceFlows)
+	{
+		Hash = HashResourceRow(Hash, Resource);
+	}
+	// The two production counters the Command Center prints as its "producing / blocked"
+	// headline. They are read from the view directly rather than counted from
+	// `ProductionSites`, so they need hashing in their own right.
+	Hash = HashCombineFast(Hash, GetTypeHash(View.ProducingSiteCount));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.BlockedProductionSiteCount));
+	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.ThreatLevel)));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bUnderAttack));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bAttackScheduled));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bThreatPreviewAvailable));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.NonTerminalAssaultCount));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.AssaultID));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.ThreatTargetTerritory));
+	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.AssaultState)));
+	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.AssaultResolution)));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.AttackingFaction));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.PlannedAttackers));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.AliveAttackers));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.PendingReserveAttackers));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.KilledAttackers));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.WithdrawnAttackers));
+	Hash = HashDisplayedFloat(Hash, View.LaunchProbability, 1000.f);
+	Hash = HashDisplayedFloat(Hash, View.EstimatedSuccessProbability, 1000.f);
+	Hash = HashDisplayedFloat(Hash, View.AttackPriority, 10.f);
+	Hash = HashDisplayedFloat(Hash, View.DistrictDefencePower, 100.f);
+	Hash = HashDisplayedFloat(Hash, View.PowerRatio, 1000.f);
+	for (const FName& Approach : View.SelectedApproaches)
+	{
+		Hash = HashCombineFast(Hash, GetTypeHash(Approach));
+	}
+	Hash = HashDisplayedText(Hash, View.ThreatEvaluationReason);
+	Hash = HashDisplayedText(Hash, View.ThreatSummary);
+	Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(View.ViewerOwnerDiplomacy)));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.OwnerReputation));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bViewerAtWarWithOwner));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bViewerAlliedWithOwner));
+	Hash = HashCombineFast(Hash, GetTypeHash(View.bViewerTradesWithOwner));
+	Hash = HashDisplayedText(Hash, View.DiplomacySummary);
+
+	// Mask rather than a plain cast: a raw uint32 can arrive negative, and a Blueprint
+	// caller testing `Revision > 0` to mean "something changed" would then never rebuild.
+	return static_cast<int32>(Hash & 0x7FFFFFFFu);
 }
 
 FTerritoryEconomyOperationsView UTerritoryUIBlueprintLibrary::BuildEconomyOperationsView(
@@ -2131,10 +2295,28 @@ FText UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
 		return NSLOCTEXT("TerritoryOperations", "AvailabilityLocked", "Locked");
 	}
 
-	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-	return StateEnum
-		? StateEnum->GetDisplayNameTextByValue(static_cast<int64>(PoliticalState))
-		: FText::GetEmpty();
+	// Spelled out per value rather than read from the enum's DisplayName metadata, for two reasons.
+	// 1. UEnum::GetDisplayNameTextByIndex only localizes under `#if WITH_EDITOR`; in a packaged
+	//    build it falls through to FText::FromString, which carries no key and can never be
+	//    translated. The rest of this file's text helpers are keyed in every build.
+	// 2. An unrecognised byte returned FText::GetEmpty(), so a save written by another build printed
+	//    a blank status label. This enum already keeps a legacy serialized value for exactly that
+	//    kind of compatibility, so unknown bytes are a real input, not a theoretical one.
+	switch (PoliticalState)
+	{
+	case ETerritoryState::Unclaimed:
+		return NSLOCTEXT("TerritoryOperations", "StateUnclaimed", "Unclaimed");
+	case ETerritoryState::Claimed:
+		return NSLOCTEXT("TerritoryOperations", "StateClaimed", "Claimed");
+	case ETerritoryState::Contested:
+		return NSLOCTEXT("TerritoryOperations", "StateContested", "Contested");
+	case ETerritoryState::Locked:
+		// The metadata calls this "Locked (Legacy)"; the parenthetical is a note to developers
+		// about the serialized compatibility value, so it is not shown to players.
+		return NSLOCTEXT("TerritoryOperations", "StateLocked", "Locked");
+	default:
+		return NSLOCTEXT("TerritoryOperations", "UnknownTerritoryState", "Unknown state");
+	}
 }
 
 FText UTerritoryUIBlueprintLibrary::GetAssaultStateText(ETerritoryAssaultState AssaultState)
@@ -2210,10 +2392,27 @@ FText UTerritoryUIBlueprintLibrary::GetAssaultResolutionText(
 
 FText UTerritoryUIBlueprintLibrary::GetDiplomacyStateText(EDiplomacyState DiplomacyState)
 {
-	const UEnum* Enum = StaticEnum<EDiplomacyState>();
-	return Enum
-		? Enum->GetDisplayNameTextByValue(static_cast<int64>(DiplomacyState))
-		: NSLOCTEXT("TerritoryOperations", "UnknownDiplomacyState", "Unknown relationship");
+	// Spelled out per value for the same two reasons as GetTerritoryStatusText above: the enum's
+	// own DisplayName text is only localizable under `#if WITH_EDITOR`, and an unrecognised byte
+	// resolved to FText::GetEmpty() rather than to the "Unknown relationship" fallback, because the
+	// fallback guarded only a null UEnum and not a value with no matching entry.
+	switch (DiplomacyState)
+	{
+	case EDiplomacyState::None:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyStateNeutral", "Neutral / No Treaty");
+	case EDiplomacyState::Alliance:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyStateAlliance", "Alliance");
+	case EDiplomacyState::TradeAgreement:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyStateTrade", "Trade Agreement");
+	case EDiplomacyState::NonAggression:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyStateNonAggression", "Non-Aggression Pact");
+	case EDiplomacyState::War:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyStateWar", "War");
+	case EDiplomacyState::Ceasefire:
+		return NSLOCTEXT("TerritoryOperations", "DiplomacyStateCeasefire", "Ceasefire");
+	default:
+		return NSLOCTEXT("TerritoryOperations", "UnknownDiplomacyState", "Unknown relationship");
+	}
 }
 
 FText UTerritoryUIBlueprintLibrary::GetDiplomacyEventTypeText(

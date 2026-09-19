@@ -133,6 +133,22 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat")
 	bool bDefendAgainstExposedEnemies = true;
 
+	/**
+	 * Let a defender attack a faction it is at War with even when the Place is Claimed
+	 * rather than Contested.
+	 *
+	 * Easy example: the Regime sends you to take Bandit outposts, then turns on you
+	 * mid-game. With this off (default) the Regime's own guards keep ignoring you in
+	 * every Place you captured for them, because those Places are Claimed and peaceful.
+	 * With this on, the war has teeth — their guards defend the territory you won for
+	 * them the moment the alliance breaks.
+	 *
+	 * Off by default: making every Claimed Place lethal at War changes stealth and quest
+	 * content that deliberately runs inside hostile territories.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat")
+	bool bEngageAtWarInClaimedTerritory = false;
+
 	/** Optional exact Narrative faction filter for combat targets. Empty allows every faction that passes diplomacy, stealth and quest rules. Uses the perceived faction while a disguise is accepted. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat", meta=(Categories="Narrative.Factions"))
 	FGameplayTagContainer CombatTargetFactions;
@@ -430,7 +446,7 @@ public:
 	/** Story availability is independent from political control. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 New Campaign",
 		meta=(DisplayName="Initial Availability",
-			ToolTip="Locked keeps this Territory silent until its Narrative Locked exit conditions pass. Ownership is preserved."))
+			ToolTip="Locked keeps this Territory silent until its Narrative Locked exit conditions pass. Ownership is preserved. Applied only when a brand-new campaign starts; an existing save keeps its saved availability, so changing this appears to do nothing while testing on a save you already have. Easy example: lock the Farm Place until the story unlocks it, then test on a new campaign."))
 	ETerritoryAvailability InitialAvailability = ETerritoryAvailability::Unlocked;
 
 	/** Political state used for a new campaign. Automatic derives the starting state from the initial owner. */
@@ -460,6 +476,41 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Economy",
 		meta=(ClampMin="0"))
 	int32 GuardRecruitmentCost = 50;
+
+	/**
+	 * Let the buyer's standing with the owner faction change guard recruitment prices.
+	 * Easy example: you betray the Regime. With this on, staffing a garrison in Regime land
+	 * you once served costs more, while an allied faction is cheaper.
+	 * Off by default, because turning it on changes a price every project has already
+	 * balanced around. Turn it on per Territory Definition where the betrayal should hurt.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Economy",
+		meta=(DisplayName="Attitude Affects Prices"))
+	bool bAttitudeAffectsPrices = false;
+
+	/**
+	 * Price multiplier when the buyer's faction is Allied or holds a Trade Agreement.
+	 * Easy example: 0.85 gives an ally a 15% discount.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Economy",
+		meta=(EditCondition="bAttitudeAffectsPrices", ClampMin="0.0"))
+	float FriendlyPriceMultiplier = 0.85f;
+
+	/**
+	 * Price multiplier for Neutral, Non-Aggression and Ceasefire relations.
+	 * Easy example: leave at 1.0 so only friendship and war move the price.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Economy",
+		meta=(EditCondition="bAttitudeAffectsPrices", ClampMin="0.0"))
+	float NeutralPriceMultiplier = 1.f;
+
+	/**
+	 * Price multiplier when the buyer's faction is at War with the owner.
+	 * Easy example: 1.5 means a faction you are fighting charges you half again as much.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Economy",
+		meta=(EditCondition="bAttitudeAffectsPrices", ClampMin="0.0"))
+	float WarPriceMultiplier = 1.5f;
 
 	UPROPERTY(EditAnywhere, EditFixedSize, BlueprintReadOnly, Category="05 State Rules",
 		meta=(DisplayName="State Rules (All Runtime States)",
@@ -551,7 +602,13 @@ public:
 		meta=(ClampMin="0.0"))
 	float NearbyAlliedSupport = 0.f;
 
-	/** Relative importance of this Territory to strategic assault planning; higher values make it a more valuable target. */
+	/**
+	 * Relative importance of this Territory to strategic assault planning; higher values make it a
+	 * more valuable target. Aggregated by *maximum*, not by sum: a District or a defence front is as
+	 * valuable as its single most valuable member, so raising one Place's value raises the whole
+	 * District and adding another trivial Place does not inflate the number.
+	 * See TerritoryAssaultTargetPolicy::AggregateStrategicValue.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Counter Attack",
 		meta=(ClampMin="0.0"))
 	float StrategicValue = 1.f;

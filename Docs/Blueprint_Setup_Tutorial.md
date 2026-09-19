@@ -135,23 +135,60 @@ Choose ONE capture method per territory:
 
 ## 6. Lock System (Quest-Gated Territories)
 
+> **Where lock settings live.** Locking is authored on the **Territory Definition
+> DataAsset**, not on the Territory volume actor.
+>
+> Older versions of this tutorial told you to set **Starts Locked** and **Lock
+> Conditions** on the volume actor. Those two properties were removed and no
+> longer exist — there is nothing to set. If you followed an older guide, could
+> not find them, and concluded locking was broken, this is why.
+
 ### 6.1 Start Locked
 
-On the territory volume:
-- **Starts Locked** = true
-- Territory starts invisible on map, no guards, can't be captured
+Open the Territory **Definition** DataAsset and set:
+
+- **Initial Availability** = **Locked** — the territory starts unavailable.
+
+A locked territory is hidden from the map, has no guards, and cannot be captured.
+Its owner and political state are preserved while it is locked.
+
+> **Important — why this can look broken.** Initial Availability is read **only
+> when a brand-new campaign starts.** An existing save keeps the availability it
+> already saved, so editing this field appears to do nothing while you test on a
+> save you already have. Either start a new campaign, or change availability at
+> runtime with the events below.
 
 ### 6.2 Unlock via Quest
 
-Add **TerritoryUnlockEvent** to a quest/dialogue node:
-- **Target Territory Tag** = the territory to unlock
-- **Force Unlock** = true
+Add a **Try Unlock Territory** event (`UTerritoryUnlockEvent`) to a quest or
+dialogue node:
+
+- **Target Territory Tag** = the exact territory to unlock
+- **Unlock Scope** = the hierarchy behaviour you want
+
+`Unlock Scope` replaces the older **Force Unlock** checkbox, which is kept only
+to migrate old assets. **Automatic Hierarchy** opens the target's required parent
+path and respects each Locked exit condition. The **Force** options are trusted
+story overrides that skip those conditions.
 
 ### 6.3 Lock Conditions (Optional)
 
-On the territory volume, add conditions to the **Lock Conditions** array:
-- These are `UNarrativeCondition` instances (e.g., quest completed, level reached)
-- `TryUnlock()` checks all conditions — only unlocks if ALL pass
+Lock conditions are the **Exit Conditions on the Locked row** of the Definition's
+**State Configs** array. They are `UNarrativeCondition` instances — quest
+completed, level reached, and so on.
+
+State Configs always contains four rows, and every row is a state. The Locked row
+is the one that decides whether the territory may open:
+
+| Row | What its Exit Conditions mean |
+|---|---|
+| **Locked** | Conditions that must pass before the territory can be unlocked |
+| Unclaimed / Contested / Claimed | Conditions needed to leave that control state |
+
+> **Lock conditions are checked, not polled.** Nothing watches them on its own.
+> A **Try Unlock Territory** event — or the equivalent Blueprint/API call — is
+> what triggers the check. If you author unlock conditions and the territory
+> never opens by itself, this is the reason: add the unlock event to your quest.
 
 ---
 

@@ -38,6 +38,28 @@ namespace TerritoryAssaultTargetPolicy
 	TERRITORYFRAMEWORK_API TArray<ATerritoryVolume*> BuildDefenceFront(
 		ATerritoryVolume* TargetTerritory);
 
+	/**
+	 * Relative importance of a set of Territories: the highest authored value, or 0 when the set is
+	 * empty or every value is zero.
+	 *
+	 * Relative importance is *intensive* — a District or a defence front is as valuable as its single
+	 * most valuable member, not as valuable as the sum of them. Summing made a District of six trivial
+	 * Places outrank one vital Place and made the number grow with how the map happened to be carved
+	 * into Places rather than with how important the place actually is, which contradicts the
+	 * property's own meaning ("higher values make it a more valuable target").
+	 *
+	 * Both the Command Center display and strategic assault planning call this, with the set each one
+	 * owns: the display passes a District plus its contributing Places, planning passes a defence
+	 * front. The *sets* legitimately differ — `BuildDefenceFront` excludes the District because a
+	 * District is never a physical defender or assault objective — but the *rule* is stated once here
+	 * so the two can never aggregate the same concept two different ways.
+	 *
+	 * Negative values are clamped away rather than folded into the maximum: the property declares
+	 * ClampMin=0, so a negative is corrupt data, and letting it win would be worse than ignoring it.
+	 */
+	TERRITORYFRAMEWORK_API float AggregateStrategicValue(
+		TConstArrayView<ATerritoryVolume*> Territories);
+
 	/** Unique registered defenders from the complete local defence front. */
 	TERRITORYFRAMEWORK_API TArray<AActor*> CollectRegisteredDefenders(
 		ATerritoryVolume* TargetTerritory);

@@ -285,9 +285,23 @@ bool ATerritoryGuardCharacter::CanEngageTerritoryTarget(const AActor* Target) co
 
 bool ATerritoryGuardCharacter::EvaluateTerritoryTarget(const AActor* Target, FText& OutReason) const
 {
-	auto Result = [&OutReason](bool bAllowed, const TCHAR* Reason)
+	// Every exit below returns through this lambda, so this is the ONE place the decision can be
+	// written to the log - not thirteen. That matters for diagnosis rather than tidiness: the
+	// guard's reasoning used to be reachable only by reading the thirteen returns, which is how
+	// the reported "the guard ignores the squad the player assigned it" bug had to be traced.
+	// One line per decision, naming who decided, about whom, where, and why - and covering the
+	// allows as well as the refusals, because "it attacked the wrong actor" and "it stood still"
+	// are both failures of this function.
+	auto Result = [this, Target, &OutReason](bool bAllowed, const TCHAR* Reason)
 	{
 		OutReason = FText::FromString(Reason);
+		if (const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+			Settings && Settings->ShouldDebugCombat())
+		{
+			UE_LOG(LogTerritory, Log, TEXT("GuardCharacter %s %s %s at %s: %s"),
+				*GetName(), bAllowed ? TEXT("engages") : TEXT("refuses"),
+				*GetNameSafe(Target), *GetNameSafe(OwningTerritory.Get()), Reason);
+		}
 		return bAllowed;
 	};
 	if (!HasAuthority()) return Result(false, TEXT("Guard combat is decided by the server."));
@@ -359,9 +373,18 @@ bool ATerritoryGuardCharacter::EvaluateTerritoryTarget(const AActor* Target, FTe
 		if (!Behavior || Behavior->bDefendAgainstExposedEnemies)
 			return Result(true, TEXT("This player is exposed and belongs to a faction at War."));
 	}
-	return OwningTerritory->GetTerritoryState() == ETerritoryState::Contested
-		? Result(true, TEXT("A faction at War is contesting the Place."))
-		: Result(false, TEXT("The Place is not contested and there is no confirmed local threat."));
+	if (OwningTerritory->GetTerritoryState() == ETerritoryState::Contested)
+	{
+		return Result(true, TEXT("A faction at War is contesting the Place."));
+	}
+	// Faction-level hostility has no other channel here: Narrative's personal aggressiveness
+	// test is a per-actor Hostiles set, not an attitude, so without this a broken alliance
+	// leaves every Claimed Place the player captured for them completely safe.
+	if (Behavior && Behavior->bEngageAtWarInClaimedTerritory)
+	{
+		return Result(true, TEXT("The Place is claimed, but this faction is at War and the guard is ordered to defend it."));
+	}
+	return Result(false, TEXT("The Place is not contested and there is no confirmed local threat."));
 }
 
 bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(

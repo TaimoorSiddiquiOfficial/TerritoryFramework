@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "TerritoryAuditEventProbe.h"
 #include "Tales/TerritoryConditionGroup.h"
+#include "Tales/TerritoryOwnershipCondition.h"
 #include "Tales/TerritoryStoryConditions.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "Tales/TerritoryLockEvent.h"
@@ -21,6 +22,8 @@
 #include "GameFramework/WorldSettings.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
+#include "NarrativeSave.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "UnrealFramework/NarrativePlayerState.h"
 #include "UnrealFramework/NarrativePlayerCharacter.h"
@@ -254,6 +257,74 @@ bool FTFTalesDynamicReputation::RunTest(const FString&)
 	Diplomacy->SetReputation(Bandits, 0);
 	Directory->ImportPersistentState();
 	TestTrue(TEXT("Restored reputation still satisfies the current faction condition"), Condition->CheckCondition(Pawn, Controller, Tales));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFOwnershipWaitsForParticipantFaction,
+	"TerritoryFramework.Tales.Regression.OwnershipWaitsForParticipantFaction",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FTFOwnershipWaitsForParticipantFaction::RunTest(const FString&)
+{
+	TerritoryConditionAudit::FWorldFixture Fixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	const auto Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	const auto Bandits = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Bandits"));
+	const auto Tag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	auto* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = Tag;
+	Definition->StableTerritoryGUID = FGuid(301, 302, 303, 304);
+	Definition->InitialGuardCount = 0;
+	auto* Place = Fixture.World->SpawnActor<ATerritoryProperty>();
+	Definition->ApplyToTerritory(Place);
+	auto* Registry = Fixture.World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	Registry->RegisterTerritory(Place);
+	FTerritoryOwnershipData Data = Place->GetOwnershipData();
+	Data.State = ETerritoryState::Claimed;
+	Data.OwningFaction = Bandits;
+	TestTrue(TEXT("Fixture has a real claimed owner"), Place->CommitOwnershipData(Data));
+	auto* Condition = NewObject<UTerritoryOwnershipCondition>(Place);
+	Condition->TerritoryToCheck = Tag;
+	auto* Node = NewObject<UNarrativeNodeBase>(Place);
+	Node->Conditions = {Condition};
+	auto* Pawn = NewObject<ANarrativePlayerCharacter>(Fixture.World->PersistentLevel);
+	Pawn->SetRole(ROLE_Authority);
+	auto* Controller = NewObject<ANarrativePlayerController>(Fixture.World->PersistentLevel);
+	Controller->SetRole(ROLE_Authority);
+	Controller->SetOwnedCharacter(Pawn);
+	Controller->SetPawn(Pawn);
+	auto* Tales = NewObject<UTalesComponent>(Controller);
+	TestTrue(TEXT("A deliberate world-only check keeps its existing meaning"), Condition->CheckCondition(nullptr, nullptr, nullptr));
+	TestFalse(TEXT("A pawn without player state cannot accept an unrelated owner"), Condition->CheckCondition(Pawn, nullptr, nullptr));
+	TestFalse(TEXT("A controller without player state cannot accept an unrelated owner"), Condition->CheckCondition(nullptr, Controller, nullptr));
+	TestFalse(TEXT("Tales-only context is still a participant, not a world-only check"), Condition->CheckCondition(nullptr, nullptr, Tales));
+	TestFalse(TEXT("Native node evaluation rejects a participant whose faction is not ready"), Node->AreConditionsMet(Pawn, Controller, Tales));
+	auto* State = Fixture.World->SpawnActor<ANarrativePlayerState>();
+	Pawn->SetPlayerState(State);
+	Controller->SetPlayerState(State);
+	State->SetFactions(FGameplayTagContainer(Heroes));
+	TestFalse(TEXT("Initialized Heroes cannot pass Bandit ownership"), Condition->CheckCondition(nullptr, nullptr, Tales));
+	State->SetFactions(FGameplayTagContainer(Bandits));
+	TestTrue(TEXT("Adopting the owning faction passes through the Narrative node"), Node->AreConditionsMet(Pawn, Controller, Tales));
+	FNarrativeActorRecord Record;
+	auto* Save = Fixture.World->GetSubsystem<UNarrativeSaveSubsystem>();
+	TestTrue(TEXT("Ownership is saved through Narrative"), Save->CreateActorRecord(Place, Record));
+	Data.OwningFaction = Heroes;
+	Place->CommitOwnershipData(Data);
+	TestFalse(TEXT("A changed owner updates the condition"), Condition->CheckCondition(Pawn, Controller, Tales));
+	Save->LoadActorFromRecord(Place, Record);
+	TestTrue(TEXT("Restored ownership updates the condition"), Condition->CheckCondition(Pawn, Controller, Tales));
+	Registry->UnregisterTerritory(Place);
+	AddExpectedError(TEXT("not found in registry"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestFalse(TEXT("Unloaded territory fails even for a valid participant"), Condition->CheckCondition(Pawn, Controller, Tales));
+	Registry->RegisterTerritory(Place);
+	Place->SetRole(ROLE_SimulatedProxy);
+	TestTrue(TEXT("Client-role reads use the supplied participant and replicated owner"), Condition->CheckCondition(Pawn, Controller, Tales));
+	// Native SetFactions ignores an empty container; use its supported removal API.
+	State->RemoveFaction(Bandits);
+	TestFalse(TEXT("Losing faction context fails again without retaining a previous answer"), Condition->CheckCondition(Pawn, Controller, Tales));
+	Condition->RequiredOwner = Bandits;
+	TestTrue(TEXT("An explicit authored owner does not need a participant faction"), Condition->CheckCondition(Pawn, Controller, Tales));
+	Place->SetRole(ROLE_Authority);
 	return true;
 }
 

@@ -1,0 +1,100 @@
+{
+  "date": "2026-09-19",
+  "engine": "5.8",
+  "build": "Build58Verified.log: Succeeded",
+  "automation": {
+    "report": "Saved/Verification/20260919_Reputation/Automation58Verified/index.json",
+    "succeeded": 324,
+    "succeededWithWarnings": 35,
+    "failed": 0,
+    "notRun": 0
+  },
+  "newRegressionTests": [
+    {
+      "fullTestPath": "TerritoryFramework.Capture.Regression.ExplicitConditionBypassReachesFinalCommit",
+      "state": "Success",
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "fullTestPath": "TerritoryFramework.Diplomacy.Regression.ExplicitSubjectIgnoresPlayerOrder",
+      "state": "Success",
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "fullTestPath": "TerritoryFramework.Diplomacy.Regression.ReputationRespectsAuthoredCallback",
+      "state": "Success",
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "fullTestPath": "TerritoryFramework.Diplomacy.SaveLoad.SubjectAndTreatyProvenance",
+      "state": "Success",
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "fullTestPath": "TerritoryFramework.Tales.Regression.OwnershipWaitsForParticipantFaction",
+      "state": "Success",
+      "errors": 0,
+      "warnings": 0
+    }
+  ],
+  "listenTwoClients": {
+    "passed": true,
+    "checks": {
+      "players_do_not_supply_an_implicit_subject": true,
+      "subject_score_and_provenance_reach_two_clients": true,
+      "client_mutations_are_rejected": true,
+      "server_is_unchanged_by_clients": true,
+      "reputation_withdraws_its_own_war_on_two_clients": true,
+      "same_state_quest_write_protects_war_and_replicates": true,
+      "cleared_subject_replicates_without_a_score_change": true
+    }
+  },
+  "dedicatedTwoClients": {
+    "passed": true,
+    "checks": {
+      "players_do_not_supply_an_implicit_subject": true,
+      "subject_score_and_provenance_reach_two_clients": true,
+      "client_mutations_are_rejected": true,
+      "server_is_unchanged_by_clients": true,
+      "reputation_withdraws_its_own_war_on_two_clients": true,
+      "same_state_quest_write_protects_war_and_replicates": true,
+      "cleared_subject_replicates_without_a_score_change": true
+    }
+  },
+  "farmPlayerContext": {
+    "checks": {
+      "owner_absent_while_locked": true,
+      "player_cannot_unlock_before_blacksmith_prerequisite": true,
+      "blacksmith_test_setup_commits": true,
+      "normal_player_unlock_succeeds_after_prerequisite": true,
+      "owner_appears_before_capture": true,
+      "handover_is_activated": true,
+      "repeated_unlock_does_not_duplicate_owner": true,
+      "no_forced_dialogue": true
+    },
+    "passed": true,
+    "scope": "PIE unlock, explicit player context and owner reveal; Blacksmith ownership staged through the server API, not combat."
+  },
+  "farmAssetValidation": {
+    "status": "completed",
+    "passed": true,
+    "checked": 2,
+    "valid": 2,
+    "invalid": 0,
+    "warnings": 0
+  },
+  "limitations": [
+    "PIE networking, not a packaged dedicated server.",
+    "Blacksmith ownership was staged through the server API for the Farm check. Full quest combat and dialogue chain remains unverified.",
+    "Complete campaign reload, World Partition gameplay, cook/package and UE 5.7 release gates remain."
+  ],
+  "originalPIESettingsRestored": {
+    "PlayNetMode": "PIE_ListenServer",
+    "PlayNumberOfClients": 1,
+    "RunUnderOneProcess": true
+  }
+}

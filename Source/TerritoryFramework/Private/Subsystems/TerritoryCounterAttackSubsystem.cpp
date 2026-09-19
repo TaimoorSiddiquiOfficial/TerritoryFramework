@@ -1743,11 +1743,18 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::WaitingForPlayerProximity) || !IsValid(Territory)) return;
 		if (Profile)
 		{
-			const bool bRelevantPlayerNearby = !Profile->bRequirePlayerProximityForActivation
+			const bool bProximityRequired = Profile->bRequirePlayerProximityForActivation
+				&& !Assault.bImmediateDeployment;
+			const bool bRelevantPlayerNearby = !bProximityRequired
 				|| HasRelevantPlayerNearby(Assault, Territory, Profile->ActivationRadius);
+			// Only consulted when the author actually asked to wait for a player;
+			// an immediate deployment never waits and so never needs a stand-in trigger.
+			const bool bGarrisonHoldsDefence = bProximityRequired
+				&& Profile->bGarrisonTriggersActivation
+				&& !TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Territory).IsEmpty();
 			if (ShouldActivateWaitingAssault(Assault.bAllowsTerritoryCapture,
-				Territory->GetTerritoryState(), Profile->bRequirePlayerProximityForActivation && !Assault.bImmediateDeployment,
-				bRelevantPlayerNearby))
+				Territory->GetTerritoryState(), bProximityRequired,
+				bRelevantPlayerNearby, bGarrisonHoldsDefence))
 			{
 				ActivateAssault(Assault, Territory);
 			}
@@ -2885,12 +2892,15 @@ void UTerritoryCounterAttackSubsystem::NotifyParticipantRemoved(
 
 bool UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
 	bool bAllowsTerritoryCapture, ETerritoryState TerritoryState,
-	bool bRequirePlayerProximity, bool bRelevantPlayerNearby)
+	bool bRequirePlayerProximity, bool bRelevantPlayerNearby,
+	bool bGarrisonHoldsDefence)
 {
 	const bool bTerritoryStateAllowsActivation = !bAllowsTerritoryCapture
 		|| TerritoryState == ETerritoryState::Claimed;
+	// A garrison standing in the Place is its own reason to attack. Without this the
+	// force idles until a player walks in, and then has a player to chase.
 	const bool bProximityAllowsActivation = !bRequirePlayerProximity
-		|| bRelevantPlayerNearby;
+		|| bRelevantPlayerNearby || bGarrisonHoldsDefence;
 	return bTerritoryStateAllowsActivation && bProximityAllowsActivation;
 }
 
@@ -4192,16 +4202,22 @@ FTerritoryAssaultEvaluationInput UTerritoryCounterAttackSubsystem::BuildEvaluati
 		QualityWeight += Weight;
 		Input.Fortification += FMath::Max(0.f, Defence->GetFortificationStrength());
 		Input.NearbyAlliedSupport += FMath::Max(0.f, Defence->GetNearbyAlliedSupport());
-		Input.StrategicValue += FMath::Max(0.f, Defence->GetStrategicValue());
 	}
 	Input.GuardQuality = QualityWeight > KINDA_SMALL_NUMBER
 		? WeightedQuality / QualityWeight : FMath::Max(0.f, Territory->GetGuardQuality());
+
+	// Strategic value is taken as the highest across the defence front, not a running total, and it
+	// is assigned rather than accumulated. Both matter:
+	//   * A total made the front look more attractive the more same-owner Places happened to sit
+	//     beside the target, regardless of whether any of them was valuable.
+	//   * Assigning removes the old "subtract the struct's default of one" correction, which only
+	//     ever produced the right answer for a front of exactly one Territory. The rule now lives in
+	//     one place, shared with the Command Center, so the number a player reads on a District and
+	//     the number the AI plans with cannot be aggregated two different ways.
+	Input.StrategicValue = TerritoryAssaultTargetPolicy::AggregateStrategicValue(DefenceTerritories);
 	Input.AttackingMilitaryPower = ForceConfig.MilitaryPower;
 	Input.EconomyReadiness = ForceConfig.EconomyReadiness;
 	Input.SupplyReadiness = ForceConfig.SupplyReadiness;
-	// The default struct value is one; remove it after accumulating authored values so
-	// one target with StrategicValue=1 remains one instead of being silently doubled.
-	Input.StrategicValue = FMath::Max(0.f, Input.StrategicValue - 1.f);
 	Input.RecentMomentum = ForceConfig.RecentMomentum;
 	Input.FactionInfluence = ForceConfig.TerritorialInfluence;
 	return Input;

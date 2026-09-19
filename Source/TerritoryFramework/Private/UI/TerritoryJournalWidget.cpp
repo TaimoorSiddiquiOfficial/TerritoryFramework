@@ -183,11 +183,12 @@ namespace
 
 	FString GetStateOption(ETerritoryState State)
 	{
-		const UEnum* StateEnum = StaticEnum<ETerritoryState>();
-		return StateEnum
-			? StateEnum->GetDisplayNameTextByValue(
-				static_cast<int64>(State)).ToString()
-			: FString();
+		// Delegates rather than reflecting the enum again, so the filter option a player picks and
+		// the value this widget compares against it are always the same string by construction.
+		// Unlocked is passed because a district view carries only the political state; the
+		// availability precedence is applied when the row itself is drawn.
+		return UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+			ETerritoryAvailability::Unlocked, State).ToString();
 	}
 }
 
@@ -275,6 +276,57 @@ int32 UTerritoryJournalWidget::GetCapturedTerritoryEntryCount() const
 		}
 	}
 	return Count;
+}
+
+FText UTerritoryJournalWidget::GetAssaultApproachListText(const TArray<FName>& ApproachIDs)
+{
+	// The separator and the empty sentence carry keys; each route name is derived from an authored
+	// ID, so there is no table to translate it from and it is spelled out for reading instead.
+	TArray<FText> ApproachNames;
+	for (const FName ApproachID : ApproachIDs)
+	{
+		ApproachNames.Add(FText::FromString(
+			FName::NameToDisplayString(ApproachID.ToString(), false)));
+	}
+
+	return ApproachNames.IsEmpty()
+		? NSLOCTEXT("TerritoryJournal", "NoAssaultRoutesSelected",
+			"No assault routes selected.")
+		: FText::Join(
+			NSLOCTEXT("TerritoryJournal", "AssaultRouteSeparator", "  |  "),
+			ApproachNames);
+}
+
+FText UTerritoryJournalWidget::GetTransactionLineText(
+	int32 Amount, const FString& Reason, const FGameplayTag& SourceTerritory)
+{
+	// Sign is explicit so a loss reads as a loss at a glance; grouping is off because these are
+	// small faction-resource counts, not currency totals worth thousands separators.
+	FNumberFormattingOptions AmountFormat;
+	AmountFormat.SetAlwaysSign(true);
+	AmountFormat.SetUseGrouping(false);
+
+	const FText AmountText = FText::AsNumber(Amount, &AmountFormat);
+	const FText ReasonText = Reason.IsEmpty()
+		? NSLOCTEXT("TerritoryJournal", "UnspecifiedTransaction", "Unspecified transaction")
+		: FText::FromString(Reason);
+
+	// The tag is resolved through the same Narrative Pro friendly names every other Territory
+	// screen uses, so a player never reads "Territory.Heroes.Farm".
+	return SourceTerritory.IsValid()
+		? FText::Format(NSLOCTEXT("TerritoryJournal", "TransactionLineWithSource",
+			"{0} — {1} [{2}]"),
+			AmountText, ReasonText,
+			UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(SourceTerritory))
+		: FText::Format(NSLOCTEXT("TerritoryJournal", "TransactionLine",
+			"{0} — {1}"), AmountText, ReasonText);
+}
+
+FText UTerritoryJournalWidget::GetTransactionAuditText(const TArray<FText>& TransactionLines)
+{
+	return TransactionLines.IsEmpty()
+		? NSLOCTEXT("TerritoryJournal", "NoRecentTransactions", "No recent transactions.")
+		: FText::Join(FText::AsCultureInvariant(TEXT("\n")), TransactionLines);
 }
 
 void UTerritoryJournalWidget::BuildPropertyBenefitsDetailTab()
@@ -585,10 +637,21 @@ void UTerritoryJournalWidget::NativeConstruct()
 
 		// The owning Narrative menu still owns input, layering, blur, and the outer
 		// CommonBorder. Territory only themes its content surface and cards.
+		const UTerritoryDeveloperSettings* ThemeSettings =
+			GetDefault<UTerritoryDeveloperSettings>();
 		TerritoryUITheme::ApplySurface(
 			Cast<UBorder>(WidgetTree->FindWidget(TEXT("TerritoryCommandRoot"))),
-			FLinearColor(1.f, 1.f, 1.f, 0.84f), FLinearColor::Transparent,
-			0.f, 0.f, true, ETerritorySurfaceRole::Screen);
+			ThemeSettings
+				? ThemeSettings->TerritoryCommandScreenFillColor
+				: FLinearColor::Transparent,
+			FLinearColor::Transparent,
+			0.f, 0.f,
+			// Off by default. The screen texture is authored as a full menu backdrop, so
+			// drawing it here double-paints over whatever the host menu already drew and
+			// buries the content under a dark full-screen wash. The panels below carry
+			// their own fill, so the Command Center stays readable without it.
+			ThemeSettings && ThemeSettings->bTerritoryCommandScreenUseBackgroundTexture,
+			ETerritorySurfaceRole::Screen);
 		for (const FName PanelName : {
 			FName(TEXT("IntelligencePanel")),
 			FName(TEXT("TerritoryJournalRailSurface")),
@@ -596,8 +659,12 @@ void UTerritoryJournalWidget::NativeConstruct()
 		{
 			TerritoryUITheme::ApplySurface(
 				Cast<UBorder>(WidgetTree->FindWidget(PanelName)),
-				FLinearColor(0.04f, 0.06f, 0.08f, 0.92f),
-				FLinearColor(0.18f, 0.52f, 0.48f, 0.42f), 5.f);
+				ThemeSettings
+					? ThemeSettings->TerritoryCommandPanelFillColor
+					: FLinearColor(0.04f, 0.06f, 0.08f, 0.92f),
+				ThemeSettings
+					? ThemeSettings->TerritoryCommandPanelOutlineColor
+					: FLinearColor(0.18f, 0.52f, 0.48f, 0.42f), 5.f);
 		}
 
 		auto ThemeTextByName = [this](const TCHAR* Name, int32 Size,
@@ -1190,7 +1257,16 @@ void UTerritoryJournalWidget::BuildGarrisonManagementControls()
 	{
 		PlannerHost = Cast<UVerticalBox>(WidgetTree->FindWidget(TEXT("CommandStack")));
 	}
-	if (!PlannerHost) return;
+	if (!PlannerHost)
+	{
+		// The planner is injected into an authored container. A rename by an artist
+		// would remove the whole command block with no other symptom, so this must
+		// never fail silently.
+		UE_LOG(LogTerritory, Warning,
+			TEXT("%s could not find a vertical box for the garrison planner. Expected 'GarrisonPlannerHost' or 'CommandStack'. The player sees no garrison planner until the container is restored."),
+			*GetClass()->GetName());
+		return;
+	}
 
 	UBorder* PlannerCard = WidgetTree->ConstructWidget<UBorder>(
 		UBorder::StaticClass(), TEXT("GarrisonPlannerCard"));
@@ -2589,16 +2665,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 	}
 	if (Text_CommandApproaches)
 	{
-		TArray<FString> ApproachNames;
-		for (const FName Approach : View.SelectedApproaches)
-		{
-			ApproachNames.Add(Approach.ToString());
-		}
-		Text_CommandApproaches->SetText(FText::Format(
-			NSLOCTEXT("TerritoryJournal", "CommandApproaches", "{0}"),
-			FText::FromString(ApproachNames.IsEmpty()
-				? FString(TEXT("No assault routes selected."))
-				: FString::Join(ApproachNames, TEXT("  |  ")))));
+		Text_CommandApproaches->SetText(
+			GetAssaultApproachListText(View.SelectedApproaches));
 	}
 	if (Text_CommandCaptureProgress)
 	{
@@ -2796,17 +2864,13 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	const FTerritoryEconomyOperationsView Economy =
 		UTerritoryUIBlueprintLibrary::BuildEconomyOperationsView(
 			this, GetOwningPlayer(), ViewerFaction, 10);
-	TArray<FString> TransactionLines;
+	TArray<FText> TransactionLines;
 	for (const FTerritoryTransaction& Transaction : Economy.RecentTransactions)
 	{
-		TransactionLines.Add(FString::Printf(TEXT("%+d — %s%s"), Transaction.Amount,
-			Transaction.Reason.IsEmpty() ? TEXT("Unspecified transaction") : *Transaction.Reason,
-			Transaction.SourceTerritory.IsValid()
-				? *FString::Printf(TEXT(" [%s]"), *Transaction.SourceTerritory.ToString()) : TEXT("")));
+		TransactionLines.Add(GetTransactionLineText(
+			Transaction.Amount, Transaction.Reason, Transaction.SourceTerritory));
 	}
-	const FText TransactionAudit = FText::FromString(TransactionLines.IsEmpty()
-		? FString(TEXT("No recent transactions."))
-		: FString::Join(TransactionLines, TEXT("\n")));
+	const FText TransactionAudit = GetTransactionAuditText(TransactionLines);
 	UTextBlock* ActiveCountText = Text_ActiveTerritoryCount
 		? Text_ActiveTerritoryCount.Get() : Text_ActiveQuestCount.Get();
 	if (ActiveCountText)

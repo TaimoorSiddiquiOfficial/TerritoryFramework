@@ -136,11 +136,11 @@ protected:
  * Changes the campaign's saved reputation value for one Narrative faction.
  *
  * Easy example: add -20 to Bandits after the player attacks a Bandit convoy.
- * This changes reputation metadata; treaty/AI attitude changes remain a separate event.
+ * The optional reputation policy can also change treaties for the explicitly selected campaign faction.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Modify Territory Faction Reputation",
-		ToolTip="Add to or set saved faction reputation on the server. Negative values can reduce it. Dynamic faction sources follow the current Narrative participant. This does not automatically change treaties or combat attitude."))
+		ToolTip="Add to or set saved campaign reputation on the server. Negative values reduce it. Dynamic sources choose whose score changes. If Reputation Declares Diplomacy is enabled and an explicit campaign subject is set, the score can also change reputation-owned treaties."))
 class TERRITORYFRAMEWORK_API UTerritoryModifyReputationEvent : public UNarrativeEvent
 {
 	GENERATED_BODY()

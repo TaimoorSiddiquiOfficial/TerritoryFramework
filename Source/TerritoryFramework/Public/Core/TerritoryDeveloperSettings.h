@@ -225,6 +225,38 @@ public:
 	TSoftObjectPtr<UMassEntityConfigAsset> DefaultRoadTrafficEntityConfig;
 
 	// ═══════════════════════════════════════════════════════════════════════════
+	// Diplomacy — reputation as an attitude input
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	/**
+	 * Let shared campaign reputation declare War or Alliance for an explicit subject.
+	 * Select the subject faction on the server before using this optional policy.
+	 * Detection, guard engagement and purchase access still follow their own rules.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Diplomacy",
+		meta=(DisplayName="Reputation Declares Diplomacy",
+			ToolTip="Choose a campaign faction with Set Reputation Subject Faction on the server, then enable this to let reputation declare War or Alliance. Without an explicit subject, scores change but treaties do not. Off means quests decide how reputation affects the story."))
+	bool bReputationDrivesDiplomacy = false;
+
+	/**
+	 * Reputation at or below this value declares War. Only read when reputation drives diplomacy.
+	 * Easy example: -50 means \"they will attack you on sight in their own territory\".
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Diplomacy",
+		meta=(DisplayName="Hostile Reputation Threshold", EditCondition="bReputationDrivesDiplomacy",
+			ToolTip="Easy example: set -50 so robbing a faction three times turns it hostile."))
+	int32 HostileReputationThreshold = -50;
+
+	/**
+	 * Reputation at or above this value declares an Alliance. Only read when reputation drives diplomacy.
+	 * Easy example: 50 means \"you have done enough for them that they fight beside you\".
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|Diplomacy",
+		meta=(DisplayName="Allied Reputation Threshold", EditCondition="bReputationDrivesDiplomacy",
+			ToolTip="Easy example: set 50 so a long chain of helpful quests earns an alliance without a scripted treaty."))
+	int32 AlliedReputationThreshold = 50;
+
+	// ═══════════════════════════════════════════════════════════════════════════
 	// Spatial Index
 	// ═══════════════════════════════════════════════════════════════════════════
 
@@ -342,9 +374,54 @@ public:
 			DisplayName="Territory Text Scale"))
 	float TerritoryTextScale = 1.f;
 
-	/** Optional nine-slice texture for Command Center, District, intelligence, and compact HUD cards. */
-	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")
+	/**
+	 * Optional nine-slice texture for Command Center, District, and intelligence panels.
+	 * Easy example: import a dark 128 x 128 nine-slice and the large panels use it.
+	 * The compact gameplay capture card does not use this texture unless
+	 * "HUD Capture Card Uses Panel Texture" is turned on.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Territory Panel Texture"))
 	TSoftObjectPtr<UTexture2D> TerritoryPanelTexture;
+
+	/**
+	 * Surface colour of the compact gameplay capture card.
+	 * Easy example: keep the default translucent dark teal so the world stays
+	 * visible behind the card, or raise the alpha toward 1.0 when the card must
+	 * stay readable over a very bright, busy level.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="HUD Capture Card Colour"))
+	FLinearColor TerritoryHUDCardFillColor = FLinearColor(0.04f, 0.07f, 0.09f, 0.62f);
+
+	/**
+	 * Draw the large panel texture behind the compact capture card.
+	 * Off by default, because that texture is authored for big panels and makes the
+	 * small card dark and heavy.
+	 * Easy example: leave this off for a light gameplay card. Only turn it on if you
+	 * also assign a texture authored for a small card.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="HUD Capture Card Uses Panel Texture"))
+	bool bTerritoryHUDCardUsePanelTexture = false;
+
+	/**
+	 * Size of the compact gameplay capture card, in Slate units.
+	 * Easy example: 328 x 108 is the shipped compact card. Increase the height if
+	 * your capture card shows an extra line of text.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="HUD Capture Card Size"))
+	FVector2D TerritoryHUDCardSize = FVector2D(328.f, 108.f);
+
+	/**
+	 * Extra height added to the capture card while a counter-attack alert is shown.
+	 * Easy example: the alert adds one line of warning text, so the card grows by 38
+	 * units until the alert expires.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(ClampMin="0.0", UIMin="0.0", DisplayName="HUD Capture Card Alert Extra Height"))
+	float TerritoryHUDCardAlertExtraHeight = 38.f;
 
 	/**
 	 * Optional full-screen image behind the Command Center content.
@@ -354,6 +431,50 @@ public:
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
 		meta=(DisplayName="Command Center Background Texture"))
 	TSoftObjectPtr<UTexture2D> TerritoryScreenBackgroundTexture;
+
+	/**
+	 * Draw the Command Center background texture behind the whole Command Center.
+	 * Off by default, because that texture is authored as a full menu backdrop and
+	 * double-paints over the background the owning Narrative Pro menu already draws.
+	 * Easy example: leave this off and the Command Center sits on your existing menu
+	 * background, with only the panels and cards drawn by Territory. Turn it on only if
+	 * Territory is hosted somewhere that draws no background of its own.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Command Center Uses Background Texture"))
+	bool bTerritoryCommandScreenUseBackgroundTexture = false;
+
+	/**
+	 * Flat colour behind the whole Command Center, used when no background texture is drawn.
+	 * Transparent by default: the Command Center is a screen inside your menu, so painting
+	 * it opaque hides the world and your menu art for no reason.
+	 * Easy example: keep the default to let the menu background show. Set a dark colour with
+	 * alpha 0.65 when the Command Center must be readable over a very busy bright level.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Command Center Screen Colour"))
+	FLinearColor TerritoryCommandScreenFillColor = FLinearColor(0.f, 0.f, 0.f, 0.f);
+
+	/**
+	 * Surface colour of the Command Center's large panels (intelligence, district rail,
+	 * selected Place details).
+	 * Easy example: the default translucent dark teal keeps panel text readable while the
+	 * menu background stays faintly visible through it. Raise the alpha toward 1.0 for a
+	 * solid panel over a bright background.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Command Center Panel Colour"))
+	FLinearColor TerritoryCommandPanelFillColor = FLinearColor(0.04f, 0.06f, 0.08f, 0.92f);
+
+	/**
+	 * Accent colour of the Command Center's large panels.
+	 * Easy example: this is the teal edge that identifies a Territory panel.
+	 * Only its alpha survives when a panel texture is drawn, so a themed project usually
+	 * changes the texture, not this colour.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
+		meta=(DisplayName="Command Center Panel Accent Colour"))
+	FLinearColor TerritoryCommandPanelOutlineColor = FLinearColor(0.18f, 0.52f, 0.48f, 0.42f);
 
 	/** Optional frame texture applied behind capture and garrison progress bars. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme")

@@ -103,6 +103,54 @@ enum class ETerritoryInitialState : uint8
 	Locked UMETA(Hidden, DisplayName="Locked (Legacy)", ToolTip="Serialized compatibility value. Use Initial Availability instead.")
 };
 
+/**
+ * The single place that answers: "what Availability does a NEW CAMPAIGN start this Territory with?"
+ *
+ * Combine the two properties like this:
+ *   - The legacy `Initial State` wins ONLY when it is the old `Locked` value. Assets authored long
+ *     ago stored "starts locked" there, before `Initial Availability` existed, so those assets must
+ *     keep starting locked. That value is hidden in the editor and is never chosen by hand.
+ *   - In every other case the modern `Initial Availability` is passed straight through, including
+ *     when it is `Unlocked`.
+ *
+ * Why this is a function and not four copies of one line: this rule was written out identically at
+ * every site that needed it (the placed actor, the replicated world state, Definition application, and
+ * the Story outcome analyzer). Four copies of a compatibility rule is four chances for one of them to
+ * drift, and a Territory that starts locked in the analyzer but unlocked at runtime is the kind of bug
+ * that only shows up in a save game. There is now exactly one answer.
+ *
+ * Example: an asset with Initial State = Locked and Initial Availability = Unlocked resolves to
+ * Locked (the legacy value wins). The same asset with Initial State = Automatic resolves to whatever
+ * Initial Availability says, i.e. Unlocked.
+ */
+TERRITORYFRAMEWORK_API ETerritoryAvailability TerritoryResolveInitialAvailability(
+	ETerritoryInitialState InitialState,
+	ETerritoryAvailability InitialAvailability);
+
+/**
+ * The single place that answers: "does a NEW CAMPAIGN start this Territory owned or unowned?"
+ *
+ * The rule, in full:
+ *   - `Unclaimed` means unclaimed. It wins even when an Initial Owning Faction is filled, because
+ *     that is literally what the option promises.
+ *   - Every other value — `Automatic`, `Claimed`, and the legacy `Locked` — asks the same question:
+ *     is an Initial Owning Faction set? Yes starts owned, no starts unowned. They differ in
+ *     *availability*, not in who holds the ground at the start.
+ *   - So "Claimed" with an empty faction resolves to Unclaimed. The game never allows the
+ *     contradictory state "owned by nobody".
+ *
+ * `bHasInitialOwningFaction` is passed in rather than the tag itself, so the same function serves a
+ * Definition asset, a placed actor, and the replicated world state without any of them needing the
+ * other's type.
+ *
+ * Example: Initial State = Automatic with no Initial Owning Faction starts Unclaimed; fill the
+ * faction in and the same Territory starts Claimed. Set Initial State = Unclaimed and it starts
+ * Unclaimed even with the faction filled.
+ */
+TERRITORYFRAMEWORK_API ETerritoryState TerritoryResolveInitialPoliticalState(
+	ETerritoryInitialState InitialState,
+	bool bHasInitialOwningFaction);
+
 UENUM(BlueprintType)
 enum class ETerritoryControlMode : uint8
 {
@@ -194,6 +242,29 @@ struct FTerritoryOwnershipData
 	/** Verified former owners, recorded only by successful ownership commits. Old saves start empty. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|History")
 	FGameplayTagContainer FormerOwningFactions;
+
+	/**
+	 * The faction that physically took this Place. Usually the player's faction, but any
+	 * faction that completes a capture writes here. Empty while Unclaimed.
+	 *
+	 * Easy example: you fight through a Bandit outpost and capture it. CapturedBy becomes
+	 * Faction.Heroes — whoever did the work.
+	 */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|History")
+	FGameplayTag CapturedBy;
+
+	/**
+	 * The faction the capture was done FOR — normally the new owner. It differs from
+	 * CapturedBy exactly when someone captures a Place on another faction's behalf.
+	 *
+	 * Easy example: the Regime sends you to take a Bandit outpost. CapturedBy is
+	 * Faction.Heroes, CapturedFor is Faction.Regime. Later the Regime turns on you, and a
+	 * quest can ask "which Places did I win for the faction that betrayed me?" by checking
+	 * CapturedFor == Faction.Regime && CapturedBy == Faction.Heroes. That comparison is
+	 * what makes the betrayal beat authorable instead of hard-coded.
+	 */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|History")
+	FGameplayTag CapturedFor;
 
 	/** State represented by this record; use the field's enum choices to interpret it. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory")
@@ -574,7 +645,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryStateGameplayRules
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Conditions",
 		meta=(DisplayName="Exit Conditions",
-			ToolTip="Every condition must pass before this state can end. Example: Locked exits only after the player completes the gate quest."))
+			ToolTip="Every condition must pass before this state can end, and something must still request the change. These conditions are a gate, not a trigger: nothing polls them, so the state stays put until a quest event or TryUnlock asks for the transition. Example: a Locked Territory opens when a quest event requests the unlock after the gate quest is complete."))
 	TArray<TObjectPtr<class UNarrativeCondition>> ExitConditions;
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Events",

@@ -8,7 +8,7 @@
 
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Ownership",
-		ToolTip="Check the current owner. The special Locked, Contested and Unclaimed options are OR exceptions and can pass without matching the owner. Empty owner follows the Narrative participant; without faction context it accepts any Claimed owner. Requires a loaded territory."))
+		ToolTip="Check the current owner. The special Locked, Contested and Unclaimed options are OR exceptions and can pass without matching the owner. Empty owner follows the Narrative participant and fails until their faction is ready. Only a call with no participant accepts any Claimed owner. Requires a loaded territory."))
 class TERRITORYFRAMEWORK_API UTerritoryOwnershipCondition : public UNarrativeCondition
 {
 	GENERATED_BODY()
@@ -21,7 +21,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory Condition",
 		meta = (Categories = "Narrative.Factions",
-			ToolTip="Optional exact owner. Leave empty to use the Narrative target pawn/controller faction when available; if the event has no faction context, any Claimed owner passes. Easy example: a locked Farm can require the Blacksmith to belong to whichever faction the player currently represents, without hardcoding Heroes."))
+			ToolTip="Optional exact owner. Leave empty to use the Narrative target pawn/controller faction, including a participant supplied by Tales. A participant whose faction is not ready fails this check. Only a world-level call with no participant accepts any Claimed owner. Easy example: a locked Farm can require the Blacksmith to belong to whichever faction the player currently represents, without hardcoding Heroes."))
 	FGameplayTag RequiredOwner;
 
 	/** Allow this ownership condition to pass while the Territory is Contested, even before checking the required owner. */

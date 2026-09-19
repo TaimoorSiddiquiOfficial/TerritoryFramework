@@ -630,37 +630,60 @@ bool UTerritoryAssaultParticipantComponent::MaintainAssaultMovement(
 			DesiredTarget = RoadMissionDestination;
 		}
 	}
-	TArray<AActor*> LiveHostileDefenders = bPrioritizeTerritoryTakeover
+	// Two deliberately separate lists.
+	//
+	// Engagement targets drive where participants walk. A defending player, or the
+	// attacker that just damaged this NPC, belongs here so the force moves toward the
+	// real fight.
+	const bool bTakeoverPriority = bPrioritizeTerritoryTakeover;
+	TArray<AActor*> LiveEngagementTargets = bTakeoverPriority
 		? CollectTakeoverCombatants(Territory)
 		: TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Territory);
-	TArray<FVector> LiveDefenderLocations;
-	for (int32 DefenderIndex = LiveHostileDefenders.Num() - 1;
-		DefenderIndex >= 0; --DefenderIndex)
+
+	// Goal scoring must only ever see genuinely registered defenders. Feeding a
+	// player-polluted list here is what let an attacker ignore the assigned guard and
+	// chase the player: every entry is treated as a defender, so a merged-in player
+	// stopped being suppressed and competed with the guard on equal score.
+	TArray<AActor*> DefenderPriorityTargets =
+		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Territory);
+
+	auto RemoveUnengageableTargets = [this, NPC](TArray<AActor*>& InOutTargets)
 	{
-		AActor* Defender = LiveHostileDefenders[DefenderIndex];
-		if (!IsValid(Defender) || Defender == NPC || Defender->IsActorBeingDestroyed())
+		for (int32 TargetIndex = InOutTargets.Num() - 1; TargetIndex >= 0; --TargetIndex)
 		{
-			LiveHostileDefenders.RemoveAtSwap(DefenderIndex);
-			continue;
-		}
-		if (UNarrativeAbilitySystemComponent* DefenderASC =
-			FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Defender))
-		{
-			if (DefenderASC->IsDead())
+			AActor* Candidate = InOutTargets[TargetIndex];
+			if (!IsValid(Candidate) || Candidate == NPC
+				|| Candidate->IsActorBeingDestroyed())
 			{
-				LiveHostileDefenders.RemoveAtSwap(DefenderIndex);
+				InOutTargets.RemoveAtSwap(TargetIndex);
 				continue;
 			}
+			if (UNarrativeAbilitySystemComponent* CandidateASC =
+				FTerritoryNarrativeProAdapter::ResolveAbilitySystem(Candidate))
+			{
+				if (CandidateASC->IsDead())
+				{
+					InOutTargets.RemoveAtSwap(TargetIndex);
+					continue;
+				}
+			}
+			const INarrativeTeamAgentInterface* NarrativeTeam =
+				Cast<INarrativeTeamAgentInterface>(NPC);
+			if (!NarrativeTeam
+				|| NarrativeTeam->GetTeamAttitudeTowards(*Candidate) != ETeamAttitude::Hostile)
+			{
+				InOutTargets.RemoveAtSwap(TargetIndex);
+			}
 		}
-		const INarrativeTeamAgentInterface* NarrativeTeam =
-			Cast<INarrativeTeamAgentInterface>(NPC);
-		if (!NarrativeTeam
-			|| NarrativeTeam->GetTeamAttitudeTowards(*Defender) != ETeamAttitude::Hostile)
-		{
-			LiveHostileDefenders.RemoveAtSwap(DefenderIndex);
-			continue;
-		}
-		LiveDefenderLocations.Add(Defender->GetActorLocation());
+	};
+
+	RemoveUnengageableTargets(LiveEngagementTargets);
+	RemoveUnengageableTargets(DefenderPriorityTargets);
+
+	TArray<FVector> LiveDefenderLocations;
+	for (const AActor* Target : LiveEngagementTargets)
+	{
+		if (Target) LiveDefenderLocations.Add(Target->GetActorLocation());
 	}
 	if (!LiveDefenderLocations.IsEmpty())
 	{
@@ -668,7 +691,19 @@ bool UTerritoryAssaultParticipantComponent::MaintainAssaultMovement(
 			NPC, LiveDefenderLocations, StableObjectiveSlot, bUseNavigation,
 			bDistribute, DesiredTarget);
 	}
-	ReconcileNarrativeDefenderTargeting(ActivityComponent, LiveHostileDefenders);
+
+	// Optional authoring override. Off by default, so a living registered guard is
+	// always fought before any non-guard.
+	if (bTakeoverPriority && Profile
+		&& Profile->bDamageRetaliationOverridesDefenderPriority)
+	{
+		if (AActor* MostRecentThreat = ResolveMostRecentDamagingThreat())
+		{
+			DefenderPriorityTargets = {MostRecentThreat};
+		}
+	}
+
+	ReconcileNarrativeDefenderTargeting(ActivityComponent, DefenderPriorityTargets);
 	const bool bMovementTargetChanged = !AssaultGoal->TargetLocation.Equals(DesiredTarget, 200.f);
 	AssaultGoal->TargetLocation = DesiredTarget;
 	auto RecordFailedRestart = [this, NPC, Territory, MaximumFailures]()
@@ -752,7 +787,21 @@ void UTerritoryAssaultParticipantComponent::ReconcileNarrativeDefenderTargeting(
 	}
 
 	UClass* GoalClass = NarrativeAttackGoalClass.Get();
-	if (!GoalClass || !GoalClass->IsChildOf(UNPCGoalItem::StaticClass())) return;
+	if (!GoalClass || !GoalClass->IsChildOf(UNPCGoalItem::StaticClass()))
+	{
+		// Without a cached attack-goal class the whole defender-preference pass is a
+		// silent no-op: guards never get priority and the player gets chased instead.
+		// Warn once so a project whose attack goal item keys differently can see why.
+		if (!bLoggedMissingAttackGoalClass)
+		{
+			bLoggedMissingAttackGoalClass = true;
+			UE_LOG(LogTerritory, Warning,
+				TEXT("[CounterAttack] %s could not learn an attack goal class from '%s'; defender-priority scoring is disabled for this participant. Expected a UNPCGoalItem subclass."),
+				*GetNameSafe(GetOwner()),
+				*GetNameSafe(ActivityComponent->GetCurrentActivityGoal()));
+		}
+		return;
+	}
 
 	const FNPCGoalContainer AttackGoals = ActivityComponent->GetGoals(GoalClass);
 	const FTerritoryDefenderGoalPreferenceResult Preference =
@@ -853,21 +902,22 @@ bool UTerritoryAssaultParticipantComponent::MatchesTargetTerritory(
 		&& TargetTerritory == Territory->GetTerritoryTag();
 }
 
-TArray<AActor*> UTerritoryAssaultParticipantComponent::CollectTakeoverCombatants(
-	ATerritoryVolume* Territory) const
+AActor* UTerritoryAssaultParticipantComponent::ResolveMostRecentDamagingThreat() const
 {
-	TArray<AActor*> Result =
-		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Territory);
+	// Bounded transient perception only: the NPC that actually took damage
+	// remembers its attacker briefly. This is never campaign state and never
+	// client input.
 	const UWorld* World = GetWorld();
-	if (!Territory || !World) return Result;
-	const ATerritoryAssaultCharacter* OwnerNPC = Cast<ATerritoryAssaultCharacter>(GetOwner());
+	const ATerritoryAssaultCharacter* OwnerNPC =
+		Cast<ATerritoryAssaultCharacter>(GetOwner());
+	if (!World || !OwnerNPC) return nullptr;
 	AActor* MostRecentThreat = nullptr;
 	double MostRecentExpiry = 0.0;
 	for (const auto& Entry : DamagingEnemies)
 	{
 		const ANarrativeCharacter* Enemy = Cast<ANarrativeCharacter>(Entry.Key.Get());
 		if (Enemy && Enemy->IsAlive() && Entry.Value > World->GetTimeSeconds()
-			&& OwnerNPC && OwnerNPC->CanEngageAssaultTarget(Enemy))
+			&& OwnerNPC->CanEngageAssaultTarget(Enemy))
 		{
 			if (Entry.Value > MostRecentExpiry)
 			{
@@ -876,11 +926,25 @@ TArray<AActor*> UTerritoryAssaultParticipantComponent::CollectTakeoverCombatants
 			}
 		}
 	}
-	// Only the NPC taking damage temporarily prioritizes its attackers. Merely
-	// admitting a distant shooter's 3.5-score goal leaves a local 4-score guard
-	// selected forever, which still ignores the damage. Restore local defence
-	// priorities when this bounded threat expires, dies, or becomes non-hostile.
-	if (MostRecentThreat) return {MostRecentThreat};
+	return MostRecentThreat;
+}
+
+TArray<AActor*> UTerritoryAssaultParticipantComponent::CollectTakeoverCombatants(
+	ATerritoryVolume* Territory) const
+{
+	TArray<AActor*> Result =
+		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Territory);
+	const UWorld* World = GetWorld();
+	if (!Territory || !World) return Result;
+	// This is the movement/engagement list only. A defending player, or the attacker
+	// that just damaged this NPC, belongs here so participants walk toward the real
+	// fight. It must never be used as the registered-defender list for goal scoring:
+	// ReconcileNarrativeDefenderTargeting treats every entry as a defender, so a
+	// player merged in here stops being suppressed and outranks the assigned guard.
+	if (AActor* MostRecentThreat = ResolveMostRecentDamagingThreat())
+	{
+		return {MostRecentThreat};
+	}
 	const FGameplayTag DefendingFaction = Territory->GetOwningFaction();
 	if (!DefendingFaction.IsValid()) return Result;
 
@@ -930,17 +994,32 @@ FString UTerritoryAssaultParticipantComponent::GetCombatDebugString() const
 		if (Entry.Key.IsValid()) Threats.Add(FString::Printf(TEXT("%s:%.2fs"),
 			*Entry.Key->GetName(), FMath::Max(0.0, Entry.Value - Now)));
 	}
+	ATerritoryVolume* DebugTerritory = ResolveTargetTerritory();
 	TArray<FString> Targets;
-	for (const AActor* Target : CollectTakeoverCombatants(ResolveTargetTerritory()))
+	for (const AActor* Target : CollectTakeoverCombatants(DebugTerritory))
 	{
 		Targets.Add(GetNameSafe(Target));
 	}
-	return FString::Printf(TEXT("Takeover=%d Ingress=%d Retired=%d AssaultGoal=%s CurrentGoal=%s Target=%s AttackClass=%s DamageBound=%d Threats=[%s] Eligible=[%s]"),
-		bPrioritizeTerritoryTakeover, IsVehicleIngressPending(), bRemovalReported,
+	// Eligible is the movement/engagement list. Defenders is the list that actually
+	// drives goal scoring, so a scoring bug shows up here as Defenders=[] while
+	// Eligible still names the player.
+	TArray<FString> Defenders;
+	for (const AActor* Defender :
+		TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(DebugTerritory))
+	{
+		Defenders.Add(GetNameSafe(Defender));
+	}
+	const UTerritoryCounterAttackProfile* DebugProfile = DebugTerritory
+		? DebugTerritory->GetCounterAttackProfile() : nullptr;
+	return FString::Printf(TEXT("Takeover=%d Retaliate=%d Ingress=%d Retired=%d AssaultGoal=%s CurrentGoal=%s Target=%s AttackClass=%s DamageBound=%d Threats=[%s] Defenders=[%s] Eligible=[%s]"),
+		bPrioritizeTerritoryTakeover,
+		DebugProfile && DebugProfile->bDamageRetaliationOverridesDefenderPriority,
+		IsVehicleIngressPending(), bRemovalReported,
 		*GetNameSafe(AssaultGoal), *GetNameSafe(Goal), *GetNameSafe(Goal ? Goal->GetGoalKey() : nullptr),
 		*GetNameSafe(NarrativeAttackGoalClass.Get()), BoundASC.IsValid() && BoundASC->OnDamagedBy.Contains(
 			this, GET_FUNCTION_NAME_CHECKED(UTerritoryAssaultParticipantComponent, HandleNarrativeDamagedBy)),
-		*FString::Join(Threats, TEXT(",")), *FString::Join(Targets, TEXT(",")));
+		*FString::Join(Threats, TEXT(",")), *FString::Join(Defenders, TEXT(",")),
+		*FString::Join(Targets, TEXT(",")));
 }
 
 void UTerritoryAssaultParticipantComponent::PlayMissionDialogue(

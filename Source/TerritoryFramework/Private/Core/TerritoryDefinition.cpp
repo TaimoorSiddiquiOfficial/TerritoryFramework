@@ -139,10 +139,19 @@ bool UTerritoryDefinition::ApplyToTerritory(ATerritoryVolume* Territory) const
 	Territory->TerritoryTag = TerritoryTag;
 	Territory->TerritoryDisplayName = DisplayName;
 	Territory->InitialOwningFaction = InitialOwningFaction;
-	Territory->InitialAvailability = InitialState == ETerritoryInitialState::Locked
-		? ETerritoryAvailability::Locked : InitialAvailability;
+	Territory->InitialAvailability =
+		TerritoryResolveInitialAvailability(InitialState, InitialAvailability);
 	Territory->InitialState = InitialState;
 	Territory->ParentTerritoryTag = DerivedParentTerritoryTag;
+
+	// Applied before the bPhysicalPlace gate below, and deliberately not gated by it. The three
+	// defence-strength fields further down (GuardQuality, FortificationStrength, NearbyAlliedSupport)
+	// are zeroed for a non-physical Territory because a District has no guards of its own to multiply
+	// or fortify. Strategic value is not a defence strength — it is how valuable a target the volume
+	// is — and a District is a legitimate target in its own right, so an authored District value must
+	// survive. It reaches the player through the Command Center, which seeds its own District into the
+	// importance set; a defence front deliberately excludes the District, because a District is never
+	// a physical defender.
 	Territory->StrategicValue = FMath::Max(0.f, StrategicValue);
 
 	const bool bPhysicalPlace = IsA<UTerritoryPlaceDefinition>();

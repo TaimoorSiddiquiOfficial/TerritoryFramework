@@ -92,6 +92,25 @@ bool FTFSaveDefaultReload::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Non-default saved ownership is still restored"), Property->GetOwningFaction(), Heroes);
 	}
 
+	// Capture provenance: who physically took the Place, and who they took it for. It is
+	// derived by the authority at commit time so a caller's proposed read model cannot
+	// invent a tenure, and it must survive both save/load and later same-owner updates.
+	{
+		TestEqual(TEXT("A claim records the faction it was captured for"),
+			Property->GetOwnershipData().CapturedFor, Heroes);
+		TestTrue(TEXT("A claim with no instigator still attributes the capture"),
+			Property->GetOwnershipData().CapturedBy.IsValid());
+
+		FTerritoryOwnershipData Garrisoned = Property->GetOwnershipData();
+		Garrisoned.DesiredGuardCount = 4;
+		Property->CommitOwnershipData(Garrisoned);
+		TestEqual(TEXT("A same-owner garrison update preserves CapturedFor"),
+			Property->GetOwnershipData().CapturedFor, Heroes);
+		TestEqual(TEXT("A same-owner garrison update preserves CapturedBy"),
+			Property->GetOwnershipData().CapturedBy,
+			Property->GetOwnershipData().CapturedFor);
+	}
+
 	AActor* PlayerOwner = World->SpawnActor<AActor>();
 	UTerritoryPlayerManagementComponent* Management = NewObject<UTerritoryPlayerManagementComponent>(PlayerOwner);
 	PlayerOwner->AddInstanceComponent(Management);

@@ -208,6 +208,12 @@ void UTerritoryDiplomacySubsystem::SignTradeAgreement(FGameplayTag FactionA, FGa
 
 void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGameplayTag FactionB, EDiplomacyState NewState)
 {
+	SetDiplomacyStateInternal(FactionA, FactionB, NewState, false);
+}
+
+void UTerritoryDiplomacySubsystem::SetDiplomacyStateInternal(FGameplayTag FactionA,
+	FGameplayTag FactionB, EDiplomacyState NewState, bool bReputationDerived)
+{
 	if (!CanMutateDiplomacy(GetWorld())) return;
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB) return;
 	if (!StaticEnum<EDiplomacyState>()->IsValidEnumValue(static_cast<int64>(NewState))) return;
@@ -220,11 +226,21 @@ void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGam
 
 	if (OldState == NewState)
 	{
+		const bool bProvenanceChanged = Existing && Existing->bReputationDerived != bReputationDerived;
+		if (Existing) Existing->bReputationDerived = bReputationDerived;
 		// A matching rich Territory state does not prove Narrative's directional
 		// attitude map is still correct. A level, save migration, or external
 		// Narrative listener may have left it stale. Reconcile even the apparent
 		// no-op -- especially None, which intentionally has no treaty row.
 		SyncNarrativeAttitudeForTreaty(FactionA, FactionB);
+		// Sync may invoke listeners that remove or replace the record. Never use the
+		// previous pointer afterwards. Publish a provenance-only change when it survived.
+		const FTreatyRecord* Final = FindTreaty(FactionA, FactionB);
+		if (bProvenanceChanged && Final && Final->State == NewState
+			&& Final->bReputationDerived == bReputationDerived)
+		{
+			OnDiplomacyStateChanged.Broadcast(FactionA, FactionB, NewState);
+		}
 		return;
 	}
 
@@ -244,6 +260,7 @@ void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGam
 	else if (Existing)
 	{
 		Existing->State = NewState;
+		Existing->bReputationDerived = bReputationDerived;
 		// P1-N09: Preserve existing timing data. Only reset to permanent when the
 		// treaty transitions from None (newly created) or when the new state is
 		// more restrictive (War/None), which should clear any pending expiry.
@@ -262,6 +279,7 @@ void UTerritoryDiplomacySubsystem::SetDiplomacyState(FGameplayTag FactionA, FGam
 		NewTreaty.FactionB = FactionB;
 		NewTreaty.State = NewState;
 		NewTreaty.bPermanent = true;
+		NewTreaty.bReputationDerived = bReputationDerived;
 
 		if (ANarrativeGameState* GS = GetNarrativeGameState())
 		{
@@ -334,6 +352,7 @@ void UTerritoryDiplomacySubsystem::AddReputation(FGameplayTag Faction, int32 Amo
 	int32& Rep = FactionReputation.FindOrAdd(Faction);
 	Rep = static_cast<int32>(FMath::Clamp<int64>(static_cast<int64>(Rep) + Amount, MIN_int32, MAX_int32));
 	OnReputationChanged.Broadcast(Faction, Rep);
+	ApplyReputationDiplomacyPolicy(Faction);
 }
 
 void UTerritoryDiplomacySubsystem::SetReputation(FGameplayTag Faction, int32 Value)
@@ -342,6 +361,7 @@ void UTerritoryDiplomacySubsystem::SetReputation(FGameplayTag Faction, int32 Val
 	if (!Faction.IsValid()) return;
 	FactionReputation.FindOrAdd(Faction) = Value;
 	OnReputationChanged.Broadcast(Faction, Value);
+	ApplyReputationDiplomacyPolicy(Faction);
 }
 
 int32 UTerritoryDiplomacySubsystem::GetReputation(FGameplayTag Faction) const
@@ -353,6 +373,61 @@ int32 UTerritoryDiplomacySubsystem::GetReputation(FGameplayTag Faction) const
 TMap<FGameplayTag, int32> UTerritoryDiplomacySubsystem::GetAllReputation() const
 {
 	return FactionReputation;
+}
+
+void UTerritoryDiplomacySubsystem::SetReputationSubjectFaction(FGameplayTag Faction)
+{
+	if (!CanMutateDiplomacy(GetWorld())) return;
+	if (ReputationSubjectFaction == Faction) return;
+	ReputationSubjectFaction = Faction;
+	OnReputationSubjectChanged.Broadcast(Faction);
+}
+
+FGameplayTag UTerritoryDiplomacySubsystem::GetReputationSubjectFaction() const
+{
+	return ReputationSubjectFaction;
+}
+
+bool UTerritoryDiplomacySubsystem::IsReputationDrivenDiplomacyEnabled() const
+{
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	return Settings && Settings->bReputationDrivesDiplomacy;
+}
+
+void UTerritoryDiplomacySubsystem::ApplyReputationDiplomacyPolicy(FGameplayTag Faction)
+{
+	if (!IsReputationDrivenDiplomacyEnabled()) return;
+	if (!Faction.IsValid()) return;
+
+	const FGameplayTag Subject = GetReputationSubjectFaction();
+	// The ledger is campaign-wide. Never guess its subject from player join order.
+	if (!Subject.IsValid() || Subject == Faction) return;
+
+	FTreatyRecord* Existing = FindTreaty(Faction, Subject);
+	// An authored treaty is an explicit statement. Reputation only fills the gap it
+	// created itself, so a quest-written peace or alliance is never overwritten.
+	if (Existing && !Existing->bReputationDerived) return;
+
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	if (!Settings) return;
+
+	const int32 Reputation = GetReputation(Faction);
+	EDiplomacyState Desired = EDiplomacyState::None;
+	if (Reputation <= Settings->HostileReputationThreshold)
+	{
+		Desired = EDiplomacyState::War;
+	}
+	else if (Reputation >= Settings->AlliedReputationThreshold)
+	{
+		Desired = EDiplomacyState::Alliance;
+	}
+
+	if (Existing && Existing->State == Desired) return;
+	// Nothing authored by reputation and nothing to declare: leave the pair alone rather
+	// than round-tripping a no-op through SetDiplomacyState.
+	if (!Existing && Desired == EDiplomacyState::None) return;
+
+	SetDiplomacyStateInternal(Faction, Subject, Desired, true);
 }
 
 TArray<FTreatyRecord> UTerritoryDiplomacySubsystem::GetAllTreaties() const
@@ -398,11 +473,13 @@ void UTerritoryDiplomacySubsystem::SyncToGameState()
 void UTerritoryDiplomacySubsystem::RestorePersistentState(
 	const TArray<FTreatyRecord>& Treaties,
 	const TMap<FGameplayTag, int32>& Reputation,
-	const TArray<FDiplomacyEvent>& History)
+	const TArray<FDiplomacyEvent>& History,
+	FGameplayTag SubjectFaction)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
 
+	ReputationSubjectFaction = SubjectFaction;
 	const TArray<FTreatyRecord> PreviousTreaties = ActiveTreaties;
 	ActiveTreaties.Reset();
 	TArray<FTreatyRecord> Candidates = Treaties;

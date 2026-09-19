@@ -364,6 +364,14 @@ bool FTFCounterAttackPlayerRelativeReserveStaging::RunTest(const FString& Parame
 		Profile->bRequireReinforcementCapabilityForStrategicCounterattacks);
 	TestTrue(TEXT("Strategic attackers prioritize physical takeover by default"),
 		Profile->bPrioritizeTerritoryTakeover);
+	// The older shipped behaviour let the most recent attacker outrank a local guard,
+	// which let an assault ignore an assigned guard and chase the player instead.
+	// A living registered guard must win unless a project deliberately opts back in.
+	TestFalse(TEXT("A living registered guard outranks a recent attacker by default"),
+		Profile->bDamageRetaliationOverridesDefenderPriority);
+	// Opt-in: overriding an explicit "wait for the player" request is never the default.
+	TestFalse(TEXT("A garrison only triggers activation when the author opts in"),
+		Profile->bGarrisonTriggersActivation);
 	return true;
 }
 
@@ -777,6 +785,19 @@ bool FTFStoryPursuitOptionalCaptureActivation::RunTest(const FString& Parameters
 	TestTrue(TEXT("A claimed capturing counterattack can activate without proximity when disabled"),
 		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
 			true, ETerritoryState::Claimed, false, false));
+	TestFalse(TEXT("No garrison and no player still waits"),
+		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
+			true, ETerritoryState::Claimed, true, false, false));
+	TestTrue(TEXT("A garrison stands in for player proximity when enabled"),
+		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
+			true, ETerritoryState::Claimed, true, false, true));
+	TestTrue(TEXT("A nearby player still activates with no garrison"),
+		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
+			true, ETerritoryState::Claimed, true, true, false));
+	// The garrison trigger is a proximity stand-in, never an override of the claim rule.
+	TestFalse(TEXT("A garrison cannot bypass the claimed-target requirement"),
+		UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
+			true, ETerritoryState::Contested, true, false, true));
 	return true;
 }
 
@@ -2477,6 +2498,245 @@ bool FTFHierarchyStrictMajorityRegression::RunTest(const FString& Parameters)
 		TerritoryHierarchyPolicy::AreAllChildrenOwnedBy(AllHeroes, Heroes));
 	TestEqual(TEXT("An insecure child reduces the secure control fraction"),
 		TerritoryHierarchyPolicy::CalculateControlFraction(AllHeroes, Heroes), 0.8f);
+	return true;
+}
+
+/**
+ * Relative importance is intensive: a District or defence front is as valuable as its single most
+ * valuable member, not as valuable as the sum of them.
+ *
+ * The three parts below cover the rule, the Command Center's set, and planning's set. Neither
+ * consumer's *set* can be asserted from here by construction — they legitimately differ, and each is
+ * built at its own call site — so what is pinned is the shared rule plus the one set difference that
+ * is easy to get wrong: planning excludes the District, because a District is never a physical
+ * defender, while the Command Center includes it, because the player is looking at the District.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFStrategicValueAggregation,
+	"TerritoryFramework.CounterAttack.Regression.StrategicValueIsRelativeImportanceNotATally",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFStrategicValueAggregation::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TestNotNull(TEXT("Strategic value world created"), World);
+	if (!World) return false;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+
+	// ── Part 1: the rule itself, on plain volumes with no hierarchy ──
+	//
+	// Two standalone Places are enough. Going through ApplyToTerritory rather than poking the field is
+	// deliberate: the field is protected, and this is the production path that authors a value onto a
+	// volume.
+	UTerritoryPlaceDefinition* CheapPlace = NewObject<UTerritoryPlaceDefinition>();
+	UTerritoryPlaceDefinition* VitalPlace = NewObject<UTerritoryPlaceDefinition>();
+	CheapPlace->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	VitalPlace->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Warehouse"), false);
+	CheapPlace->StableTerritoryGUID = FGuid::NewGuid();
+	VitalPlace->StableTerritoryGUID = FGuid::NewGuid();
+	CheapPlace->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	VitalPlace->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	CheapPlace->StrategicValue = 1.f;
+	VitalPlace->StrategicValue = 5.f;
+
+	// Fixture guard. An unregistered tag would make ApplyToTerritory fail and leave both volumes at
+	// the field default, and a maximum of two equal defaults would still "pass" — so the fixture is
+	// proved valid before it is used.
+	if (!TestTrue(TEXT("Fixture: the example Place tags are registered"),
+		CheapPlace->TerritoryTag.IsValid() && VitalPlace->TerritoryTag.IsValid()))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	ATerritoryProperty* Cheap = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* Vital = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestTrue(TEXT("Fixture: both Place definitions apply to a Place volume"),
+		Cheap && Vital && CheapPlace->ApplyToTerritory(Cheap) && VitalPlace->ApplyToTerritory(Vital)))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	TestEqual(TEXT("Fixture: the cheap Place reads back its authored one"),
+		Cheap->GetStrategicValue(), 1.f);
+	if (!TestEqual(TEXT("Fixture: the vital Place reads back its authored five"),
+		Vital->GetStrategicValue(), 5.f))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const TArray<ATerritoryVolume*> Places = {Cheap, Vital};
+	const float Aggregated = TerritoryAssaultTargetPolicy::AggregateStrategicValue(Places);
+
+	// The discriminating assertion. A summing implementation returns six here, and everything else in
+	// this test would still pass against it — so the sum is named explicitly rather than only implied.
+	TestEqual(TEXT("Two Places of value one and five aggregate to five, not their total of six"),
+		Aggregated, 5.f);
+	TestNotEqual(TEXT("The aggregate is not the sum"), Aggregated, 6.f);
+
+	// Order independence, so the answer cannot depend on which Place happened to be added first.
+	const TArray<ATerritoryVolume*> Reversed = {Vital, Cheap};
+	TestEqual(TEXT("Reversing the set does not change the answer"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(Reversed), Aggregated);
+
+	// Degenerate inputs. Empty and all-zero both report no importance at all, which is the honest
+	// answer and matches what the old sum returned; a negative is corrupt data (the property declares
+	// ClampMin=0) and must neither win the maximum nor cancel a positive out of it.
+	TestEqual(TEXT("An empty set has no strategic value"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(TArray<ATerritoryVolume*>()), 0.f);
+	TestEqual(TEXT("A null entry is skipped rather than dereferenced"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(
+			TArray<ATerritoryVolume*>{nullptr, Vital}), 5.f);
+
+	UTerritoryPlaceDefinition* ZeroedPlace = NewObject<UTerritoryPlaceDefinition>();
+	ZeroedPlace->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.CastleHill.Farm"), false);
+	ZeroedPlace->StableTerritoryGUID = FGuid::NewGuid();
+	ZeroedPlace->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	ZeroedPlace->StrategicValue = 0.f;
+	ATerritoryProperty* Zeroed = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ZeroedPlace->ApplyToTerritory(Zeroed);
+	TestEqual(TEXT("A Place authored at zero contributes nothing"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(
+			TArray<ATerritoryVolume*>{Zeroed}), 0.f);
+	TestEqual(TEXT("A zero Place cannot drag a valuable neighbour down"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(
+			TArray<ATerritoryVolume*>{Zeroed, Vital}), 5.f);
+
+	// ── Part 2: planning excludes the District; the Command Center includes it ──
+	ATerritoryDistrict* District = World->SpawnActor<ATerritoryDistrict>(
+		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* Blacksmith = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	ATerritoryProperty* Warehouse = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestTrue(TEXT("Fixture: district and both Places spawned"),
+		District && Blacksmith && Warehouse))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	const FGameplayTag DistrictTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare"), false);
+	const FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(
+		TEXT("Narrative.Factions.Bandits"), false);
+
+	UTerritoryDistrictDefinition* DistrictDefinition = NewObject<UTerritoryDistrictDefinition>();
+	DistrictDefinition->TerritoryTag = DistrictTag;
+	DistrictDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	DistrictDefinition->TerritoryActorClass = ATerritoryDistrict::StaticClass();
+	// The District authors by far the highest importance. Nothing else in the fixture does, so this
+	// value is the only thing that can make the two consumers disagree — which is exactly the point.
+	DistrictDefinition->StrategicValue = 9.f;
+
+	UTerritoryPlaceDefinition* BlacksmithDefinition = NewObject<UTerritoryPlaceDefinition>();
+	BlacksmithDefinition->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	BlacksmithDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	BlacksmithDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	BlacksmithDefinition->StrategicValue = 1.f;
+
+	UTerritoryPlaceDefinition* WarehouseDefinition = NewObject<UTerritoryPlaceDefinition>();
+	WarehouseDefinition->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Warehouse"), false);
+	WarehouseDefinition->StableTerritoryGUID = FGuid::NewGuid();
+	WarehouseDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	WarehouseDefinition->StrategicValue = 7.f;
+
+	DistrictDefinition->Places.Add(BlacksmithDefinition);
+	DistrictDefinition->Places.Add(WarehouseDefinition);
+	DistrictDefinition->RefreshHierarchyLinks();
+
+	if (!TestTrue(TEXT("Fixture: the District definition applies"),
+		DistrictDefinition->ApplyToTerritory(District))
+		|| !TestTrue(TEXT("Fixture: the Blacksmith definition applies"),
+			BlacksmithDefinition->ApplyToTerritory(Blacksmith))
+		|| !TestTrue(TEXT("Fixture: the Warehouse definition applies"),
+			WarehouseDefinition->ApplyToTerritory(Warehouse)))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	// A District keeps an authored strategic value even though its three defence-strength siblings are
+	// zeroed for a non-physical Territory. Asserted because the two consumers below are only
+	// interesting if this is true.
+	TestEqual(TEXT("A District keeps its authored strategic value"), District->GetStrategicValue(), 9.f);
+	TestEqual(TEXT("A District still has no guard quality of its own"),
+		District->GetGuardQuality(), 0.f);
+	TestEqual(TEXT("A Place keeps its authored strategic value"),
+		Warehouse->GetStrategicValue(), 7.f);
+
+	FTerritoryOwnershipData Claimed;
+	Claimed.OwningFaction = Bandits;
+	Claimed.State = ETerritoryState::Claimed;
+	Blacksmith->CommitOwnershipData(Claimed);
+	Warehouse->CommitOwnershipData(Claimed);
+	District->SetDerivedControl(Bandits, ETerritoryState::Claimed);
+
+	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!TestNotNull(TEXT("Fixture: registry exists"), Registry))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	Registry->RegisterTerritory(District);
+	Registry->RegisterTerritory(Blacksmith);
+	Registry->RegisterTerritory(Warehouse);
+
+	// The defence front of a Place is the Place plus its same-owner sibling Places — the District is
+	// excluded, because a District is never a physical defender or assault objective. So planning must
+	// see the highest *Place* value, and must not be drawn up to the District's authored nine.
+	const TArray<ATerritoryVolume*> Front =
+		TerritoryAssaultTargetPolicy::BuildDefenceFront(Blacksmith);
+	TestTrue(TEXT("Fixture: the Place defence front spans both sibling Places"),
+		Front.Contains(Blacksmith) && Front.Contains(Warehouse));
+	TestFalse(TEXT("The defence front excludes the non-physical District"),
+		Front.Contains(District));
+	TestEqual(TEXT("The front's relative importance is its highest Place, seven"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(Front), 7.f);
+	TestNotEqual(TEXT("The front's relative importance is not the Places' total of eight"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(Front), 8.f);
+	TestNotEqual(TEXT("The District's own nine does not reach the front"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(Front), 9.f);
+
+	// The Command Center's set does include the District, so the authored nine is what a player is
+	// shown. Before this change that nine was read by nothing at all: the view summed only the
+	// District's Places, and the front never contained the District.
+	const TArray<ATerritoryVolume*> DistrictSet = {District, Blacksmith, Warehouse};
+	TestEqual(TEXT("The Command Center's District set answers with the District's own nine"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(DistrictSet), 9.f);
+	TestNotEqual(TEXT("The Command Center's set is not the total of seventeen"),
+		TerritoryAssaultTargetPolicy::AggregateStrategicValue(DistrictSet), 17.f);
+
+	// And the planning input itself, end to end, through the same entry point a live counterattack
+	// uses. This is the assertion that would catch a regression at the call site rather than in the
+	// rule — a future edit that went back to accumulating would fail here.
+	if (UTerritoryCounterAttackSubsystem* Subsystem =
+		World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
+	{
+		FTerritoryFactionAssaultConfig Force;
+		Force.Faction = Bandits;
+		const FTerritoryAssaultEvaluationInput Input = Subsystem->BuildEvaluationInput(
+			Blacksmith, Force);
+		TestEqual(TEXT("Planning builds its input from the front's highest Place, seven"),
+			Input.StrategicValue, 7.f);
+		TestNotEqual(TEXT("Planning no longer totals the front"), Input.StrategicValue, 8.f);
+	}
+	else
+	{
+		AddError(TEXT("No counterattack subsystem was available, so the planning path went unproven."));
+	}
+
+	World->DestroyWorld(false);
 	return true;
 }
 

@@ -371,7 +371,19 @@ public:
 	 * No intermediate state is visible to listeners between steps.
 	 * Returns true if the commit was applied (old != new).
 	 */
-	bool CommitOwnershipData(const FTerritoryOwnershipData& NewData, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
+	// Explicit story/admin requests may bypass transition conditions for this commit only.
+	bool CommitOwnershipData(const FTerritoryOwnershipData& NewData,
+		const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext(),
+		bool bBypassConditionsForCommit = false);
+
+	/**
+	 * Resolve who physically performed a capture, for FTerritoryOwnershipData::CapturedBy.
+	 * Prefers the transition instigator's faction, then the transition's requesting
+	 * faction, then falls back to the new owner so the field is never left half-filled.
+	 */
+	FGameplayTag ResolveCaptureInstigatorFaction(
+		const FTerritoryTransitionContext& TransitionContext,
+		const FGameplayTag& NewOwner) const;
 
 	// ═══════════════════════════════════════════════════════════════════════════
 	// Blueprint Events (BlueprintNativeEvent — subclasses can override)
@@ -547,9 +559,23 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Recruitment Cost"))
 	int32 GetGuardRecruitmentCost(int32 Count = 1) const;
 
+	/**
+	 * Recruitment cost as the given buyer would actually be charged, including the
+	 * definition's attitude multipliers. Pass the exact actor who will pay; this is
+	 * the overload the purchase path uses, so a displayed price and a charged price
+	 * can never disagree. Falls back to the base cost when attitude pricing is off,
+	 * the buyer has no faction, or diplomacy is unavailable.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Recruitment Cost For"))
+	int32 GetGuardRecruitmentCostFor(const AActor* Requester, int32 Count = 1) const;
+
 	/** Calculate currency required for the proposed guard purchase. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Purchase Cost"))
 	int32 GetGuardPurchaseCost(int32 Count = 1) const;
+
+	/** Purchase cost for the exact buyer, including attitude multipliers. */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Get Guard Purchase Cost For"))
+	int32 GetGuardPurchaseCostFor(const AActor* Requester, int32 Count = 1) const;
 
 	/** Check whether the proposed guard purchase is currently allowed. The server repeats these checks during the actual request. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guards", meta=(DisplayName="Can Purchase Guards"))
@@ -835,6 +861,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDefenderNarrativeEventConditions;
 	friend class FTFVolumeRuleCallbacks;
+	friend class FTFForcedMutationConditions;
 	friend class FTFFactionStateRulesIntegration;
 	friend class FTFGuardRetirementCallbacks;
 	friend class FTFGuardRecordLoadRetirement;

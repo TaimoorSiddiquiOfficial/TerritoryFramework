@@ -48,6 +48,42 @@ polling and continues its Territory activity without a weapon or a misleading wa
 Capsule and mesh initialization starts from valid named Unreal profiles before the exact
 Narrative trace-channel overrides are applied at runtime.
 
+## Combat Policy — who a guard will attack
+
+`ATerritoryGuardCharacter::EvaluateTerritoryTarget` is the single decision point. It runs in
+this order and returns at the first match:
+
+1. Reject if the guard, target or owning Place is unavailable, dead, or the target is itself.
+2. Reject if a matching quest pauses defender combat.
+3. Reject if the target is perceived as belonging to the guard's own faction.
+4. Reject if **any** protective treaty exists between the factions — Alliance, Trade,
+   Non-Aggression or Ceasefire. Protective relations win over a War pair on a multi-faction actor.
+5. Reject if the target fails the authored `CombatTargetFactions` filter (when that filter is set).
+6. Allow on **personal hostility** — the target is in the guard's own `Hostiles` set.
+7. Reject unless the factions are at **War**.
+8. Allow if an active hostile assault threatens this Place's defence front.
+9. Stealth: allow an exposed enemy when `bDefendAgainstExposedEnemies` permits.
+10. Allow if the Place is `Contested`.
+11. Allow if `bEngageAtWarInClaimedTerritory` is authored on.
+
+> **Why step 11 exists.** Faction-level hostility has no other channel into this decision.
+> Narrative's `ShouldBeAggressiveTowardsTarget` is `Hostiles.Contains(Target)` — a *per-actor*
+> set populated by actual damage, not a faction attitude. So before step 11, turning a faction
+> hostile changed nothing: its guards went on ignoring you in every `Claimed` Place, including
+> the ones you had captured for them. Step 11 is what makes a broken alliance bite.
+
+| Option | Default | What it does |
+|---|---|---|
+| `bAllowPersonalRetaliation` | on | Lets a guard answer real Narrative personal hostility, including damage taken. Never declares War and never unlocks capture. |
+| `bDefendAgainstExposedEnemies` | on | Lets a guard fight an exposed enemy faction while a quest keeps the Place `Claimed`. Hidden players and Local Alarm still require personal hostility. |
+| `bEngageAtWarInClaimedTerritory` | **off** | Lets a guard fight a faction at War even when the Place is `Claimed`, not just `Contested`. Turn this on when a mid-game betrayal should make previously safe territory dangerous. |
+| `CombatTargetFactions` | empty | Exact faction filter. Empty admits every faction that passes diplomacy, stealth and quest rules. Uses the perceived faction while a disguise is accepted. |
+
+`bEngageAtWarInClaimedTerritory` is off by default because making every `Claimed` Place lethal
+at War would change stealth and quest content that deliberately runs inside hostile territory.
+Author it per Territory Definition, so you can make the betrayal dangerous in the regions where
+the story needs it and leave the rest of the map alone.
+
 ## Patrol System
 
 Territory spawn points can define patrol routes. These are consumed by Narrative's existing patrol activity:

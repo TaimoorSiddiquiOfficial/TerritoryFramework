@@ -96,6 +96,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	TMap<FGameplayTag, int32> GetAllReputation() const;
 
+	/**
+	 * Choose the faction represented by this campaign's shared reputation scores.
+	 * Call this on the server with an explicit Narrative faction. No player is selected
+	 * automatically. An empty tag pauses reputation-driven treaty changes; scores can
+	 * still change. Setting a subject does not immediately change any existing treaty.
+	 * Easy example: choose Rebels at campaign start. After a betrayal, the story must
+	 * explicitly choose whether the shared scores still represent Rebels or a new faction.
+	 * This is one campaign ledger, not a separate reputation account for each player.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
+	void SetReputationSubjectFaction(FGameplayTag Faction);
+
+	/** The explicitly selected campaign faction. Empty means automatic treaty changes are paused. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
+	FGameplayTag GetReputationSubjectFaction() const;
+
+	/** True when reputation is configured to declare War and Alliance by itself. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
+	bool IsReputationDrivenDiplomacyEnabled() const;
+
 	/** Return the treaty records currently available to this world or replicated snapshot. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	TArray<FTreatyRecord> GetAllTreaties() const;
@@ -120,7 +140,8 @@ public:
 	void RestorePersistentState(
 		const TArray<FTreatyRecord>& Treaties,
 		const TMap<FGameplayTag, int32>& Reputation,
-		const TArray<FDiplomacyEvent>& History);
+		const TArray<FDiplomacyEvent>& History,
+		FGameplayTag SubjectFaction = FGameplayTag());
 
 	/** Direct Narrative attitude setter — Narrative is sole authority for AI attitudes */
 	void SetNarrativeAttitude(FGameplayTag FactionA, FGameplayTag FactionB, ETeamAttitude::Type Attitude);
@@ -140,6 +161,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnReputationChanged OnReputationChanged;
 
+	/** Called after the server changes the faction represented by the shared reputation ledger. */
+	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
+	FOnReputationSubjectChanged OnReputationSubjectChanged;
+
 	/** Broadcast when a timed treaty expires. FactionA/B are the treaty parties. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnDiplomacyStateChanged OnTreatyExpired;
@@ -151,6 +176,10 @@ protected:
 	UPROPERTY(SaveGame)
 	TMap<FGameplayTag, int32> FactionReputation;
 
+	/** Explicit campaign subject. Empty disables reputation-driven treaty changes. */
+	UPROPERTY(SaveGame)
+	FGameplayTag ReputationSubjectFaction;
+
 	UPROPERTY(SaveGame)
 	TArray<FDiplomacyEvent> DiplomacyHistory;
 
@@ -161,6 +190,17 @@ private:
 	void RecordEvent(EDiplomacyEventType EventType, FGameplayTag FactionA, FGameplayTag FactionB);
 	ANarrativeGameState* GetNarrativeGameState() const;
 	ETeamAttitude::Type DiplomacyStateToAttitude(EDiplomacyState State) const;
+
+	/** Commit treaty provenance before Narrative or Territory observers run. */
+	void SetDiplomacyStateInternal(FGameplayTag FactionA, FGameplayTag FactionB,
+		EDiplomacyState NewState, bool bReputationDerived);
+
+	/**
+	 * Re-evaluate what reputation says this faction's relationship should be.
+	 * Reputation owns only the treaties it created (see FTreatyRecord::bReputationDerived),
+	 * so an authored treaty is read as an explicit statement and left alone.
+	 */
+	void ApplyReputationDiplomacyPolicy(FGameplayTag Faction);
 
 	UFUNCTION()
 	void OnFactionAttitudeChanged(FGameplayTag Faction, FGameplayTag OtherFaction, ETeamAttitude::Type NewAttitude);

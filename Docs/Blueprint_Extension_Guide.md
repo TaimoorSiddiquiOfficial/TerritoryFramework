@@ -419,11 +419,24 @@ ATerritoryVolume BP → Event Graph:
 
 ```
 ATerritoryVolume BP:
-  Initial State: Locked
+  Initial Availability: Locked        (takes effect on a NEW campaign only)
   State Configs -> Locked -> Exit Conditions: [QuestComplete_Q001]
-  → Territory stays Locked until quest Q001 completes
-  → TryUnlock checks the same modular state-transition conditions automatically
+  → Territory stays Locked until something REQUESTS the unlock AND Q001 is complete
+  → TryUnlock checks those conditions for you; it does not watch them
 ```
+
+> **Exit Conditions are a gate, not a trigger.** Nothing polls them. A Territory does not open
+> because its condition became true — something has to *ask*: a quest event, or `TryUnlock` /
+> `TryUnlockWithContext` from Blueprint or C++. **If nothing asks, a Territory that starts Locked
+> stays Locked forever, however many conditions pass.** This is what makes it look like the lock
+> settings "do not work": fill in the conditions, complete the quest, and the gate quietly holds
+> until an unlock is requested.
+>
+> Use `Initial Availability` (under **03 New Campaign**), not `Initial State`. The `Initial State`
+> property still exists for save compatibility, but its `Locked` option is hidden — you cannot select
+> it, and picking anything else there leaves the Territory unlocked. `Initial Availability` is also
+> read once, when a new campaign initialises; an existing save keeps its saved availability, so test
+> this on a fresh campaign.
 
 ### Pattern: Custom guard behavior on defeat
 

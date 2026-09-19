@@ -32,6 +32,7 @@ namespace
 		Result.SignedGameTime = Treaty.SignedGameTime;
 		Result.ExpiryGameTime = Treaty.ExpiryGameTime;
 		Result.bPermanent = Treaty.bPermanent;
+		Result.bReputationDerived = Treaty.bReputationDerived;
 		return Result;
 	}
 
@@ -78,10 +79,15 @@ namespace
 		FReplicatedCaptureSummary& Summary)
 	{
 		if (!Definition) return;
-		Summary.Availability = Definition->InitialState == ETerritoryInitialState::Locked
-			? ETerritoryAvailability::Locked : Definition->InitialAvailability;
-		const bool bStartsClaimed = Definition->InitialOwningFaction.IsValid()
-			&& Definition->InitialState != ETerritoryInitialState::Unclaimed;
+		Summary.Availability = TerritoryResolveInitialAvailability(
+			Definition->InitialState, Definition->InitialAvailability);
+		// One shared rule decides ownership, and both the owner tag and the State are derived from
+		// that single answer. This used to be a second, hand-written copy of the rule, which is how
+		// a summary could in principle report a State that disagreed with its own CurrentOwner.
+		const bool bStartsClaimed =
+			TerritoryResolveInitialPoliticalState(
+				Definition->InitialState,
+				Definition->InitialOwningFaction.IsValid()) == ETerritoryState::Claimed;
 		Summary.CurrentOwner = bStartsClaimed
 			? Definition->InitialOwningFaction : FGameplayTag();
 		Summary.State = bStartsClaimed
@@ -137,6 +143,12 @@ void ATerritoryWorldState::BeginPlay()
 		SubscribeToLiveUpdates();
 		RefreshStrategicDirectory();
 
+		// The delegates above only fire when a relationship changes. A session that opens
+		// with an authored war (or any restored treaty) would otherwise replicate none of it:
+		// the subsystem loads from the GameState in OnWorldBeginPlay, which runs before this
+		// actor BeginPlay, and LoadFromGameState broadcasts nothing.
+		PublishDiplomacyReadModel();
+
 		// Actor BeginPlay order is not guaranteed. Seed summaries for Territory actors
 		// that registered before this WorldState; territories that start later publish
 		// their own summary from ATerritoryVolume::BeginPlay.
@@ -178,6 +190,7 @@ void ATerritoryWorldState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedResourceSnapshots);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTreaties);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedReputation);
+	DOREPLIFETIME(ATerritoryWorldState, ReplicatedReputationSubjectFaction);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedDiplomacyHistory);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedCaptureSummaries);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedAssaults);
@@ -804,25 +817,7 @@ void ATerritoryWorldState::ExportPersistentState()
 			ReplicatedResourceSnapshots = Economy->GetAllResourceSnapshots();
 		}
 
-		if (UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>())
-		{
-			ReplicatedTreaties.Empty();
-			for (const FTreatyRecord& Treaty : Diplomacy->GetAllTreaties())
-			{
-				ReplicatedTreaties.Add(MakeReplicatedTreaty(Treaty));
-			}
-
-			ReplicatedReputation.Empty();
-			TMap<FGameplayTag, int32> AllRep = Diplomacy->GetAllReputation();
-			for (const auto& Pair : AllRep)
-			{
-				FReplicatedFactionReputation RepRep;
-				RepRep.Faction = Pair.Key;
-				RepRep.Reputation = Pair.Value;
-				ReplicatedReputation.Add(RepRep);
-			}
-			ReplicatedDiplomacyHistory = Diplomacy->GetDiplomacyHistory();
-		}
+		PublishDiplomacyReadModel();
 
 		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
@@ -850,6 +845,7 @@ void ATerritoryWorldState::ExportPersistentState()
 	SavedResourceSnapshots = ReplicatedResourceSnapshots;
 	SavedTreaties = ReplicatedTreaties;
 	SavedReputation = ReplicatedReputation;
+	SavedReputationSubjectFaction = ReplicatedReputationSubjectFaction;
 	SavedDiplomacyHistory = ReplicatedDiplomacyHistory;
 	SavedAssaults = ReplicatedAssaults;
 	// This is a presentation/query cache only. It prevents unloaded World Partition
@@ -869,6 +865,7 @@ void ATerritoryWorldState::ImportPersistentState()
 	ReplicatedResourceSnapshots = SavedResourceSnapshots;
 	ReplicatedTreaties = SavedTreaties;
 	ReplicatedReputation = SavedReputation;
+	ReplicatedReputationSubjectFaction = SavedReputationSubjectFaction;
 	ReplicatedDiplomacyHistory = SavedDiplomacyHistory;
 	ReplicatedAssaults = SavedAssaults;
 	ReplicatedCaptureSummaries = SavedStrategicDirectory;
@@ -952,6 +949,38 @@ void ATerritoryWorldState::SyncEconomySubsystemFromReplicatedState()
 	}
 }
 
+void ATerritoryWorldState::PublishDiplomacyReadModel()
+{
+	if (!HasAuthority()) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UTerritoryDiplomacySubsystem* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	if (!Diplomacy) return;
+
+	ReplicatedTreaties.Empty();
+	for (const FTreatyRecord& Treaty : Diplomacy->GetAllTreaties())
+	{
+		ReplicatedTreaties.Add(MakeReplicatedTreaty(Treaty));
+	}
+
+	ReplicatedReputation.Empty();
+	TMap<FGameplayTag, int32> AllRep = Diplomacy->GetAllReputation();
+	for (const auto& Pair : AllRep)
+	{
+		FReplicatedFactionReputation RepRep;
+		RepRep.Faction = Pair.Key;
+		RepRep.Reputation = Pair.Value;
+		ReplicatedReputation.Add(RepRep);
+	}
+	ReplicatedDiplomacyHistory = Diplomacy->GetDiplomacyHistory();
+	ReplicatedReputationSubjectFaction = Diplomacy->GetReputationSubjectFaction();
+
+	// The live handlers push each change as it happens; this seeds the standing state a
+	// session opens with, which no live delegate ever fires for.
+	ForceNetUpdate();
+}
+
 void ATerritoryWorldState::SyncDiplomacySubsystemFromReplicatedState()
 {
 	UWorld* World = GetWorld();
@@ -971,6 +1000,7 @@ void ATerritoryWorldState::SyncDiplomacySubsystemFromReplicatedState()
 			Record.SignedGameTime = Treaty.SignedGameTime;
 			Record.ExpiryGameTime = Treaty.ExpiryGameTime;
 			Record.bPermanent = Treaty.bPermanent;
+			Record.bReputationDerived = Treaty.bReputationDerived;
 			Treaties.Add(Record);
 		}
 
@@ -979,7 +1009,8 @@ void ATerritoryWorldState::SyncDiplomacySubsystemFromReplicatedState()
 		{
 			Reputation.Add(Entry.Faction, Entry.Reputation);
 		}
-		Diplomacy->RestorePersistentState(Treaties, Reputation, ReplicatedDiplomacyHistory);
+		Diplomacy->RestorePersistentState(Treaties, Reputation, ReplicatedDiplomacyHistory,
+			ReplicatedReputationSubjectFaction);
 		if (HasAuthority())
 		{
 			// Publish the normalized authoritative rows after migration, including
@@ -1043,6 +1074,7 @@ void ATerritoryWorldState::SubscribeToLiveUpdates()
 		Diplomacy->OnDiplomacyStateChanged.AddDynamic(this, &ATerritoryWorldState::OnDiplomacyChangedLive);
 		Diplomacy->OnDiplomacyEvent.AddDynamic(this, &ATerritoryWorldState::OnDiplomacyEventLive);
 		Diplomacy->OnReputationChanged.AddDynamic(this, &ATerritoryWorldState::OnReputationChangedLive);
+		Diplomacy->OnReputationSubjectChanged.AddDynamic(this, &ATerritoryWorldState::OnReputationSubjectChangedLive);
 	}
 
 	if (UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>())
@@ -1073,6 +1105,7 @@ void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
 		Diplomacy->OnDiplomacyStateChanged.RemoveDynamic(this, &ATerritoryWorldState::OnDiplomacyChangedLive);
 		Diplomacy->OnDiplomacyEvent.RemoveDynamic(this, &ATerritoryWorldState::OnDiplomacyEventLive);
 		Diplomacy->OnReputationChanged.RemoveDynamic(this, &ATerritoryWorldState::OnReputationChangedLive);
+		Diplomacy->OnReputationSubjectChanged.RemoveDynamic(this, &ATerritoryWorldState::OnReputationSubjectChangedLive);
 	}
 
 	if (UTerritoryControlSubsystem* Control = World->GetSubsystem<UTerritoryControlSubsystem>())
@@ -1305,6 +1338,17 @@ void ATerritoryWorldState::OnDiplomacyEventLive(const FDiplomacyEvent& Event)
 	{
 		ReplicatedDiplomacyHistory.RemoveAt(0, Excess);
 	}
+	ForceNetUpdate();
+}
+
+void ATerritoryWorldState::OnReputationSubjectChangedLive(FGameplayTag SubjectFaction)
+{
+	if (!HasAuthority()) return;
+	// Read the current authority in case an earlier listener changed the subject again.
+	const UTerritoryDiplomacySubsystem* Diplomacy = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
+	if (!Diplomacy) return;
+	ReplicatedReputationSubjectFaction = Diplomacy->GetReputationSubjectFaction();
 	ForceNetUpdate();
 }
 

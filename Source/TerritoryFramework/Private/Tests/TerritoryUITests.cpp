@@ -1,6 +1,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Engine/Blueprint.h"
+#include "Modules/ModuleManager.h"
 #include "CommonButtonBase.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
@@ -32,6 +36,12 @@
 #include "Components/Overlay.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Widgets/NarrativeCommonTextBlock.h"
+#include "UObject/UnrealType.h"
+#include "UObject/EnumProperty.h"
+#include "UObject/StrProperty.h"
+#include "UObject/TextProperty.h"
+#include "UObject/SoftObjectPath.h"
+#include "Internationalization/Text.h"
 
 namespace TerritoryUITest
 {
@@ -103,6 +113,20 @@ bool FTerritoryUICommonUIContractTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Community projects can select a readable Territory interface font"),
 		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
 			TEXT("TerritoryInterfaceFont")));
+	TestNotNull(TEXT("Community projects can recolour the compact HUD capture card"),
+		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
+			TEXT("TerritoryHUDCardFillColor")));
+	TestNotNull(TEXT("Community projects can resize the compact HUD capture card"),
+		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
+			TEXT("TerritoryHUDCardSize")));
+	TestNotNull(TEXT("Community projects can size the counter-attack alert card"),
+		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
+			TEXT("TerritoryHUDCardAlertExtraHeight")));
+	TestNotNull(TEXT("The large panel texture stays off the compact HUD card by default"),
+		UTerritoryDeveloperSettings::StaticClass()->FindPropertyByName(
+			TEXT("bTerritoryHUDCardUsePanelTexture")));
+	TestFalse(TEXT("The compact HUD card does not inherit the large panel texture"),
+		GetDefault<UTerritoryDeveloperSettings>()->bTerritoryHUDCardUsePanelTexture);
 	TestNotNull(TEXT("Every Definition exposes passive gameplay-HUD visibility"),
 		UTerritoryDefinition::StaticClass()->FindPropertyByName(
 			TEXT("bShowGameplayHUD")));
@@ -1200,6 +1224,380 @@ bool FTerritoryUIRevisionRegressionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+namespace TerritoryUIRevisionCoverage
+{
+	/**
+	 * The fields the revision deliberately ignores, as a hard allow-list.
+	 * These are the loaded-actor handles: they are not displayed content, and their
+	 * addresses change on streaming and GC in ways that would force needless rebuilds.
+	 * Everything a widget can render about load state is already covered by `bRegistered`,
+	 * `bRuntimeLoaded` and the stable tags, so nothing is lost by excluding them.
+	 * The test asserts this set is exactly what reflection finds, so a NEW handle has to be
+	 * argued for here rather than silently escaping coverage.
+	 */
+	const TSet<FString>& ExpectedHandleNames()
+	{
+		static const TSet<FString> Expected = {
+			TEXT("District"), TEXT("City"), TEXT("Territory") };
+		return Expected;
+	}
+
+	/** True for a plain instance handle (FObjectProperty but not TSubclassOf, which IS hashed). */
+	bool IsHandleProperty(const FProperty* Prop)
+	{
+		return Prop->IsA<FObjectProperty>() && !Prop->IsA<FClassProperty>();
+	}
+
+	/**
+	 * A struct-typed property cannot be "changed" as a whole, so it is not probeable directly.
+	 * Its members are probed individually by the recursion instead, which is stronger anyway.
+	 */
+	bool IsProbeableLeaf(const FProperty* Prop)
+	{
+		return !Prop->IsA<FStructProperty>();
+	}
+
+	/** Give every struct array one default element so nested rows are reachable. */
+	void PopulateArrays(void* Container, const UStruct* Struct, int32 Depth)
+	{
+		if (Depth > 6) return;
+		for (TFieldIterator<FProperty> It(Struct); It; ++It)
+		{
+			FProperty* Prop = *It;
+			if (FStructProperty* S = CastField<FStructProperty>(Prop))
+			{
+				PopulateArrays(S->ContainerPtrToValuePtr<void>(Container), S->Struct, Depth + 1);
+				continue;
+			}
+			FArrayProperty* Array = CastField<FArrayProperty>(Prop);
+			if (!Array) continue;
+			FScriptArrayHelper Helper(Array, Array->ContainerPtrToValuePtr<void>(Container));
+			if (Helper.Num() == 0) Helper.AddValue();
+			if (FStructProperty* ElementStruct = CastField<FStructProperty>(Array->Inner))
+			{
+				for (int32 Index = 0; Index < Helper.Num(); ++Index)
+				{
+					PopulateArrays(Helper.GetRawPtr(Index), ElementStruct->Struct, Depth + 1);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Set one property to a different value. False means the test cannot probe this type,
+	 * which is a test failure rather than a pass: an unprobeable field might be unhashed.
+	 * Every accessor below takes a value pointer and is defined by the engine property class
+	 * it is called on, so no pointer arithmetic is re-derived here.
+	 */
+	bool PerturbProperty(void* ValuePtr, FProperty* Prop)
+	{
+		if (FBoolProperty* Bool = CastField<FBoolProperty>(Prop))
+		{
+			Bool->SetPropertyValue(ValuePtr, !Bool->GetPropertyValue(ValuePtr));
+			return true;
+		}
+		// FEnumProperty stores the underlying number in place, so its own value pointer is
+		// exactly what the underlying numeric accessors expect.
+		if (FEnumProperty* Enum = CastField<FEnumProperty>(Prop))
+		{
+			FNumericProperty* Underlying = Enum->GetUnderlyingProperty();
+			if (!Underlying) return false;
+			Underlying->SetIntPropertyValue(ValuePtr, Underlying->GetSignedIntPropertyValue(ValuePtr) + 1);
+			return true;
+		}
+		// FNumericProperty covers int32/int64/uint32/uint64/float/double/uint8 in one place.
+		if (FNumericProperty* Numeric = CastField<FNumericProperty>(Prop))
+		{
+			if (Numeric->IsFloatingPoint())
+			{
+				Numeric->SetFloatingPointPropertyValue(ValuePtr,
+					Numeric->GetFloatingPointPropertyValue(ValuePtr) + 1.0);
+			}
+			else
+			{
+				Numeric->SetIntPropertyValue(ValuePtr, Numeric->GetSignedIntPropertyValue(ValuePtr) + 1);
+			}
+			return true;
+		}
+		if (FNameProperty* Name = CastField<FNameProperty>(Prop))
+		{
+			Name->SetPropertyValue(ValuePtr, FName(TEXT("RevisionProbe")));
+			return true;
+		}
+		if (FStrProperty* Str = CastField<FStrProperty>(Prop))
+		{
+			Str->SetPropertyValue(ValuePtr, TEXT("RevisionProbe"));
+			return true;
+		}
+		if (FTextProperty* Text = CastField<FTextProperty>(Prop))
+		{
+			Text->SetPropertyValue(ValuePtr, FText::FromString(TEXT("RevisionProbe")));
+			return true;
+		}
+		if (FClassProperty* Class = CastField<FClassProperty>(Prop))
+		{
+			// MetaClass is itself a valid TSubclassOf of itself, so this needs no asset.
+			if (UClass* Meta = Class->MetaClass)
+			{
+				Class->SetObjectPropertyValue(ValuePtr, Meta);
+				return true;
+			}
+			return false;
+		}
+		if (FSoftObjectProperty* Soft = CastField<FSoftObjectProperty>(Prop))
+		{
+			// FSoftObjectProperty stores an FSoftObjectPtr in place; SetObjectPropertyValue
+			// would try to resolve it to a live UObject, so write the soft pointer directly.
+			FSoftObjectPtr* SoftPtr = static_cast<FSoftObjectPtr*>(ValuePtr);
+			*SoftPtr = FSoftObjectPtr(FSoftObjectPath(TEXT("/Engine/EngineMeshes/Cube.Cube")));
+			return true;
+		}
+		// Only reachable as an array's element type; the array itself is probed by count.
+		if (FArrayProperty* Array = CastField<FArrayProperty>(Prop))
+		{
+			FScriptArrayHelper Helper(Array, ValuePtr);
+			Helper.AddValue();
+			return true;
+		}
+		return false;
+	}
+
+	/** Walk a property chain, taking element 0 whenever it steps through an array. */
+	bool PerturbChain(FTerritoryDistrictOperationsView& View, const TArray<FProperty*>& Chain)
+	{
+		void* Container = &View;
+		for (int32 Step = 0; Step < Chain.Num(); ++Step)
+		{
+			FProperty* Prop = Chain[Step];
+			void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Container);
+			if (Step == Chain.Num() - 1) return PerturbProperty(ValuePtr, Prop);
+			if (FStructProperty* S = CastField<FStructProperty>(Prop))
+			{
+				Container = ValuePtr;
+				continue;
+			}
+			if (FArrayProperty* A = CastField<FArrayProperty>(Prop))
+			{
+				FScriptArrayHelper Helper(A, ValuePtr);
+				if (Helper.Num() == 0) Helper.AddValue();
+				Container = Helper.GetRawPtr(0);
+				continue;
+			}
+			return false;
+		}
+		return false;
+	}
+
+	FString ChainPath(const TArray<FProperty*>& Chain)
+	{
+		FString Path;
+		for (const FProperty* Prop : Chain)
+		{
+			Path += TEXT(".");
+			Path += Prop->GetName();
+		}
+		return Path;
+	}
+
+	/** Collect one probe per hashed field, at every reachable depth. */
+	void CollectProbes(const UStruct* Struct, const TArray<FProperty*>& Prefix, int32 Depth,
+		TArray<TArray<FProperty*>>& Out, TSet<FString>& SeenHandles)
+	{
+		for (TFieldIterator<FProperty> It(Struct); It; ++It)
+		{
+			FProperty* Prop = *It;
+			if (IsHandleProperty(Prop))
+			{
+				// Recorded rather than ignored, so the test can prove the exclusion list is
+				// exactly the set of handles that actually exist.
+				SeenHandles.Add(Prop->GetName());
+				continue;
+			}
+
+			TArray<FProperty*> Chain = Prefix;
+			Chain.Add(Prop);
+			if (IsProbeableLeaf(Prop)) Out.Add(Chain);
+
+			if (Depth > 5) continue;
+			if (FStructProperty* S = CastField<FStructProperty>(Prop))
+			{
+				CollectProbes(S->Struct, Chain, Depth + 1, Out, SeenHandles);
+			}
+			else if (FArrayProperty* A = CastField<FArrayProperty>(Prop))
+			{
+				// Probing the array itself only proves the element COUNT is hashed, so probe
+				// one element's value too — otherwise a hash that folded in only `Num()`
+				// would pass. Struct elements are excluded here because their members are
+				// reached by the recursion below.
+				if (FStructProperty* ElementStruct = CastField<FStructProperty>(A->Inner))
+				{
+					CollectProbes(ElementStruct->Struct, Chain, Depth + 1, Out, SeenHandles);
+				}
+				else if (!IsHandleProperty(A->Inner))
+				{
+					TArray<FProperty*> ElementChain = Chain;
+					ElementChain.Add(A->Inner);
+					Out.Add(ElementChain);
+				}
+			}
+		}
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIRevisionCoverageRegressionTest,
+	"TerritoryFramework.UI.Regression.EveryDisplayedFieldInvalidatesRevision",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIRevisionCoverageRegressionTest::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryUIRevisionCoverage;
+
+	// The revision exists to decide whether the Command Center must rebuild. A field that is
+	// displayed but missing from it means the panel keeps showing a stale value — which is
+	// exactly what happened before: PlannedAttackers, AssaultResolution, ThreatSummary, all
+	// four failure-reason texts, the four guard-strength floats, and both `Hierarchy` and
+	// `ResourceFlows` were omitted while the widget happily rendered them.
+	//
+	// Instead of spot-checking a few fields, this walks the struct by reflection and asserts
+	// that changing ANY field moves the revision. A field added later is covered for free,
+	// and a field the test cannot probe fails loudly rather than passing quietly.
+
+	FTerritoryDistrictOperationsView Populated;
+	PopulateArrays(&Populated, FTerritoryDistrictOperationsView::StaticStruct(), 0);
+	const int32 Baseline = UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(Populated);
+	TestTrue(TEXT("The revision is non-negative so a `> 0` Blueprint test is safe"), Baseline >= 0);
+
+	TArray<TArray<FProperty*>> Probes;
+	TSet<FString> SeenHandles;
+	CollectProbes(FTerritoryDistrictOperationsView::StaticStruct(), {}, 0, Probes, SeenHandles);
+
+	// The excluded handles must be exactly the ones that exist, or a newly added handle would
+	// quietly drop out of coverage.
+	const TSet<FString>& ExpectedHandles = ExpectedHandleNames();
+	TestEqual(TEXT("No undocumented handle pointer is excluded from the revision"),
+		SeenHandles.Num(), ExpectedHandles.Num());
+	for (const FString& Name : ExpectedHandles)
+	{
+		TestTrue(FString::Printf(TEXT("%s is still a documented revision exclusion"), *Name),
+			SeenHandles.Contains(Name));
+	}
+
+	TestTrue(TEXT("Reflection found fields to probe"), Probes.Num() > 40);
+
+	int32 Unprobeable = 0;
+	for (const TArray<FProperty*>& Chain : Probes)
+	{
+		FTerritoryDistrictOperationsView Probe = Populated;
+		if (!PerturbChain(Probe, Chain))
+		{
+			++Unprobeable;
+			AddError(FString::Printf(
+				TEXT("Revision coverage: cannot probe %s (%s). Either hash it, or add it to the "
+					 "documented exclusion list with a reason."),
+				*ChainPath(Chain), *Chain.Last()->GetCPPType()));
+			continue;
+		}
+		const int32 Changed = UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(Probe);
+		TestTrue(FString::Printf(
+			TEXT("Changing %s invalidates the Command Center revision"), *ChainPath(Chain)),
+			Baseline != Changed);
+	}
+	TestEqual(TEXT("Every reflected field was probeable"), Unprobeable, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIManagementRefusalTextTest,
+	"TerritoryFramework.UI.Regression.ManagementRefusalTextIsLocalizable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIManagementRefusalTextTest::RunTest(const FString& Parameters)
+{
+	// These are the most frequently seen messages in the whole plugin: every failed guard
+	// purchase or removal lands on one of them. They used to be built with
+	// `FText::FromString`, which produces text with no namespace and no key — invisible to the
+	// localization pipeline, so a translated build would show English here forever.
+	//
+	// Two properties matter and both are checked below: the text is *gatherable* (it has a
+	// namespace and key, so the string table can pick it up), and buy and remove share one
+	// instance rather than two copies that can drift apart.
+
+	struct FExpected
+	{
+		const TCHAR* Key;
+		const TCHAR* Sentence;
+	};
+
+	const FExpected Expected[] = {
+		{ TEXT("ManagementUnavailable"), TEXT("Territory management is not installed on this PlayerController.") },
+		{ TEXT("OutOfManagementRange"),  TEXT("Move closer to the district management point.") },
+		{ TEXT("NoGarrisonSelected"),    TEXT("No district or Property garrison is selected.") },
+	};
+	const FText Messages[] = {
+		UTerritoryDistrictManagementWidget::GetManagementUnavailableReason(),
+		UTerritoryDistrictManagementWidget::GetOutOfManagementRangeReason(),
+		UTerritoryDistrictManagementWidget::GetNoGarrisonSelectedReason(),
+	};
+	static_assert(UE_ARRAY_COUNT(Expected) == UE_ARRAY_COUNT(Messages), "one expectation per message");
+
+	TSet<FString> SeenKeys;
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Messages); ++Index)
+	{
+		const FText& Message = Messages[Index];
+		const FString Where = FString::Printf(TEXT("message '%s'"), Expected[Index].Key);
+
+		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Message);
+		const TOptional<FString> Key = FTextInspector::GetKey(Message);
+		const FString* Source = FTextInspector::GetSourceString(Message);
+
+		TestTrue(FString::Printf(TEXT("%s carries a localization namespace"), *Where),
+			Namespace.IsSet() && Namespace.GetValue() == TEXT("TerritoryManagement"));
+		TestTrue(FString::Printf(TEXT("%s carries a localization key"), *Where),
+			Key.IsSet() && Key.GetValue() == Expected[Index].Key);
+		TestNotNull(FString::Printf(TEXT("%s has a source string"), *Where), Source);
+		if (!Source) continue;
+
+		TestEqual(FString::Printf(TEXT("%s still says what it always said"), *Where),
+			*Source, FString(Expected[Index].Sentence));
+
+		if (Key.IsSet())
+		{
+			TestFalse(FString::Printf(TEXT("%s does not share a key with another message"), *Where),
+				SeenKeys.Contains(Key.GetValue()));
+			SeenKeys.Add(Key.GetValue());
+		}
+	}
+
+	// Permanent negative control. Every assertion above passes if these messages are localizable;
+	// this proves the checks can tell the difference, by building the very same sentence the old
+	// way and requiring it to be *rejected*. Without it, an FTextInspector that reported a
+	// namespace for everything would make the whole test pass vacuously.
+	const FText LegacyStyle = FText::FromString(
+		TEXT("Territory management is not installed on this PlayerController."));
+	TestFalse(TEXT("The old FText::FromString spelling has no localization namespace"),
+		FTextInspector::GetNamespace(LegacyStyle).IsSet());
+	TestFalse(TEXT("The old FText::FromString spelling has no localization key"),
+		FTextInspector::GetKey(LegacyStyle).IsSet());
+	// Note if you extend this: `ShouldGatherForLocalization()` is deliberately *not* asserted.
+	// It inspects only the source string, not the namespace or key, so it answers true for a
+	// fresh `FText::FromString` and for a keyed message alike — it cannot tell these two apart.
+	// The namespace/key checks above are the ones that discriminate.
+	// ...and the sentence itself is byte-identical, so the key is the only thing that differs.
+	// That is the whole point: the wording was never the problem, the missing key was.
+	const FString* LegacySource = FTextInspector::GetSourceString(LegacyStyle);
+	const FString* MessageSource = FTextInspector::GetSourceString(Messages[0]);
+	TestTrue(TEXT("The old and new spellings read identically to a player"),
+		LegacySource && MessageSource && *LegacySource == *MessageSource);
+
+	// Buy and remove returning *the same* message rather than two hand-written copies is a
+	// property of the code shape, not something this test observes: both call sites now call the
+	// shared accessors above. It is deliberately not asserted here, because the only way to reach
+	// those call sites is to instantiate the widget, and this widget is UCLASS(Abstract). A test
+	// that loaded the WBP subclass to prove it would fail for widget-asset reasons and report them
+	// as localization failures. The key-uniqueness check above is what catches the realistic
+	// regression: someone adding a fourth near-duplicate sentence for the same situation.
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIUnloadedDistrictDirectoryTest,
 	"TerritoryFramework.UI.WorldPartition.UnloadedDistrictRemainsVisible",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -1269,6 +1667,564 @@ bool FTerritoryUIUnloadedDistrictDirectoryTest::RunTest(const FString& Parameter
 
 	World->DestroyActor(WorldState);
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIStatusTextFamilyTest,
+	"TerritoryFramework.UI.Regression.StatusTextIsAlwaysReadable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * Every player-facing status label the UI library hands to a widget must be readable and
+ * translatable, for any input a save file can carry.
+ *
+ * The load-bearing assertions are the two that the previous implementation would fail:
+ *   - Namespace. These labels used to be read from the enum's own `DisplayName` metadata, which
+ *     resolves to the engine's `UObjectDisplayNames` namespace. That namespace is only populated
+ *     under `#if WITH_EDITOR`, so a packaged build got `FText::FromString` with no key at all.
+ *     Requiring our own namespace is what makes the label translatable in a shipped game.
+ *   - Unknown values. `UEnum::GetDisplayNameTextByValue` returns `FText::GetEmpty()` when no entry
+ *     matches the value, so an unrecognised state byte printed a blank status label. This enum
+ *     already keeps a legacy serialized value for compatibility, so unknown bytes are a real
+ *     input rather than a theoretical one.
+ *
+ * Honest limit: a test running in an editor build cannot observe the `WITH_EDITOR` difference
+ * itself — both spellings return keyed text here. What it can observe is *which* namespace the
+ * text carries, and that is what discriminates the two implementations.
+ */
+bool FTerritoryUIStatusTextFamilyTest::RunTest(const FString& Parameters)
+{
+	TSet<FString> SeenKeys;
+
+	// Fails if the label is blank, keyless, or keyed into a namespace this plugin does not own.
+	auto ExpectReadable = [this, &SeenKeys](
+		const FText& Label, const TCHAR* What, const TCHAR* ExpectedSource, bool bTrackKey)
+	{
+		if (!TestFalse(FString::Printf(TEXT("%s is not blank"), What), Label.IsEmpty()))
+		{
+			return;
+		}
+
+		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Label);
+		const TOptional<FString> Key = FTextInspector::GetKey(Label);
+		TestTrue(FString::Printf(TEXT("%s carries a localization namespace"), What),
+			Namespace.IsSet() && Namespace.GetValue() == TEXT("TerritoryOperations"));
+		TestTrue(FString::Printf(TEXT("%s carries a localization key"), What), Key.IsSet());
+
+		const FString* Source = FTextInspector::GetSourceString(Label);
+		TestTrue(FString::Printf(TEXT("%s reads as authored English"), What),
+			Source != nullptr && *Source == ExpectedSource);
+
+		if (bTrackKey && Key.IsSet())
+		{
+			TestFalse(FString::Printf(TEXT("%s has its own key, so translators can word it separately"),
+				What), SeenKeys.Contains(Key.GetValue()));
+			SeenKeys.Add(Key.GetValue());
+		}
+	};
+
+	// The four known political states, each with its own key.
+	const TPair<ETerritoryState, const TCHAR*> KnownStates[] = {
+		{ ETerritoryState::Unclaimed, TEXT("Unclaimed") },
+		{ ETerritoryState::Claimed,   TEXT("Claimed") },
+		{ ETerritoryState::Contested, TEXT("Contested") },
+		{ ETerritoryState::Locked,    TEXT("Locked") },
+	};
+	for (const TPair<ETerritoryState, const TCHAR*>& Entry : KnownStates)
+	{
+		ExpectReadable(
+			UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+				ETerritoryAvailability::Unlocked, Entry.Key),
+			*FString::Printf(TEXT("The '%s' status label"), Entry.Value),
+			Entry.Value, /*bTrackKey=*/true);
+	}
+
+	// Availability outranks the political state; the state cannot change this label.
+	for (const TPair<ETerritoryState, const TCHAR*>& Entry : KnownStates)
+	{
+		ExpectReadable(
+			UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+				ETerritoryAvailability::Locked, Entry.Key),
+			*FString::Printf(TEXT("The locked '%s' status label"), Entry.Value),
+			TEXT("Locked"), /*bTrackKey=*/false);
+	}
+
+	// A state byte this build does not recognise. 255 is the value a corrupted or
+	// newer-build save would most plausibly carry.
+	for (const uint8 UnknownState : { static_cast<uint8>(200), static_cast<uint8>(255) })
+	{
+		ExpectReadable(
+			UTerritoryUIBlueprintLibrary::GetTerritoryStatusText(
+				ETerritoryAvailability::Unlocked,
+				static_cast<ETerritoryState>(UnknownState)),
+			*FString::Printf(TEXT("An unrecognised political state (%d)"), UnknownState),
+			TEXT("Unknown state"), /*bTrackKey=*/false);
+	}
+
+	// Faction relationships reach the player through the same path.
+	const TPair<EDiplomacyState, const TCHAR*> KnownRelations[] = {
+		{ EDiplomacyState::None,           TEXT("Neutral / No Treaty") },
+		{ EDiplomacyState::Alliance,       TEXT("Alliance") },
+		{ EDiplomacyState::TradeAgreement, TEXT("Trade Agreement") },
+		{ EDiplomacyState::NonAggression,  TEXT("Non-Aggression Pact") },
+		{ EDiplomacyState::War,            TEXT("War") },
+		{ EDiplomacyState::Ceasefire,      TEXT("Ceasefire") },
+	};
+	for (const TPair<EDiplomacyState, const TCHAR*>& Entry : KnownRelations)
+	{
+		ExpectReadable(
+			UTerritoryUIBlueprintLibrary::GetDiplomacyStateText(Entry.Key),
+			*FString::Printf(TEXT("The '%s' relationship label"), Entry.Value),
+			Entry.Value, /*bTrackKey=*/true);
+	}
+	for (const uint8 UnknownRelation : { static_cast<uint8>(200), static_cast<uint8>(255) })
+	{
+		ExpectReadable(
+			UTerritoryUIBlueprintLibrary::GetDiplomacyStateText(
+				static_cast<EDiplomacyState>(UnknownRelation)),
+			*FString::Printf(TEXT("An unrecognised relationship (%d)"), UnknownRelation),
+			TEXT("Unknown relationship"), /*bTrackKey=*/false);
+	}
+
+	// The rest of the family already spelled its labels out by hand, so these assertions pass
+	// before this change as well. They are here as a contract for the next helper: a switch with a
+	// keyed `default:` is what keeps an unknown value from reaching a text block as a blank.
+	ExpectReadable(UTerritoryUIBlueprintLibrary::GetAssaultStateText(
+		static_cast<ETerritoryAssaultState>(200)), TEXT("An unrecognised assault state"),
+		TEXT("Unknown status"), false);
+	ExpectReadable(UTerritoryUIBlueprintLibrary::GetAssaultResolutionText(
+		static_cast<ETerritoryAssaultResolution>(200)), TEXT("An unrecognised assault outcome"),
+		TEXT("Unknown outcome"), false);
+	ExpectReadable(UTerritoryUIBlueprintLibrary::GetDiplomacyEventTypeText(
+		static_cast<EDiplomacyEventType>(200)), TEXT("An unrecognised diplomacy event"),
+		TEXT("Diplomacy updated"), false);
+	ExpectReadable(UTerritoryUIBlueprintLibrary::GetThreatLevelText(
+		static_cast<ETerritoryThreatLevel>(200)), TEXT("An unrecognised threat level"),
+		TEXT("Secure"), false);
+	ExpectReadable(UTerritoryUIBlueprintLibrary::GetProductionStatusText(
+		static_cast<ETerritoryProductionStatus>(200)), TEXT("An unrecognised production status"),
+		TEXT("Not evaluated"), false);
+
+	// Negative control. Without this, the namespace and key assertions above could be vacuous:
+	// they would still pass if FTextInspector reported a namespace for unkeyed text. The old
+	// spelling of these very labels is the counter-example, so it must be rejected.
+	const FText Unkeyed = FText::FromString(TEXT("Unknown state"));
+	TestTrue(TEXT("Control: the message text reads the same"), Unkeyed.ToString() == TEXT("Unknown state"));
+	TestFalse(TEXT("Control: but it owns no localization namespace"),
+		FTextInspector::GetNamespace(Unkeyed).IsSet());
+	TestFalse(TEXT("Control: and no localization key"),
+		FTextInspector::GetKey(Unkeyed).IsSet());
+
+	// Controls that run the engine's own enum reflection, the implementation these labels used
+	// before. They exist so the two load-bearing assertions above are proven to discriminate
+	// rather than merely asserted to. Both were checked by running them; if either ever starts
+	// failing, the reasoning in the doc comment is what needs revisiting, not the fix.
+	const UEnum* StateEnum = StaticEnum<ETerritoryState>();
+	if (TestNotNull(TEXT("Control: the state enum is reflected"), StateEnum))
+	{
+		const FText EngineKnown = StateEnum->GetDisplayNameTextByValue(
+			static_cast<int64>(ETerritoryState::Contested));
+		TestEqual(TEXT("Control: the engine path spells a known state the same way we do"),
+			EngineKnown.ToString(), FString(TEXT("Contested")));
+		const TOptional<FString> EngineKnownNamespace = FTextInspector::GetNamespace(EngineKnown);
+		TestTrue(TEXT("Control: but files it under the engine's editor-only namespace, not ours"),
+			!EngineKnownNamespace.IsSet()
+			|| EngineKnownNamespace.GetValue() != TEXT("TerritoryOperations"));
+
+		const FText EngineUnknown = StateEnum->GetDisplayNameTextByValue(200);
+		TestTrue(TEXT("Control: the engine path returns genuinely blank text for an unrecognised state"),
+			EngineUnknown.IsEmpty());
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIJournalIdentifierTextTest,
+	"TerritoryFramework.UI.Regression.JournalRowsShowNamesNotIdentifiers",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * Two journal rows are built from raw engine data — assault-route IDs and a source-territory
+ * gameplay tag — and both used to print that data straight at the player, inside sentences that
+ * were `FText::FromString` and therefore untranslatable.
+ *
+ * The load-bearing assertion is the leak check: the raw tag used to appear verbatim, so a line
+ * that no longer contains it is the fix, and a line that still contains it is the bug.
+ */
+bool FTerritoryUIJournalIdentifierTextTest::RunTest(const FString& Parameters)
+{
+	// --- Assault routes ----------------------------------------------------------------------
+	const FText NoRoutes =
+		UTerritoryJournalWidget::GetAssaultApproachListText(TArray<FName>());
+	TestFalse(TEXT("An operation with no selected routes does not render a blank line"),
+		NoRoutes.IsEmpty());
+	TestEqual(TEXT("An operation with no selected routes says so"),
+		NoRoutes.ToString(), FString(TEXT("No assault routes selected.")));
+	TestTrue(TEXT("The empty-routes sentence can be translated"),
+		FTextInspector::GetKey(NoRoutes).IsSet());
+
+	// "RemovedDeparture" is the real shape of an authored route ID.
+	const FText OneRoute = UTerritoryJournalWidget::GetAssaultApproachListText(
+		{ FName(TEXT("RemovedDeparture")) });
+	TestTrue(TEXT("A route ID is split into readable words"),
+		OneRoute.ToString().Contains(TEXT("Removed Departure")));
+	TestFalse(TEXT("The raw identifier never reaches the player"),
+		OneRoute.ToString().Contains(TEXT("RemovedDeparture")));
+	// Deliberately no key assertion on a joined line. `FTextInspector::GetKey` reads
+	// `GetTextHistory().GetTextId()`, and text composed by `FText::Join` / `FText::Format` has no
+	// text id of its own — the key belongs to the *pattern* the formatter owns. Asserting a key here
+	// fails against a correct implementation, which is how this test first failed. The keyed cases
+	// assertable from outside are the sentences returned directly (here and below); the composed
+	// lines are covered by their content and leak checks instead.
+
+	const FText TwoRoutes = UTerritoryJournalWidget::GetAssaultApproachListText(
+		{ FName(TEXT("RemovedDeparture")), FName(TEXT("NorthRoad")) });
+	TestTrue(TEXT("Both routes are shown"), TwoRoutes.ToString().Contains(TEXT("Removed Departure"))
+		&& TwoRoutes.ToString().Contains(TEXT("North Road")));
+	TestFalse(TEXT("No technical punctuation leaks through the joined route line"),
+		TwoRoutes.ToString().Contains(TEXT("_")) || TwoRoutes.ToString().Contains(TEXT(".")));
+
+	// --- Transaction lines -------------------------------------------------------------------
+	// GuardStaffing is declared natively by this plugin, so it is registered in any project that
+	// loads the plugin. Asserting its validity is what keeps the two leak checks below honest: with
+	// an unregistered tag there would be no bracket on the line, and "the raw tag is absent" would
+	// pass for entirely the wrong reason.
+	const FGameplayTag SourceTag = FGameplayTag::RequestGameplayTag(
+		FName(TEXT("Territory.Capability.GuardStaffing")));
+	if (!TestTrue(TEXT("Fixture: the plugin's native GuardStaffing tag is registered"),
+		SourceTag.IsValid()))
+	{
+		return false;
+	}
+	const FText TagName = UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(SourceTag);
+	TestTrue(TEXT("Fixture: the tag resolves to a friendly name rather than itself"),
+		!TagName.IsEmpty() && TagName.ToString() != SourceTag.ToString());
+
+	const FText Gain = UTerritoryJournalWidget::GetTransactionLineText(
+		50, TEXT("Capture reward"), SourceTag);
+	TestTrue(TEXT("A gain shows its sign"), Gain.ToString().Contains(TEXT("+50")));
+	TestTrue(TEXT("A gain shows its reason"), Gain.ToString().Contains(TEXT("Capture reward")));
+	TestTrue(TEXT("The source territory is shown by its friendly name"),
+		Gain.ToString().Contains(TagName.ToString()));
+	TestTrue(TEXT("The source territory is bracketed"), Gain.ToString().Contains(TEXT("[")));
+	TestFalse(TEXT("The raw gameplay tag never reaches the player"),
+		Gain.ToString().Contains(SourceTag.ToString()));
+	TestFalse(TEXT("The technical tag namespace never reaches the player"),
+		Gain.ToString().Contains(TEXT("Territory.")));
+	// No key assertion on the composed line, for the reason given at the route line above.
+
+	// Controls proving the two leak assertions are not vacuous: both transformations must actually
+	// remove the raw token the old lines printed, or "the raw value is absent" would pass because
+	// the fixture never contained it in the first place.
+	const FString RawApproach = FName(TEXT("RemovedDeparture")).ToString();
+	const FString ReadableApproach = FName::NameToDisplayString(RawApproach, false);
+	TestFalse(TEXT("Control: the readable route name no longer contains the raw identifier"),
+		ReadableApproach.Contains(RawApproach));
+	TestFalse(TEXT("Control: the friendly tag name no longer contains the raw tag"),
+		TagName.ToString().Contains(SourceTag.ToString()));
+
+	const FText Loss = UTerritoryJournalWidget::GetTransactionLineText(
+		-20, FString(), FGameplayTag());
+	TestTrue(TEXT("A loss shows its sign"), Loss.ToString().Contains(TEXT("-20")));
+	TestTrue(TEXT("A missing reason is described, not left blank"),
+		Loss.ToString().Contains(TEXT("Unspecified transaction")));
+	TestFalse(TEXT("A line without a source territory omits the bracket"),
+		Loss.ToString().Contains(TEXT("[")));
+
+	// --- The audit block ---------------------------------------------------------------------
+	const FText EmptyAudit = UTerritoryJournalWidget::GetTransactionAuditText(TArray<FText>());
+	TestEqual(TEXT("An empty audit says so"), EmptyAudit.ToString(),
+		FString(TEXT("No recent transactions.")));
+	TestTrue(TEXT("The empty-audit sentence can be translated"),
+		FTextInspector::GetKey(EmptyAudit).IsSet());
+
+	const FText FilledAudit = UTerritoryJournalWidget::GetTransactionAuditText({ Gain, Loss });
+	TestTrue(TEXT("The audit shows every line"), FilledAudit.ToString().Contains(TEXT("+50"))
+		&& FilledAudit.ToString().Contains(TEXT("-20")));
+
+	// Negative control: without this, "carries a localization key" above could be vacuous.
+	const FText Unkeyed = FText::FromString(TEXT("No recent transactions."));
+	TestEqual(TEXT("Control: the old spelling reads identically"),
+		Unkeyed.ToString(), EmptyAudit.ToString());
+	TestFalse(TEXT("Control: but it has no key, so a translated build would show English forever"),
+		FTextInspector::GetKey(Unkeyed).IsSet());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIFocusReachabilityTest,
+	"TerritoryFramework.UI.Regression.FocusNeverTargetsAHiddenWidget",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * Focus selection must never land on a widget the player cannot see.
+ *
+ * The trap this covers: collapsing a panel leaves every child's *own* visibility at `Visible`, so
+ * the previous `IsVisible()` check accepted a button inside a collapsed pane and handed it focus.
+ * `IsVisible()` also reads the widget's own cached Slate visibility, so it answers about the widget
+ * and not about where the widget sits.
+ */
+bool FTerritoryUIFocusReachabilityTest::RunTest(const FString& Parameters)
+{
+	UOverlay* Root = NewObject<UOverlay>();
+	UOverlay* DetailPane = NewObject<UOverlay>();
+	UTextBlock* PaneChild = NewObject<UTextBlock>();
+	if (!TestNotNull(TEXT("Root panel"), Root)
+		|| !TestNotNull(TEXT("Detail pane"), DetailPane)
+		|| !TestNotNull(TEXT("Pane child"), PaneChild))
+	{
+		return false;
+	}
+	Root->AddChild(DetailPane);
+	DetailPane->AddChild(PaneChild);
+
+	// A plain visible child under an expanded parent is reachable.
+	TestTrue(TEXT("A visible widget under a visible parent can take focus"),
+		UTerritoryActivatableWidget::IsFocusTargetReachable(PaneChild));
+
+	// The load-bearing case. Collapsing the pane must make the child unreachable even though the
+	// child was never told anything about visibility.
+	DetailPane->SetVisibility(ESlateVisibility::Collapsed);
+	TestFalse(TEXT("A widget inside a collapsed pane can never take focus"),
+		UTerritoryActivatableWidget::IsFocusTargetReachable(PaneChild));
+	TestFalse(TEXT("The collapsed pane itself can never take focus"),
+		UTerritoryActivatableWidget::IsFocusTargetReachable(DetailPane));
+
+	// Control: this is *why* looking at the widget alone answers the wrong question. The child still
+	// reports its own visibility as Visible while the pane above it is collapsed, so any check that
+	// skips the ancestor walk accepts it. This is the exact value the old `IsVisible()` path saw.
+	TestEqual(TEXT("Control: the child still reports its own visibility as Visible"),
+		PaneChild->GetVisibility(), ESlateVisibility::Visible);
+
+	DetailPane->SetVisibility(ESlateVisibility::Hidden);
+	TestFalse(TEXT("A widget inside a hidden pane can never take focus"),
+		UTerritoryActivatableWidget::IsFocusTargetReachable(PaneChild));
+
+	DetailPane->SetVisibility(ESlateVisibility::Visible);
+	TestTrue(TEXT("Restoring the pane restores reachability"),
+		UTerritoryActivatableWidget::IsFocusTargetReachable(PaneChild));
+
+	// Boundary: these block the mouse but are still drawn, and a gamepad focus path never hit-tests,
+	// so they stay reachable. Recorded here so the distinction is deliberate, not accidental.
+	DetailPane->SetVisibility(ESlateVisibility::HitTestInvisible);
+	TestTrue(TEXT("A drawn-but-not-clickable pane still offers focus targets"),
+		UTerritoryActivatableWidget::IsFocusTargetReachable(PaneChild));
+	DetailPane->SetVisibility(ESlateVisibility::Visible);
+
+	// Disabled and null.
+	PaneChild->SetIsEnabled(false);
+	TestFalse(TEXT("A disabled widget can never take focus"),
+		UTerritoryActivatableWidget::IsFocusTargetReachable(PaneChild));
+	TestFalse(TEXT("A null widget can never take focus"),
+		UTerritoryActivatableWidget::IsFocusTargetReachable(nullptr));
+
+	Root->ClearChildren();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryUIShippedStyleAssetsLoadTest,
+	"TerritoryFramework.UI.Regression.ShippedStyleAssetsAreLoadable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIShippedStyleAssetsLoadTest::RunTest(const FString& Parameters)
+{
+	// Why this test exists.
+	//
+	// The shipped Territory UI styles are *assets that reference other assets*, and a reference can rot
+	// without a single line of C++ changing. Reparenting a Blueprint to a class that later moves into a
+	// plugin, or pointing a style at a theme asset that was never committed, leaves a dangling path
+	// frozen inside a .uasset. No compiler sees it, the plugin still builds, and the UI still comes up -
+	// the asset just fails to load and the widget quietly falls back to a default look. Nothing reports
+	// a problem to the developer.
+	//
+	// This is not hypothetical. ButtonStyle_TerritoryTab shipped parented to
+	// /Game/NP_RPGUITheme/Style/MasterStyles/Button/ButtonStyle_NarrativeMaster, a path that has never
+	// existed for this plugin: NP_RPGUITheme is a plugin whose content mounts at /NP_RPGUITheme/...,
+	// never under /Game/. The Blueprint failed to load, so
+	// UTerritoryDeveloperSettings::TerritoryTabButtonStyle resolved to null and every Territory
+	// navigation tab fell back to the default button style. WBP_TerritoryButton_Text carried the same
+	// class of dangling reference to /Game/NP_RPGUITheme/.../TextStyle_Master_Primary_H2, and that
+	// widget is used by the Command Row, the District Management widget and the Journal.
+	//
+	// The check is "the class compiles", not "the file exists" - deliberately. An asset can sit on disk
+	// and still be unusable, which is exactly what a dangling parent produces, so asserting existence
+	// would pass straight through the bug this guards.
+	//
+	// Scope note: this covers the plugin's own shipped content under /TerritoryFramework/UI, so it is
+	// portable to any project that installs the plugin. It does not cover a consuming project's own
+	// copies of these styles - this project duplicates them under /Game/TerritoryFramework/UI/Styles
+	// and overrides the settings to match, which is what TerritoryFramework.UI.ExclusiveTabSelection
+	// exercises.
+
+	FAssetRegistryModule& AssetRegistryModule =
+		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+	// Named first, so renaming or moving a shipped style cannot quietly shrink the sweep below.
+	const TCHAR* RequiredAssets[] = {
+		TEXT("/TerritoryFramework/UI/Styles/ButtonStyle_TerritoryAction"),
+		TEXT("/TerritoryFramework/UI/Styles/ButtonStyle_TerritoryPrimary"),
+		TEXT("/TerritoryFramework/UI/Styles/ButtonStyle_TerritorySecondary"),
+		TEXT("/TerritoryFramework/UI/Styles/ButtonStyle_TerritoryTab"),
+		TEXT("/TerritoryFramework/UI/Styles/TextStyle_TerritoryButton"),
+		TEXT("/TerritoryFramework/UI/Styles/TextStyle_TerritoryButtonDisabled"),
+		TEXT("/TerritoryFramework/UI/Styles/TextStyle_TerritoryButtonSelected"),
+		TEXT("/TerritoryFramework/UI/Styles/WBP_TerritoryButton_Text"),
+	};
+
+	auto ReportAsset = [this](const FString& AssetPath) -> bool
+	{
+		UObject* Asset = LoadObject<UObject>(nullptr, *AssetPath);
+		if (!TestNotNull(*FString::Printf(TEXT("%s loads"), *AssetPath), Asset))
+		{
+			return false;
+		}
+		if (const UBlueprint* Blueprint = Cast<UBlueprint>(Asset))
+		{
+			// A Blueprint that loads but cannot compile has a broken parent or a broken reference.
+			return TestNotNull(
+				*FString::Printf(TEXT("%s compiles (its parent class resolves)"), *AssetPath),
+				Blueprint->GeneratedClass.Get());
+		}
+		return true;
+	};
+
+	for (const TCHAR* Required : RequiredAssets)
+	{
+		ReportAsset(Required);
+	}
+
+	TArray<FAssetData> ShippedAssets;
+	AssetRegistry.GetAssetsByPath(FName(TEXT("/TerritoryFramework/UI")), ShippedAssets,
+		/*bRecursive=*/true);
+	TestTrue(TEXT("The shipped UI folder is discoverable in the asset registry"),
+		ShippedAssets.Num() > 0);
+
+	int32 UnusableCount = 0;
+	for (const FAssetData& AssetData : ShippedAssets)
+	{
+		if (!ReportAsset(AssetData.GetSoftObjectPath().ToString()))
+		{
+			++UnusableCount;
+		}
+	}
+
+	AddInfo(FString::Printf(
+		TEXT("Checked %d shipped UI assets under /TerritoryFramework/UI; %d unusable."),
+		ShippedAssets.Num(), UnusableCount));
+	return true;
+}
+
+// -------------------------------------------------------------------------------------------------
+// Dependency guard: a Territory asset must not reference a package that cannot exist.
+//
+// Why this test exists. The loadability test above cannot catch this class of defect. Six stale
+// references to /Game/NP_RPGUITheme/... were found across four Territory widgets, and every one of
+// them is invisible to that test: the asset still loads and its class still compiles, because a
+// dangling reference held by a child widget does not stop either. The only symptom is a "LoadErrors"
+// line in the log, and nothing asserted on it.
+//
+// The asset registry does retain unresolvable content-package imports, so the defect IS visible from
+// C++ even though the widget tree is not reachable from Python - reading
+// /Game/NP_RPGUITheme/Style/MasterStyles/Text/Primary/TextStyle_Master_Primary_H2 straight out of
+// WBP_TerritoryButton_Text's dependency list is how these were found.
+//
+// /Script/... entries are skipped deliberately: they are code modules, not packages, so they are
+// never in the asset registry and every asset would otherwise report as broken.
+//
+// Confirmed red before any fix, at 7 assets and 10 references. It is expected to stay red until the
+// stale references are repointed, which needs the editor - the references live in widget trees.
+// -------------------------------------------------------------------------------------------------
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FTerritoryUIDependenciesResolveTest,
+	"TerritoryFramework.UI.Regression.ShippedUIDependenciesResolve",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryUIDependenciesResolveTest::RunTest(const FString& Parameters)
+{
+	FAssetRegistryModule& AssetRegistryModule =
+		FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+
+	FAssetRegistryDependencyOptions Options;
+	Options.bIncludeHardPackageReferences = true;
+
+	// The plugin's own shipped UI is always checked. The project's duplicate copy is checked only if
+	// this project actually has one, so a consumer project keeping a single authored copy in the
+	// plugin does not fail for its absence.
+	TArray<FString> Scopes;
+	Scopes.Add(TEXT("/TerritoryFramework/UI"));
+
+	TArray<FAssetData> ProjectCopies;
+	AssetRegistry.GetAssetsByPath(FName(TEXT("/Game/TerritoryFramework/UI")), ProjectCopies,
+		/*bRecursive=*/true);
+	if (ProjectCopies.Num() > 0)
+	{
+		Scopes.Add(TEXT("/Game/TerritoryFramework/UI"));
+	}
+	else
+	{
+		AddInfo(TEXT("No /Game/TerritoryFramework/UI copy here; checking the plugin copy only."));
+	}
+
+	int32 CheckedAssets = 0;
+	int32 BrokenAssets = 0;
+	int32 DanglingReferences = 0;
+
+	for (const FString& Scope : Scopes)
+	{
+		TArray<FAssetData> Assets;
+		AssetRegistry.GetAssetsByPath(FName(*Scope), Assets, /*bRecursive=*/true);
+
+		for (const FAssetData& AssetData : Assets)
+		{
+			++CheckedAssets;
+
+			TArray<FName> Dependencies;
+			AssetRegistry.K2_GetDependencies(AssetData.PackageName, Options, Dependencies);
+
+			TArray<FString> Missing;
+			for (const FName& Dependency : Dependencies)
+			{
+				const FString DependencyName = Dependency.ToString();
+
+				if (DependencyName.StartsWith(TEXT("/Script/")))
+				{
+					continue; // A code module, not a package - never in the asset registry.
+				}
+
+				TArray<FAssetData> DependencyAssets;
+				if (!AssetRegistry.GetAssetsByPackageName(Dependency, DependencyAssets)
+					|| DependencyAssets.Num() == 0)
+				{
+					Missing.Add(DependencyName);
+				}
+			}
+
+			if (Missing.Num() > 0)
+			{
+				++BrokenAssets;
+				DanglingReferences += Missing.Num();
+				AddError(FString::Printf(
+					TEXT("%s references %d package(s) that do not exist: %s. NP_RPGUITheme is a plugin ")
+					TEXT("mounting at /NP_RPGUITheme/, so a /Game/NP_RPGUITheme/... reference can never ")
+					TEXT("resolve - point it at the plugin mount instead."),
+					*AssetData.PackageName.ToString(), Missing.Num(),
+					*FString::Join(Missing, TEXT(", "))));
+			}
+		}
+	}
+
+	// A guard that inspects nothing passes vacuously. If the sweep ever stops finding assets, this
+	// is what says so instead of the test quietly becoming a no-op.
+	TestTrue(*FString::Printf(TEXT("The sweep inspected assets (checked %d)"), CheckedAssets),
+		CheckedAssets > 0);
+
+	AddInfo(FString::Printf(
+		TEXT("Checked %d Territory UI assets across %d scope(s); %d asset(s) hold %d unresolvable ")
+		TEXT("reference(s)."),
+		CheckedAssets, Scopes.Num(), BrokenAssets, DanglingReferences));
+
 	return true;
 }
 

@@ -66,6 +66,34 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|UI|Diagnostics")
 	int32 GetCapturedTerritoryEntryCount() const;
 
+	/**
+	 * The assault-route line, built from the routes an operation actually selected.
+	 * Route IDs are author-typed names ("RemovedDeparture"), so each one is split into words before
+	 * it reaches a player rather than printed raw. An empty selection reads as a keyed sentence
+	 * about there being no routes, not as a blank line.
+	 *
+	 * Easy example: a project HUD showing "Removed Departure  |  North Road" can call this instead
+	 * of copying the formatting and drifting from it.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Formatting")
+	static FText GetAssaultApproachListText(const TArray<FName>& ApproachIDs);
+
+	/**
+	 * One "amount — reason [territory]" audit line.
+	 * The territory is a gameplay tag, so it is resolved to its friendly name through the same
+	 * Narrative Pro tag names every other Territory screen uses; the raw tag never reaches a player.
+	 * An empty reason reads as "Unspecified transaction" rather than leaving a gap in the line.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Formatting")
+	static FText GetTransactionLineText(
+		int32 Amount,
+		const FString& Reason,
+		const FGameplayTag& SourceTerritory);
+
+	/** The audit block: the lines joined for display, or a keyed sentence when there are none. */
+	UFUNCTION(BlueprintPure, Category="Territory|UI|Formatting")
+	static FText GetTransactionAuditText(const TArray<FText>& TransactionLines);
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
@@ -169,25 +197,30 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UTextBlock> Text_IntelligenceSummary;
 
-	UPROPERTY(Transient)
+	// These seven were declared Transient without a binding specifier, so UMG never
+	// populated them: every handler below is guarded by `if (Btn_...)`, so the whole
+	// Intelligence filter row was inert and no filter could ever be applied. The meta
+	// specifier is what makes UMG resolve the button by name from the authored widget.
+	// Optional, so a widget that does not author the row keeps working unchanged.
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceAll;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceConflict;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceControl;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceEconomy;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceCommand;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceProduction;
 
-	UPROPERTY(Transient)
+	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_IntelligenceDiplomacy;
 
 	UPROPERTY(meta=(BindWidgetOptional))

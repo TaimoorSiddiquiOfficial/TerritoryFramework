@@ -182,11 +182,12 @@ public:
 	/**
 	 * Waiting-state activation policy. Strategic counterattacks require a claimed
 	 * target because they may recapture it; story pursuits that explicitly disable
-	 * capture may activate in any available Territory state.
+	 * capture may activate in any available Territory state. When bGarrisonHoldsDefence
+	 * is set, a living registered defender stands in for player proximity.
 	 */
 	static bool ShouldActivateWaitingAssault(bool bAllowsTerritoryCapture,
 		ETerritoryState TerritoryState, bool bRequirePlayerProximity,
-		bool bRelevantPlayerNearby);
+		bool bRelevantPlayerNearby, bool bGarrisonHoldsDefence = false);
 
 	/** State events are live transition notifications, never save/load replays or same-state updates. */
 	static bool ShouldEmitCounterHappened(ETerritoryAssaultState PreviousState,
@@ -328,6 +329,7 @@ public:
 private:
 	friend class FTFAssaultSurvivorRestore;
 	friend class FTFAssaultCheckpointValidation;
+	friend class FTFStrategicValueAggregation;
 	friend class FTFAssaultSpawnFailureBudget;
 	friend class FTFAssaultTargetStreamingWait;
 	friend class FTFAssaultSavedVehicleBudget;

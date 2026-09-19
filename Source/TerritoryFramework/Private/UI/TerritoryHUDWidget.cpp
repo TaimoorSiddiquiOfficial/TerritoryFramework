@@ -22,9 +22,17 @@
 void UTerritoryHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	// The compact capture card is passive gameplay information, so it must stay
+	// translucent and must not inherit the large Command Center panel texture.
+	// That texture is authored for big panels and made this card dark and heavy
+	// while hiding the world behind it. Both are authorable settings.
+	const UTerritoryDeveloperSettings* ThemeSettings =
+		GetDefault<UTerritoryDeveloperSettings>();
 	TerritoryUITheme::ApplySurface(CaptureSurface,
-		FLinearColor(0.025f, 0.04f, 0.055f, 0.94f),
-		FLinearColor(0.18f, 0.52f, 0.48f, 0.5f), 5.f);
+		ThemeSettings ? ThemeSettings->TerritoryHUDCardFillColor
+			: FLinearColor(0.04f, 0.07f, 0.09f, 0.62f),
+		FLinearColor(0.18f, 0.52f, 0.48f, 0.5f), 5.f, 1.f,
+		ThemeSettings && ThemeSettings->bTerritoryHUDCardUsePanelTexture);
 	TerritoryUITheme::ApplyProgress(ProgressBar_Capture, false);
 	TerritoryUITheme::ApplyText(Text_DistrictName, TerritoryTypography::CardTitle,
 		FLinearColor(0.94f, 0.93f, 0.89f, 1.f),
@@ -198,7 +206,14 @@ void UTerritoryHUDWidget::RefreshTerritoryDisplay()
 		{
 			// HUD owns immediate location/capture feedback only. Strategic guard,
 			// finance, and intelligence details stay in the Command Center.
-			CardSlot->SetSize(FVector2D(360.f, bAlertVisible ? 162.f : 124.f));
+			const UTerritoryDeveloperSettings* CardSettings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			const FVector2D CardSize = CardSettings
+				? CardSettings->TerritoryHUDCardSize : FVector2D(328.f, 108.f);
+			const float AlertExtraHeight = CardSettings
+				? CardSettings->TerritoryHUDCardAlertExtraHeight : 38.f;
+			CardSlot->SetSize(FVector2D(CardSize.X,
+				CardSize.Y + (bAlertVisible ? AlertExtraHeight : 0.f)));
 		}
 	}
 

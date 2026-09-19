@@ -66,6 +66,26 @@ TArray<ATerritoryVolume*> TerritoryAssaultTargetPolicy::BuildDefenceFront(
 	return Result;
 }
 
+float TerritoryAssaultTargetPolicy::AggregateStrategicValue(
+	TConstArrayView<ATerritoryVolume*> Territories)
+{
+	// Folding a maximum rather than accumulating a sum. See the header for why relative importance
+	// is intensive; briefly, a sum made the number track how the map was divided into Places instead
+	// of how important the place is, so six trivial Places outranked one vital Place.
+	//
+	// Starting at zero means an empty set, or a set in which nothing was authored, reports no
+	// strategic value at all — the honest answer, and the same answer the previous sum gave.
+	float Highest = 0.f;
+	for (const ATerritoryVolume* Territory : Territories)
+	{
+		if (Territory)
+		{
+			Highest = FMath::Max(Highest, FMath::Max(0.f, Territory->GetStrategicValue()));
+		}
+	}
+	return Highest;
+}
+
 TArray<AActor*> TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(
 	ATerritoryVolume* TargetTerritory)
 {

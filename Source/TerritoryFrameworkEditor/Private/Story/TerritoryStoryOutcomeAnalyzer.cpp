@@ -200,26 +200,19 @@ namespace
 
 	ETerritoryState ResolveInitialPlaceState(const UTerritoryDefinition* Definition)
 	{
-		switch (Definition->InitialState)
-		{
-		case ETerritoryInitialState::Claimed:
-			return Definition->InitialOwningFaction.IsValid()
-				? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
-		case ETerritoryInitialState::Unclaimed:
-			return ETerritoryState::Unclaimed;
-		case ETerritoryInitialState::Locked:
-		case ETerritoryInitialState::Automatic:
-		default:
-			return Definition->InitialOwningFaction.IsValid()
-				? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
-		}
+		// Same rule the runtime uses. This used to be a second copy of the switch, which meant the
+		// editor could describe a starting state the game would never actually produce.
+		return TerritoryResolveInitialPoliticalState(
+			Definition->InitialState, Definition->InitialOwningFaction.IsValid());
 	}
 
 	ETerritoryAvailability ResolveInitialAvailability(
 		const UTerritoryDefinition* Definition)
 	{
-		return Definition->InitialState == ETerritoryInitialState::Locked
-			? ETerritoryAvailability::Locked : Definition->InitialAvailability;
+		// Same rule the runtime uses. This used to be a second copy of it, which meant the analyzer
+		// could tell a designer a Territory starts unlocked while the game started it locked.
+		return TerritoryResolveInitialAvailability(
+			Definition->InitialState, Definition->InitialAvailability);
 	}
 
 	void AddNewCampaignScenario(FTerritoryStoryOutcomeReport& Report,

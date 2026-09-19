@@ -1714,7 +1714,8 @@ FTerritoryMutationResponse UTerritoryControlSubsystem::ApplyTerritoryMutation(co
 	// Step 7: Atomic commit — one struct write, one event bundle
 	// P1-05: Do NOT clear capture state before commit — clear only after success
 	// ═══════════════════════════════════════════════════════════════════════════
-	const bool bApplied = Territory->CommitOwnershipData(Candidate, Request.TransitionContext);
+	const bool bApplied = Territory->CommitOwnershipData(Candidate, Request.TransitionContext,
+		Request.bBypassConditions);
 	if (!bApplied)
 	{
 		Response.Result = ETerritoryMutationResult::Rejected_StateUnchanged;

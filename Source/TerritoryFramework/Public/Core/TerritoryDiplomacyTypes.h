@@ -58,6 +58,18 @@ struct FTreatyRecord
 		meta=(ToolTip="True means the treaty does not expire automatically. Story events may still change or break it."))
 	bool bPermanent = true;
 
+	/**
+	 * True when faction reputation declared this treaty rather than a designer or a quest.
+	 * Reputation owns what it created: it may raise or lower this treaty as the number
+	 * moves, and it may remove it. It never touches a treaty it did not create, so an
+	 * authored peace or alliance is never overwritten.
+	 * Defaults to false, which is the safe reading for an existing save: every treaty
+	 * written before this field existed is treated as authored and stays untouched.
+	 */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Diplomacy",
+		meta=(ToolTip="True means faction reputation created this treaty and may still change it. False means a designer or quest owns it."))
+	bool bReputationDerived = false;
+
 	bool IsValid() const { return FactionA.IsValid() && FactionB.IsValid(); }
 
 	bool IsExpired(float CurrentGameTime) const
@@ -111,3 +123,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FOnReputationChanged,
 	FGameplayTag, Faction,
 	int32, NewReputation);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnReputationSubjectChanged,
+	FGameplayTag, SubjectFaction);

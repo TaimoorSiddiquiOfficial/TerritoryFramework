@@ -47,6 +47,13 @@ bool UTerritoryOwnershipCondition::CheckCondition_Implementation(APawn* Target, 
 		return Territory->IsOwnedByFaction(RequiredOwner);
 	}
 
+	// Tales-only calls still carry a participant; they are not world-only checks.
+	if (IsValid(NarrativeComponent))
+	{
+		if (!Target) Target = NarrativeComponent->GetOwningPawn();
+		if (!Controller) Controller = NarrativeComponent->GetOwningController();
+	}
+
 	// Empty RequiredOwner is dynamic, not a hidden Heroes/Bandits hardcode. State
 	// conditions receive the pawn/controller carried by the capture or quest event.
 	// When that actor has a Narrative faction, require the checked Territory to be
@@ -68,8 +75,11 @@ bool UTerritoryOwnershipCondition::CheckCondition_Implementation(APawn* Target, 
 	{
 		return Territory->IsOwnedByFaction(ContextFaction);
 	}
+	// Narrative returns no factions until its player state is ready. An explicit
+	// participant must not gain access through the world-only compatibility path.
+	if (Target || Controller) return false;
 
-	// Default: pass if the territory is in the Claimed state
+	// Deliberately world-only: pass if the territory is in the Claimed state.
 	return State == ETerritoryState::Claimed;
 }
 
@@ -83,7 +93,7 @@ FString UTerritoryOwnershipCondition::GetGraphDisplayText_Implementation()
 	}
 	else
 	{
-		Text += TEXT(" owned by Narrative target faction (or any owner without context)");
+		Text += TEXT(" owned by Narrative target faction (wait for faction; any owner only without a participant)");
 	}
 
 	if (bPassWhenContested) Text += TEXT(" [or contested]");

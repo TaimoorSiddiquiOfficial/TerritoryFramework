@@ -1,9 +1,11 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
+#include "Misc/OutputDeviceRedirector.h"
 #include "Misc/ScopeExit.h"
 #include "Tests/TerritoryAuditEventProbe.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryHierarchy.h"
 #include "AI/TerritoryNPCActivityComponent.h"
@@ -99,6 +101,46 @@ namespace TerritoryGuardResponseTests
 		}
 		void ControlTick() { Control->ProcessEvent(Control->FindFunction(TEXT("OnCaptureTick")), nullptr); }
 	};
+
+	/**
+	 * Captures the plugin's own log exactly as a developer running with -log would read it.
+	 *
+	 * Asserting on the log rather than on an internal variable is the point: the complaint this
+	 * test answers is that a guard's decision could only be discovered by reading the source.
+	 * Only LogTerritory is kept, so this is the plugin's own voice and not the engine's.
+	 *
+	 * UE_LOG can be reached from any thread, so the buffer is guarded; the assertions that read
+	 * it run on the game thread after Flush and see a stable snapshot.
+	 */
+	struct FTerritoryLogCapture : public FOutputDevice
+	{
+		mutable FCriticalSection Guard;
+		TArray<FString> Lines;
+
+		virtual void Serialize(const TCHAR* V, ELogVerbosity::Type,
+			const FName& Category) override
+		{
+			// Match the category by its name, which is the string a developer types into the
+			// Output Log filter. This module cannot reference the LogTerritory symbol itself:
+			// DEFINE_LOG_CATEGORY does not export it from the runtime module's DLL, so naming
+			// it here is an unresolved external. The name is the contract anyway.
+			static const FName TerritoryCategory(TEXT("LogTerritory"));
+			if (Category != TerritoryCategory) return;
+			FScopeLock Lock(&Guard);
+			Lines.Add(FString(V));
+		}
+
+		int32 CountContaining(const FString& Needle) const
+		{
+			FScopeLock Lock(&Guard);
+			int32 Count = 0;
+			for (const FString& Line : Lines)
+			{
+				Count += Line.Contains(Needle) ? 1 : 0;
+			}
+			return Count;
+		}
+	};
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardResponsePolicy,
@@ -131,6 +173,34 @@ bool FTFGuardResponsePolicy::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Exposure clearing immediately closes this player's combat gate"), Guard->CanEngageTerritoryTarget(Target));
 	F.ControlTick();
 	TestEqual(TEXT("Retaliation fixture starts from a Claimed Place"), F.Place->GetTerritoryState(), ETerritoryState::Claimed);
+
+	// Faction-level hostility has no other channel in the guard decision: Narrative's
+	// personal aggressiveness test is a per-actor Hostiles set, not an attitude. Without
+	// this policy a broken alliance left every Claimed Place the player captured for that
+	// faction completely safe, which is exactly the betrayal having no teeth.
+	//
+	// Stealth infiltration is switched off so the decision can reach the faction policy at
+	// all. While it is on, a hidden player is refused earlier (a hidden player is never
+	// attacked, policy or not) and an exposed one is admitted earlier by
+	// bDefendAgainstExposedEnemies — either way the faction-War policy is never consulted.
+	// Reporting damage as the exposure would not work either: that escalates the Place to
+	// Contested, which is itself an allow. Turning infiltration off leaves faction War as
+	// the only reason left to engage, which is exactly what these assertions are about.
+	const bool bStealthWasEnabled = F.Profile->bAllowStealthInfiltration;
+	F.Profile->bAllowStealthInfiltration = false;
+	TestFalse(TEXT("Stealth infiltration is off, so visibility cannot decide this"),
+		F.Control->IsStealthInfiltrationEnabled(F.Place));
+	TestEqual(TEXT("The Place is Claimed rather than Contested"),
+		F.Place->GetTerritoryState(), ETerritoryState::Claimed);
+	TestFalse(TEXT("A Claimed Place stays safe at War while the policy is off"),
+		Guard->CanEngageTerritoryTarget(Target));
+	F.Definition->GuardBehavior.bEngageAtWarInClaimedTerritory = true;
+	TestTrue(TEXT("Authoring the policy lets a faction at War defend its Claimed Place"),
+		Guard->CanEngageTerritoryTarget(Target));
+	F.Definition->GuardBehavior.bEngageAtWarInClaimedTerritory = false;
+	TestFalse(TEXT("Clearing the policy restores the peaceful Claimed Place"),
+		Guard->CanEngageTerritoryTarget(Target));
+	F.Profile->bAllowStealthInfiltration = bStealthWasEnabled;
 
 	// The real online Tales context activates a normal quest override. There is no
 	// fake quest-state subsystem and no bypass of the production guard decision.
@@ -306,6 +376,150 @@ bool FTFStealthParticipationSources::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Native load restores existing capture progress"), F.Control->GetCaptureProgress(F.Place) > 0.f);
 	TestFalse(TEXT("Restoring political capture state does not manufacture exposure"), F.Control->IsInfiltratorExposed(F.Place, Target));
 	TestEqual(TEXT("Transient source registrations are not invented by save restore"), F.Control->GetActiveAttackers(F.Place, F.Heroes), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFAttitudePricePolicy,
+	"TerritoryFramework.Economy.Regression.AttitudeChangesGuardPrice",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFAttitudePricePolicy::RunTest(const FString& Parameters)
+{
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	TerritoryGuardResponseTests::FFixture F;
+	auto* Buyer = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player buyer with the Heroes faction"), Buyer)) return false;
+	if (!TestNotNull(TEXT("Diplomacy subsystem"), F.Diplomacy)) return false;
+
+	// FTerritoryOwnershipData defaults GuardRecruitmentCost to 0, and the shared fixture
+	// commits ownership without one, so this Place would otherwise recruit for free and
+	// every multiplier assertion below would pass on 0 == 0. Give it the price a captured
+	// place actually adopts from its definition, so the arithmetic has something to scale.
+	FTerritoryOwnershipData Priced;
+	Priced.OwningFaction = F.Bandits;
+	Priced.State = ETerritoryState::Claimed;
+	Priced.GuardRecruitmentCost = F.Definition->GuardRecruitmentCost;
+	F.Place->CommitOwnershipData(Priced);
+
+	const int32 BaseCost = F.Place->GetGuardRecruitmentCost(1);
+	if (!TestTrue(TEXT("The Place carries a real base guard price to scale"), BaseCost > 0)) return false;
+
+	// Off by default, so a betrayal cannot silently reprice a project that never asked
+	// for attitude pricing. This is the assertion that protects every existing user.
+	TestFalse(TEXT("Attitude pricing is off by default"), F.Definition->bAttitudeAffectsPrices);
+	F.Diplomacy->DeclareWar(F.Bandits, F.Heroes);
+	TestEqual(TEXT("With the policy off, War does not move the price"),
+		F.Place->GetGuardRecruitmentCostFor(Buyer, 1), BaseCost);
+	TestEqual(TEXT("The base overload still ignores attitude, preserving existing callers"),
+		F.Place->GetGuardRecruitmentCost(1), BaseCost);
+
+	F.Definition->bAttitudeAffectsPrices = true;
+
+	const int32 WarCost = F.Place->GetGuardRecruitmentCostFor(Buyer, 1);
+	TestTrue(TEXT("A faction at War pays more than the base price"), WarCost > BaseCost);
+	TestEqual(TEXT("War applies the authored multiplier"),
+		WarCost, FMath::RoundToInt32(BaseCost * F.Definition->WarPriceMultiplier));
+
+	F.Diplomacy->SetDiplomacyState(F.Bandits, F.Heroes, EDiplomacyState::Alliance);
+	const int32 AllyCost = F.Place->GetGuardRecruitmentCostFor(Buyer, 1);
+	TestTrue(TEXT("An allied faction pays less than the base price"), AllyCost < BaseCost);
+	TestEqual(TEXT("Alliance applies the authored multiplier"),
+		AllyCost, FMath::RoundToInt32(BaseCost * F.Definition->FriendlyPriceMultiplier));
+
+	F.Diplomacy->SetDiplomacyState(F.Bandits, F.Heroes, EDiplomacyState::None);
+	TestEqual(TEXT("A neutral faction pays the neutral multiplier"),
+		F.Place->GetGuardRecruitmentCostFor(Buyer, 1),
+		FMath::RoundToInt32(BaseCost * F.Definition->NeutralPriceMultiplier));
+
+	// A whole batch is priced in one step, so the surcharge cannot be lost by applying
+	// it to a per-guard price that was already rounded.
+	F.Diplomacy->DeclareWar(F.Bandits, F.Heroes);
+	TestTrue(TEXT("A War batch of three costs more than three base-priced guards"),
+		F.Place->GetGuardRecruitmentCostFor(Buyer, 3) > BaseCost * 3);
+
+	// A zero multiplier must floor at free rather than invert the price into a refund.
+	F.Definition->WarPriceMultiplier = 0.f;
+	TestEqual(TEXT("A zero multiplier makes the price free, never negative"),
+		F.Place->GetGuardRecruitmentCostFor(Buyer, 1), 0);
+	F.Definition->WarPriceMultiplier = 1.5f;
+
+	F.Diplomacy->SetDiplomacyState(F.Bandits, F.Heroes, EDiplomacyState::None);
+	F.Definition->bAttitudeAffectsPrices = false;
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardDecisionIsObservable,
+	"TerritoryFramework.Guards.Regression.DecisionReasonIsObservable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+// The reported bug is a guard standing still - or chasing the wrong actor - and the reason was
+// only discoverable by reading thirteen return statements. EvaluateTerritoryTarget already
+// computes a human-readable reason for every one of its exits; this test holds the plugin to
+// actually writing that reason to the log, so the next occurrence is a one-line answer.
+bool FTFGuardDecisionIsObservable::RunTest(const FString& Parameters)
+{
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	TerritoryGuardResponseTests::FFixture F;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+
+	auto* Settings = GetMutableDefault<UTerritoryDeveloperSettings>();
+	FText Reason;
+
+	// Negative control. The master gate is forced off rather than asserted off, so this stays a
+	// statement about behaviour on any project - including one whose config turns debug on.
+	{
+		TGuardValue<bool> Debug(Settings->bEnableDebug, false);
+		TerritoryGuardResponseTests::FTerritoryLogCapture Capture;
+		GLog->AddOutputDevice(&Capture);
+		ON_SCOPE_EXIT { GLog->RemoveOutputDevice(&Capture); };
+
+		TestFalse(TEXT("A neutral visitor is refused"), Guard->EvaluateTerritoryTarget(Target, Reason));
+		GLog->Flush();
+		TestFalse(TEXT("Even a refusal carries a human-readable reason"), Reason.IsEmpty());
+		TestEqual(TEXT("With the debug system off the plugin logs no guard decision"),
+			Capture.CountContaining(Reason.ToString()), 0);
+	}
+
+	{
+		TGuardValue<bool> Debug(Settings->bEnableDebug, true);
+		TGuardValue<bool> Combat(Settings->bDebugCombat, true);
+		TerritoryGuardResponseTests::FTerritoryLogCapture Capture;
+		GLog->AddOutputDevice(&Capture);
+		ON_SCOPE_EXIT { GLog->RemoveOutputDevice(&Capture); };
+
+		TestFalse(TEXT("The same neutral visitor is refused with debug on"),
+			Guard->EvaluateTerritoryTarget(Target, Reason));
+		GLog->Flush();
+		const FString Refusal = Reason.ToString();
+		TestEqual(TEXT("The refusal reason reaches the log exactly once"),
+			Capture.CountContaining(Refusal), 1);
+		TestEqual(TEXT("The logged line names the guard that decided"),
+			Capture.CountContaining(Guard->GetName()), 1);
+		TestEqual(TEXT("The logged line names the actor it decided about"),
+			Capture.CountContaining(Target->GetName()), 1);
+
+		// The real runtime path is GetTeamAttitudeTowards -> CanEngageTerritoryTarget -> this
+		// same decision. One log site serves both, which is what keeps the change small: it is
+		// in the single place every exit already funnels through, not repeated at thirteen exits.
+		TestFalse(TEXT("The runtime wrapper refuses too"), Guard->CanEngageTerritoryTarget(Target));
+		GLog->Flush();
+		TestEqual(TEXT("The runtime entry point reports the same decision through the same line"),
+			Capture.CountContaining(Refusal), 2);
+
+		// The other direction matters just as much: the reported bug is a guard engaging an
+		// actor it should have ignored, so an allow must be as visible as a refusal.
+		F.Diplomacy->DeclareWar(F.Bandits, F.Heroes);
+		F.Evidence(Target);
+		TestTrue(TEXT("A confirmed enemy at War is engaged"),
+			Guard->EvaluateTerritoryTarget(Target, Reason));
+		GLog->Flush();
+		TestEqual(TEXT("The allow reason reaches the log too"),
+			Capture.CountContaining(Reason.ToString()), 1);
+	}
 	return true;
 }
 

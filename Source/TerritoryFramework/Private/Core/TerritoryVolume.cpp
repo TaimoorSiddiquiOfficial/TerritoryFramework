@@ -11,6 +11,7 @@
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
+#include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "SaveSystemStatics.h"
@@ -1550,30 +1551,15 @@ void ATerritoryVolume::ReconcileAvailabilityDependentSystems()
 
 ETerritoryState ATerritoryVolume::ResolveInitialTerritoryState() const
 {
-	switch (InitialState)
-	{
-	case ETerritoryInitialState::Unclaimed:
-		return ETerritoryState::Unclaimed;
-	case ETerritoryInitialState::Claimed:
-		// Never create the contradictory state "Claimed with no owner".
-		return InitialOwningFaction.IsValid()
-			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
-	case ETerritoryInitialState::Locked:
-		// Legacy definitions resolve their political control independently. Their
-		// availability is handled by ResolveInitialTerritoryAvailability().
-		return InitialOwningFaction.IsValid()
-			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
-	case ETerritoryInitialState::Automatic:
-	default:
-		return InitialOwningFaction.IsValid()
-			? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
-	}
+	// Political control only — who holds the ground at the start of a new campaign. Availability
+	// ("may this participate at all") is a separate question, answered by
+	// ResolveInitialTerritoryAvailability().
+	return TerritoryResolveInitialPoliticalState(InitialState, InitialOwningFaction.IsValid());
 }
 
 ETerritoryAvailability ATerritoryVolume::ResolveInitialTerritoryAvailability() const
 {
-	return InitialState == ETerritoryInitialState::Locked
-		? ETerritoryAvailability::Locked : InitialAvailability;
+	return TerritoryResolveInitialAvailability(InitialState, InitialAvailability);
 }
 
 void ATerritoryVolume::SetOwningFaction(const FGameplayTag& NewFaction)
@@ -1718,7 +1704,25 @@ void ATerritoryVolume::ForceSetOwningFactionWithContext(const FGameplayTag& NewF
 	bApplyingDerivedOwnership = bWasApplyingDerivedOwnership;
 }
 
-bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewData, const FTerritoryTransitionContext& TransitionContext)
+FGameplayTag ATerritoryVolume::ResolveCaptureInstigatorFaction(
+	const FTerritoryTransitionContext& TransitionContext,
+	const FGameplayTag& NewOwner) const
+{
+	if (AActor* CapturingActor = TransitionContext.Instigator.Get())
+	{
+		const FGameplayTag InstigatorFaction =
+			UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, CapturingActor);
+		if (InstigatorFaction.IsValid()) return InstigatorFaction;
+	}
+	// No resolvable actor faction: an AI capture, a scripted handover, or an editor-time
+	// commit. The requesting faction is the next best statement of intent; the new owner
+	// is the last resort so the field is never left half-filled.
+	return TransitionContext.RequestingFaction.IsValid()
+		? TransitionContext.RequestingFaction : NewOwner;
+}
+
+bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewData,
+	const FTerritoryTransitionContext& TransitionContext, bool bBypassConditionsForCommit)
 {
 	if (!HasAuthority()) return false;
 	if (NewData.State == ETerritoryState::Locked)
@@ -1761,7 +1765,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		&& NewOwner.IsValid() && OldOwner != NewOwner;
 
 	if ((OldState != NewState || bCapturedByDifferentOwner)
-		&& !bBypassTransitionConditions)
+		&& !bBypassTransitionConditions && !bBypassConditionsForCommit)
 	{
 		FText ConditionFailure;
 		const bool bConditionsPass = CheckStateExitConditions(OldState,
@@ -1817,6 +1821,33 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	if (OldOwner.IsValid() && OldOwner != NewOwner)
 	{
 		CommittedData.FormerOwningFactions.AddTag(OldOwner);
+	}
+	// Capture provenance is authority-owned history too, derived here for the same reason:
+	// a caller's proposed read model must not be able to invent who took this Place.
+	if (bApplyingDerivedOwnership)
+	{
+		// Aggregate City/District control is reduced from authored children, not captured.
+		CommittedData.CapturedBy = OwnershipData.CapturedBy;
+		CommittedData.CapturedFor = OwnershipData.CapturedFor;
+	}
+	else if (!NewOwner.IsValid())
+	{
+		// Nobody owns it, so there is nothing to attribute.
+		CommittedData.CapturedBy = FGameplayTag();
+		CommittedData.CapturedFor = FGameplayTag();
+	}
+	else if (OldOwner != NewOwner)
+	{
+		CommittedData.CapturedBy = ResolveCaptureInstigatorFaction(TransitionContext, NewOwner);
+		CommittedData.CapturedFor = NewOwner;
+	}
+	else
+	{
+		// Same owner: this is a progress/state update, not a new capture. Preserve the
+		// original tenure so "who won this for whom" survives garrison changes and
+		// contested-to-claimed transitions.
+		CommittedData.CapturedBy = OwnershipData.CapturedBy;
+		CommittedData.CapturedFor = OwnershipData.CapturedFor;
 	}
 	OwnershipData = MoveTemp(CommittedData);
 	// Keep the replicated World Partition read model current before state events
@@ -3208,9 +3239,52 @@ bool ATerritoryVolume::IsGuardSpawnLocationClear(UClass* GuardClass, const FVect
 		QueryParams);
 }
 
+int32 ATerritoryVolume::GetGuardRecruitmentCostFor(const AActor* Requester, int32 Count) const
+{
+	const int32 BaseCost = GetGuardRecruitmentCost(Count);
+	const UTerritoryDefinition* Definition = GetTerritoryDefinition();
+	if (!Definition || !Definition->bAttitudeAffectsPrices
+		|| !Requester || !OwnershipData.OwningFaction.IsValid())
+	{
+		return BaseCost;
+	}
+	const FGameplayTag RequesterFaction =
+		UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, const_cast<AActor*>(Requester));
+	if (!RequesterFaction.IsValid()) return BaseCost;
+	const UWorld* World = GetWorld();
+	const UTerritoryDiplomacySubsystem* Diplomacy = World
+		? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
+	if (!Diplomacy) return BaseCost;
+	// Alliance and Trade are friendly; War is hostile; everything else (Neutral,
+	// Non-Aggression, Ceasefire) uses the neutral rate. A Ceasefire is deliberately
+	// NOT priced as war: the fighting has stopped, so the prices have too.
+	float Multiplier = Definition->NeutralPriceMultiplier;
+	switch (Diplomacy->GetDiplomacyState(OwnershipData.OwningFaction, RequesterFaction))
+	{
+	case EDiplomacyState::Alliance:
+	case EDiplomacyState::TradeAgreement:
+		Multiplier = Definition->FriendlyPriceMultiplier;
+		break;
+	case EDiplomacyState::War:
+		Multiplier = Definition->WarPriceMultiplier;
+		break;
+	default:
+		Multiplier = Definition->NeutralPriceMultiplier;
+		break;
+	}
+	const int64 Scaled = FMath::RoundToInt64(
+		static_cast<double>(BaseCost) * FMath::Max(0.f, Multiplier));
+	return Scaled > MAX_int32 ? MAX_int32 : static_cast<int32>(Scaled);
+}
+
 int32 ATerritoryVolume::GetGuardPurchaseCost(int32 Count) const
 {
 	return GetGuardRecruitmentCost(Count);
+}
+
+int32 ATerritoryVolume::GetGuardPurchaseCostFor(const AActor* Requester, int32 Count) const
+{
+	return GetGuardRecruitmentCostFor(Requester, Count);
 }
 
 bool ATerritoryVolume::CanPurchaseGuards(const AActor* Requester, int32 Count, FText& OutFailureReason) const
@@ -3317,7 +3391,10 @@ bool ATerritoryVolume::CanSetDesiredGuardCount(const AActor* Requester,
 	}
 
 	const int32 Increase = FMath::Max(0, NewDesiredGuardCount - GetDesiredGuardCount());
-	OutRecruitmentCost = GetGuardRecruitmentCost(Increase);
+	// Price for the exact buyer. This is the one place a guard purchase is charged
+	// (TrySetDesiredGuardCount reuses it), so attitude pricing is applied once here
+	// rather than at each display site.
+	OutRecruitmentCost = GetGuardRecruitmentCostFor(Requester, Increase);
 	if (OutRecruitmentCost == MAX_int32)
 	{
 		OutFailureReason = FText::FromString(TEXT("The recruitment cost exceeds the supported currency range."));

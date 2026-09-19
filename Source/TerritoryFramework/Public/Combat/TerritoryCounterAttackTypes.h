@@ -540,7 +540,13 @@ struct FTerritoryAssaultEvaluationInput
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float EconomyReadiness = 0.f;
 	/** Attacking faction's supply readiness used by strategic planning. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float SupplyReadiness = 0.f;
-	/** Relative importance of this Territory to strategic assault planning; higher values make it a more valuable target. */
+	/**
+	 * Relative importance of the defended front to strategic assault planning; higher values make it a
+	 * more valuable target. This is the *highest* authored value across the front, not their total, so
+	 * it stays in the same range a single Territory authors and normalises the same way —
+	 * see TerritoryAssaultTargetPolicy::AggregateStrategicValue. The default of one is a placeholder
+	 * for a front that was never built; production code always assigns the aggregated value.
+	 */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float StrategicValue = 1.f;
 	/** Recent faction wins and losses reflected in the strategic planning input. */
 	UPROPERTY(SaveGame, BlueprintReadWrite, Category="Territory|Counter Attack") float RecentMomentum = 0.f;

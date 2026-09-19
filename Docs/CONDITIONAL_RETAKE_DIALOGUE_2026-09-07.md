@@ -108,9 +108,27 @@ or erase it. WorldState's existing saved/replicated capture summary projects the
 same field for streaming and joining clients. There is no separate history
 subsystem. Same-owner changes do not append history.
 
+`FTerritoryOwnershipData.CapturedBy` and `CapturedFor` answer a different question
+from the tenure list: *who physically took this Place, and on whose behalf*. Both are
+saved and replicated with the ownership struct, and both are derived by the same
+atomic commit, so a caller cannot propose them either. `CapturedFor` mirrors the new
+owner; `CapturedBy` resolves the transition instigator's primary faction, then the
+transition's requesting faction, then the new owner, so it is never half-filled.
+Only a real owner change writes them — a same-owner progress or garrison update
+preserves the original tenure, and derived City/District aggregate reduction never
+overwrites it. Losing the Place to nobody clears both.
+
+The pair exists so a betrayal beat is authorable rather than engine behaviour. When
+the player captures a Place for another faction, `CapturedBy` and `CapturedFor`
+differ; a quest can then ask "which Places did I win for the faction that later
+accused me?" with no new subsystem and no Narrative Pro change.
+
 Older saves contain no verified former-owner history. They start empty; this
 does not assert that the faction never owned the Place. Subsequent verified
-losses are recorded. Loading an earlier campaign replaces later history rather
+losses are recorded. `CapturedBy`/`CapturedFor` follow the same rule: a Place
+already owned in an older save loads with both empty until its next real owner
+change. Quest conditions that gate on provenance should therefore treat an empty
+pair as "from before the feature existed", not as "nobody captured it". Loading an earlier campaign replaces later history rather
 than merging campaigns. Narrative's actor load callback now republishes the
 ownership summary even when garrison counts did not change, fixing stale
 ownership/history in the directory after in-place reload.

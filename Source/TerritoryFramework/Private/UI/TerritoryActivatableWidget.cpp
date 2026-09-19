@@ -22,6 +22,29 @@ APlayerController* UTerritoryActivatableWidget::GetTerritoryPlayerController() c
 	return GetOwningPlayer();
 }
 
+bool UTerritoryActivatableWidget::IsFocusTargetReachable(const UWidget* Widget)
+{
+	if (!Widget || !Widget->GetIsEnabled())
+	{
+		return false;
+	}
+
+	// Collapsed and Hidden take a widget's descendants off the screen. Every other visibility mode
+	// is still drawn. The chain is walked because a child keeps its own "Visible" value while an
+	// ancestor is collapsed, so asking the widget about itself alone answers the wrong question.
+	for (const UWidget* Current = Widget; Current; Current = Current->GetParent())
+	{
+		const ESlateVisibility CurrentVisibility = Current->GetVisibility();
+		if (CurrentVisibility == ESlateVisibility::Collapsed
+			|| CurrentVisibility == ESlateVisibility::Hidden)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 UWidget* UTerritoryActivatableWidget::NativeGetDesiredFocusTarget() const
 {
 	const FName ConfiguredFocusTarget = !DesiredFocusTargetName.IsNone()
@@ -32,7 +55,7 @@ UWidget* UTerritoryActivatableWidget::NativeGetDesiredFocusTarget() const
 	{
 		if (UWidget* ExplicitTarget = GetWidgetFromName(ConfiguredFocusTarget))
 		{
-			if (ExplicitTarget->GetIsEnabled() && ExplicitTarget->IsVisible())
+			if (IsFocusTargetReachable(ExplicitTarget))
 			{
 				return ExplicitTarget;
 			}
@@ -47,7 +70,7 @@ UWidget* UTerritoryActivatableWidget::NativeGetDesiredFocusTarget() const
 		{
 			if (UNarrativeCommonButtonBase* Button = Cast<UNarrativeCommonButtonBase>(Widget))
 			{
-				if (Button->GetIsEnabled() && Button->IsVisible())
+				if (IsFocusTargetReachable(Button))
 				{
 					return Button;
 				}

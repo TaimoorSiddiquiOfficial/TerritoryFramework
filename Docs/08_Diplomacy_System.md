@@ -172,6 +172,50 @@ Diplomacy->SetReputation(Faction, 500);   // Set to 500
 int32 Rep = Diplomacy->GetReputation(Faction);
 ```
 
+By default reputation is a **read-only number**: quests change it and quests react to it, but it
+never changes how a faction behaves. Turn on **Territory → Diplomacy → Reputation Declares
+Diplomacy** in Project Settings to let it declare alliances and wars on its own.
+
+```cpp
+// Project Settings → Territory → Diplomacy
+bReputationDrivesDiplomacy  = true;   // off by default
+HostileReputationThreshold  = -50;    // at or below this: War
+AlliedReputationThreshold   =  50;    // at or above this: Alliance
+```
+
+With it on and a campaign subject explicitly selected, dropping the Regime to `-50` can
+declare War between the Regime and that subject. Guards still follow their detection and
+engagement rules. Optional attitude pricing can change the quoted recruitment cost, but
+only members of the owning faction can manage the garrison. A price quote does not grant
+an outsider permission to recruit guards.
+
+**Who owns the treaty.** Reputation only ever changes treaties it created itself. A treaty you
+wrote with `SetDiplomacyState`, `DeclareWar`, or a quest event outranks the number permanently —
+reputation will not overwrite it, and will not raise it later. Reputation-created treaties are
+marked `FTreatyRecord::bReputationDerived`, and when reputation recovers back inside the neutral
+band, reputation **withdraws** the war it declared and removes the treaty. So a player can always
+earn their way back out of a bad reputation, and an authored peace is never undone.
+
+**Whose reputation is it?** This is one shared campaign ledger. Select its subject on the
+server with an explicit Narrative faction tag. The plugin never picks a local player or
+the first connected player. In a quest, use the actual Narrative participant to choose
+the tag only when the story intends to change the whole campaign's subject:
+
+```cpp
+Diplomacy->SetReputationSubjectFaction(Rebels);  // authority only
+FGameplayTag Subject = Diplomacy->GetReputationSubjectFaction();
+```
+
+An empty subject allows scores to change but pauses automatic treaty changes. Changing the
+subject does not immediately rewrite existing scores or treaties; later score changes use
+the selected subject. A player changing faction does not silently change this campaign-wide
+selection. Decide that explicitly in the betrayal story. This is not a per-player ledger.
+
+**Migration:** projects using the former first-player fallback must explicitly call
+`SetReputationSubjectFaction` on the server. Existing Blueprint function pins are unchanged.
+Old saves have no subject, so they safely pause automatic treaty changes until one is chosen.
+Treaties from old saves default to authored because their original source cannot be recovered.
+
 ## Treaty Expiration
 
 Timed treaties (e.g., trade agreements with `DurationGameTime > 0`) are checked every `TreatyExpirationCheckInterval` (default 10s). When expired:
@@ -187,6 +231,11 @@ WorldState and SavableData restore treaty state, signed time, expiry, permanence
 
 The subsystem binds Narrative SaveSubsystem `OnFinishedLoad` and reapplies treaty-derived attitudes after each completed load, avoiding actor deserialization order races.
 
+The authoritative WorldState save and replicated snapshot also carry the explicit reputation
+subject and `bReputationDerived`. The flag is committed before Narrative and Territory
+callbacks run, so a quest that changes the treaty in a callback keeps ownership of its change.
+Legacy `SavableData` remains a migration path; it has no explicit reputation subject.
+
 TerritoryFramework never edits Narrative Pro's faction database. Narrative faction tags remain identity and Narrative GameState remains combat-attitude authority; TerritoryFramework owns only the richer treaty/reputation metadata and its replicated read model.
 
 ## Delegates
@@ -196,6 +245,7 @@ TerritoryFramework never edits Narrative Pro's faction database. Narrative facti
 | OnDiplomacyStateChanged | (FactionA, FactionB, NewState) |
 | OnDiplomacyEvent | (const FDiplomacyEvent&) |
 | OnReputationChanged | (Faction, NewReputation) |
+| OnReputationSubjectChanged | (SubjectFaction) |
 
 ## Capture Rules
 

@@ -3,6 +3,7 @@
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryTypes.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryHierarchy.h"
@@ -197,7 +198,16 @@ void UTerritoryDistrictManagementWidget::BuildGarrisonControls()
 			}
 		}
 	}
-	if (!Host) return;
+	if (!Host)
+	{
+		// The staffing controls are injected into an authored container. If an artist
+		// renames that container, every control disappears with no other symptom, so
+		// this must never fail silently.
+		UE_LOG(LogTerritory, Warning,
+			TEXT("%s could not find a vertical box for the garrison staffing controls. Expected 'ManagementStack' or 'ContentStack'. The player sees no staffing controls until the container is restored."),
+			*GetClass()->GetName());
+		return;
+	}
 
 	UTextBlock* Heading = WidgetTree->ConstructWidget<UNarrativeCommonTextBlock>(
 		UNarrativeCommonTextBlock::StaticClass(), TEXT("Text_LocalGarrisonHeading"));
@@ -290,6 +300,24 @@ int32 UTerritoryDistrictManagementWidget::GetDistrictIncome() const
 	return District ? District->GetEffectiveIncome() : 0;
 }
 
+FText UTerritoryDistrictManagementWidget::GetManagementUnavailableReason()
+{
+	return NSLOCTEXT("TerritoryManagement", "ManagementUnavailable",
+		"Territory management is not installed on this PlayerController.");
+}
+
+FText UTerritoryDistrictManagementWidget::GetOutOfManagementRangeReason()
+{
+	return NSLOCTEXT("TerritoryManagement", "OutOfManagementRange",
+		"Move closer to the district management point.");
+}
+
+FText UTerritoryDistrictManagementWidget::GetNoGarrisonSelectedReason()
+{
+	return NSLOCTEXT("TerritoryManagement", "NoGarrisonSelected",
+		"No district or Property garrison is selected.");
+}
+
 bool UTerritoryDistrictManagementWidget::CanPurchaseGuard(FText& OutFailureReason) const
 {
 	const ATerritoryVolume* Target = SelectedGarrisonTarget.Get();
@@ -297,7 +325,7 @@ bool UTerritoryDistrictManagementWidget::CanPurchaseGuard(FText& OutFailureReaso
 	APawn* ManagingCharacter = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController);
 	if (!ManagementComponent.IsValid())
 	{
-		OutFailureReason = FText::FromString(TEXT("Territory management is not installed on this PlayerController."));
+		OutFailureReason = GetManagementUnavailableReason();
 		return false;
 	}
 	if (!ManagementPoint.IsValid() || !PlayerController
@@ -307,12 +335,12 @@ bool UTerritoryDistrictManagementWidget::CanPurchaseGuard(FText& OutFailureReaso
 	}
 	if (!ManagementPoint->IsInteractorInRange(ManagingCharacter))
 	{
-		OutFailureReason = FText::FromString(TEXT("Move closer to the district management point."));
+		OutFailureReason = GetOutOfManagementRangeReason();
 		return false;
 	}
 	if (!Target)
 	{
-		OutFailureReason = FText::FromString(TEXT("No district or Property garrison is selected."));
+		OutFailureReason = GetNoGarrisonSelectedReason();
 		return false;
 	}
 	int32 RecruitmentCost = 0;
@@ -327,7 +355,7 @@ bool UTerritoryDistrictManagementWidget::CanRemoveGuard(FText& OutFailureReason)
 	APawn* ManagingCharacter = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController);
 	if (!ManagementComponent.IsValid())
 	{
-		OutFailureReason = FText::FromString(TEXT("Territory management is not installed on this PlayerController."));
+		OutFailureReason = GetManagementUnavailableReason();
 		return false;
 	}
 	if (!ManagementPoint.IsValid() || !PlayerController || !ManagementPoint->CanManage(ManagingCharacter, OutFailureReason))
@@ -336,12 +364,12 @@ bool UTerritoryDistrictManagementWidget::CanRemoveGuard(FText& OutFailureReason)
 	}
 	if (!ManagementPoint->IsInteractorInRange(ManagingCharacter))
 	{
-		OutFailureReason = FText::FromString(TEXT("Move closer to the district management point."));
+		OutFailureReason = GetOutOfManagementRangeReason();
 		return false;
 	}
 	if (!Target)
 	{
-		OutFailureReason = FText::FromString(TEXT("No district or Property garrison is selected."));
+		OutFailureReason = GetNoGarrisonSelectedReason();
 		return false;
 	}
 	int32 RecruitmentCost = 0;
