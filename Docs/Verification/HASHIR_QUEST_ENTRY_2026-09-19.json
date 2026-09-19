@@ -1,0 +1,18 @@
+{
+  "prefix": "TerritoryFramework.ProjectStory.HashirTripDoesNotStartOrRestartQuest",
+  "success": true,
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "results": [
+    {
+      "full_path": "TerritoryFramework.ProjectStory.HashirTripDoesNotStartOrRestartQuest",
+      "test_name": "FTFHashirQuestEntryLifecycle",
+      "status": "passed",
+      "duration_seconds": 0.007895801216363907,
+      "error_count": 0,
+      "warning_count": 2
+    }
+  ]
+}

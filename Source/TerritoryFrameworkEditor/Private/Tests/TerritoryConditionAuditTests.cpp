@@ -10,13 +10,20 @@
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryTalesUtilities.h"
 #include "Tales/NarrativeNodeBase.h"
+#include "Tales/NarrativeEvent.h"
 #include "Tales/TalesComponent.h"
+#include "Tales/Dialogue.h"
+#include "Tales/DialogueBlueprintGeneratedClass.h"
+#include "Tales/DialogueSM.h"
+#include "Tales/Quest.h"
+#include "Misc/PackageName.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryWorldState.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/Level.h"
+#include "Engine/LatentActionManager.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/WorldSettings.h"
@@ -325,6 +332,86 @@ bool FTFOwnershipWaitsForParticipantFaction::RunTest(const FString&)
 	Condition->RequiredOwner = Bandits;
 	TestTrue(TEXT("An explicit authored owner does not need a participant faction"), Condition->CheckCondition(Pawn, Controller, Tales));
 	Place->SetRole(ROLE_Authority);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFHashirQuestEntryLifecycle,
+	"TerritoryFramework.ProjectStory.HashirTripDoesNotStartOrRestartQuest",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FTFHashirQuestEntryLifecycle::RunTest(const FString&)
+{
+	const TCHAR* DialoguePackage = TEXT("/Game/HOPTRENDY/Character/Hashir/DBP_Hahsir");
+	if (!FPackageName::DoesPackageExist(DialoguePackage))
+	{
+		AddInfo(TEXT("TDA story content is not installed; the project-only Hashir check is skipped."));
+		return true;
+	}
+	UClass* DialogueClass = LoadClass<UDialogue>(nullptr,
+		TEXT("/Game/HOPTRENDY/Character/Hashir/DBP_Hahsir.DBP_Hahsir_C"));
+	UClass* QuestClass = LoadClass<UQuest>(nullptr,
+		TEXT("/Game/TerritoryFramework/NQ_CaptureBlacksmith.NQ_CaptureBlacksmith_C"));
+	if (!TestNotNull(TEXT("Authored dialogue compiles"), DialogueClass)
+		|| !TestNotNull(TEXT("Authored quest compiles"), QuestClass)) return false;
+	TerritoryConditionAudit::FWorldFixture Fixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	auto* Controller = NewObject<ANarrativePlayerController>(Fixture.World->PersistentLevel);
+	Controller->SetRole(ROLE_Authority);
+	auto* Tales = NewObject<UTalesComponent>(Controller);
+	auto* GeneratedClass = Cast<UDialogueBlueprintGeneratedClass>(DialogueClass);
+	if (!TestNotNull(TEXT("Native compiled dialogue template is available"), GeneratedClass)) return false;
+	auto* Dialogue = NewObject<UDialogue>(Tales, DialogueClass);
+	// Use Native's compiled template duplication without starting a camera or requiring story NPCs.
+	GeneratedClass->InitializeDialogue(Dialogue);
+	Dialogue->OwningComp = Tales;
+	Dialogue->OwningController = Controller;
+	UDialogueNode* Offer = nullptr;
+	UDialogueNode* Trip = nullptr;
+	for (UDialogueNode* Node : Dialogue->GetNodes())
+	{
+		if (!Node) continue;
+		Node->OwningDialogue = Dialogue;
+		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_GoCaptureBlacksmitFirst")) Offer = Node;
+		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_ActuallyComeWithMe")) Trip = Node;
+	}
+	if (!TestNotNull(TEXT("Original offer exists"), Offer)
+		|| !TestNotNull(TEXT("Trip line exists"), Trip)) return false;
+	auto* Registry = Fixture.World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	for (const TCHAR* Name : {TEXT("Territory.HavenReach.MarketSquare.Blacksmith"),
+		TEXT("Territory.HavenReach.CastleHill.Farm")})
+	{
+		auto* Definition = NewObject<UTerritoryPlaceDefinition>();
+		Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(Name);
+		Definition->StableTerritoryGUID = FGuid::NewGuid();
+		Definition->InitialGuardCount = 0;
+		auto* Place = Fixture.World->SpawnActor<ATerritoryProperty>();
+		Definition->ApplyToTerritory(Place);
+		Registry->RegisterTerritory(Place);
+	}
+	auto PlayEvents = [Controller, Tales, &Fixture](UDialogueNode* Node)
+	{
+		Node->ProcessEvents(nullptr, Controller, Tales, EEventRuntime::Start);
+		Node->ProcessEvents(nullptr, Controller, Tales, EEventRuntime::End);
+		// NE_BeginQuest uses Async Load Class Asset even when the class is already loaded.
+		// Process its real latent callback before checking for a quest or a duplicate start.
+		Fixture.World->GetLatentActionManager().BeginFrame();
+		for (UNarrativeEvent* Event : Node->Events)
+		{
+			if (Event) Fixture.World->GetLatentActionManager().ProcessLatentActions(Event, 0.1f);
+		}
+	};
+	PlayEvents(Trip);
+	TestNull(TEXT("A trip line cannot implicitly start the Blacksmith quest"), Tales->GetQuestInstance(QuestClass));
+	PlayEvents(Offer);
+	UQuest* Quest = Tales->GetQuestInstance(QuestClass);
+	if (TestNotNull(TEXT("The original offer still starts the quest through Native events"), Quest))
+	{
+		UQuestState* State = Quest->GetCurrentState();
+		PlayEvents(Trip);
+		TestEqual(TEXT("The trip retains the same live quest instance"), Tales->GetQuestInstance(QuestClass), Quest);
+		TestEqual(TEXT("The trip does not reset quest progress"), Quest->GetCurrentState(), State);
+		TestEqual(TEXT("There is still one quest"), Tales->GetAllQuests().Num(), 1);
+		TestTrue(TEXT("Fixture cleanup uses the public Tales lifecycle"), Tales->ForgetQuest(QuestClass));
+	}
 	return true;
 }
 
