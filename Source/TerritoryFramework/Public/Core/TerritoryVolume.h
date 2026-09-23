@@ -861,6 +861,9 @@ protected:
 private:
 	friend class ATerritoryGuardSpawnPoint;
 #if WITH_DEV_AUTOMATION_TESTS
+	// Seeds OwnershipData the way Narrative's Actor->Serialize(Ar) does on load, so a
+	// test can build the one state a loaded aggregate City can hold.
+	friend class FTFHierarchyTestAccess;
 	friend class FTFDefenderNarrativeEventConditions;
 	friend class FTFVolumeRuleCallbacks;
 	friend class FTFTransitionEventReconciliation;

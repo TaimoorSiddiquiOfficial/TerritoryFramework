@@ -122,6 +122,13 @@ protected:
 
 private:
 	friend class ATerritoryWorldState;
+#if WITH_DEV_AUTOMATION_TESTS
+	// Reaches ReconcileDerivedControl so the reduction can be observed on a City that
+	// already holds an owner. No public route can produce that state: driving it through
+	// BeginPlay requires a save load, and CommitOwnershipData refuses a direct aggregate
+	// political change (TerritoryVolume.cpp:1739-1744).
+	friend class FTFHierarchyTestAccess;
+#endif
 	UFUNCTION()
 	void OnDistrictControlChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
@@ -135,6 +142,16 @@ private:
 	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 
 	void BindToDistrict(ATerritoryVolume* District);
+
+	/**
+	 * Reduce loaded Districts to this City's control and commit it.
+	 *
+	 * Does nothing at all while any authored District is neither loaded nor covered by a
+	 * durable WorldState summary. Such a District reduces to a default Unclaimed view, and
+	 * committing that would clear a City owner restored from a save and permanently record
+	 * a city loss that never happened. The missing District's own registration re-enters
+	 * here with a complete set, so the suppressed commit is deferred rather than dropped.
+	 */
 	void ReconcileDerivedControl(ATerritoryVolume* ChangedDistrict = nullptr);
 };
 
@@ -216,6 +233,8 @@ private:
 	void OnTerritoryRegistered(ATerritoryVolume* Territory, bool bWasUnregistered);
 
 	void BindToProperty(ATerritoryVolume* Property);
+
+	/** Districts are aggregate too: same suppression as ATerritoryCity::ReconcileDerivedControl. */
 	void ReconcileDerivedControl(ATerritoryVolume* ChangedProperty = nullptr);
 };
 

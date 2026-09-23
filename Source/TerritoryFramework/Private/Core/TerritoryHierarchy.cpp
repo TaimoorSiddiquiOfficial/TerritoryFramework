@@ -168,12 +168,28 @@ namespace
 		return Owners;
 	}
 
-	FDerivedHierarchyControl ReduceChildControl(const ATerritoryVolume* Parent,
+	/** A reduction plus how much of the authored hierarchy it could actually see. */
+	struct FReducedChildControl
+	{
+		FDerivedHierarchyControl Control;
+		int32 UnresolvedChildCount = 0;
+	};
+
+	/**
+	 * Reduce authored children to parent control, reporting how many expected slots could
+	 * not be resolved from either a loaded actor or a durable WorldState summary.
+	 *
+	 * An invalid or duplicate authored tag is deliberately NOT counted as unresolved. That
+	 * is an authoring defect rather than a hierarchy still arriving, and counting it would
+	 * leave such a parent permanently unable to reconcile at all.
+	 */
+	FReducedChildControl ReduceChildControl(const ATerritoryVolume* Parent,
 		const TArray<ATerritoryVolume*>& LoadedChildren)
 	{
 		const TArray<FGameplayTag> ExpectedTags = GetExpectedChildTags(Parent);
 		TArray<FChildControlView> Children;
 		TSet<FGameplayTag> SeenTags;
+		FReducedChildControl Result;
 		for (const FGameplayTag& ExpectedTag : ExpectedTags)
 		{
 			FChildControlView& Child = Children.AddDefaulted_GetRef();
@@ -182,9 +198,13 @@ namespace
 				continue;
 			}
 			SeenTags.Add(ExpectedTag);
-			ResolveExpectedChildControl(Parent, LoadedChildren, ExpectedTag, Child);
+			if (!ResolveExpectedChildControl(Parent, LoadedChildren, ExpectedTag, Child))
+			{
+				++Result.UnresolvedChildCount;
+			}
 		}
-		return TerritoryHierarchyPolicy::ReduceControl(Children);
+		Result.Control = TerritoryHierarchyPolicy::ReduceControl(Children);
+		return Result;
 	}
 }
 
@@ -478,7 +498,18 @@ void ATerritoryCity::ReconcileDerivedControl(ATerritoryVolume* ChangedDistrict)
 	if (!HasAuthority()) return;
 	const FGameplayTag PreviousOwner = GetOwningFaction();
 	const ETerritoryState PreviousControlState = GetTerritoryState();
-	const FDerivedHierarchyControl Derived = ReduceChildControl(this, GetDistricts());
+	const FReducedChildControl Reduction = ReduceChildControl(this, GetDistricts());
+	if (Reduction.UnresolvedChildCount > 0)
+	{
+		// At least one authored District is neither loaded nor summarised, so the reduction
+		// above is a default Unclaimed view standing in for an unknown, not a result. A City
+		// can hold political state only by being restored from a save (CommitOwnershipData
+		// refuses a direct aggregate mutation), so committing it would clear a restored
+		// owner, report a City loss, and permanently record a tenure that never ended. The
+		// District's own registration re-enters here with a complete set.
+		return;
+	}
+	const FDerivedHierarchyControl Derived = Reduction.Control;
 	const FTerritoryTransitionContext Context = ChangedDistrict
 		? ChangedDistrict->GetActiveTransitionContext() : FTerritoryTransitionContext();
 	SetDerivedControl(Derived.SecuredOwner, Derived.State, Context);
@@ -590,7 +621,14 @@ void ATerritoryDistrict::OnPropertyAvailabilityChanged(ATerritoryVolume* Propert
 void ATerritoryDistrict::ReconcileDerivedControl(ATerritoryVolume* ChangedProperty)
 {
 	if (!HasAuthority()) return;
-	const FDerivedHierarchyControl Derived = ReduceChildControl(this, GetProperties());
+	const FReducedChildControl Reduction = ReduceChildControl(this, GetProperties());
+	if (Reduction.UnresolvedChildCount > 0)
+	{
+		// Same rule as the City: an unresolved Place is an unknown, not an unclaimed result,
+		// and a District must not derive control from a partial view of its Places.
+		return;
+	}
+	const FDerivedHierarchyControl Derived = Reduction.Control;
 	const FTerritoryTransitionContext Context = ChangedProperty
 		? ChangedProperty->GetActiveTransitionContext() : FTerritoryTransitionContext();
 	SetDerivedControl(Derived.SecuredOwner, Derived.State, Context);
