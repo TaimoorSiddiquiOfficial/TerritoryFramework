@@ -28,7 +28,14 @@
  *     project's own. The engine's scan loop consumes every entry with no dedupe, so scan paths
  *     accumulate and the last entry's Rules win: the effective cook rule is decided by array order.
  *
- * Both assert the host project's own config, which is why they skip on any host other than TDA --
+ *  3. VendorCleanupHolds -- three pieces of vendor residue that were cleaned out and must not come
+ *     back: the setup-notice gate (bDisplayProjectSettingsNotification=False) that keeps the notice,
+ *     and therefore the "Don't Remind Me" button that appends to Config/DefaultEditor.ini, out of
+ *     reach; the single remaining CVar line that button wrote four times; the dead
+ *     HopDistrictSystem.HopDistrictSettings section; and the Android PackageName, which shipped as
+ *     the unsubstituted com.Narrative.[PROJECT] placeholder.
+ *
+ * All three assert the host project's own config, which is why they skip on any host other than TDA --
  * the same way TerritoryNarrativeProMigrationTests.cpp states its /Game/HopDistrictTest dependency
  * rather than failing on a host that legitimately lacks it.
  */
@@ -559,6 +566,146 @@ bool FTerritorySingleAssetManagerRulePerPrimaryAssetType::RunTest(const FString&
 	else
 	{
 		AddInfo(TEXT("The Asset Manager is not initialized in this session; skipped observing the resolved cook rule."));
+	}
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Guard 3: vendor residue stays cleaned up.
+// ---------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTerritoryVendorConfigCleanupHolds,
+	"TerritoryFramework.ProjectConfig.VendorCleanupHolds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTerritoryVendorConfigCleanupHolds::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryProjectConfigGuardTests;
+
+	if (FCString::Stricmp(FApp::GetProjectName(), HostProjectName) != 0)
+	{
+		AddInfo(FString::Printf(
+			TEXT("Skipped: this guard asserts the %s host project's Config/*.ini; the host project is %s."),
+			HostProjectName, FApp::GetProjectName()));
+		return true;
+	}
+
+	// --- 1. The notice gate ------------------------------------------------------------------
+	// bDisplayProjectSettingsNotification is the second of the two editor-side gates. It is NOT the
+	// merge gate (that is bCheckProjectSettingsOnStartup, asserted by guard 1 above); it decides only
+	// whether the mismatch notice is shown at all (NarrativeProjectSetup.cpp:868 schedules it, :914
+	// re-checks before showing). With it False the notice never appears, so the "Don't Remind Me"
+	// button is unreachable, so nothing appends to Config/DefaultEditor.ini any more. This is what
+	// makes the de-duplication below hold rather than regrow.
+	const TCHAR* NoticeGateKey = TEXT("bDisplayProjectSettingsNotification");
+	bool bDisplayNotice = true;
+	const bool bHasNoticeGate = GConfig != nullptr
+		&& GConfig->GetBool(ArsenalSettingsSection, NoticeGateKey, bDisplayNotice, GEngineIni);
+	TestTrue(TEXT("The project config declares bDisplayProjectSettingsNotification"), bHasNoticeGate);
+	TestFalse(
+		TEXT("bDisplayProjectSettingsNotification is False: it keeps the vendor's setup notice, and with "
+			 "it the \"Don't Remind Me\" button, out of reach. That button writes to DefaultEditor.ini via "
+			 "AddToSection, which appends without dedup, so every click adds another identical CVar line."),
+		bDisplayNotice);
+
+	// --- 2. The CVar the button wrote, now a single line -------------------------------------
+	// Counted per line rather than by substring, so a mention of the name inside a comment cannot
+	// inflate the count and the assertion measures what it claims to: declarations of this key.
+	// The CVar itself is declared but never read by the vendor (only NarrativeProjectSetup.cpp:24 and
+	// the write at :991), so one line is a marker, not a setting.
+	const FString EditorIniPath = FPaths::ProjectConfigDir() / TEXT("DefaultEditor.ini");
+	FString EditorIniText;
+	if (TestTrue(*FString::Printf(TEXT("The project's Config/DefaultEditor.ini is readable at %s"), *EditorIniPath),
+		FFileHelper::LoadFileToString(EditorIniText, *EditorIniPath)))
+	{
+		const TCHAR* CvarName = TEXT("NarrativePro.DisableProjectSettingsSetupNotification");
+
+		TArray<FString> EditorLines;
+		EditorIniText.ParseIntoArrayLines(EditorLines);
+		int32 CvarDeclarations = 0;
+		for (const FString& EditorLine : EditorLines)
+		{
+			if (EditorLine.TrimStartAndEnd().StartsWith(CvarName, ESearchCase::CaseSensitive))
+			{
+				++CvarDeclarations;
+			}
+		}
+
+		TestEqual(
+			TEXT("NarrativePro.DisableProjectSettingsSetupNotification is declared exactly once in "
+				 "Config/DefaultEditor.ini. It shipped four times: AddToSection appends, so four clicks of "
+				 "the notice's button stacked four identical lines, and no vendor template covers "
+				 "DefaultEditor.ini to normalise it."),
+			CvarDeclarations, 1);
+	}
+
+	// --- 3. The dead HopDistrictSettings section --------------------------------------------
+	const FString GameIniPath = FPaths::ProjectConfigDir() / TEXT("DefaultGame.ini");
+	FString GameIniText;
+	if (TestTrue(*FString::Printf(TEXT("The project's Config/DefaultGame.ini is readable at %s"), *GameIniPath),
+		FFileHelper::LoadFileToString(GameIniText, *GameIniPath)))
+	{
+		// No module ever declared this settings class: Source/ has no HopDistrictSystem module, no
+		// .uplugin declares one, and none of the five property names appeared anywhere else in the
+		// repository. The section was residue from a removed module and is deleted, not disabled.
+		TestFalse(
+			TEXT("The dead HopDistrictSystem.HopDistrictSettings section has not come back. It described "
+				 "no existing class, so anything reading it would silently get nothing."),
+			GameIniText.Contains(TEXT("HopDistrictSystem.HopDistrictSettings"), ESearchCase::CaseSensitive));
+
+		static const TCHAR* const DeadHopKeys[] = {
+			TEXT("DefaultMaximumAttackers"),
+			TEXT("QueueUpdateInterval"),
+			TEXT("DefaultFloorHeightTolerance"),
+			TEXT("bAutomaticallyResolveDistricts"),
+			TEXT("bEnableDebugLogging"),
+		};
+		for (const TCHAR* DeadHopKey : DeadHopKeys)
+		{
+			TestFalse(*FString::Printf(
+				TEXT("The removed HopDistrictSettings key %s has not come back"), DeadHopKey),
+				GameIniText.Contains(DeadHopKey, ESearchCase::CaseSensitive));
+		}
+
+		// The deletion's real risk is taking a neighbour with it: the section immediately after the
+		// dead one was AbilitySystemGlobals, which carries NarrativePro's gameplay cue path. Assert it
+		// survived, so a future edit cannot quietly eat it the way this one could have.
+		TestTrue(
+			TEXT("The section that followed the deleted one, GameplayAbilities.AbilitySystemGlobals, is intact"),
+			GameIniText.Contains(TEXT("[/Script/GameplayAbilities.AbilitySystemGlobals]"), ESearchCase::CaseSensitive));
+		TestTrue(
+			TEXT("AbilitySystemGlobals still declares NarrativePro's gameplay cue path"),
+			GameIniText.Contains(TEXT("+GameplayCueNotifyPaths=/NarrativePro/Pro/Core/Abilities/Cues"), ESearchCase::CaseSensitive));
+	}
+
+	// --- 4. The Android package name ---------------------------------------------------------
+	// '[' and ']' are not legal in an Android package identifier, and NarrativePro.uplugin's
+	// PlatformAllowList includes Android, so the placeholder was a packaging blocker for that target.
+	const TCHAR* AndroidSection = TEXT("/Script/AndroidRuntimeSettings.AndroidRuntimeSettings");
+	const TCHAR* PackageNameKey = TEXT("PackageName");
+
+	FString LivePackageName;
+	const bool bHasPackageName = ReadLiveEngineValue(AndroidSection, PackageNameKey, LivePackageName);
+	TestTrue(TEXT("The project config declares an Android PackageName"), bHasPackageName);
+	TestFalse(
+		TEXT("PackageName contains no '[' or ']', which are not legal in an Android package identifier"),
+		LivePackageName.Contains(TEXT("[")) || LivePackageName.Contains(TEXT("]")));
+
+	// Assert the threat is still real, the same way guard 1 does for the maps: if the vendor template
+	// stops shipping the placeholder, the check above stops meaning anything.
+	const FString VendorEngineTemplate = FPaths::ProjectPluginsDir() / TEXT("NarrativePro/Resources/IniSetups/Add/DefaultEngine.ini");
+	FString VendorEngineText;
+	if (TestTrue(*FString::Printf(TEXT("The vendor setup template is readable at %s"), *VendorEngineTemplate),
+		FFileHelper::LoadFileToString(VendorEngineText, *VendorEngineTemplate)))
+	{
+		FString VendorPackageName;
+		TestTrue(TEXT("The vendor template still declares PackageName"),
+			ReadIniKeyFromText(VendorEngineText, AndroidSection, PackageNameKey, VendorPackageName));
+		TestNotEqual(
+			TEXT("The vendor template's PackageName differs from this project's, so the project value is a "
+				 "deliberate substitution rather than an untouched copy of the placeholder"),
+			VendorPackageName, LivePackageName);
 	}
 
 	return true;
