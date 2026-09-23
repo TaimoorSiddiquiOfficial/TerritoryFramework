@@ -1,6 +1,12 @@
 # Included content
 
-The plugin now contains copies of all 108 assets from the project's Territory Framework folder. It also includes their Territory attack-goal Blueprint and the nine existing Tales tasks: **118 assets in total**.
+The plugin's content gate (`Tools/Validate-Content.py` against
+`Tools/ContentManifest.json`) covers **122 assets**: the 108 assets in the folders
+below, which include the Territory attack-goal Blueprint, ten Tales task
+Blueprints, and four assets that sit at the plugin root — `DA_CounterAttack`,
+`EUB_TerritoryHDRSceneMaker`, `NQ_CaptureBlacksmith`, and `WBP_TerritoryInfoWidget`.
+The manifest is authoritative for this total; the validator asserts that the saved
+content matches it exactly.
 
 In the Content Browser, enable **Show Plugin Content** and open **Territory Framework Content**. Asset paths start with `/TerritoryFramework/`.
 
@@ -15,7 +21,7 @@ In the Content Browser, enable **Show Plugin Content** and open **Territory Fram
 | Cinematics/Dialogue/Shots | Seven reusable dialogue camera sequences. |
 | Framework | Example player character, player controller, Game Mode, and quest recipe. |
 | PhysicalMaterial | A road physical material to assign to your own road meshes. |
-| Tales/Tasks | Nine Narrative task Blueprints. |
+| Tales/Tasks | Ten Narrative task Blueprints. |
 
 ## Changes made for the community copy
 

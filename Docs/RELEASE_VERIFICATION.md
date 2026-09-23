@@ -4,6 +4,11 @@ These checks cover the community help and content-import batch on 8 September
 2026. Both downloads use the same source commit and the same 118 content assets.
 `BUILD_INFO.json` in each download records the exact commit and build results.
 
+The figures below are this release's recorded results and are deliberately not
+retroactively updated. The content manifest has since grown to 122 assets, so
+[Included content](INCLUDED_CONTENT.md) states the current total. Do not renumber
+this file to match it; these are dated verification results.
+
 ## Tested versions
 
 | Check | UE 5.7.4 | UE 5.8.2 |
