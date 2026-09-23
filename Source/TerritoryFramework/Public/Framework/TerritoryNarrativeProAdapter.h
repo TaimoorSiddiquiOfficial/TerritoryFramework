@@ -12,12 +12,13 @@ class APlayerController;
 class UNarrativeAbilitySystemComponent;
 struct FGameplayEventData;
 
-/** One unordered Narrative faction-pair attitude, normalized for Territory use. */
+/** Conservative strategic projection of a Narrative pair. Never a write-back payload. */
 struct TERRITORYFRAMEWORK_API FTerritoryNarrativeAttitudeSnapshot
 {
 	FGameplayTag FactionA;
 	FGameplayTag FactionB;
 	ETeamAttitude::Type Attitude = ETeamAttitude::Neutral;
+	bool bAsymmetric = false;
 };
 
 /**

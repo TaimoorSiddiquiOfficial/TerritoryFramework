@@ -295,6 +295,8 @@ public:
 	TArray<FTerritoryAssaultRecord> GetPersistentState() const;
 	TArray<FTerritoryAssaultCycleRecord> GetPersistentCycleState() const;
 	void RestorePersistentState(const TArray<FTerritoryAssaultRecord>& Records);
+	/** Resolve reservations against explicit WorldState tombstones through normal cleanup. */
+	void ReconcileRetiredTargets();
 	void RestorePersistentState(const TArray<FTerritoryAssaultRecord>& Records,
 		const TArray<FTerritoryAssaultCycleRecord>& CycleRecords);
 

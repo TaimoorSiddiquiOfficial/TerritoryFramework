@@ -1,10 +1,47 @@
 # Territory Framework — Remaining Work and Roadmap
 
-> **Reviewed:** 2026-09-14 (Narrative pattern and lifecycle audit)
+> **Reviewed:** 2026-09-23 (modular re-audit follow-up)
 > **Purpose:** one current list of release gates, engineering debt, and possible future features.
 > Historical audit reports are evidence, not the current task list.
 
 ## Current remaining work
+
+The [23 September modular re-audit](Verification/MODULAR_REAUDIT_2026-09-23.md)
+repairs mixed streaming hierarchy reconciliation, retired assault reservations,
+party owner-context departure, admission authoring and portable content
+dependencies. It also corrects the actual TDA owner definitions and Farm dialogue
+used by the level. Party continuation is optional and has a safe-end fallback;
+automatic disconnect cleanup and rendered local/split-screen acceptance remain
+open. A composed player-driven campaign/cold restart and independent adoption
+exercise are still required before a complete playable-campaign release claim.
+The six Victorian material repairs are delivered through a private project asset
+overlay because the host Git ignore policy excludes them. The earlier shader-map
+errors below are historical; the subsequent presentation package cleared them.
+
+The [Hashir defence follow-up](Verification/HASHIR_REPEAT_DEFENCE_2026-09-19.md)
+moves the story Wave to the defence state after guard assignment and removes an
+old condition that skipped it after the earlier handover battle. The real
+standalone sequence, repeat conversation and campaign reload pass. The user's
+copied save retained four attackers in the second battle; it did not contain a
+lost second victory. A separate traffic follow-up remains: empty cars left at a
+short road entrance can delay the next force until their 120-second retirement.
+Keep that wait visible and investigate safe earlier route clearance without
+discarding finite enemies or claiming a cancelled deployment was a victory.
+
+The [multiplayer interaction repair](Verification/MULTIPLAYER_INTERACTION_2026-09-19.md)
+routes District Management from the server to the requesting client's existing
+Narrative UI stack. TDA doors now replicate their open state and apply it for
+late joiners. The 362-test suite, seven-asset validation, listen/two-client and
+dedicated/two-client checks pass, including late join. This closes the reproduced
+client management panel failure. Other interaction types, physical keyboard focus,
+complete multiplayer conversations and real World Partition travel are not
+certified by this focused batch. One repeated-session Python/editor late-join
+crash remains recorded; the fresh dedicated run passed.
+The new HopDistrictTest package builds, but its 60-second server-mode smoke is
+not clean: six unnamed material shader-map errors need tracing. Its loading-screen
+cutscene callback also repeats a missing-player-actor warning from the older
+baseline. Investigate those before calling this package release-ready; retain the
+63 cook warnings as a separate content cleanup list.
 
 The [direct light element batch](DIRECT_LIGHT_ELEMENT_PROFILES.md) adds matching
 instanced adapters for original `BP_LightRigElement` and

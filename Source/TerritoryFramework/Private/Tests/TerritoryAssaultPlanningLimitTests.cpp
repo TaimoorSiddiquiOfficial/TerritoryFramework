@@ -6,6 +6,32 @@
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include <limits>
 
+// A second expression of the planned-force rule, written from the contract rather than by
+// calling the planner: the force a column can move is the request capped by the seats of
+// the largest deployments the budget authorises. It sums every usable deployment and caps
+// once, where the planner accumulates and returns early, so the two disagree if that early
+// return is wrong. It is a second statement of the same rule, not an oracle.
+static int32 ReferenceVehicleOnlyPlannedForce(const int32 RequestedForce,
+	const int32 MaximumVehicleDeployments, const TArray<int32>& VehicleDeploymentCapacities)
+{
+	if (RequestedForce <= 0 || MaximumVehicleDeployments <= 0
+		|| VehicleDeploymentCapacities.IsEmpty())
+	{
+		return 0;
+	}
+
+	TArray<int32> SortedCapacities = VehicleDeploymentCapacities;
+	SortedCapacities.Sort(TGreater<int32>());
+	const int32 UsableDeployments = FMath::Min(
+		MaximumVehicleDeployments, SortedCapacities.Num());
+	int64 AvailableSeats = 0;
+	for (int32 Index = 0; Index < UsableDeployments; ++Index)
+	{
+		AvailableSeats += FMath::Max(0, SortedCapacities[Index]);
+	}
+	return static_cast<int32>(FMath::Min(static_cast<int64>(RequestedForce), AvailableSeats));
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFAssaultPlanningLimits,
 	"TerritoryFramework.CounterAttack.Regression.BoundedAuthoredPlanning",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -61,14 +87,43 @@ bool FTFAssaultPlanningLimits::RunTest(const FString& Parameters)
 	AccumulateVehicleCapacity(5, 4, ReorderedMaximum, ReorderedSeats);
 	AccumulateVehicleCapacity(6, 2, ReorderedMaximum, ReorderedSeats);
 	TestTrue(TEXT("Approach order cannot reroll vehicle capacity planning"), ReorderedSeats == Seats);
+	// The authored list is descending; this hand written one is the same seats in the
+	// opposite order. The planner sorts, so the two must plan identically.
 	const TArray<int32> FullAuthoredSeats = { 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 8, 8, 8 };
+	TestEqual(TEXT("Capacity list order cannot change the planned force"),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(100, 8, Seats),
+		UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(100, 8, FullAuthoredSeats));
+
+	// Sweep every legal budget and request, asserting the contract rather than comparing the
+	// planner with itself. The reference states the rule independently; the invariants below
+	// hold for any correct planner without restating the rule, so a shared misreading of the
+	// rule cannot satisfy them.
+	int32 TotalAuthoredSeats = 0;
+	for (const int32 Capacity : Seats)
+	{
+		TotalAuthoredSeats += FMath::Max(0, Capacity);
+	}
+	TArray<int32> PreviousCarsForce;
+	PreviousCarsForce.Init(0, 65);
 	for (int32 Cars = 0; Cars <= 8; ++Cars)
 	{
+		int32 PreviousForce = 0;
 		for (int32 FiniteForce = 0; FiniteForce <= 64; ++FiniteForce)
 		{
-			TestEqual(TEXT("Bounded planning preserves the existing answer for every legal car budget"),
-				UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(FiniteForce, Cars, Seats),
-				UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(FiniteForce, Cars, FullAuthoredSeats));
+			const int32 Planned = UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(
+				FiniteForce, Cars, Seats);
+			TestEqual(TEXT("Bounded planning matches the authored rule at every legal car budget"),
+				Planned, ReferenceVehicleOnlyPlannedForce(FiniteForce, Cars, Seats));
+			TestTrue(TEXT("Planning never transports more force than was requested"),
+				Planned >= 0 && Planned <= FiniteForce);
+			TestTrue(TEXT("Planning never invents more seats than were authored"),
+				Planned <= TotalAuthoredSeats);
+			TestTrue(TEXT("More requested force never transports less"),
+				Planned >= PreviousForce);
+			TestTrue(TEXT("A larger car budget never transports less"),
+				Planned >= PreviousCarsForce[FiniteForce]);
+			PreviousForce = Planned;
+			PreviousCarsForce[FiniteForce] = Planned;
 		}
 	}
 	FTerritoryFactionAssaultConfig Force;

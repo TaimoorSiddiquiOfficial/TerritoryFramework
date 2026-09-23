@@ -231,9 +231,11 @@ class UTerritoryAuditNarrativeEvent final : public UNarrativeEvent
 	GENERATED_BODY()
 public:
 	TFunction<void()> Callback;
+	TFunction<void(APawn*, APlayerController*, UTalesComponent*)> ContextCallback;
 	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
 		UTalesComponent* NarrativeComponent) override
 	{
 		if (Callback) Callback();
+		if (ContextCallback) ContextCallback(Target, Controller, NarrativeComponent);
 	}
 };

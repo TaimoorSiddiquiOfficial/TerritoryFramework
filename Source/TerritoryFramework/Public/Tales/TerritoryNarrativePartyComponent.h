@@ -4,6 +4,13 @@
 #include "Tales/NarrativePartyComponent.h"
 #include "TerritoryNarrativePartyComponent.generated.h"
 
+UENUM(BlueprintType)
+enum class ETerritoryPartyOwnerDeparturePolicy : uint8
+{
+	ContinueWhenSupported UMETA(DisplayName="Continue with compatible dialogue adapter"),
+	EndConversation UMETA(DisplayName="End the conversation safely")
+};
+
 /** Native shared Tales component with server checks for who may choose a reply.
  * Uses Narrative's Party Dialogue Control Policy, members, leader and dialogue.
  * Use Territory Narrative Party, or this component on a custom replicated party actor.
@@ -13,16 +20,22 @@ class TERRITORYFRAMEWORK_API UTerritoryNarrativePartyComponent : public UNarrati
 {
 	GENERATED_BODY()
 public:
+	/** Only applies when the dialogue's cached owning controller leaves. The default
+	 * continues through Territory Party Dialogue's compatible adapter; otherwise
+	 * Native ends before Leave callbacks. Departure during a spoken player reply
+	 * ends for everyone: Native has no client speaker/camera handover RPC. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Parties")
+	ETerritoryPartyOwnerDeparturePolicy OwnerDeparturePolicy = ETerritoryPartyOwnerDeparturePolicy::ContinueWhenSupported;
 	/** Keep Native's local viewing player. A server with only remote members uses the Native leader. */
 	virtual APlayerController* GetOwningController() const override;
 	/** Join through Native only after the old party confirms departure. Requires a valid
 	 * server controller and PlayerState in this world. A repeated join returns false.
+	 * Active conversations reject new members; Native has no playback catch-up.
 	 * Story callbacks may change membership again; success means this party still owns it.
 	 */
 	virtual bool AddPartyMember(UTalesComponent* Member) override;
 	/** Release the departing member's alias and party tag grant before Leave Party.
-	 * Remaining members keep the same dialogue. The final departure ends it through
-	 * Native first. Migrating a continuing dialogue's avatar/camera/leader is separate.
+	 * Owner departure uses OwnerDeparturePolicy. The final departure ends it through Native first.
 	 */
 	virtual bool RemovePartyMember(UTalesComponent* Member) override;
 	/** Start a Native conversation for the current members. An empty party returns false. */
@@ -53,6 +66,17 @@ private:
 	bool bAllowNativeInitialSet = false;
 	TWeakObjectPtr<UDialogue> DeferredExitDialogue;
 	TOptional<EExitDialogueReason> DeferredExitReason;
+	struct FPendingLogout
+	{
+		TWeakObjectPtr<UTalesComponent> Member;
+		TWeakObjectPtr<APlayerState> State;
+	};
+	TArray<FPendingLogout> PendingLogouts;
+	TSet<TWeakObjectPtr<AController>> ExitingControllers;
+	FDelegateHandle LogoutHandle;
+	bool bFlushingDeferredOperations = false;
+	void HandleGameModeLogout(class AGameModeBase* GameMode, AController* Exiting);
+	void UnbindLogout();
 	void RecordNativePartySpeakerGrants();
 	void PrepareNativeSpeakerCleanup();
 	void FlushDeferredDialogueExit();

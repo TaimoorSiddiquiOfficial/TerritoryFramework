@@ -1,4 +1,5 @@
 #include "TerritoryPartyReplyProbe.h"
+#include "Engine/NetConnection.h"
 #include "UObject/UnrealType.h"
 #include "AbilitySystemComponent.h"
 #include "Core/TerritoryPropertyTags.h"
@@ -94,4 +95,14 @@ int32 ATerritoryPartyReplyTestDriver::GetSpeakerTagCount(APlayerState* State) co
 	const auto* NativeState = Cast<ANarrativePlayerState>(State);
 	const UAbilitySystemComponent* ASC = IsValid(NativeState) ? NativeState->GetAbilitySystemComponent() : nullptr;
 	return ASC ? ASC->GetTagCount(GetTerritoryPartySpeakerTestTag()) : INDEX_NONE;
+}
+
+bool ATerritoryPartyReplyTestDriver::DisconnectMember(UTalesComponent* Member)
+{
+	APlayerController* Controller = IsValid(Member) ? Member->GetOwningController() : nullptr;
+	if (!IsValid(Controller) || !Controller->HasAuthority() || Controller->GetWorld() != GetWorld()) return false;
+	UNetConnection* Connection = Controller->GetNetConnection();
+	if (!Connection) return false;
+	Connection->Close();
+	return true;
 }

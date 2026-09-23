@@ -1,4 +1,5 @@
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
+#include "Core/TerritoryWorldState.h"
 #include "Templates/Greater.h"
 
 #include "Combat/TerritoryAssaultCharacter.h"
@@ -741,6 +742,9 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		"TerritoryCounterAttack", "ScheduleInvalidTerritory", "The target Territory is invalid, unloaded, or belongs to another World."));
 	if (!Territory->HasAuthority()) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "ScheduleNoAuthority", "The target Territory is not authoritative on this machine."));
+	if (const auto* State = ATerritoryWorldState::FindTerritoryWorldState(this);
+		State && State->IsDirectoryIdentityRetired(Territory->GetTerritoryGUID()))
+		return Reject(NSLOCTEXT("TerritoryCounterAttack", "RetiredTarget", "The target Territory identity has been permanently retired."));
 	if (Territory->GetControlMode() != ETerritoryControlMode::Independent) return Reject(NSLOCTEXT(
 		"TerritoryCounterAttack", "InheritedControlTarget", "The target uses inherited control. Schedule the assault against an independently controlled Place."));
 	if (!Territory->IsAvailableForGameplay()) return Reject(NSLOCTEXT(
@@ -1499,6 +1503,26 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 			Cycle.TargetTerritoryGUID).FindOrAdd(Cycle.AttackingFaction);
 		HighWater = FMath::Max(HighWater, Cycle.HighestEvaluationCycle);
 	}
+	if (bAuthority) ReconcileRetiredTargets();
+}
+
+void UTerritoryCounterAttackSubsystem::ReconcileRetiredTargets()
+{
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
+	const auto* State = ATerritoryWorldState::FindTerritoryWorldState(this);
+	if (!State || !State->HasAuthority()) return;
+	TArray<FGuid> IDs;
+	Assaults.GetKeys(IDs);
+	const uint64 Generation = RestoreGeneration;
+	for (const FGuid& ID : IDs)
+	{
+		if (FTerritoryAssaultRecord* Record = Assaults.Find(ID);
+			Record && !Record->IsTerminal() && State->IsDirectoryIdentityRetired(Record->TargetTerritoryGUID))
+		{
+			ResolveAssault(*Record, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::InvalidTerritory);
+			if (RestoreGeneration != Generation || !IsValid(State)) return;
+		}
+	}
 }
 
 void UTerritoryCounterAttackSubsystem::UpdateAssaults()
@@ -1589,6 +1613,12 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	if (Assault.IsTerminal()) return;
 	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
 	const ETerritoryAssaultState InitialState = Assault.State;
+	if (const auto* State = ATerritoryWorldState::FindTerritoryWorldState(this);
+		State && State->IsDirectoryIdentityRetired(Assault.TargetTerritoryGUID))
+	{
+		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::InvalidTerritory);
+		return;
+	}
 	ATerritoryVolume* Territory = ResolveTerritory(Assault);
 	if (!Territory) return; // World Partition: wait for authoritative actor registration.
 	if (Territory->GetControlMode() != ETerritoryControlMode::Independent

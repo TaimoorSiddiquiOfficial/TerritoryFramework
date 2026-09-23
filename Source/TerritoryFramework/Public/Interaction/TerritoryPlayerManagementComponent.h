@@ -48,6 +48,11 @@ public:
 	/** Ensures the owned bridge exists on a player controller for framework-only projects. */
 	static UTerritoryPlayerManagementComponent* FindOrCreateForPlayerController(APlayerController* PlayerController);
 
+	/** Server validates the nearby command point and asks only this player's client to show its menu.
+	 * Returns true when the request is sent; the local Narrative HUD must also be ready. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Management")
+	bool SendOpenManagementPoint(ATerritoryDistrictManagementPoint* ManagementPoint);
+
 	/** Returns the server's verified outcome of a guard purchase or removal request. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Management")
 	FOnTerritoryGuardPurchaseResult OnGuardPurchaseResult;
@@ -374,6 +379,9 @@ private:
 
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveGuardPurchaseResult(ATerritoryVolume* Territory, bool bSuccess, const FText& Message, int32 RequestId);
+
+	UFUNCTION(Client, Reliable)
+	void ClientOpenManagementPoint(ATerritoryDistrictManagementPoint* ManagementPoint);
 
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveAssaultNotification(const FTerritoryAssaultRecord& Assault);

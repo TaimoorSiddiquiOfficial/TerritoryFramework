@@ -163,6 +163,12 @@ public:
 			ToolTip="Launch the physical force immediately after validation. Use for an authored ambush or Quest climax. Leave off for the normal strategic schedule."))
 	bool bStartImmediately = false;
 
+	/** Native admission used by this event and persistent Narrative admission tasks.
+	 * Rechecks conditions and returns the scheduler's refusal without logging retries. */
+	bool TryScheduleWave(APawn* Target, APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent, FText& OutFailureReason,
+		bool bLogFailure = false);
+
 protected:
 	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
 		class UTalesComponent* NarrativeComponent) override;

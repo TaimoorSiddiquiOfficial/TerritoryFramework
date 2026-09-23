@@ -11,6 +11,21 @@ class UTerritoryProductionProfile;
 /** Shared pure hierarchy rules used by City, District, UI, and native tests. */
 namespace TerritoryHierarchyPolicy
 {
+	struct FChildControlView
+	{
+		FGameplayTag Owner;
+		ETerritoryState State = ETerritoryState::Unclaimed;
+		ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
+	};
+	struct FDerivedHierarchyControl
+	{
+		FGameplayTag SecuredOwner;
+		ETerritoryState State = ETerritoryState::Unclaimed;
+	};
+	/** Include one default view for every missing, invalid or duplicate authored slot. */
+	TERRITORYFRAMEWORK_API FDerivedHierarchyControl ReduceControl(
+		TConstArrayView<FChildControlView> Children);
+
 	/** Returns a faction only when it owns strictly more than half of all children. */
 	TERRITORYFRAMEWORK_API FGameplayTag FindStrictMajorityOwner(
 		const TArray<FGameplayTag>& ChildOwners);
@@ -106,6 +121,7 @@ protected:
 	virtual void OnDistrictCapturedInCity_Implementation(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
 private:
+	friend class ATerritoryWorldState;
 	UFUNCTION()
 	void OnDistrictControlChanged(ATerritoryVolume* District, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
@@ -186,6 +202,7 @@ protected:
 	virtual void OnDistrictFullyCaptured_Implementation(FGameplayTag CapturingFaction);
 
 private:
+	friend class ATerritoryWorldState;
 	UFUNCTION()
 	void OnPropertyControlChanged(ATerritoryVolume* Property, FGameplayTag OldOwner, FGameplayTag NewOwner);
 
@@ -278,6 +295,7 @@ protected:
 	// Override base class ownership change to invoke property-specific side effects
 	// on every ownership path (direct capture, hierarchy cascade, quest event).
 	virtual void OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner) override;
+	virtual void ReconcileOwnershipDependentSystems(FGameplayTag OldOwner, FGameplayTag NewOwner) override;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 

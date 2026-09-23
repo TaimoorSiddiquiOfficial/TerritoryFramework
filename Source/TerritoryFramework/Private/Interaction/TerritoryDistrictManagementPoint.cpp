@@ -505,9 +505,25 @@ void ATerritoryDistrictManagementPoint::HandleInteraction(APawn* Interactor)
 
 void ATerritoryDistrictManagementPoint::OpenManagementWidget(APlayerController* PlayerController)
 {
-	if (!PlayerController || !PlayerController->IsLocalController() || !ManagementWidgetClass) return;
+	if (!IsValid(PlayerController) || PlayerController->GetWorld() != GetWorld()) return;
+	if (!PlayerController->IsLocalController())
+	{
+		// Narrative completes physical interactions on the server, including for
+		// remote players. Route presentation through their owned RPC component.
+		if (PlayerController->HasAuthority())
+		{
+			if (UTerritoryPlayerManagementComponent* Bridge =
+				UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController))
+			{
+				Bridge->SendOpenManagementPoint(this);
+			}
+		}
+		return;
+	}
+	if (!ManagementWidgetClass) return;
+	APawn* Pawn = FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController);
 	FText FailureReason;
-	if (!CanManage(FTerritoryNarrativeProAdapter::ResolvePlayerCharacter(PlayerController), FailureReason)) return;
+	if (!CanManage(Pawn, FailureReason) || !IsInteractorInRange(Pawn)) return;
 	UTerritoryPlayerManagementComponent::FindOrCreateForPlayerController(PlayerController);
 
 	if (UTerritoryDistrictManagementWidget* Widget = Cast<UTerritoryDistrictManagementWidget>(

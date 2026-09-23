@@ -73,6 +73,38 @@ UTerritoryPlayerManagementComponent::UTerritoryPlayerManagementComponent()
 	SetIsReplicatedByDefault(true);
 }
 
+bool UTerritoryPlayerManagementComponent::SendOpenManagementPoint(
+	ATerritoryDistrictManagementPoint* ManagementPoint)
+{
+	const APlayerController* Controller = Cast<APlayerController>(GetOwner());
+	APawn* Pawn = GetManagingPawn();
+	FText FailureReason;
+	if (!IsValid(Controller) || !Controller->HasAuthority()
+		|| !IsValid(ManagementPoint) || ManagementPoint->GetWorld() != GetWorld()
+		|| !IsValid(Pawn) || Pawn->GetWorld() != GetWorld()
+		|| !ManagementPoint->CanManage(Pawn, FailureReason)
+		|| !ManagementPoint->IsInteractorInRange(Pawn))
+	{
+		return false;
+	}
+
+	// Follow Narrative's controller-owned ClientShowHUDNotification / Tales
+	// ClientBeginDialogue pattern. A world interactable does not own a connection.
+	ClientOpenManagementPoint(ManagementPoint);
+	return true;
+}
+
+void UTerritoryPlayerManagementComponent::ClientOpenManagementPoint_Implementation(
+	ATerritoryDistrictManagementPoint* ManagementPoint)
+{
+	APlayerController* Controller = Cast<APlayerController>(GetOwner());
+	if (IsValid(Controller) && Controller->IsLocalController()
+		&& IsValid(ManagementPoint) && ManagementPoint->GetWorld() == GetWorld())
+	{
+		ManagementPoint->OpenManagementWidget(Controller);
+	}
+}
+
 void UTerritoryPlayerManagementComponent::BeginPlay()
 {
 	Super::BeginPlay();

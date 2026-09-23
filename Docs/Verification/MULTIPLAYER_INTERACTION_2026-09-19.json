@@ -1,0 +1,412 @@
+{
+  "date": "2026-09-19",
+  "scope": "District Management owning-client UI and TDA door replication",
+  "automation": {
+    "managementRegression": "Success",
+    "failed": 0,
+    "withWarnings": 37,
+    "passed": true,
+    "clean": 325,
+    "total": 362
+  },
+  "assets": {
+    "status": "completed",
+    "passed": true,
+    "checked": 7,
+    "valid": 7,
+    "invalid": 0,
+    "warnings": 0,
+    "assets": [
+      "/Game/HOPTRENDY/Blueprint/Door/BP_2Door",
+      "/Game/HOPTRENDY/Blueprint/Door/BP_Door_Base",
+      "/Game/HOPTRENDY/Blueprint/Door/BP_Door_Bunglow",
+      "/Game/TerritoryFramework/Interaction/BP_TerritoryDistrictManagementPoint",
+      "/Game/TerritoryFramework/Framework/Controller_Reworked/BP_HopNarrativePlayerController_DemoMap",
+      "/Game/TerritoryFramework/UI/WBP_TerritoryDistrictManagement",
+      "/Game/HopDistrictTest"
+    ]
+  },
+  "blueprints": [
+    {
+      "asset_path": "/Game/HOPTRENDY/Blueprint/Door/BP_2Door",
+      "success": true,
+      "status": "UpToDate",
+      "errors": [],
+      "warnings": [],
+      "error_count": 0,
+      "warning_count": 0
+    },
+    {
+      "asset_path": "/Game/HOPTRENDY/Blueprint/Door/BP_Door_Base",
+      "success": true,
+      "status": "UpToDate",
+      "errors": [],
+      "warnings": [],
+      "error_count": 0,
+      "warning_count": 0
+    },
+    {
+      "asset_path": "/Game/HOPTRENDY/Blueprint/Door/BP_Door_Bunglow",
+      "success": true,
+      "status": "UpToDate",
+      "errors": [],
+      "warnings": [],
+      "error_count": 0,
+      "warning_count": 0
+    }
+  ],
+  "listen": {
+    "mode": "Listen",
+    "fixture": "Exercise Native interaction input, owning-client management UI and project doors.\n\nRun in fresh HopDistrictTest PIE with a listen/dedicated server and two clients.\nOnly PIE state changes. Blacksmith is captured through Territory Control to make\nits District eligible. Input uses the inherited Narrative Begin/End Interact\nevents on next-tick timers, so client RPCs run outside editor Python execution.\nThis checks the gameplay input path, not hardware keyboard focus.\n",
+    "checks": {
+      "menu_0": true,
+      "isolated_0": true,
+      "menu_1": true,
+      "isolated_1": true,
+      "menu_2": true,
+      "isolated_2": true,
+      "door_step_0": true,
+      "door_step_1": true,
+      "door_step_2": true,
+      "late_join_door_state_and_meshes": true,
+      "menu_3": true,
+      "isolated_3": true,
+      "late_join_management": true
+    },
+    "samples": [
+      {
+        "player": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest:PersistentLevel.BP_HopNarrativePlayerController_DemoMap_C_0",
+        "widget": "/Engine/Transient.NarrativeEditorEngine_0:BP_NarrativeGameInstance_C_0.WBP_TerritoryGameplayHUD_Modular_C_0.WidgetTree_0.WBP_TerritoryDistrictManagement_C_0"
+      },
+      {
+        "player": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest:PersistentLevel.BP_HopNarrativePlayerController_DemoMap_C_0",
+        "widget": "/Engine/Transient.NarrativeEditorEngine_0:BP_NarrativeGameInstance_C_1.WBP_TerritoryGameplayHUD_Modular_C_0.WidgetTree_0.WBP_TerritoryDistrictManagement_C_0"
+      },
+      {
+        "player": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest:PersistentLevel.BP_HopNarrativePlayerController_DemoMap_C_0",
+        "widget": "/Engine/Transient.NarrativeEditorEngine_0:BP_NarrativeGameInstance_C_2.WBP_TerritoryGameplayHUD_Modular_C_0.WidgetTree_0.WBP_TerritoryDistrictManagement_C_0"
+      },
+      {
+        "door_step": 0,
+        "rows": [
+          {
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          }
+        ]
+      },
+      {
+        "door_step": 1,
+        "rows": [
+          {
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": false,
+            "left": 0.0,
+            "right": 0.0
+          },
+          {
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": false,
+            "left": 0.0,
+            "right": 0.0
+          },
+          {
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": false,
+            "left": 0.0,
+            "right": 0.0
+          }
+        ]
+      },
+      {
+        "door_step": 2,
+        "rows": [
+          {
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          }
+        ]
+      },
+      {
+        "late_join": [
+          {
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_3_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          }
+        ]
+      },
+      {
+        "player": "/Game/UEDPIE_3_HopDistrictTest.HopDistrictTest:PersistentLevel.BP_HopNarrativePlayerController_DemoMap_C_0",
+        "widget": "/Engine/Transient.NarrativeEditorEngine_0:BP_NarrativeGameInstance_C_3.WBP_TerritoryGameplayHUD_Modular_C_0.WidgetTree_0.WBP_TerritoryDistrictManagement_C_0"
+      }
+    ],
+    "phase": "stage_door",
+    "passed": true
+  },
+  "dedicated": {
+    "mode": "Dedicated",
+    "fixture": "Exercise Native interaction input, owning-client management UI and project doors.\n\nRun in fresh HopDistrictTest PIE with a listen/dedicated server and two clients.\nOnly PIE state changes. Blacksmith is captured through Territory Control to make\nits District eligible. Input uses the inherited Narrative Begin/End Interact\nevents on next-tick timers, so client RPCs run outside editor Python execution.\nThis checks the gameplay input path, not hardware keyboard focus.\n",
+    "checks": {
+      "menu_0": true,
+      "isolated_0": true,
+      "menu_1": true,
+      "isolated_1": true,
+      "door_step_0": true,
+      "door_step_1": true,
+      "door_step_2": true,
+      "late_join_door_state_and_meshes": true,
+      "menu_2": true,
+      "isolated_2": true,
+      "late_join_management": true,
+      "single_and_child_door_replicate": true
+    },
+    "samples": [
+      {
+        "player": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest:PersistentLevel.BP_HopNarrativePlayerController_DemoMap_C_0",
+        "widget": "/Engine/Transient.NarrativeEditorEngine_0:BP_NarrativeGameInstance_C_1.WBP_TerritoryGameplayHUD_Modular_C_0.WidgetTree_0.WBP_TerritoryDistrictManagement_C_0"
+      },
+      {
+        "player": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest:PersistentLevel.BP_HopNarrativePlayerController_DemoMap_C_0",
+        "widget": "/Engine/Transient.NarrativeEditorEngine_0:BP_NarrativeGameInstance_C_2.WBP_TerritoryGameplayHUD_Modular_C_0.WidgetTree_0.WBP_TerritoryDistrictManagement_C_0"
+      },
+      {
+        "door_step": 0,
+        "rows": [
+          {
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          }
+        ]
+      },
+      {
+        "door_step": 1,
+        "rows": [
+          {
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": false,
+            "left": 0.0,
+            "right": 0.0
+          },
+          {
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": false,
+            "left": 0.0,
+            "right": 0.0
+          },
+          {
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": false,
+            "left": 0.0,
+            "right": 0.0
+          }
+        ]
+      },
+      {
+        "door_step": 2,
+        "rows": [
+          {
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          }
+        ]
+      },
+      {
+        "late_join": [
+          {
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          },
+          {
+            "world": "/Game/UEDPIE_3_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "left": -119.99999999999997,
+            "right": 119.99999999999999
+          }
+        ]
+      },
+      {
+        "player": "/Game/UEDPIE_3_HopDistrictTest.HopDistrictTest:PersistentLevel.BP_HopNarrativePlayerController_DemoMap_C_0",
+        "widget": "/Engine/Transient.NarrativeEditorEngine_0:BP_NarrativeGameInstance_C_3.WBP_TerritoryGameplayHUD_Modular_C_0.WidgetTree_0.WBP_TerritoryDistrictManagement_C_0"
+      },
+      {
+        "extra_doors": [
+          {
+            "actor": "BP_Door_Base_C_1",
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "rotations": {
+              "Door": -119.99999999999997
+            }
+          },
+          {
+            "actor": "BP_Door_Base_C_1",
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "rotations": {
+              "Door": -119.99999999999997
+            }
+          },
+          {
+            "actor": "BP_Door_Base_C_1",
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "rotations": {
+              "Door": -119.99999999999997
+            }
+          },
+          {
+            "actor": "BP_Door_Base_C_1",
+            "world": "/Game/UEDPIE_3_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "rotations": {
+              "Door": -119.99999999999997
+            }
+          },
+          {
+            "actor": "BP_Door_Bunglow_C_1",
+            "world": "/Game/UEDPIE_0_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "rotations": {
+              "DoorLeft": -119.99999999999997,
+              "DoorRight": 119.99999999999997
+            }
+          },
+          {
+            "actor": "BP_Door_Bunglow_C_1",
+            "world": "/Game/UEDPIE_1_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "rotations": {
+              "DoorLeft": -119.99999999999997,
+              "DoorRight": 119.99999999999997
+            }
+          },
+          {
+            "actor": "BP_Door_Bunglow_C_1",
+            "world": "/Game/UEDPIE_2_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "rotations": {
+              "DoorLeft": -119.99999999999997,
+              "DoorRight": 119.99999999999997
+            }
+          },
+          {
+            "actor": "BP_Door_Bunglow_C_1",
+            "world": "/Game/UEDPIE_3_HopDistrictTest.HopDistrictTest",
+            "open": true,
+            "rotations": {
+              "DoorLeft": -119.99999999999997,
+              "DoorRight": 119.99999999999997
+            }
+          }
+        ]
+      }
+    ],
+    "phase": "extra_doors",
+    "passed": true
+  },
+  "narrativeSource": {
+    "passed": true,
+    "checked": 741,
+    "differences": []
+  },
+  "package": {
+    "mode": "Development Game server mode; not compiled TDAServer",
+    "smokeExit": 0,
+    "cookExit": 0,
+    "durationSeconds": 60
+  },
+  "packagedSmokeClean": false,
+  "packagedShaderMapErrorCount": 6,
+  "cookWarningCount": 63,
+  "repeatedEditorPythonCrashUnresolved": true
+}

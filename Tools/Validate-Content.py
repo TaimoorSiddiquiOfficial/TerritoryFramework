@@ -4,6 +4,10 @@ import os
 from pathlib import Path
 import unreal
 
+assert not unreal.EditorLevelLibrary.get_pie_worlds(True), 'Stop PIE/Simulate before validating assets'
+manifest = json.loads(Path(__file__).with_name('ContentManifest.json').read_text(encoding='utf-8'))
+expected = set(manifest['packages'])
+assert len(expected) == len(manifest['packages']), 'Duplicate package in content manifest'
 registry = unreal.AssetRegistryHelpers.get_asset_registry()
 registry.search_all_assets(True)
 registry.wait_for_completion()
@@ -21,6 +25,8 @@ blueprints = 0
 for asset in assets:
     row = {'asset': str(asset.package_name), 'errors': [], 'warnings': []}
     try:
+        if not asset.is_valid():
+            raise RuntimeError('Invalid AssetData record')
         obj = asset.get_asset()
         if not obj:
             raise RuntimeError('Asset did not load')
@@ -52,10 +58,13 @@ report = {
     'warnings': sum(len(r['warnings']) for r in rows),
     'invalid': [r['asset'] for r in rows if 'INVALID' in r.get('result', '') or r['errors']],
     'external_dependencies': external, 'optional_editor_dependencies': optional, 'assets': rows,
+    'expected_assets': len(expected),
+    'missing_packages': sorted(expected - {r['asset'] for r in rows}),
+    'unexpected_packages': sorted({r['asset'] for r in rows} - expected),
 }
 path = Path(os.environ.get('TF_RELEASE_REPORT', str(Path(unreal.Paths.project_saved_dir()) / 'TerritoryContentValidation.json')))
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text(json.dumps(report, indent=2), encoding='utf-8')
 print('TERRITORY_CONTENT_VALIDATION ' + json.dumps({k: v for k, v in report.items() if k != 'assets'}))
-assert len(rows) == 118, 'Expected all 118 included assets'
+assert not report['missing_packages'] and not report['unexpected_packages'], 'Saved content differs from the reviewed manifest; see ' + str(path)
 assert not report['invalid'] and not external, 'Content validation failed; see ' + str(path)

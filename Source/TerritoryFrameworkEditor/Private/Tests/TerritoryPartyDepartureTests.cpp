@@ -76,6 +76,8 @@ bool FTFTerritoryPartyDepartureAuthority::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Leave callback starts a separate personal session"), Members[0]->GetCurrentDialogue() && Members[0]->GetCurrentDialogue() != Shared);
 	TestTrue(TEXT("Synchronous personal replacement leaves the original dialogue alive"), Party->GetCurrentDialogue() == Shared && Shared->IsInitialized());
 	TestTrue(TEXT("Native membership appoints the remaining leader"), Party->GetPartyLeader() == Members[2]);
+	TestTrue(TEXT("The running dialogue migrates its cached event controller"), Shared->OwningController == Members[2]->GetOwningController());
+	TestTrue(TEXT("The running dialogue migrates its cached distance-check pawn"), Shared->OwningPawn == Members[2]->GetOwningPawn());
 	TestTrue(TEXT("The remaining member can still skip through Native"), Members[2]->TrySkipCurrentDialogueLine());
 	TestTrue(TEXT("Existing shared playback advances instead of restarting"), Shared->GetCurrentNode() != FirstLine);
 	Members[0]->ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
@@ -106,14 +108,6 @@ bool FTFTerritoryPartyDepartureAlias::RunTest(const FString& Parameters)
 	auto* View = NewObject<UTerritoryCinematicPresentationSubsystem>(NewObject<ULocalPlayer>(GEngine));
 	View->BindToController(PC);
 	Party->AddPartyMember(Tales);
-	auto* Shared = NewObject<UDialogue>(Party);
-	Shared->OwningComp = Party;
-	Shared->OwningController = PC;
-	Party->CurrentDialogue = Shared;
-	Tales->CurrentDialogue = Shared;
-	Party->OnDialogueBegan.Broadcast(Shared);
-	View->DetachDepartedPartyAlias(Party);
-	TestTrue(TEXT("Stale leave cannot detach a current or rejoined member"), Tales->GetCurrentDialogue() == Shared);
 	// A second local member must retain the client's shared copy too.
 	auto* OtherPC = NewObject<ATerritoryPartyLocalControllerProbe>(World->PersistentLevel);
 	OtherPC->SetRole(ROLE_Authority);
@@ -123,7 +117,17 @@ bool FTFTerritoryPartyDepartureAlias::RunTest(const FString& Parameters)
 	auto* OtherTales = OtherPC->GetTalesComponent();
 	TestTrue(TEXT("Fixture has a remaining local viewer"), OtherPC->IsLocalController());
 	Party->AddPartyMember(OtherTales);
+	auto* Shared = NewObject<UDialogue>(Party);
+	Shared->OwningComp = Party;
+	Shared->OwningController = PC;
+	Party->CurrentDialogue = Shared;
+	Tales->CurrentDialogue = Shared;
+	Party->OnDialogueBegan.Broadcast(Shared);
+	View->DetachDepartedPartyAlias(Party);
+	TestTrue(TEXT("Stale leave cannot detach a current or rejoined member"), Tales->GetCurrentDialogue() == Shared);
 	OtherTales->CurrentDialogue = Shared;
+	// This alias test removes a non-owner. Owner transfer policy is tested separately.
+	Shared->OwningController = OtherPC;
 	Party->RemovePartyMember(Tales);
 	TestTrue(TEXT("Listen-server detach preserves the shared authority object for the remaining member"), Shared->IsInitialized());
 	// Reproduce the alias on a client before its membership RepNotify is observed.

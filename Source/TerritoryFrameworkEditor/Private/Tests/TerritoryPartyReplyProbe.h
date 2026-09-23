@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Tales/Dialogue.h"
+#include "Tales/TerritoryPartyDialogue.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/NarrativePartyComponent.h"
 #include "GameFramework/Actor.h"
@@ -33,11 +34,21 @@ public:
 
 /** Editor-only fixture: holds both NPC lines and the selected reply until explicitly skipped. */
 UCLASS()
-class UTerritoryPartyReplyTestDialogue : public UDialogue
+class UTerritoryPartyReplyTestDialogue : public UTerritoryPartyDialogue
 {
 	GENERATED_BODY()
 public:
 	virtual bool Initialize(UTalesComponent* Component, const FDialoguePlayParams Params) override;
+	void AddDistanceProbe(AActor* Actor)
+	{
+		FSpeakerInfo Speaker;
+		Speaker.SpeakerID = TEXT("DistanceProbe");
+		Speakers.Add(Speaker);
+		SpeakerAvatars.Add(Speaker.GetSpeakerID(), Actor);
+	}
+	void RunNodeEventsForProbe(UDialogueNode* Node) { ProcessNodeEvents(Node, true); }
+	AActor* GetReturnTargetForProbe() const { return OldViewTarget; }
+	APlayerState* GetPartySpeakerForProbe() const { return CurrentPartySpeakerAvatar; }
 };
 
 /** Uses Native's actual speaker-tag begin/end implementation. */
@@ -66,8 +77,16 @@ class UTerritoryPartyReplyMemberProbe : public UTalesComponent
 	GENERATED_BODY()
 public:
 	int32 ReplyDispatches = 0;
+	void EndPlayForProbe() { EndPlay(EEndPlayReason::Destroyed); }
+	void BeginPlayForProbe() { RegisterAllComponentTickFunctions(true); BeginPlay(); }
 	TFunction<void(UNarrativePartyComponent*)> LeaveAction;
 	TFunction<void(UNarrativePartyComponent*)> JoinAction;
+	TFunction<void(UDialogue*)> DialogueBeginAction;
+	UFUNCTION()
+	void ObserveDialogueBegin(UDialogue* Dialogue)
+	{
+		if (DialogueBeginAction) DialogueBeginAction(Dialogue);
+	}
 	UFUNCTION()
 	void ObserveJoin(UNarrativePartyComponent* JoinedParty, UNarrativePartyComponent* OldParty)
 	{
@@ -115,4 +134,7 @@ public:
 	bool AddExternalSpeakerTag(APlayerState* State);
 	UFUNCTION(BlueprintCallable, Category="Test")
 	int32 GetSpeakerTagCount(APlayerState* State) const;
+	/** Closes an actual server connection; engine teardown must deliver Logout. */
+	UFUNCTION(BlueprintCallable, Category="Test")
+	bool DisconnectMember(UTalesComponent* Member);
 };

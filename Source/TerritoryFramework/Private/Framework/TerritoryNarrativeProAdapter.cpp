@@ -149,8 +149,8 @@ TArray<FTerritoryNarrativeAttitudeSnapshot> FTerritoryNarrativeProAdapter::ReadF
 				continue;
 			}
 
-			// Lossless conservative merge for asymmetric Narrative data: hostility wins,
-			// then friendliness, otherwise neutral.
+			// Strategic policy uses hostility first. The projection is deliberately
+			// lossy and must never be written back as a bilateral Narrative attitude.
 			if (Existing->Attitude == ETeamAttitude::Hostile
 				|| DirectionalAttitude == ETeamAttitude::Hostile)
 			{
@@ -175,7 +175,16 @@ TArray<FTerritoryNarrativeAttitudeSnapshot> FTerritoryNarrativeProAdapter::ReadF
 	Result.Reserve(Keys.Num());
 	for (const FString& Key : Keys)
 	{
-		Result.Add(ByPair.FindChecked(Key));
+		FTerritoryNarrativeAttitudeSnapshot Snapshot = ByPair.FindChecked(Key);
+		auto ReadDirection = [GameState](FGameplayTag From, FGameplayTag To)
+		{
+			const FFactionAttitudeData* Data = GameState->FactionAllianceMap.Find(From);
+			const TEnumAsByte<ETeamAttitude::Type>* Attitude = Data ? Data->AttitudeMap.Find(To) : nullptr;
+			return Attitude ? Attitude->GetValue() : ETeamAttitude::Neutral;
+		};
+		Snapshot.bAsymmetric = ReadDirection(Snapshot.FactionA, Snapshot.FactionB)
+			!= ReadDirection(Snapshot.FactionB, Snapshot.FactionA);
+		Result.Add(Snapshot);
 	}
 	return Result;
 }

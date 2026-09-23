@@ -1800,6 +1800,34 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 		Revision = HashCombineFast(Revision,
 			static_cast<uint32>(UTerritoryUIBlueprintLibrary::GetDistrictOperationsRevision(View)));
 	}
+	FGameplayTag ViewerFaction;
+	for (const FTerritoryDistrictOperationsView& View : AllViews)
+	{
+		if (View.ViewerFaction.IsValid())
+		{
+			ViewerFaction = View.ViewerFaction;
+			break;
+		}
+	}
+	// A credit and debit between polls can leave every District and wallet
+	// unchanged. Read and fingerprint the same ledger snapshot we will render.
+	const FTerritoryEconomyOperationsView Economy =
+		UTerritoryUIBlueprintLibrary::BuildEconomyOperationsView(
+			this, GetOwningPlayer(), ViewerFaction, 10);
+	Revision = HashCombineFast(Revision, GetTypeHash(Economy.Faction));
+	for (int64 Value : {Economy.AvailableFunds, int64(Economy.IncomePerTick),
+		int64(Economy.CostsPerTick), int64(Economy.NetPerTick),
+		Economy.RecentCredits, Economy.RecentDebits})
+	{
+		Revision = HashCombineFast(Revision, GetTypeHash(Value));
+	}
+	for (const FTerritoryTransaction& Transaction : Economy.RecentTransactions)
+	{
+		Revision = HashCombineFast(Revision, GetTypeHash(Transaction.TransactionID));
+		Revision = HashCombineFast(Revision, GetTypeHash(Transaction.Amount));
+		Revision = HashCombineFast(Revision, GetTypeHash(Transaction.Reason));
+		Revision = HashCombineFast(Revision, GetTypeHash(Transaction.SourceTerritory));
+	}
 	if (LastOperationsRevision == static_cast<int32>(Revision))
 	{
 		return;
@@ -1903,7 +1931,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 			NSLOCTEXT("TerritoryJournal", "FilterSummary", "{0} visible districts  |  City > District > Place"),
 			FText::AsNumber(VisibleCount)));
 	}
-	RefreshOperationalSummaries(AllViews);
+	RefreshOperationalSummaries(AllViews, Economy);
 	RefreshEntrySelection();
 }
 
@@ -2736,7 +2764,8 @@ void UTerritoryJournalWidget::UpdateSelectedDistrictView(
 }
 
 void UTerritoryJournalWidget::RefreshOperationalSummaries(
-	const TArray<FTerritoryDistrictOperationsView>& Views)
+	const TArray<FTerritoryDistrictOperationsView>& Views,
+	const FTerritoryEconomyOperationsView& Economy)
 {
 	UPanelWidget* ActivePanel = GetActiveTerritoriesPanel();
 	UPanelWidget* CapturedPanel = GetCapturedTerritoriesPanel();
@@ -2757,10 +2786,8 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 	ATerritoryDistrict* PlayerDistrict =
 		UTerritoryUIBlueprintLibrary::GetDistrictAtPlayerLocation(
 			this, GetOwningPlayer());
-	FGameplayTag ViewerFaction;
 	for (const FTerritoryDistrictOperationsView& View : Views)
 	{
-		if (!ViewerFaction.IsValid()) ViewerFaction = View.ViewerFaction;
 		AvailableCount += View.bAvailable ? 1 : 0;
 		ThreatCount += (View.bUnderAttack || View.bAttackScheduled
 			|| View.bThreatPreviewAvailable) ? 1 : 0;
@@ -2861,9 +2888,6 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 			TEXT("NoOperationalRiskDistricts"));
 	}
 
-	const FTerritoryEconomyOperationsView Economy =
-		UTerritoryUIBlueprintLibrary::BuildEconomyOperationsView(
-			this, GetOwningPlayer(), ViewerFaction, 10);
 	TArray<FText> TransactionLines;
 	for (const FTerritoryTransaction& Transaction : Economy.RecentTransactions)
 	{

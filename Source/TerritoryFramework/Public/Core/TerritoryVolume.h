@@ -360,13 +360,10 @@ public:
 
 	/**
 	 * P0-05: Atomically commit a new FTerritoryOwnershipData struct.
-	 * Writes the entire struct in one operation, then fires ONE ordered event bundle:
-	 *   1. Despawn old guards
-	 *   2. Spawn new guards (if applicable)
-	 *   3. BP virtual OnOwnershipChanged
-	 *   4. OnTerritoryOwnershipChanged delegate
-	 *   5. BP virtual OnStateChanged (if state changed)
-	 *   6. OnTerritoryStateChangedDelegate (if state changed)
+	 * Writes the entire struct, reconciles guard/availability and native ownership
+	 * dependencies, clears stale capture tracking and publishes current snapshots.
+	 * Then invokes Narrative state/availability events, ownership hooks/delegates,
+	 * state hooks/delegates and the availability delegate, in that order.
 	 *
 	 * No intermediate state is visible to listeners between steps.
 	 * Returns true if the commit was applied (old != new).
@@ -695,6 +692,11 @@ public:
 	bool CheckStateTransitionConditions(ETerritoryState OldState, ETerritoryState NewState, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 protected:
+	/** Native subclass state required before Narrative transition events.
+	 * The base Volume has no additional ownership-dependent state.
+	 */
+	virtual void ReconcileOwnershipDependentSystems(FGameplayTag OldOwner, FGameplayTag NewOwner) {}
+
 	/** Native SaveGame deserialization invalidates even an identical in-flight purchase. */
 	uint64 GetPurchaseLoadGeneration() const { return GarrisonLoadGeneration; }
 	/** Serializes plugin purchases with state validation and garrison reconciliation. */
@@ -861,6 +863,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDefenderNarrativeEventConditions;
 	friend class FTFVolumeRuleCallbacks;
+	friend class FTFTransitionEventReconciliation;
 	friend class FTFForcedMutationConditions;
 	friend class FTFFactionStateRulesIntegration;
 	friend class FTFGuardRetirementCallbacks;

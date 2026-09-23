@@ -2,11 +2,14 @@
 
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/GameModeBase.h"
+#include "Misc/ScopeExit.h"
 #include "Tales/NarrativeDialogueSettings.h"
 #include "UnrealFramework/NarrativeParty.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "UnrealFramework/NarrativePlayerState.h"
 #include "AbilitySystemComponent.h"
+#include "Tales/TerritoryPartyDialogue.h"
 
 void UTerritoryNarrativePartyComponent::RecordNativePartySpeakerGrants()
 {
@@ -104,13 +107,77 @@ void UTerritoryNarrativePartyComponent::ExitDialogue(EExitDialogueReason Reason)
 
 void UTerritoryNarrativePartyComponent::FlushDeferredDialogueExit()
 {
-	if (DialogueMutationDepth || !DeferredExitReason.IsSet()) return;
-	UDialogue* Requested = DeferredExitDialogue.Get();
-	const EExitDialogueReason Reason = DeferredExitReason.GetValue();
-	DeferredExitReason.Reset();
-	DeferredExitDialogue.Reset();
-	// A finish callback for an old dialogue must not close its replacement.
-	if (IsValid(Requested) && Requested == GetCurrentDialogue() && Requested->IsInitialized()) ExitDialogue(Reason);
+	if (DialogueMutationDepth || bFlushingDeferredOperations) return;
+	TGuardValue<bool> Flushing(bFlushingDeferredOperations, true);
+	while (!PendingLogouts.IsEmpty() || DeferredExitReason.IsSet())
+	{
+		if (!PendingLogouts.IsEmpty())
+		{
+			// Logout can run inside Native's member iteration. Keep arrays stable until
+			// it returns, then remove captured identities even if their actors died.
+			const auto Departures = MoveTemp(PendingLogouts);
+			PendingLogouts.Reset();
+			TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
+			PartyMembers.RemoveAll([](UTalesComponent* Member) { return !IsValid(Member); });
+			PartyMemberStates.RemoveAll([](APlayerState* State) { return !IsValid(State); });
+			RefreshActorMembership();
+			PrepareNativeSpeakerCleanup();
+			// A nested teardown cannot safely transfer context partway through Native
+			// initialization/tag/finish callbacks. End after the outer operation.
+			Super::ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
+			for (const FPendingLogout& Departure : Departures)
+			{
+				if (UTalesComponent* Member = Departure.Member.Get())
+				{
+					if (Member->GetParty() == this && IsValid(Member->GetOwningController()))
+					{
+						RefreshActorMembership(nullptr, Member);
+						Super::RemovePartyMember(Member);
+					}
+				}
+				// Native Remove requires a live controller and its original PlayerState.
+				// Destroyed objects cannot receive Leave; retire their captured entries.
+				PartyMembers.RemoveAll([&](UTalesComponent* Member)
+					{ return TWeakObjectPtr<UTalesComponent>(Member) == Departure.Member; });
+				PartyMemberStates.RemoveAll([&](APlayerState* State)
+					{ return TWeakObjectPtr<APlayerState>(State) == Departure.State; });
+			}
+			RefreshActorMembership();
+		}
+		if (DeferredExitReason.IsSet())
+		{
+			UDialogue* Requested = DeferredExitDialogue.Get();
+			const EExitDialogueReason Reason = DeferredExitReason.GetValue();
+			DeferredExitReason.Reset();
+			DeferredExitDialogue.Reset();
+			// A finish callback for an old dialogue must not close its replacement.
+			if (IsValid(Requested) && Requested == GetCurrentDialogue() && Requested->IsInitialized()) ExitDialogue(Reason);
+		}
+	}
+}
+
+void UTerritoryNarrativePartyComponent::HandleGameModeLogout(AGameModeBase* GameMode, AController* Exiting)
+{
+	if (!HasAuthority() || !IsValid(GameMode) || GameMode->GetWorld() != GetWorld()
+		|| !IsValid(Exiting) || Exiting->GetWorld() != GetWorld()) return;
+	for (UTalesComponent* Member : GetPartyMembers())
+	{
+		if (!IsValid(Member) || Member->GetParty() != this || Member->GetOwningController() != Exiting) continue;
+		ExitingControllers.Add(Exiting);
+		ON_SCOPE_EXIT { ExitingControllers.Remove(Exiting); };
+		const TWeakObjectPtr<APlayerState> DepartingState = Exiting->PlayerState.Get();
+		if (!DialogueMutationDepth && RemovePartyMember(Member)) continue;
+		if (!PartyMembers.Contains(Member)) continue;
+		// Personal Tales EndPlay otherwise deinitializes the group's shared object.
+		// Do not mutate membership or broadcast Leave inside Native's iteration.
+		// Native can restore this alias while finishing Begin; its normal Exit below
+		// clears it after that operation, before another gameplay frame can run.
+		PendingLogouts.Add({Member, DepartingState});
+		if (IsValid(Member))
+			if (UDialogue* Alias = Member->GetCurrentDialogue(); IsValid(Alias) && Alias->OwningComp == this)
+				Member->CurrentDialogue = nullptr;
+		FlushDeferredDialogueExit();
+	}
 }
 
 bool UTerritoryNarrativePartyComponent::CanAddMember(const UTalesComponent* Member) const
@@ -120,11 +187,11 @@ bool UTerritoryNarrativePartyComponent::CanAddMember(const UTalesComponent* Memb
 		|| Member->GetParty() == this || PartyMembers.Contains(Member)) return false;
 	// Native does not synchronize an in-progress conversation to a newly joined
 	// member. Reject before releasing their old party or applying unbalanced tags.
-	if (SpeakerTagDialogue == GetCurrentDialogue() && SpeakerTagDialogue.IsValid()
-		&& SpeakerTagDialogue->IsInitialized() && !PartySpeakerTags.IsEmpty()) return false;
+	if (IsValid(GetCurrentDialogue()) && GetCurrentDialogue()->IsInitialized()) return false;
 	const APlayerController* Controller = Member->GetOwningController();
 	const APlayerState* State = IsValid(Controller) ? Controller->PlayerState.Get() : nullptr;
-	if (!IsValid(Controller) || !Controller->HasAuthority() || Controller->GetWorld() != GetWorld()
+	if (!IsValid(Controller) || Controller->IsActorBeingDestroyed() || ExitingControllers.Contains(Controller)
+		|| !Controller->HasAuthority() || Controller->GetWorld() != GetWorld()
 		|| !IsValid(State) || !State->HasAuthority() || State->GetWorld() != GetWorld()
 		|| State->GetOwningController() != Controller || PartyMemberStates.Contains(State)) return false;
 	if (const ANarrativePlayerController* NarrativeController = Cast<ANarrativePlayerController>(Controller))
@@ -209,6 +276,33 @@ bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Membe
 		|| Member->GetWorld() != GetWorld()) return false;
 	APlayerController* Controller = Member->GetOwningController();
 	if (!IsValid(Controller) || !Controller->HasAuthority() || Controller->GetWorld() != GetWorld()) return false;
+	ON_SCOPE_EXIT { FlushDeferredDialogueExit(); };
+	UDialogue* Current = GetCurrentDialogue();
+	// Native sends the selected party speaker only to client copies. A server-only
+	// context transfer cannot repair a camera already following a departing speaker.
+	const bool bPlayerLineActive = IsValid(Current) && Current->GetCurrentNode()
+		&& Current->GetCurrentNode()->IsA<UDialogueNode_Player>();
+	const bool bOwnerLeaving = IsValid(Current) && Current->OwningController == Controller;
+	APlayerController* NextController = nullptr;
+	if (bOwnerLeaving)
+	{
+		for (UTalesComponent* Remaining : PartyMembers)
+		{
+			if (!IsValid(Remaining) || Remaining == Member) continue;
+			APlayerController* Candidate = Remaining->GetOwningController();
+			if (!IsValid(Candidate) || Candidate->IsActorBeingDestroyed() || ExitingControllers.Contains(Candidate)) continue;
+			if (!NextController) NextController = Candidate;
+			if (GetNetMode() != NM_DedicatedServer && Candidate->IsLocalController())
+			{
+				NextController = Candidate;
+				break;
+			}
+		}
+	}
+	auto* Adapter = Cast<UTerritoryPartyDialogue>(Current);
+	const bool bTransferContext = bOwnerLeaving && !bPlayerLineActive
+		&& OwnerDeparturePolicy == ETerritoryPartyOwnerDeparturePolicy::ContinueWhenSupported
+		&& Adapter && Adapter->CanTransferPartyContext(NextController);
 
 	// Native shares the authority's UDialogue with each personal Tales component.
 	// Its removal clears membership but leaves that alias. A personal BeginDialogue
@@ -218,11 +312,11 @@ bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Membe
 	bool bRemoved = false;
 	{
 		TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
-		if (PartyMembers.Num() == 1 && GetCurrentDialogue())
+		if ((PartyMembers.Num() == 1 || bPlayerLineActive || (bOwnerLeaving && !bTransferContext)) && GetCurrentDialogue())
 		{
-			// Native must still see the last member when it balances speaker grants
+			// Native must still see the departing member when it balances speaker grants
 			// and sends its reliable client exit. Finish before Leave callbacks can
-			// start a personal conversation. No remaining member loses playback.
+			// start a personal conversation. Unsupported transfers end for the group.
 			PrepareNativeSpeakerCleanup();
 			Super::ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
 			if (!IsValid(Member) || Member->GetParty() != this || !PartyMembers.Contains(Member)) return false;
@@ -232,6 +326,11 @@ bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Membe
 		UDialogue* Alias = Member->GetCurrentDialogue();
 		const bool bSharedAlias = IsValid(Alias) && Alias->OwningComp == this;
 		if (bSharedAlias) Member->CurrentDialogue = nullptr;
+		if (bTransferContext && Adapter == GetCurrentDialogue() && !Adapter->TransferPartyContext(NextController))
+		{
+			PrepareNativeSpeakerCleanup();
+			Super::ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
+		}
 		const TWeakObjectPtr<APlayerState> State = Controller->PlayerState.Get();
 		TWeakObjectPtr<UAbilitySystemComponent> ReleasedASC;
 		const FGameplayTagContainer ReleasedTags = PartySpeakerTags;
@@ -261,7 +360,6 @@ bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Membe
 			Member->CurrentDialogue = Alias;
 		}
 	}
-	FlushDeferredDialogueExit();
 	return bRemoved && IsValid(Member) && Member->GetParty() != this && !PartyMembers.Contains(Member);
 }
 
@@ -287,12 +385,21 @@ void UTerritoryNarrativePartyComponent::OnRegister()
 	OnDialogueRepliesAvailable.AddUniqueDynamic(this, &ThisClass::HandleRepliesAvailable);
 	OnNPCDialogueLineStarted.AddUniqueDynamic(this, &ThisClass::HandleNPCLineStarted);
 	bReplyEventsBound = true;
+	if (HasAuthority() && !LogoutHandle.IsValid())
+		LogoutHandle = FGameModeEvents::OnGameModeLogoutEvent().AddUObject(this, &ThisClass::HandleGameModeLogout);
 }
 
 void UTerritoryNarrativePartyComponent::OnUnregister()
 {
 	UnbindReplyEvents();
+	UnbindLogout();
 	Super::OnUnregister();
+}
+
+void UTerritoryNarrativePartyComponent::UnbindLogout()
+{
+	FGameModeEvents::OnGameModeLogoutEvent().Remove(LogoutHandle);
+	LogoutHandle.Reset();
 }
 
 void UTerritoryNarrativePartyComponent::UnbindReplyEvents()
@@ -308,11 +415,14 @@ void UTerritoryNarrativePartyComponent::UnbindReplyEvents()
 void UTerritoryNarrativePartyComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	UnbindReplyEvents();
+	UnbindLogout();
 	TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
 	PrepareNativeSpeakerCleanup();
 	Super::EndPlay(EndPlayReason);
 	DeferredExitDialogue.Reset();
 	DeferredExitReason.Reset();
+	PendingLogouts.Reset();
+	ExitingControllers.Reset();
 }
 
 bool UTerritoryNarrativePartyComponent::CanMemberChooseDialogueReply(APlayerState* Member) const
@@ -347,7 +457,11 @@ void UTerritoryNarrativePartyComponent::SelectDialogueOption(UDialogueNode_Playe
 
 	// Consume readiness before Native runs line events, which can re-enter Tales.
 	ReadyDialogue.Reset();
-	Super::SelectDialogueOption(Option, Selector);
+	{
+		TGuardValue<int32> Mutation(DialogueMutationDepth, DialogueMutationDepth + 1);
+		Super::SelectDialogueOption(Option, Selector);
+	}
+	FlushDeferredDialogueExit();
 }
 
 void UTerritoryNarrativePartyComponent::TrySelectDialogueOption(UDialogueNode_Player* Option)

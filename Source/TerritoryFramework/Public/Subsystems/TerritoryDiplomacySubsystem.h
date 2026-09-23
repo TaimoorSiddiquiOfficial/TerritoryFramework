@@ -128,7 +128,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Territory|Diplomacy")
 	TArray<FDiplomacyEvent> GetDiplomacyHistory() const;
 
-	/** Update Narrative's faction attitudes from Territory's current treaty state on the server. */
+	/** Apply authored bilateral treaties on the server. Observed Narrative attitudes are never written back. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Diplomacy")
 	void SyncToGameState();
 
@@ -207,6 +207,7 @@ private:
 
 	void CheckTreatyExpirations();
 	void FinalizeGameStateSync();
+	void RefreshFromGameState(bool bBroadcastChanges);
 	void SyncNarrativeAttitudeForTreaty(FGameplayTag FactionA, FGameplayTag FactionB);
 
 	FTimerHandle TreatyExpirationTimerHandle;

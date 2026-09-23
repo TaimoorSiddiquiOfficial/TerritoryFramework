@@ -3,6 +3,7 @@
 #include <limits>
 
 #include "Misc/AutomationTest.h"
+#include "Tales/TerritoryAssaultAdmissionTask.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "AI/NPCDefinition.h"
@@ -595,6 +596,23 @@ bool FTFTerritoryQuestTerminalStateValidation::RunTest(const FString& Parameters
 	Warnings.Reset();
 	TestTrue(TEXT("A Regular intermediate state followed by one final Success is valid"),
 		UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
+	auto* Admission = NewObject<UTerritoryAssaultAdmissionTask>(CaptureBranch);
+	CaptureBranch->QuestTasks.Add(Admission);
+	Errors.Reset(); Warnings.Reset();
+	TestFalse(TEXT("Missing nested admission request fails quest validation"), UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
+	TestTrue(TEXT("Failure identifies the admission task"), Errors.ContainsByPredicate([](const auto& Error) { return Error.Contains(TEXT("admission task")); }));
+	Admission->Request = NewObject<UTerritoryScheduleEnemyWaveEvent>(Admission);
+	Errors.Reset(); Warnings.Reset();
+	TestFalse(TEXT("Unconfigured request fails validation"), UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
+	TestTrue(TEXT("Missing Scenario ID explains durable identity"), Errors.ContainsByPredicate([](const auto& Error) { return Error.Contains(TEXT("Scenario ID")); }));
+	Admission->Request->ScenarioID = TEXT("TestAdmission");
+	Admission->Request->TargetTerritory = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	Admission->Request->AttackingFaction = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Bandits"));
+	Errors.Reset(); Warnings.Reset();
+	TestTrue(TEXT("Configured admission can legitimately wait for runtime eligibility"), UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
+	Admission->RequiredQuantity = 2;
+	Errors.Reset(); Warnings.Reset();
+	TestFalse(TEXT("Multiple admissions cannot share one task receipt"), UTerritoryDataValidator::ValidateQuest(Blueprint, Errors, Warnings));
 	return true;
 }
 

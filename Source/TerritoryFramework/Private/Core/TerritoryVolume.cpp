@@ -1804,8 +1804,9 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		return false;
 	}
 
-	bTransitionInProgress = true;
-	ActiveTransitionContext = TransitionContext;
+	TGuardValue<bool> TransitionGuard(bTransitionInProgress, true);
+	TGuardValue<FTerritoryTransitionContext> ContextGuard(ActiveTransitionContext, TransitionContext);
+	const uint64 CommitLoadGeneration = GarrisonLoadGeneration;
 
 	// Cache previous values for RepNotify diff
 	PreviousOwningFaction = OldOwner;
@@ -1881,8 +1882,8 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	// This switch owns owner-change and claim/contest garrison churn only. There is
 	// no Locked case by design: a Locked control state cannot reach here (rejected by
 	// CommitOwnershipData above), and lock/unlock garrison changes are applied by
-	// ReconcileAvailabilityDependentSystems() — DespawnGuards() on lock, spawn to
-	// desired count on unlock. See TerritoryGuardLifecyclePolicy.h.
+	// ReconcileAvailabilityDependentSystems() below, before transition events.
+	// See TerritoryGuardLifecyclePolicy.h.
 	switch (TerritoryGuardLifecyclePolicy::DetermineAction(
 		OldOwner, NewOwner, OldState, NewState))
 	{
@@ -1899,7 +1900,27 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		break;
 	}
 
-	// ─── ONE ordered event bundle ───
+	if (GarrisonLoadGeneration != CommitLoadGeneration || IsActorBeingDestroyed()) return false;
+	if (OldAvailability != NewAvailability)
+	{
+		ReconcileAvailabilityDependentSystems();
+	}
+	if (GarrisonLoadGeneration != CommitLoadGeneration || IsActorBeingDestroyed()) return false;
+	if (OldOwner != NewOwner)
+	{
+		if (UTerritoryControlSubsystem* Control = GetWorld()
+			? GetWorld()->GetSubsystem<UTerritoryControlSubsystem>() : nullptr)
+		{
+			Control->ClearCaptureTrackingOnly(this);
+		}
+		ReconcileOwnershipDependentSystems(OldOwner, NewOwner);
+	}
+	if (GarrisonLoadGeneration != CommitLoadGeneration || IsActorBeingDestroyed()) return false;
+	RefreshGarrisonSnapshot();
+	if (GarrisonLoadGeneration != CommitLoadGeneration || IsActorBeingDestroyed()) return false;
+	PublishCaptureSummary();
+
+	// ─── ONE ordered event bundle, observing reconciled dependencies ───
 	if (OldState != NewState)
 	{
 		FireStateEvents(OldState, false, TransitionContext, &OldOwner);
@@ -1940,25 +1961,8 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		OnTerritoryAvailabilityChanged.Broadcast(this, NewAvailability);
 	}
 
-	// P1-N03: Clear any stale capture state in ControlSubsystem when ownership changes
-	// P0-01: Clean up runtime capture tracking only — do NOT mutate terminal
-	// ownership fields (progress, contesting faction, state). Those were just
-	// committed atomically and must not be zeroed by ResetCapture.
-	if (OldOwner != NewOwner)
-	{
-		if (UWorld* W = GetWorld())
-		{
-			if (UTerritoryControlSubsystem* Control = W->GetSubsystem<UTerritoryControlSubsystem>())
-			{
-				Control->ClearCaptureTrackingOnly(this);
-			}
-		}
-	}
-
 	RefreshGarrisonSnapshot();
 	ForceNetUpdate();
-	ActiveTransitionContext = FTerritoryTransitionContext();
-	bTransitionInProgress = false;
 	return true;
 }
 
@@ -2235,7 +2239,6 @@ bool ATerritoryVolume::LockTerritoryWithContext(
 	Candidate.ContestingFaction = FGameplayTag();
 	Candidate.LockReason = Reason;
 	if (!CommitOwnershipData(Candidate, TransitionContext)) return false;
-	ReconcileAvailabilityDependentSystems();
 
 	if (const UTerritoryDeveloperSettings* Settings =
 		GetDefault<UTerritoryDeveloperSettings>();
@@ -2289,7 +2292,6 @@ bool ATerritoryVolume::TryUnlockWithContext(
 	const bool bCommitted = CommitOwnershipData(Candidate, TransitionContext);
 	bBypassTransitionConditions = bWasBypassing;
 	if (!bCommitted) return false;
-	ReconcileAvailabilityDependentSystems();
 
 	if (const UTerritoryDeveloperSettings* Settings =
 		GetDefault<UTerritoryDeveloperSettings>();

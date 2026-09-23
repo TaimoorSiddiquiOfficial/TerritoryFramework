@@ -275,19 +275,37 @@ UTerritoryScheduleEnemyWaveEvent::UTerritoryScheduleEnemyWaveEvent(
 void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
+	FText FailureReason;
+	TryScheduleWave(Target, Controller, NarrativeComponent, FailureReason, true);
+}
+
+bool UTerritoryScheduleEnemyWaveEvent::TryScheduleWave(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent,
+	FText& OutFailureReason, bool bLogFailure)
+{
+	OutFailureReason = FText::GetEmpty();
+	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent))
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryStoryEvent", "AdmissionConditions", "The Wave's Narrative conditions are not satisfied.");
+		return false;
+	}
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
-	if (!World || World->GetNetMode() == NM_Client) return;
+	if (!World || World->GetNetMode() == NM_Client)
+	{
+		OutFailureReason = NSLOCTEXT("TerritoryStoryEvent", "AdmissionAuthority", "Assault admission requires a server world.");
+		return false;
+	}
 	ATerritoryVolume* Territory = ResolveTerritory(World, TargetTerritory);
 	UTerritoryCounterAttackSubsystem* Counter = World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
 	if (!Territory || !Counter)
 	{
-		UE_LOG(LogTerritory, Warning, TEXT("[EnemyWaveEvent] Target Territory '%s' is not loaded or registered"),
-			*TargetTerritory.ToString());
-		return;
+		OutFailureReason = NSLOCTEXT("TerritoryStoryEvent", "AdmissionTargetUnavailable", "Waiting for the target Territory and counterattack subsystem.");
+		if (bLogFailure)
+			UE_LOG(LogTerritory, Warning, TEXT("[EnemyWaveEvent] Target Territory '%s' is not loaded or registered"), *TargetTerritory.ToString());
+		return false;
 	}
-	FText FailureReason;
+	FText& FailureReason = OutFailureReason;
 	bool bScheduled = false;
 	if (LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
 	{
@@ -334,12 +352,10 @@ void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target
 			AttackingFaction, LaunchMode, IdentityOptions,
 			bStartImmediately, FailureReason);
 	}
-	if (!bScheduled)
-	{
-		UE_LOG(LogTerritory, Warning,
-			TEXT("[EnemyWaveEvent] No Territory assault was scheduled for %s: %s"),
+	if (!bScheduled && bLogFailure)
+		UE_LOG(LogTerritory, Warning, TEXT("[EnemyWaveEvent] No Territory assault was scheduled for %s: %s"),
 			*TargetTerritory.ToString(), *FailureReason.ToString());
-	}
+	return bScheduled;
 }
 
 FString UTerritoryScheduleEnemyWaveEvent::GetGraphDisplayText_Implementation()

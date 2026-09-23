@@ -70,6 +70,12 @@ struct FTreatyRecord
 		meta=(ToolTip="True means faction reputation created this treaty and may still change it. False means a designer or quest owns it."))
 	bool bReputationDerived = false;
 
+	/** Read-only projection of Narrative's directional map, not a bilateral command.
+	 * Legacy saves default to authored because their original provenance is unknowable.
+	 */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Diplomacy")
+	bool bNarrativeObserved = false;
+
 	bool IsValid() const { return FactionA.IsValid() && FactionB.IsValid(); }
 
 	bool IsExpired(float CurrentGameTime) const

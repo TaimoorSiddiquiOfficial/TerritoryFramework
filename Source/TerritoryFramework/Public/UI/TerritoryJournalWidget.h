@@ -30,6 +30,7 @@ UCLASS(BlueprintType, Blueprintable)
 class TERRITORYFRAMEWORK_API UTerritoryJournalWidget : public UTerritoryActivatableWidget
 {
 	GENERATED_BODY()
+	friend class FTFJournalTransactionRefresh;
 
 public:
 	/** Rebuild the journal's District rows using the current viewer and filter. */
@@ -493,7 +494,8 @@ private:
 	void RefreshEntrySelection();
 	UTextBlock* CreateHierarchyTextRow(const FText& Text, FName WidgetName, bool bHeading = false);
 	UWidget* CreatePlaceCommandCard(const FTerritoryHierarchyOperationsView& Place);
-	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views);
+	void RefreshOperationalSummaries(const TArray<FTerritoryDistrictOperationsView>& Views,
+		const FTerritoryEconomyOperationsView& Economy);
 	void RefreshCommandCenterIdentity(const TArray<FTerritoryDistrictOperationsView>& Views);
 	void BuildLiveEventPanel();
 	void RefreshLiveEvents();

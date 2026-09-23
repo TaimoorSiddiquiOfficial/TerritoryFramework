@@ -53,6 +53,7 @@
 #include "Tales/TerritoryDiplomacyCondition.h"
 #include "Tales/TerritoryDiplomacyEvent.h"
 #include "Tales/TerritoryStoryEvents.h"
+#include "Tales/TerritoryAssaultAdmissionTask.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
 #include "WorldPartition/WorldPartitionHandle.h"
@@ -62,6 +63,20 @@
 
 namespace
 {
+	void ValidateWaveRequest(const UTerritoryScheduleEnemyWaveEvent* Wave,
+		const FString& Context, TArray<FString>& Errors)
+	{
+		if (!Wave)
+		{
+			Errors.Add(Context + TEXT(": configure a Wave request."));
+			return;
+		}
+		if (!Wave->TargetTerritory.IsValid())
+			Errors.Add(Context + TEXT(": Wave of Enemies event without a target Territory."));
+		if (!Wave->bChooseBestEligibleAttacker && !Wave->AttackingFaction.IsValid())
+			Errors.Add(Context + TEXT(": Wave of Enemies event without an attacking faction; choose an attacker or enable Best Eligible Attacker."));
+	}
+
 	bool IsTerritoryDataAsset(const UObject* Asset)
 	{
 		if (!Asset || !Asset->IsA<UDataAsset>()) return false;
@@ -1293,6 +1308,16 @@ bool UTerritoryDataValidator::ValidateQuest(UQuestBlueprint* QuestBlueprint,
 				Error(FString::Printf(TEXT("Quest branch '%s' contains an empty task row"),
 					*GetNameSafe(Branch)));
 			}
+			if (const auto* Admission = Cast<UTerritoryAssaultAdmissionTask>(Task))
+			{
+				const FString TaskContext = FString::Printf(TEXT("Quest branch '%s' admission task '%s'"),
+					*GetNameSafe(Branch), *GetNameSafe(Task));
+				ValidateWaveRequest(Admission->Request, TaskContext, OutErrors);
+				if (Admission->Request && Admission->Request->ScenarioID.IsNone())
+					Error(TaskContext + TEXT(": a stable Scenario ID is required to identify the admitted attempt."));
+				if (Task->RequiredQuantity != 1)
+					Error(TaskContext + TEXT(": Required Quantity must be 1; one admission records one attempt."));
+			}
 		}
 	}
 
@@ -1502,19 +1527,7 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 					Cast<UTerritoryScheduleEnemyWaveEvent>(Event);
 				if (!WaveEvent) continue;
 				bSchedulesEnemyWave = true;
-				if (!WaveEvent->TargetTerritory.IsValid())
-				{
-					Error(FString::Printf(
-						TEXT("State %d contains a Wave of Enemies event without a target Territory"),
-						static_cast<int32>(Pair.Key)));
-				}
-				if (!WaveEvent->bChooseBestEligibleAttacker
-					&& !WaveEvent->AttackingFaction.IsValid())
-				{
-					Error(FString::Printf(
-						TEXT("State %d contains a Wave of Enemies event without an attacking faction; choose an attacker or enable Best Eligible Attacker"),
-						static_cast<int32>(Pair.Key)));
-				}
+				ValidateWaveRequest(WaveEvent, FString::Printf(TEXT("State %d"), static_cast<int32>(Pair.Key)), OutErrors);
 
 				const bool bHasWarCondition = WaveEvent->Conditions.ContainsByPredicate(
 					[](const UNarrativeCondition* Condition)

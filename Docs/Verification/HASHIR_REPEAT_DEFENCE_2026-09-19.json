@@ -1,0 +1,93 @@
+{
+  "date": "2026-09-19",
+  "scope": "Hashir post-capture defence quest authoring",
+  "editorBuild": "Succeeded; UHT/runtime/editor",
+  "automation": {
+    "passed": 362,
+    "clean": 323,
+    "warnings": 39,
+    "notRun": 0,
+    "failed": 0
+  },
+  "standalone": {
+    "passed": true,
+    "checks": {
+      "earlier_physical_force_defeated": true,
+      "capture_does_not_start_wave_before_guard": true,
+      "paid_guard_purchase": true,
+      "quest_launched_post_capture_wave": true,
+      "actual_wait_line_before_victory": true,
+      "talk_did_not_duplicate_force": true,
+      "post_capture_finite_force_defeated": true,
+      "actual_congratulations_after_victory": true,
+      "native_dialogue_task_advanced_quest": true,
+      "save_reload_keeps_travel_stage": true,
+      "save_reload_keeps_two_battles": true,
+      "repeat_conversation_after_reload_uses_victory": true,
+      "no_new_attack_after_victory": true
+    },
+    "durationSeconds": 131.75
+  },
+  "listen": {
+    "checks": {
+      "active_replicated": true,
+      "no_early_victory": true,
+      "client_mutation_refused": true,
+      "physical_force_defeated": true,
+      "victory_replicated": true,
+      "late_join_victory": true
+    },
+    "passed": true
+  },
+  "dedicated": {
+    "checks": {
+      "active_replicated": true,
+      "no_early_victory": true,
+      "client_mutation_refused": true,
+      "physical_force_defeated": true,
+      "victory_replicated": true,
+      "late_join_victory": true
+    },
+    "passed": true
+  },
+  "validation": {
+    "status": "completed",
+    "passed": true,
+    "checked": 2,
+    "valid": 2,
+    "invalid": 0,
+    "warnings": 0
+  },
+  "blueprintCompile": {
+    "errors": 0,
+    "warnings": 0,
+    "checked": 2
+  },
+  "narrativeSource": {
+    "differences": [],
+    "checked": 741,
+    "passed": true
+  },
+  "remaining": [
+    "Short road entrance can stay occupied until 120-second retired vehicle cleanup.",
+    "Normal weapon playthrough and complete multiplayer conversation were not certified.",
+    "Main-map World Partition story playthrough and UE 5.7 release remain broader gates.",
+    "Packaged smoke repeats six baseline ShaderMap errors and the missing CutscenePlayerActor callback warning."
+  ],
+  "evidence": "Saved/Verification/20260919_HashirRepeat",
+  "package": {
+    "cookExit": 0,
+    "mode": "Development Game server mode; not compiled TDAServer",
+    "durationSeconds": 60,
+    "smokeExit": 0,
+    "cookWarnings": 63,
+    "cleanSmoke": false,
+    "materialShaderMapErrors": 6
+  },
+  "editorFinal": {
+    "playMode": "Standalone",
+    "dirtyPackages": 0,
+    "players": 1,
+    "PIE": "Stopped"
+  }
+}

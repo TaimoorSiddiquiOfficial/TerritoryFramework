@@ -34,6 +34,7 @@ Every task also inherits Narrative's normal settings:
 | Capture or Lose Territory | One Territory must gain an owner, one exact faction must own it, or its starting owner must lose it | Capture Blacksmith for Heroes |
 | Territory State / Garrison | A Territory must unlock, lock, enter a political state, lose all defenders, receive guards, or be entered/left | Unlock Castle Hill Farm after Blacksmith is claimed |
 | Territory Counterattack / Chase | A durable counterattack or boss-chase record must reach an outcome | Repel the Bandit counterattack at Blacksmith |
+| Wait for Territory Assault Admission | The scheduler must accept one named attempt, retrying temporary refusals | Keep the Blacksmith defence objective pending while its cell is unloaded or the assault budget is occupied |
 | Territory Disguise Mission | A disguise, checkpoint, cover, or double-agent outcome must occur | Enter the Bandit camp with an accepted Bandit uniform |
 
 Quest Cascade Recipes also generate an internal **Wait For Narrative Conditions** task whenever a
@@ -53,6 +54,27 @@ withdrawn, and assault cancelled. Community movement, GAS, combat, and AI tasks 
 [Community Narrative Quest Tasks](30_Community_Narrative_Tasks.md).
 
 ## State / Garrison objectives
+
+### Admission before victory
+
+Choose **Wait for Territory Assault Admission** from **Tasks: Territory**. Set **Required
+Quantity** to **1** and create its **Request** as **Wave of Enemies**. Configure the target,
+attacking faction (or Best Eligible Attacker), and a stable **Scenario ID**. Quest validation
+rejects missing mandatory fields. The task calls the Wave's native scheduling API and
+conditions; it does not execute custom Blueprint `Execute Event` overrides.
+
+Pair it with **Territory Counterattack / Chase**, requiring **Assault Defeated**, on the
+same mandatory quest branch and with the same target/scenario. Native saves task progress;
+the existing scheduler saves the assault. Unloaded cells, diplomacy and full budgets leave
+admission pending. A saved attempt completes admission even if it was later cancelled.
+Admission alone is never evidence of victory.
+
+For an explicit retry, provide a separate cancellation/failure branch observed by the
+counterattack task, then an authored player choice to try again. Its destination uses a
+new stable Scenario ID (for example `BlacksmithDefenceRetry1`) in both the admission and
+victory tasks. Do not reset the original receipt or automatically retry a cancelled assault
+with the same scenario: that would erase the distinction between one decision and a new
+story attempt. Bound the number of authored retries deliberately.
 
 ### Unlock Territory
 

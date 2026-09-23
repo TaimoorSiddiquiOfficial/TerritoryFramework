@@ -474,6 +474,8 @@ bool FTFHashirWaitsForDefence::RunTest(const FString&)
 	UDialogueNode_NPC* Entry = nullptr;
 	UDialogueNode_NPC* Departure = nullptr;
 	UDialogueNode_NPC* Congratulations = nullptr;
+	UDialogueNode_NPC* Waiting = nullptr;
+	UDialogueNode_Player* Anything = nullptr;
 	for (UDialogueNode* Node : Dialogue->GetNodes())
 	{
 		if (!Node) continue;
@@ -481,15 +483,30 @@ bool FTFHashirWaitsForDefence::RunTest(const FString&)
 		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_ActuallyComeWithMe")) Entry = Cast<UDialogueNode_NPC>(Node);
 		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_DepartForFarm")) Departure = Cast<UDialogueNode_NPC>(Node);
 		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_WellDoneWithCapturing")) Congratulations = Cast<UDialogueNode_NPC>(Node);
+		if (Node->GetID() == TEXT("DBP_Hahsir_Hahsir_WaitForBlacksmithDefence")) Waiting = Cast<UDialogueNode_NPC>(Node);
+		if (Node->GetID() == TEXT("DBP_Hahsir_Player_Anything")) Anything = Cast<UDialogueNode_Player>(Node);
 	}
 	if (!TestNotNull(TEXT("Stable trip entry"), Entry) || !TestNotNull(TEXT("Gated departure"), Departure)
-		|| !TestNotNull(TEXT("Congratulations line"), Congratulations)) return false;
+		|| !TestNotNull(TEXT("Congratulations line"), Congratulations)
+		|| !TestNotNull(TEXT("Waiting line"), Waiting)
+		|| !TestNotNull(TEXT("Player's normal question"), Anything)) return false;
 	TestTrue(TEXT("Direct trip entry cannot run a driving event"), Entry->Events.IsEmpty());
 	auto CanDepart = [&] { return Entry->GetReplyChain(Controller, Pawn, Tales).Contains(Departure); };
 	TestFalse(TEXT("No quest and no victory cannot start the trip"), CanDepart());
 	UQuest* Quest = Tales->BeginQuest(QuestClass, TEXT("QuestState_10"));
 	if (!TestNotNull(TEXT("Native quest starts at the defence checkpoint"), Quest)) return false;
+	UTerritoryScheduleEnemyWaveEvent* Wave = nullptr;
+	for (UNarrativeEvent* Event : Quest->GetState(TEXT("QuestState_10"))->Events)
+		if (auto* Candidate = Cast<UTerritoryScheduleEnemyWaveEvent>(Event)) Wave = Candidate;
+	if (!TestNotNull(TEXT("Defence state owns the authored Wave"), Wave)) return false;
+	for (UNarrativeEvent* Event : Quest->GetBranch(TEXT("QuestBranch_50"))->Events)
+		TestNull(TEXT("Starting the guard task cannot launch the Wave"), Cast<UTerritoryScheduleEnemyWaveEvent>(Event));
+	TestEqual(TEXT("Defence entry runs the Wave once"), Wave->EventRuntime, EEventRuntime::Start);
+	TestFalse(TEXT("Loading defence does not launch a new force"), Wave->bRefireOnLoad);
+	auto WaveMayRun = [&] { return TerritoryTales::DoEventConditionsPass(Wave, Pawn, Controller, Tales); };
 	TestFalse(TEXT("Owning the Blacksmith alone cannot unlock congratulations"), Congratulations->AreConditionsMet(Pawn, Controller, Tales));
+	TestEqual(TEXT("Normal question routes to the defence reminder before victory"),
+		Anything->GetFirstValidNPCReply(Controller, Pawn, Tales), Waiting);
 	FTerritoryAssaultRecord Record;
 	Record.AssaultID = FGuid::NewGuid(); Record.TargetTerritoryGUID = Blacksmith->GetTerritoryGUID();
 	Record.TargetTerritory = Blacksmith->GetTerritoryTag(); Record.AttackingFaction = Bandits;
@@ -498,12 +515,14 @@ bool FTFHashirWaitsForDefence::RunTest(const FString&)
 	Record.State = ETerritoryAssaultState::Defeated; Record.Resolution = ETerritoryAssaultResolution::AllAttackersRemoved;
 	Record.PlannedForce = Record.KilledForce = 4;
 	Counter->RestorePersistentState({Record});
+	TestTrue(TEXT("Earlier handover victory must not suppress the post-capture Wave"), WaveMayRun());
 	TestFalse(TEXT("Earlier handover victory cannot unlock the trip"), CanDepart());
 	TestFalse(TEXT("Earlier victory cannot unlock congratulations"), Congratulations->AreConditionsMet(Pawn, Controller, Tales));
 	Record.StoryScenarioID = TEXT("Blacksmith_PostCapture");
 	Record.State = ETerritoryAssaultState::Grace; Record.Resolution = ETerritoryAssaultResolution::None;
 	Record.KilledForce = 0; Record.PendingReserveForce = 4;
 	Counter->RestorePersistentState({Record});
+	TestFalse(TEXT("An existing pending force prevents a second launch"), WaveMayRun());
 	Tales->PrepareForSave_Implementation();
 	TArray<uint8> Bytes;
 	FMemoryWriter Writer(Bytes); FObjectAndNameAsStringProxyArchive Save(Writer, false); Save.ArIsSaveGame = true;
@@ -518,6 +537,7 @@ bool FTFHashirWaitsForDefence::RunTest(const FString&)
 	Record.State = ETerritoryAssaultState::Cancelled; Record.Resolution = ETerritoryAssaultResolution::InvalidApproachOrRoute;
 	Record.PendingReserveForce = 0; Record.WithdrawnForce = 4;
 	Counter->RestorePersistentState({Record});
+	TestTrue(TEXT("A cancelled attempt permits a guarded retry"), WaveMayRun());
 	TestFalse(TEXT("A failed route cannot count as victory"), Congratulations->AreConditionsMet(Pawn, Controller, Tales));
 	Record.State = ETerritoryAssaultState::Succeeded; Record.Resolution = ETerritoryAssaultResolution::CaptureCompleted;
 	Counter->RestorePersistentState({Record});
@@ -525,7 +545,11 @@ bool FTFHashirWaitsForDefence::RunTest(const FString&)
 	Record.State = ETerritoryAssaultState::Defeated; Record.Resolution = ETerritoryAssaultResolution::AllAttackersRemoved;
 	Record.WithdrawnForce = 0; Record.KilledForce = 4;
 	Counter->RestorePersistentState({Record}); Counter->OnAssaultChanged.Broadcast(Record);
+	TestFalse(TEXT("A recorded victory prevents another launch"), WaveMayRun());
 	TestTrue(TEXT("Exact post-capture victory unlocks congratulations"), Congratulations->AreConditionsMet(Pawn, Controller, Tales));
+	TestFalse(TEXT("Victory disables the waiting line"), Waiting->AreConditionsMet(Pawn, Controller, Tales));
+	TestEqual(TEXT("Normal question routes to congratulations after victory"),
+		Anything->GetFirstValidNPCReply(Controller, Pawn, Tales), Congratulations);
 	TestFalse(TEXT("Victory still requires speaking with Hashir before departure"), CanDepart());
 	Tales->OnNPCDialogueLineFinished.Broadcast(Dialogue, Congratulations, Congratulations->Line, FSpeakerInfo());
 	TestEqual(TEXT("Native dialogue task advances after victory"), Quest->GetCurrentState()->GetID(), FName(TEXT("QuestState_13")));

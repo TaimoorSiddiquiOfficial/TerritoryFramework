@@ -118,7 +118,10 @@ jobs:
             -DDC=InstalledNoZenLocalFallback -unattended -nullrhi -nosplash -nop4
           if ($LASTEXITCODE -ne 0) { throw 'Included content failed its clean-project check.' }
           $content = Get-Content -LiteralPath $env:TF_RELEASE_REPORT -Raw | ConvertFrom-Json
-          if ($content.errors -ne 0 -or $content.assets_checked -ne 118 -or $content.external_dependencies.Count -ne 0) {
+          if ($content.errors -ne 0 -or $content.invalid.Count -ne 0 -or
+              $content.assets_checked -ne $content.expected_assets -or
+              $content.missing_packages.Count -ne 0 -or $content.unexpected_packages.Count -ne 0 -or
+              $content.external_dependencies.Count -ne 0) {
             throw 'The content report did not pass.'
           }
           @{

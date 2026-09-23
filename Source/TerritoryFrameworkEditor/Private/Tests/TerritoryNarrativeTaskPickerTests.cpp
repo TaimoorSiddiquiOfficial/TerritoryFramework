@@ -11,6 +11,8 @@
 #include "UObject/UnrealType.h"
 #include "Tales/TerritoryAIObservationTask.h"
 #include "Tales/TerritoryAssaultTask.h"
+#include "Tales/TerritoryAssaultAdmissionTask.h"
+#include "Engine/ObjectLibrary.h"
 #include "Tales/TerritoryCaptureTask.h"
 #include "Tales/TerritoryCharacterActionTask.h"
 #include "Tales/TerritoryCombatProgressTask.h"
@@ -57,6 +59,16 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryNarrativeTaskPickerAssets,
 
 bool FTFTerritoryNarrativeTaskPickerAssets::RunTest(const FString& Parameters)
 {
+	TerritoryNarrativeTaskPickerTests::VerifyTaskBlueprint(*this,
+		TEXT("/TerritoryFramework/Tales/Tasks/BPT_TerritoryAssaultAdmission.BPT_TerritoryAssaultAdmission"),
+		UTerritoryAssaultAdmissionTask::StaticClass(), TEXT("Wait for Territory Assault Admission"));
+	// Exercise the same Blueprint discovery mechanism as Native's quest menu.
+	UObjectLibrary* Library = UObjectLibrary::CreateLibrary(UNarrativeTask::StaticClass(), true, GIsEditor);
+	Library->LoadBlueprintsFromPaths({TEXT("/TerritoryFramework/Tales/Tasks/")});
+	TArray<UClass*> Discovered;
+	Library->GetObjects<UClass>(Discovered);
+	TestTrue(TEXT("Native picker discovery finds the admission wrapper"), Discovered.ContainsByPredicate(
+		[](const UClass* Class) { return Class && Class->GetName() == TEXT("BPT_TerritoryAssaultAdmission_C"); }));
 	TerritoryNarrativeTaskPickerTests::VerifyTaskBlueprint(*this,
 		TEXT("/TerritoryFramework/Tales/Tasks/BPT_TerritoryCapture.BPT_TerritoryCapture"),
 		UTerritoryCaptureTask::StaticClass(), TEXT("Capture or Lose Territory"));

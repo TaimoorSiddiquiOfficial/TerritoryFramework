@@ -87,7 +87,10 @@ bool FTFTerritoryPartyReplyAuthority::RunTest(const FString& Parameters)
 	Party->RemovePartyMember(Members[1]);
 	Request(1);
 	TestNull(TEXT("A departed member's stale Native alias cannot choose a reply"), Dialogue->GetCurrentNode());
-	TestTrue(TEXT("Removed member can join through Native again"), Party->AddPartyMember(Members[1]));
+	TestFalse(TEXT("Removed member cannot rejoin an ongoing conversation"), Party->AddPartyMember(Members[1]));
+	Party->ExitDialogue(EExitDialogueReason::EDR_PlayerExited);
+	TestTrue(TEXT("Removed member can join after the conversation ends"), Party->AddPartyMember(Members[1]));
+	Dialogue = Seed(true);
 	Actor->SetRole(ROLE_SimulatedProxy);
 	Request(0);
 	TestNull(TEXT("Client party cannot mutate a reply"), Dialogue->GetCurrentNode());

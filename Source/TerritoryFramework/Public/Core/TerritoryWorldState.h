@@ -122,6 +122,10 @@ struct FReplicatedTreaty
 	/** True when reputation owns this treaty. False protects a quest-authored treaty. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
 	bool bReputationDerived = false;
+
+	/** Observation of Narrative attitudes; restoring this row must not write attitudes. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Diplomacy")
+	bool bNarrativeObserved = false;
 };
 
 /**
@@ -167,6 +171,21 @@ struct FReplicatedCaptureSummary
 	/** Read projection only; the Territory's OwnershipData owns the durable history. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Capture|History")
 	FGameplayTagContainer FormerOwningFactions;
+
+	/**
+	 * Read projection only; the Territory's OwnershipData owns the durable history.
+	 *
+	 * The faction that physically took this Place. It is published alongside CapturedFor so a
+	 * client can ask "which Places did I win for the faction that betrayed me?" without loading
+	 * the Territory: a Place the player is not standing in may be unloaded, and an unloaded
+	 * Territory actor cannot answer, while this directory still can.
+	 */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Capture|History")
+	FGameplayTag CapturedBy;
+
+	/** Read projection only; see CapturedBy. Equal to CurrentOwner for a solo capture. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Capture|History")
+	FGameplayTag CapturedFor;
 
 	/** Faction currently represented by this capture contest. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Territory|Capture")
@@ -218,6 +237,9 @@ class TERRITORYFRAMEWORK_API ATerritoryWorldState : public AActor, public INarra
 public:
 	ATerritoryWorldState();
 	virtual void Serialize(FArchive& Ar) override;
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
+#endif
 
 	/** Resolve the single strategic read-model actor for this world. */
 	UFUNCTION(BlueprintPure, Category="Territory|World State",
@@ -307,6 +329,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Directory",
 		meta=(DisplayName="Campaign City Definitions"))
 	TArray<TObjectPtr<UTerritoryCityDefinition>> CampaignCities;
+
+	/** Explicit tombstones for removed directory identities. Never populate from
+	 * missing/unloaded actors. Retire every removed identity individually; keep
+	 * a renamed Territory's GUID out of this list. This is current content policy,
+	 * deliberately not SaveGame data that an old campaign could overwrite. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Directory")
+	TSet<FGuid> RetiredDirectoryGUIDs;
+
+	/** Permanent authored tombstone; an unloaded actor alone is never retired. */
+	bool IsDirectoryIdentityRetired(const FGuid& Identity) const;
 
 	/** Projection writer used by Territory actors/subsystems; not a gameplay mutation API. */
 	void SetCaptureSummary(const FReplicatedCaptureSummary& Summary);
@@ -493,13 +525,26 @@ protected:
 private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FTFDiplomacyWorldStateLiveBridge;
+	friend class FTFDirectionalDiplomacyBridge;
 	friend class FTFReputationPersistenceRoundTrip;
 	friend class FTFCurrencyCallbacks;
+	friend class FTFJournalTransactionRefresh;
+	friend class FTFUnloadedHierarchyReconciliation;
+	friend class FTFDirectoryRetirement;
+
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
 	friend class FTFSaveDefaultReload;
 	friend class FTFSavedStrategicDirectoryProjectionRoundTrip;
 	friend class FTFWorldPartitionActorRecords;
 #endif
+	/** Authored topology only; political state remains in Volumes and derived snapshots. */
+	UPROPERTY(Transient)
+	TMap<FGameplayTag, TObjectPtr<UTerritoryDefinition>> RegisteredHierarchyDefinitions;
+
+	TMap<FGameplayTag, uint32> RegisteredHierarchyRevisions;
+	void ApplyDirectoryRetirements(bool bReconcileAssaults = true);
+	void ReconcileUnloadedAncestors(const FGameplayTag& ChangedChild);
+	void ReconcileUnloadedHierarchy(const TSet<FGameplayTag>* ParentsToRebuild = nullptr);
 	/** Save departing Territory actors through Narrative before level cleanup changes their guard counts. */
 	void SaveStreamingLevel(ULevel* Level, UWorld* World);
 	void SyncSubsystemsFromReplicatedState();

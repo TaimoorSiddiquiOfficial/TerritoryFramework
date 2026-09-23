@@ -1,5 +1,9 @@
 # Hashir waits for the Blacksmith defence
 
+Follow-up: [the complete capture/guard sequence](HASHIR_REPEAT_DEFENCE_2026-09-19.md)
+corrects the Wave's event location and its obsolete earlier-battle condition.
+Use that report for the current authoring and remaining road-entry delay.
+
 The player must defeat the post-capture attack before leaving with Hashir.
 The earlier battle before the owner hands over the Blacksmith does not count.
 

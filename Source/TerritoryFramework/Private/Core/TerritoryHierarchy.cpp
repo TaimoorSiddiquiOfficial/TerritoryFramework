@@ -25,12 +25,8 @@ namespace
 		return Settings && Settings->ShouldDebugEconomy();
 	}
 
-	struct FChildControlView
-	{
-		FGameplayTag Owner;
-		ETerritoryState State = ETerritoryState::Unclaimed;
-		ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked;
-	};
+	using TerritoryHierarchyPolicy::FChildControlView;
+	using TerritoryHierarchyPolicy::FDerivedHierarchyControl;
 
 	TArray<FGameplayTag> GetExpectedChildTags(const ATerritoryVolume* Parent)
 	{
@@ -172,69 +168,52 @@ namespace
 		return Owners;
 	}
 
-	struct FDerivedHierarchyControl
-	{
-		FGameplayTag SecuredOwner;
-		ETerritoryState State = ETerritoryState::Unclaimed;
-	};
-
 	FDerivedHierarchyControl ReduceChildControl(const ATerritoryVolume* Parent,
 		const TArray<ATerritoryVolume*>& LoadedChildren)
 	{
-		FDerivedHierarchyControl Result;
 		const TArray<FGameplayTag> ExpectedTags = GetExpectedChildTags(Parent);
-		if (ExpectedTags.IsEmpty())
-		{
-			return Result;
-		}
-
-		FGameplayTag CommonOwner;
-		bool bAllSecure = true;
-		bool bAnyPoliticalControl = false;
+		TArray<FChildControlView> Children;
 		TSet<FGameplayTag> SeenTags;
 		for (const FGameplayTag& ExpectedTag : ExpectedTags)
 		{
+			FChildControlView& Child = Children.AddDefaulted_GetRef();
 			if (!ExpectedTag.IsValid() || SeenTags.Contains(ExpectedTag))
 			{
-				bAllSecure = false;
 				continue;
 			}
 			SeenTags.Add(ExpectedTag);
-			FChildControlView Child;
-			if (!ResolveExpectedChildControl(Parent, LoadedChildren, ExpectedTag, Child))
-			{
-				// World Partition and invalid hierarchy references fail closed. An
-				// unrelated actor with the same parent can never replace this tag.
-				bAllSecure = false;
-				continue;
-			}
-
-			const FGameplayTag ChildOwner = Child.Owner;
-			bAnyPoliticalControl |= ChildOwner.IsValid()
-				|| Child.State == ETerritoryState::Contested;
-			if (Child.Availability == ETerritoryAvailability::Locked
-				|| Child.State != ETerritoryState::Claimed
-				|| !ChildOwner.IsValid())
-			{
-				bAllSecure = false;
-				continue;
-			}
-
-			if (!CommonOwner.IsValid()) CommonOwner = ChildOwner;
-			else if (CommonOwner != ChildOwner) bAllSecure = false;
+			ResolveExpectedChildControl(Parent, LoadedChildren, ExpectedTag, Child);
 		}
-
-		if (bAllSecure && CommonOwner.IsValid())
-		{
-			Result.SecuredOwner = CommonOwner;
-			Result.State = ETerritoryState::Claimed;
-		}
-		else if (bAnyPoliticalControl)
-		{
-			Result.State = ETerritoryState::Contested;
-		}
-		return Result;
+		return TerritoryHierarchyPolicy::ReduceControl(Children);
 	}
+}
+
+TerritoryHierarchyPolicy::FDerivedHierarchyControl TerritoryHierarchyPolicy::ReduceControl(
+	TConstArrayView<FChildControlView> Children)
+{
+	FDerivedHierarchyControl Result;
+	FGameplayTag CommonOwner;
+	bool bAllSecure = !Children.IsEmpty();
+	bool bAnyPoliticalControl = false;
+	for (const FChildControlView& Child : Children)
+	{
+		bAnyPoliticalControl |= Child.Owner.IsValid() || Child.State == ETerritoryState::Contested;
+		if (Child.Availability != ETerritoryAvailability::Unlocked
+			|| Child.State != ETerritoryState::Claimed || !Child.Owner.IsValid())
+		{
+			bAllSecure = false;
+			continue;
+		}
+		if (!CommonOwner.IsValid()) CommonOwner = Child.Owner;
+		else if (CommonOwner != Child.Owner) bAllSecure = false;
+	}
+	if (bAllSecure && CommonOwner.IsValid())
+	{
+		Result.SecuredOwner = CommonOwner;
+		Result.State = ETerritoryState::Claimed;
+	}
+	else if (bAnyPoliticalControl) Result.State = ETerritoryState::Contested;
+	return Result;
 }
 
 FGameplayTag TerritoryHierarchyPolicy::FindStrictMajorityOwner(
@@ -776,6 +755,17 @@ ATerritoryDistrict* ATerritoryProperty::GetOwningDistrict() const
 	return nullptr;
 }
 
+void ATerritoryProperty::ReconcileOwnershipDependentSystems(FGameplayTag OldOwner, FGameplayTag NewOwner)
+{
+	Super::ReconcileOwnershipDependentSystems(OldOwner, NewOwner);
+	// Captured ownership and its upgrade/income state must agree before Tales
+	// events read or save this actor, even when Blueprint overrides the notice.
+	if (NewOwner.IsValid() && OldOwner != NewOwner && UpgradeLevel > 0)
+	{
+		SetUpgradeLevel(0);
+	}
+}
+
 void ATerritoryProperty::OnPropertyCaptured_Implementation(FGameplayTag NewOwner)
 {
 	if (ShouldLogHierarchyOwnership())
@@ -784,8 +774,8 @@ void ATerritoryProperty::OnPropertyCaptured_Implementation(FGameplayTag NewOwner
 			*GetTerritoryTag().ToString(), *NewOwner.ToString());
 	}
 
-	// Reset upgrade level on capture by a new faction — use SetUpgradeLevel to
-	// ensure income recalculation and logging are triggered.
+	// Retain direct-call compatibility. Real ownership transitions already reset
+	// the level in ReconcileOwnershipDependentSystems before Tales events.
 	if (HasAuthority() && UpgradeLevel > 0)
 	{
 		SetUpgradeLevel(0);
