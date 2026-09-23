@@ -2658,14 +2658,14 @@ bool FTFIntegration_GameStateDiplomacySync::RunTest(const FString& Parameters)
 		}
 	}
 
-	// ─── Diplomacy subsystem state mapping ───
+	// ─── Narrative attitude enum layout ───
 	{
 		const UClass* DiploClass = UTerritoryDiplomacySubsystem::StaticClass();
 
-		// Verify DiplomacyStateToAttitude mapping would be correct:
-		// Alliance → Friendly, War → Hostile, None → Neutral
-		// We can't call the private method, but we verify the enum values
-		// that drive the mapping are correct
+		// These pin Narrative's engine numbering only. They do not cover the Territory bridge:
+		// a wrong AttitudeToDiplomacyState leaves every value below unchanged.
+		// The bridge itself is covered behaviourally by
+		// TerritoryFramework.Diplomacy.AttitudeMapping.FriendlyNeverWritesBackAsNeutral.
 		TestEqual(TEXT("ETeamAttitude::Friendly == 0"),
 			static_cast<uint8>(ETeamAttitude::Friendly), static_cast<uint8>(0));
 		TestEqual(TEXT("ETeamAttitude::Neutral == 1"),
