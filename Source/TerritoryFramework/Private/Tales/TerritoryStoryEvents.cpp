@@ -661,11 +661,17 @@ void UTerritoryPlayCutsceneEvent::ExecuteEvent_Implementation(APawn* Target,
 	}
 
 	FNarrativeSequencePlaybackSettings Settings = PlaybackSettings;
-	// Both of these are forced rather than authored. Auto Play is the event's whole contract, and
+	// Both of these are forced rather than authored, and Auto Play is forced the opposite way to what
+	// it looks like. The vendor factory spawns the sequence actor with deferred construction so that
+	// BeginPlay runs inside the factory, and BeginPlay calls Play() whenever Auto Play is set - so
+	// leaving it authored would start the sequence before Territory could arm teardown, and a
+	// cutscene that stopped in that window would leak its actor for the session. Territory starts
+	// playback itself, as the last step below, after teardown is armed.
+	//
 	// Pause At End is the one value that would strand the player: ULevelSequencePlayer releases
 	// cinematic mode only from OnStopped, so a sequence that merely pauses never gives movement
 	// and look back. See the class comment for the engine path this relies on.
-	Settings.bAutoPlay = true;
+	Settings.bAutoPlay = false;
 	Settings.bPauseAtEnd = false;
 
 	// Only used for net relevancy. Spawning at the audience keeps a relevancy radius honest, and
@@ -700,8 +706,24 @@ void UTerritoryPlayCutsceneEvent::ExecuteEvent_Implementation(APawn* Target,
 	// OutActor and never destroys it, so without this the actor survives for the rest of the session
 	// - one per cutscene trigger. The component destroys it once the sequence has genuinely stopped,
 	// after the authored grace that keeps a lagging client's copy from being cut short.
-	UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(
-		SequenceActor, TeardownGraceSeconds);
+	UTerritoryCutsceneTeardownComponent* Teardown =
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(
+			SequenceActor, TeardownGraceSeconds);
+
+	// Playback starts only now. Auto Play is forced off above, so nothing else can have started this
+	// sequence: vendor BeginPlay takes its Play() branch only when Auto Play is set, and a client does
+	// not autoplay at all - it follows the server's status through the replicated player state. This
+	// is the ordering the class comment describes, with teardown already armed.
+	Player->Play();
+
+	// A sequence can be over by the time Play() returns - a StopTags tag, a zero-length sequence, or
+	// an immediate cancellation ends playback synchronously and broadcasts OnStop/OnFinished to a
+	// player whose bindings did not exist yet. Reconcile against the state Play() left behind, so
+	// that ending cannot leak the actor this event just took responsibility for.
+	if (Teardown)
+	{
+		Teardown->ReconcileAfterPlaybackRequest();
+	}
 }
 
 FString UTerritoryPlayCutsceneEvent::GetGraphDisplayText_Implementation()

@@ -92,6 +92,22 @@ void UTerritoryCutsceneTeardownComponent::HandleSequenceStopped()
 	Subject->Destroy();
 }
 
+void UTerritoryCutsceneTeardownComponent::ReconcileAfterPlaybackRequest()
+{
+	// Playing, or held on its last frame by a dialogue shot. The binding armed above will deliver the
+	// ending whenever it arrives, so there is nothing to reconcile. IsPaused covers the dialogue-shot
+	// case for the same reason HandleSequenceStopped tests it.
+	if (const ULevelSequencePlayer* Player = SequencePlayer.Get())
+	{
+		if (Player->IsPlaying() || Player->IsPaused()) return;
+	}
+
+	// Playback is already over, or never began. Both are the same answer to a caller that has just
+	// asked for playback: there is nothing to wait for, so tear the actor down - through the one stop
+	// path, so the authored grace still applies and the arming guard still holds.
+	HandleSequenceStopped();
+}
+
 void UTerritoryCutsceneTeardownComponent::UnbindFromPlayer()
 {
 	if (ULevelSequencePlayer* Player = SequencePlayer.Get())

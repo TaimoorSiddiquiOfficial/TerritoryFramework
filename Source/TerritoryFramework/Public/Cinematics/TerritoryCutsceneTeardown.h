@@ -55,6 +55,32 @@ public:
 	static UTerritoryCutsceneTeardownComponent* ScheduleAfterSequence(
 		ANarrativeLevelSequenceActor* SequenceActor, float GraceSeconds);
 
+	/**
+	 * Reconcile teardown against the status the sequence player was left in, for a caller that has just
+	 * asked it to play.
+	 *
+	 * Arming subscribes to OnStop and OnFinished, so an ending that arrives *after* arming is always
+	 * caught. An ending that has already happened is not, and one that happened before arming existed
+	 * is lost forever: a StopTags tag, a zero-length sequence or an immediate cancellation can end
+	 * playback inside the Play() call itself, broadcasting both signals to a player whose bindings did
+	 * not exist yet. The caller that started playback is the only party positioned to notice, which is
+	 * why this is called by the caller and not from Arming.
+	 *
+	 * A player that is playing, or held by a dialogue shot, is left alone - the binding will deliver
+	 * its ending. Anything else is handed to the same stop path the bindings use, so the grace, the
+	 * paused rule and the idempotence guard all stay in one place.
+	 *
+	 * Note carefully what this is not: a general "already stopped, so tear down" test that arming
+	 * could perform on its own. A never-played player is indistinguishable from a played-and-stopped
+	 * one through the player's public API - both answer not-playing and not-paused, because
+	 * ULevelSequencePlayer leaves its status at its zero value until something plays it, and
+	 * StopInternal is a no-op unless the player is playing or paused - and the status itself is
+	 * protected, so no caller can read it at all. Arming on that reading would destroy every cutscene
+	 * the instant it was armed. This is only sound because its caller knows it has just asked this
+	 * exact player to play.
+	 */
+	void ReconcileAfterPlaybackRequest();
+
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void OnComponentDestroyed(bool bDestroyingHierarchy) override;
 

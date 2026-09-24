@@ -168,16 +168,18 @@ namespace TerritoryCutsceneTests
 	}
 
 	/**
-	 * Run the cutscene event once against a fresh world and hand back the actor it created, with
-	 * playback actually started.
+	 * Run the cutscene event once against a fresh world and hand back the actor it created.
 	 *
 	 * GraceSeconds is authored on the event before it runs, so the teardown policy under test is the
 	 * one production would read rather than a test-only override.
 	 *
-	 * Playback is started explicitly. The event authors Auto Play, but that is a setting the sequence
-	 * actor consumes from the game loop, and this isolated world has none - so without this the player
-	 * would sit at Stopped and a Stop(), Pause() or skip below would act on nothing. Territory's light
-	 * rig lifecycle test starts its factory-created player by hand for the same reason.
+	 * Playback is no longer started by hand here, and removing that is part of the fix rather than
+	 * tidying. Auto Play is forced off by the event now, so this world would otherwise be left with a
+	 * stopped player and a Stop(), Pause() or skip below would act on nothing - which is exactly how
+	 * the old hand-play masked the ordering: the event armed teardown during ExecuteEvent, and the
+	 * helper played afterwards, so the two were never in the same frame and the leak the ordering
+	 * could cause was unreachable from any test. The event starts the sequence itself as its last step,
+	 * so playback is under way by the time ExecuteEvent returns.
 	 */
 	ANarrativeLevelSequenceActor* PlayCutscene(FWorldFixture& Fixture, float GraceSeconds)
 	{
@@ -188,15 +190,21 @@ namespace TerritoryCutsceneTests
 			MakeEvent(Fixture.World, Heroes, MakeSequence(Fixture.World));
 		Event->TeardownGraceSeconds = GraceSeconds;
 		Event->ExecuteEvent(nullptr, nullptr, nullptr);
+		return SoleCutscene(Fixture.World);
+	}
 
-		ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
-		if (Cutscene)
-		{
-			if (ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer())
-			{
-				Player->Play();
-			}
-		}
+	/**
+	 * Build a sequence actor through the vendor factory exactly as the event does, but without the
+	 * event, so a test can drive playback and arming in a chosen order. Used by the tests that own the
+	 * ordering themselves.
+	 */
+	ANarrativeLevelSequenceActor* SpawnCutscene(UWorld* World, APlayerController* Viewer,
+		const FNarrativeSequencePlaybackSettings& Settings)
+	{
+		if (!World || !Viewer) return nullptr;
+		ANarrativeLevelSequenceActor* Cutscene = nullptr;
+		ANarrativeLevelSequenceActor::CreateNarrativeLevelSequencePlayer(World, {Viewer},
+			FVector::ZeroVector, 0.f, MakeSequence(World), Settings, Cutscene);
 		return Cutscene;
 	}
 
@@ -505,10 +513,23 @@ bool FTFTerritoryCutsceneNeverPausesAtEnd::RunTest(const FString&)
 
 	TestFalse(TEXT("Pause At End is forced off so the sequence reaches a real stop"),
 		Cutscene->PlaybackSettings.bPauseAtEnd);
-	TestTrue(TEXT("Auto Play is forced on, because an event that never plays is not a cutscene"),
+	// This assertion used to read the other way, and it is the one existing test the fix had to change.
+	// Auto Play was forced *on* because the event relied on the vendor's BeginPlay to start playback;
+	// that is exactly the window claim 8 is about, so the event now forces it off and starts the
+	// sequence itself, after teardown is armed. The assertion below is what keeps the inversion from
+	// degenerating into "the settings are safe because nothing ever plays".
+	TestFalse(TEXT("Auto Play is forced off, because the engine starting the sequence is the window this closes"),
 		Cutscene->PlaybackSettings.bAutoPlay);
 	TestFalse(TEXT("The authored pausing configuration did not survive to the player"),
 		Cutscene->NarrativeSequenceParams.bPauseAtEnd);
+
+	// The contract the old Auto Play assertion was really about, asserted directly instead: an event
+	// that never plays is not a cutscene, and this one plays.
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+	TestTrue(TEXT("The cutscene is playing even though Auto Play is off"),
+		Player->IsPlaying());
 
 	DestroyCutscenes(Fixture.World);
 	return true;
@@ -813,6 +834,315 @@ bool FTFTerritoryCutsceneTeardownGraceAuthorable::RunTest(const FString&)
 		TestTrue(TEXT("The default grace leaves a client a moment behind room to finish"),
 			CDO->TeardownGraceSeconds > 0.f);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutscenePlaybackStartedByEvent,
+	"TerritoryFramework.Presentation.Cutscenes.PlaybackIsStartedByTheEventAfterArming",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutscenePlaybackStartedByEvent::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	MakeFactionViewer(Fixture.World, Heroes);
+	UTerritoryPlayCutsceneEvent* Event =
+		MakeEvent(Fixture.World, Heroes, MakeSequence(Fixture.World));
+	Event->TeardownGraceSeconds = 1.f;
+	// Authored on purpose, and authored true. The claim is that the event overrides it, so a designer
+	// who fills this in expecting the vendor's Auto Play to drive the cutscene gets Territory's
+	// ordering instead - and the cutscene still plays.
+	Event->PlaybackSettings.bAutoPlay = true;
+	Event->PlaybackSettings.bPauseAtEnd = true;
+
+	Event->ExecuteEvent(nullptr, nullptr, nullptr);
+
+	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+	TestNotNull(TEXT("The event creates exactly one cutscene actor"), Cutscene);
+	if (!Cutscene) return false;
+
+	TestNotNull(TEXT("The teardown that owns the actor's lifetime is armed"), TeardownOn(Cutscene));
+
+	// This is the window claim 8 describes. The vendor factory spawns the actor with deferred
+	// construction so BeginPlay runs inside the factory, and BeginPlay calls Play() whenever Auto Play
+	// is set - so this value decides whether playback could have started before the teardown above
+	// existed. It is read off the actor the factory built, through the engine base property the
+	// vendor's own BeginPlay reads.
+	TestFalse(TEXT("Auto Play is forced off, so the factory cannot start the cutscene itself"),
+		ReadShotPlaybackFlag(Cutscene, TEXT("bAutoPlay")));
+	TestFalse(TEXT("Pause At End is forced off, so a cutscene always reaches a real stop"),
+		ReadShotPlaybackFlag(Cutscene, TEXT("bPauseAtEnd")));
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+
+	// Nothing in this test plays by hand, and the two assertions above rule out the factory having
+	// played. So Territory started this, and the only place it can have done so is after arming.
+	TestTrue(TEXT("The event started the sequence itself, once teardown was armed"),
+		Player->IsPlaying());
+	TestEqual(TEXT("A cutscene that is playing has had no lifespan armed"),
+		Cutscene->GetLifeSpan(), 0.f);
+	TestEqual(TEXT("The cutscene actor is still alive while it plays"),
+		CountCutscenes(Fixture.World), 1);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneArmingBeforePlayback,
+	"TerritoryFramework.Presentation.Cutscenes.ArmingBeforePlaybackDoesNotTearDown",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneArmingBeforePlayback::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	APlayerController* Viewer = MakeFactionViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("A faction viewer can be built"), Viewer);
+	if (!Viewer) return false;
+
+	// The settings the event forces, reproduced here so this test is about the component's contract
+	// rather than about the event that happens to call it.
+	FNarrativeSequencePlaybackSettings Settings;
+	Settings.bAutoPlay = false;
+	Settings.bPauseAtEnd = false;
+	ANarrativeLevelSequenceActor* Cutscene = SpawnCutscene(Fixture.World, Viewer, Settings);
+	TestNotNull(TEXT("The vendor factory creates a cutscene actor"), Cutscene);
+	if (!Cutscene) return false;
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+
+	// A brand-new player reads as not playing and not paused, because ULevelSequencePlayer leaves its
+	// status at its zero value until something plays it - not because this sequence has ended, which
+	// the last test in this section measures. Read through the public predicates rather than
+	// GetPlaybackStatus(), which is protected on the player and therefore not available to a caller at
+	// all: IsPlaying/IsPaused are the whole of what arming could consult.
+	TestFalse(TEXT("A never-played player is not playing"),
+		Player->IsPlaying());
+	TestFalse(TEXT("A never-played player is not paused"),
+		Player->IsPaused());
+
+	TestNotNull(TEXT("Arming a player that has not played yet succeeds"),
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(Cutscene, 1.f));
+
+	// The regression this pins, and the reason arming must not consult the playback status: arming
+	// happens before playback starts, so a "status is Stopped" branch inside arming would destroy every
+	// cutscene the instant it was armed, silently and universally.
+	TestTrue(TEXT("Arming does not destroy a cutscene that has not started yet"),
+		IsValid(Cutscene) && !Cutscene->IsActorBeingDestroyed());
+	TestEqual(TEXT("Arming arms no lifespan of its own"), Cutscene->GetLifeSpan(), 0.f);
+
+	// The control for the two assertions above: the player really was startable, so they are not a
+	// dead player proving nothing.
+	Player->Play();
+	TestTrue(TEXT("The armed cutscene plays on request"), Player->IsPlaying());
+	Player->Stop();
+	TestTrue(TEXT("Stopping after arming arms the authored grace"),
+		Cutscene->GetLifeSpan() > 0.f && Cutscene->GetLifeSpan() <= 1.f);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneReconcileAlreadyStopped,
+	"TerritoryFramework.Presentation.Cutscenes.ReconcileTearsDownASequenceAlreadyStopped",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneReconcileAlreadyStopped::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	APlayerController* Viewer = MakeFactionViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("A faction viewer can be built"), Viewer);
+	if (!Viewer) return false;
+
+	FNarrativeSequencePlaybackSettings Settings;
+	Settings.bAutoPlay = false;
+	Settings.bPauseAtEnd = false;
+	ANarrativeLevelSequenceActor* Cutscene = SpawnCutscene(Fixture.World, Viewer, Settings);
+	TestNotNull(TEXT("The vendor factory creates a cutscene actor"), Cutscene);
+	if (!Cutscene) return false;
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+
+	// Play and stop *before* arming, so the ending is broadcast to a player that has no bindings yet.
+	// That is the window an immediate cancellation opens - a StopTags tag, a zero-length sequence, a
+	// producer that cancels the shot as it starts - and it is the window a stop binding alone cannot
+	// cover, because the signal has already been sent by the time the binding exists.
+	Player->Play();
+	TestTrue(TEXT("The sequence plays before it is stopped"), Player->IsPlaying());
+	Player->Stop();
+	TestFalse(TEXT("The sequence has already stopped when teardown is armed"),
+		Player->IsPlaying());
+
+	UTerritoryCutsceneTeardownComponent* Teardown =
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(Cutscene, 0.f);
+	TestNotNull(TEXT("Arming on an already-stopped player still arms"), Teardown);
+	if (!Teardown) return false;
+
+	// Before the reconcile the actor is alive, deliberately. Arming cannot tell "already stopped" from
+	// "not started yet" - the previous test measures why - so it must not guess, and the ending is only
+	// recoverable by the caller that knows it just asked this player to play.
+	TestTrue(TEXT("Arming alone leaves the already-ended cutscene alive"),
+		IsValid(Cutscene) && !Cutscene->IsActorBeingDestroyed());
+
+	Teardown->ReconcileAfterPlaybackRequest();
+
+	TestTrue(TEXT("Reconciling destroys a cutscene whose sequence has already ended"),
+		!IsValid(Cutscene) || Cutscene->IsActorBeingDestroyed());
+	TestEqual(TEXT("No cutscene actor is left behind"), CountCutscenes(Fixture.World), 0);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneReconcileKeepsGrace,
+	"TerritoryFramework.Presentation.Cutscenes.ReconcileFromAnAlreadyStoppedPlayerKeepsTheGrace",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneReconcileKeepsGrace::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	APlayerController* Viewer = MakeFactionViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("A faction viewer can be built"), Viewer);
+	if (!Viewer) return false;
+
+	FNarrativeSequencePlaybackSettings Settings;
+	Settings.bAutoPlay = false;
+	Settings.bPauseAtEnd = false;
+	ANarrativeLevelSequenceActor* Cutscene = SpawnCutscene(Fixture.World, Viewer, Settings);
+	TestNotNull(TEXT("The vendor factory creates a cutscene actor"), Cutscene);
+	if (!Cutscene) return false;
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+
+	Player->Play();
+	Player->Stop();
+
+	// The grace exists because this destruction replicates: a client whose own copy is a moment behind
+	// must not have its cutscene cut off. A reconcile that short-circuited to Destroy() would satisfy
+	// the previous test and quietly drop that guarantee for every already-ended sequence, which is what
+	// this test separates.
+	UTerritoryCutsceneTeardownComponent* Teardown =
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(Cutscene, 1.f);
+	TestNotNull(TEXT("Arming on an already-stopped player still arms"), Teardown);
+	if (!Teardown) return false;
+
+	Teardown->ReconcileAfterPlaybackRequest();
+
+	TestTrue(TEXT("Reconciling an already-ended sequence applies the authored grace, not an immediate destroy"),
+		Cutscene->GetLifeSpan() > 0.f && Cutscene->GetLifeSpan() <= 1.f);
+	TestTrue(TEXT("The actor is still alive during that grace"),
+		IsValid(Cutscene) && !Cutscene->IsActorBeingDestroyed());
+
+	// The same timer drive the other grace tests use, so the destruction is what the grace would have
+	// caused rather than a wait.
+	Cutscene->LifeSpanExpired();
+	TestTrue(TEXT("The reconciled cutscene is destroyed once its lifespan expires"),
+		!IsValid(Cutscene) || Cutscene->IsActorBeingDestroyed());
+	TestEqual(TEXT("No cutscene actor is left behind"), CountCutscenes(Fixture.World), 0);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+/**
+ * The engine facts the playback order rests on, measured rather than quoted from the engine source, so
+ * an engine upgrade that invalidates the reasoning fails a test instead of silently reopening claim 8.
+ *
+ * Together they are why the order is "force the settings, spawn, arm, play, reconcile" and why arming
+ * cannot perform the reconcile itself:
+ *
+ *   1. A player that was never played and a player that played and stopped answer the *same* to every
+ *      question a caller can ask: not playing, not paused. ULevelSequencePlayer leaves its status at
+ *      its zero value until something plays it, so "it is not playing" cannot be read as "this
+ *      sequence has already ended".
+ *   2. Stop() on a player that never played is a silent no-op, so a sequence is only "already ended"
+ *      from Territory's point of view once something has played it.
+ *
+ * The predicates are IsPlaying and IsPaused rather than the status enum for a reason that is itself
+ * part of the finding: GetPlaybackStatus() is protected on the player, so it is not an API a caller
+ * could reach even if it did disambiguate. Nothing about this can be checked from outside the player
+ * except the two predicates that cannot tell the two histories apart.
+ *
+ * The remaining leg - that the vendor's BeginPlay autoplays, creating the window in the first place -
+ * cannot be measured the same way: it fires only inside the factory's FinishSpawning in a *begun*
+ * world, and there is no engine hook between the factory's InitializePlayer() and that BeginPlay to
+ * interpose a probe on. It is covered by construction instead: the event forces Auto Play off, which
+ * is the value the vendor's BeginPlay branches on, and the test above asserts that forced value on the
+ * actor the factory built.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutscenePlaybackOrder,
+	"TerritoryFramework.Presentation.Cutscenes.Regression.PlaybackOrderIsSettingsSpawnObserverPlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutscenePlaybackOrder::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	APlayerController* Viewer = MakeFactionViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("A faction viewer can be built"), Viewer);
+	if (!Viewer) return false;
+
+	FNarrativeSequencePlaybackSettings Settings;
+	Settings.bAutoPlay = false;
+	Settings.bPauseAtEnd = false;
+	ANarrativeLevelSequenceActor* Cutscene = SpawnCutscene(Fixture.World, Viewer, Settings);
+	TestNotNull(TEXT("The vendor factory creates a cutscene actor"), Cutscene);
+	if (!Cutscene) return false;
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+
+	TestFalse(TEXT("A never-played player is not playing"), Player->IsPlaying());
+	TestFalse(TEXT("A never-played player is not paused"), Player->IsPaused());
+
+	Player->Stop();
+	TestFalse(TEXT("Stopping a never-played player changes nothing, because StopInternal only acts on a playing or paused player"),
+		Player->IsPlaying());
+	TestFalse(TEXT("and leaves it not paused"), Player->IsPaused());
+
+	Player->Play();
+	TestTrue(TEXT("A played player is playing"), Player->IsPlaying());
+
+	Player->Stop();
+	TestFalse(TEXT("A played-and-stopped player reads exactly as the never-played one did: not playing"),
+		Player->IsPlaying());
+	TestFalse(TEXT("and not paused"), Player->IsPaused());
+
+	// Identical readings, different histories. That is the whole reason the ordering cannot be replaced
+	// by a status check inside arming, and the reason ReconcileAfterPlaybackRequest is a method the
+	// caller invokes rather than something arming decides for itself.
+	DestroyCutscenes(Fixture.World);
 	return true;
 }
 

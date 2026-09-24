@@ -348,6 +348,15 @@ protected:
  * OnStopped only on a real stop - a sequence that merely pauses fires OnPause, never releases
  * cinematic mode, and would leave the player permanently unable to move.
  *
+ * Auto Play is forced off as well, and this is the one setting where the forced value is the
+ * counter-intuitive one. The vendor factory spawns the actor with deferred construction so that
+ * BeginPlay runs inside the factory, and BeginPlay calls Play() whenever Auto Play is set - so an
+ * authored Auto Play would start the sequence before this event could arm teardown, and a cutscene
+ * that stopped inside that window (a StopTags tag, a zero-length sequence, an immediate cancel) would
+ * broadcast its ending to nothing and leak its actor. Playback order is therefore: force the
+ * settings, spawn the actor, arm teardown, start the sequence, then reconcile against the status the
+ * start left behind.
+ *
  * This event also owns the actor's lifetime, because nobody else does: the vendor factory returns
  * the actor through OutActor and never destroys it. Teardown is delegated to
  * UTerritoryCutsceneTeardownComponent, which this event attaches to the actor it just created, so
@@ -370,10 +379,13 @@ public:
 			ToolTip="Level Sequence asset played as the cutscene. Example: a short shot of defenders walking down the stairwell."))
 	TSoftObjectPtr<ULevelSequence> CutsceneSequence;
 
-	/** Playback settings. Pause At End is overridden to false when the cutscene runs; see the class comment. */
+	/**
+	 * Playback settings. Two fields are overridden when the cutscene runs: Auto Play is forced off and
+	 * Pause At End is forced off. Both are explained in the class comment; the rest are authored.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(ShowOnlyInnerProperties,
-			ToolTip="Narrative playback settings for this cutscene. Pause At End is ignored: a paused sequence never fires OnStopped, which is the engine's only path that releases cinematic input suppression."))
+			ToolTip="Narrative playback settings for this cutscene. Two fields are ignored. Auto Play: the engine would start the sequence before Territory had armed teardown, so Territory starts it instead, once teardown is armed. Pause At End: a paused sequence never fires OnStopped, which is the engine's only path that releases cinematic input suppression."))
 	FNarrativeSequencePlaybackSettings PlaybackSettings;
 
 	/**
