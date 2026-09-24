@@ -18,6 +18,7 @@
 #include "LevelSequencePlayer.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Tales/TerritoryStoryEvents.h"
+#include "TerritoryCinematicAudienceProbe.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UObject/UnrealType.h"
 
@@ -34,6 +35,56 @@ public:
 	static void SequenceStopped(UTerritoryCutsceneTeardownComponent* Component)
 	{
 		if (Component) Component->HandleSequenceStopped();
+	}
+
+	/**
+	 * One turn of the audience reconcile.
+	 *
+	 * The reconcile's real entry point is the world's MovieSceneSequenceTick delegate, which only
+	 * fires from UWorld::Tick, and the component cannot tick any other way - ALevelSequenceActor
+	 * leaves bCanEverTick false and RegisterActorTickFunctions is protected. A headless fixture world
+	 * has no game loop, so the test drives the handler directly rather than ticking the world.
+	 *
+	 * This covers the reconcile's *logic*, and only its logic. Two things it cannot show, both of
+	 * them stated here rather than left to be inferred from a green run:
+	 *
+	 * That the world's sequence tick delegate is what actually invokes the handler in play. The
+	 * reconcile subscribes to it and nothing in a headless fixture can fire it.
+	 *
+	 * And the registration-order consequence that follows from being on that delegate - the tick
+	 * multicast invokes in reverse registration order, so the release lands one frame after the
+	 * engine's suppression. Every assertion here drives the handler by hand, so it would read the
+	 * same if the delegate were never wired at all.
+	 *
+	 * The listen-server harness was run for this batch and does not close either gap: its fixture
+	 * authors a faction audience with no explicit controllers, so on a listen server the vendor's
+	 * fallback resolves that audience to the authority world's only local controller and the
+	 * reconcile has nothing to release. It proves the audience *bound* - no local controller was
+	 * frozen without being named by the sequence that froze it - and not the release. See
+	 * Docs/Verification/CUTSCENE_AUDIENCE_2026-09-24.md, which records the gap and what a fixture
+	 * would need in order to close it.
+	 */
+	static void SequenceTick(UTerritoryCutsceneTeardownComponent* Component)
+	{
+		if (Component) Component->HandleSequenceTick(0.f);
+	}
+
+	/** How many controllers the reconcile resolved as outside the audience. */
+	static int32 UncoveredCount(const UTerritoryCutsceneTeardownComponent* Component)
+	{
+		return Component ? Component->UncoveredControllers.Num() : 0;
+	}
+
+	/** Whether the component is currently subscribed to the world's sequence tick. */
+	static bool HasTickSubscription(const UTerritoryCutsceneTeardownComponent* Component)
+	{
+		return Component && Component->SequenceTickHandle.IsValid();
+	}
+
+	/** Whether the one teardown has already been armed for this actor. */
+	static bool IsArmed(const UTerritoryCutsceneTeardownComponent* Component)
+	{
+		return Component && Component->bTeardownArmed;
 	}
 };
 
@@ -82,12 +133,17 @@ namespace TerritoryCutsceneTests
 	 * The controller is given a real local player because a cutscene viewer is a local player in
 	 * production: ULevelSequencePlayer::EnableCinematicMode suppresses input on local controllers,
 	 * so a fixture without one would not exercise the path a real audience takes.
+	 *
+	 * Templated so the audience tests can build the recording subclass through the same recipe: a
+	 * controller that is set up differently from production's would not prove anything about the
+	 * audience the engine resolves.
 	 */
-	APlayerController* MakeFactionViewer(UWorld* World, const FGameplayTag& Faction)
+	template <typename ControllerType>
+	ControllerType* MakeLocalViewer(UWorld* World, const FGameplayTag& Faction)
 	{
 		if (!World) return nullptr;
 		UGameInstance* Instance = World->GetGameInstance();
-		APlayerController* Viewer = World->SpawnActor<APlayerController>();
+		ControllerType* Viewer = World->SpawnActor<ControllerType>();
 		ATerritoryGuardCharacter* Body = World->SpawnActor<ATerritoryGuardCharacter>();
 		if (!Viewer || !Body) return nullptr;
 		if (Instance)
@@ -108,6 +164,48 @@ namespace TerritoryCutsceneTests
 			TeamAgent->AddFaction(Faction);
 		}
 		return Viewer;
+	}
+
+	APlayerController* MakeFactionViewer(UWorld* World, const FGameplayTag& Faction)
+	{
+		return MakeLocalViewer<APlayerController>(World, Faction);
+	}
+
+	/**
+	 * A viewer that records every cinematic transition it is put through.
+	 *
+	 * A local controller's final bCinematicMode cannot distinguish "suppressed and released" from
+	 * "never touched", so a test asserting only the flag would pass against a reconcile that never
+	 * ran. The recording is what makes the claim falsifiable.
+	 */
+	ATerritoryCinematicRecordingController* MakeRecordingViewer(UWorld* World,
+		const FGameplayTag& Faction)
+	{
+		return MakeLocalViewer<ATerritoryCinematicRecordingController>(World, Faction);
+	}
+
+	/**
+	 * The engine's own suppression, reproduced verbatim.
+	 *
+	 * ULevelSequencePlayer::EnableCinematicMode is private and only reachable from OnStartedPlaying,
+	 * which fires on the player's first update after Play() - and a headless fixture world has no
+	 * game loop to produce that update. So the test performs the call the engine would make, with the
+	 * engine's own argument order and the actor's own settings
+	 * (LevelSequencePlayer.cpp:395), rather than approximating it. The live harness is what proves the
+	 * engine really makes it.
+	 */
+	void SuppressCinematics(UWorld* World, const FMovieSceneSequencePlaybackSettings& Settings)
+	{
+		for (FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator();
+			Iterator; ++Iterator)
+		{
+			APlayerController* Controller = Iterator->Get();
+			if (Controller && Controller->IsLocalController())
+			{
+				Controller->SetCinematicMode(true, Settings.bHidePlayer, Settings.bHideHud,
+					Settings.bDisableMovementInput, Settings.bDisableLookAtInput);
+			}
+		}
 	}
 
 	/**
@@ -1142,6 +1240,504 @@ bool FTFTerritoryCutscenePlaybackOrder::RunTest(const FString&)
 	// Identical readings, different histories. That is the whole reason the ordering cannot be replaced
 	// by a status check inside arming, and the reason ReconcileAfterPlaybackRequest is a method the
 	// caller invokes rather than something arming decides for itself.
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// Claim 7: the authority's cinematic sweep is bounded by the resolved audience
+//
+// ULevelSequencePlayer::EnableCinematicMode walks every local controller in its own world and never
+// consults OwnerControllers - the vendor applies that list to net relevancy only. On a listen server a
+// cutscene staged for one player therefore suppresses movement and look on every local controller the
+// world has, including someone watching a cutscene that is not theirs. These tests are the bound.
+//
+// The fixture world has no game loop, so the engine's sweep is reproduced verbatim rather than
+// triggered, and the reconcile is driven through the test seam. Both are named as such in the test
+// bodies: what they prove is the reconcile's logic, and the live run in the listen-server harness is
+// what proves the engine really makes that call and that the world's delegate really invokes the
+// handler. Neither leg substitutes for the other.
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+namespace TerritoryCutsceneTests
+{
+	/**
+	 * An event configured the way a real cutscene is: the four flags that make
+	 * ULevelSequencePlayer::EnableCinematicMode suppress anything at all.
+	 *
+	 * Without at least one of them the engine never calls SetCinematicMode, so a fixture with default
+	 * settings would prove nothing about the audience - it would be testing a sequence that cannot
+	 * suppress anyone.
+	 */
+	UTerritoryPlayCutsceneEvent* MakeSuppressingEvent(UObject* Outer,
+		const FGameplayTag& AudienceFaction, ULevelSequence* Sequence)
+	{
+		UTerritoryPlayCutsceneEvent* Event = MakeEvent(Outer, AudienceFaction, Sequence);
+		Event->PlaybackSettings.bDisableMovementInput = true;
+		Event->PlaybackSettings.bDisableLookAtInput = true;
+		Event->PlaybackSettings.bHidePlayer = true;
+		Event->PlaybackSettings.bHideHud = true;
+		return Event;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicAudienceReleased,
+	"TerritoryFramework.Presentation.Cutscenes.CinematicModeIsReleasedOutsideTheAudience",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicAudienceReleased::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+
+	// The listen-server shape: two local controllers in one authority world, and a cutscene staged for
+	// exactly one of them. This is the case the engine gets wrong, because its sweep has no audience.
+	ATerritoryCinematicRecordingController* Watcher = MakeRecordingViewer(Fixture.World, Heroes);
+	ATerritoryCinematicRecordingController* Bystander = MakeRecordingViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("The audience controller can be built"), Watcher);
+	TestNotNull(TEXT("A second local controller can be built"), Bystander);
+	if (!Watcher || !Bystander) return false;
+
+	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
+		MakeSequence(Fixture.World));
+	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+
+	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+	TestNotNull(TEXT("The cutscene starts for the explicit audience"), Cutscene);
+	if (!Cutscene) return false;
+	TestEqual(TEXT("The audience is exactly the controller the transition named"),
+		Cutscene->OwnerControllers.Num(), 1);
+
+	UTerritoryCutsceneTeardownComponent* Teardown = TeardownOn(Cutscene);
+	TestNotNull(TEXT("The cutscene has a teardown observer"), Teardown);
+	if (!Teardown) return false;
+
+	TestEqual(TEXT("Exactly the one local controller outside the audience is resolved"),
+		FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(Teardown), 1);
+	TestTrue(TEXT("The reconcile subscribes to the world's sequence tick while it has something to bound"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+
+	const FMovieSceneSequencePlaybackSettings& Settings = Cutscene->PlaybackSettings;
+	TestTrue(TEXT("The authored cutscene really does suppress input, so there is something to bound"),
+		Settings.bDisableMovementInput || Settings.bDisableLookAtInput
+			|| Settings.bHidePlayer || Settings.bHideHud);
+
+	// The engine's sweep, reproduced verbatim because it is private and only reachable from the
+	// player's first update - which a world with no game loop never produces.
+	SuppressCinematics(Fixture.World, Settings);
+	TestEqual(TEXT("The engine suppressed the audience controller"), Watcher->NumberEntering(), 1);
+	TestEqual(TEXT("The engine suppressed the bystander too, which is the defect"),
+		Bystander->NumberEntering(), 1);
+
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+
+	TestEqual(TEXT("The audience controller keeps the suppression its cutscene is for"),
+		Watcher->Num(), 1);
+	TestTrue(TEXT("and is still in cinematic mode"), Watcher->bCinematicMode);
+	TestEqual(TEXT("The bystander is released"), Bystander->Num(), 2);
+	if (const ATerritoryCinematicRecordingController::FCall* Last = Bystander->Last())
+	{
+		TestFalse(TEXT("The bystander's last word is control, not suppression"),
+			Last->bCinematicMode);
+		// Symmetry, not just "off": the release repeats the engine's own flags, so it is the inverse of
+		// the call being undone rather than a second opinion about what cinematic mode means.
+		TestTrue(TEXT("and the release repeats the engine's hide-player flag"),
+			Last->bHidePlayer == Settings.bHidePlayer);
+		TestTrue(TEXT("and the engine's hide-HUD flag"),
+			Last->bHideHud == Settings.bHideHud);
+		TestTrue(TEXT("and the engine's movement flag"),
+			Last->bAffectsMovement == Settings.bDisableMovementInput);
+		TestTrue(TEXT("and the engine's look flag"),
+			Last->bAffectsTurning == Settings.bDisableLookAtInput);
+	}
+	TestFalse(TEXT("The bystander really is out of cinematic mode"), Bystander->bCinematicMode);
+
+	// Idempotence, and it is not a nicety: APlayerController's own setter has no change guard and
+	// calls the reliable ClientSetCinematicMode RPC unconditionally, so a reconcile that released
+	// again on every frame would send that RPC for every bystander for the whole cutscene.
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	TestEqual(TEXT("Later frames release nothing, because there is nothing left to release"),
+		Bystander->Num(), 2);
+	TestEqual(TEXT("and the audience controller is never touched again"), Watcher->Num(), 1);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicAudienceCovered,
+	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileStaysInertWhenItCoversEveryLocalController",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicAudienceCovered::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	ATerritoryCinematicRecordingController* Only = MakeRecordingViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("A local controller can be built"), Only);
+	if (!Only) return false;
+
+	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
+		MakeSequence(Fixture.World));
+	Event->ExecuteEvent(nullptr, Only, nullptr);
+
+	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	UTerritoryCutsceneTeardownComponent* Teardown = TeardownOn(Cutscene);
+	TestNotNull(TEXT("The cutscene has a teardown observer"), Teardown);
+	if (!Teardown) return false;
+
+	// The single-player case, and the client's: the audience is the whole world, so the engine's sweep
+	// is exactly right and the reconcile must hold no tick at all. This is the anti-regression guard
+	// for the common path - a reconcile that armed here would be releasing the very controller the
+	// cutscene is for.
+	TestEqual(TEXT("An audience that covers every local controller leaves nothing uncovered"),
+		FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(Teardown), 0);
+	TestFalse(TEXT("so no per-frame hook is taken"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+
+	SuppressCinematics(Fixture.World, Cutscene->PlaybackSettings);
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+
+	TestEqual(TEXT("The only controller was suppressed once, by the engine, and never released"),
+		Only->Num(), 1);
+	TestTrue(TEXT("and is still in cinematic mode, because the cutscene is for it"),
+		Only->bCinematicMode);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicBystanderAlreadyFrozen,
+	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileLeavesAControllerAnotherSystemAlreadyFroze",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicBystanderAlreadyFrozen::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	ATerritoryCinematicRecordingController* Watcher = MakeRecordingViewer(Fixture.World, Heroes);
+	ATerritoryCinematicRecordingController* Bystander = MakeRecordingViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("The audience controller can be built"), Watcher);
+	TestNotNull(TEXT("A second local controller can be built"), Bystander);
+	if (!Watcher || !Bystander) return false;
+
+	// Something else already has the bystander in cinematic mode before this cutscene exists - another
+	// system's own cinematic. Territory has no standing to take that back, and could not tell it apart
+	// from its own suppression afterwards, so it must decide before it starts.
+	Bystander->SetCinematicMode(true, true, true, true, true);
+	TestEqual(TEXT("The bystander starts out suppressed by something that is not this cutscene"),
+		Bystander->Num(), 1);
+	TestTrue(TEXT("and is in cinematic mode before the cutscene is armed"),
+		Bystander->bCinematicMode);
+
+	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
+		MakeSequence(Fixture.World));
+	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+
+	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	UTerritoryCutsceneTeardownComponent* Teardown = TeardownOn(Cutscene);
+	TestNotNull(TEXT("The cutscene has a teardown observer"), Teardown);
+	if (!Teardown) return false;
+
+	TestEqual(TEXT("A controller another system already froze is not claimed by this reconcile"),
+		FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(Teardown), 0);
+	TestFalse(TEXT("so this cutscene takes no per-frame hook"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+
+	// The engine sweeps it again, as it does in production - the freeze is re-applied with the
+	// cutscene's flags and must survive the reconcile untouched.
+	SuppressCinematics(Fixture.World, Cutscene->PlaybackSettings);
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+
+	TestEqual(TEXT("Territory never releases a suppression it did not make"), Bystander->Num(), 2);
+	TestTrue(TEXT("and the bystander is still in cinematic mode"), Bystander->bCinematicMode);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicPausedSequence,
+	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileDoesNotReleaseAPausedSequence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicPausedSequence::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	ATerritoryCinematicRecordingController* Watcher = MakeRecordingViewer(Fixture.World, Heroes);
+	ATerritoryCinematicRecordingController* Bystander = MakeRecordingViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("The audience controller can be built"), Watcher);
+	TestNotNull(TEXT("A second local controller can be built"), Bystander);
+	if (!Watcher || !Bystander) return false;
+
+	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
+		MakeSequence(Fixture.World));
+	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+
+	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	UTerritoryCutsceneTeardownComponent* Teardown = TeardownOn(Cutscene);
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	TestNotNull(TEXT("The cutscene has a teardown observer"), Teardown);
+	if (!Player || !Teardown) return false;
+
+	Player->Pause();
+	TestTrue(TEXT("The sequence is paused"), Player->IsPaused());
+	TestFalse(TEXT("and no longer playing"), Player->IsPlaying());
+
+	SuppressCinematics(Fixture.World, Cutscene->PlaybackSettings);
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+
+	// A paused sequence has deliberately not stopped, and the engine releases cinematic mode only from
+	// a real stop. Releasing here would hand a bystander control in the middle of a shot that is still
+	// on screen - the very failure the audience bound must not introduce while fixing the other one.
+	TestEqual(TEXT("A paused sequence releases nobody"), Bystander->Num(), 1);
+	TestTrue(TEXT("so the bystander stays in cinematic mode"), Bystander->bCinematicMode);
+	TestTrue(TEXT("and the reconcile keeps its hook, because playback can resume"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicSelfTerminating,
+	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileStopsWhenTheSequenceEnds",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicSelfTerminating::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	ATerritoryCinematicRecordingController* Watcher = MakeRecordingViewer(Fixture.World, Heroes);
+	ATerritoryCinematicRecordingController* Bystander = MakeRecordingViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("The audience controller can be built"), Watcher);
+	TestNotNull(TEXT("A second local controller can be built"), Bystander);
+	if (!Watcher || !Bystander) return false;
+
+	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
+		MakeSequence(Fixture.World));
+	// A grace, so the actor outlives its sequence and the reconcile is still in place afterwards.
+	Event->TeardownGraceSeconds = 1.f;
+	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+
+	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	UTerritoryCutsceneTeardownComponent* Teardown = TeardownOn(Cutscene);
+	TestNotNull(TEXT("The cutscene has a teardown observer"), Teardown);
+	if (!Teardown) return false;
+	TestTrue(TEXT("The reconcile is subscribed while the cutscene plays"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+
+	SuppressCinematics(Fixture.World, Cutscene->PlaybackSettings);
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	TestEqual(TEXT("The bystander is released while the sequence plays"), Bystander->Num(), 2);
+
+	// The sequence ends. The actor survives for the authored grace, so without self-termination the
+	// reconcile would keep a world hook and keep sweeping every frame of it.
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceStopped(Teardown);
+	TestTrue(TEXT("The ending arms the one teardown"), FTFTerritoryCutsceneTeardownTestAccess::IsArmed(Teardown));
+	TestTrue(TEXT("and the actor is kept alive for the authored grace"),
+		Cutscene->GetLifeSpan() > 0.f);
+
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	TestFalse(TEXT("The reconcile hands the world tick back once it has nothing to bound"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+	TestEqual(TEXT("and the grace period releases nobody further"), Bystander->Num(), 2);
+	TestEqual(TEXT("nor touches the audience"), Watcher->Num(), 1);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicDialogueShotReceipt,
+	"TerritoryFramework.Presentation.Cutscenes.DialogueShotForcedFlagsAreRecordedNotBounded",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicDialogueShotReceipt::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+
+	// The other half of the receipt: a cutscene Territory starts forces none of the four flags of its
+	// own. That is what makes the audience bound above inert for default content - nothing suppresses,
+	// so nothing needs releasing - and it is why the shot below is the residual rather than the rule.
+	// It is the value the engine reads, on the actor the event actually spawned, not a reading of the
+	// authored template.
+	{
+		FWorldFixture Fixture;
+		PlayCutscene(Fixture, 1.f);
+
+		ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+		TestNotNull(TEXT("A cutscene starts from an event with no cinematic flags authored"), Cutscene);
+		if (Cutscene)
+		{
+			const FMovieSceneSequencePlaybackSettings& Authored = Cutscene->PlaybackSettings;
+			TestFalse(TEXT("A Territory cutscene leaves movement suppression to the designer"),
+				Authored.bDisableMovementInput);
+			TestFalse(TEXT("and look suppression"),
+				Authored.bDisableLookAtInput);
+			TestFalse(TEXT("and player hiding"),
+				Authored.bHidePlayer);
+			TestFalse(TEXT("and HUD hiding"),
+				Authored.bHideHud);
+		}
+
+		DestroyCutscenes(Fixture.World);
+	}
+
+	// This test is a receipt, not coverage. UTerritoryDialogueShot forces three of the same four flags
+	// the cutscene audience reconcile now bounds, so a Territory dialogue shot is the unconditional
+	// instance of claim 7. It is deliberately left unbounded in this batch: a shot's audience is the
+	// conversation's, the dialogue system stops the sequence itself, and bounding it is a
+	// dialogue-design question with its own test surface. What this measures is the residual, so that
+	// the next reader cannot mistake "cutscenes are bounded" for "Territory is bounded".
+	//
+	// The flag values themselves are already asserted by DialogueShotSuppressesInput. They are repeated
+	// here because a receipt has to state the whole finding in one place; the leg that this test adds is
+	// the reflection below, which is why the shot's values are Territory's decision and not an
+	// inheritance from the vendor's defaults.
+	UTerritoryDialogueShot* Shot = NewObject<UTerritoryDialogueShot>();
+	TestNotNull(TEXT("A Territory dialogue shot can be built"), Shot);
+	if (!Shot) return false;
+
+	const FMovieSceneSequencePlaybackSettings ShotSettings = Shot->GetPlaybackSettings();
+	TestTrue(TEXT("A Territory shot still forces HUD hiding"), ShotSettings.bHideHud);
+	TestTrue(TEXT("A Territory shot still forces movement suppression"),
+		ShotSettings.bDisableMovementInput);
+	TestTrue(TEXT("A Territory shot still forces look suppression"),
+		ShotSettings.bDisableLookAtInput);
+
+	// The settings are the designer's, which is why the forced values above are a decision Territory
+	// made rather than a value it inherited from the vendor's defaults.
+	const FProperty* PlaybackProperty =
+		UNarrativeDialogueSequence::StaticClass()->FindPropertyByName(TEXT("PlaybackSettings"));
+	TestNotNull(TEXT("PlaybackSettings is declared on the vendor dialogue sequence"),
+		PlaybackProperty);
+	if (PlaybackProperty)
+	{
+		TestTrue(TEXT("A designer can author the shot's playback settings"),
+			(PlaybackProperty->PropertyFlags & CPF_Edit) != 0);
+		TestTrue(TEXT("and a Blueprint can read and write them"),
+			(PlaybackProperty->PropertyFlags & CPF_BlueprintVisible) != 0);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicNothingToBound,
+	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileHoldsNothingWhenThereIsNothingToBound",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicNothingToBound::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	ATerritoryCinematicRecordingController* Viewer = MakeRecordingViewer(Fixture.World, Heroes);
+	// A second local controller is what gives these legs their teeth. With only the audience local,
+	// every one of the three inert guards below is masked: the audience covers the world, so nothing
+	// is uncovered whatever the guard does, and a red leg that swapped the guard for a no-op would
+	// still read green. With a bystander present, each guard is the only thing holding the reconcile
+	// away from it - which is what these tests claim.
+	ATerritoryCinematicRecordingController* Bystander = MakeRecordingViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("A local controller can be built"), Viewer);
+	TestNotNull(TEXT("A second local controller can be built"), Bystander);
+	if (!Viewer || !Bystander) return false;
+
+	// An empty audience is the vendor's own "everyone": OwnerControllers gates net relevancy only when
+	// it has entries. The engine sweeping every local controller is exactly right for that content, so
+	// the reconcile must stay completely out of the way rather than treating empty as "nobody".
+	FNarrativeSequencePlaybackSettings EveryoneSettings;
+	EveryoneSettings.bDisableMovementInput = true;
+	EveryoneSettings.bDisableLookAtInput = true;
+	EveryoneSettings.bHidePlayer = true;
+	EveryoneSettings.bHideHud = true;
+
+	ANarrativeLevelSequenceActor* Unbounded = SpawnCutscene(Fixture.World, Viewer, EveryoneSettings);
+	TestNotNull(TEXT("A cutscene can be built directly from the vendor factory"), Unbounded);
+	if (!Unbounded) return false;
+	Unbounded->OwnerControllers.Empty();
+
+	UTerritoryCutsceneTeardownComponent* EveryoneTeardown =
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(Unbounded, 0.f);
+	TestNotNull(TEXT("Teardown still arms for an unbounded audience"), EveryoneTeardown);
+	if (EveryoneTeardown)
+	{
+		TestEqual(TEXT("An audience the vendor left empty covers everyone, so nothing is uncovered"),
+			FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(EveryoneTeardown), 0);
+		TestFalse(TEXT("and no per-frame hook is taken"),
+			FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(EveryoneTeardown));
+	}
+
+	// A sequence that suppresses nothing. EnableCinematicMode returns before touching a controller
+	// unless one of the four flags is authored, so there is no suppression to undo and no reason to
+	// sweep a world every frame for the length of a cutscene.
+	FNarrativeSequencePlaybackSettings SilentSettings;
+	SilentSettings.bDisableMovementInput = false;
+	SilentSettings.bDisableLookAtInput = false;
+	SilentSettings.bHidePlayer = false;
+	SilentSettings.bHideHud = false;
+
+	ANarrativeLevelSequenceActor* Silent = SpawnCutscene(Fixture.World, Viewer, SilentSettings);
+	TestNotNull(TEXT("A non-suppressing cutscene can be built"), Silent);
+	if (Silent)
+	{
+		UTerritoryCutsceneTeardownComponent* SilentTeardown =
+			UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(Silent, 0.f);
+		TestNotNull(TEXT("Teardown still arms for a non-suppressing cutscene"), SilentTeardown);
+		if (SilentTeardown)
+		{
+			TestEqual(TEXT("A cutscene that cannot suppress anyone has no audience to bound"),
+				FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(SilentTeardown), 0);
+			TestFalse(TEXT("so it takes no per-frame hook either"),
+				FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(SilentTeardown));
+
+			// Nothing suppressed the bystander, so there is nothing for the reconcile to release - and
+			// this is the half a count alone cannot show: a reconcile that resolved the bystander and
+			// did nothing with it would pass the count assertion above on a quiet frame.
+			FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(SilentTeardown);
+			TestEqual(TEXT("A non-suppressing sequence never touches a controller"), Bystander->Num(), 0);
+			TestFalse(TEXT("and the bystander is not in cinematic mode"), Bystander->bCinematicMode);
+		}
+	}
+
+	TestNull(TEXT("Teardown cannot be armed for a missing actor"),
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(nullptr, 0.f));
+
 	DestroyCutscenes(Fixture.World);
 	return true;
 }

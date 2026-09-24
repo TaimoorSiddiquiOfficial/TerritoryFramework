@@ -342,9 +342,12 @@ protected:
  * audience-filtered player factory and hands the camera back when the sequence ends.
  *
  * Input suppression is a data flag, not an API call. The engine enters and leaves cinematic mode
- * from the sequence player's own OnStartedPlaying/OnStopped, so this event must never call
- * SetCinematicMode itself: the release would not be symmetric and the player would be left without
- * control. Pause At End is forced off when the cutscene runs, because ULevelSequencePlayer fires
+ * from the sequence player's own OnStartedPlaying/OnStopped, so this event must never suppress or
+ * release input itself: the audience it resolves is not the set the engine sweeps, and a release that
+ * did not mirror the engine's own flags would leave a player without control. Bounding that sweep -
+ * releasing the local controllers the audience does not name - is
+ * UTerritoryCutsceneTeardownComponent's job, from the audience this event handed to the factory.
+ * Pause At End is forced off when the cutscene runs, because ULevelSequencePlayer fires
  * OnStopped only on a real stop - a sequence that merely pauses fires OnPause, never releases
  * cinematic mode, and would leave the player permanently unable to move.
  *

@@ -1,0 +1,1477 @@
+{
+  "fixture": "story-staged defenders across floors over the HopDistrictTest Blacksmith",
+  "checks": {
+    "authored_floors_reach_the_read_model": true,
+    "floor_capacity_is_the_posts_placed_on_it": true,
+    "nothing_is_cleared_before_the_fight": true,
+    "a_floor_the_level_cannot_deploy_to_is_not_reported_cleared": true,
+    "input_is_not_ignored_before_the_cutscene": true,
+    "blacksmith_unlocked": true,
+    "the_staffing_target_covers_every_post_on_a_floor_the_run_clears": true,
+    "every_floor_the_run_clears_is_defended": true,
+    "every_post_on_a_floor_the_run_clears_is_staffed": true,
+    "per_floor_counts_match_the_posts": true,
+    "spawn_delegate_fires_once_per_arrival": true,
+    "spawn_delegate_carries_the_post_floor": true,
+    "the_first_floor_reports_cleared": true,
+    "floor_cleared_fires_once_for_the_first_floor": true,
+    "the_still_defended_floor_is_not_reported_cleared": true,
+    "cutscene_started_a_sequence_for_the_cleared_floor": true,
+    "cutscene_suppressed_movement_and_look": true,
+    "control_returned_when_the_cutscene_stopped": true,
+    "no_client_was_frozen_without_a_cutscene_staged_for_it": true,
+    "the_cutscene_reached_exactly_the_controllers_it_named": true,
+    "every_frozen_local_controller_was_named_by_the_sequence_that_froze_it": true,
+    "cutscene_stopped_rather_than_paused": true,
+    "the_second_floor_reports_cleared": true,
+    "floor_cleared_fires_once_per_floor": true,
+    "the_already_cleared_floor_does_not_refire": true,
+    "floor_without_an_authored_event_starts_no_sequence": true,
+    "the_cutscene_actor_is_destroyed_once_its_sequence_stops": true,
+    "every_client_holds_the_same_floors_the_server_built": true,
+    "the_late_joiner_is_a_client_world": true,
+    "the_late_joiner_sees_the_same_floors_the_server_built": true,
+    "the_late_joiner_is_not_handed_a_finished_cutscene": true,
+    "a_client_replica_never_broadcasts_the_clear_itself": true,
+    "fixture_restored": true
+  },
+  "recon": {
+    "sequence_accessor": {
+      "actor_sequence_player_property": true,
+      "actor_get_sequence_player": false,
+      "player_is_playing": true
+    },
+    "late_join_accessor": {
+      "probe_class": true,
+      "request_late_join_for_pie": true
+    },
+    "pie_worlds": [
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "has_game_mode": true,
+        "controllers": 3,
+        "local_controllers": 1,
+        "sequence_actors": 0
+      },
+      {
+        "world": "/Game/UEDPIE_1_HopDistrictTest",
+        "has_game_mode": false,
+        "controllers": 1,
+        "local_controllers": 1,
+        "sequence_actors": 0
+      },
+      {
+        "world": "/Game/UEDPIE_2_HopDistrictTest",
+        "has_game_mode": false,
+        "controllers": 1,
+        "local_controllers": 1,
+        "sequence_actors": 0
+      }
+    ],
+    "pie_worlds_at_boot": [
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "has_game_mode": true,
+        "controllers": 1,
+        "local_controllers": 1,
+        "sequence_actors": 0
+      },
+      {
+        "world": "/Temp/Untitled_5",
+        "has_game_mode": false,
+        "controllers": 0,
+        "local_controllers": 0,
+        "sequence_actors": 0
+      }
+    ],
+    "pie_config": {
+      "launch_settings": {
+        "candidates": [
+          "..\\..\\..\\..\\..\\..\\HOP TRENDY UNREAL\\Unreal Projects\\TDA\\Saved\\Config\\WindowsEditor\\EditorPerProjectUserSettings.ini"
+        ],
+        "readable": true,
+        "source": "..\\..\\..\\..\\..\\..\\HOP TRENDY UNREAL\\Unreal Projects\\TDA\\Saved\\Config\\WindowsEditor\\EditorPerProjectUserSettings.ini",
+        "mtime": 1790261764,
+        "PlayNetMode": "PIE_ListenServer",
+        "PlayNumberOfClients": "2",
+        "RunUnderOneProcess": "True"
+      },
+      "local_controllers_by_world": {
+        "/Game/UEDPIE_0_HopDistrictTest": 1,
+        "/Game/UEDPIE_1_HopDistrictTest": 1,
+        "/Game/UEDPIE_2_HopDistrictTest": 1
+      },
+      "authority_worlds": [
+        "/Game/UEDPIE_0_HopDistrictTest"
+      ],
+      "client_world_count": 2
+    },
+    "territory": "BP_Property_Blacksmith_C_1",
+    "territory_count": 5,
+    "player_controller": "BP_HopNarrativePlayerController_DemoMap_C_0",
+    "boot_wait": "waiting for the Heroes faction on the player state",
+    "floors_at_boot": {
+      "0": {
+        "index": 0,
+        "active": 0,
+        "desired": 2,
+        "maximum": 2,
+        "reserve": 2,
+        "pending": 0,
+        "counts_known": true,
+        "cleared": false
+      },
+      "1": {
+        "index": 1,
+        "active": 0,
+        "desired": 3,
+        "maximum": 3,
+        "reserve": 3,
+        "pending": 0,
+        "counts_known": true,
+        "cleared": false
+      },
+      "2": {
+        "index": 2,
+        "active": 0,
+        "desired": 2,
+        "maximum": 2,
+        "reserve": 2,
+        "pending": 0,
+        "counts_known": true,
+        "cleared": false
+      }
+    },
+    "authored_posts_per_floor": {
+      "0": 2,
+      "1": 3,
+      "2": 2
+    },
+    "undeployable_posts": [
+      "BP_TerritoryGuardSpawnPoint_C_5",
+      "BP_TerritoryGuardSpawnPoint_C_6"
+    ],
+    "floors_the_run_clears": [
+      0,
+      1
+    ],
+    "floors_the_run_does_not_clear": [
+      2
+    ],
+    "controllers_before_the_cutscene": [
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+        "local": true,
+        "move": false,
+        "look": false
+      },
+      {
+        "world": "/Game/UEDPIE_1_HopDistrictTest",
+        "name": "PlayerController_0",
+        "local": true,
+        "move": false,
+        "look": false
+      }
+    ],
+    "a_local_controller_existed_before_the_cutscene": true,
+    "try_unlock": true,
+    "staffing": {
+      "posts": 7,
+      "posts_on_the_floors_the_run_clears": 5,
+      "desired_now": 5,
+      "max_guards": 7,
+      "authored_target": 5,
+      "desired_after": 5,
+      "active_total": 5
+    },
+    "post_active_counts": {
+      "0": 2,
+      "1": 3
+    },
+    "unstaffed_posts": [],
+    "announcements": {
+      "total": 5,
+      "distinct_guards": 5,
+      "per_guard": {
+        "BP_TerritoryGuard_C_0": 1,
+        "BP_TerritoryGuard_C_1": 1,
+        "BP_TerritoryGuard_C_2": 1,
+        "BP_TerritoryGuard_C_3": 1,
+        "BP_TerritoryGuard_C_4": 1
+      },
+      "active_guards": 5
+    },
+    "kills_per_floor": {
+      "0": 4,
+      "1": 6
+    },
+    "cinematic_on_witness": [
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+        "local": true,
+        "move": true,
+        "look": true
+      },
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+        "local": false,
+        "move": false,
+        "look": false
+      },
+      {
+        "world": "/Game/UEDPIE_1_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+        "local": true,
+        "move": false,
+        "look": false
+      }
+    ],
+    "cinematic_on_staging": {
+      "/Game/UEDPIE_0_HopDistrictTest": {
+        "actors": 1,
+        "players": 1,
+        "playing": true,
+        "paused": false,
+        "authority": true,
+        "owners": [
+          "BP_HopNarrativePlayerController_DemoMap_C_0"
+        ]
+      }
+    },
+    "cinematic_off_witness": [
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+        "local": true,
+        "move": false,
+        "look": false
+      },
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+        "local": false,
+        "move": false,
+        "look": false
+      },
+      {
+        "world": "/Game/UEDPIE_1_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+        "local": true,
+        "move": false,
+        "look": false
+      }
+    ],
+    "cinematic_off_staging": {},
+    "control_return": {
+      "input_was_suppressed_at_all": true,
+      "control_was_released": true
+    },
+    "frames_frozen_outside_its_staging": 0,
+    "cutscene_audience": {
+      "owner_counts": [
+        1
+      ],
+      "staged_client_worlds": [],
+      "frozen_client_worlds": [],
+      "client_worlds": [
+        "/Game/UEDPIE_1_HopDistrictTest"
+      ]
+    },
+    "authority_audience": {
+      "judgeable_local_controllers": [
+        "/Game/UEDPIE_0_HopDistrictTest/BP_HopNarrativePlayerController_DemoMap_C_0"
+      ],
+      "staged_in_an_authority_world": [
+        "/Game/UEDPIE_0_HopDistrictTest/BP_HopNarrativePlayerController_DemoMap_C_0"
+      ],
+      "frozen_and_named_frames": 203,
+      "frozen_and_not_named_frames": 0,
+      "pie_config": {
+        "launch_settings": {
+          "candidates": [
+            "..\\..\\..\\..\\..\\..\\HOP TRENDY UNREAL\\Unreal Projects\\TDA\\Saved\\Config\\WindowsEditor\\EditorPerProjectUserSettings.ini"
+          ],
+          "readable": true,
+          "source": "..\\..\\..\\..\\..\\..\\HOP TRENDY UNREAL\\Unreal Projects\\TDA\\Saved\\Config\\WindowsEditor\\EditorPerProjectUserSettings.ini",
+          "mtime": 1790261764,
+          "PlayNetMode": "PIE_ListenServer",
+          "PlayNumberOfClients": "2",
+          "RunUnderOneProcess": "True"
+        },
+        "local_controllers_by_world": {
+          "/Game/UEDPIE_0_HopDistrictTest": 1,
+          "/Game/UEDPIE_1_HopDistrictTest": 1
+        },
+        "authority_worlds": [
+          "/Game/UEDPIE_0_HopDistrictTest"
+        ],
+        "client_world_count": 1
+      }
+    },
+    "authority_audience_was_exercised": true,
+    "sequence_at_cutscene_end": {
+      "playing": false,
+      "paused": false,
+      "actors": 1,
+      "worlds": {
+        "/Game/UEDPIE_0_HopDistrictTest": {
+          "actors": 1,
+          "players": 1,
+          "playing": false,
+          "paused": false,
+          "authority": true,
+          "owners": [
+            "BP_HopNarrativePlayerController_DemoMap_C_0"
+          ]
+        },
+        "/Game/UEDPIE_1_HopDistrictTest": {
+          "actors": 0,
+          "players": 0,
+          "playing": false,
+          "paused": false,
+          "authority": false,
+          "owners": []
+        }
+      }
+    },
+    "controllers_at_cutscene_end": [
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+        "local": true,
+        "move": false,
+        "look": false
+      },
+      {
+        "world": "/Game/UEDPIE_0_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+        "local": false,
+        "move": false,
+        "look": false
+      },
+      {
+        "world": "/Game/UEDPIE_1_HopDistrictTest",
+        "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+        "local": true,
+        "move": false,
+        "look": false
+      }
+    ],
+    "suppression_tally": {
+      "staged_worlds": [],
+      "local": 2,
+      "suppressed": 0,
+      "in_audience": 0,
+      "outside_audience": 0,
+      "rows": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ]
+    },
+    "sequence_actors_at_clear1": 0,
+    "sequence_actors_after_the_quiet_floor": 0,
+    "quiet_sequence_peak": 0,
+    "quiet_teardown_waited_seconds": 0.05,
+    "server_floors_after_the_fights": {
+      "0": {
+        "active": 0,
+        "desired": 2,
+        "maximum": 2,
+        "reserve": 0,
+        "counts_known": true,
+        "cleared": true
+      },
+      "1": {
+        "active": 0,
+        "desired": 3,
+        "maximum": 3,
+        "reserve": 0,
+        "counts_known": true,
+        "cleared": true
+      },
+      "2": {
+        "active": 0,
+        "desired": 2,
+        "maximum": 2,
+        "reserve": 2,
+        "counts_known": true,
+        "cleared": false
+      }
+    },
+    "server_lookup_floors_after_the_fights": {
+      "0": {
+        "active": 0,
+        "desired": 2,
+        "maximum": 2,
+        "reserve": 0,
+        "counts_known": true,
+        "cleared": true
+      },
+      "1": {
+        "active": 0,
+        "desired": 3,
+        "maximum": 3,
+        "reserve": 0,
+        "counts_known": true,
+        "cleared": true
+      },
+      "2": {
+        "active": 0,
+        "desired": 2,
+        "maximum": 2,
+        "reserve": 2,
+        "counts_known": true,
+        "cleared": false
+      }
+    },
+    "client_floor_models": {
+      "/Game/UEDPIE_1_HopDistrictTest": {
+        "0": {
+          "active": 0,
+          "desired": 2,
+          "maximum": 2,
+          "reserve": 0,
+          "counts_known": true,
+          "cleared": true
+        },
+        "1": {
+          "active": 0,
+          "desired": 3,
+          "maximum": 3,
+          "reserve": 0,
+          "counts_known": true,
+          "cleared": true
+        },
+        "2": {
+          "active": 0,
+          "desired": 2,
+          "maximum": 2,
+          "reserve": 2,
+          "counts_known": true,
+          "cleared": false
+        }
+      }
+    },
+    "replica_gaps": {
+      "/Game/UEDPIE_1_HopDistrictTest": []
+    },
+    "late_join_requested": true,
+    "worlds_before_late_join": [
+      "/Game/UEDPIE_0_HopDistrictTest",
+      "/Game/UEDPIE_1_HopDistrictTest"
+    ],
+    "late_joiner": {
+      "world": "/Game/UEDPIE_2_HopDistrictTest",
+      "has_game_mode": false
+    },
+    "late_joiner_waiting": {
+      "seconds": 2.14,
+      "model": {}
+    },
+    "late_joiner_joined_after_seconds": 2.66,
+    "late_joiner_local_controllers": 1,
+    "late_joiner_floors": {
+      "0": {
+        "active": 0,
+        "desired": 2,
+        "maximum": 2,
+        "reserve": 0,
+        "counts_known": true,
+        "cleared": true
+      },
+      "1": {
+        "active": 0,
+        "desired": 3,
+        "maximum": 3,
+        "reserve": 0,
+        "counts_known": true,
+        "cleared": true
+      },
+      "2": {
+        "active": 0,
+        "desired": 2,
+        "maximum": 2,
+        "reserve": 2,
+        "counts_known": true,
+        "cleared": false
+      }
+    },
+    "late_joiner_sequences": {
+      "actors": 0,
+      "players": 0,
+      "playing": false,
+      "paused": false,
+      "authority": false,
+      "owners": []
+    },
+    "late_joiner_volume": "BP_Property_Blacksmith_C_1",
+    "floor_cleared_counts": {
+      "server": 2,
+      "clients": {
+        "/Game/UEDPIE_2_HopDistrictTest": 0
+      }
+    },
+    "observer_self_test": {
+      "world": "/Game/UEDPIE_0_HopDistrictTest",
+      "controller": "BP_HopNarrativePlayerController_DemoMap_C_0",
+      "raised": [
+        true,
+        true
+      ],
+      "cleared": [
+        false,
+        false
+      ],
+      "works": true
+    }
+  },
+  "samples": [
+    {
+      "event": "cinematic_on",
+      "seconds": 13.92,
+      "staged_worlds": [
+        "/Game/UEDPIE_0_HopDistrictTest"
+      ],
+      "playing": true,
+      "local_controllers": 1,
+      "suppressed": 1
+    },
+    {
+      "event": "cinematic_off",
+      "seconds": 19.95,
+      "staged_worlds": [],
+      "playing": false,
+      "local_controllers": 0,
+      "suppressed": 0
+    }
+  ],
+  "spawns": [
+    {
+      "guard": "BP_TerritoryGuard_C_0",
+      "declared_floor": 0,
+      "post_floor": 0,
+      "post": "BP_TerritoryGuardSpawnPoint_C_1",
+      "seconds": 1.74
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_1",
+      "declared_floor": 0,
+      "post_floor": 0,
+      "post": "BP_TerritoryGuardSpawnPoint_C_0",
+      "seconds": 1.74
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_2",
+      "declared_floor": 1,
+      "post_floor": 1,
+      "post": "BP_TerritoryGuardSpawnPoint_C_2",
+      "seconds": 1.75
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_3",
+      "declared_floor": 1,
+      "post_floor": 1,
+      "post": "BP_TerritoryGuardSpawnPoint_C_3",
+      "seconds": 1.75
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_4",
+      "declared_floor": 1,
+      "post_floor": 1,
+      "post": "BP_TerritoryGuardSpawnPoint_C_4",
+      "seconds": 1.75
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_5",
+      "declared_floor": 0,
+      "post_floor": 0,
+      "post": "BP_TerritoryGuardSpawnPoint_C_1",
+      "seconds": 13.69
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_6",
+      "declared_floor": 0,
+      "post_floor": 0,
+      "post": "BP_TerritoryGuardSpawnPoint_C_0",
+      "seconds": 13.7
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_7",
+      "declared_floor": 1,
+      "post_floor": 1,
+      "post": "BP_TerritoryGuardSpawnPoint_C_3",
+      "seconds": 29.53
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_8",
+      "declared_floor": 1,
+      "post_floor": 1,
+      "post": "BP_TerritoryGuardSpawnPoint_C_2",
+      "seconds": 29.53
+    },
+    {
+      "guard": "BP_TerritoryGuard_C_9",
+      "declared_floor": 1,
+      "post_floor": 1,
+      "post": "BP_TerritoryGuardSpawnPoint_C_4",
+      "seconds": 29.53
+    }
+  ],
+  "clears": [
+    {
+      "floor": 0,
+      "seconds": 13.88
+    },
+    {
+      "floor": 1,
+      "seconds": 29.61
+    }
+  ],
+  "cinematic_trace": [
+    {
+      "t": 5.3,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 6.3,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 7.31,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 8.31,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 9.33,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 10.33,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 11.34,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 12.36,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 13.38,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 13.92,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": true,
+          "look": true
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "actor": "NarrativeLevelSequenceActor_0",
+          "playing": true,
+          "paused": false,
+          "settings": {
+            "bDisableMovementInput": true,
+            "bDisableLookAtInput": true,
+            "bHideHud": false,
+            "bAutoPlay": false,
+            "bPauseAtEnd": false
+          }
+        }
+      ]
+    },
+    {
+      "t": 14.92,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": true,
+          "look": true
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "actor": "NarrativeLevelSequenceActor_0",
+          "playing": true,
+          "paused": false,
+          "settings": {
+            "bDisableMovementInput": true,
+            "bDisableLookAtInput": true,
+            "bHideHud": false,
+            "bAutoPlay": false,
+            "bPauseAtEnd": false
+          }
+        }
+      ]
+    },
+    {
+      "t": 15.92,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": true,
+          "look": true
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "actor": "NarrativeLevelSequenceActor_0",
+          "playing": true,
+          "paused": false,
+          "settings": {
+            "bDisableMovementInput": true,
+            "bDisableLookAtInput": true,
+            "bHideHud": false,
+            "bAutoPlay": false,
+            "bPauseAtEnd": false
+          }
+        }
+      ]
+    },
+    {
+      "t": 16.92,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": true,
+          "look": true
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "actor": "NarrativeLevelSequenceActor_0",
+          "playing": true,
+          "paused": false,
+          "settings": {
+            "bDisableMovementInput": true,
+            "bDisableLookAtInput": true,
+            "bHideHud": false,
+            "bAutoPlay": false,
+            "bPauseAtEnd": false
+          }
+        }
+      ]
+    },
+    {
+      "t": 17.94,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": true,
+          "look": true
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "actor": "NarrativeLevelSequenceActor_0",
+          "playing": true,
+          "paused": false,
+          "settings": {
+            "bDisableMovementInput": true,
+            "bDisableLookAtInput": true,
+            "bHideHud": false,
+            "bAutoPlay": false,
+            "bPauseAtEnd": false
+          }
+        }
+      ]
+    },
+    {
+      "t": 18.95,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": true,
+          "look": true
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "actor": "NarrativeLevelSequenceActor_0",
+          "playing": true,
+          "paused": false,
+          "settings": {
+            "bDisableMovementInput": true,
+            "bDisableLookAtInput": true,
+            "bHideHud": false,
+            "bAutoPlay": false,
+            "bPauseAtEnd": false
+          }
+        }
+      ]
+    },
+    {
+      "t": 19.95,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "actor": "NarrativeLevelSequenceActor_0",
+          "playing": false,
+          "paused": false,
+          "settings": {
+            "bDisableMovementInput": true,
+            "bDisableLookAtInput": true,
+            "bHideHud": false,
+            "bAutoPlay": false,
+            "bPauseAtEnd": false
+          }
+        }
+      ]
+    },
+    {
+      "t": 20.95,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "actor": "NarrativeLevelSequenceActor_0",
+          "playing": false,
+          "paused": false,
+          "settings": {
+            "bDisableMovementInput": true,
+            "bDisableLookAtInput": true,
+            "bHideHud": false,
+            "bAutoPlay": false,
+            "bPauseAtEnd": false
+          }
+        }
+      ]
+    },
+    {
+      "t": 20.99,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 22.0,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 23.0,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 24.0,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 25.02,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 26.02,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 27.03,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 28.05,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    },
+    {
+      "t": 29.05,
+      "controllers": [
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_0_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_1",
+          "local": false,
+          "move": false,
+          "look": false
+        },
+        {
+          "world": "/Game/UEDPIE_1_HopDistrictTest",
+          "name": "BP_HopNarrativePlayerController_DemoMap_C_0",
+          "local": true,
+          "move": false,
+          "look": false
+        }
+      ],
+      "players": []
+    }
+  ],
+  "receipt": {
+    "path": "D:\\HOP TRENDY UNREAL\\Unreal Projects\\TDA\\Saved\\Verification\\FloorStagingPIE\\SinglePlayer.json",
+    "bytes": 40480,
+    "cwd": "D:\\Program Files\\Epic Games\\UE_5.8\\Engine\\Binaries\\Win64"
+  },
+  "unresolved": [],
+  "phase": "restore",
+  "seconds": 39.19,
+  "passed": true
+}
