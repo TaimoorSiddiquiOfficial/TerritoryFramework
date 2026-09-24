@@ -131,12 +131,42 @@ void UTerritoryStateTask::ObservePresence()
 		|| (Objective == ETerritoryStateTaskObjective::LeaveTerritory && bLeft)) CompleteTask();
 }
 
+const FTerritoryFloorSnapshot* UTerritoryStateTask::FindTargetFloor(
+	const ATerritoryVolume& Territory) const
+{
+	if (!IsFloorFiltered()) return nullptr;
+	return Territory.GetGarrisonSnapshot().Floors.FindByPredicate(
+		[this](const FTerritoryFloorSnapshot& Entry)
+		{
+			return Entry.FloorIndex == TargetFloor;
+		});
+}
+
 bool UTerritoryStateTask::IsObjectiveSatisfiedBy(
 	const ATerritoryVolume* Territory) const
 {
 	if (!Territory || Territory->GetTerritoryTag() != TargetTerritory)
 	{
 		return false;
+	}
+
+	if (IsFloorFiltered())
+	{
+		// An undeclared floor is never satisfied. Falling back to the whole Place here
+		// would complete an objective the author never asked for.
+		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(*Territory);
+		if (!Floor) return false;
+		switch (Objective)
+		{
+		case ETerritoryStateTaskObjective::AllDefendersDefeated:
+			// The cleared rule and the floor-cleared event share one definition, so a floor
+			// cannot satisfy the quest while the framework still counts defenders on it.
+			return Floor->IsCleared();
+		case ETerritoryStateTaskObjective::ReachDesiredGarrison:
+			return Floor->ActiveGuards >= FMath::Max(1, RequiredQuantity);
+		default:
+			break;
+		}
 	}
 
 	switch (Objective)
@@ -232,7 +262,13 @@ void UTerritoryStateTask::EvaluateCurrent(bool bInitialEvaluation)
 	if (!bCompleteIfAlreadySatisfied && (bNewObservation || bWasSatisfied)) return;
 	if (Objective == ETerritoryStateTaskObjective::ReachDesiredGarrison)
 	{
-		SetProgress(Territory->GetDesiredGuardCount());
+		// Whole Place: progress is the owner's staffing target, which the management
+		// screen raises. One floor: a floor has no staffing target of its own, so progress
+		// is the guards physically standing there.
+		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(*Territory);
+		SetProgress(IsFloorFiltered()
+			? (Floor ? Floor->ActiveGuards : 0)
+			: Territory->GetDesiredGuardCount());
 		return;
 	}
 	if (bSatisfied) CompleteTask();
@@ -283,7 +319,9 @@ void UTerritoryStateTask::HandleAvailabilityChanged(
 void UTerritoryStateTask::HandleAllDefendersDefeated(
 	ATerritoryVolume* Territory)
 {
-	if (Territory == CachedTerritory.Get()
+	// This delegate describes the whole Place. A floor-filtered task follows its own floor
+	// and is evaluated from the per-floor snapshot in HandleGarrisonChanged instead.
+	if (Territory == CachedTerritory.Get() && !IsFloorFiltered()
 		&& Objective == ETerritoryStateTaskObjective::AllDefendersDefeated)
 	{
 		CompleteTask();
@@ -293,10 +331,22 @@ void UTerritoryStateTask::HandleAllDefendersDefeated(
 void UTerritoryStateTask::HandleGarrisonChanged(
 	ATerritoryVolume* Territory, FTerritoryGarrisonSnapshot Snapshot)
 {
-	if (Territory == CachedTerritory.Get()
-		&& Objective == ETerritoryStateTaskObjective::ReachDesiredGarrison)
+	if (Territory != CachedTerritory.Get()) return;
+	if (Objective == ETerritoryStateTaskObjective::ReachDesiredGarrison)
 	{
-		SetProgress(Snapshot.DesiredGuards);
+		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(*Territory);
+		SetProgress(IsFloorFiltered()
+			? (Floor ? Floor->ActiveGuards : 0)
+			: Snapshot.DesiredGuards);
+		return;
+	}
+	// Route a floor defeat through the normal evaluation so the task keeps the same
+	// "must be seen to change" rule every other objective uses, rather than completing on
+	// whatever the snapshot happened to say when the quest started.
+	if (IsFloorFiltered()
+		&& Objective == ETerritoryStateTaskObjective::AllDefendersDefeated)
+	{
+		EvaluateCurrent(false);
 	}
 }
 
@@ -340,10 +390,18 @@ FText UTerritoryStateTask::GetTaskDescription_Implementation() const
 	case ETerritoryStateTaskObjective::BecomeClaimed:
 		return FText::Format(NSLOCTEXT("TerritoryTask", "Claim", "Secure {0}"), Name);
 	case ETerritoryStateTaskObjective::AllDefendersDefeated:
-		return FText::Format(NSLOCTEXT("TerritoryTask", "ClearDefenders", "Defeat the defenders at {0}"), Name);
+		return IsFloorFiltered()
+			? FText::Format(NSLOCTEXT("TerritoryTask", "ClearFloorDefenders",
+				"Defeat the defenders on floor {0} of {1}"),
+				FText::AsNumber(TargetFloor), Name)
+			: FText::Format(NSLOCTEXT("TerritoryTask", "ClearDefenders", "Defeat the defenders at {0}"), Name);
 	case ETerritoryStateTaskObjective::ReachDesiredGarrison:
-		return FText::Format(NSLOCTEXT("TerritoryTask", "AssignGuards", "Assign {0} guards to {1}"),
-			FMath::Max(1, RequiredQuantity), Name);
+		return IsFloorFiltered()
+			? FText::Format(NSLOCTEXT("TerritoryTask", "AssignFloorGuards",
+				"Assign {0} guards to floor {1} of {2}"),
+				FMath::Max(1, RequiredQuantity), FText::AsNumber(TargetFloor), Name)
+			: FText::Format(NSLOCTEXT("TerritoryTask", "AssignGuards", "Assign {0} guards to {1}"),
+				FMath::Max(1, RequiredQuantity), Name);
 	case ETerritoryStateTaskObjective::EnterTerritory:
 		return FText::Format(NSLOCTEXT("TerritoryTask", "Enter", "Enter {0}"), Name);
 	case ETerritoryStateTaskObjective::LeaveTerritory:

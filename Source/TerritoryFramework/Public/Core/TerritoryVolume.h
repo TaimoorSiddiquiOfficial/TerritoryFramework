@@ -683,6 +683,13 @@ public:
 	void RefreshGarrisonSnapshot();
 	FTerritoryGarrisonSnapshot BuildGarrisonSnapshot() const;
 
+	/**
+	 * Regroup the live guard posts into the Definition's declared floor rows. Derived, never
+	 * stored: the posts own the counts, so nothing here is saved and no migration applies.
+	 * Leaves Floors empty when the Definition declares none.
+	 */
+	void BuildFloorSnapshots(FTerritoryGarrisonSnapshot& OutSnapshot) const;
+
 public:
 	/** Check if all Entry Conditions for the given state pass. Public for atomic mutation validation. */
 	bool CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext(), const FGameplayTag* RuleOwner = nullptr) const;
@@ -858,6 +865,18 @@ protected:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Guard Killed"))
 	FOnGuardKilled OnGuardKilled;
 
+	/** Called once when an authored floor loses its last defender. Floor staging and cutscenes. */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Floor Cleared"))
+	FOnTerritoryFloorCleared OnFloorCleared;
+
+	/**
+	 * Called when a guard finished deploying and is fully configured. Fires for first-time
+	 * defenders and for reserve replacements alike, because both arrive through the one
+	 * deployment path.
+	 */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Guards", meta=(DisplayName="On Defender Spawned"))
+	FOnTerritoryDefenderSpawned OnDefenderSpawned;
+
 private:
 	friend class ATerritoryGuardSpawnPoint;
 #if WITH_DEV_AUTOMATION_TESTS
@@ -877,6 +896,12 @@ private:
 	friend class FTFGuardResponsePolicy;
 	friend class FTFIndependentGuardPostStreaming;
 	friend class FTFTerritoryDefinitionRuntimeNarrative;
+	// Floor staging tests share one fixture, so the attachment seam lives in one class.
+	friend class FTFTerritoryFloorTestAccess;
+	// Floor event tests reach the same read model and the two announcement entry points, and
+	// the delegate test itself is named for the behaviour it proves.
+	friend class FTFTerritoryFloorEventTestAccess;
+	friend class FTFTerritoryFloorEventCallbacks;
 #endif
 
 	static int32 CalculateGuardRestoreCount(bool bLoadedFromSave, int32 DesiredGuards,
@@ -945,7 +970,13 @@ private:
 	void ScheduleDefenderDeathBindingRetry(AActor* Defender);
 	void RetryPendingDefenderDeathBindings();
 	void CleanupInvalidDefenders();
-	void TryCompleteDefenderDefeat(const FTerritoryTransitionContext& EventContext);
+	void TryCompleteDefenderDefeat(const FTerritoryTransitionContext& EventContext,
+		const TArray<FTerritoryFloorSnapshot>& FloorsBeforeLoss);
+	void DispatchClearedFloors(const TArray<FTerritoryFloorSnapshot>& FloorsBeforeLoss,
+		const FTerritoryTransitionContext& TransitionContext);
+	void DispatchFloorClearedEvents(int32 FloorIndex,
+		const FTerritoryTransitionContext& TransitionContext);
+	void AnnounceDefenderSpawned(AActor* Guard, ATerritoryGuardSpawnPoint* SpawnPoint);
 	void ReconcileStoryBoundsContesters();
 	void ReleaseStoryBoundsContesters();
 	void ReconcileAvailabilityDependentSystems();

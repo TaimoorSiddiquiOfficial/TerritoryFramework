@@ -5030,7 +5030,8 @@ bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 		UTerritoryActivateDisguiseEvent::StaticClass(),
 		UTerritoryRemoveDisguiseEvent::StaticClass(),
 		UTerritorySetDisguiseCoverEvent::StaticClass(),
-		UTerritoryDisguiseIdentityCheckEvent::StaticClass()
+		UTerritoryDisguiseIdentityCheckEvent::StaticClass(),
+		UTerritoryPlayCutsceneEvent::StaticClass()
 	};
 
 	auto AuditClasses = [this](const TArray<UClass*>& Classes,

@@ -168,6 +168,45 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
 	TArray<FTerritoryFactionDialogueProfile> FactionDialogueProfiles;
 };
 
+/**
+ * One authored floor of a Place, used to stage defenders and to drive per-floor story
+ * objectives. Declaring floors is optional: a Definition with no floor rows keeps the
+ * whole-Territory behaviour exactly, and guard posts then need no floor assignment.
+ *
+ * Floor state itself is never stored. The guard posts that stand on a floor own the live
+ * counts, and the replicated per-floor read model is regrouped from them, so renumbering a
+ * floor is an authoring-only change with no save migration.
+ */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryFloorTemplate
+{
+	GENERATED_BODY()
+
+	/** Canonical floor identity within this Definition. Zero is ground; upper floors are positive. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Floor",
+		meta=(DisplayName="Floor Index", ClampMin="0"))
+	int32 FloorIndex = 0;
+
+	/** Designer-facing label for UI and objective text. Display only; never used as identity. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Floor",
+		meta=(DisplayName="Display Name"))
+	FText DisplayName;
+
+	/**
+	 * Authored defender quota for this floor. Zero means "every post on this floor", so a
+	 * floor may be declared without restating its post count. The quota cannot exceed the
+	 * number of guard posts assigned to the floor, because one post holds exactly one
+	 * active guard; validation reports the mismatch instead of silently clamping it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Floor",
+		meta=(ClampMin="0"))
+	int32 DesiredGuards = 0;
+
+	/** Narrative events executed when this floor's last living defender is defeated, before any ownership change. */
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Floor|Narrative")
+	TArray<TObjectPtr<UNarrativeEvent>> FloorClearedEvents;
+};
+
 /** One physical guard slot and its reusable Narrative guard-post profile. */
 USTRUCT(BlueprintType)
 struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
@@ -178,6 +217,15 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post",
 		meta=(DisplayName="Guard Post ID"))
 	FName GuardPostID;
+
+	/**
+	 * Which authored floor this post stands on. Must name a row in the Place's Floors array
+	 * once that array is non-empty; with no declared floors this value is ignored.
+	 * Zero is ground; upper floors are positive.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post",
+		meta=(DisplayName="Floor Index", ClampMin="0"))
+	int32 FloorIndex = 0;
 
 	/** Stable save identity for the physical post instance. Duplicating the Territory asset regenerates it. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Guard Post")
@@ -570,6 +618,15 @@ public:
 		meta=(TitleProperty="GuardPostID"))
 	TArray<FTerritoryGuardPostTemplate> GuardPosts;
 
+	/**
+	 * Optional authored floors for staging defenders and driving per-floor story beats.
+	 * Empty disables floor grouping entirely. When non-empty, each post's FloorIndex must
+	 * name a row here.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards|Floor",
+		meta=(TitleProperty="FloorIndex"))
+	TArray<FTerritoryFloorTemplate> Floors;
+
 	/** Narrative events executed when a registered defender dies, using the live Territory transition context. */
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="07 Guards|Narrative")
 	TArray<TObjectPtr<UNarrativeEvent>> DefenderDiedEvents;
@@ -639,6 +696,24 @@ public:
 	bool GetGuardPostTemplate(FName GuardPostID,
 		FTerritoryGuardPostTemplate& OutGuardPost) const;
 
+	const FTerritoryFloorTemplate* FindFloor(int32 FloorIndex) const;
+
+	/** Find an authored floor row by its index. False means this Place declares no such floor. */
+	UFUNCTION(BlueprintPure, Category="Territory|Definition",
+		meta=(DisplayName="Get Floor Template"))
+	bool GetFloorTemplate(int32 FloorIndex,
+		FTerritoryFloorTemplate& OutFloor) const;
+
+	/** Number of guard posts assigned to an authored floor. This is that floor's physical guard ceiling. */
+	UFUNCTION(BlueprintPure, Category="Territory|Definition",
+		meta=(DisplayName="Get Floor Guard Post Count"))
+	int32 GetFloorGuardPostCount(int32 FloorIndex) const;
+
+	/** True when this Place declares at least one authored floor. */
+	UFUNCTION(BlueprintPure, Category="Territory|Definition",
+		meta=(DisplayName="Has Authored Floors"))
+	bool HasAuthoredFloors() const { return !Floors.IsEmpty(); }
+
 	/** Refresh derived child parent links after changing hierarchy arrays. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
 	virtual void RefreshHierarchyLinks();
@@ -650,6 +725,7 @@ public:
 	virtual void PostInitProperties() override;
 	virtual void PostDuplicate(EDuplicateMode::Type DuplicateMode) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
 #endif
 
 protected:

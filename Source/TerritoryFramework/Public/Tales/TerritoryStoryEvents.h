@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Cinematics/NarrativeLevelSequenceActor.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "GameplayTagContainer.h"
@@ -8,6 +9,8 @@
 #include "TerritoryStoryEvents.generated.h"
 
 class ANarrativePlayerState;
+class ULevelSequence;
+class UTerritoryCinematicLightRigProfile;
 
 /**
  * Changes the exact Narrative quest player's saved faction membership.
@@ -323,6 +326,70 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(ClampMin="1", ToolTip="Finite number of recipe batches executed in one validated transaction."))
 	int32 BatchCount = 1;
+
+protected:
+	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
+		class UTalesComponent* NarrativeComponent) override;
+	virtual FString GetGraphDisplayText_Implementation() override;
+};
+
+/**
+ * Plays one authored Level Sequence as a Territory cutscene, for an explicitly resolved audience.
+ *
+ * Place it in Defender Died, All Defenders Defeated, or a Floor's Cleared Events, so "the third
+ * defender steps out of the stairwell" and "floor 2 is clear" become cutscene cues. Narrative stays
+ * the presentation authority: this event only starts a sequence through the vendor's replicated,
+ * audience-filtered player factory and hands the camera back when the sequence ends.
+ *
+ * Input suppression is a data flag, not an API call. The engine enters and leaves cinematic mode
+ * from the sequence player's own OnStartedPlaying/OnStopped, so this event must never call
+ * SetCinematicMode itself: the release would not be symmetric and the player would be left without
+ * control. Pause At End is forced off when the cutscene runs, because ULevelSequencePlayer fires
+ * OnStopped only on a real stop - a sequence that merely pauses fires OnPause, never releases
+ * cinematic mode, and would leave the player permanently unable to move.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew,
+	meta=(DisplayName="Play Territory Cutscene",
+		ToolTip="Play one Level Sequence as a cutscene for the exact Narrative target player, or for the players of Audience Faction when this event runs with no player context. Server-only; Narrative owns presentation. Movement and look are released when the sequence ends, so the player always gets control back."))
+class TERRITORYFRAMEWORK_API UTerritoryPlayCutsceneEvent : public UNarrativeEvent
+{
+	GENERATED_BODY()
+
+public:
+	UTerritoryPlayCutsceneEvent(const FObjectInitializer& ObjectInitializer);
+
+	/** The sequence played as the cutscene. Empty does nothing and reports why. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(AllowedClasses="/Script/LevelSequence.LevelSequence",
+			ToolTip="Level Sequence asset played as the cutscene. Example: a short shot of defenders walking down the stairwell."))
+	TSoftObjectPtr<ULevelSequence> CutsceneSequence;
+
+	/** Playback settings. Pause At End is overridden to false when the cutscene runs; see the class comment. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ShowOnlyInnerProperties,
+			ToolTip="Narrative playback settings for this cutscene. Pause At End is ignored: a paused sequence never fires OnStopped, which is the engine's only path that releases cinematic input suppression."))
+	FNarrativeSequencePlaybackSettings PlaybackSettings;
+
+	/**
+	 * Net relevancy radius for the sequence actor. Zero makes it always relevant to the resolved
+	 * audience, which is the correct default: the audience is already filtered by the explicit
+	 * player list, and a distance check on top of it would silently drop a viewer who walked away.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ClampMin="0.0", Units="cm",
+			ToolTip="Leave at 0 so every resolved viewer receives the cutscene regardless of distance. A non-zero radius additionally culls viewers who are far from the spawn location."))
+	float RelevancyDist = 0.f;
+
+	/** Fallback audience used only when this event runs without an explicit player context. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(Categories="Territory",
+			ToolTip="Faction whose players watch this cutscene when the event runs with no player context, such as a defender defeat with no instigator. Matched against Narrative faction identity exactly as capture context resolution does. Leave empty to play for nobody rather than guess."))
+	FGameplayTag AudienceFaction;
+
+	/** Optional per-viewer cinematic light rig. Empty leaves lighting entirely to Narrative. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ToolTip="Optional Territory light rig to follow the sequence for each viewer. Leave empty to leave lighting authority with Narrative."))
+	TObjectPtr<UTerritoryCinematicLightRigProfile> LightRigProfile;
 
 protected:
 	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,

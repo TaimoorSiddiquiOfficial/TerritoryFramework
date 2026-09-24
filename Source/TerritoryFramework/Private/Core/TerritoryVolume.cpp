@@ -2429,6 +2429,11 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 		return !Ptr.IsValid() || Ptr.Get() == KilledActor;
 	});
 
+	// Floors as they stood while this defender was still alive, kept so the fight conclusion
+	// below can tell "this floor just lost its last defender" apart from "this floor has
+	// never held one". Captured before the refresh at the end of this block overwrites it.
+	const TArray<FTerritoryFloorSnapshot> FloorsBeforeLoss = GarrisonSnapshot.Floors;
+
 	// Queue reserve deployment before broadcasting so a manual Blueprint listener can
 	// satisfy the same request without racing a synchronous automatic spawn.
 	if (ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(KilledActor))
@@ -2535,16 +2540,24 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 	};
 	FireDefenderEvents(GetDefenderDiedEvents(), TEXT("DefenderDiedEvent"));
 
-	TryCompleteDefenderDefeat(DefenderEventContext);
+	TryCompleteDefenderDefeat(DefenderEventContext, FloorsBeforeLoss);
 }
 
 void ATerritoryVolume::TryCompleteDefenderDefeat(
-	const FTerritoryTransitionContext& EventContext)
+	const FTerritoryTransitionContext& EventContext,
+	const TArray<FTerritoryFloorSnapshot>& FloorsBeforeLoss)
 {
 	// Check ALL registered defenders (includes non-guard defenders registered via
 	// RegisterDefender Blueprint API), not just SpawnedGuards. Pending reserves remain
 	// part of the fight unless their bounded deployment retries were exhausted.
 	CleanupInvalidDefenders();
+
+	// Per-floor conclusions are announced from here because this function is the one place a
+	// fight is concluded: the defender death path and a post abandoning its queued reserves.
+	// A floor can be cleared while other floors still fight, so this runs before the
+	// whole-Place early return below.
+	DispatchClearedFloors(FloorsBeforeLoss, EventContext);
+
 	if (RegisteredDefenders.Num() != 0 || HasPendingReserveDeployments()) return;
 
 	if (const UTerritoryDeveloperSettings* Settings =
@@ -2578,6 +2591,78 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
 		Event->ExecuteEvent(EventContext.TargetPawn,
 			EventContext.PlayerController, EventContext.TalesComponent);
+	}
+}
+
+void ATerritoryVolume::DispatchClearedFloors(
+	const TArray<FTerritoryFloorSnapshot>& FloorsBeforeLoss,
+	const FTerritoryTransitionContext& TransitionContext)
+{
+	// Read the committed snapshot, not a fresh build: a listener may act on this inside
+	// GetGarrisonSnapshot(), and it must never see a floor reported cleared while the
+	// replicated read model still counts a guard standing on it.
+	for (const FTerritoryFloorSnapshot& Floor : GarrisonSnapshot.Floors)
+	{
+		if (!Floor.IsCleared()) continue;
+
+		// A floor first seen with no defenders was never cleared by anyone: a freshly claimed
+		// Territory, a Place whose posts hold no reserve, or a save loaded after the fight.
+		// Requiring an observed, still-defended previous read is what stops a story beat from
+		// replaying on every load or announcing a fight nobody fought.
+		const FTerritoryFloorSnapshot* Previous = FloorsBeforeLoss.FindByPredicate(
+			[&Floor](const FTerritoryFloorSnapshot& Entry)
+			{
+				return Entry.FloorIndex == Floor.FloorIndex;
+			});
+		if (!Previous || Previous->IsCleared()) continue;
+
+		OnFloorCleared.Broadcast(this, Floor.FloorIndex);
+		DispatchFloorClearedEvents(Floor.FloorIndex, TransitionContext);
+	}
+}
+
+void ATerritoryVolume::AnnounceDefenderSpawned(AActor* Guard,
+	ATerritoryGuardSpawnPoint* SpawnPoint)
+{
+	// A guard deployed without a post is still an arrival, but it belongs to no authored
+	// floor, so it reports INDEX_NONE rather than being silently attributed to ground.
+	OnDefenderSpawned.Broadcast(this, Guard,
+		SpawnPoint ? SpawnPoint->GetFloorIndex() : INDEX_NONE);
+}
+
+void ATerritoryVolume::DispatchFloorClearedEvents(int32 FloorIndex,
+	const FTerritoryTransitionContext& TransitionContext)
+{
+	const UTerritoryDefinition* Definition = TerritoryDefinition;
+	if (!Definition) return;
+	const FTerritoryFloorTemplate* Floor = Definition->FindFloor(FloorIndex);
+	if (!Floor) return;
+
+	// Copy first: an authored event may legitimately re-author the Definition while it runs.
+	const TArray<TObjectPtr<UNarrativeEvent>> EventSnapshot = Floor->FloorClearedEvents;
+	for (UNarrativeEvent* Event : EventSnapshot)
+	{
+		if (!Event) continue;
+		FString FailedCondition;
+		if (!TerritoryTales::DoEventConditionsPass(Event,
+			TransitionContext.TargetPawn, TransitionContext.PlayerController,
+			TransitionContext.TalesComponent, &FailedCondition))
+		{
+			const UTerritoryDeveloperSettings* Settings =
+				GetDefault<UTerritoryDeveloperSettings>();
+			if (Settings && Settings->ShouldDebugTales()
+				&& Settings->IsDebugLevelEnabled(6))
+			{
+				UE_LOG(LogTerritory, Log,
+					TEXT("[FloorClearedEvent] %s skipped on %s floor %d because condition '%s' failed"),
+					*Event->GetGraphDisplayText(), *TerritoryTag.ToString(), FloorIndex,
+					*FailedCondition);
+			}
+			continue;
+		}
+		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
+		Event->ExecuteEvent(TransitionContext.TargetPawn,
+			TransitionContext.PlayerController, TransitionContext.TalesComponent);
 	}
 }
 
@@ -2735,7 +2820,82 @@ FTerritoryGarrisonSnapshot ATerritoryVolume::BuildGarrisonSnapshot() const
 	NewSnapshot.ReserveGuards = static_cast<int32>(FMath::Min<int64>(ReserveGuards, MAX_int32));
 	NewSnapshot.PendingDeployments = static_cast<int32>(FMath::Min<int64>(PendingDeployments, MAX_int32));
 
+	BuildFloorSnapshots(NewSnapshot);
+
 	return NewSnapshot;
+}
+
+void ATerritoryVolume::BuildFloorSnapshots(FTerritoryGarrisonSnapshot& OutSnapshot) const
+{
+	OutSnapshot.Floors.Reset();
+	if (!TerritoryDefinition || TerritoryDefinition->Floors.IsEmpty())
+	{
+		return;
+	}
+
+	// Mirror GetMaxGuardCount: the Definition owns physical slot identities even while a
+	// post actor sits in an unloaded cell, so counting only loaded actors would drop a
+	// floor's capacity whenever its posts stream out. Aggregate parents own no guards at
+	// all, so they contribute no floor capacity here either.
+	const bool bCountsPhysicalSlots = ControlMode != ETerritoryControlMode::AggregateOnly;
+	TMap<int32, TSet<FGuid>> FloorSlotIDs;
+	TMap<int32, int32> FloorUnidentifiedSlots;
+	if (bCountsPhysicalSlots)
+	{
+		for (const FTerritoryGuardPostTemplate& Post : TerritoryDefinition->GuardPosts)
+		{
+			if (Post.GuardPostID.IsNone() || !Post.StableGuardPostGUID.IsValid()) continue;
+			FloorSlotIDs.FindOrAdd(Post.FloorIndex).Add(Post.StableGuardPostGUID);
+		}
+	}
+
+	TMap<int32, int64> FloorActive;
+	TMap<int32, int64> FloorReserve;
+	TMap<int32, int64> FloorPending;
+	for (const ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
+	{
+		if (!SpawnPoint) continue;
+		const int32 FloorIndex = SpawnPoint->GetFloorIndex();
+		// int64 accumulation matches the whole-Territory totals so a crowded floor
+		// cannot wrap before the saturating clamp below.
+		FloorActive.FindOrAdd(FloorIndex) += SpawnPoint->GetActiveGuardCount();
+		// Every post's reserve counts, which is what makes a floor read as defended before anyone
+		// has deployed to it: without it a floor objective marked bCompleteIfAlreadySatisfied
+		// would satisfy the moment its quest began. The cost is an authoring constraint worth
+		// knowing - a reserve leaves a post only through the slot that post's own guard vacates by
+		// dying (TrySpawnReserveGuard requires HasAvailableSlot()), so a post the Territory's
+		// DesiredGuardCount never reaches keeps its reserve for the whole run and pins its floor
+		// uncleared, which stops that floor's FloorClearedEvents from ever firing. Keep the
+		// staffing target at or above the number of posts on any floor you expect to clear.
+		FloorReserve.FindOrAdd(FloorIndex) += SpawnPoint->GetReserveCount();
+		FloorPending.FindOrAdd(FloorIndex) += SpawnPoint->GetPendingReserveCount();
+		// A guard whose post is gone still counts in the whole-Territory total but cannot
+		// be attributed to a floor, so per-floor active counts need not sum to it.
+		if (!bCountsPhysicalSlots) continue;
+		const FGuid PostID = SpawnPoint->GetActorGUID_Implementation();
+		if (PostID.IsValid()) FloorSlotIDs.FindOrAdd(FloorIndex).Add(PostID);
+		else ++FloorUnidentifiedSlots.FindOrAdd(FloorIndex);
+	}
+
+	OutSnapshot.Floors.Reserve(TerritoryDefinition->Floors.Num());
+	for (const FTerritoryFloorTemplate& Floor : TerritoryDefinition->Floors)
+	{
+		FTerritoryFloorSnapshot& Entry = OutSnapshot.Floors.AddDefaulted_GetRef();
+		Entry.FloorIndex = Floor.FloorIndex;
+		Entry.ActiveGuards = static_cast<int32>(FMath::Min<int64>(
+			FloorActive.FindOrAdd(Floor.FloorIndex), MAX_int32));
+		Entry.ReserveGuards = static_cast<int32>(FMath::Min<int64>(
+			FloorReserve.FindOrAdd(Floor.FloorIndex), MAX_int32));
+		Entry.PendingDeployments = static_cast<int32>(FMath::Min<int64>(
+			FloorPending.FindOrAdd(Floor.FloorIndex), MAX_int32));
+
+		const int32 MaximumGuards = FloorSlotIDs.FindOrAdd(Floor.FloorIndex).Num()
+			+ FloorUnidentifiedSlots.FindOrAdd(Floor.FloorIndex);
+		Entry.MaximumGuards = MaximumGuards;
+		// A zero quota means "every post on this floor", so a designer may declare a floor
+		// without restating its post count.
+		Entry.DesiredGuards = Floor.DesiredGuards > 0 ? Floor.DesiredGuards : MaximumGuards;
+	}
 }
 
 void ATerritoryVolume::RemoveGuardWithoutReplacement(ATerritoryGuardCharacter* Guard)
@@ -3083,6 +3243,12 @@ bool ATerritoryVolume::TrySpawnSingleGuard(ATerritoryGuardSpawnPoint* SpawnPoint
 		SpawnPoint->RegisterSpawnedGuard(Guard);
 	}
 	RefreshGarrisonSnapshot();
+
+	// Announce only after the guard is fully configured and already counted in the committed
+	// snapshot: spawn info filled, definition validated, activity configuration and TriggerSets
+	// applied and the Narrative controller live. Firing earlier would hand story a half-built
+	// NPC, and a listener reading GetGarrisonSnapshot() would not yet see it.
+	AnnounceDefenderSpawned(Guard, SpawnPoint);
 
 	if (const UTerritoryDeveloperSettings* Settings =
 		GetDefault<UTerritoryDeveloperSettings>();

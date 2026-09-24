@@ -1,11 +1,13 @@
 #include "Tales/TerritoryStoryEvents.h"
 
+#include "Cinematics/TerritoryCinematicLightRig.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryMutationTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "LevelSequence.h"
 #include "Tales/TalesComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -600,4 +602,103 @@ FString UTerritoryExecuteResourceRecipeEvent::GetGraphDisplayText_Implementation
 {
 	return FString::Printf(TEXT("Resources: execute %s x%d for %s"),
 		*Recipe.RuleTag.ToString(), FMath::Max(1, BatchCount), *Faction.ToString());
+}
+
+UTerritoryPlayCutsceneEvent::UTerritoryPlayCutsceneEvent(
+	const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// A cutscene is a scripted moment the player watched, so it must not replay when the quest
+	// holding this event is loaded again.
+	bRefireOnLoad = false;
+}
+
+void UTerritoryPlayCutsceneEvent::ExecuteEvent_Implementation(APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
+	UWorld* World = TerritoryTales::ResolveWorld(
+		this, Target, Controller, NarrativeComponent);
+	// Started once on the server. The vendor's sequence actor replicates playback and carries the
+	// audience list itself, so a client that also started one would play the cutscene twice.
+	if (!World || World->GetNetMode() == NM_Client) return;
+
+	ULevelSequence* Sequence = CutsceneSequence.LoadSynchronous();
+	if (!Sequence)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[PlayCutsceneEvent] No Level Sequence authored, so no cutscene was started"));
+		return;
+	}
+
+	// Resolve the audience explicitly. The event's own player context is authoritative whenever it
+	// exists. A defender defeat legitimately runs with no instigator, which is why the authored
+	// faction is the fallback rather than GetFirstPlayerController - a gameplay transition never
+	// picks a player by accident of local player order.
+	TArray<APlayerController*> Viewers;
+	if (Controller)
+	{
+		Viewers.Add(Controller);
+	}
+	else if (AudienceFaction.IsValid())
+	{
+		const UTerritoryControlSubsystem* Control =
+			World->GetSubsystem<UTerritoryControlSubsystem>();
+		if (APlayerController* Resolved = Control
+			? Control->ResolveFactionPlayerContext(AudienceFaction).PlayerController.Get()
+			: nullptr)
+		{
+			Viewers.Add(Resolved);
+		}
+	}
+	if (Viewers.IsEmpty())
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("[PlayCutsceneEvent] No audience resolved for faction '%s', so the cutscene was not started"),
+			*AudienceFaction.ToString());
+		return;
+	}
+
+	FNarrativeSequencePlaybackSettings Settings = PlaybackSettings;
+	// Both of these are forced rather than authored. Auto Play is the event's whole contract, and
+	// Pause At End is the one value that would strand the player: ULevelSequencePlayer releases
+	// cinematic mode only from OnStopped, so a sequence that merely pauses never gives movement
+	// and look back. See the class comment for the engine path this relies on.
+	Settings.bAutoPlay = true;
+	Settings.bPauseAtEnd = false;
+
+	// Only used for net relevancy. Spawning at the audience keeps a relevancy radius honest, and
+	// the default radius of 0 makes the actor always relevant to the list we resolved.
+	FVector SpawnLocation = FVector::ZeroVector;
+	if (const APawn* FirstViewerPawn = Viewers[0] ? Viewers[0]->GetPawn() : nullptr)
+	{
+		SpawnLocation = FirstViewerPawn->GetActorLocation();
+	}
+
+	ANarrativeLevelSequenceActor* SequenceActor = nullptr;
+	UNarrativeLevelSequencePlayer* Player =
+		ANarrativeLevelSequenceActor::CreateNarrativeLevelSequencePlayer(World,
+			Viewers, SpawnLocation, RelevancyDist, Sequence, Settings, SequenceActor);
+	if (!Player || !SequenceActor)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[PlayCutsceneEvent] Narrative refused to create a sequence player for %s"),
+			*Sequence->GetName());
+		return;
+	}
+
+	// The light rig is the existing per-viewer hook, and it deliberately never starts playback.
+	for (APlayerController* Viewer : Viewers)
+	{
+		if (!Viewer) continue;
+		UTerritoryCinematicLightRigComponent::FollowNarrativeSequence(SequenceActor,
+			Viewer, Viewer->GetPawn(), LightRigProfile);
+	}
+}
+
+FString UTerritoryPlayCutsceneEvent::GetGraphDisplayText_Implementation()
+{
+	return FString::Printf(TEXT("Cutscene: play %s"),
+		CutsceneSequence.IsNull() ? TEXT("(none authored)")
+			: *CutsceneSequence.GetAssetName());
 }

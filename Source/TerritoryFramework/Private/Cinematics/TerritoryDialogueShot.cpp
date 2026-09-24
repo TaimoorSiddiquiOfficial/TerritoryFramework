@@ -49,6 +49,15 @@ UTerritoryDialogueShot::UTerritoryDialogueShot()
 		"DefaultFriendlyName", "Territory Cinematic Shot");
 	CropSettings.AspectRatio = 2.39f;
 	PlaybackSettings.bHideHud = true;
+	// A Territory shot is a real cutscene, not just a hidden HUD. These two flags are what the
+	// engine reads to suppress input: ULevelSequencePlayer::EnableCinematicMode passes them to
+	// APlayerController::SetCinematicMode on every local controller, and Narrative's controller
+	// turns bAffectsMovement into a full DisableInput. Without them the player keeps walking and
+	// looking around during the shot. They are released symmetrically by OnStopped, which
+	// UDialogue::StopDialogueSequence reaches by calling Stop() when the dialogue ends - so a shot
+	// cannot strand the player, even though PlaybackSettings pauses at the end of each line.
+	PlaybackSettings.bDisableMovementInput = true;
+	PlaybackSettings.bDisableLookAtInput = true;
 	bShouldRestart = false;
 	AnchorOriginRule = EAnchorOriginRule::AOR_Speaker;
 	AnchorRotationRule = EAnchorRotationRule::ARR_Conversation;

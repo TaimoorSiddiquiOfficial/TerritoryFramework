@@ -232,6 +232,19 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Stealth")
 	FOnTerritoryExposureChanged OnExposureChanged;
 
+	/**
+	 * Resolve one explicit transition context for a faction's player, or an empty context when no
+	 * player is connected as that faction.
+	 *
+	 * Public because it is the one rule that decides which player a faction's context belongs to,
+	 * and story-driven presentation legitimately needs the same answer when a Territory event runs
+	 * with no player context of its own - a defender defeat with no instigator. Duplicating the
+	 * identity match (controller, pawn and player state) elsewhere would let a cutscene reach a
+	 * different player than a capture does. Selection is path-sorted, so it stays stable when
+	 * several players share one Narrative faction.
+	 */
+	FTerritoryTransitionContext ResolveFactionPlayerContext(const FGameplayTag& Faction) const;
+
 private:
 	friend class FTFCaptureAtomicContestTransition;
 
@@ -299,7 +312,6 @@ private:
 	FTerritoryTransitionContext ResolveCaptureContext(
 		const ATerritoryVolume* Territory,
 		const FGameplayTag& Faction) const;
-	FTerritoryTransitionContext ResolveFactionPlayerContext(const FGameplayTag& Faction) const;
 	void AddAttackerRegistration(AActor* Attacker);
 	void ReleaseAttackerRegistration(const TWeakObjectPtr<AActor>& Attacker);
 	int32 PruneInvalidAttackers(TSet<TWeakObjectPtr<AActor>>& Attackers);

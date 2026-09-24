@@ -145,6 +145,9 @@ public:
 	bool ApplyTerritoryDefinition();
 	UTerritoryDefinition* GetTerritoryDefinition() const { return TerritoryDefinition; }
 	FName GetGuardPostID() const { return GuardPostID; }
+
+	/** Which authored floor this post stands on. Zero is ground; upper floors are positive. */
+	int32 GetFloorIndex() const { return FloorIndex; }
 	void SetDefinitionBinding(UTerritoryDefinition* NewDefinition, FName NewGuardPostID)
 	{
 		TerritoryDefinition = NewDefinition;
@@ -160,6 +163,14 @@ public:
 	 */
 	UPROPERTY(Transient)
 	FGameplayTag OwnerTerritoryTag;
+
+	/**
+	 * Which authored floor this post stands on, copied from its Definition row. Zero is
+	 * ground; upper floors are positive. Ignored while the owning Place declares no floors.
+	 * The Definition owns the assignment, so this stays transient.
+	 */
+	UPROPERTY(Transient)
+	int32 FloorIndex = 0;
 
 	/**
 	 * Number of reserve guards that spawn on demand when active guards die.
@@ -517,6 +528,8 @@ private:
 	friend class FTFGarrisonPurchaseCallbacks;
 	friend class FTFGuardReserveTotals;
 	friend class FTFIndependentGuardPostStreaming;
+	// Floor staging tests share one fixture, so the reserve seam lives in one class.
+	friend class FTFTerritoryFloorTestAccess;
 #endif
 
 	/** Hidden serialized binding maintained by the Definition synchronizer. */

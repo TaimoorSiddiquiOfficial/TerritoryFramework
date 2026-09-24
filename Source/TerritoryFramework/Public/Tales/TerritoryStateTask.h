@@ -59,6 +59,26 @@ public:
 			ToolTip="Place, District, or City followed by this task. Easy example: Territory.HavenReach.CastleHill.Farm."))
 	FGameplayTag TargetTerritory;
 
+	/**
+	 * Restrict a garrison objective to one authored floor of the Place, for the two
+	 * objectives that read a garrison. -1 follows the whole Place and is the default, so an
+	 * existing task is unchanged.
+	 *
+	 * A floor changes what the objective means, deliberately:
+	 * - Assign Guards becomes physical. The guards must actually be standing on the floor,
+	 *   because a floor has no separate staffing target to satisfy on paper.
+	 * - Defeat Defenders becomes that floor's own defenders, taken from the replicated
+	 *   per-floor snapshot instead of the Place-wide defeat event.
+	 *
+	 * Every other objective ignores this field.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Task|Target",
+		meta=(ClampMin="-1",
+			EditCondition="Objective == ETerritoryStateTaskObjective::AllDefendersDefeated || Objective == ETerritoryStateTaskObjective::ReachDesiredGarrison",
+			EditConditionHides,
+			ToolTip="Which floor this objective follows. -1 means the whole Place. Easy example: 2 for 'clear the defenders on floor 2'."))
+	int32 TargetFloor = -1;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Task|Objective",
 		meta=(ToolTip="If the objective is already true when the quest reaches this task, complete immediately. Leave Territory always requires an observed inside-to-outside transition."))
 	bool bCompleteIfAlreadySatisfied = true;
@@ -86,6 +106,12 @@ private:
 	void EvaluateCurrent(bool bInitialEvaluation);
 	ATerritoryVolume* ResolveTerritory() const;
 	FText ResolveTerritoryName() const;
+
+	/** A negative TargetFloor means this task follows the whole Place, never a floor row. */
+	bool IsFloorFiltered() const { return TargetFloor >= 0; }
+
+	/** The replicated floor entry this task follows, or null when the Place declares no such floor. */
+	const struct FTerritoryFloorSnapshot* FindTargetFloor(const ATerritoryVolume& Territory) const;
 
 	UFUNCTION()
 	void HandleTerritoryRegistered(ATerritoryVolume* Territory,

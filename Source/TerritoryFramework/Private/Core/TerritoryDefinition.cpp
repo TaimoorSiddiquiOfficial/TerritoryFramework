@@ -3,6 +3,7 @@
 #include "AI/TerritoryPatrolGoal.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
+#include "Misc/DataValidation.h"
 
 namespace
 {
@@ -233,6 +234,35 @@ bool UTerritoryDefinition::GetGuardPostTemplate(FName GuardPostID,
 	return false;
 }
 
+const FTerritoryFloorTemplate* UTerritoryDefinition::FindFloor(int32 FloorIndex) const
+{
+	return Floors.FindByPredicate([FloorIndex](const FTerritoryFloorTemplate& Floor)
+	{
+		return Floor.FloorIndex == FloorIndex;
+	});
+}
+
+bool UTerritoryDefinition::GetFloorTemplate(int32 FloorIndex,
+	FTerritoryFloorTemplate& OutFloor) const
+{
+	if (const FTerritoryFloorTemplate* Floor = FindFloor(FloorIndex))
+	{
+		OutFloor = *Floor;
+		return true;
+	}
+	return false;
+}
+
+int32 UTerritoryDefinition::GetFloorGuardPostCount(int32 FloorIndex) const
+{
+	int32 Count = 0;
+	for (const FTerritoryGuardPostTemplate& Post : GuardPosts)
+	{
+		if (Post.FloorIndex == FloorIndex) ++Count;
+	}
+	return Count;
+}
+
 void UTerritoryDefinition::RefreshHierarchyLinks()
 {
 #if WITH_EDITOR
@@ -349,6 +379,65 @@ void UTerritoryDefinition::PostEditChangeProperty(
 		StableTerritoryGUID = FGuid::NewGuid();
 	}
 	RefreshHierarchyLinks();
+}
+
+EDataValidationResult UTerritoryDefinition::IsDataValid(FDataValidationContext& Context) const
+{
+	const EDataValidationResult SuperResult = Super::IsDataValid(Context);
+
+	// Floors are opt-in. With no declared floor rows every post keeps its legacy
+	// whole-Place behaviour, so an asset that predates floors still validates clean.
+	if (!Floors.IsEmpty())
+	{
+		TSet<int32> DeclaredFloors;
+		for (const FTerritoryFloorTemplate& Floor : Floors)
+		{
+			// Floor index doubles as the story task's target, where -1 already means
+			// "whole Place", so a negative floor would be unreachable from a quest.
+			if (Floor.FloorIndex < 0)
+			{
+				Context.AddError(FText::Format(NSLOCTEXT("TerritoryFloors", "NegativeFloorIndex",
+					"Floor index {0} is negative. Floors are zero-based, with zero as ground; use a non-negative index."),
+					FText::AsNumber(Floor.FloorIndex)));
+			}
+			if (DeclaredFloors.Contains(Floor.FloorIndex))
+			{
+				Context.AddError(FText::Format(NSLOCTEXT("TerritoryFloors", "DuplicateFloorIndex",
+					"Floor index {0} is declared more than once. Give each floor a unique index."),
+					FText::AsNumber(Floor.FloorIndex)));
+				continue;
+			}
+			DeclaredFloors.Add(Floor.FloorIndex);
+
+			// One guard post holds exactly one active guard, so the number of posts
+			// assigned to a floor is that floor's physical ceiling. Report the mismatch
+			// rather than clamping it: a silently reduced quota would hide a level that
+			// is missing a post actor.
+			const int32 PostCount = GetFloorGuardPostCount(Floor.FloorIndex);
+			if (Floor.DesiredGuards > PostCount)
+			{
+				Context.AddError(FText::Format(NSLOCTEXT("TerritoryFloors", "FloorQuotaExceedsPosts",
+					"Floor {0} asks for {1} defenders but only {2} guard post(s) are assigned to it. Each post holds one guard, so add post actors on this floor or lower the quota."),
+					FText::AsNumber(Floor.FloorIndex),
+					FText::AsNumber(Floor.DesiredGuards),
+					FText::AsNumber(PostCount)));
+			}
+		}
+
+		for (const FTerritoryGuardPostTemplate& Post : GuardPosts)
+		{
+			if (!DeclaredFloors.Contains(Post.FloorIndex))
+			{
+				Context.AddError(FText::Format(NSLOCTEXT("TerritoryFloors", "UndeclaredPostFloor",
+					"Guard post '{0}' is assigned to floor {1}, which this Place does not declare. Add that floor row or move the post onto a declared floor."),
+					FText::FromName(Post.GuardPostID),
+					FText::AsNumber(Post.FloorIndex)));
+			}
+		}
+	}
+
+	if (Context.GetNumErrors() > 0) return EDataValidationResult::Invalid;
+	return SuperResult == EDataValidationResult::Invalid ? SuperResult : EDataValidationResult::Valid;
 }
 #endif
 

@@ -118,6 +118,34 @@ public:
 	static int32 GetFactionTerritoryCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag);
 
 	// ═══════════════════════════════════════════════════════════════════════════════
+	// Authored Floors
+	// ═══════════════════════════════════════════════════════════════════════════════
+
+	/**
+	 * One authored floor's guard read model, the same replicated values the Territory's own
+	 * garrison snapshot carries. Returns false when this Territory declares no such floor, so a
+	 * widget can tell "no such floor" apart from "a floor holding nothing" - the struct is left
+	 * untouched in that case rather than zeroed into a floor that does not exist.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards|Floor",
+		meta=(DisplayName="Get Territory Floor Guards"))
+	static bool GetTerritoryFloorGuards(const ATerritoryVolume* Territory,
+		int32 FloorIndex, FTerritoryFloorSnapshot& OutFloor);
+
+	/**
+	 * Whether an authored floor has nothing left to send: a post stands on it, nobody is alive,
+	 * nobody is deploying and no reserve remains. A floor between reinforcement waves is not
+	 * cleared, and a floor that never held a defender is not cleared either.
+	 *
+	 * This is the one rule the per-floor story objective and the floor-cleared event both read.
+	 * Widgets must call this rather than restating it from the raw counts, so a HUD can never
+	 * disagree with the quest that completes on it.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards|Floor",
+		meta=(DisplayName="Is Territory Floor Cleared"))
+	static bool IsTerritoryFloorCleared(const FTerritoryFloorSnapshot& Floor);
+
+	// ═══════════════════════════════════════════════════════════════════════════════
 	// State-driven Command Capabilities
 	// ═══════════════════════════════════════════════════════════════════════════════
 

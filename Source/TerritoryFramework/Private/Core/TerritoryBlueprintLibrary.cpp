@@ -228,6 +228,27 @@ bool UTerritoryBlueprintLibrary::IsTerritoryAtLocation(const UObject* WorldConte
 	return GetTerritoryAtLocation(WorldContextObject, WorldLocation) != nullptr;
 }
 
+bool UTerritoryBlueprintLibrary::GetTerritoryFloorGuards(const ATerritoryVolume* Territory,
+	int32 FloorIndex, FTerritoryFloorSnapshot& OutFloor)
+{
+	if (!Territory) return false;
+	// The snapshot is the replicated read model, so this resolves identically on a client.
+	const FTerritoryGarrisonSnapshot Snapshot = Territory->GetGarrisonSnapshot();
+	const FTerritoryFloorSnapshot* Found = Snapshot.Floors.FindByPredicate(
+		[FloorIndex](const FTerritoryFloorSnapshot& Entry)
+		{
+			return Entry.FloorIndex == FloorIndex;
+		});
+	if (!Found) return false;
+	OutFloor = *Found;
+	return true;
+}
+
+bool UTerritoryBlueprintLibrary::IsTerritoryFloorCleared(const FTerritoryFloorSnapshot& Floor)
+{
+	return Floor.IsCleared();
+}
+
 int32 UTerritoryBlueprintLibrary::GetFactionGold(const UObject* WorldContextObject, const FGameplayTag& FactionTag)
 {
 	UTerritoryEconomySubsystem* Economy = GetTerritoryEconomy(WorldContextObject);

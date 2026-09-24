@@ -280,6 +280,10 @@ bool ATerritoryGuardSpawnPoint::ApplyTerritoryDefinition()
 	if (!Template) return false;
 
 	OwnerTerritoryTag = TerritoryDefinition->TerritoryTag;
+	// Copied through unclamped: an undeclared or negative index is an authoring error that
+	// UTerritoryDefinition::IsDataValid reports, and the post keeps the floor it names
+	// rather than being silently moved to ground.
+	FloorIndex = Template->FloorIndex;
 	GuardPostDefinition = Template->GuardPostDefinition;
 	NPCDefinitionOverride = Template->NPCDefinitionOverride;
 	ActivityConfigurationOverride = Template->ActivityConfigurationOverride;
@@ -702,9 +706,13 @@ void ATerritoryGuardSpawnPoint::TryAutomaticReserveSpawn()
 		UE_LOG(LogTerritory, Error,
 			TEXT("GuardSpawnPoint %s abandoned %d queued reserve deployment(s) after %d failures; reserves were not consumed."),
 			*GetName(), PendingReserveSpawns, AutomaticReserveSpawnFailures);
+		// Floors as they stood while this post still had a queued deployment. Abandoning that
+		// deployment can leave the post with nobody alive, which is a real conclusion of the
+		// fight rather than a reinforcement gap, so the floor may now be cleared.
+		const TArray<FTerritoryFloorSnapshot> FloorsBeforeLoss = Territory->GetGarrisonSnapshot().Floors;
 		CancelPendingReserveSpawns();
 		Territory->RefreshGarrisonSnapshot();
-		Territory->TryCompleteDefenderDefeat(FTerritoryTransitionContext());
+		Territory->TryCompleteDefenderDefeat(FTerritoryTransitionContext(), FloorsBeforeLoss);
 	}
 	else
 	{

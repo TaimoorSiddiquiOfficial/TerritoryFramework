@@ -351,6 +351,86 @@ struct FTerritoryUnlockCascadeResult
 	TArray<FTerritoryUnlockResultRow> Results;
 };
 
+/**
+ * Exact replicated read model for one authored floor of a Territory; live pawn pointers
+ * remain server-owned. One entry exists per declared FTerritoryFloorTemplate row, in
+ * declaration order, so the list is stable across streaming and iteration order.
+ *
+ * These numbers are *derived*: they are regrouped from the guard posts that already own
+ * the real state, never stored, so no save record and no migration are involved.
+ */
+USTRUCT(BlueprintType)
+struct FTerritoryFloorSnapshot
+{
+	GENERATED_BODY()
+
+	/** Authored floor identity. Zero is ground; upper floors are positive. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards|Floor")
+	int32 FloorIndex = 0;
+
+	/** Guards currently alive and assigned to posts on this floor. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards|Floor")
+	int32 ActiveGuards = 0;
+
+	/**
+	 * Authored quota for this floor. A row quota of zero reports the floor's physical
+	 * capacity instead, so a floor may be declared without also restating its post count.
+	 * This is staging and objective data; the Territory's runtime DesiredGuards still
+	 * governs how many guards the owner actually wants.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards|Floor")
+	int32 DesiredGuards = 0;
+
+	/** Physical guard slots on this floor: its authored posts plus any unidentified loaded post. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards|Floor")
+	int32 MaximumGuards = 0;
+
+	/** Finite replacement guards still available to this floor's posts. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards|Floor")
+	int32 ReserveGuards = 0;
+
+	/**
+	 * This floor's replacements still waiting for their allowed physical deployment. A floor
+	 * with no living guard but a pending deployment is mid-fight, not cleared, so this is
+	 * what stops a reserve gap from reading as an empty floor.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards|Floor")
+	int32 PendingDeployments = 0;
+
+	/**
+	 * Whether this floor has nothing left to send: a post stands on it, nobody is alive,
+	 * nobody is mid-deployment, and no reserve is left to walk in.
+	 *
+	 * Requiring the reserves is what stops a reinforcement gap from reading as an empty
+	 * floor. Requiring a post stops a floor that never held defenders from reading as
+	 * cleared, so a fresh Territory does not announce a fight nobody fought.
+	 *
+	 * The per-floor objective, the floor-cleared event and any Blueprint widget all read this
+	 * one rule, so a floor can never satisfy the quest while it is still being defended.
+	 * Blueprint reaches it through UTerritoryBlueprintLibrary::IsTerritoryFloorCleared, because
+	 * UHT does not reflect UFUNCTIONs declared inside a USTRUCT.
+	 */
+	bool IsCleared() const
+	{
+		return MaximumGuards > 0
+			&& ActiveGuards == 0
+			&& PendingDeployments == 0
+			&& ReserveGuards == 0;
+	}
+
+	bool operator==(const FTerritoryFloorSnapshot& Other) const
+	{
+		return FloorIndex == Other.FloorIndex
+			&& ActiveGuards == Other.ActiveGuards
+			&& DesiredGuards == Other.DesiredGuards
+			&& MaximumGuards == Other.MaximumGuards
+			&& ReserveGuards == Other.ReserveGuards
+			&& PendingDeployments == Other.PendingDeployments;
+	}
+
+	bool operator!=(const FTerritoryFloorSnapshot& Other) const { return !(*this == Other); }
+};
+
 /** Exact replicated read model for guard UI; live pawn pointers remain server-owned. */
 USTRUCT(BlueprintType)
 struct FTerritoryGarrisonSnapshot
@@ -377,13 +457,22 @@ struct FTerritoryGarrisonSnapshot
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	int32 PendingDeployments = 0;
 
+	/**
+	 * Per-floor breakdown, one entry per declared floor row and in declaration order.
+	 * Empty when the Definition declares no floors, which keeps the legacy whole-Territory
+	 * comparison byte-for-byte unchanged for every existing asset.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	TArray<FTerritoryFloorSnapshot> Floors;
+
 	bool operator==(const FTerritoryGarrisonSnapshot& Other) const
 	{
 		return ActiveGuards == Other.ActiveGuards
 			&& DesiredGuards == Other.DesiredGuards
 			&& MaximumGuards == Other.MaximumGuards
 			&& ReserveGuards == Other.ReserveGuards
-			&& PendingDeployments == Other.PendingDeployments;
+			&& PendingDeployments == Other.PendingDeployments
+			&& Floors == Other.Floors;
 	}
 
 	bool operator!=(const FTerritoryGarrisonSnapshot& Other) const { return !(*this == Other); }
@@ -770,3 +859,22 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
 	AActor*, Guard,
 	AActor*, Killer,
 	int32, RemainingDefenders);
+
+/**
+ * One authored floor of a Territory lost its last defender. Fired at each fight conclusion,
+ * once per floor, only on an observed transition, and never for a floor first seen empty.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FOnTerritoryFloorCleared,
+	class ATerritoryVolume*, Territory,
+	int32, FloorIndex);
+
+/**
+ * A guard finished deploying and is fully configured, so story may address it. FloorIndex is
+ * the authored floor of the post it deployed from, or INDEX_NONE when it had no post.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FOnTerritoryDefenderSpawned,
+	class ATerritoryVolume*, Territory,
+	AActor*, Guard,
+	int32, FloorIndex);
