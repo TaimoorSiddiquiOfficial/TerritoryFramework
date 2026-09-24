@@ -2846,7 +2846,7 @@ FTerritoryGarrisonSnapshot ATerritoryVolume::BuildGarrisonSnapshot() const
 void ATerritoryVolume::BuildFloorSnapshots(FTerritoryGarrisonSnapshot& OutSnapshot) const
 {
 	OutSnapshot.Floors.Reset();
-	if (!TerritoryDefinition || TerritoryDefinition->Floors.IsEmpty())
+	if (!TerritoryDefinition)
 	{
 		return;
 	}
@@ -2858,12 +2858,19 @@ void ATerritoryVolume::BuildFloorSnapshots(FTerritoryGarrisonSnapshot& OutSnapsh
 	const bool bCountsPhysicalSlots = ControlMode != ETerritoryControlMode::AggregateOnly;
 	TMap<int32, TSet<FGuid>> FloorSlotIDs;
 	TMap<int32, int32> FloorUnidentifiedSlots;
+	// Completeness needs the authored set and the observed set kept apart, because FloorSlotIDs
+	// above is their union and cannot answer "is anything missing". AuthoredFloorSlots is every
+	// post the Definition declares, loaded or not; LiveFloorPostIDs is the subset observed
+	// standing this pass. A floor is complete when the second covers the first.
+	TMap<int32, TSet<FGuid>> AuthoredFloorSlots;
+	TMap<int32, TSet<FGuid>> LiveFloorPostIDs;
 	if (bCountsPhysicalSlots)
 	{
 		for (const FTerritoryGuardPostTemplate& Post : TerritoryDefinition->GuardPosts)
 		{
 			if (Post.GuardPostID.IsNone() || !Post.StableGuardPostGUID.IsValid()) continue;
 			FloorSlotIDs.FindOrAdd(Post.FloorIndex).Add(Post.StableGuardPostGUID);
+			AuthoredFloorSlots.FindOrAdd(Post.FloorIndex).Add(Post.StableGuardPostGUID);
 		}
 	}
 
@@ -2890,9 +2897,32 @@ void ATerritoryVolume::BuildFloorSnapshots(FTerritoryGarrisonSnapshot& OutSnapsh
 		// A guard whose post is gone still counts in the whole-Territory total but cannot
 		// be attributed to a floor, so per-floor active counts need not sum to it.
 		if (!bCountsPhysicalSlots) continue;
+		// ApplyTerritoryDefinition assigns the post its template's StableGuardPostGUID, so a
+		// standing post's identity is its authored slot identity and the two sets are comparable.
 		const FGuid PostID = SpawnPoint->GetActorGUID_Implementation();
-		if (PostID.IsValid()) FloorSlotIDs.FindOrAdd(FloorIndex).Add(PostID);
+		if (PostID.IsValid())
+		{
+			FloorSlotIDs.FindOrAdd(FloorIndex).Add(PostID);
+			LiveFloorPostIDs.FindOrAdd(FloorIndex).Add(PostID);
+		}
 		else ++FloorUnidentifiedSlots.FindOrAdd(FloorIndex);
+	}
+
+	// Whole-Territory completeness, computed over every authored post rather than over the declared
+	// floor rows: a post whose FloorIndex is not a declared floor still belongs to this Territory's
+	// totals, so the Place flag must not depend on Floors being non-empty. The totals above are
+	// accumulated from live posts, so a fully streamed-out Place reports zero defenders and zero
+	// pending deployments; without this flag the whole-Place AllDefendersDefeated objective would
+	// satisfy with every guard still standing in the unloaded cell.
+	TSet<FGuid> AuthoredAll;
+	TSet<FGuid> LiveAll;
+	for (const TPair<int32, TSet<FGuid>>& Pair : AuthoredFloorSlots) AuthoredAll.Append(Pair.Value);
+	for (const TPair<int32, TSet<FGuid>>& Pair : LiveFloorPostIDs) LiveAll.Append(Pair.Value);
+	OutSnapshot.bCountsKnown = bCountsPhysicalSlots && LiveAll.Includes(AuthoredAll);
+
+	if (TerritoryDefinition->Floors.IsEmpty())
+	{
+		return;
 	}
 
 	OutSnapshot.Floors.Reserve(TerritoryDefinition->Floors.Num());
@@ -2913,6 +2943,15 @@ void ATerritoryVolume::BuildFloorSnapshots(FTerritoryGarrisonSnapshot& OutSnapsh
 		// A zero quota means "every post on this floor", so a designer may declare a floor
 		// without restating its post count.
 		Entry.DesiredGuards = Floor.DesiredGuards > 0 ? Floor.DesiredGuards : MaximumGuards;
+
+		// Complete when every authored post on this floor was observed standing. A floor that
+		// authors no post is complete with MaximumGuards 0 - "known to hold nothing" is a
+		// different statement from "unknown", and IsCleared() already refuses the former on its
+		// own MaximumGuards > 0 gate. AggregateOnly owns no physical counts, so it reports
+		// unknown rather than claiming a completeness it cannot observe.
+		const TSet<FGuid>& Authored = AuthoredFloorSlots.FindOrAdd(Floor.FloorIndex);
+		const TSet<FGuid>& Live = LiveFloorPostIDs.FindOrAdd(Floor.FloorIndex);
+		Entry.bCountsKnown = bCountsPhysicalSlots && Live.Includes(Authored);
 	}
 }
 

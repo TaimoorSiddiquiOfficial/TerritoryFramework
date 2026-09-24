@@ -193,6 +193,10 @@ bool UTerritoryStateTask::IsObjectiveSatisfiedBy(
 			// A replacement delay is still part of the fight. Use the replicated
 			// garrison view so Blueprint previews also work without client-side posts.
 			&& Territory->GetGarrisonSnapshot().PendingDeployments == 0
+			// A streamed-out Place has no loaded posts, so both reads above are zero while every
+			// guard is still standing in the unloaded cell. bCountsKnown is false exactly then;
+			// requiring it stops the objective satisfying on a garrison nobody has fought.
+			&& Territory->GetGarrisonSnapshot().bCountsKnown
 			&& (Territory->GetDesiredGuardCount() > 0
 				|| Territory->GetConfiguredGuardCount() > 0);
 	case ETerritoryStateTaskObjective::ReachDesiredGarrison:

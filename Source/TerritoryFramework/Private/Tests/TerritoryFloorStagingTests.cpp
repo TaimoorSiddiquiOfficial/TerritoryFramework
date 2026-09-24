@@ -8,6 +8,8 @@
 #include "Core/TerritoryVolume.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
+#include "NarrativeSave.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryStateTask.h"
@@ -32,6 +34,17 @@ public:
 	static void AttachPost(ATerritoryVolume& Territory, ATerritoryGuardSpawnPoint* Post)
 	{
 		Territory.GuardSpawnPoints.Add(Post);
+	}
+
+	/**
+	 * Register a post the way a streamed level does - through the resolved (weak) array, which is
+	 * the call the post's own ownership resolution makes. This is deliberately not AttachPost:
+	 * GuardSpawnPoints holds a strong pointer that keeps a destroyed post readable until GC, so a
+	 * post attached there cannot model a stream-out. Only tests ever append to that array.
+	 */
+	static void RegisterPost(ATerritoryVolume& Territory, ATerritoryGuardSpawnPoint* Post)
+	{
+		Territory.RegisterResolvedGuardSpawnPoint(Post);
 	}
 
 	/** Provision the saved reserve pool, which ownership normally does before deploying. */
@@ -145,6 +158,26 @@ namespace TerritoryFloorTest
 			Post->SetDefinitionBinding(Definition, FName(PostID));
 			if (!Post->ApplyTerritoryDefinition()) return nullptr;
 			FTFTerritoryFloorTestAccess::AttachPost(*Place, Post);
+			Posts.Add(FName(PostID), Post);
+			return Post;
+		}
+
+		/**
+		 * Stand up a post the way a streamed level does: named, bound, then registered with the
+		 * Territory through the resolved array - the production entry point, which stores a weak
+		 * pointer. This is deliberately NOT StandUp(): that one appends to GuardSpawnPoints, whose
+		 * strong pointer keeps a destroyed post readable until GC and would mask a stream-out
+		 * entirely. Only tests ever append to that array.
+		 */
+		ATerritoryGuardSpawnPoint* StreamIn(const TCHAR* PostID)
+		{
+			if (!IsValid()) return nullptr;
+			ATerritoryGuardSpawnPoint* Post =
+				NewObject<ATerritoryGuardSpawnPoint>(World->PersistentLevel);
+			if (!Post) return nullptr;
+			Post->SetDefinitionBinding(Definition, FName(PostID));
+			if (!Post->ApplyTerritoryDefinition()) return nullptr;
+			FTFTerritoryFloorTestAccess::RegisterPost(*Place, Post);
 			Posts.Add(FName(PostID), Post);
 			return Post;
 		}
@@ -723,10 +756,18 @@ bool FTFTerritoryFloorContract::RunTest(const FString& Parameters)
 		HasProperty(FloorSnapshot, TEXT("ReserveGuards")));
 	TestTrue(TEXT("The per-floor read model carries its pending deployments"),
 		HasProperty(FloorSnapshot, TEXT("PendingDeployments")));
+	TestTrue(TEXT("The per-floor read model carries its completeness"),
+		HasProperty(FloorSnapshot, TEXT("bCountsKnown")));
 	TestTrue(TEXT("The garrison read model carries the per-floor breakdown"),
 		HasProperty(GarrisonSnapshot, TEXT("Floors")));
+	TestTrue(TEXT("The garrison read model carries its own completeness"),
+		HasProperty(GarrisonSnapshot, TEXT("bCountsKnown")));
 	TestTrue(TEXT("The floor breakdown is visible to client UI"),
 		HasFlag(GarrisonSnapshot, TEXT("Floors"), CPF_BlueprintVisible, true));
+	TestTrue(TEXT("The per-floor completeness is visible to client UI"),
+		HasFlag(FloorSnapshot, TEXT("bCountsKnown"), CPF_BlueprintVisible, true));
+	TestTrue(TEXT("The whole-Place completeness is visible to client UI"),
+		HasFlag(GarrisonSnapshot, TEXT("bCountsKnown"), CPF_BlueprintVisible, true));
 
 	TestTrue(TEXT("A story task can target one floor"),
 		HasProperty(TaskClass, TEXT("TargetFloor")));
@@ -741,8 +782,52 @@ bool FTFTerritoryFloorContract::RunTest(const FString& Parameters)
 		HasFlag(VolumeClass, TEXT("GarrisonSnapshot"), CPF_Net, true));
 	TestTrue(TEXT("A floor entry is not saved"),
 		HasFlag(FloorSnapshot, TEXT("FloorIndex"), CPF_SaveGame, false));
+	TestTrue(TEXT("A floor's completeness is derived, not saved"),
+		HasFlag(FloorSnapshot, TEXT("bCountsKnown"), CPF_SaveGame, false));
+	TestTrue(TEXT("The whole-Place completeness is derived, not saved"),
+		HasFlag(GarrisonSnapshot, TEXT("bCountsKnown"), CPF_SaveGame, false));
 	TestTrue(TEXT("A post's floor assignment is not saved"),
 		HasFlag(PostClass, TEXT("FloorIndex"), CPF_Transient, true));
+
+	// Completeness has to travel with the snapshot or it is only ever an authority-side fact.
+	// RefreshGarrisonSnapshot publishes and calls ForceNetUpdate only when the new snapshot
+	// compares unequal, so a flag missing from operator== would let a Place become unknown
+	// without a single byte crossing the wire - the client would keep reading cleared.
+	const auto MakeSnapshot = [](bool bKnown)
+	{
+		FTerritoryGarrisonSnapshot Snapshot;
+		Snapshot.MaximumGuards = 2;
+		Snapshot.bCountsKnown = bKnown;
+		FTerritoryFloorSnapshot& Floor = Snapshot.Floors.AddDefaulted_GetRef();
+		Floor.FloorIndex = 3;
+		Floor.MaximumGuards = 2;
+		Floor.bCountsKnown = bKnown;
+		return Snapshot;
+	};
+	TestTrue(TEXT("Two snapshots that differ only in completeness are not equal"),
+		MakeSnapshot(false) != MakeSnapshot(true));
+	TestTrue(TEXT("Two snapshots with the same completeness are equal"),
+		MakeSnapshot(true) == MakeSnapshot(true));
+	TestTrue(TEXT("Two floor entries that differ only in completeness are not equal"),
+		MakeSnapshot(false).Floors[0] != MakeSnapshot(true).Floors[0]);
+
+	// A Place that declares no floors at all - still the shape of every Place before a designer
+	// authors its first floor row - cannot borrow the floor comparison for its own completeness.
+	// Without this leg the whole-Place flag could drop out of
+	// FTerritoryGarrisonSnapshot::operator== and the assertions above would still pass on
+	// Floors' comparison alone, hiding a Place that becomes unknown without a byte crossing
+	// the wire: RefreshGarrisonSnapshot only publishes and ForceNetUpdates an unequal snapshot.
+	const auto MakeFloorlessSnapshot = [](bool bKnown)
+	{
+		FTerritoryGarrisonSnapshot Snapshot;
+		Snapshot.MaximumGuards = 2;
+		Snapshot.bCountsKnown = bKnown;
+		return Snapshot;
+	};
+	TestTrue(TEXT("A floorless Place's own completeness change is a snapshot change"),
+		MakeFloorlessSnapshot(false) != MakeFloorlessSnapshot(true));
+	TestTrue(TEXT("A floorless Place with the same completeness is the same snapshot"),
+		MakeFloorlessSnapshot(true) == MakeFloorlessSnapshot(true));
 
 	return true;
 }
@@ -803,6 +888,275 @@ bool FTFTerritoryFloorRegression::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Only the authored variant carries floor entries"),
 		Legacy.Floors.IsEmpty() && !Authored.Floors.IsEmpty());
 
+	return true;
+}
+
+/**
+ * Completeness. A post's authored slot keeps its floor capacity whether or not the actor is
+ * loaded, so a floor whose posts are still in an unloaded cell reports capacity with every
+ * count at zero - which is the exact reading a cleared floor has. The flag separates the two:
+ * "nobody is left" and "nobody has been seen yet" are different statements, and only the first
+ * may satisfy a clear objective or fire a FloorClearedEvent.
+ *
+ * The red leg for this test is dropping bCountsKnown from IsCleared(): every assertion that
+ * reads a partly loaded floor then reports a cleared floor.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorCompleteness,
+	"TerritoryFramework.Guards.Floors.IncompleteFloorReadsNotCleared",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorCompleteness::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+
+	// Floor 1 authors one post and floor 3 authors two, so "nothing loaded" and "half loaded"
+	// are both reachable. Floor 6 declares no post at all - that is the third state, known to
+	// hold nothing, which is a different statement from unknown.
+	Fixture.Definition->Floors = { MakeFloor(1, 0), MakeFloor(3, 0), MakeFloor(6, 0) };
+	Fixture.Definition->GuardPosts = {
+		MakePost(TEXT("Ground_A"), 1),
+		MakePost(TEXT("Upper_A"), 3),
+		MakePost(TEXT("Upper_B"), 3) };
+	if (!TestTrue(TEXT("The completeness Definition applies to its Place"),
+		Fixture.Definition->ApplyToTerritory(Fixture.Place)))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	// Nothing is loaded. Every count reads zero while every authored slot still holds its
+	// capacity, which is precisely the state that used to read as a cleared floor.
+	Fixture.Place->RefreshGarrisonSnapshot();
+	const FTerritoryGarrisonSnapshot Unloaded = Fixture.Place->GetGarrisonSnapshot();
+	const FTerritoryFloorSnapshot* UnloadedFloor = FindFloor(Unloaded, 3);
+	const FTerritoryFloorSnapshot* EmptyFloor = FindFloor(Unloaded, 6);
+	if (!TestNotNull(TEXT("The half-loaded floor has an entry"), UnloadedFloor)
+		|| !TestNotNull(TEXT("The postless floor has an entry"), EmptyFloor))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	TestFalse(TEXT("A Place with none of its posts loaded does not know its guard counts"),
+		Unloaded.bCountsKnown);
+	TestEqual(TEXT("An unloaded post still holds its authored floor capacity"),
+		UnloadedFloor->MaximumGuards, 2);
+	TestEqual(TEXT("An unloaded post contributes no living guards"),
+		UnloadedFloor->ActiveGuards, 0);
+	TestEqual(TEXT("An unloaded post contributes no reserves"),
+		UnloadedFloor->ReserveGuards, 0);
+	TestEqual(TEXT("An unloaded post contributes no pending deployments"),
+		UnloadedFloor->PendingDeployments, 0);
+	TestFalse(TEXT("A floor with an unloaded post does not know its guard counts"),
+		UnloadedFloor->bCountsKnown);
+	TestFalse(TEXT("A floor whose post has not streamed in is never cleared, however empty it reads"),
+		UnloadedFloor->IsCleared());
+	TestTrue(TEXT("A floor that authors no post is known to hold nothing"),
+		EmptyFloor->bCountsKnown);
+	TestEqual(TEXT("A floor that authors no post holds no capacity"), EmptyFloor->MaximumGuards, 0);
+	TestFalse(TEXT("A floor that holds nothing is not a cleared floor"),
+		EmptyFloor->IsCleared());
+
+	// One of floor 3's two posts loads. The floor is still not knowable: the missing post's
+	// guards would be standing in the unloaded cell, invisible to every count above.
+	Fixture.StreamIn(TEXT("Upper_A"));
+	Fixture.Place->RefreshGarrisonSnapshot();
+	const FTerritoryGarrisonSnapshot Half = Fixture.Place->GetGarrisonSnapshot();
+	TestFalse(TEXT("Half a floor's posts is not enough to know its guard counts"),
+		FindFloor(Half, 3)->bCountsKnown);
+	TestFalse(TEXT("A half-loaded floor is still not cleared"),
+		FindFloor(Half, 3)->IsCleared());
+	TestFalse(TEXT("One unloaded post is enough to make the whole Place unknown"),
+		Half.bCountsKnown);
+
+	// The remaining posts load. The same empty counts now describe a floor that really holds
+	// nothing, so the floor is both known and cleared.
+	Fixture.StreamIn(TEXT("Upper_B"));
+	Fixture.StreamIn(TEXT("Ground_A"));
+	Fixture.Place->RefreshGarrisonSnapshot();
+	const FTerritoryGarrisonSnapshot Loaded = Fixture.Place->GetGarrisonSnapshot();
+	TestTrue(TEXT("Every post standing makes the Place know its guard counts"), Loaded.bCountsKnown);
+	TestTrue(TEXT("The same empty counts clear the floor once every post is standing"),
+		FindFloor(Loaded, 3)->IsCleared());
+	TestTrue(TEXT("A floor whose only post is standing reads known and cleared"),
+		FindFloor(Loaded, 1)->IsCleared());
+
+	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * Stream-out. This is the production half of the completeness rule: a post that leaves the
+ * loaded set must take its floor's knowledge with it, and the only thing that removes a post
+ * from the read model in production is the weak registration dropping it. AttachPost cannot
+ * show this - its strong pointer keeps a destroyed post readable until GC.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorStreamOut,
+	"TerritoryFramework.Guards.Floors.StreamedOutPostCannotClearItsFloor",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorStreamOut::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+
+	Fixture.Definition->Floors = { MakeFloor(4, 0) };
+	Fixture.Definition->GuardPosts = {
+		MakePost(TEXT("Upper_A"), 4),
+		MakePost(TEXT("Upper_B"), 4) };
+	if (!TestTrue(TEXT("The stream-out Definition applies to its Place"),
+		Fixture.Definition->ApplyToTerritory(Fixture.Place)))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	ATerritoryGuardSpawnPoint* UpperA = Fixture.StreamIn(TEXT("Upper_A"));
+	ATerritoryGuardSpawnPoint* UpperB = Fixture.StreamIn(TEXT("Upper_B"));
+	if (!TestNotNull(TEXT("First post streams in"), UpperA)
+		|| !TestNotNull(TEXT("Second post streams in"), UpperB))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	// Premise control. Were both posts not registered, the assertions below would pass on a
+	// broken fixture rather than on the rule.
+	Fixture.Place->RefreshGarrisonSnapshot();
+	TestEqual(TEXT("Both streamed-in posts are in the read model"),
+		Fixture.Place->GetGuardSpawnPoints().Num(), 2);
+	TestTrue(TEXT("A floor with every post standing knows its counts"),
+		FindFloor(Fixture.Place->GetGarrisonSnapshot(), 4)->bCountsKnown);
+	TestTrue(TEXT("A fully loaded empty floor reads cleared"),
+		FindFloor(Fixture.Place->GetGarrisonSnapshot(), 4)->IsCleared());
+
+	// The post streams out. Its floor keeps the authored capacity and loses the knowledge.
+	UpperB->Destroy();
+	TestFalse(TEXT("A destroyed post leaves the Territory's resolved post list"),
+		Fixture.Place->GetGuardSpawnPoints().Contains(UpperB));
+	Fixture.Place->RefreshGarrisonSnapshot();
+	const FTerritoryGarrisonSnapshot StreamedOut = Fixture.Place->GetGarrisonSnapshot();
+	const FTerritoryFloorSnapshot* StreamedFloor = FindFloor(StreamedOut, 4);
+	if (!TestNotNull(TEXT("The streamed-out floor keeps its entry"), StreamedFloor))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	TestEqual(TEXT("A streamed-out post keeps holding its authored floor capacity"),
+		StreamedFloor->MaximumGuards, 2);
+	TestEqual(TEXT("A streamed-out post contributes no reserves"),
+		StreamedFloor->ReserveGuards, 0);
+	TestFalse(TEXT("A floor with a streamed-out post stops knowing its guard counts"),
+		StreamedFloor->bCountsKnown);
+	TestFalse(TEXT("A floor cannot read cleared while one of its posts is in an unloaded cell"),
+		StreamedFloor->IsCleared());
+	TestFalse(TEXT("The whole Place stops knowing its counts with a post gone"),
+		StreamedOut.bCountsKnown);
+
+	// Restoring the post restores the knowledge, so the rule tracks the loaded set rather than
+	// latching unknown for the rest of the run.
+	ATerritoryGuardSpawnPoint* Restored = Fixture.StreamIn(TEXT("Upper_B"));
+	Fixture.Place->RefreshGarrisonSnapshot();
+	TestTrue(TEXT("Restoring the post restores the floor's knowledge"),
+		FindFloor(Fixture.Place->GetGarrisonSnapshot(), 4)->bCountsKnown);
+
+	// Save/load. Completeness is derived on the authority and deliberately not a SaveGame
+	// property, so a record written while the post was unloaded cannot carry it: a reloaded
+	// Place has to recompute unknown from the same missing post rather than resurrecting a
+	// clear out of the save.
+	Restored->Destroy();
+	UNarrativeSaveSubsystem* Save = NewObject<UNarrativeSaveSubsystem>();
+	FNarrativeActorRecord Record;
+	if (!TestTrue(TEXT("Narrative saves the Place"),
+		Save->CreateActorRecord(Fixture.Place, Record)))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	ATerritoryProperty* Reloaded = Fixture.World->SpawnActor<ATerritoryProperty>();
+	if (!TestNotNull(TEXT("The reloaded Place exists"), Reloaded)
+		|| !TestTrue(TEXT("The reloaded Place takes the same Definition"),
+			Fixture.Definition->ApplyToTerritory(Reloaded)))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	Save->LoadActorFromRecord(Reloaded, Record);
+	Reloaded->RefreshGarrisonSnapshot();
+	const FTerritoryGarrisonSnapshot ReloadedSnapshot = Reloaded->GetGarrisonSnapshot();
+	const FTerritoryFloorSnapshot* ReloadedFloor = FindFloor(ReloadedSnapshot, 4);
+	if (!TestNotNull(TEXT("The reloaded floor has an entry"), ReloadedFloor))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	TestFalse(TEXT("A reloaded Place with the post still unloaded reads unknown, not cleared"),
+		ReloadedSnapshot.bCountsKnown);
+	TestFalse(TEXT("A reloaded floor does not read cleared out of a save"),
+		ReloadedFloor->IsCleared());
+
+	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * The story half of the same rule. A floor objective and the whole-Place objective both read
+ * the garrison snapshot, so both used to satisfy on a Place nobody had fought, purely because
+ * the posts holding the defenders were in an unloaded cell.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorObjectivesWaitForLoad,
+	"TerritoryFramework.Tales.Tasks.DefenderObjectivesWaitForTheirPostsToLoad",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorObjectivesWaitForLoad::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+
+	Fixture.Definition->Floors = { MakeFloor(3, 0) };
+	Fixture.Definition->GuardPosts = {
+		MakePost(TEXT("Upper_A"), 3),
+		MakePost(TEXT("Upper_B"), 3) };
+	Fixture.Definition->ApplyToTerritory(Fixture.Place);
+
+	UTerritoryStateTask* ClearFloor = NewObject<UTerritoryStateTask>();
+	ClearFloor->TargetTerritory = TestTag();
+	ClearFloor->Objective = ETerritoryStateTaskObjective::AllDefendersDefeated;
+	ClearFloor->TargetFloor = 3;
+
+	UTerritoryStateTask* ClearPlace = NewObject<UTerritoryStateTask>();
+	ClearPlace->TargetTerritory = TestTag();
+	ClearPlace->Objective = ETerritoryStateTaskObjective::AllDefendersDefeated;
+	ClearPlace->TargetFloor = -1;
+
+	// Nothing is loaded: no defenders, no pending deployments, and two authored slots. The
+	// Place is also configured for guards, so the objective's "is there anything to defeat"
+	// gate is genuinely open and completeness is the only thing holding it shut.
+	Fixture.Place->RefreshGarrisonSnapshot();
+	TestTrue(TEXT("The Place is configured for guards, so the objective is not vacuously denied"),
+		Fixture.Place->GetConfiguredGuardCount() > 0);
+	TestFalse(TEXT("A Place whose posts are unloaded does not know its guard counts"),
+		Fixture.Place->GetGarrisonSnapshot().bCountsKnown);
+	TestFalse(TEXT("A floor objective cannot complete on a floor whose posts are unloaded"),
+		ClearFloor->IsObjectiveSatisfiedBy(Fixture.Place));
+	TestFalse(TEXT("A whole-Place objective cannot complete while its posts are unloaded"),
+		ClearPlace->IsObjectiveSatisfiedBy(Fixture.Place));
+
+	// The posts load and are empty, which is a real defeat: the same objectives now satisfy.
+	Fixture.StreamIn(TEXT("Upper_A"));
+	Fixture.StreamIn(TEXT("Upper_B"));
+	Fixture.Place->RefreshGarrisonSnapshot();
+	TestTrue(TEXT("The floor objective completes once its posts are loaded and empty"),
+		ClearFloor->IsObjectiveSatisfiedBy(Fixture.Place));
+	TestTrue(TEXT("The whole-Place objective completes once its posts are loaded and empty"),
+		ClearPlace->IsObjectiveSatisfiedBy(Fixture.Place));
+
+	Fixture.TearDown();
 	return true;
 }
 

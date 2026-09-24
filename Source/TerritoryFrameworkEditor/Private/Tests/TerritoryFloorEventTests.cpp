@@ -43,6 +43,17 @@ public:
 		Territory.GuardSpawnPoints.Add(Post);
 	}
 
+	/**
+	 * Register a post the way a streamed level does - through the resolved (weak) array, which is
+	 * the call the post's own ownership resolution makes. AttachPost cannot stand in for it:
+	 * GuardSpawnPoints holds a strong pointer that keeps a destroyed post readable until GC, so a
+	 * post attached there can never model a stream-out.
+	 */
+	static void RegisterPost(ATerritoryVolume& Territory, ATerritoryGuardSpawnPoint* Post)
+	{
+		Territory.RegisterResolvedGuardSpawnPoint(Post);
+	}
+
 	/** Publish the garrison read model, standing in for a deployment or a casualty. */
 	static void SetGarrison(ATerritoryVolume& Territory, const FTerritoryGarrisonSnapshot& Snapshot)
 	{
@@ -119,6 +130,11 @@ namespace TerritoryFloorEventTest
 		Entry.ReserveGuards = ReserveGuards;
 		Entry.PendingDeployments = PendingDeployments;
 		Entry.DesiredGuards = MaximumGuards;
+		// A hand-built entry stands in for a producer that has seen this floor's posts, so it
+		// states its counts as complete. FTerritoryFloorSnapshot defaults this to false so a real
+		// producer that forgets it fails closed, which is why every fixture here has to say so
+		// explicitly - the tests that do not are the ones asserting an unloaded floor.
+		Entry.bCountsKnown = true;
 		return Entry;
 	}
 
@@ -135,6 +151,10 @@ namespace TerritoryFloorEventTest
 			Snapshot.PendingDeployments += Floor.PendingDeployments;
 			Snapshot.DesiredGuards += Floor.DesiredGuards;
 		}
+		// Same claim as MakeFloorEntry, at Territory scope: this fixture models a published read
+		// model, and the whole-Place AllDefendersDefeated objective requires the flag, so an
+		// unset default here would make every whole-Place assertion read as "unknown".
+		Snapshot.bCountsKnown = true;
 		return Snapshot;
 	}
 
@@ -197,6 +217,34 @@ namespace TerritoryFloorEventTest
 		if (!Post->ApplyTerritoryDefinition()) return nullptr;
 		FTFTerritoryFloorEventTestAccess::AttachPost(*Fixture.Place, Post);
 		return Post;
+	}
+
+	/**
+	 * Stand up a post the way a streamed World Partition cell does: a fresh actor registered
+	 * through the resolved array, so destroying it models the cell unloading rather than leaving
+	 * a strong pointer behind for the rest of the test.
+	 */
+	ATerritoryGuardSpawnPoint* StreamIn(FFloorFixture& Fixture, const TCHAR* PostID)
+	{
+		if (!Fixture.IsValid()) return nullptr;
+		ATerritoryGuardSpawnPoint* Post =
+			NewObject<ATerritoryGuardSpawnPoint>(Fixture.World->PersistentLevel);
+		if (!Post) return nullptr;
+		Post->SetDefinitionBinding(Fixture.Definition, FName(PostID));
+		if (!Post->ApplyTerritoryDefinition()) return nullptr;
+		FTFTerritoryFloorEventTestAccess::RegisterPost(*Fixture.Place, Post);
+		return Post;
+	}
+
+	/** One floor entry out of a snapshot by index, or null when the snapshot has none. */
+	const FTerritoryFloorSnapshot* FindFloor(
+		const FTerritoryGarrisonSnapshot& Snapshot, int32 FloorIndex)
+	{
+		return Snapshot.Floors.FindByPredicate(
+			[FloorIndex](const FTerritoryFloorSnapshot& Entry)
+			{
+				return Entry.FloorIndex == FloorIndex;
+			});
 	}
 
 	/** Bind the probe to both real delegates through the Blueprint-assignable properties. */
@@ -349,6 +397,104 @@ bool FTFTerritoryFloorEventCallbacks::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("A floor-clear announcement is not a defender arrival"),
 		Probe->DefenderSpawnedCount, 0);
+
+	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * The second harm of the same defect, and the reason the completeness gate is a story fix and not
+ * only a read-model tidy-up.
+ *
+ * A floor whose post sits in an unloaded cell contributes no counts. Before the gate that read as
+ * "cleared" - authored capacity, every count zero - so the committed read model AND the pre-loss
+ * read the death path captures at TerritoryVolume.cpp:2449 both said cleared, the observed-
+ * transition compare at :2631 found no transition, and the floor's clear beat was lost for the rest
+ * of the campaign. A later death could never recover it, because by then the floor still read
+ * cleared. The gate makes the unloaded read *unknown* instead, so the first read that can actually
+ * see an empty floor is a real transition and the beat fires there.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorStreamOutKeepsItsBeat,
+	"TerritoryFramework.Guards.Floors.StreamedOutFloorKeepsItsClearBeat",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorStreamOutKeepsItsBeat::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorEventTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+
+	UTerritoryFloorEventProbe* Probe = NewObject<UTerritoryFloorEventProbe>();
+	if (!BindProbe(*Fixture.Place, *Probe, *this)) { Fixture.TearDown(); return false; }
+
+	// Floor 0 is the one-post floor, so a single stream-out empties its loaded set completely.
+	ATerritoryGuardSpawnPoint* GroundA = StreamIn(Fixture, TEXT("Ground_A"));
+	if (!TestNotNull(TEXT("The floor's post streams in"), GroundA))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	Fixture.Place->RefreshGarrisonSnapshot();
+	TestTrue(TEXT("A floor with its post standing knows its counts"),
+		FindFloor(Fixture.Place->GetGarrisonSnapshot(), 0)->bCountsKnown);
+
+	// The post's cell streams out. This is the committed read model a death on that floor would
+	// capture as its pre-loss read, so the beat's fate is decided here.
+	GroundA->Destroy();
+	Fixture.Place->RefreshGarrisonSnapshot();
+	const FTerritoryGarrisonSnapshot StreamedOut = Fixture.Place->GetGarrisonSnapshot();
+	const FTerritoryFloorSnapshot* UnloadedFloor = FindFloor(StreamedOut, 0);
+	if (!TestNotNull(TEXT("The streamed-out floor keeps its entry"), UnloadedFloor))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	TestEqual(TEXT("The unloaded floor still holds its authored capacity"),
+		UnloadedFloor->MaximumGuards, 1);
+	TestFalse(TEXT("The unloaded floor's pre-loss read is not cleared"), UnloadedFloor->IsCleared());
+	const TArray<FTerritoryFloorSnapshot> FloorsBeforeLoss = StreamedOut.Floors;
+
+	// The cell streams back in with the fight over: the floor is fully loaded, empty, and so
+	// genuinely clearable - the state the announcement is decided from.
+	ATerritoryGuardSpawnPoint* Restored = StreamIn(Fixture, TEXT("Ground_A"));
+	if (!TestNotNull(TEXT("The floor's post streams back in"), Restored))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	Fixture.Place->RefreshGarrisonSnapshot();
+	// Bound to a named snapshot, not read straight out of the accessor: GetGarrisonSnapshot()
+	// returns the read model BY VALUE, so a floor entry taken from its return value dies with the
+	// full expression and the assertions below would read freed bytes. The release allocator keeps
+	// serving those bytes often enough to look plausible - the reading that exposed it here was an
+	// impossible ActiveGuards of 646 on a floor whose post had just been streamed in empty.
+	const FTerritoryGarrisonSnapshot Reloaded = Fixture.Place->GetGarrisonSnapshot();
+	const FTerritoryFloorSnapshot* ReloadedFloor = FindFloor(Reloaded, 0);
+	if (!TestNotNull(TEXT("The reloaded floor has an entry"), ReloadedFloor))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	TestTrue(TEXT("Once every post is standing the floor knows its counts again"),
+		ReloadedFloor->bCountsKnown);
+	TestEqual(TEXT("The reloaded floor keeps its authored capacity"), ReloadedFloor->MaximumGuards, 1);
+	TestEqual(TEXT("The reloaded floor has nobody standing"), ReloadedFloor->ActiveGuards, 0);
+	TestEqual(TEXT("The reloaded floor holds no reserve"), ReloadedFloor->ReserveGuards, 0);
+	TestEqual(TEXT("The reloaded floor queues no replacement"), ReloadedFloor->PendingDeployments, 0);
+	TestTrue(TEXT("Once every post is standing the empty floor reads cleared"),
+		ReloadedFloor->IsCleared());
+
+	FTFTerritoryFloorEventTestAccess::ConcludeFight(*Fixture.Place, FloorsBeforeLoss);
+	TestEqual(TEXT("A floor unloaded when its last defender fell still announces its clear"),
+		Probe->FloorClearedCount, 1);
+	TestEqual(TEXT("The announcement names the floor that was unloaded"),
+		Probe->ClearedFloors.Num() == 1 ? Probe->ClearedFloors[0] : INDEX_NONE, 0);
+
+	// The transition is now observed, so a second conclusion stays silent - the deferred beat is
+	// announced once, not replayed on every later evaluation.
+	FTFTerritoryFloorEventTestAccess::ConcludeFight(*Fixture.Place, Reloaded.Floors);
+	TestEqual(TEXT("The recovered beat is announced exactly once"), Probe->FloorClearedCount, 1);
 
 	Fixture.TearDown();
 	return true;

@@ -249,6 +249,19 @@ bool UTerritoryBlueprintLibrary::IsTerritoryFloorCleared(const FTerritoryFloorSn
 	return Floor.IsCleared();
 }
 
+bool UTerritoryBlueprintLibrary::AreTerritoryFloorGuardCountsKnown(
+	const FTerritoryFloorSnapshot& Floor)
+{
+	return Floor.bCountsKnown;
+}
+
+bool UTerritoryBlueprintLibrary::AreTerritoryGuardCountsKnown(const ATerritoryVolume* Territory)
+{
+	if (!Territory) return false;
+	// The snapshot is the replicated read model, so this resolves identically on a client.
+	return Territory->GetGarrisonSnapshot().bCountsKnown;
+}
+
 int32 UTerritoryBlueprintLibrary::GetFactionGold(const UObject* WorldContextObject, const FGameplayTag& FactionTag)
 {
 	UTerritoryEconomySubsystem* Economy = GetTerritoryEconomy(WorldContextObject);

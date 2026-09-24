@@ -399,12 +399,31 @@ struct FTerritoryFloorSnapshot
 	int32 PendingDeployments = 0;
 
 	/**
+	 * Whether these counts are complete: every guard post the Definition authors for this floor was
+	 * observed standing. False means **unknown, not zero** - the same vocabulary
+	 * FTerritoryGarrisonOperationsView::bReserveCountKnown already establishes.
+	 *
+	 * A post actor streams out with its cell, and the counts above are accumulated from live post
+	 * actors, so an unloaded post contributes nothing while its authored capacity stays in
+	 * MaximumGuards. Without this flag that reads as an emptied floor, and IsCleared() would report a
+	 * floor nobody has fought as cleared. Defaults to false so a producer that forgets to set it
+	 * fails closed: a missing flag must never be read as "counts are fine".
+	 */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	bool bCountsKnown = false;
+
+	/**
 	 * Whether this floor has nothing left to send: a post stands on it, nobody is alive,
 	 * nobody is mid-deployment, and no reserve is left to walk in.
 	 *
 	 * Requiring the reserves is what stops a reinforcement gap from reading as an empty
 	 * floor. Requiring a post stops a floor that never held defenders from reading as
 	 * cleared, so a fresh Territory does not announce a fight nobody fought.
+	 *
+	 * Requiring the counts to be known is what stops a streamed-out post from clearing its own
+	 * floor: the counts would all read zero because the post that owns them is not loaded, so the
+	 * floor would satisfy its objective and fire its cleared beat while a defender is still
+	 * physically standing there.
 	 *
 	 * The per-floor objective, the floor-cleared event and any Blueprint widget all read this
 	 * one rule, so a floor can never satisfy the quest while it is still being defended.
@@ -413,7 +432,8 @@ struct FTerritoryFloorSnapshot
 	 */
 	bool IsCleared() const
 	{
-		return MaximumGuards > 0
+		return bCountsKnown
+			&& MaximumGuards > 0
 			&& ActiveGuards == 0
 			&& PendingDeployments == 0
 			&& ReserveGuards == 0;
@@ -426,7 +446,8 @@ struct FTerritoryFloorSnapshot
 			&& DesiredGuards == Other.DesiredGuards
 			&& MaximumGuards == Other.MaximumGuards
 			&& ReserveGuards == Other.ReserveGuards
-			&& PendingDeployments == Other.PendingDeployments;
+			&& PendingDeployments == Other.PendingDeployments
+			&& bCountsKnown == Other.bCountsKnown;
 	}
 
 	bool operator!=(const FTerritoryFloorSnapshot& Other) const { return !(*this == Other); }
@@ -486,6 +507,18 @@ struct FTerritoryGarrisonSnapshot
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
 	TArray<FTerritoryFloorSnapshot> Floors;
 
+	/**
+	 * Whether the whole-Territory counts above are complete: every guard post the Definition
+	 * authors for this Territory was observed standing. False means **unknown, not zero**.
+	 *
+	 * The totals have the same stream-out hole the per-floor counts have, and the same failure:
+	 * a fully streamed-out Place reports no defenders and no pending deployments, so the
+	 * whole-Place AllDefendersDefeated objective satisfies with every guard still standing in the
+	 * unloaded cell. Defaults to false so a producer that forgets to set it fails closed.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Guards")
+	bool bCountsKnown = false;
+
 	bool operator==(const FTerritoryGarrisonSnapshot& Other) const
 	{
 		return ActiveGuards == Other.ActiveGuards
@@ -493,7 +526,8 @@ struct FTerritoryGarrisonSnapshot
 			&& MaximumGuards == Other.MaximumGuards
 			&& ReserveGuards == Other.ReserveGuards
 			&& PendingDeployments == Other.PendingDeployments
-			&& Floors == Other.Floors;
+			&& Floors == Other.Floors
+			&& bCountsKnown == Other.bCountsKnown;
 	}
 
 	bool operator!=(const FTerritoryGarrisonSnapshot& Other) const { return !(*this == Other); }

@@ -145,6 +145,29 @@ public:
 		meta=(DisplayName="Is Territory Floor Cleared"))
 	static bool IsTerritoryFloorCleared(const FTerritoryFloorSnapshot& Floor);
 
+	/**
+	 * Whether a floor's counts are complete: every post the Definition authors for it was observed
+	 * standing. False means **unknown, not zero** - the floor's post actors are outside the loaded
+	 * set, so its counts say nothing about whether anyone is defending it.
+	 *
+	 * A widget must render this as "unknown" rather than "not cleared". IsTerritoryFloorCleared is
+	 * already false whenever this is false, so the two never disagree about a cleared floor; this
+	 * exists so the presentation layer can tell an empty floor from an unloaded one.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards|Floor",
+		meta=(DisplayName="Are Territory Floor Guard Counts Known"))
+	static bool AreTerritoryFloorGuardCountsKnown(const FTerritoryFloorSnapshot& Floor);
+
+	/**
+	 * Whether a Territory's whole-garrison counts are complete: every post the Definition authors
+	 * was observed standing. False means **unknown, not zero**, and the whole-Place
+	 * AllDefendersDefeated objective requires it, so a fully streamed-out Place cannot satisfy a
+	 * "defenders defeated" quest it has not fought.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guards",
+		meta=(DisplayName="Are Territory Guard Counts Known"))
+	static bool AreTerritoryGuardCountsKnown(const ATerritoryVolume* Territory);
+
 	// ═══════════════════════════════════════════════════════════════════════════════
 	// State-driven Command Capabilities
 	// ═══════════════════════════════════════════════════════════════════════════════
