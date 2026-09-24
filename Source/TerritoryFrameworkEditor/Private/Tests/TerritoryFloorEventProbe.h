@@ -33,6 +33,26 @@ public:
 	int32 DefenderSpawnedCount = 0;
 	TArray<int32> SpawnedFloors;
 
+	/** How many times OnGuardKilled reached this probe. */
+	int32 GuardKilledCount = 0;
+
+	/** How many times the whole-Place defeat delegate reached this probe. */
+	int32 AllGuardsDefeatedCount = 0;
+
+	/**
+	 * The announcements in the order they arrived, so a cascade test can prove not just how many
+	 * times a floor was announced but *which frame* announced it.
+	 */
+	TArray<FString> Trace;
+
+	/**
+	 * Test hooks. The cascade these tests exercise is a synchronous re-entry inside a broadcast, so
+	 * a test has to run its own code from inside a callback - a second defender dying while the
+	 * first death is still being handled is exactly the nesting the announcement rules survive.
+	 */
+	TFunction<void(ATerritoryVolume*, AActor*)> GuardKilledCallback;
+	TFunction<void(ATerritoryVolume*, int32)> FloorClearedCallback;
+
 	UPROPERTY()
 	TObjectPtr<AActor> LastSpawnedGuard = nullptr;
 
@@ -41,6 +61,8 @@ public:
 	{
 		++FloorClearedCount;
 		ClearedFloors.Add(FloorIndex);
+		Trace.Add(FString::Printf(TEXT("cleared:%d"), FloorIndex));
+		if (FloorClearedCallback) FloorClearedCallback(Territory, FloorIndex);
 	}
 
 	UFUNCTION()
@@ -49,6 +71,25 @@ public:
 		++DefenderSpawnedCount;
 		SpawnedFloors.Add(FloorIndex);
 		LastSpawnedGuard = Guard;
+	}
+
+	UFUNCTION()
+	void GuardKilled(ATerritoryVolume* Territory, AActor* Guard, AActor* Killer,
+		int32 RemainingDefenders)
+	{
+		(void)Killer;
+		(void)RemainingDefenders;
+		++GuardKilledCount;
+		Trace.Add(TEXT("killed"));
+		if (GuardKilledCallback) GuardKilledCallback(Territory, Guard);
+	}
+
+	UFUNCTION()
+	void AllGuardsDefeated(ATerritoryVolume* Territory)
+	{
+		(void)Territory;
+		++AllGuardsDefeatedCount;
+		Trace.Add(TEXT("all-defeated"));
 	}
 };
 

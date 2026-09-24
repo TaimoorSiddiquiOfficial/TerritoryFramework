@@ -2416,6 +2416,22 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 		return;
 	}
 
+	// Open this death's conclusion cascade. Everything below is arbitrary Blueprint and may kill the
+	// next defender synchronously, and that death concludes the fight from inside this frame, so
+	// this is the outermost scope for the nested conclusion that follows. The depth is guarded first
+	// and the announcement bookkeeping cleared second on purpose: destructors run in reverse, so the
+	// clear runs while the depth still holds this frame's value, and "== 1" there means this frame
+	// was the outermost one - the frame that owns the cascade. See FloorsAnnouncedInDefeatCascade.
+	TGuardValue<int32> CascadeDepth(DefeatCascadeDepth, DefeatCascadeDepth + 1);
+	ON_SCOPE_EXIT
+	{
+		if (DefeatCascadeDepth == 1)
+		{
+			FloorsAnnouncedInDefeatCascade.Reset();
+			bPlaceDefeatAnnouncedInDefeatCascade = false;
+		}
+	};
+
 	// Narrative Pro 2.4.2 added a Boolean to its BlueprintNativeEvent death path.
 	// Reconcile the physical pawn from the ASC before Territory removes its defender
 	// registration, so old Blueprint-generated classes cannot remain walking when dead.
@@ -2561,6 +2577,21 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 	const FTerritoryTransitionContext& EventContext,
 	const TArray<FTerritoryFloorSnapshot>& FloorsBeforeLoss)
 {
+	// The second conclusion entry, and the outermost scope of its own cascade when a post abandons
+	// its queued reserves - that path concludes a fight with no death to open a scope, so without
+	// this the announcements it records would never be cleared again. Same discipline as
+	// OnDefenderDied: the clear runs while the depth is still incremented, so "== 1" means this
+	// frame owns the cascade. See FloorsAnnouncedInDefeatCascade.
+	TGuardValue<int32> CascadeDepth(DefeatCascadeDepth, DefeatCascadeDepth + 1);
+	ON_SCOPE_EXIT
+	{
+		if (DefeatCascadeDepth == 1)
+		{
+			FloorsAnnouncedInDefeatCascade.Reset();
+			bPlaceDefeatAnnouncedInDefeatCascade = false;
+		}
+	};
+
 	// Check ALL registered defenders (includes non-guard defenders registered via
 	// RegisterDefender Blueprint API), not just SpawnedGuards. Pending reserves remain
 	// part of the fight unless their bounded deployment retries were exhausted.
@@ -2573,6 +2604,13 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 	DispatchClearedFloors(FloorsBeforeLoss, EventContext);
 
 	if (RegisteredDefenders.Num() != 0 || HasPendingReserveDeployments()) return;
+
+	// The same cascade rule, for the whole-Place beat: a nested conclusion reaches this terminal
+	// read first, because the frame before it had already unregistered its own defender. The state
+	// mutation below is idempotent, but the delegate and the authored events are not, so the outer
+	// frame must not repeat a conclusion that has already been broadcast.
+	if (bPlaceDefeatAnnouncedInDefeatCascade) return;
+	bPlaceDefeatAnnouncedInDefeatCascade = true;
 
 	if (const UTerritoryDeveloperSettings* Settings =
 		GetDefault<UTerritoryDeveloperSettings>();
@@ -2615,7 +2653,19 @@ void ATerritoryVolume::DispatchClearedFloors(
 	// Read the committed snapshot, not a fresh build: a listener may act on this inside
 	// GetGarrisonSnapshot(), and it must never see a floor reported cleared while the
 	// replicated read model still counts a guard standing on it.
-	for (const FTerritoryFloorSnapshot& Floor : GarrisonSnapshot.Floors)
+	//
+	// Iterate a copy of it. Everything this announces is arbitrary Blueprint and may conclude
+	// another fight synchronously, which reaches RefreshGarrisonSnapshot and reassigns the live
+	// member this loop would otherwise be walking. The copy also keeps every announcement in this
+	// pass decided against one consistent read of the committed snapshot.
+	//
+	// The announcement set is consulted only while a conclusion cascade is open, because that is
+	// the only time it can be trusted: it is cleared by the frame that owns the cascade, so outside
+	// one it is either empty or stale from a call that never opened a scope. A dispatch with no
+	// open cascade is not a conclusion this frame owns and announces exactly as it did before.
+	const TArray<FTerritoryFloorSnapshot> ClearedCandidates = GarrisonSnapshot.Floors;
+	const bool bInDefeatCascade = DefeatCascadeDepth > 0;
+	for (const FTerritoryFloorSnapshot& Floor : ClearedCandidates)
 	{
 		if (!Floor.IsCleared()) continue;
 
@@ -2629,6 +2679,17 @@ void ATerritoryVolume::DispatchClearedFloors(
 				return Entry.FloorIndex == Floor.FloorIndex;
 			});
 		if (!Previous || Previous->IsCleared()) continue;
+
+		// One conclusion per cascade announces a floor. A nested frame observes the same real
+		// transition, because the floor did empty, and the frame that observes it first is the one
+		// whose death emptied it - so it is the frame that carries the right context and the one
+		// that announces. Without this, the outer frame announces the floor a second time off its
+		// own pre-loss read and the authored reward runs twice for one fight.
+		if (bInDefeatCascade)
+		{
+			if (FloorsAnnouncedInDefeatCascade.Contains(Floor.FloorIndex)) continue;
+			FloorsAnnouncedInDefeatCascade.Add(Floor.FloorIndex);
+		}
 
 		OnFloorCleared.Broadcast(this, Floor.FloorIndex);
 		DispatchFloorClearedEvents(Floor.FloorIndex, TransitionContext);

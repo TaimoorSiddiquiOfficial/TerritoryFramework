@@ -61,14 +61,36 @@ public:
 	}
 
 	/**
-	 * Conclude a fight the way the defender death path and the abandoned-reserve path do, so
-	 * a test can reach the announcement without spawning a Narrative NPC.
+	 * Reach the floor announcement on its own, without a conclusion around it. This is the
+	 * announcement seam, not a fight conclusion: it opens no cascade, so the once-per-cascade rules
+	 * do not apply and each call announces exactly what the read model says.
 	 */
 	static void ConcludeFight(ATerritoryVolume& Territory,
 		const TArray<FTerritoryFloorSnapshot>& FloorsBeforeLoss,
 		const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext())
 	{
 		Territory.DispatchClearedFloors(FloorsBeforeLoss, TransitionContext);
+	}
+
+	/**
+	 * Conclude a fight the way the defender death path and the abandoned-reserve path do, through
+	 * the real entry point - which is what opens the cascade the announcement rules belong to.
+	 */
+	static void CompleteDefeat(ATerritoryVolume& Territory,
+		const TArray<FTerritoryFloorSnapshot>& FloorsBeforeLoss,
+		const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext())
+	{
+		Territory.TryCompleteDefenderDefeat(TransitionContext, FloorsBeforeLoss);
+	}
+
+	/**
+	 * Run a registered defender's death through the real death path. This is the entry a cascade
+	 * starts from in gameplay, because it broadcasts the death callbacks that may nest another death
+	 * inside its own frame.
+	 */
+	static void KillDefender(ATerritoryVolume& Territory, AActor* Defender)
+	{
+		Territory.OnDefenderDied(Defender, nullptr, true);
 	}
 
 	/** Announce a deployment the way TrySpawnSingleGuard does once the guard is configured. */
@@ -247,7 +269,7 @@ namespace TerritoryFloorEventTest
 			});
 	}
 
-	/** Bind the probe to both real delegates through the Blueprint-assignable properties. */
+	/** Bind the probe to every real delegate a floor fight announces through. */
 	bool BindProbe(ATerritoryVolume& Territory, UTerritoryFloorEventProbe& Probe,
 		FAutomationTestBase& Test)
 	{
@@ -255,8 +277,15 @@ namespace TerritoryFloorEventTest
 			ATerritoryVolume::StaticClass(), TEXT("OnFloorCleared"));
 		FMulticastDelegateProperty* SpawnedProperty = FindFProperty<FMulticastDelegateProperty>(
 			ATerritoryVolume::StaticClass(), TEXT("OnDefenderSpawned"));
+		FMulticastDelegateProperty* KilledProperty = FindFProperty<FMulticastDelegateProperty>(
+			ATerritoryVolume::StaticClass(), TEXT("OnGuardKilled"));
+		FMulticastDelegateProperty* DefeatedProperty = FindFProperty<FMulticastDelegateProperty>(
+			ATerritoryVolume::StaticClass(), TEXT("OnAllGuardsDefeatedDelegate"));
 		if (!Test.TestNotNull(TEXT("OnFloorCleared is a multicast delegate property"), ClearedProperty)
-			|| !Test.TestNotNull(TEXT("OnDefenderSpawned is a multicast delegate property"), SpawnedProperty))
+			|| !Test.TestNotNull(TEXT("OnDefenderSpawned is a multicast delegate property"), SpawnedProperty)
+			|| !Test.TestNotNull(TEXT("OnGuardKilled is a multicast delegate property"), KilledProperty)
+			|| !Test.TestNotNull(TEXT("OnAllGuardsDefeatedDelegate is a multicast delegate property"),
+				DefeatedProperty))
 		{
 			return false;
 		}
@@ -270,6 +299,19 @@ namespace TerritoryFloorEventTest
 		SpawnedDelegate.BindUFunction(&Probe,
 			GET_FUNCTION_NAME_CHECKED(UTerritoryFloorEventProbe, DefenderSpawned));
 		SpawnedProperty->AddDelegate(SpawnedDelegate, &Territory);
+
+		// The death callback is the seam a cascade starts from: it is broadcast before the death
+		// that triggered it concludes the fight, so a listener here nests one conclusion inside the
+		// frame of the death before it.
+		FScriptDelegate KilledDelegate;
+		KilledDelegate.BindUFunction(&Probe,
+			GET_FUNCTION_NAME_CHECKED(UTerritoryFloorEventProbe, GuardKilled));
+		KilledProperty->AddDelegate(KilledDelegate, &Territory);
+
+		FScriptDelegate DefeatedDelegate;
+		DefeatedDelegate.BindUFunction(&Probe,
+			GET_FUNCTION_NAME_CHECKED(UTerritoryFloorEventProbe, AllGuardsDefeated));
+		DefeatedProperty->AddDelegate(DefeatedDelegate, &Territory);
 		return true;
 	}
 
@@ -298,6 +340,18 @@ namespace TerritoryFloorEventTest
 		TArray<FTerritoryFloorSnapshot> Exhausted()
 		{
 			return { MakeFloorEntry(0, 0, 1), MakeFloorEntry(2, 0, 2) };
+		}
+
+		/** Floor 0 holds both of its defenders; floor 2 keeps fighting. */
+		TArray<FTerritoryFloorSnapshot> GroundHoldingTwo()
+		{
+			return { MakeFloorEntry(0, 2, 2), MakeFloorEntry(2, 1, 2) };
+		}
+
+		/** One of floor 0's two defenders is down and the other is still standing. */
+		TArray<FTerritoryFloorSnapshot> GroundHoldingOne()
+		{
+			return { MakeFloorEntry(0, 1, 2), MakeFloorEntry(2, 1, 2) };
 		}
 	}
 }
@@ -495,6 +549,258 @@ bool FTFTerritoryFloorStreamOutKeepsItsBeat::RunTest(const FString& Parameters)
 	// announced once, not replayed on every later evaluation.
 	FTFTerritoryFloorEventTestAccess::ConcludeFight(*Fixture.Place, Reloaded.Floors);
 	TestEqual(TEXT("The recovered beat is announced exactly once"), Probe->FloorClearedCount, 1);
+
+	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * A death can nest inside a death, and one fight must still be announced once.
+ *
+ * OnGuardKilled is broadcast from the middle of the death path - before the frame that is handling
+ * the death concludes the fight - and everything it announces is arbitrary Blueprint. A listener may
+ * therefore kill the next defender synchronously, and that second death concludes the fight first,
+ * from inside the frame of the first. Both frames then observe the same real transition, because the
+ * floor did empty, so without the cascade rule the floor's clear beat and its authored reward run
+ * twice for one fight, and the frame that runs them second decides on a pre-loss read that is
+ * already stale.
+ *
+ * The trace is the assertion that matters: it proves not only how many announcements happened but
+ * which frame made them. The innermost frame announces, because it is the frame whose death emptied
+ * the floor, and the outer frame stays silent.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorNestedDeathAnnouncesOnce,
+	"TerritoryFramework.Guards.Floors.NestedDeathAnnouncesAFlooredFightOnce",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorNestedDeathAnnouncesOnce::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorEventTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+
+	// Floor 0 authors the reward whose double run is the defect, and the Place authors the
+	// whole-Place beat that the same nesting reaches twice. The Territory executes its own clones,
+	// so the Definition has to be re-applied for both to be picked up.
+	UTerritoryFloorClearedProbeEvent* AuthoredFloorReward =
+		NewObject<UTerritoryFloorClearedProbeEvent>();
+	UTerritoryFloorClearedProbeEvent* AuthoredDefeatReward =
+		NewObject<UTerritoryFloorClearedProbeEvent>();
+	Fixture.Definition->Floors[0].FloorClearedEvents = { AuthoredFloorReward };
+	Fixture.Definition->AllDefendersDefeatedEvents = { AuthoredDefeatReward };
+	if (!TestTrue(TEXT("Re-applying the Definition rebuilds the runtime event clones"),
+		Fixture.Definition->ApplyToTerritory(Fixture.Place)))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	const TArray<TObjectPtr<UNarrativeEvent>>* FloorClones =
+		FTFTerritoryFloorEventTestAccess::FindFloorClearedEventClones(*Fixture.Place, 0);
+	UTerritoryFloorClearedProbeEvent* ClonedFloorReward = FloorClones && FloorClones->Num() > 0
+		? Cast<UTerritoryFloorClearedProbeEvent>((*FloorClones)[0]) : nullptr;
+	const TArray<TObjectPtr<UNarrativeEvent>>& DefeatClones =
+		Fixture.Place->GetAllDefendersDefeatedEvents();
+	UTerritoryFloorClearedProbeEvent* ClonedDefeatReward = DefeatClones.Num() > 0
+		? Cast<UTerritoryFloorClearedProbeEvent>(DefeatClones[0]) : nullptr;
+	if (!TestNotNull(TEXT("Floor 0's authored reward has a clone for this Territory"),
+			ClonedFloorReward)
+		|| !TestNotNull(TEXT("The authored all-defenders reward has a clone for this Territory"),
+			ClonedDefeatReward))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	UTerritoryFloorEventProbe* Probe = NewObject<UTerritoryFloorEventProbe>();
+	if (!BindProbe(*Fixture.Place, *Probe, *this)) { Fixture.TearDown(); return false; }
+
+	// Two registered defenders on floor 0: the death path only concludes for a defender it has
+	// registered. The fixture has no Narrative ASC, so the death binding registration also attempts
+	// is a no-op and the test drives the death callback itself.
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	AActor* FirstGuard = Fixture.World->SpawnActor<AActor>(
+		AActor::StaticClass(), FTransform::Identity, SpawnParams);
+	AActor* SecondGuard = Fixture.World->SpawnActor<AActor>(
+		AActor::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Both floor-0 defenders exist"), FirstGuard)
+		|| !TestNotNull(TEXT("Both floor-0 defenders exist"), SecondGuard))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	Fixture.Place->RegisterDefender(FirstGuard);
+	Fixture.Place->RegisterDefender(SecondGuard);
+
+	int32 NestedConclusions = 0;
+	Probe->GuardKilledCallback = [&](ATerritoryVolume* Territory, AActor* Guard)
+	{
+		// The second defender dies while the first death is still being handled: it leaves the
+		// registered set, the garrison is republished without it, and its conclusion runs - all
+		// before the frame already on the stack reaches its own conclusion.
+		(void)Guard;
+		++NestedConclusions;
+		Territory->UnregisterDefender(SecondGuard);
+		FTFTerritoryFloorEventTestAccess::SetGarrison(*Territory,
+			MakeGarrison({ MakeFloorEntry(0, 0, 2), MakeFloorEntry(2, 1, 2) }));
+		// Its own pre-loss read still shows a defender on floor 0, which is what makes the inner
+		// frame see a transition of its own rather than an already-cleared floor.
+		FTFTerritoryFloorEventTestAccess::CompleteDefeat(*Territory, Fight::GroundHoldingOne());
+	};
+
+	// The read the death captures before the casualty: both of floor 0's defenders standing.
+	FTFTerritoryFloorEventTestAccess::SetGarrison(*Fixture.Place,
+		MakeGarrison(Fight::GroundHoldingTwo()));
+
+	FTFTerritoryFloorEventTestAccess::KillDefender(*Fixture.Place, FirstGuard);
+
+	TestEqual(TEXT("The first defender's death reached the story callback"),
+		Probe->GuardKilledCount, 1);
+	TestEqual(TEXT("The second death really nested inside the first"), NestedConclusions, 1);
+	TestEqual(TEXT("One fight concludes one floor once"), Probe->FloorClearedCount, 1);
+	TestEqual(TEXT("The announcement names the floor that emptied"),
+		Probe->ClearedFloors.Num() == 1 ? Probe->ClearedFloors[0] : INDEX_NONE, 0);
+	TestEqual(TEXT("The authored floor reward runs once for one fight"),
+		ClonedFloorReward->ExecutionCount, 1);
+	TestEqual(TEXT("The whole-Place defeat is announced once for one fight"),
+		Probe->AllGuardsDefeatedCount, 1);
+	TestEqual(TEXT("The authored all-defenders reward runs once for one fight"),
+		ClonedDefeatReward->ExecutionCount, 1);
+	// Order, not just counts: the nested frame announces the floor, the outer frame adds nothing,
+	// and the whole-Place beat follows the floor beat it belongs to.
+	TestEqual(TEXT("The innermost frame announces and the outer frame stays silent"),
+		FString::Join(Probe->Trace, TEXT(">")),
+		FString(TEXT("killed>cleared:0>all-defeated")));
+
+	// The templates are authored data: nothing may ever execute them. Every assertion above ran
+	// through the clones.
+	TestEqual(TEXT("The Definition's floor reward never executes"), AuthoredFloorReward->ExecutionCount, 0);
+	TestEqual(TEXT("The Definition's all-defenders reward never executes"),
+		AuthoredDefeatReward->ExecutionCount, 0);
+
+	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * The other ordering of the same cascade, and the case that proves the rule is not over-broad.
+ *
+ * Here the nesting starts from the floor-clear callback, so the outer frame has already announced
+ * floor 0 when the nested conclusion runs. That nested frame sees floor 0's transition too - it must
+ * not announce it again - and it also sees floor 2, which the outer frame has not reached yet, and
+ * that one it must announce. A rule that suppressed every floor the cascade had touched would lose
+ * floor 2's beat, which is what this asserts against.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorCascadeDoesNotSuppressOtherFloors,
+	"TerritoryFramework.Guards.Floors.NestedConclusionKeepsAnotherFloorsBeat",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorCascadeDoesNotSuppressOtherFloors::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorEventTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+
+	UTerritoryFloorEventProbe* Probe = NewObject<UTerritoryFloorEventProbe>();
+	if (!BindProbe(*Fixture.Place, *Probe, *this)) { Fixture.TearDown(); return false; }
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	AActor* SecondGuard = Fixture.World->SpawnActor<AActor>(
+		AActor::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("The second defender exists"), SecondGuard))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	Fixture.Place->RegisterDefender(SecondGuard);
+
+	int32 NestedConclusions = 0;
+	Probe->FloorClearedCallback = [&](ATerritoryVolume* Territory, int32 FloorIndex)
+	{
+		// Nest once, on the outer frame's first announcement.
+		if (NestedConclusions > 0 || FloorIndex != 0) return;
+		++NestedConclusions;
+		Territory->UnregisterDefender(SecondGuard);
+		FTFTerritoryFloorEventTestAccess::SetGarrison(*Territory,
+			MakeGarrison({ MakeFloorEntry(0, 0, 2), MakeFloorEntry(2, 0, 2) }));
+		// The nested death's own pre-loss read shows both floors still defended, so its frame sees
+		// a transition on floor 0 as well as on floor 2 and only the cascade rule stops the first.
+		FTFTerritoryFloorEventTestAccess::CompleteDefeat(*Territory,
+			{ MakeFloorEntry(0, 1, 2), MakeFloorEntry(2, 1, 2) });
+	};
+
+	// Both floors were defended when the loss was captured and both are empty now.
+	FTFTerritoryFloorEventTestAccess::SetGarrison(*Fixture.Place,
+		MakeGarrison({ MakeFloorEntry(0, 0, 2), MakeFloorEntry(2, 0, 2) }));
+	FTFTerritoryFloorEventTestAccess::CompleteDefeat(*Fixture.Place,
+		{ MakeFloorEntry(0, 1, 2), MakeFloorEntry(2, 1, 2) });
+
+	TestEqual(TEXT("The nested conclusion really ran inside the announcement"),
+		NestedConclusions, 1);
+	TestEqual(TEXT("Each floor is announced once for one cascade"), Probe->FloorClearedCount, 2);
+	TestEqual(TEXT("Both floors are announced, in authored order"),
+		FString::Join(Probe->Trace, TEXT(">")),
+		FString(TEXT("cleared:0>cleared:2>all-defeated")));
+	TestEqual(TEXT("The floor the outer frame already announced is not announced again"),
+		Probe->ClearedFloors.Num() > 0 ? Probe->ClearedFloors[0] : INDEX_NONE, 0);
+	TestEqual(TEXT("The floor the nested frame reached first is still announced"),
+		Probe->ClearedFloors.Num() > 1 ? Probe->ClearedFloors[1] : INDEX_NONE, 2);
+	TestEqual(TEXT("The whole-Place defeat is announced once for one cascade"),
+		Probe->AllGuardsDefeatedCount, 1);
+
+	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * A listener acting on the beat may re-read the garrison, and the refresh reassigns the very array
+ * the announcement pass is walking.
+ *
+ * The dispatch must therefore decide the pass from a snapshot of its own rather than from the live
+ * member. This is the half that only the stomp allocator exposes: the default allocator keeps
+ * serving the freed bytes, so the walk completes with the right answer by luck; the stomp allocator
+ * poisons them and the pass fails, or crashes, on the second floor.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorReentrantRefreshSurvives,
+	"TerritoryFramework.Guards.Floors.ClearedDispatchSurvivesReentrantGarrisonRefresh",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorReentrantRefreshSurvives::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorEventTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+
+	UTerritoryFloorEventProbe* Probe = NewObject<UTerritoryFloorEventProbe>();
+	if (!BindProbe(*Fixture.Place, *Probe, *this)) { Fixture.TearDown(); return false; }
+
+	int32 Reentries = 0;
+	Probe->FloorClearedCallback = [&](ATerritoryVolume* Territory, int32 FloorIndex)
+	{
+		(void)FloorIndex;
+		++Reentries;
+		// Everything a listener does on the beat is legitimate, and re-reading the garrison is the
+		// most ordinary thing it can do. The refresh republishes the read model and the explicit
+		// publish that follows it reassigns the member again.
+		Territory->RefreshGarrisonSnapshot();
+		FTFTerritoryFloorEventTestAccess::SetGarrison(*Territory,
+			MakeGarrison({ MakeFloorEntry(0, 0, 2), MakeFloorEntry(2, 0, 2) }));
+	};
+
+	// Two floors empty at once, both defended when the loss was captured: the pass announces two
+	// floors, so the first announcement invalidates the array with one iteration still to run.
+	FTFTerritoryFloorEventTestAccess::SetGarrison(*Fixture.Place,
+		MakeGarrison({ MakeFloorEntry(0, 0, 2), MakeFloorEntry(2, 0, 2) }));
+	FTFTerritoryFloorEventTestAccess::CompleteDefeat(*Fixture.Place,
+		{ MakeFloorEntry(0, 2, 2), MakeFloorEntry(2, 1, 2) });
+
+	TestEqual(TEXT("The re-entrant refresh and publish really ran inside the pass"), Reentries, 2);
+	TestEqual(TEXT("Both floors cleared by one conclusion are announced"),
+		Probe->FloorClearedCount, 2);
+	TestEqual(TEXT("The pass survives the re-entrant reassignment and keeps its order"),
+		FString::Join(Probe->Trace, TEXT(">")),
+		FString(TEXT("cleared:0>cleared:2>all-defeated")));
 
 	Fixture.TearDown();
 	return true;

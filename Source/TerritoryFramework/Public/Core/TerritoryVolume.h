@@ -949,6 +949,29 @@ private:
 	bool bTransitionInProgress = false;
 	bool bValidatingOwnershipData = false;
 	mutable TSet<int32> EvaluatingStateConditionKeys;
+
+	/**
+	 * Frame-local bookkeeping for one cascade of fight conclusions. Not durable state: never
+	 * replicated, never saved, and never a second authority over "was this floor cleared" - it
+	 * records only which beats this cascade has already broadcast.
+	 *
+	 * A conclusion nests. Everything the conclusion broadcasts is arbitrary Blueprint, so a listener
+	 * on OnGuardKilled, or an authored DefenderDiedEvent, may kill the next defender synchronously -
+	 * and that death concludes the fight from inside the frame of the death before it. Both frames
+	 * then observe the same real transition, because a floor did empty, and without these two the
+	 * same floor-clear beat and the same authored all-defenders defeat run twice for one fight.
+	 *
+	 * A floor is announced by the first frame that observes its transition - the frame whose death
+	 * emptied it - and the whole-Place defeat runs once per cascade. DefeatCascadeDepth counts the
+	 * open conclusion scopes; the bookkeeping is cleared when the outermost one closes, which is the
+	 * frame that owns the cascade, and it is only consulted while a scope is open, so it can never
+	 * outlive the cascade it describes. The two entry points are OnDefenderDied and
+	 * TryCompleteDefenderDefeat, the second because a post abandoning its queued reserves concludes a
+	 * fight without a death.
+	 */
+	TSet<int32> FloorsAnnouncedInDefeatCascade;
+	bool bPlaceDefeatAnnouncedInDefeatCascade = false;
+	int32 DefeatCascadeDepth = 0;
 	/** True after OnRep_OwnershipData has fired at least once. Suppresses synthetic
 	 *  ownership/state change events on initial replication (late join). */
 	bool bReplicationInitialized = false;
