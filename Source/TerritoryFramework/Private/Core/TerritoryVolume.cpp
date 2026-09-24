@@ -751,6 +751,7 @@ bool ATerritoryVolume::ApplyTerritoryDefinition()
 		RuntimeStateConfigs.Reset();
 		RuntimeDefenderDiedEvents.Reset();
 		RuntimeAllDefendersDefeatedEvents.Reset();
+		RuntimeFloorClearedEvents.Reset();
 		return false;
 	}
 	return TerritoryDefinition->ApplyToTerritory(this);
@@ -777,6 +778,19 @@ void ATerritoryVolume::RebuildRuntimeNarrativeConfiguration(
 	{
 		RuntimeDefenderDiedEvents.Reset();
 		RuntimeAllDefendersDefeatedEvents.Reset();
+	}
+
+	// Deliberately outside the Place gate above. Floors are authored on the base Definition and
+	// FindFloor is a base-class query, so the cleared-event dispatch serves any definition type that
+	// declares floors; nesting this inside the gate would silently drop floor beats for a District or
+	// a City. A definition with no floors leaves this map empty, which is the "nothing to run" case.
+	RuntimeFloorClearedEvents.Reset();
+	for (const FTerritoryFloorTemplate& Floor : Definition.Floors)
+	{
+		if (Floor.FloorClearedEvents.IsEmpty()) continue;
+		FTerritoryFloorRuntimeEvents RuntimeEvents;
+		RuntimeEvents.Events = CloneNarrativeArrayForTerritory(Floor.FloorClearedEvents, this);
+		RuntimeFloorClearedEvents.Add(Floor.FloorIndex, MoveTemp(RuntimeEvents));
 	}
 }
 
@@ -2633,13 +2647,17 @@ void ATerritoryVolume::AnnounceDefenderSpawned(AActor* Guard,
 void ATerritoryVolume::DispatchFloorClearedEvents(int32 FloorIndex,
 	const FTerritoryTransitionContext& TransitionContext)
 {
-	const UTerritoryDefinition* Definition = TerritoryDefinition;
-	if (!Definition) return;
-	const FTerritoryFloorTemplate* Floor = Definition->FindFloor(FloorIndex);
-	if (!Floor) return;
+	// Read the per-Territory clones, never the Definition's own objects. A Definition-owned event is a
+	// shared authoring template: executing it would run one asset for every Territory that references
+	// the Definition, and its outer chain holds no gameplay world, so TerritoryTales::ResolveWorld
+	// finds none and a world-dependent beat (a cutscene) returns before it ever resolves an audience.
+	// The clone's outer is this actor, so both problems go away and the event behaves like the
+	// defender arrays already do. An undeclared floor, or one with no authored events, has no entry.
+	const FTerritoryFloorRuntimeEvents* RuntimeEvents = RuntimeFloorClearedEvents.Find(FloorIndex);
+	if (!RuntimeEvents) return;
 
 	// Copy first: an authored event may legitimately re-author the Definition while it runs.
-	const TArray<TObjectPtr<UNarrativeEvent>> EventSnapshot = Floor->FloorClearedEvents;
+	const TArray<TObjectPtr<UNarrativeEvent>> EventSnapshot = RuntimeEvents->Events;
 	for (UNarrativeEvent* Event : EventSnapshot)
 	{
 		if (!Event) continue;

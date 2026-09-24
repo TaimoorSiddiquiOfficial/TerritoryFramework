@@ -10,6 +10,7 @@ class UTerritoryStealthProfile;
 DECLARE_LOG_CATEGORY_EXTERN(LogTerritory, Log, All);
 
 class ATerritoryVolume;
+class UNarrativeEvent;
 class UTalesComponent;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -429,6 +430,26 @@ struct FTerritoryFloorSnapshot
 	}
 
 	bool operator!=(const FTerritoryFloorSnapshot& Other) const { return !(*this == Other); }
+};
+
+/**
+ * One Territory's runtime clones of a single floor's authored cleared events.
+ *
+ * This exists only because UHT forbids a container as a TMap value. A floor carries a list of
+ * events, and the runtime store is keyed by floor index, so the list needs a name before it can be
+ * a value. Keeping the key on the outside preserves the "one row per floor, no duplicates" shape
+ * the map gives us; folding the index into the struct instead would allow a repeated row.
+ *
+ * Runtime-only: not Blueprint-visible, not replicated and not saved. The events it holds are
+ * Transient duplicates owned by the Territory actor, never the Definition's shared templates.
+ */
+USTRUCT()
+struct FTerritoryFloorRuntimeEvents
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UNarrativeEvent>> Events;
 };
 
 /** Exact replicated read model for guard UI; live pawn pointers remain server-owned. */

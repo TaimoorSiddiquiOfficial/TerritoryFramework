@@ -927,6 +927,17 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<class UNarrativeEvent>> RuntimeAllDefendersDefeatedEvents;
 
+	/**
+	 * Per-floor clones of the Definition's FloorClearedEvents, keyed by authored floor index.
+	 * A Definition-owned event is a shared template whose outer chain holds no gameplay world, so
+	 * anything that has to resolve a world (a cutscene, for example) fails on it, and executing it
+	 * would run one asset for every Territory that references the Definition. Cloning to this actor
+	 * fixes both, exactly as RuntimeDefenderDiedEvents does. Floors live on the base Definition and
+	 * the dispatch path serves any definition type, so this is not gated to Places.
+	 */
+	UPROPERTY(Transient)
+	TMap<int32, FTerritoryFloorRuntimeEvents> RuntimeFloorClearedEvents;
+
 	FGameplayTag PreviousOwningFaction;
 	ETerritoryState PreviousState = ETerritoryState::Unclaimed;
 	ETerritoryAvailability PreviousAvailability = ETerritoryAvailability::Unlocked;

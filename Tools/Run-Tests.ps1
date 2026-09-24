@@ -48,13 +48,30 @@ $editor = "$EngineRoot/Engine/Binaries/Win64/UnrealEditor-Cmd.exe"
 if (-not (Test-Path -LiteralPath $editor)) { throw "UnrealEditor-Cmd not found: $editor" }
 
 #Refuse to test a binary the current sources were not built into.
-$dll = Get-Item -LiteralPath "$plugin/Binaries/Win64/UnrealEditor-TerritoryFramework.dll"
-$newestSource = Get-ChildItem -LiteralPath "$plugin/Source" -Recurse -File |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if ($newestSource.LastWriteTime -gt $dll.LastWriteTime) {
-    throw ("UnrealEditor-TerritoryFramework.dll is older than $($newestSource.Name). " +
-        "Build before running tests, or this run tests the previous code. " +
-        "A host editor holding the DLLs blocks the link; close it first.")
+#
+# Each module is checked against its own sources. A single whole-tree check against the runtime DLL
+# reports a stale binary whenever an editor-only file changes, and the editor module is where the
+# tests live, so that false positive fires on every test-only edit. Pairing a module with its own
+# directory keeps the guarantee that matters - no module is tested older than its code - while
+# letting a change that genuinely needs only one module relink only that module.
+$modules = @(
+    @{ Name = 'TerritoryFramework';       Dir = "$plugin/Source/TerritoryFramework" },
+    @{ Name = 'TerritoryFrameworkEditor'; Dir = "$plugin/Source/TerritoryFrameworkEditor" }
+)
+foreach ($module in $modules) {
+    $moduleDll = "$plugin/Binaries/Win64/UnrealEditor-$($module.Name).dll"
+    if (-not (Test-Path -LiteralPath $moduleDll)) {
+        throw "UnrealEditor-$($module.Name).dll is missing; build before running tests."
+    }
+    if (-not (Test-Path -LiteralPath $module.Dir)) { continue }
+    $newestSource = Get-ChildItem -LiteralPath $module.Dir -Recurse -File |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $moduleDllItem = Get-Item -LiteralPath $moduleDll
+    if ($newestSource.LastWriteTime -gt $moduleDllItem.LastWriteTime) {
+        throw ("UnrealEditor-$($module.Name).dll is older than $($newestSource.Name). " +
+            "Build before running tests, or this run tests the previous code. " +
+            "A host editor holding the DLLs blocks the link; close it first.")
+    }
 }
 
 $label = if ($Stomp) { 'stomp' } else { 'default' }

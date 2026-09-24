@@ -2,14 +2,27 @@
 
 #include "Misc/AutomationTest.h"
 #include "TerritoryFloorEventProbe.h"
+#include "Cinematics/NarrativeLevelSequenceActor.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/Level.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/WorldSettings.h"
+#include "LevelSequence.h"
+#include "Tales/TerritoryStoryEvents.h"
+#include "Tales/TerritoryTalesUtilities.h"
+#include "UnrealFramework/NarrativeGameState.h"
 #include "UObject/UnrealType.h"
 
 /**
@@ -52,6 +65,19 @@ public:
 		ATerritoryGuardSpawnPoint* SpawnPoint)
 	{
 		Territory.AnnounceDefenderSpawned(Guard, SpawnPoint);
+	}
+
+	/**
+	 * This Territory's clones of one floor's authored cleared events. Null means no clone array
+	 * exists for that floor, which is the case for an undeclared floor and for one that authored
+	 * no events - the same "nothing to run" state the dispatch treats as a no-op.
+	 */
+	static const TArray<TObjectPtr<UNarrativeEvent>>* FindFloorClearedEventClones(
+		const ATerritoryVolume& Territory, int32 FloorIndex)
+	{
+		const FTerritoryFloorRuntimeEvents* RuntimeEvents =
+			Territory.RuntimeFloorClearedEvents.Find(FloorIndex);
+		return RuntimeEvents ? &RuntimeEvents->Events : nullptr;
 	}
 };
 
@@ -414,34 +440,311 @@ bool FTFTerritoryFloorClearedEvents::RunTest(const FString& Parameters)
 	Fixture.Definition->Floors[1].FloorClearedEvents = { Ungated, Gated };
 	Fixture.Definition->Floors[0].FloorClearedEvents = {};
 
+	// The rows above only changed the Definition. A Territory executes its own clones, built when
+	// the Definition is applied - the same rule the defender-died and all-defenders-defeated
+	// arrays already follow - so the Definition has to be re-applied for the Territory to pick
+	// them up. Asserting against the templates instead is what let the shared-template defect
+	// pass: one authored object executed for every Territory referencing the Definition, and its
+	// outer chain holds no world.
+	TestTrue(TEXT("Re-applying the Definition rebuilds the floor event clones"),
+		Fixture.Definition->ApplyToTerritory(Fixture.Place));
+
+	const TArray<TObjectPtr<UNarrativeEvent>>* Clones =
+		FTFTerritoryFloorEventTestAccess::FindFloorClearedEventClones(*Fixture.Place, 2);
+	TestNotNull(TEXT("A floor that authors events has a cloned array for this Territory"), Clones);
+	TestNull(TEXT("A floor that authors no events has no cloned array"),
+		FTFTerritoryFloorEventTestAccess::FindFloorClearedEventClones(*Fixture.Place, 0));
+	TestNull(TEXT("A declared floor with no post and no events has no cloned array"),
+		FTFTerritoryFloorEventTestAccess::FindFloorClearedEventClones(*Fixture.Place, 5));
+	if (!Clones) { Fixture.TearDown(); return false; }
+
+	TestEqual(TEXT("Both authored events are cloned for this Territory"), Clones->Num(), 2);
+	UTerritoryFloorClearedProbeEvent* ClonedUngated = Clones->Num() > 0
+		? Cast<UTerritoryFloorClearedProbeEvent>((*Clones)[0]) : nullptr;
+	UTerritoryFloorClearedProbeEvent* ClonedGated = Clones->Num() > 1
+		? Cast<UTerritoryFloorClearedProbeEvent>((*Clones)[1]) : nullptr;
+	TestNotNull(TEXT("The ungated clone is the authored probe type"), ClonedUngated);
+	TestNotNull(TEXT("The gated clone is the authored probe type"), ClonedGated);
+	if (!ClonedUngated || !ClonedGated) { Fixture.TearDown(); return false; }
+
 	// Ground falls while floor 2 is still defended: the announcement happens, but ground
 	// authored nothing, so no event may run.
 	FTFTerritoryFloorEventTestAccess::SetGarrison(*Fixture.Place, MakeGarrison({
 		MakeFloorEntry(0, 0, 1),
 		MakeFloorEntry(2, 2, 2) }));
 	FTFTerritoryFloorEventTestAccess::ConcludeFight(*Fixture.Place, Fight::Defended());
-	TestEqual(TEXT("A floor with no authored events runs none"), Ungated->ExecutionCount, 0);
+	TestEqual(TEXT("A floor with no authored events runs none"), ClonedUngated->ExecutionCount, 0);
 
-	// Floor 2 falls: the ungated event runs and the blocked one stays suppressed.
+	// Floor 2 falls: the ungated clone runs and the blocked one stays suppressed.
 	FTFTerritoryFloorEventTestAccess::SetGarrison(*Fixture.Place,
 		MakeGarrison(Fight::Exhausted()));
 	FTFTerritoryFloorEventTestAccess::ConcludeFight(*Fixture.Place, {
 		MakeFloorEntry(0, 0, 1),
 		MakeFloorEntry(2, 2, 2) });
-	TestEqual(TEXT("A cleared floor runs its authored event"), Ungated->ExecutionCount, 1);
+	TestEqual(TEXT("A cleared floor runs its authored event"), ClonedUngated->ExecutionCount, 1);
 	TestEqual(TEXT("A failed condition suppresses the cleared-floor event"),
-		Gated->ExecutionCount, 0);
+		ClonedGated->ExecutionCount, 0);
 
-	// The condition is the only thing blocking the second event, so passing it must let the
-	// event through on the next genuine transition.
-	Blocking->bPasses = true;
+	// The condition is the only thing blocking the second event, so passing it must let the event
+	// through on the next genuine transition. The clone owns its own copy of the Instanced
+	// condition, so the switch is flipped on that copy: flipping the Definition's template would
+	// reach a different object and prove nothing about what actually executed.
+	UTerritoryFloorClearedProbeCondition* ClonedCondition = ClonedGated->Conditions.Num() > 0
+		? Cast<UTerritoryFloorClearedProbeCondition>(ClonedGated->Conditions[0]) : nullptr;
+	TestNotNull(TEXT("The gated clone carries its own copy of the Instanced condition"),
+		ClonedCondition);
+	if (ClonedCondition) ClonedCondition->bPasses = true;
 	FTFTerritoryFloorEventTestAccess::ConcludeFight(*Fixture.Place, {
 		MakeFloorEntry(0, 0, 1),
 		MakeFloorEntry(2, 1, 2) });
 	TestEqual(TEXT("A passing condition lets the cleared-floor event run"),
-		Gated->ExecutionCount, 1);
+		ClonedGated->ExecutionCount, 1);
+
+	// The whole point of the clone: the Definition's own objects are authored templates and
+	// nothing may ever execute them. Every transition above ran through the clones, so these two
+	// counters are what fail if the dispatch ever goes back to the shared array.
+	TestEqual(TEXT("The Definition's ungated cleared event never executes"),
+		Ungated->ExecutionCount, 0);
+	TestEqual(TEXT("The Definition's gated cleared event never executes"),
+		Gated->ExecutionCount, 0);
 
 	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * One Definition, two Territories: each executes its own floor event instance, and each instance
+ * resolves the gameplay world from its own outer chain.
+ *
+ * This is the defect the live floor-staging run exposed. A Definition-owned event is a single
+ * shared object, so every Territory referencing the Definition executes that one instance; and
+ * its outer chain holds no world, so when the death that empties a floor records no killer the
+ * transition context is empty, TerritoryTales::ResolveWorld falls through to the event's own
+ * GetWorld(), and a world-dependent beat returns silently with no log line. Reserves dying without
+ * a recorded instigator are exactly that case, and a floor cleared by its last reserve is the
+ * common way a floor empties.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorClearedEventCloning,
+	"TerritoryFramework.Guards.Floors.ClearedEventsAreClonedPerTerritoryAndResolveAWorld",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorClearedEventCloning::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorEventTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+
+	UTerritoryFloorClearedProbeEvent* Authored = NewObject<UTerritoryFloorClearedProbeEvent>();
+	Fixture.Definition->Floors[1].FloorClearedEvents = { Authored };
+	if (!TestTrue(TEXT("The Definition re-applies with the authored floor event"),
+		Fixture.Definition->ApplyToTerritory(Fixture.Place)))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	// A second Territory on the same Definition, which is the only way to see one shared event
+	// object being executed for two Places.
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryProperty* Other = Fixture.World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("A second Place exists"), Other)) { Fixture.TearDown(); return false; }
+	if (!TestTrue(TEXT("The same Definition applies to the second Place"),
+		Fixture.Definition->ApplyToTerritory(Other)))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	const TArray<TObjectPtr<UNarrativeEvent>>* FirstClones =
+		FTFTerritoryFloorEventTestAccess::FindFloorClearedEventClones(*Fixture.Place, 2);
+	const TArray<TObjectPtr<UNarrativeEvent>>* SecondClones =
+		FTFTerritoryFloorEventTestAccess::FindFloorClearedEventClones(*Other, 2);
+	TestNotNull(TEXT("The first Place clones the authored floor event"), FirstClones);
+	TestNotNull(TEXT("The second Place clones the authored floor event"), SecondClones);
+	if (!FirstClones || !SecondClones || FirstClones->IsEmpty() || SecondClones->IsEmpty())
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	UTerritoryFloorClearedProbeEvent* First = Cast<UTerritoryFloorClearedProbeEvent>(
+		(*FirstClones)[0]);
+	UTerritoryFloorClearedProbeEvent* Second = Cast<UTerritoryFloorClearedProbeEvent>(
+		(*SecondClones)[0]);
+	TestNotNull(TEXT("The first Place has its own floor event instance"), First);
+	TestNotNull(TEXT("The second Place has its own floor event instance"), Second);
+	if (!First || !Second) { Fixture.TearDown(); return false; }
+
+	TestTrue(TEXT("Neither Place executes the Definition's shared event object"),
+		First != Authored && Second != Authored);
+	TestTrue(TEXT("The two Places do not share one floor event object"), First != Second);
+	TestTrue(TEXT("Each clone is outered to its own Territory"),
+		First->GetOuter() == Fixture.Place && Second->GetOuter() == Other);
+
+	// The mechanism, stated directly. With no killer on the deciding death the context is empty
+	// and world resolution falls through to the event object itself.
+	TestNull(TEXT("A Definition-owned floor event resolves no world"),
+		TerritoryTales::ResolveWorld(Authored, nullptr, nullptr, nullptr));
+	TestNotNull(TEXT("A floor event clone resolves its Territory's world"),
+		TerritoryTales::ResolveWorld(First, nullptr, nullptr, nullptr));
+	TestTrue(TEXT("The clone resolves the very world its Territory stands in"),
+		TerritoryTales::ResolveWorld(First, nullptr, nullptr, nullptr) == Fixture.World);
+
+	// And the two instances are genuinely independent counters, not aliases of one object.
+	FTFTerritoryFloorEventTestAccess::SetGarrison(*Fixture.Place,
+		MakeGarrison(Fight::Exhausted()));
+	FTFTerritoryFloorEventTestAccess::ConcludeFight(*Fixture.Place, {
+		MakeFloorEntry(0, 0, 1),
+		MakeFloorEntry(2, 2, 2) });
+	TestEqual(TEXT("The first Place's instance runs for the first Place"),
+		First->ExecutionCount, 1);
+	TestEqual(TEXT("The second Place's instance does not run for the first Place"),
+		Second->ExecutionCount, 0);
+	TestEqual(TEXT("The Definition's shared template never executes"),
+		Authored->ExecutionCount, 0);
+
+	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * The live defect, end to end: a floor that empties with no recorded killer still plays its
+ * authored cutscene.
+ *
+ * A floor's last defender is usually a reserve walking in, and a reserve death records no killer,
+ * so the transition context handed to the cleared-floor events is empty
+ * (FTFTerritoryFloorEventTestAccess::ConcludeFight defaults it to exactly that). With an empty
+ * context TerritoryTales::ResolveWorld has nothing to prefer and falls through to
+ * ContextObject->GetWorld() - which is null for a Definition-owned event, whose outer chain is the
+ * authoring DataAsset and a transient package. The beat then returns before it resolves an
+ * audience, with no log line, so the floor silently loses its story.
+ *
+ * This is the one assertion in the batch that proves the consequence a player would notice: a
+ * sequence actor exists. The world-resolution and single-instance assertions above prove the
+ * mechanism; this proves the mechanism is wired to the vendor factory.
+ *
+ * A cutscene audience is resolved through the world's controller iterator, and that iterator is
+ * only populated once actors are initialized for play (AController::PostInitializeComponents ->
+ * UWorld::AddController), so this world is built the way the cinematic tests build theirs rather
+ * than the bare world the other floor tests use.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorClearedEventPlaysItsCutscene,
+	"TerritoryFramework.Guards.Floors.ClearedEventPlaysItsAuthoredCutscene",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorClearedEventPlaysItsCutscene::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorEventTest;
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Floor cutscene world exists"), World)) return false;
+
+	auto TearDownWorld = [World]()
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+	};
+
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->SetGameInstance(NewObject<UGameInstance>(GEngine));
+	World->GetWorldSettings()->DefaultGameMode = AGameModeBase::StaticClass();
+	World->SetGameMode(FURL());
+	ANarrativeGameState* Clock = NewObject<ANarrativeGameState>(World->PersistentLevel);
+	Clock->SetRole(ROLE_Authority);
+	World->SetGameState(Clock);
+	World->InitializeActorsForPlay(FURL());
+
+	// A viewer whose pawn carries the faction the floor event addresses. The pawn is what real
+	// players put their Narrative membership on.
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	if (!TestTrue(TEXT("The floor cutscene audience faction exists"), Heroes.IsValid()))
+	{
+		TearDownWorld();
+		return false;
+	}
+	APlayerController* Viewer = World->SpawnActor<APlayerController>();
+	ATerritoryGuardCharacter* Body = World->SpawnActor<ATerritoryGuardCharacter>();
+	if (!TestNotNull(TEXT("A viewer controller exists"), Viewer)
+		|| !TestNotNull(TEXT("The viewer has a pawn"), Body))
+	{
+		TearDownWorld();
+		return false;
+	}
+	if (UGameInstance* Instance = World->GetGameInstance())
+	{
+		// ULocalPlayer is ClassWithin=Engine, so its outer must be the engine even though the
+		// game instance owns it.
+		if (ULocalPlayer* LocalPlayer = NewObject<ULocalPlayer>(GEngine))
+		{
+			Instance->AddLocalPlayer(LocalPlayer, FPlatformUserId::CreateFromInternalId(0));
+			Viewer->SetPlayer(LocalPlayer);
+		}
+	}
+	Viewer->Possess(Body);
+	if (INarrativeTeamAgentInterface* TeamAgent = Cast<INarrativeTeamAgentInterface>(Body))
+	{
+		TeamAgent->AddFaction(Heroes);
+	}
+
+	FFloorFixture Fixture;
+	Fixture.World = World;
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	Fixture.Place = World->SpawnActor<ATerritoryProperty>(
+		ATerritoryProperty::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("Floor cutscene Place exists"), Fixture.Place))
+	{
+		TearDownWorld();
+		return false;
+	}
+
+	Fixture.Definition = NewObject<UTerritoryPlaceDefinition>();
+	Fixture.Definition->TerritoryTag = TestTag();
+	Fixture.Definition->DisplayName = FText::FromString(TEXT("Blacksmith"));
+	Fixture.Definition->StableTerritoryGUID = FGuid::NewGuid();
+	Fixture.Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	Fixture.Definition->Floors = { MakeFloor(2) };
+	Fixture.Definition->GuardPosts = { MakePost(TEXT("Upper_A"), 2) };
+
+	// The cutscene is authored on the Definition, outered to it, exactly as DA_Place_Blacksmith
+	// carries the one the live run inspected. Applying the Definition is what gives the Territory
+	// its own clone; without that step the Place would still be holding the previous configuration.
+	ULevelSequence* Sequence = NewObject<ULevelSequence>(World);
+	Sequence->Initialize();
+	UTerritoryPlayCutsceneEvent* Cutscene =
+		NewObject<UTerritoryPlayCutsceneEvent>(Fixture.Definition);
+	Cutscene->AudienceFaction = Heroes;
+	Cutscene->CutsceneSequence = Sequence;
+	Fixture.Definition->Floors[0].FloorClearedEvents = { Cutscene };
+
+	if (!TestTrue(TEXT("The cutscene Definition applies to its Place"),
+		Fixture.Definition->ApplyToTerritory(Fixture.Place)))
+	{
+		TearDownWorld();
+		return false;
+	}
+
+	StandUp(Fixture, TEXT("Upper_A"));
+
+	// Floor 2 empties with nobody left alive, one reserve spent and no deployment pending: a real
+	// transition from "still defended" to cleared, driven through the empty-context path.
+	FTFTerritoryFloorEventTestAccess::SetGarrison(*Fixture.Place,
+		MakeGarrison({ MakeFloorEntry(2, 0, 1) }));
+	FTFTerritoryFloorEventTestAccess::ConcludeFight(*Fixture.Place,
+		{ MakeFloorEntry(2, 1, 1) });
+
+	int32 CutsceneCount = 0;
+	for (TActorIterator<ANarrativeLevelSequenceActor> It(World); It; ++It)
+	{
+		++CutsceneCount;
+	}
+	TestEqual(TEXT("A floor cleared with no recorded killer still plays its authored cutscene"),
+		CutsceneCount, 1);
+
+	TearDownWorld();
 	return true;
 }
 
