@@ -111,6 +111,21 @@ namespace
 		const FGameplayTag& ExpectedTag, FChildControlView& OutView)
 	{
 		if (!Parent || !ExpectedTag.IsValid()) return false;
+
+		// A child that resolves to an exact value is verified control only while its own
+		// subtree is complete. An unloaded District whose Places have no rows keeps the last
+		// owner it was reconciled to, and a loaded District whose Places are in that state is
+		// in exactly the same position, so both are refused here. This is the single point at
+		// which the recursion enters the loaded reducer, which is why the whole pure hierarchy
+		// surface - AllDistrictsOwnedBy, GetCityControlPercentage, GetMajorityOwner and the
+		// rest - inherits the rule rather than restating it.
+		//
+		// No world state means no durable directory, so no row is retaining anything and there
+		// is no unverified value to refuse.
+		const ATerritoryWorldState* WorldState =
+			ATerritoryWorldState::FindTerritoryWorldState(Parent);
+		if (WorldState && !WorldState->IsHierarchyReductionComplete(ExpectedTag)) return false;
+
 		if (const ATerritoryVolume* Child = FindLoadedExpectedChild(
 			LoadedChildren, ExpectedTag))
 		{
@@ -123,8 +138,7 @@ namespace
 
 		// WorldState is the durable read model for an authored child that World
 		// Partition has unloaded. Without an exact summary, fail closed.
-		if (const ATerritoryWorldState* WorldState =
-			ATerritoryWorldState::FindTerritoryWorldState(Parent))
+		if (WorldState)
 		{
 			const FReplicatedCaptureSummary Summary =
 				WorldState->GetCaptureSummary(ExpectedTag);
@@ -172,16 +186,41 @@ namespace
 	struct FReducedChildControl
 	{
 		FDerivedHierarchyControl Control;
+		/** Authored slots that resolved to neither a loaded actor nor an exact directory row. */
 		int32 UnresolvedChildCount = 0;
+		/** Authored slots whose tag is empty or declared more than once. */
+		int32 InconsistentChildCount = 0;
+
+		/**
+		 * Whether the reduction above is a result rather than a default view standing in for
+		 * a value nobody has. Both counts deny a commit and they are kept apart because they
+		 * have different causes and different fixes.
+		 */
+		bool IsComplete() const
+		{
+			return UnresolvedChildCount == 0 && InconsistentChildCount == 0;
+		}
 	};
 
 	/**
-	 * Reduce authored children to parent control, reporting how many expected slots could
-	 * not be resolved from either a loaded actor or a durable WorldState summary.
+	 * Reduce authored children to parent control, reporting how much of the authored
+	 * hierarchy the reduction could actually see.
 	 *
-	 * An invalid or duplicate authored tag is deliberately NOT counted as unresolved. That
-	 * is an authoring defect rather than a hierarchy still arriving, and counting it would
-	 * leave such a parent permanently unable to reconcile at all.
+	 * Unknown and inconsistent are different failures:
+	 *
+	 * - A child that resolves to neither a loaded actor nor an exact durable directory row is
+	 *   *unknown*. It reduces to a default Unclaimed view, and committing that would clear a
+	 *   restored owner and record a tenure that never ended.
+	 * - A child whose tag is empty or declared twice is *inconsistent*. This used to be
+	 *   deliberately exempt, on the grounds that counting it would leave such a parent unable
+	 *   to reconcile at all. The exemption was itself the defect: the reduction committed a
+	 *   phantom view of a defective topology, which is the same failure the unknown case
+	 *   causes, and it hid the authoring error rather than reporting it. That topology defect
+	 *   is now an error from UTerritoryDefinition::IsDataValid, so a bad asset fails
+	 *   validation instead of shipping a permanent deferral.
+	 *
+	 * A child whose own subtree is incomplete arrives here as unresolved, through
+	 * ResolveExpectedChildControl - see the recursion there.
 	 */
 	FReducedChildControl ReduceChildControl(const ATerritoryVolume* Parent,
 		const TArray<ATerritoryVolume*>& LoadedChildren)
@@ -195,6 +234,7 @@ namespace
 			FChildControlView& Child = Children.AddDefaulted_GetRef();
 			if (!ExpectedTag.IsValid() || SeenTags.Contains(ExpectedTag))
 			{
+				++Result.InconsistentChildCount;
 				continue;
 			}
 			SeenTags.Add(ExpectedTag);
@@ -499,14 +539,18 @@ void ATerritoryCity::ReconcileDerivedControl(ATerritoryVolume* ChangedDistrict)
 	const FGameplayTag PreviousOwner = GetOwningFaction();
 	const ETerritoryState PreviousControlState = GetTerritoryState();
 	const FReducedChildControl Reduction = ReduceChildControl(this, GetDistricts());
-	if (Reduction.UnresolvedChildCount > 0)
+	if (!Reduction.IsComplete())
 	{
-		// At least one authored District is neither loaded nor summarised, so the reduction
-		// above is a default Unclaimed view standing in for an unknown, not a result. A City
+		// Part of the authored hierarchy is unknown or inconsistent, so the reduction above is
+		// a default Unclaimed view standing in for a value nobody has, not a result. A City
 		// can hold political state only by being restored from a save (CommitOwnershipData
 		// refuses a direct aggregate mutation), so committing it would clear a restored
 		// owner, report a City loss, and permanently record a tenure that never ended. The
 		// District's own registration re-enters here with a complete set.
+		//
+		// Deliberately nothing is written and nothing is announced on this path: owner, state
+		// and history all keep their last verified values, which is what lets a later complete
+		// reduction be recognised as a real change rather than a second loss.
 		return;
 	}
 	const FDerivedHierarchyControl Derived = Reduction.Control;
@@ -622,10 +666,12 @@ void ATerritoryDistrict::ReconcileDerivedControl(ATerritoryVolume* ChangedProper
 {
 	if (!HasAuthority()) return;
 	const FReducedChildControl Reduction = ReduceChildControl(this, GetProperties());
-	if (Reduction.UnresolvedChildCount > 0)
+	if (!Reduction.IsComplete())
 	{
 		// Same rule as the City: an unresolved Place is an unknown, not an unclaimed result,
-		// and a District must not derive control from a partial view of its Places.
+		// and a District must not derive control from a partial view of its Places. An
+		// inconsistent authored slot is refused for the same reason and is reported by
+		// UTerritoryDefinition::IsDataValid rather than deferred here forever.
 		return;
 	}
 	const FDerivedHierarchyControl Derived = Reduction.Control;

@@ -706,6 +706,20 @@ bool UTerritoryUIBlueprintLibrary::BuildHierarchyOperationsView(
 	{
 		OutView.bHasProductionProfile = Property->GetProductionProfile() != nullptr;
 	}
+	// A live actor showing an owner still has to answer this: its own owner is authoritative for
+	// itself, but a City or District whose children are unresolved is holding a retained value,
+	// and the row must say so rather than present it as current control.
+	if (const ATerritoryWorldState* WorldState =
+		ATerritoryWorldState::FindTerritoryWorldState(WorldContextObject))
+	{
+		OutView.bReductionComplete = WorldState->IsHierarchyReductionComplete(OutView.TerritoryTag);
+	}
+	else
+	{
+		// No durable directory at all means no row is retaining anything, so nothing on this
+		// row is a last-known value.
+		OutView.bReductionComplete = true;
+	}
 	return OutView.bRegistered;
 }
 
@@ -1391,6 +1405,10 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsViewFromSummary(
 			CityView.bVisibleToPlayer = OutView.bHierarchyVisible;
 			CityView.bOwnedByViewer = OutView.ViewerFaction.IsValid()
 				&& City->CurrentOwner == OutView.ViewerFaction;
+			// The row's owner is a retained value while any authored descendant is missing, so
+			// the view has to carry that distinction rather than presenting it as control.
+			CityView.bReductionComplete =
+				WorldState->IsHierarchyReductionComplete(City->TerritoryTag);
 			OutView.Hierarchy.Add(MoveTemp(CityView));
 		}
 	}
@@ -1408,6 +1426,8 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsViewFromSummary(
 	DistrictView.bVisibleToPlayer = OutView.bHierarchyVisible;
 	DistrictView.bOwnedByViewer = OutView.ViewerFaction.IsValid()
 		&& OutView.OwnerFaction == OutView.ViewerFaction;
+	DistrictView.bReductionComplete =
+		WorldState->IsHierarchyReductionComplete(DistrictView.TerritoryTag);
 	OutView.Hierarchy.Add(MoveTemp(DistrictView));
 
 	for (const FReplicatedCaptureSummary& Child : Directory)
@@ -1433,6 +1453,10 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsViewFromSummary(
 		PlaceView.bVisibleToPlayer = OutView.bHierarchyVisible;
 		PlaceView.bOwnedByViewer = OutView.ViewerFaction.IsValid()
 			&& Child.CurrentOwner == OutView.ViewerFaction;
+		// Asked rather than assumed - a Place is a leaf today, but the query is the single
+		// authority for that, so a future authored child under a Place cannot be missed here.
+		PlaceView.bReductionComplete =
+			WorldState->IsHierarchyReductionComplete(Child.TerritoryTag);
 		OutView.OwnedProperties += PlaceView.bOwnedByViewer ? 1 : 0;
 		OutView.bCaptureInProgress |= Child.State == ETerritoryState::Contested;
 		if (Child.ControlProgress >= OutView.CaptureProgress)
@@ -1805,6 +1829,7 @@ namespace
 		Hash = HashCombineFast(Hash, GetTypeHash(Row.GuardUpkeep));
 		Hash = HashCombineFast(Hash, GetTypeHash(Row.NetIncome));
 		Hash = HashCombineFast(Hash, GetTypeHash(Row.bHasProductionProfile));
+		Hash = HashCombineFast(Hash, GetTypeHash(Row.bReductionComplete));
 		return Hash;
 	}
 

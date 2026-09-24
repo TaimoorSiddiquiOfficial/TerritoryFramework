@@ -146,11 +146,13 @@ private:
 	/**
 	 * Reduce loaded Districts to this City's control and commit it.
 	 *
-	 * Does nothing at all while any authored District is neither loaded nor covered by a
-	 * durable WorldState summary. Such a District reduces to a default Unclaimed view, and
-	 * committing that would clear a City owner restored from a save and permanently record
-	 * a city loss that never happened. The missing District's own registration re-enters
-	 * here with a complete set, so the suppressed commit is deferred rather than dropped.
+	 * Does nothing at all while the reduction is incomplete: an authored District that is
+	 * neither loaded nor covered by an exact durable row, a District whose own Places are
+	 * unresolved, or a District entry that is empty or declared twice. Any of those reduces
+	 * to a default Unclaimed view, and committing that would clear a City owner restored from
+	 * a save and permanently record a city loss that never happened. The missing District's
+	 * own registration re-enters here with a complete set, so the suppressed commit is
+	 * deferred rather than dropped.
 	 */
 	void ReconcileDerivedControl(ATerritoryVolume* ChangedDistrict = nullptr);
 };
@@ -234,7 +236,7 @@ private:
 
 	void BindToProperty(ATerritoryVolume* Property);
 
-	/** Districts are aggregate too: same suppression as ATerritoryCity::ReconcileDerivedControl. */
+	/** Districts are aggregate too: same incomplete-reduction suppression as ATerritoryCity::ReconcileDerivedControl. */
 	void ReconcileDerivedControl(ATerritoryVolume* ChangedProperty = nullptr);
 };
 

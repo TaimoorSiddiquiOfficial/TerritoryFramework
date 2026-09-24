@@ -724,21 +724,58 @@ void ATerritoryWorldState::ReconcileUnloadedHierarchy(const TSet<FGameplayTag>* 
 		if (!Summary) return;
 		TArray<TerritoryHierarchyPolicy::FChildControlView> Views;
 		TSet<FGameplayTag> Seen;
+		int32 InconsistentChildren = 0;
+		int32 UnresolvedChildren = 0;
 		for (const UTerritoryDefinition* Child : Children)
 		{
 			auto& View = Views.AddDefaulted_GetRef();
 			if (!Child || !Child->TerritoryTag.IsValid() || Seen.Contains(Child->TerritoryTag)
-				|| Child->DerivedParentTerritoryTag != Parent->TerritoryTag) continue;
+				|| Child->DerivedParentTerritoryTag != Parent->TerritoryTag)
+			{
+				// An empty or duplicate authored tag is a topology defect rather than a
+				// hierarchy still arriving. It reduces to a default view either way, and
+				// committing that would clear a restored owner and record a tenure that never
+				// ended. Refusing it here is only safe because the defect is now reported by
+				// UTerritoryDefinition::IsDataValid, so the authoring fix is a failed
+				// validation gate rather than a reconciliation deferred forever.
+				++InconsistentChildren;
+				continue;
+			}
 			Seen.Add(Child->TerritoryTag);
 			const FReplicatedCaptureSummary Row = GetCaptureSummary(Child->TerritoryTag);
 			if (Row.TerritoryTag != Child->TerritoryTag
 				|| Row.TerritoryGUID != Child->StableTerritoryGUID
 				|| Row.ParentTerritoryTag != Parent->TerritoryTag
-				|| Row.HierarchyLevel != GetDefinitionHierarchyLevel(Child)) continue;
+				|| Row.HierarchyLevel != GetDefinitionHierarchyLevel(Child))
+			{
+				++UnresolvedChildren;
+				continue;
+			}
+			// The child has an exact row, but its own reduction may still be incomplete: a
+			// resolved District whose Places are unresolved holds a last-known owner. Reading
+			// that as verified control is exactly the upward propagation this contract forbids,
+			// and without this check the parent would commit from a value the child refused to
+			// stand behind.
+			if (!IsHierarchyReductionComplete(Child->TerritoryTag))
+			{
+				++UnresolvedChildren;
+				continue;
+			}
 			View.Owner = Row.CurrentOwner;
 			View.State = Row.State;
 			View.Availability = Row.Availability;
 		}
+
+		if (UnresolvedChildren + InconsistentChildren > 0)
+		{
+			// Incomplete. Owner, state, progress and history all keep their last verified
+			// values and nothing is announced: this reduction is a default view standing in for
+			// an unknown, not a result. The history append below is the one durable side effect
+			// here, which is why it sits inside the complete branch rather than above this gate
+			// - recording a tenure from an unknown is what made the mistake permanent.
+			return;
+		}
+
 		const auto Derived = TerritoryHierarchyPolicy::ReduceControl(Views);
 		if (Summary->CurrentOwner.IsValid() && Summary->CurrentOwner != Derived.SecuredOwner)
 			Summary->FormerOwningFactions.AddTag(Summary->CurrentOwner);
@@ -863,7 +900,67 @@ FReplicatedCaptureSummary ATerritoryWorldState::GetCaptureSummary(const FGamepla
 int32 ATerritoryWorldState::GetClaimedDistrictCountForFaction(
 	const FGameplayTag& Faction) const
 {
-	return CountClaimedDistrictsForFaction(ReplicatedCaptureSummaries, Faction);
+	// CountClaimedDistrictsForFaction is the row-shape rule; this is the gameplay gate above it.
+	// A row that is Claimed with an owner is not yet verified control: an incomplete reduction
+	// keeps the last verified owner and state rather than committing a default view, so a
+	// District whose own Places could not be resolved would otherwise grant staging eligibility
+	// to a faction that may no longer hold it.
+	TArray<FReplicatedCaptureSummary> Verified;
+	Verified.Reserve(ReplicatedCaptureSummaries.Num());
+	for (const FReplicatedCaptureSummary& Summary : ReplicatedCaptureSummaries)
+	{
+		if (IsHierarchyReductionComplete(Summary.TerritoryTag)) Verified.Add(Summary);
+	}
+	return CountClaimedDistrictsForFaction(Verified, Faction);
+}
+
+bool ATerritoryWorldState::IsHierarchyReductionComplete(const FGameplayTag& TerritoryTag) const
+{
+	TSet<FGameplayTag> Visited;
+	return IsHierarchyReductionComplete(TerritoryTag, Visited);
+}
+
+bool ATerritoryWorldState::IsHierarchyReductionComplete(const FGameplayTag& TerritoryTag,
+	TSet<FGameplayTag>& Visited) const
+{
+	if (!TerritoryTag.IsValid()) return true;
+
+	// A row set that reaches the same tag twice is malformed. Failing closed here keeps a bad
+	// save from recursing until the stack runs out.
+	if (Visited.Contains(TerritoryTag)) return false;
+	Visited.Add(TerritoryTag);
+
+	const FReplicatedCaptureSummary* Row = ReplicatedCaptureSummaries.FindByPredicate(
+		[&TerritoryTag](const FReplicatedCaptureSummary& Entry)
+		{
+			return Entry.TerritoryTag == TerritoryTag;
+		});
+
+	// No durable row means nothing is being retained under this tag: a caller that needed one
+	// has already failed to resolve it, so there is no unknown value here to report.
+	if (!Row) return true;
+
+	// A Place is a leaf, so there is no authored child that could be missing.
+	if (Row->HierarchyLevel == ETerritoryHierarchyLevel::Place) return true;
+
+	const ETerritoryHierarchyLevel ChildLevel =
+		Row->HierarchyLevel == ETerritoryHierarchyLevel::City
+			? ETerritoryHierarchyLevel::District : ETerritoryHierarchyLevel::Place;
+
+	int32 ResolvedChildren = 0;
+	for (const FReplicatedCaptureSummary& Child : ReplicatedCaptureSummaries)
+	{
+		if (Child.ParentTerritoryTag != TerritoryTag || Child.HierarchyLevel != ChildLevel) continue;
+		++ResolvedChildren;
+		if (!IsHierarchyReductionComplete(Child.TerritoryTag, Visited)) return false;
+	}
+
+	// TotalChildren is the authored direct-child count, so fewer rows than that means at least
+	// one authored child has no row at all. This is a lower bound rather than an equality: an
+	// extra row is never treated as missing data. The reduction's own identity requirement -
+	// exact tag, GUID, parent and level - is enforced per child by the two reducers, so a row
+	// that satisfies this count but not that test is refused there rather than here.
+	return ResolvedChildren >= Row->TotalChildren;
 }
 
 int32 ATerritoryWorldState::CountClaimedDistrictsForFaction(

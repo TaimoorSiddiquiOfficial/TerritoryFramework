@@ -102,6 +102,15 @@ struct TERRITORYFRAMEWORK_API FTerritoryHierarchyOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") int64 NetIncome = 0;
 	/** Whether this Territory has a production configuration assigned. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bHasProductionProfile = false;
+	/**
+	 * True when the owner shown on this row was derived from a complete view of the Territory's
+	 * authored children, recursively - every child, and every child of those children, resolved.
+	 *
+	 * False means part of the hierarchy is unknown and the owner, state and progress on this row
+	 * are the last values that were verified rather than current control. Defaults to false so a
+	 * producer that forgets to answer under-claims rather than presenting a stale owner as fact.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Hierarchy") bool bReductionComplete = false;
 };
 
 /** One resource row shared by compact Territory, District, Journal, and Economy widgets. */

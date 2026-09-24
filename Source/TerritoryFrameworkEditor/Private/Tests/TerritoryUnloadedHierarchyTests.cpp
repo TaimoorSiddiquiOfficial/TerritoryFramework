@@ -1,11 +1,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 #include "Misc/AutomationTest.h"
 #include "Misc/ScopeExit.h"
+#include "AssetRegistry/AssetData.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryWorldState.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Misc/DataValidation.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFUnloadedHierarchyReconciliation,
@@ -68,19 +70,27 @@ bool FTFUnloadedHierarchyReconciliation::RunTest(const FString& Parameters)
 	Publish(Second, Heroes);
 	State->ReplicatedCaptureSummaries.RemoveAll([Second](const auto& Row) { return Row.TerritoryTag == Second->TerritoryTag; });
 	Publish(First, Heroes);
-	TestFalse(TEXT("Missing child snapshot fails closed"), State->GetCaptureSummary(District->TerritoryTag).CurrentOwner.IsValid());
+	// Preserved, not cleared: a missing row is an unknown, and the district keeps the last owner
+	// it was reconciled to until a complete reduction replaces it. The dedicated contract test
+	// below carries the tenure and eligibility half of this.
+	TestEqual(TEXT("Missing child snapshot preserves the last verified owner"),
+		State->GetCaptureSummary(District->TerritoryTag).CurrentOwner, Heroes);
 	State->RegisterDefinitionHierarchy(City);
 	Publish(Second, Heroes);
 	District->Places.Add(First);
 	State->RegisterDefinitionHierarchy(City);
-	TestFalse(TEXT("Duplicate authored slot cannot secure parent"), State->GetCaptureSummary(District->TerritoryTag).CurrentOwner.IsValid());
+	// A duplicate authored slot is refused rather than silently skipped, so it cannot secure the
+	// parent - but refusing is a deferral, so the parent keeps its owner instead of losing it.
+	TestEqual(TEXT("Duplicate authored slot defers without clearing the parent"),
+		State->GetCaptureSummary(District->TerritoryTag).CurrentOwner, Heroes);
 	District->Places.Pop();
 	State->RegisterDefinitionHierarchy(City);
 	TestEqual(TEXT("Corrected topology recovers"), State->GetCaptureSummary(City->TerritoryTag).CurrentOwner, Heroes);
 	FReplicatedCaptureSummary WrongIdentity = State->GetCaptureSummary(Second->TerritoryTag);
 	WrongIdentity.TerritoryGUID = FGuid::NewGuid();
 	State->SetCaptureSummary(WrongIdentity);
-	TestFalse(TEXT("Reused tag with wrong GUID cannot secure parent"), State->GetCaptureSummary(District->TerritoryTag).CurrentOwner.IsValid());
+	TestEqual(TEXT("Reused tag with wrong GUID is an unknown, so it defers rather than clearing"),
+		State->GetCaptureSummary(District->TerritoryTag).CurrentOwner, Heroes);
 	State->RegisterDefinitionHierarchy(City);
 	Publish(Second, Heroes);
 	State->SetRole(ROLE_SimulatedProxy);
@@ -116,6 +126,326 @@ bool FTFUnloadedHierarchyReconciliation::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Directory import does not overwrite loaded actor ownership"), LoadedCity->GetOwningFaction(), Heroes);
 	State->PublishTerritorySummary(LoadedPlace);
 	TestEqual(TEXT("Restored actor publication reconciles all ancestor snapshots"), State->GetCaptureSummary(City->TerritoryTag).CurrentOwner, Heroes);
+	return true;
+}
+
+/**
+ * The completeness contract on the durable side, as five transitions.
+ *
+ * A reduction is a *result* only when every authored child resolved to an exact identity. Anything
+ * less - a child with no row, a child whose own subtree is unresolved, a child slot that is empty or
+ * declared twice - is a default view standing in for a value nobody has. Committing it clears a
+ * restored owner and, worse, writes a tenure to history that never ended: the second half is what
+ * made the mistake permanent, because history is saved and nothing later can tell a fabricated
+ * tenure from a real one.
+ *
+ * The three "records no tenure" assertions are the evidence for the fix. Against the
+ * pre-contract reducer the first of them fails twice over: the owner is cleared *and* the tenure is
+ * appended.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFHierarchyCompletenessContract,
+	"TerritoryFramework.WorldPartition.Regression.IncompleteReductionPreservesVerifiedState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFHierarchyCompletenessContract::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Completeness world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); };
+	const auto Tag = [](const TCHAR* Value) { return FGameplayTag::RequestGameplayTag(Value); };
+	const FGameplayTag Heroes = Tag(TEXT("Narrative.Factions.Heroes"));
+	const FGameplayTag Bandits = Tag(TEXT("Narrative.Factions.Bandits"));
+	auto* City = NewObject<UTerritoryCityDefinition>();
+	auto* District = NewObject<UTerritoryDistrictDefinition>();
+	auto* First = NewObject<UTerritoryPlaceDefinition>();
+	auto* Second = NewObject<UTerritoryPlaceDefinition>();
+	City->TerritoryTag = Tag(TEXT("Territory.HavenReach"));
+	District->TerritoryTag = Tag(TEXT("Territory.HavenReach.MarketSquare"));
+	First->TerritoryTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	Second->TerritoryTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Warehouse"));
+	for (UTerritoryDefinition* Definition : TArray<UTerritoryDefinition*>{City, District, First, Second})
+	{
+		Definition->StableTerritoryGUID = FGuid::NewGuid();
+		Definition->InitialState = ETerritoryInitialState::Unclaimed;
+		Definition->InitialAvailability = ETerritoryAvailability::Unlocked;
+		Definition->InitialGuardCount = 0;
+	}
+	District->Places = {First, Second};
+	City->Districts = {District};
+	City->RefreshHierarchyLinks();
+	auto* State = World->SpawnActor<ATerritoryWorldState>();
+	State->CampaignCities = {City};
+	State->RefreshStrategicDirectory();
+	auto Publish = [&](UTerritoryPlaceDefinition* Definition, FGameplayTag Owner,
+		ETerritoryAvailability Availability = ETerritoryAvailability::Unlocked)
+	{
+		FReplicatedCaptureSummary Row = State->GetCaptureSummary(Definition->TerritoryTag);
+		Row.CurrentOwner = Owner;
+		Row.State = Owner.IsValid() ? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+		Row.Availability = Availability;
+		State->SetCaptureSummary(Row);
+	};
+	const auto OwnerOf = [State](const UTerritoryDefinition* Definition)
+	{
+		return State->GetCaptureSummary(Definition->TerritoryTag).CurrentOwner;
+	};
+	const auto TenureCount = [State](const UTerritoryDefinition* Definition)
+	{
+		return State->GetCaptureSummary(Definition->TerritoryTag).FormerOwningFactions.Num();
+	};
+	const auto TenureOf = [State](const UTerritoryDefinition* Definition)
+	{
+		return State->GetCaptureSummary(Definition->TerritoryTag).FormerOwningFactions;
+	};
+
+	Publish(First, Heroes);
+	Publish(Second, Heroes);
+	TestEqual(TEXT("Premise: a complete hierarchy secures the City"), OwnerOf(City), Heroes);
+	TestEqual(TEXT("Premise: a complete hierarchy stages its District"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 1);
+	const int32 CityTenuresBefore = TenureCount(City);
+	const int32 DistrictTenuresBefore = TenureCount(District);
+	const FReplicatedCaptureSummary FirstRow = State->GetCaptureSummary(First->TerritoryTag);
+	const FReplicatedCaptureSummary SecondRow = State->GetCaptureSummary(Second->TerritoryTag);
+
+	// ─── Case 1: a missing child is an unknown, not a loss ───
+	State->ReplicatedCaptureSummaries.RemoveAll([Second](const auto& Row)
+	{
+		return Row.TerritoryTag == Second->TerritoryTag;
+	});
+	// Re-publishing a child that did resolve is what re-enters the ancestors, exactly as the
+	// streamed-out sibling's removal would in gameplay.
+	Publish(First, Heroes);
+	TestFalse(TEXT("Case 1: a missing child makes the District reduction incomplete"),
+		State->IsHierarchyReductionComplete(District->TerritoryTag));
+	TestEqual(TEXT("Case 1: a missing child preserves the District's last verified owner"),
+		OwnerOf(District), Heroes);
+	TestEqual(TEXT("Case 1: a missing child preserves the District's last verified state"),
+		State->GetCaptureSummary(District->TerritoryTag).State, ETerritoryState::Claimed);
+	TestEqual(TEXT("Case 1: a missing child preserves the City's last verified owner"),
+		OwnerOf(City), Heroes);
+	TestEqual(TEXT("Case 1: a missing child records no tenure on the District"),
+		TenureCount(District), DistrictTenuresBefore);
+	TestEqual(TEXT("Case 1: a missing child records no tenure on the City"),
+		TenureCount(City), CityTenuresBefore);
+	TestEqual(TEXT("Case 1: a retained owner is not staging eligibility"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 0);
+
+	// ─── Case 2: incompleteness propagates upward through an unresolved grandchild ───
+	// Restore the missing child so the hierarchy is complete again, then remove the *other* Place.
+	// The City's own slot still resolves to an exact District row, so nothing at the City's own
+	// level is missing: only the recursion into the District's Places can deny it. That recursion
+	// is the whole content of this case.
+	State->SetCaptureSummary(SecondRow);
+	TestTrue(TEXT("Case 2 premise: restoring the child restores completeness"),
+		State->IsHierarchyReductionComplete(City->TerritoryTag));
+	State->ReplicatedCaptureSummaries.RemoveAll([First](const auto& Row)
+	{
+		return Row.TerritoryTag == First->TerritoryTag;
+	});
+	Publish(Second, Heroes);
+	TestFalse(TEXT("Case 2: a missing grandchild denies the District reduction"),
+		State->IsHierarchyReductionComplete(District->TerritoryTag));
+	TestFalse(TEXT("Case 2: a missing grandchild denies the City reduction"),
+		State->IsHierarchyReductionComplete(City->TerritoryTag));
+	TestEqual(TEXT("Case 2: the District's own row still resolves, so only the recursion denies it"),
+		State->GetCaptureSummary(District->TerritoryTag).TerritoryTag, District->TerritoryTag);
+	TestEqual(TEXT("Case 2: the District authors two Places, which is what the count compares against"),
+		State->GetCaptureSummary(District->TerritoryTag).TotalChildren, 2);
+	TestEqual(TEXT("Case 2: a missing grandchild preserves the City's last verified owner"),
+		OwnerOf(City), Heroes);
+	TestEqual(TEXT("Case 2: a missing grandchild preserves the District's last verified owner"),
+		OwnerOf(District), Heroes);
+	TestEqual(TEXT("Case 2: a missing grandchild records no tenure on the City"),
+		TenureCount(City), CityTenuresBefore);
+	TestEqual(TEXT("Case 2: a retained owner is still not staging eligibility"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 0);
+
+	// ─── Case 5 (taken here, while the hierarchy is still incomplete): a save/load round trip ───
+	State->ExportPersistentState();
+	State->ImportPersistentState();
+	TestFalse(TEXT("Case 5: the incomplete window survives a save/load"),
+		State->IsHierarchyReductionComplete(City->TerritoryTag));
+	TestEqual(TEXT("Case 5: the preserved City owner survives a save/load"), OwnerOf(City), Heroes);
+	TestEqual(TEXT("Case 5: the preserved District owner survives a save/load"),
+		OwnerOf(District), Heroes);
+	TestEqual(TEXT("Case 5: the preserved District state survives a save/load"),
+		State->GetCaptureSummary(District->TerritoryTag).State, ETerritoryState::Claimed);
+	TestEqual(TEXT("Case 5: no tenure is fabricated by the round trip"),
+		TenureCount(City), CityTenuresBefore);
+	TestEqual(TEXT("Case 5: an incomplete hierarchy still stages nothing"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 0);
+
+	// ─── Case 3: the child comes back with the same owner ───
+	// Restored as the very rows that left, which is what a streamed-in Place re-publishes: the
+	// point is that no intermediate state is invented on the way back. Second is already restored
+	// by case 2, so this is First arriving.
+	State->SetCaptureSummary(FirstRow);
+	TestTrue(TEXT("Case 3: restoring the child restores completeness"),
+		State->IsHierarchyReductionComplete(City->TerritoryTag));
+	TestEqual(TEXT("Case 3: the City keeps the owner it never lost"), OwnerOf(City), Heroes);
+	TestEqual(TEXT("Case 3: the District keeps the owner it never lost"), OwnerOf(District), Heroes);
+	TestEqual(TEXT("Case 3: restoring the same owner records no tenure"),
+		TenureCount(District), DistrictTenuresBefore);
+	TestEqual(TEXT("Case 3: restoring the same owner records no tenure on the City"),
+		TenureCount(City), CityTenuresBefore);
+	TestEqual(TEXT("Case 3: a complete hierarchy stages its District again"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 1);
+
+	// ─── Case 4: a genuinely Unclaimed child IS a loss, recorded exactly once ───
+	FReplicatedCaptureSummary Unclaimed = State->GetCaptureSummary(Second->TerritoryTag);
+	Unclaimed.CurrentOwner = FGameplayTag();
+	Unclaimed.State = ETerritoryState::Unclaimed;
+	State->SetCaptureSummary(Unclaimed);
+	TestFalse(TEXT("Case 4: a complete hierarchy with an unclaimed child is a real loss"),
+		OwnerOf(District).IsValid());
+	TestFalse(TEXT("Case 4: the City loses control with it"), OwnerOf(City).IsValid());
+	TestTrue(TEXT("Case 4: the real loss records the tenure"),
+		TenureOf(District).HasTagExact(Heroes));
+	TestEqual(TEXT("Case 4: the real loss records exactly one tenure on the District"),
+		TenureCount(District), DistrictTenuresBefore + 1);
+	TestEqual(TEXT("Case 4: the City's loss is recorded too, and only from the real transition"),
+		TenureCount(City), CityTenuresBefore + 1);
+	TestTrue(TEXT("Case 4: the City's tenure names the faction it genuinely lost to"),
+		TenureOf(City).HasTagExact(Heroes));
+	State->SetCaptureSummary(Unclaimed);
+	TestEqual(TEXT("Case 4: re-reducing the same inputs does not add a second tenure"),
+		TenureCount(District), DistrictTenuresBefore + 1);
+	TestEqual(TEXT("Case 4: re-reducing adds no second City tenure either"),
+		TenureCount(City), CityTenuresBefore + 1);
+	TestEqual(TEXT("Case 4: an unowned District stages nothing"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 0);
+
+	// ─── Premise control: the same fixture can still record a loss and a recovery ───
+	Publish(Second, Heroes);
+	Publish(First, Heroes);
+	TestEqual(TEXT("Premise: the fixture recovers ownership"), OwnerOf(City), Heroes);
+	TestEqual(TEXT("Premise: the fixture stages again"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 1);
+	Publish(First, Bandits);
+	TestFalse(TEXT("Premise: mixed ownership is still a loss"), OwnerOf(City).IsValid());
+	TestTrue(TEXT("Premise: the mixed-ownership loss is recorded"),
+		TenureOf(City).HasTagExact(Heroes));
+	return true;
+}
+
+/**
+ * The topology defects both reducers now refuse are reported, so refusing is a deferral and not a
+ * permanent silent stall.
+ *
+ * The old duplicate-slot exemption was justified by exactly that risk: a parent that can never
+ * reconcile is worse than one that commits a phantom result. The exemption was still wrong - the
+ * phantom result is the same defect the unknown case is refused for - so the fix has to answer the
+ * objection rather than ignore it. This is the answer: the asset fails validation, in the shape the
+ * duplicate-floor check already established, and the project's editor validation gate already
+ * treats an error as a failed run.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFHierarchyChildTopologyValidation,
+	"TerritoryFramework.Hierarchy.Validation.ReportsInconsistentChildSlots",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFHierarchyChildTopologyValidation::RunTest(const FString& Parameters)
+{
+	const TArray<FAssetData> NoAssociatedAssets;
+	const auto HasIssue = [](const FDataValidationContext& Context, const FString& Fragment)
+	{
+		return Context.GetIssues().ContainsByPredicate(
+			[&Fragment](const FDataValidationContext::FIssue& Issue)
+			{
+				return Issue.Message.ToString().Contains(Fragment);
+			});
+	};
+	const auto Tag = [](const TCHAR* Value) { return FGameplayTag::RequestGameplayTag(Value); };
+	const FGameplayTag CityTag = Tag(TEXT("Territory.HavenReach"));
+	const FGameplayTag DistrictTag = Tag(TEXT("Territory.HavenReach.MarketSquare"));
+	const FGameplayTag PlaceTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	const FGameplayTag OtherTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Warehouse"));
+
+	// Healthy content must validate clean, or the gate would fail on every shipped asset.
+	{
+		auto* District = NewObject<UTerritoryDistrictDefinition>();
+		auto* OtherDistrict = NewObject<UTerritoryDistrictDefinition>();
+		District->TerritoryTag = DistrictTag;
+		OtherDistrict->TerritoryTag = OtherTag;
+		auto* City = NewObject<UTerritoryCityDefinition>();
+		City->TerritoryTag = CityTag;
+		City->Districts = {District, OtherDistrict};
+		FDataValidationContext Context(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		City->IsDataValid(Context);
+		TestEqual(TEXT("A City with two distinct child tags reports no errors"),
+			static_cast<int32>(Context.GetNumErrors()), 0);
+	}
+	{
+		auto* First = NewObject<UTerritoryPlaceDefinition>();
+		auto* Second = NewObject<UTerritoryPlaceDefinition>();
+		First->TerritoryTag = PlaceTag;
+		Second->TerritoryTag = OtherTag;
+		auto* District = NewObject<UTerritoryDistrictDefinition>();
+		District->TerritoryTag = DistrictTag;
+		District->Places = {First, Second};
+		FDataValidationContext Context(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		District->IsDataValid(Context);
+		TestEqual(TEXT("A District with two distinct child tags reports no errors"),
+			static_cast<int32>(Context.GetNumErrors()), 0);
+	}
+
+	// The defect the reducers refuse with InconsistentChildCount.
+	{
+		auto* District = NewObject<UTerritoryDistrictDefinition>();
+		District->TerritoryTag = DistrictTag;
+		auto* City = NewObject<UTerritoryCityDefinition>();
+		City->TerritoryTag = CityTag;
+		City->Districts = {District, District};
+		FDataValidationContext Context(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		City->IsDataValid(Context);
+		TestEqual(TEXT("A duplicated District tag is an error"),
+			static_cast<int32>(Context.GetNumErrors()), 1);
+		TestTrue(TEXT("The duplicated District error names the tag"),
+			HasIssue(Context, TEXT("declared more than once")));
+		TestTrue(TEXT("The duplicated District error names the tag's text"),
+			HasIssue(Context, DistrictTag.ToString()));
+	}
+	{
+		auto* Place = NewObject<UTerritoryPlaceDefinition>();
+		Place->TerritoryTag = PlaceTag;
+		auto* District = NewObject<UTerritoryDistrictDefinition>();
+		District->TerritoryTag = DistrictTag;
+		District->Places = {Place, Place};
+		FDataValidationContext Context(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		District->IsDataValid(Context);
+		TestTrue(TEXT("A duplicated Place tag is an error"),
+			HasIssue(Context, TEXT("declared more than once")));
+	}
+
+	// An empty slot cannot resolve to an identity either, so it is refused the same way.
+	{
+		auto* City = NewObject<UTerritoryCityDefinition>();
+		City->TerritoryTag = CityTag;
+		City->Districts = {nullptr};
+		FDataValidationContext Context(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		City->IsDataValid(Context);
+		TestEqual(TEXT("A null child slot is an error"),
+			static_cast<int32>(Context.GetNumErrors()), 1);
+		TestTrue(TEXT("The null child error explains the empty slot"),
+			HasIssue(Context, TEXT("empty child slot")));
+	}
+
+	// An untagged child is the third shape, and a validation warning would be worse than useless
+	// here: the project's gate counts warnings as a failed run, and a deferred parent silently
+	// stops reconciling.
+	{
+		auto* Place = NewObject<UTerritoryPlaceDefinition>();
+		auto* District = NewObject<UTerritoryDistrictDefinition>();
+		District->TerritoryTag = DistrictTag;
+		District->Places = {Place};
+		FDataValidationContext Context(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		District->IsDataValid(Context);
+		TestEqual(TEXT("An untagged child is an error"),
+			static_cast<int32>(Context.GetNumErrors()), 1);
+		TestTrue(TEXT("The untagged child error asks for a tag"),
+			HasIssue(Context, TEXT("has no Territory tag")));
+	}
 	return true;
 }
 #endif

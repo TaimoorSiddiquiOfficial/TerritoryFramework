@@ -436,6 +436,56 @@ EDataValidationResult UTerritoryDefinition::IsDataValid(FDataValidationContext& 
 		}
 	}
 
+	// Authored child topology. A child whose tag is empty, or which shares its tag with a
+	// sibling, cannot be resolved to one identity: the reduction that turns children into
+	// parent control would have to choose between them or silently drop one, and every
+	// hierarchy read would disagree about the same asset. Both reducers therefore refuse an
+	// inconsistent slot rather than committing a phantom view of it, and refusing is only safe
+	// because the defect is reported here - otherwise the asset would defer reconciliation
+	// forever with nothing telling the author why.
+	TArray<const UTerritoryDefinition*> HierarchyChildren;
+	if (const UTerritoryCityDefinition* City = Cast<UTerritoryCityDefinition>(this))
+	{
+		for (const UTerritoryDistrictDefinition* District : City->Districts)
+		{
+			HierarchyChildren.Add(District);
+		}
+	}
+	else if (const UTerritoryDistrictDefinition* District = Cast<UTerritoryDistrictDefinition>(this))
+	{
+		for (const UTerritoryPlaceDefinition* Place : District->Places)
+		{
+			HierarchyChildren.Add(Place);
+		}
+	}
+
+	TSet<FGameplayTag> DeclaredChildren;
+	for (const UTerritoryDefinition* Child : HierarchyChildren)
+	{
+		if (!Child)
+		{
+			Context.AddError(FText::Format(NSLOCTEXT("TerritoryHierarchy", "NullHierarchyChild",
+				"{0} declares an empty child slot. Assign a Definition to it or remove the entry, because an empty slot leaves the parent unable to reconcile control from its children."),
+				FText::FromString(GetPathName())));
+			continue;
+		}
+		if (!Child->TerritoryTag.IsValid())
+		{
+			Context.AddError(FText::Format(NSLOCTEXT("TerritoryHierarchy", "UntaggedHierarchyChild",
+				"Child Definition {0} has no Territory tag. Give it one so the parent can resolve it; an untagged slot leaves the parent unable to reconcile control from its children."),
+				FText::FromString(Child->GetPathName())));
+			continue;
+		}
+		if (DeclaredChildren.Contains(Child->TerritoryTag))
+		{
+			Context.AddError(FText::Format(NSLOCTEXT("TerritoryHierarchy", "DuplicateHierarchyChildTag",
+				"Territory tag {0} is declared more than once in this Definition's children. Give each child a unique tag, because two children sharing one tag cannot be told apart when the parent reduces their control."),
+				FText::FromString(Child->TerritoryTag.ToString())));
+			continue;
+		}
+		DeclaredChildren.Add(Child->TerritoryTag);
+	}
+
 	if (Context.GetNumErrors() > 0) return EDataValidationResult::Invalid;
 	return SuperResult == EDataValidationResult::Invalid ? SuperResult : EDataValidationResult::Valid;
 }

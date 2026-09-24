@@ -342,4 +342,106 @@ bool FTFSaveLoadedCityUnknownDistrict::RunTest(const FString& Parameters)
 	return true;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// 4. A duplicated child slot defers; it does not clear a restored owner
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Property 1 above covers a child that is *unknown*. This covers the other incomplete
+// cause: the same authored slot declared twice. It used to be exempt, on the grounds that a
+// permanent deferral was worse than a phantom result — but a phantom result is exactly what
+// the unknown case is refused for, and the exemption meant a defective asset cleared a
+// restored City owner and wrote a tenure for it, silently and forever. The defect is now an
+// error from UTerritoryDefinition::IsDataValid, so refusing it defers until the asset is
+// fixed rather than deferring forever.
+//
+// The phase-2 premise control is what makes phase 1 mean anything: one input changes (the
+// duplicate is removed) and the identical District is then a real loss. Without it, phase 1
+// would pass on a reducer that simply never ran.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFHierarchyDuplicateChildSlot,
+	"TerritoryFramework.Hierarchy.Regression.DuplicatedChildSlotDefersInsteadOfClearing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFHierarchyDuplicateChildSlot::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Duplicate slot world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); };
+
+	const FTFHierarchyTags Tags = FTFHierarchyTags::Resolve();
+	if (!TestTrue(TEXT("Fixture tags resolve"), Tags.IsValid())) return false;
+
+	FTFHierarchyFixture Fixture = MakeHierarchyFixture(Tags, Tags.Bandits,
+		ETerritoryInitialState::Claimed);
+	// The defect under test: one District object occupying two authored slots, so the reduction
+	// cannot tell the two slots apart.
+	Fixture.CityDefinition->Districts.Add(Fixture.DistrictDefinition);
+	Fixture.CityDefinition->RefreshHierarchyLinks();
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.ObjectFlags |= RF_Transient;
+	ATerritoryCity* City = World->SpawnActor<ATerritoryCity>(
+		ATerritoryCity::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("City actor"), City)) return false;
+	if (!TestTrue(TEXT("City reads its hierarchy Definition"),
+		Fixture.CityDefinition->ApplyToTerritory(City)))
+	{
+		return false;
+	}
+
+	UTerritoryRegistrySubsystem* Registry =
+		World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!TestNotNull(TEXT("Registry"), Registry)) return false;
+	TestEqual(TEXT("City registers"), Registry->RegisterTerritory(City),
+		ETerritoryRegistrationResult::Success);
+
+	FTFHierarchyTestAccess::SeedLoadedOwnership(*City, Tags.Bandits,
+		ETerritoryState::Claimed, false);
+	TestEqual(TEXT("Premise: the City holds an owner before reconciling"),
+		City->GetOwningFaction(), Tags.Bandits);
+
+	// Loaded and genuinely unclaimed, so with a sound topology this IS a loss of the City.
+	ATerritoryDistrict* District = World->SpawnActor<ATerritoryDistrict>(
+		ATerritoryDistrict::StaticClass(), FTransform::Identity, SpawnParams);
+	if (!TestNotNull(TEXT("District actor"), District)) return false;
+	if (!TestTrue(TEXT("District reads its hierarchy Definition"),
+		Fixture.DistrictDefinition->ApplyToTerritory(District)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("District registers"), Registry->RegisterTerritory(District),
+		ETerritoryRegistrationResult::Success);
+	TestFalse(TEXT("Premise: the loaded District is unclaimed"),
+		District->GetOwningFaction().IsValid());
+	TestEqual(TEXT("Premise: the City authors two slots for one District tag"),
+		City->GetDistrictCount(), 2);
+	TestEqual(TEXT("Premise: the loaded District resolves through the child query"),
+		City->GetDistricts().Num(), 1);
+
+	// ─── Phase 1: the duplicated slot is refused, so nothing is committed ───
+	FTFHierarchyTestAccess::Reconcile(*City);
+
+	TestEqual(TEXT("A duplicated child slot does not clear a restored owner"),
+		City->GetOwningFaction(), Tags.Bandits);
+	TestEqual(TEXT("A duplicated child slot does not un-Claim the City"),
+		City->GetTerritoryState(), ETerritoryState::Claimed);
+	TestFalse(TEXT("A duplicated child slot records no tenure the City never lost"),
+		City->GetOwnershipData().FormerOwningFactions.HasTagExact(Tags.Bandits));
+
+	// ─── Phase 2: premise control — the duplicate is the only input that changes ───
+	Fixture.CityDefinition->Districts.Pop();
+	Fixture.CityDefinition->RefreshHierarchyLinks();
+	TestEqual(TEXT("Premise: the City now authors one slot"), City->GetDistrictCount(), 1);
+
+	FTFHierarchyTestAccess::Reconcile(*City);
+
+	TestFalse(TEXT("With a sound topology the same unclaimed District IS a City loss"),
+		City->GetOwningFaction().IsValid());
+	TestEqual(TEXT("The City is Unclaimed once its only District is"),
+		City->GetTerritoryState(), ETerritoryState::Unclaimed);
+	TestTrue(TEXT("The real loss DOES record the tenure in history"),
+		City->GetOwnershipData().FormerOwningFactions.HasTagExact(Tags.Bandits));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

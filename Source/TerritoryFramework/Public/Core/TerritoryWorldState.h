@@ -367,12 +367,41 @@ public:
 	 * Counts the faction's currently unlocked, stable Claimed Districts from the
 	 * complete replicated strategic directory. Definition-backed rows keep this
 	 * correct while a District actor is unloaded by World Partition.
+	 *
+	 * A row that is Claimed with an owner is not yet verified control. An incomplete
+	 * reduction preserves the last verified owner and state rather than committing a
+	 * default view, so a District whose own Places could not be resolved is skipped
+	 * here instead of granting staging eligibility to a faction that may not hold it.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Capture|Hierarchy",
 		meta=(DisplayName="Get Claimed District Count For Faction"))
 	int32 GetClaimedDistrictCountForFaction(const FGameplayTag& Faction) const;
 
-	/** Pure summary reducer shared by runtime queries and regression tests. */
+	/**
+	 * True when this Territory's owner was derived from a complete view of its authored
+	 * children: every one of them present as an exact directory row, and every one of those
+	 * complete in turn.
+	 *
+	 * False means part of the hierarchy is unknown and the owner, state and progress being
+	 * reported are the last values that were verified rather than current control. Gameplay
+	 * gates must ask this before treating a retained owner as control; presentation asks it so
+	 * a row can be labelled honestly instead of showing a stale owner as fact.
+	 *
+	 * Recursive by design, and that is the substantive half: a City is complete only when
+	 * every District resolves *and* that District's own Places resolve, so a missing
+	 * grandchild denies the City too.
+	 *
+	 * Computed at query time from the replicated directory rather than stored. A completeness
+	 * flag on FReplicatedCaptureSummary would be exported into the save with that struct, go
+	 * stale between reconciliations, and become a second authority over a derived fact. The
+	 * cost is one directory scan per level per call, which suits the event-driven
+	 * reconciliation this is used for.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Capture|Hierarchy",
+		meta=(DisplayName="Is Hierarchy Reduction Complete"))
+	bool IsHierarchyReductionComplete(const FGameplayTag& TerritoryTag) const;
+
+	/** Pure row-shape filter shared by the gameplay gate above and regression tests. */
 	static int32 CountClaimedDistrictsForFaction(
 		TConstArrayView<FReplicatedCaptureSummary> Summaries,
 		const FGameplayTag& Faction);
@@ -530,6 +559,7 @@ private:
 	friend class FTFCurrencyCallbacks;
 	friend class FTFJournalTransactionRefresh;
 	friend class FTFUnloadedHierarchyReconciliation;
+	friend class FTFHierarchyCompletenessContract;
 	friend class FTFDirectoryRetirement;
 
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
@@ -545,6 +575,9 @@ private:
 	void ApplyDirectoryRetirements(bool bReconcileAssaults = true);
 	void ReconcileUnloadedAncestors(const FGameplayTag& ChangedChild);
 	void ReconcileUnloadedHierarchy(const TSet<FGameplayTag>* ParentsToRebuild = nullptr);
+	/** Recursive body of IsHierarchyReductionComplete; Visited fails a malformed row set closed. */
+	bool IsHierarchyReductionComplete(const FGameplayTag& TerritoryTag,
+		TSet<FGameplayTag>& Visited) const;
 	/** Save departing Territory actors through Narrative before level cleanup changes their guard counts. */
 	void SaveStreamingLevel(ULevel* Level, UWorld* World);
 	void SyncSubsystemsFromReplicatedState();
