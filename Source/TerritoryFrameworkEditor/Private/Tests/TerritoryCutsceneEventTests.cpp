@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "Cinematics/NarrativeLevelSequenceActor.h"
 #include "Cinematics/NarrativeLevelSequencePlayer.h"
+#include "Cinematics/TerritoryCutsceneTeardown.h"
 #include "Cinematics/TerritoryDialogueShot.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Engine/Engine.h"
@@ -14,10 +15,27 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/WorldSettings.h"
 #include "LevelSequence.h"
+#include "LevelSequencePlayer.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UObject/UnrealType.h"
+
+/**
+ * The paused-guard seam. HandleSequenceStopped is private because only the sequence player's own
+ * delegates should reach it, but the guard it holds - a paused player has not stopped - cannot be
+ * reached any other way: the engine broadcasts OnFinished after Pause() only from
+ * FinishPlaybackInternal, which a test cannot trigger without driving playback to its authored end.
+ * Territory's light rig lifecycle test reaches its equivalent end-of-playback handler the same way.
+ */
+class FTFTerritoryCutsceneTeardownTestAccess
+{
+public:
+	static void SequenceStopped(UTerritoryCutsceneTeardownComponent* Component)
+	{
+		if (Component) Component->HandleSequenceStopped();
+	}
+};
 
 namespace TerritoryCutsceneTests
 {
@@ -147,6 +165,47 @@ namespace TerritoryCutsceneTests
 		Event->AudienceFaction = AudienceFaction;
 		Event->CutsceneSequence = Sequence;
 		return Event;
+	}
+
+	/**
+	 * Run the cutscene event once against a fresh world and hand back the actor it created, with
+	 * playback actually started.
+	 *
+	 * GraceSeconds is authored on the event before it runs, so the teardown policy under test is the
+	 * one production would read rather than a test-only override.
+	 *
+	 * Playback is started explicitly. The event authors Auto Play, but that is a setting the sequence
+	 * actor consumes from the game loop, and this isolated world has none - so without this the player
+	 * would sit at Stopped and a Stop(), Pause() or skip below would act on nothing. Territory's light
+	 * rig lifecycle test starts its factory-created player by hand for the same reason.
+	 */
+	ANarrativeLevelSequenceActor* PlayCutscene(FWorldFixture& Fixture, float GraceSeconds)
+	{
+		const FGameplayTag Heroes =
+			FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+		MakeFactionViewer(Fixture.World, Heroes);
+		UTerritoryPlayCutsceneEvent* Event =
+			MakeEvent(Fixture.World, Heroes, MakeSequence(Fixture.World));
+		Event->TeardownGraceSeconds = GraceSeconds;
+		Event->ExecuteEvent(nullptr, nullptr, nullptr);
+
+		ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+		if (Cutscene)
+		{
+			if (ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer())
+			{
+				Player->Play();
+			}
+		}
+		return Cutscene;
+	}
+
+	/** The teardown Territory attached to this cutscene, if any. */
+	UTerritoryCutsceneTeardownComponent* TeardownOn(ANarrativeLevelSequenceActor* Cutscene)
+	{
+		return Cutscene
+			? Cutscene->FindComponentByClass<UTerritoryCutsceneTeardownComponent>()
+			: nullptr;
 	}
 
 	/**
@@ -514,6 +573,246 @@ bool FTFTerritoryCutsceneFailurePaths::RunTest(const FString&)
 	}
 
 	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// The sequence actor's lifetime
+//
+// The vendor factory spawns the actor, returns it through OutActor and never destroys it, so the
+// actor leaks for the rest of the session unless the caller discharges that contract. These tests
+// are that caller's proof: they drive the real engine playback paths and assert on real lifetime.
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneTeardownOnStop,
+	"TerritoryFramework.Presentation.Cutscenes.SequenceActorIsDestroyedAfterItStops",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneTeardownOnStop::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+
+	FWorldFixture Fixture;
+	ANarrativeLevelSequenceActor* Cutscene = PlayCutscene(Fixture, 1.f);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	// The actor nobody owned is now owned: production attaches its teardown to the actor it created,
+	// rather than tracking it somewhere that could outlive its subject.
+	TestNotNull(TEXT("Starting a cutscene arms its teardown"), TeardownOn(Cutscene));
+	TestEqual(TEXT("A cutscene still playing has no lifespan armed"), Cutscene->GetLifeSpan(), 0.f);
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+	// StopInternal only reaches its OnStop broadcast from inside an IsPlaying-or-IsPaused branch, so
+	// this assertion is what keeps the stop below from being a silent no-op.
+	TestTrue(TEXT("The cutscene is playing before it is stopped"), Player->IsPlaying());
+
+	// Stop() is the engine path a real cutscene ends by: a natural finish reaches StopInternal through
+	// FinishPlaybackInternal, and a skip reaches StopInternal directly.
+	Player->Stop();
+
+	// GetLifeSpan returns the timer remaining, which starts at the authored grace and counts down, so
+	// the assertion is a range rather than an equality.
+	TestTrue(TEXT("Stopping the cutscene arms the teardown with the authored grace"),
+		Cutscene->GetLifeSpan() > 0.f && Cutscene->GetLifeSpan() <= 1.f);
+
+	// Drive the timer rather than waiting on it. LifeSpanExpired is exactly what the world's lifespan
+	// timer calls, so this is the destruction the grace would have caused, deterministically.
+	Cutscene->LifeSpanExpired();
+	TestTrue(TEXT("The sequence actor is destroyed once its lifespan expires"),
+		!IsValid(Cutscene) || Cutscene->IsActorBeingDestroyed());
+	TestEqual(TEXT("No cutscene actor is left behind"), CountCutscenes(Fixture.World), 0);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneTeardownOnSkip,
+	"TerritoryFramework.Presentation.Cutscenes.SequenceActorIsDestroyedOnSkipToEnd",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneTeardownOnSkip::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+
+	FWorldFixture Fixture;
+	ANarrativeLevelSequenceActor* Cutscene = PlayCutscene(Fixture, 1.f);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+	TestTrue(TEXT("The cutscene is playing before it is skipped"), Player->IsPlaying());
+
+	// This is the path that makes OnStop the load-bearing binding rather than a belt-and-braces
+	// second one: GoToEndAndStop calls StopInternal directly, so FinishPlaybackInternal never runs.
+	int32 FinishedBroadcasts = 0;
+	Player->OnNativeFinished.BindLambda([&FinishedBroadcasts] { ++FinishedBroadcasts; });
+	Player->GoToEndAndStop();
+
+	// The claim above, measured rather than asserted from the engine source: a teardown bound only to
+	// OnFinished would leak every skipped cutscene.
+	TestEqual(TEXT("Skipping to the end does not broadcast OnFinished at all"),
+		FinishedBroadcasts, 0);
+	TestTrue(TEXT("Skipping to the end still arms the teardown"),
+		Cutscene->GetLifeSpan() > 0.f && Cutscene->GetLifeSpan() <= 1.f);
+
+	Player->OnNativeFinished.Unbind();
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneTeardownZeroGrace,
+	"TerritoryFramework.Presentation.Cutscenes.ZeroGraceDestroysImmediately",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneTeardownZeroGrace::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+
+	FWorldFixture Fixture;
+	ANarrativeLevelSequenceActor* Cutscene = PlayCutscene(Fixture, 0.f);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Player) return false;
+
+	Player->Stop();
+
+	// The trap this guards is specific: AActor::SetLifeSpan takes its clear-the-timer branch for any
+	// value <= 0, so an implementation that armed the grace unconditionally would leave the actor
+	// alive with no timer - the same silent leak, now depending on the authored value.
+	TestTrue(TEXT("Zero grace destroys the actor as soon as the sequence stops"),
+		!IsValid(Cutscene) || Cutscene->IsActorBeingDestroyed());
+	TestEqual(TEXT("No cutscene actor is left behind"), CountCutscenes(Fixture.World), 0);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneTeardownPaused,
+	"TerritoryFramework.Presentation.Cutscenes.PausedPlayerIsNotTornDown",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneTeardownPaused::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+
+	FWorldFixture Fixture;
+	ANarrativeLevelSequenceActor* Cutscene = PlayCutscene(Fixture, 1.f);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	UTerritoryCutsceneTeardownComponent* Teardown = TeardownOn(Cutscene);
+	TestNotNull(TEXT("Starting a cutscene arms its teardown"), Teardown);
+	ULevelSequencePlayer* Player = Cutscene->GetSequencePlayer();
+	TestNotNull(TEXT("The cutscene has a sequence player"), Player);
+	if (!Teardown || !Player) return false;
+
+	// The dialogue-shaped case the guard exists for: the engine holds a sequence on its last frame
+	// while a line is still displayed, and broadcasts OnFinished after Pause().
+	Player->Pause();
+	TestTrue(TEXT("Pause holds the player rather than stopping it"), Player->IsPaused());
+	TestFalse(TEXT("A paused player is not playing"), Player->IsPlaying());
+
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceStopped(Teardown);
+
+	TestTrue(TEXT("A paused cutscene is left alive"),
+		IsValid(Cutscene) && !Cutscene->IsActorBeingDestroyed());
+	TestEqual(TEXT("A paused cutscene arms no teardown"), Cutscene->GetLifeSpan(), 0.f);
+
+	// The control for the two assertions above. Without it, a component that never worked at all
+	// would satisfy them, and the zero would prove nothing.
+	Player->Stop();
+	TestTrue(TEXT("The same cutscene does arm its teardown once the player has really stopped"),
+		Cutscene->GetLifeSpan() > 0.f);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneTeardownAuthority,
+	"TerritoryFramework.Presentation.Cutscenes.TeardownIsServerAuthoritative",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneTeardownAuthority::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	APlayerController* Viewer = MakeFactionViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("A faction viewer can be built"), Viewer);
+	if (!Viewer) return false;
+
+	// Built through the vendor factory directly rather than through the event, so the role set below
+	// is the only thing that has touched this actor's authority.
+	FNarrativeSequencePlaybackSettings Settings;
+	Settings.bAutoPlay = false;
+	Settings.bPauseAtEnd = false;
+	Settings.TagsToApplyWhilstBound.Reset();
+	ANarrativeLevelSequenceActor* Cutscene = nullptr;
+	ANarrativeLevelSequenceActor::CreateNarrativeLevelSequencePlayer(Fixture.World, {Viewer},
+		FVector::ZeroVector, 0.f, MakeSequence(Fixture.World), Settings, Cutscene);
+	TestNotNull(TEXT("The vendor factory creates a cutscene actor"), Cutscene);
+	if (!Cutscene) return false;
+
+	// A client holds a replica of the server's actor. Destroying its own copy would desync the
+	// cutscene from the server that owns it, and a locally destroyed replica comes back.
+	Cutscene->SetRole(ROLE_SimulatedProxy);
+	TestTrue(TEXT("A client does not arm a teardown for a replicated cutscene actor"),
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(Cutscene, 1.f) == nullptr);
+	TestNull(TEXT("A client adds no teardown component"),
+		Cutscene->FindComponentByClass<UTerritoryCutsceneTeardownComponent>());
+
+	// The control: the identical call on the authority does arm one.
+	Cutscene->SetRole(ROLE_Authority);
+	TestNotNull(TEXT("The authority does arm a teardown"),
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(Cutscene, 1.f));
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCutsceneTeardownGraceAuthorable,
+	"TerritoryFramework.Presentation.Cutscenes.TeardownGraceIsAuthorable",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCutsceneTeardownGraceAuthorable::RunTest(const FString&)
+{
+	UClass* EventClass = UTerritoryPlayCutsceneEvent::StaticClass();
+	const FFloatProperty* GraceProperty =
+		FindFProperty<FFloatProperty>(EventClass, TEXT("TeardownGraceSeconds"));
+	TestNotNull(TEXT("The teardown grace is reflected"), GraceProperty);
+	if (GraceProperty)
+	{
+		TestTrue(TEXT("A designer can author the teardown grace"),
+			GraceProperty->HasAnyPropertyFlags(CPF_Edit));
+		TestTrue(TEXT("The teardown grace is readable in Blueprint"),
+			GraceProperty->HasAnyPropertyFlags(CPF_BlueprintVisible));
+	}
+
+	const UTerritoryPlayCutsceneEvent* CDO =
+		EventClass->GetDefaultObject<UTerritoryPlayCutsceneEvent>();
+	TestNotNull(TEXT("The cutscene event has a default object"), CDO);
+	if (CDO)
+	{
+		// A default of zero would destroy the actor the instant its sequence stops, cutting off any
+		// client whose own copy is a moment behind, so the shipped default must leave a grace.
+		TestTrue(TEXT("The default grace leaves a client a moment behind room to finish"),
+			CDO->TeardownGraceSeconds > 0.f);
+	}
 	return true;
 }
 

@@ -347,6 +347,12 @@ protected:
  * control. Pause At End is forced off when the cutscene runs, because ULevelSequencePlayer fires
  * OnStopped only on a real stop - a sequence that merely pauses fires OnPause, never releases
  * cinematic mode, and would leave the player permanently unable to move.
+ *
+ * This event also owns the actor's lifetime, because nobody else does: the vendor factory returns
+ * the actor through OutActor and never destroys it. Teardown is delegated to
+ * UTerritoryCutsceneTeardownComponent, which this event attaches to the actor it just created, so
+ * the actor is destroyed once its sequence has genuinely stopped rather than leaking for the rest
+ * of the session. See that component for why it binds OnStop rather than trusting OnFinished.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Play Territory Cutscene",
@@ -390,6 +396,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(ToolTip="Optional Territory light rig to follow the sequence for each viewer. Leave empty to leave lighting authority with Narrative."))
 	TObjectPtr<UTerritoryCinematicLightRigProfile> LightRigProfile;
+
+	/**
+	 * How long the sequence actor survives after the cutscene stops, before it is destroyed.
+	 *
+	 * The destruction is replicated, so this grace is what keeps a client whose own copy of the
+	 * sequence is a fraction of a second behind from having its cutscene cut off mid-shot. It is
+	 * measured from the stop, not from the start, so an authored PlayRate or a skipped sequence
+	 * cannot make it fire early. Zero destroys as soon as the sequence stops.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(ClampMin="0.0", Units="s",
+			ToolTip="Seconds the cutscene actor is kept alive after its sequence stops, so a client a moment behind is not cut off mid-shot. Raise it for a high-latency audience; 0 destroys immediately."))
+	float TeardownGraceSeconds = 1.f;
 
 protected:
 	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,

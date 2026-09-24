@@ -122,41 +122,102 @@ existed.
   node type.
 - **No Narrative Pro source file was modified.**
 
-## Known limitation: the sequence actor is never destroyed
+## Sequence-actor teardown: implemented, and no longer a limitation
 
-**The plan's step-5 assertion "the sequence actor is cleaned up" is NOT satisfied, and this record
-must not be read as claiming it is.** `UTerritoryPlayCutsceneEvent::ExecuteEvent_Implementation`
-ends at its light-rig loop with no `OnFinished` binding and no `Destroy()`, and the vendor factory
-hands `OutActor` back to the caller with no self-cleanup of its own, so teardown is the caller's
-contract and Territory's caller does not discharge it.
+This section **replaces** an earlier "Known limitation: the sequence actor is never destroyed",
+which recorded the plan's step-5 assertion "the sequence actor is cleaned up" as **NOT satisfied**
+and measured `sequence_actors_after_the_quiet_floor = 2`. That was accurate for the batch it
+described. It is not accurate now, and the old text is stated here rather than deleted so the change
+is auditable. The teardown was implemented as its own coherent batch — exactly as that section said
+it had to be ("a deliberate teardown policy ... plus its own test and mutation control") — and the
+same probe now measures the count at **0**.
 
-It is spawned `RF_Transient`, so nothing is written to the level and §7 is not violated. It is a
-session leak of one actor per cutscene trigger, unbounded across a long session. Measured in this
-receipt: `sequence_actors_after_the_quiet_floor = 2` — one cutscene's server copy plus its one
-replicated client copy — still alive after the *second*, eventless floor had cleared.
+What changed: `UTerritoryPlayCutsceneEvent::ExecuteEvent_Implementation` ends by calling
+`UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(SequenceActor, TeardownGraceSeconds)`, a
+new Territory-owned component attached to the actor it will destroy. It binds the sequence player's
+`OnStop`, which is the only signal covering all three ways a cutscene ends: a natural finish reaches
+`StopInternal` through `FinishPlaybackInternal`, an explicit `Stop()` calls `StopInternal` directly,
+and a skip-to-end (`GoToEndAndStop`) also calls `StopInternal` directly and therefore never
+broadcasts `OnFinished` at all. `OnFinished` is bound as well, behind an `IsPaused()` guard, because
+`StopInternal` skips the whole `OnStop` broadcast when the entity system runner declines to queue
+its final update (`MovieSceneSequencePlayer.cpp:540`), and a sequence that genuinely stopped would
+otherwise leak.
 
-That count comes from the same probe as every other number here, but the two diagnostics that
-located the leak are committed beside it rather than left in a session transcript:
-`Scripts/Territory/_probe_cutscene_sequence_actor.py` (finds the actor, reads the floor-0 event
-array at runtime, and calls the event directly to separate "never ran" from "ran and started
-nothing") and `Scripts/Territory/_probe_authored_cutscene_event.py` (reads the instanced event
-back off the live Definition, which the receipt cannot distinguish from an event that ran). Both
-are diagnostic-only and neither is part of the delivered path.
+Three details are load-bearing, and each has its own test:
 
-Why the plan's step-4 design was not implemented as written: the plan called for binding the
-player's `OnFinished` and calling `Stop()` by hand, because `bPauseAtEnd = true` would leave a
-finished sequence *paused*, and `Pause()` never fires `OnStopped`, so `EnableCinematicMode(false)`
-would never run and the player would never get control back. The implementation instead forces
-`Settings.bPauseAtEnd = false` on the sequence it creates, so a sequence that ends genuinely stops
-and the engine's own symmetric entry/exit releases input. That is the same outcome by a simpler
-route — `control_returned_when_the_cutscene_stopped` and `cutscene_stopped_rather_than_paused` are
-both green — but it left the actor alive, which the plan's `Stop()`-then-destroy shape would have
-had a natural place to clean up.
+- **`IsPaused()` can never reject a genuine stop.** `StopInternal` assigns
+  `Status = EMovieScenePlayerStatus::Stopped` inside the same `if (IsPlaying() || IsPaused())` block
+  that broadcasts `OnStop` (`MovieSceneSequencePlayer.cpp:466-529`), so by the time the handler runs
+  the player is not paused. On the `OnFinished`-after-`Pause()` path the status really is `Paused`,
+  and that guard is what keeps a live dialogue-shaped shot from being destroyed.
+- **Grace `<= 0` destroys directly, never `SetLifeSpan(0)`.** `AActor::SetLifeSpan` takes its
+  clear-the-timer branch for any value `<= 0` (`Actor.cpp:6577-6604`), which would leave the actor
+  alive with no timer at all — the silent version of the very leak being fixed.
+- **Authority only.** A client must not locally destroy a replicated actor; the client's copy is
+  removed by the destruction replicating.
 
-Fixing it is its own coherent batch, not a rider on this one: destroying the authority's actor
-immediately on finish would destroy the clients' replicated copies too and could cut a lagging
-client's tail, so the fix needs a deliberate teardown policy (a grace delay, or destruction when the
-last viewer's copy reports finished) plus its own test and mutation control.
+The grace (authored `TeardownGraceSeconds`, default 1.0s) exists because the destruction replicates:
+a client whose own copy is a fraction of a second behind must not have its cutscene cut off mid-shot.
+**A client that lags longer than the grace would still be cut short** — that is the remaining,
+deliberate limit of this policy, and the authored field is the escape hatch.
+
+The two diagnostics that located the leak stay committed beside this record rather than in a session
+transcript, and they are what made the fix targetable: `Scripts/Territory/_probe_cutscene_sequence_actor.py`
+(finds the actor, reads the floor-0 event array at runtime, and calls the event directly to separate
+"never ran" from "ran and started nothing") and `Scripts/Territory/_probe_authored_cutscene_event.py`
+(reads the instanced event back off the live Definition, which the receipt cannot distinguish from an
+event that ran). Both are diagnostic-only and neither is part of the delivered path.
+
+### Measured, same probe, same fixture
+
+Marker `FLOORSTAGE_TEARDOWN`: harness `ok: true`, `lifecycle: teardown-complete`, `warnings: []`,
+`total_matches: 0`; the probe itself `passed: true`, **32 checks, `unresolved: []`, 47.8s**.
+
+| Reading | Before | Now |
+|---|---|---|
+| `sequence_actors_after_the_quiet_floor` | 2 | **0** |
+| `sequence_actors_at_clear1` | — | 0 |
+| `quiet_sequence_peak` | — | 0 |
+| `quiet_teardown_waited_seconds` | — | 0.03 |
+
+`quiet_teardown_waited_seconds = 0.03` is the reading that makes the zero mean something. The phase
+dwells 3.0s before sampling, and the teardown had **already finished** by the time that dwell
+elapsed — the actor was gone at `clear1` as well. The zero is a prompt teardown observed, not a
+drain that happened to complete inside the observation window.
+
+Two checks that were green before are re-asserted, because this batch changes actor lifetime:
+`control_returned_when_the_cutscene_stopped` — the engine releases input before any finish/stop
+delegate fires, so destroying the actor cannot strand the player, now proven in live gameplay rather
+than by argument — and `cutscene_stopped_rather_than_paused`.
+
+The quiet phase's own check was **rewritten, not merely re-baselined**, and this is the trap that
+would have looked like a regression. `floor_without_an_authored_event_starts_no_sequence` used to
+compare the live count against a number captured at `clear1`. Once the leak was fixed, the teardown
+can complete *between* `clear1` and the quiet phase, so that equality would have gone **red purely
+because the fix worked**. It now reads "the count never rose across the phase"
+(`quiet_sequence_peak <= quiet_start_count`), which is what "starts no sequence" always meant, and
+`the_cutscene_actor_is_destroyed_once_its_sequence_stops` is the new check for the count reaching
+zero.
+
+### Mutation control for this batch
+
+Each new native test was seen to fail against a deliberately broken production value before it was
+counted, with the reds attributable to one policy each and the unaffected tests left green as the
+specificity control:
+
+| Mutation | Tests seen red |
+|---|---|
+| call site removed (the exact bug) | after-it-stops, skip-to-end, zero-grace, paused (at its control line) |
+| `OnStop` binding dropped | after-it-stops, skip-to-end, zero-grace, paused (at its control line) |
+| `SetLifeSpan` armed unconditionally | zero-grace **only** — "No cutscene actor is left behind" expected 0, got 1 |
+| authority gate dropped | server-authoritative **only** |
+| `IsPaused()` guard dropped | paused, at its guard assertion **only** |
+
+The drop-`OnStop` run is what justifies binding `OnStop` at all: `SequenceActorIsDestroyedOnSkipToEnd`
+exists precisely because `GoToEndAndStop` never broadcasts `OnFinished`, and it goes red when the
+binding is removed. Note the paused test carries **two** assertions, and the runs reddened them
+separately — its control line by the dropped binding, its guard line only by the dropped guard.
+All 12 tests then re-ran green: `**** TEST COMPLETE. EXIT CODE: 0 ****`.
 
 ## Level-authoring constraints this proof surfaced
 
@@ -196,8 +257,10 @@ upper floors is a level-authoring task, not a code one.
    reconstruct the previous floor entries; the defeat path already holds them.
 2. **The plan's 6b step 4 `OnFinished` + `Stop()` binding is replaced by forcing
    `Settings.bPauseAtEnd = false`** on the created sequence. Same outcome (control returns, and the
-   check that catches the trap is green), simpler, and with the actor-lifetime consequence recorded
-   above.
+   check that catches the trap is green), simpler. The actor-lifetime consequence this briefly left
+   behind — the sequence actor surviving the session — is closed by its own later batch; see the
+   teardown section below, which also records why the original `Stop()`-then-destroy shape was not
+   the right vehicle for it.
 3. **"Single-player PIE" and "two-client PIE" are one launch in this project's editor
    configuration**, as described under "What the run actually put up". The receipt says so rather
    than claiming a standalone single-player run.
@@ -206,7 +269,8 @@ upper floors is a level-authoring task, not a code one.
    `ULevelSequencePlayer::EnableCinematicMode` on every sequence whose playback settings request
    cinematic mode, including Territory dialogue shots. `Docs/TERRITORY_STORY_SURFACE_2026-09-23.md`
    carried that claim at line 220 and has been corrected.
-5. **The sequence actor is never destroyed**, where the plan's step 5 asserted it was cleaned up.
+5. **The sequence actor was not destroyed by this batch**, where the plan's step 5 asserted it was
+   cleaned up. Closed afterwards, by its own batch — see the teardown section below.
 
 ## Mutation control
 

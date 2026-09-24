@@ -1,6 +1,7 @@
 #include "Tales/TerritoryStoryEvents.h"
 
 #include "Cinematics/TerritoryCinematicLightRig.h"
+#include "Cinematics/TerritoryCutsceneTeardown.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryVolume.h"
@@ -694,6 +695,13 @@ void UTerritoryPlayCutsceneEvent::ExecuteEvent_Implementation(APawn* Target,
 		UTerritoryCinematicLightRigComponent::FollowNarrativeSequence(SequenceActor,
 			Viewer, Viewer->GetPawn(), LightRigProfile);
 	}
+
+	// Nobody else owns this actor's lifetime. The vendor factory spawns it, hands it back through
+	// OutActor and never destroys it, so without this the actor survives for the rest of the session
+	// - one per cutscene trigger. The component destroys it once the sequence has genuinely stopped,
+	// after the authored grace that keeps a lagging client's copy from being cut short.
+	UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(
+		SequenceActor, TeardownGraceSeconds);
 }
 
 FString UTerritoryPlayCutsceneEvent::GetGraphDisplayText_Implementation()
