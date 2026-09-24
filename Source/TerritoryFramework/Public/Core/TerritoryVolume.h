@@ -886,6 +886,7 @@ private:
 	friend class FTFDefenderNarrativeEventConditions;
 	friend class FTFVolumeRuleCallbacks;
 	friend class FTFTransitionEventReconciliation;
+	friend struct FTFTransitionFrameProbe;
 	friend class FTFForcedMutationConditions;
 	friend class FTFFactionStateRulesIntegration;
 	friend class FTFGuardRetirementCallbacks;

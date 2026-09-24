@@ -1822,6 +1822,15 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	TGuardValue<FTerritoryTransitionContext> ContextGuard(ActiveTransitionContext, TransitionContext);
 	const uint64 CommitLoadGeneration = GarrisonLoadGeneration;
 
+	// Declared AFTER the guards above, deliberately. Destruction runs in reverse declaration order,
+	// so this scope closes FIRST - while ActiveTransitionContext still holds this child's context.
+	// The deferred ancestor commits drained on close read that context off the child, so declaring
+	// this before the guards would drain with a default context and any cutscene authored on
+	// OnCityLost would find no audience. RAII rather than paired calls because this function has
+	// several early returns below, and every one of them has to close the frame.
+	ATerritoryWorldState::FTransitionFrameScope TransitionFrameScope(
+		ATerritoryWorldState::FindTerritoryWorldState(this));
+
 	// Cache previous values for RepNotify diff
 	PreviousOwningFaction = OldOwner;
 	PreviousState = OldState;

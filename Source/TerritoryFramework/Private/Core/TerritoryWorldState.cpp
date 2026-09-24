@@ -690,12 +690,107 @@ void ATerritoryWorldState::ReconcileUnloadedAncestors(const FGameplayTag& Change
 		const auto* Definition = RegisteredHierarchyDefinitions.Find(Parent);
 		if (!IsValid(Loaded) || !Definition || !*Definition
 			|| Loaded->GetTerritoryGUID() != (*Definition)->StableTerritoryGUID) continue;
-		if (auto* City = Cast<ATerritoryCity>(Loaded)) City->ReconcileDerivedControl(Source);
-		else if (auto* District = Cast<ATerritoryDistrict>(Loaded)) District->ReconcileDerivedControl(Source);
-		// A Native actor may already match the derived result while its directory
-		// still contains the older saved value. A no-op Volume commit emits nothing.
-		if (IsValid(Loaded)) PublishTerritorySummary(Loaded);
+
+		if (TransitionFrameDepth > 0)
+		{
+			// A source transition is still unwinding, so committing this ancestor now would fire
+			// its events against a child that has not finished changing - guards not yet
+			// refreshed, availability not yet reconciled, the child's own state events not yet
+			// fired. Queue the pair and let the outermost frame exit drain it, when the child
+			// commit is complete and its transition context is still installed.
+			//
+			// The directory pass above deliberately stays here rather than moving into the queue:
+			// it is a read model the in-flight transition may already depend on, and deferring it
+			// would hide the change from anything that reads the row during the transition.
+			DeferredLoadedAncestorReconciles.Emplace(Parent, ChangedChild);
+			continue;
+		}
+
+		ReconcileLoadedAncestor(Loaded, Source);
 	}
+}
+
+void ATerritoryWorldState::ReconcileLoadedAncestor(ATerritoryVolume* Loaded,
+	ATerritoryVolume* Source)
+{
+	if (!IsValid(Loaded)) return;
+	if (auto* City = Cast<ATerritoryCity>(Loaded)) City->ReconcileDerivedControl(Source);
+	else if (auto* District = Cast<ATerritoryDistrict>(Loaded)) District->ReconcileDerivedControl(Source);
+	// A Native actor may already match the derived result while its directory
+	// still contains the older saved value. A no-op Volume commit emits nothing.
+	PublishTerritorySummary(Loaded);
+}
+
+void ATerritoryWorldState::EnterTransitionFrame()
+{
+	++TransitionFrameDepth;
+}
+
+void ATerritoryWorldState::ExitTransitionFrame()
+{
+	if (TransitionFrameDepth > 0) --TransitionFrameDepth;
+	if (TransitionFrameDepth > 0) return;
+	DrainDeferredAncestorReconciles();
+}
+
+void ATerritoryWorldState::DrainDeferredAncestorReconciles()
+{
+	// A commit performed by the drain opens and closes its own frame, so its exit re-enters here.
+	// Returning immediately is correct: the loop below keeps popping, and the entries that nested
+	// exit queued are already in the array it is walking.
+	if (bDrainingDeferredReconciles) return;
+	if (DeferredLoadedAncestorReconciles.IsEmpty()) return;
+	// Authority-gated like every sibling reconciliation entry point. A client never queues - the
+	// producer returns before queueing without authority - so this is a contract guard, not the
+	// thing that keeps the queue empty.
+	if (!HasAuthority())
+	{
+		DeferredLoadedAncestorReconciles.Empty();
+		return;
+	}
+	TGuardValue<bool> DrainGuard(bDrainingDeferredReconciles, true);
+
+	// Bounded rather than trusting the topology: a malformed or self-referential hierarchy must
+	// not hang the transition. Dropping the remainder with a warning is recoverable - the next
+	// transition rebuilds the queue - whereas spinning is not.
+	constexpr int32 MaxAncestorReconcilesPerFrame = 64;
+	int32 Drained = 0;
+	int32 Index = 0;
+	while (Index < DeferredLoadedAncestorReconciles.Num())
+	{
+		if (Index >= MaxAncestorReconcilesPerFrame)
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("[TransitionFrame] Deferred ancestor reconcile cap (%d) reached; dropping %d queued entries rather than hanging the transition."),
+				MaxAncestorReconcilesPerFrame, DeferredLoadedAncestorReconciles.Num() - Index);
+			break;
+		}
+		const TPair<FGameplayTag, FGameplayTag> Entry = DeferredLoadedAncestorReconciles[Index];
+		++Index;
+		++Drained;
+
+		// Resolved now rather than captured at queue time: the pair holds tags precisely so a
+		// queued entry cannot dangle, and the child is re-resolved to the actor that exists at
+		// drain time rather than the one that existed when the transition began.
+		const auto* Registry = GetWorld()
+			? GetWorld()->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+		if (!Registry) continue;
+		ReconcileLoadedAncestor(Registry->GetTerritoryByTag(Entry.Key),
+			Registry->GetTerritoryByTag(Entry.Value));
+	}
+	if (Index > 0) DeferredLoadedAncestorReconciles.RemoveAt(0, Index, EAllowShrinking::No);
+}
+
+ATerritoryWorldState::FTransitionFrameScope::FTransitionFrameScope(
+	ATerritoryWorldState* InWorldState)
+	: WorldState(InWorldState)
+{
+	if (ATerritoryWorldState* Pinned = WorldState.Get()) Pinned->EnterTransitionFrame();
+}
+
+ATerritoryWorldState::FTransitionFrameScope::~FTransitionFrameScope()
+{
+	if (ATerritoryWorldState* Pinned = WorldState.Get()) Pinned->ExitTransitionFrame();
 }
 
 void ATerritoryWorldState::ReconcileUnloadedHierarchy(const TSet<FGameplayTag>* ParentsToRebuild)

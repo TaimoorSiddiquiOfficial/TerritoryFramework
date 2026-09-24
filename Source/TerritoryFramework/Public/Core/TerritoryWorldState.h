@@ -406,6 +406,40 @@ public:
 		TConstArrayView<FReplicatedCaptureSummary> Summaries,
 		const FGameplayTag& Faction);
 
+	/**
+	 * RAII scope for one transition frame, opened by the source Territory's commit.
+	 *
+	 * A child's commit publishes its summary part-way through that commit, and the publish
+	 * reconciles the child's ancestors immediately. The ancestor therefore committed - and fired
+	 * its City/District events - while the child still had unreconciled guards and availability
+	 * and had not yet run its own state events. A parent callback could observe a child that had
+	 * not finished changing.
+	 *
+	 * Deferring only the ancestor's *volume commit* to the end of the outermost frame fixes that
+	 * without inventing a second execution path for the events: the ancestor still commits once,
+	 * through the one existing path, with the live transition context. The queue holds tags, never
+	 * state or pointers, so nothing durable can be stale.
+	 *
+	 * Declare this AFTER any TGuardValue for the transition context. Destructors run in reverse
+	 * declaration order, so the frame closes while the child's ActiveTransitionContext is still
+	 * installed - which is what lets the drained commit see the live child context. Declared
+	 * before them, the drain would fire ancestor events with a default context and any cutscene
+	 * authored on OnCityLost would find no audience. That ordering is the single subtle failure
+	 * mode of this design, which is why the scope is RAII rather than paired calls: CommitOwnershipData
+	 * has several early returns, and each one must close the frame.
+	 */
+	struct FTransitionFrameScope
+	{
+		explicit FTransitionFrameScope(ATerritoryWorldState* InWorldState);
+		~FTransitionFrameScope();
+		FTransitionFrameScope(const FTransitionFrameScope&) = delete;
+		FTransitionFrameScope& operator=(const FTransitionFrameScope&) = delete;
+
+	private:
+		/** Weak because a Narrative condition can destroy actors synchronously mid-commit. */
+		TWeakObjectPtr<ATerritoryWorldState> WorldState;
+	};
+
 	/** Replicated physical assault read model used by strategic UI for unloaded cells. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Assault")
 	TArray<FTerritoryAssaultRecord> GetAllAssaultSummaries() const
@@ -566,6 +600,7 @@ private:
 	friend class FTFSaveDefaultReload;
 	friend class FTFSavedStrategicDirectoryProjectionRoundTrip;
 	friend class FTFWorldPartitionActorRecords;
+	friend struct FTFTransitionFrameProbe;
 #endif
 	/** Authored topology only; political state remains in Volumes and derived snapshots. */
 	UPROPERTY(Transient)
@@ -575,6 +610,25 @@ private:
 	void ApplyDirectoryRetirements(bool bReconcileAssaults = true);
 	void ReconcileUnloadedAncestors(const FGameplayTag& ChangedChild);
 	void ReconcileUnloadedHierarchy(const TSet<FGameplayTag>* ParentsToRebuild = nullptr);
+	/** Commit one resolved loaded ancestor; the single path, used both inline and by the drain. */
+	void ReconcileLoadedAncestor(ATerritoryVolume* Loaded, ATerritoryVolume* Source);
+
+	/** Frame scope hooks; see FTransitionFrameScope for why the drain closes the outermost only. */
+	void EnterTransitionFrame();
+	void ExitTransitionFrame();
+	void DrainDeferredAncestorReconciles();
+
+	/** Nested commit depth. The outermost exit is the one that drains. */
+	int32 TransitionFrameDepth = 0;
+	/** Re-entrancy guard: a nested exit returns so the outer loop keeps popping. */
+	bool bDrainingDeferredReconciles = false;
+	/**
+	 * (parent, changed child) pairs awaiting their deferred commit.
+	 *
+	 * Tags rather than pointers or state, so a queued entry cannot dangle and cannot disagree
+	 * with the live child by the time it drains. An empty queue on the outermost exit is normal.
+	 */
+	TArray<TPair<FGameplayTag, FGameplayTag>> DeferredLoadedAncestorReconciles;
 	/** Recursive body of IsHierarchyReductionComplete; Visited fails a malformed row set closed. */
 	bool IsHierarchyReductionComplete(const FGameplayTag& TerritoryTag,
 		TSet<FGameplayTag>& Visited) const;
