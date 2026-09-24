@@ -8,7 +8,10 @@
 #include "Core/TerritoryVolume.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Tales/TalesComponent.h"
 #include "Tales/TerritoryStateTask.h"
+#include "UnrealFramework/NarrativePlayerController.h"
 
 #if WITH_EDITOR
 #include "Misc/DataValidation.h"
@@ -537,6 +540,132 @@ bool FTFTerritoryFloorObjectives::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A whole-Place task description is unchanged"),
 		!WholePlace->GetTaskDescription().ToString().Contains(TEXT("floor")));
 
+	Fixture.TearDown();
+	return true;
+}
+
+/**
+ * Regression. A floor-filtered garrison objective must read the floor entry out of a snapshot
+ * that is still alive, and must read the floor it is named after.
+ *
+ * ATerritoryVolume::GetGarrisonSnapshot() returns the read model by value, so a floor entry
+ * taken from its return value dies with the full expression. A release allocator usually keeps
+ * serving the freed bytes, which is why the same test passes either way under the default
+ * allocator; Tools/Run-Tests.ps1 -Stomp is what turns the stale read into the access violation
+ * it really is. Both legs below assert the value that was read as well as
+ * exercising the read, and the two floor rows carry different counts, so a stale, a neighbouring
+ * or a Place-wide read cannot produce the expected numbers.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorProgressSnapshotRead,
+	"TerritoryFramework.Guards.Floors.ProgressReadsItsOwnFloorSnapshot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorProgressSnapshotRead::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorTest;
+	FFloorFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+
+	Fixture.Definition->Floors = { MakeFloor(0, 0), MakeFloor(2, 2) };
+	Fixture.Definition->GuardPosts = {
+		MakePost(TEXT("Ground_A"), 0),
+		MakePost(TEXT("Upper_A"), 2) };
+	if (!TestTrue(TEXT("Floor fixture definition applied"),
+		Fixture.Definition->ApplyToTerritory(Fixture.Place))
+		|| !TestNotNull(TEXT("Ground post bound"), Fixture.StandUp(TEXT("Ground_A")))
+		|| !TestNotNull(TEXT("Floor 2 post bound"), Fixture.StandUp(TEXT("Upper_A"))))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	// The reader only commits progress when its Tales component holds authority, so the fixture
+	// needs a real authoritative owner rather than a bare task.
+	auto* Controller = NewObject<ANarrativePlayerController>(Fixture.World->PersistentLevel);
+	Controller->SetRole(ROLE_Authority);
+	UTalesComponent* Tales = Controller->GetTalesComponent();
+	auto* Registry = Fixture.World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!TestNotNull(TEXT("Authoritative Tales owner exists"), Tales)
+		|| !TestNotNull(TEXT("Territory registry exists"), Registry))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+	if (!TestTrue(TEXT("Floor fixture Territory registered"),
+		Registry->RegisterTerritory(Fixture.Place) == ETerritoryRegistrationResult::Success))
+	{
+		Fixture.TearDown();
+		return false;
+	}
+
+	// Publish a read model whose floor rows disagree with each other and with the Place-wide
+	// staffing target, so reading the wrong row is visible in the progress that follows.
+	const auto Publish = [&](int32 GroundGuards, int32 UpperGuards)
+	{
+		FTerritoryGarrisonSnapshot Snapshot;
+		Snapshot.ActiveGuards = GroundGuards + UpperGuards;
+		Snapshot.DesiredGuards = 7;
+		Snapshot.MaximumGuards = 3;
+		FTerritoryFloorSnapshot Ground;
+		Ground.FloorIndex = 0;
+		Ground.ActiveGuards = GroundGuards;
+		Ground.MaximumGuards = 1;
+		FTerritoryFloorSnapshot Upper;
+		Upper.FloorIndex = 2;
+		Upper.ActiveGuards = UpperGuards;
+		Upper.MaximumGuards = 2;
+		Snapshot.Floors = { Ground, Upper };
+		FTFTerritoryFloorTestAccess::SetGarrison(*Fixture.Place, Snapshot);
+		return Snapshot;
+	};
+
+	const auto MakeTask = [&](int32 Floor)
+	{
+		auto* Task = NewObject<UTerritoryStateTask>(Tales);
+		Task->TargetTerritory = TestTag();
+		Task->Objective = ETerritoryStateTaskObjective::ReachDesiredGarrison;
+		Task->TargetFloor = Floor;
+		// Above every guard count here, so the objective stays a progress reading rather than
+		// a completion.
+		Task->RequiredQuantity = 9;
+		Task->OwningComp = Tales;
+		Task->MarkerSettings.bAddNavigationMarker = false;
+		return Task;
+	};
+
+	Publish(1, 3);
+
+	// Leg one: activation. BeginTask resolves the registered Place, binds it, and evaluates the
+	// objective - the path that first took a floor entry out of a destroyed snapshot.
+	UTerritoryStateTask* Upper = MakeTask(2);
+	UTerritoryStateTask* Ground = MakeTask(0);
+	Upper->BeginTask();
+	Ground->BeginTask();
+	TestEqual(TEXT("A floor task reads its own floor's guards"), Upper->CurrentProgress, 3);
+	TestEqual(TEXT("A ground task does not read the upper floor's guards"), Ground->CurrentProgress, 1);
+
+	// Leg two: the replica path. The garrison delegate hands its subscriber the read model by
+	// value, and the floor entry is taken out of that copy.
+	const FTerritoryGarrisonSnapshot Second = Publish(4, 5);
+	Fixture.Place->OnGarrisonChanged.Broadcast(Fixture.Place, Second);
+	TestEqual(TEXT("A floor task follows its own floor's new guard count"), Upper->CurrentProgress, 5);
+	TestEqual(TEXT("A ground task follows its own floor's new guard count"), Ground->CurrentProgress, 4);
+
+	// A floor the Place does not declare reads nothing. The two legs above prove this same reader
+	// commits a non-zero count for a declared floor, so this zero is a real reading of an absent
+	// floor row rather than a progress write that never happened.
+	UTerritoryStateTask* Undeclared = MakeTask(9);
+	Undeclared->BeginTask();
+	TestEqual(TEXT("A floor the Place does not declare reads no guards"), Undeclared->CurrentProgress, 0);
+
+	// The whole-Place reading of the same objective is deliberately not re-asserted here;
+	// FTFTerritoryFloorObjectives already pins -1 to the Place staffing target, and this fixture
+	// never commits ownership, so its staffing target is zero and could not discriminate.
+
+	Upper->EndTask();
+	Ground->EndTask();
+	Undeclared->EndTask();
 	Fixture.TearDown();
 	return true;
 }

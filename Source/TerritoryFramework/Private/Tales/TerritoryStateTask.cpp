@@ -132,10 +132,10 @@ void UTerritoryStateTask::ObservePresence()
 }
 
 const FTerritoryFloorSnapshot* UTerritoryStateTask::FindTargetFloor(
-	const ATerritoryVolume& Territory) const
+	const TArray<FTerritoryFloorSnapshot>& Floors) const
 {
 	if (!IsFloorFiltered()) return nullptr;
-	return Territory.GetGarrisonSnapshot().Floors.FindByPredicate(
+	return Floors.FindByPredicate(
 		[this](const FTerritoryFloorSnapshot& Entry)
 		{
 			return Entry.FloorIndex == TargetFloor;
@@ -152,9 +152,14 @@ bool UTerritoryStateTask::IsObjectiveSatisfiedBy(
 
 	if (IsFloorFiltered())
 	{
+		// GetGarrisonSnapshot() returns by value, so the snapshot has to be named before a floor
+		// entry is taken out of it. Reading the entry straight from the accessor left the pointer
+		// aimed at a temporary that died at the end of that statement, which a release allocator
+		// happily serves intact and the stomp allocator turns into an access violation.
+		const FTerritoryGarrisonSnapshot Garrison = Territory->GetGarrisonSnapshot();
 		// An undeclared floor is never satisfied. Falling back to the whole Place here
 		// would complete an objective the author never asked for.
-		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(*Territory);
+		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(Garrison.Floors);
 		if (!Floor) return false;
 		switch (Objective)
 		{
@@ -265,7 +270,8 @@ void UTerritoryStateTask::EvaluateCurrent(bool bInitialEvaluation)
 		// Whole Place: progress is the owner's staffing target, which the management
 		// screen raises. One floor: a floor has no staffing target of its own, so progress
 		// is the guards physically standing there.
-		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(*Territory);
+		const FTerritoryGarrisonSnapshot Garrison = Territory->GetGarrisonSnapshot();
+		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(Garrison.Floors);
 		SetProgress(IsFloorFiltered()
 			? (Floor ? Floor->ActiveGuards : 0)
 			: Territory->GetDesiredGuardCount());
@@ -334,7 +340,9 @@ void UTerritoryStateTask::HandleGarrisonChanged(
 	if (Territory != CachedTerritory.Get()) return;
 	if (Objective == ETerritoryStateTaskObjective::ReachDesiredGarrison)
 	{
-		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(*Territory);
+		// The delegate already hands us the snapshot by value, so it outlives the floor entry
+		// read out of it and no second copy is needed here.
+		const FTerritoryFloorSnapshot* Floor = FindTargetFloor(Snapshot.Floors);
 		SetProgress(IsFloorFiltered()
 			? (Floor ? Floor->ActiveGuards : 0)
 			: Snapshot.DesiredGuards);

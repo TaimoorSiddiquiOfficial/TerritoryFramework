@@ -100,6 +100,8 @@ protected:
 
 private:
 	friend class FTFTerritoryObservationTaskLifecycle;
+	/** Drives BeginTask and the garrison path to hold the floor snapshot reads in place. */
+	friend class FTFTerritoryFloorProgressSnapshotRead;
 	void ObservePresence();
 	void BindTerritory(ATerritoryVolume* Territory);
 	void UnbindTerritory();
@@ -110,8 +112,14 @@ private:
 	/** A negative TargetFloor means this task follows the whole Place, never a floor row. */
 	bool IsFloorFiltered() const { return TargetFloor >= 0; }
 
-	/** The replicated floor entry this task follows, or null when the Place declares no such floor. */
-	const struct FTerritoryFloorSnapshot* FindTargetFloor(const ATerritoryVolume& Territory) const;
+	/**
+	 * The floor entry this task follows within an already-resolved garrison snapshot, or null when
+	 * the Place declares no such floor. The snapshot's floor array is passed in rather than read
+	 * from the Territory here because ATerritoryVolume::GetGarrisonSnapshot() returns by value: a
+	 * pointer taken from that temporary would dangle as soon as the full expression ended.
+	 */
+	const FTerritoryFloorSnapshot* FindTargetFloor(
+		const TArray<FTerritoryFloorSnapshot>& Floors) const;
 
 	UFUNCTION()
 	void HandleTerritoryRegistered(ATerritoryVolume* Territory,
