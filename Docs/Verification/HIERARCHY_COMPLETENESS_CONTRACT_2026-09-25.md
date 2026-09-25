@@ -105,6 +105,18 @@ counting child rows at the level below and comparing against the row's own autho
 recursing into each. A `TSet<FGameplayTag> Visited` fails a malformed row set closed instead of
 recursing until the stack runs out.
 
+> **Corrected 2026-09-25, by `HIERARCHY_COMPLETENESS_IDENTITY_2026-09-25.md`.** The sentence above
+> describes the rule *as this batch introduced it*, and it was wrong: it is what the follow-up
+> finding P1 was raised against. Counting rows can be satisfied by a row the reducer refuses -
+> the right tag with the wrong GUID, an obsolete row standing in for a missing authored child, a
+> `TotalChildren` saved before the authored child list changed - so this query approved reductions
+> the reducer had deferred, including for the eligibility consumer
+> `GetClaimedDistrictCountForFaction`. The query now walks the **authored** children by exact
+> identity, through the one helper that also supplies the reducer and the registration path. The
+> counting rule survives only for a row with no registered authored definition, which is documented
+> on the branch. Read the follow-up record for the rule as shipped; the table row below for
+> `UTerritorySituationProfile` should also be read with its limitation note there.
+
 Deliberately **not** added to `FReplicatedCaptureSummary`: that struct is exported as part of
 `SavedStrategicDirectory` (`SaveGame`), so a stored completeness flag would be written into the save,
 go stale the moment a child registers or streams in, and become a second authority over a question

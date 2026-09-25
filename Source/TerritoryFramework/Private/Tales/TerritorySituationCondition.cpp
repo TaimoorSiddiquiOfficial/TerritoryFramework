@@ -57,6 +57,13 @@ bool UTerritorySituationProfile::ReadPlaceHoldings(
 			if (Expected == ETerritoryHierarchyLevel::Place) Places.Add(Row);
 			else if (!Visit(Row, Depth + 1)) return false;
 		}
+		// The count equality below is a lower bound on strictness, not an identity test: it compares
+		// the directory against the authored child count and cannot tell an authored child from an
+		// obsolete row, so a row left behind under this parent can satisfy it while an authored child
+		// is missing. That is a misreported holding share and nothing worse - this is a BlueprintPure
+		// report and grants no ownership, eligibility or control - and the strict authored-identity
+		// walk the durability layer uses needs a definition, which this static helper is deliberately
+		// not given. Recorded rather than repaired here.
 		return Children == Parent.TotalChildren;
 	};
 	if ((*Found)->HierarchyLevel == ETerritoryHierarchyLevel::Place)

@@ -69,6 +69,44 @@ namespace
 		return 0;
 	}
 
+	/**
+	 * The authored direct children of a definition, in authoring order.
+	 *
+	 * The one place the hierarchy reads a definition's child list: definition registration, the
+	 * reducer that decides whether to commit a parent, and the query that decides whether a retained
+	 * parent counts as verified control all go through here. That is what stops them disagreeing
+	 * about which children were authored - the disagreement that let the query approve a reduction
+	 * the reducer had refused.
+	 *
+	 * Children are returned exactly as authored, including a null entry, so a topology defect stays
+	 * visible to the readers that report it. A reader that cannot tolerate a null - registration,
+	 * which hashes each child - filters at its own call site.
+	 *
+	 * GetDefinitionChildCount above reads the same two arrays for TotalChildren, which is now
+	 * metadata for the no-authored-topology case rather than the completeness rule itself.
+	 */
+	void GetDefinitionChildren(const UTerritoryDefinition* Definition,
+		TArray<const UTerritoryDefinition*>& OutChildren)
+	{
+		OutChildren.Reset();
+		if (const auto* City = Cast<UTerritoryCityDefinition>(Definition))
+		{
+			OutChildren.Reserve(City->Districts.Num());
+			for (const UTerritoryDistrictDefinition* District : City->Districts)
+			{
+				OutChildren.Add(District);
+			}
+		}
+		else if (const auto* District = Cast<UTerritoryDistrictDefinition>(Definition))
+		{
+			OutChildren.Reserve(District->Places.Num());
+			for (const UTerritoryPlaceDefinition* Place : District->Places)
+			{
+				OutChildren.Add(Place);
+			}
+		}
+	}
+
 	bool MatchesCaptureIdentity(const FReplicatedCaptureSummary& Existing,
 		const FGameplayTag& TerritoryTag, const FGuid& TerritoryGUID)
 	{
@@ -588,22 +626,18 @@ void ATerritoryWorldState::RegisterDefinitionHierarchy(
 				const_cast<UTerritoryDefinition*>(Current));
 		}
 
+		// The authored child list comes from the one helper every hierarchy reader uses, so a
+		// topology change cannot be visible to one of them and invisible to another. Entries come
+		// back as authored, including a null; a null is skipped here rather than filtered at the
+		// source, because registering and hashing one would be a crash while leaving it in the list
+		// is what lets the reducer and the completeness query report it as the defect it is.
+		TArray<const UTerritoryDefinition*> AuthoredChildren;
+		GetDefinitionChildren(Current, AuthoredChildren);
 		TArray<const UTerritoryDefinition*> Children;
-		if (const UTerritoryCityDefinition* City =
-			Cast<UTerritoryCityDefinition>(Current))
+		Children.Reserve(AuthoredChildren.Num());
+		for (const UTerritoryDefinition* Child : AuthoredChildren)
 		{
-			for (const UTerritoryDistrictDefinition* District : City->Districts)
-			{
-				if (District) Children.Add(District);
-			}
-		}
-		else if (const UTerritoryDistrictDefinition* District =
-			Cast<UTerritoryDistrictDefinition>(Current))
-		{
-			for (const UTerritoryPlaceDefinition* Place : District->Places)
-			{
-				if (Place) Children.Add(Place);
-			}
+			if (Child) Children.Add(Child);
 		}
 		for (const UTerritoryDefinition* Child : Children)
 		{
@@ -803,12 +837,14 @@ void ATerritoryWorldState::ReconcileUnloadedHierarchy(const TSet<FGameplayTag>* 
 	{
 		if (!Parent || Visited.Contains(Parent)) return;
 		Visited.Add(Parent);
+		// A Place is a leaf. This reduction is over a parent's child list, so a leaf has nothing to
+		// reduce and is never a candidate for a derived commit here.
+		if (GetDefinitionHierarchyLevel(Parent) == ETerritoryHierarchyLevel::Place) return;
+		// The authored child list comes from the one helper the completeness query also uses, so
+		// this reducer and that query cannot disagree about which children were authored. That
+		// disagreement is what let an eligibility check approve a reduction this loop had refused.
 		TArray<const UTerritoryDefinition*> Children;
-		if (const auto* City = Cast<UTerritoryCityDefinition>(Parent))
-			for (const UTerritoryDistrictDefinition* District : City->Districts) Children.Add(District);
-		else if (const auto* District = Cast<UTerritoryDistrictDefinition>(Parent))
-			for (const UTerritoryPlaceDefinition* Place : District->Places) Children.Add(Place);
-		else return;
+		GetDefinitionChildren(Parent, Children);
 		for (const auto* Child : Children) Reduce(Child);
 		if (ParentsToRebuild && !ParentsToRebuild->Contains(Parent->TerritoryTag)) return;
 		// Loaded parents still commit through their own hierarchy lifecycle.
@@ -1035,7 +1071,70 @@ bool ATerritoryWorldState::IsHierarchyReductionComplete(const FGameplayTag& Terr
 	// has already failed to resolve it, so there is no unknown value here to report.
 	if (!Row) return true;
 
-	// A Place is a leaf, so there is no authored child that could be missing.
+	// The authored topology decides, whenever it is known. This is deliberately the same walk
+	// ReconcileUnloadedHierarchy performs below before it commits a parent - exact tag, GUID,
+	// parent and level per authored child, recursing into each - because the two must agree:
+	// this query is what grants a retained owner the status of verified control
+	// (GetClaimedDistrictCountForFaction) and what lets a reducer propagate a child's
+	// incompleteness upward (ReconcileUnloadedHierarchy). Counting rows against a saved
+	// TotalChildren cannot do either job: it cannot tell an authored child from an obsolete row,
+	// and a count saved by an older build survives an in-place import even after the authored
+	// child list changed.
+	const UTerritoryDefinition* Definition = RegisteredHierarchyDefinitions.FindRef(TerritoryTag);
+	TArray<const UTerritoryDefinition*> AuthoredChildren;
+	GetDefinitionChildren(Definition, AuthoredChildren);
+
+	if (Definition)
+	{
+		// An authored leaf has no child that could be missing, and no row under this tag can
+		// change that. Return before the row's own HierarchyLevel is consulted: a row that
+		// disagrees with its authored definition about its level is a topology defect, and the
+		// authored side is the authority.
+		if (AuthoredChildren.IsEmpty()) return true;
+
+		TSet<FGameplayTag> SeenTags;
+		for (const UTerritoryDefinition* Child : AuthoredChildren)
+		{
+			if (!Child || !Child->TerritoryTag.IsValid() || SeenTags.Contains(Child->TerritoryTag)
+				|| Child->DerivedParentTerritoryTag != TerritoryTag)
+			{
+				// The same topology defect the reducer counts as InconsistentChildren. It is
+				// refused by that reducer and reported by UTerritoryDefinition::IsDataValid, so
+				// this is a refused reduction rather than a reconciliation deferred forever.
+				return false;
+			}
+			SeenTags.Add(Child->TerritoryTag);
+
+			const FReplicatedCaptureSummary ChildRow = GetCaptureSummary(Child->TerritoryTag);
+			if (ChildRow.TerritoryTag != Child->TerritoryTag
+				|| ChildRow.TerritoryGUID != Child->StableTerritoryGUID
+				|| ChildRow.ParentTerritoryTag != TerritoryTag
+				|| ChildRow.HierarchyLevel != GetDefinitionHierarchyLevel(Child))
+			{
+				return false;
+			}
+
+			// The child's own subtree, through the same rule: a resolved District whose Places
+			// are unresolved holds a last-known owner, and reading that as verified control is
+			// the upward propagation this contract forbids.
+			if (!IsHierarchyReductionComplete(Child->TerritoryTag, Visited)) return false;
+		}
+		return true;
+	}
+
+	// No authored definition is registered for this tag, so there is no authored child list to
+	// check identity against and the row's saved TotalChildren is the only child knowledge left.
+	// This branch is a strictly weaker reading than the one above, and it is reachable only for a
+	// row published by a runtime-only integration that carries no Definition (the
+	// bDefinitionBacked=false path in SetCaptureSummary) or for one whose authored tree has not
+	// been registered - on a server BeginPlay registers every CampaignCities tree, so a
+	// Definition-backed campaign row takes the branch above.
+	//
+	// It is left as a lower bound rather than an equality on purpose. Without authored data an
+	// extra row cannot be told from an obsolete one, and refusing on the equality would deny a
+	// parent permanently: the reducer cannot clean up a row it has no definition for either, so
+	// nothing would ever resolve it. Where the reducer has no opinion there is no reduction for
+	// this query to disagree with, which is the property that matters.
 	if (Row->HierarchyLevel == ETerritoryHierarchyLevel::Place) return true;
 
 	const ETerritoryHierarchyLevel ChildLevel =
@@ -1050,11 +1149,6 @@ bool ATerritoryWorldState::IsHierarchyReductionComplete(const FGameplayTag& Terr
 		if (!IsHierarchyReductionComplete(Child.TerritoryTag, Visited)) return false;
 	}
 
-	// TotalChildren is the authored direct-child count, so fewer rows than that means at least
-	// one authored child has no row at all. This is a lower bound rather than an equality: an
-	// extra row is never treated as missing data. The reduction's own identity requirement -
-	// exact tag, GUID, parent and level - is enforced per child by the two reducers, so a row
-	// that satisfies this count but not that test is refused there rather than here.
 	return ResolvedChildren >= Row->TotalChildren;
 }
 

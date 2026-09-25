@@ -251,7 +251,7 @@ bool FTFHierarchyCompletenessContract::RunTest(const FString& Parameters)
 		State->IsHierarchyReductionComplete(City->TerritoryTag));
 	TestEqual(TEXT("Case 2: the District's own row still resolves, so only the recursion denies it"),
 		State->GetCaptureSummary(District->TerritoryTag).TerritoryTag, District->TerritoryTag);
-	TestEqual(TEXT("Case 2: the District authors two Places, which is what the count compares against"),
+	TestEqual(TEXT("Case 2: the District authors two Places, which is what the authored walk requires"),
 		State->GetCaptureSummary(District->TerritoryTag).TotalChildren, 2);
 	TestEqual(TEXT("Case 2: a missing grandchild preserves the City's last verified owner"),
 		OwnerOf(City), Heroes);
@@ -327,6 +327,176 @@ bool FTFHierarchyCompletenessContract::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Premise: mixed ownership is still a loss"), OwnerOf(City).IsValid());
 	TestTrue(TEXT("Premise: the mixed-ownership loss is recorded"),
 		TenureOf(City).HasTagExact(Heroes));
+	return true;
+}
+
+/**
+ * The completeness query and the durable reducer are one rule, so a reduction the reducer refused can
+ * never be read as verified control.
+ *
+ * IsHierarchyReductionComplete counted rows whose parent and level matched and compared that count to
+ * the row's saved TotalChildren, while ReconcileUnloadedHierarchy classified each *authored* child by
+ * exact tag, GUID, parent and level. The two therefore disagreed in precisely the cases where it
+ * matters: a child row carrying the right tag and the wrong identity, an obsolete row standing in for
+ * a missing authored child, and a TotalChildren saved before the authored child list changed. In all
+ * three the reducer deferred and kept its last verified owner, while the query - the gate
+ * GetClaimedDistrictCountForFaction applies before a District may stage an assault - reported
+ * verified control.
+ *
+ * Every case drives the same three assertions: the query refuses, the retained owner is the one the
+ * reducer kept, and the eligibility consumer agrees with both. Against the cardinality rule the three
+ * "the query refuses it" assertions read complete and the three eligibility assertions read 1.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFHierarchyCompletenessIdentity,
+	"TerritoryFramework.WorldPartition.Regression.CompletenessIsIdentityNotCardinality",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFHierarchyCompletenessIdentity::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Identity world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); };
+	const auto Tag = [](const TCHAR* Value) { return FGameplayTag::RequestGameplayTag(Value); };
+	const FGameplayTag Heroes = Tag(TEXT("Narrative.Factions.Heroes"));
+	auto* City = NewObject<UTerritoryCityDefinition>();
+	auto* District = NewObject<UTerritoryDistrictDefinition>();
+	auto* First = NewObject<UTerritoryPlaceDefinition>();
+	auto* Second = NewObject<UTerritoryPlaceDefinition>();
+	City->TerritoryTag = Tag(TEXT("Territory.HavenReach"));
+	District->TerritoryTag = Tag(TEXT("Territory.HavenReach.MarketSquare"));
+	First->TerritoryTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	Second->TerritoryTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Warehouse"));
+	for (UTerritoryDefinition* Definition : TArray<UTerritoryDefinition*>{City, District, First, Second})
+	{
+		Definition->StableTerritoryGUID = FGuid::NewGuid();
+		Definition->InitialState = ETerritoryInitialState::Unclaimed;
+		Definition->InitialAvailability = ETerritoryAvailability::Unlocked;
+		Definition->InitialGuardCount = 0;
+	}
+	District->Places = {First, Second};
+	City->Districts = {District};
+	City->RefreshHierarchyLinks();
+	auto* State = World->SpawnActor<ATerritoryWorldState>();
+	State->CampaignCities = {City};
+	State->RefreshStrategicDirectory();
+	auto Publish = [&](UTerritoryPlaceDefinition* Definition, FGameplayTag Owner)
+	{
+		FReplicatedCaptureSummary Row = State->GetCaptureSummary(Definition->TerritoryTag);
+		Row.CurrentOwner = Owner;
+		Row.State = Owner.IsValid() ? ETerritoryState::Claimed : ETerritoryState::Unclaimed;
+		Row.Availability = ETerritoryAvailability::Unlocked;
+		State->SetCaptureSummary(Row);
+	};
+	const auto OwnerOf = [State](const UTerritoryDefinition* Definition)
+	{
+		return State->GetCaptureSummary(Definition->TerritoryTag).CurrentOwner;
+	};
+	const auto DropRow = [State](const UTerritoryDefinition* Definition)
+	{
+		State->ReplicatedCaptureSummaries.RemoveAll([Definition](const FReplicatedCaptureSummary& Row)
+		{
+			return Row.TerritoryTag == Definition->TerritoryTag;
+		});
+	};
+
+	Publish(First, Heroes);
+	Publish(Second, Heroes);
+	TestEqual(TEXT("Premise: a complete hierarchy secures the District"), OwnerOf(District), Heroes);
+	TestEqual(TEXT("Premise: a complete hierarchy secures the City"), OwnerOf(City), Heroes);
+	TestEqual(TEXT("Premise: a complete hierarchy stages its District"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 1);
+	// Captured while the reduction is known complete, so a later case can restore the exact rows an
+	// earlier one disturbed without re-deriving them.
+	const FReplicatedCaptureSummary DistrictRow = State->GetCaptureSummary(District->TerritoryTag);
+	const FReplicatedCaptureSummary SecondRow = State->GetCaptureSummary(Second->TerritoryTag);
+
+	// ─── Case 1: the right tag carrying the wrong identity is an unknown, not control ───
+	// The reducer refuses this row, because its GUID is not the authored child's. The query must
+	// refuse it too: a reused tag is how a recycled or corrupted row presents, and the identity test
+	// is the only thing that can tell it from the real child.
+	{
+		FReplicatedCaptureSummary Impostor = State->GetCaptureSummary(Second->TerritoryTag);
+		Impostor.TerritoryGUID = FGuid::NewGuid();
+		State->SetCaptureSummary(Impostor);
+		TestFalse(TEXT("Case 1: the query refuses a child carrying the wrong GUID"),
+			State->IsHierarchyReductionComplete(District->TerritoryTag));
+		TestEqual(TEXT("Case 1: the retained owner is the one the reducer kept"),
+			OwnerOf(District), Heroes);
+		TestEqual(TEXT("Case 1: a row the reducer refused is not staging eligibility"),
+			State->GetClaimedDistrictCountForFaction(Heroes), 0);
+		State->SetCaptureSummary(SecondRow);
+		TestTrue(TEXT("Case 1: the exact identity restores completeness"),
+			State->IsHierarchyReductionComplete(District->TerritoryTag));
+		TestEqual(TEXT("Case 1: and restores staging eligibility"),
+			State->GetClaimedDistrictCountForFaction(Heroes), 1);
+	}
+
+	// ─── Case 2: an obsolete row cannot stand in for a missing authored child ───
+	// The Farm belongs to a District this City does not author, so it is what content leaves behind
+	// when a Place is reparented or retired: a row with a valid tag, a valid GUID, this parent and
+	// this level, and no authored child to match. The authored walk never looks at it; the count rule
+	// read it as the missing Place and approved the reduction on the strength of it.
+	{
+		DropRow(Second);
+		FReplicatedCaptureSummary Orphan;
+		Orphan.TerritoryTag = Tag(TEXT("Territory.HavenReach.CastleHill.Farm"));
+		Orphan.TerritoryGUID = FGuid::NewGuid();
+		Orphan.ParentTerritoryTag = District->TerritoryTag;
+		Orphan.HierarchyLevel = ETerritoryHierarchyLevel::Place;
+		Orphan.State = ETerritoryState::Unclaimed;
+		Orphan.Availability = ETerritoryAvailability::Unlocked;
+		Orphan.bDefinitionBacked = true;
+		State->SetCaptureSummary(Orphan);
+		TestEqual(TEXT("Case 2: the two authored Places are the threshold the count compared against"),
+			State->GetCaptureSummary(District->TerritoryTag).TotalChildren, 2);
+		TestFalse(TEXT("Case 2: an obsolete row does not resolve the missing authored child"),
+			State->IsHierarchyReductionComplete(District->TerritoryTag));
+		TestEqual(TEXT("Case 2: the retained owner is the one the reducer kept"),
+			OwnerOf(District), Heroes);
+		TestEqual(TEXT("Case 2: an obsolete row grants no staging eligibility"),
+			State->GetClaimedDistrictCountForFaction(Heroes), 0);
+		State->ReplicatedCaptureSummaries.RemoveAll([&](const FReplicatedCaptureSummary& Row)
+		{
+			return Row.TerritoryTag == Orphan.TerritoryTag;
+		});
+		State->SetCaptureSummary(SecondRow);
+		TestTrue(TEXT("Case 2: restoring the authored child restores completeness"),
+			State->IsHierarchyReductionComplete(District->TerritoryTag));
+	}
+
+	// ─── Case 3: a count saved before the authored child list changed cannot approve it ───
+	// Registration refreshes TotalChildren, but a row restored by an in-place import keeps whatever
+	// the build that wrote it recorded, and nothing re-validates it against the authored list. One
+	// authored Place standing against a count of one reads complete - with the other authored Place
+	// gone.
+	{
+		DropRow(Second);
+		FReplicatedCaptureSummary Stale = DistrictRow;
+		Stale.TotalChildren = 1;
+		State->SetCaptureSummary(Stale);
+		TestEqual(TEXT("Case 3: the saved count is the narrower one this case is about"),
+			State->GetCaptureSummary(District->TerritoryTag).TotalChildren, 1);
+		TestFalse(TEXT("Case 3: a saved count cannot approve a reduction the authored list denies"),
+			State->IsHierarchyReductionComplete(District->TerritoryTag));
+		TestEqual(TEXT("Case 3: the retained owner is the one the reducer kept"),
+			OwnerOf(District), Heroes);
+		TestEqual(TEXT("Case 3: a stale count grants no staging eligibility"),
+			State->GetClaimedDistrictCountForFaction(Heroes), 0);
+	}
+
+	// ─── The refusals above are deferrals, not permanent stalls ───
+	// Same reason the topology-defect test gives: a parent that can never reconcile would be worse
+	// than one that commits a phantom result. Restoring the authored rows is all it takes, which is
+	// what makes refusing the right answer rather than merely the safe one.
+	State->SetCaptureSummary(DistrictRow);
+	State->SetCaptureSummary(SecondRow);
+	TestTrue(TEXT("The authored child list restores completeness"),
+		State->IsHierarchyReductionComplete(District->TerritoryTag));
+	TestTrue(TEXT("and the City above it"), State->IsHierarchyReductionComplete(City->TerritoryTag));
+	TestEqual(TEXT("The fixture returns to exactly what it staged before the cases"),
+		State->GetClaimedDistrictCountForFaction(Heroes), 1);
+	TestEqual(TEXT("and holds the owner it never lost"), OwnerOf(District), Heroes);
 	return true;
 }
 

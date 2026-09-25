@@ -594,6 +594,7 @@ private:
 	friend class FTFJournalTransactionRefresh;
 	friend class FTFUnloadedHierarchyReconciliation;
 	friend class FTFHierarchyCompletenessContract;
+	friend class FTFHierarchyCompletenessIdentity;
 	friend class FTFDirectoryRetirement;
 
 	friend class FTFWorldStateAssaultPersistenceRoundTrip;
