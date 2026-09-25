@@ -9,6 +9,13 @@ the subject of its own section.
 
 Adversarial-audit finding, claim 7: replication audience does not bound local server effects.
 
+> **Partly superseded 2026-09-25.** `CUTSCENE_SUPPRESSION_OWNERSHIP_2026-09-25.md` corrects the
+> release rule this batch shipped: the reconcile now releases only while a controller is still *owed*
+> a release for the current play-run, and it does so whether or not the sequence is paused. Two
+> paragraphs below - R3b in the red-leg list and the "A controller suppressed on a bystander after
+> arming is released" limitation - are the finding that prompted it and are each marked in place. The
+> engine facts, the audience resolution, the ordering argument and the harness record are unchanged.
+
 ## The mechanism
 
 Two engine facts decide the shape of any fix, and both were read in the engine source rather than
@@ -194,6 +201,14 @@ false); R3c the already-released gate removed (`Later frames release nothing...`
 breaks were run together because they are disjoint in attribution, and the group produced three
 separate assertion failures - one per break - which is what makes the grouping safe.
 
+> **Superseded 2026-09-25, by `CUTSCENE_SUPPRESSION_OWNERSHIP_2026-09-25.md`.** R1 and **R3b are
+> named here as this batch's evidence, and R3b was evidence for the wrong rule.** "A paused sequence
+> releases nobody" is the finding P2 #3 was raised against - the paused case left a controller the
+> cutscene was not for frozen for the whole pause - and the test carrying that assertion has been
+> renamed and inverted (`AudienceReconcileReleasesABystanderOfAPausedSequence`). R3b is no longer a
+> red leg in either direction. R1's other named assertion still holds. R3c and R3a survive unchanged.
+> The record's own caveats section below repeats the same error; it is corrected there too.
+
 ## The isolated listen-server harness
 
 Per the decision taken for this batch, the repository's default PIE configuration was **not** changed.
@@ -313,6 +328,15 @@ else freezes *after* arming and during the sequence is in `UncoveredControllers`
 The window is small and no producer in this plugin opens it, but it is a real edge rather than a
 theoretical one - the honest bound is "Territory releases a suppression it did not make, if that
 suppression began while its cutscene was already playing".
+
+> **Corrected 2026-09-25, by `CUTSCENE_SUPPRESSION_OWNERSHIP_2026-09-25.md`.** This paragraph is the
+> finding P2 #2 was raised against, written up here as an accepted bound. It was **not** small: the
+> window was the whole of playback, because a plain `UncoveredControllers` snapshot never forgot a
+> controller it had already released, so any suppression on that controller for the rest of the
+> cutscene was taken back - including a second cutscene legitimately staged for it. The bound is now
+> real rather than nominal: the pool decides who may ever be released, and `OwedReleases` decides who
+> is still owed one, so a suppression arriving after this sequence's own has been answered is left
+> alone. The paragraph's first sentence is still true; its second is not.
 
 **The launch used `-unattended -nosplash`**, which every run of this harness uses; it is not specific
 to this batch and is recorded only so that a reader does not take the runs for interactive ones.

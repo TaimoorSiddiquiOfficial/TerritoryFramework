@@ -114,6 +114,21 @@ void UTerritoryCutsceneTeardownComponent::ReconcileAfterPlaybackRequest()
 	HandleSequenceStopped();
 }
 
+void UTerritoryCutsceneTeardownComponent::HandleSequenceStarted()
+{
+	// The teardown is armed, so this actor is already on its way out and there is no sweep left to
+	// answer. Reachable: a Stop followed by a Play on the same player, inside the authored grace.
+	if (bTeardownArmed) return;
+
+	// Every play-start sweeps, so every controller in the pool is owed its release again. This is the
+	// whole of what makes a resume work: ULevelSequencePlayer::PlayInternal's own guard is
+	// `!IsPlaying()`, so a resume after a pause passes it and StartTimeControllerAndBroadcastPlayState
+	// re-arms bPendingOnStartedPlaying from the same function that broadcasts OnPlay - the engine
+	// suppresses the world all over again. Without this the reconcile would answer the first play-run
+	// only, and a resumed cutscene would hold a bystander frozen for the rest of its playback.
+	OwedReleases = UncoveredControllers;
+}
+
 void UTerritoryCutsceneTeardownComponent::ArmAudienceReconcile()
 {
 	// A client must never do this. Its own local controller is the audience for the server's
@@ -156,10 +171,24 @@ void UTerritoryCutsceneTeardownComponent::ArmAudienceReconcile()
 
 		// Something else already put this controller in cinematic mode. Releasing it would take back a
 		// suppression no part of this sequence asked for, so it is left exactly as it was found. This is
-		// the bound on how far the release reaches: it only ever undoes the sweep this sequence made.
+		// the first of the two bounds on how far the release reaches, and the one that needs no evidence
+		// to be decided: it is taken before this sequence has suppressed anything. The second is per
+		// play-start, and is held in OwedReleases.
 		if (Controller->bCinematicMode) continue;
 
 		UncoveredControllers.Add(Controller);
+	}
+
+	// Nothing is owed yet. The debt is incurred by this player's own play-start, below - not by arming,
+	// because a sweep that has not happened owes nothing and a controller frozen in the meantime was
+	// frozen by somebody else. A player that is *already* playing is the one other case: Play() has
+	// happened and the sweep it triggered has not, because bPendingOnStartedPlaying is consumed by the
+	// player's next position update rather than by Play() itself. Its debt is already incurred, so it
+	// is taken here rather than waited for on a binding that will never fire again.
+	OwedReleases.Reset();
+	if (const ULevelSequencePlayer* Player = SequencePlayer.Get())
+	{
+		if (Player->IsPlaying()) OwedReleases = UncoveredControllers;
 	}
 
 	if (UncoveredControllers.IsEmpty()) return;
@@ -167,15 +196,27 @@ void UTerritoryCutsceneTeardownComponent::ArmAudienceReconcile()
 	// Registered now, which is after UMovieSceneSequenceTickManager registered its own handler when
 	// the factory built the player - and that ordering is what puts this handler *before* playback
 	// ticks, not after. TMulticastDelegateBase::Broadcast calls its bound functions in reverse
-	// registration order (MulticastDelegateBase.h:299-300, whose own comment gives the reason: an
+	// registration order (MulticastDelegateBase.h:298-300, whose own comment gives the reason: an
 	// instance added by a callee must not be called in the same broadcast), so the newest binding
 	// runs first. The engine's suppression therefore lands after this handler has already looked, and
-	// the release it owes arrives on the following frame. See the class comment for why a one-frame
-	// lag is still the last word on that controller.
+	// the release it owes arrives on the following frame - which the owed list absorbs without
+	// noticing, because a release is not lost by arriving late, only by arriving twice.
 	ReconciledWorld = World;
 	SequenceTickHandle = World->AddMovieSceneSequenceTickHandler(
 		FOnMovieSceneSequenceTick::FDelegate::CreateUObject(
 			this, &UTerritoryCutsceneTeardownComponent::HandleSequenceTick));
+
+	// Both starts, not just OnPlay: bReversePlayback picks which one PlayInternal broadcasts, and while
+	// nothing in Territory asks for reverse playback, this component does not own the play call - it is
+	// handed a player by ScheduleAfterSequence. Missing a start costs a bystander the whole play-run,
+	// and the pair costs one line.
+	if (ULevelSequencePlayer* Player = SequencePlayer.Get())
+	{
+		Player->OnPlay.AddUniqueDynamic(this,
+			&UTerritoryCutsceneTeardownComponent::HandleSequenceStarted);
+		Player->OnPlayReverse.AddUniqueDynamic(this,
+			&UTerritoryCutsceneTeardownComponent::HandleSequenceStarted);
+	}
 
 	UE_LOG(LogTerritory, Log,
 		TEXT("[CutsceneTeardown] %s is staged for %d controller(s) and will release %d local controller(s) outside that audience"),
@@ -184,8 +225,18 @@ void UTerritoryCutsceneTeardownComponent::ArmAudienceReconcile()
 
 void UTerritoryCutsceneTeardownComponent::DisarmAudienceReconcile()
 {
-	// Reset the handle first: the release is one-way, and a world mid-teardown must not be asked to
-	// remove a handler it has already dropped with itself.
+	// Both hooks, and the play-start binding first: the release is one-way, so a start that arrives
+	// after the reconcile has handed its work back must not re-open a debt nothing will answer.
+	if (ULevelSequencePlayer* Player = SequencePlayer.Get())
+	{
+		Player->OnPlay.RemoveAll(this);
+		Player->OnPlayReverse.RemoveAll(this);
+	}
+
+	OwedReleases.Reset();
+
+	// Reset the handle before the world removes it: the release is one-way, and a world mid-teardown
+	// must not be asked to remove a handler it has already dropped with itself.
 	const FDelegateHandle Handle = SequenceTickHandle;
 	SequenceTickHandle.Reset();
 
@@ -217,30 +268,43 @@ void UTerritoryCutsceneTeardownComponent::HandleSequenceTick(float DeltaSeconds)
 		return;
 	}
 
-	// Only while it genuinely plays. EnableCinematicMode suppresses on a start and releases only on a
-	// real stop, so a paused sequence is deliberately still suppressing and releasing it here would
-	// hand a bystander control in the middle of a shot that is still on screen. The handler stays
-	// subscribed while paused, because playback can resume and the suppression would resume with it.
-	if (!Player->IsPlaying()) return;
-
-	// The actor's settings are the engine's own input to EnableCinematicMode, so releasing with them
-	// is the exact inverse of the call being undone - the same flags, the same argument order.
+	// Playback status deliberately does not gate this. What is being undone is this sequence's own
+	// sweep, and a sweep is not undone by a pause: the engine releases cinematic mode only from
+	// OnStopped, so a bystander still owed a release when a pause lands between the sweep and this
+	// handler would stay frozen for the whole pause. The audience - the controller the suppression is
+	// actually for - is not in this list, so leaving the gate off cannot release it.
 	const FMovieSceneSequencePlaybackSettings& Settings = Subject->PlaybackSettings;
 
-	for (TWeakObjectPtr<APlayerController>& Weak : UncoveredControllers)
+	for (int32 Index = OwedReleases.Num() - 1; Index >= 0; --Index)
 	{
-		APlayerController* Controller = Weak.Get();
-		if (!Controller) continue;
+		APlayerController* Controller = OwedReleases[Index].Get();
+		if (!Controller)
+		{
+			// Destroyed mid-cutscene. Dropped rather than held, because a release must never resurrect
+			// it and the debt can never be paid.
+			OwedReleases.RemoveAt(Index);
+			continue;
+		}
 
 		// This gate is what makes the loop affordable rather than a nicety. APlayerController's outer
 		// setter has no change guard - it assigns bCinematicMode and calls ClientSetCinematicMode, a
 		// reliable RPC, unconditionally - so an ungated release would send that RPC every frame for
-		// every bystander. After the first release the flag is false and every later frame costs one
-		// bool read.
+		// every bystander.
+		//
+		// It is also the "this one has not been answered yet" test, and the reason an owed release is a
+		// state rather than a one-shot: the frame between Play() and the sweep it triggers reads not
+		// cinematic, and the release it owes must survive that frame rather than be spent on it.
 		if (!Controller->bCinematicMode) continue;
 
+		// The actor's settings are the engine's own input to EnableCinematicMode, so releasing with them
+		// is the exact inverse of the call being undone - the same flags, the same argument order.
 		Controller->SetCinematicMode(false, Settings.bHidePlayer, Settings.bHideHud,
 			Settings.bDisableMovementInput, Settings.bDisableLookAtInput);
+
+		// Dropped, not merely flagged: the suppression this controller carries has now been answered, so
+		// anything that freezes it from here on - another cutscene's sweep, another system's cinematic -
+		// is not this sequence's to undo. Releasing it again is the defect this list exists to prevent.
+		OwedReleases.RemoveAt(Index);
 
 		UE_LOG(LogTerritory, Log,
 			TEXT("[CutsceneTeardown] Released %s, which is not in this cutscene's audience"),

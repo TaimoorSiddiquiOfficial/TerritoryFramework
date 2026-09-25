@@ -69,16 +69,46 @@ public:
 		if (Component) Component->HandleSequenceTick(0.f);
 	}
 
+	/**
+	 * One play-start, driven directly.
+	 *
+	 * Unlike SequenceStopped, this one is *not* here because the engine call is out of reach: Play()
+	 * runs synchronously in a headless fixture - NeedsQueueLatentAction is IsEvaluating(), which is
+	 * false outside an evaluation callback - so a test can reach the real OnPlay by resuming a paused
+	 * player, and does exactly that where the assertion is about the engine. This seam is for the other
+	 * kind of leg: the debt is incurred at a play-start whether or not playback is still running, so a
+	 * leg that wants to assert what an *unanswered* debt does has to be able to open one without the
+	 * engine also applying the suppression that the same call triggers.
+	 */
+	static void SequenceStarted(UTerritoryCutsceneTeardownComponent* Component)
+	{
+		if (Component) Component->HandleSequenceStarted();
+	}
+
 	/** How many controllers the reconcile resolved as outside the audience. */
 	static int32 UncoveredCount(const UTerritoryCutsceneTeardownComponent* Component)
 	{
 		return Component ? Component->UncoveredControllers.Num() : 0;
 	}
 
+	/** How many of them are still owed a release for the current play-run. */
+	static int32 OwedCount(const UTerritoryCutsceneTeardownComponent* Component)
+	{
+		return Component ? Component->OwedReleases.Num() : 0;
+	}
+
 	/** Whether the component is currently subscribed to the world's sequence tick. */
 	static bool HasTickSubscription(const UTerritoryCutsceneTeardownComponent* Component)
 	{
 		return Component && Component->SequenceTickHandle.IsValid();
+	}
+
+	/** Whether the component is currently answering this player's play-starts. */
+	static bool HasPlayStartBinding(const UTerritoryCutsceneTeardownComponent* Component)
+	{
+		return Component && Component->SequencePlayer.IsValid()
+			&& Component->SequencePlayer->OnPlay.Contains(Component,
+				GET_FUNCTION_NAME_CHECKED(UTerritoryCutsceneTeardownComponent, HandleSequenceStarted));
 	}
 
 	/** Whether the one teardown has already been armed for this actor. */
@@ -1405,6 +1435,12 @@ bool FTFTerritoryCinematicAudienceCovered::RunTest(const FString&)
 		FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(Teardown), 0);
 	TestFalse(TEXT("so no per-frame hook is taken"),
 		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+	// The play-start binding is the second hook the reconcile takes, and it is taken for the same
+	// reason - to incur a debt - so an inert reconcile must not have it either. A component that bound
+	// it without a pool would leave a live binding on the player for the life of the actor with
+	// nothing to do.
+	TestFalse(TEXT("and no play-start binding is taken either"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasPlayStartBinding(Teardown));
 
 	SuppressCinematics(Fixture.World, Cutscene->PlaybackSettings);
 	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
@@ -1461,6 +1497,8 @@ bool FTFTerritoryCinematicBystanderAlreadyFrozen::RunTest(const FString&)
 		FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(Teardown), 0);
 	TestFalse(TEXT("so this cutscene takes no per-frame hook"),
 		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+	TestFalse(TEXT("and no play-start binding, so its pool can never be re-opened"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasPlayStartBinding(Teardown));
 
 	// The engine sweeps it again, as it does in production - the freeze is re-applied with the
 	// cutscene's flags and must survive the reconcile untouched.
@@ -1475,7 +1513,7 @@ bool FTFTerritoryCinematicBystanderAlreadyFrozen::RunTest(const FString&)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicPausedSequence,
-	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileDoesNotReleaseAPausedSequence",
+	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileReleasesABystanderOfAPausedSequence",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FTFTerritoryCinematicPausedSequence::RunTest(const FString&)
@@ -1511,15 +1549,230 @@ bool FTFTerritoryCinematicPausedSequence::RunTest(const FString&)
 	TestFalse(TEXT("and no longer playing"), Player->IsPlaying());
 
 	SuppressCinematics(Fixture.World, Cutscene->PlaybackSettings);
+	TestEqual(TEXT("The pause did not stop the engine suppressing, which is what strands the bystander"),
+		Bystander->NumberEntering(), 1);
+
 	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
 
 	// A paused sequence has deliberately not stopped, and the engine releases cinematic mode only from
-	// a real stop. Releasing here would hand a bystander control in the middle of a shot that is still
-	// on screen - the very failure the audience bound must not introduce while fixing the other one.
-	TestEqual(TEXT("A paused sequence releases nobody"), Bystander->Num(), 1);
-	TestTrue(TEXT("so the bystander stays in cinematic mode"), Bystander->bCinematicMode);
-	TestTrue(TEXT("and the reconcile keeps its hook, because playback can resume"),
-		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(Teardown));
+	// a real stop - so this bystander would hold movement and look taken away for the whole of the
+	// pause, for a cutscene it is not in and may not even be able to see. The suppression being undone
+	// belongs to this sequence's own sweep; the pause does not change whose it is. A playback-status
+	// gate here is the defect, which is why the assertion is on the release and not on the hook.
+	TestEqual(TEXT("A paused sequence still releases the controller it is not for"),
+		Bystander->NumberLeaving(), 1);
+	TestFalse(TEXT("so the bystander gets control back while the shot is still on screen"),
+		Bystander->bCinematicMode);
+
+	// And the audience is what the pause is protecting, so it must be untouched by that. It is not in
+	// the pool at all: nothing this reconcile does can reach the controller the cutscene is for.
+	TestEqual(TEXT("The audience controller is never touched, paused or not"), Watcher->Num(), 1);
+	TestTrue(TEXT("and keeps the suppression its cutscene is for"), Watcher->bCinematicMode);
+
+	// Resume. This is the engine's own play-start, not the seam: Play() reaches
+	// StartTimeControllerAndBroadcastPlayState synchronously - PlayInternal's NeedsQueueLatentAction is
+	// IsEvaluating(), false outside an evaluation callback - so this asserts the binding production
+	// uses. The engine re-arms bPendingOnStartedPlaying there and sweeps the whole world again, so the
+	// bystander is frozen a second time and is owed a second release.
+	Player->Play();
+	TestTrue(TEXT("The sequence resumes"), Player->IsPlaying());
+	TestEqual(TEXT("and the resume is what re-opens the release, not the first play-start"),
+		FTFTerritoryCutsceneTeardownTestAccess::OwedCount(Teardown), 1);
+
+	SuppressCinematics(Fixture.World, Cutscene->PlaybackSettings);
+	TestEqual(TEXT("The resumed sequence suppresses the bystander all over again"),
+		Bystander->NumberEntering(), 2);
+
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	TestEqual(TEXT("So the resumed sequence releases it again"),
+		Bystander->NumberLeaving(), 2);
+	TestFalse(TEXT("and it is out of cinematic mode"), Bystander->bCinematicMode);
+
+	// A third frame releases nothing: the debt was paid by the frame above, and a reconcile that
+	// released whenever it saw the flag would send ClientSetCinematicMode for the rest of the shot.
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	TestEqual(TEXT("and a frame with nothing owed releases nothing"), Bystander->Num(), 4);
+	// The audience is swept by the engine on every play-start - twice here, once for the first run and
+	// once for the resume - and released by this reconcile never. That is what makes the audience bound
+	// structural rather than a matter of timing: the pool is decided before any suppression exists, and
+	// the audience is not in it, so no frame this component ever sees can reach it.
+	TestEqual(TEXT("The engine swept the audience controller on both play-starts"),
+		Watcher->NumberEntering(), 2);
+	TestEqual(TEXT("while the reconcile never released it, on any frame"),
+		Watcher->NumberLeaving(), 0);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicLaterSuppressionSurvives,
+	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileLeavesALaterSuppressionAlone",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicLaterSuppressionSurvives::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	ATerritoryCinematicRecordingController* Watcher = MakeRecordingViewer(Fixture.World, Heroes);
+	ATerritoryCinematicRecordingController* Bystander = MakeRecordingViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("The audience controller can be built"), Watcher);
+	TestNotNull(TEXT("A second local controller can be built"), Bystander);
+	if (!Watcher || !Bystander) return false;
+
+	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
+		MakeSequence(Fixture.World));
+	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+
+	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	UTerritoryCutsceneTeardownComponent* Teardown = TeardownOn(Cutscene);
+	TestNotNull(TEXT("The cutscene has a teardown observer"), Teardown);
+	if (!Teardown) return false;
+
+	const FMovieSceneSequencePlaybackSettings& Settings = Cutscene->PlaybackSettings;
+
+	SuppressCinematics(Fixture.World, Settings);
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	TestEqual(TEXT("The bystander is released while the cutscene plays"), Bystander->NumberLeaving(), 1);
+
+	// A later suppression on the same controller, with the engine's own arguments
+	// (LevelSequencePlayer.cpp:395). This is the shape of any cinematic that starts after ours - a
+	// second cutscene staged for this controller, a vendor dialogue shot, another system's freeze - and
+	// every one of them reaches this controller through this same call, which is the point: nothing in
+	// the engine records *which* sequence put a controller in cinematic mode, so the only thing that
+	// can tell this suppression from our own is when it arrived relative to our sweep.
+	Bystander->SetCinematicMode(true, Settings.bHidePlayer, Settings.bHideHud,
+		Settings.bDisableMovementInput, Settings.bDisableLookAtInput);
+	TestTrue(TEXT("Something else freezes the bystander later in our own playback"),
+		Bystander->bCinematicMode);
+
+	// This is the finding in one assertion. The suppression above is not ours to undo - our own sweep was
+	// answered by an earlier frame - and bCinematicMode is a bare bool that cannot say so. Only the debt
+	// can, and it is paid: a reconcile that kept releasing whatever it found in cinematic mode would take
+	// this controller's suppression back here and on every frame after it, for the whole of a cutscene
+	// it is not in.
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+
+	// Three calls and no fourth: the engine's suppression, this reconcile's release, and then the later
+	// freeze - which is left standing. A released-then-refrozen controller is exactly the case the bare
+	// bool cannot describe, so the count is the assertion rather than the flag.
+	TestEqual(TEXT("The later suppression is left exactly as it was found"), Bystander->Num(), 3);
+	TestTrue(TEXT("so the bystander is still in cinematic mode"), Bystander->bCinematicMode);
+	TestEqual(TEXT("and the reconcile has nothing left to pay, so it is owed nothing"),
+		FTFTerritoryCutsceneTeardownTestAccess::OwedCount(Teardown), 0);
+
+	// The audience is untouched throughout, which is what makes the two bounds independent: this one is
+	// about a controller that was released and then frozen again, and the audience was never released.
+	TestEqual(TEXT("nor does any of this release the audience controller"), Watcher->NumberLeaving(), 0);
+	TestTrue(TEXT("which keeps the suppression its own cutscene is for"), Watcher->bCinematicMode);
+
+	DestroyCutscenes(Fixture.World);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryCinematicUnansweredDebt,
+	"TerritoryFramework.Presentation.Cutscenes.AudienceReconcileHoldsAReleaseUntilItsSweepLands",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryCinematicUnansweredDebt::RunTest(const FString&)
+{
+	using namespace TerritoryCutsceneTests;
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const FGameplayTag Heroes =
+		FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+
+	FWorldFixture Fixture;
+	ATerritoryCinematicRecordingController* Watcher = MakeRecordingViewer(Fixture.World, Heroes);
+	ATerritoryCinematicRecordingController* Bystander = MakeRecordingViewer(Fixture.World, Heroes);
+	TestNotNull(TEXT("The audience controller can be built"), Watcher);
+	TestNotNull(TEXT("A second local controller can be built"), Bystander);
+	if (!Watcher || !Bystander) return false;
+
+	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
+		MakeSequence(Fixture.World));
+	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+
+	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
+	TestNotNull(TEXT("The cutscene starts"), Cutscene);
+	if (!Cutscene) return false;
+
+	UTerritoryCutsceneTeardownComponent* Teardown = TeardownOn(Cutscene);
+	TestNotNull(TEXT("The cutscene has a teardown observer"), Teardown);
+	if (!Teardown) return false;
+
+	// What the debt has to be, for the two tests above to work. The engine's sweep is not synchronous
+	// with Play(): bPendingOnStartedPlaying is consumed by the player's next position update, so there
+	// is a frame where the play-start has happened and the suppression has not - and on that frame the
+	// reconcile runs *before* the tick manager, so the frame is every frame in production rather than a
+	// corner. A release that were spent on it would release nobody. It is owed across that frame and
+	// paid on the first frame the suppression is actually there, which is what these assertions pin.
+	// (This leg is a guard on the design, not a red leg: the previous two tests are the ones that fail
+	// against the released code.)
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceStarted(Teardown);
+	TestEqual(TEXT("A play-start owes the pool a release, before anything is suppressed"),
+		FTFTerritoryCutsceneTeardownTestAccess::OwedCount(Teardown), 1);
+
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	TestEqual(TEXT("A frame where the sweep has not landed releases nobody"), Bystander->Num(), 0);
+	TestEqual(TEXT("and stays owed rather than being spent on that frame"),
+		FTFTerritoryCutsceneTeardownTestAccess::OwedCount(Teardown), 1);
+
+	SuppressCinematics(Fixture.World, Cutscene->PlaybackSettings);
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(Teardown);
+	TestEqual(TEXT("So the debt is paid on the first frame the sweep has landed, not the first frame after the start"),
+		Bystander->NumberLeaving(), 1);
+	TestFalse(TEXT("and the bystander really is out of cinematic mode"), Bystander->bCinematicMode);
+
+	// The other half of the same rule, and the one the first bound in ArmAudienceReconcile rests on:
+	// nothing is owed before a play-start. Arming is not a start, so a sequence that has been armed but
+	// never played holds no debt, takes the play-start binding that would incur one, and releases
+	// nothing at all - including a controller that something else freezes while it waits.
+	//
+	// The bystander is free at this point, having just been released, which is what puts it in this
+	// second cutscene's pool rather than being excluded the way the already-frozen test's controller is.
+	FNarrativeSequencePlaybackSettings Settings;
+	Settings.bAutoPlay = false;
+	Settings.bPauseAtEnd = false;
+	Settings.bDisableMovementInput = true;
+	Settings.bDisableLookAtInput = true;
+	Settings.bHidePlayer = true;
+	Settings.bHideHud = true;
+	ANarrativeLevelSequenceActor* Fresh = SpawnCutscene(Fixture.World, Watcher, Settings);
+	TestNotNull(TEXT("A cutscene can be built and left unplayed"), Fresh);
+	if (!Fresh) return false;
+
+	UTerritoryCutsceneTeardownComponent* FreshTeardown =
+		UTerritoryCutsceneTeardownComponent::ScheduleAfterSequence(Fresh, 1.f);
+	TestNotNull(TEXT("Teardown arms for a cutscene that has not started playing"), FreshTeardown);
+	if (!FreshTeardown) return false;
+
+	TestTrue(TEXT("Arming alone takes the play-start binding that will incur the debt"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasPlayStartBinding(FreshTeardown));
+	TestTrue(TEXT("and takes the world hook, because it does have a controller to bound"),
+		FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(FreshTeardown));
+	TestEqual(TEXT("but owes nothing yet, because nothing of its has swept"),
+		FTFTerritoryCutsceneTeardownTestAccess::OwedCount(FreshTeardown), 0);
+
+	// Something else freezes the bystander while that sequence is still waiting for its first
+	// play-start. The call is the engine's own, with the same arguments, because there is no other
+	// shape it could have: this is what any later cinematic does to any controller, and the engine
+	// keeps no record of which sequence made it.
+	Bystander->SetCinematicMode(true, true, true, true, true);
+	TestEqual(TEXT("The bystander is suppressed again by something outside this cutscene"),
+		Bystander->Num(), 3);
+	TestTrue(TEXT("and is in cinematic mode"), Bystander->bCinematicMode);
+
+	FTFTerritoryCutsceneTeardownTestAccess::SequenceTick(FreshTeardown);
+	TestEqual(TEXT("A sequence that has not started releases nothing somebody else froze"),
+		Bystander->Num(), 3);
+	TestTrue(TEXT("and leaves it in cinematic mode"), Bystander->bCinematicMode);
 
 	DestroyCutscenes(Fixture.World);
 	return true;
@@ -1701,6 +1954,8 @@ bool FTFTerritoryCinematicNothingToBound::RunTest(const FString&)
 			FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(EveryoneTeardown), 0);
 		TestFalse(TEXT("and no per-frame hook is taken"),
 			FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(EveryoneTeardown));
+		TestFalse(TEXT("nor a play-start binding, so a later start cannot re-open it"),
+			FTFTerritoryCutsceneTeardownTestAccess::HasPlayStartBinding(EveryoneTeardown));
 	}
 
 	// A sequence that suppresses nothing. EnableCinematicMode returns before touching a controller
@@ -1725,6 +1980,8 @@ bool FTFTerritoryCinematicNothingToBound::RunTest(const FString&)
 				FTFTerritoryCutsceneTeardownTestAccess::UncoveredCount(SilentTeardown), 0);
 			TestFalse(TEXT("so it takes no per-frame hook either"),
 				FTFTerritoryCutsceneTeardownTestAccess::HasTickSubscription(SilentTeardown));
+			TestFalse(TEXT("and no play-start binding either"),
+				FTFTerritoryCutsceneTeardownTestAccess::HasPlayStartBinding(SilentTeardown));
 
 			// Nothing suppressed the bystander, so there is nothing for the reconcile to release - and
 			// this is the half a count alone cannot show: a reconcile that resolved the bystander and

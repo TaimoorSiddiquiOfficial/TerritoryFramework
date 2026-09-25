@@ -37,12 +37,32 @@ class ULevelSequencePlayer;
  * its own world with no audience input at all - it never consults OwnerControllers, which the vendor
  * only applies to net relevancy. On a listen server, a cutscene staged for one player therefore
  * suppresses movement and look on every local controller that world has, including the host watching
- * someone else's cutscene. This component releases exactly the controllers the audience does not name,
- * one frame after the engine suppresses them, and only while the sequence is genuinely playing.
+ * someone else's cutscene. This component releases exactly the controllers the audience does not name.
  *
  * That release is Territory-owned rather than a change to the flags, because PlaybackSettings
  * replicates: stripping the flags on the authority would strip them on the audience client too, which
  * is the one client that should keep them.
+ *
+ * It is bounded twice, and both bounds are needed because APlayerController::bCinematicMode is a bare
+ * bool: it reports that a controller is suppressed and never reports by whom.
+ *
+ * The first bound is decided before any suppression exists. A controller already in cinematic mode
+ * when this is armed is not in the pool at all - something else put it there deliberately.
+ *
+ * The second is per sweep. The engine does not sweep once per player, it sweeps once per *play-start*:
+ * PlayInternal's own guard is `!IsPlaying()`, so a resume from a pause passes it, and
+ * StartTimeControllerAndBroadcastPlayState re-arms bPendingOnStartedPlaying from the same function
+ * that broadcasts OnPlay. So each play-start owes the pool one release, and a controller leaves that
+ * debt the moment it is paid. A controller suppressed while it is still owed was suppressed by this
+ * sequence's most recent sweep; one suppressed after its release was suppressed by something else,
+ * and is left alone. Without that second bound the reconcile would take back any cinematic call in
+ * the world, its own or not, for the whole of playback.
+ *
+ * No playback-status gate belongs on the release, for the same reason. The engine's own release comes
+ * only from OnStopped, so a bystander still owed when a pause lands between the sweep and the handler
+ * would stay frozen for the whole pause - movement and look taken from a player the cutscene is not
+ * for, for as long as somebody else is watching one. Releasing it cannot touch the audience, which is
+ * what the suppression is for and is not in the pool.
  *
  * The per-frame hook is the world's MovieSceneSequenceTick delegate, not this component's tick. The
  * sequence player is ticked by UMovieSceneSequenceTickManager, which registers on that same delegate,
@@ -56,10 +76,10 @@ class ULevelSequencePlayer;
  * because the ordering is not the obvious one. A multicast delegate invokes in *reverse* registration
  * order, so this handler - registered after the tick manager - runs *before* playback ticks, not after.
  * The release therefore lands on the frame following the engine's suppression rather than inside the
- * same one. That is sound only because the reconcile repeats: the engine suppresses once, on the
- * player's first update after Play(), from a flag that never re-arms, so a release that arrives one
- * frame later is the last word on that controller. Repeating is also why the bCinematicMode gate is
- * load-bearing rather than an optimisation.
+ * same one, and an owed release is what makes that lag harmless: the first frame the controller reads
+ * cinematic is the frame it is released on, whenever that frame arrives. That is also why the
+ * bCinematicMode gate is load-bearing rather than an optimisation - it is the test for "this one has
+ * not been answered yet".
  *
  * Authority note: the destruction is server-authoritative and replicates like any other actor
  * removal. Nothing here is saved - the sequence actor is spawned RF_Transient - so this changes no
@@ -127,24 +147,41 @@ private:
 	/** One sequence has ended. Arms the teardown exactly once for this actor. */
 	UFUNCTION() void HandleSequenceStopped();
 
+	/**
+	 * One play-start, which is one sweep of the engine's to answer.
+	 *
+	 * Bound to the player's own OnPlay and OnPlayReverse, because they are the last thing
+	 * StartTimeControllerAndBroadcastPlayState does before the engine re-arms the suppression it is
+	 * about to apply - so this is the exact frame at which the debt is incurred, rather than a frame
+	 * later when a poll of IsPlaying() would notice it.
+	 */
+	UFUNCTION() void HandleSequenceStarted();
+
 	/** Release the player bindings. Safe to call more than once. */
 	void UnbindFromPlayer();
 
 	/**
-	 * Resolve the local controllers this sequence would wrongly suppress and subscribe the reconcile.
+	 * Resolve the local controllers this sequence would wrongly suppress, and take the two hooks the
+	 * reconcile needs: the world's sequence tick, and the player's play-start.
 	 *
-	 * Does nothing - and holds no tick - when there is nothing to bound: no authority, an audience the
-	 * vendor left empty (its own "everyone", which makes the engine's sweep correct), a sequence with
-	 * none of the four cinematic flags authored (so EnableCinematicMode never touches a controller),
-	 * or a world whose local controllers the audience already covers. Those are the single-player,
-	 * client and dedicated-server cases, and they are inert by construction rather than by a test.
+	 * Does nothing - and takes neither hook - when there is nothing to bound: no authority, an audience
+	 * the vendor left empty (its own "everyone", which makes the engine's sweep correct), a sequence
+	 * with none of the four cinematic flags authored (so EnableCinematicMode never touches a
+	 * controller), or a world whose local controllers the audience already covers. Those are the
+	 * single-player, client and dedicated-server cases, and they are inert by construction rather than
+	 * by a test.
 	 */
 	void ArmAudienceReconcile();
 
-	/** Drop the world tick subscription. Safe to call more than once, and with no world left. */
+	/** Drop both reconcile hooks. Safe to call more than once, and with no world left. */
 	void DisarmAudienceReconcile();
 
-	/** The world's per-frame sequence tick. Releases uncovered controllers while playback runs. */
+	/**
+	 * The world's per-frame sequence tick. Pays the releases the last play-start owes.
+	 *
+	 * Runs whether or not the sequence is still playing, deliberately: see the class comment on why no
+	 * playback-status gate belongs here.
+	 */
 	void HandleSequenceTick(float DeltaSeconds);
 
 	UPROPERTY(Transient) TObjectPtr<ANarrativeLevelSequenceActor> SequenceActor;
@@ -158,8 +195,26 @@ private:
 	 * Weak, because a controller can be destroyed while the cutscene plays and a release must never
 	 * resurrect it. A controller that was already in cinematic mode when this was armed is excluded:
 	 * something else put it there deliberately, and Territory has no standing to take it back.
+	 *
+	 * This is the pool - it decides which controllers this component may *ever* release, once, before
+	 * there is any suppression to misread. What is currently owed a release is OwedReleases.
 	 */
 	TArray<TWeakObjectPtr<APlayerController>> UncoveredControllers;
+
+	/**
+	 * Of that pool, the controllers still owed a release for the current play-run.
+	 *
+	 * Filled from the pool on every play-start and emptied as each release lands. That is what makes
+	 * the release attributable without an owner field on bCinematicMode: the engine applies its
+	 * suppression to every local controller on each play-start, so a controller that reads cinematic
+	 * while it is still owed was suppressed by this sequence's most recent sweep, and one that reads
+	 * cinematic after its release was suppressed by somebody else.
+	 *
+	 * Empty is also the "no sweep of ours can exist yet" state. Nothing is owed until this player
+	 * reaches a play-start, so a controller another system freezes while this sequence is still arming
+	 * - or one that never plays at all - is never released.
+	 */
+	TArray<TWeakObjectPtr<APlayerController>> OwedReleases;
 
 	TWeakObjectPtr<UWorld> ReconciledWorld;
 	FDelegateHandle SequenceTickHandle;
