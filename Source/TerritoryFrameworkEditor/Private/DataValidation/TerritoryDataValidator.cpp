@@ -7,6 +7,7 @@
 #include "Core/TerritorySavableData.h"
 #include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Core/TerritoryFloorVolume.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
@@ -29,6 +30,7 @@
 #include "Vehicles/MountComponent.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 #include "Components/ShapeComponent.h"
+#include "Components/BoxComponent.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -901,6 +903,7 @@ bool UTerritoryDataValidator::ValidateLevel(ULevel* Level, TArray<FString>& OutE
 	CheckGuardPostBindings(Level, OutWarnings);
 	CheckPatrolContainment(Level, OutWarnings);
 	CheckGuardDeploymentFeasibility(Level, OutWarnings);
+	CheckFloorVolumes(Level, OutErrors, OutWarnings);
 	CheckMissingParentTags(Level, OutWarnings);
 
 	for (ATerritoryVolume* Territory : GetActorsForValidation<ATerritoryVolume>(Level))
@@ -936,6 +939,11 @@ bool UTerritoryDataValidator::ValidateWorld(UWorld* World, TArray<FString>& OutE
 
 		PinActorClass(ATerritoryVolume::StaticClass());
 		PinActorClass(ATerritoryGuardSpawnPoint::StaticClass());
+		// Floor regions are pinned for the same reason as everything else here, and the consequence
+		// of missing one is specific: a floor volume that has not streamed in is indistinguishable
+		// from a floor with no region authored, so CheckFloorVolumes would warn that a correctly
+		// separated floor is unseparated.
+		PinActorClass(ATerritoryFloorVolume::StaticClass());
 		PinActorClass(ATerritoryWorldState::StaticClass());
 		PinActorClass(ATerritorySavableData::StaticClass());
 	}
@@ -2652,9 +2660,12 @@ void UTerritoryDataValidator::CheckGuardDeploymentFeasibility(ULevel* Level, TAr
 	// the gap between the two is exactly a dead floor.
 	for (ATerritoryVolume* Territory : Index.Territories)
 	{
-		const UTerritoryDefinition* Definition =
-			Territory ? Territory->GetTerritoryDefinition() : nullptr;
-		if (!Definition || !Definition->HasAuthoredFloors()) continue;
+		// Floors are authored on the Place and nowhere else: an aggregate owns no defenders and so
+		// declares no floor rows. Resolving the Place here is therefore both the type-safe read and
+		// the correct scope - a City or a District has no dead-floor case to report.
+		const UTerritoryPlaceDefinition* PlaceDefinition = Territory
+			? Cast<UTerritoryPlaceDefinition>(Territory->GetTerritoryDefinition()) : nullptr;
+		if (!PlaceDefinition || PlaceDefinition->Floors.IsEmpty()) continue;
 
 		const TSet<int32>* const Staffable = StaffableFloors.Find(Territory);
 
@@ -2679,7 +2690,7 @@ void UTerritoryDataValidator::CheckGuardDeploymentFeasibility(ULevel* Level, TAr
 				TEXT("; the rows this level's posts are bound to put them on floor(s) %s"),
 				*FString::Join(CreditedFloors, TEXT(", ")));
 		}
-		for (const FTerritoryFloorTemplate& Floor : Definition->Floors)
+		for (const FTerritoryFloorTemplate& Floor : PlaceDefinition->Floors)
 		{
 			if (Floor.DesiredGuards <= 0) continue;
 			if (Staffable && Staffable->Contains(Floor.FloorIndex)) continue;
@@ -2752,6 +2763,182 @@ int32 UTerritoryDataValidator::ResolveAuthoredPostFloor(const ATerritoryGuardSpa
 	// ApplyTerritoryDefinition finds no matching row — so this value only keeps a post that is
 	// already reported elsewhere from being credited to a floor it does not have.
 	return SpawnPoint->GetFloorIndex();
+}
+
+void UTerritoryDataValidator::CheckFloorVolumes(ULevel* Level, TArray<FString>& OutErrors,
+	TArray<FString>& OutWarnings)
+{
+	if (!Level) return;
+
+	// Floor regions are level actors, so every finding here is a property of this level. A Place
+	// whose Definition authors floors but which has no regions placed is the ordinary case this
+	// check exists to report, so an empty region list is not an early-out.
+	const TArray<ATerritoryFloorVolume*> Volumes = GetActorsForValidation<ATerritoryFloorVolume>(Level);
+
+	/** Regions in this level that resolved to a Place, grouped by the floor each one claims. */
+	TMap<const UTerritoryPlaceDefinition*, TMap<int32, TArray<ATerritoryFloorVolume*>>> VolumesByFloor;
+
+	// ─── Every region must name a floor row that exists ───
+	for (ATerritoryFloorVolume* Volume : Volumes)
+	{
+		if (!Volume) continue;
+
+		const FString Label = Volume->GetActorLabel();
+		const UTerritoryPlaceDefinition* const PlaceDefinition = Volume->GetPlaceDefinition();
+		if (!PlaceDefinition)
+		{
+			OutErrors.Add(FString::Printf(
+				TEXT("Floor volume '%s' names no Place Definition, so it registers without an owner tag and no floor lookup can ever reach it"),
+				*Label));
+			continue;
+		}
+
+		if (!PlaceDefinition->FindFloor(Volume->FloorIndex))
+		{
+			OutErrors.Add(FString::Printf(
+				TEXT("Floor volume '%s' claims floor %d of %s, which authors no such floor row; the region can never be reached, and it does not separate anything"),
+				*Label, Volume->FloorIndex,
+				PlaceDefinition->DisplayName.IsEmpty()
+					? *PlaceDefinition->GetName() : *PlaceDefinition->DisplayName.ToString()));
+			continue;
+		}
+
+		VolumesByFloor.FindOrAdd(PlaceDefinition).FindOrAdd(Volume->FloorIndex).Add(Volume);
+	}
+
+	// ─── Two regions of one Place claiming different floors over the same space ───
+	//
+	// The resolver decides this deterministically: the smaller region wins, with the volume GUID
+	// breaking an exact tie. That is the right runtime behaviour, but an author who placed two
+	// regions over one doorway has almost certainly not reasoned about it, so the consequence is
+	// named here instead of being left to be discovered in play.
+	//
+	// Both loops below run over sorted keys. A TMap's iteration order is not stable, and this check's
+	// output is a release gate, so the same level must always produce the same warnings in the same
+	// order.
+	TArray<FString> PlaceNames;
+	TMap<FString, const UTerritoryPlaceDefinition*> PlaceByName;
+	for (const TPair<const UTerritoryPlaceDefinition*, TMap<int32, TArray<ATerritoryFloorVolume*>>>& Pair : VolumesByFloor)
+	{
+		if (!Pair.Key) continue;
+		const FString Name = Pair.Key->GetName();
+		PlaceNames.AddUnique(Name);
+		PlaceByName.Add(Name, Pair.Key);
+	}
+	PlaceNames.Sort();
+
+	for (const FString& PlaceNameKey : PlaceNames)
+	{
+		const UTerritoryPlaceDefinition* const PlaceDefinition = PlaceByName.FindRef(PlaceNameKey);
+		const TMap<int32, TArray<ATerritoryFloorVolume*>>* const VolumesOnFloor =
+			VolumesByFloor.Find(PlaceDefinition);
+		if (!PlaceDefinition || !VolumesOnFloor) continue;
+
+		const FString PlaceName = PlaceDefinition->DisplayName.IsEmpty()
+			? PlaceDefinition->GetName() : PlaceDefinition->DisplayName.ToString();
+
+		TArray<int32> FloorIndices;
+		VolumesOnFloor->GetKeys(FloorIndices);
+		FloorIndices.Sort();
+
+		for (int32 Outer = 0; Outer < FloorIndices.Num(); ++Outer)
+		{
+			const TArray<ATerritoryFloorVolume*>* const OuterVolumes =
+				VolumesOnFloor->Find(FloorIndices[Outer]);
+			if (!OuterVolumes) continue;
+
+			for (int32 Inner = Outer + 1; Inner < FloorIndices.Num(); ++Inner)
+			{
+				const TArray<ATerritoryFloorVolume*>* const InnerVolumes =
+					VolumesOnFloor->Find(FloorIndices[Inner]);
+				if (!InnerVolumes) continue;
+
+				for (const ATerritoryFloorVolume* const A : *OuterVolumes)
+				{
+					for (const ATerritoryFloorVolume* const B : *InnerVolumes)
+					{
+						if (!A || !B || !FloorVolumesOverlap(A, B)) continue;
+						OutWarnings.Add(FString::Printf(
+							TEXT("%s: floor volume '%s' (floor %d) and '%s' (floor %d) overlap; a point in the overlap resolves to the smaller region, with the volume GUID breaking an exact tie, so the floor a guard there belongs to is decided by the resolver rather than by the authored intent"),
+							*PlaceName, *A->GetActorLabel(), FloorIndices[Outer],
+							*B->GetActorLabel(), FloorIndices[Inner]));
+					}
+				}
+			}
+		}
+	}
+
+	// ─── A floor that staffs guards, with no region to separate it ───
+	//
+	// Scoped to floors that actually carry guard posts. A floor row with no posts cannot hold a
+	// guard, so it cannot be separated from anything, and warning about it would flag every
+	// story-only floor row that exists purely to drive a cleared event.
+	TSet<const UTerritoryPlaceDefinition*> ReportedDefinitions;
+	for (ATerritoryVolume* Territory : GetActorsForValidation<ATerritoryVolume>(Level))
+	{
+		const UTerritoryPlaceDefinition* const PlaceDefinition = Territory
+			? Cast<UTerritoryPlaceDefinition>(Territory->GetTerritoryDefinition()) : nullptr;
+		if (!PlaceDefinition || PlaceDefinition->Floors.IsEmpty()) continue;
+
+		// One report per Place definition, not per actor: two actors bound to one definition would
+		// otherwise repeat the same finding for the same authored floors.
+		if (ReportedDefinitions.Contains(PlaceDefinition)) continue;
+		ReportedDefinitions.Add(PlaceDefinition);
+
+		const TMap<int32, TArray<ATerritoryFloorVolume*>>* const Claimed =
+			VolumesByFloor.Find(PlaceDefinition);
+
+		// Sorted so a definition's floors are always reported in index order.
+		TArray<int32> AuthoredFloorIndices;
+		for (const FTerritoryFloorTemplate& Floor : PlaceDefinition->Floors)
+		{
+			AuthoredFloorIndices.AddUnique(Floor.FloorIndex);
+		}
+		AuthoredFloorIndices.Sort();
+
+		for (const int32 FloorIndex : AuthoredFloorIndices)
+		{
+			const int32 PostCount = PlaceDefinition->GetFloorGuardPostCount(FloorIndex);
+			if (PostCount <= 0) continue;
+			if (Claimed && Claimed->Contains(FloorIndex)) continue;
+
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: floor %d staffs %d guard post(s) but no floor volume in this level claims it; guards on that floor engage targets on every floor, and its floor-cleared events cannot be gated on that floor being emptied"),
+				*Territory->GetActorLabel(), FloorIndex, PostCount));
+		}
+	}
+}
+
+bool UTerritoryDataValidator::FloorVolumesOverlap(
+	const ATerritoryFloorVolume* A, const ATerritoryFloorVolume* B)
+{
+	const UBoxComponent* const BoxA = A ? A->FloorBounds : nullptr;
+	const UBoxComponent* const BoxB = B ? B->FloorBounds : nullptr;
+	if (!BoxA || !BoxB) return false;
+
+	// Axis-aligned pre-filter. A rotated region's bound is looser than the region itself, so this
+	// can only ever admit a candidate that the containment test below then rejects - never the
+	// other way round.
+	if (!BoxA->Bounds.GetBox().Intersect(BoxB->Bounds.GetBox())) return false;
+
+	// Confirmed with the real containment query rather than the axis-aligned bound, so two rotated
+	// regions that merely share an AABB corner are not reported as overlapping.
+	const auto AnyCornerInside = [](const UBoxComponent* Source, const ATerritoryFloorVolume* Target)
+	{
+		const FTransform& SourceTransform = Source->GetComponentTransform();
+		const FVector Extent = Source->GetUnscaledBoxExtent();
+		for (int32 Corner = 0; Corner < 8; ++Corner)
+		{
+			const FVector Local(
+				(Corner & 1) ? Extent.X : -Extent.X,
+				(Corner & 2) ? Extent.Y : -Extent.Y,
+				(Corner & 4) ? Extent.Z : -Extent.Z);
+			if (Target->ContainsPoint(SourceTransform.TransformPosition(Local))) return true;
+		}
+		return false;
+	};
+
+	return AnyCornerInside(BoxA, B) || AnyCornerInside(BoxB, A);
 }
 
 void UTerritoryDataValidator::CheckMissingParentTags(ULevel* Level, TArray<FString>& OutWarnings)

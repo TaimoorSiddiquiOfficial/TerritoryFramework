@@ -238,8 +238,19 @@ public:
 		meta=(EditCondition="bUsePlayerRelativeReserveStaging", ClampMin="0.0", ClampMax="1.0", ToolTip="Preferred absolute view dot. Around 0.55 places arrivals near the left or right camera edge instead of directly in front or behind."))
 	float PreferredCameraEdgeDot = 0.55f;
 
+	/**
+	 * Approach SCORING only. This is a soft preference inside the reserve-staging sort: a
+	 * height difference beyond the tolerance makes an approach less attractive, it never
+	 * rejects one, and nothing is excluded at any height. It is read only when
+	 * bUsePlayerRelativeReserveStaging is on, and it compares against the player pawn's Z.
+	 *
+	 * It is deliberately NOT the floor-membership authority. "Which floor is this actor on"
+	 * is answered by UTerritoryRegistrySubsystem::GetFloorAtLocation from authored floor
+	 * volumes, which is the single answer combat gates on. Do not grow this field into a
+	 * second, conflicting answer to that question.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Force|Deployment|Presentation",
-		meta=(EditCondition="bUsePlayerRelativeReserveStaging", ClampMin="0.0", ToolTip="Maximum height difference considered the same floor. Use authored Rooftop, Stair, or Custom approaches plus Nav Links for multi-floor Places."))
+		meta=(EditCondition="bUsePlayerRelativeReserveStaging", ClampMin="0.0", ToolTip="Preferred height band when staging a reserve wave near the player; approaches outside it are scored lower but still usable. This is not a same-floor requirement. Multi-floor Places need authored Rooftop, Stair, or Custom approaches plus Nav Links."))
 	float SameFloorHeightTolerance = 500.f;
 
 	/**

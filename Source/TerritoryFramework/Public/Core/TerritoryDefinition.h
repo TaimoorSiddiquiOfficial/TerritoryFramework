@@ -25,6 +25,7 @@ class UGameplayEffect;
 class UWeaponItem;
 class UTerritoryCounterAttackProfile;
 class UTerritoryDistrictManagementWidget;
+class UTerritoryFloorCombatPolicy;
 class UTerritoryGuardPostDefinition;
 class UTerritoryPatrolGoal;
 class UTerritoryProductionProfile;
@@ -205,6 +206,18 @@ struct TERRITORYFRAMEWORK_API FTerritoryFloorTemplate
 	/** Narrative events executed when this floor's last living defender is defeated, before any ownership change. */
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Floor|Narrative")
 	TArray<TObjectPtr<UNarrativeEvent>> FloorClearedEvents;
+
+	/**
+	 * Separation rule for this floor alone. Empty falls back to the Place's DefaultFloorCombatPolicy.
+	 *
+	 * The policy of the DEFENDER's floor is the one that applies, so this is "may this floor's
+	 * defenders engage across floors", not "may anyone engage this floor". Overriding a single
+	 * floor is how one stairwell can be held strictly while the rest of the building answers
+	 * normally.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Floor|Combat",
+		meta=(ToolTip="Leave empty to inherit the Place's Default Floor Combat Policy. Set it to give this one floor a different rule."))
+	TObjectPtr<UTerritoryFloorCombatPolicy> CombatPolicy;
 };
 
 /** One physical guard slot and its reusable Narrative guard-post profile. */
@@ -618,15 +631,6 @@ public:
 		meta=(TitleProperty="GuardPostID"))
 	TArray<FTerritoryGuardPostTemplate> GuardPosts;
 
-	/**
-	 * Optional authored floors for staging defenders and driving per-floor story beats.
-	 * Empty disables floor grouping entirely. When non-empty, each post's FloorIndex must
-	 * name a row here.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards|Floor",
-		meta=(TitleProperty="FloorIndex"))
-	TArray<FTerritoryFloorTemplate> Floors;
-
 	/** Narrative events executed when a registered defender dies, using the live Territory transition context. */
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="07 Guards|Narrative")
 	TArray<TObjectPtr<UNarrativeEvent>> DefenderDiedEvents;
@@ -696,9 +700,18 @@ public:
 	bool GetGuardPostTemplate(FName GuardPostID,
 		FTerritoryGuardPostTemplate& OutGuardPost) const;
 
+	/**
+	 * Floors are authored data on UTerritoryPlaceDefinition only: a City or a District owns no
+	 * defenders, so it has nothing to stage by floor. These three queries stay declared on the
+	 * shared base so existing Blueprints that call them keep compiling, and each one resolves
+	 * through the Place subclass and reports the honest answer for an aggregate: no floor row,
+	 * zero posts, no authored floors. That is a true answer, not a compatibility stub - a City
+	 * genuinely has no floors - and it is the migration path AGENTS.md requires for a breaking
+	 * change. Any new authoring surface must live on the Place.
+	 */
 	const FTerritoryFloorTemplate* FindFloor(int32 FloorIndex) const;
 
-	/** Find an authored floor row by its index. False means this Place declares no such floor. */
+	/** Find an authored floor row by its index. False means this definition declares no such floor, which a City or a District never does. */
 	UFUNCTION(BlueprintPure, Category="Territory|Definition",
 		meta=(DisplayName="Get Floor Template"))
 	bool GetFloorTemplate(int32 FloorIndex,
@@ -709,10 +722,10 @@ public:
 		meta=(DisplayName="Get Floor Guard Post Count"))
 	int32 GetFloorGuardPostCount(int32 FloorIndex) const;
 
-	/** True when this Place declares at least one authored floor. */
+	/** True when this definition declares at least one authored floor. Only a Place can. */
 	UFUNCTION(BlueprintPure, Category="Territory|Definition",
 		meta=(DisplayName="Has Authored Floors"))
-	bool HasAuthoredFloors() const { return !Floors.IsEmpty(); }
+	bool HasAuthoredFloors() const;
 
 	/** Refresh derived child parent links after changing hierarchy arrays. */
 	UFUNCTION(BlueprintCallable, CallInEditor, Category="Territory|Definition")
@@ -740,6 +753,31 @@ class TERRITORYFRAMEWORK_API UTerritoryPlaceDefinition : public UTerritoryDefini
 
 public:
 	UTerritoryPlaceDefinition();
+
+	/**
+	 * Optional authored floors for staging defenders and driving per-floor story beats.
+	 * Empty disables floor grouping entirely. When non-empty, each post's FloorIndex must
+	 * name a row here.
+	 *
+	 * Authored on the Place and nowhere else. A City or a District is an aggregate over
+	 * Places and registers no defenders of its own, so floors could never do anything there;
+	 * declaring them on the shared base only made an aggregate's floor rows a permanent
+	 * validation error whose own advice (add guard posts) named an array the City/District
+	 * panel hides. GuardPosts stays on the base so the shared floor-quota check can still
+	 * count a Place's posts.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards|Floor",
+		meta=(TitleProperty="FloorIndex"))
+	TArray<FTerritoryFloorTemplate> Floors;
+
+	/**
+	 * Separation rule applied to every floor row of this Place that names no policy of its own.
+	 * Empty means floors restrict nothing, which is the behaviour of every Place until this is
+	 * authored, so an existing project is unaffected by the feature.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="07 Guards|Floor",
+		meta=(ToolTip="Optional. Leave empty to keep floors as pure staging groups with no effect on combat. Set it to separate this Place's floors, then override individual floors in the Floors list if one needs a different rule."))
+	TObjectPtr<UTerritoryFloorCombatPolicy> DefaultFloorCombatPolicy;
 
 	/** Optional semantic role used by Territory/Narrative tags, filters, conditions, and UI. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Benefits",
@@ -776,6 +814,21 @@ public:
 
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 	virtual bool IsDefinitionCompatible(const ATerritoryVolume* Territory) const override;
+
+	/**
+	 * The floor-separation policy that governs a defender standing on FloorIndex.
+	 *
+	 * Resolution order is the floor row's own CombatPolicy, then DefaultFloorCombatPolicy, then
+	 * null (which every caller reads as "floors separate nothing"). INDEX_NONE names no row and so
+	 * resolves to the Place default: a defender whose floor could not be resolved is not a defender
+	 * on a floor.
+	 */
+	const UTerritoryFloorCombatPolicy* GetEffectiveFloorCombatPolicy(int32 FloorIndex) const;
+
+#if WITH_EDITOR
+	/** Validates the floor rows against this Place's own guard posts, then defers to the base checks. */
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
 };
 
 /** One District and the complete list of Places that determine its control. */

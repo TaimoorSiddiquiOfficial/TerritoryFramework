@@ -474,6 +474,48 @@ bool FTFTerritoryFloorValidation::RunTest(const FString& Parameters)
 		TestTrue(TEXT("A negative floor index is an error"),
 			HasIssueContaining(Context, TEXT("negative")));
 	}
+	// The behavioural half of the Place-only boundary. The reflection block in the contract test
+	// proves where the property lives; this proves the consequence an author actually meets, and
+	// it is the exact defect that motivated the move: an aggregate could not declare a floor
+	// without a quota error whose own advice named an array the City/District panel hides.
+	{
+		UTerritoryDistrictDefinition* Aggregate = NewObject<UTerritoryDistrictDefinition>();
+		Aggregate->TerritoryTag = TestTag();
+		FDataValidationContext Context = MakeContext(Associated);
+		Aggregate->IsDataValid(Context);
+		TestEqual(TEXT("An aggregate validates clean with no floor rows to declare"),
+			static_cast<int32>(Context.GetNumErrors()), 0);
+		TestFalse(TEXT("An aggregate does not claim authored floors"),
+			Aggregate->HasAuthoredFloors());
+
+		// The shared-base queries resolve through the Place. They must tell the truth in both
+		// directions: false/zero here, and the real authored row through the same base-class
+		// pointer below. A query that only ever answered "no floors" would satisfy the first half
+		// while silently breaking every existing Blueprint that reads a Place's floors.
+		const UTerritoryDefinition* AggregateAsBase = Aggregate;
+		FTerritoryFloorTemplate AbsentFloor;
+		TestFalse(TEXT("An aggregate has no floor row to return"),
+			AggregateAsBase->GetFloorTemplate(0, AbsentFloor));
+		TestEqual(TEXT("An aggregate reports no posts on a floor"),
+			AggregateAsBase->GetFloorGuardPostCount(0), 0);
+		TestNull(TEXT("An aggregate resolves no floor row at all"),
+			AggregateAsBase->FindFloor(0));
+
+		UTerritoryPlaceDefinition* FlooredPlace = NewObject<UTerritoryPlaceDefinition>();
+		FlooredPlace->TerritoryTag = TestTag();
+		FlooredPlace->Floors = { MakeFloor(2, 0) };
+		FlooredPlace->GuardPosts = { MakePost(TEXT("Upper_A"), 2) };
+		const UTerritoryDefinition* PlaceAsBase = FlooredPlace;
+		FTerritoryFloorTemplate AuthoredFloor;
+		TestTrue(TEXT("A Place still returns its authored floor through the base query"),
+			PlaceAsBase->GetFloorTemplate(2, AuthoredFloor));
+		TestEqual(TEXT("The returned floor row is the authored one"),
+			AuthoredFloor.FloorIndex, 2);
+		TestEqual(TEXT("A Place still counts its floor's posts through the base query"),
+			PlaceAsBase->GetFloorGuardPostCount(2), 1);
+		TestTrue(TEXT("A Place still reports authored floors through the base query"),
+			PlaceAsBase->HasAuthoredFloors());
+	}
 #endif
 	return true;
 }
@@ -729,6 +771,9 @@ bool FTFTerritoryFloorContract::RunTest(const FString& Parameters)
 	const UStruct* FloorSnapshot = FTerritoryFloorSnapshot::StaticStruct();
 	const UStruct* GarrisonSnapshot = FTerritoryGarrisonSnapshot::StaticStruct();
 	const UClass* DefinitionClass = UTerritoryDefinition::StaticClass();
+	const UClass* PlaceClass = UTerritoryPlaceDefinition::StaticClass();
+	const UClass* DistrictClass = UTerritoryDistrictDefinition::StaticClass();
+	const UClass* CityClass = UTerritoryCityDefinition::StaticClass();
 	const UClass* TaskClass = UTerritoryStateTask::StaticClass();
 	const UClass* PostClass = ATerritoryGuardSpawnPoint::StaticClass();
 	const UClass* VolumeClass = ATerritoryVolume::StaticClass();
@@ -740,9 +785,33 @@ bool FTFTerritoryFloorContract::RunTest(const FString& Parameters)
 		HasProperty(FloorTemplate, TEXT("FloorClearedEvents")));
 	TestTrue(TEXT("A guard post carries its floor"),
 		HasProperty(PostTemplate, TEXT("FloorIndex")));
-	TestTrue(TEXT("A Definition carries its floors"), HasProperty(DefinitionClass, TEXT("Floors")));
 	TestTrue(TEXT("A floor row is authorable in the Definition"),
 		HasFlag(FloorTemplate, TEXT("FloorIndex"), CPF_Edit, true));
+
+	// Floors belong to the Place and to nothing above it. A City or a District is an aggregate
+	// over Places and registers no defenders of its own, so a floor row there could never stage
+	// anyone; when the rows lived on the shared base, an aggregate's floor rows instead raised a
+	// quota error whose own advice named a GuardPosts array the City/District panel hides - an
+	// unfollowable, unavoidable error. These assertions are the regression test for that: they
+	// fail both if the row is put back on the base and if it is ever re-added to an aggregate.
+	TestTrue(TEXT("A Place carries its floors"),
+		HasProperty(PlaceClass, TEXT("Floors")));
+	TestTrue(TEXT("A Place's floors are authorable"),
+		HasFlag(PlaceClass, TEXT("Floors"), CPF_Edit, true));
+	TestFalse(TEXT("A City carries no floors"),
+		HasProperty(CityClass, TEXT("Floors")));
+	TestFalse(TEXT("A District carries no floors"),
+		HasProperty(DistrictClass, TEXT("Floors")));
+
+	// The queries stay on the shared base on purpose, so a Blueprint holding a
+	// UTerritoryDefinition reference keeps compiling. Each reports the honest answer for an
+	// aggregate, so this pins both the migration path and the fact that it is not a stub.
+	TestTrue(TEXT("A Definition can be asked for a floor row"),
+		DefinitionClass->FindFunctionByName(FName(TEXT("GetFloorTemplate"))) != nullptr);
+	TestTrue(TEXT("A Definition can be asked for a floor's post count"),
+		DefinitionClass->FindFunctionByName(FName(TEXT("GetFloorGuardPostCount"))) != nullptr);
+	TestTrue(TEXT("A Definition can be asked whether it authored floors"),
+		DefinitionClass->FindFunctionByName(FName(TEXT("HasAuthoredFloors"))) != nullptr);
 
 	TestTrue(TEXT("The per-floor read model carries its index"),
 		HasProperty(FloorSnapshot, TEXT("FloorIndex")));

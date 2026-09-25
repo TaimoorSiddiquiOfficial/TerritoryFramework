@@ -11,6 +11,7 @@
 #include "Core/TerritoryStealthProfile.h"
 #include "Core/TerritoryVolume.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Combat/TerritoryFloorCombatPolicy.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "Navigation/TerritoryRoadGuide.h"
 #include "Navigation/TerritoryRoadTrafficActors.h"
@@ -501,7 +502,8 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 		FOnGetDetailCustomizationInstance::CreateStatic(
 			&FTerritoryQuestCascadeRecipeDetails::MakeInstance));
 	for (UClass* AssetClass : {UTerritoryCounterAttackProfile::StaticClass(),
-		UTerritoryGuardPostDefinition::StaticClass(), UTerritoryProductionProfile::StaticClass(),
+		UTerritoryGuardPostDefinition::StaticClass(), UTerritoryFloorCombatPolicy::StaticClass(),
+		UTerritoryProductionProfile::StaticClass(),
 		UTerritoryStealthProfile::StaticClass(), UTerritoryDisguiseProfile::StaticClass(),
 		UTerritoryDiplomacyDialogueProfile::StaticClass(), UTerritorySituationProfile::StaticClass(),
 		UTerritoryDialogueRecipe::StaticClass()})
@@ -568,7 +570,8 @@ void FTerritoryFrameworkEditorModule::ShutdownModule()
 			UTerritoryQuestCascadeRecipe::StaticClass()->GetFName());
 		PropertyEditor.UnregisterCustomClassLayout(UTerritoryCinematicLightRigProfile::StaticClass()->GetFName());
 		for (UClass* AssetClass : {UTerritoryCounterAttackProfile::StaticClass(),
-			UTerritoryGuardPostDefinition::StaticClass(), UTerritoryProductionProfile::StaticClass(),
+			UTerritoryGuardPostDefinition::StaticClass(), UTerritoryFloorCombatPolicy::StaticClass(),
+			UTerritoryProductionProfile::StaticClass(),
 			UTerritoryStealthProfile::StaticClass(), UTerritoryDisguiseProfile::StaticClass(),
 			UTerritoryDiplomacyDialogueProfile::StaticClass(), UTerritorySituationProfile::StaticClass(),
 			UTerritoryDialogueRecipe::StaticClass()})
@@ -658,6 +661,13 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 			"Creates reusable guard capacity, spawn, patrol, and garrison placement settings."),
 		CombatMenu,
 		FColor(185, 81, 65));
+	Register(
+		UTerritoryFloorCombatPolicy::StaticClass(),
+		LOCTEXT("TerritoryFloorCombatPolicyAsset", "Territory Floor Combat Policy"),
+		LOCTEXT("TerritoryFloorCombatPolicyDescription",
+			"Decides whether a defender on one floor engages a target on another: any floor, the same floor, or the same floor and its neighbours."),
+		CombatMenu,
+		FColor(165, 94, 120));
 	Register(
 		UTerritoryProductionProfile::StaticClass(),
 		LOCTEXT("TerritoryProductionProfileAsset", "Territory Production Profile"),

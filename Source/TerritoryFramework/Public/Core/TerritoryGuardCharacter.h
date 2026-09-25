@@ -334,6 +334,20 @@ private:
 	void TryWieldDefaultWeapon();
 	TArray<FTerritoryPatrolNode> BuildStaggeredPatrolRoute() const;
 
+	/**
+	 * Floor separation for one target: true means a proactive engagement must be refused.
+	 *
+	 * False covers two different situations on purpose - the floors permit it, and no separation is
+	 * declared here - because they are the same answer to the caller and only the second one is what
+	 * keeps an unauthored map behaving exactly as it did before floors could be enforced.
+	 *
+	 * Called from one place, the proactive half of EvaluateTerritoryTarget. Retaliation is answered
+	 * above that point and is deliberately not routed through here: a guard that is actually damaged
+	 * must answer from any floor, or separation would produce a defender that is shot and does
+	 * nothing.
+	 */
+	bool IsFloorSeparationRefused(const AActor* Target, FText& OutReason) const;
+
 	FTimerHandle DefaultWeaponWieldTimer;
 	FTimerHandle CombatPriorityTimer;
 	TWeakObjectPtr<UClass> NarrativeAttackGoalClass;

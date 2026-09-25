@@ -4,9 +4,14 @@
 #include "Misc/OutputDeviceRedirector.h"
 #include "Misc/ScopeExit.h"
 #include "Tests/TerritoryAuditEventProbe.h"
+#include "Combat/TerritoryFloorCombatPolicy.h"
+#include "Components/BoxComponent.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryFloorVolume.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "AI/TerritoryNPCActivityComponent.h"
 #include "AI/NarrativeNPCController.h"
@@ -28,6 +33,7 @@
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/Quest.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativePlayerController.h"
@@ -45,6 +51,7 @@ namespace TerritoryGuardResponseTests
 		UTerritoryStealthProfile* Profile;
 		UTerritoryControlSubsystem* Control;
 		UTerritoryDiplomacySubsystem* Diplomacy;
+		UTerritoryRegistrySubsystem* Registry;
 		FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
 		FGameplayTag Bandits = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Bandits"));
 		FFixture()
@@ -59,6 +66,7 @@ namespace TerritoryGuardResponseTests
 			World->CreateAISystem();
 			Control = World->GetSubsystem<UTerritoryControlSubsystem>();
 			Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+			Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 			Place = World->SpawnActor<ATerritoryProperty>();
 			Definition = NewObject<UTerritoryPlaceDefinition>();
 			Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
@@ -101,6 +109,72 @@ namespace TerritoryGuardResponseTests
 				Target->GetActorLocation(), FVector::ZeroVector, Type == ETerritoryStealthEvidence::Damage, 0.f);
 		}
 		void ControlTick() { Control->ProcessEvent(Control->FindFunction(TEXT("OnCaptureTick")), nullptr); }
+
+		// ─── Floor authoring, mirroring what a designer does in the editor ───
+
+		/** Author a floor row so a region's index and a post's index name something real. */
+		void AuthorFloor(int32 FloorIndex)
+		{
+			FTerritoryFloorTemplate Floor;
+			Floor.FloorIndex = FloorIndex;
+			Floor.DisplayName = FText::FromString(FString::Printf(TEXT("Floor %d"), FloorIndex));
+			Definition->Floors.Add(Floor);
+		}
+
+		/** The region that makes one floor answerable. Without it a floor row is only a label. */
+		ATerritoryFloorVolume* AddFloorRegion(int32 FloorIndex, const FVector& Center,
+			const FVector& Extent)
+		{
+			ATerritoryFloorVolume* Volume = NewObject<ATerritoryFloorVolume>(World->PersistentLevel);
+			Volume->PlaceDefinition = Definition;
+			Volume->FloorIndex = FloorIndex;
+			Volume->FloorVolumeGUID = FGuid::NewGuid();
+			Volume->SetActorLocation(Center);
+			Volume->FloorBounds->SetBoxExtent(Extent);
+			Volume->ApplyFloorVolumeDefinition();
+			Registry->RegisterFloorVolume(Volume);
+			return Volume;
+		}
+
+		UTerritoryFloorCombatPolicy* AuthorPolicy(ETerritoryFloorEngagementPolicy Policy)
+		{
+			UTerritoryFloorCombatPolicy* Asset = NewObject<UTerritoryFloorCombatPolicy>(Definition);
+			Asset->EngagementPolicy = Policy;
+			return Asset;
+		}
+
+		/** Floors 0 to 3, each with a region 200cm tall and 300cm apart, so Z picks the floor. */
+		void AuthorStackedFloors()
+		{
+			for (int32 FloorIndex = 0; FloorIndex <= 3; ++FloorIndex)
+			{
+				AuthorFloor(FloorIndex);
+				AddFloorRegion(FloorIndex, FVector(0.f, 0.f, FloorIndex * 300.f),
+					FVector(500.f, 500.f, 100.f));
+			}
+		}
+
+		/** Where floor N's region is centred, for placing actors on it. */
+		static FVector FloorLocation(int32 FloorIndex)
+		{
+			return FVector(0.f, 0.f, FloorIndex * 300.f);
+		}
+
+		/**
+		 * Leave faction War as the only reason a guard may engage, so the floor gate is the only
+		 * thing an assertion can be measuring.
+		 *
+		 * Infiltration is switched off for the reason TerritoryGuardResponsePolicyTests already
+		 * documents: while it is on, exposure admits or refuses a player before the faction policy
+		 * is ever consulted. With it off, the Place stays Claimed and its guard reaches the
+		 * proactive allowances below the floor gate.
+		 */
+		void AuthorWarDefence()
+		{
+			Profile->bAllowStealthInfiltration = false;
+			Definition->GuardBehavior.bEngageAtWarInClaimedTerritory = true;
+			Diplomacy->DeclareWar(Bandits, Heroes);
+		}
 	};
 
 	/**
@@ -611,6 +685,443 @@ bool FTFGuardControllerAttitude::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The controller and the guard agree"),
 		static_cast<int32>(ControllerTeam->GetTeamAttitudeTowards(*Target)),
 		static_cast<int32>(PawnAttitude));
+	return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Floor separation.
+//
+// The reported symptom is that a Place declaring floors still sends its whole garrison at a player
+// fighting one of them: "floor 1 guards spawn too at the same time when player fights with floor 0
+// guards". The cause was not the floor data, which validates clean, but that nothing in the combat
+// funnel had ever been told about floors - ATerritoryGuardCharacter contained no Floor token at
+// all before this change. These tests hold the gate that fixes it, and hold the three properties
+// that make shipping it safe:
+//
+//   - Retaliation is NOT routed through the gate. A guard that is actually damaged answers from any
+//     floor, so separation can never produce a defender that is shot and does nothing.
+//   - A Place with floors and no authored region behaves exactly as it did before the feature.
+//     That is the shipped state of HopDistrictTest, so this is the "nothing changes yet" pin.
+//   - Refusal is directional and nests: a stricter policy always refuses at least what a looser
+//     one refuses.
+// ─────────────────────────────────────────────────────────────────────────────
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardFloorEngagement,
+	"TerritoryFramework.Guards.Floors.EngagementIsDirectionalAndNested",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFGuardFloorEngagement::RunTest(const FString& Parameters)
+{
+	using TerritoryGuardResponseTests::FFixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	FFixture F;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+	F.AuthorWarDefence();
+	Guard->SetActorLocation(FFixture::FloorLocation(1));
+	Target->SetActorLocation(FFixture::FloorLocation(0));
+
+	// The control. Nothing is authored yet, so this is the decision the shipped game makes - and
+	// the decision a Place with floor rows but no regions must keep making.
+	TestTrue(TEXT("An unauthored Place engages through its faction policy exactly as before"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	// Floor rows without regions are labels. The reported map is in exactly this state, which is
+	// why "the floor does nothing" and "the data is valid" were both true at the same time.
+	F.AuthorStackedFloors();
+	TestTrue(TEXT("Floor rows alone separate nothing without a region"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	auto EngagesOnFloor = [&](int32 Floor)
+	{
+		Target->SetActorLocation(FFixture::FloorLocation(Floor));
+		return Guard->CanEngageTerritoryTarget(Target);
+	};
+	auto Author = [&](ETerritoryFloorEngagementPolicy Policy)
+	{
+		F.Definition->DefaultFloorCombatPolicy = F.AuthorPolicy(Policy);
+	};
+
+	TestEqual(TEXT("The defender resolves to the floor it is standing on"),
+		F.Registry->GetFloorAtLocation(F.Place, Guard->GetActorLocation()), 1);
+
+	Author(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	TestTrue(TEXT("Same Floor Only admits the floor the defender holds"), EngagesOnFloor(1));
+	TestFalse(TEXT("Same Floor Only refuses the floor below"), EngagesOnFloor(0));
+	TestFalse(TEXT("Same Floor Only refuses the floor above"), EngagesOnFloor(2));
+
+	Author(ETerritoryFloorEngagementPolicy::SameOrAdjacent);
+	TestTrue(TEXT("Same Or Adjacent admits the floor below"), EngagesOnFloor(0));
+	TestTrue(TEXT("Same Or Adjacent admits the defender's own floor"), EngagesOnFloor(1));
+	TestTrue(TEXT("Same Or Adjacent admits the floor above"), EngagesOnFloor(2));
+	TestFalse(TEXT("Same Or Adjacent refuses a floor two above"), EngagesOnFloor(3));
+
+	// Direction, not just distance. Adjacency must mean "above or below", so moving the defender up
+	// one floor mirrors every answer; a one-way rule would pass the four assertions above.
+	Guard->SetActorLocation(FFixture::FloorLocation(2));
+	TestTrue(TEXT("Adjacency is symmetric: the floor below is admitted from above it"), EngagesOnFloor(1));
+	TestTrue(TEXT("Adjacency is symmetric: the defender's new floor is admitted"), EngagesOnFloor(2));
+	TestFalse(TEXT("Adjacency is symmetric: a floor two below is refused"), EngagesOnFloor(0));
+	Guard->SetActorLocation(FFixture::FloorLocation(1));
+
+	// Monotonicity, read out of the decisions rather than assumed from the enum's order: a stricter
+	// policy must refuse every floor a looser one refuses. It is asserted alongside the concrete
+	// expectations above, because nesting alone would also hold for a policy that refuses the lot.
+	auto Refused = [&](ETerritoryFloorEngagementPolicy Policy)
+	{
+		Author(Policy);
+		TArray<int32> Floors;
+		for (int32 Floor = 0; Floor <= 3; ++Floor)
+		{
+			if (!EngagesOnFloor(Floor)) Floors.Add(Floor);
+		}
+		return Floors;
+	};
+	auto RefusesEvery = [](const TArray<int32>& Stricter, const TArray<int32>& Looser)
+	{
+		for (const int32 Floor : Looser)
+		{
+			if (!Stricter.Contains(Floor)) return false;
+		}
+		return true;
+	};
+	const TArray<int32> AnyFloorRefusals = Refused(ETerritoryFloorEngagementPolicy::AnyFloor);
+	const TArray<int32> AdjacentRefusals = Refused(ETerritoryFloorEngagementPolicy::SameOrAdjacent);
+	const TArray<int32> SameFloorRefusals = Refused(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	TestEqual(TEXT("Any Floor refuses nothing"), AnyFloorRefusals.Num(), 0);
+	TestTrue(TEXT("Same Or Adjacent refuses every floor Any Floor refuses"),
+		RefusesEvery(AdjacentRefusals, AnyFloorRefusals));
+	TestTrue(TEXT("Same Floor Only refuses every floor Same Or Adjacent refuses"),
+		RefusesEvery(SameFloorRefusals, AdjacentRefusals));
+	TestTrue(TEXT("Separation refuses something, so the nesting above cannot pass vacuously"),
+		SameFloorRefusals.Num() > 0);
+
+	// A target standing where no region reaches has not declared a different floor. Reading that as
+	// a refusal would make an unauthored courtyard a safe zone; reading it as permission keeps the
+	// gate a statement about floors that are actually authored.
+	Author(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	Target->SetActorLocation(FVector(5000.f, 5000.f, 0.f));
+	TestTrue(TEXT("A target outside every region is not treated as being on another floor"),
+		Guard->CanEngageTerritoryTarget(Target));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardFloorRetaliation,
+	"TerritoryFramework.Guards.Floors.RetaliationSurvivesSeparation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * The floor gate is deliberately placed BELOW Narrative personal hostility, so a guard shot from
+ * another floor still answers it. Moving the gate higher would silently regress this, and the
+ * regression would be invisible: the guard would simply stand still while being shot, which is the
+ * same "guard does nothing" shape as the original bug.
+ */
+bool FTFGuardFloorRetaliation::RunTest(const FString& Parameters)
+{
+	using TerritoryGuardResponseTests::FFixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	FFixture F;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+	F.AuthorStackedFloors();
+	F.Definition->DefaultFloorCombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	Guard->SetActorLocation(FFixture::FloorLocation(1));
+	Target->SetActorLocation(FFixture::FloorLocation(0));
+
+	TestFalse(TEXT("Separation on its own gives this guard no reason to engage"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	// The real Narrative damage path, the same one the policy suite above already exercises.
+	FScriptDelegate DamageListener;
+	DamageListener.BindUFunction(Guard, TEXT("HandleNarrativeDamagedBy"));
+	Guard->GetNarrativeAbilitySystemComponent()->OnDamagedBy.Add(DamageListener);
+	FGameplayEffectSpec Spec;
+	Guard->GetNarrativeAbilitySystemComponent()->DamagedBy(
+		Target->GetNarrativeAbilitySystemComponent(), 12.f, Spec);
+
+	TestTrue(TEXT("A guard damaged from the floor below still answers it under Same Floor Only"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	Target->SetActorLocation(FFixture::FloorLocation(1));
+	TestTrue(TEXT("Retaliation on the defender's own floor is unaffected"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	// The definition-level switch keeps owning "this guard never retaliates at all"; the floor
+	// policy must not have become a second authority for the same behaviour.
+	F.Definition->GuardBehavior.bAllowPersonalRetaliation = false;
+	TestFalse(TEXT("An authored non-retaliating guard stays non-retaliating across floors"),
+		Guard->CanEngageTerritoryTarget(Target));
+	F.Definition->GuardBehavior.bAllowPersonalRetaliation = true;
+	TestTrue(TEXT("Restoring the authored policy restores the answer"),
+		Guard->CanEngageTerritoryTarget(Target));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardFloorInert,
+	"TerritoryFramework.Guards.Floors.InertUntilRegionsAreAuthored",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * The pin that makes this feature safe to ship into an authored project. HopDistrictTest declares
+ * floors on the Blacksmith and authors no floor region anywhere, so every location resolves to "no
+ * floor" and the gate must be invisible.
+ *
+ * Stated the other way round, because it is the honest reading: until someone authors regions, the
+ * upper floors DO still join the ground-floor fight. That is the reported symptom, and it is closed
+ * by content, not by code - which is why the editor validation gate that reports the missing
+ * regions already exists.
+ */
+bool FTFGuardFloorInert::RunTest(const FString& Parameters)
+{
+	using TerritoryGuardResponseTests::FFixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	FFixture F;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+	F.AuthorWarDefence();
+
+	// The strictest policy anyone can author, on a Place whose floors are declared and whose
+	// geometry is not.
+	for (int32 Floor = 0; Floor <= 2; ++Floor) F.AuthorFloor(Floor);
+	F.Definition->DefaultFloorCombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+
+	Target->SetActorLocation(FFixture::FloorLocation(0));
+	for (int32 Floor = 0; Floor <= 2; ++Floor)
+	{
+		Guard->SetActorLocation(FFixture::FloorLocation(Floor));
+		TestTrue(FString::Printf(
+			TEXT("Without a region, a defender on floor %d engages exactly as it did before"), Floor),
+			Guard->CanEngageTerritoryTarget(Target));
+	}
+
+	// And a defender standing where no region could reach it is separated from nothing at all.
+	Guard->SetActorLocation(FVector(0.f, 0.f, 9000.f));
+	TestTrue(TEXT("A defender outside every region engages exactly as it did before"),
+		Guard->CanEngageTerritoryTarget(Target));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardFloorPostFallback,
+	"TerritoryFramework.Guards.Floors.PostFloorIsTheFallbackOffRegion",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * Floors are resolved from where the defender is standing, falling back to the floor its post was
+ * authored on. The fallback is what stops separation from being defeated by the other reported
+ * symptom - "some guard goes patrolling outside of territory bound" - since a guard that wanders
+ * off the authored regions would otherwise revert to floor-blind engagement.
+ */
+bool FTFGuardFloorPostFallback::RunTest(const FString& Parameters)
+{
+	using TerritoryGuardResponseTests::FFixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	FFixture F;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+	F.AuthorWarDefence();
+	F.AuthorStackedFloors();
+	F.Definition->DefaultFloorCombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	Target->SetActorLocation(FFixture::FloorLocation(0));
+
+	// Above every region, so the guard's own position answers nothing.
+	Guard->SetActorLocation(FVector(0.f, 0.f, 9000.f));
+	TestTrue(TEXT("With no authored post either, an unresolvable defender is not separated"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	auto* Post = F.World->SpawnActor<ATerritoryGuardSpawnPoint>();
+	Post->FloorIndex = 1;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritorySpawnPoint"))
+		->SetObjectPropertyValue_InContainer(Guard, Post);
+	TestFalse(TEXT("A guard that has patrolled off its region keeps its post's floor"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	// Back inside floor 0's region the position wins, so the same post does not pin the guard to
+	// floor 1 while it is genuinely standing on the ground floor.
+	Guard->SetActorLocation(FFixture::FloorLocation(0));
+	TestTrue(TEXT("A guard standing on another floor answers for the floor it is on"),
+		Guard->CanEngageTerritoryTarget(Target));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardFloorBlueprintFunnel,
+	"TerritoryFramework.Guards.Floors.BlueprintCombatGoalFunnelIsGated",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * The gate has two entry points and Narrative's AI reaches the second one. Vendor Blueprint graphs
+ * (GoalGenerator_Attack and friends) call UTerritoryBlueprintLibrary::CanScoreTerritoryCombatGoal,
+ * which for a guard forwards to CanEngageTerritoryTarget. A fix that only held on the C++ attitude
+ * call would leave the shipped attack goal scoring the cross-floor player, which is precisely the
+ * path the reported fight arrives on.
+ */
+bool FTFGuardFloorBlueprintFunnel::RunTest(const FString& Parameters)
+{
+	using TerritoryGuardResponseTests::FFixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	FFixture F;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+	F.AuthorWarDefence();
+	F.AuthorStackedFloors();
+	F.Definition->DefaultFloorCombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	Guard->SetActorLocation(FFixture::FloorLocation(1));
+
+	auto* Controller = F.World->SpawnActor<ANarrativeNPCController>();
+	Controller->SetPawn(Guard);
+	UClass* GoalClass = LoadClass<UNPCGoalItem>(nullptr,
+		TEXT("/NarrativePro/Pro/Core/AI/Activities/Attacks/Goals/Goal_Attack.Goal_Attack_C"));
+	if (!TestNotNull(TEXT("Narrative attack goal class loads"), GoalClass)) return false;
+	const FObjectProperty* GoalTarget =
+		FindFProperty<FObjectProperty>(GoalClass, TEXT("TargetToAttack"));
+	if (!TestNotNull(TEXT("Narrative attack goal target contract"), GoalTarget)) return false;
+
+	UNPCGoalItem* Goal = NewObject<UNPCGoalItem>(Controller, GoalClass);
+	Goal->OwnerController = Controller;
+	GoalTarget->SetObjectPropertyValue_InContainer(Goal, Target);
+
+	Target->SetActorLocation(FFixture::FloorLocation(1));
+	TestTrue(TEXT("On the defender's own floor the shipped attack goal still scores"),
+		UTerritoryBlueprintLibrary::CanScoreTerritoryCombatGoal(Controller, Goal));
+
+	Target->SetActorLocation(FFixture::FloorLocation(0));
+	TestFalse(TEXT("The same goal refuses the same target one floor down"),
+		UTerritoryBlueprintLibrary::CanScoreTerritoryCombatGoal(Controller, Goal));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardFloorResolution,
+	"TerritoryFramework.Guards.Floors.PolicyResolutionAndFailurePaths",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFGuardFloorResolution::RunTest(const FString& Parameters)
+{
+	using TerritoryGuardResponseTests::FFixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	FFixture F;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+	F.AuthorWarDefence();
+	F.AuthorStackedFloors();
+	Guard->SetActorLocation(FFixture::FloorLocation(1));
+	Target->SetActorLocation(FFixture::FloorLocation(0));
+
+	// A floor's own policy wins over the Place's default, which is what lets one stairwell be held
+	// strictly while the rest of the building answers normally.
+	F.Definition->DefaultFloorCombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::AnyFloor);
+	TestTrue(TEXT("An Any Floor default refuses nothing"), Guard->CanEngageTerritoryTarget(Target));
+	F.Definition->Floors[1].CombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	TestFalse(TEXT("The defender's own floor row overrides the Place default"),
+		Guard->CanEngageTerritoryTarget(Target));
+	TestTrue(TEXT("The floor row resolves to the policy that was authored on it"),
+		F.Definition->GetEffectiveFloorCombatPolicy(1) == F.Definition->Floors[1].CombatPolicy.Get());
+	F.Definition->Floors[1].CombatPolicy = nullptr;
+	TestTrue(TEXT("Clearing the floor row falls back to the Place default"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	// A Place default with no floor rows at all still applies to floors that a region declares,
+	// because the row is an override and not a prerequisite.
+	F.Definition->Floors.Empty();
+	F.Definition->DefaultFloorCombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	TestFalse(TEXT("A Place default separates floors that only regions declare"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	F.Definition->DefaultFloorCombatPolicy = nullptr;
+	TestTrue(TEXT("A Place with no policy anywhere separates nothing"),
+		Guard->CanEngageTerritoryTarget(Target));
+
+	// Failure paths of the new code specifically. The floor helper dereferences the target's
+	// location, so a null target is a genuine new input rather than a restatement of the existing
+	// guards, and it must be refused with a reason like every other exit.
+	F.Definition->DefaultFloorCombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	FText Reason;
+	TestFalse(TEXT("A null target is refused rather than engaged"),
+		Guard->EvaluateTerritoryTarget(nullptr, Reason));
+	TestFalse(TEXT("The refusal still names a reason"), Reason.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardFloorScoping,
+	"TerritoryFramework.Guards.Floors.DecisionIsRepeatableAndScopedToItsPlace",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * Two properties that a per-floor decision cannot be shipped without. It is asked every time a
+ * Narrative goal is scored, so it must be a pure function of the authored data; and a region bound
+ * to a neighbouring Place must never answer for this one, since ATerritoryFloorVolume is a separate
+ * level actor whose bounds may overlap anything.
+ */
+bool FTFGuardFloorScoping::RunTest(const FString& Parameters)
+{
+	using TerritoryGuardResponseTests::FFixture;
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	FFixture F;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+	F.AuthorWarDefence();
+	F.AuthorStackedFloors();
+	F.Definition->DefaultFloorCombatPolicy =
+		F.AuthorPolicy(ETerritoryFloorEngagementPolicy::SameFloorOnly);
+	Guard->SetActorLocation(FFixture::FloorLocation(1));
+	Target->SetActorLocation(FFixture::FloorLocation(0));
+
+	const bool bFirst = Guard->CanEngageTerritoryTarget(Target);
+	TestFalse(TEXT("The cross-floor target is refused"), bFirst);
+	for (int32 Repeat = 0; Repeat < 5; ++Repeat)
+	{
+		TestEqual(TEXT("Repeating the same question gives the same answer"),
+			Guard->CanEngageTerritoryTarget(Target), bFirst);
+	}
+
+	// A neighbouring Place's region, covering the defender exactly. It declares floor 0 there, so
+	// an unscoped lookup would move this guard to floor 0 and admit the target.
+	UTerritoryPlaceDefinition* Sibling = NewObject<UTerritoryPlaceDefinition>();
+	Sibling->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Warehouse"), false);
+	Sibling->StableTerritoryGUID = FGuid::NewGuid();
+	Sibling->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	TestTrue(TEXT("The sibling Place tag exists"), Sibling->TerritoryTag.IsValid());
+	ATerritoryFloorVolume* SiblingRegion = NewObject<ATerritoryFloorVolume>(F.World->PersistentLevel);
+	SiblingRegion->PlaceDefinition = Sibling;
+	SiblingRegion->FloorIndex = 0;
+	SiblingRegion->FloorVolumeGUID = FGuid::NewGuid();
+	SiblingRegion->SetActorLocation(FFixture::FloorLocation(1));
+	SiblingRegion->FloorBounds->SetBoxExtent(FVector(500.f, 500.f, 100.f));
+	SiblingRegion->ApplyFloorVolumeDefinition();
+	F.Registry->RegisterFloorVolume(SiblingRegion);
+
+	TestEqual(TEXT("A neighbouring Place's region does not claim this defender's floor"),
+		F.Registry->GetFloorAtLocation(F.Place, Guard->GetActorLocation()), 1);
+	TestEqual(TEXT("The decision is unchanged by a neighbouring Place's region"),
+		Guard->CanEngageTerritoryTarget(Target), bFirst);
 	return true;
 }
 

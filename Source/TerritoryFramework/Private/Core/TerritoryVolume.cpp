@@ -767,31 +767,34 @@ void ATerritoryVolume::RebuildRuntimeNarrativeConfiguration(
 		RuntimeStateConfigs.Add(Pair.Key,
 			CloneStateConfigForTerritory(Pair.Value, this));
 	}
-	if (Definition.IsA<UTerritoryPlaceDefinition>())
+	RuntimeDefenderDiedEvents.Reset();
+	RuntimeAllDefendersDefeatedEvents.Reset();
+	RuntimeFloorClearedEvents.Reset();
+
+	// Floors and the defender-loss beats they depend on both belong to a Place. Only a Place
+	// registers defenders (RegisterDefender hard-returns on AggregateOnly), so a City or a
+	// District has no defender death to key a floor beat off and no floor rows to author in the
+	// first place. Gating the clone on the Place is therefore the honest shape rather than a
+	// restriction: before Floors moved onto the Place, an aggregate's floor entries always had a
+	// zero guard ceiling and IsCleared() refuses to fire on a zero ceiling, so a floor beat on an
+	// aggregate could never have run either. The merge is equivalent, not lossy.
+	if (const UTerritoryPlaceDefinition* PlaceDefinition =
+		Cast<UTerritoryPlaceDefinition>(&Definition))
 	{
 		RuntimeDefenderDiedEvents = CloneNarrativeArrayForTerritory(
-			Definition.DefenderDiedEvents, this);
+			PlaceDefinition->DefenderDiedEvents, this);
 		RuntimeAllDefendersDefeatedEvents = CloneNarrativeArrayForTerritory(
-			Definition.AllDefendersDefeatedEvents, this);
-	}
-	else
-	{
-		RuntimeDefenderDiedEvents.Reset();
-		RuntimeAllDefendersDefeatedEvents.Reset();
-	}
+			PlaceDefinition->AllDefendersDefeatedEvents, this);
 
-	// Deliberately outside the Place gate above. Floors are authored on the base Definition and
-	// FindFloor is a base-class query, so the cleared-event dispatch serves any definition type that
-	// declares floors; nesting this inside the gate would silently drop floor beats for a District or
-	// a City. A definition with no floors leaves this map empty, which is the "nothing to run" case.
-	RuntimeFloorClearedEvents.Reset();
-	for (const FTerritoryFloorTemplate& Floor : Definition.Floors)
-	{
-		if (Floor.FloorClearedEvents.IsEmpty()) continue;
-		FTerritoryFloorRuntimeEvents RuntimeEvents;
-		RuntimeEvents.Events = CloneNarrativeArrayForTerritory(Floor.FloorClearedEvents, this);
-		RuntimeFloorClearedEvents.Add(Floor.FloorIndex, MoveTemp(RuntimeEvents));
+		for (const FTerritoryFloorTemplate& Floor : PlaceDefinition->Floors)
+		{
+			if (Floor.FloorClearedEvents.IsEmpty()) continue;
+			FTerritoryFloorRuntimeEvents RuntimeEvents;
+			RuntimeEvents.Events = CloneNarrativeArrayForTerritory(Floor.FloorClearedEvents, this);
+			RuntimeFloorClearedEvents.Add(Floor.FloorIndex, MoveTemp(RuntimeEvents));
+		}
 	}
+	// A Place with no floors leaves this map empty, which is the "nothing to run" case.
 }
 
 void ATerritoryVolume::EnsurePersistentTerritoryGUID()
@@ -2990,13 +2993,17 @@ void ATerritoryVolume::BuildFloorSnapshots(FTerritoryGarrisonSnapshot& OutSnapsh
 	for (const TPair<int32, TSet<FGuid>>& Pair : LiveFloorPostIDs) LiveAll.Append(Pair.Value);
 	OutSnapshot.bCountsKnown = bCountsPhysicalSlots && LiveAll.Includes(AuthoredAll);
 
-	if (TerritoryDefinition->Floors.IsEmpty())
+	// Floors are authored on the Place. A City or a District declares none and reports no floor
+	// entries, which every consumer already treats as "no floor grouping" rather than "unknown".
+	const UTerritoryPlaceDefinition* PlaceDefinition =
+		Cast<UTerritoryPlaceDefinition>(TerritoryDefinition);
+	if (!PlaceDefinition || PlaceDefinition->Floors.IsEmpty())
 	{
 		return;
 	}
 
-	OutSnapshot.Floors.Reserve(TerritoryDefinition->Floors.Num());
-	for (const FTerritoryFloorTemplate& Floor : TerritoryDefinition->Floors)
+	OutSnapshot.Floors.Reserve(PlaceDefinition->Floors.Num());
+	for (const FTerritoryFloorTemplate& Floor : PlaceDefinition->Floors)
 	{
 		FTerritoryFloorSnapshot& Entry = OutSnapshot.Floors.AddDefaulted_GetRef();
 		Entry.FloorIndex = Floor.FloorIndex;

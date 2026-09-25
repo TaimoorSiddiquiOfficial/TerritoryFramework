@@ -4,6 +4,7 @@
 #include "Cinematics/TerritoryCinematicLightRig.h"
 #include "AssetToolsModule.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Combat/TerritoryFloorCombatPolicy.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryDisguiseProfile.h"
@@ -88,6 +89,11 @@ UTerritoryCounterAttackProfileFactory::UTerritoryCounterAttackProfileFactory()
 UTerritoryGuardPostDefinitionFactory::UTerritoryGuardPostDefinitionFactory()
 {
 	InitializeFor(UTerritoryGuardPostDefinition::StaticClass());
+}
+
+UTerritoryFloorCombatPolicyFactory::UTerritoryFloorCombatPolicyFactory()
+{
+	InitializeFor(UTerritoryFloorCombatPolicy::StaticClass());
 }
 
 UTerritoryProductionProfileFactory::UTerritoryProductionProfileFactory()

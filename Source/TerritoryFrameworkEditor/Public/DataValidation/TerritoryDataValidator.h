@@ -6,6 +6,7 @@
 #include "TerritoryDataValidator.generated.h"
 
 class ATerritoryGuardSpawnPoint;
+class ATerritoryFloorVolume;
 class ATerritoryVolume;
 class ULevel;
 class UNPCDefinition;
@@ -98,6 +99,46 @@ private:
 	static void CheckGuardPostBindings(ULevel* Level, TArray<FString>& OutWarnings);
 	static void CheckPatrolContainment(ULevel* Level, TArray<FString>& OutWarnings);
 	static void CheckGuardDeploymentFeasibility(ULevel* Level, TArray<FString>& OutWarnings);
+
+	/**
+	 * Validate the floor regions that give a floor row its geometry.
+	 *
+	 * A floor row is an integer grouping key: FTerritoryFloorTemplate has no volume, bounds, anchor
+	 * or transform, so a row on its own cannot answer "is this actor on that floor" and cannot
+	 * separate combat. ATerritoryFloorVolume supplies that geometry, and these are the three ways
+	 * the authoring can be wrong about it:
+	 *
+	 *   * A floor that staffs guards but has no region is separation declared and never enforced -
+	 *     the floor's guards engage every floor, which is the reported symptom. Warned, scoped to
+	 *     floors that actually carry guard posts so a post-less story-only floor row stays silent.
+	 *   * A region naming a floor row that does not exist can never be reached by any lookup.
+	 *     Errored, because the region is then dead weight that looks authored.
+	 *   * Two regions of one Place claiming *different* floors over the same space leave the answer
+	 *     to the resolver's most-specific rule rather than to the author's intent. Warned, naming
+	 *     the rule so the consequence is visible.
+	 *
+	 * Deliberately narrow in two places, both because the alternative would be a second authority:
+	 * the overlap test confirms a candidate with real containment queries rather than trusting an
+	 * axis-aligned bound (so a rotated pair cannot produce a false warning), and no region is
+	 * required to sit inside its Place's Bounds Shape, because a floor is a stage for combat rather
+	 * than a claim on territory ownership.
+	 */
+	static void CheckFloorVolumes(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
+
+	/**
+	 * True when two floor regions claim overlapping space.
+	 *
+	 * An axis-aligned bounds test alone would be wrong: a rotated region's bound is looser than the
+	 * region, so two boxes that only share a bound corner would be reported as overlapping. The
+	 * bound is used purely as an admission filter and the answer is then confirmed with the
+	 * runtime's own containment query in both directions, which is the same query the resolver uses
+	 * - so a reported overlap is one the resolver would genuinely have to choose within.
+	 *
+	 * A pair whose regions cross without putting a corner inside the other is not reported. That is
+	 * the safe direction for a warning: it under-reports rather than inventing an ambiguity.
+	 */
+	static bool FloorVolumesOverlap(
+		const ATerritoryFloorVolume* A, const ATerritoryFloorVolume* B);
 
 	/**
 	 * Every guard post in a level, with the Place lookups that resolution needs. Built once per

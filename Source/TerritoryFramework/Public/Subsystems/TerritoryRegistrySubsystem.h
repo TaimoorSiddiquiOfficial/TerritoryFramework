@@ -8,6 +8,7 @@
 #include "TerritoryRegistrySubsystem.generated.h"
 
 class ATerritoryVolume;
+class ATerritoryFloorVolume;
 
 /**
  * Territory registry subsystem — the authoritative list of all registered territories.
@@ -104,6 +105,56 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Registry", meta=(DisplayName="Get Territories Owned By Faction"))
 	TArray<ATerritoryVolume*> GetTerritoriesOwnedByFaction(const FGameplayTag& Faction) const;
 
+	// ═══════════════════════════════════════════════════════════════════════════
+	// Floor regions (authored geometry for a Place's floor rows)
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	/**
+	 * Register an authored floor region. Called automatically by ATerritoryFloorVolume::BeginPlay.
+	 *
+	 * Rejected, with a logged reason, when the volume has no resolved Place tag, no editor-baked
+	 * FloorVolumeGUID, a negative FloorIndex, or a FloorVolumeGUID another registered volume already
+	 * claims. Rejection is deliberate rather than lenient: a negative index would be indistinguishable
+	 * from GetFloorAtLocation's "unresolved" answer, and a duplicated GUID would make the overlap
+	 * tie-break depend on iteration order.
+	 *
+	 * Returns false when the volume was not admitted.
+	 */
+	bool RegisterFloorVolume(ATerritoryFloorVolume* FloorVolume);
+
+	/** Unregister an authored floor region. Safe on null or unregistered volumes — no-op in those cases. */
+	void UnregisterFloorVolume(ATerritoryFloorVolume* FloorVolume);
+
+	/**
+	 * Resolves which authored floor of Place contains a world location.
+	 *
+	 * Returns INDEX_NONE when the location is on no authored floor region of that Place - including
+	 * the ordinary case of a Place that declares floor rows but has no floor volumes authored at all.
+	 * INDEX_NONE therefore means "no floor separation is declared here", and callers must treat it as
+	 * permission to proceed unchanged rather than as an error.
+	 *
+	 * A Place is never inferred from the location; it must be named, because a City or District volume
+	 * spanning the same space owns no floors and would otherwise mask the Place's answer.
+	 *
+	 * When two regions of the same Place overlap the location, the smaller region wins, with the
+	 * volume GUID breaking an exact tie. That order is total and independent of actor iteration,
+	 * which World Partition streaming does not preserve.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Registry", meta=(DisplayName="Get Floor At Location"))
+	int32 GetFloorAtLocation(const ATerritoryVolume* Place, const FVector& WorldLocation) const;
+
+	/** Every registered floor region claiming a floor of this Place. Empty when none are authored. */
+	UFUNCTION(BlueprintPure, Category="Territory|Registry", meta=(DisplayName="Get Floor Volumes For Place"))
+	TArray<ATerritoryFloorVolume*> GetFloorVolumesForPlace(const ATerritoryVolume* Place) const;
+
+	/** True when this Place has at least one registered floor region, i.e. floor separation is enforced. */
+	UFUNCTION(BlueprintPure, Category="Territory|Registry", meta=(DisplayName="Has Authored Floor Volumes"))
+	bool HasAuthoredFloorVolumes(const ATerritoryVolume* Place) const;
+
+	/** Every registered floor region, for validation and diagnostics. */
+	UFUNCTION(BlueprintPure, Category="Territory|Registry", meta=(DisplayName="Get All Floor Volumes"))
+	TArray<ATerritoryFloorVolume*> GetAllFloorVolumes() const;
+
 	/** Returns all registered territories in the world. */
 	UFUNCTION(BlueprintPure, Category="Territory|Registry", meta=(DisplayName="Get All Territories"))
 	TArray<ATerritoryVolume*> GetAllTerritories() const;
@@ -149,6 +200,12 @@ private:
 	TMap<FGameplayTag, TWeakObjectPtr<ATerritoryVolume>> TagToTerritoryMap;
 	TMap<FGuid, TWeakObjectPtr<ATerritoryVolume>> GUIDToTerritoryMap;
 	FTerritorySpatialIndex SpatialIndex;
+
+	// Authored floor regions, keyed by the Place tag they claim. Weak references for the same reason
+	// the territory lists are weak: World Partition stream-out must not leave a stale entry behind.
+	// Keyed by tag rather than by actor because a floor region resolves its Place through the tag, the
+	// way ATerritoryGuardSpawnPoint resolves its owner, and never by level-actor identity.
+	TMap<FGameplayTag, TArray<TWeakObjectPtr<ATerritoryFloorVolume>>> FloorVolumesByPlaceTag;
 
 	FTimerHandle BoundsCheckTimerHandle;
 	void PollBoundsChanges();

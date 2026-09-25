@@ -2,6 +2,7 @@
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultParticipantComponent.h"
+#include "Combat/TerritoryFloorCombatPolicy.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -353,6 +354,20 @@ bool ATerritoryGuardCharacter::EvaluateTerritoryTarget(const AActor* Target, FTe
 	if (!Diplomacy->AreAnyFactionsAtWar(GuardFactions, TargetFactions))
 		return Result(false, TEXT("There is no personal hostility or faction War."));
 
+	// Floor separation sits exactly here: the target is already established as a legitimate enemy,
+	// personal hostility has had its say above, and every remaining allowance below is a PROACTIVE
+	// one. Those proactive paths are how an upper floor joins a ground-floor fight - a Place that
+	// becomes Contested, a faction at War in a Claimed Place, an exposed player, an assault front -
+	// so refusing here is what makes floor 0's fight floor 0's alone. Nothing is refused that the
+	// player did not already earn the right to be attacked for.
+	{
+		FText FloorReason;
+		if (IsFloorSeparationRefused(Target, FloorReason))
+		{
+			return Result(false, *FloorReason.ToString());
+		}
+	}
+
 	const ATerritoryAssaultCharacter* Attacker = Cast<ATerritoryAssaultCharacter>(Target);
 	const UTerritoryAssaultParticipantComponent* Participant = Attacker ? Attacker->AssaultParticipant : nullptr;
 	if (Participant && !Participant->HasRetired() && Attacker->CanEngageAssaultTarget(this)
@@ -385,6 +400,53 @@ bool ATerritoryGuardCharacter::EvaluateTerritoryTarget(const AActor* Target, FTe
 		return Result(true, TEXT("The Place is claimed, but this faction is at War and the guard is ordered to defend it."));
 	}
 	return Result(false, TEXT("The Place is not contested and there is no confirmed local threat."));
+}
+
+bool ATerritoryGuardCharacter::IsFloorSeparationRefused(const AActor* Target, FText& OutReason) const
+{
+	// "No floor" is the answer that must stay cheap and safe: it is what every location in a Place
+	// with floor rows and no authored region resolves to, which is the state the shipped map is in.
+	// Reading it as a refusal would make an unauthored Place refuse its own defence, so the whole
+	// helper returns false the moment either side has no declared floor.
+	const UWorld* World = GetWorld();
+	const UTerritoryRegistrySubsystem* Registry = World
+		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
+	if (!Registry || !Target) return false;
+
+	int32 GuardFloor = Registry->GetFloorAtLocation(OwningTerritory, GetActorLocation());
+	if (GuardFloor == INDEX_NONE && OwningTerritorySpawnPoint)
+	{
+		// Position first, because "which floor is this defender on" is a fact about where it is.
+		// The post is the fallback for a defender that has patrolled off every authored region -
+		// otherwise one step outside its own floor would silently restore floor-blind engagement,
+		// which is the second half of the reported problem.
+		GuardFloor = OwningTerritorySpawnPoint->GetFloorIndex();
+	}
+	if (GuardFloor == INDEX_NONE) return false;
+
+	const UTerritoryPlaceDefinition* Place = OwningTerritory
+		? Cast<UTerritoryPlaceDefinition>(OwningTerritory->GetTerritoryDefinition()) : nullptr;
+	const UTerritoryFloorCombatPolicy* Policy = Place
+		? Place->GetEffectiveFloorCombatPolicy(GuardFloor) : nullptr;
+	if (!Policy || Policy->EngagementPolicy == ETerritoryFloorEngagementPolicy::AnyFloor)
+	{
+		return false;
+	}
+
+	const int32 TargetFloor = Registry->GetFloorAtLocation(
+		OwningTerritory, Target->GetActorLocation());
+	if (TargetFloor == INDEX_NONE) return false;
+	if (TargetFloor == GuardFloor) return false;
+	if (Policy->EngagementPolicy == ETerritoryFloorEngagementPolicy::SameOrAdjacent
+		&& FMath::Abs(TargetFloor - GuardFloor) == 1)
+	{
+		return false;
+	}
+
+	OutReason = FText::FromString(FString::Printf(
+		TEXT("Floor separation holds this defender on floor %d; the target is on floor %d."),
+		GuardFloor, TargetFloor));
+	return true;
 }
 
 bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(

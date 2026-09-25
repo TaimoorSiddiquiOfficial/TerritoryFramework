@@ -80,6 +80,14 @@ public:
 };
 
 UCLASS(hidecategories=Object)
+class UTerritoryFloorCombatPolicyFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryFloorCombatPolicyFactory();
+};
+
+UCLASS(hidecategories=Object)
 class UTerritoryProductionProfileFactory : public UTerritoryAssetFactoryBase
 {
 	GENERATED_BODY()

@@ -4,6 +4,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritorySpatialIndex.h"
+#include "Core/TerritoryFloorVolume.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -43,6 +44,7 @@ void UTerritoryRegistrySubsystem::Deinitialize()
 	TagToTerritoryMap.Empty();
 	GUIDToTerritoryMap.Empty();
 	SpatialIndex.Clear();
+	FloorVolumesByPlaceTag.Empty();
 	Super::Deinitialize();
 }
 
@@ -337,6 +339,168 @@ TArray<ATerritoryVolume*> UTerritoryRegistrySubsystem::GetChildTerritories(const
 			if (ParentRef == ParentTag)
 			{
 				Result.Add(Territory);
+			}
+		}
+	}
+	return Result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Floor regions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+bool UTerritoryRegistrySubsystem::RegisterFloorVolume(ATerritoryFloorVolume* FloorVolume)
+{
+	if (!IsValid(FloorVolume) || FloorVolume->IsActorBeingDestroyed()
+		|| FloorVolume->GetWorld() != GetWorld())
+	{
+		return false;
+	}
+
+	const FGameplayTag PlaceTag = FloorVolume->GetOwnerTerritoryTag();
+	if (!PlaceTag.IsValid())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("[Registry] Rejecting floor volume %s - it claims no Place tag, so no floor lookup could ever reach it"),
+			*FloorVolume->GetName());
+		return false;
+	}
+
+	// A negative index would be indistinguishable from "this location is on no authored floor", which
+	// is the answer callers act on. Rejecting keeps that meaning unambiguous.
+	const int32 FloorIndex = FloorVolume->FloorIndex;
+	if (FloorIndex < 0)
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("[Registry] Rejecting floor volume %s - floor index %d is negative, which would collide with the 'unresolved' answer"),
+			*FloorVolume->GetName(), FloorIndex);
+		return false;
+	}
+
+	const FGuid VolumeGUID = FloorVolume->FloorVolumeGUID;
+	if (!VolumeGUID.IsValid())
+	{
+		UE_LOG(LogTerritory, Error,
+			TEXT("[Registry] Rejecting floor volume %s - no editor-baked FloorVolumeGUID, so overlapping floor regions of %s could not be ordered deterministically"),
+			*FloorVolume->GetName(), *PlaceTag.ToString());
+		return false;
+	}
+
+	// A duplicated GUID makes the tie-break non-total. Refusing the second volume keeps the answer
+	// deterministic and loud; UTerritoryDataValidator reports the same condition on the asset.
+	for (const TPair<FGameplayTag, TArray<TWeakObjectPtr<ATerritoryFloorVolume>>>& Pair : FloorVolumesByPlaceTag)
+	{
+		for (const TWeakObjectPtr<ATerritoryFloorVolume>& ExistingPtr : Pair.Value)
+		{
+			const ATerritoryFloorVolume* Existing = ExistingPtr.Get();
+			if (Existing && Existing != FloorVolume && Existing->FloorVolumeGUID == VolumeGUID)
+			{
+				UE_LOG(LogTerritory, Error,
+					TEXT("[Registry] Rejecting floor volume %s - FloorVolumeGUID %s is already claimed by %s"),
+					*FloorVolume->GetName(), *VolumeGUID.ToString(), *Existing->GetName());
+				return false;
+			}
+		}
+	}
+
+	FloorVolumesByPlaceTag.FindOrAdd(PlaceTag).AddUnique(FloorVolume);
+	return true;
+}
+
+void UTerritoryRegistrySubsystem::UnregisterFloorVolume(ATerritoryFloorVolume* FloorVolume)
+{
+	if (!FloorVolume) return;
+
+	for (auto It = FloorVolumesByPlaceTag.CreateIterator(); It; ++It)
+	{
+		TArray<TWeakObjectPtr<ATerritoryFloorVolume>>& Volumes = It.Value();
+		Volumes.RemoveAll([FloorVolume](const TWeakObjectPtr<ATerritoryFloorVolume>& Ptr)
+		{
+			const ATerritoryFloorVolume* Candidate = Ptr.Get();
+			return !Candidate || Candidate == FloorVolume;
+		});
+		if (Volumes.IsEmpty())
+		{
+			It.RemoveCurrent();
+		}
+	}
+}
+
+int32 UTerritoryRegistrySubsystem::GetFloorAtLocation(
+	const ATerritoryVolume* Place, const FVector& WorldLocation) const
+{
+	if (!IsValid(Place)) return INDEX_NONE;
+
+	const FGameplayTag PlaceTag = Place->GetTerritoryTag();
+	if (!PlaceTag.IsValid()) return INDEX_NONE;
+
+	const TArray<TWeakObjectPtr<ATerritoryFloorVolume>>* Volumes = FloorVolumesByPlaceTag.Find(PlaceTag);
+	if (!Volumes) return INDEX_NONE;
+
+	const ATerritoryFloorVolume* Best = nullptr;
+	double BestVolume = TNumericLimits<double>::Max();
+	FString BestGUID;
+
+	for (const TWeakObjectPtr<ATerritoryFloorVolume>& VolumePtr : *Volumes)
+	{
+		const ATerritoryFloorVolume* Candidate = VolumePtr.Get();
+		if (!Candidate || !Candidate->ContainsPoint(WorldLocation)) continue;
+
+		// Most specific region wins, with a GUID tie-break so the order is total. This mirrors
+		// ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory's smallest-bounds-then-name rule,
+		// and the total order is what keeps the answer independent of World Partition iteration.
+		const double CandidateVolume = Candidate->GetFloorBoundsVolume();
+		const FString CandidateGUID = Candidate->FloorVolumeGUID.ToString();
+		if (!Best
+			|| CandidateVolume < BestVolume
+			|| (FMath::IsNearlyEqual(CandidateVolume, BestVolume) && CandidateGUID < BestGUID))
+		{
+			Best = Candidate;
+			BestVolume = CandidateVolume;
+			BestGUID = CandidateGUID;
+		}
+	}
+
+	return Best ? Best->FloorIndex : INDEX_NONE;
+}
+
+TArray<ATerritoryFloorVolume*> UTerritoryRegistrySubsystem::GetFloorVolumesForPlace(
+	const ATerritoryVolume* Place) const
+{
+	TArray<ATerritoryFloorVolume*> Result;
+	if (!IsValid(Place)) return Result;
+
+	const FGameplayTag PlaceTag = Place->GetTerritoryTag();
+	if (!PlaceTag.IsValid()) return Result;
+
+	if (const TArray<TWeakObjectPtr<ATerritoryFloorVolume>>* Volumes = FloorVolumesByPlaceTag.Find(PlaceTag))
+	{
+		for (const TWeakObjectPtr<ATerritoryFloorVolume>& VolumePtr : *Volumes)
+		{
+			if (ATerritoryFloorVolume* Volume = VolumePtr.Get())
+			{
+				Result.Add(Volume);
+			}
+		}
+	}
+	return Result;
+}
+
+bool UTerritoryRegistrySubsystem::HasAuthoredFloorVolumes(const ATerritoryVolume* Place) const
+{
+	return !GetFloorVolumesForPlace(Place).IsEmpty();
+}
+
+TArray<ATerritoryFloorVolume*> UTerritoryRegistrySubsystem::GetAllFloorVolumes() const
+{
+	TArray<ATerritoryFloorVolume*> Result;
+	for (const TPair<FGameplayTag, TArray<TWeakObjectPtr<ATerritoryFloorVolume>>>& Pair : FloorVolumesByPlaceTag)
+	{
+		for (const TWeakObjectPtr<ATerritoryFloorVolume>& VolumePtr : Pair.Value)
+		{
+			if (ATerritoryFloorVolume* Volume = VolumePtr.Get())
+			{
+				Result.Add(Volume);
 			}
 		}
 	}
