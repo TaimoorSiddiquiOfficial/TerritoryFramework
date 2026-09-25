@@ -106,10 +106,12 @@ crowd workaround. Use `Get Staggered Patrol Start Index`, `Refresh Patrol Crowd 
 
 The public patrol getters use the Place Definition row's relative patrol route when it is
 present, otherwise they use the row's optional `UTerritoryGuardPostDefinition` route and loop policy. Spawn-point
-selection is deterministic: higher priority fills first, a patrol-capable post wins an
-equal-priority tie over an intentional static post, and actor path is the final stable tie-break.
-The editor validator rejects a misleading one-node data-asset route; use at least two nodes
-or leave the route empty for an intentional static sentry.
+selection is deterministic: higher priority fills first, a multi-stop patrol post wins an
+equal-priority tie over a single-stop or static post, and actor path is the final stable tie-break.
+Any node count is valid. One node is a single-stop patrol: the guard walks there and holds it.
+A post with no route has no patrol duty at all, unless it sets `Use Spawn Transform As Patrol Stop`,
+which makes the post's own transform the single stop. The editor validator accepts all three cases
+and still rejects an invalid node transform or wait time.
 
 ## Reserve System
 

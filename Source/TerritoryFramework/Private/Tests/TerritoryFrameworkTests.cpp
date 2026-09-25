@@ -3556,6 +3556,8 @@ bool FTFContract_TerritoryGuardCharacter::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetTerritoryPatrolRoute")));
 	TestTrue(TEXT("Has HasTerritoryPatrolRoute (BlueprintPure)"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("HasTerritoryPatrolRoute")));
+	TestTrue(TEXT("Has HasAnyTerritoryPatrolDuty (BlueprintPure)"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasAnyTerritoryPatrolDuty")));
 	TestTrue(TEXT("Has GetPatrolNodeCount (BlueprintPure)"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPatrolNodeCount")));
 	TestTrue(TEXT("Has GetSafePatrolNode (BlueprintPure)"),
@@ -3588,6 +3590,9 @@ bool FTFContract_TerritoryGuardCharacter::RunTest(const FString& Parameters)
 
 	UTerritoryPatrolGoal* PatrolGoal = NewObject<UTerritoryPatrolGoal>();
 	TestEqual(TEXT("Empty patrol goals do not score"), PatrolGoal->GetGoalScore(), 0.f);
+	PatrolGoal->TerritoryPatrol.SetNum(1);
+	TestEqual(TEXT("A single-stop patrol goal scores like any other"),
+		PatrolGoal->GetGoalScore(), PatrolGoal->DefaultScore);
 	PatrolGoal->TerritoryPatrol.SetNum(2);
 	TestEqual(TEXT("Populated patrol goals retain their configured score"),
 		PatrolGoal->GetGoalScore(), PatrolGoal->DefaultScore);
@@ -3621,6 +3626,17 @@ bool FTFContract_GuardSpawnPointPure::RunTest(const FString& Parameters)
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetPatrolRoute")));
 	TestTrue(TEXT("HasPatrolRoute is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("HasPatrolRoute")));
+	TestTrue(TEXT("HasMultiStopPatrolRoute is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasMultiStopPatrolRoute")));
+	TestTrue(TEXT("HasImplicitPatrolStop is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasImplicitPatrolStop")));
+	TestTrue(TEXT("GetImplicitPatrolStop is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("GetImplicitPatrolStop")));
+	TestTrue(TEXT("HasAnyPatrolDuty is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class, TEXT("HasAnyPatrolDuty")));
+	TestTrue(TEXT("GetEffectiveUseSpawnTransformAsPatrolStop is BlueprintPure"),
+		TFTestUtils::IsBlueprintPure(Class,
+			TEXT("GetEffectiveUseSpawnTransformAsPatrolStop")));
 	TestTrue(TEXT("GetLoopPatrol is BlueprintPure"),
 		TFTestUtils::IsBlueprintPure(Class, TEXT("GetLoopPatrol")));
 	TestTrue(TEXT("GetPatrolRouteAsTransforms is BlueprintPure"),

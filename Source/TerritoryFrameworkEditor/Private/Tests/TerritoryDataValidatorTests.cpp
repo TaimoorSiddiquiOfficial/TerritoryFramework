@@ -353,15 +353,25 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 			GuardPostAssetData, GuardPost, EmptyGuardPostContext),
 		EDataValidationResult::Valid);
 
+	// A post that patrols in place authors no route and opts in instead. It must stay valid.
+	GuardPost->bUseSpawnTransformAsPatrolStop = true;
+	FDataValidationContext ImplicitStopContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A patrol-in-place guard post is valid"),
+		Validator->ValidateLoadedAsset_Implementation(
+			GuardPostAssetData, GuardPost, ImplicitStopContext),
+		EDataValidationResult::Valid);
+	GuardPost->bUseSpawnTransformAsPatrolStop = false;
+
 	GuardPost->PatrolRoute.SetNum(1);
 	FDataValidationContext SingleNodePatrolContext(
 		false, EDataValidationUsecase::Script, NoAssociatedAssets);
-	TestEqual(TEXT("A misleading one-node patrol route is rejected"),
+	TestEqual(TEXT("A single-stop patrol route is valid"),
 		Validator->ValidateLoadedAsset_Implementation(
 			GuardPostAssetData, GuardPost, SingleNodePatrolContext),
-		EDataValidationResult::Invalid);
-	TestTrue(TEXT("One-node patrol route emits a validation error"),
-		SingleNodePatrolContext.GetNumErrors() > 0u);
+		EDataValidationResult::Valid);
+	TestEqual(TEXT("One node is not a validation error"),
+		SingleNodePatrolContext.GetNumErrors(), 0u);
 
 	GuardPost->PatrolRoute.SetNum(2);
 	FDataValidationContext PatrolReadyContext(
@@ -370,6 +380,18 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 		Validator->ValidateLoadedAsset_Implementation(
 			GuardPostAssetData, GuardPost, PatrolReadyContext),
 		EDataValidationResult::Valid);
+
+	// The node-integrity check must still fire now that the count rule is gone.
+	GuardPost->PatrolRoute[0].WaitTime = -1.f;
+	FDataValidationContext BadWaitContext(
+		false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("A negative patrol wait time is still rejected"),
+		Validator->ValidateLoadedAsset_Implementation(
+			GuardPostAssetData, GuardPost, BadWaitContext),
+		EDataValidationResult::Invalid);
+	TestTrue(TEXT("A negative patrol wait time emits a validation error"),
+		BadWaitContext.GetNumErrors() > 0u);
+	GuardPost->PatrolRoute.SetNum(0);
 
 	UTerritoryProductionProfile* ProductionProfile =
 		NewObject<UTerritoryProductionProfile>();

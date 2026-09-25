@@ -225,7 +225,8 @@ Lives on the Place definition as `GuardBehavior`. A guard copies most of it at s
 flags are re-read live from the Place's definition on every target query**, so they always reflect
 whoever owns the Place right now.
 
-- `PatrolGoalClass` — the Narrative goal created for a guard that has a route of two or more nodes.
+- `PatrolGoalClass` — the Narrative goal created for a guard that has any patrol duty: a route
+  of one or more nodes, or a post that opted in to using its spawn transform as a single stop.
   **Empty means no goal and no patrolling.** **Example:** leave the default; only change it on a farm
   whose guards need custom patrol behaviour.
 - `bEnablePatrolCrowdAvoidance` — turns server-side steering around other agents on or off.

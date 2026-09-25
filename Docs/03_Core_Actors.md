@@ -315,7 +315,8 @@ Extends `ANarrativeNPCCharacter` from Narrative Pro.
 | ConfigureTerritorySpawnWithContext(...) | bool | Authority-only external deferred-spawn adapter. Validates typed Territory/spawn-point ownership and stable identities before applying the Narrative definition. |
 | ConfigureTerritorySpawn(...) | void | Deprecated migration node. Resolves typed context by Territory GUID and spawn-point name or fails closed; core garrisons use the Narrative subsystem adapter. |
 | GetTerritoryPatrolRoute() | Array<PatrolNode> | Copy the assigned spawn point's route |
-| HasTerritoryPatrolRoute() | bool | True when an assigned route has at least two nodes |
+| HasTerritoryPatrolRoute() | bool | True when an assigned route has 1 or more nodes |
+| HasAnyTerritoryPatrolDuty() | bool | True when the guard patrols at all: authored route or implicit single stop |
 | GetPatrolNodeCount() | int32 | Number of assigned patrol nodes |
 | GetSafePatrolNode(Index, OutNode) | bool | Bounds-checked patrol node access |
 | GetSpawnTransform() | Transform | Stored `TerritoryHomeTransform` used for return-to-home behavior |

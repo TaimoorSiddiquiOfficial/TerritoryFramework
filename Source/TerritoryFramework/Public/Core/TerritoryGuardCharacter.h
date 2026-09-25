@@ -196,11 +196,12 @@ public:
 	// ─── Patrol Route Helpers ───
 
 	/**
-	 * Returns the guard's patrol route from their spawn point. Empty array if no spawn point
-	 * is assigned (random-spawned guards have no route).
+	 * Returns the guard's authored patrol route from their spawn point. Empty array if no spawn
+	 * point is assigned (random-spawned guards have no route), and empty for a post that opted
+	 * into patrolling in place - that post's single stop is materialised by the goal instead.
 	 *
 	 * Use in BPA_TerritoryPatrol or any patrol AI to get the waypoints this guard should visit.
-	 * Always pair with HasTerritoryPatrolRoute() to guard the empty-route case.
+	 * Pair with HasAnyTerritoryPatrolDuty() to guard the no-route case.
 	 *
 	 * Example:
 	 *   Route = Guard->GetTerritoryPatrolRoute();
@@ -212,7 +213,11 @@ public:
 	TArray<FTerritoryPatrolNode> GetTerritoryPatrolRoute() const;
 
 	/**
-	 * Returns true if this guard has a valid patrol route (spawn point assigned AND has >= 2 nodes).
+	 * Returns true if this guard has an authored patrol route (spawn point assigned AND has
+	 * 1 or more nodes). One node is a valid single-stop route.
+	 *
+	 * This is false for a guard whose post opted into patrolling in place with no route; use
+	 * HasAnyTerritoryPatrolDuty() when the question is whether the guard patrols at all.
 	 *
 	 * Example:
 	 *   if (Guard->HasTerritoryPatrolRoute()) { StartPatrol(); } else { StandGuard(); }
@@ -222,10 +227,22 @@ public:
 	bool HasTerritoryPatrolRoute() const;
 
 	/**
-	 * Returns the number of patrol nodes this guard's route contains.
-	 * Zero if no spawn point is assigned.
+	 * Returns true if this guard has any patrol duty at all: an authored route, or an implicit
+	 * single stop because the post opted in to patrolling in place.
 	 *
-	 * Shorthand for GetTerritoryPatrolRoute().Num() without copying the array.
+	 * This is the gate the guard's own patrol goal uses, so a guard that reports true here is a
+	 * guard that gets a UTerritoryPatrolGoal.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol",
+		meta=(DisplayName="Has Any Territory Patrol Duty"))
+	bool HasAnyTerritoryPatrolDuty() const;
+
+	/**
+	 * Returns the number of *authored* patrol nodes in this guard's route.
+	 * Zero if no spawn point is assigned, and zero for a post patrolling in place with no route.
+	 *
+	 * Shorthand for GetTerritoryPatrolRoute().Num() without copying the array. It does not count
+	 * the implicit stop: HasAnyTerritoryPatrolDuty() is what tells those cases apart.
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol",
 		meta=(DisplayName="Get Patrol Node Count"))
@@ -293,7 +310,7 @@ public:
 	 *   2. Verify activity configuration is active on UNPCActivityComponent
 	 *   3. Add Territory patrol goal via this function
 	 *   4. Assert the expected Narrative activity becomes selected
-	 *   5. Assert the NPC reaches at least two patrol nodes
+	 *   5. Assert the NPC reaches every patrol stop, including a single-stop route
 	 *   6. Assert combat interruption and patrol resumption work
 	 * Until a PIE test proves this, patrol is integrated but unverified.
 	 */
@@ -333,6 +350,12 @@ private:
 	void ApplyGuardBehaviorFromTerritoryDefinition();
 	void TryWieldDefaultWeapon();
 	TArray<FTerritoryPatrolNode> BuildStaggeredPatrolRoute() const;
+
+#if WITH_DEV_AUTOMATION_TESTS
+	// The patrol-cardinality test proves the route the goal actually receives, including the
+	// implicit stop a post materialises when it has no authored route.
+	friend class FTFPatrolRouteCardinality;
+#endif
 
 	/**
 	 * Floor separation for one target: true means a proactive engagement must be refused.

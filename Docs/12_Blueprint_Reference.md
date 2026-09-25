@@ -218,7 +218,12 @@ structured success or rejection instead of leaving a half-finished transition.
 | GetSpawnTransform() | Transform |
 | ResolveGuardDeploymentTransform(GuardClass) | Transform (out) |
 | GetPatrolRoute() | Array<TerritoryPatrolNode> |
-| HasPatrolRoute() | bool (requires at least two nodes) |
+| HasPatrolRoute() | bool (authored route with 1 or more nodes) |
+| HasMultiStopPatrolRoute() | bool (authored route with 2 or more nodes) |
+| HasImplicitPatrolStop() | bool (no route, opted in to patrolling in place) |
+| GetImplicitPatrolStop() | TerritoryPatrolNode (the post's own transform) |
+| HasAnyPatrolDuty() | bool (authored route or implicit stop) |
+| GetEffectiveUseSpawnTransformAsPatrolStop() | bool |
 | GetLoopPatrol() | bool |
 | GetPatrolRouteAsTransforms() | Array<Transform> |
 | GetPatrolWaitTimes() | Array<float> |

@@ -71,8 +71,15 @@ enum class EGuardRemovalReason : uint8
 /**
  * A single waypoint in a guard's patrol route.
  *
- * Use these in pairs/triples inside ATerritoryGuardSpawnPoint's PatrolRoute array.
- * Guards walk Node0 -> Node1 -> Node2 ... and optionally loop back to Node0.
+ * A route may hold any number of nodes, including exactly one:
+ *   - 1 node:  a single stop. The guard walks there, waits, then holds that spot.
+ *   - 2+ nodes: a walk. The guard visits each in order, optionally looping back to Node0.
+ *
+ * A post patrols in place when it opts in via bUseSpawnTransformAsPatrolStop and authors no
+ * route: the spawn point's own transform then becomes an implicit single stop, so a stationary
+ * sentry needs no route authored. A post that authors neither has no patrol duty at all, which
+ * is the authored way to say "this post does not patrol". See
+ * ATerritoryGuardSpawnPoint::HasImplicitPatrolStop() and HasAnyPatrolDuty().
  */
 USTRUCT(BlueprintType, meta=(DisplayName="Territory Patrol Node"))
 struct FTerritoryPatrolNode
@@ -96,8 +103,12 @@ struct FTerritoryPatrolNode
 	float WaitTime = 2.f;
 
 	/**
-	 * Optional activity tag (e.g., Guard.Activity.Inspect, Guard.Activity.Rest).
-	 * If set, the guard plays this activity at the node instead of standing idle.
+	 * Optional Guard.Activity tag naming the activity requested at this node
+	 * (e.g. Guard.Activity.Inspect, Guard.Activity.Rest).
+	 *
+	 * NOT YET CONSUMED. Neither BPA_TerritoryPatrol nor BT_TerritoryPatrol reads this
+	 * field, so setting it does not start an activity today. Recorded as gap 4 of
+	 * Docs/GUARD_STORY_CONVERSATIONS.md.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol",
 		meta=(Categories="Guard.Activity", DisplayName="Activity Tag"))
@@ -110,15 +121,17 @@ struct FTerritoryPatrolNode
  *
  * Key design points:
  *   - Each spawn point owns its own PatrolRoute (TArray<FTerritoryPatrolNode>).
+ *   - A route may hold any number of nodes, including exactly one. A post with no route
+ *     patrols in place only when it opts in via bUseSpawnTransformAsPatrolStop.
  *   - Guards spawned from this point access the route via ATerritoryGuardCharacter
- *     helpers (GetTerritoryPatrolRoute, HasTerritoryPatrolRoute, GetPatrolNodeCount).
+ *     helpers (GetTerritoryPatrolRoute, HasTerritoryPatrolDuty, GetPatrolNodeCount).
  *   - Every unique spawn point contributes exactly one active combat slot.
  *   - Authored spawn points are authoritative. No random active-guard fallback or
  *     collision-driven relocation is allowed.
  *
  * Quick Blueprint Example:
  *   for spawn point in territory->GetGuardSpawnPoints():
- *     if spawn point->HasAvailableSlot() and spawn point->HasPatrolRoute():
+ *     if spawn point->HasAvailableSlot() and spawn point->HasAnyPatrolDuty():
  *       spawn guard here -> configure spawn -> start patrol
  */
 UCLASS(BlueprintType, Blueprintable, meta=(DisplayName="Territory Guard Spawn Point"))
@@ -216,8 +229,11 @@ public:
 	int32 ReserveTotalRetryLimit = 10;
 
 	/**
-	 * The patrol route this spawn point's guards walk through.
-	 * Empty = guard stands idle at spawn. Minimum useful route: 2 nodes.
+	 * The patrol route this spawn point's guards walk through. Rebuilt at BeginPlay from the
+	 * bound Place Definition row or GuardPostDefinition, which is why it is transient.
+	 *
+	 * One node is a valid single-stop route. An empty route means this post has no authored
+	 * patrol duty unless bUseSpawnTransformAsPatrolStop opts in to the implicit stop.
 	 * Guarded access via GetPatrolRoute() or HasPatrolRoute().
 	 */
 	UPROPERTY(Transient)
@@ -226,6 +242,18 @@ public:
 	/** If true, the patrol loop returns to Node0 after the last node. */
 	UPROPERTY(Transient)
 	bool bLoopPatrol = true;
+
+	/**
+	 * Let this post patrol with no authored route: its own spawn transform becomes the guard's
+	 * single patrol stop, so a stationary sentry needs nothing authored to get a patrol goal.
+	 *
+	 * Authored on the Place Definition guard-post row or on the nested Guard Post Definition,
+	 * then copied here by ApplyTerritoryDefinition - the placed actor has no authoring surface
+	 * of its own. Defaults false, so a post that never opted in keeps its previous behaviour of
+	 * having no patrol goal at all. Ignored once any route node is authored: a route always wins.
+	 */
+	UPROPERTY(Transient)
+	bool bUseSpawnTransformAsPatrolStop = false;
 
 	/**
 	 * Faction override. If invalid, the guard uses the territory owner's faction.
@@ -369,20 +397,81 @@ public:
 	 * For patrol AI, prefer the ATerritoryGuardCharacter helpers (GetTerritoryPatrolRoute)
 	 * which read this array via the guard's bound spawn point.
 	 *
-	 * Returns every configured node. Use HasPatrolRoute() when AI requires at least two nodes.
+	 * Returns every configured node, including a single-node route. An empty result means
+	 * this post patrols its own spawn transform; see HasImplicitPatrolStop().
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
 		meta=(DisplayName="Get Patrol Route", CompactNodeTitle="Patrol Route"))
 	TArray<FTerritoryPatrolNode> GetPatrolRoute() const;
 
 	/**
-	 * Returns true if this spawn point has a meaningful patrol route (>= 2 nodes).
+	 * Returns true if this spawn point has an authored patrol route (1 or more nodes).
 	 *
-	 * Example: if (spawn point->HasPatrolRoute()) { RunPatrolActivity(); } else { StandIdle(); }
+	 * A single node is a valid single-stop route. Use HasMultiStopPatrolRoute() when the
+	 * caller needs a guard that actually covers ground, and HasAnyPatrolDuty() when it needs
+	 * to know whether the guard has any patrol duty at all, authored or implicit.
+	 *
+	 * Example: if (spawn point->HasAnyPatrolDuty()) { RunPatrolActivity(); } else { StandIdle(); }
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
 		meta=(DisplayName="Has Patrol Route"))
 	bool HasPatrolRoute() const;
+
+	/**
+	 * Returns true if this spawn point has a route that walks between stops (2 or more nodes).
+	 *
+	 * This is the deployment tie-break predicate: a post whose guard covers ground wins an
+	 * equal-priority tie over one that holds a single spot. It is deliberately narrower than
+	 * HasPatrolRoute() so that adding a single stop never reorders existing deployment.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Has Multi-Stop Patrol Route"))
+	bool HasMultiStopPatrolRoute() const;
+
+	/**
+	 * Returns true if this post opted in to patrolling in place and authored no route, so its
+	 * own transform becomes the guard's single patrol stop.
+	 *
+	 * Requires GetEffectiveUseSpawnTransformAsPatrolStop(), so a post that simply has no route
+	 * still reports false and gets no patrol goal. False once any node is authored: an authored
+	 * route always takes precedence, so a designer who wants control over the stop's wait time
+	 * or activity authors one node instead of relying on this.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Has Implicit Patrol Stop"))
+	bool HasImplicitPatrolStop() const;
+
+	/**
+	 * Returns the single stop used when this post authored no route: this actor's own
+	 * transform, with the FTerritoryPatrolNode defaults for wait time and activity.
+	 *
+	 * Callers must check HasImplicitPatrolStop() first; when a route is authored this still
+	 * returns a node, but it is not the route the guard walks.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Get Implicit Patrol Stop"))
+	FTerritoryPatrolNode GetImplicitPatrolStop() const;
+
+	/**
+	 * Returns true if this post's guards have any patrol duty: an authored route, or the
+	 * implicit single stop on a post that opted in to it.
+	 *
+	 * This is the gate patrol AI should use. It is false for a post with neither, which is a
+	 * deliberate static post and not an idle-guard bug.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Has Any Patrol Duty"))
+	bool HasAnyPatrolDuty() const;
+
+	/**
+	 * Returns whether this post opted in to using its spawn transform as a patrol stop.
+	 *
+	 * Prefers the post's own flag, then its GuardPostDefinition's, mirroring how the route
+	 * itself resolves between the two authorities.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|GuardSpawn|Patrol",
+		meta=(DisplayName="Get Effective Use Spawn Transform As Patrol Stop"))
+	bool GetEffectiveUseSpawnTransformAsPatrolStop() const;
 
 	/**
 	 * Returns whether the patrol route loops back to the first node after the last.

@@ -735,10 +735,10 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 		{
 			Warnings.Add(TEXT("Guard post definition has no display name"));
 		}
-		if (GuardPost->PatrolRoute.Num() == 1)
-		{
-			Errors.Add(TEXT("Guard post patrol route has one node; author at least two nodes or clear the route for an intentional static post"));
-		}
+		// Deliberately no node-count rule here. Any number of nodes is valid: one node is a
+		// single-stop patrol, and an empty route is a post with no patrol duty unless it opts
+		// in to using its spawn transform as the stop (bUseSpawnTransformAsPatrolStop). A count
+		// rule would reject authoring that the runtime supports.
 		for (int32 NodeIndex = 0; NodeIndex < GuardPost->PatrolRoute.Num(); ++NodeIndex)
 		{
 			const FTerritoryPatrolNode& Node = GuardPost->PatrolRoute[NodeIndex];
@@ -1780,6 +1780,10 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 					*Post.GuardPostID.ToString(), *FailureReason.ToString()));
 			}
 		}
+		// Deliberately no node-count rule on this row either. The row is a template that expands
+		// per guard post, so a count rule here would repeat one authoring choice across every
+		// post in the Place, and the per-post check is the one with enough context to report it.
+		// Any count is valid: see the comment on the guard post definition branch above.
 		for (const FTerritoryGuardPatrolTemplateNode& Node : Post.PatrolRoute)
 		{
 			if (Node.RelativeTransform.ContainsNaN() || !FMath::IsFinite(Node.WaitTime)

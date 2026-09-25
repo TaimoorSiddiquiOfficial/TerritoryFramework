@@ -65,7 +65,8 @@ public:
 
 	/**
 	 * The patrol route guards walk through.
-	 * Empty = guard stands idle at spawn. Minimum useful route: 2 nodes.
+	 * One node is a valid single-stop route. Empty means the guard has no patrol duty, unless
+	 * bUseSpawnTransformAsPatrolStop is set.
 	 * A Place Definition Guard Post row can override this with its own relative route.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Patrol")
@@ -74,6 +75,17 @@ public:
 	/** If true, the patrol loop returns to Node0 after the last node. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Patrol")
 	bool bLoopPatrol = true;
+
+	/**
+	 * Patrol in place when no route is authored: the guard post's own transform becomes the
+	 * single patrol stop.
+	 *
+	 * Defaults to false so a post with no route keeps its previous behaviour of no patrol goal.
+	 * Ignored when PatrolRoute has any node.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Patrol",
+		meta = (DisplayName = "Use Spawn Transform As Patrol Stop"))
+	bool bUseSpawnTransformAsPatrolStop = false;
 
 	// ─── Capacity & Reserves ───
 

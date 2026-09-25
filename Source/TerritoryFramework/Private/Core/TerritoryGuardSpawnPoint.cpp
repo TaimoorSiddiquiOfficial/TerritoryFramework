@@ -306,10 +306,14 @@ bool ATerritoryGuardSpawnPoint::ApplyTerritoryDefinition()
 		FMath::Clamp(Template->ReserveTotalRetryLimit, 1, 100);
 	ReserveOwnershipPolicy = Template->ReserveOwnershipPolicy;
 	bLoopPatrol = Template->bLoopPatrol;
+	bUseSpawnTransformAsPatrolStop = Template->bUseSpawnTransformAsPatrolStop;
 	if (Template->StableGuardPostGUID.IsValid())
 	{
 		SpawnPointGUID = Template->StableGuardPostGUID;
 	}
+	// Note: the route is only repopulated when the row authors one, so re-applying this post
+	// after the row's route was cleared leaves the previous nodes in place. Pre-existing, and
+	// unchanged here on purpose: this apply is additive-only for the route array.
 	if (!Template->PatrolRoute.IsEmpty())
 	{
 		PatrolRoute.Reset(Template->PatrolRoute.Num());
@@ -840,7 +844,46 @@ bool ATerritoryGuardSpawnPoint::IsWaitingForOwningTerritory() const
 
 bool ATerritoryGuardSpawnPoint::HasPatrolRoute() const
 {
+	// One node is a real route: the guard walks to it and holds. A post with no route has no
+	// authored duty and reports false; see HasAnyPatrolDuty() for the patrol-in-place case.
+	return GetEffectivePatrolRoute().Num() >= 1;
+}
+
+bool ATerritoryGuardSpawnPoint::HasMultiStopPatrolRoute() const
+{
 	return GetEffectivePatrolRoute().Num() >= 2;
+}
+
+bool ATerritoryGuardSpawnPoint::GetEffectiveUseSpawnTransformAsPatrolStop() const
+{
+	// Same precedence shape as the route itself: the value applied to this post, then the
+	// nested Guard Post Definition. The post's copy is never *cleared* by the definition,
+	// only defaulted, because ApplyTerritoryDefinition assigns it from the Place row.
+	if (bUseSpawnTransformAsPatrolStop) return true;
+	return GuardPostDefinition && GuardPostDefinition->bUseSpawnTransformAsPatrolStop;
+}
+
+bool ATerritoryGuardSpawnPoint::HasImplicitPatrolStop() const
+{
+	// An authored route always wins: one node is enough to say exactly where the guard stops,
+	// and it carries the wait time and activity the implicit stop cannot express.
+	return GetEffectiveUseSpawnTransformAsPatrolStop() && GetEffectivePatrolRoute().IsEmpty();
+}
+
+bool ATerritoryGuardSpawnPoint::HasAnyPatrolDuty() const
+{
+	return HasPatrolRoute() || HasImplicitPatrolStop();
+}
+
+FTerritoryPatrolNode ATerritoryGuardSpawnPoint::GetImplicitPatrolStop() const
+{
+	// Built from the struct's own defaults so no wait time or activity is baked in here; a
+	// designer who wants either authors one node instead of relying on the implicit stop.
+	FTerritoryPatrolNode Stop;
+	const FTransform SpawnTransform = GetSpawnTransform();
+	Stop.Location = SpawnTransform.GetLocation();
+	Stop.Rotation = SpawnTransform.Rotator();
+	return Stop;
 }
 
 void ATerritoryGuardSpawnPoint::SortForDeployment(TArray<ATerritoryGuardSpawnPoint*>& Posts)
@@ -848,7 +891,12 @@ void ATerritoryGuardSpawnPoint::SortForDeployment(TArray<ATerritoryGuardSpawnPoi
 	Posts.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
 	{
 		if (A.Priority != B.Priority) return A.Priority > B.Priority;
-		if (A.HasPatrolRoute() != B.HasPatrolRoute()) return A.HasPatrolRoute();
+		// Deliberately HasMultiStopPatrolRoute(), not HasAnyPatrolDuty(). This tie-break means
+		// "this post's guard covers ground", so a single stop - authored or implicit - must not
+		// win it. Widening this changes which posts and floors deployment fills first for
+		// existing content, so it is a decision, not an oversight: do not "fix" it later.
+		if (A.HasMultiStopPatrolRoute() != B.HasMultiStopPatrolRoute())
+			return A.HasMultiStopPatrolRoute();
 		return A.GetPathName() < B.GetPathName();
 	});
 }
@@ -1029,6 +1077,10 @@ FGameplayTag ATerritoryGuardSpawnPoint::GetEffectiveFactionOverride() const
 
 const TArray<FTerritoryPatrolNode>& ATerritoryGuardSpawnPoint::GetEffectivePatrolRoute() const
 {
+	// Returns *authored* nodes only: an implicit stop is never synthesised here because the
+	// fallback below is a function-local static, so a caller holding this reference and
+	// comparing or mutating it across frames would be reading shared state. Consumers that
+	// need patrol duty ask HasAnyPatrolDuty() and build the stop via GetImplicitPatrolStop().
 	if (!PatrolRoute.IsEmpty()) return PatrolRoute;
 	if (GuardPostDefinition && !GuardPostDefinition->PatrolRoute.IsEmpty())
 		return GuardPostDefinition->PatrolRoute;

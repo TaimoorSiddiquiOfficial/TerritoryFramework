@@ -360,6 +360,17 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
 	/** Return to the first patrol node after the last node instead of ending the route. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post")
 	bool bLoopPatrol = true;
+
+	/**
+	 * Patrol in place when this row authors no route: the guard-post actor's own transform
+	 * becomes the single patrol stop.
+	 *
+	 * Defaults to false so an unauthored row keeps its previous behaviour of no patrol goal.
+	 * Ignored when PatrolRoute has any node.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post",
+		meta=(DisplayName="Use Spawn Transform As Patrol Stop"))
+	bool bUseSpawnTransformAsPatrolStop = false;
 };
 
 /** Physical multiplayer capture-point Blueprint and settings for a Place. */

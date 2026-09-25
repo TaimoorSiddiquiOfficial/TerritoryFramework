@@ -1092,6 +1092,15 @@ bool ATerritoryGuardCharacter::HasTerritoryPatrolRoute() const
 	return OwningTerritorySpawnPoint->HasPatrolRoute();
 }
 
+bool ATerritoryGuardCharacter::HasAnyTerritoryPatrolDuty() const
+{
+	if (!IsValid(OwningTerritorySpawnPoint))
+	{
+		return false;
+	}
+	return OwningTerritorySpawnPoint->HasAnyPatrolDuty();
+}
+
 int32 ATerritoryGuardCharacter::GetPatrolNodeCount() const
 {
 	if (IsValid(OwningTerritorySpawnPoint))
@@ -1116,7 +1125,17 @@ int32 ATerritoryGuardCharacter::GetStaggeredPatrolStartIndex() const
 
 TArray<FTerritoryPatrolNode> ATerritoryGuardCharacter::BuildStaggeredPatrolRoute() const
 {
-	const TArray<FTerritoryPatrolNode> SourceRoute = GetTerritoryPatrolRoute();
+	TArray<FTerritoryPatrolNode> SourceRoute = GetTerritoryPatrolRoute();
+	if (SourceRoute.IsEmpty() && IsValid(OwningTerritorySpawnPoint))
+	{
+		// Patrol in place: the post opted in to using its spawn transform as the single stop.
+		// Materialised here rather than in the post's route accessor, which returns authored
+		// nodes only (its empty fallback is a shared static). One node needs no stagger below.
+		if (OwningTerritorySpawnPoint->HasImplicitPatrolStop())
+		{
+			SourceRoute.Add(OwningTerritorySpawnPoint->GetImplicitPatrolStop());
+		}
+	}
 	if (SourceRoute.Num() <= 1)
 	{
 		return SourceRoute;
@@ -1192,7 +1211,7 @@ bool ATerritoryGuardCharacter::IsSpawnPointGuard() const
 
 bool ATerritoryGuardCharacter::InitializeTerritoryPatrolGoal()
 {
-	if (!HasAuthority() || !HasTerritoryPatrolRoute() || !PatrolGoalClass)
+	if (!HasAuthority() || !HasAnyTerritoryPatrolDuty() || !PatrolGoalClass)
 	{
 		return false;
 	}

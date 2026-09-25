@@ -1,5 +1,10 @@
 # TerritoryFramework stabilization re-audit — 2026-08-25
 
+> **2026-09-26 follow-up:** The one-node patrol route this pass had the validator reject is now
+> valid. Any node count is accepted: one node is a single-stop patrol, and a post with no route
+> has no patrol duty unless it sets `Use Spawn Transform As Patrol Stop`. The equal-priority
+> deployment tie-break now follows multi-stop routes only. See `Docs/05_Guard_System.md`.
+
 ## Outcome
 
 This pass re-audited the complete TerritoryFramework source inventory (120 runtime C++

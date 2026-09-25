@@ -351,7 +351,8 @@ This returns the save-system-assigned GUID when valid. Otherwise it generates an
 | ConfigureTerritorySpawnWithContext(..., OwningTerritory, OwningSpawnPoint) | bool | Authority-only deferred-spawn configuration. Validates typed ownership and stable identities before applying the Narrative definition. |
 | ConfigureTerritorySpawn(...) | void | Deprecated migration node. Resolves typed ownership by Territory GUID and spawn-point name, then calls `ConfigureTerritorySpawnWithContext`; fails closed when resolution is ambiguous. |
 | GetTerritoryPatrolRoute | TArray<FTerritoryPatrolNode> | Copy assigned patrol route |
-| HasTerritoryPatrolRoute | bool | True when an assigned route has at least two nodes |
+| HasTerritoryPatrolRoute | bool | True when an assigned route has 1 or more nodes |
+| HasAnyTerritoryPatrolDuty | bool | True when the guard patrols at all: authored route or implicit single stop |
 | GetPatrolNodeCount | int32 | Number of assigned nodes |
 | GetStaggeredPatrolStartIndex | int32 | Stable per-guard first node used to separate overlapping patrols |
 | RefreshPatrolCrowdAvoidance | void | Authority-only application of authored RVO settings |
@@ -430,7 +431,12 @@ Actor placed in level to define guard spawn locations and patrol routes.
 | GetPatrolRoute | TArray<FTerritoryPatrolNode> | Full patrol node array, returned by value |
 | GetPatrolRouteAsTransforms | TArray<FTransform> | Patrol route as transforms (for behavior trees) |
 | GetPatrolWaitTimes | TArray<float> | Wait times parallel to GetPatrolRouteAsTransforms |
-| HasPatrolRoute | bool | Whether PatrolRoute contains at least two nodes |
+| HasPatrolRoute | bool | Whether PatrolRoute has 1 or more authored nodes |
+| HasMultiStopPatrolRoute | bool | Whether the route has 2 or more nodes; the deployment tie-break predicate |
+| HasImplicitPatrolStop | bool | No route, but opted in to patrolling in place |
+| GetImplicitPatrolStop | FTerritoryPatrolNode | The post's own transform as a single stop |
+| HasAnyPatrolDuty | bool | Authored route or implicit stop; the gate patrol AI uses |
+| GetEffectiveUseSpawnTransformAsPatrolStop | bool | Post flag, else the nested Guard Post Definition's |
 | GetSpawnTransform | FTransform | Exact authored foot-marker transform |
 | ResolveGuardDeploymentTransform | bool + FTransform | Preserves exact X/Y/facing and aligns Z for the guard capsule |
 | HasPendingReserveSpawn | bool | Whether a reserve guard spawn is pending |
