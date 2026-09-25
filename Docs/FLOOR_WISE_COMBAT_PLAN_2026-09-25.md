@@ -1010,8 +1010,10 @@ action, which the batch had omitted. Added `UTerritoryFloorCombatPolicyFactory`,
 - **Dedicated server + two clients.** Not yet performed. The gate is already authority-only (§2.8),
   so clients already answer Neutral; this proves the change did not alter that.
 - **Known limitation — floor laundering by movement.** A guard that physically chases onto another
-  floor adopts *that* floor's policy, because the guard floor is position-first. The movement-
-  leashing phase owns this; it is recorded here so it is not mistaken for a bug in the gate.
+  floor adopts *that* floor's policy, because the guard floor is position-first. **A2 owns this**
+  (§5 Phase A2) — corrected from "the movement-leashing phase", which was named here but never
+  existed as a phase; A2 is now written down, and its recon changes the design rather than filling a
+  blank. Recorded here so it is not mistaken for a bug in the gate.
 - **Known limitation — the user's roof scenario needs content.** "Player lands on the roof and
   fights 2→0" requires the roof to be authored into a floor region. That is authoring, not code.
 - **The two mechanisms in §2.9 other than the gate are not addressed by Phase 2:** the teammate
@@ -1032,6 +1034,92 @@ action, which the batch had omitted. Added `UTerritoryFloorCombatPolicyFactory`,
 - **Determinism:** the same (guard, target, position) yields the same verdict across repeated
   calls and after a re-index. ✅
 - **Post floor as fallback:** a guard off its region keeps its post's floor. ✅
+
+### Phase A2 — Movement bounding (ask 2). RECON ONLY, 2026-09-25: no code written, and the original framing is now known to be wrong.
+
+The phase is listed here because §5's Phase 2 and §8 item 3 both referred to "the movement-leashing
+phase" while no such phase existed and `grep` found **no leash symbol of any kind** in either tree.
+That gap is now closed as a *finding*, not an implementation. This section is deliberately a recon
+record: **nothing below authorises writing a leash system.**
+
+#### A2-i. The headline: "build a leash" is the wrong design, because one already ships
+
+A return-to-post pipeline already exists end to end and is already wired into the guard:
+
+| Stage | Where |
+|---|---|
+| home transform, replicated | `TerritoryGuardCharacter.h:144-146` `TerritoryHomeTransform`, filled from `SpawnInfo.SpawnTransform` at `:1021-1022` and returned by `GetSpawnTransform()` at `:1167-1170` |
+| project activity | `Content/AI/BPA_ReturnToTerritory.uasset` — casts to `BP_TerritoryGuard`, calls `GetSpawnTransform()`, writes `BBKey_TargetLocation`, runs the vendor BT |
+| vendor behaviour tree | `Content/Pro/Core/AI/Activities/ReturnToSpawn/BT_ReturnToSpawn.uasset` |
+| the actual distance-vs-home test | `.../Services/BTS_CheckAtTransform.uasset` — `Vector_Distance2D` against `OwningSpawn->GetTransform()`. This is the **only** distance-vs-home comparison in the vendor tree |
+| hard reset when unobserved | `.../Services/BTS_OutOfSightDestroyCheck.uasset` — teleports to `SpawnTransform` |
+| the existing global off-switch | `Narrative.State.DontReturnToSpawn` (`NarrativeGameplayTags.cpp:190`, applied by `NarrativeLevelSequenceActor.h:71` during cinematics) |
+
+Two consequences, and they are the reason this phase is recon-only:
+
+1. **A new leash would be a second authority for a solved problem** — AGENTS.md §4.1 and §3. It
+   would also create a *second teleport authority* alongside `BTS_OutOfSightDestroyCheck` and a
+   second switch fighting `Narrative.State.DontReturnToSpawn` — the exact failure §5.2 warns about
+   for the diplomacy bridge.
+2. **The vendor has no bounded-movement mechanism to reuse.** No `PatrolRadius`, `WanderRadius`,
+   `NavigationBoundary`, `ReturnTo`, or movement-scoped `MaxDistance` exists, no vendor patrol or
+   wander *C++* class exists at all (that layer is vendor Blueprint content), and
+   `UNPCActivityComponent::PerformActivitySelection` / `CanRunActivity` are **not virtual**, so
+   activity selection cannot be intercepted from a subclass. `NPCSpawnComponent::UntetherDistance`
+   and `FNPCTether` are **false positives** — spawn lifecycle and player-companion bookkeeping.
+
+#### A2-ii. Where the genuinely unbounded movement is — verified in our own source
+
+These are **[V]** by reading our C++, not content inference:
+
+- **Investigation pursuit has no containment check.** `UTerritoryInvestigationActivity::RunActivity`
+  calls `OwnerController->MoveToLocation(InvestigationGoal->InvestigationLocation, …)` with no test
+  that the location is inside the territory, and `UTerritoryInvestigationGoal` stores
+  `InvestigationLocation` with no territory validation in `Refresh()`. A goal that resolves outside
+  the volume is walked to verbatim.
+- **`UTerritoryAssaultActivity::RunActivity` does the same** — but there it is *by design*, because
+  an assault deliberately targets another territory. Do not "fix" this one.
+- **Patrol is bounded by authoring only.** `GetEffectivePatrolRoute` returns authored nodes
+  unchanged; `UTerritoryPatrolGoal` is a 24-line data container whose only gate is
+  `TerritoryPatrol.Num() >= 2`; the destination picker is vendor Blueprint content
+  (`BTT_SetNextPatrolPoint` → `BPA_Patrol`), and the vendor patrol node struct carries only a
+  transform — no radius. `AcceptableRadius` on our `BT_TerritoryPatrol` is `BTTask_MoveTo`'s
+  *arrival tolerance*, not a travel bound. So Phase 1's validator **warns** about an out-of-bounds
+  node but nothing stops the walk. That is the honest state of the user's "guards patrol outside the
+  territory bound" complaint: **detected, not prevented.**
+
+#### A2-iii. The legal extension points, and the one that actually fits
+
+- `UNPCActivity::SetupBlackboard_Implementation` (`NPCActivity.h:61-63`) — fires **once per activity
+  start**, so it can seed a destination but cannot clamp a patrol that re-picks every loop.
+- `UNPCActivity::ScoreActivity_Implementation` / `UNPCGoalItem::GetGoalScore_Implementation` — the
+  veto hook, and the pattern this codebase already uses (`TerritoryPatrolGoal.cpp:11-14`).
+- `ATerritoryNPCController::OnMoveComplete` (`NarrativeNPCController.h:112`) — live, since the guard
+  is driven by that controller class.
+- **`BPA_TerritoryPatrol` is the only per-loop interception point**, because we own that asset and a
+  vendor-content picker cannot be overridden without editing vendor content.
+- If the intent is only to stop *authored* routes leaving the volume, no runtime hook is needed at
+  all: filtering in `BuildStaggeredPatrolRoute` / `InitializeTerritoryPatrolGoal`
+  (`TerritoryGuardCharacter.cpp:1117-1132`, `:1193-1228`) bounds the route once, permanently, using
+  the existing `ATerritoryVolume::ContainsPoint` (`TerritoryVolume.cpp:1188`).
+
+#### A2-iv. What must be verified in the editor before any of A2 is designed
+
+Every row in A2-i's table is a **content** claim. It was derived by extracting identifier strings
+from `.uasset` files, which is not evidence of graph wiring — the whole reason §10 item 3 is still
+open. These are **[P]** and must be confirmed by opening the assets:
+
+1. That `AC_TerritoryGuard` actually lists `BPA_ReturnToTerritory` in the guard's activity set.
+2. That `BPA_ReturnToTerritory` is or is not distance-gated. No distance node was found in its
+   strings, so the "am I home yet" test is assumed to live in `BTS_CheckAtTransform` — **assumed,
+   not seen.** A leash whose outbound trigger is redundant hinges on this.
+3. That `BTS_OutOfSightDestroyCheck` really teleports, and under what conditions.
+4. That the vendor patrol node struct carries only a transform.
+5. Whether anything reads `Narrative.State.DontReturnToSpawn` for guards in practice.
+
+**Therefore: no leash work starts until the editor is running.** The duplicate-authority finding and
+all five [P] items above are cheap to confirm with the assets open and impossible to confirm safely
+from disk. Building on them now would repeat the exact mistake §10 exists to prevent.
 
 ### Phase 3 — Per-node activities (ask 4).
 
@@ -1352,20 +1440,30 @@ Unresolved floor geometry must never reduce a guard's engagement below today's b
    **B1**.
 2. **§2.5** — resolve the aggregate floor-beat contradiction in the same batch, or leave it and
    keep the base-class design? B1 forces this; B2 does not.
-3. **§6.2** — is movement leashing (A2) in scope now, or is engagement-only acceptable as a
-   first release? The feature will feel incomplete without A2.
+3. **§6.2 / §5 Phase A2 — movement bounding.** Still open, but now **informed**, and the question has
+   changed shape. Recon (§5 Phase A2) found a return-to-post pipeline already shipping
+   (`TerritoryHomeTransform` → `BPA_ReturnToTerritory` → vendor `BT_ReturnToSpawn`), so "add a leash"
+   is a duplicate authority rather than a feature. The real gaps are the unbounded
+   `MoveToLocation` in `UTerritoryInvestigationActivity::RunActivity` and the fact that Phase 1 only
+   *warns* about an out-of-bounds patrol node. **The decision I need from the user:** (a) is
+   engagement-only still acceptable for a first release, (b) should authored out-of-bounds patrol
+   nodes be *filtered* at route build (no runtime hook, no new authority) or merely warned about, and
+   (c) should investigation pursuit be bounded to the territory — which is the one genuine behaviour
+   change here. Five content claims in A2-iv must be verified in the editor first.
 4. **§6.4 — struck as a question.** Per-floor progression already exists and is per-floor
    (§2.7.1). The only decision left is whether Phase 1 warns about the "whole-Place target too
    low pins a floor uncleared" trap, or whether that stays a source comment. My recommendation
-   is to warn.
+   is to warn — **now decided and implemented** as rule R1 in §5 Phase 1c.
 5. **§4.5 E1** — typed DataAsset reference per node (recommended) or keep the tag and add a
    tag→activity library asset?
 6. **§6.3** — are there HUD or vendor systems reading guard attitude that a cross-floor
    `Neutral` would visibly change?
-7. **§C5** — comment the counter-attack height tolerance as scoring-only (recommended), or
-   migrate the planner onto the resolved floor? The first is one line and no behaviour change;
-   the second removes the duplicate concept outright at the cost of touching a working scoring
-   curve that is outside this feature.
+7. ~~**§C5** — comment the counter-attack height tolerance as scoring-only (recommended), or
+   migrate the planner onto the resolved floor?~~ **Decided and already implemented — the
+   comment.** `TerritoryCounterAttackProfile.h:241-254` carries it and its claims are verified
+   against all four call sites; see §10 item 8 for the evidence table. The migration was not
+   taken, because it would touch a working scoring curve outside this feature. The residual gap
+   (nothing test-pins the property) is recorded there rather than left implicit.
 
 ---
 
@@ -1531,15 +1629,51 @@ not re-opened.
    (§2.7.1): dispatch is per-floor and fires while other floors still fight. The remaining part
    of item 7 — that a low whole-Place `DesiredGuardCount` can pin a floor uncleared forever — is
    carried forward as Phase 1 validator work (§6.4).
-8. **§2.12 — the coexistence decision.** Whether `TerritoryCounterAttackProfile::SameFloorHeightTolerance`
-   should gain a "scoring only, not membership" comment (§C5) or be migrated onto the resolved
-   floor. My recommendation is the comment, but the planner's four call sites have not been read
-   in full by me. **Phase 1 item.** The recon strengthened the case for the comment: the field is
-   read **only** at `TerritoryCounterAttackSubsystem.cpp:2211`, `:2218`, `:2848`, `:2871-2874`,
-   i.e. it is a reserve-staging presentation setting, and it is under
-   `bUsePlayerRelativeReserveStaging` — so it is even narrower than §2.12 assumed, and the risk
-   of it being mistaken for a membership answer is real precisely because the name is so
-   suggestive.
+8. ~~**§2.12 — the coexistence decision.**~~ **Answered — the comment, it is already in the
+   source, and the four call sites have now been read in full (2026-09-25).** The recommended
+   option is implemented: `TerritoryCounterAttackProfile.h:241-254` carries the "Approach SCORING
+   only … It is deliberately NOT the floor-membership authority … answered by
+   `UTerritoryRegistrySubsystem::GetFloorAtLocation`" block, and the tooltip states "This is not a
+   same-floor requirement".
+
+   All four call sites were read, and every claim the comment makes was checked against the code
+   rather than accepted:
+
+   | Claim in the comment | Evidence |
+   |---|---|
+   | scoring only; never rejects, nothing excluded at any height | `:2873-2874` is a bare `Score += HeightDifference <= FloorTolerance ? 2.f : -FMath::Min(4.f, …)` — additive, bounded, no early-out and no filter anywhere in the function |
+   | read only when `bUsePlayerRelativeReserveStaging` is on | both reads (`:2211`, `:2218`) sit inside `if (Profile->bUsePlayerRelativeReserveStaging && PresentationPlayer)` at `:2189` |
+   | compares against the player pawn's Z | `:2191` `PlayerLocation = PresentationPlayer->GetActorLocation()`, then `Offset.Z` at `:2872` |
+   | an approach outside the band is still usable | the penalty saturates at 4 and the sort only reorders `WaveApproaches`; every approach stays in the array consumed at `:2237` |
+
+   `:2848` is the parameter declaration and `:2871` the `FMath::Max(1.f, …)` guard against a
+   zero divisor — neither is a second reader. So the field is a reserve-staging *presentation*
+   preference and nothing else, which is narrower even than §2.12 assumed. **No code change was
+   needed for this item**, and this is one of the few places in this feature where a source
+   comment does *not* run ahead of the code (contrast the floor-consumption sweep's comment
+   findings).
+
+   **Gap closed 2026-09-25.** The comment's property was previously unpinned, and the sibling
+   staging test could not catch its removal: that test asserts only that a same-floor route
+   *outranks* a cross-floor one at H/T = 2.4, and 2.4 stays well under the edge route's margin, so
+   deleting the clamp leaves it green. `CalculatePlayerRelativeApproachScore` is a public static
+   pure function, so the pin needs no fixture:
+
+   `TerritoryFramework.CounterAttack.Regression.ReserveStagingHeightIsABoundedPreference`
+   (`TerritoryCounterAttackTests.cpp`) asserts the height term is a *bounded preference* — the
+   penalty saturates at exactly 6 below a same-band route and no height can cost more; the score
+   never improves as height grows; an unconnected floor is scored lower rather than excluded with a
+   sentinel; and a zero tolerance behaves as one rather than dividing by zero. Because the distance
+   and view terms come from the horizontal offset only, varying Z leaves the rest exactly constant,
+   so the asserted differences are exact.
+
+   Evidence, and this is the part that matters: shipped **1/0**; mutation "delete the
+   `FMath::Min(4.f, …)` clamp" **0/1** — failing on exactly the saturation, sentinel and sweep-bound
+   assertions, reporting the penalty as 1002 rather than 6 — while the **pre-existing** staging test
+   stayed **1/0 under that same mutation**. So the pre-existing coverage was demonstrably not
+   sensitive to it, and this test is what now stops the preference being turned into a filter.
+   Reverted to byte-identical (`git diff` empty), rebuilt, re-run **1/0**, and the whole
+   `TerritoryFramework.CounterAttack` suite **60/0**.
 9. **§6.4 Phase 1c — two things the per-floor claim pass has not been shown to do.** Both are
    stated so they cannot be quietly assumed later:
    - **It has never run in live PIE.** The evidence is a constructed `EWorldType::Game` world with
@@ -1554,3 +1688,11 @@ not re-opened.
    whole-Place target*, not a second staffing authority — a floor claiming more guards than the
    target holds still gets only what the budget reaches, and a floor with no post on it claims
    nothing.
+
+10. **§5 Phase A2 — the movement-bounding recon is content-derived and must be confirmed in the
+    editor.** The five items are listed in A2-iv and are the reason A2 is recon-only. The one that
+    changes the design is whether `BPA_ReturnToTerritory` is distance-gated: the recon found no
+    distance node in its strings, but absence of a string is not absence of a node, and if it *is*
+    gated then a new outbound leash trigger would be redundant. Related and also open: §10 item 3's
+    Blueprint audit, which is the same class of question (what does a project graph actually bind).
+    **No A2 code is to be written until these are seen with the assets open.**

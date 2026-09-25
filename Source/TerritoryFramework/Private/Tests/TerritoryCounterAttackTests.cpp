@@ -375,6 +375,73 @@ bool FTFCounterAttackPlayerRelativeReserveStaging::RunTest(const FString& Parame
 	return true;
 }
 
+/**
+ * The reserve-staging height term is a bounded preference, never a filter.
+ *
+ * TerritoryCounterAttackProfile.h documents SameFloorHeightTolerance as "Approach SCORING only ...
+ * it never rejects one, and nothing is excluded at any height", and tells a future reader not to
+ * grow it into a second floor-membership authority. Until this test, nothing pinned that. The
+ * sibling staging test above asserts only that a same-floor route *outranks* a cross-floor one at
+ * H/T = 2.4 - and that assertion still holds if the clamp is deleted, because 2.4 stays well under
+ * the edge route's margin. So the clamp can be removed, silently turning a soft preference into an
+ * unbounded penalty, without any existing test going red. These assertions are that missing control.
+ *
+ * The distance and view terms are computed from the horizontal offset only, so varying Z leaves the
+ * rest of the score exactly constant and the differences asserted below are exact, not approximate.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackReserveStagingHeightBound,
+	"TerritoryFramework.CounterAttack.Regression.ReserveStagingHeightIsABoundedPreference",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackReserveStagingHeightBound::RunTest(const FString& Parameters)
+{
+	const FVector PlayerLocation = FVector::ZeroVector;
+	const FVector ViewForward = FVector::ForwardVector;
+	const float PreferredDot = 0.55f;
+	const float Side = FMath::Sqrt(1.f - PreferredDot * PreferredDot);
+	const FVector Base = FVector(PreferredDot, Side, 0.f) * 2600.f;
+	const float Tolerance = 500.f;
+	const auto Score = [&](float Height, float UseTolerance)
+	{
+		return UTerritoryCounterAttackSubsystem::CalculatePlayerRelativeApproachScore(
+			Base + FVector(0.f, 0.f, Height), PlayerLocation, ViewForward,
+			1200.f, 2600.f, 5500.f, PreferredDot, UseTolerance);
+	};
+
+	const float Within = Score(0.f, Tolerance);
+	TestEqual(TEXT("A height at the edge of the band earns the same flat bonus as one inside it"),
+		Score(Tolerance, Tolerance), Within);
+
+	// 2 for being inside the band, versus the clamp's -4: exactly 6, and no more at any height.
+	const float Extreme = Score(Tolerance * 1000.f, Tolerance);
+	TestEqual(TEXT("The height penalty saturates at its clamp, 6 below a same-band route"),
+		Within - Extreme, 6.f);
+	TestTrue(TEXT("An unconnected floor is scored lower, not excluded with a sentinel"),
+		FMath::IsFinite(Extreme) && Extreme > -100.f);
+
+	const float Heights[] = {0.f, Tolerance, Tolerance * 2.f, Tolerance * 4.f,
+		Tolerance * 8.f, Tolerance * 1000.f};
+	float Previous = Score(Heights[0], Tolerance);
+	for (int32 Index = 1; Index < UE_ARRAY_COUNT(Heights); ++Index)
+	{
+		const float Current = Score(Heights[Index], Tolerance);
+		TestTrue(FString::Printf(TEXT("Height %.0f never improves the score"), Heights[Index]),
+			Current <= Previous + KINDA_SMALL_NUMBER);
+		TestTrue(FString::Printf(TEXT("Height %.0f cannot cost more than the clamp"),
+			Heights[Index]), Within - Current <= 6.f + KINDA_SMALL_NUMBER);
+		Previous = Current;
+	}
+
+	// FMath::Max(1.f, SameFloorHeightTolerance) guards the divisor; a zero tolerance must behave
+	// as one rather than exploding the score.
+	const float ZeroTolerance = Score(5000.f, 0.f);
+	TestTrue(TEXT("A zero tolerance yields a finite score rather than a division blow-up"),
+		FMath::IsFinite(ZeroTolerance));
+	TestEqual(TEXT("A zero tolerance behaves exactly as a tolerance of one"),
+		ZeroTolerance, Score(5000.f, 1.f));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackNarrativeDifficultyVehicleBudget,
 	"TerritoryFramework.CounterAttack.Vehicle.NarrativeDifficultyBudget",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
