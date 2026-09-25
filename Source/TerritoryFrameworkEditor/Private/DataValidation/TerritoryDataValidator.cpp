@@ -2558,6 +2558,13 @@ void UTerritoryDataValidator::CheckGuardDeploymentFeasibility(ULevel* Level, TAr
 	/** Floors with at least one post that can actually put a guard on the ground, per Place. */
 	TMap<const ATerritoryVolume*, TSet<int32>> StaffableFloors;
 
+	/**
+	 * The posts that can put a guard on the ground, per Place, kept unsorted here and put into
+	 * deployment order at the rollup below. Deployment reach is a property of the *order*, so the
+	 * order has to come from the runtime's own comparator rather than from level iteration order.
+	 */
+	TMap<const ATerritoryVolume*, TArray<ATerritoryGuardSpawnPoint*>> DeployablePosts;
+
 	for (ATerritoryGuardSpawnPoint* Post : Index.Posts)
 	{
 		if (!Post) continue;
@@ -2625,6 +2632,7 @@ void UTerritoryDataValidator::CheckGuardDeploymentFeasibility(ULevel* Level, TAr
 			// its default zero on a map that has not been played, which would credit every post to
 			// ground and report every upper floor as unstaffable. See ResolveAuthoredPostFloor.
 			StaffableFloors.FindOrAdd(Owner).Add(ResolveAuthoredPostFloor(Post));
+			DeployablePosts.FindOrAdd(Owner).Add(Post);
 			continue;
 		}
 
@@ -2697,6 +2705,111 @@ void UTerritoryDataValidator::CheckGuardDeploymentFeasibility(ULevel* Level, TAr
 			OutWarnings.Add(FString::Printf(
 				TEXT("%s: floor %d wants %d guard(s) but no guard post on that floor can deploy one; the floor can never be staffed%s"),
 				*Territory->GetActorLabel(), Floor.FloorIndex, Floor.DesiredGuards, *CreditedNote));
+		}
+
+		// A second way a floor dies, disjoint from the one above: its posts are all clear, and the
+		// whole-Place staffing target still never reaches them.
+		//
+		// SpawnGuardsToCount fills the deployment order front to back, one guard per post, and stops
+		// at the target. A floor past that point receives no guard, its posts keep their reserve
+		// forever, IsCleared() reads a nonzero reserve as uncleared, and so the floor's
+		// FloorClearedEvents never fire and a floor-filtered Tales objective on it can never be
+		// satisfied. TerritoryVolume.cpp:2957 records the trap; this is the editor finding for it.
+		//
+		// Disjoint by construction rather than by a guard: the finding above needs a floor with no
+		// deployable post, this one needs a floor with at least one. Neither can fire for the floor
+		// the other reports, so no floor is ever reported twice.
+		//
+		// Only the *authored* target is knowable here, and GuardSpawnCount is it. GetMaxGuardCount()
+		// and GetDesiredGuardCount() both answer from runtime state with no authority - the first
+		// returns the snapshot's zero - so neither can be read at edit time. GuardSpawnCount is also
+		// the honest number: the runtime target seeds from it and can afterwards only rise (guards
+		// purchased, or a post-capture policy staffing above the authored count), and a higher target
+		// reaches further down the order, never less far. So a floor this check clears cannot be
+		// starved later by the target alone.
+		//
+		// A floor row is reported whether or not it states a DesiredGuards count: zero is not "wants
+		// nothing" but "every post on this floor", which the snapshot builder honours, so a zero-count
+		// floor beyond the reach is exactly as dead as a counted one.
+		if (TArray<ATerritoryGuardSpawnPoint*>* const Posts = DeployablePosts.Find(Territory))
+		{
+			// The runtime's own comparator, so this cannot drift from what will actually deploy.
+			ATerritoryGuardSpawnPoint::SortForDeployment(*Posts);
+
+			// The rank each floor's posts hold among the posts the fill will accept. Counting every
+			// post instead would report a floor as out of reach when a blocked post above it is
+			// precisely what pushes the fill's next guard onto it.
+			TArray<int32> ResolvedFloorByRank;
+			ResolvedFloorByRank.Reserve(Posts->Num());
+			for (const ATerritoryGuardSpawnPoint* const Post : *Posts)
+			{
+				ResolvedFloorByRank.Add(ResolveAuthoredPostFloor(Post));
+			}
+			TMap<int32, TArray<int32>> FloorRanks;
+			for (int32 Rank = 0; Rank < ResolvedFloorByRank.Num(); ++Rank)
+			{
+				FloorRanks.FindOrAdd(ResolvedFloorByRank[Rank]).Add(Rank);
+			}
+
+			// Clamped to the posts that can accept a guard. The runtime clamps its target to capacity
+			// instead, which differs only once every deployable post is already reached - so the
+			// verdict is the same either way, and re-deriving capacity here would be a second
+			// authority for a number the runtime owns.
+			const int32 AuthoredTarget =
+				FMath::Clamp(Territory->GetConfiguredGuardCount(), 0, Posts->Num());
+
+			// Spend the fill's own claim plan, then walk the surplus the way the fill's loop does:
+			// one guard per unstaffed post in rank order until the residual budget runs out.
+			//
+			// A flat "is this rank below the target" test is no longer the fill's rule. An authored
+			// floor quota pulls that floor ahead of the flat order, so a floor standing past the
+			// target is staffed whenever it claims and the budget survives to its turn - and reporting
+			// it as unreachable would tell the author to raise a target that is already sufficient.
+			TArray<ATerritoryGuardSpawnPoint::FTerritoryFloorClaim> Claims;
+			const int32 SurplusBudget = ATerritoryGuardSpawnPoint::PlanFloorClaims(
+				ResolvedFloorByRank, PlaceDefinition->Floors, AuthoredTarget, Claims);
+
+			TSet<int32> ReachedRanks;
+			for (const ATerritoryGuardSpawnPoint::FTerritoryFloorClaim& Claim : Claims)
+			{
+				int32 Taken = 0;
+				for (int32 Rank = 0; Rank < ResolvedFloorByRank.Num() && Taken < Claim.Guards; ++Rank)
+				{
+					if (ReachedRanks.Contains(Rank)) continue;
+					if (ResolvedFloorByRank[Rank] != Claim.FloorIndex) continue;
+					ReachedRanks.Add(Rank);
+					++Taken;
+				}
+			}
+			for (int32 Rank = 0, Remaining = SurplusBudget;
+				Rank < ResolvedFloorByRank.Num() && Remaining > 0; ++Rank)
+			{
+				if (ReachedRanks.Contains(Rank)) continue;
+				ReachedRanks.Add(Rank);
+				--Remaining;
+			}
+
+			for (const FTerritoryFloorTemplate& Floor : PlaceDefinition->Floors)
+			{
+				const TArray<int32>* const Ranks = FloorRanks.Find(Floor.FloorIndex);
+				if (!Ranks || Ranks->IsEmpty()) continue;
+
+				const bool bReached = Ranks->ContainsByPredicate(
+					[&ReachedRanks](const int32 Rank) { return ReachedRanks.Contains(Rank); });
+				if (bReached) continue;
+
+				// Named so the author can see how far short the target falls. One-based, because this
+				// is read next to the Guard Spawn Count it is being compared against.
+				TArray<FString> Positions;
+				for (const int32 Rank : *Ranks)
+				{
+					Positions.Add(FString::FromInt(Rank + 1));
+				}
+				OutWarnings.Add(FString::Printf(
+					TEXT("%s: floor %d's guard post(s) stand at position(s) %s of %d in deployment order, beyond the Place's Guard Spawn Count of %d, so a garrison of that size never reaches the floor; it is staffed only if the target is later raised above %d"),
+					*Territory->GetActorLabel(), Floor.FloorIndex,
+					*FString::Join(Positions, TEXT(", ")), Posts->Num(), AuthoredTarget, AuthoredTarget));
+			}
 		}
 	}
 }
@@ -2905,6 +3018,111 @@ void UTerritoryDataValidator::CheckFloorVolumes(ULevel* Level, TArray<FString>& 
 			OutWarnings.Add(FString::Printf(
 				TEXT("%s: floor %d staffs %d guard post(s) but no floor volume in this level claims it; guards on that floor engage targets on every floor, and its floor-cleared events cannot be gated on that floor being emptied"),
 				*Territory->GetActorLabel(), FloorIndex, PostCount));
+		}
+	}
+
+	// ─── A post that physically stands on a floor other than the one its row claims ───
+	//
+	// The only check here that looks at where a post actually STANDS. The rule above compares a
+	// floor's post count to the regions, and rule 1 compares a region's floor to the authored rows,
+	// but nothing compared a post's own row to the region containing it - so a post authored on
+	// floor 0 while sitting inside floor 1's volume was invisible to every check in this file.
+	//
+	// It matters because the resolver reads POSITION FIRST and falls back to the post's row only
+	// when no region contains it (ATerritoryGuardCharacter::IsFloorSeparationRefused). A
+	// disagreement is therefore not settled in the row's favour: the guard is treated as the floor
+	// the region names, which decides both the combat policy it obeys and which floor's cleared
+	// events wait on it - so the floor its row claims can never report cleared while that post
+	// holds a reserve. That is a silently unreachable floor, which is what this whole check exists
+	// to prevent.
+	//
+	// Deliberately silent when a post resolves to NO region. That is not a defect: the same
+	// fallback then answers from the post's own row, so the defender is still separated exactly as
+	// authored. Warning about it would flag every partially-authored Place and every guard that has
+	// patrolled off its own region - which is precisely why the fallback exists.
+	{
+		const FSpawnPointPlaceIndex PostIndex = BuildSpawnPointPlaceIndex(Level);
+
+		TMap<const UTerritoryPlaceDefinition*, TArray<ATerritoryGuardSpawnPoint*>> PostsByPlace;
+		for (ATerritoryGuardSpawnPoint* Post : PostIndex.Posts)
+		{
+			if (!Post) continue;
+
+			const ATerritoryVolume* const Owner = ResolvePostTerritory(Post, PostIndex).Owner;
+			const UTerritoryPlaceDefinition* const PlaceDefinition = Owner
+				? Cast<UTerritoryPlaceDefinition>(Owner->GetTerritoryDefinition()) : nullptr;
+
+			// No owner: already reported as orphaned above. No Place: a City or District cannot own
+			// defenders, so it cannot own a floor either.
+			if (!PlaceDefinition) continue;
+
+			// Only Places that authored a region somewhere. With no region nothing can resolve, and
+			// this rule would be a silent no-op rather than a finding.
+			if (!VolumesByFloor.Contains(PlaceDefinition)) continue;
+
+			PostsByPlace.FindOrAdd(PlaceDefinition).Add(Post);
+		}
+
+		TArray<FString> PostPlaceNames;
+		TMap<FString, const UTerritoryPlaceDefinition*> PostPlaceByName;
+		for (const TPair<const UTerritoryPlaceDefinition*, TArray<ATerritoryGuardSpawnPoint*>>& Pair : PostsByPlace)
+		{
+			if (!Pair.Key) continue;
+			const FString Name = Pair.Key->GetName();
+			PostPlaceNames.AddUnique(Name);
+			PostPlaceByName.Add(Name, Pair.Key);
+		}
+		PostPlaceNames.Sort();
+
+		for (const FString& PlaceNameKey : PostPlaceNames)
+		{
+			const UTerritoryPlaceDefinition* const PlaceDefinition = PostPlaceByName.FindRef(PlaceNameKey);
+			TArray<ATerritoryGuardSpawnPoint*>* const Posts = PostsByPlace.Find(PlaceDefinition);
+			const TMap<int32, TArray<ATerritoryFloorVolume*>>* const VolumesOnFloor =
+				VolumesByFloor.Find(PlaceDefinition);
+			if (!PlaceDefinition || !Posts || !VolumesOnFloor) continue;
+
+			// One candidate list per Place, in the runtime's own shape: every region that resolved to
+			// this Place and named a real floor row. Definition keying is the edit-time equivalent of
+			// the registry's tag keying, because the tag a volume registers under is derived from
+			// this same asset and stays transient until BeginPlay.
+			TArray<const ATerritoryFloorVolume*> Candidates;
+			for (const TPair<int32, TArray<ATerritoryFloorVolume*>>& FloorPair : *VolumesOnFloor)
+			{
+				for (const ATerritoryFloorVolume* const Volume : FloorPair.Value)
+				{
+					if (Volume) Candidates.Add(Volume);
+				}
+			}
+
+			const FString PlaceName = PlaceDefinition->DisplayName.IsEmpty()
+				? PlaceDefinition->GetName() : PlaceDefinition->DisplayName.ToString();
+
+			// Sorted by label: this check's output is a release gate, so the same level must always
+			// produce the same warnings in the same order.
+			Posts->Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
+			{
+				return A.GetActorLabel() < B.GetActorLabel();
+			});
+
+			for (const ATerritoryGuardSpawnPoint* const Post : *Posts)
+			{
+				const int32 ResolvedFloor = ATerritoryFloorVolume::ResolveFloorAtLocation(
+					Candidates, Post->GetActorLocation());
+				if (ResolvedFloor == INDEX_NONE) continue;
+
+				const int32 AuthoredFloor = ResolveAuthoredPostFloor(Post);
+				if (ResolvedFloor == AuthoredFloor) continue;
+
+				// A row naming a floor this Place does not declare is already an error in the
+				// Definition's own IsDataValid, so restating it here would double-report one mistake.
+				if (!PlaceDefinition->FindFloor(AuthoredFloor)) continue;
+
+				OutWarnings.Add(FString::Printf(
+					TEXT("%s: guard post '%s' is authored on floor %d but stands inside floor %d's floor volume; the resolver reads position before the post's row, so a guard deployed here is treated as floor %d's defender - it obeys floor %d's combat policy, and floor %d can never report cleared while this post holds a reserve"),
+					*PlaceName, *Post->GetActorLabel(), AuthoredFloor, ResolvedFloor,
+					ResolvedFloor, ResolvedFloor, AuthoredFloor));
+			}
 		}
 	}
 }

@@ -104,6 +104,28 @@ public:
 	/** Signed box volume, used as the registry's "most specific region wins" key. */
 	double GetFloorBoundsVolume() const;
 
+	/**
+	 * The one rule for "which authored region decides a point's floor", over an explicit candidate
+	 * set. Two callers share it so they cannot disagree: the registry, over the volumes it has
+	 * registered at runtime, and the authoring validator, over this level's actors - which is the
+	 * only form available before Play, because BeginPlay is what registers them.
+	 *
+	 * Most specific region wins - smallest bounds volume - with the volume GUID breaking an exact
+	 * tie. That order is total and independent of actor iteration, which World Partition streaming
+	 * does not preserve. Returns null when no candidate contains the point.
+	 */
+	static const ATerritoryFloorVolume* SelectMostSpecificRegion(
+		const TArray<const ATerritoryFloorVolume*>& Candidates, const FVector& WorldLocation);
+
+	/**
+	 * SelectMostSpecificRegion's floor index, or INDEX_NONE when no candidate contains the point.
+	 * INDEX_NONE is the answer that means "no separation declared": every caller treats it as
+	 * permission to proceed rather than as a refusal, which is what keeps an unauthored Place
+	 * defending itself exactly as it did before floors could be enforced.
+	 */
+	static int32 ResolveFloorAtLocation(
+		const TArray<const ATerritoryFloorVolume*>& Candidates, const FVector& WorldLocation);
+
 	/** Gives this volume its editor-baked identity when it has none yet. */
 	void EnsurePersistentFloorVolumeGUID();
 

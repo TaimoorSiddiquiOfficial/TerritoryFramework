@@ -176,6 +176,21 @@ struct FFixture
 	}
 
 	/**
+	 * Author the whole-Place staffing target and apply it, the way the content pipeline does.
+	 * ApplyToTerritory is what copies InitialGuardCount onto the actor, so writing the Definition
+	 * field alone would leave the actor sitting on its default.
+	 */
+	bool SetAuthoredGuardTarget(int32 Count)
+	{
+		if (!Place || !Definition)
+		{
+			return false;
+		}
+		Definition->InitialGuardCount = Count;
+		return Definition->ApplyToTerritory(Place);
+	}
+
+	/**
 	 * Author a guard-post row, then spawn and bind the post through the same two calls the
 	 * Definition path uses. ApplyTerritoryDefinition is what copies OwnerTerritoryTag and
 	 * FloorIndex off the row, so nothing here restates that mapping.
@@ -314,6 +329,8 @@ const TCHAR* const BlockedDeploymentFragment =
 	TEXT("blocked at its authored deployment location");
 const TCHAR* const UnstaffableFloorFragment =
 	TEXT("no guard post on that floor can deploy one");
+const TCHAR* const DeploymentReachFragment =
+	TEXT("beyond the Place's Guard Spawn Count of");
 const TCHAR* const OrphanedPostFragment =
 	TEXT("Orphaned GuardSpawnPoint");
 const TCHAR* const UnresolvedTagFragment =
@@ -1024,6 +1041,293 @@ bool FTFValidatorGuardPostBinding::RunTest(const FString& Parameters)
 		CountWarnings(Warnings, NoBoundDefinitionFragment), 1);
 	TestEqual(TEXT("The no-ID finding clears with the binding that caused it"),
 		CountWarnings(Warnings, NoGuardPostIDFragment), 0);
+	return true;
+}
+
+/**
+ * A floor that stands past the target but claims a quota IS staffed, so it must not be reported.
+ *
+ * The floor-quota claim pass (ATerritoryGuardSpawnPoint::PlanFloorClaims, spent by
+ * SpawnGuardsToCount) serves a floor authoring DesiredGuards > 0 ahead of the flat deployment order.
+ * Here the upper floor is the *worse* placed post and the ground floor claims nothing, so the flat
+ * order would spend the single guard on the ground floor and this check would report the upper floor
+ * as unreachable - while the runtime now staffs it first. Asserting that inverted verdict is what
+ * proves the rule spends the fill's own plan rather than restating it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFValidatorClaimedFloorBeyondReachIsStaffed,
+	"TerritoryFramework.Editor.DataValidation.ClaimedFloorBeyondDeploymentReachIsNotReported",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFValidatorClaimedFloorBeyondReachIsStaffed::RunTest(const FString& Parameters)
+{
+	FFixture Fixture;
+	ATerritoryProperty* Place = Fixture.SpawnPlace(TEXT("Validator Claim Place"), FGuid(5100, 5, 5, 5));
+	if (!TestNotNull(TEXT("Fixture Place exists"), Place))
+	{
+		return false;
+	}
+	if (!TestTrue(TEXT("The fixture authors a staffing target of one guard"),
+		Fixture.SetAuthoredGuardTarget(1)))
+	{
+		return false;
+	}
+
+	FTerritoryFloorTemplate GroundFloor;
+	GroundFloor.FloorIndex = 0;
+	GroundFloor.DisplayName = FText::FromString(TEXT("Ground"));
+	GroundFloor.DesiredGuards = 0; // Claims nothing: takes only what the flat order gives it.
+	FTerritoryFloorTemplate UpperFloor;
+	UpperFloor.FloorIndex = 1;
+	UpperFloor.DisplayName = FText::FromString(TEXT("Upper"));
+	UpperFloor.DesiredGuards = 1; // Claims the single guard outright.
+	Fixture.Definition->Floors = {GroundFloor, UpperFloor};
+
+	ATerritoryGuardSpawnPoint* GroundPost =
+		Fixture.SpawnBoundPost(TEXT("Ground_A"), 0, FVector::ZeroVector);
+	ATerritoryGuardSpawnPoint* UpperPost =
+		Fixture.SpawnBoundPost(TEXT("Upper_A"), 1, FVector(300.f, 0.f, 0.f));
+	if (!TestNotNull(TEXT("Ground post exists"), GroundPost)
+		|| !TestNotNull(TEXT("Upper post exists"), UpperPost))
+	{
+		return false;
+	}
+
+	GroundPost->Priority = 100; // Better placed, but claims nothing.
+	UpperPost->Priority = 50;   // Worse placed, but claims the quota.
+
+	TestEqual(TEXT("Scenario: the authored staffing target is one guard"),
+		Place->GetConfiguredGuardCount(), 1);
+
+	// The claim itself, stated directly, so a failure below cannot be mistaken for a fixture problem.
+	// Rank order is the sorted order: the ground post leads, the upper post follows.
+	TArray<ATerritoryGuardSpawnPoint::FTerritoryFloorClaim> Claims;
+	const TArray<int32> ResolvedFloors = {0, 1};
+	const int32 Surplus = ATerritoryGuardSpawnPoint::PlanFloorClaims(
+		ResolvedFloors, Fixture.Definition->Floors, 1, Claims);
+	TestEqual(TEXT("Scenario: exactly one floor claims"), Claims.Num(), 1);
+	TestEqual(TEXT("Scenario: the worse-placed upper floor is the one claiming"),
+		Claims.Num() == 1 ? Claims[0].FloorIndex : INDEX_NONE, 1);
+	TestEqual(TEXT("Scenario: the claim consumes the whole budget, leaving no flat surplus"),
+		Surplus, 0);
+
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+
+	TestFalse(TEXT("The floor the claim staffs is not reported as unreachable"),
+		HasWarning(Warnings, TEXT("floor 1's guard post(s)")));
+	TestEqual(TEXT("The unclaimed floor is the one now out of reach"),
+		CountWarnings(Warnings, DeploymentReachFragment), 1);
+	TestTrue(TEXT("And the finding names it"),
+		HasWarning(Warnings, TEXT("floor 0's guard post(s)")));
+	return true;
+}
+
+/**
+ * A floor whose posts are clear but that the Place's own staffing target never reaches.
+ *
+ * This is deliberately *not* the shipped "no guard post on that floor can deploy one" case: both
+ * posts here resolve a transform and are unobstructed. The floor is dead because SpawnGuardsToCount
+ * fills front to back, one guard per post, and a whole-Place target that stops short of the floor
+ * never spends a guard on it. That leaves the floor's reserve untouched forever, which IsCleared()
+ * reads as "not cleared", so its FloorClearedEvents never fire and a floor-filtered Tales objective
+ * on it can never be satisfied. TerritoryVolume.cpp:2957 records the trap; this is the editor
+ * finding for it.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFValidatorFloorBeyondDeploymentReach,
+	"TerritoryFramework.Editor.DataValidation.FloorBeyondDeploymentReachIsReported",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFValidatorFloorBeyondDeploymentReach::RunTest(const FString& Parameters)
+{
+	FFixture Fixture;
+	ATerritoryProperty* Place = Fixture.SpawnPlace(TEXT("Validator Reach Place"), FGuid(5100, 4, 4, 4));
+	if (!TestNotNull(TEXT("Fixture Place exists"), Place))
+	{
+		return false;
+	}
+
+	// The whole-Place staffing target, authored on the Definition through the same call that puts
+	// every other Place setting on the actor.
+	if (!TestTrue(TEXT("The fixture authors a staffing target of one guard"),
+		Fixture.SetAuthoredGuardTarget(1)))
+	{
+		return false;
+	}
+
+	FTerritoryFloorTemplate GroundFloor;
+	GroundFloor.FloorIndex = 0;
+	GroundFloor.DisplayName = FText::FromString(TEXT("Ground"));
+	GroundFloor.DesiredGuards = 1;
+	FTerritoryFloorTemplate UpperFloor;
+	UpperFloor.FloorIndex = 1;
+	UpperFloor.DisplayName = FText::FromString(TEXT("Upper"));
+	UpperFloor.DesiredGuards = 1;
+	Fixture.Definition->Floors = {GroundFloor, UpperFloor};
+
+	// Priority decides deployment order outright when the two differ, so the test does not rest on
+	// the path-name tiebreak that only applies to equal priorities.
+	ATerritoryGuardSpawnPoint* GroundPost =
+		Fixture.SpawnBoundPost(TEXT("Ground_A"), 0, FVector::ZeroVector);
+	ATerritoryGuardSpawnPoint* UpperPost =
+		Fixture.SpawnBoundPost(TEXT("Upper_A"), 1, FVector(300.f, 0.f, 0.f));
+	if (!TestNotNull(TEXT("Ground post exists"), GroundPost)
+		|| !TestNotNull(TEXT("Upper post exists"), UpperPost))
+	{
+		return false;
+	}
+	GroundPost->Priority = 100;
+	UpperPost->Priority = 50;
+
+	TestEqual(TEXT("Scenario: the authored staffing target is one guard"),
+		Place->GetConfiguredGuardCount(), 1);
+
+	TArray<ATerritoryGuardSpawnPoint*> DeploymentOrder = {GroundPost, UpperPost};
+	ATerritoryGuardSpawnPoint::SortForDeployment(DeploymentOrder);
+	TestTrue(TEXT("Scenario: the higher-priority ground post deploys first"),
+		DeploymentOrder[0] == GroundPost && DeploymentOrder[1] == UpperPost);
+	TestTrue(TEXT("Scenario: the target of one reaches the ground post"),
+		ATerritoryGuardSpawnPoint::IsReachedByDeploymentTarget(0, 1));
+	TestFalse(TEXT("Scenario: the target of one stops before the upper post"),
+		ATerritoryGuardSpawnPoint::IsReachedByDeploymentTarget(1, 1));
+
+	// The upper post is clear: this must be reported as a reach problem, not as a blocked post or as
+	// a floor with nothing deployable on it, or the two findings would be indistinguishable to the
+	// author who has to fix it.
+	FVector UpperDeployment;
+	TestTrue(TEXT("Scenario: the upper post resolves a deployment transform"),
+		Fixture.ResolveDeployment(UpperPost, UpperDeployment));
+
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+
+	TestEqual(TEXT("A floor past the deployment reach is reported exactly once"),
+		CountWarnings(Warnings, DeploymentReachFragment), 1);
+	TestTrue(TEXT("The reach warning names the authored floor"),
+		HasWarning(Warnings, TEXT("floor 1's guard post(s) stand at position(s) 2 of 2")));
+	TestTrue(TEXT("The reach warning names the target the author has to raise"),
+		HasWarning(Warnings, TEXT("raised above 1")));
+	TestFalse(TEXT("The floor the target does reach is not reported"),
+		HasWarning(Warnings, TEXT("floor 0's guard post(s)")));
+	TestFalse(TEXT("A post that can deploy is not reported as blocked"),
+		HasWarning(Warnings, BlockedDeploymentFragment));
+	TestFalse(TEXT("A reachable-posts floor is not reported as unstaffable"),
+		HasWarning(Warnings, UnstaffableFloorFragment));
+
+	// Green by reordering: swapping the two priorities moves the floor the single guard lands on.
+	// Nothing about the floors, the posts or the target changed, so only a rule that reads the real
+	// deployment order can follow this.
+	GroundPost->Priority = 50;
+	UpperPost->Priority = 200;
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("Reordering deployment moves the finding to the floor now out of reach"),
+		CountWarnings(Warnings, DeploymentReachFragment), 1);
+	TestTrue(TEXT("The finding now names the ground floor"),
+		HasWarning(Warnings, TEXT("floor 0's guard post(s)")));
+	TestFalse(TEXT("The floor now reached first is no longer reported"),
+		HasWarning(Warnings, TEXT("floor 1's guard post(s)")));
+
+	// Green by target: raising the whole-Place garrison by one reaches the floor again.
+	GroundPost->Priority = 100;
+	UpperPost->Priority = 50;
+	if (!TestTrue(TEXT("The fixture raises the staffing target to two"),
+		Fixture.SetAuthoredGuardTarget(2)))
+	{
+		return false;
+	}
+	TestEqual(TEXT("Re-applying the Definition raised the staffing target"),
+		Place->GetConfiguredGuardCount(), 2);
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("A staffing target that reaches the floor clears the finding"),
+		CountWarnings(Warnings, DeploymentReachFragment), 0);
+	// Guards the green leg itself: if re-applying had dropped the posts, both floors would now read
+	// as having nothing deployable, and the finding would have cleared for the wrong reason.
+	TestFalse(TEXT("The green leg was not achieved by losing the posts"),
+		HasWarning(Warnings, UnstaffableFloorFragment));
+	return true;
+}
+
+/**
+ * The reach rule counts *accepted* posts, not raw positions, because the fill skips a post it
+ * refuses and carries on down the order. A Place whose single guard is pushed past a blocked post
+ * onto the next floor therefore does staff that floor, and reporting it would be a false finding on
+ * content whose only real problem is the blocked post one floor down.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFValidatorReachFollowsAcceptedPosts,
+	"TerritoryFramework.Editor.DataValidation.DeploymentReachCountsOnlyAcceptedPosts",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFValidatorReachFollowsAcceptedPosts::RunTest(const FString& Parameters)
+{
+	FFixture Fixture;
+	ATerritoryProperty* Place = Fixture.SpawnPlace(TEXT("Validator Reach Skip Place"), FGuid(5100, 5, 5, 5));
+	if (!TestNotNull(TEXT("Fixture Place exists"), Place))
+	{
+		return false;
+	}
+
+	if (!TestTrue(TEXT("The fixture authors a staffing target of one guard"),
+		Fixture.SetAuthoredGuardTarget(1)))
+	{
+		return false;
+	}
+
+	FTerritoryFloorTemplate GroundFloor;
+	GroundFloor.FloorIndex = 0;
+	GroundFloor.DisplayName = FText::FromString(TEXT("Ground"));
+	GroundFloor.DesiredGuards = 1;
+	FTerritoryFloorTemplate UpperFloor;
+	UpperFloor.FloorIndex = 1;
+	UpperFloor.DisplayName = FText::FromString(TEXT("Upper"));
+	UpperFloor.DesiredGuards = 1;
+	Fixture.Definition->Floors = {GroundFloor, UpperFloor};
+
+	ATerritoryGuardSpawnPoint* GroundPost =
+		Fixture.SpawnBoundPost(TEXT("Ground_A"), 0, FVector::ZeroVector);
+	ATerritoryGuardSpawnPoint* UpperPost =
+		Fixture.SpawnBoundPost(TEXT("Upper_A"), 1, FVector(300.f, 0.f, 0.f));
+	if (!TestNotNull(TEXT("Ground post exists"), GroundPost)
+		|| !TestNotNull(TEXT("Upper post exists"), UpperPost))
+	{
+		return false;
+	}
+	GroundPost->Priority = 100;
+	UpperPost->Priority = 50;
+
+	FVector GroundDeployment;
+	if (!TestTrue(TEXT("The ground post resolves a deployment transform"),
+		Fixture.ResolveDeployment(GroundPost, GroundDeployment)))
+	{
+		return false;
+	}
+	AStaticMeshActor* Blocker = Fixture.SpawnBlocker(GroundDeployment);
+	if (!TestNotNull(TEXT("Blocking actor exists"), Blocker))
+	{
+		return false;
+	}
+
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+
+	TestTrue(TEXT("The blocked ground post is reported"),
+		HasWarning(Warnings, BlockedDeploymentFragment));
+	TestTrue(TEXT("The blocked floor is reported as unstaffable"),
+		HasWarning(Warnings, UnstaffableFloorFragment));
+	// The one guard the target allows skips the refused post and stands on the upper floor, so the
+	// upper floor is staffed and must not be reported as out of reach.
+	TestEqual(TEXT("A floor the fill reaches past a refused post is not reported as out of reach"),
+		CountWarnings(Warnings, DeploymentReachFragment), 0);
+
+	// And the mirror image: clear the obstruction and the same single guard stops on the ground
+	// floor, putting the upper floor back out of reach.
+	Blocker->SetActorEnableCollision(false);
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("Clearing the obstruction puts the upper floor back out of reach"),
+		CountWarnings(Warnings, DeploymentReachFragment), 1);
+	TestTrue(TEXT("The finding names the upper floor"),
+		HasWarning(Warnings, TEXT("floor 1's guard post(s)")));
 	return true;
 }
 

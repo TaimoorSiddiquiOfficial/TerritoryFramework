@@ -123,6 +123,42 @@ double ATerritoryFloorVolume::GetFloorBoundsVolume() const
 	return FMath::Abs(static_cast<double>(Size.X) * Size.Y * Size.Z);
 }
 
+const ATerritoryFloorVolume* ATerritoryFloorVolume::SelectMostSpecificRegion(
+	const TArray<const ATerritoryFloorVolume*>& Candidates, const FVector& WorldLocation)
+{
+	// Most specific region wins, with a GUID tie-break so the order is total. This mirrors
+	// ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory's smallest-bounds-then-name rule, and
+	// the total order is what keeps the answer independent of World Partition iteration.
+	const ATerritoryFloorVolume* Best = nullptr;
+	double BestVolume = TNumericLimits<double>::Max();
+	FString BestGUID;
+
+	for (const ATerritoryFloorVolume* Candidate : Candidates)
+	{
+		if (!Candidate || !Candidate->ContainsPoint(WorldLocation)) continue;
+
+		const double CandidateVolume = Candidate->GetFloorBoundsVolume();
+		const FString CandidateGUID = Candidate->FloorVolumeGUID.ToString();
+		if (!Best
+			|| CandidateVolume < BestVolume
+			|| (FMath::IsNearlyEqual(CandidateVolume, BestVolume) && CandidateGUID < BestGUID))
+		{
+			Best = Candidate;
+			BestVolume = CandidateVolume;
+			BestGUID = CandidateGUID;
+		}
+	}
+
+	return Best;
+}
+
+int32 ATerritoryFloorVolume::ResolveFloorAtLocation(
+	const TArray<const ATerritoryFloorVolume*>& Candidates, const FVector& WorldLocation)
+{
+	const ATerritoryFloorVolume* const Best = SelectMostSpecificRegion(Candidates, WorldLocation);
+	return Best ? Best->FloorIndex : INDEX_NONE;
+}
+
 void ATerritoryFloorVolume::EnsurePersistentFloorVolumeGUID()
 {
 	if (!FloorVolumeGUID.IsValid())

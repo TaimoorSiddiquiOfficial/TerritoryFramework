@@ -437,31 +437,21 @@ int32 UTerritoryRegistrySubsystem::GetFloorAtLocation(
 	const TArray<TWeakObjectPtr<ATerritoryFloorVolume>>* Volumes = FloorVolumesByPlaceTag.Find(PlaceTag);
 	if (!Volumes) return INDEX_NONE;
 
-	const ATerritoryFloorVolume* Best = nullptr;
-	double BestVolume = TNumericLimits<double>::Max();
-	FString BestGUID;
-
+	// The selection rule itself lives on ATerritoryFloorVolume, not here, because the authoring
+	// validator has to reach the same answer and reaches it from this level's actors rather than
+	// from these registrations - BeginPlay is what registers, so the registry is empty at edit
+	// time. One implementation is the only way the two cannot drift.
+	TArray<const ATerritoryFloorVolume*> Candidates;
+	Candidates.Reserve(Volumes->Num());
 	for (const TWeakObjectPtr<ATerritoryFloorVolume>& VolumePtr : *Volumes)
 	{
-		const ATerritoryFloorVolume* Candidate = VolumePtr.Get();
-		if (!Candidate || !Candidate->ContainsPoint(WorldLocation)) continue;
-
-		// Most specific region wins, with a GUID tie-break so the order is total. This mirrors
-		// ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory's smallest-bounds-then-name rule,
-		// and the total order is what keeps the answer independent of World Partition iteration.
-		const double CandidateVolume = Candidate->GetFloorBoundsVolume();
-		const FString CandidateGUID = Candidate->FloorVolumeGUID.ToString();
-		if (!Best
-			|| CandidateVolume < BestVolume
-			|| (FMath::IsNearlyEqual(CandidateVolume, BestVolume) && CandidateGUID < BestGUID))
+		if (const ATerritoryFloorVolume* Candidate = VolumePtr.Get())
 		{
-			Best = Candidate;
-			BestVolume = CandidateVolume;
-			BestGUID = CandidateGUID;
+			Candidates.Add(Candidate);
 		}
 	}
 
-	return Best ? Best->FloorIndex : INDEX_NONE;
+	return ATerritoryFloorVolume::ResolveFloorAtLocation(Candidates, WorldLocation);
 }
 
 TArray<ATerritoryFloorVolume*> UTerritoryRegistrySubsystem::GetFloorVolumesForPlace(

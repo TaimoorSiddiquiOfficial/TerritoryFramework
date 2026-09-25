@@ -203,6 +203,32 @@ struct TERRITORYFRAMEWORK_API FTerritoryFloorTemplate
 		meta=(ClampMin="0"))
 	int32 DesiredGuards = 0;
 
+	/**
+	 * The one rule for "how many guards does this floor want", given that floor's own ceiling.
+	 *
+	 * Two callers share it so they cannot disagree about what a zero quota means: the garrison
+	 * snapshot, which reports it as the floor's staffing target, and SpawnGuardsToCount, which now
+	 * reserves it out of the Territory's target before the surplus is filled in Priority order.
+	 *
+	 * Capacity is a parameter rather than something this reads, because the two callers measure the
+	 * ceiling differently and both are right to: the snapshot counts authored slot identities union
+	 * the slots it can actually see standing (so a streamed-out post still contributes), while the
+	 * fill counts the posts it can reach. Passing it keeps this a pure statement of the quota rule.
+	 */
+	static int32 ResolveGuardQuota(int32 AuthoredQuota, int32 FloorCapacity)
+	{
+		return AuthoredQuota > 0 ? AuthoredQuota : FloorCapacity;
+	}
+
+	/**
+	 * Whether this row claims a share of the Territory's staffing target ahead of the global
+	 * Priority order. Only an authored count does: a zero quota means "every post on this floor" for
+	 * reporting, which is not the same as claiming the whole budget. Reading zero as a claim would
+	 * make every declared floor reserve its full ceiling, which reorders deployment for content that
+	 * never asked for it - the one thing this feature must not do.
+	 */
+	bool ClaimsFloorQuota() const { return DesiredGuards > 0; }
+
 	/** Narrative events executed when this floor's last living defender is defeated, before any ownership change. */
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="Floor|Narrative")
 	TArray<TObjectPtr<UNarrativeEvent>> FloorClearedEvents;

@@ -3018,8 +3018,9 @@ void ATerritoryVolume::BuildFloorSnapshots(FTerritoryGarrisonSnapshot& OutSnapsh
 			+ FloorUnidentifiedSlots.FindOrAdd(Floor.FloorIndex);
 		Entry.MaximumGuards = MaximumGuards;
 		// A zero quota means "every post on this floor", so a designer may declare a floor
-		// without restating its post count.
-		Entry.DesiredGuards = Floor.DesiredGuards > 0 ? Floor.DesiredGuards : MaximumGuards;
+		// without restating its post count. The rule itself lives on FTerritoryFloorTemplate so that
+		// the deployment fill cannot read the same authored number differently.
+		Entry.DesiredGuards = FTerritoryFloorTemplate::ResolveGuardQuota(Floor.DesiredGuards, MaximumGuards);
 
 		// Complete when every authored post on this floor was observed standing. A floor that
 		// authors no post is complete with MaximumGuards 0 - "known to hold nothing" is a
@@ -3190,12 +3191,7 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 	// The unique spawn-point union defines both placement and capacity: one point,
 	// one active guard. There is deliberately no random fallback.
 	TArray<ATerritoryGuardSpawnPoint*> SpawnPointActors = GetGuardSpawnPoints();
-	SpawnPointActors.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
-	{
-		if (A.Priority != B.Priority) return A.Priority > B.Priority;
-		if (A.HasPatrolRoute() != B.HasPatrolRoute()) return A.HasPatrolRoute();
-		return A.GetPathName() < B.GetPathName();
-	});
+	ATerritoryGuardSpawnPoint::SortForDeployment(SpawnPointActors);
 	if (SpawnPointActors.IsEmpty())
 	{
 		UE_LOG(LogTerritory, Warning,
@@ -3219,6 +3215,74 @@ void ATerritoryVolume::SpawnGuardsToCount(int32 RequestedGuardCount)
 		UE_LOG(LogTerritory, Log, TEXT("SpawnGuards: %s spawning %d guards, faction=%s, spawn points=%d"),
 			*GetTerritoryTag().ToString(), TargetGuardCount, *OwnerFaction.ToString(),
 			SpawnPointActors.Num());
+	}
+
+	// ─── Per-floor claims, then the global surplus ───
+	//
+	// A floor row that authors a DesiredGuards count claims that many guards out of the target
+	// before the global Priority order is consulted. Without this the fill is one flat order, so a
+	// low-Priority upper floor loses every post to a high-Priority ground floor and reads as a floor
+	// with no defenders however its quota is authored - the dead floor the validator already reports.
+	//
+	// Floors are served in the order of their best-placed post, which is SortForDeployment's own
+	// comparison, so Priority still decides between floors. It is cut per floor, never replaced.
+	//
+	// Nothing here runs for content that authors no quota: the claim list comes out empty and the
+	// loop below is then exactly the single loop it has always been, so an existing project's
+	// staffing is unchanged by this feature.
+	const UTerritoryPlaceDefinition* const FloorPlace =
+		Cast<UTerritoryPlaceDefinition>(TerritoryDefinition);
+	if (FloorPlace && FloorPlace->HasAuthoredFloors()
+		&& IsDeploymentCurrent() && GetSpawnedGuardCount() < TargetGuardCount)
+	{
+		// Which posts stand on which floor, and each post's floor in deployment order. Keyed on
+		// GetFloorIndex, which ApplyTerritoryDefinition copies from the post's row at BeginPlay, so it
+		// is the same floor the editor check resolves from that row.
+		TMap<int32, TArray<ATerritoryGuardSpawnPoint*>> PostsByFloor;
+		TArray<int32> ResolvedFloorByRank;
+		ResolvedFloorByRank.Reserve(SpawnPointActors.Num());
+		for (ATerritoryGuardSpawnPoint* const SpawnPoint : SpawnPointActors)
+		{
+			if (!IsValid(SpawnPoint) || SpawnPoint->IsActorBeingDestroyed()) continue;
+			const int32 FloorIndex = SpawnPoint->GetFloorIndex();
+			PostsByFloor.FindOrAdd(FloorIndex).Add(SpawnPoint);
+			ResolvedFloorByRank.Add(FloorIndex);
+		}
+
+		// The split comes from the post class, shared with the editor rule that predicts which floors
+		// this fill reaches. That rule can only be trusted if it spends this same plan.
+		TArray<ATerritoryGuardSpawnPoint::FTerritoryFloorClaim> Claims;
+		ATerritoryGuardSpawnPoint::PlanFloorClaims(
+			ResolvedFloorByRank, FloorPlace->Floors, TargetGuardCount, Claims);
+
+		for (const ATerritoryGuardSpawnPoint::FTerritoryFloorClaim& Claim : Claims)
+		{
+			if (!IsDeploymentCurrent()) return;
+			if (GetSpawnedGuardCount() >= TargetGuardCount) break;
+
+			const TArray<ATerritoryGuardSpawnPoint*>* const Posts = PostsByFloor.Find(Claim.FloorIndex);
+			if (!Posts) continue;
+
+			// Counted as "posts whose slot is already taken" rather than as live guards, so the claim
+			// is a floor total and not a per-call increment: a later call for the same floor - a
+			// reserve refilling a dead guard's post, a re-reconcile - tops the floor up to its quota
+			// instead of deploying a second copy of it.
+			int32 CommittedOnFloor = 0;
+			for (const ATerritoryGuardSpawnPoint* const Post : *Posts)
+			{
+				if (Post && !Post->HasAvailableSlot()) ++CommittedOnFloor;
+			}
+
+			int32 DeployedHere = 0;
+			for (ATerritoryGuardSpawnPoint* Post : *Posts)
+			{
+				if (CommittedOnFloor + DeployedHere >= Claim.Guards) break;
+				if (!IsDeploymentCurrent()) return;
+				if (GetSpawnedGuardCount() >= TargetGuardCount) break;
+				if (!IsValid(Post) || Post->IsActorBeingDestroyed() || !Post->HasAvailableSlot()) continue;
+				if (TrySpawnSingleGuard(Post, false)) ++DeployedHere;
+			}
+		}
 	}
 
 	while (IsDeploymentCurrent() && GetSpawnedGuardCount() < TargetGuardCount)
@@ -3810,12 +3874,7 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySetDesiredGuardCount(
 	}
 
 	TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
-	SpawnPoints.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
-	{
-		if (A.Priority != B.Priority) return A.Priority > B.Priority;
-		if (A.HasPatrolRoute() != B.HasPatrolRoute()) return A.HasPatrolRoute();
-		return A.GetPathName() < B.GetPathName();
-	});
+	ATerritoryGuardSpawnPoint::SortForDeployment(SpawnPoints);
 	for (int32 Index = 0; Index < GuardsToDeploy; ++Index)
 	{
 		if (!IsCurrent()) return Finish(false, FText::GetEmpty());
@@ -4014,12 +4073,7 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySendReinforcements(
 	}
 
 	TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
-	SpawnPoints.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
-	{
-		if (A.Priority != B.Priority) return A.Priority > B.Priority;
-		if (A.HasPatrolRoute() != B.HasPatrolRoute()) return A.HasPatrolRoute();
-		return A.GetPathName() < B.GetPathName();
-	});
+	ATerritoryGuardSpawnPoint::SortForDeployment(SpawnPoints);
 	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
 	{
 		if (Result.GuardsDeployed >= Count)

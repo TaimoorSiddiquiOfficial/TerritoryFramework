@@ -848,14 +848,11 @@ consequence, which is real: `ValidateWorld` had to pin `ATerritoryFloorVolume` a
 actor classes, or a region that had not streamed in would be indistinguishable from a floor with no
 region authored and R1 would warn about correctly separated floors.
 
-- Validator, second rule (§6.4): a floor whose row can never be cleared because the **whole-Place**
-  `DesiredGuardCount` is below the sum of its posts' reach. `TerritoryVolume.cpp:2957-2964`
-  documents this consequence in source; nothing warns about it. This is a *different* failure
-  from the already-shipped "floor can never be staffed" warning and must not be merged with it.
-  **Still open** — needs a read of the staffing-order logic (`SpawnGuardsToCount`,
-  `TrySpawnReserveGuard`, `HasAvailableSlot`) before it can be written without inventing a rule.
-  Verified so far: the mechanism is real (`FTerritoryFloorSnapshot::IsCleared()` requires
-  `ReserveGuards == 0`) and it is genuinely distinct from the shipped warning.
+- Validator, second rule (§6.4): a floor whose posts are all clear but that the **whole-Place**
+  staffing target never reaches. `TerritoryVolume.cpp:2957-2964` documents the consequence in
+  source; nothing warned about it. This is a *different* failure from the shipped "floor can never
+  be staffed" warning and is not merged with it. **Implemented 2026-09-25** — see §6.4 for the
+  mechanism it was finally written against and the evidence.
 - One comment at `TerritoryCounterAttackProfile.h:243` stating membership vs. scoring (§C5).
 - Tests: resolution inside/outside/above a volume; determinism for a repeated query; overlap
   tie-break; unbound ⇒ `INDEX_NONE` ⇒ gate inert; WP stream-out ⇒ `INDEX_NONE`, no crash; the
@@ -944,6 +941,14 @@ re-learn them:
    184.7-second scan that finished only once the sleep ended. The driver polls from a slate
    post-tick callback for `get_assets_by_path("/Game")` to become non-empty. With the project
    correctly open this took 1.0s and found 64,330 assets.
+
+### Phase 1c — Third validator rule and per-floor staffing (2026-09-25)
+
+Two more changes to the same defect, recorded in full under §6.4: the validator now reports a post
+authored on one floor but standing in another floor's region, and a floor row's `DesiredGuards`
+now claims that many guards out of the Territory's target ahead of the flat deployment order. The
+second is the first **behaviour** change in the floor work, so it carries its own red/green/mutation
+evidence and an explicit statement of what is still unproven — see §6.4.
 
 ### Phase 2 — The engagement gate (ask 1). Behaviour change; needs PIE.
 
@@ -1099,9 +1104,193 @@ One real trap remains, and it is already documented in source rather than fixed:
 `TerritoryVolume.cpp:2957-2964` records that a post the Place's `DesiredGuardCount` never reaches
 "pins its floor uncleared, which stops that floor's FloorClearedEvents from ever firing". A
 floor can be authored correctly, staffed correctly, and still dead because the *whole-Place*
-target was set too low. That belongs in Phase 1's validator work — a floor whose row is
-unreachable given the Place's own `DesiredGuardCount` deserves the same warning as one with no
-deployable post.
+target was set too low.
+
+**This is now implemented as Phase 1's second validator rule (2026-09-25).** The wording above
+was the plan's, and writing it required correcting it twice — the mechanism is sharper than
+"the whole-Place `DesiredGuardCount` is below the sum of its posts' reach":
+
+- **It is the fill, not the count.** `SpawnGuardsToCount` fills the *deployment order* front to
+  back, one guard per post (`GetEffectiveMaxGuards()` is `1`), stopping at the target. So guard
+  *k* stands on the *k*-th post the fill **accepts** — not the *k*-th post. A refused post is
+  skipped and the fill carries on down the order. Counting every post would report a floor as out
+  of reach when a blocked post above it is exactly what pushes the next guard onto it. The editor
+  check therefore ranks only the posts it has already proved can deploy, which is disjoint from
+  what the shipped R1 warning counts — R1 needs a floor with *no* deployable post, this needs one
+  with *at least one*, so a floor is never reported twice.
+- **The authored number is `GuardSpawnCount`, not `DesiredGuardCount`.** At edit time
+  `GetDesiredGuardCount()` and `GetMaxGuardCount()` both answer from runtime state with no
+  authority — the latter returns `GarrisonSnapshot.MaximumGuards`, i.e. zero. The authored target
+  is `GetConfiguredGuardCount()` (`GuardSpawnCount`, `TerritoryVolume.h:529`). It is also the
+  honest number: the runtime target seeds from it and can afterwards only *rise* (guards
+  purchased, or a post-capture policy staffing above the authored count), and a higher target
+  reaches further down the order, never less far — so a floor this check clears cannot later be
+  starved by the target alone.
+- **A zero-count floor row is not exempt.** `DesiredGuards == 0` means "every post on this
+  floor" at the snapshot builder (`TerritoryVolume.cpp:3015`), not "wants nothing", so a
+  zero-count row beyond the reach is exactly as dead as a counted one. The shipped R1 rule skips
+  `<= 0`; this one does not, deliberately.
+
+The deployment order itself had no authority: the same comparator was written out three times
+(`TerritoryVolume.cpp:3193`, `:3813`, `:4017`). It is now one static on `ATerritoryGuardSpawnPoint`
+(`SortForDeployment`), plus `IsReachedByDeploymentTarget`, and all three call sites call it — so
+the validator reads the order that will actually deploy instead of restating it.
+
+Evidence, three legs, `TerritoryFramework.Editor.DataValidation`:
+
+| leg | result |
+|---|---|
+| rule absent | 26 pass / **2 fail** — exactly the two new tests, every failure a missing reach warning; no fixture noise |
+| rule shipped | **28 / 0** |
+| mutation: count refused posts too | 27 / **1** — only `DeploymentReachCountsOnlyAcceptedPosts` |
+| mutation: drop `SortForDeployment` | 27 / **1** — only `FloorBeyondDeploymentReachIsReported`, on its priority-swap leg |
+
+Adjacent filters, one at a time: `Guards` 45, `Floors` 9, `Contract` 53, `Editor` 53. The
+`Guards` run is also the proof that the comparator extraction was behaviour-neutral.
+
+**A floor row's `DesiredGuards` staffs nothing — this was true when the rule above shipped and
+is no longer true.** As of the same day (Phase 1c, below) it drives per-floor staffing, so this
+paragraph is kept only as the record of what the finding was: `FTerritoryFloorTemplate::
+DesiredGuards` was read only by the Definition's own `IsDataValid`, the snapshot copy at
+`TerritoryVolume.cpp:3022`, and this rule's R1 gate — no staffing path read it, and staffing was
+exclusively the whole-Place `GuardSpawnCount`. Phase 1c is the deliberate decision that was
+called for here, not a silent patch.
+
+#### Phase 1c — the third validator rule, and per-floor staffing (added 2026-09-25)
+
+Two changes, both aimed at the same defect: a floor row could be authored, validated, and still
+have no effect on who stands where.
+
+**1c-i. A post's declared floor vs. the region it physically stands in.** `Floors` is definition
+data and a floor region is level data, so the two can disagree — a post can be authored on floor
+1 and placed inside floor 0's volume. Nothing could see that, and it is not cosmetic: the combat
+gate resolves a *position* and the post's row decides what the editor's other rules and the
+snapshot builder read, so a guard deployed at that post is treated as floor 0's defender while
+its author believes it defends floor 1. The warning says exactly that, and names both floors.
+
+The rule spends `ATerritoryFloorVolume::SelectMostSpecificRegion` — the same static the registry
+now calls — so the validator and the runtime cannot disagree about which region wins. That
+extraction was the reason the rule could be written at all: `BeginPlay` is what registers
+volumes, so at edit time `GetFloorAtLocation` has nothing to read. Both callers now pass an
+explicit candidate set: the registry passes its registrations, the validator passes this level's
+actors.
+
+Deliberate silence: a post standing inside **no** region is not reported. The row is the
+authority for definition data and the region only answers "where is this actor", so a post
+outside every authored region is a Place that has not declared that area's separation - the
+`INDEX_NONE` rule from §4.3, not an error. Reporting it would make every post on every unauthored
+Place a finding. A post naming an **undeclared** floor is likewise not reported here:
+`IsDataValid` already rejects that on the definition, and this check bails with
+`FindFloor(AuthoredFloor)` before adding anything, so one asset never gets two messages.
+
+Evidence, `TerritoryFramework.Editor.DataValidation`, three legs on a fixture holding one genuine
+mismatch alongside the cases that must stay silent, so a fixture that went quiet could not pass:
+
+| leg | result |
+|---|---|
+| rule shipped | **31 / 0** |
+| mutation: drop the double-report guard (`FindFloor`) | 30 / **1** — only `PostMismatchDoesNotDoubleReportAnUndeclaredFloor`, on its count assertion |
+| reverted | **31 / 0** |
+
+The mutation was chosen because it is the one a weaker suite would miss: it removes only the
+guard that keeps the undeclared-floor case quiet, and that single test is the only thing pinning
+it.
+
+**1c-ii. `DesiredGuards` now claims its share of the target.** `SpawnGuardsToCount` fills one
+flat deployment order, so on a two-floor Place the better-placed ground floor takes every guard
+and a low-`Priority` upper floor reads as a floor with no defenders however its quota is
+authored. A floor row authoring `DesiredGuards > 0` now reserves that many guards out of the
+Territory's target before the flat order is consulted; the surplus is then filled exactly as
+before.
+
+The two rules that had to be shared, or they would drift:
+
+- **The quota rule** — `FTerritoryFloorTemplate::ResolveGuardQuota(AuthoredQuota, Capacity)` and
+  `ClaimsFloorQuota()`. Capacity is a parameter because the two callers measure the ceiling
+  differently and both are right to: the snapshot counts authored slot identities union the slots
+  it can see standing (so a streamed-out post still contributes), while the fill counts the posts
+  it can reach.
+- **The budget split** — `ATerritoryGuardSpawnPoint::PlanFloorClaims(...)`. The fill spends the
+  plan; the editor's deployment-reach rule spends the *same* plan, which is what stops the
+  warning from reporting a floor the fill staffs first. Without that coupling the validator would
+  have emitted a false positive on content that authors quotas - and a warning is a gate failure
+  on this project.
+
+Two properties are deliberate and load-bearing. A **zero** quota does not claim: it still means
+"every post on this floor" for reporting, and reading it as a claim would reserve every declared
+floor's whole ceiling and reorder deployment for content that never asked. And content authoring
+**no** quota is unchanged: the claim list comes out empty and the fill reduces to the single loop
+it has always been. A claim is a floor *total* - counted as posts whose slot is already taken, not
+as live guards - so a reserve refilling a dead guard's post tops the floor up instead of
+deploying a second copy of the quota.
+
+Evidence. Runtime, `TerritoryFramework.Guards.Floors.ClaimedFloorIsStaffedAheadOfTheFlatOrder`,
+the first test here that deploys real Narrative guards, with two legs in one fixture (the claimed
+low-`Priority` floor gets the single guard; remove the quota and the same fixture puts it back on
+the high-`Priority` floor - without that control a green first leg could just mean the fixture
+sorted the upper post first):
+
+| leg | result |
+|---|---|
+| shipped | `Guards` **46 / 0** |
+| mutation: disable only the fill's consumption of the plan | 45 / **1** — exactly leg 1's two assertions; leg 2 and the other 45 green |
+| reverted | **46 / 0** |
+
+Editor, `ClaimedFloorBeyondDeploymentReachIsNotReported`, which asserts the **inverted** verdict
+the plan produces:
+
+| leg | result |
+|---|---|
+| shipped | `Editor.DataValidation` **32 / 0** |
+| mutation: drop the claims in the rule | 29 / **3** — but this also distorts the budget, so it is not the sharp leg |
+| mutation: **the exact pre-fix flat rule** (`IsReachedByDeploymentTarget`) | 31 / **1** — *only* the new test, on exactly its two inverted-verdict assertions |
+| reverted | **32 / 0** |
+
+That last row is the finding worth keeping: the pre-existing reachability tests *do* author
+quotas, yet none of them is sensitive to the rule, so green there was never evidence that the
+rule was right. The new test is the only thing in the suite that pins it.
+
+Adjacent filters, one at a time, after both changes: `Guards` 46, `Floors` 9, `Definition` 4,
+`UI` 27, `Editor.DataValidation` 32. The snapshot rewiring is a pure extraction - the value it
+reports is unchanged (`Floor.DesiredGuards > 0 ? Floor.DesiredGuards : MaximumGuards` became
+`ResolveGuardQuota(Floor.DesiredGuards, MaximumGuards)`).
+
+**Still not proven, and not to be reported as working:** the claim pass has never run in live
+PIE, only in a constructed world; and whether `DA_SameFloorTerritoryFloorCombatPolicy` is
+actually assigned on `DA_Place_Blacksmith` is still unconfirmed.
+
+#### Real-content run, 2026-09-25 — the new rule is a correct no-op on `HopDistrictTest`
+
+The gate run via `Scripts/Territory/validate_hopdistrict_headless.py` produced a finding set
+**byte-identical to the pre-change measurement**: Blacksmith's two floor-volume warnings, four
+patrol-containment warnings, and the pre-existing counter-attack error. The new rule added
+nothing. A silent check is worth exactly as much as the reason for its silence, and three
+different reasons would produce the same output, so the numbers were read rather than assumed
+(`Scripts/Territory/probe_blacksmith_floors.py`, added for this):
+
+```
+DA_Place_Blacksmith  InitialGuardCount=7  GuardPosts=7
+  floor 1  desired_guards=2  cleared_events=1   (2 posts)
+  floor 0  desired_guards=0  cleared_events=0   (5 posts)
+DA_Place_Farm        InitialGuardCount=0  GuardPosts=0   floors: EMPTY
+```
+
+That resolves all three:
+
+- **It is correct silence.** The authored target is 7 and there are exactly 7 posts, so the fill
+  reaches every one of them and no floor is past the reach.
+- **The check ran with real data, and this is provable rather than hoped.** Floor 1's row has
+  `DesiredGuards = 2`, so R1 did not skip it; R1 is nevertheless silent for floor 1, which means
+  floor 1 is in `StaffableFloors` — and that map is populated in the *same* branch that populates
+  `DeployablePosts`. So the per-Place deployment map was non-empty and the rule really did run.
+  Floor 0 would have been skipped by R1 for its `DesiredGuards == 0` alone, which is why the
+  conclusion rests on floor 1.
+- **`FTerritoryFloorTemplate::DisplayName` is empty on both real floor rows** (`display=''`).
+  Not a code defect, but a content gap: this is now an *answered* open item rather than a pending
+  one — nothing can read a meaningful floor name off Blacksmith's rows because none is authored.
+
+`DA_Place_Farm` is a Place with no posts, no floors and a zero target, and it validates clean:
+a Place with no defenders is legitimate authoring, not a dead floor.
 
 ### 6.5 Attack tokens
 
@@ -1351,3 +1540,17 @@ not re-opened.
    `bUsePlayerRelativeReserveStaging` — so it is even narrower than §2.12 assumed, and the risk
    of it being mistaken for a membership answer is real precisely because the name is so
    suggestive.
+9. **§6.4 Phase 1c — two things the per-floor claim pass has not been shown to do.** Both are
+   stated so they cannot be quietly assumed later:
+   - **It has never run in live PIE.** The evidence is a constructed `EWorldType::Game` world with
+     real Narrative guards, a registered Place and the production binding path — not a running
+     game, and not a streamed World Partition cell. Whether a streamed-out post's absence from the
+     `PostsByFloor` map changes which floor the claim serves is untested.
+   - **Whether `DA_SameFloorTerritoryFloorCombatPolicy` is actually the policy assigned on
+     `DA_Place_Blacksmith`** is still unconfirmed. Import-table bytes are not proof; this needs the
+     asset opened and read in the editor.
+
+   Also still true and unchanged by Phase 1c: the per-floor quota is a *claim on the same
+   whole-Place target*, not a second staffing authority — a floor claiming more guards than the
+   target holds still gets only what the budget reaches, and a floor with no post on it claims
+   nothing.

@@ -22,6 +22,7 @@
 #include "Components/BoxComponent.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryFloorVolume.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "DataValidation/TerritoryDataValidator.h"
@@ -165,6 +166,39 @@ struct FFloorFixture
 		Volume->FloorBounds->SetBoxExtent(Extent);
 		return Volume;
 	}
+
+	/**
+	 * Author a guard-post row and spawn the post actor that stands over it, which the
+	 * post-versus-region rule needs and AuthorPostRow deliberately does not provide: that rule is
+	 * the only one here that reads where a post physically STANDS, and a row has no location.
+	 *
+	 * SetDefinitionBinding writes the serialized binding a loaded map already carries, which is what
+	 * ResolveAuthoredPostFloor reads the row through - it never reads the post's own FloorIndex,
+	 * because that is transient and its zero default is indistinguishable from an authored ground
+	 * floor. OwnerTerritoryTag is how the post resolves to its Place here: the typed
+	 * GuardSpawnPoints array is authoritative but protected, and the tag path is the one a streamed
+	 * post uses.
+	 */
+	ATerritoryGuardSpawnPoint* SpawnBoundPost(UTerritoryPlaceDefinition* Definition,
+		const FGameplayTag& OwnerTag, const TCHAR* PostID, int32 FloorIndex, const FVector& Location)
+	{
+		if (!World || !Definition) return nullptr;
+
+		AuthorPostRow(Definition, PostID, FloorIndex);
+
+		ATerritoryGuardSpawnPoint* Post = World->SpawnActor<ATerritoryGuardSpawnPoint>(
+			ATerritoryGuardSpawnPoint::StaticClass(), FTransform(Location));
+		if (!Post) return nullptr;
+
+		Post->SetDefinitionBinding(Definition, FName(PostID));
+		Post->OwnerTerritoryTag = OwnerTag;
+#if WITH_EDITOR
+		// Named from the authored post id rather than the spawn counter, so the finding that names
+		// the post is stable across the order the level was built in.
+		Post->SetActorLabel(FString::Printf(TEXT("Post_%s"), PostID), /*bMarkDirty=*/false);
+#endif
+		return Post;
+	}
 };
 
 void ValidateFloorFixture(const FFloorFixture& Fixture, TArray<FString>& OutErrors, TArray<FString>& OutWarnings)
@@ -211,6 +245,19 @@ const TCHAR* const OverlapFragment =
 	TEXT("overlap; a point in the overlap resolves to the smaller region");
 
 /**
+ * The post-versus-region finding. Both floors are in the message for the same reason
+ * UnseparatedFloorFragment numbers them: a neighbouring floor's finding must not be able to satisfy
+ * an assertion about this one.
+ */
+const TCHAR* const FloorMismatchFragment = TEXT("but stands inside floor");
+
+/** "guard post 'Post_UpperPost'" - one post's findings, told apart from its neighbour's. */
+FString PostFragment(const TCHAR* PostID)
+{
+	return FString::Printf(TEXT("guard post 'Post_%s'"), PostID);
+}
+
+/**
  * Only the messages CheckFloorVolumes itself writes.
  *
  * ValidateLevel's overall ordering is not stable, and never was: several checks that run before this
@@ -225,7 +272,8 @@ bool IsFloorVolumeFinding(const FString& Message)
 	return Message.Contains(UnseparatedFloorSuffix)
 		|| Message.Contains(OverlapFragment)
 		|| Message.Contains(UndeclaredFloorFragment)
-		|| Message.Contains(NoPlaceDefinitionFragment);
+		|| Message.Contains(NoPlaceDefinitionFragment)
+		|| Message.Contains(FloorMismatchFragment);
 }
 
 void KeepFloorVolumeFindings(const TArray<FString>& In, TArray<FString>& Out)
@@ -609,6 +657,129 @@ bool FTFValidatorFloorFindingsAreDeterministic::RunTest(const FString& Parameter
 		FString::Join(ForwardWarnings, TEXT("\n")), FString::Join(ReverseWarnings, TEXT("\n")));
 	TestEqual(TEXT("Errors are identical regardless of spawn order"),
 		FString::Join(ForwardErrors, TEXT("\n")), FString::Join(ReverseErrors, TEXT("\n")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFValidatorPostStandingOnAnotherFloor,
+	"TerritoryFramework.Editor.DataValidation.PostStandingOnAnotherFloorIsReported",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFValidatorPostStandingOnAnotherFloor::RunTest(const FString& Parameters)
+{
+	FFloorFixture Fixture;
+	if (!TestTrue(TEXT("Fixture level with two Places is built"), Fixture.Build())) return false;
+
+	// Two floors, each with a region and each with a post. The regions do not overlap in Z, so
+	// nothing here can be satisfied by the overlap rule instead.
+	Fixture.AuthorFloor(Fixture.BlacksmithDefinition, 0);
+	Fixture.AuthorFloor(Fixture.BlacksmithDefinition, 1);
+	Fixture.SpawnRegion(Fixture.BlacksmithDefinition, 0, FVector::ZeroVector);
+	Fixture.SpawnRegion(Fixture.BlacksmithDefinition, 1, FVector(0.f, 0.f, 1000.f));
+
+	Fixture.SpawnBoundPost(Fixture.BlacksmithDefinition, BlacksmithTag(),
+		TEXT("GroundPost"), 0, FVector::ZeroVector);
+
+	// Authored on floor 1, standing inside floor 0's region. The resolver reads position before the
+	// row, so this guard is treated as floor 0's defender whatever its row says.
+	ATerritoryGuardSpawnPoint* const Mismatched = Fixture.SpawnBoundPost(
+		Fixture.BlacksmithDefinition, BlacksmithTag(), TEXT("UpperPost"), 1, FVector(0.f, 0.f, 100.f));
+	if (!TestNotNull(TEXT("The mismatched post exists"), Mismatched)) return false;
+
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	ValidateFloorFixture(Fixture, Errors, Warnings);
+
+	TestEqual(TEXT("The disagreement between a post's row and its position is reported once"),
+		CountMessages(Warnings, FloorMismatchFragment), 1);
+	TestTrue(TEXT("The finding names the post"), HasMessage(Warnings, PostFragment(TEXT("UpperPost"))));
+	TestTrue(TEXT("The finding names both floors, not just one"),
+		HasMessage(Warnings, TEXT("authored on floor 1 but stands inside floor 0's floor volume")));
+	TestEqual(TEXT("The post whose row and position agree is not reported"),
+		CountMessages(Warnings, PostFragment(TEXT("GroundPost"))), 0);
+	TestEqual(TEXT("Both floors have regions, so neither is unseparated"),
+		CountMessages(Warnings, UnseparatedFloorSuffix), 0);
+	TestEqual(TEXT("This rule warns rather than errors"), Errors.Num(), 0);
+
+	// Positive control: moving the post into the region its own row names is the whole fix, so the
+	// finding must clear. Without this leg the first assertion could hold for the wrong reason.
+	Mismatched->SetActorLocation(FVector(0.f, 0.f, 1000.f));
+	ValidateFloorFixture(Fixture, Errors, Warnings);
+	TestEqual(TEXT("Placing the post where its row says it is clears the finding"),
+		CountMessages(Warnings, FloorMismatchFragment), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFValidatorPostOutsideEveryRegionStaysSilent,
+	"TerritoryFramework.Editor.DataValidation.PostOutsideEveryRegionIsNotReported",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFValidatorPostOutsideEveryRegionStaysSilent::RunTest(const FString& Parameters)
+{
+	FFloorFixture Fixture;
+	if (!TestTrue(TEXT("Fixture level with two Places is built"), Fixture.Build())) return false;
+
+	Fixture.AuthorFloor(Fixture.BlacksmithDefinition, 0);
+	Fixture.AuthorFloor(Fixture.BlacksmithDefinition, 1);
+	Fixture.SpawnRegion(Fixture.BlacksmithDefinition, 0, FVector::ZeroVector);
+	Fixture.SpawnRegion(Fixture.BlacksmithDefinition, 1, FVector(0.f, 0.f, 1000.f));
+
+	// One genuine mismatch, so a silent fixture cannot pass this test by producing nothing at all.
+	Fixture.SpawnBoundPost(Fixture.BlacksmithDefinition, BlacksmithTag(),
+		TEXT("MismatchedPost"), 1, FVector(0.f, 0.f, 100.f));
+
+	// Well above every region. This is not a defect: with no region containing the post the
+	// engagement gate falls back to the post's own row, so the defender is separated exactly as
+	// authored. It is also the state every guard that has patrolled off its region is in, which is
+	// why the fallback exists - warning here would flag correct authoring.
+	Fixture.SpawnBoundPost(Fixture.BlacksmithDefinition, BlacksmithTag(),
+		TEXT("OffRegionPost"), 1, FVector(0.f, 0.f, 5000.f));
+
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	ValidateFloorFixture(Fixture, Errors, Warnings);
+
+	TestEqual(TEXT("Only the real disagreement is reported"),
+		CountMessages(Warnings, FloorMismatchFragment), 1);
+	TestTrue(TEXT("And it is the mismatched post that is named"),
+		HasMessage(Warnings, PostFragment(TEXT("MismatchedPost"))));
+	TestEqual(TEXT("A post outside every region is left alone, because its row still answers"),
+		CountMessages(Warnings, PostFragment(TEXT("OffRegionPost"))), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFValidatorMismatchDoesNotDoubleReportUndeclaredFloor,
+	"TerritoryFramework.Editor.DataValidation.PostMismatchDoesNotDoubleReportAnUndeclaredFloor",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFValidatorMismatchDoesNotDoubleReportUndeclaredFloor::RunTest(const FString& Parameters)
+{
+	FFloorFixture Fixture;
+	if (!TestTrue(TEXT("Fixture level with two Places is built"), Fixture.Build())) return false;
+
+	Fixture.AuthorFloor(Fixture.BlacksmithDefinition, 0);
+	Fixture.AuthorFloor(Fixture.BlacksmithDefinition, 1);
+	Fixture.SpawnRegion(Fixture.BlacksmithDefinition, 0, FVector::ZeroVector);
+	Fixture.SpawnRegion(Fixture.BlacksmithDefinition, 1, FVector(0.f, 0.f, 1000.f));
+
+	Fixture.SpawnBoundPost(Fixture.BlacksmithDefinition, BlacksmithTag(),
+		TEXT("DeclaredPost"), 1, FVector(0.f, 0.f, 100.f));
+
+	// Its row names floor 7, which this Place does not declare. That is already an error in the
+	// Definition's own IsDataValid, so this check must skip it rather than report the same mistake
+	// from a second place - and the post above keeps a silent fixture from passing this test.
+	Fixture.SpawnBoundPost(Fixture.BlacksmithDefinition, BlacksmithTag(),
+		TEXT("StrayPost"), 7, FVector::ZeroVector);
+
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+	ValidateFloorFixture(Fixture, Errors, Warnings);
+
+	TestEqual(TEXT("Only the declared-floor disagreement is reported"),
+		CountMessages(Warnings, FloorMismatchFragment), 1);
+	TestTrue(TEXT("And it is the declared post that is named"),
+		HasMessage(Warnings, PostFragment(TEXT("DeclaredPost"))));
+	TestEqual(TEXT("The undeclared-floor post is left to IsDataValid, not reported twice"),
+		CountMessages(Warnings, PostFragment(TEXT("StrayPost"))), 0);
 	return true;
 }
 

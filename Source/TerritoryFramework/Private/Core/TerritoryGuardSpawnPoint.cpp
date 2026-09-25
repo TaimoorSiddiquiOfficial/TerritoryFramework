@@ -843,6 +843,92 @@ bool ATerritoryGuardSpawnPoint::HasPatrolRoute() const
 	return GetEffectivePatrolRoute().Num() >= 2;
 }
 
+void ATerritoryGuardSpawnPoint::SortForDeployment(TArray<ATerritoryGuardSpawnPoint*>& Posts)
+{
+	Posts.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
+	{
+		if (A.Priority != B.Priority) return A.Priority > B.Priority;
+		if (A.HasPatrolRoute() != B.HasPatrolRoute()) return A.HasPatrolRoute();
+		return A.GetPathName() < B.GetPathName();
+	});
+}
+
+bool ATerritoryGuardSpawnPoint::IsReachedByDeploymentTarget(int32 PostIndex, int32 TargetGuardCount)
+{
+	// Guard k (1-based) stands on the k-th post the fill accepts, so the k-th accepted post needs
+	// k <= TargetGuardCount. A caller passing an *accepted* rank is exact; one passing a raw index
+	// over every post is conservative, because refused posts let the fill reach further down.
+	return PostIndex >= 0 && TargetGuardCount > 0 && PostIndex < TargetGuardCount;
+}
+
+int32 ATerritoryGuardSpawnPoint::PlanFloorClaims(
+	const TArray<int32>& ResolvedFloorByRank,
+	const TArray<FTerritoryFloorTemplate>& Floors,
+	int32 TargetGuardCount,
+	TArray<FTerritoryFloorClaim>& OutClaims)
+{
+	OutClaims.Reset();
+
+	const int32 Budget = FMath::Max(0, TargetGuardCount);
+	if (Budget == 0 || Floors.IsEmpty() || ResolvedFloorByRank.IsEmpty())
+	{
+		return Budget;
+	}
+
+	// Each floor's size and its best-placed post, over the posts the fill can accept. A refused post
+	// lets the fill reach further down, so a rank is a conservative stand-in for the deployment
+	// order - all that is needed, because it only has to order floors against one another.
+	TMap<int32, int32> PostCountByFloor;
+	TMap<int32, int32> BestRankByFloor;
+	for (int32 Rank = 0; Rank < ResolvedFloorByRank.Num(); ++Rank)
+	{
+		const int32 RankedFloor = ResolvedFloorByRank[Rank];
+		++PostCountByFloor.FindOrAdd(RankedFloor);
+		int32& BestRank = BestRankByFloor.FindOrAdd(RankedFloor, MAX_int32);
+		BestRank = FMath::Min(BestRank, Rank);
+	}
+
+	TArray<int32> ClaimingFloors;
+	for (const FTerritoryFloorTemplate& Floor : Floors)
+	{
+		// Only an authored count claims. A zero quota means "every post on this floor" for
+		// reporting, which is not a claim on the budget; reading it as one would reserve the whole
+		// ceiling of every declared floor and reorder deployment for content that never asked.
+		if (!Floor.ClaimsFloorQuota()) continue;
+		if (!PostCountByFloor.Contains(Floor.FloorIndex)) continue;
+		ClaimingFloors.AddUnique(Floor.FloorIndex);
+	}
+	ClaimingFloors.Sort([&BestRankByFloor](const int32 A, const int32 B)
+	{
+		return BestRankByFloor.FindRef(A) < BestRankByFloor.FindRef(B);
+	});
+
+	int32 Remaining = Budget;
+	for (const int32 ClaimFloor : ClaimingFloors)
+	{
+		if (Remaining <= 0) break;
+
+		const FTerritoryFloorTemplate* const Floor = Floors.FindByPredicate(
+			[ClaimFloor](const FTerritoryFloorTemplate& Row) { return Row.FloorIndex == ClaimFloor; });
+		if (!Floor) continue;
+
+		// A claim can never exceed the posts that can hold it, and never the budget left when its
+		// turn comes - so a claim is a floor's share of what exists, not a promise the target cannot
+		// keep.
+		const int32 FloorPosts = PostCountByFloor.FindRef(ClaimFloor);
+		const int32 Quota = FTerritoryFloorTemplate::ResolveGuardQuota(Floor->DesiredGuards, FloorPosts);
+		const int32 Served = FMath::Clamp(Quota, 0, FMath::Min(Remaining, FloorPosts));
+		if (Served <= 0) continue;
+
+		FTerritoryFloorClaim& Claim = OutClaims.AddDefaulted_GetRef();
+		Claim.FloorIndex = ClaimFloor;
+		Claim.Guards = Served;
+		Remaining -= Served;
+	}
+
+	return Remaining;
+}
+
 TArray<FTransform> ATerritoryGuardSpawnPoint::GetPatrolRouteAsTransforms() const
 {
 	TArray<FTransform> Transforms;

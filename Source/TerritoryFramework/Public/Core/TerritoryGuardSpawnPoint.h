@@ -12,6 +12,10 @@ class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
 class UTerritoryDefinition;
+// Forward-declared rather than included: TerritoryDefinition.h already reaches this header for the
+// patrol node a guard-post row carries, so including it back would be circular. Only a reference is
+// needed here; the floor claim plan's implementation is where the full type is used.
+struct FTerritoryFloorTemplate;
 enum class ETerritoryState : uint8;
 
 /**
@@ -417,6 +421,65 @@ public:
 		meta=(DisplayName="Get Owning Territory"))
 	ATerritoryVolume* GetOwningTerritory() const;
 
+	// ─── Deployment Order ───
+
+	/**
+	 * Sorts posts into the one order their Territory fills them in: higher Priority first, a post
+	 * with a patrol route before one without, then by actor path name so the order is identical on
+	 * every machine and every run.
+	 *
+	 * This is the single authority for "which post gets a guard first". SpawnGuardsToCount, both
+	 * reinforcement paths and the editor's deployment-reachability check all call it, so a change
+	 * here moves them together. It replaced three byte-identical comparators.
+	 */
+	static void SortForDeployment(TArray<ATerritoryGuardSpawnPoint*>& Posts);
+
+	/**
+	 * Whether a territory staffing itself toward TargetGuardCount reaches the post standing at
+	 * PostIndex in the order SortForDeployment produces.
+	 *
+	 * SpawnGuardsToCount fills front to back, one guard per post (GetEffectiveMaxGuards is 1), and
+	 * each pass restarts from the front - so guard k stands on the k-th post the fill accepts. A
+	 * post below the target is therefore always reached; a post at or above it is reached only if
+	 * enough earlier posts were refused, which is why the editor check passes the *accepted* count
+	 * rather than the raw index.
+	 *
+	 * If a post ever holds more than one guard, this predicate and that fill loop change together.
+	 */
+	static bool IsReachedByDeploymentTarget(int32 PostIndex, int32 TargetGuardCount);
+
+	/** One floor's share of the staffing target, reserved before the flat order is consulted. */
+	struct FTerritoryFloorClaim
+	{
+		int32 FloorIndex = INDEX_NONE;
+		int32 Guards = 0;
+	};
+
+	/**
+	 * How the authored target is split between floors that claim a quota and the flat surplus.
+	 *
+	 * A floor row authoring DesiredGuards > 0 claims that many guards ahead of SortForDeployment's
+	 * order, so a low-priority upper floor is staffed instead of losing every post to a
+	 * high-priority ground floor. Floors are served in the order of their best-placed post, which is
+	 * SortForDeployment's own comparison, so Priority still decides between floors.
+	 *
+	 * Shared, like the two helpers above it, because SpawnGuardsToCount spends this plan and the
+	 * editor's deployment-reachability check predicts it. A second implementation of the budget walk
+	 * is exactly how the rule that says "this floor can never be staffed" drifts away from the fill
+	 * that staffs it.
+	 *
+	 * @param ResolvedFloorByRank  each deployable post's floor, in SortForDeployment order
+	 * @param Floors               the Place's authored floor rows
+	 * @param TargetGuardCount     the authored, clamped staffing target
+	 * @param OutClaims            floors served ahead of the flat order, in service order
+	 * @return                     the budget left for the flat surplus pass
+	 */
+	static int32 PlanFloorClaims(
+		const TArray<int32>& ResolvedFloorByRank,
+		const TArray<FTerritoryFloorTemplate>& Floors,
+		int32 TargetGuardCount,
+		TArray<FTerritoryFloorClaim>& OutClaims);
+
 	// ─── P1-07: Effective Configuration Getters ───
 	// The optional nested GuardPostDefinition supplies reusable defaults behind the
 	// owning Place Definition row. Each post is always one active combat slot.
@@ -530,6 +593,9 @@ private:
 	friend class FTFIndependentGuardPostStreaming;
 	// Floor staging tests share one fixture, so the reserve seam lives in one class.
 	friend class FTFTerritoryFloorTestAccess;
+	// The floor-quota deployment test deploys through the production binding (BindToTerritory),
+	// which is the private call BeginPlay makes for each authored post.
+	friend class FTFFloorQuotaDeployment;
 #endif
 
 	/** Hidden serialized binding maintained by the Definition synchronizer. */
