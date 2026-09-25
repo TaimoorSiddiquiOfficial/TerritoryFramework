@@ -10,6 +10,7 @@
 #include "Core/TerritoryHierarchy.h"
 #include "AI/TerritoryNPCActivityComponent.h"
 #include "AI/NarrativeNPCController.h"
+#include "AI/TerritoryNPCController.h"
 #include "AI/Activities/NPCGoalGenerator.h"
 #include "AI/Activities/NPCGoalItem.h"
 #include "Character/NarrativeCharacterVisual.h"
@@ -520,6 +521,96 @@ bool FTFGuardDecisionIsObservable::RunTest(const FString& Parameters)
 		TestEqual(TEXT("The allow reason reaches the log too"),
 			Capture.CountContaining(Reason.ToString()), 1);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFGuardControllerAttitude,
+	"TerritoryFramework.Guards.Regression.ControllerAndCharacterShareOneAttitude",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+/**
+ * A guard has TWO Narrative team agents: ATerritoryGuardCharacter and the ATerritoryNPCController
+ * possessing it. The inherited controller implementation answers from the raw faction table, and
+ * UArsenalStatics::GetAttitude - the Blueprint-facing helper read by UEnvQueryTest_Team - answers
+ * for whichever of the two it is handed. A consumer handed the controller therefore never sees the
+ * gate at all.
+ *
+ * Measured in live PIE before this test existed (HopDistrictTest, seven guards on the
+ * authoritative Blacksmith volume): the raw table said HOSTILE, the guard pawn said NEUTRAL (its
+ * gates refused, and the downgrade at TerritoryGuardCharacter.cpp:273 is deliberate), and the
+ * controller said HOSTILE. Two answers from one NPC - and the controller's answer bypassed every
+ * Territory gate, and the downgrade with it.
+ *
+ * The attitude is read through the team-agent interface in every assertion here, because that is
+ * how the shipped consumers reach it and because both base classes declare the name. A C++
+ * cross-check through UArsenalStatics is not available to this module: its public header includes
+ * Vehicles/NarrativeArsenalVehicleTypes.h, which exists only in the vendor module's Private tree,
+ * so including it from here fails to compile. The interface call is the same virtual the helper
+ * makes, so nothing is lost by asserting on it directly.
+ */
+bool FTFGuardControllerAttitude::RunTest(const FString& Parameters)
+{
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	TerritoryGuardResponseTests::FFixture F;
+	auto* State = Cast<ANarrativeGameState>(F.World->GetGameState());
+	if (!TestNotNull(TEXT("Authored GameState owns the Narrative faction table"), State)) return false;
+	auto* Guard = F.Character(F.Bandits);
+	auto* Target = F.Player();
+	if (!TestNotNull(TEXT("Real Narrative player target"), Target)) return false;
+	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("OwningTerritory"))
+		->SetObjectPropertyValue_InContainer(Guard, F.Place);
+
+	// Runtime supplies this controller through AIControllerClass. An isolated world has not run the
+	// possession, so take whichever controller the guard actually has and only make one if it has
+	// none - the test must describe the guard that exists, not one it assembled to suit itself.
+	auto* Controller = Cast<ATerritoryNPCController>(Guard->GetController());
+	if (!Controller)
+	{
+		Controller = F.World->SpawnActor<ATerritoryNPCController>();
+		if (!TestNotNull(TEXT("Territory NPC controller spawns"), Controller)) return false;
+		F.World->AddController(Controller);
+		Controller->Possess(Guard);
+	}
+	if (!TestNotNull(TEXT("The guard is controlled by the Territory NPC controller"), Controller)) return false;
+	TestTrue(TEXT("The guard reports the Territory controller as its controller"),
+		Guard->GetController() == static_cast<AController*>(Controller));
+
+	auto* GuardTeam = Cast<INarrativeTeamAgentInterface>(Guard);
+	auto* ControllerTeam = Cast<INarrativeTeamAgentInterface>(Controller);
+	auto* TargetTeam = Cast<INarrativeTeamAgentInterface>(Target);
+	if (!TestNotNull(TEXT("The guard is a team agent"), GuardTeam)
+		|| !TestNotNull(TEXT("The controller is a team agent"), ControllerTeam)
+		|| !TestNotNull(TEXT("The target is a team agent"), TargetTeam)) return false;
+
+	// Validity of the whole scenario, asserted rather than assumed. An empty faction set makes the
+	// raw table answer Neutral - which is also what a gated pawn answers - so without this the
+	// comparison below would pass for entirely the wrong reason.
+	TestTrue(TEXT("The controller reports the possessed guard's factions, so the table is consulted with them"),
+		ControllerTeam->GetFactions().HasTag(F.Bandits));
+	TestTrue(TEXT("The target reports its own faction"),
+		TargetTeam->GetFactions().HasTag(F.Heroes));
+
+	State->SetFactionAttitude(F.Bandits, F.Heroes, ETeamAttitude::Hostile);
+	TestEqual(TEXT("The raw Narrative faction table really does call this pair Hostile"),
+		static_cast<int32>(State->GetFactionsAttitudeTowardsFactions(
+			GuardTeam->GetFactions(), TargetTeam->GetFactions())),
+		static_cast<int32>(ETeamAttitude::Hostile));
+
+	// Territory refuses on its own authorities - diplomacy, stealth, territory state - none of which
+	// is the Narrative faction table. The guarded pawn therefore reports Neutral on purpose.
+	FText Reason;
+	TestFalse(TEXT("No Territory gate admits this target"), Guard->EvaluateTerritoryTarget(Target, Reason));
+	const ETeamAttitude::Type PawnAttitude = GuardTeam->GetTeamAttitudeTowards(*Target);
+	TestEqual(TEXT("The guard pawn refuses stale Narrative hostility"),
+		static_cast<int32>(PawnAttitude), static_cast<int32>(ETeamAttitude::Neutral));
+
+	// One NPC, one answer. This is the assertion that failed before the controller forwarded.
+	TestEqual(TEXT("The controller reports the guard's own attitude, not the raw faction table"),
+		static_cast<int32>(ControllerTeam->GetTeamAttitudeTowards(*Target)),
+		static_cast<int32>(ETeamAttitude::Neutral));
+	TestEqual(TEXT("The controller and the guard agree"),
+		static_cast<int32>(ControllerTeam->GetTeamAttitudeTowards(*Target)),
+		static_cast<int32>(PawnAttitude));
 	return true;
 }
 
