@@ -903,6 +903,10 @@ private:
 	// the delegate test itself is named for the behaviour it proves.
 	friend class FTFTerritoryFloorEventTestAccess;
 	friend class FTFTerritoryFloorEventCallbacks;
+	// The level-scoped guard deployment checks read authored state a fixture cannot otherwise
+	// write: BoundsShape, GuardNPCDefinition and the typed GuardSpawnPoints array are all
+	// protected. One seam class keeps that access in a single place.
+	friend class FTFDeploymentValidatorSeams;
 #endif
 
 	static int32 CalculateGuardRestoreCount(bool bLoadedFromSave, int32 DesiredGuards,

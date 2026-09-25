@@ -898,6 +898,9 @@ bool UTerritoryDataValidator::ValidateLevel(ULevel* Level, TArray<FString>& OutE
 	CheckSingletonActors(Level, OutErrors, OutWarnings);
 	CheckDuplicateDisplayNames(Level, OutWarnings);
 	CheckOrphanedSpawnPoints(Level, OutWarnings);
+	CheckGuardPostBindings(Level, OutWarnings);
+	CheckPatrolContainment(Level, OutWarnings);
+	CheckGuardDeploymentFeasibility(Level, OutWarnings);
 	CheckMissingParentTags(Level, OutWarnings);
 
 	for (ATerritoryVolume* Territory : GetActorsForValidation<ATerritoryVolume>(Level))
@@ -2247,64 +2250,145 @@ void UTerritoryDataValidator::CheckBoundsShape(ATerritoryVolume* Territory, TArr
 	}
 }
 
+UTerritoryDataValidator::FSpawnPointPlaceIndex UTerritoryDataValidator::BuildSpawnPointPlaceIndex(ULevel* Level)
+{
+	FSpawnPointPlaceIndex Index;
+	if (!Level) return Index;
+
+	Index.Territories = GetActorsForValidation<ATerritoryVolume>(Level);
+	Index.Posts = GetActorsForValidation<ATerritoryGuardSpawnPoint>(Level);
+	for (ATerritoryVolume* Territory : Index.Territories)
+	{
+		if (!Territory) continue;
+		if (Territory->GetTerritoryTag().IsValid())
+		{
+			Index.TerritoriesByTag.Add(Territory->GetTerritoryTag(), Territory);
+		}
+		for (AActor* Authored : Territory->GuardSpawnPoints)
+		{
+			if (Authored) Index.TypedArrayOwner.Add(Authored, Territory);
+		}
+	}
+	return Index;
+}
+
+UTerritoryDataValidator::FPostPlaceResolution UTerritoryDataValidator::ResolvePostTerritory(
+	const ATerritoryGuardSpawnPoint* Post, const FSpawnPointPlaceIndex& Index)
+{
+	FPostPlaceResolution Result;
+	if (!Post) return Result;
+
+	// The authored typed array is authoritative: a post listed on a Territory needs no tag.
+	if (ATerritoryVolume* const* TypedOwner = Index.TypedArrayOwner.Find(Post))
+	{
+		Result.Owner = *TypedOwner;
+		Result.Reason = EPostPlaceResolution::TypedArray;
+		return Result;
+	}
+
+	if (Post->OwnerTerritoryTag.IsValid())
+	{
+		ATerritoryVolume* const* Resolved = Index.TerritoriesByTag.Find(Post->OwnerTerritoryTag);
+		if (!Resolved)
+		{
+			Result.Reason = EPostPlaceResolution::UnresolvedOwnerTag;
+			return Result;
+		}
+		if (!(*Resolved)->IsA<ATerritoryProperty>())
+		{
+			Result.Reason = EPostPlaceResolution::AggregateOwnerTarget;
+			return Result;
+		}
+		Result.Owner = *Resolved;
+		Result.Reason = EPostPlaceResolution::OwnerTag;
+		return Result;
+	}
+
+	// OwnerTerritoryTag is transient and ApplyTerritoryDefinition is what writes it, so a map that
+	// has never been played can have a correctly bound post here with no tag at all — and the
+	// containment fallback below would then bind it by geometry instead, which reports a post the
+	// runtime will actually attach by tag. The binding it is copied from is serialized, so read
+	// that. Additive by construction: when the transient tag above is populated it holds this same
+	// value, so a post that resolved before resolves identically.
+	if (const UTerritoryDefinition* const Bound = Post->GetTerritoryDefinition())
+	{
+		const FGameplayTag& BoundTag = Bound->TerritoryTag;
+		if (BoundTag.IsValid())
+		{
+			ATerritoryVolume* const* Resolved = Index.TerritoriesByTag.Find(BoundTag);
+			if (!Resolved)
+			{
+				// Faithful to the runtime: IsWaitingForOwningTerritory answers true for a valid but
+				// unregistered tag, so the post waits rather than falling through to proximity.
+				Result.Reason = EPostPlaceResolution::UnresolvedOwnerTag;
+				return Result;
+			}
+			if (!(*Resolved)->IsA<ATerritoryProperty>())
+			{
+				Result.Reason = EPostPlaceResolution::AggregateOwnerTarget;
+				return Result;
+			}
+			Result.Owner = *Resolved;
+			Result.Reason = EPostPlaceResolution::OwnerTag;
+			return Result;
+		}
+	}
+
+	// No authored binding at all: fall back to containment, exactly as the runtime's
+	// FindPlacementOrPatrolTerritory does, and take the most specific hit. The hits deliberately
+	// span every Territory — that is the runtime's own rule, and narrowing it here would report a
+	// post the runtime would happily bind. CheckPatrolContainment is what catches a node that
+	// overlaps a *neighbouring* Place.
+	TArray<ATerritoryVolume*> PlacementHits;
+	for (ATerritoryVolume* Territory : Index.Territories)
+	{
+		if (!Territory) continue;
+		if (Territory->ContainsPoint(Post->GetActorLocation())) PlacementHits.Add(Territory);
+		for (const FTerritoryPatrolNode& Node : Post->GetEffectivePatrolRoute())
+		{
+			if (Territory->ContainsPoint(Node.Location)) PlacementHits.Add(Territory);
+		}
+	}
+	Result.Owner = ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(PlacementHits);
+	Result.Reason = Result.Owner
+		? EPostPlaceResolution::Containment
+		: EPostPlaceResolution::Orphaned;
+	return Result;
+}
+
 void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FString>& OutWarnings)
 {
 	if (!Level) return;
 
 	// A post may be connected by the typed Territory array or by its stable owner tag.
-	const TArray<ATerritoryVolume*> Territories = GetActorsForValidation<ATerritoryVolume>(Level);
-	const TArray<ATerritoryGuardSpawnPoint*> SpawnPoints =
-		GetActorsForValidation<ATerritoryGuardSpawnPoint>(Level);
-	TSet<AActor*> ReferencedSpawnPoints;
-	TMap<FGameplayTag, ATerritoryVolume*> TerritoriesByTag;
-	for (ATerritoryVolume* Territory : Territories)
-	{
-		if (Territory->GetTerritoryTag().IsValid())
-		{
-			TerritoriesByTag.Add(Territory->GetTerritoryTag(), Territory);
-		}
-		for (AActor* SP : Territory->GuardSpawnPoints)
-		{
-			if (SP) ReferencedSpawnPoints.Add(SP);
-		}
-	}
+	const FSpawnPointPlaceIndex Index = BuildSpawnPointPlaceIndex(Level);
+	const TArray<ATerritoryVolume*>& Territories = Index.Territories;
+	const TArray<ATerritoryGuardSpawnPoint*>& SpawnPoints = Index.Posts;
 
-	// Find orphaned spawn points
+	// Find orphaned spawn points. This function owns every message about a post with no Place;
+	// the placement checks that also call ResolvePostTerritory stay silent on the same condition.
 	for (ATerritoryGuardSpawnPoint* SP : SpawnPoints)
 	{
-		if (ReferencedSpawnPoints.Contains(SP)) continue;
-		if (SP->OwnerTerritoryTag.IsValid())
+		const FPostPlaceResolution Resolution = ResolvePostTerritory(SP, Index);
+		switch (Resolution.Reason)
 		{
-			if (ATerritoryVolume* const* Resolved =
-				TerritoriesByTag.Find(SP->OwnerTerritoryTag))
-			{
-				if ((*Resolved)->IsA<ATerritoryProperty>()) continue;
-				OutWarnings.Add(FString::Printf(
-					TEXT("GuardSpawnPoint '%s' targets aggregate Territory '%s'; guard posts belong to Place Definitions only"),
-					*SP->GetActorLabel(), *SP->OwnerTerritoryTag.ToString()));
-				continue;
-			}
+		case EPostPlaceResolution::AggregateOwnerTarget:
+			OutWarnings.Add(FString::Printf(
+				TEXT("GuardSpawnPoint '%s' targets aggregate Territory '%s'; guard posts belong to Place Definitions only"),
+				*SP->GetActorLabel(), *SP->OwnerTerritoryTag.ToString()));
+			break;
+		case EPostPlaceResolution::UnresolvedOwnerTag:
 			OutWarnings.Add(FString::Printf(
 				TEXT("GuardSpawnPoint '%s' OwnerTerritoryTag '%s' does not resolve to a loaded territory"),
 				*SP->GetActorLabel(), *SP->OwnerTerritoryTag.ToString()));
-		}
-		else
-		{
-			TArray<ATerritoryVolume*> PlacementHits;
-			for (ATerritoryVolume* Territory : Territories)
-			{
-				if (!Territory) continue;
-				if (Territory->ContainsPoint(SP->GetActorLocation())) PlacementHits.Add(Territory);
-				for (const FTerritoryPatrolNode& Node : SP->GetEffectivePatrolRoute())
-				{
-					if (Territory->ContainsPoint(Node.Location)) PlacementHits.Add(Territory);
-				}
-			}
-			if (!ATerritoryGuardSpawnPoint::ChooseMostSpecificTerritory(PlacementHits))
-			{
-				OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — bind it through a Place Definition or overlap its placement/patrol route with a Place"),
-					*SP->GetActorLabel()));
-			}
+			break;
+		case EPostPlaceResolution::Orphaned:
+			OutWarnings.Add(FString::Printf(TEXT("Orphaned GuardSpawnPoint '%s' — bind it through a Place Definition or overlap its placement/patrol route with a Place"),
+				*SP->GetActorLabel()));
+			break;
+		default:
+			// Bound by the typed array, its owner tag, or containment: nothing to report.
+			break;
 		}
 	}
 
@@ -2342,6 +2426,332 @@ void UTerritoryDataValidator::CheckOrphanedSpawnPoints(ULevel* Level, TArray<FSt
 				*Territory->GetActorLabel(), Territory->GuardSpawnCount));
 		}
 	}
+}
+
+void UTerritoryDataValidator::CheckGuardPostBindings(ULevel* Level, TArray<FString>& OutWarnings)
+{
+	if (!Level) return;
+
+	// A placed post produces no guard at all unless its serialized binding resolves. BeginPlay calls
+	// ApplyTerritoryDefinition, which answers false for a Definition with no row matching the post's
+	// Guard Post ID, and BeginPlay then logs an error and returns before any spawn
+	// (TerritoryGuardSpawnPoint.cpp:179-185, "Legacy Blueprint configuration is disabled"). Nothing
+	// else reports it: the post still has a Place, a patrol route and a guard definition, so it
+	// looks fully configured from every other angle.
+	//
+	// This is also the only editor-time route to a post's floor and owner. ApplyTerritoryDefinition
+	// is what copies OwnerTerritoryTag and FloorIndex off the row, so both stay transient and hold
+	// their defaults until Play; the binding is serialized, which is why it can be read here and
+	// what ResolveAuthoredPostFloor and ResolvePostTerritory both read instead.
+	for (ATerritoryGuardSpawnPoint* Post : GetActorsForValidation<ATerritoryGuardSpawnPoint>(Level))
+	{
+		if (!Post) continue;
+
+		const UTerritoryDefinition* const Definition = Post->GetTerritoryDefinition();
+		if (!Definition)
+		{
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: no Territory Definition is bound, so no row can supply this post's floor, patrol or guard; BeginPlay reports 'no matching Territory Definition row' and it never spawns a guard"),
+				*Post->GetActorLabel()));
+			continue;
+		}
+
+		const FName PostID = Post->GetGuardPostID();
+		if (PostID.IsNone())
+		{
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: bound to '%s' with no Guard Post ID, so no row can be matched; BeginPlay reports 'no matching Territory Definition row' and it never spawns a guard"),
+				*Post->GetActorLabel(), *Definition->GetName()));
+			continue;
+		}
+
+		if (!Definition->FindGuardPost(PostID))
+		{
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: Guard Post ID '%s' matches no row in '%s'; BeginPlay reports 'no matching Territory Definition row' and it never spawns a guard"),
+				*Post->GetActorLabel(), *PostID.ToString(), *Definition->GetName()));
+		}
+	}
+}
+
+void UTerritoryDataValidator::CheckPatrolContainment(ULevel* Level, TArray<FString>& OutWarnings)
+{
+	if (!Level) return;
+
+	// This is the check CheckOrphanedSpawnPoints cannot make. That one asks whether *any*
+	// Territory contains the post, so a patrol node that wanders out of its own Place and into a
+	// neighbour still counts as bound and warns nothing. Here each node is tested against the
+	// Place the post actually belongs to, which is the reported "guard patrols outside the
+	// territory bound" defect.
+	const FSpawnPointPlaceIndex Index = BuildSpawnPointPlaceIndex(Level);
+	for (ATerritoryGuardSpawnPoint* Post : Index.Posts)
+	{
+		if (!Post) continue;
+
+		// Null means the post has no Place and CheckOrphanedSpawnPoints has already reported it.
+		ATerritoryVolume* const Owner = ResolvePostTerritory(Post, Index).Owner;
+		if (!Owner) continue;
+
+		const TArray<FTerritoryPatrolNode>& Route = Post->GetEffectivePatrolRoute();
+		if (Route.IsEmpty()) continue;
+
+		// ContainsPoint answers false for every point when there is no bounds shape, which would
+		// turn every patrol node in the level into a warning. CheckBoundsShape already reports the
+		// missing shape, so stay silent here and leave that one finding standing alone.
+		if (!Owner->BoundsShape) continue;
+
+		for (int32 NodeIndex = 0; NodeIndex < Route.Num(); ++NodeIndex)
+		{
+			const FVector& NodeLocation = Route[NodeIndex].Location;
+			if (Owner->ContainsPoint(NodeLocation)) continue;
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: guard spawn point '%s' patrol node %d at %s lies outside this Place; its guards leave the territory bound"),
+				*Owner->GetActorLabel(), *Post->GetActorLabel(), NodeIndex,
+				*NodeLocation.ToCompactString()));
+		}
+	}
+}
+
+void UTerritoryDataValidator::CheckGuardDeploymentFeasibility(ULevel* Level, TArray<FString>& OutWarnings)
+{
+	if (!Level) return;
+
+	// Whether a floor can be staffed is a property of the level, not of the Definition asset: a
+	// floor with three authored posts whose guards are all refused has a valid Definition and a
+	// dead floor. TrySpawnSingleGuard discards such a guard *after* spawning it, with no counter,
+	// delegate or snapshot field, so nothing downstream can observe the refusal — which is why it
+	// has to be caught here, before Play.
+	//
+	// Guard definitions are gathered as *candidates* rather than resolved the way the runtime
+	// resolves them. ResolveGuardDefinition(GetOwningFaction()) answers with the entry matching the
+	// owning faction, and ownership is runtime state: with Play stopped the faction is invalid, so
+	// the call falls through to the Place's default. A Place that staffs its floors per faction
+	// therefore has a null default on purpose and would resolve to no class for every post — which
+	// would report its correctly authored floors as unstaffable. That was a false finding on the
+	// project's own content, so every declared definition is checked instead, and a post is refused
+	// only when *every* candidate refuses it.
+	//
+	// Three things this deliberately does not attempt:
+	//
+	//   * The concealed reserve path (TrySpawnSingleGuard(..., bRequireConcealment = true), taken
+	//     only by SpawnReserveGuard) searches GetRandomReachablePointInRadius and picks with
+	//     FMath::FRandRange against live player views. It is nondeterministic by construction and
+	//     cannot be validated. Every primary deployment passes false, which is the branch mirrored
+	//     below.
+	//   * The post-spawn IsPlacementAcceptable check compares the intended transform with where the
+	//     capsule actually settles. Predicting that would mean re-deriving engine spawn adjustment
+	//     for a second time, and there is no recorded data to validate such a prediction against.
+	//   * Which candidate the runtime will pick. A post cleared under one declared definition and
+	//     blocked under another is credited here, because before Play there is no way to know which
+	//     one its faction selects. Erring toward "can deploy" is deliberate: the alternative invents
+	//     a dead floor out of a choice that has not been made yet.
+	const FSpawnPointPlaceIndex Index = BuildSpawnPointPlaceIndex(Level);
+
+	/** Floors with at least one post that can actually put a guard on the ground, per Place. */
+	TMap<const ATerritoryVolume*, TSet<int32>> StaffableFloors;
+
+	for (ATerritoryGuardSpawnPoint* Post : Index.Posts)
+	{
+		if (!Post) continue;
+
+		// Null means the post has no Place and CheckOrphanedSpawnPoints has already reported it.
+		ATerritoryVolume* const Owner = ResolvePostTerritory(Post, Index).Owner;
+		if (!Owner) continue;
+
+		TArray<UNPCDefinition*> Candidates;
+		GatherCandidateGuardDefinitions(Owner, Post, Candidates);
+		if (Candidates.IsEmpty())
+		{
+			// Nothing declares a guard definition for this post anywhere. CheckGuardConfig owns
+			// that finding — it warns when GuardSpawnCount is above zero with no definition at all
+			// — so this neither restates it nor concludes anything about the floor from it.
+			continue;
+		}
+
+		// The post's own choice is not faction-dependent, so a single candidate is the whole
+		// answer for it. Several candidates only ever means the Place declares per-faction
+		// definitions, and only when ownership is unknowable here.
+		const bool bFactionDerived = Candidates.Num() > 1
+			|| (!Post->NPCDefinitionOverride
+				&& !(Post->GuardPostDefinition && Post->GuardPostDefinition->NPCDefinition)
+				&& !Owner->FactionGuardDefinitions.IsEmpty());
+
+		bool bAnyClass = false;
+		bool bAnyTransform = false;
+		bool bAnyDeployable = false;
+		bool bAnyBlocked = false;
+		FTransform FirstBlockedDeployment;
+		for (UNPCDefinition* const Candidate : Candidates)
+		{
+			UClass* const GuardClass = Candidate ? Candidate->NPCClassPath.LoadSynchronous() : nullptr;
+			if (!GuardClass) continue;
+			bAnyClass = true;
+
+			FTransform Deployment;
+			if (!Post->ResolveGuardDeploymentTransform(GuardClass, Deployment)) continue;
+			bAnyTransform = true;
+
+			// IsGuardSpawnLocationClear is private on the volume and reachable here through
+			// ATerritoryVolume's existing friendship with this validator. Reusing it keeps one
+			// authority for the shape and profile that decide clearance.
+			if (!Owner->IsGuardSpawnLocationClear(GuardClass, Deployment.GetLocation()))
+			{
+				// Named in the finding so the author can go and look at the spot. The first
+				// blocked candidate's location, since with several candidates the message reports
+				// one post rather than one class.
+				if (!bAnyBlocked)
+				{
+					FirstBlockedDeployment = Deployment;
+					bAnyBlocked = true;
+				}
+				continue;
+			}
+
+			bAnyDeployable = true;
+			break;
+		}
+
+		if (bAnyDeployable)
+		{
+			// The authored row, never Post->GetFloorIndex(): that field is transient and still holds
+			// its default zero on a map that has not been played, which would credit every post to
+			// ground and report every upper floor as unstaffable. See ResolveAuthoredPostFloor.
+			StaffableFloors.FindOrAdd(Owner).Add(ResolveAuthoredPostFloor(Post));
+			continue;
+		}
+
+		// Definitions exist but none names a class that loads this side of Play. That is
+		// ValidateNarrativeSpawnDefinition's finding, reported through CheckGuardConfig.
+		if (!bAnyClass) continue;
+
+		// Every candidate that gets this far refuses the post. Reported once, naming what was
+		// covered, because with ownership unknown the author is the only one who knows whether the
+		// runtime would have picked a definition that deploys.
+		const FString CoverageNote = bFactionDerived
+			? FString::Printf(
+				TEXT(" (all %d declared per-faction guard definitions were checked; the owning faction is chosen at runtime)"),
+				Candidates.Num())
+			: FString();
+
+		if (!bAnyTransform)
+		{
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: guard spawn point '%s' cannot resolve a deployment transform (no guard class capsule); no guard can stand there%s"),
+				*Owner->GetActorLabel(), *Post->GetActorLabel(), *CoverageNote));
+			continue;
+		}
+
+		OutWarnings.Add(FString::Printf(
+			TEXT("%s: guard spawn point '%s' is blocked at its authored deployment location %s; TrySpawnSingleGuard refuses it and does not attempt relocation%s"),
+			*Owner->GetActorLabel(), *Post->GetActorLabel(),
+			*FirstBlockedDeployment.GetLocation().ToCompactString(), *CoverageNote));
+	}
+
+	// A floor whose every post was refused is a floor that can never be cleared. Definition
+	// validation counts authored posts; this counts posts that can actually produce a guard, and
+	// the gap between the two is exactly a dead floor.
+	for (ATerritoryVolume* Territory : Index.Territories)
+	{
+		const UTerritoryDefinition* Definition =
+			Territory ? Territory->GetTerritoryDefinition() : nullptr;
+		if (!Definition || !Definition->HasAuthoredFloors()) continue;
+
+		const TSet<int32>* const Staffable = StaffableFloors.Find(Territory);
+
+		// Which floors the level's posts are actually bound to, named in the finding. Without it a
+		// dead floor is a dead end: "no post is bound to that floor's row" and "the posts are bound
+		// to another floor's row" produce the same warning but need opposite fixes, and the binding
+		// values are not readable from outside the module.
+		FString CreditedNote;
+		if (!Staffable || Staffable->IsEmpty())
+		{
+			CreditedNote = TEXT("; no guard post in this level is bound to a row on any floor");
+		}
+		else
+		{
+			TArray<FString> CreditedFloors;
+			for (const int32 Credited : *Staffable)
+			{
+				CreditedFloors.Add(FString::FromInt(Credited));
+			}
+			CreditedFloors.Sort();
+			CreditedNote = FString::Printf(
+				TEXT("; the rows this level's posts are bound to put them on floor(s) %s"),
+				*FString::Join(CreditedFloors, TEXT(", ")));
+		}
+		for (const FTerritoryFloorTemplate& Floor : Definition->Floors)
+		{
+			if (Floor.DesiredGuards <= 0) continue;
+			if (Staffable && Staffable->Contains(Floor.FloorIndex)) continue;
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: floor %d wants %d guard(s) but no guard post on that floor can deploy one; the floor can never be staffed%s"),
+				*Territory->GetActorLabel(), Floor.FloorIndex, Floor.DesiredGuards, *CreditedNote));
+		}
+	}
+}
+
+void UTerritoryDataValidator::GatherCandidateGuardDefinitions(
+	const ATerritoryVolume* Territory, const ATerritoryGuardSpawnPoint* SpawnPoint,
+	TArray<UNPCDefinition*>& OutDefinitions)
+{
+	OutDefinitions.Reset();
+
+	// The post's own choice wins outright. TrySpawnSingleGuard applies these same two overrides on
+	// top of whatever the territory supplied (TerritoryVolume.cpp:3275-3305), and neither of them
+	// is faction-dependent, so when either is set there is exactly one candidate and no ambiguity.
+	if (SpawnPoint && SpawnPoint->NPCDefinitionOverride)
+	{
+		OutDefinitions.Add(SpawnPoint->NPCDefinitionOverride);
+		return;
+	}
+	if (SpawnPoint && SpawnPoint->GuardPostDefinition && SpawnPoint->GuardPostDefinition->NPCDefinition)
+	{
+		OutDefinitions.Add(SpawnPoint->GuardPostDefinition->NPCDefinition);
+		return;
+	}
+
+	if (!Territory) return;
+
+	// Otherwise every definition the territory declares for guards is a candidate, because which
+	// one the runtime uses is decided by the owning faction — runtime state, and therefore invalid
+	// with Play stopped. ResolveGuardDefinition(Territory->GetOwningFaction()) would answer with
+	// the default alone, which a per-faction Place leaves null by design.
+	if (Territory->GuardNPCDefinition)
+	{
+		OutDefinitions.Add(Territory->GuardNPCDefinition);
+	}
+	for (const FTerritoryFactionGuardDefinition& Entry : Territory->FactionGuardDefinitions)
+	{
+		if (Entry.NPCDefinition && !OutDefinitions.Contains(Entry.NPCDefinition))
+		{
+			OutDefinitions.Add(Entry.NPCDefinition);
+		}
+	}
+}
+
+int32 UTerritoryDataValidator::ResolveAuthoredPostFloor(const ATerritoryGuardSpawnPoint* SpawnPoint)
+{
+	// Mirrors what ApplyTerritoryDefinition does at BeginPlay (TerritoryGuardSpawnPoint.cpp:286):
+	// FloorIndex = Template->FloorIndex, copied through unclamped. Reading the row directly is the
+	// editor-time equivalent of that copy, and it is the only one available before Play — the post's
+	// own FloorIndex is transient and its default zero is a valid floor, so a stale zero cannot be
+	// told apart from an authored ground floor.
+	if (!SpawnPoint) return 0;
+
+	const UTerritoryDefinition* const Definition = SpawnPoint->GetTerritoryDefinition();
+	const FName PostID = SpawnPoint->GetGuardPostID();
+	if (Definition && !PostID.IsNone())
+	{
+		if (const FTerritoryGuardPostTemplate* const Row = Definition->FindGuardPost(PostID))
+		{
+			return Row->FloorIndex;
+		}
+	}
+
+	// No row to read. The post cannot deploy at all — BeginPlay errors and disables it when
+	// ApplyTerritoryDefinition finds no matching row — so this value only keeps a post that is
+	// already reported elsewhere from being credited to a floor it does not have.
+	return SpawnPoint->GetFloorIndex();
 }
 
 void UTerritoryDataValidator::CheckMissingParentTags(ULevel* Level, TArray<FString>& OutWarnings)
