@@ -4,12 +4,15 @@
 
 #include "Core/TerritoryInterfaces.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Economy/TerritoryFactionResourceAccountComponent.h"
 #include "Interaction/TerritoryCapturePoint.h"
 #include "Interaction/TerritoryPlayerManagementComponent.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
+#include "Navigation/TerritoryRoadGuide.h"
+#include "DataValidation/TerritoryDataValidator.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Tales/TerritoryDiplomacyCondition.h"
@@ -546,10 +549,17 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 	TestNotNull(TEXT("Farm owns its stable enabled road approach"), FarmRoute);
 	if (BlacksmithRoute)
 	{
-		const FVector WorldSpawn = (BlacksmithRoute->RelativeSpawnTransform
-			* Blacksmith->GetActorTransform()).GetLocation();
-		TestTrue(TEXT("Blacksmith route remains on the repaired nav-side point"),
-			WorldSpawn.Equals(FVector(-3952.f, 795.4146f, 3.0717f), 1.f));
+		// A matching Road Guide owns the driven endpoints even when the Place moves
+		// or scales. The fallback transforms and an old world coordinate are not the
+		// runtime route. Use the production resolver without initializing gameplay.
+		UTerritoryCounterAttackSubsystem* RouteResolver =
+			NewObject<UTerritoryCounterAttackSubsystem>(World);
+		ATerritoryRoadGuide* RoadGuide = RouteResolver->ResolveRoadGuide(*BlacksmithRoute);
+		if (!TestNotNull(TEXT("Blacksmith resolves its authored road guide"), RoadGuide)) return false;
+		TestEqual(TEXT("Blacksmith road guide keeps its stable identity"),
+			RoadGuide->GetRoadGuideID(), FName(TEXT("Blacksmith_WestRoad")));
+		const FVector WorldSpawn = RoadGuide->GetRouteStartTransform(
+			false, BlacksmithRoute->RoadLaneSide).GetLocation();
 		TestEqual(TEXT("Blacksmith west road uses the Narrative vehicle entry"),
 			BlacksmithRoute->EntryType,
 			ETerritoryAssaultEntryType::NarrativeVehicle);
@@ -559,9 +569,10 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		TestEqual(TEXT("Blacksmith permits two vehicle deployments per assault route"),
 			BlacksmithRoute->MaximumVehicleDeployments, 2);
 
-		const FVector WorldDropOff =
-			(BlacksmithRoute->RelativeVehicleDropOffTransform
-				* Blacksmith->GetActorTransform()).GetLocation();
+		const FVector WorldDropOff = RoadGuide->GetRouteEndTransform(
+			false, BlacksmithRoute->RoadLaneSide).GetLocation();
+		TestFalse(TEXT("Blacksmith road start and drop-off remain distinct"),
+			WorldSpawn.Equals(WorldDropOff, 100.f));
 		// The route validator runs against a world's subsystems, and LoadObject only returns an
 		// initialised world when this map happens to be the one the editor currently has open.
 		// Point the editor at any other map and the test receives an uninitialised asset world whose
@@ -577,19 +588,46 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		}
 		else
 		{
-			FString RouteFailure;
-			const bool bVehicleRouteValid =
-				UTerritoryCounterAttackSubsystem::ValidateNarrativeVehicleRoute(
-					World, WorldSpawn, WorldDropOff, &RouteFailure);
-			TestTrue(FString::Printf(TEXT("Blacksmith Sedan route is complete: %s"),
-				*RouteFailure),
-				bVehicleRouteValid);
+			FText RouteFailure;
 			TArray<FVector> RoutePoints;
-			TestTrue(TEXT("Blacksmith route supplies ordered Territory drive points"),
-				UTerritoryCounterAttackSubsystem::BuildNarrativeVehicleRoute(
-					World, WorldSpawn, WorldDropOff, RoutePoints, &RouteFailure));
+			const bool bVehicleRouteValid = RoadGuide->BuildRoutePoints(
+				false, BlacksmithRoute->RoadLaneSide, RoutePoints, RouteFailure);
+			TestTrue(FString::Printf(TEXT("Blacksmith Sedan route is complete: %s"),
+				*RouteFailure.ToString()),
+				bVehicleRouteValid);
 			TestTrue(TEXT("Blacksmith drive route has more than its endpoints"),
 				RoutePoints.Num() > 2);
+			if (RoutePoints.Num() > 1)
+			{
+				TestTrue(TEXT("Drive points start on the approach's authored lane"),
+					RoutePoints[0].Equals(WorldSpawn, 1.f));
+				TestTrue(TEXT("Drive points end on the approach's authored lane"),
+					RoutePoints.Last().Equals(WorldDropOff, 1.f));
+			}
+			FVector Objective;
+			FString WalkFailure;
+			const bool bHasWalkRoute = UTerritoryDataValidator::FindReachableCounterAttackObjective(
+				Blacksmith, WorldDropOff, Objective, WalkFailure);
+			TestTrue(FString::Printf(TEXT("Blacksmith drop-off has a complete walk route: %s"),
+				*WalkFailure), bHasWalkRoute);
+			if (!UTerritoryCounterAttackSubsystem::ValidateNavigationRoute(World,
+				WorldDropOff, Blacksmith->GetTerritoryBounds().GetCenter()))
+			{
+				// The current multi-storey fixture has a disconnected center projection.
+				// A Place without reachable authored posts must still fail at that point;
+				// the editor fix adds real objectives instead of bypassing navigation.
+				FActorSpawnParameters Params;
+				Params.ObjectFlags = RF_Transient;
+				ATerritoryProperty* NoPostPlace = World->SpawnActor<ATerritoryProperty>(
+					ATerritoryProperty::StaticClass(), Blacksmith->GetActorTransform(), Params);
+				if (TestNotNull(TEXT("Transient no-post negative control"), NoPostPlace))
+				{
+					TestFalse(TEXT("The same inaccessible center with no authored posts still rejects the route"),
+						UTerritoryDataValidator::FindReachableCounterAttackObjective(
+							NoPostPlace, WorldDropOff, Objective, WalkFailure));
+					NoPostPlace->Destroy();
+				}
+			}
 		}
 	}
 

@@ -10,6 +10,7 @@ class AActor;
 class APlayerController;
 class UActorComponent;
 class UDialogue;
+class ULevelSequence;
 class UNarrativePartyComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
@@ -36,6 +37,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Cinematics")
 	static UTerritoryCinematicPresentationSubsystem* GetForPlayerController(
 		const APlayerController* PlayerController);
+
+	/** Queries Narrative's sequence registry for this exact player; ordinary ambient sequences are excluded. */
+	UFUNCTION(BlueprintPure, Category="Territory|Cinematics",
+		meta=(DisplayName="Is In Cutscene", AdvancedDisplay="Sequence,bIncludePaused", ToolTip="True while a Narrative movie sequence for this player is playing. Optional Sequence restricts the check to one asset. Paused sequences count only when Include Paused is enabled. This reads playback on the caller's world; it does not create replicated state."))
+	static bool IsInCutscene(const APlayerController* PlayerController,
+		const ULevelSequence* Sequence = nullptr, bool bIncludePaused = false);
 
 	/** True while Narrative has a dialogue. A failed dialogue replacement clears this on the next tick. */
 	UFUNCTION(BlueprintPure, Category="Territory|Cinematics")

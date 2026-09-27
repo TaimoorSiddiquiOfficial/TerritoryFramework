@@ -1,8 +1,12 @@
 # Guard story conversations
 
-Status: requested on 2026-09-11; source and Blueprint audit complete. The coordinated
-conversation adapter and playable example are still to be implemented and tested.
-Existing tagged greetings do not by themselves implement this feature.
+Status, 2026-09-27: the first two-defender, one-personal-listener adapter is implemented.
+See [Modular authoring](39_Modular_Authoring_Workflow.md) for its current setup,
+ownership and limits, and the current verification report for executed checks.
+Existing tagged greetings do not by themselves implement coordinated meetings.
+
+The specification below records the broader 2026-09-11 request. Assault recruitment,
+party/multiple audiences and mid-conversation late join remain outside the first slice.
 
 ## Required player experience
 
@@ -152,6 +156,6 @@ to bind the same speakers without replaying story events.
   a server with two clients to prove one hidden listener remains hidden while
   another exposed player interrupts the guards. Finish normal build/release gates.
 
-This update changes documentation only. No runtime implementation, map, NPC
-Definition, quest, save schema or replicated field changed, and no new runtime
-verification is claimed.
+The original September 11 audit changed documentation only. Its broader acceptance
+criteria remain useful; do not treat the implemented first slice as proof that every
+requested audience or assault scenario below is supported.

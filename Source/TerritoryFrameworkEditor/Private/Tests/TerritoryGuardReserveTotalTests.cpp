@@ -28,17 +28,20 @@ bool FTFGuardReserveTotals::RunTest(const FString& Parameters)
 	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
 	UTerritoryDistrictDefinition* DistrictDefinition = NewObject<UTerritoryDistrictDefinition>();
 	DistrictDefinition->TerritoryTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare"));
+	DistrictDefinition->StableTerritoryGUID = FGuid(301, 302, 303, 304);
 	for (const TCHAR* Tag : { TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), TEXT("Territory.HavenReach.CastleHill.Farm") })
 	{
 		UTerritoryPlaceDefinition* Definition = NewObject<UTerritoryPlaceDefinition>();
 		Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(Tag);
+		Definition->StableTerritoryGUID = FGuid(305, DistrictDefinition->Places.Num() + 1, 307, 308);
 		DistrictDefinition->Places.Add(Definition);
 	}
 	DistrictDefinition->RefreshHierarchyLinks();
 	ATerritoryDistrict* District = World->SpawnActor<ATerritoryDistrict>();
 	District->TerritoryDefinition = DistrictDefinition;
 	District->ApplyTerritoryDefinition();
-	District->SetActorGUID_Implementation(FGuid(301, 302, 303, 304));
+	TestEqual(TEXT("District retains its authored save identity"),
+		District->GetTerritoryGUID(), DistrictDefinition->StableTerritoryGUID);
 	District->OwnershipData.OwningFaction = Heroes;
 	District->OwnershipData.State = ETerritoryState::Claimed;
 	Registry->RegisterTerritory(District);
@@ -50,7 +53,8 @@ bool FTFGuardReserveTotals::RunTest(const FString& Parameters)
 		ATerritoryProperty* Place = World->SpawnActor<ATerritoryProperty>();
 		Place->TerritoryDefinition = DistrictDefinition->Places[PlaceIndex];
 		Place->ApplyTerritoryDefinition();
-		Place->SetActorGUID_Implementation(FGuid(305, PlaceIndex + 1, 307, 308));
+		TestEqual(TEXT("Reserve fixture Place retains its authored save identity"),
+			Place->GetTerritoryGUID(), DistrictDefinition->Places[PlaceIndex]->StableTerritoryGUID);
 		Place->OwnershipData.OwningFaction = Heroes;
 		Place->OwnershipData.State = ETerritoryState::Claimed;
 		Place->OwnershipData.DesiredGuardCount = 2;

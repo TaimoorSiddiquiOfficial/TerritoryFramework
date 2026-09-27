@@ -21,4 +21,19 @@ public:
 	virtual float GetGoalScore_Implementation() const override;
 	virtual FString GetDebugString_Implementation() const override;
 	virtual bool ShouldCleanup_Implementation() const override;
+
+	/**
+	 * Delivers the Spot authored on one of this goal's patrol nodes to the owning guard.
+	 *
+	 * The patrol activity calls this after completing a node's move, rotation and wait, passing
+	 * the completed node's index captured before selecting its next stop. The node is selected from THIS
+	 * array rather than from a guard-side accessor. The two agree only while a route has a single
+	 * node; once it is staggered they are different arrays in a different order, and reading the
+	 * wrong one delivers the wrong node's spot, silently.
+	 *
+	 * Returns true only when a goal was actually delivered. False is the ordinary answer for a node
+	 * that authors no spot, or for a goal whose pawn has already gone.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|Patrol")
+	bool DeliverPatrolSpot(int32 PatrolIdx);
 };

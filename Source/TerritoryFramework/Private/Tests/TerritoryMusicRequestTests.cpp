@@ -51,6 +51,7 @@ bool FTFTerritoryMusicRequestLifecycle::RunTest(const FString& Parameters)
 	const FGameplayTag Baseline = TerritoryMusicTags::Unclaimed;
 	const FGameplayTag PlaceTheme = TerritoryMusicTags::Contested;
 	const FGameplayTag QuestTheme = TerritoryMusicTags::Claimed;
+	const FGameplayTag Ambient = FGameplayTag::RequestGameplayTag(TEXT("Music.Ambient"));
 	FMapProperty* TracksProperty = FindFProperty<FMapProperty>(UTaggedMusicSet::StaticClass(), TEXT("MusicSets"));
 	FObjectPropertyBase* SetProperty = FindFProperty<FObjectPropertyBase>(UNarrativeMusicSubsystem::StaticClass(), TEXT("CurrentMusicSet"));
 	FObjectPropertyBase* AudioProperty = FindFProperty<FObjectPropertyBase>(UNarrativeMusicSubsystem::StaticClass(), TEXT("PrimaryAudioComponent"));
@@ -64,7 +65,7 @@ bool FTFTerritoryMusicRequestLifecycle::RunTest(const FString& Parameters)
 		return false;
 	}
 	auto* Tracks = TracksProperty->ContainerPtrToValuePtr<TMap<FGameplayTag, FMusicTracksContainer>>(Set);
-	for (FGameplayTag Tag : { Baseline, PlaceTheme, QuestTheme })
+	for (FGameplayTag Tag : { Baseline, PlaceTheme, QuestTheme, Ambient })
 	{
 		FMusicSound& Track = Tracks->FindOrAdd(Tag).MusicSounds.AddDefaulted_GetRef();
 		Track.Music = Sound;
@@ -73,13 +74,20 @@ bool FTFTerritoryMusicRequestLifecycle::RunTest(const FString& Parameters)
 	SetProperty->SetObjectPropertyValue_InContainer(Native, Set);
 	UAudioComponent* Audio = NewObject<UAudioComponent>(GameInstance);
 	AudioProperty->SetObjectPropertyValue_InContainer(Native, Audio);
-	TestTrue(TEXT("Native accepts initial baseline"), Territory->SetNarrativeTheme(Native, Baseline, true));
-	Advance(0.01f);
-	Advance(0.02f);
 	ATerritoryProperty* Place = World->SpawnActor<ATerritoryProperty>();
 	FTerritoryStateAudioConfig Config;
 	Config.bOverrideNarrativeMusic = true;
 	Config.MusicTheme = PlaceTheme;
+	Territory->ApplyMusicRule(Place, Config);
+	TestEqual(TEXT("First territory retains or supplies Native default Ambient baseline"), Territory->BaselineMusicTheme, Ambient);
+	Territory->ReleaseMusicRule();
+	Territory->MaintainMusicRule();
+	Advance(0.01f); Advance(4.f); Advance(4.f);
+	Territory->MaintainMusicRule();
+	TestEqual(TEXT("Leaving first territory restores default ambient"), Native->GetActiveTheme(), Ambient);
+	TestTrue(TEXT("Native accepts initial baseline"), Territory->SetNarrativeTheme(Native, Baseline, true));
+	Advance(0.01f);
+	Advance(0.02f);
 	Territory->ApplyMusicRule(Place, Config);
 	TestEqual(TEXT("Territory requests its theme through Native"), Native->GetActiveTheme(), PlaceTheme);
 	Territory->ReleaseMusicRule();
@@ -122,6 +130,65 @@ bool FTFTerritoryMusicRequestLifecycle::RunTest(const FString& Parameters)
 	Override->Music = nullptr;
 	Territory->MaintainMusicRule();
 	TestEqual(TEXT("Clearing an override does not trigger an old Territory retry"), Native->GetActiveTheme(), QuestTheme);
+
+	// Rapid overlapping territory transitions: Native accepts B while A is still
+	// audible. Leaving must replace B's pending selection with the original world theme.
+	Territory->SetNarrativeTheme(Native, Baseline, true);
+	Advance(0.01f); Advance(4.f); Advance(4.f);
+	Territory->ApplyMusicRule(Place, Config);
+	FTerritoryStateAudioConfig NextConfig = Config;
+	NextConfig.MusicTheme = QuestTheme;
+	Territory->ApplyMusicRule(Place, NextConfig);
+	TestEqual(TEXT("Second territory theme is queued behind first fade"), Native->GetActiveTheme(), PlaceTheme);
+	Territory->ReleaseMusicRule();
+	Territory->MaintainMusicRule();
+	TestTrue(TEXT("Leaving accepted queued territory retains restoration ownership"), Territory->bBaselineThemeRequested);
+	Advance(4.f); Advance(4.f);
+	Territory->MaintainMusicRule();
+	TestEqual(TEXT("Rapid A to B to outside restores original world theme"), Native->GetActiveTheme(), Baseline);
+
+	// Native refuses to replace a queued theme with one already playing. Observe
+	// our pending theme once it surfaces, without treating it as an external quest.
+	Territory->SetNarrativeTheme(Native, PlaceTheme, false);
+	Advance(4.f); Advance(4.f);
+	Territory->SetNarrativeTheme(Native, Baseline, false);
+	Territory->ApplyMusicRule(Place, NextConfig);
+	TestEqual(TEXT("Baseline remains audible while territory request is queued"), Native->GetActiveTheme(), Baseline);
+	Territory->ReleaseMusicRule();
+	Territory->MaintainMusicRule();
+	TestTrue(TEXT("No public queue cancellation: waits for accepted territory request"), Territory->bWaitingForReleasedTheme);
+	Advance(4.f);
+	TestEqual(TEXT("Previously accepted territory theme surfaces"), Native->GetActiveTheme(), QuestTheme);
+	Territory->MaintainMusicRule();
+	Advance(4.f); Advance(4.f);
+	Territory->MaintainMusicRule();
+	TestEqual(TEXT("Late accepted territory request cannot strand world ambience"), Native->GetActiveTheme(), Baseline);
+
+	// Re-entering while a restore is queued must not capture the territory's
+	// still-playing theme as a new world baseline.
+	Territory->ApplyMusicRule(Place, Config);
+	Territory->ReleaseMusicRule();
+	Territory->ApplyMusicRule(Place, NextConfig);
+	TestEqual(TEXT("Re-entering during restoration preserves original baseline"), Territory->BaselineMusicTheme, Baseline);
+	Territory->ReleaseMusicRule();
+	Territory->MaintainMusicRule();
+	Advance(4.f); Advance(4.f);
+	Territory->MaintainMusicRule();
+
+	Territory->ApplyMusicRule(Place, Config);
+	Territory->ReleaseMusicRule();
+	Territory->MaintainMusicRule();
+	Territory->ApplyMusicRule(Place, Config);
+	TestTrue(TEXT("Re-entering same territory tracks older queued restoration"), Territory->SupersededQueuedTheme.IsValid());
+	Advance(4.f);
+	Territory->MaintainMusicRule();
+	Advance(4.f); Advance(4.f);
+	Territory->MaintainMusicRule();
+	TestEqual(TEXT("Older queued baseline cannot strand re-entered territory music"), Native->GetActiveTheme(), PlaceTheme);
+	Territory->ReleaseMusicRule();
+	Territory->MaintainMusicRule();
+	Advance(4.f); Advance(4.f);
+	Territory->MaintainMusicRule();
 
 	// Explicit local story control also covers queued requests Native cannot expose.
 	Territory->ApplyMusicRule(Place, Config);

@@ -144,6 +144,14 @@ public:
 	UTerritoryDialogueRecipeFactory();
 };
 
+UCLASS(hidecategories=Object)
+class UTerritoryConversationProfileFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryConversationProfileFactory();
+};
+
 /**
  * Creates a Blueprint with an exact Territory parent class and skips Unreal's
  * broad parent-class picker. These entries are for reusable level actors; all
@@ -213,6 +221,22 @@ class UTerritoryCapturePointBlueprintFactory : public UTerritoryBlueprintFactory
 	GENERATED_BODY()
 public:
 	UTerritoryCapturePointBlueprintFactory();
+};
+
+UCLASS(hidecategories=Object)
+class UTerritoryFloorVolumeBlueprintFactory : public UTerritoryBlueprintFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryFloorVolumeBlueprintFactory();
+};
+
+UCLASS(hidecategories=Object)
+class UTerritoryConversationMeetingPointBlueprintFactory : public UTerritoryBlueprintFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryConversationMeetingPointBlueprintFactory();
 };
 
 UCLASS(hidecategories=Object)

@@ -1,6 +1,19 @@
 #include "Tales/TerritoryDialogueRecipe.h"
 #include "Tales/TerritorySituationCondition.h"
+#include "Tales/TerritoryAmbientDialogue.h"
 #include "Misc/DataValidation.h"
+#include "UObject/UnrealType.h"
+#include "UObject/Package.h"
+
+UTerritoryDialogueRecipe::UTerritoryDialogueRecipe()
+{
+	ParentDialogueClass = UDialogue::StaticClass();
+}
+
+bool UTerritoryDialogueRecipe::UsesAmbientRoles() const
+{
+	return ParentDialogueClass && ParentDialogueClass->IsChildOf(UTerritoryAmbientDialogue::StaticClass());
+}
 
 bool UTerritoryDialogueRecipe::ValidateRecipe(FText& OutError) const
 {
@@ -10,17 +23,38 @@ bool UTerritoryDialogueRecipe::ValidateRecipe(FText& OutError) const
 		return false;
 	};
 	OutError = FText::GetEmpty();
+	if (!ParentDialogueClass || ParentDialogueClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+		return Fail(TEXT("Choose a concrete, current Narrative dialogue parent class."));
 	if (RootID.IsNone() || Nodes.IsEmpty()) return Fail(TEXT("Choose a root and at least one dialogue node."));
+	const bool bAmbient = UsesAmbientRoles();
 	TMap<FName, const FTerritoryDialogueRecipeNode*> ByID;
 	TSet<FName> SpeakerIDs;
+	TSet<FName> SpokenRoles;
+	if (bAmbient)
+	{
+		if (Nodes.Num() > 1024) return Fail(TEXT("Ambient meetings support at most 1024 dialogue nodes."));
+		if (!Speakers.IsEmpty()) return Fail(TEXT("Ambient meetings bind two recruited actors by role; remove NPC Definition speakers."));
+		const FName PlayerID = ParentDialogueClass.GetDefaultObject()->PlayerSpeakerInfo.GetSpeakerID();
+		if (FirstRoleID.IsNone() || SecondRoleID.IsNone() || FirstRoleID == SecondRoleID
+			|| FirstRoleID == PlayerID || SecondRoleID == PlayerID)
+			return Fail(TEXT("Ambient meetings require two distinct, nonempty role IDs that do not identify the player."));
+		SpeakerIDs.Add(FirstRoleID);
+		SpeakerIDs.Add(SecondRoleID);
+	}
 	for (const UNPCDefinition* Speaker : Speakers)
 	{
 		if (!Speaker || Speaker->NPCID.IsNone() || SpeakerIDs.Contains(Speaker->NPCID))
 			return Fail(TEXT("Speakers require distinct Narrative NPC IDs."));
+		// The generated Blueprint belongs to a different package. Native compilation
+		// clears private external references, so an inline/transient definition cannot bind a speaker.
+		if (!Speaker->IsAsset() || Speaker->GetOutermost() == GetTransientPackage()
+			|| Speaker->GetOutermost()->HasAnyFlags(RF_Transient))
+			return Fail(TEXT("Speakers must reference public Narrative NPC Definition assets, not private or transient objects."));
 		SpeakerIDs.Add(Speaker->NPCID);
 	}
 	for (const auto& Node : Nodes)
 	{
+		if (bAmbient && Node.bPlayer) return Fail(TEXT("Ambient meeting dialogues cannot contain player replies."));
 		if (Node.ID.IsNone() || ByID.Contains(Node.ID)) return Fail(TEXT("Dialogue node IDs must be nonempty and unique."));
 		if (!FMath::IsFinite(Node.Position.X) || !FMath::IsFinite(Node.Position.Y)) return Fail(TEXT("Node positions must be finite."));
 #if WITH_EDITOR
@@ -32,6 +66,7 @@ bool UTerritoryDialogueRecipe::ValidateRecipe(FText& OutError) const
 #endif
 		if (!Node.bPlayer && !Node.Text.IsEmpty() && !SpeakerIDs.Contains(Node.SpeakerID))
 			return Fail(TEXT("Each spoken NPC line must identify a configured speaker."));
+		if (bAmbient && !Node.Text.IsEmpty()) SpokenRoles.Add(Node.SpeakerID);
 		ByID.Add(Node.ID, &Node);
 		for (const UNarrativeCondition* Condition : Node.Conditions)
 		{
@@ -48,6 +83,8 @@ bool UTerritoryDialogueRecipe::ValidateRecipe(FText& OutError) const
 			if (!Event) return Fail(TEXT("Remove empty event entries."));
 		}
 	}
+	if (bAmbient && SpokenRoles.Num() != 2)
+		return Fail(TEXT("Both ambient meeting roles must have a spoken line."));
 	if (!ByID.Contains(RootID) || ByID[RootID]->bPlayer) return Fail(TEXT("The root must identify an NPC node."));
 	for (const auto& Node : Nodes)
 	{
@@ -89,6 +126,18 @@ bool UTerritoryDialogueRecipe::ValidateRecipe(FText& OutError) const
 }
 
 #if WITH_EDITOR
+bool UTerritoryDialogueRecipe::CanEditChange(const FProperty* InProperty) const
+{
+	if (!Super::CanEditChange(InProperty)) return false;
+	if (!InProperty) return true;
+	const FName Name = InProperty->GetFName();
+	// Preserve stale ordinary speakers when switching parent, but let the author remove them.
+	if (Name == GET_MEMBER_NAME_CHECKED(UTerritoryDialogueRecipe, Speakers)) return !UsesAmbientRoles() || !Speakers.IsEmpty();
+	if (Name == GET_MEMBER_NAME_CHECKED(UTerritoryDialogueRecipe, FirstRoleID)
+		|| Name == GET_MEMBER_NAME_CHECKED(UTerritoryDialogueRecipe, SecondRoleID)) return UsesAmbientRoles();
+	return true;
+}
+
 EDataValidationResult UTerritoryDialogueRecipe::IsDataValid(FDataValidationContext& Context) const
 {
 	Super::IsDataValid(Context);

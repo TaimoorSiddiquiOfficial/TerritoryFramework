@@ -9,16 +9,21 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include <limits>
+
 #include "Misc/AutomationTest.h"
 
 #include "AI/NPCDefinition.h"
+#include "AI/Activities/NPCGoalItem.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
+#include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "DataValidation/TerritoryDataValidator.h"
 #include "Engine/Engine.h"
 #include "Engine/Level.h"
@@ -1328,6 +1333,111 @@ bool FTFValidatorReachFollowsAcceptedPosts::RunTest(const FString& Parameters)
 		CountWarnings(Warnings, DeploymentReachFragment), 1);
 	TestTrue(TEXT("The finding names the upper floor"),
 		HasWarning(Warnings, TEXT("floor 1's guard post(s)")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFPlacedPatrolSpotValidation,
+	"TerritoryFramework.Editor.DataValidation.PlacedPatrolSpotsUseAuthoredRoute",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFPlacedPatrolSpotValidation::RunTest(const FString& Parameters)
+{
+	FFixture Fixture;
+	if (!TestNotNull(TEXT("Patrol spot Place"), Fixture.SpawnPlace(TEXT("Spot validation"), FGuid::NewGuid()))) return false;
+	ATerritoryGuardSpawnPoint* Post = Fixture.SpawnBoundButUnappliedPost(TEXT("SpotPost"), 0, FVector::ZeroVector);
+	if (!TestNotNull(TEXT("Bound, unapplied patrol post"), Post)) return false;
+	FTerritoryGuardPostTemplate& Row = Fixture.Definition->GuardPosts.Last();
+	Row.PatrolRoute.SetNum(1);
+	FTerritoryPatrolSpot& Spot = Row.PatrolRoute[0].Spot;
+	Spot.bEnabled = true;
+	Spot.SearchRadius = std::numeric_limits<float>::quiet_NaN();
+	Spot.SlotIndex = -2;
+	TArray<FString> Errors, Warnings;
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestTrue(TEXT("Unapplied route reports a nonfinite radius"), HasWarning(Errors, TEXT("SearchRadius")));
+	TestTrue(TEXT("Unapplied route reports an invalid slot"), HasWarning(Errors, TEXT("SlotIndex")));
+	TestTrue(TEXT("Enabled placed route requires its actual owner's goal class"),
+		HasWarning(Errors, TEXT("require a Spot Interact Goal Class")));
+	TestTrue(TEXT("Validation never applies the authored route to the actor"), Post->PatrolRoute.IsEmpty());
+
+	UClass* VendorGoalClass = LoadClass<UNPCGoalItem>(nullptr,
+		TEXT("/NarrativePro/Pro/Core/AI/Activities/Interact/Goals/Goal_Interact.Goal_Interact_C"));
+	if (!TestNotNull(TEXT("Narrative interact goal"), VendorGoalClass)) return false;
+	Fixture.Definition->GuardBehavior.SpotInteractGoalClass = VendorGoalClass;
+	Spot.SearchRadius = 300.f;
+	Spot.SlotIndex = INDEX_NONE;
+	// A stale transient route must not override a nonempty serialized template route.
+	Post->PatrolRoute.SetNum(1);
+	Post->PatrolRoute[0].Spot.bEnabled = true;
+	Post->PatrolRoute[0].Spot.SearchRadius = 0.f;
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestFalse(TEXT("Valid authored route wins over stale transient nodes"), HasWarning(Errors, TEXT("patrol Spot")));
+	TestFalse(TEXT("Valid class satisfies the placed contract"), HasWarning(Errors, TEXT("Spot Interact Goal Class")));
+
+	Row.PatrolRoute.Reset();
+	Row.GuardPostDefinition = NewObject<UTerritoryGuardPostDefinition>();
+	Row.GuardPostDefinition->PatrolRoute.SetNum(1);
+	Row.GuardPostDefinition->PatrolRoute[0].Spot.bEnabled = true;
+	Row.GuardPostDefinition->PatrolRoute[0].Spot.SearchRadius = 0.f;
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestTrue(TEXT("Unapplied reusable fallback is validated"), HasWarning(Errors, TEXT("SearchRadius")));
+	TestNull(TEXT("Validation does not copy the fallback onto the placed post"), Post->GuardPostDefinition.Get());
+	Row.GuardPostDefinition->PatrolRoute[0].Spot.bEnabled = false;
+	Fixture.Definition->GuardBehavior.SpotInteractGoalClass = nullptr;
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestFalse(TEXT("Disabled placed fallback ignores stale actor nodes and accepts the default radius"), HasWarning(Errors, TEXT("patrol Spot")));
+	TestFalse(TEXT("Disabled placed fallback needs no goal class"), HasWarning(Errors, TEXT("Spot Interact Goal Class")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCounterAttackEditorObjectives,
+	"TerritoryFramework.Editor.DataValidation.CounterAttackObjectivesBeforeBeginPlay",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCounterAttackEditorObjectives::RunTest(const FString& Parameters)
+{
+	FFixture Fixture;
+	if (!TestNotNull(TEXT("Multi-storey Place"), Fixture.SpawnPlace(TEXT("Editor objective fixture"), FGuid::NewGuid()))) return false;
+	Fixture.Place->SetActorLocation(FVector(0.f, 0.f, 420.f));
+	Fixture.Place->SetActorScale3D(FVector(4.f));
+	ATerritoryGuardSpawnPoint* Post = Fixture.SpawnBoundButUnappliedPost(TEXT("GroundPost"), 0, FVector(100.f, 0.f, 0.f));
+	if (!TestNotNull(TEXT("Unregistered authored ground post"), Post)) return false;
+	FTerritoryGuardPostTemplate& Row = Fixture.Definition->GuardPosts.Last();
+	Row.PatrolRoute.SetNum(1);
+	Row.PatrolRoute[0].RelativeTransform = FTransform(FVector(0.f, 100.f, 0.f));
+	Post->PatrolRoute.SetNum(1);
+	const FVector StaleNode(123.f, 456.f, 789.f);
+	Post->PatrolRoute[0].Location = StaleNode;
+	const FVector AuthoredNode(100.f, 100.f, 0.f);
+	const FVector Center = Fixture.Place->GetTerritoryBounds().GetCenter();
+	TestTrue(TEXT("BeginPlay has not populated runtime post registration"), Fixture.Place->GetGuardSpawnPoints().IsEmpty());
+	const TArray<FVector> RuntimeObjectives = TerritoryAssaultTargetPolicy::BuildObjectiveLocations(Fixture.Place, true);
+	TestEqual(TEXT("Runtime-only lookup sees only the elevated center before registration"), RuntimeObjectives.Num(), 1);
+	TArray<FVector> Objectives = UTerritoryDataValidator::BuildCounterAttackObjectiveLocations(Fixture.Place);
+	TestTrue(TEXT("Editor lookup includes actual ground post position"), Objectives.Contains(Post->GetActorLocation()));
+	TestTrue(TEXT("Editor lookup reconstructs authored node in the placed post transform"), Objectives.Contains(AuthoredNode));
+	TestTrue(TEXT("Bounds center remains a fallback"), Objectives.Contains(Center));
+	TestFalse(TEXT("Stale transient nodes cannot create a phantom reachable route"), Objectives.Contains(StaleNode));
+	TestTrue(TEXT("Editor lookup does not register gameplay posts"), Fixture.Place->GetGuardSpawnPoints().IsEmpty());
+	TestEqual(TEXT("Editor lookup does not apply the route to the actor"), Post->PatrolRoute[0].Location, StaleNode);
+
+	Row.PatrolRoute.Reset();
+	Row.GuardPostDefinition = NewObject<UTerritoryGuardPostDefinition>();
+	Row.GuardPostDefinition->PatrolRoute.SetNum(1);
+	const FVector ReusableNode(-100.f, 200.f, 0.f);
+	Row.GuardPostDefinition->PatrolRoute[0].Location = ReusableNode;
+	Objectives = UTerritoryDataValidator::BuildCounterAttackObjectiveLocations(Fixture.Place);
+	TestTrue(TEXT("Empty row inherits reusable world-space route"), Objectives.Contains(ReusableNode));
+	TestFalse(TEXT("Cleared row no longer contributes its former route"), Objectives.Contains(AuthoredNode));
+	Post->SetDefinitionBinding(Fixture.Definition, TEXT("MissingRow"));
+	Objectives = UTerritoryDataValidator::BuildCounterAttackObjectiveLocations(Fixture.Place);
+	TestEqual(TEXT("A missing binding cannot supply a gameplay objective"), Objectives.Num(), 1);
+	TestTrue(TEXT("No valid posts leaves only the real bounds center"), Objectives.Contains(Center));
+	FVector Reachable;
+	FString Failure;
+	TestFalse(TEXT("Editor objective discovery cannot turn a world without navmesh into a valid route"),
+		UTerritoryDataValidator::FindReachableCounterAttackObjective(Fixture.Place, FVector::ZeroVector, Reachable, Failure));
+	TestFalse(TEXT("Unusable physical route retains a diagnostic"), Failure.IsEmpty());
 	return true;
 }
 

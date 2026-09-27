@@ -1,7 +1,10 @@
 #include "TerritoryFrameworkEditor.h"
 #include "AI/TerritoryDiplomacyDialogue.h"
 #include "Assets/TerritoryAssetTypeActions.h"
+#include "Assets/TerritoryAuthoringMenu.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryFloorVolume.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Cinematics/TerritoryCinematicLightRig.h"
 #include "Cinematics/TerritoryLightRigEditorLibrary.h"
@@ -20,6 +23,7 @@
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "Tales/Quest.h"
 #include "Tales/TerritoryDialogueRecipe.h"
+#include "Social/TerritoryConversationProfile.h"
 #include "Tales/TerritorySituationCondition.h"
 #include "Tales/TerritoryQuestCascadeEditorLibrary.h"
 #include "TerritoryDefinitionEditorLibrary.h"
@@ -50,6 +54,76 @@
 
 namespace
 {
+	void AddFloorSyncControl(IDetailLayoutBuilder& Builder, UTerritoryPlaceDefinition* Definition)
+	{
+		const TWeakObjectPtr<UTerritoryPlaceDefinition> WeakDefinition = Definition;
+		auto& Category = Builder.EditCategory(TEXT("00 Floor Setup"), FText::GetEmpty(), ECategoryPriority::Important);
+		Category.AddCustomRow(FText::FromString(TEXT("Floor authoring ownership"))).WholeRowContent()
+		[
+			SNew(STextBlock).AutoWrapText(true).Text(FText::FromString(
+				TEXT("Floor Volume boxes own floor geometry. Place Definition rows own floor names, quotas and events. Detect & Sync binds unassigned boxes and writes contained posts' floor assignments into those rows. Review and save changed assets afterward.")))
+		];
+		Category.AddCustomRow(FText::FromString(TEXT("Detect Sync Floors"))).WholeRowContent()
+		[
+			SNew(SButton).Text(FText::FromString(Definition ? TEXT("Detect & Sync Floors") : TEXT("Detect & Sync Loaded Floors")))
+			.IsEnabled_Lambda([] { return GEditor && !GEditor->PlayWorld; })
+			.OnClicked_Lambda([WeakDefinition, bRequireDefinition = Definition != nullptr, BuilderPtr = &Builder]()
+			{
+				if (!GEditor || (bRequireDefinition && !WeakDefinition.IsValid())) return FReply::Handled();
+				TerritoryAuthoringMenu::SynchronizeFloorsWithDialog(WeakDefinition.Get());
+				BuilderPtr->ForceRefreshDetails();
+				return FReply::Handled();
+			})
+		];
+		if (Definition)
+		{
+			Category.AddCustomRow(FText::FromString(TEXT("Edit owning Place Definition"))).WholeRowContent()
+			[
+				SNew(SButton).Text(FText::FromString(TEXT("Open Place Definition")))
+				.OnClicked_Lambda([WeakDefinition]()
+				{
+					if (GEditor && WeakDefinition.IsValid())
+						GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(WeakDefinition.Get());
+					return FReply::Handled();
+				})
+			];
+		}
+	}
+
+	class FTerritoryFloorAuthoringDetails final : public IDetailCustomization
+	{
+	public:
+		static TSharedRef<IDetailCustomization> MakeInstance() { return MakeShared<FTerritoryFloorAuthoringDetails>(); }
+		virtual void CustomizeDetails(IDetailLayoutBuilder& Builder) override
+		{
+			TArray<TWeakObjectPtr<UObject>> Objects;
+			Builder.GetObjectsBeingCustomized(Objects);
+			if (Objects.Num() != 1) return;
+			UTerritoryPlaceDefinition* Definition = nullptr;
+			if (ATerritoryFloorVolume* Floor = Cast<ATerritoryFloorVolume>(Objects[0].Get()))
+				Definition = Floor->GetPlaceDefinition();
+			else if (ATerritoryGuardSpawnPoint* Post = Cast<ATerritoryGuardSpawnPoint>(Objects[0].Get()))
+			{
+				Definition = Cast<UTerritoryPlaceDefinition>(Post->GetTerritoryDefinition());
+				Builder.HideProperty(TEXT("FloorIndex"), ATerritoryGuardSpawnPoint::StaticClass());
+				const FTerritoryGuardPostTemplate* Row = Definition ? Definition->FindGuardPost(Post->GetGuardPostID()) : nullptr;
+				Builder.EditCategory(TEXT("00 Floor Setup")).AddCustomRow(FText::FromString(TEXT("Resolved Floor"))).WholeRowContent()
+				[
+					SNew(STextBlock).AutoWrapText(true).Text(FText::FromString(Row
+						? FString::Printf(TEXT("Assigned floor: %d (Place Definition / Guard Posts / %s). This actor has no independent floor setting."), Row->FloorIndex, *Row->GuardPostID.ToString())
+						: TEXT("No valid Place Definition post binding. Bind this post before detecting its floor.")))
+				];
+				if (!Row) return;
+			}
+			else if (ATerritoryVolume* Territory = Cast<ATerritoryVolume>(Objects[0].Get()))
+			{
+				Definition = Cast<UTerritoryPlaceDefinition>(Territory->GetTerritoryDefinition());
+				if (!Definition) return;
+			}
+			AddFloorSyncControl(Builder, Definition);
+		}
+	};
+
 	void SortTerritoryDataAssetCategories(IDetailLayoutBuilder& DetailBuilder)
 	{
 		// Unreal's default order follows derived properties before their base class.
@@ -268,6 +342,7 @@ namespace
 			}
 			if (SelectedPlace.IsValid())
 			{
+				if (Objects.Num() == 1) AddFloorSyncControl(DetailBuilder, SelectedPlace.Get());
 				IDetailCategoryBuilder& Capture = DetailBuilder.EditCategory(
 					TEXT("06 Capture"), FText::GetEmpty());
 				Capture.AddCustomRow(FText::FromString(TEXT("Active Capture Mode")))
@@ -485,6 +560,7 @@ namespace
 void FTerritoryFrameworkEditorModule::StartupModule()
 {
 	RegisterTerritoryAssetTypes();
+	TerritoryAuthoringMenu::Register();
 	const bool bNarrativeTasksRegistered = RegisterNarrativeTaskSearchPath();
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(
 		TEXT("PropertyEditor"));
@@ -497,6 +573,9 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 		UTerritoryDefinition::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(
 			&FTerritoryDefinitionDetails::MakeInstance));
+	for (UClass* ActorClass : {ATerritoryVolume::StaticClass(), ATerritoryFloorVolume::StaticClass(), ATerritoryGuardSpawnPoint::StaticClass()})
+		PropertyEditor.RegisterCustomClassLayout(ActorClass->GetFName(),
+			FOnGetDetailCustomizationInstance::CreateStatic(&FTerritoryFloorAuthoringDetails::MakeInstance));
 	PropertyEditor.RegisterCustomClassLayout(
 		UTerritoryQuestCascadeRecipe::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(
@@ -506,7 +585,7 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 		UTerritoryProductionProfile::StaticClass(),
 		UTerritoryStealthProfile::StaticClass(), UTerritoryDisguiseProfile::StaticClass(),
 		UTerritoryDiplomacyDialogueProfile::StaticClass(), UTerritorySituationProfile::StaticClass(),
-		UTerritoryDialogueRecipe::StaticClass()})
+		UTerritoryDialogueRecipe::StaticClass(), UTerritoryConversationProfile::StaticClass()})
 	{
 		PropertyEditor.RegisterCustomClassLayout(AssetClass->GetFName(),
 			FOnGetDetailCustomizationInstance::CreateStatic(&FTerritoryDataAssetDetails::MakeInstance));
@@ -541,6 +620,7 @@ void FTerritoryFrameworkEditorModule::StartupModule()
 
 void FTerritoryFrameworkEditorModule::ShutdownModule()
 {
+	TerritoryAuthoringMenu::Unregister();
 	UnregisterTerritoryAssetTypes();
 	if (EnsureVehicleRoadsConsoleCommand)
 	{
@@ -566,6 +646,8 @@ void FTerritoryFrameworkEditorModule::ShutdownModule()
 			TEXT("PropertyEditor"));
 		PropertyEditor.UnregisterCustomClassLayout(
 			UTerritoryDefinition::StaticClass()->GetFName());
+		for (UClass* ActorClass : {ATerritoryVolume::StaticClass(), ATerritoryFloorVolume::StaticClass(), ATerritoryGuardSpawnPoint::StaticClass()})
+			PropertyEditor.UnregisterCustomClassLayout(ActorClass->GetFName());
 		PropertyEditor.UnregisterCustomClassLayout(
 			UTerritoryQuestCascadeRecipe::StaticClass()->GetFName());
 		PropertyEditor.UnregisterCustomClassLayout(UTerritoryCinematicLightRigProfile::StaticClass()->GetFName());
@@ -574,7 +656,7 @@ void FTerritoryFrameworkEditorModule::ShutdownModule()
 			UTerritoryProductionProfile::StaticClass(),
 			UTerritoryStealthProfile::StaticClass(), UTerritoryDisguiseProfile::StaticClass(),
 			UTerritoryDiplomacyDialogueProfile::StaticClass(), UTerritorySituationProfile::StaticClass(),
-			UTerritoryDialogueRecipe::StaticClass()})
+			UTerritoryDialogueRecipe::StaticClass(), UTerritoryConversationProfile::StaticClass()})
 		{
 			PropertyEditor.UnregisterCustomClassLayout(AssetClass->GetFName());
 		}
@@ -709,7 +791,11 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 		StoryMenu, FColor(78, 171, 204));
 	Register(UTerritoryDialogueRecipe::StaticClass(),
 		LOCTEXT("TerritoryDialogueRecipeAsset", "Territory Conditional Dialogue Recipe"),
-		LOCTEXT("TerritoryDialogueRecipeDescription", "Authors conditional dialogue nodes that generate an ordinary Narrative Dialogue Blueprint."),
+		LOCTEXT("TerritoryDialogueRecipeDescription", "Authors conditional dialogue nodes that generate an editable Narrative Dialogue Blueprint, including two-role ambient meetings."),
+		StoryMenu, FColor(78, 171, 204));
+	Register(UTerritoryConversationProfile::StaticClass(),
+		LOCTEXT("TerritoryConversationProfileAsset", "Territory Conversation Profile"),
+		LOCTEXT("TerritoryConversationProfileDescription", "Configures a two-guard ambient dialogue, recruitment tags, meeting distances and bounded session timing."),
 		StoryMenu, FColor(78, 171, 204));
 }
 

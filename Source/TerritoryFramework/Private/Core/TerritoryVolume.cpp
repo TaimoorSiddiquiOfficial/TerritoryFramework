@@ -1666,13 +1666,13 @@ void ATerritoryVolume::SetDerivedOwningFaction(const FGameplayTag& NewFaction,
 		TransitionContext);
 }
 
-void ATerritoryVolume::SetDerivedControl(const FGameplayTag& SecuredOwner,
+bool ATerritoryVolume::SetDerivedControl(const FGameplayTag& SecuredOwner,
 	ETerritoryState DerivedState, const FTerritoryTransitionContext& TransitionContext)
 {
 	if (!HasAuthority() || ControlMode != ETerritoryControlMode::AggregateOnly
 		|| bTransitionInProgress)
 	{
-		return;
+		return false;
 	}
 
 	if (DerivedState == ETerritoryState::Locked)
@@ -1698,9 +1698,10 @@ void ATerritoryVolume::SetDerivedControl(const FGameplayTag& SecuredOwner,
 	const bool bWasBypassing = bBypassTransitionConditions;
 	bApplyingDerivedOwnership = true;
 	bBypassTransitionConditions = true;
-	CommitOwnershipData(Candidate, TransitionContext);
+	const bool bCommitted = CommitOwnershipData(Candidate, TransitionContext);
 	bBypassTransitionConditions = bWasBypassing;
 	bApplyingDerivedOwnership = bWasApplyingDerivedOwnership;
+	return bCommitted;
 }
 
 void ATerritoryVolume::ForceSetOwningFaction(const FGameplayTag& NewFaction)
@@ -1769,6 +1770,11 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	// Conditions are callbacks too. The final ownership candidate must not be
 	// validated across a second commit that the outer call would then overwrite.
 	TGuardValue<bool> ValidationGuard(bValidatingOwnershipData, true);
+	const uint64 CommitLoadGeneration = GarrisonLoadGeneration;
+	const auto IsCommitCurrent = [this, CommitLoadGeneration]()
+	{
+		return IsGameplayCallbackStateCurrent(CommitLoadGeneration);
+	};
 
 	const FGameplayTag OldOwner = OwnershipData.OwningFaction;
 	const ETerritoryState OldState = OwnershipData.State;
@@ -1802,8 +1808,8 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		}
 	}
 
-	// A Narrative condition may destroy its target synchronously.
-	if (!IsValid(this) || IsActorBeingDestroyed()) return false;
+	// Conditions can restore a campaign too. Never write the old candidate over that load.
+	if (!IsCommitCurrent()) return false;
 
 	// P2-N01: Compare all ownership data fields, not just owner/state/contest/progress
 	if (OldOwner == NewOwner && OldState == NewState
@@ -1823,7 +1829,6 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 
 	TGuardValue<bool> TransitionGuard(bTransitionInProgress, true);
 	TGuardValue<FTerritoryTransitionContext> ContextGuard(ActiveTransitionContext, TransitionContext);
-	const uint64 CommitLoadGeneration = GarrisonLoadGeneration;
 
 	// Declared AFTER the guards above, deliberately. Destruction runs in reverse declaration order,
 	// so this scope closes FIRST - while ActiveTransitionContext still holds this child's context.
@@ -1876,10 +1881,12 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		CommittedData.CapturedBy = OwnershipData.CapturedBy;
 		CommittedData.CapturedFor = OwnershipData.CapturedFor;
 	}
+	if (!IsCommitCurrent()) return false;
 	OwnershipData = MoveTemp(CommittedData);
 	// Keep the replicated World Partition read model current before state events
 	// evaluate cross-territory conflict protection.
 	PublishCaptureSummary();
+	if (!IsCommitCurrent()) return false;
 
 	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
 	if (Settings && Settings->ShouldDebugOwnership())
@@ -1901,6 +1908,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		for (ATerritoryGuardSpawnPoint* SpawnPoint : GetGuardSpawnPoints())
 		{
 			if (SpawnPoint) SpawnPoint->HandleOwnershipTransition(Reason);
+			if (!IsCommitCurrent()) return false;
 		}
 	}
 
@@ -1915,6 +1923,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 	{
 	case ETerritoryGuardLifecycleAction::ReplaceForNewOwner:
 		DespawnGuards();
+		if (!IsCommitCurrent()) return false;
 		if (NewOwner.IsValid() && ResolveGuardDefinition(NewOwner)
 			&& NewData.DesiredGuardCount > 0)
 		{
@@ -1926,12 +1935,12 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		break;
 	}
 
-	if (GarrisonLoadGeneration != CommitLoadGeneration || IsActorBeingDestroyed()) return false;
+	if (!IsCommitCurrent()) return false;
 	if (OldAvailability != NewAvailability)
 	{
 		ReconcileAvailabilityDependentSystems();
 	}
-	if (GarrisonLoadGeneration != CommitLoadGeneration || IsActorBeingDestroyed()) return false;
+	if (!IsCommitCurrent()) return false;
 	if (OldOwner != NewOwner)
 	{
 		if (UTerritoryControlSubsystem* Control = GetWorld()
@@ -1941,16 +1950,19 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		}
 		ReconcileOwnershipDependentSystems(OldOwner, NewOwner);
 	}
-	if (GarrisonLoadGeneration != CommitLoadGeneration || IsActorBeingDestroyed()) return false;
+	if (!IsCommitCurrent()) return false;
 	RefreshGarrisonSnapshot();
-	if (GarrisonLoadGeneration != CommitLoadGeneration || IsActorBeingDestroyed()) return false;
+	if (!IsCommitCurrent()) return false;
 	PublishCaptureSummary();
+	if (!IsCommitCurrent()) return false;
 
 	// ─── ONE ordered event bundle, observing reconciled dependencies ───
 	if (OldState != NewState)
 	{
 		FireStateEvents(OldState, false, TransitionContext, &OldOwner);
+		if (!IsCommitCurrent()) return false;
 		FireStateEvents(NewState, true, TransitionContext, &NewOwner);
+		if (!IsCommitCurrent()) return false;
 	}
 	else if (bCapturedByDifferentOwner)
 	{
@@ -1961,7 +1973,9 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		// designers can author On Lost and On Captured behavior in the same row.
 		// Same-owner resets are excluded by the owner comparison above.
 		FireStateEvents(ETerritoryState::Claimed, false, TransitionContext, &OldOwner);
+		if (!IsCommitCurrent()) return false;
 		FireStateEvents(ETerritoryState::Claimed, true, TransitionContext, &NewOwner);
+		if (!IsCommitCurrent()) return false;
 	}
 	if (OldAvailability != NewAvailability)
 	{
@@ -1969,25 +1983,32 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		// but lock availability no longer replaces political control state.
 		FireStateEvents(ETerritoryState::Locked,
 			NewAvailability == ETerritoryAvailability::Locked, TransitionContext);
+		if (!IsCommitCurrent()) return false;
 	}
 
 	if (OldOwner != NewOwner)
 	{
 		OnOwnershipChanged(OldOwner, NewOwner);
+		if (!IsCommitCurrent()) return false;
 		OnTerritoryOwnershipChanged.Broadcast(this, OldOwner, NewOwner);
+		if (!IsCommitCurrent()) return false;
 	}
 
 	if (OldState != NewState)
 	{
 		OnStateChanged(OldState, NewState);
+		if (!IsCommitCurrent()) return false;
 		OnTerritoryStateChangedDelegate.Broadcast(this, NewState);
+		if (!IsCommitCurrent()) return false;
 	}
 	if (OldAvailability != NewAvailability)
 	{
 		OnTerritoryAvailabilityChanged.Broadcast(this, NewAvailability);
+		if (!IsCommitCurrent()) return false;
 	}
 
 	RefreshGarrisonSnapshot();
+	if (!IsCommitCurrent()) return false;
 	ForceNetUpdate();
 	return true;
 }
@@ -2044,6 +2065,7 @@ void ATerritoryVolume::ForceSetTerritoryState(ETerritoryState NewState)
 
 bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext, const FGameplayTag* RuleOwner) const
 {
+	const uint64 EvaluationLoadGeneration = GarrisonLoadGeneration;
 	const int32 EvaluationKey = static_cast<int32>(State) * 2;
 	if (EvaluatingStateConditionKeys.Contains(EvaluationKey))
 	{
@@ -2082,8 +2104,15 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 	{
 		if (!Cond) continue;
 		// P0-02: Pass TalesComponent from transition context for full Narrative condition evaluation
-		if (!TerritoryTales::DoesConditionPass(Cond, ContextPawn, ContextPC,
-			TransitionContext.TalesComponent))
+		const bool bPasses = TerritoryTales::DoesConditionPass(Cond, ContextPawn, ContextPC,
+			TransitionContext.TalesComponent);
+		if (!IsGameplayCallbackStateCurrent(EvaluationLoadGeneration))
+		{
+			OutFailureReason = NSLOCTEXT("TerritoryVolume", "InvalidatedStateCondition",
+				"The Territory was restored or destroyed while evaluating a state condition.");
+			return false;
+		}
+		if (!bPasses)
 		{
 			OutFailureReason = FText::FromString(FString::Printf(TEXT("Condition '%s' not met."),
 				*Cond->GetGraphDisplayText()));
@@ -2098,6 +2127,7 @@ bool ATerritoryVolume::CheckStateConditions(ETerritoryState State, FText& OutFai
 bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& OutFailureReason,
 	const FTerritoryTransitionContext& TransitionContext, const FGameplayTag* RuleOwner) const
 {
+	const uint64 EvaluationLoadGeneration = GarrisonLoadGeneration;
 	const int32 EvaluationKey = static_cast<int32>(State) * 2 + 1;
 	if (EvaluatingStateConditionKeys.Contains(EvaluationKey))
 	{
@@ -2126,8 +2156,15 @@ bool ATerritoryVolume::CheckStateExitConditions(ETerritoryState State, FText& Ou
 	for (const TObjectPtr<UNarrativeCondition>& Cond : Conditions)
 	{
 		if (!Cond) continue;
-		if (!TerritoryTales::DoesConditionPass(Cond, TransitionContext.TargetPawn,
-			TransitionContext.PlayerController, TransitionContext.TalesComponent))
+		const bool bPasses = TerritoryTales::DoesConditionPass(Cond, TransitionContext.TargetPawn,
+			TransitionContext.PlayerController, TransitionContext.TalesComponent);
+		if (!IsGameplayCallbackStateCurrent(EvaluationLoadGeneration))
+		{
+			OutFailureReason = NSLOCTEXT("TerritoryVolume", "InvalidatedStateCondition",
+				"The Territory was restored or destroyed while evaluating a state condition.");
+			return false;
+		}
+		if (!bPasses)
 		{
 			OutFailureReason = FText::FromString(FString::Printf(
 				TEXT("Exit condition '%s' not met."), *Cond->GetGraphDisplayText()));
@@ -2155,6 +2192,7 @@ bool ATerritoryVolume::CheckStateTransitionConditions(ETerritoryState OldState,
 void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, const FTerritoryTransitionContext& TransitionContext, const FGameplayTag* RuleOwner)
 {
 	if (!HasAuthority()) return;
+	const uint64 EventLoadGeneration = GarrisonLoadGeneration;
 	if (IsPrimaryRuntimeRuleSuspendedWithContext(
 		ETerritoryQuestOverrideEffect::StateRules,
 		TransitionContext.TalesComponent))
@@ -2184,8 +2222,10 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 	{
 		if (!Event) continue;
 		FString FailedCondition;
-		if (!TerritoryTales::DoEventConditionsPass(Event, ContextPawn, ContextPC,
-			TransitionContext.TalesComponent, &FailedCondition))
+		const bool bConditionsPass = TerritoryTales::DoEventConditionsPass(Event, ContextPawn, ContextPC,
+			TransitionContext.TalesComponent, &FailedCondition);
+		if (!IsGameplayCallbackStateCurrent(EventLoadGeneration)) return;
+		if (!bConditionsPass)
 		{
 			const UTerritoryDeveloperSettings* Settings =
 				GetDefault<UTerritoryDeveloperSettings>();
@@ -2200,6 +2240,7 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 		}
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
 		Event->ExecuteEvent(ContextPawn, ContextPC, TransitionContext.TalesComponent);
+		if (!IsGameplayCallbackStateCurrent(EventLoadGeneration)) return;
 	}
 }
 

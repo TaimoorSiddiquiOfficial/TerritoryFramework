@@ -66,6 +66,9 @@ public:
 	static bool ValidateTerritory(ATerritoryVolume* Territory, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	static bool ValidateDefinition(UTerritoryDefinition* Definition,
 		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
+	/** Validate a complete NavMesh route to a real Place objective before BeginPlay registers its posts. */
+	static bool FindReachableCounterAttackObjective(ATerritoryVolume* Territory,
+		const FVector& Start, FVector& OutObjective, FString& OutFailureReason);
 	static bool ValidateQuest(UQuestBlueprint* QuestBlueprint,
 		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 	/** Validate Narrative shot coverage and every referenced Level Sequence binding. */
@@ -73,6 +76,8 @@ public:
 		TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
 
 private:
+	friend class FTFCounterAttackEditorObjectives;
+	static TArray<FVector> BuildCounterAttackObjectiveLocations(ATerritoryVolume* Territory);
 	static void CheckDuplicateTags(ULevel* Level, TArray<FString>& OutErrors);
 	static void CheckDuplicateGUIDs(ULevel* Level, TArray<FString>& OutErrors);
 	static void CheckHierarchyIntegrity(ULevel* Level, TArray<FString>& OutErrors, TArray<FString>& OutWarnings);
@@ -98,6 +103,8 @@ private:
 	 */
 	static void CheckGuardPostBindings(ULevel* Level, TArray<FString>& OutWarnings);
 	static void CheckPatrolContainment(ULevel* Level, TArray<FString>& OutWarnings);
+	/** Validate enabled spot settings against the route and territory definition used after BeginPlay. */
+	static void CheckPatrolSpots(ULevel* Level, TArray<FString>& OutErrors);
 	static void CheckGuardDeploymentFeasibility(ULevel* Level, TArray<FString>& OutWarnings);
 
 	/**

@@ -329,6 +329,7 @@ public:
 	FOnTerritoryCounterHappened OnCounterHappened;
 
 private:
+	friend class FTFCounterAttackMapConfigurationRegression;
 	friend class FTFAssaultSurvivorRestore;
 	friend class FTFAssaultCheckpointValidation;
 	friend class FTFStrategicValueAggregation;

@@ -7,6 +7,7 @@
 
 class UBoxComponent;
 class UTerritoryPlaceDefinition;
+class ATerritoryVolume;
 
 /**
  * Authored level region that claims one floor of one Place.
@@ -98,11 +99,14 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Floor", meta=(DisplayName="Contains Point"))
 	bool ContainsPoint(const FVector& WorldPoint) const;
 
-	/** Unrotated box size. Zero when unshaped. */
+	/** Local, unscaled box size. Zero when unshaped. */
 	FVector GetFloorBoundsSize() const;
 
-	/** Signed box volume, used as the registry's "most specific region wins" key. */
+	/** Absolute world-scaled box volume, used as the registry's "most specific region wins" key. */
 	double GetFloorBoundsVolume() const;
+
+	/** Conservative authoring test for automatic Place association; checks all transformed box corners. */
+	bool IsFullyContainedBy(const ATerritoryVolume* Place) const;
 
 	/**
 	 * The one rule for "which authored region decides a point's floor", over an explicit candidate

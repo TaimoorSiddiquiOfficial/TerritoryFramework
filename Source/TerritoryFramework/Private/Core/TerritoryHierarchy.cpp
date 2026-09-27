@@ -54,24 +54,46 @@ namespace
 		return Result;
 	}
 
+	const UTerritoryDefinition* FindExpectedChildDefinition(const ATerritoryVolume* Parent,
+		const FGameplayTag& ChildTag)
+	{
+		if (!Parent || !ChildTag.IsValid()) return nullptr;
+		if (const auto* City = Cast<UTerritoryCityDefinition>(Parent->GetTerritoryDefinition()))
+		{
+			for (const UTerritoryDistrictDefinition* Child : City->Districts)
+			{
+				if (Child && Child->TerritoryTag == ChildTag) return Child;
+			}
+		}
+		else if (const auto* District = Cast<UTerritoryDistrictDefinition>(Parent->GetTerritoryDefinition()))
+		{
+			for (const UTerritoryPlaceDefinition* Child : District->Places)
+			{
+				if (Child && Child->TerritoryTag == ChildTag) return Child;
+			}
+		}
+		return nullptr;
+	}
+
 	bool IsExpectedAuthoredChild(const ATerritoryVolume* Parent,
 		const ATerritoryVolume* Child)
 	{
-		if (!Parent || !Child
-			|| Child->GetParentTerritoryTag() != Parent->GetTerritoryTag()
-			|| !GetExpectedChildTags(Parent).Contains(Child->GetTerritoryTag()))
+		if (!Parent || !Child) return false;
+		ETerritoryHierarchyLevel ChildLevel;
+		if (Parent->IsA<ATerritoryCity>() && Child->IsA<ATerritoryDistrict>())
 		{
-			return false;
+			ChildLevel = ETerritoryHierarchyLevel::District;
 		}
-		if (Parent->IsA<ATerritoryCity>())
+		else if (Parent->IsA<ATerritoryDistrict>() && Child->IsA<ATerritoryProperty>())
 		{
-			return Child->IsA<ATerritoryDistrict>() && !Child->IsA<ATerritoryCity>();
+			ChildLevel = ETerritoryHierarchyLevel::Place;
 		}
-		if (Parent->IsA<ATerritoryDistrict>())
-		{
-			return Child->IsA<ATerritoryProperty>();
-		}
-		return false;
+		else return false;
+
+		return TerritoryHierarchyPolicy::MatchesAuthoredChildIdentity(
+			FindExpectedChildDefinition(Parent, Child->GetTerritoryTag()),
+			Parent->GetTerritoryTag(), Child->GetTerritoryTag(), Child->GetTerritoryGUID(),
+			Child->GetParentTerritoryTag(), ChildLevel);
 	}
 
 	TArray<ATerritoryVolume*> GetLoadedAuthoredChildren(
@@ -111,6 +133,8 @@ namespace
 		const FGameplayTag& ExpectedTag, FChildControlView& OutView)
 	{
 		if (!Parent || !ExpectedTag.IsValid()) return false;
+		const UTerritoryDefinition* ExpectedChild = FindExpectedChildDefinition(Parent, ExpectedTag);
+		if (!ExpectedChild) return false;
 
 		// A child that resolves to an exact value is verified control only while its own
 		// subtree is complete. An unloaded District whose Places have no rows keeps the last
@@ -142,7 +166,9 @@ namespace
 		{
 			const FReplicatedCaptureSummary Summary =
 				WorldState->GetCaptureSummary(ExpectedTag);
-			if (Summary.TerritoryTag == ExpectedTag)
+			if (TerritoryHierarchyPolicy::MatchesAuthoredChildIdentity(ExpectedChild,
+				Parent->GetTerritoryTag(), Summary.TerritoryTag, Summary.TerritoryGUID,
+				Summary.ParentTerritoryTag, Summary.HierarchyLevel))
 			{
 				OutView.Owner = Summary.CurrentOwner;
 				OutView.State = Summary.State;
@@ -246,6 +272,23 @@ namespace
 		Result.Control = TerritoryHierarchyPolicy::ReduceControl(Children);
 		return Result;
 	}
+}
+
+bool TerritoryHierarchyPolicy::MatchesAuthoredChildIdentity(
+	const UTerritoryDefinition* Child, const FGameplayTag& ExpectedParent,
+	const FGameplayTag& ActualTag, const FGuid& ActualGUID,
+	const FGameplayTag& ActualParent, ETerritoryHierarchyLevel ActualLevel)
+{
+	if (!Child || !Child->TerritoryTag.IsValid() || !Child->StableTerritoryGUID.IsValid()
+		|| Child->TerritoryTag != ActualTag || Child->StableTerritoryGUID != ActualGUID
+		|| Child->DerivedParentTerritoryTag != ExpectedParent || ActualParent != ExpectedParent)
+	{
+		return false;
+	}
+	const ETerritoryHierarchyLevel ExpectedLevel = Child->IsA<UTerritoryCityDefinition>()
+		? ETerritoryHierarchyLevel::City : Child->IsA<UTerritoryDistrictDefinition>()
+			? ETerritoryHierarchyLevel::District : ETerritoryHierarchyLevel::Place;
+	return ActualLevel == ExpectedLevel;
 }
 
 TerritoryHierarchyPolicy::FDerivedHierarchyControl TerritoryHierarchyPolicy::ReduceControl(
@@ -556,18 +599,28 @@ void ATerritoryCity::ReconcileDerivedControl(ATerritoryVolume* ChangedDistrict)
 	const FDerivedHierarchyControl Derived = Reduction.Control;
 	const FTerritoryTransitionContext Context = ChangedDistrict
 		? ChangedDistrict->GetActiveTransitionContext() : FTerritoryTransitionContext();
-	SetDerivedControl(Derived.SecuredOwner, Derived.State, Context);
+	const uint64 ReconcileLoadGeneration = GetPurchaseLoadGeneration();
+	if (!SetDerivedControl(Derived.SecuredOwner, Derived.State, Context)) return;
+	const auto IsResultCurrent = [this, ReconcileLoadGeneration, &Derived]()
+	{
+		return IsGameplayCallbackStateCurrent(ReconcileLoadGeneration)
+			&& GetOwningFaction() == Derived.SecuredOwner && GetTerritoryState() == Derived.State;
+	};
+	if (!IsResultCurrent()) return;
 
 	if (PreviousOwner.IsValid() && PreviousControlState == ETerritoryState::Claimed
 		&& (Derived.State != ETerritoryState::Claimed || Derived.SecuredOwner != PreviousOwner))
 	{
 		OnCityLost(PreviousOwner);
+		if (!IsResultCurrent()) return;
 		OnCityLostDelegate.Broadcast(this, PreviousOwner);
+		if (!IsResultCurrent()) return;
 	}
 	if (Derived.State == ETerritoryState::Claimed && Derived.SecuredOwner.IsValid()
 		&& (PreviousControlState != ETerritoryState::Claimed || PreviousOwner != Derived.SecuredOwner))
 	{
 		OnCityFullyCaptured(Derived.SecuredOwner);
+		if (!IsResultCurrent()) return;
 		OnCityCapturedDelegate.Broadcast(this, Derived.SecuredOwner);
 	}
 }
@@ -682,10 +735,13 @@ void ATerritoryDistrict::ReconcileDerivedControl(ATerritoryVolume* ChangedProper
 
 void ATerritoryDistrict::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	const uint64 CallbackLoadGeneration = GetPurchaseLoadGeneration();
 	Super::OnOwnershipChanged_Implementation(OldOwner, NewOwner);
+	if (!IsGameplayCallbackStateCurrent(CallbackLoadGeneration)) return;
 	if (NewOwner.IsValid())
 	{
 		OnDistrictFullyCaptured(NewOwner);
+		if (!IsGameplayCallbackStateCurrent(CallbackLoadGeneration)) return;
 		OnDistrictCapturedDelegate.Broadcast(this, OldOwner, NewOwner);
 	}
 }
@@ -868,12 +924,15 @@ void ATerritoryProperty::OnPropertyCaptured_Implementation(FGameplayTag NewOwner
 
 void ATerritoryProperty::OnOwnershipChanged_Implementation(FGameplayTag OldOwner, FGameplayTag NewOwner)
 {
+	const uint64 CallbackLoadGeneration = GetPurchaseLoadGeneration();
 	Super::OnOwnershipChanged_Implementation(OldOwner, NewOwner);
+	if (!IsGameplayCallbackStateCurrent(CallbackLoadGeneration)) return;
 
 	// Invoke property-specific side effects on every ownership change path
 	if (NewOwner.IsValid() && OldOwner != NewOwner)
 	{
 		OnPropertyCaptured(NewOwner);
+		if (!IsGameplayCallbackStateCurrent(CallbackLoadGeneration)) return;
 		OnPropertyCapturedDelegate.Broadcast(this, NewOwner);
 	}
 }

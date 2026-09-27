@@ -416,7 +416,8 @@ Actor placed in level to define guard spawn locations and patrol routes.
 | Location | FVector | World position |
 | Rotation | FRotator | Face direction |
 | WaitTime | float | Seconds to wait at node |
-| ActivityTag | FGameplayTag | Optional activity tag (e.g., Guard.Activity.Inspect) |
+| ActivityTag | FGameplayTag | Reserved metadata with no runtime consumer; does not start an activity |
+| Spot | FTerritoryPatrolSpot | Optional post-arrival Narrative interaction. Requires a compatible goal class; tagged/pinned slots still require claim-time validation. |
 
 ### Functions
 

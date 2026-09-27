@@ -69,6 +69,79 @@ enum class EGuardRemovalReason : uint8
 };
 
 /**
+ * A reservable spot a patrol node can send its guard to.
+ *
+ * The prop is resolved by QUERY at the node's own location rather than stored as an actor
+ * reference, so a node stays valid when the level streams, when the prop is replaced, and when
+ * two posts deliberately point at the same bench. Both the prop choice and the
+ * slot-availability answer stay owned by Narrative Pro's UNarrativeInteractableComponent:
+ * Territory contributes only WHICH prop and WHEN, never whether a seat is free.
+ *
+ * An unconfigured spot never queries. bEnabled defaults to false and SearchRadius to 0, so a
+ * node that merely gained this field cannot silently walk its guard to a nearby bench.
+ */
+USTRUCT(BlueprintType, meta=(DisplayName="Territory Patrol Spot"))
+struct FTerritoryPatrolSpot
+{
+	GENERATED_BODY()
+
+	/** Opt in. A spot that is not enabled is never resolved and never reaches the guard. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Spot", meta=(DisplayName="Enabled"))
+	bool bEnabled = false;
+
+	/**
+	 * Radius in centimetres around this node in which the spot prop is searched for.
+	 * 0 disables the query outright rather than substituting a usable default, so a
+	 * mis-authored spot fails visibly instead of silently claiming whichever prop is nearest.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Spot",
+		meta=(EditCondition="bEnabled", ClampMin="0.0", UIMin="0.0", UIMax="3000.0", Units="cm",
+			DisplayName="Search Radius"))
+	float SearchRadius = 0.f;
+
+	/** Narrative goal priority for this visit. The shipped patrol scores 1; keep urgent combat higher. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Spot",
+		meta=(EditCondition="bEnabled", ClampMin="0.001", UIMin="0.001", DisplayName="Goal Score"))
+	float GoalScore = 1.1f;
+
+	/**
+	 * Maximum total seconds from delivery until this visit expires, including travel and
+	 * interaction. Narrative's normal goal rescore releases it after this deadline. This is
+	 * a time budget for the whole visit, not guaranteed seated time or a completion reward.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Spot",
+		meta=(EditCondition="bEnabled", ClampMin="0.1", UIMin="0.1", Units="s", DisplayName="Maximum Visit Seconds"))
+	float MaximumVisitSeconds = 30.f;
+
+	/**
+	 * Optional class filter. Empty searches by physical overlap, which finds any actor carrying a
+	 * Narrative interactable but cannot see one without collision; naming a class searches that
+	 * class directly and so also finds a prop with none.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Spot",
+		meta=(EditCondition="bEnabled", DisplayName="Spot Actor Class"))
+	TSubclassOf<AActor> SpotActorClass;
+
+	/** Optional filter matched against each candidate slot's own tag. Invalid accepts any slot. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Spot",
+		meta=(EditCondition="bEnabled", DisplayName="Spot Tag"))
+	FGameplayTag SpotTag;
+
+	/**
+	 * Preferred slot on the resolved prop. -1 lets Narrative choose the best eligible slot.
+	 * An unavailable preference falls back to a slot that also satisfies Spot Tag.
+	 *
+	 * Pinning is stricter than it looks: Narrative Pro's pinned branch returns the index WITHOUT
+	 * checking it is free, so Territory checks eligibility when delivering the goal. The activity
+	 * must still revalidate before claiming if occupancy changes during travel.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Spot",
+		meta=(EditCondition="bEnabled", ClampMin="-1", UIMin="-1", UIMax="15",
+			DisplayName="Slot Index"))
+	int32 SlotIndex = -1;
+};
+
+/**
  * A single waypoint in a guard's patrol route.
  *
  * A route may hold any number of nodes, including exactly one:
@@ -110,9 +183,21 @@ struct FTerritoryPatrolNode
 	 * field, so setting it does not start an activity today. Recorded as gap 4 of
 	 * Docs/GUARD_STORY_CONVERSATIONS.md.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol",
-		meta=(Categories="Guard.Activity", DisplayName="Activity Tag"))
+	UPROPERTY(BlueprintReadOnly, Category="Patrol",
+		meta=(Categories="Guard.Activity", DisplayName="Activity Tag (Not Implemented)",
+			ToolTip="Reserved metadata only. No patrol activity currently reads this tag, so setting it does not start an activity."))
 	FGameplayTag ActivityTag;
+
+	/**
+	 * Optional reservable spot at this node. Disabled by default, so adding it to a node changes
+	 * nothing until a designer opts in.
+	 *
+	 * Consumed on the authority after this node's move, rotation and wait complete (see
+	 * UTerritoryPatrolGoal::DeliverPatrolSpot), which is what keeps a spot per-node rather than
+	 * per-route.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol", meta=(DisplayName="Spot"))
+	FTerritoryPatrolSpot Spot;
 };
 
 /**
@@ -381,6 +466,11 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|GuardSpawn",
 		meta=(DisplayName="Register Spawned Guard"))
 	void RegisterSpawnedGuard(ATerritoryGuardCharacter* Guard);
+
+	/** Records only this post's real guard-damage callback, never an inferred faction target. */
+	void RememberGuardDamage(ATerritoryGuardCharacter* Witness, AActor* DamageSource);
+	/** Current local report only; false after expiry, owner rebind or Narrative load. */
+	bool HasRecentGuardDamageFrom(const AActor* DamageSource, const ATerritoryGuardCharacter* Receiver = nullptr) const;
 
 	/**
 	 * Unregisters a guard (death or despawn). Frees the active slot and may spawn a reserve.
@@ -656,6 +746,12 @@ protected:
 	FTimerHandle ReserveSpawnTimer;
 	int32 AutomaticReserveSpawnFailures = 0;
 
+	// A short-lived local report, deliberately excluded from campaign saves and replication.
+	TWeakObjectPtr<AActor> RecentDamageSource;
+	FVector RecentDamageLocation = FVector::ZeroVector;
+	FGameplayTag RecentDamageOwner;
+	double RecentDamageExpiresAt = 0.0;
+
 	// ─── P0-06: Persistence ───
 
 	/** Baked GUID for save/load. Set at editor placement time, not at runtime. */
@@ -680,6 +776,7 @@ private:
 	friend class FTFGarrisonPurchaseCallbacks;
 	friend class FTFGuardReserveTotals;
 	friend class FTFIndependentGuardPostStreaming;
+	friend class FTFReserveThreatHandoff;
 	// Floor staging tests share one fixture, so the reserve seam lives in one class.
 	friend class FTFTerritoryFloorTestAccess;
 	// The floor-quota deployment test deploys through the production binding (BindToTerritory),
@@ -709,6 +806,8 @@ private:
 	/** @param bRequireCameraAvoidance If true, spawn location must be outside player camera frustums. */
 	bool TrySpawnReserveGuard(bool bRequireCameraAvoidance);
 	void CancelPendingReserveSpawns();
+	void ForgetRecentGuardDamage();
+	bool ApplyRecentGuardDamage(ATerritoryGuardCharacter* Guard);
 
 	/**
 	 * P1-03: Called when the owning territory changes ownership.

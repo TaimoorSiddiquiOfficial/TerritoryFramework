@@ -1095,6 +1095,15 @@ bool FTFTerritoryFloorClearedEventPlaysItsCutscene::RunTest(const FString& Param
 
 	auto TearDownWorld = [World]()
 	{
+		if (UGameInstance* Instance = World->GetGameInstance())
+		{
+			// Match AddLocalPlayer before world destruction to release subsystem input hooks.
+			const TArray<ULocalPlayer*> LocalPlayers = Instance->GetLocalPlayers();
+			for (ULocalPlayer* LocalPlayer : LocalPlayers)
+			{
+				Instance->RemoveLocalPlayer(LocalPlayer);
+			}
+		}
 		World->DestroyWorld(false);
 		GEngine->DestroyWorldContext(World);
 	};

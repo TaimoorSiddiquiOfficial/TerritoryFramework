@@ -9,6 +9,196 @@
 #include "Engine/World.h"
 #include "Misc/DataValidation.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
+#include "NarrativeSave.h"
+#include "TerritoryAuditEventProbe.h"
+#include "TerritoryTransitionFrameProbe.h"
+#include "UObject/UnrealType.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFLoadedHierarchyIdentity,
+	"TerritoryFramework.WorldPartition.Regression.LoadedParentRequiresAuthoredChildIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFLoadedHierarchyIdentity::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Loaded identity world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); };
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	const auto Tag = [](const TCHAR* Value) { return FGameplayTag::RequestGameplayTag(Value); };
+	const FGameplayTag Heroes = Tag(TEXT("Narrative.Factions.Heroes"));
+	const FGameplayTag Bandits = Tag(TEXT("Narrative.Factions.Bandits"));
+	auto* District = NewObject<UTerritoryDistrictDefinition>();
+	auto* Place = NewObject<UTerritoryPlaceDefinition>();
+	District->TerritoryTag = Tag(TEXT("Territory.HavenReach.MarketSquare"));
+	Place->TerritoryTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	for (UTerritoryDefinition* Definition : TArray<UTerritoryDefinition*>{District, Place})
+	{
+		Definition->StableTerritoryGUID = FGuid::NewGuid();
+		Definition->InitialState = ETerritoryInitialState::Unclaimed;
+		Definition->InitialAvailability = ETerritoryAvailability::Unlocked;
+		Definition->InitialGuardCount = 0;
+	}
+	District->Places = {Place};
+	District->RefreshHierarchyLinks();
+	auto* State = World->SpawnActor<ATerritoryWorldState>();
+	State->SetActorGUID_Implementation(FGuid::NewGuid());
+	State->RegisterDefinitionHierarchy(District);
+	auto* LoadedDistrict = World->SpawnActor<ATerritoryDistrict>();
+	TestTrue(TEXT("District applies its definition"), District->ApplyToTerritory(LoadedDistrict));
+	auto* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	TestEqual(TEXT("District registers"), Registry->RegisterTerritory(LoadedDistrict),
+		ETerritoryRegistrationResult::Success);
+	FReplicatedCaptureSummary Exact = State->GetCaptureSummary(Place->TerritoryTag);
+	Exact.CurrentOwner = Heroes;
+	Exact.State = ETerritoryState::Claimed;
+	Exact.ControlProgress = 1.f;
+	State->SetCaptureSummary(Exact);
+	TestEqual(TEXT("An exact unloaded Place secures its loaded District"),
+		LoadedDistrict->GetOwningFaction(), Heroes);
+	TestTrue(TEXT("The Blueprint ownership query agrees with exact child control"),
+		LoadedDistrict->AllPropertiesOwnedBy(Heroes));
+	int32 StateChanges = 0;
+	auto* Probe = NewObject<UTerritoryAuditEventProbe>(LoadedDistrict);
+	Probe->StateCallback = [&StateChanges](ATerritoryVolume*, ETerritoryState) { ++StateChanges; };
+	LoadedDistrict->OnTerritoryStateChangedDelegate.AddDynamic(Probe,
+		&UTerritoryAuditEventProbe::StateChanged);
+	int32 LossEvents = 0;
+	auto* LossEvent = NewObject<UTerritoryAuditNarrativeEvent>(LoadedDistrict);
+	LossEvent->Callback = [&LossEvents]() { ++LossEvents; };
+	FTFTransitionFrameProbe::InstallStateEvent(LoadedDistrict, ETerritoryState::Claimed, false, LossEvent);
+
+	FReplicatedCaptureSummary Impostor = Exact;
+	Impostor.TerritoryGUID = FGuid::NewGuid();
+	Impostor.CurrentOwner = Bandits;
+	State->SetCaptureSummary(Impostor);
+	TestEqual(TEXT("A same-tag different-GUID row cannot replace the loaded parent's owner"),
+		LoadedDistrict->GetOwningFaction(), Heroes);
+	TestEqual(TEXT("Publication does not relabel an impostor GUID as authored identity"),
+		State->GetCaptureSummary(Place->TerritoryTag).TerritoryGUID, Impostor.TerritoryGUID);
+	TestFalse(TEXT("An impostor snapshot is not verified parent control"),
+		State->IsHierarchyReductionComplete(District->TerritoryTag));
+	TestFalse(TEXT("The public child ownership query refuses an impostor snapshot"),
+		LoadedDistrict->AllPropertiesOwnedBy(Bandits));
+	TestFalse(TEXT("Refusing a child does not append a false lost tenure"),
+		LoadedDistrict->GetOwnershipData().FormerOwningFactions.HasTagExact(Heroes));
+	TestEqual(TEXT("Refusing a child emits no state-change event"), StateChanges, 0);
+	TestEqual(TEXT("Refusing a child emits no Narrative ownership-loss event"), LossEvents, 0);
+
+	// Exercise the supported Narrative record path, including re-entry with a loaded parent.
+	auto* Save = World->GetSubsystem<UNarrativeSaveSubsystem>();
+	if (!TestNotNull(TEXT("Narrative save subsystem"), Save)) return false;
+	FNarrativeActorRecord Record;
+	if (!TestTrue(TEXT("Narrative saves the unresolved directory"), Save->CreateActorRecord(State, Record))) return false;
+	State->SetCaptureSummary(Exact);
+	Save->LoadActorFromRecord(State, Record);
+	TestEqual(TEXT("Narrative reload retains the unresolved identity"),
+		State->GetCaptureSummary(Place->TerritoryTag).TerritoryGUID, Impostor.TerritoryGUID);
+	State->SetCaptureSummary(Impostor);
+	TestEqual(TEXT("Reconciling after reload still retains the last verified loaded owner"),
+		LoadedDistrict->GetOwningFaction(), Heroes);
+	TestEqual(TEXT("Reload and incomplete reconcile emit no invented transition"), StateChanges, 0);
+	State->SetCaptureSummary(Exact);
+
+	// An imported row's metadata must be checked as well as its GUID. Import leaves
+	// loaded actors authoritative, so these queries run before an actor refreshes metadata.
+	const FArrayProperty* DirectoryProperty = FindFProperty<FArrayProperty>(
+		State->GetClass(), TEXT("SavedStrategicDirectory"));
+	if (!TestNotNull(TEXT("Saved directory property exists for migration fixture"), DirectoryProperty)) return false;
+	for (int32 Mismatch = 0; Mismatch < 2; ++Mismatch)
+	{
+		FReplicatedCaptureSummary WrongMetadata = Exact;
+		WrongMetadata.CurrentOwner = Bandits;
+		if (Mismatch == 0) WrongMetadata.ParentTerritoryTag = Tag(TEXT("Territory.HavenReach"));
+		else WrongMetadata.HierarchyLevel = ETerritoryHierarchyLevel::District;
+		State->ExportPersistentState();
+		auto* SavedDirectory = DirectoryProperty->ContainerPtrToValuePtr<TArray<FReplicatedCaptureSummary>>(State);
+		for (FReplicatedCaptureSummary& Row : *SavedDirectory)
+		{
+			if (Row.TerritoryTag == Place->TerritoryTag) Row = WrongMetadata;
+		}
+		State->ImportPersistentState();
+		TestFalse(TEXT("Loaded-parent queries reject wrong saved parent or level"),
+			LoadedDistrict->AllPropertiesOwnedBy(Bandits));
+		TestFalse(TEXT("Directory completeness uses the same metadata identity rule"),
+			State->IsHierarchyReductionComplete(District->TerritoryTag));
+		State->SetCaptureSummary(Exact);
+	}
+
+	// A registry actor with the right tag/class but another GUID is not the authored Place.
+	auto* LoadedPlace = World->SpawnActor<ATerritoryProperty>();
+	TestTrue(TEXT("Place applies its definition"), Place->ApplyToTerritory(LoadedPlace));
+	LoadedPlace->SetActorGUID_Implementation(Impostor.TerritoryGUID);
+	TestEqual(TEXT("An otherwise unique runtime identity registers"), Registry->RegisterTerritory(LoadedPlace),
+		ETerritoryRegistrationResult::Success);
+	LoadedPlace->ForceSetOwningFaction(Bandits);
+	TestTrue(TEXT("A wrong-GUID actor is not returned as an authored child"), LoadedDistrict->GetProperties().IsEmpty());
+	TestNull(TEXT("A wrong-GUID Place cannot claim the authored parent"), LoadedPlace->GetOwningDistrict());
+	TestFalse(TEXT("A wrong-GUID loaded actor cannot satisfy ownership queries"),
+		LoadedDistrict->AllPropertiesOwnedBy(Bandits));
+	TestEqual(TEXT("Wrong-GUID actor publication cannot capture its apparent parent"),
+		LoadedDistrict->GetOwningFaction(), Heroes);
+	TestEqual(TEXT("No rejected identity emitted a state change"), StateChanges, 0);
+	TestEqual(TEXT("No rejected identity emitted a Narrative loss"), LossEvents, 0);
+
+	// Correct actor admission is the recovery path; exact live publication supersedes the row.
+	Registry->UnregisterTerritory(LoadedPlace);
+	LoadedPlace->SetActorGUID_Implementation(Place->StableTerritoryGUID);
+	TestEqual(TEXT("Corrected live identity registers"), Registry->RegisterTerritory(LoadedPlace),
+		ETerritoryRegistrationResult::Success);
+	State->PublishTerritorySummary(LoadedPlace);
+	TestEqual(TEXT("An exact loaded Place can secure its parent"), LoadedDistrict->GetOwningFaction(), Bandits);
+	TestTrue(TEXT("Loaded and durable paths recover to the same verified owner"),
+		LoadedDistrict->AllPropertiesOwnedBy(Bandits) && State->IsHierarchyReductionComplete(District->TerritoryTag));
+	TestTrue(TEXT("The real ownership loss records history"),
+		LoadedDistrict->GetOwnershipData().FormerOwningFactions.HasTagExact(Heroes));
+	TestEqual(TEXT("Exact actor recovery emits the real Narrative loss once"), LossEvents, 1);
+	State->SetRole(ROLE_SimulatedProxy);
+	State->SetCaptureSummary(Exact);
+	TestEqual(TEXT("Client snapshot mutation cannot change the recovered ownership"),
+		State->GetCaptureSummary(Place->TerritoryTag).CurrentOwner, Bandits);
+	State->SetRole(ROLE_Authority);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFHierarchyIdentityMigration,
+	"TerritoryFramework.WorldPartition.Regression.IdentityRefreshPreservesGuidRenames",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFHierarchyIdentityMigration::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Identity migration world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); };
+	const auto Tag = [](const TCHAR* Value) { return FGameplayTag::RequestGameplayTag(Value); };
+	const FGameplayTag OldTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	const FGameplayTag NewTag = Tag(TEXT("Territory.HavenReach.MarketSquare.Warehouse"));
+	const FGameplayTag Heroes = Tag(TEXT("Narrative.Factions.Heroes"));
+	auto* State = World->SpawnActor<ATerritoryWorldState>();
+	auto* Place = NewObject<UTerritoryPlaceDefinition>();
+	Place->StableTerritoryGUID = FGuid::NewGuid();
+	Place->TerritoryTag = OldTag;
+	FReplicatedCaptureSummary Legacy;
+	Legacy.TerritoryTag = OldTag;
+	Legacy.CurrentOwner = Heroes;
+	Legacy.State = ETerritoryState::Claimed;
+	State->SetCaptureSummary(Legacy);
+	State->RegisterDefinitionHierarchy(Place);
+	TestEqual(TEXT("A GUID-less legacy row can adopt its first authored identity"),
+		State->GetCaptureSummary(OldTag).TerritoryGUID, Place->StableTerritoryGUID);
+	TestEqual(TEXT("First identity adoption retains existing political state"),
+		State->GetCaptureSummary(OldTag).CurrentOwner, Heroes);
+	Place->TerritoryTag = NewTag;
+	State->RegisterDefinitionHierarchy(Place);
+	TestEqual(TEXT("Same-GUID tag rename retains political state"), State->GetCaptureSummary(NewTag).CurrentOwner, Heroes);
+	TestEqual(TEXT("Same-GUID rename retains durable identity"),
+		State->GetCaptureSummary(NewTag).TerritoryGUID, Place->StableTerritoryGUID);
+	TestFalse(TEXT("Same-GUID rename does not retain an obsolete directory row"),
+		State->GetCaptureSummary(OldTag).TerritoryTag.IsValid());
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFUnloadedHierarchyReconciliation,
 	"TerritoryFramework.WorldPartition.Regression.UnloadedAncestorsFollowChildSnapshots",
@@ -86,12 +276,18 @@ bool FTFUnloadedHierarchyReconciliation::RunTest(const FString& Parameters)
 	District->Places.Pop();
 	State->RegisterDefinitionHierarchy(City);
 	TestEqual(TEXT("Corrected topology recovers"), State->GetCaptureSummary(City->TerritoryTag).CurrentOwner, Heroes);
-	FReplicatedCaptureSummary WrongIdentity = State->GetCaptureSummary(Second->TerritoryTag);
+	const FReplicatedCaptureSummary ExactSecond = State->GetCaptureSummary(Second->TerritoryTag);
+	FReplicatedCaptureSummary WrongIdentity = ExactSecond;
 	WrongIdentity.TerritoryGUID = FGuid::NewGuid();
 	State->SetCaptureSummary(WrongIdentity);
 	TestEqual(TEXT("Reused tag with wrong GUID is an unknown, so it defers rather than clearing"),
 		State->GetCaptureSummary(District->TerritoryTag).CurrentOwner, Heroes);
 	State->RegisterDefinitionHierarchy(City);
+	TestEqual(TEXT("Definition refresh must not relabel a different durable identity"),
+		State->GetCaptureSummary(Second->TerritoryTag).TerritoryGUID, WrongIdentity.TerritoryGUID);
+	// Recover through an exact authoritative snapshot; registration cannot migrate
+	// another GUID's political state merely because its tag is the same.
+	State->SetCaptureSummary(ExactSecond);
 	Publish(Second, Heroes);
 	State->SetRole(ROLE_SimulatedProxy);
 	Publish(Second, Bandits);

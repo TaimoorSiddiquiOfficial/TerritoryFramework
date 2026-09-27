@@ -1,5 +1,7 @@
 #include "Subsystems/TerritoryMusicSubsystem.h"
 
+#include "ArsenalSettings.h"
+#include "Components/AudioComponent.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Engine/GameInstance.h"
@@ -9,6 +11,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Music/NarrativeMusicSubsystem.h"
 #include "Music/TaggedMusicSet.h"
+#include "NarrativeWorldSettings.h"
 #include "Sound/SoundBase.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UObject/UnrealType.h"
@@ -64,6 +67,8 @@ bool UTerritoryMusicSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 void UTerritoryMusicSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+	WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddUObject(
+		this, &UTerritoryMusicSubsystem::HandleWorldCleanup);
 	RefreshAccumulator = RefreshInterval;
 }
 
@@ -72,6 +77,7 @@ void UTerritoryMusicSubsystem::Deinitialize()
 	// Native owns world/audio teardown. Do not start a new async music load while
 	// the GameInstance and its subsystems are being destroyed.
 	ResetForWorld(nullptr);
+	FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
 	Super::Deinitialize();
 }
 
@@ -90,6 +96,10 @@ void UTerritoryMusicSubsystem::SetAutomaticMusicEnabled(bool bEnabled)
 	bOwnsMusicRule = false;
 	bThemeApplyPending = false;
 	bThemeAppliedByTerritory = false;
+	RequestSourceTheme = FGameplayTag();
+	SupersededQueuedTheme = FGameplayTag();
+	RequestSourceMusicSet.Reset();
+	DesiredMusicSet.Reset();
 	ClearBaselineRestoration();
 	if (bEnabled) RefreshNow();
 }
@@ -131,21 +141,16 @@ void UTerritoryMusicSubsystem::RefreshNow()
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
 	if (!Listener || !Registry)
 	{
-		for (const FStateSoundRequest& Request : RefreshObservedTerritory(nullptr))
-		{
-			PlayStateSound(Request.Sound, Request.Config);
-		}
+		RefreshObservedTerritory(nullptr);
+		StopStateSounds();
 		RefreshMusicTerritory(nullptr);
 		MaintainMusicRule();
 		return;
 	}
 
 	const FVector ListenerLocation = Listener->GetActorLocation();
-	for (const FStateSoundRequest& Request : RefreshObservedTerritory(
-		Registry->GetTerritoryAtLocation(ListenerLocation)))
-	{
-		PlayStateSound(Request.Sound, Request.Config);
-	}
+	PlayStateSounds(RefreshObservedTerritory(
+		ResolveMusicTerritory(ListenerLocation, false)));
 	RefreshMusicTerritory(bAutomaticMusicEnabled
 		? ResolveMusicTerritory(ListenerLocation) : nullptr);
 	MaintainMusicRule();
@@ -177,7 +182,7 @@ AActor* UTerritoryMusicSubsystem::ResolveLocalListener() const
 }
 
 ATerritoryVolume* UTerritoryMusicSubsystem::ResolveMusicTerritory(
-	const FVector& ListenerLocation) const
+	const FVector& ListenerLocation, bool bRequireMusicRule) const
 {
 	UWorld* World = GetTickableGameObjectWorld();
 	const UTerritoryRegistrySubsystem* Registry = World
@@ -186,6 +191,7 @@ ATerritoryVolume* UTerritoryMusicSubsystem::ResolveMusicTerritory(
 
 	ATerritoryVolume* Best = nullptr;
 	int32 BestPriority = INDEX_NONE;
+	int32 BestAuthoredPriority = MIN_int32;
 	double BestVolume = TNumericLimits<double>::Max();
 	TArray<ATerritoryVolume*> Candidates = Registry->GetTerritoriesAtLocation(
 		ListenerLocation);
@@ -193,8 +199,9 @@ ATerritoryVolume* UTerritoryMusicSubsystem::ResolveMusicTerritory(
 	// A Place can inherit a soundtrack rule from its exact authored District or
 	// City even when a parent's presentation volume does not overlap the Place.
 	// This follows the Definition hierarchy instead of guessing tag prefixes.
-	if (ATerritoryProperty* Place = Cast<ATerritoryProperty>(
-		Registry->GetTerritoryAtLocation(ListenerLocation)))
+	ATerritoryVolume* Containing = bRequireMusicRule
+		? ResolveMusicTerritory(ListenerLocation, false) : nullptr;
+	if (ATerritoryProperty* Place = Cast<ATerritoryProperty>(Containing))
 	{
 		if (ATerritoryDistrict* District = Place->GetOwningDistrict())
 		{
@@ -202,8 +209,7 @@ ATerritoryVolume* UTerritoryMusicSubsystem::ResolveMusicTerritory(
 			Candidates.AddUnique(District->GetOwningCity());
 		}
 	}
-	else if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(
-		Registry->GetTerritoryAtLocation(ListenerLocation)))
+	else if (ATerritoryDistrict* District = Cast<ATerritoryDistrict>(Containing))
 	{
 		Candidates.AddUnique(District->GetOwningCity());
 	}
@@ -213,15 +219,24 @@ ATerritoryVolume* UTerritoryMusicSubsystem::ResolveMusicTerritory(
 		if (!IsValid(Candidate)) continue;
 		const FTerritoryStateAudioConfig* Audio = FindStateAudio(
 			Candidate, TerritoryMusicPrivate::GetPresentationState(Candidate));
-		if (!Audio || !IsMusicConfigUsable(*Audio)) continue;
+		if (bRequireMusicRule && (!Audio || !IsMusicConfigUsable(*Audio))) continue;
+		const int32 AuthoredPriority = Audio ? Audio->MusicPriority : 0;
 
 		const int32 Priority = TerritoryMusicPrivate::GetTerritoryPriority(Candidate);
 		const double BoundsVolume = TerritoryMusicPrivate::GetBoundsVolume(Candidate);
-		if (Priority > BestPriority
-			|| (Priority == BestPriority && BoundsVolume < BestVolume))
+		const bool bSamePriority = Priority == BestPriority
+			&& AuthoredPriority == BestAuthoredPriority;
+		const bool bStableTieWins = Best && bSamePriority && BoundsVolume == BestVolume
+			&& (Candidate->GetTerritoryGUID().ToString() < Best->GetTerritoryGUID().ToString()
+				|| (Candidate->GetTerritoryGUID() == Best->GetTerritoryGUID()
+					&& Candidate->GetPathName() < Best->GetPathName()));
+		if (!Best || Priority > BestPriority
+			|| (Priority == BestPriority && AuthoredPriority > BestAuthoredPriority)
+			|| (bSamePriority && BoundsVolume < BestVolume) || bStableTieWins)
 		{
 			Best = Candidate;
 			BestPriority = Priority;
+			BestAuthoredPriority = AuthoredPriority;
 			BestVolume = BoundsVolume;
 		}
 	}
@@ -241,13 +256,20 @@ UTerritoryMusicSubsystem::RefreshObservedTerritory(
 	ATerritoryVolume* NewTerritory)
 {
 	TArray<FStateSoundRequest> Sounds;
-	const bool bSameTerritory = NewTerritory == ObservedTerritory.Get();
+	const bool bSameTerritory = NewTerritory == ObservedTerritory.Get()
+		&& !(bHasObservedState && !NewTerritory);
 	const ETerritoryState NewState =
 		TerritoryMusicPrivate::GetPresentationState(NewTerritory);
 	const FTerritoryStateAudioConfig* NewAudioPtr = FindStateAudio(
 		NewTerritory, NewState);
 	const FTerritoryStateAudioConfig NewAudio = NewAudioPtr
 		? *NewAudioPtr : FTerritoryStateAudioConfig();
+	if (!bSameTerritory || (bHasObservedState && NewState != ObservedState))
+	{
+		// Cancel only this bridge's old cues, including loops authored in error.
+		// Exit/entry cues for the new transition are subsequently serialized.
+		StopStateSounds();
+	}
 
 	if (bHasObservedState && bSameTerritory && NewTerritory && NewState != ObservedState)
 	{
@@ -312,49 +334,50 @@ void UTerritoryMusicSubsystem::ApplyMusicRule(ATerritoryVolume* Territory,
 {
 	UNarrativeMusicSubsystem* Music = GetNarrativeMusic();
 	if (!bAutomaticMusicEnabled || !Music || !Territory || !IsMusicConfigUsable(Config)) return;
+	const bool bWasRestoringSet = bRestoringBaseline
+		&& RestoreSourceMusicSet.ToSoftObjectPath() != BaselineMusicSet.ToSoftObjectPath();
+	FGameplayTag PreviousQueuedTheme = SupersededQueuedTheme;
+	if (bOwnsMusicRule && bThemeAppliedByTerritory && Music->GetActiveTheme() != AppliedMusicTheme)
+		PreviousQueuedTheme = AppliedMusicTheme;
+	else if (bRestoringBaseline && bBaselineThemeRequested && Music->GetActiveTheme() != BaselineMusicTheme)
+		PreviousQueuedTheme = BaselineMusicTheme;
 
 	if (!bOwnsMusicRule)
 	{
 		if (!bRestoringBaseline)
 		{
 			BaselineMusicSet = Music->GetActiveMusicSet();
+			if (BaselineMusicSet.IsNull()) BaselineMusicSet = ResolveDefaultMusicSet();
 			BaselineMusicTheme = Music->GetActiveTheme();
+			if (!BaselineMusicTheme.IsValid())
+				BaselineMusicTheme = FGameplayTag::RequestGameplayTag(TEXT("Music.Ambient"), false);
 		}
 		bRestoringBaseline = false;
 		bBaselineThemeRequested = false;
 		RestoreSourceTheme = FGameplayTag();
 		RestoreSourceMusicSet.Reset();
+		ReleasedQueuedTheme = FGameplayTag();
+		bWaitingForReleasedTheme = false;
 		bOwnsMusicRule = true;
 	}
 
-	const TSoftObjectPtr<UTaggedMusicSet> PreviousTerritorySet =
-		AppliedAudio.MusicSetOverride;
+	const TSoftObjectPtr<UTaggedMusicSet> PreviousDesiredSet = DesiredMusicSet;
+	RequestSourceMusicSet = Music->GetActiveMusicSet();
+	RequestSourceTheme = Music->GetActiveTheme();
 	AppliedAudio = Config;
+	DesiredMusicSet = Config.MusicSetOverride.IsNull() ? BaselineMusicSet : Config.MusicSetOverride;
 	AppliedMusicTheme = Config.MusicTheme;
+	SupersededQueuedTheme = Music->GetActiveTheme() == AppliedMusicTheme
+		? PreviousQueuedTheme : FGameplayTag();
 	bThemeApplyPending = true;
 	bThemeAppliedByTerritory = false;
-	if (!Config.MusicSetOverride.IsNull())
+	if (!DesiredMusicSet.IsNull())
 	{
-		if (PreviousTerritorySet.ToSoftObjectPath()
-			!= Config.MusicSetOverride.ToSoftObjectPath())
+		if (bWasRestoringSet || (PreviousDesiredSet.ToSoftObjectPath() != DesiredMusicSet.ToSoftObjectPath()
+			&& (!TerritoryMusicPrivate::HasSameAssetPath(Music->GetActiveMusicSet(), DesiredMusicSet)
+				|| !PreviousDesiredSet.IsNull())))
 		{
-			SetNarrativeMusicSet(Music, Config.MusicSetOverride);
-		}
-	}
-	else
-	{
-		// A state with no set override means the pre-Territory world music set,
-		// not a custom set left behind by the previous Territory row.
-		if (!PreviousTerritorySet.IsNull())
-		{
-			if (!BaselineMusicSet.IsNull())
-			{
-				SetNarrativeMusicSet(Music, BaselineMusicSet);
-			}
-			else
-			{
-				ResetNarrativeMusicSet(Music);
-			}
+			SetNarrativeMusicSet(Music, DesiredMusicSet);
 		}
 	}
 
@@ -376,25 +399,22 @@ void UTerritoryMusicSubsystem::ReleaseMusicRule()
 	}
 
 	UNarrativeMusicSubsystem* Music = GetNarrativeMusic();
-	bool bStillOwnsNarrativeSelection = Music != nullptr;
-	if (Music && !AppliedAudio.MusicSetOverride.IsNull())
+	bool bStillOwnsNarrativeSelection = false;
+	if (Music)
 	{
 		UTaggedMusicSet* CurrentSet = Music->GetActiveMusicSet();
-		const bool bTargetActive = TerritoryMusicPrivate::HasSameAssetPath(
-			CurrentSet, AppliedAudio.MusicSetOverride);
-		const bool bTargetStillPending = TerritoryMusicPrivate::HasSameAssetPath(
-			CurrentSet, BaselineMusicSet) && bThemeApplyPending;
-		const bool bTargetThemeActive = Music->GetActiveTheme().MatchesTagExact(
-			AppliedMusicTheme);
-		bStillOwnsNarrativeSelection = (bTargetActive
-			&& (bTargetThemeActive || bThemeApplyPending
-				|| !bThemeAppliedByTerritory))
-			|| bTargetStillPending || (CurrentSet == nullptr && bThemeApplyPending);
-	}
-	else if (Music && AppliedMusicTheme.IsValid())
-	{
-		bStillOwnsNarrativeSelection = Music->GetActiveTheme().MatchesTagExact(
-			AppliedMusicTheme);
+		const bool bTargetSet = DesiredMusicSet.IsNull()
+			? CurrentSet == RequestSourceMusicSet.Get()
+			: TerritoryMusicPrivate::HasSameAssetPath(CurrentSet, DesiredMusicSet);
+		const bool bSourceSet = CurrentSet == RequestSourceMusicSet.Get();
+		const FGameplayTag CurrentTheme = Music->GetActiveTheme();
+		// Native accepts a theme into its fade queue without changing ActiveTheme.
+		// That is still our request while the visible selection is its source.
+		bStillOwnsNarrativeSelection = (bTargetSet
+			&& bThemeAppliedByTerritory
+			&& (CurrentTheme == AppliedMusicTheme || CurrentTheme == RequestSourceTheme))
+			|| (bThemeApplyPending && (bSourceSet || bTargetSet)
+				&& CurrentTheme == RequestSourceTheme);
 	}
 
 	if (Music && bStillOwnsNarrativeSelection)
@@ -402,9 +422,13 @@ void UTerritoryMusicSubsystem::ReleaseMusicRule()
 		UTaggedMusicSet* CurrentSet = Music->GetActiveMusicSet();
 		RestoreSourceMusicSet = CurrentSet;
 		RestoreSourceTheme = Music->GetActiveTheme();
+		ReleasedQueuedTheme = bThemeAppliedByTerritory
+			&& RestoreSourceTheme != AppliedMusicTheme ? AppliedMusicTheme : FGameplayTag();
+		bWaitingForReleasedTheme = false;
 		bBaselineThemeRequested = false;
 		if (!BaselineMusicSet.IsNull()
-			&& !TerritoryMusicPrivate::HasSameAssetPath(CurrentSet, BaselineMusicSet))
+			&& (!TerritoryMusicPrivate::HasSameAssetPath(CurrentSet, BaselineMusicSet)
+				|| DesiredMusicSet.ToSoftObjectPath() != BaselineMusicSet.ToSoftObjectPath()))
 		{
 			SetNarrativeMusicSet(Music, BaselineMusicSet);
 		}
@@ -426,6 +450,10 @@ void UTerritoryMusicSubsystem::ReleaseMusicRule()
 	bThemeAppliedByTerritory = false;
 	AppliedAudio = FTerritoryStateAudioConfig();
 	AppliedMusicTheme = FGameplayTag();
+	DesiredMusicSet.Reset();
+	RequestSourceMusicSet.Reset();
+	RequestSourceTheme = FGameplayTag();
+	SupersededQueuedTheme = FGameplayTag();
 }
 
 void UTerritoryMusicSubsystem::MaintainMusicRule()
@@ -436,16 +464,32 @@ void UTerritoryMusicSubsystem::MaintainMusicRule()
 
 	if (bOwnsMusicRule && bThemeApplyPending && AppliedMusicTheme.IsValid())
 	{
-		const bool bSetReady = AppliedAudio.MusicSetOverride.IsNull()
+		const bool bSetReady = DesiredMusicSet.IsNull()
 			? Music->GetActiveMusicSet() != nullptr
 			: TerritoryMusicPrivate::HasSameAssetPath(
-				Music->GetActiveMusicSet(), AppliedAudio.MusicSetOverride);
+				Music->GetActiveMusicSet(), DesiredMusicSet);
 		if (bSetReady)
 		{
+			if (SupersededQueuedTheme.IsValid())
+			{
+				// Re-entry can request the still-playing theme while our previous
+				// restoration is queued. Native cannot cancel that queue with its
+				// active theme; reconcile once the known older request surfaces.
+				if (Music->GetActiveTheme() == AppliedMusicTheme) return;
+				if (Music->GetActiveTheme() != SupersededQueuedTheme)
+				{
+					bThemeApplyPending = false;
+					SupersededQueuedTheme = FGameplayTag();
+					return;
+				}
+				SupersededQueuedTheme = FGameplayTag();
+			}
 			bThemeAppliedByTerritory = Music->GetActiveTheme().MatchesTagExact(
 				AppliedMusicTheme);
 			if (!bThemeAppliedByTerritory)
 			{
+				RequestSourceTheme = Music->GetActiveTheme();
+				RequestSourceMusicSet = Music->GetActiveMusicSet();
 				bThemeAppliedByTerritory = SetNarrativeTheme(Music,
 					AppliedMusicTheme, AppliedAudio.bImmediateThemeChange)
 					|| Music->GetActiveTheme().MatchesTagExact(AppliedMusicTheme);
@@ -471,7 +515,8 @@ void UTerritoryMusicSubsystem::MaintainMusicRule()
 			&& !TerritoryMusicPrivate::HasSameAssetPath(CurrentSet, BaselineMusicSet)
 			&& !TerritoryMusicPrivate::HasSameAssetPath(CurrentSet, RestoreSourceMusicSet);
 		const bool bExternalTheme = CurrentTheme.IsValid()
-			&& CurrentTheme != BaselineMusicTheme && CurrentTheme != RestoreSourceTheme;
+			&& CurrentTheme != BaselineMusicTheme && CurrentTheme != RestoreSourceTheme
+			&& CurrentTheme != ReleasedQueuedTheme;
 		if (bExternalSet || bExternalTheme)
 		{
 			ClearBaselineRestoration();
@@ -483,13 +528,24 @@ void UTerritoryMusicSubsystem::MaintainMusicRule()
 				Music->GetActiveMusicSet(), BaselineMusicSet);
 		if (bSetReady)
 		{
-			if (!bBaselineThemeRequested && CurrentTheme != BaselineMusicTheme)
+			if (bWaitingForReleasedTheme && CurrentTheme == BaselineMusicTheme) return;
+			if (!bBaselineThemeRequested
+				&& (CurrentTheme != BaselineMusicTheme || ReleasedQueuedTheme.IsValid()))
 			{
 				// Accepted may mean queued, not audible yet. Never resubmit while
 				// waiting: a later Native quest request can replace that queue.
 				bBaselineThemeRequested = true;
 				if (!SetNarrativeTheme(Music, BaselineMusicTheme, false))
 				{
+					if (CurrentTheme == BaselineMusicTheme && ReleasedQueuedTheme.IsValid())
+					{
+						// Native cannot replace a queue with the already-playing theme.
+						// Wait for our queued theme to surface, then restore once. A
+						// visibly different story theme still cancels this restoration.
+						bBaselineThemeRequested = false;
+						bWaitingForReleasedTheme = true;
+						return;
+					}
 					// Already queued, a manual sound override, and invalid content all
 					// return false. Native has no public discriminator; yield safely.
 					ClearBaselineRestoration();
@@ -512,22 +568,81 @@ void UTerritoryMusicSubsystem::ClearBaselineRestoration()
 	BaselineMusicTheme = FGameplayTag();
 	RestoreSourceMusicSet.Reset();
 	RestoreSourceTheme = FGameplayTag();
+	ReleasedQueuedTheme = FGameplayTag();
+	bWaitingForReleasedTheme = false;
 }
 
-void UTerritoryMusicSubsystem::PlayStateSound(
-	const TSoftObjectPtr<USoundBase>& Sound,
-	const FTerritoryStateAudioConfig& Config) const
+void UTerritoryMusicSubsystem::PlayStateSounds(TArray<FStateSoundRequest> Sounds)
 {
-	if (Sound.IsNull()) return;
-	USoundBase* LoadedSound = Sound.LoadSynchronous();
-	if (!LoadedSound) return;
-	UGameplayStatics::PlaySound2D(GetGameInstance(), LoadedSound,
-		FMath::Clamp(Config.StateEffectVolume, 0.f, 4.f),
-		FMath::Clamp(Config.StateEffectPitch, 0.25f, 4.f));
+	StateSoundQueue.Append(MoveTemp(Sounds));
+	if (StateSoundComponent) return;
+	while (!StateSoundQueue.IsEmpty())
+	{
+		const FStateSoundRequest Request = StateSoundQueue[0];
+		StateSoundQueue.RemoveAt(0);
+		USoundBase* Sound = Request.Sound.LoadSynchronous();
+		if (!Sound) continue;
+		// This channel is for one-shots. Loops belong in Narrative music sets and
+		// must not block every subsequent entry/exit cue indefinitely.
+		if (Sound->IsLooping())
+		{
+			UE_LOG(LogTerritory, Warning, TEXT("[TerritoryMusic] Looping state cue %s ignored; author continuous ambience in a Narrative music set."), *GetNameSafe(Sound));
+			continue;
+		}
+		StateSoundComponent = UGameplayStatics::CreateSound2D(GetGameInstance(), Sound,
+			FMath::Clamp(Request.Config.StateEffectVolume, 0.f, 4.f),
+			FMath::Clamp(Request.Config.StateEffectPitch, 0.25f, 4.f), 0.f, nullptr, false, false);
+		if (!StateSoundComponent) continue;
+		StateSoundComponent->OnAudioFinished.AddUniqueDynamic(this,
+			&UTerritoryMusicSubsystem::HandleStateSoundFinished);
+		StateSoundComponent->Play();
+		break;
+	}
+}
+
+void UTerritoryMusicSubsystem::StopStateSounds()
+{
+	StateSoundQueue.Reset();
+	if (IsValid(StateSoundComponent))
+	{
+		StateSoundComponent->OnAudioFinished.RemoveDynamic(this,
+			&UTerritoryMusicSubsystem::HandleStateSoundFinished);
+		StateSoundComponent->Stop();
+		StateSoundComponent->DestroyComponent();
+	}
+	StateSoundComponent = nullptr;
+}
+
+void UTerritoryMusicSubsystem::HandleStateSoundFinished()
+{
+	if (IsValid(StateSoundComponent))
+	{
+		StateSoundComponent->OnAudioFinished.RemoveDynamic(this,
+			&UTerritoryMusicSubsystem::HandleStateSoundFinished);
+		StateSoundComponent->DestroyComponent();
+	}
+	StateSoundComponent = nullptr;
+	PlayStateSounds({});
+}
+
+void UTerritoryMusicSubsystem::HandleWorldCleanup(UWorld* World, bool, bool)
+{
+	if (World && (World == EvaluatedWorld.Get() || World == GetTickableGameObjectWorld()))
+		ResetForWorld(nullptr);
+}
+
+TSoftObjectPtr<UTaggedMusicSet> UTerritoryMusicSubsystem::ResolveDefaultMusicSet() const
+{
+	const UWorld* World = GetTickableGameObjectWorld();
+	const ANarrativeWorldSettings* Settings = World
+		? Cast<ANarrativeWorldSettings>(World->GetWorldSettings()) : nullptr;
+	if (Settings && Settings->DefaultMusicSetOverride) return Settings->DefaultMusicSetOverride.Get();
+	return GetDefault<UArsenalSettings>()->DefaultMusicSet;
 }
 
 void UTerritoryMusicSubsystem::ResetForWorld(UWorld* NewWorld)
 {
+	StopStateSounds();
 	ObservedTerritory.Reset();
 	MusicTerritory.Reset();
 	ObservedAudio = FTerritoryStateAudioConfig();
@@ -541,6 +656,10 @@ void UTerritoryMusicSubsystem::ResetForWorld(UWorld* NewWorld)
 	bOwnsMusicRule = false;
 	bThemeApplyPending = false;
 	bThemeAppliedByTerritory = false;
+	RequestSourceTheme = FGameplayTag();
+	SupersededQueuedTheme = FGameplayTag();
+	RequestSourceMusicSet.Reset();
+	DesiredMusicSet.Reset();
 	bAutomaticMusicEnabled = true;
 	EvaluatedWorld = NewWorld;
 }

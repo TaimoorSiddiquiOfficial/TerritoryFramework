@@ -1,5 +1,6 @@
 #include "Core/TerritoryFloorVolume.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Components/BoxComponent.h"
@@ -119,8 +120,25 @@ FVector ATerritoryFloorVolume::GetFloorBoundsSize() const
 
 double ATerritoryFloorVolume::GetFloorBoundsVolume() const
 {
-	const FVector Size = GetFloorBoundsSize();
+	// Containment uses the component's world transform, so specificity must include that
+	// same scale. Actor/editor scaling must not let a physically larger region win.
+	const FVector Size = FloorBounds ? FloorBounds->GetScaledBoxExtent() * 2.0 : FVector::ZeroVector;
 	return FMath::Abs(static_cast<double>(Size.X) * Size.Y * Size.Z);
+}
+
+bool ATerritoryFloorVolume::IsFullyContainedBy(const ATerritoryVolume* Place) const
+{
+	const double Volume = GetFloorBoundsVolume();
+	if (!Place || !FloorBounds || !FMath::IsFinite(Volume) || Volume <= 0.0) return false;
+	const FVector Extent = FloorBounds->GetUnscaledBoxExtent();
+	const FTransform Transform = FloorBounds->GetComponentTransform();
+	for (int32 Corner = 0; Corner < 8; ++Corner)
+	{
+		const FVector Local((Corner & 1) ? Extent.X : -Extent.X,
+			(Corner & 2) ? Extent.Y : -Extent.Y, (Corner & 4) ? Extent.Z : -Extent.Z);
+		if (!Place->ContainsPoint(Transform.TransformPosition(Local))) return false;
+	}
+	return true;
 }
 
 const ATerritoryFloorVolume* ATerritoryFloorVolume::SelectMostSpecificRegion(
@@ -138,10 +156,11 @@ const ATerritoryFloorVolume* ATerritoryFloorVolume::SelectMostSpecificRegion(
 		if (!Candidate || !Candidate->ContainsPoint(WorldLocation)) continue;
 
 		const double CandidateVolume = Candidate->GetFloorBoundsVolume();
+		if (!FMath::IsFinite(CandidateVolume) || CandidateVolume <= 0.0) continue;
 		const FString CandidateGUID = Candidate->FloorVolumeGUID.ToString();
 		if (!Best
 			|| CandidateVolume < BestVolume
-			|| (FMath::IsNearlyEqual(CandidateVolume, BestVolume) && CandidateGUID < BestGUID))
+			|| (CandidateVolume == BestVolume && CandidateGUID < BestGUID))
 		{
 			Best = Candidate;
 			BestVolume = CandidateVolume;

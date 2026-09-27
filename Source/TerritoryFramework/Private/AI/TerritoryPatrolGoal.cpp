@@ -1,5 +1,8 @@
 #include "AI/TerritoryPatrolGoal.h"
 
+#include "AI/NarrativeNPCController.h"
+#include "Core/TerritoryGuardCharacter.h"
+
 UTerritoryPatrolGoal::UTerritoryPatrolGoal(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
@@ -25,4 +28,26 @@ bool UTerritoryPatrolGoal::ShouldCleanup_Implementation() const
 	// Mirrors the scoring gate above so the two cannot disagree. Nothing calls ShouldCleanup
 	// today, so this is the contract a future caller inherits rather than live behaviour.
 	return TerritoryPatrol.Num() < 1;
+}
+
+bool UTerritoryPatrolGoal::DeliverPatrolSpot(int32 PatrolIdx)
+{
+	if (!TerritoryPatrol.IsValidIndex(PatrolIdx))
+	{
+		return false;
+	}
+
+	// The index is resolved against THIS array, because it is the array the patrol Blueprint
+	// indexes with the same value. Asking the guard for a node instead would read the authored
+	// route, which is a different array in a different order once the route is staggered.
+	ATerritoryGuardCharacter* Guard = OwnerController
+		? Cast<ATerritoryGuardCharacter>(OwnerController->GetPawn()) : nullptr;
+	if (!Guard)
+	{
+		// Not a warning: a goal can outlive its pawn during teardown, and the patrol activity
+		// itself is what stops being driven in that case.
+		return false;
+	}
+
+	return Guard->DeliverPatrolSpot(TerritoryPatrol[PatrolIdx]);
 }

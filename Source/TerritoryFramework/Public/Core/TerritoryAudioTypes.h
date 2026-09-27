@@ -25,6 +25,11 @@ struct TERRITORYFRAMEWORK_API FTerritoryStateAudioConfig
 			ToolTip="When enabled, a local player inside this Territory uses the Music Theme below. The most specific configured Place wins over its District and City. This is cosmetic and never changes replicated gameplay state."))
 	bool bOverrideNarrativeMusic = false;
 
+	/** Higher wins between overlapping Territories at the same hierarchy tier. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Audio|Music",
+		meta=(EditCondition="bOverrideNarrativeMusic", ToolTip="Places still take precedence over Districts and Cities. Within the same tier, higher priority wins; ties use smaller bounds then stable Territory identity."))
+	int32 MusicPriority = 0;
+
 	/**
 	 * Optional music library for this state. Empty keeps the active Narrative
 	 * music set and only changes its theme.

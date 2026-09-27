@@ -308,8 +308,8 @@ public:
 	void SetDerivedOwningFaction(const FGameplayTag& NewFaction,
 		const FTerritoryTransitionContext& TransitionContext);
 
-	/** Internal hierarchy reducer path. Aggregate parents never change their children. */
-	void SetDerivedControl(const FGameplayTag& SecuredOwner, ETerritoryState DerivedState,
+	/** Internal hierarchy reducer path. True only when the derived commit completes. */
+	bool SetDerivedControl(const FGameplayTag& SecuredOwner, ETerritoryState DerivedState,
 		const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext());
 
 	/** Valid only while an atomic transition is broadcasting its synchronous event bundle. */
@@ -706,6 +706,12 @@ protected:
 
 	/** Native SaveGame deserialization invalidates even an identical in-flight purchase. */
 	uint64 GetPurchaseLoadGeneration() const { return GarrisonLoadGeneration; }
+	/** A synchronous callback must not continue work from before a save load or destruction. */
+	bool IsGameplayCallbackStateCurrent(uint64 ExpectedLoadGeneration) const
+	{
+		return IsValid(this) && !IsActorBeingDestroyed()
+			&& GarrisonLoadGeneration == ExpectedLoadGeneration;
+	}
 	/** Serializes plugin purchases with state validation and garrison reconciliation. */
 	bool bPurchaseInProgress = false;
 	bool IsGameplayMutationInProgress() const
@@ -886,6 +892,8 @@ private:
 	friend class FTFDefenderNarrativeEventConditions;
 	friend class FTFVolumeRuleCallbacks;
 	friend class FTFTransitionEventReconciliation;
+	friend class FTFTransitionCallbackInvalidation;
+	friend class FTFCityCallbackInvalidation;
 	friend struct FTFTransitionFrameProbe;
 	friend class FTFForcedMutationConditions;
 	friend class FTFFactionStateRulesIntegration;

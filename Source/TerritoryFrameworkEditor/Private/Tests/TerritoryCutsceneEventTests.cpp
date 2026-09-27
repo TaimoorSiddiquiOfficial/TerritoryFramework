@@ -150,6 +150,16 @@ namespace TerritoryCutsceneTests
 
 		~FWorldFixture()
 		{
+			if (UGameInstance* Instance = World->GetGameInstance())
+			{
+				// Added local players initialize subsystems with Slate input processors.
+				// Remove them while their controllers/world still exist so Deinitialize runs.
+				const TArray<ULocalPlayer*> LocalPlayers = Instance->GetLocalPlayers();
+				for (ULocalPlayer* LocalPlayer : LocalPlayers)
+				{
+					Instance->RemoveLocalPlayer(LocalPlayer);
+				}
+			}
 			World->DestroyWorld(false);
 			GEngine->DestroyWorldContext(World);
 		}

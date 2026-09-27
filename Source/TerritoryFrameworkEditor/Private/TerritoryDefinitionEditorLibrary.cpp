@@ -743,6 +743,15 @@ UTerritoryDefinitionEditorLibrary::SynchronizeCityInCurrentLevel(
 				bMoveExistingActorsToDefinitionTransforms, Report);
 			SyncPlaceHelpers(World, Place, PlaceActor, bCreateMissingActors,
 				bMoveExistingActorsToDefinitionTransforms, Report);
+			if (PlaceActor)
+			{
+				const FTerritoryDefinitionSyncReport Floors = SynchronizeFloorsInWorld(World, Place, false);
+				Report.UpdatedActors += Floors.UpdatedActors;
+				Report.UpdatedDefinitions += Floors.UpdatedDefinitions;
+				Report.UpdatedFloorAssignments += Floors.UpdatedFloorAssignments;
+				Report.Errors.Append(Floors.Errors);
+				Report.Warnings.Append(Floors.Warnings);
+			}
 		}
 	}
 

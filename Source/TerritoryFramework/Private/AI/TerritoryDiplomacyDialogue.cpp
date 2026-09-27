@@ -3,6 +3,8 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryVolume.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Tales/Dialogue.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
@@ -133,12 +135,20 @@ TSubclassOf<UDialogue> UTerritoryDiplomacyDialogueComponent::ResolveDialogueForI
 UTerritoryDiplomacyDialogueProfile*
 UTerritoryDiplomacyDialogueComponent::GetDialogueProfileForOwner() const
 {
+	// Guard behavior is authored on the replicated Territory Definition. The
+	// server's transient cache is not populated on clients, and can predate a
+	// streamed owner or a definition replacement. Resolve that authority at use.
+	const ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(GetOwner());
+	const ATerritoryVolume* Territory = Guard ? Guard->GetOwningTerritory() : nullptr;
+	const UTerritoryDefinition* Definition = Territory ? Territory->GetTerritoryDefinition() : nullptr;
+	const auto& Profiles = Definition ? Definition->GuardBehavior.FactionDialogueProfiles : FactionDialogueProfiles;
+	UTerritoryDiplomacyDialogueProfile* Fallback = Definition ? Definition->GuardBehavior.DialogueProfile.Get() : DialogueProfile.Get();
 	const INarrativeTeamAgentInterface* OwnerTeam =
 		Cast<INarrativeTeamAgentInterface>(GetOwner());
 	if (OwnerTeam)
 	{
 		const FGameplayTagContainer OwnerFactions = OwnerTeam->GetFactions();
-		for (const FTerritoryFactionDialogueProfile& Mapping : FactionDialogueProfiles)
+		for (const FTerritoryFactionDialogueProfile& Mapping : Profiles)
 		{
 			if (Mapping.Faction.IsValid() && Mapping.DialogueProfile
 				&& OwnerFactions.HasTagExact(Mapping.Faction))
@@ -147,7 +157,7 @@ UTerritoryDiplomacyDialogueComponent::GetDialogueProfileForOwner() const
 			}
 		}
 	}
-	return DialogueProfile;
+	return Fallback;
 }
 
 UTerritoryDiplomacyInteractable::UTerritoryDiplomacyInteractable(

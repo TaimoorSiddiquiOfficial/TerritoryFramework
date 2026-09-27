@@ -39,6 +39,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	bool bIdentityConfirmed = false;
 
+	/** Reserve reports stop when their real post evidence or protective policy becomes invalid. */
+	UPROPERTY(Transient)
+	bool bRequireDamageReport = false;
+
 	/** Distance in centimetres at which movement considers the destination reached. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth", meta=(ClampMin="10.0", Units="cm"))
 	float AcceptanceRadius = 150.f;
@@ -50,4 +54,5 @@ public:
 
 	virtual FString GetDebugString_Implementation() const override;
 	virtual bool ShouldCleanup_Implementation() const override;
+	virtual float GetGoalScore_Implementation() const override;
 };

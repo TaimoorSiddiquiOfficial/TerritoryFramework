@@ -7,6 +7,7 @@
 
 #include "AssetRegistry/AssetData.h"
 #include "AI/NPCDefinition.h"
+#include "AI/Activities/NPCGoalItem.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Cinematics/TerritoryDialogueShot.h"
@@ -781,7 +782,8 @@ bool FTFBlueprintVehicleSeatsValidation::RunTest(const FString& Parameters)
 
 	Approach.VehicleOccupantCapacity = 6;
 	Definition->CounterAttackApproaches = {Approach};
-	Definition->ApplyToTerritory(Territory);
+	TestEqual(TEXT("The placed cache still has its original capacity before reconstruction"),
+		Territory->GetCounterAttackApproaches()[0].VehicleOccupantCapacity, 4);
 	Errors.Reset();
 	Warnings.Reset();
 	TestTrue(TEXT("A smaller authored seat count remains valid for finite later deployment"),
@@ -795,7 +797,6 @@ bool FTFBlueprintVehicleSeatsValidation::RunTest(const FString& Parameters)
 
 	Approach.VehicleClass = ANarrativeVehicleBase::StaticClass();
 	Definition->CounterAttackApproaches = {Approach};
-	Definition->ApplyToTerritory(Territory);
 	Errors.Reset();
 	Warnings.Reset();
 	TestFalse(TEXT("A vehicle without any mount remains invalid"),
@@ -868,6 +869,104 @@ bool FTFVehicleRoadPreflightIsNonMutating::RunTest(const FString& Parameters)
 		ShapesAfter, ShapesBefore);
 
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFPatrolSpotAuthoringValidation,
+	"TerritoryFramework.Editor.DataValidation.PatrolSpotAuthoring",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFPatrolSpotAuthoringValidation::RunTest(const FString& Parameters)
+{
+	UTerritoryDataValidator* Validator = NewObject<UTerritoryDataValidator>();
+	UTerritoryGuardPostDefinition* Post = NewObject<UTerritoryGuardPostDefinition>();
+	Post->PatrolRoute.SetNum(1);
+	FTerritoryPatrolSpot& Spot = Post->PatrolRoute[0].Spot;
+	const FAssetData AssetData(Post);
+	const TConstArrayView<FAssetData> NoAssociatedAssets;
+	auto ValidatePost = [&](const TCHAR* Assertion, EDataValidationResult Expected)
+	{
+		FDataValidationContext Context(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		TestEqual(Assertion, Validator->ValidateLoadedAsset_Implementation(
+			AssetData, Post, Context), Expected);
+	};
+	ValidatePost(TEXT("Disabled default spot needs no radius or goal class"), EDataValidationResult::Valid);
+	Spot.bEnabled = true;
+	ValidatePost(TEXT("Enabled spot rejects the default zero radius"), EDataValidationResult::Invalid);
+	Spot.SearchRadius = std::numeric_limits<float>::quiet_NaN();
+	ValidatePost(TEXT("Enabled spot rejects a nonfinite radius"), EDataValidationResult::Invalid);
+	Spot.SearchRadius = 500.f;
+	Spot.GoalScore = std::numeric_limits<float>::quiet_NaN();
+	ValidatePost(TEXT("Enabled spot rejects a nonfinite goal score"), EDataValidationResult::Invalid);
+	Spot.GoalScore = 0.f;
+	ValidatePost(TEXT("Enabled spot rejects a zero goal score"), EDataValidationResult::Invalid);
+	Spot.GoalScore = 1.1f;
+	Spot.MaximumVisitSeconds = std::numeric_limits<float>::infinity();
+	ValidatePost(TEXT("Enabled spot rejects an unbounded visit"), EDataValidationResult::Invalid);
+	Spot.MaximumVisitSeconds = 0.f;
+	ValidatePost(TEXT("Enabled spot rejects a zero visit deadline"), EDataValidationResult::Invalid);
+	Spot.MaximumVisitSeconds = 30.f;
+	Spot.SlotIndex = -2;
+	ValidatePost(TEXT("Enabled spot rejects a slot below minus one"), EDataValidationResult::Invalid);
+	Spot.SlotIndex = INDEX_NONE;
+	ValidatePost(TEXT("A standalone reusable spot needs no class filter or territory goal class"),
+		EDataValidationResult::Valid);
+
+	UTerritoryPlaceDefinition* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(
+		TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), false);
+	Definition->DisplayName = FText::FromString(TEXT("Patrol spot fixture"));
+	Definition->StableTerritoryGUID = FGuid::NewGuid();
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	FTerritoryGuardPostTemplate& Row = Definition->GuardPosts.AddDefaulted_GetRef();
+	Row.GuardPostID = TEXT("SpotPost");
+	Row.StableGuardPostGUID = FGuid::NewGuid();
+	Row.ActorClass = ATerritoryGuardSpawnPoint::StaticClass();
+	Row.PatrolRoute.SetNum(1);
+	TArray<FString> Errors, Warnings;
+	auto ValidateDefinition = [&]()
+	{
+		Errors.Reset();
+		Warnings.Reset();
+		UTerritoryDataValidator::ValidateDefinition(Definition, Errors, Warnings);
+	};
+	auto HasError = [&](const TCHAR* Fragment)
+	{
+		return Errors.ContainsByPredicate([Fragment](const FString& Error) { return Error.Contains(Fragment); });
+	};
+	ValidateDefinition();
+	TestFalse(TEXT("No enabled spots means the goal class remains optional"), HasError(TEXT("Spot Interact Goal Class")));
+	Row.PatrolRoute[0].Spot.bEnabled = true;
+	Row.PatrolRoute[0].Spot.SearchRadius = 400.f;
+	ValidateDefinition();
+	TestTrue(TEXT("Enabled template spot requires the territory's goal class"), HasError(TEXT("require a Spot Interact Goal Class")));
+	Definition->GuardBehavior.SpotInteractGoalClass = UNPCGoalItem::StaticClass();
+	ValidateDefinition();
+	TestTrue(TEXT("Unsteerable goal reports its missing provider contract"), HasError(TEXT("ActorToInteractWith")));
+	TestTrue(TEXT("Unsteerable goal reports its missing slot contract"), HasError(TEXT("SlotIdx")));
+
+	UClass* VendorGoalClass = LoadClass<UNPCGoalItem>(nullptr,
+		TEXT("/NarrativePro/Pro/Core/AI/Activities/Interact/Goals/Goal_Interact.Goal_Interact_C"));
+	if (!TestNotNull(TEXT("Installed Narrative interact goal contract"), VendorGoalClass)) return false;
+	Definition->GuardBehavior.SpotInteractGoalClass = VendorGoalClass;
+	ValidateDefinition();
+	TestFalse(TEXT("Vendor goal satisfies both property contracts"), HasError(TEXT("Spot Interact Goal Class")));
+	Row.PatrolRoute[0].Spot.SlotIndex = -2;
+	ValidateDefinition();
+	TestTrue(TEXT("Embedded template spot validates SlotIndex"), HasError(TEXT("SlotIndex")));
+	Row.PatrolRoute[0].Spot.SlotIndex = INDEX_NONE;
+	Row.PatrolRoute[0].Spot.SearchRadius = std::numeric_limits<float>::infinity();
+	ValidateDefinition();
+	TestTrue(TEXT("Manual definition validation rejects an infinite spot radius"), HasError(TEXT("SearchRadius")));
+
+	Row.PatrolRoute.Reset();
+	Row.GuardPostDefinition = Post;
+	Definition->GuardBehavior.SpotInteractGoalClass = nullptr;
+	ValidateDefinition();
+	TestTrue(TEXT("Inherited reusable spots also require the territory goal class"), HasError(TEXT("require a Spot Interact Goal Class")));
+	Spot.bEnabled = false;
+	ValidateDefinition();
+	TestFalse(TEXT("Disabling inherited spots restores optional class behavior"), HasError(TEXT("Spot Interact Goal Class")));
 	return true;
 }
 

@@ -1,6 +1,9 @@
 #include "Cinematics/TerritoryCinematicPresentationSubsystem.h"
 
 #include "AI/NPCDefinition.h"
+#include "Cinematics/NarrativeLevelSequenceActor.h"
+#include "LevelSequence.h"
+#include "LevelSequencePlayer.h"
 #include "Components/LODSyncComponent.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -49,6 +52,31 @@ UTerritoryCinematicPresentationSubsystem::GetForPlayerController(
 	return LocalPlayer
 		? LocalPlayer->GetSubsystem<UTerritoryCinematicPresentationSubsystem>()
 		: nullptr;
+}
+
+bool UTerritoryCinematicPresentationSubsystem::IsInCutscene(
+	const APlayerController* PlayerController, const ULevelSequence* Sequence,
+	bool bIncludePaused)
+{
+	const ANarrativePlayerController* NarrativeController =
+		Cast<ANarrativePlayerController>(PlayerController);
+	if (!IsValid(NarrativeController) || !NarrativeController->GetWorld()
+		|| NarrativeController->GetWorld()->bIsTearingDown) return false;
+
+	for (const TWeakObjectPtr<ANarrativeLevelSequenceActor>& Entry : NarrativeController->CurrentSequences)
+	{
+		const ANarrativeLevelSequenceActor* Actor = Entry.Get();
+		if (!IsValid(Actor) || Actor->IsActorBeingDestroyed()
+			|| Actor->GetWorld() != NarrativeController->GetWorld()) continue;
+		// Native OnPlay adds entries to all authority controllers, including those
+		// outside its explicit audience; OnStop can leave server entries behind.
+		if (!Actor->OwnerControllers.IsEmpty()
+			&& !Actor->OwnerControllers.Contains(PlayerController)) continue;
+		const ULevelSequencePlayer* Player = Actor->GetSequencePlayer();
+		if (Player && (!Sequence || Player->GetSequence() == Sequence)
+			&& (Player->IsPlaying() || (bIncludePaused && Player->IsPaused()))) return true;
+	}
+	return false;
 }
 
 void UTerritoryCinematicPresentationSubsystem::BindToController(

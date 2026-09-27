@@ -59,6 +59,8 @@ namespace
 				!= ETerritoryPostCaptureGarrisonPolicy::AlwaysUnstaffed
 			|| Definition->GuardBehavior.PatrolGoalClass
 				!= DefaultGuardBehavior.PatrolGoalClass
+			|| Definition->GuardBehavior.SpotInteractGoalClass
+				!= DefaultGuardBehavior.SpotInteractGoalClass
 			|| Definition->GuardBehavior.bEnablePatrolCrowdAvoidance
 				!= DefaultGuardBehavior.bEnablePatrolCrowdAvoidance
 			|| !FMath::IsNearlyEqual(

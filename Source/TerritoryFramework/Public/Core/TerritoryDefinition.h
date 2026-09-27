@@ -19,6 +19,7 @@ class ATerritoryVolume;
 class UDialogue;
 class UNarrativeEvent;
 class UNPCDefinition;
+class UNPCGoalItem;
 class UNPCActivityConfiguration;
 class UNarrativeGameplayAbility;
 class UGameplayEffect;
@@ -90,10 +91,19 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPatrolTemplateNode
 		meta=(ClampMin="0.0", Units="s"))
 	float WaitTime = 2.f;
 
-	/** Optional Guard.Activity tag identifying the activity requested at this patrol node. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol",
-		meta=(Categories="Guard.Activity"))
+	/** Reserved metadata. No patrol activity currently consumes this tag. */
+	UPROPERTY(BlueprintReadOnly, Category="Patrol",
+		meta=(Categories="Guard.Activity", DisplayName="Activity Tag (Not Implemented)",
+			ToolTip="Reserved metadata only. No patrol activity currently reads this tag, so setting it does not start an activity."))
 	FGameplayTag ActivityTag;
+
+	/**
+	 * Optional reservable spot at this patrol node. Carried across to the placed guard post
+	 * unchanged: every field describes the search around the node rather than the node's own
+	 * position, so the relative-to-world conversion of RelativeTransform does not apply to it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol")
+	FTerritoryPatrolSpot Spot;
 };
 
 /** Territory-wide behavior applied to every stationary defender spawned for this asset. */
@@ -107,6 +117,21 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
 	/** Narrative goal created for guards that have a patrol route. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol")
 	TSubclassOf<UTerritoryPatrolGoal> PatrolGoalClass;
+
+	/**
+	 * Narrative interact goal a patrol node's Spot is delivered through.
+	 *
+	 * Must be Narrative Pro's own interact goal class (Goal_Interact), not a Territory subclass:
+	 * an activity scores a goal only when its runtime class is EXACTLY the activity's
+	 * SupportedGoalType, because NPC goals are filed under GetClass(). A subclass is filed under a
+	 * different key, is never scored, and would look exactly like a spot that did nothing.
+	 *
+	 * Deliberately left empty by default rather than hardcoded to a vendor asset path. A spot whose
+	 * node enables it while this is unset is reported by name at the node instead of silently
+	 * doing nothing.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol")
+	TSubclassOf<UNPCGoalItem> SpotInteractGoalClass;
 
 	/** Server-side CharacterMovement RVO helps physical guards avoid blocking one another. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Crowd Avoidance")
@@ -278,7 +303,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post")
 	FTransform RelativeTransform = FTransform::Identity;
 
-	/** Guard type, Narrative activity, TriggerSets, reserves, and default patrol policy. */
+	/** Reusable guard profile. Its reserve settings replace the inline reserve defaults below; row Narrative overrides and nonempty relative patrol routes still take precedence. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post")
 	TObjectPtr<UTerritoryGuardPostDefinition> GuardPostDefinition;
 
@@ -306,7 +331,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
 
 	/** Finite replacement guards available at this post, separate from the active guard slot. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
-		meta=(ClampMin="0", UIMin="0", UIMax="10"))
+		meta=(ClampMin="0", UIMin="0", UIMax="10", EditCondition="GuardPostDefinition == nullptr", EditConditionHides))
 	int32 ReserveSlots = 1;
 
 	/** Allow this post to deploy its remaining reserves after a vacancy, subject to ownership and spawn checks. */
@@ -315,27 +340,27 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
 
 	/** Seconds to wait before attempting an automatic reserve deployment. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
-		meta=(ClampMin="0.1", Units="s"))
+		meta=(ClampMin="0.1", Units="s", EditCondition="GuardPostDefinition == nullptr", EditConditionHides))
 	float ReserveSpawnDelay = 3.f;
 
 	/** Seconds between failed automatic reserve placement attempts. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
-		meta=(ClampMin="0.1", Units="s"))
+		meta=(ClampMin="0.1", Units="s", EditCondition="GuardPostDefinition == nullptr", EditConditionHides))
 	float ReserveSpawnRetryInterval = 2.f;
 
 	/** Radius in centimetres around the post in which reserve placement searches for valid navigation. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
-		meta=(ClampMin="100.0", Units="cm"))
+		meta=(ClampMin="100.0", Units="cm", EditCondition="GuardPostDefinition == nullptr", EditConditionHides))
 	float ReserveSpawnRadius = 600.f;
 
 	/** Minimum distance in centimetres between a reserve spawn candidate and player cameras. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
-		meta=(ClampMin="0.0", Units="cm"))
+		meta=(ClampMin="0.0", Units="cm", EditCondition="GuardPostDefinition == nullptr", EditConditionHides))
 	float ReserveMinimumPlayerDistance = 500.f;
 
 	/** Maximum navigation candidates checked during one reserve placement attempt. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Reserve",
-		meta=(ClampMin="1", ClampMax="64"))
+		meta=(ClampMin="1", ClampMax="64", EditCondition="GuardPostDefinition == nullptr", EditConditionHides))
 	int32 ReserveSpawnCandidateCount = 12;
 
 	/** Failed attempts before camera avoidance may relax. The total retry limit still bounds deployment attempts. */

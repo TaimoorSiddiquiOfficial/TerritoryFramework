@@ -6,6 +6,8 @@
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryStealthProfile.h"
+#include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
@@ -88,6 +90,7 @@ void ATerritoryGuardSpawnPoint::PrepareForSave_Implementation()
 void ATerritoryGuardSpawnPoint::Load_Implementation()
 {
 	if (!HasAuthority()) return;
+	ForgetRecentGuardDamage();
 	bLoadedFromSave = true;
 	if (SavedActiveGuardCount > 1 || PendingReserveSpawns > 1)
 	{
@@ -220,6 +223,7 @@ void ATerritoryGuardSpawnPoint::BeginPlay()
 
 void ATerritoryGuardSpawnPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	ForgetRecentGuardDamage();
 	if (ATerritoryVolume* Territory = GetOwningTerritory())
 	{
 		Territory->UnregisterResolvedGuardSpawnPoint(this);
@@ -311,12 +315,11 @@ bool ATerritoryGuardSpawnPoint::ApplyTerritoryDefinition()
 	{
 		SpawnPointGUID = Template->StableGuardPostGUID;
 	}
-	// Note: the route is only repopulated when the row authors one, so re-applying this post
-	// after the row's route was cleared leaves the previous nodes in place. Pre-existing, and
-	// unchanged here on purpose: this apply is additive-only for the route array.
+	// This is a derived copy of the row, including an empty row. Clearing it also restores
+	// the nested GuardPostDefinition fallback or the explicitly opted-in spawn stop.
+	PatrolRoute.Reset(Template->PatrolRoute.Num());
 	if (!Template->PatrolRoute.IsEmpty())
 	{
-		PatrolRoute.Reset(Template->PatrolRoute.Num());
 		for (const FTerritoryGuardPatrolTemplateNode& Source : Template->PatrolRoute)
 		{
 			const FTransform WorldTransform =
@@ -326,6 +329,11 @@ bool ATerritoryGuardSpawnPoint::ApplyTerritoryDefinition()
 			Node.Rotation = WorldTransform.Rotator();
 			Node.WaitTime = FMath::Max(0.f, Source.WaitTime);
 			Node.ActivityTag = Source.ActivityTag;
+			// The spot is node-relative in every field, so it is carried across verbatim: the
+			// world-space conversion above applies to the node's own transform, not to the search
+			// around it. A new field here without this assignment would silently stay default,
+			// which is why the resolver is exercised against a Place row in the tests.
+			Node.Spot = Source.Spot;
 		}
 	}
 	return true;
@@ -408,6 +416,7 @@ void ATerritoryGuardSpawnPoint::SetResolvedTerritory(ATerritoryVolume* Territory
 	{
 		PreviousTerritory->UnregisterResolvedGuardSpawnPoint(this);
 	}
+	ForgetRecentGuardDamage();
 	CachedTerritory = Territory;
 	if (Territory)
 	{
@@ -630,6 +639,73 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard,
 	}
 }
 
+void ATerritoryGuardSpawnPoint::ForgetRecentGuardDamage()
+{
+	RecentDamageSource.Reset();
+	RecentDamageLocation = FVector::ZeroVector;
+	RecentDamageOwner = FGameplayTag();
+	RecentDamageExpiresAt = 0.0;
+}
+
+void ATerritoryGuardSpawnPoint::RememberGuardDamage(
+	ATerritoryGuardCharacter* Witness, AActor* DamageSource)
+{
+	ATerritoryVolume* Territory = GetOwningTerritory();
+	if (!HasAuthority() || !IsValid(Witness) || !Witness->HasAuthority()
+		|| !ActiveGuards.Contains(Witness) || !IsValid(Territory)
+		|| Witness->GetOwningTerritory() != Territory || !GetWorld()
+		|| GetWorld()->bIsTearingDown) return;
+	ForgetRecentGuardDamage();
+	const INarrativeTeamAgentInterface* SourceTeam = Cast<INarrativeTeamAgentInterface>(DamageSource);
+	if (!IsValid(DamageSource) || DamageSource == Witness || DamageSource->IsActorBeingDestroyed()
+		|| DamageSource->GetWorld() != GetWorld() || !SourceTeam
+		|| SourceTeam->GetFactions().IsEmpty() || Witness->GetFactions().HasAnyExact(SourceTeam->GetFactions())) return;
+	const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
+	if (!Profile) Profile = GetDefault<UTerritoryStealthProfile>();
+	if (Profile->MaximumInvestigators <= 0 || !FMath::IsFinite(Profile->InvestigationDuration)
+		|| Profile->InvestigationDuration < 0.5f || Witness->GetActorLocation().ContainsNaN()) return;
+	RecentDamageSource = DamageSource;
+	// A real damage callback identifies the source but is not proof the victim
+	// saw its position. Reinforce the known hit location, never track the shooter.
+	RecentDamageLocation = Witness->GetActorLocation();
+	RecentDamageOwner = Territory->GetOwningFaction();
+	// A report is immediate tactical context, even if a story profile authors a
+	// much longer search. Never keep its live source beyond one minute.
+	RecentDamageExpiresAt = GetWorld()->GetTimeSeconds() + FMath::Min(60.f, Profile->InvestigationDuration);
+}
+
+bool ATerritoryGuardSpawnPoint::HasRecentGuardDamageFrom(const AActor* DamageSource, const ATerritoryGuardCharacter* Receiver) const
+{
+	const ATerritoryVolume* Territory = GetOwningTerritory();
+	return HasAuthority() && !IsActorBeingDestroyed() && GetWorld() && !GetWorld()->bIsTearingDown
+		&& IsValid(Territory) && Territory->IsAvailableForGameplay()
+		&& Territory->GetOwningFaction() == RecentDamageOwner
+		&& IsValid(DamageSource) && !DamageSource->IsActorBeingDestroyed()
+		&& RecentDamageSource.Get() == DamageSource
+		&& (!Receiver || ActiveGuards.ContainsByPredicate([Receiver](const TWeakObjectPtr<ATerritoryGuardCharacter>& Guard) { return Guard.Get() == Receiver; }))
+		&& GetWorld()->GetTimeSeconds() < RecentDamageExpiresAt;
+}
+
+bool ATerritoryGuardSpawnPoint::ApplyRecentGuardDamage(ATerritoryGuardCharacter* Guard)
+{
+	ATerritoryVolume* Territory = GetOwningTerritory();
+	if (!HasAuthority() || !GetWorld() || GetWorld()->bIsTearingDown
+		|| !IsValid(Guard) || !Guard->HasAuthority() || !Guard->IsAlive()
+		|| Guard->IsActorBeingDestroyed() || !ActiveGuards.Contains(Guard)
+		|| !IsValid(Territory) || !Territory->IsAvailableForGameplay()
+		|| Guard->GetOwningTerritory() != Territory
+		|| Guard->OwningTerritorySpawnPoint != this
+		|| !HasRecentGuardDamageFrom(RecentDamageSource.Get())) return false;
+	const float Remaining = static_cast<float>(RecentDamageExpiresAt - GetWorld()->GetTimeSeconds());
+	if (Remaining < 0.5f || !Guard->CanInvestigateRecentGuardDamage(RecentDamageSource.Get())) return false;
+	const UTerritoryStealthProfile* Profile = Territory->GetActiveStealthProfile();
+	if (!Profile) Profile = GetDefault<UTerritoryStealthProfile>();
+	if (Profile->MaximumInvestigators <= 0 || !FMath::IsFinite(Profile->InvestigationDuration)
+		|| Profile->InvestigationDuration < 0.5f) return false;
+	return Guard->RequestTerritoryInvestigation(ETerritoryStealthEvidence::Damage,
+		RecentDamageLocation, FVector::ZeroVector, RecentDamageSource.Get(), false, *Profile, true, Remaining);
+}
+
 void ATerritoryGuardSpawnPoint::QueueReserveSpawn()
 {
 	const int32 FreeSlots = FMath::Max(0, GetEffectiveMaxGuards() - GetActiveGuardCount());
@@ -758,6 +834,19 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 	--CurrentReserveCount;
 	PendingReserveSpawns = FMath::Max(0, PendingReserveSpawns - 1);
 	Territory->RefreshGarrisonSnapshot();
+	// Admission and finite reserve accounting are complete before Narrative can
+	// select an activity or run Blueprint callbacks. The weak callback also lets
+	// the guard's normal next-tick activity initialization finish first.
+	if (IsValid(this) && !IsActorBeingDestroyed() && GetWorld() && !GetWorld()->bIsTearingDown)
+	{
+		for (const TWeakObjectPtr<ATerritoryGuardCharacter>& Guard : ActiveGuards)
+		{
+			GetWorld()->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, Guard]()
+			{
+				ApplyRecentGuardDamage(Guard.Get());
+			}));
+		}
+	}
 	if (ShouldLogGuardSpawning())
 	{
 		UE_LOG(LogTerritory, Log, TEXT("GuardSpawnPoint %s: deployed one reserve (%d remaining, %d pending)"),
@@ -784,6 +873,7 @@ void ATerritoryGuardSpawnPoint::CancelPendingReserveSpawns()
 
 void ATerritoryGuardSpawnPoint::HandleOwnershipTransition(EOwnershipTransitionReason Reason)
 {
+	ForgetRecentGuardDamage();
 	if (!HasAuthority()) return;
 	// P1-03: Only apply reserve ownership policy when ownership actually changes.
 	// InitialSpawn and AdminOverride do not trigger the policy.
@@ -817,6 +907,7 @@ void ATerritoryGuardSpawnPoint::HandleOwnershipTransition(EOwnershipTransitionRe
 void ATerritoryGuardSpawnPoint::ResetReserveState()
 {
 	if (!HasAuthority()) return;
+	ForgetRecentGuardDamage();
 	// The post owns the finite reserve. Rebuilding live registrations is not a refill.
 	InitializeReserves();
 	ActiveGuards.Reset();

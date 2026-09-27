@@ -11,7 +11,13 @@ Zero pauses a goal; a negative score tells Narrative to remove it.
 The shared melee, ranged strafe and grenade activities include this check.
 TDA's three project activities include it too. A project that overrides
 `ScoreGoalItem` without calling these implementations must add the same check.
-The shared assets are saved with UE 5.7 and can also load in UE 5.8.
+The latest melee refactor was saved with UE 5.8. Earlier engine compatibility must
+be verified separately; a resaved asset is not a backwards-compatibility guarantee.
+
+The melee activity now inherits Native BPA_Attack_Melee instead of copying its
+alert/visibility/reachability graph. A close-range preference preserves Native's
+zero, negative and 0.2 unreachable fallback scores. See
+[Modular authoring](39_Modular_Authoring_Workflow.md) for equipment and distance setup.
 
 For an assault NPC, the function uses its existing participant and
 `CanEngageAssaultTarget` rules. Vehicle boarding and travel, an escape mission,

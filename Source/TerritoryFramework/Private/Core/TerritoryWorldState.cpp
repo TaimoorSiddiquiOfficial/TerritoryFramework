@@ -674,6 +674,16 @@ void ATerritoryWorldState::RegisterDefinitionHierarchy(
 			});
 		if (Existing)
 		{
+			// A reused tag is not a GUID migration. Relabelling another durable actor's
+			// row would turn its saved ownership into verified control for this child.
+			// Keep that mismatch visible until an exact actor publication or explicit
+			// migration replaces it. GUID-less legacy rows may still adopt first identity,
+			// and a rename retaining the same GUID still refreshes its tag below.
+			if (Existing->TerritoryGUID.IsValid() && Seed.TerritoryGUID.IsValid()
+				&& Existing->TerritoryGUID != Seed.TerritoryGUID)
+			{
+				return;
+			}
 			// Definition registration is presentation reconciliation, never a second
 			// ownership authority. Preserve the live/saved political snapshot.
 			Existing->TerritoryTag = Seed.TerritoryTag;
@@ -874,10 +884,9 @@ void ATerritoryWorldState::ReconcileUnloadedHierarchy(const TSet<FGameplayTag>* 
 			}
 			Seen.Add(Child->TerritoryTag);
 			const FReplicatedCaptureSummary Row = GetCaptureSummary(Child->TerritoryTag);
-			if (Row.TerritoryTag != Child->TerritoryTag
-				|| Row.TerritoryGUID != Child->StableTerritoryGUID
-				|| Row.ParentTerritoryTag != Parent->TerritoryTag
-				|| Row.HierarchyLevel != GetDefinitionHierarchyLevel(Child))
+			if (!TerritoryHierarchyPolicy::MatchesAuthoredChildIdentity(Child,
+				Parent->TerritoryTag, Row.TerritoryTag, Row.TerritoryGUID,
+				Row.ParentTerritoryTag, Row.HierarchyLevel))
 			{
 				++UnresolvedChildren;
 				continue;
@@ -1106,10 +1115,9 @@ bool ATerritoryWorldState::IsHierarchyReductionComplete(const FGameplayTag& Terr
 			SeenTags.Add(Child->TerritoryTag);
 
 			const FReplicatedCaptureSummary ChildRow = GetCaptureSummary(Child->TerritoryTag);
-			if (ChildRow.TerritoryTag != Child->TerritoryTag
-				|| ChildRow.TerritoryGUID != Child->StableTerritoryGUID
-				|| ChildRow.ParentTerritoryTag != TerritoryTag
-				|| ChildRow.HierarchyLevel != GetDefinitionHierarchyLevel(Child))
+			if (!TerritoryHierarchyPolicy::MatchesAuthoredChildIdentity(Child,
+				TerritoryTag, ChildRow.TerritoryTag, ChildRow.TerritoryGUID,
+				ChildRow.ParentTerritoryTag, ChildRow.HierarchyLevel))
 			{
 				return false;
 			}

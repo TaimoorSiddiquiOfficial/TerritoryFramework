@@ -13,21 +13,22 @@ class UNPCActivityConfiguration;
 class UTriggerSet;
 
 /**
- * Data-oriented guard post configuration — consolidates all guard authoring into one
- * reusable UPrimaryDataAsset. Assign to ATerritoryGuardSpawnPoint::GuardPostDefinition
- * to configure guard type, patrol, reserves, and Narrative overrides in a single asset.
+ * Reusable guard-post profile selected by a Place Definition's Guard Posts row.
+ * Placed spawn actors copy that binding; their transient fields are not another editor setup.
  *
  * Design rationale (AGENTS.md 5.2):
- *   - Spawn-point actors contain transforms + optional definition override reference.
+ *   - Spawn-point actors contain transforms and a Place Definition / Guard Post ID binding.
  *   - They do NOT duplicate all policy data inline.
  *   - Multiple spawn points can share one GuardPostDefinition for consistent behavior.
- *   - Territory-level FactionGuardDefinitions remain the per-faction fallback when no
- *     spawn-point-level definition is assigned.
+ *   - Row NPC/activity/TriggerSet/faction overrides win over this profile, then Place defaults.
+ *   - A nonempty relative row patrol route wins over this profile's world-space route.
+ *   - This profile owns reserve count, delay, retry, radius, camera distance and candidate count
+ *     when assigned; their unused inline defaults are hidden without erasing serialized values.
  *
  * Usage:
  *   1. Create a UTerritoryGuardPostDefinition asset in Content Browser.
  *   2. Set NPCDefinition, patrol route, reserve count, etc.
- *   3. Assign it to one or more ATerritoryGuardSpawnPoint actors via GuardPostDefinition.
+ *   3. Select it in one or more Place Definition Guard Posts rows.
  *   4. SpawnGuards/TrySpawnSingleGuard reads from the data asset when present.
  */
 UCLASS(BlueprintType, Const)

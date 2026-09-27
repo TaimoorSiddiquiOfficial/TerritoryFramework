@@ -2,6 +2,9 @@
 #include "Engine/World.h"
 
 #include "Core/TerritoryStealthTags.h"
+#include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardSpawnPoint.h"
+#include "AI/NarrativeNPCController.h"
 
 UTerritoryInvestigationGoal::UTerritoryInvestigationGoal(
 	const FObjectInitializer& ObjectInitializer)
@@ -47,6 +50,21 @@ FString UTerritoryInvestigationGoal::GetDebugString_Implementation() const
 
 bool UTerritoryInvestigationGoal::ShouldCleanup_Implementation() const
 {
+	if (bRequireDamageReport)
+	{
+		const ATerritoryGuardCharacter* Guard = OwnerController
+			? Cast<ATerritoryGuardCharacter>(OwnerController->GetControlledNPC()) : nullptr;
+		if (!Guard || !Guard->HasAuthority() || !SuspectedSource.IsValid()
+			|| !IsValid(Guard->OwningTerritorySpawnPoint)
+			|| !Guard->OwningTerritorySpawnPoint->HasRecentGuardDamageFrom(SuspectedSource.Get())
+			|| !Guard->CanInvestigateRecentGuardDamage(SuspectedSource.Get())) return true;
+	}
 	return !TerritoryTag.IsValid() || GoalLifetime >= 0.f
 		&& GetGoalAgeSeconds() >= GoalLifetime;
+}
+
+float UTerritoryInvestigationGoal::GetGoalScore_Implementation() const
+{
+	return bRequireDamageReport && ShouldCleanup_Implementation()
+		? -1.f : Super::GetGoalScore_Implementation();
 }

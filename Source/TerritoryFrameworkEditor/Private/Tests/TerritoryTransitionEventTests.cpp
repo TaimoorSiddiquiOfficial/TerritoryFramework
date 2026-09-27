@@ -631,4 +631,132 @@ bool FTFTransitionFrameSaveLoad::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTransitionCallbackInvalidation,
+	"TerritoryFramework.Capture.Regression.NarrativeCallbacksInvalidateStaleTransition",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTransitionCallbackInvalidation::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Callback invalidation world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ON_SCOPE_EXIT { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); };
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	auto* Property = World->SpawnActor<ATerritoryProperty>();
+	Property->SetActorGUID_Implementation(FGuid::NewGuid());
+	auto* Save = World->GetSubsystem<UNarrativeSaveSubsystem>();
+	if (!TestNotNull(TEXT("Narrative save subsystem"), Save)) return false;
+	FNarrativeActorRecord UnclaimedRecord;
+	if (!TestTrue(TEXT("Narrative records the initial campaign state"),
+		Save->CreateActorRecord(Property, UnclaimedRecord))) return false;
+	FTerritoryOwnershipData Claimed = Property->GetOwnershipData();
+	Claimed.State = ETerritoryState::Claimed;
+	Claimed.OwningFaction = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	Claimed.ControlProgress = 1.f;
+	Claimed.DesiredGuardCount = 0;
+	int32 OwnershipEvents = 0;
+	int32 StateEvents = 0;
+	int32 Rewards = 0;
+	int32 TrailingConditions = 0;
+	auto* Probe = NewObject<UTerritoryAuditEventProbe>(Property);
+	Probe->OwnershipCallback = [&]() { ++OwnershipEvents; };
+	Probe->StateCallback = [&](ATerritoryVolume*, ETerritoryState) { ++StateEvents; };
+	Property->OnTerritoryOwnershipChanged.AddDynamic(Probe, &UTerritoryAuditEventProbe::OwnershipChanged);
+	Property->OnTerritoryStateChangedDelegate.AddDynamic(Probe, &UTerritoryAuditEventProbe::StateChanged);
+	auto* RestoreCondition = NewObject<UTerritoryAuditCondition>(Property);
+	RestoreCondition->Callback = [&]() { Save->LoadActorFromRecord(Property, UnclaimedRecord); return true; };
+	auto* RemainingCondition = NewObject<UTerritoryAuditCondition>(Property);
+	RemainingCondition->Callback = [&]() { ++TrailingConditions; return true; };
+	for (bool bEntering : {false, true})
+	{
+		Property->RuntimeStateConfigs.Empty();
+		auto& Rule = Property->RuntimeStateConfigs.FindOrAdd(
+			bEntering ? ETerritoryState::Claimed : ETerritoryState::Unclaimed);
+		(bEntering ? Rule.EntryConditions : Rule.ExitConditions) = {RestoreCondition, RemainingCondition};
+		TestFalse(TEXT("A Narrative reload in entry/exit validation supersedes the proposed claim"),
+			Property->CommitOwnershipData(Claimed));
+		TestFalse(TEXT("A stale candidate never overwrites the restored owner"), Property->GetOwningFaction().IsValid());
+		TestEqual(TEXT("Restored state survives condition evaluation"), Property->GetTerritoryState(), ETerritoryState::Unclaimed);
+		TestEqual(TEXT("Conditions following an invalidating condition do not run"), TrailingConditions, 0);
+	}
+	Property->RuntimeStateConfigs.Empty();
+	auto* RestoreEvent = NewObject<UTerritoryAuditNarrativeEvent>(Property);
+	RestoreEvent->Callback = [&]() { Save->LoadActorFromRecord(Property, UnclaimedRecord); };
+	auto* RewardEvent = NewObject<UTerritoryAuditNarrativeEvent>(Property);
+	RewardEvent->Callback = [&]() { ++Rewards; };
+	Property->RuntimeStateConfigs.FindOrAdd(ETerritoryState::Claimed).EntryEvents = {RestoreEvent, RewardEvent};
+	TestFalse(TEXT("First entry-event reload invalidates the commit result"), Property->CommitOwnershipData(Claimed));
+	TestFalse(TEXT("Entry-event reload preserves the restored owner"), Property->GetOwningFaction().IsValid());
+	TestEqual(TEXT("Remaining reward event does not run after restore"), Rewards, 0);
+	TestEqual(TEXT("No ownership success is broadcast after restore"), OwnershipEvents, 0);
+	TestEqual(TEXT("No state success is broadcast after restore"), StateEvents, 0);
+
+	// Event preconditions are authored callbacks as well; a successful condition
+	// which restores the actor must prevent its event body and the remaining array.
+	RewardEvent->Conditions = {RestoreCondition};
+	Property->RuntimeStateConfigs.FindOrAdd(ETerritoryState::Claimed).EntryEvents = {RewardEvent};
+	TestFalse(TEXT("Reload from an event precondition aborts dispatch"), Property->CommitOwnershipData(Claimed));
+	TestEqual(TEXT("Invalidated event precondition cannot grant a reward"), Rewards, 0);
+	RewardEvent->Conditions.Empty();
+	Property->RuntimeStateConfigs.FindOrAdd(ETerritoryState::Claimed).EntryEvents = {RewardEvent};
+	Property->SetRole(ROLE_SimulatedProxy);
+	TestFalse(TEXT("Client cannot invoke a recovered server transition"), Property->CommitOwnershipData(Claimed));
+	TestEqual(TEXT("Client rejection dispatches no reward"), Rewards, 0);
+	Property->SetRole(ROLE_Authority);
+	TestTrue(TEXT("Invalidation releases the guards for a later valid claim"), Property->CommitOwnershipData(Claimed));
+	TestEqual(TEXT("Recovery grants exactly one reward"), Rewards, 1);
+	TestEqual(TEXT("Recovery broadcasts exactly one ownership result"), OwnershipEvents, 1);
+	TestEqual(TEXT("Recovery broadcasts exactly one state result"), StateEvents, 1);
+
+	// A late listener may restore a campaign after its broadcast has started. We
+	// cannot retract that broadcast, but later bundle stages must not announce it.
+	Property->RuntimeStateConfigs.Empty();
+	Save->LoadActorFromRecord(Property, UnclaimedRecord);
+	Probe->OwnershipCallback = [&]() { ++OwnershipEvents; Save->LoadActorFromRecord(Property, UnclaimedRecord); };
+	TestFalse(TEXT("Reload during the ownership delegate invalidates later stages"), Property->CommitOwnershipData(Claimed));
+	TestEqual(TEXT("No stale state event follows the invalidating ownership delegate"), StateEvents, 1);
+	TestFalse(TEXT("Late delegate restore remains authoritative"), Property->GetOwningFaction().IsValid());
+	Probe->OwnershipCallback = [&]() { ++OwnershipEvents; };
+	RestoreEvent->Callback = [&]() { Property->Destroy(); };
+	Property->RuntimeStateConfigs.FindOrAdd(ETerritoryState::Claimed).EntryEvents = {RestoreEvent, RewardEvent};
+	TestFalse(TEXT("Destroying the actor in its first entry event aborts the commit"), Property->CommitOwnershipData(Claimed));
+	TestEqual(TEXT("No reward event follows destruction"), Rewards, 1);
+	TestEqual(TEXT("No state event follows destruction"), StateEvents, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFCityCallbackInvalidation,
+	"TerritoryFramework.Capture.Regression.CityDoesNotAnnounceInvalidatedDerivedCommit",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFCityCallbackInvalidation::RunTest(const FString& Parameters)
+{
+	FFrameFixture F;
+	if (!BuildLoadedHierarchy(*this, F, true)) return false;
+	ON_SCOPE_EXIT { F.World->DestroyWorld(false); GEngine->DestroyWorldContext(F.World); };
+	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	auto* Save = F.World->GetSubsystem<UNarrativeSaveSubsystem>();
+	FNarrativeActorRecord UnclaimedCity;
+	if (!TestTrue(TEXT("Narrative records the unclaimed City"), Save->CreateActorRecord(F.LoadedCity, UnclaimedCity))) return false;
+	int32 Captures = 0;
+	int32 Rewards = 0;
+	auto* Probe = NewObject<UTerritoryAuditEventProbe>(F.LoadedCity);
+	Probe->CityCaptureCallback = [&]() { ++Captures; };
+	F.LoadedCity->OnCityCapturedDelegate.AddDynamic(Probe, &UTerritoryAuditEventProbe::CityCaptured);
+	auto* Restore = NewObject<UTerritoryAuditNarrativeEvent>(F.LoadedCity);
+	Restore->Callback = [&]() { Save->LoadActorFromRecord(F.LoadedCity, UnclaimedCity); };
+	auto* Reward = NewObject<UTerritoryAuditNarrativeEvent>(F.LoadedCity);
+	Reward->Callback = [&]() { ++Rewards; };
+	F.LoadedCity->RuntimeStateConfigs.FindOrAdd(ETerritoryState::Claimed).EntryEvents = {Restore, Reward};
+	TestTrue(TEXT("The independent child claim still completes"), CommitChildOwner(F, F.Heroes, 0));
+	TestFalse(TEXT("The City's save restore supersedes its derived claim"), F.LoadedCity->GetOwningFaction().IsValid());
+	TestEqual(TEXT("City entry rewards do not continue after restore"), Rewards, 0);
+	TestEqual(TEXT("City-specific capture delegate does not announce a rejected result"), Captures, 0);
+	F.LoadedCity->RuntimeStateConfigs.Empty();
+	F.State->PublishTerritorySummary(F.LoadedPlace);
+	TestEqual(TEXT("A later valid reduction recovers City ownership"), F.LoadedCity->GetOwningFaction(), F.Heroes);
+	TestEqual(TEXT("The verified recovery announces one City capture"), Captures, 1);
+	return true;
+}
+
 #endif

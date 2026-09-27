@@ -513,4 +513,83 @@ bool FTFTerritoryFloorVolumeBlueprintContract::RunTest(const FString& Parameters
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorVolumeScaledSpecificity,
+	"TerritoryFramework.Floors.ScaledSpecificityIsOrderIndependent",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorVolumeScaledSpecificity::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorVolumeTest;
+	FVolumeFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+	Fixture.AuthorFloor(0);
+	Fixture.AuthorFloor(2);
+	ATerritoryFloorVolume* Scaled = Fixture.AddVolume(0, FVector::ZeroVector,
+		FVector(100, 100, 100), LowerGUID);
+	ATerritoryFloorVolume* Small = Fixture.AddVolume(2, FVector::ZeroVector,
+		FVector(200, 200, 200), HigherGUID);
+	if (!TestNotNull(TEXT("Scaled volume"), Scaled) || !TestNotNull(TEXT("Small volume"), Small))
+	{
+		Fixture.TearDown(); return false;
+	}
+	// Local volume says Scaled is smaller; world volume and containment say the opposite.
+	Scaled->SetActorScale3D(FVector(-4, 3, 2));
+	Scaled->SetActorRotation(FRotator(0, 37, 0));
+	TestTrue(TEXT("Mirrored, rotated volume contains the common center"),
+		Scaled->ContainsPoint(FVector::ZeroVector));
+	TestEqual(TEXT("World volume includes the absolute nonuniform scale determinant"),
+		Scaled->GetFloorBoundsVolume(), 192000000.0);
+	TArray<const ATerritoryFloorVolume*> Forward{Scaled, Small};
+	TArray<const ATerritoryFloorVolume*> Reverse{Small, Scaled};
+	TestTrue(TEXT("Physically smaller region wins despite larger local extent"),
+		ATerritoryFloorVolume::SelectMostSpecificRegion(Forward, FVector::ZeroVector) == Small);
+	TestTrue(TEXT("Reversed iteration gives the same region"),
+		ATerritoryFloorVolume::SelectMostSpecificRegion(Reverse, FVector::ZeroVector) == Small);
+	TestEqual(TEXT("Registry uses the same scaled selection as authoring"),
+		Fixture.Registry->GetFloorAtLocation(Fixture.Place, FVector::ZeroVector), 2);
+	Fixture.Registry->UnregisterFloorVolume(Small);
+	TestEqual(TEXT("Remaining broad region answers after stream-out"),
+		Fixture.Registry->GetFloorAtLocation(Fixture.Place, FVector::ZeroVector), 0);
+	Fixture.Registry->RegisterFloorVolume(Small);
+	TestEqual(TEXT("Re-registering restores the more specific floor"),
+		Fixture.Registry->GetFloorAtLocation(Fixture.Place, FVector::ZeroVector), 2);
+	Fixture.TearDown();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryFloorVolumeNearlyEqualSpecificity,
+	"TerritoryFramework.Floors.NearlyEqualVolumesHaveTotalOrdering",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryFloorVolumeNearlyEqualSpecificity::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryFloorVolumeTest;
+	FVolumeFixture Fixture;
+	if (!BuildFixture(Fixture, *this)) { Fixture.TearDown(); return false; }
+	Fixture.AuthorFloor(0);
+	Fixture.AuthorFloor(2);
+	ATerritoryFloorVolume* Larger = Fixture.AddVolume(0, FVector::ZeroVector,
+		FVector(1.0 + 1.e-10, 1, 1), LowerGUID);
+	ATerritoryFloorVolume* Smaller = Fixture.AddVolume(2, FVector::ZeroVector,
+		FVector(1, 1, 1), HigherGUID);
+	if (!TestNotNull(TEXT("Larger volume"), Larger) || !TestNotNull(TEXT("Smaller volume"), Smaller))
+	{
+		Fixture.TearDown(); return false;
+	}
+	TestTrue(TEXT("Regression premise: unequal volumes were considered nearly equal"),
+		Larger->GetFloorBoundsVolume() > Smaller->GetFloorBoundsVolume()
+		&& FMath::IsNearlyEqual(Larger->GetFloorBoundsVolume(), Smaller->GetFloorBoundsVolume()));
+	TArray<const ATerritoryFloorVolume*> Forward{Larger, Smaller};
+	TArray<const ATerritoryFloorVolume*> Reverse{Smaller, Larger};
+	TestTrue(TEXT("Smaller volume wins in forward order"),
+		ATerritoryFloorVolume::SelectMostSpecificRegion(Forward, FVector::ZeroVector) == Smaller);
+	TestTrue(TEXT("GUID cannot override unequal volume in reverse order"),
+		ATerritoryFloorVolume::SelectMostSpecificRegion(Reverse, FVector::ZeroVector) == Smaller);
+	Larger->SetActorScale3D(FVector::ZeroVector);
+	TestTrue(TEXT("Collapsed region cannot displace a usable floor"),
+		ATerritoryFloorVolume::SelectMostSpecificRegion(Forward, FVector::ZeroVector) == Smaller);
+	Fixture.TearDown();
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

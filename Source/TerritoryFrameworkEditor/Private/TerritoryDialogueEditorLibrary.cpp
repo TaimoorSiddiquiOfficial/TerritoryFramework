@@ -1,6 +1,7 @@
 #include "TerritoryDialogueEditorLibrary.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "BlueprintEditorLibrary.h"
 #include "DialogueAssetFactory.h"
 #include "DialogueBlueprint.h"
 #include "EdGraph/EdGraph.h"
@@ -10,6 +11,7 @@
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
 #include "Tales/TerritoryDialogueRecipe.h"
+#include "Tales/TerritoryAmbientDialogue.h"
 #include "Tales/DialogueBlueprintGeneratedClass.h"
 #include "Tales/NarrativeDialogueSettings.h"
 #include "ScopedTransaction.h"
@@ -33,11 +35,16 @@ bool UTerritoryDialogueEditorLibrary::AddDialogueReply(UDialogueBlueprint* Dialo
 	UDialogue* Template = Dialogue ? Dialogue->DialogueTemplate : nullptr;
 	const UDialogue* Defaults = Dialogue && Dialogue->GeneratedClass
 		? Cast<UDialogue>(Dialogue->GeneratedClass->GetDefaultObject()) : nullptr;
+	if (Cast<UTerritoryAmbientDialogue>(Defaults) && Reply.bPlayer)
+	{
+		OutError = FText::FromString(TEXT("Ambient meetings bind two NPC roles and cannot contain player replies."));
+		return false;
+	}
 	if (!Graph || !Graph->GetSchema() || !Template || !Defaults || Reply.ID.IsNone()
 		|| !Reply.Replies.IsEmpty() || Reply.Position.ContainsNaN()
 		|| FMath::Abs(Reply.Position.X) > 1000000.0 || FMath::Abs(Reply.Position.Y) > 1000000.0
 		|| (!Reply.bPlayer && !Defaults->Speakers.ContainsByPredicate([&](const FSpeakerInfo& Speaker)
-			{ return Speaker.SpeakerID == Reply.SpeakerID; })))
+			{ return Speaker.GetSpeakerID() == Reply.SpeakerID; })))
 	{
 		OutError = FText::FromString(TEXT("Choose an existing dialogue, a new reply ID, a configured speaker and valid coordinates. Add outgoing links separately."));
 		return false;
@@ -317,17 +324,38 @@ UDialogueBlueprint* UTerritoryDialogueEditorLibrary::CreateDialogueFromRecipe(
 		OutError = NSLOCTEXT("TerritoryDialogueBuilder", "NativeFactoryFailed", "Narrative could not create the Dialogue Blueprint.");
 		return nullptr;
 	}
+	// Native's factory reads its project default class, ignoring UBlueprintFactory::ParentClass.
+	// Use the supported editor reparent path so generated defaults and virtual dispatch agree.
+	if (BP->ParentClass != Recipe->ParentDialogueClass.Get())
+		UBlueprintEditorLibrary::ReparentBlueprint(BP, Recipe->ParentDialogueClass.Get());
+	if (!BP->GeneratedClass || !BP->GeneratedClass->IsChildOf(Recipe->ParentDialogueClass.Get()))
+	{
+		OutError = FText::FromString(TEXT("Narrative could not compile the requested dialogue parent. The unsaved asset needs review."));
+		return nullptr;
+	}
 	UDialogue* Template = BP->DialogueTemplate;
 	BP->DialogueGraph = FBlueprintEditorUtils::CreateNewGraph(BP, TEXT("DialogueGraph"), GraphClass, SchemaClass);
 	UDialogue* CDO = CastChecked<UDialogue>(BP->GeneratedClass->GetDefaultObject());
-	CDO->Speakers.Reset();
-	for (UNPCDefinition* Definition : Recipe->Speakers)
+	if (auto* Ambient = Cast<UTerritoryAmbientDialogue>(CDO))
 	{
-		FSpeakerInfo Speaker;
-		Speaker.NPCDataAsset = Definition;
-		Speaker.SpeakerID = Definition->NPCID;
-		CDO->Speakers.Add(Speaker);
+		Ambient->FirstRoleID = Recipe->FirstRoleID;
+		Ambient->SecondRoleID = Recipe->SecondRoleID;
+		Ambient->NormalizeMeetingRoles();
 	}
+	else
+	{
+		CDO->Speakers.Reset();
+		for (UNPCDefinition* Definition : Recipe->Speakers)
+		{
+			FSpeakerInfo Speaker;
+			Speaker.NPCDataAsset = Definition;
+			Speaker.SpeakerID = Definition->NPCID;
+			CDO->Speakers.Add(Speaker);
+		}
+	}
+	// Native owns this base-class graph template. Speakers belong to the generated CDO;
+	// nonempty template speakers trigger Native's legacy PostLoad migration over that CDO.
+	Template->Speakers.Reset();
 	TMap<FName, UDialogueNode*> RuntimeNodes;
 	TMap<FName, UEdGraphNode*> GraphNodes;
 	Template->NPCReplies.Reset();
@@ -386,11 +414,36 @@ UDialogueBlueprint* UTerritoryDialogueEditorLibrary::CreateDialogueFromRecipe(
 	FKismetEditorUtilities::CompileBlueprint(BP);
 	const auto* Generated = Cast<UDialogueBlueprintGeneratedClass>(BP->GeneratedClass);
 	const UDialogue* Compiled = Generated ? Generated->GetDialogueTemplate() : nullptr;
-	if (BP->Status == BS_Error || !Compiled || !Compiled->RootDialogue
+	if (BP->Status == BS_Error || !Generated || !Generated->IsChildOf(Recipe->ParentDialogueClass.Get())
+		|| !Compiled || !Compiled->RootDialogue
 		|| Compiled->GetNodes().Num() != Recipe->Nodes.Num())
 	{
 		OutError = NSLOCTEXT("TerritoryDialogueBuilder", "CompilationFailed", "Native dialogue compilation or node preservation failed. The unsaved asset needs review.");
 		return nullptr;
+	}
+	if (Recipe->UsesAmbientRoles())
+	{
+		const auto* Ambient = Cast<UTerritoryAmbientDialogue>(Generated->GetDefaultObject());
+		FString Failure;
+		if (!Ambient || Ambient->FirstRoleID != Recipe->FirstRoleID || Ambient->SecondRoleID != Recipe->SecondRoleID
+			|| !UTerritoryAmbientDialogue::ValidateDialogueClass(BP->GeneratedClass.Get(), Failure))
+		{
+			OutError = FText::FromString(FString::Printf(TEXT("Ambient role compilation failed: %s. The unsaved asset needs review."), *Failure));
+			return nullptr;
+		}
+	}
+	else
+	{
+		const UDialogue* CompiledDefaults = Cast<UDialogue>(Generated->GetDefaultObject());
+		bool bSpeakersPreserved = CompiledDefaults && CompiledDefaults->Speakers.Num() == Recipe->Speakers.Num();
+		for (int32 Index = 0; bSpeakersPreserved && Index < Recipe->Speakers.Num(); ++Index)
+			bSpeakersPreserved = CompiledDefaults->Speakers[Index].NPCDataAsset == Recipe->Speakers[Index]
+				&& CompiledDefaults->Speakers[Index].GetSpeakerID() == Recipe->Speakers[Index]->NPCID;
+		if (!bSpeakersPreserved)
+		{
+			OutError = FText::FromString(TEXT("Native compilation did not preserve the configured NPC Definition speakers. The unsaved asset needs review."));
+			return nullptr;
+		}
 	}
 	FAssetRegistryModule::AssetCreated(BP);
 	BP->MarkPackageDirty();

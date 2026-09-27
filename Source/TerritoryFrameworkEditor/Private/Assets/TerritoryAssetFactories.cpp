@@ -7,6 +7,7 @@
 #include "Combat/TerritoryFloorCombatPolicy.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryFloorVolume.h"
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
@@ -25,6 +26,8 @@
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "Tales/TerritorySituationCondition.h"
 #include "Tales/TerritoryDialogueRecipe.h"
+#include "Social/TerritoryConversationProfile.h"
+#include "Social/TerritoryConversationMeetingPoint.h"
 
 #define LOCTEXT_NAMESPACE "TerritoryAssetFactories"
 
@@ -129,6 +132,11 @@ UTerritorySituationProfileFactory::UTerritorySituationProfileFactory()
 UTerritoryDialogueRecipeFactory::UTerritoryDialogueRecipeFactory()
 {
 	InitializeFor(UTerritoryDialogueRecipe::StaticClass());
+}
+
+UTerritoryConversationProfileFactory::UTerritoryConversationProfileFactory()
+{
+	InitializeFor(UTerritoryConversationProfile::StaticClass());
 }
 
 FString UTerritoryQuestCascadeRecipeFactory::GetDefaultNewAssetName() const
@@ -237,6 +245,26 @@ UTerritoryGuardSpawnPointBlueprintFactory::UTerritoryGuardSpawnPointBlueprintFac
 		LOCTEXT("TerritoryGuardSpawnPointBlueprintTip",
 			"Creates a definition-bound spawn and patrol slot for defenders or counterattack staging."),
 		LOCTEXT("TerritoryCombatActorSubMenu", "Guard & Combat Actors"));
+}
+
+UTerritoryFloorVolumeBlueprintFactory::UTerritoryFloorVolumeBlueprintFactory()
+{
+	InitializeBlueprintFor(
+		ATerritoryFloorVolume::StaticClass(),
+		LOCTEXT("TerritoryFloorVolumeBlueprint", "Territory Floor Volume Blueprint"),
+		LOCTEXT("TerritoryFloorVolumeBlueprintTip",
+			"Creates floor geometry. Place the box inside a Place and use Detect & Sync Floors to bind it and assign contained posts. Quotas and events stay in the Place Definition."),
+		LOCTEXT("TerritoryWorldActorSubMenu", "World Actors"));
+}
+
+UTerritoryConversationMeetingPointBlueprintFactory::UTerritoryConversationMeetingPointBlueprintFactory()
+{
+	InitializeBlueprintFor(
+		ATerritoryConversationMeetingPoint::StaticClass(),
+		LOCTEXT("TerritoryConversationMeetingPointBlueprint", "Territory Conversation Meeting Point Blueprint"),
+		LOCTEXT("TerritoryConversationMeetingPointBlueprintTip",
+			"Creates a Place-bound two-guard meeting point. Assign a Conversation Profile and explicitly supply the listening player's Tales component when starting the meeting."),
+		LOCTEXT("TerritoryInteractionActorSubMenu", "Interaction & Navigation Actors"));
 }
 
 UTerritoryStoryOwnerSpawnerBlueprintFactory::UTerritoryStoryOwnerSpawnerBlueprintFactory()

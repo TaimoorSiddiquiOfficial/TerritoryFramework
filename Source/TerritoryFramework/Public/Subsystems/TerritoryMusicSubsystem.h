@@ -10,6 +10,7 @@
 class ATerritoryVolume;
 class UNarrativeMusicSubsystem;
 class UTaggedMusicSet;
+class UAudioComponent;
 
 /**
  * Client-cosmetic bridge from replicated Territory state to Narrative Music.
@@ -67,6 +68,7 @@ public:
 private:
 	friend class FTFTerritoryMusicObservationTransitions;
 	friend class FTFTerritoryMusicRequestLifecycle;
+	friend class FTFTerritoryMusicOverlapPriority;
 
 	struct FStateSoundRequest
 	{
@@ -75,7 +77,8 @@ private:
 	};
 
 	AActor* ResolveLocalListener() const;
-	ATerritoryVolume* ResolveMusicTerritory(const FVector& ListenerLocation) const;
+	ATerritoryVolume* ResolveMusicTerritory(const FVector& ListenerLocation,
+		bool bRequireMusicRule = true) const;
 	const FTerritoryStateAudioConfig* FindStateAudio(
 		const ATerritoryVolume* Territory, ETerritoryState State) const;
 	TArray<FStateSoundRequest> RefreshObservedTerritory(ATerritoryVolume* NewTerritory);
@@ -85,9 +88,13 @@ private:
 	void ReleaseMusicRule();
 	void MaintainMusicRule();
 	void ClearBaselineRestoration();
-	void PlayStateSound(const TSoftObjectPtr<class USoundBase>& Sound,
-		const FTerritoryStateAudioConfig& Config) const;
+	void PlayStateSounds(TArray<FStateSoundRequest> Sounds);
+	void StopStateSounds();
+	UFUNCTION()
+	void HandleStateSoundFinished();
+	void HandleWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
 	void ResetForWorld(UWorld* NewWorld);
+	TSoftObjectPtr<UTaggedMusicSet> ResolveDefaultMusicSet() const;
 
 	UNarrativeMusicSubsystem* GetNarrativeMusic() const;
 	static bool SetNarrativeTheme(UNarrativeMusicSubsystem* Music,
@@ -124,9 +131,21 @@ private:
 	bool bOwnsMusicRule = false;
 	bool bThemeApplyPending = false;
 	bool bThemeAppliedByTerritory = false;
+	FGameplayTag RequestSourceTheme;
+	FGameplayTag SupersededQueuedTheme;
+	TSoftObjectPtr<UTaggedMusicSet> RequestSourceMusicSet;
+	TSoftObjectPtr<UTaggedMusicSet> DesiredMusicSet;
 	bool bRestoringBaseline = false;
 	bool bBaselineThemeRequested = false;
 	FGameplayTag RestoreSourceTheme;
 	TSoftObjectPtr<UTaggedMusicSet> RestoreSourceMusicSet;
+	FGameplayTag ReleasedQueuedTheme;
+	bool bWaitingForReleasedTheme = false;
 	bool bAutomaticMusicEnabled = true;
+
+	/** Only Territory state cues use this component. Narrative/voice retain their own components. */
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> StateSoundComponent;
+	TArray<FStateSoundRequest> StateSoundQueue;
+	FDelegateHandle WorldCleanupHandle;
 };

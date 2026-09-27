@@ -4,6 +4,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Tales/TerritoryConditionGroup.h"
+#include "Tales/TerritoryCutsceneCondition.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryInterfaces.h"
@@ -5000,6 +5001,7 @@ bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 {
 	const TArray<UClass*> ExpectedConditions = {
 		UTerritoryConditionGroup::StaticClass(),
+		UTerritoryCutsceneCondition::StaticClass(),
 		UTerritorySituationCondition::StaticClass(),
 		UTerritoryCaptureEligibilityCondition::StaticClass(),
 		UTerritoryDiplomacyCondition::StaticClass(),

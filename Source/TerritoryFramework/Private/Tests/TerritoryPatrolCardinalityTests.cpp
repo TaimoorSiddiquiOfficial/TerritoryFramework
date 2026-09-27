@@ -4,6 +4,7 @@
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
+#include "Core/TerritoryDefinition.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 
@@ -136,6 +137,59 @@ bool FTFPatrolRouteCardinality::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A multi-stop post stays a multi-stop post when opted in"),
 		Post->HasMultiStopPatrolRoute());
 
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFPatrolRouteReapply,
+	"TerritoryFramework.Guards.Regression.ReapplyClearedPatrolRoute",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFPatrolRouteReapply::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Route reapply world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	ATerritoryGuardSpawnPoint* Post = World->SpawnActor<ATerritoryGuardSpawnPoint>();
+	if (!TestNotNull(TEXT("Guard post"), Post))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	Post->SetActorTransform(FTransform(FRotator(0.f, 90.f, 0.f), FVector(100.f, 200.f, 30.f)));
+	UTerritoryPlaceDefinition* Place = NewObject<UTerritoryPlaceDefinition>();
+	FTerritoryGuardPostTemplate& Row = Place->GuardPosts.AddDefaulted_GetRef();
+	Row.GuardPostID = TEXT("RouteReapply");
+	FTerritoryGuardPatrolTemplateNode& Node = Row.PatrolRoute.AddDefaulted_GetRef();
+	Node.RelativeTransform = FTransform(FVector(300.f, 0.f, 0.f));
+	Node.Spot.bEnabled = true;
+	Node.Spot.SearchRadius = 100.f;
+	Post->SetDefinitionBinding(Place, Row.GuardPostID);
+	TestTrue(TEXT("The authored row applies"), Post->ApplyTerritoryDefinition());
+	if (TestEqual(TEXT("The row contributes one patrol node"), Post->GetPatrolRoute().Num(), 1))
+	{
+		TestTrue(TEXT("The relative node uses the placed post transform"),
+			Post->GetPatrolRoute()[0].Location.Equals((Node.RelativeTransform * Post->GetActorTransform()).GetLocation(), 0.01f));
+		TestTrue(TEXT("The row's enabled spot is copied"), Post->GetPatrolRoute()[0].Spot.bEnabled);
+	}
+	Row.PatrolRoute.Reset();
+	TestTrue(TEXT("The cleared row applies"), Post->ApplyTerritoryDefinition());
+	TestEqual(TEXT("Clearing the row removes stale nodes and spots"), Post->GetPatrolRoute().Num(), 0);
+	TestFalse(TEXT("No implicit duty appears without opt-in"), Post->HasAnyPatrolDuty());
+	Row.bUseSpawnTransformAsPatrolStop = true;
+	Post->ApplyTerritoryDefinition();
+	TestTrue(TEXT("A cleared row allows the opted-in spawn stop"), Post->HasImplicitPatrolStop());
+	UTerritoryGuardPostDefinition* Nested = NewObject<UTerritoryGuardPostDefinition>();
+	Nested->PatrolRoute.AddDefaulted_GetRef().Location = FVector(4000.f, 5000.f, 0.f);
+	Row.GuardPostDefinition = Nested;
+	Post->ApplyTerritoryDefinition();
+	if (TestEqual(TEXT("A cleared row restores the nested definition route"), Post->GetPatrolRoute().Num(), 1))
+	{
+		TestTrue(TEXT("The fallback contains the nested node rather than stale row data"),
+			Post->GetPatrolRoute()[0].Location.Equals(Nested->PatrolRoute[0].Location));
+		TestFalse(TEXT("The removed row spot does not leak into the nested route"), Post->GetPatrolRoute()[0].Spot.bEnabled);
+	}
+	TestFalse(TEXT("The nested route suppresses the implicit stop"), Post->HasImplicitPatrolStop());
 	World->DestroyWorld(false);
 	return true;
 }

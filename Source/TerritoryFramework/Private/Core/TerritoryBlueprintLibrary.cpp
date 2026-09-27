@@ -1,4 +1,5 @@
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Combat/TerritoryCombatTargetPolicy.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
@@ -376,32 +377,7 @@ FText UTerritoryBlueprintLibrary::GetFriendlyTagDisplayName(const FGameplayTag& 
 bool UTerritoryBlueprintLibrary::CanScoreTerritoryCombatGoal(
 	const ANarrativeNPCController* OwnerController, const UNPCGoalItem* Goal)
 {
-	if (!IsValid(OwnerController) || !OwnerController->HasAuthority()
-		|| OwnerController->IsActorBeingDestroyed() || !IsValid(Goal)
-		|| Goal->OwnerController != OwnerController) return false;
-
-	// A controller driving a Narrative vehicle is not currently controlling an
-	// on-foot combatant. Do not use GetOwnedNPC(), which also returns the driver.
-	const ANarrativeNPCCharacter* NPC = OwnerController->GetControlledNPC();
-	const AActor* Target = Cast<AActor>(Goal->GetGoalKey());
-	if (!IsValid(NPC) || !NPC->HasAuthority() || !NPC->IsAlive()
-		|| NPC->IsActorBeingDestroyed() || !IsValid(Target) || Target == NPC
-		|| Target->IsActorBeingDestroyed() || Target->GetWorld() != NPC->GetWorld()) return false;
-	if (const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(Target);
-		Character && !Character->IsAlive()) return false;
-
-	if (const ATerritoryAssaultCharacter* Assault = Cast<ATerritoryAssaultCharacter>(NPC))
-	{
-		const UTerritoryAssaultParticipantComponent* Participant = Assault->AssaultParticipant;
-		return Participant && !Participant->HasRetired()
-			&& IsValid(Participant->GetTargetTerritory())
-			&& Assault->CanEngageAssaultTarget(Target);
-	}
-	if (const ATerritoryGuardCharacter* Guard = Cast<ATerritoryGuardCharacter>(NPC))
-	{
-		return Guard->CanEngageTerritoryTarget(Target);
-	}
-	return true;
+	return TerritoryCombatTargetPolicy::ResolveEligibleTarget(OwnerController, Goal) != nullptr;
 }
 
 bool UTerritoryBlueprintLibrary::CanSafelyRefreshPerceivedActors(

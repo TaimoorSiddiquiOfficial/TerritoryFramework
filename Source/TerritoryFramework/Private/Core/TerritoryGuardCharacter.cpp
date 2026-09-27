@@ -14,6 +14,10 @@
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "AI/TerritoryPatrolGoal.h"
+#include "AI/NarrativeActorProvider_InteractableSpot.h"
+#include "Interaction/InteractableComponent.h"
+#include "Interaction/InteractionComponent.h"
+#include "Interaction/NPCInteractionComponent.h"
 #include "AI/TerritoryNarrativeDeathSupport.h"
 #include "AI/TerritoryNPCController.h"
 #include "AI/TerritoryContextualAnimComponent.h"
@@ -38,6 +42,8 @@
 #include "NarrativeArsenal.h"
 #include "Tales/TriggerSet.h"
 #include "Net/UnrealNetwork.h"
+#include "NarrativeActorProvider.h"
+#include "UObject/UnrealType.h"
 #include "TimerManager.h"
 #include "GameFramework/DamageType.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -239,6 +245,7 @@ void ATerritoryGuardCharacter::ApplyGuardBehaviorFromTerritoryDefinition()
 
 	const FTerritoryGuardBehaviorTemplate& Behavior = Definition->GuardBehavior;
 	PatrolGoalClass = Behavior.PatrolGoalClass;
+	SpotInteractGoalClass = Behavior.SpotInteractGoalClass;
 	bEnablePatrolCrowdAvoidance = Behavior.bEnablePatrolCrowdAvoidance;
 	PatrolAvoidanceConsiderationRadius = FMath::Max(
 		100.f, Behavior.PatrolAvoidanceConsiderationRadius);
@@ -285,6 +292,21 @@ bool ATerritoryGuardCharacter::CanEngageTerritoryTarget(const AActor* Target) co
 }
 
 bool ATerritoryGuardCharacter::EvaluateTerritoryTarget(const AActor* Target, FText& OutReason) const
+{
+	return EvaluateTerritoryTargetInternal(Target, OutReason, false);
+}
+
+bool ATerritoryGuardCharacter::CanInvestigateRecentGuardDamage(const AActor* Source) const
+{
+	FText Reason;
+	return IsValid(OwningTerritorySpawnPoint)
+		&& OwningTerritorySpawnPoint->GetOwningTerritory() == GetOwningTerritory()
+		&& OwningTerritorySpawnPoint->HasRecentGuardDamageFrom(Source, this)
+		&& EvaluateTerritoryTargetInternal(Source, Reason, true);
+}
+
+bool ATerritoryGuardCharacter::EvaluateTerritoryTargetInternal(const AActor* Target,
+	FText& OutReason, bool bDamageReport) const
 {
 	// Every exit below returns through this lambda, so this is the ONE place the decision can be
 	// written to the log - not thirteen. That matters for diagnosis rather than tidiness: the
@@ -349,6 +371,14 @@ bool ATerritoryGuardCharacter::EvaluateTerritoryTarget(const AActor* Target, FTe
 	if (Behavior && !Behavior->CombatTargetFactions.IsEmpty()
 		&& !TargetFactions.HasAnyExact(Behavior->CombatTargetFactions))
 		return Result(false, TEXT("The target does not match the authored combat faction filter."));
+	if (bDamageReport)
+	{
+		if (Behavior && !Behavior->bAllowPersonalRetaliation)
+			return Result(false, TEXT("The Place disables response to personal attacks."));
+		FText FloorReason;
+		if (IsFloorSeparationRefused(Target, FloorReason)) return Result(false, *FloorReason.ToString());
+		return Result(true, TEXT("A live post damage report permits investigating the hit location, not combat or target acquisition."));
+	}
 	if ((!Behavior || Behavior->bAllowPersonalRetaliation) && ShouldBeAggressiveTowardsTarget(Target))
 		return Result(true, TEXT("Narrative personal hostility allows local self-defence. Capture and diplomacy are unchanged."));
 	if (!Diplomacy->AreAnyFactionsAtWar(GuardFactions, TargetFactions))
@@ -452,7 +482,8 @@ bool ATerritoryGuardCharacter::IsFloorSeparationRefused(const AActor* Target, FT
 bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(
 	ETerritoryStealthEvidence Evidence, const FVector& InvestigationLocation,
 	const FVector& EstimatedSourceDirection, AActor* SuspectedSource,
-	bool bIdentityConfirmed, const UTerritoryStealthProfile& StealthProfile)
+	bool bIdentityConfirmed, const UTerritoryStealthProfile& StealthProfile,
+	bool bRequireDamageReport, float MaximumLifetime)
 {
 	if (!HasAuthority() || !IsValid(OwningTerritory)
 		|| Evidence == ETerritoryStealthEvidence::None)
@@ -465,7 +496,25 @@ bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(
 		if (ASC->IsDead()) return false;
 	}
 	UNPCActivityComponent* ActivityComponent = GetActivityComponent();
-	if (!ActivityComponent) return false;
+	ANarrativeNPCController* GuardController = Cast<ANarrativeNPCController>(GetController());
+	if (!ActivityComponent || !GuardController || GuardController->GetPawn() != this) return false;
+	const TWeakObjectPtr<ATerritoryGuardCharacter> ExpectedGuard(this);
+	const TWeakObjectPtr<ATerritoryVolume> ExpectedTerritory(OwningTerritory);
+	const TWeakObjectPtr<ATerritoryGuardSpawnPoint> ExpectedPost(OwningTerritorySpawnPoint);
+	const TWeakObjectPtr<ANarrativeNPCController> ExpectedController(GuardController);
+	const TWeakObjectPtr<UNPCActivityComponent> ExpectedComponent(ActivityComponent);
+	const TWeakObjectPtr<AActor> ExpectedSource(SuspectedSource);
+	const auto ContextStillValid = [&]()
+	{
+		return ExpectedGuard.IsValid() && !IsActorBeingDestroyed() && HasAuthority() && IsAlive()
+			&& ExpectedTerritory.IsValid() && GetOwningTerritory() == ExpectedTerritory.Get()
+			&& OwningTerritorySpawnPoint == ExpectedPost.Get()
+			&& ExpectedController.IsValid() && GetController() == ExpectedController.Get()
+			&& ExpectedController->GetPawn() == this && ExpectedComponent.IsValid()
+			&& GetActivityComponent() == ExpectedComponent.Get()
+			&& (!bRequireDamageReport || CanInvestigateRecentGuardDamage(ExpectedSource.Get()));
+	};
+	if (!ContextStillValid()) return false;
 
 	TSubclassOf<UTerritoryInvestigationActivity> ActivityClass =
 		StealthProfile.InvestigationActivityClass;
@@ -482,6 +531,7 @@ bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(
 	UObject* GoalKey = SuspectedSource
 		? static_cast<UObject*>(SuspectedSource)
 		: static_cast<UObject*>(OwningTerritory.Get());
+	if (!ContextStillValid()) return false;
 	bool bFoundExisting = false;
 	UTerritoryInvestigationGoal* Goal = Cast<UTerritoryInvestigationGoal>(
 		ActivityComponent->GetGoalByKey(
@@ -495,15 +545,34 @@ bool ATerritoryGuardCharacter::RequestTerritoryInvestigation(
 	}
 	Goal->Refresh(OwningTerritory->GetTerritoryTag(), Evidence,
 		InvestigationLocation, EstimatedSourceDirection, SuspectedSource,
-		bIdentityConfirmed, StealthProfile.InvestigationDuration,
+		bIdentityConfirmed, MaximumLifetime >= 0.f
+			? FMath::Min(StealthProfile.InvestigationDuration, MaximumLifetime)
+			: StealthProfile.InvestigationDuration,
 		StealthProfile.InvestigationAcceptanceRadius);
+	Goal->bRequireDamageReport = bRequireDamageReport;
 	if (!bFoundExisting)
 	{
 		Goal = Cast<UTerritoryInvestigationGoal>(
 			ActivityComponent->AddGoal(Goal, false));
 		if (!Goal) return false;
 	}
+	// Native AddGoal(false) still selects higher-scoring goals and invokes Blueprint
+	// callbacks. A non-null return does not prove the owner and admission survived.
+	const auto GoalStillAdmitted = [&]()
+	{
+		return ContextStillValid() && IsValid(Goal)
+			&& Goal->OwnerController == ExpectedController.Get()
+			&& ExpectedComponent->GetGoals(UTerritoryInvestigationGoal::StaticClass()).Goals.Contains(Goal);
+	};
+	const auto RemoveRejectedGoal = [&]()
+	{
+		if (ExpectedComponent.IsValid() && IsValid(Goal)
+			&& ExpectedComponent->GetGoals(UTerritoryInvestigationGoal::StaticClass()).Goals.Contains(Goal))
+			ExpectedComponent->RemoveGoal(Goal);
+	};
+	if (!GoalStillAdmitted()) { RemoveRejectedGoal(); return false; }
 	ActivityComponent->PerformActivitySelection(true);
+	if (!GoalStillAdmitted()) { RemoveRejectedGoal(); return false; }
 	return true;
 }
 
@@ -537,10 +606,16 @@ void ATerritoryGuardCharacter::HandleNarrativeDamagedBy(
 		|| DamageCauserASC == GetNarrativeAbilitySystemComponent())
 	{
 		LastDamagingInstigator.Reset();
+		if (IsValid(OwningTerritorySpawnPoint))
+			OwningTerritorySpawnPoint->RememberGuardDamage(this, nullptr);
 	}
 	else
 	{
 		LastDamagingInstigator = DamageInstigator;
+		// A replacement may arrive after this guard has died. Retain the real hit's
+		// reported position at its post; never query the source's new position later.
+		if (IsValid(OwningTerritorySpawnPoint))
+			OwningTerritorySpawnPoint->RememberGuardDamage(this, DamageInstigator);
 		if (IsValid(OwningTerritory) && DamageInstigator->GetWorld() == GetWorld())
 			if (UTerritoryDisguiseSubsystem* Disguises = GetWorld()->GetSubsystem<UTerritoryDisguiseSubsystem>())
 				Disguises->ProcessStealthEvidence(DamageInstigator, OwningTerritory, this,
@@ -613,6 +688,8 @@ void ATerritoryGuardCharacter::BeginPlay()
 
 void ATerritoryGuardCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	TGuardValue<bool> DeliveryGuard(bDeliveringTerritorySpotGoal, true);
+	if (HasAuthority()) ClearTerritorySpotGoal();
 	// Catch goals created during deferred cleanup, and direct stream-out/destruction.
 	TerritoryNarrativeDeathSupport::DetachTargetGoals(*this);
 	GetWorldTimerManager().ClearTimer(DefaultWeaponWieldTimer);
@@ -1244,4 +1321,219 @@ bool ATerritoryGuardCharacter::InitializeTerritoryPatrolGoal()
 	NewGoal->bRemoveOnSucceeded = false;
 	TerritoryPatrolGoal = Cast<UTerritoryPatrolGoal>(ActivityComponent->AddGoal(NewGoal, true));
 	return IsValid(TerritoryPatrolGoal);
+}
+
+namespace
+{
+	/**
+	 * Aims a Narrative Pro interact goal at a resolved spot.
+	 *
+	 * `ActorToInteractWith` and `SlotIdx` are Blueprint-local variables on the vendor's
+	 * Goal_Interact, so there is no C++ declaration to write against and they are reached by name.
+	 * Only the LOOKUP is reflective: the property's value type is the real C++ FInstancedActorProvider
+	 * and a real int, so both writes are typed. A missing or wrongly-typed property is reported by
+	 * name — silently skipping the write would leave a goal that is scored but never steered, which
+	 * is indistinguishable from a spot that resolved nothing.
+	 */
+	bool AimInteractGoalAtSpot(UNPCGoalItem* Goal,
+		UNarrativeActorProvider* Provider, int32 SlotToPin)
+	{
+		FStructProperty* ProviderProperty =
+			FindFProperty<FStructProperty>(Goal->GetClass(), TEXT("ActorToInteractWith"));
+		if (!ProviderProperty || ProviderProperty->Struct != FInstancedActorProvider::StaticStruct())
+		{
+			UE_LOG(LogTerritory, Error,
+				TEXT("Interact goal %s does not expose an InstancedActorProvider named "
+					 "ActorToInteractWith, so a patrol spot cannot steer it. The vendor goal's "
+					 "property was renamed or retyped rather than merely left unset."),
+				*Goal->GetClass()->GetName());
+			return false;
+		}
+
+		FIntProperty* SlotProperty = FindFProperty<FIntProperty>(Goal->GetClass(), TEXT("SlotIdx"));
+		if (!SlotProperty)
+		{
+			UE_LOG(LogTerritory, Error,
+				TEXT("Interact goal %s does not expose an integer SlotIdx; the patrol spot was not delivered."),
+				*Goal->GetClass()->GetName());
+			return false;
+		}
+		ProviderProperty->ContainerPtrToValuePtr<FInstancedActorProvider>(Goal)->Provider = Provider;
+		SlotProperty->SetPropertyValue_InContainer(Goal, SlotToPin);
+		return true;
+	}
+}
+
+void ATerritoryGuardCharacter::ClearTerritorySpotGoal()
+{
+	UNPCGoalItem* PreviousGoal = TerritorySpotGoal;
+	// RemoveGoal calls Blueprint and can trigger an activity switch. Drop our cache first so
+	// reentrant cleanup cannot remove another delivery or recurse through the same goal.
+	TerritorySpotGoal = nullptr;
+	if (IsValid(PreviousGoal))
+	{
+		if (UNPCActivityComponent* ActivityComponent = GetActivityComponent())
+		{
+			// Narrative RemoveGoal erases the key even when the passed object is not registered.
+			// Never remove a different system's goal that happens to have the same interactable key.
+			if (ActivityComponent->GetGoals(PreviousGoal->GetClass()).Goals.Contains(PreviousGoal))
+			{
+				ActivityComponent->RemoveGoal(PreviousGoal);
+			}
+		}
+	}
+}
+
+bool ATerritoryGuardCharacter::DeliverPatrolSpot(const FTerritoryPatrolNode& Node)
+{
+	if (!HasAuthority() || bDeliveringTerritorySpotGoal)
+	{
+		return false;
+	}
+	// The caller may pass an element in a goal's route array. Removal can run Blueprint and
+	// rebuild that route, so retain values before invoking any activity callbacks.
+	const FTerritoryPatrolSpot Spot = Node.Spot;
+	const FVector SearchOrigin = Node.Location;
+	TGuardValue<bool> DeliveryGuard(bDeliveringTerritorySpotGoal, true);
+	ClearTerritorySpotGoal();
+	if (!IsValid(this) || IsActorBeingDestroyed()) return false;
+
+	if (!Spot.bEnabled)
+	{
+		// Releasing matters as much as delivering. Without it a guard that reached a spot node
+		// once keeps walking back to that bench on every later loop, because an interact goal that
+		// is never removed keeps being scored.
+		UE_LOG(LogTerritory, Verbose,
+			TEXT("%s: patrol node authors no spot; any previously delivered spot goal is released."),
+			*GetName());
+		return false;
+	}
+	if (!FMath::IsFinite(Spot.SearchRadius) || Spot.SearchRadius <= 0.f
+		|| !FMath::IsFinite(Spot.GoalScore) || Spot.GoalScore <= 0.f
+		|| !FMath::IsFinite(Spot.MaximumVisitSeconds) || Spot.MaximumVisitSeconds <= 0.f
+		|| SearchOrigin.ContainsNaN() || Spot.SlotIndex < INDEX_NONE)
+	{
+		UE_LOG(LogTerritory, Warning, TEXT("%s: patrol spot has an invalid origin, radius, score, visit duration or slot index."), *GetName());
+		return false;
+	}
+
+	UNPCActivityComponent* ActivityComponent = GetActivityComponent();
+
+	// Narrative keeps this component on the NPC's controller, not on the pawn: ANarrativeNPCController
+	// creates it and exposes it as InteractionComponent, and the vendor's own interact graph reads it
+	// back as OwnerController.InteractionComponent. A pawn-side lookup therefore finds nothing on a
+	// guard that is fully able to sit down - and resolving anything other than the controller's
+	// component would hand the goal a claimer the vendor's own interact path never consults, so the
+	// controller is the only authority asked here. This is the accessor the assault driver path
+	// already uses.
+	const ANarrativeNPCController* NPCController = GetNPCController();
+	UNarrativeInteractionComponent* Claimer =
+		NPCController ? NPCController->GetInteractionComponent() : nullptr;
+
+	if (!IsValid(ActivityComponent) || !IsValid(Claimer))
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("%s: patrol node authors a spot but this guard lacks %s, so the spot is not "
+				 "delivered."),
+			*GetName(),
+			ActivityComponent
+				? TEXT("a Narrative interaction component on its controller")
+				: TEXT("an activity component"));
+		return false;
+	}
+
+	if (!SpotInteractGoalClass
+		|| SpotInteractGoalClass->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated | CLASS_NewerVersionExists))
+	{
+		// Reported rather than defaulted. The class has to be exactly the interact activity's
+		// SupportedGoalType, and a guessed class produces a goal that is filed under a key no
+		// activity reads — never scored, and visually identical to a spot that did nothing.
+		UE_LOG(LogTerritory, Warning,
+			TEXT("%s: patrol node authors a spot but the Territory Definition sets no usable Spot Interact "
+				 "Goal Class, so the spot is not delivered."),
+			*GetName());
+		return false;
+	}
+
+	// Goal_Interact.Initialize caches the interactable and GetGoalKey returns that component,
+	// not GoalKey. A new delivery must remove only our old goal and initialize a new one;
+	// changing a registered provider cannot retarget the cached component or its unique-map key.
+	UNPCGoalItem* SpotGoal = NewObject<UNPCGoalItem>(ActivityComponent, SpotInteractGoalClass);
+	if (!SpotGoal) return false;
+	SpotGoal->bSaveGoal = false;
+	SpotGoal->DefaultScore = Spot.GoalScore;
+	// Vendor BT_Interact marks the goal succeeded immediately after starting interaction,
+	// not when its animation/dwell ends. Removing on that notification would request exit
+	// immediately. Use Narrative's existing expiry to bound travel plus interaction instead.
+	SpotGoal->bRemoveOnSucceeded = false;
+	SpotGoal->GoalLifetime = Spot.MaximumVisitSeconds;
+
+	UNarrativeActorProvider_InteractableSpot* Provider =
+		NewObject<UNarrativeActorProvider_InteractableSpot>(SpotGoal);
+	Provider->SearchOrigin = SearchOrigin;
+	Provider->SearchRadius = Spot.SearchRadius;
+	Provider->SpotActorClass = Spot.SpotActorClass;
+	Provider->SpotTag = Spot.SpotTag;
+	Provider->ClaimerComponent = Claimer;
+
+	AActor* SpotActor = Provider->ResolveSpotActor(this);
+	UNarrativeInteractableComponent* Interactable = IsValid(SpotActor)
+		? SpotActor->FindComponentByClass<UNarrativeInteractableComponent>() : nullptr;
+	TArray<int32> EligibleSlots;
+	if (!Provider->GetEligibleSlots(Interactable, EligibleSlots)) return false;
+	if (!IsValid(this) || IsActorBeingDestroyed() || !IsValid(ActivityComponent)
+		|| !IsValid(SpotActor) || !IsValid(Interactable) || !IsValid(Claimer)) return false;
+
+	bool bFoundExisting = false;
+	if (ActivityComponent->GetGoalByKey(SpotInteractGoalClass, Interactable, bFoundExisting))
+	{
+		// This existing goal belongs to another activity/author; do not adopt or overwrite it.
+		return false;
+	}
+
+	int32 SlotToPin = Spot.SlotIndex;
+	// Preserve Narrative's claim-time availability query for the ordinary automatic case.
+	// Converting -1 to an early pin would allow a slot taken after delivery to be reclaimed
+	// without the vendor rechecking IsUsable/IsStealable.
+	const bool bNeedsFilteredSlot = SlotToPin >= 0 || Spot.SpotTag.IsValid();
+	if (bNeedsFilteredSlot && !EligibleSlots.Contains(SlotToPin))
+	{
+		if (SlotToPin >= 0)
+		{
+			UE_LOG(LogTerritory, Warning,
+				TEXT("%s: patrol spot slot %d is unavailable; selecting among the matching eligible slots."),
+				*GetName(), SlotToPin);
+		}
+		SlotToPin = Interactable->GetBestAvailableSlot(Claimer, EligibleSlots);
+	}
+	if ((bNeedsFilteredSlot && !EligibleSlots.Contains(SlotToPin)) || !IsValid(this) || IsActorBeingDestroyed()
+		|| !IsValid(ActivityComponent) || !IsValid(Interactable)) return false;
+
+	// Resolve once and bind that exact actor through Narrative's existing provider. Otherwise
+	// Initialize could resolve a different prop while keeping the first prop's selected slot.
+	UNarrativeActorProvider_LevelReference* TargetProvider =
+		NewObject<UNarrativeActorProvider_LevelReference>(SpotGoal);
+	TargetProvider->SoftActorReference = SpotActor;
+	if (!AimInteractGoalAtSpot(SpotGoal, TargetProvider, SlotToPin))
+	{
+		return false;
+	}
+
+	TerritorySpotGoal = SpotGoal;
+	UNPCGoalItem* AddedGoal = ActivityComponent->AddGoal(SpotGoal, true);
+	if (AddedGoal != SpotGoal || !IsValid(this) || IsActorBeingDestroyed()
+		|| !IsValid(ActivityComponent)
+		|| !ActivityComponent->GetGoals(SpotInteractGoalClass).Goals.Contains(SpotGoal))
+	{
+		ClearTerritorySpotGoal();
+		return false;
+	}
+
+	// Logged once per completed node rather than every rescore, so it is a usable PIE trace.
+	UE_LOG(LogTerritory, Log,
+		TEXT("%s: delivered patrol spot for node %s within %.0fcm (slot %s)."),
+		*GetName(), *SearchOrigin.ToCompactString(), Spot.SearchRadius,
+		SlotToPin >= 0 ? *FString::FromInt(SlotToPin) : TEXT("chosen by Narrative Pro"));
+
+	return TerritorySpotGoal == SpotGoal;
 }

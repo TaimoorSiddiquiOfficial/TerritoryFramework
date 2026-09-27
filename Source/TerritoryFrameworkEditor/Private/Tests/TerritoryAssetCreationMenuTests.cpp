@@ -7,8 +7,10 @@
 #include "AssetToolsModule.h"
 #include "Assets/TerritoryAssetFactories.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
+#include "Combat/TerritoryFloorCombatPolicy.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryFloorVolume.h"
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryGuardPostDefinition.h"
@@ -19,11 +21,17 @@
 #include "Economy/TerritoryProductionProfile.h"
 #include "Factories/BlueprintFactory.h"
 #include "IAssetTools.h"
+#include "IPlacementModeModule.h"
+#include "ToolMenus.h"
 #include "Interaction/TerritoryCapturePoint.h"
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "Navigation/TerritoryRoadGuide.h"
 #include "Tales/TerritoryQuestCascadeRecipe.h"
+#include "Tales/TerritorySituationCondition.h"
+#include "Tales/TerritoryDialogueRecipe.h"
+#include "Social/TerritoryConversationProfile.h"
+#include "Social/TerritoryConversationMeetingPoint.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
 	FTerritoryAssetCreationMenuTest,
@@ -39,6 +47,27 @@ bool FTerritoryAssetCreationMenuTest::RunTest(const FString& Parameters)
 	TestTrue(
 		TEXT("Territory Framework has its own advanced Content Browser category"),
 		Category != EAssetTypeCategories::Misc);
+	if (!IsRunningCommandlet())
+	{
+		IPlacementModeModule* Placement = FModuleManager::GetModulePtr<IPlacementModeModule>(TEXT("PlacementMode"));
+		if (TestNotNull(TEXT("Territory actor placement module is available"), Placement))
+		{
+			TArray<TSharedPtr<FPlaceableItem>> Items;
+			Placement->GetItemsForCategory(TEXT("TerritoryFramework"), Items);
+			TestTrue(TEXT("Floor geometry can be placed without hunting through class lists"), Items.ContainsByPredicate([](const TSharedPtr<FPlaceableItem>& Item)
+			{
+				return Item.IsValid() && Item->AssetData.GetAsset() == ATerritoryFloorVolume::StaticClass();
+			}));
+			TestTrue(TEXT("Conversation meeting points are directly placeable"), Items.ContainsByPredicate([](const TSharedPtr<FPlaceableItem>& Item)
+			{
+				return Item.IsValid() && Item->AssetData.GetAsset() == ATerritoryConversationMeetingPoint::StaticClass();
+			}));
+		}
+		UToolMenu* Tools = UToolMenus::Get()->FindMenu(TEXT("LevelEditor.MainMenu.Tools"));
+		const FToolMenuSection* Section = Tools ? Tools->FindSection(TEXT("TerritoryFramework")) : nullptr;
+		TestTrue(TEXT("Native Tools menu exposes the shared Territory authoring workflow"),
+			Section && Section->FindEntry(TEXT("TerritoryFramework")));
+	}
 	const auto ContainsSubMenu = [](const TArray<FText>& Menus, const TCHAR* Expected)
 	{
 		for (const FText& Menu : Menus)
@@ -78,6 +107,9 @@ bool FTerritoryAssetCreationMenuTest::RunTest(const FString& Parameters)
 		{ UTerritoryGuardPostDefinition::StaticClass(),
 			UTerritoryGuardPostDefinitionFactory::StaticClass(),
 			TEXT("Territory Guard Post Definition"), TEXT("Combat & Defence") },
+		{ UTerritoryFloorCombatPolicy::StaticClass(),
+			UTerritoryFloorCombatPolicyFactory::StaticClass(),
+			TEXT("Territory Floor Combat Policy"), TEXT("Combat & Defence") },
 		{ UTerritoryProductionProfile::StaticClass(),
 			UTerritoryProductionProfileFactory::StaticClass(),
 			TEXT("Territory Production Profile"), TEXT("Economy") },
@@ -92,7 +124,16 @@ bool FTerritoryAssetCreationMenuTest::RunTest(const FString& Parameters)
 			TEXT("Territory Diplomacy Dialogue Profile"), TEXT("AI & Diplomacy") },
 		{ UTerritoryQuestCascadeRecipe::StaticClass(),
 			UTerritoryQuestCascadeRecipeFactory::StaticClass(),
-			TEXT("Territory Quest Cascade Recipe"), TEXT("Story & Quests") }
+			TEXT("Territory Quest Cascade Recipe"), TEXT("Story & Quests") },
+		{ UTerritorySituationProfile::StaticClass(),
+			UTerritorySituationProfileFactory::StaticClass(),
+			TEXT("Territory Situation Profile"), TEXT("Story & Quests") },
+		{ UTerritoryDialogueRecipe::StaticClass(),
+			UTerritoryDialogueRecipeFactory::StaticClass(),
+			TEXT("Territory Conditional Dialogue Recipe"), TEXT("Story & Quests") },
+		{ UTerritoryConversationProfile::StaticClass(),
+			UTerritoryConversationProfileFactory::StaticClass(),
+			TEXT("Territory Conversation Profile"), TEXT("Story & Quests") }
 	};
 
 	for (const FExpectedEntry& Entry : Entries)
@@ -172,6 +213,12 @@ bool FTerritoryAssetCreationMenuTest::RunTest(const FString& Parameters)
 		{ ATerritoryWorldState::StaticClass(),
 			UTerritoryWorldStateBlueprintFactory::StaticClass(),
 			TEXT("Territory World State Blueprint"), TEXT("World Actors") },
+		{ ATerritoryFloorVolume::StaticClass(),
+			UTerritoryFloorVolumeBlueprintFactory::StaticClass(),
+			TEXT("Territory Floor Volume Blueprint"), TEXT("World Actors") },
+		{ ATerritoryConversationMeetingPoint::StaticClass(),
+			UTerritoryConversationMeetingPointBlueprintFactory::StaticClass(),
+			TEXT("Territory Conversation Meeting Point Blueprint"), TEXT("Interaction & Navigation Actors") },
 		{ ATerritoryCapturePoint::StaticClass(),
 			UTerritoryCapturePointBlueprintFactory::StaticClass(),
 			TEXT("Territory Capture Point Blueprint"), TEXT("Interaction & Navigation Actors") },

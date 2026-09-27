@@ -7,10 +7,17 @@
 class UTerritoryEconomySubsystem;
 class UTerritoryNavigationMarkerComponent;
 class UTerritoryProductionProfile;
+class UTerritoryDefinition;
 
 /** Shared pure hierarchy rules used by City, District, UI, and native tests. */
 namespace TerritoryHierarchyPolicy
 {
+	/** Exact authored identity, shared by loaded actors and durable hierarchy rows. */
+	TERRITORYFRAMEWORK_API bool MatchesAuthoredChildIdentity(
+		const UTerritoryDefinition* Child, const FGameplayTag& ExpectedParent,
+		const FGameplayTag& ActualTag, const FGuid& ActualGUID,
+		const FGameplayTag& ActualParent, ETerritoryHierarchyLevel ActualLevel);
+
 	struct FChildControlView
 	{
 		FGameplayTag Owner;

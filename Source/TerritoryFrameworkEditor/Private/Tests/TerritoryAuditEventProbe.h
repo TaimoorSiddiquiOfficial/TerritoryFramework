@@ -16,6 +16,7 @@
 #include "TerritoryAuditEventProbe.generated.h"
 
 class ATerritoryWorldState;
+class ATerritoryCity;
 
 /** Real Narrative item classes with a controllable removal failure for transaction tests. */
 UCLASS(Transient)
@@ -73,6 +74,18 @@ public:
 		const FTerritoryProductionRule& Recipe, int32 BatchCount, FGameplayTag SourceTerritory);
 
 	TFunction<void(ATerritoryVolume*, ETerritoryState)> StateCallback;
+	TFunction<void()> OwnershipCallback;
+	TFunction<void()> CityCaptureCallback;
+	UFUNCTION()
+	void OwnershipChanged(ATerritoryVolume* Territory, FGameplayTag OldOwner, FGameplayTag NewOwner)
+	{
+		if (OwnershipCallback) OwnershipCallback();
+	}
+	UFUNCTION()
+	void CityCaptured(ATerritoryCity* City, FGameplayTag Faction)
+	{
+		if (CityCaptureCallback) CityCaptureCallback();
+	}
 	TFunction<void(ATerritoryVolume*, AActor*)> EvidenceCallback;
 	TFunction<void(ATerritoryVolume*, AActor*, ETerritoryExposureState)> ExposureCallback;
 	TFunction<void(FGameplayTag, FGameplayTag, EDiplomacyState)> DiplomacyCallback;

@@ -3,6 +3,9 @@
 #include "Misc/AutomationTest.h"
 
 #include "Core/TerritoryAudioTypes.h"
+#include "Components/AudioComponent.h"
+#include "Components/BoxComponent.h"
+#include "Engine/Engine.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryMusicTags.h"
@@ -13,6 +16,7 @@
 #include "Music/NarrativeMusicSubsystem.h"
 #include "Music/TaggedMusicSet.h"
 #include "Subsystems/TerritoryMusicSubsystem.h"
+#include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UObject/UnrealType.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryMusicAuthoringContract,
@@ -252,7 +256,77 @@ bool FTFTerritoryMusicObservationTransitions::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Arrival can be disabled without disabling state cues"), Music->RefreshObservedTerritory(Place).Num(), 0);
 	Place->ForceSetTerritoryState(ETerritoryState::Locked);
 	TestEqual(TEXT("State change still emits cues with arrival disabled"), Music->RefreshObservedTerritory(Place).Num(), 2);
+
+	// A cue from an old territory must not survive a silent transition, nor may
+	// cleanup destroy an unrelated voice/dialogue component in the same world.
+	UAudioComponent* OldCue = NewObject<UAudioComponent>(GameInstance);
+	UAudioComponent* Voice = NewObject<UAudioComponent>(GameInstance);
+	Music->StateSoundComponent = OldCue;
+	Music->StateSoundQueue.Add({ Arrival, FTerritoryStateAudioConfig() });
+	Music->RefreshObservedTerritory(nullptr);
+	TestNull(TEXT("Leaving clears this bridge's audio component"), Music->StateSoundComponent.Get());
+	TestTrue(TEXT("Leaving discards obsolete queued entry cues"), Music->StateSoundQueue.IsEmpty());
+	TestTrue(TEXT("Old owned component is destroyed"), OldCue->IsBeingDestroyed());
+	TestFalse(TEXT("Unrelated voice component is untouched"), Voice->IsBeingDestroyed());
+	Music->StateSoundComponent = NewObject<UAudioComponent>(GameInstance);
+	Music->StateSoundQueue.Add({ Arrival, FTerritoryStateAudioConfig() });
+	Music->ResetForWorld(nullptr);
+	TestNull(TEXT("Travel clears owned state sound"), Music->StateSoundComponent.Get());
+	TestTrue(TEXT("Travel clears pending state cues"), Music->StateSoundQueue.IsEmpty());
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryMusicOverlapPriority,
+	"TerritoryFramework.Audio.NarrativeMusic.OverlapPriorityAndStreamingFallback",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryMusicOverlapPriority::RunTest(const FString& Parameters)
+{
+	UGameInstance* GameInstance = NewObject<UGameInstance>(GEngine);
+	GameInstance->InitializeStandalone();
+	UWorld* World = GameInstance->GetWorld();
+	UTerritoryMusicSubsystem* Music = GameInstance->GetSubsystem<UTerritoryMusicSubsystem>();
+	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	if (!Music || !Registry)
+	{
+		AddError(TEXT("Music/registry subsystems required for overlap fixture"));
+		GameInstance->Shutdown(); World->DestroyWorld(false); GEngine->DestroyWorldContext(World);
+		return false;
+	}
+	auto* First = World->SpawnActor<ATerritoryProperty>();
+	auto* Second = World->SpawnActor<ATerritoryProperty>();
+	auto* FirstDefinition = NewObject<UTerritoryPlaceDefinition>();
+	FirstDefinition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	FirstDefinition->TerritoryTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	FirstDefinition->StableTerritoryGUID = FGuid(1, 0, 0, 0);
+	auto& FirstAudio = FirstDefinition->StateConfigs.FindOrAdd(ETerritoryState::Unclaimed).Audio;
+	FirstAudio.bOverrideNarrativeMusic = true;
+	FirstAudio.MusicTheme = TerritoryMusicTags::Unclaimed;
+	auto* SecondDefinition = DuplicateObject<UTerritoryPlaceDefinition>(FirstDefinition, GetTransientPackage());
+	SecondDefinition->TerritoryTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare"));
+	SecondDefinition->StableTerritoryGUID = FGuid(2, 0, 0, 0);
+	TestTrue(TEXT("First audio definition applies"), FirstDefinition->ApplyToTerritory(First));
+	TestTrue(TEXT("Second audio definition applies"), SecondDefinition->ApplyToTerritory(Second));
+	Registry->RegisterTerritory(Second);
+	Registry->RegisterTerritory(First);
+	TestTrue(TEXT("Stable identity wins exact overlap independent of insertion order"), Music->ResolveMusicTerritory(FVector::ZeroVector) == First);
+	Registry->UnregisterTerritory(First);
+	Registry->UnregisterTerritory(Second);
+	Registry->RegisterTerritory(First);
+	Registry->RegisterTerritory(Second);
+	TestTrue(TEXT("Reversed insertion retains exact-tie winner"), Music->ResolveMusicTerritory(FVector::ZeroVector) == First);
+	SecondDefinition->StateConfigs.FindChecked(ETerritoryState::Unclaimed).Audio.MusicPriority = 10;
+	SecondDefinition->ApplyToTerritory(Second);
+	TestTrue(TEXT("Explicit within-tier priority wins overlap"), Music->ResolveMusicTerritory(FVector::ZeroVector) == Second);
+	TestTrue(TEXT("State cues use the same deterministic overlapping listener territory"), Music->ResolveMusicTerritory(FVector::ZeroVector, false) == Second);
+	Registry->UnregisterTerritory(Second);
+	TestTrue(TEXT("Streaming selected territory out falls back to remaining rule"), Music->ResolveMusicTerritory(FVector::ZeroVector) == First);
+	Registry->UnregisterTerritory(First);
+	TestNull(TEXT("Leaving all loaded territories yields no override"), Music->ResolveMusicTerritory(FVector::ZeroVector));
+	GameInstance->Shutdown();
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
 	return true;
 }
 

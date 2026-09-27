@@ -16,7 +16,7 @@ struct TERRITORYFRAMEWORK_API FTerritoryDialogueRecipeNode
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue") FName ID;
 	/** Create a player response node instead of an NPC dialogue node. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue") bool bPlayer = false;
-	/** NPC ID from one of this recipe's configured Narrative speakers; identifies who speaks this line. */
+	/** Configured Narrative NPC ID, or an ambient meeting role ID; identifies who speaks this line. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue", meta=(EditCondition="!bPlayer", EditConditionHides)) FName SpeakerID;
 	/** Dialogue line displayed or spoken by this node. The routing root may be silent. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue", meta=(MultiLine="true")) FText Text;
@@ -36,16 +36,27 @@ class TERRITORYFRAMEWORK_API UTerritoryDialogueRecipe : public UDataAsset
 {
 	GENERATED_BODY()
 public:
+	UTerritoryDialogueRecipe();
+	/** UDialogue preserves ordinary NPC/player recipes. TerritoryAmbientDialogue creates two-role ambient meetings. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue", meta=(AllowAbstract="false"))
+	TSubclassOf<UDialogue> ParentDialogueClass;
+	/** First recruited actor's role. Used only when Parent Dialogue Class derives from TerritoryAmbientDialogue. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue|Ambient Roles") FName FirstRoleID = TEXT("FirstGuard");
+	/** Second recruited actor's distinct role. Neither meeting role may identify the player. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue|Ambient Roles") FName SecondRoleID = TEXT("SecondGuard");
 	/** One NPC routing root. Give it empty Text for a silent entry point. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue") FName RootID;
-	/** Narrative NPC Definitions available as speakers. Their NPC IDs must be distinct. */
+	/** Ordinary dialogues only: Narrative NPC Definitions with distinct NPC IDs. Ambient meetings use role IDs instead. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue") TArray<TObjectPtr<UNPCDefinition>> Speakers;
 	/** Dialogue nodes and reply links used to generate an editable Native Dialogue Blueprint. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Dialogue") TArray<FTerritoryDialogueRecipeNode> Nodes;
 
 	/** Deterministic structural validation; no conditions/events are executed. */
 	bool ValidateRecipe(FText& OutError) const;
+	/** The selected parent determines the speaker contract; no separate mode can drift from it. */
+	UFUNCTION(BlueprintPure, Category="Dialogue") bool UsesAmbientRoles() const;
 #if WITH_EDITOR
+	virtual bool CanEditChange(const FProperty* InProperty) const override;
 	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
 #endif
 };

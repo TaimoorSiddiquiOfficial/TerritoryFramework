@@ -21,9 +21,10 @@ param(
     [switch]$Stomp,
     [string]$EngineRoot,
     [string]$Project,
-    [int]$TimeoutSeconds = 1800
+    [ValidateRange(1, 2147483)][int]$TimeoutSeconds = 1800
 )
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/Invoke-BoundedProcess.ps1"
 
 $plugin = [IO.Path]::GetFullPath("$PSScriptRoot/..")
 $project = if ($Project) { [IO.Path]::GetFullPath($Project) }
@@ -88,8 +89,12 @@ $arguments = @(
 if ($Stomp) { $arguments += '-stompmalloc' }
 
 Write-Host "Running $Filter under the $label allocator. Log: $log"
-$process = Start-Process -FilePath $editor -ArgumentList $arguments -NoNewWindow -Wait -PassThru `
-    -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+$process = Invoke-BoundedProcess -FilePath $editor -ArgumentList $arguments `
+    -StandardOutputPath $log -StandardErrorPath "$log.err" -TimeoutSeconds $TimeoutSeconds
+if ($process.TimedOut) {
+    Write-Host "FAILED - automation exceeded $TimeoutSeconds seconds; stopped child process $($process.ProcessId). See $log"
+    exit 1
+}
 $text = (Get-Content -LiteralPath $log -Raw) + (Get-Content -LiteralPath "$log.err" -Raw)
 
 $success = ([regex]::Matches($text, 'Result=\{Success\}')).Count

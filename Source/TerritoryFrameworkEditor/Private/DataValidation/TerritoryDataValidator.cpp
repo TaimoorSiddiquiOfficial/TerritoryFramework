@@ -43,6 +43,7 @@
 #include "Items/WeaponItem.h"
 #include "Misc/DataValidation.h"
 #include "NarrativeGameplayTags.h"
+#include "NarrativeActorProvider.h"
 #include "NavigationSystem.h"
 #include "QuestBlueprint.h"
 #include "Tales/Quest.h"
@@ -65,6 +66,37 @@
 
 namespace
 {
+	bool ValidatePatrolSpot(const FTerritoryPatrolSpot& Spot,
+		const FString& Context, TArray<FString>& Errors)
+	{
+		if (!Spot.bEnabled) return false;
+		if (!FMath::IsFinite(Spot.SearchRadius) || Spot.SearchRadius <= 0.f)
+			Errors.Add(Context + TEXT(": enabled patrol Spot SearchRadius must be finite and greater than zero"));
+		if (!FMath::IsFinite(Spot.GoalScore) || Spot.GoalScore <= 0.f)
+			Errors.Add(Context + TEXT(": enabled patrol Spot GoalScore must be finite and greater than zero"));
+		if (!FMath::IsFinite(Spot.MaximumVisitSeconds) || Spot.MaximumVisitSeconds <= 0.f)
+			Errors.Add(Context + TEXT(": enabled patrol Spot MaximumVisitSeconds must be finite and greater than zero"));
+		if (Spot.SlotIndex < INDEX_NONE)
+			Errors.Add(Context + TEXT(": enabled patrol Spot SlotIndex must be -1 or a nonnegative slot index"));
+		return true;
+	}
+
+	void ValidatePatrolSpotGoalClass(UClass* GoalClass, bool bRequired,
+		const FString& Context, TArray<FString>& Errors)
+	{
+		if (!GoalClass)
+		{
+			if (bRequired)
+				Errors.Add(Context + TEXT(": enabled patrol spots require a Spot Interact Goal Class in Guard Behavior"));
+			return;
+		}
+		const FStructProperty* Provider = FindFProperty<FStructProperty>(GoalClass, TEXT("ActorToInteractWith"));
+		if (!Provider || Provider->Struct != FInstancedActorProvider::StaticStruct())
+			Errors.Add(Context + TEXT(": Spot Interact Goal Class must expose ActorToInteractWith as an InstancedActorProvider"));
+		if (!FindFProperty<FIntProperty>(GoalClass, TEXT("SlotIdx")))
+			Errors.Add(Context + TEXT(": Spot Interact Goal Class must expose SlotIdx as an int32"));
+	}
+
 	void ValidateWaveRequest(const UTerritoryScheduleEnemyWaveEvent* Wave,
 		const FString& Context, TArray<FString>& Errors)
 	{
@@ -742,6 +774,8 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 		for (int32 NodeIndex = 0; NodeIndex < GuardPost->PatrolRoute.Num(); ++NodeIndex)
 		{
 			const FTerritoryPatrolNode& Node = GuardPost->PatrolRoute[NodeIndex];
+			ValidatePatrolSpot(Node.Spot, FString::Printf(
+				TEXT("Guard post patrol node %d"), NodeIndex), Errors);
 			if (Node.Location.ContainsNaN() || Node.Rotation.ContainsNaN()
 				|| !FMath::IsFinite(Node.WaitTime) || Node.WaitTime < 0.f)
 			{
@@ -902,6 +936,7 @@ bool UTerritoryDataValidator::ValidateLevel(ULevel* Level, TArray<FString>& OutE
 	CheckOrphanedSpawnPoints(Level, OutWarnings);
 	CheckGuardPostBindings(Level, OutWarnings);
 	CheckPatrolContainment(Level, OutWarnings);
+	CheckPatrolSpots(Level, OutErrors);
 	CheckGuardDeploymentFeasibility(Level, OutWarnings);
 	CheckFloorVolumes(Level, OutErrors, OutWarnings);
 	CheckMissingParentTags(Level, OutWarnings);
@@ -1740,6 +1775,7 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 
 	TSet<FName> GuardPostIDs;
 	TSet<FGuid> GuardPostGUIDs;
+	bool bHasEnabledPatrolSpot = false;
 	for (const FTerritoryGuardPostTemplate& Post : Definition->GuardPosts)
 	{
 		if (Post.GuardPostID.IsNone()) Error(TEXT("Guard Post ID is required"));
@@ -1786,15 +1822,25 @@ bool UTerritoryDataValidator::ValidateDefinition(UTerritoryDefinition* Definitio
 		// Any count is valid: see the comment on the guard post definition branch above.
 		for (const FTerritoryGuardPatrolTemplateNode& Node : Post.PatrolRoute)
 		{
+			bHasEnabledPatrolSpot |= ValidatePatrolSpot(Node.Spot,
+				Context + TEXT(" Guard Post ") + Post.GuardPostID.ToString(), OutErrors);
 			if (Node.RelativeTransform.ContainsNaN() || !FMath::IsFinite(Node.WaitTime)
 				|| Node.WaitTime < 0.f)
 			{
 				Error(FString::Printf(TEXT("Guard Post %s has an invalid patrol node"),
 					*Post.GuardPostID.ToString()));
-				break;
 			}
 		}
+		// With no inline route, a generated post can inherit the reusable post's route.
+		if (Post.PatrolRoute.IsEmpty() && Post.GuardPostDefinition)
+		{
+			for (const FTerritoryPatrolNode& Node : Post.GuardPostDefinition->PatrolRoute)
+				bHasEnabledPatrolSpot |= ValidatePatrolSpot(Node.Spot,
+					Context + TEXT(" Guard Post ") + Post.GuardPostID.ToString(), OutErrors);
+		}
 	}
+	ValidatePatrolSpotGoalClass(Definition->GuardBehavior.SpotInteractGoalClass,
+		bHasEnabledPatrolSpot, Context, OutErrors);
 
 	if (Definition->CapturePoint.bEnabled)
 	{
@@ -2000,8 +2046,14 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 {
 	if (!Territory) return;
 	const FString Label = Territory->GetActorLabel();
-	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
-	const TArray<FTerritoryAssaultApproach>& Approaches = Territory->GetCounterAttackApproaches();
+	// Definition edits need not have reconstructed every placed actor yet. Read
+	// the same authoritative source ApplyToTerritory will copy at BeginPlay.
+	const UTerritoryDefinition* Definition = Territory->GetTerritoryDefinition();
+	if (Definition && !Definition->IsA<UTerritoryPlaceDefinition>()) return;
+	UTerritoryCounterAttackProfile* Profile = Definition
+		? Definition->CounterAttackProfile.Get() : Territory->GetCounterAttackProfile();
+	const TArray<FTerritoryAssaultApproach>& Approaches = Definition
+		? Definition->CounterAttackApproaches : Territory->GetCounterAttackApproaches();
 
 	if (!Profile)
 	{
@@ -2224,19 +2276,10 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 				}
 			}
 		}
-		FString RouteFailure = TEXT("No shared Territory defence objective is reachable");
-		bool bHasRoute = false;
-		for (const FVector& Objective :
-			TerritoryAssaultTargetPolicy::BuildObjectiveLocations(Territory, true))
-		{
-			if (UTerritoryCounterAttackSubsystem::ValidateNavigationRoute(
-				ValidationWorld, FootDeploymentTransform.GetLocation(), Objective,
-				&RouteFailure))
-			{
-				bHasRoute = true;
-				break;
-			}
-		}
+		FString RouteFailure;
+		FVector Objective;
+		const bool bHasRoute = FindReachableCounterAttackObjective(Territory,
+			FootDeploymentTransform.GetLocation(), Objective, RouteFailure);
 		if (!bHasRoute)
 		{
 			OutErrors.Add(FString::Printf(
@@ -2249,6 +2292,65 @@ void UTerritoryDataValidator::CheckCounterAttackConfig(
 	{
 		OutErrors.Add(FString::Printf(TEXT("%s: counterattacks require at least one enabled approach"), *Label));
 	}
+}
+
+TArray<FVector> UTerritoryDataValidator::BuildCounterAttackObjectiveLocations(ATerritoryVolume* Territory)
+{
+	TArray<FVector> Objectives;
+	if (!Territory || Territory->GetControlMode() != ETerritoryControlMode::Independent)
+		return Objectives;
+	const FVector BoundsCenter = Territory->GetTerritoryBounds().GetCenter();
+	// Runtime registration is populated at BeginPlay. In an editor world the saved
+	// post binding is the available authority; an empty registration list must not
+	// reduce a multi-storey Place to its potentially unreachable bounds center.
+	FSpawnPointPlaceIndex Index = BuildSpawnPointPlaceIndex(Territory->GetLevel());
+	Index.Posts.Sort([](const ATerritoryGuardSpawnPoint& A, const ATerritoryGuardSpawnPoint& B)
+	{
+		return A.GetPathName() < B.GetPathName();
+	});
+	for (const ATerritoryGuardSpawnPoint* Post : Index.Posts)
+	{
+		if (!IsValid(Post) || ResolvePostTerritory(Post, Index).Owner != Territory) continue;
+		const UTerritoryDefinition* Definition = Post->GetTerritoryDefinition();
+		const FTerritoryGuardPostTemplate* Row = Definition && Definition->IsA<UTerritoryPlaceDefinition>()
+			? Definition->FindGuardPost(Post->GetGuardPostID()) : nullptr;
+		// A missing binding cannot produce a runtime guard and is diagnosed separately.
+		if (!Row) continue;
+		auto AddContained = [&](const FVector& Location)
+		{
+			if (Territory->ContainsPoint(Location)) Objectives.AddUnique(Location);
+		};
+		if (!Row->PatrolRoute.IsEmpty())
+		{
+			for (const FTerritoryGuardPatrolTemplateNode& Node : Row->PatrolRoute)
+				AddContained((Node.RelativeTransform * Post->GetActorTransform()).GetLocation());
+		}
+		else if (Row->GuardPostDefinition)
+		{
+			for (const FTerritoryPatrolNode& Node : Row->GuardPostDefinition->PatrolRoute)
+				AddContained(Node.Location);
+		}
+		AddContained(Post->GetActorLocation());
+	}
+	Objectives.AddUnique(BoundsCenter);
+	return Objectives;
+}
+
+bool UTerritoryDataValidator::FindReachableCounterAttackObjective(ATerritoryVolume* Territory,
+	const FVector& Start, FVector& OutObjective, FString& OutFailureReason)
+{
+	OutFailureReason = TEXT("No shared Territory defence objective is reachable");
+	for (const FVector& Candidate : BuildCounterAttackObjectiveLocations(Territory))
+	{
+		if (UTerritoryCounterAttackSubsystem::ValidateNavigationRoute(
+			Territory->GetWorld(), Start, Candidate, &OutFailureReason))
+		{
+			OutObjective = Candidate;
+			OutFailureReason.Reset();
+			return true;
+		}
+	}
+	return false;
 }
 
 void UTerritoryDataValidator::CheckBoundsShape(ATerritoryVolume* Territory, TArray<FString>& OutWarnings)
@@ -2521,6 +2623,48 @@ void UTerritoryDataValidator::CheckPatrolContainment(ULevel* Level, TArray<FStri
 				*Owner->GetActorLabel(), *Post->GetActorLabel(), NodeIndex,
 				*NodeLocation.ToCompactString()));
 		}
+	}
+}
+
+void UTerritoryDataValidator::CheckPatrolSpots(ULevel* Level, TArray<FString>& OutErrors)
+{
+	if (!Level) return;
+	const FSpawnPointPlaceIndex Index = BuildSpawnPointPlaceIndex(Level);
+	for (const ATerritoryGuardSpawnPoint* Post : Index.Posts)
+	{
+		if (!Post) continue;
+		const FString Context = Post->GetActorLabel();
+		const UTerritoryDefinition* BoundDefinition = Post->GetTerritoryDefinition();
+		const FTerritoryGuardPostTemplate* Row = BoundDefinition
+			? BoundDefinition->FindGuardPost(Post->GetGuardPostID()) : nullptr;
+		bool bHasEnabledSpot = false;
+		if (Row && !Row->PatrolRoute.IsEmpty())
+		{
+			// ApplyTerritoryDefinition copies this route at BeginPlay. Read its authored
+			// source without mutating the placed actor during editor validation.
+			for (const FTerritoryGuardPatrolTemplateNode& Node : Row->PatrolRoute)
+				bHasEnabledSpot |= ValidatePatrolSpot(Node.Spot, Context, OutErrors);
+		}
+		else
+		{
+			// A bound row clears the transient route at BeginPlay. Only an unbound post
+			// can retain its inline nodes; the row's reusable definition is authoritative.
+			const UTerritoryGuardPostDefinition* Fallback = Row
+				? Row->GuardPostDefinition.Get() : Post->GuardPostDefinition.Get();
+			const TArray<FTerritoryPatrolNode>* Route = !Row && !Post->PatrolRoute.IsEmpty()
+				? &Post->PatrolRoute : Fallback ? &Fallback->PatrolRoute : nullptr;
+			if (Route)
+				for (const FTerritoryPatrolNode& Node : *Route)
+					bHasEnabledSpot |= ValidatePatrolSpot(Node.Spot, Context, OutErrors);
+		}
+		if (!bHasEnabledSpot) continue;
+		const ATerritoryVolume* Owner = ResolvePostTerritory(Post, Index).Owner;
+		const UTerritoryDefinition* Definition = Owner ? Owner->GetTerritoryDefinition() : nullptr;
+		if (Definition)
+			ValidatePatrolSpotGoalClass(Definition->GuardBehavior.SpotInteractGoalClass,
+				true, Context, OutErrors);
+		// A streamed-out owner or a guard using class defaults supplies no authoritative
+		// definition here. Its eventual activity configuration needs runtime validation.
 	}
 }
 
@@ -2904,16 +3048,19 @@ void UTerritoryDataValidator::CheckFloorVolumes(ULevel* Level, TArray<FString>& 
 		const UTerritoryPlaceDefinition* const PlaceDefinition = Volume->GetPlaceDefinition();
 		if (!PlaceDefinition)
 		{
+			int32 ContainingPlaces = 0;
+			for (ATerritoryProperty* Place : GetActorsForValidation<ATerritoryProperty>(Level))
+				if (Cast<UTerritoryPlaceDefinition>(Place->GetTerritoryDefinition()) && Volume->IsFullyContainedBy(Place)) ++ContainingPlaces;
 			OutErrors.Add(FString::Printf(
-				TEXT("Floor volume '%s' names no Place Definition, so it registers without an owner tag and no floor lookup can ever reach it"),
-				*Label));
+				TEXT("Floor volume '%s' names no Place Definition, so no floor lookup can reach it. Found %d fully containing Places; use Detect & Sync Floors for one unique owner, or bind explicitly when bounds overlap"),
+				*Label, ContainingPlaces));
 			continue;
 		}
 
 		if (!PlaceDefinition->FindFloor(Volume->FloorIndex))
 		{
 			OutErrors.Add(FString::Printf(
-				TEXT("Floor volume '%s' claims floor %d of %s, which authors no such floor row; the region can never be reached, and it does not separate anything"),
+				TEXT("Floor volume '%s' claims floor %d of %s, which authors no such floor row; use Detect & Sync Floors to create the policy row without changing this region's identity"),
 				*Label, Volume->FloorIndex,
 				PlaceDefinition->DisplayName.IsEmpty()
 					? *PlaceDefinition->GetName() : *PlaceDefinition->DisplayName.ToString()));

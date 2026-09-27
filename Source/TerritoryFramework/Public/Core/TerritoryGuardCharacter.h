@@ -8,6 +8,7 @@
 #include "TerritoryGuardCharacter.generated.h"
 
 class UNPCDefinition;
+class UNPCGoalItem;
 class UNPCActivityConfiguration;
 class UNarrativeCharacterSubsystem;
 class UTriggerSet;
@@ -82,6 +83,8 @@ public:
 	/** Read the same server combat decision used by Narrative AI, with an easy-English reason. Clients do not own guard perception or personal-hostility records. */
 	UFUNCTION(BlueprintPure, Category="Territory|Guard|Combat")
 	bool EvaluateTerritoryTarget(const AActor* Target, FText& OutReason) const;
+	/** A real post report permits movement to its hit location, never target acquisition or personal hostility. */
+	bool CanInvestigateRecentGuardDamage(const AActor* Source) const;
 
 	/**
 	 * Adds or refreshes a transient Narrative investigation goal. Combat goals keep
@@ -90,7 +93,8 @@ public:
 	bool RequestTerritoryInvestigation(ETerritoryStealthEvidence Evidence,
 		const FVector& InvestigationLocation, const FVector& EstimatedSourceDirection,
 		AActor* SuspectedSource, bool bIdentityConfirmed,
-		const UTerritoryStealthProfile& StealthProfile);
+		const UTerritoryStealthProfile& StealthProfile,
+		bool bRequireDamageReport = false, float MaximumLifetime = -1.f);
 
 	/**
 	 * Reconciles Narrative Pro's reported event value with its authoritative ASC state,
@@ -160,6 +164,18 @@ public:
 	/** Live per-guard goal populated from the assigned spawn point. */
 	UPROPERTY(Transient, BlueprintReadOnly, Category="Territory|AI|Patrol")
 	TObjectPtr<UTerritoryPatrolGoal> TerritoryPatrolGoal;
+
+	/** Runtime interact-goal-class cache populated exclusively from the owning Territory Definition. */
+	UPROPERTY(Transient)
+	TSubclassOf<UNPCGoalItem> SpotInteractGoalClass;
+
+	/**
+	 * The live per-guard goal delivered for the patrol node's Spot, or null when no spot is
+	 * active. Transient, and never saved: a spot goal is rebuilt from the route on the authority
+	 * whenever the patrol loop completes its node, the same way the route itself is.
+	 */
+	UPROPERTY(Transient, BlueprintReadOnly, Category="Territory|AI|Patrol")
+	TObjectPtr<UNPCGoalItem> TerritorySpotGoal;
 
 	/** Relationship-aware dialogue selector used by the Territory NPC interactable. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|AI|Dialogue")
@@ -317,6 +333,31 @@ public:
 	UFUNCTION(BlueprintCallable, Category="Territory|Guard|Patrol")
 	bool InitializeTerritoryPatrolGoal();
 
+	/**
+	 * Delivers this guard's interact goal for a patrol node's Spot, or clears it.
+	 *
+	 * The patrol activity calls this after a node's move, rotation and wait complete, through
+	 * UTerritoryPatrolGoal::DeliverPatrolSpot, so a Spot is per-NODE rather than per-route. A node
+	 * whose Spot is disabled clears any goal delivered for an earlier node — otherwise the guard
+	 * would keep walking back to the previous node's bench for the rest of the loop.
+	 *
+	 * Takes the NODE rather than an index on purpose. The index the patrol Blueprint holds is an
+	 * index into the goal's own TerritoryPatrol array, which is the staggered route; re-deriving a
+	 * node from a guard-side accessor would be a different array in a different order, and the
+	 * mismatch would show up as the wrong node's spot being delivered — quietly, and only for posts
+	 * with more than one patrol node.
+	 *
+	 * Server-authoritative in the same way InitializeTerritoryPatrolGoal is: the function is
+	 * callable from the activity Blueprint on every machine, and returns false without acting
+	 * anywhere but the authority.
+	 *
+	 * Returns true only when a goal was actually delivered. False is the normal answer for a node
+	 * that authors no spot, so a caller must not treat it as an error.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Guard|Patrol",
+		meta=(DisplayName="Deliver Patrol Spot"))
+	bool DeliverPatrolSpot(const FTerritoryPatrolNode& Node);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -340,6 +381,16 @@ public:
 
 private:
 	FTerritoryDeathCollisionState DeathCollisionState;
+
+	/**
+	 * Removes any live spot goal from this guard's activity component and clears the cache.
+	 * Separate from DeliverPatrolSpot because the removal has to go through the component: a goal
+	 * dropped here but left in the component's map would keep being scored.
+	 */
+	void ClearTerritorySpotGoal();
+
+	// Narrative goal removal/selection can call Blueprint code back into the guard.
+	bool bDeliveringTerritorySpotGoal = false;
 
 	UFUNCTION()
 	void HandleNarrativeDamagedBy(
@@ -370,6 +421,7 @@ private:
 	 * nothing.
 	 */
 	bool IsFloorSeparationRefused(const AActor* Target, FText& OutReason) const;
+	bool EvaluateTerritoryTargetInternal(const AActor* Target, FText& OutReason, bool bDamageReport) const;
 
 	FTimerHandle DefaultWeaponWieldTimer;
 	FTimerHandle CombatPriorityTimer;

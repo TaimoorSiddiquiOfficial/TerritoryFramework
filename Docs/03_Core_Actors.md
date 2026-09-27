@@ -303,7 +303,8 @@ BP_TerritoryProperty "Blacksmith"
 | Location | Vector | World position |
 | Rotation | Rotator | Facing direction |
 | WaitTime | float | Seconds to wait |
-| ActivityTag | GameplayTag | e.g., `Guard.Activity.Rest` |
+| ActivityTag | GameplayTag | Reserved metadata; currently has no activity consumer. Setting it does not start an activity. |
+| Spot | TerritoryPatrolSpot | Optional Narrative interaction after move, rotation and wait. Requires a compatible Spot Interact Goal Class; tagged/pinned claim-time safety remains a release gate. |
 
 ## ATerritoryGuardCharacter
 
