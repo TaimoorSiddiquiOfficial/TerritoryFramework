@@ -17,7 +17,7 @@ UTerritoryCaptureEvent::UTerritoryCaptureEvent(const FObjectInitializer& ObjectI
 	bRefireOnLoad = false;
 }
 
-void UTerritoryCaptureEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryCaptureEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	const FGameplayTag EffectiveTerritory = SituationProfile ? SituationProfile->Territory : TargetTerritoryTag;

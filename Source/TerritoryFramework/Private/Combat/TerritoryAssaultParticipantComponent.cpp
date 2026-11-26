@@ -28,6 +28,9 @@
 #include "UnrealFramework/NarrativeCharacter.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
+#include "Engine/Level.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
@@ -38,6 +41,7 @@
 #include "Perception/AIPerceptionComponent.h"
 #include "TimerManager.h"
 #include "UObject/UnrealType.h"
+#include "Misc/EngineVersionComparison.h"
 
 UTerritoryAssaultParticipantComponent::UTerritoryAssaultParticipantComponent()
 {
@@ -142,6 +146,8 @@ void UTerritoryAssaultParticipantComponent::BeginPlay()
 	Super::BeginPlay();
 	AActor* Owner = GetOwner();
 	if (!Owner || !Owner->HasAuthority()) return;
+	FWorldDelegates::PreLevelRemovedFromWorld.AddUObject(
+		this, &UTerritoryAssaultParticipantComponent::HandleLevelRemoving);
 
 	if (UWorld* World = GetWorld())
 	{
@@ -152,6 +158,7 @@ void UTerritoryAssaultParticipantComponent::BeginPlay()
 
 void UTerritoryAssaultParticipantComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	FWorldDelegates::PreLevelRemovedFromWorld.RemoveAll(this);
 	if (bNarrativeVehicleDriver && GetWorld())
 	{
 		if (auto* Traffic = GetWorld()->GetSubsystem<UTerritoryRoadTrafficSubsystem>())
@@ -203,6 +210,7 @@ void UTerritoryAssaultParticipantComponent::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(UTerritoryAssaultParticipantComponent, AttackingFaction);
 	DOREPLIFETIME(UTerritoryAssaultParticipantComponent, bCaptureRegistered);
 	DOREPLIFETIME(UTerritoryAssaultParticipantComponent, bAllowsTerritoryCapture);
+	DOREPLIFETIME(UTerritoryAssaultParticipantComponent, bStreamingSuspended);
 }
 
 bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
@@ -352,7 +360,12 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeActivityAndGoal()
 	bool bFoundGoal = false;
 	AssaultGoal = Cast<UTerritoryAssaultGoal>(ActivityComponent->GetGoalByKey(
 		UTerritoryAssaultGoal::StaticClass(), this, bFoundGoal));
-	if (bFoundGoal && AssaultGoal) return true;
+	if (bFoundGoal && AssaultGoal)
+	{
+		// The goal outlives a streamed actor; keep its transient target current.
+		AssaultGoal->TargetTerritory = ResolveTargetTerritory();
+		return true;
+	}
 	UNPCActivity* Activity = ActivityComponent->GetActivity(UTerritoryAssaultActivity::StaticClass());
 	if (!Activity)
 	{
@@ -445,6 +458,90 @@ void UTerritoryAssaultParticipantComponent::HandleNarrativeDamagedBy(
 	(void)Spec;
 }
 
+void UTerritoryAssaultParticipantComponent::HandleLevelRemoving(ULevel* Level, UWorld* World)
+{
+	const auto* NPC = Cast<ATerritoryAssaultCharacter>(GetOwner());
+	if (!NPC || !NPC->HasAuthority() || !Level || World != GetWorld()
+		|| World->bIsTearingDown || bRemovalReported || IsVehicleIngressPending()) return;
+	const ATerritoryVolume* Target = ResolveTargetTerritory();
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+	const UPrimitiveComponent* Base = NPC->GetMovementBase();
+#else
+	const UPrimitiveComponent* Base = Cast<UPrimitiveComponent>(NPC->GetMovementBaseObject());
+#endif
+	if ((Target && Target->GetLevel() == Level)
+		|| (Base && Base->GetOwner() && Base->GetOwner()->GetLevel() == Level))
+	{
+		// The half-second participation timer is too late: collision can disappear
+		// this frame. Suspend before the engine unregisters the supporting level.
+		SuspendForStreaming();
+	}
+}
+
+void UTerritoryAssaultParticipantComponent::SuspendForStreaming()
+{
+	auto* NPC = Cast<ATerritoryAssaultCharacter>(GetOwner());
+	if (!NPC || !NPC->HasAuthority() || bRemovalReported || bStreamingSuspended
+		|| IsVehicleIngressPending()) return;
+	auto* Movement = NPC->GetCharacterMovement();
+	if (!Movement) return;
+	bStreamingSuspended = true;
+	StreamingMovementMode = Movement->MovementMode;
+	StreamingCustomMovementMode = Movement->CustomMovementMode;
+	StreamingVelocity = Movement->Velocity;
+	bStreamingCollisionWasEnabled = NPC->GetActorEnableCollision();
+	auto* Activity = NPC->GetActivityComponent();
+	bStreamingActivityWasActive = Activity && Activity->IsActive();
+	// Native keeps its goals/health/equipment. Deactivate ends the running activity
+	// through its public lifecycle instead of replacing the NPC or finite budget.
+	Movement->DisableMovement();
+	NPC->SetActorEnableCollision(false);
+	UnregisterCapturePressure();
+	if (IsValid(Activity) && bStreamingActivityWasActive) Activity->Deactivate();
+	if (IsValid(NPC) && !NPC->IsActorBeingDestroyed())
+	{
+		if (auto* Controller = NPC->GetNPCController()) Controller->StopMovement();
+		NPC->ForceNetUpdate();
+	}
+	bHasMovementProgressSample = false;
+}
+
+bool UTerritoryAssaultParticipantComponent::ResumeAfterStreaming(ATerritoryVolume* Territory)
+{
+	if (!bStreamingSuspended) return true;
+	auto* NPC = Cast<ATerritoryAssaultCharacter>(GetOwner());
+	if (!IsValid(NPC) || NPC->IsActorBeingDestroyed() || bRemovalReported
+		|| !NPC->HasAuthority() || !IsValid(Territory)
+		|| Territory->GetLevel()->bIsBeingRemoved) return false;
+	auto* Movement = NPC->GetCharacterMovement();
+	if (!Movement) return false;
+	if (StreamingMovementMode == MOVE_Walking || StreamingMovementMode == MOVE_NavWalking)
+	{
+		// Target registration can precede the floor's collision registration.
+		// ComputeFloorDist is the Native movement query that works with collision
+		// disabled; a navmesh alone is not proof of physical support.
+		FFindFloorResult Floor;
+		const float Distance = Movement->MaxStepHeight + 10.f;
+		Movement->ComputeFloorDist(NPC->GetActorLocation(), Distance, Distance,
+			Floor, NPC->GetCapsuleComponent()->GetScaledCapsuleRadius());
+		const AActor* FloorActor = Floor.HitResult.GetActor();
+		if (!Floor.IsWalkableFloor() || !IsValid(FloorActor)
+			|| FloorActor->GetLevel()->bIsBeingRemoved) return false;
+	}
+	bStreamingSuspended = false;
+	NPC->SetActorEnableCollision(bStreamingCollisionWasEnabled);
+	Movement->SetMovementMode(static_cast<EMovementMode>(StreamingMovementMode), StreamingCustomMovementMode);
+	Movement->Velocity = StreamingVelocity;
+	bHasMovementProgressSample = false;
+	NextMovementRestartTime = 0.0;
+	if (AssaultGoal) AssaultGoal->TargetTerritory = Territory;
+	if (auto* Activity = NPC->GetActivityComponent(); Activity && bStreamingActivityWasActive)
+		Activity->Activate();
+	if (!IsValid(NPC) || NPC->IsActorBeingDestroyed() || bRemovalReported) return false;
+	NPC->ForceNetUpdate();
+	return true;
+}
+
 void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 {
 	AActor* Owner = GetOwner();
@@ -501,6 +598,7 @@ void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 	ATerritoryVolume* Territory = ResolveTargetTerritory();
 	if (!Territory)
 	{
+		SuspendForStreaming();
 		// A missing streamed target is not an AI initialization failure. Wait
 		// before creating its goal, preserving both the survivor and retry budget.
 		// The old weak-keyed capture state is pruned by the control subsystem when
@@ -521,6 +619,7 @@ void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 		bCaptureRegistered = false;
 		return;
 	}
+	if (!ResumeAfterStreaming(Territory)) return;
 
 	if (!EnsureNarrativeActivityAndGoal())
 	{
@@ -679,6 +778,14 @@ bool UTerritoryAssaultParticipantComponent::MaintainAssaultMovement(
 
 	RemoveUnengageableTargets(LiveEngagementTargets);
 	RemoveUnengageableTargets(DefenderPriorityTargets);
+	// Movement and Native goal scoring share the same authored preference. Damage
+	// remains remembered, but cannot divert a guard-priority force unless enabled.
+	if (bTakeoverPriority && !DefenderPriorityTargets.IsEmpty())
+	{
+		AActor* Override = Profile && Profile->bDamageRetaliationOverridesDefenderPriority
+			? ResolveMostRecentDamagingThreat() : nullptr;
+		LiveEngagementTargets = Override ? TArray<AActor*>({Override}) : DefenderPriorityTargets;
+	}
 
 	TArray<FVector> LiveDefenderLocations;
 	for (const AActor* Target : LiveEngagementTargets)
@@ -704,13 +811,31 @@ bool UTerritoryAssaultParticipantComponent::MaintainAssaultMovement(
 	}
 
 	ReconcileNarrativeDefenderTargeting(ActivityComponent, DefenderPriorityTargets);
+	// Once an unopposed capture force physically occupies the Place, holding it
+	// is the objective. An optional post/road waypoint may be on another navmesh
+	// island; failure to reach it cannot invalidate this legitimate occupation.
+	// The counterattack subsystem still validates defenders, player presence,
+	// story availability, diplomacy and the living body before any handover.
+	if (bAllowsTerritoryCapture && LiveEngagementTargets.IsEmpty()
+		&& Territory->ContainsPoint(NPC->GetActorLocation()))
+	{
+		ConsecutiveMovementRestartFailures = 0;
+		bHasMovementProgressSample = false;
+		NextMovementRestartTime = Now + RetryInterval;
+		AssaultGoal->TargetLocation = NPC->GetActorLocation();
+		if (ActivityComponent->GetCurrentActivityGoal() == AssaultGoal)
+		{
+			Controller->StopMovement();
+		}
+		return true;
+	}
 	const bool bMovementTargetChanged = !AssaultGoal->TargetLocation.Equals(DesiredTarget, 200.f);
 	AssaultGoal->TargetLocation = DesiredTarget;
 	auto RecordFailedRestart = [this, NPC, Territory, MaximumFailures]()
 	{
 		if (++ConsecutiveMovementRestartFailures < MaximumFailures) return true;
-		UE_LOG(LogTerritory, Error,
-			TEXT("Assault participant %s withdrew after %d failed movement restarts toward %s"),
+		UE_LOG(LogTerritory, Warning,
+			TEXT("Assault participant %s withdrew after %d movement intervals without progress toward %s"),
 			*GetNameSafe(NPC), ConsecutiveMovementRestartFailures,
 			*Territory->GetTerritoryTag().ToString());
 		Retire(false);
@@ -731,28 +856,72 @@ bool UTerritoryAssaultParticipantComponent::MaintainAssaultMovement(
 	// Registered-defender combat remains authoritative and interrupts movement.
 	if (CurrentGoal && CurrentGoal != AssaultGoal)
 	{
-		ConsecutiveMovementRestartFailures = 0;
+		// Combat/other deliberate Native activities pause this clock. A subsequent
+		// movement interval starts from the new physical location.
+		bHasMovementProgressSample = false;
+		NextMovementRestartTime = Now + RetryInterval;
 		return true;
 	}
 	if (!CurrentGoal) return true;
-	if (Controller->GetMoveStatus() != EPathFollowingStatus::Idle && !bMovementTargetChanged)
+	const FVector Location = NPC->GetActorLocation();
+	const auto* Following = Controller->GetPathFollowingComponent();
+	// Match the actual MoveTo request below: Native measures from the agent's
+	// feet and includes capsule radius. A centre-based sphere can mark an
+	// already completed movement as stalled, particularly for reinforcements.
+	const bool bReached = Following
+		? Following->HasReached(DesiredTarget, EPathFollowingReachMode::OverlapAgent, 150.f)
+		: FVector::DistSquared(Location, DesiredTarget) <= FMath::Square(200.f);
+	if (bReached)
 	{
 		ConsecutiveMovementRestartFailures = 0;
+		bHasMovementProgressSample = false;
+		NextMovementRestartTime = Now + RetryInterval;
 		return true;
 	}
-
-	if (Now < NextMovementRestartTime) return true;
-	NextMovementRestartTime = Now + RetryInterval;
-
-	const EPathFollowingRequestResult::Type Result = Controller->MoveToLocation(
-		AssaultGoal->TargetLocation, 150.f, true, true, true, false, nullptr, true);
-	if (Result != EPathFollowingRequestResult::Failed)
+	FVector NextWaypoint = DesiredTarget;
+	double RemainingDistance = FVector::Distance(Location, DesiredTarget);
+	const FNavPathSharedPtr Path = Following ? Following->GetPath() : nullptr;
+	if (Path.IsValid() && Path->IsValid())
 	{
-		ConsecutiveMovementRestartFailures = 0;
-		return true;
+		const auto& Points = Path->GetPathPoints();
+		const int32 Next = static_cast<int32>(Following->GetNextPathIndex());
+		if (Points.IsValidIndex(Next))
+		{
+			NextWaypoint = Points[Next].Location;
+			RemainingDistance = FVector::Distance(Location, NextWaypoint);
+			for (int32 Index = Next + 1; Index < Points.Num(); ++Index)
+				RemainingDistance += FVector::Distance(Points[Index - 1].Location, Points[Index].Location);
+			// Reaching the end of a partial path is not reaching the objective.
+			RemainingDistance += FVector::Distance(Points.Last().Location, DesiredTarget);
+		}
 	}
-
-	return RecordFailedRestart();
+	bool bProgress = false;
+	if (bHasMovementProgressSample && Now >= NextMovementRestartTime)
+	{
+		const bool bDisplaced = FVector::DistSquared(Location, LastMovementLocation) >= FMath::Square(25.f);
+		bProgress = bDisplaced && (FVector::Distance(LastMovementLocation, LastMovementWaypoint)
+			- FVector::Distance(Location, LastMovementWaypoint) >= 25.f
+			|| (LastMovementObjective.Equals(DesiredTarget, 200.f)
+				&& LastMovementRemainingDistance - RemainingDistance >= 25.f));
+		if (bProgress) ConsecutiveMovementRestartFailures = 0;
+		else if (!RecordFailedRestart()) return false;
+	}
+	else if (bHasMovementProgressSample && !bMovementTargetChanged) return true;
+	const bool bSampleDue = !bHasMovementProgressSample || Now >= NextMovementRestartTime;
+	if (bSampleDue)
+	{
+		bHasMovementProgressSample = true;
+		LastMovementLocation = Location;
+		LastMovementWaypoint = NextWaypoint;
+		LastMovementObjective = DesiredTarget;
+		LastMovementRemainingDistance = RemainingDistance;
+		NextMovementRestartTime = Now + RetryInterval;
+	}
+	if (bProgress && Controller->GetMoveStatus() != EPathFollowingStatus::Idle && !bMovementTargetChanged) return true;
+	// Accepted requests do not reset the budget. Only observed physical progress
+	// does; a moving/partial path can otherwise strand a living force forever.
+	Controller->MoveToLocation(AssaultGoal->TargetLocation, 150.f, true, true, true, false, nullptr, true);
+	return true;
 }
 
 void UTerritoryAssaultParticipantComponent::ReconcileNarrativeDefenderTargeting(
@@ -1364,17 +1533,32 @@ bool UTerritoryAssaultParticipantComponent::QueryVehicleObstacleDistance(
 			IgnoreActorAndAttachments(Candidate->GetCharacterVisual());
 		}
 	}
-	FHitResult Hit;
+	TArray<FHitResult> Hits;
 	const FCollisionShape Box = FCollisionShape::MakeBox(FVector(
 		FMath::Max(50.f, VehicleAwareness.ProbeHalfWidth),
 		FMath::Max(50.f, VehicleAwareness.ProbeHalfWidth),
 		FMath::Max(25.f, VehicleAwareness.ProbeHalfHeight)));
-	if (!World->SweepSingleByObjectType(Hit, Start, End,
+	if (!World->SweepMultiByObjectType(Hits, Start, End,
 		QueryDirection.Rotation().Quaternion(), Objects, Box, Params))
 	{
 		return false;
 	}
-	OutDistance = FVector::Dist2D(Start, Hit.ImpactPoint);
+	// Object queries also return overlap-only gameplay triggers. They must not
+	// become invisible emergency brakes or mask a real obstacle behind them.
+	const UPrimitiveComponent* VehicleRoot = Cast<UPrimitiveComponent>(Vehicle->GetRootComponent());
+	const ECollisionChannel VehicleChannel = VehicleRoot
+		? VehicleRoot->GetCollisionObjectType() : ECC_Vehicle;
+	float ClosestDistance = TNumericLimits<float>::Max();
+	for (const FHitResult& Hit : Hits)
+	{
+		const UPrimitiveComponent* Component = Hit.GetComponent();
+		if (Component && Component->GetCollisionResponseToChannel(VehicleChannel) == ECR_Block)
+		{
+			ClosestDistance = FMath::Min(ClosestDistance, FVector::Dist2D(Start, Hit.ImpactPoint));
+		}
+	}
+	if (ClosestDistance == TNumericLimits<float>::Max()) return false;
+	OutDistance = ClosestDistance;
 	return true;
 }
 

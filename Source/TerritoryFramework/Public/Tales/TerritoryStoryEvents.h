@@ -6,6 +6,7 @@
 #include "Economy/TerritoryProductionProfile.h"
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryStoryEvents.generated.h"
 
 class ANarrativePlayerState;
@@ -20,7 +21,7 @@ UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Set Narrative Player Factions",
 		ToolTip="Change the exact player saved Narrative memberships. Replace removes old memberships; Add keeps them. Primary Faction selects the membership used by Territory ownership and accounts. Disguise is a separate system."))
 class TERRITORYFRAMEWORK_API UTerritorySetNarrativePlayerFactionsEvent
-	: public UNarrativeEvent
+	: public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -46,9 +47,9 @@ public:
 	bool ApplyToPlayerState(ANarrativePlayerState* PlayerState) const;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target,
-		APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -69,7 +70,7 @@ enum class ETerritoryHierarchyStoryOperation : uint8
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Apply Territory Hierarchy Story Override",
 		ToolTip="Apply an explicit story decision to loaded descendants. Each Place commits through existing authority; parents are derived from their children. This is not an atomic transaction across the whole city. Unloaded descendants are not changed."))
-class TERRITORYFRAMEWORK_API UTerritoryHierarchyStoryOverrideEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryHierarchyStoryOverrideEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -104,8 +105,9 @@ public:
 	FText LockReason;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -119,7 +121,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Wave of Enemies (Schedule Territory Assault)",
 		ToolTip="Request one finite physical force through the counterattack scheduler. Choose strategic counterattack, story pursuit, or owner reinforcements before handover. Immediate removes the preparation wait; route, budget and policy checks can still reject it."))
-class TERRITORYFRAMEWORK_API UTerritoryScheduleEnemyWaveEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryScheduleEnemyWaveEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -173,8 +175,9 @@ public:
 		bool bLogFailure = false);
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -186,7 +189,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Start Territory Boss Chase",
 		ToolTip="Start a finite story pursuit using the existing attack profile and Narrative NPCs. Choose who chases whom in Pursuit Options. The default is one enemy and no territory capture; route and spawn checks still apply."))
-class TERRITORYFRAMEWORK_API UTerritoryStartBossChaseEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryStartBossChaseEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -209,8 +212,9 @@ public:
 	FTerritoryStoryPursuitOptions PursuitOptions;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -218,7 +222,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Cancel Territory Enemy Waves",
 		ToolTip="Cancel matching finite assault records on the server. Optional faction and story ID narrow the selection. By default only preparing forces are cancelled. Include Active also withdraws deployed attackers from capture."))
-class TERRITORYFRAMEWORK_API UTerritoryCancelEnemyWavesEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryCancelEnemyWavesEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -245,8 +249,9 @@ public:
 	bool bIncludePhysicallyActiveAssaults = false;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -254,7 +259,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Set Territory Guard Assignment Target",
 		ToolTip="Request a new guard assignment target using the exact Narrative requester. Ownership, capacity and payment rules still apply. This does not grant free guards or immediately fill every post."))
-class TERRITORYFRAMEWORK_API UTerritorySetGarrisonTargetEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritorySetGarrisonTargetEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -270,8 +275,9 @@ public:
 	int32 DesiredGuards = 1;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -279,7 +285,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Purchase One Territory Property Upgrade",
 		ToolTip="Buy one upgrade for a loaded Property using the exact Narrative requester. Requires ownership, an eligible upgrade and payment. Districts and Cities cannot be upgraded by this event."))
-class TERRITORYFRAMEWORK_API UTerritoryUpgradePropertyEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryUpgradePropertyEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -291,8 +297,9 @@ public:
 	FGameplayTag TargetProperty;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -300,7 +307,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Execute Territory Resource Recipe",
 		ToolTip="Execute a finite recipe batch using Narrative inventory and faction storage. Requires an explicit requester and valid resources. Recipe failures do not grant output."))
-class TERRITORYFRAMEWORK_API UTerritoryExecuteResourceRecipeEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryExecuteResourceRecipeEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -328,8 +335,9 @@ public:
 	int32 BatchCount = 1;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -369,7 +377,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Play Territory Cutscene",
 		ToolTip="Play one Level Sequence as a cutscene for the exact Narrative target player, or for the players of Audience Faction when this event runs with no player context. Server-only; Narrative owns presentation. Movement and look are released when the sequence ends, so the player always gets control back."))
-class TERRITORYFRAMEWORK_API UTerritoryPlayCutsceneEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryPlayCutsceneEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -426,7 +434,8 @@ public:
 	float TeardownGraceSeconds = 1.f;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

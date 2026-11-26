@@ -3,13 +3,15 @@
 
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Subsystems/TerritoryDisguiseSubsystem.h"
+#include "NarrativeGameplayTags.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 
 UTerritoryDisguiseClothingItem::UTerritoryDisguiseClothingItem()
 {
 	// Narrative's Equipment Gameplay Effect already knows how to apply this as a
 	// SetByCaller modifier. Designers can lower it for imperfect uniforms.
-	StealthRating = 100.f;
+	// Narrative 2.5 replaced the StealthRating field with EquipmentEffectValues.
+	EquipmentEffectValues.Add(FNarrativeGameplayTags::Get().SetByCaller_StealthRating, 100.f);
 }
 
 void UTerritoryDisguiseClothingItem::HandleEquip_Implementation()

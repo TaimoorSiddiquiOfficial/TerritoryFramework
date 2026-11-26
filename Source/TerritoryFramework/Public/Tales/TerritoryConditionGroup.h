@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Tales/NarrativeCondition.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryConditionGroup.generated.h"
 
 UENUM(BlueprintType)
@@ -15,7 +16,7 @@ enum class ETerritoryConditionGroupMatch : uint8
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Condition Group (All / Any)",
 		ToolTip="Combine any Narrative conditions. Example: All of Blacksmith Locked and Any of Player Trusted or Bandits Weak. Child Not and party options are respected. Empty groups, empty rows, and cycles fail. The group's own Not is applied by Narrative."))
-class TERRITORYFRAMEWORK_API UTerritoryConditionGroup : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryConditionGroup : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 public:
@@ -34,8 +35,9 @@ public:
 #endif
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 
 private:

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayCueInterface.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "TerritoryGuardSpawnPoint.h"
 #include "Combat/TerritoryAssaultTargetPolicy.h"
@@ -32,12 +33,16 @@ enum class ETerritoryStealthEvidence : uint8;
  *   - Home:         Guard->TerritoryHomeTransform     -> FTransform
  */
 UCLASS(BlueprintType, Blueprintable)
-class TERRITORYFRAMEWORK_API ATerritoryGuardCharacter : public ANarrativeNPCCharacter
+class TERRITORYFRAMEWORK_API ATerritoryGuardCharacter : public ANarrativeNPCCharacter, public IGameplayCueInterface
 {
 	GENERATED_BODY()
 
 public:
 	ATerritoryGuardCharacter(const FObjectInitializer& ObjectInitializer);
+
+	/** Drop transient Native damage reactions until the local appearance can render them. */
+	virtual bool ShouldAcceptGameplayCue(UObject* Self, FGameplayTag GameplayCueTag,
+		EGameplayCueEvent::Type EventType, const FGameplayCueParameters& Parameters) override;
 
 	// INarrativeStableActor — return SpawnAssignedSaveGUID instead of crashing
 	virtual FGuid GetActorGUID_Implementation() const override;

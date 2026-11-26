@@ -953,11 +953,10 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 		OutView.CaptureEligibility = Control->GetCaptureEligibility(District, OutView.ViewerFaction);
 		OutView.bCaptureInProgress = false;
 		OutView.CaptureProgress = 0.f;
-		OutView.bAttackerCountKnown = World->GetNetMode() != NM_Client;
-		if (OutView.bAttackerCountKnown && OutView.ContestingFaction.IsValid())
-		{
-			OutView.ActiveAttackers = Control->GetActiveAttackers(District, OutView.ContestingFaction);
-		}
+		int32 Living = -1, Pressure = -1;
+		OutView.bAttackerCountKnown = Control->TryGetCaptureParticipants(District,
+			OutView.ViewerFaction, Living, Pressure);
+		OutView.ActiveAttackers = OutView.bAttackerCountKnown ? 0 : -1;
 
 		// District is an aggregate authority, so surface child Property pressure instead of
 		// making an active leaf assault disappear from the command center.
@@ -970,17 +969,17 @@ bool UTerritoryUIBlueprintLibrary::BuildDistrictOperationsView(
 				continue;
 			}
 			OutView.bCaptureInProgress = true;
-			const float ChildProgress = Property->GetControlProgress();
+			const float ChildProgress = Control->GetCaptureProgress(Property);
 			if (ChildProgress >= HighestChildProgress)
 			{
 				HighestChildProgress = ChildProgress;
-				OutView.ContestingFaction = Property->GetOwnershipData().ContestingFaction;
+				OutView.ContestingFaction = Control->GetContestingFaction(Property);
 			}
-			if (OutView.bAttackerCountKnown
-				&& Property->GetOwnershipData().ContestingFaction.IsValid())
+			if (OutView.bAttackerCountKnown)
 			{
-				OutView.ActiveAttackers += Control->GetActiveAttackers(
-					Property, Property->GetOwnershipData().ContestingFaction);
+				OutView.bAttackerCountKnown = Control->TryGetCaptureParticipants(
+					Property, Control->GetContestingFaction(Property), Living, Pressure);
+				OutView.ActiveAttackers = OutView.bAttackerCountKnown ? OutView.ActiveAttackers + Living : -1;
 			}
 		}
 		OutView.CaptureProgress = HighestChildProgress;
@@ -2076,6 +2075,7 @@ FTerritoryEconomyOperationsView UTerritoryUIBlueprintLibrary::BuildEconomyOperat
 		View.bDeficit = View.NetPerTick < 0;
 		View.RecentTransactions = Economy->GetTransactionHistory(
 			View.Faction, FMath::Max(0, MaxRecentTransactions));
+		View.bTransactionHistoryReady = true;
 		for (const FTerritoryTransaction& Transaction : View.RecentTransactions)
 		{
 			if (Transaction.Amount >= 0)
@@ -2095,6 +2095,7 @@ FTerritoryEconomyOperationsView UTerritoryUIBlueprintLibrary::BuildEconomyOperat
 		if (WorldState)
 		{
 			const FTerritoryTreasury Snapshot = WorldState->GetFactionTreasury(View.Faction);
+			View.bTransactionHistoryReady = WorldState->IsTransactionHistoryReady();
 			View.IncomePerTick = Snapshot.IncomePerTick;
 			View.CostsPerTick = Snapshot.CostsPerTick;
 			View.NetPerTick = View.IncomePerTick - View.CostsPerTick;

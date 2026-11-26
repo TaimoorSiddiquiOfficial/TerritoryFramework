@@ -24,6 +24,7 @@
 #include "UnrealFramework/NarrativePlayerCharacter.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "UnrealFramework/NarrativePlayerState.h"
+#include "Tales/TerritoryNarrativeContext.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryObservationTaskLifecycle,
 	"TerritoryFramework.Tales.Regression.OptionalObjectivesAndObservationIdentity",

@@ -1,4 +1,5 @@
 #include "Combat/TerritoryAssaultCharacter.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 
 #include "Combat/TerritoryAssaultParticipantComponent.h"
 #include "AI/TerritoryDiplomacyDialogue.h"
@@ -276,10 +277,6 @@ void ATerritoryAssaultCharacter::SetNPCDefinition(UNPCDefinition* Definition)
 	{
 		if (UNarrativeAbilitySystemComponent* ASC = GetNarrativeAbilitySystemComponent())
 		{
-			// Narrative's native ASC leaves its save-attribute list empty by default.
-			// Finite survivors must retain damage through that existing save authority.
-			ASC->AttributesToSave.AddUnique(UNarrativeAttributeSetBase::GetMaxHealthAttribute());
-			ASC->AttributesToSave.AddUnique(UNarrativeAttributeSetBase::GetHealthAttribute());
 			ASC->OnDeathStateChanged.AddUniqueDynamic(this, &ATerritoryAssaultCharacter::HandleDeath);
 		}
 	}
@@ -354,11 +351,13 @@ ETeamAttitude::Type ATerritoryAssaultCharacter::GetTeamAttitudeTowards(
 
 bool ATerritoryAssaultCharacter::CanEngageAssaultTarget(const AActor* Target) const
 {
-	if (!IsValid(Target) || Target == this || !AssaultParticipant
+	if (!HasAuthority() || !IsAlive() || IsActorBeingDestroyed() || !IsValid(Target)
+		|| Target->IsActorBeingDestroyed() || Target->GetWorld() != GetWorld() || Target == this || !AssaultParticipant
 		|| !AssaultParticipant->IsConfigured())
 	{
 		return false;
 	}
+	if (const auto* Character = Cast<ANarrativeCharacter>(Target); Character && !Character->IsAlive()) return false;
 
 	const UWorld* World = GetWorld();
 	const UTerritoryCounterAttackSubsystem* Counterattacks = World
@@ -378,7 +377,7 @@ bool ATerritoryAssaultCharacter::CanEngageAssaultTarget(const AActor* Target) co
 	return Counterattacks && Diplomacy && TargetTeam
 		&& AssaultParticipant->CanEngageCombat()
 		&& Counterattacks->IsAssaultActive(AssaultParticipant->GetAssaultID())
-		&& Diplomacy->AreAnyFactionsAtWar(GetFactions(), TargetFactions);
+		&& Diplomacy->CanFactionsEngage(GetFactions(), TargetFactions);
 }
 
 void ATerritoryAssaultCharacter::BeginPlay()
@@ -471,4 +470,11 @@ bool ATerritoryAssaultCharacter::ShouldRespawn_Implementation() const
 	// The durable assault record reconstructs surviving finite force after load.
 	// Saving individual live pawn pointers/records would create a second authority.
 	return false;
+}
+
+bool ATerritoryAssaultCharacter::ShouldAcceptGameplayCue(UObject* Self, FGameplayTag GameplayCueTag,
+	EGameplayCueEvent::Type EventType, const FGameplayCueParameters& Parameters)
+{
+	return IGameplayCueInterface::ShouldAcceptGameplayCue(Self, GameplayCueTag, EventType, Parameters)
+		&& FTerritoryNarrativeProAdapter::CanPresentGameplayCue(this, GameplayCueTag, EventType);
 }

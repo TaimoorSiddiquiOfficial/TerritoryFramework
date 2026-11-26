@@ -4,6 +4,7 @@
 #include "Tales/NarrativeEvent.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryLockEvent.generated.h"
 
 /**
@@ -13,7 +14,7 @@
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Lock Territory",
 		ToolTip="Lock one loaded territory on the server while preserving its owner and political state. Add a reason for the player. The runtime change is saved; it does not edit the Definition default."))
-class TERRITORYFRAMEWORK_API UTerritoryLockEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryLockEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -30,7 +31,9 @@ public:
 	FText LockReason;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -43,7 +46,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Try Unlock Territory",
 		ToolTip="Try to open the selected territory using the chosen hierarchy scope. Normal scopes respect Locked Exit Conditions. Force scopes bypass them for a deliberate story override. Definition defaults stay unchanged for the next new campaign."))
-class TERRITORYFRAMEWORK_API UTerritoryUnlockEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryUnlockEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -66,6 +69,8 @@ public:
 	bool bForceUnlock = false;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

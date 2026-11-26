@@ -32,7 +32,9 @@ enum class ETerritoryProductionStatus : uint8
 	/** A Narrative load superseded this request; its old continuation was discarded. */
 	Superseded,
 	/** An authored inventory check or output cap paused this cycle. No items were consumed. */
-	StockLimited UMETA(DisplayName="Stock Limit")
+	StockLimited UMETA(DisplayName="Stock Limit"),
+	/** Authored assets are loading. Checkpoints and item quantities are unchanged. */
+	LoadingAssets
 };
 
 /** Pause the whole recipe when any enabled check matches the receiving inventory. */
@@ -310,6 +312,36 @@ struct TERRITORYFRAMEWORK_API FTerritoryProductionSiteRecord
 	/** Zero is a legacy record. It must rebind to its Place before paying under new rules. */
 	UPROPERTY(SaveGame)
 	int32 StateRulesVersion = 0;
+
+	/** Versioned rate inputs only. Native inventory remains the currency balance authority. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	int32 CurrencyRatesVersion = 0;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	int32 BaseCurrencyIncome = 0;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	int32 CurrencyIncomePerUpgrade = 0;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	int32 CurrencyGuardCost = 0;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	int32 DesiredGarrison = 0;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	bool bAllowCurrencyIncome = false;
+
+	/** Last verified parent policy, retained if the District and its Definition are unavailable. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	float CurrencyCapitalMultiplier = 1.f;
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	bool bCurrencyCapitalPolicyKnown = false;
+
+	/** Nonempty means currency contribution is withheld until exact saved inputs can be resolved. */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Economy")
+	FText CurrencyMigrationIssue;
 
 	/** Requested Place upgrade level used by the selected scripted operation. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Production")

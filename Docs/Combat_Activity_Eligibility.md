@@ -11,8 +11,9 @@ Zero pauses a goal; a negative score tells Narrative to remove it.
 The shared melee, ranged strafe and grenade activities include this check.
 TDA's three project activities include it too. A project that overrides
 `ScoreGoalItem` without calling these implementations must add the same check.
-The latest melee refactor was saved with UE 5.8. Earlier engine compatibility must
-be verified separately; a resaved asset is not a backwards-compatibility guarantee.
+The included attack assets use UE 5.7-compatible packages. Both supported engine
+hosts still require build, content and runtime verification for each release;
+see [content compatibility evidence](Verification/2026-10-05-content-backport.md).
 
 The melee activity now inherits Native BPA_Attack_Melee instead of copying its
 alert/visibility/reachability graph. A close-range preference preserves Native's
@@ -38,6 +39,14 @@ There are no new save fields, replicated fields, stable IDs or ownership
 transitions. Existing saves derive eligibility from the restored participant,
 mission target and diplomacy. No Narrative Pro source or asset is changed.
 
+Keep **Call Tick on Search Start** disabled on the Native `BTS_Attack` service in
+Territory combat trees. Its tick can remove an expired goal and synchronously
+select a different Native activity. A search-start tick can therefore free the
+tree memory while the Engine is still using it. The ordinary scheduled service
+tick provides the Engine's cleanup barrier. Preserve the authored interval and
+random deviation; do not replace this with an immediate callback from another
+search hook. See the [lifetime regression](Verification/2026-10-06-combat-search-lifetime.md).
+
 ## Diagnosing same-team damage messages
 
 Native `NarrativeDamageExecCalc` reports a same-team shot when its friendly-fire
@@ -59,7 +68,8 @@ peace. Assault NPCs selected on-foot combat in 414 samples, including after each
 restore. The unique temporary save was deleted. This proves the activity gate;
 it does not certify every city route or World Partition scenario.
 
-Both engine suites pass all 299 automation tests. The expanded autonomy test
+The September verification ran 299 automation tests on both engines. Current
+release totals belong to the fresh build receipt. The expanded autonomy test
 executes the actual combat Blueprints, pauses them during ingress and escape,
 then resumes the same goal after arrival. It also checks client authority,
 foreign/null goals, self targets, unpossession and restored mission identity.

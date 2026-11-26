@@ -124,7 +124,7 @@ bool FTFIndependentGuardPostStreaming::RunTest(const FString& Parameters)
 	Definition->ApplyToTerritory(ReturnedPlace);
 	ReturnedPlace->DispatchBeginPlay();
 	TestEqual(TEXT("The replacement owner restores the staffing target"), ReturnedPlace->GetDesiredGuardCount(), 2);
-	TestEqual(TEXT("The replacement owner restores exactly two Native guards"), ReturnedPlace->GetSpawnedGuardCount(), 2);
+	if (!TestEqual(TEXT("The replacement owner restores exactly two Native guards"), ReturnedPlace->GetSpawnedGuardCount(), 2)) return false;
 	for (ATerritoryGuardSpawnPoint* Post : Posts)
 	{
 		TestTrue(TEXT("A still-loaded post binds the newly registered owner"), Post->GetOwningTerritory() == ReturnedPlace);

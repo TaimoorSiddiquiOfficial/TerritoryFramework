@@ -524,6 +524,8 @@ struct TERRITORYFRAMEWORK_API FTerritoryEconomyOperationsView
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") int64 RecentDebits = 0;
 	/** Recent verified economy transactions retained for display. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") TArray<FTerritoryTransaction> RecentTransactions;
+	/** False means history has not arrived or exceeds its supported transport budget, not an empty account. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Finance") bool bTransactionHistoryReady = false;
 	/** Whether an eligible Narrative resource inventory is available. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|UI|Resources") bool bResourceStorageAvailable = false;
 	/** Resource accounts tied for highest priority; the server is waiting for a deliberate storage choice. */

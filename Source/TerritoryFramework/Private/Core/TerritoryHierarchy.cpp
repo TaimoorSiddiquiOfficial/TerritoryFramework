@@ -1,11 +1,22 @@
 #include "Core/TerritoryHierarchy.h"
+#include "Economy/TerritoryCurrencyRates.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryWorldState.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryUpgradeDefinition.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
+#include "Subsystems/TerritoryUpgradeSubsystem.h"
+#include "Tales/NarrativeCondition.h"
+#include "Tales/NarrativeEvent.h"
+#include "Tales/NarrativeFunctionLibrary.h"
+#include "Tales/TalesComponent.h"
+#include "Tales/TerritoryTalesUtilities.h"
+#include "Tales/TerritoryUpgradeEvents.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
 
@@ -900,9 +911,59 @@ void ATerritoryProperty::ReconcileOwnershipDependentSystems(FGameplayTag OldOwne
 	Super::ReconcileOwnershipDependentSystems(OldOwner, NewOwner);
 	// Captured ownership and its upgrade/income state must agree before Tales
 	// events read or save this actor, even when Blueprint overrides the notice.
-	if (NewOwner.IsValid() && OldOwner != NewOwner && UpgradeLevel > 0)
+	if (NewOwner.IsValid() && OldOwner != NewOwner)
 	{
-		SetUpgradeLevel(0);
+		const int32 OldLevel = UpgradeLevel;
+		PendingCaptureOldLevel = OldLevel;
+		if (OldLevel > 0)
+		{
+			SetUpgradeLevel(0);
+		}
+		DispatchPlaceCaptureEvents(OldOwner, NewOwner, OldLevel);
+		PendingCaptureOldLevel = INDEX_NONE;
+	}
+}
+
+void ATerritoryProperty::DispatchPlaceCaptureEvents(FGameplayTag OldOwner, FGameplayTag NewOwner,
+	int32 OldLevel)
+{
+	if (!HasAuthority() || !NewOwner.IsValid())
+	{
+		return;
+	}
+	if (UTerritoryUpgradeSubsystem* Upgrades = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryUpgradeSubsystem>() : nullptr)
+	{
+		Upgrades->NotifyPlaceCaptured(this);
+	}
+
+	const UTerritoryPlaceDefinition* PlaceDefinition =
+		Cast<UTerritoryPlaceDefinition>(GetTerritoryDefinition());
+	if (!PlaceDefinition || PlaceDefinition->PlaceCapturedEvents.IsEmpty())
+	{
+		return;
+	}
+
+	for (UNarrativeEvent* Event : PlaceDefinition->PlaceCapturedEvents)
+	{
+		if (!IsValid(Event))
+		{
+			continue;
+		}
+		UTerritoryPlaceCapturedEvent* Captured =
+			Cast<UTerritoryPlaceCapturedEvent>(Event);
+		if (Captured)
+		{
+			Captured->SetPayload(this, OldOwner, NewOwner, OldLevel);
+		}
+		FString FailedCondition;
+		if (!TerritoryTales::DoEventConditionsPass(Event, nullptr, nullptr, nullptr,
+			&FailedCondition))
+		{
+			continue;
+		}
+		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
+      TerritoryTales::ExecuteEvent(Event, nullptr, nullptr, nullptr);
 	}
 }
 
@@ -918,7 +979,11 @@ void ATerritoryProperty::OnPropertyCaptured_Implementation(FGameplayTag NewOwner
 	// the level in ReconcileOwnershipDependentSystems before Tales events.
 	if (HasAuthority() && UpgradeLevel > 0)
 	{
+		const int32 OldLevel = UpgradeLevel;
 		SetUpgradeLevel(0);
+		// Ownership paths that do not run the reconcile still owe designers the
+		// capture payload; the previous owner is unknown on this direct path.
+		DispatchPlaceCaptureEvents(FGameplayTag(), NewOwner, OldLevel);
 	}
 }
 
@@ -952,26 +1017,30 @@ int32 ATerritoryProperty::GetUpgradeCost() const
 
 int32 ATerritoryProperty::GetEffectiveIncome() const
 {
-	if (!GetActiveStateGameplayRules().bAllowPeriodicIncome) return 0;
-	int64 BaseIncome = FMath::Max(0, GetPeriodicIncome());
-
-	// Capital district income multiplier
-	ATerritoryDistrict* District = GetOwningDistrict();
-	if (District && District->IsCapitalDistrict())
+	float Multiplier = 1.f;
+	if (const UTerritoryEconomySubsystem* Economy = GetWorld() ? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr)
 	{
-		const double Multiplier = FMath::IsFinite(District->CapitalIncomeMultiplier)
-			? FMath::Max(0.0, static_cast<double>(District->CapitalIncomeMultiplier)) : 0.0;
-		BaseIncome = static_cast<int64>(FMath::Clamp(
-			static_cast<double>(BaseIncome) * Multiplier, 0.0, static_cast<double>(MAX_int32)));
+		if (!Economy->TryGetCurrencyCapitalMultiplier(this, Multiplier)) return 0;
 	}
-
-	const int64 UpgradeIncome = static_cast<int64>(FMath::Max(0, UpgradeLevel))
-		* FMath::Max(0, IncomeBonusPerLevel);
-	return static_cast<int32>(FMath::Min<int64>(BaseIncome + UpgradeIncome, MAX_int32));
+	return TerritoryCurrencyRates::Income(GetPeriodicIncome(), IncomeBonusPerLevel, UpgradeLevel,
+		Multiplier, GetActiveStateGameplayRules().bAllowPeriodicIncome);
 }
 
 bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 {
+	if (UpgradeDefinition)
+	{
+		FString Failure;
+		const bool bApplied = TryUpgradeInternal(UpgradeLevel + 1, Requester, FGameplayTag(),
+			false, false, Failure);
+		if (!bApplied && !Failure.IsEmpty())
+		{
+			UE_LOG(LogTerritory, Warning, TEXT("[PropertyUpgrade] %s rejected: %s"),
+				*GetTerritoryTag().ToString(), *Failure);
+		}
+		return bApplied;
+	}
+
 	if (!HasAuthority() || IsGameplayMutationInProgress() || !CanUpgrade() || !IsValid(Requester)
 		|| !GetWorld() || Requester->GetWorld() != GetWorld()
 		|| !IsAvailableForGameplay() || GetTerritoryState() != ETerritoryState::Claimed) return false;
@@ -1029,6 +1098,194 @@ bool ATerritoryProperty::TryUpgrade(AActor* Requester)
 			*GetTerritoryTag().ToString(), UpgradeLevel, Cost, *OwnerFaction.ToString());
 	}
 
+	return true;
+}
+
+bool ATerritoryProperty::TryUpgradeToLevel(int32 TargetLevel, AActor* Requester,
+	bool bAllowForeignOwnership, bool bFree, FString& OutFailure)
+{
+	return TryUpgradeInternal(TargetLevel, Requester, FGameplayTag(), bAllowForeignOwnership,
+		bFree, OutFailure);
+}
+
+bool ATerritoryProperty::ApplyScriptedUpgrade(int32 TargetLevel, FGameplayTag RequestingFaction,
+	bool bAllowForeignOwnership, bool bFree, AActor* Requester, FString& OutFailure)
+{
+	return TryUpgradeInternal(TargetLevel, Requester, RequestingFaction, bAllowForeignOwnership,
+		bFree, OutFailure);
+}
+
+bool ATerritoryProperty::TryUpgradeInternal(int32 TargetLevel, AActor* Requester,
+	FGameplayTag RequestingFaction, bool bAllowForeignOwnership, bool bFree, FString& OutFailure)
+{
+	OutFailure.Reset();
+	if (bUpgradeEventDispatchInProgress)
+	{
+		OutFailure = TEXT("A Place upgrade event is already executing for this Place.");
+		return false;
+	}
+	if (!HasAuthority() || IsGameplayMutationInProgress() || !GetWorld()
+		|| !IsAvailableForGameplay() || GetTerritoryState() != ETerritoryState::Claimed)
+	{
+		OutFailure = TEXT("The Place is not available for an upgrade.");
+		return false;
+	}
+	if (!UpgradeDefinition)
+	{
+		OutFailure = TEXT("No upgrade definition is assigned.");
+		return false;
+	}
+	if (TargetLevel != UpgradeLevel + 1 || !CanUpgrade())
+	{
+		OutFailure = TEXT("The requested level is not the next upgrade level.");
+		return false;
+	}
+
+	const FGameplayTag OwnerFaction = GetOwningFaction();
+	if (!OwnerFaction.IsValid())
+	{
+		OutFailure = TEXT("The Place has no owning faction.");
+		return false;
+	}
+	if (!RequestingFaction.IsValid())
+	{
+		RequestingFaction = Requester
+			? UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Requester) : OwnerFaction;
+	}
+	if (!bAllowForeignOwnership && RequestingFaction != OwnerFaction)
+	{
+		OutFailure = TEXT("The requesting faction does not own this Place.");
+		return false;
+	}
+	if (Requester && !bAllowForeignOwnership
+		&& !UTerritoryBlueprintLibrary::IsActorInFaction(this, Requester, OwnerFaction))
+	{
+		OutFailure = TEXT("The requester is not a member of the owning faction.");
+		return false;
+	}
+
+	const FTerritoryUpgradeTier* Tier = UpgradeDefinition->FindTierConst(TargetLevel);
+	if (!Tier)
+	{
+		OutFailure = FString::Printf(TEXT("No upgrade tier is authored for level %d."), TargetLevel);
+		return false;
+	}
+
+	UTerritoryUpgradeSubsystem* Upgrades = GetWorld()->GetSubsystem<UTerritoryUpgradeSubsystem>();
+	if (!Upgrades)
+	{
+		OutFailure = TEXT("The Territory upgrade subsystem is unavailable.");
+		return false;
+	}
+	if (UpgradeDefinition->bRequireFactionPerkTier
+		&& !Upgrades->HasFactionTier(RequestingFaction, Tier->RequiredFactionTier))
+	{
+		OutFailure = FString::Printf(TEXT("Faction %s needs upgrade tier %d (current %d)."),
+			*RequestingFaction.ToString(), Tier->RequiredFactionTier,
+			Upgrades->GetFactionTier(RequestingFaction));
+		return false;
+	}
+
+	APawn* TargetPawn = Cast<APawn>(Requester);
+	APlayerController* Controller = TargetPawn
+		? Cast<APlayerController>(TargetPawn->GetController()) : nullptr;
+	UTalesComponent* Tales = Requester
+		? UNarrativeFunctionLibrary::GetTalesComponentFromTarget(Requester) : nullptr;
+
+	for (UNarrativeCondition* Condition : Tier->Requirements)
+	{
+		if (!IsValid(Condition))
+		{
+			continue;
+		}
+		if (!TerritoryTales::DoesConditionPass(Condition, TargetPawn, Controller, Tales))
+		{
+			OutFailure = FString::Printf(TEXT("Requirement failed: %s"),
+				*Condition->GetGraphDisplayText());
+			return false;
+		}
+	}
+
+	TerritoryUpgrade::FTerritoryUpgradePaymentPlan PaymentPlan;
+	if (!bFree && !TerritoryUpgrade::BuildPaymentPlan(*Tier, Requester, TargetPawn, Controller,
+		Tales, OutFailure, PaymentPlan))
+	{
+		return false;
+	}
+
+	TGuardValue<bool> PurchaseGuard(bPurchaseInProgress, true);
+	const int32 OldLevel = UpgradeLevel;
+	const int32 PurchasedLevel = OldLevel + 1;
+	const uint64 LoadGeneration = GetPurchaseLoadGeneration();
+	const FString Reason = FString::Printf(TEXT("Property upgrade %s level %d→%d"),
+		*GetTerritoryTag().ToString(), OldLevel, PurchasedLevel);
+
+	ApplyUpgradeLevel(PurchasedLevel);
+	if (!bFree && !TerritoryUpgrade::ExecutePaymentPlan(PaymentPlan, Requester, OwnerFaction,
+		Reason, OutFailure))
+	{
+		ApplyUpgradeLevel(OldLevel);
+		return false;
+	}
+
+	const auto IsStillCurrent = [this, PurchasedLevel, LoadGeneration, OwnerFaction]()
+	{
+		return IsValid(this) && !IsActorBeingDestroyed() && UpgradeLevel == PurchasedLevel
+			&& GetPurchaseLoadGeneration() == LoadGeneration
+			&& GetOwningFaction() == OwnerFaction
+			&& GetTerritoryState() == ETerritoryState::Claimed;
+	};
+	if (!IsStillCurrent())
+	{
+		ApplyUpgradeLevel(OldLevel);
+		if (!bFree)
+		{
+			TerritoryUpgrade::RefundPaymentPlan(PaymentPlan, Requester, OwnerFaction, Reason);
+		}
+		OutFailure = TEXT("The upgrade transaction was superseded before it committed.");
+		return false;
+	}
+
+	PublishUpgradeLevelChange(OldLevel);
+	if (!IsStillCurrent())
+	{
+		if (!bFree)
+		{
+			TerritoryUpgrade::RefundPaymentPlan(PaymentPlan, Requester, OwnerFaction, Reason);
+		}
+		OutFailure = TEXT("The upgrade transaction was superseded after publication.");
+		return false;
+	}
+
+	{
+		TGuardValue<bool> EventGuard(bUpgradeEventDispatchInProgress, true);
+		for (UNarrativeEvent* Event : Tier->OnUpgraded)
+		{
+			if (!IsValid(Event))
+			{
+				continue;
+			}
+			FString FailedCondition;
+			if (!TerritoryTales::DoEventConditionsPass(Event, TargetPawn, Controller, Tales,
+				&FailedCondition))
+			{
+				UE_LOG(LogTerritory, Log,
+					TEXT("[PropertyUpgrade] %s skipped OnUpgraded %s: %s"),
+					*GetTerritoryTag().ToString(), *GetNameSafe(Event), *FailedCondition);
+				continue;
+			}
+			TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
+			TerritoryTales::ExecuteEvent(Event, TargetPawn, Controller, Tales);
+		}
+	}
+
+	if (ShouldLogPropertyEconomy())
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("[PropertyUpgrade] %s upgraded to level %d (tier %d, faction %s, free=%d)"),
+			*GetTerritoryTag().ToString(), UpgradeLevel, Tier->RequiredFactionTier,
+			*OwnerFaction.ToString(), bFree ? 1 : 0);
+	}
 	return true;
 }
 

@@ -6,6 +6,7 @@
 #include "Tales/TerritoryNarrativeParty.h"
 #include "Tales/TerritoryNarrativePartyComponent.h"
 #include "Tales/NarrativeDialogueSettings.h"
+#include "Tales/TerritoryReplyTimeoutProfile.h"
 #include "Engine/Engine.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
@@ -236,6 +237,125 @@ bool FTFTerritoryRemotePartyContext::RunTest(const FString& Parameters)
 	Members[1]->GetOwningController()->SetRole(ROLE_Authority);
 	Party->RemovePartyMember(Members[1]);
 	TestNull(TEXT("Empty party has deliberately empty context"), Party->GetOwningController());
+	GEngine->DestroyWorldContext(World);
+	World->DestroyWorld(false);
+	return true;
+}
+
+void UTerritoryPartyReplyTimeoutProbe::ServerSelectDialogueOption_Implementation(const FName& OptionID)
+{
+	RecordedSelection = OptionID;
+	++SelectionCount;
+}
+
+/**
+ * Server reply countdown: the timer only runs when the authored silence reply is really offered, it
+ * selects that reply through the same server path players use, and a player who answers first is never
+ * overridden. Profile policy (override, zero seconds, disabled, missing asset) is covered too.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryReplyTimeoutAuthority,
+	"TerritoryFramework.Tales.PartyReplies.ReplyTimeoutAuthorityAndSelection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFTerritoryReplyTimeoutAuthority::RunTest(const FString& Parameters)
+{
+	TGuardValue<bool> Scripts(GAllowActorScriptExecutionInEditor, true);
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+
+	auto* Host = World->SpawnActor<AActor>();
+	auto* Party = NewObject<UTerritoryPartyReplyTimeoutProbe>(Host);
+	Host->AddInstanceComponent(Party);
+	Party->RegisterComponent();
+
+	UTerritoryReplyTimeoutProfile* Profile = NewObject<UTerritoryReplyTimeoutProfile>();
+	Profile->DefaultSeconds = 5.f;
+	Profile->SilentReplyID = TEXT("SayNothing");
+	Party->ReplyTimeoutProfile = Profile;
+
+	const auto MakeDialogue = [&](bool bOfferSilence)
+	{
+		auto* Dialogue = NewObject<UDialogue>(Host);
+		Dialogue->OwningComp = Party;
+		auto* Real = NewObject<UDialogueNode_Player>(Dialogue);
+		Real->SetID(TEXT("Agree"));
+		Real->OwningDialogue = Dialogue;
+		Real->OwningComponent = Party;
+		Dialogue->AvailableResponses.Add(Real);
+		if (bOfferSilence)
+		{
+			auto* Silent = NewObject<UDialogueNode_Player>(Dialogue);
+			Silent->SetID(TEXT("SayNothing"));
+			Silent->OwningDialogue = Dialogue;
+			Silent->OwningComponent = Party;
+			Dialogue->AvailableResponses.Add(Silent);
+		}
+		Party->CurrentDialogue = Dialogue;
+		return Dialogue;
+	};
+
+	// 1. The authored silence reply is offered, so one server countdown starts.
+	UDialogue* WithSilence = MakeDialogue(true);
+	Party->OnDialogueRepliesAvailable.Broadcast(WithSilence, WithSilence->AvailableResponses);
+	TestTrue(TEXT("Countdown starts when the silence reply is offered"), Party->IsReplyTimeoutActive());
+	TestTrue(TEXT("Countdown uses the profile duration"),
+		FMath::IsNearlyEqual(Party->GetReplyTimeoutDuration(), 5.f));
+	TestTrue(TEXT("Countdown targets the authored silence reply"),
+		Party->GetPendingSilentReplyID() == FName(TEXT("SayNothing")));
+	TestTrue(TEXT("Countdown reports remaining time inside its duration"),
+		Party->GetReplyTimeRemaining() > 0.f && Party->GetReplyTimeRemaining() <= 5.f);
+
+	// 2. Expiry reports and selects the silence reply exactly once.
+	TestTrue(TEXT("Resolving the countdown reports the silence selection"),
+		Party->ResolveReplyCountdownNow());
+	TestFalse(TEXT("Countdown stops after it expires"), Party->IsReplyTimeoutActive());
+	TestEqual(TEXT("Expiry selects the silence reply once"), Party->SelectionCount, 1);
+	TestTrue(TEXT("Expiry selects the authored silence reply"),
+		Party->RecordedSelection == FName(TEXT("SayNothing")));
+	TestTrue(TEXT("Countdown state clears after expiry"), Party->GetPendingSilentReplyID().IsNone());
+	TestTrue(TEXT("Duration clears with the countdown"),
+		FMath::IsNearlyZero(Party->GetReplyTimeoutDuration()));
+
+	// 3. A player who answers first is never overridden: the offered replies are gone.
+	UDialogue* Answered = MakeDialogue(true);
+	Party->OnDialogueRepliesAvailable.Broadcast(Answered, Answered->AvailableResponses);
+	TestTrue(TEXT("A later dialogue starts its own countdown"), Party->IsReplyTimeoutActive());
+	Answered->AvailableResponses.Reset();
+	TestFalse(TEXT("An answered prompt cannot resolve to silence"),
+		Party->ResolveReplyCountdownNow());
+	TestFalse(TEXT("Countdown stops when the player already answered"), Party->IsReplyTimeoutActive());
+	TestEqual(TEXT("An answered prompt never gets a forced silence reply"), Party->SelectionCount, 1);
+
+	// 4. Without the authored silence reply Native's indefinite wait is preserved.
+	UDialogue* NoSilence = MakeDialogue(false);
+	Party->OnDialogueRepliesAvailable.Broadcast(NoSilence, NoSilence->AvailableResponses);
+	TestFalse(TEXT("No countdown without the authored silence reply"), Party->IsReplyTimeoutActive());
+	TestEqual(TEXT("Without a countdown nothing is selected"), Party->SelectionCount, 1);
+
+	// 5. Profile policy: override wins, disabled and zero seconds stop the countdown.
+	FTerritoryReplyTimeoutRule Rule;
+	Rule.Dialogue = WithSilence;
+	Rule.Seconds = 12.f;
+	Rule.SilentReplyID = TEXT("SilentOverride");
+	Profile->DialogueOverrides.Add(Rule);
+	TestTrue(TEXT("A dialogue override replaces the default duration"),
+		FMath::IsNearlyEqual(Profile->ResolveSeconds(WithSilence), 12.f));
+	TestTrue(TEXT("A dialogue override replaces the silence id"),
+		Profile->ResolveSilentReplyID(WithSilence) == FName(TEXT("SilentOverride")));
+	TestTrue(TEXT("An unmatched dialogue keeps the default duration"),
+		FMath::IsNearlyEqual(Profile->ResolveSeconds(Answered), 5.f));
+	Profile->bEnabled = false;
+	TestFalse(TEXT("A disabled profile resolves no countdown"),
+		Profile->IsEnabledForDialogue(Answered));
+	Profile->bEnabled = true;
+	Profile->DefaultSeconds = 0.f;
+	TestFalse(TEXT("Zero seconds disables the countdown"),
+		Profile->IsEnabledForDialogue(Answered));
+	Profile->DefaultSeconds = 5.f;
+	Party->ReplyTimeoutProfile = nullptr;
+	Party->OnDialogueRepliesAvailable.Broadcast(NoSilence, NoSilence->AvailableResponses);
+	TestFalse(TEXT("Without a profile the countdown never starts"), Party->IsReplyTimeoutActive());
+
 	GEngine->DestroyWorldContext(World);
 	World->DestroyWorld(false);
 	return true;

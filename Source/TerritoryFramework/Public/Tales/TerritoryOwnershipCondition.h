@@ -4,12 +4,13 @@
 #include "Tales/NarrativeCondition.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryOwnershipCondition.generated.h"
 
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Ownership",
 		ToolTip="Check the current owner. The special Locked, Contested and Unclaimed options are OR exceptions and can pass without matching the owner. Empty owner follows the Narrative participant and fails until their faction is ready. Only a call with no participant accepts any Claimed owner. Requires a loaded territory."))
-class TERRITORYFRAMEWORK_API UTerritoryOwnershipCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryOwnershipCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -37,6 +38,8 @@ public:
 	bool bPassWhenLocked = false;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

@@ -1,4 +1,5 @@
 #include "Core/TerritoryGuardCharacter.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultParticipantComponent.h"
@@ -26,6 +27,7 @@
 #include "AI/TerritoryInvestigationGoal.h"
 #include "AI/TerritoryStealthObserverComponent.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryBlueprintLibrary.h"
 #include "AI/Activities/NPCActivityConfiguration.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "AI/Activities/NPCGoalItem.h"
@@ -359,13 +361,8 @@ bool ATerritoryGuardCharacter::EvaluateTerritoryTargetInternal(const AActor* Tar
 		return Result(false, TEXT("The target belongs to the guard's perceived faction."));
 	// Protective relations win across multi-faction actors. One War pair must not
 	// override another pair's alliance, peace, trade, non-aggression or ceasefire.
-	for (const FGameplayTag& GuardFaction : GuardFactions)
-		for (const FGameplayTag& TargetFaction : TargetFactions)
-		{
-			const EDiplomacyState Relation = Diplomacy->GetDiplomacyState(GuardFaction, TargetFaction);
-			if (Relation != EDiplomacyState::None && Relation != EDiplomacyState::War)
-				return Result(false, TEXT("A protective treaty blocks combat with this faction."));
-		}
+	if (!Diplomacy->CanFactionsEngage(GuardFactions, TargetFactions, true))
+		return Result(false, TEXT("A protective treaty blocks combat with this faction."));
 	const UTerritoryDefinition* Definition = OwningTerritory->GetTerritoryDefinition();
 	const FTerritoryGuardBehaviorTemplate* Behavior = Definition ? &Definition->GuardBehavior : nullptr;
 	if (Behavior && !Behavior->CombatTargetFactions.IsEmpty()
@@ -415,6 +412,18 @@ bool ATerritoryGuardCharacter::EvaluateTerritoryTargetInternal(const AActor* Tar
 		const UTerritoryStealthProfile* Profile = OwningTerritory->GetActiveStealthProfile();
 		if (Profile && Profile->EscalationScope == ETerritoryStealthEscalationScope::LocalAlarm)
 			return Result(false, TEXT("Local Alarm allows investigation; personal hostility is required for combat."));
+		// A holstered player who is not at war and has not attacked anyone is warned, not fought: the
+		// shared contest rule decides whether an exposed player is a physical threat yet, so an
+		// unarmed visitor keeps investigation and the warning line instead of combat.
+		// A player who is merely seen is investigated and warned, not fought, until they wield a
+		// weapon or actually attack someone. A faction at war is still an enemy once it is armed,
+		// which the shared rule already admits through the wielded-weapon test.
+		FTerritoryInfiltrationSnapshot Snapshot;
+		const bool bAggressor = Control->GetInfiltrationSnapshot(OwningTerritory, Target, Snapshot)
+			&& UTerritoryBlueprintLibrary::IsRecentAggressiveStealthEvidence(this, Snapshot,
+				Profile ? Profile->AggressionEvidenceWindow : 0.f);
+		if (!UTerritoryBlueprintLibrary::DoesPawnAdmitStoryContest(Target, OwningTerritory, Profile, bAggressor))
+			return Result(false, TEXT("This player is exposed but has not attacked and is not wielding a weapon; investigation only."));
 		if (!Behavior || Behavior->bDefendAgainstExposedEnemies)
 			return Result(true, TEXT("This player is exposed and belongs to a faction at War."));
 	}
@@ -1536,4 +1545,11 @@ bool ATerritoryGuardCharacter::DeliverPatrolSpot(const FTerritoryPatrolNode& Nod
 		SlotToPin >= 0 ? *FString::FromInt(SlotToPin) : TEXT("chosen by Narrative Pro"));
 
 	return TerritorySpotGoal == SpotGoal;
+}
+
+bool ATerritoryGuardCharacter::ShouldAcceptGameplayCue(UObject* Self, FGameplayTag GameplayCueTag,
+	EGameplayCueEvent::Type EventType, const FGameplayCueParameters& Parameters)
+{
+	return IGameplayCueInterface::ShouldAcceptGameplayCue(Self, GameplayCueTag, EventType, Parameters)
+		&& FTerritoryNarrativeProAdapter::CanPresentGameplayCue(this, GameplayCueTag, EventType);
 }

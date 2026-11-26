@@ -1,6 +1,9 @@
 #include "Framework/TerritoryNarrativeProAdapter.h"
 
 #include "UnrealFramework/NarrativeCharacter.h"
+#include "Character/NarrativeCharacterVisual.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
 #include "UObject/StructOnScope.h"
 #include "UObject/UnrealType.h"
 
@@ -24,6 +27,47 @@ bool FTerritoryNarrativeProAdapter::IsCharacterReady(ANarrativeCharacter* Charac
 	Result->SetPropertyValue_InContainer(Parameters.GetStructMemory(), true);
 	Character->ProcessEvent(Query, Parameters.GetStructMemory());
 	return !Result->GetPropertyValue_InContainer(Parameters.GetStructMemory());
+}
+
+bool FTerritoryNarrativeProAdapter::CanPresentGameplayCue(ANarrativeCharacter* Character,
+	FGameplayTag CueTag, EGameplayCueEvent::Type EventType)
+{
+	const FGameplayTag DamageCue = FGameplayTag::RequestGameplayTag(TEXT("GameplayCue.TakeDamage"), false);
+	if (EventType != EGameplayCueEvent::Executed || !CueTag.MatchesTag(DamageCue)) return true;
+
+	// Native GC_TakeDamage dereferences this chain in OnBurst. Late-join GAS cues
+	// can arrive before the character's asynchronously loaded appearance exists.
+	// No health, ability, casualty or persistent cue state is changed by this gate.
+	if (!IsValid(Character) || Character->IsActorBeingDestroyed()) return false;
+	ANarrativeCharacterVisual* Visual = Character->GetCharacterVisual();
+	if (!IsValid(Visual) || Visual->IsActorBeingDestroyed() || !Visual->bBaseAppearanceLoaded) return false;
+	USkeletalMeshComponent* Mesh = Visual->GetMainMesh();
+	return IsValid(Mesh) && Mesh->IsRegistered() && IsValid(Mesh->GetSkeletalMeshAsset())
+		&& IsValid(Mesh->GetAnimInstance());
+}
+
+void FTerritoryNarrativeProAdapter::HandleCharacterRemoval(AActor* Actor)
+{
+	ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(Actor);
+	if (!IsValid(Character) || Character->HasAuthority()) return;
+	ANarrativeCharacterVisual* Visual = Character->GetCharacterVisual();
+	if (!IsValid(Visual) || Visual->IsActorBeingDestroyed() || Visual->GetWorld() != Character->GetWorld()) return;
+
+	// Native's ordinary visual Destroy() is refused for a simulated replica. Its
+	// own actor channel can close later than the character's. Detach these links
+	// while the leader is still valid, so Engine allocates coherent local pose and
+	// visibility buffers instead of ticking a follower with a stale weak leader.
+	TInlineComponentArray<USkeletalMeshComponent*> Meshes;
+	Visual->GetComponents(Meshes);
+	for (USkeletalMeshComponent* Mesh : Meshes)
+	{
+		if (!IsValid(Mesh)) continue;
+		USkinnedMeshComponent* Leader = Mesh->LeaderPoseComponent.Get();
+		if (Leader && Leader->GetOwner() == Character)
+		{
+			Mesh->SetLeaderPoseComponent(nullptr, true);
+		}
+	}
 }
 
 namespace

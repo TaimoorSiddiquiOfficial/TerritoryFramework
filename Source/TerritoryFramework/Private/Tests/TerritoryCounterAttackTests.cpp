@@ -787,6 +787,21 @@ bool FTFCounterAttackUnguardedGuarantee::RunTest(const FString& Parameters)
 		UTerritoryCounterAttackSubsystem::CalculateEvaluation(Defended, Profile);
 	TestTrue(TEXT("Adding the first valid guard cannot increase launch probability"),
 		DefendedResult.LaunchProbability <= EmptyResult.LaunchProbability);
+	// These values satisfy the public validator's minimum/maximum ranges. The
+	// independent unguarded branch must also upper-bound every defended branch.
+	for (const float Unguarded : {0.05f, 0.25f, 0.5f, 1.f})
+	{
+		Profile->UnguardedLaunchProbability = Unguarded;
+		Profile->MinimumLaunchProbability = 0.01f;
+		float Previous = Unguarded;
+		for (int32 Guards = 1; Guards <= 32; ++Guards)
+		{
+			Defended.ActiveGuards = Guards;
+			const float Chance = UTerritoryCounterAttackSubsystem::CalculateEvaluation(Defended, Profile).LaunchProbability;
+			TestTrue(TEXT("Accepted custom profiles remain monotonic across zero and positive guards"), Chance <= Previous + KINDA_SMALL_NUMBER);
+			Previous = Chance;
+		}
+	}
 	return true;
 }
 

@@ -21,6 +21,7 @@
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritorySituationCondition.h"
 #include "UObject/UnrealType.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 namespace
 {
@@ -167,7 +168,7 @@ bool FTFSituationHistoryAndNarrative::RunTest(const FString& Parameters)
 	TestTrue(TEXT("First real ownership commit"), Place->CommitOwnershipData(Candidate));
 	FNarrativeActorRecord FirstOwnership;
 	TestTrue(TEXT("Native saves first ownership without invented history"), Save->CreateActorRecord(Place, FirstOwnership));
-	TestFalse(TEXT("Current ownership is not a retake"), Retake->CheckCondition(Pawn, nullptr, Tales));
+	TestFalse(TEXT("Current ownership is not a retake"), Retake->CheckConditionInContext(Pawn, nullptr, Tales));
 	Candidate = Place->GetOwnershipData();
 	Candidate.OwningFaction = Bandits;
 	Place->SetRole(ROLE_SimulatedProxy);
@@ -175,7 +176,7 @@ bool FTFSituationHistoryAndNarrative::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Rejected client mutation adds no history"), Place->GetOwnershipData().FormerOwningFactions.IsEmpty());
 	Place->SetRole(ROLE_Authority);
 	TestTrue(TEXT("Server commits a real loss"), Place->CommitOwnershipData(Candidate));
-	TestTrue(TEXT("Losing one's former Place enables retake dialogue"), Retake->CheckCondition(Pawn, nullptr, Tales));
+	TestTrue(TEXT("Losing one's former Place enables retake dialogue"), Retake->CheckConditionInContext(Pawn, nullptr, Tales));
 	TestTrue(TEXT("History is published with the ownership snapshot"), State->GetCaptureSummary(PlaceTag).FormerOwningFactions.HasTagExact(Heroes));
 	FNarrativeActorRecord LostOwnership;
 	TestTrue(TEXT("Native saves the lost Place"), Save->CreateActorRecord(Place, LostOwnership));
@@ -199,9 +200,9 @@ bool FTFSituationHistoryAndNarrative::RunTest(const FString& Parameters)
 	}
 	Save->LoadActorFromRecord(Place, FirstOwnership);
 	TestTrue(TEXT("Loading an earlier campaign clears later history"), Place->GetOwnershipData().FormerOwningFactions.IsEmpty());
-	TestFalse(TEXT("Earlier ownership reload also refreshes Native dialogue's directory"), Retake->CheckCondition(Pawn, nullptr, Tales));
+	TestFalse(TEXT("Earlier ownership reload also refreshes Native dialogue's directory"), Retake->CheckConditionInContext(Pawn, nullptr, Tales));
 	Save->LoadActorFromRecord(Place, LostOwnership);
-	TestTrue(TEXT("Actual Native actor reload restores the retake condition"), Retake->CheckCondition(Pawn, nullptr, Tales));
+	TestTrue(TEXT("Actual Native actor reload restores the retake condition"), Retake->CheckConditionInContext(Pawn, nullptr, Tales));
 	*FindFProperty<FFloatProperty>(Place->GetClass(), TEXT("FortificationStrength"))->ContainerPtrToValuePtr<float>(Place) = 12.f;
 	const auto LoadedReport = Profile->InspectSituation(Pawn, nullptr, Tales, ETerritorySituationScope::District);
 	TestTrue(TEXT("A complete loaded defence front is known"), LoadedReport.bDefencePowerKnown);
@@ -212,16 +213,16 @@ bool FTFSituationHistoryAndNarrative::RunTest(const FString& Parameters)
 	Handover->SituationProfile = Profile;
 	Handover->Conditions = {Eligibility};
 	Diplomacy->SetDiplomacyState(Heroes, Bandits, EDiplomacyState::War);
-	TestTrue(TEXT("The shared profile binds the eligible handover without legacy target fields"), Eligibility->CheckCondition(Pawn, nullptr, Tales));
+	TestTrue(TEXT("The shared profile binds the eligible handover without legacy target fields"), Eligibility->CheckConditionInContext(Pawn, nullptr, Tales));
 	Eligibility->bRequireStoryCaptureFlow = true;
-	TestFalse(TEXT("Story handover cannot bypass automatic multiplayer flag capture"), Eligibility->CheckCondition(Pawn, nullptr, Tales));
-	Handover->ExecuteEvent(Pawn, nullptr, Tales);
+	TestFalse(TEXT("Story handover cannot bypass automatic multiplayer flag capture"), Eligibility->CheckConditionInContext(Pawn, nullptr, Tales));
+	TerritoryTales::ExecuteEvent(Handover, Pawn);
 	TestEqual(TEXT("A cached story offer cannot change a flag Place's owner"), Place->GetOwningFaction(), Bandits);
 	auto* StoryCapture = FindFProperty<FBoolProperty>(Place->GetClass(), TEXT("bStoryCaptureFromBounds"));
 	StoryCapture->SetPropertyValue_InContainer(Place, true);
-	TestTrue(TEXT("Explicit story capture enables the optional handover"), Eligibility->CheckCondition(Pawn, nullptr, Tales));
+	TestTrue(TEXT("Explicit story capture enables the optional handover"), Eligibility->CheckConditionInContext(Pawn, nullptr, Tales));
 	StoryCapture->SetPropertyValue_InContainer(Place, false);
-	Handover->ExecuteEvent(Pawn, nullptr, Tales);
+	TerritoryTales::ExecuteEvent(Handover, Pawn);
 	TestEqual(TEXT("Switching back to flag capture invalidates a cached story offer"), Place->GetOwningFaction(), Bandits);
 	StoryCapture->SetPropertyValue_InContainer(Place, true);
 	auto* Configs = FindFProperty<FMapProperty>(Place->GetClass(), TEXT("RuntimeStateConfigs"))
@@ -230,32 +231,32 @@ bool FTFSituationHistoryAndNarrative::RunTest(const FString& Parameters)
 	BlockEntry->Profile = Profile;
 	BlockEntry->bNot = true; // This Place needs a retake, so its inverse blocks entry.
 	Configs->FindOrAdd(ETerritoryState::Claimed).FactionOverrides.FindOrAdd(Heroes).EntryConditions = {BlockEntry};
-	TestFalse(TEXT("An incoming-faction state condition hides the handover offer"), Eligibility->CheckCondition(Pawn, nullptr, Tales));
-	Handover->ExecuteEvent(Pawn, nullptr, Tales);
+	TestFalse(TEXT("An incoming-faction state condition hides the handover offer"), Eligibility->CheckConditionInContext(Pawn, nullptr, Tales));
+	TerritoryTales::ExecuteEvent(Handover, Pawn);
 	TestEqual(TEXT("Faction state conditions also block cached handover execution"), Place->GetOwningFaction(), Bandits);
 	Configs->Reset();
-	TestTrue(TEXT("Removing the blocking story rule restores eligibility"), Eligibility->CheckCondition(Pawn, nullptr, Tales));
+	TestTrue(TEXT("Removing the blocking story rule restores eligibility"), Eligibility->CheckConditionInContext(Pawn, nullptr, Tales));
 	Diplomacy->SetDiplomacyState(Heroes, Bandits, EDiplomacyState::Ceasefire);
-	Handover->ExecuteEvent(Pawn, nullptr, Tales);
+	TerritoryTales::ExecuteEvent(Handover, Pawn);
 	TestEqual(TEXT("A cached offer cannot bypass a new ceasefire"), Place->GetOwningFaction(), Bandits);
 	Diplomacy->SetDiplomacyState(Heroes, Bandits, EDiplomacyState::War);
 	AActor* Defender = World->SpawnActor<ATerritoryGuardCharacter>();
 	Place->RegisterDefender(Defender);
-	Handover->ExecuteEvent(Pawn, nullptr, Tales);
+	TerritoryTales::ExecuteEvent(Handover, Pawn);
 	TestEqual(TEXT("A newly arrived defender blocks the cached handover"), Place->GetOwningFaction(), Bandits);
 	Place->UnregisterDefender(Defender);
 	Place->SetRole(ROLE_SimulatedProxy);
 	AddExpectedError(TEXT("Mutation rejected"), EAutomationExpectedErrorFlags::Contains, 1);
-	Handover->ExecuteEvent(Pawn, nullptr, Tales);
+	TerritoryTales::ExecuteEvent(Handover, Pawn);
 	TestEqual(TEXT("A client-role target cannot execute the handover"), Place->GetOwningFaction(), Bandits);
 	Place->SetRole(ROLE_Authority);
-	Handover->ExecuteEvent(Pawn, nullptr, Tales);
+	TerritoryTales::ExecuteEvent(Handover, Pawn);
 	TestEqual(TEXT("An eligible Native event commits through the capture authority"), Place->GetOwningFaction(), Heroes);
-	TestFalse(TEXT("Verified handover closes the retake branch"), Retake->CheckCondition(Pawn, nullptr, Tales));
+	TestFalse(TEXT("Verified handover closes the retake branch"), Retake->CheckConditionInContext(Pawn, nullptr, Tales));
 	Save->LoadActorFromRecord(Place, LostOwnership);
 	TestEqual(TEXT("An in-place Native reload replaces the published later owner"), State->GetCaptureSummary(PlaceTag).CurrentOwner, Bandits);
 	Registry->UnregisterTerritory(Place);
-	TestTrue(TEXT("Retake remains readable while its actor is streamed out"), Retake->CheckCondition(Pawn, nullptr, Tales));
+	TestTrue(TEXT("Retake remains readable while its actor is streamed out"), Retake->CheckConditionInContext(Pawn, nullptr, Tales));
 	const auto Streamed = Profile->InspectSituation(Pawn, nullptr, Tales, ETerritorySituationScope::City);
 	const auto BanditView = Profile->InspectSituation(Pawn, nullptr, Tales, ETerritorySituationScope::City, Bandits);
 	TestEqual(TEXT("Optional tag changes only the faction being inspected"), BanditView.RequestingFaction, Bandits);
@@ -265,14 +266,14 @@ bool FTFSituationHistoryAndNarrative::RunTest(const FString& Parameters)
 	BanditHoldings->FactionOverride = Bandits;
 	BanditHoldings->Scope = ETerritorySituationScope::Place;
 	BanditHoldings->Query = ETerritorySituationQuery::FactionPlaceCount;
-	TestTrue(TEXT("Native condition uses the override while the target actor is streamed out"), BanditHoldings->CheckCondition(Pawn, nullptr, Tales));
+	TestTrue(TEXT("Native condition uses the override while the target actor is streamed out"), BanditHoldings->CheckConditionInContext(Pawn, nullptr, Tales));
 	TestTrue(TEXT("Graph text names the faction being checked"), BanditHoldings->GetGraphDisplayText().Contains(Bandits.ToString()));
 	TestTrue(TEXT("City holdings remain known from the directory"), Streamed.bHoldingsKnown);
 	TestFalse(TEXT("Unloaded garrison never reports zero known power"), Streamed.bDefencePowerKnown);
 	Candidate = Place->GetOwnershipData();
 	Candidate.OwningFaction = Heroes;
 	TestTrue(TEXT("Recapture follows the same ownership authority"), Place->CommitOwnershipData(Candidate));
-	TestFalse(TEXT("After recapture the retake-needed branch is closed"), Retake->CheckCondition(Pawn, nullptr, Tales));
+	TestFalse(TEXT("After recapture the retake-needed branch is closed"), Retake->CheckConditionInContext(Pawn, nullptr, Tales));
 	GEngine->DestroyWorldContext(World);
 	World->DestroyWorld(false);
 	return true;

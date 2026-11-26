@@ -11,8 +11,7 @@ UTerritoryOwnerHandoverEvent::UTerritoryOwnerHandoverEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryOwnerHandoverEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryOwnerHandoverEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(
 		this, Target, Controller, NarrativeComponent))

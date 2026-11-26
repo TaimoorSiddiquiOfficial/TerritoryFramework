@@ -21,6 +21,8 @@ class UTerritoryNavigationMarkerComponent;
 class UTerritoryCounterAttackProfile;
 class UTerritoryDefinition;
 class UTerritoryStealthProfile;
+enum class EGuardRemovalReason : uint8;
+enum class EDiplomacyState : uint8;
 /**
  * Base class for all territory volumes (City / District / Property inherit from this).
  *
@@ -699,6 +701,9 @@ public:
 	bool CheckStateTransitionConditions(ETerritoryState OldState, ETerritoryState NewState, FText& OutFailureReason, const FTerritoryTransitionContext& TransitionContext = FTerritoryTransitionContext()) const;
 
 protected:
+	/** Unknown streamed ancestors defer gameplay without erasing saved garrison requests. */
+	bool ResolveGameplayAvailability(bool& bOutWaitingForAncestors) const;
+
 	/** Native subclass state required before Narrative transition events.
 	 * The base Volume has no additional ownership-dependent state.
 	 */
@@ -884,6 +889,10 @@ protected:
 	FOnTerritoryDefenderSpawned OnDefenderSpawned;
 
 private:
+	friend class UTerritoryControlSubsystem;
+	bool CommitOwnershipDataValidated(const FTerritoryOwnershipData& NewData,
+		const FTerritoryTransitionContext& TransitionContext, bool bBypassConditionsForCommit,
+		TFunctionRef<bool()> FinalAdmission);
 	friend class ATerritoryGuardSpawnPoint;
 #if WITH_DEV_AUTOMATION_TESTS
 	// Seeds OwnershipData the way Narrative's Actor->Serialize(Ar) does on load, so a
@@ -904,6 +913,9 @@ private:
 	friend class FTFGuardReserveTotals;
 	friend class FTFGuardResponsePolicy;
 	friend class FTFIndependentGuardPostStreaming;
+	friend class FTFGuardRestoreComposition;
+	friend class FTFGuardKilledEvidence;
+	friend class FTFGuardKilledRefusedWithoutAuthority;
 	friend class FTFTerritoryDefinitionRuntimeNarrative;
 	// Floor staging tests share one fixture, so the attachment seam lives in one class.
 	friend class FTFTerritoryFloorTestAccess;
@@ -956,7 +968,10 @@ private:
 	ETerritoryAvailability PreviousAvailability = ETerritoryAvailability::Unlocked;
 	FBox LastKnownBounds;
 	bool bLoadedFromSave = false;
-	bool bGuardsReconciled = false;
+	bool bReconcilingGuardRestore = false;
+	bool bHasDurableGuardPostRecords = false;
+	/** Bounded migration budget only when a legacy save has no post records. */
+	TSet<FGuid> LegacyGuardRestorePosts;
 	/** Native record readers must finish before retired guard EndPlay can write new save records. */
 	bool bDeferGuardDestructionForRecordLoad = false;
 	bool bTransitionInProgress = false;
@@ -1008,9 +1023,24 @@ private:
 	/** Server-only physical occupants whose stealth profile has deferred contest admission. */
 	TMap<TWeakObjectPtr<AActor>, FGameplayTag> StoryBoundsInfiltrators;
 
+	/**
+	 * Server-only last warning time per player, so a holstered visitor is warned once per cooldown
+	 * instead of every evaluation. Transient, like the contest registrations above.
+	 */
+	TMap<TWeakObjectPtr<AActor>, double> HolsteredWeaponWarningTimes;
+
 	UFUNCTION()
 	void OnDefenderDied(AActor* KilledActor, UNarrativeAbilitySystemComponent* KilledASC,
 		const bool bIsDead);
+
+	/**
+	 * Records the committed defender death as a Territory evidence fact.
+	 *
+	 * Called from OnDefenderDied after the death is verified and before OnGuardKilled is
+	 * broadcast, so a durable record exists the moment the consequence is real. Silent when
+	 * the defender has no stable GUID or the ledger subsystem is absent.
+	 */
+	void RecordGuardKilledEvidence(AActor* KilledActor, AActor* Killer);
 
 	bool BindDefenderDeath(AActor* Defender);
 	void UnbindDefenderDeath(AActor* Defender);
@@ -1025,8 +1055,37 @@ private:
 		const FTerritoryTransitionContext& TransitionContext);
 	void AnnounceDefenderSpawned(AActor* Guard, ATerritoryGuardSpawnPoint* SpawnPoint);
 	void ReconcileStoryBoundsContesters();
+
+	/**
+	 * Story-bounds Places only. False while the player's weapon is holstered and neither faction is
+	 * at war, so the Place stays Claimed and the guards warn instead of fighting.
+	 */
+	bool ShouldAdmitStoryBoundsContest(const AActor* Pawn, const FGameplayTag& Faction) const;
+
+	/** Territory diplomacy relationship between this Place's owning faction and the given faction. Used for the contest-gate debug log. */
+	EDiplomacyState ResolveOwnerRelationship(const FGameplayTag& Faction) const;
+
+	/** Plays the holstered-weapon warning on the nearest defender, at most once per profile cooldown. Returns true when a line was actually requested. */
+	bool WarnHolsteredWeaponIfDue(AActor* Pawn);
 	void ReleaseStoryBoundsContesters();
-	void ReconcileAvailabilityDependentSystems();
+
+	/**
+	 * Keeps the defenders' dialogue-state tags in step with what this Place is actually doing: the
+	 * owner's relationship to a visitor inside (War -> Hostile, Alliance -> Ally, War wins if both are
+	 * present), and the defender that just delivered the holstered weapon warning stays Wary for that
+	 * warning's cooldown. The tags themselves are written by the defender's own
+	 * UTerritoryDiplomacyDialogueComponent, so they keep a single writer.
+	 */
+	void SyncDefenderDialogueStates(const FGameplayTag& OwnerRelationshipTag);
+
+	/** Defender -> how long its holstered-weapon Wary state may stay applied. */
+	TMap<TWeakObjectPtr<AActor>, double> WaryDialogueStateUntil;
+
+	/** Defender -> the dialogue-state tag this volume last applied to it. */
+	TMap<TWeakObjectPtr<AActor>, FGameplayTag> DefenderDialogueStateApplied;
+	void ReconcileAvailabilityDependentSystems(bool bAllowFreshStaffing = true);
+	void RetireGuards(EGuardRemovalReason Reason, ATerritoryGuardSpawnPoint* OnlyPost = nullptr);
+	void ReconcileRestoredGuardPost(ATerritoryGuardSpawnPoint* SpawnPoint);
 	void ApplyInitialStateDiplomacyPolicies();
 	void RebuildRuntimeNarrativeConfiguration(const UTerritoryDefinition& Definition);
 	void PublishCaptureSummary();

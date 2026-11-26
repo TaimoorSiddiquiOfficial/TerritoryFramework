@@ -122,6 +122,45 @@ cost/cooldown, traces from the player's view (or AI aim), and spawns
 projectile finishes spawning. Missing capability, empty inventory, failed aim, failed commit, or
 failed spawn consumes nothing.
 
+### Where the stone actually flies
+
+The camera supplies the aim **point**, never the spawn point. The spawn stays at the throwing hand
+(`Launch Socket Name`, `hand_l` by default) or at the avatar origin plus `Fallback Spawn Height` when
+no socket exists, and `Forward Spawn Offset` only applies to that fallback. A camera-to-hand offset in
+a third-person view is what used to send stones over the shoulder.
+
+The launch direction is solved, not copied from the crosshair. With the authored `Initial Speed` of
+1200 cm/s and gravity scale 1.0, a stone leaving along the crosshair sags 0.9 m at 5 m and 3.4 m at
+10 m, which reads as "it does not follow the crosshair". `bCompensateLaunchForGravity` (on by default)
+bends the throw up by the low ballistic arc so the same speed and gravity land on the traced aim point,
+capped by `Max Compensated Launch Pitch` (55°). Targets beyond the ballistic reach, a target directly
+overhead, or zero gravity/speed keep the straight aim direction instead of inventing an arc.
+
+A `ServerOnly` ability runs on the server's copy of a remote client, where the camera is only refreshed
+by `ServerUpdateCamera`. Until that first camera update `APlayerController::GetPlayerViewPoint` falls
+back to the view-target actor rotation, which is yaw only, so a remote client's throw silently lost its
+pitch. The ability now reads the possessed pawn's replicated eye location plus the replicated
+`ControlRotation` in that window, and keeps the synced camera once the camera cache is live.
+
+The camera supplies the aim point in one of two ways. While the game hides the cursor (the TDA demo
+player controller captures and locks it), the screen centre *is* the pointer, so the camera view ray is
+already the pointer ray and `bAimWithVisibleMouseCursor` changes nothing. When a project shows the
+cursor, the pointer pixel is not the screen centre any more: the ability deprojects the mouse position
+with `APlayerController::DeprojectScreenPositionToWorld` and rebuilds the aim ray through that pixel,
+so the stone follows the mouse instead of the crosshair. A pointer that resolves behind the camera keeps
+the crosshair ray. Cursor state is not replicated, so a remote client's pointer can never be honoured on
+the server — that throw keeps the replicated aim described above.
+
+The spawn direction is only half of it: the projectile must not re-interpret the launch vector. The
+throwing ability spawns the projectile deferred, writes a world-space velocity (hand socket → aim
+point), and then calls `FinishSpawning`. That call runs
+`UProjectileMovementComponent::InitializeComponent`, which rotates `Velocity` by the component rotation
+whenever `bInitialVelocityInLocalSpace` is true — the engine default. The stone was therefore rotated a
+second time by its own launch rotation: a throw aimed along -X left along +X. `ATerritoryDistractionProjectile`
+now sets `bInitialVelocityInLocalSpace = false` because every throw this plugin produces supplies world
+space. Any custom projectile Blueprint assigned to `Projectile Class` must do the same, otherwise it will
+inherit the double rotation.
+
 The projectile deliberately remains an Actor rather than pretending to be a Gameplay Ability. It
 is the replicated physical payload and provides swept sphere collision, projectile movement,
 bounce, owner/instigator collision filtering, and the `Territory Distraction` component. Duplicate
@@ -210,6 +249,167 @@ existing save authorities.
 Use explicit quest state for long mission checkpoints. Do not expect a mid-search save to restore
 individual guards' short-lived sight memories.
 
+## Wielded weapon contest gate
+
+A story-bounds Place must not start a confrontation just because a player walked in. The stealth
+profile owns the rule, and one shared helper enforces it on **every** route that can register a
+contester.
+
+| Option (`profile` → `07 Contest Gate`) | Meaning |
+|---|---|
+| `Require Wielded Weapon For Contest` | Default on. While the player's Narrative weapon is holstered the Place stays Claimed and the nearest guard warns instead of contesting. |
+| `Holstered Weapon Warning Tag` | Line played while the player stays holstered. Empty uses `Territory.TaggedDialogue.Warn.HolsteredWeapon`. |
+| `Holstered Weapon Warning Cooldown` | Minimum seconds between warnings for the same player (default 20). |
+
+Admission rule (`UTerritoryBlueprintLibrary::DoesPawnAdmitStoryContest`):
+
+```text
+profile flag off          -> contest (legacy behavior)
+war with the Place owner  -> contest (hostility is already declared, no weapon check)
+weapon in a wield slot    -> contest (weapon drawn)
+otherwise                 -> no contest; warn, guards keep investigating
+```
+
+"Wielded" reads Narrative's own state: a slot in `ANarrativeCharacter::GetWeaponWieldState().WieldSlots`.
+An equipped-but-holstered weapon stays in `EquipSlots` only, so it does not count.
+
+Both call sites must stay on that helper:
+
+- `ATerritoryVolume::ReconcileStoryBoundsContesters` - the bounds/overlap route (`StoryBounds`).
+- `UTerritoryControlSubsystem::ReportStealthEvidence` - the exposure escalation (`Exposure`). Without
+  this one a spotted player is still contested while holstered, because guards report suspicion and
+  exposure through their own observer component independently of the volume.
+
+The warning line is delivered by the **nearest** registered defender via
+`UTerritoryDiplomacyDialogueComponent::RequestTaggedDialogue`. That component owns the whole chain
+natively for guards, assault characters and story NPCs: it resolves the row from the NPC definition's
+`TaggedDialogueSet`, applies the NPC's `RequiredTags`/`BlockedTags`, calls Narrative's own
+`PlayTaggedDialogue` for its per-instance cooldown bookkeeping, then plays the line through the
+listener's Tales component (`UTalesComponent::BeginDialogue`, `Speakers[0]` = the NPC) - the same
+call Narrative's own `NPCInteractable` makes.
+
+Why the native chain is required: `ANarrativeNPCCharacter::ExecutePlayTaggedDialogue` is a
+`BlueprintImplementableEvent`, and **nothing in this project implements it** - neither the vendor
+`BP_NarrativeNPC`, nor `BP_TerritoryGuard`, nor `BP_TerritoryStoryNPC`. Without the C++ playback the
+row would only be stamped (`LastPlayTime`) and never actually heard, which is exactly what "the
+dialogue does not play" looked like.
+
+Two routes now share one playback rule, `UTerritoryBlueprintLibrary::PlayTaggedDialogueLine(Row,
+Speaker, DialogueInstigator)`:
+
+| Route | Trigger | Path |
+|---|---|---|
+| Territory's own | the contest gate warns a holstered player | `RequestTaggedDialogue` → Narrative gate + `PlayTaggedDialogue` → helper (or the hook, if it already started one) |
+| Narrative's own | the vendor BT/activity calls `PlayTaggedDialogue` (Taunt, BeginAttacking, Investigate.*, Flee) | `PlayTaggedDialogue` → the guard Blueprint's `ExecutePlayTaggedDialogue` **event** → helper |
+
+`BP_TerritoryGuard` carries that event in its EventGraph (`Event ExecutePlayTaggedDialogue` →
+`Play Tagged Dialogue Line`, `Speaker` = Self, `Row` = the event's `Dialogue` pin). It must be an
+**Event node**: an `override_parent_function` function graph of the same name clashes with it and
+leaves the Blueprint in an error state that `compile_blueprint` still reports as `UpToDate`.
+
+The listener is chosen from: the explicit instigator (unless it is the speaker itself, which is what
+Narrative's own callers pass), then the nearest player pawn inside the row's `MaxDistance`, then the
+remaining player pawns. A candidate only wins if it actually has a `UTalesComponent`, so an NPC
+instigator never swallows the line, and an instigator already inside a dialogue is skipped rather
+than blocking the bark.
+
+`ATerritoryVolume` keeps its own warning cooldown, and it only stamps that cooldown when the line
+actually started - a listener already inside a dialogue is retried on the next evaluation instead of
+being silenced for the whole cooldown.
+
+The authored row lives in `/TerritoryFramework/AI/Dialogue/TaggedDialogues_TerritoryGuard`:
+
+| Tag | Dialogue | Cooldown | MaxDistance | RequiredTags |
+|---|---|---|---|---|
+| `Territory.TaggedDialogue.Warn.HolsteredWeapon` | `/Game/TerritoryFramework/AI/Dialogue/DBP_TerritoryGuard_WarnHolsteredWeapon` (a project-owned copy so the line can be edited without touching vendor content; give it the real VO) | 20 | 5000 | none (plays while the guard is merely wary) — Blocked: `Narrative.State.IsDead`, `Narrative.State.NPC.IsBusy` so a fighting or dead guard does not warn |
+
+While a warning is being delivered the warning defender carries `Territory.DialogueState.Wary`, and every
+defender of a Place whose owner faction is at war with a visitor carries `Territory.DialogueState.Hostile`
+- both written only by that defender's own `UTerritoryDiplomacyDialogueComponent`, driven from
+`ATerritoryVolume::SyncDefenderDialogueStates` (the same evaluation that reconciles the contesters). No
+state machine is involved; see `NARRATIVE_TAGGED_DIALOGUE_ATTITUDE_STATES.md` for that decision.
+
+That set is a **superset of the vendor bandit set** (Taunt, BeginAttacking, the six `Investigate.*`
+lines, plus the warning row), so replacing the guard definition's set does not remove the
+investigation dialogue.
+
+### Where the contest-gate options are visible in the editor
+
+| Editor location | What you author there |
+|---|---|
+| Profile asset → `07 Contest Gate` | `Require Wielded Weapon For Contest`, `Ignore War For Weapon Requirement`, `Holstered Weapon Warning Tag` (tag picker, `Territory.TaggedDialogue`), `Holstered Weapon Warning Cooldown` |
+| Same asset, Blueprint | `Get Effective Holstered Weapon Warning Tag` / `... Cooldown` (`BlueprintPure`) return the authored value or the native fallback, so a graph never needs its own fallback branch |
+| `Project Settings → Territory → Debug → Tagged dialogue` | The `[TaggedDialogue]` log category (row, tag, dialogue class and listener of every started line) |
+| `Project Settings → Territory → Debug → Enable Debug System` | Master switch for every Territory debug category |
+| Guard dialogue asset (`TaggedDialogues_TerritoryGuard`) | The rows: tag, dialogue class, cooldown, max distance, required/blocked tags |
+
+Guard definitions exist twice in this project, and the live NPCs use the **project** copies:
+
+| Asset | Live? |
+|---|---|
+| `/Game/TerritoryFramework/AI/NPC_TerritoryBandit` (Hero / RangedGuard / BanditAssault) | yes — spawned guards report these paths |
+| `/TerritoryFramework/AI/NPC_Territory*` (plugin content) | no, but keep it in sync |
+
+Both copies must carry `TaggedDialogueSet = TaggedDialogues_TerritoryGuard` and a **null**
+`Dialogue` field: an *empty string* soft class path there makes `ApplyDialogue(nullptr)` break
+`ANarrativeNPCCharacter::OnCharacterDefinitionDataLoaded`, which then never populates
+`TaggedDialogues`. Monolith's `save_packages` crashed the editor on that invalid state
+(`FMonolithEditorActions::HandleSavePackages`), so save these assets with
+`unreal.EditorAssetLibrary.save_loaded_asset` instead.
+
+Debug: with `Project Settings → Territory → Debug → Enable Debug System` and the `Stealth`, `Capture`
+or `Tagged dialogue` category enabled, the gate logs one line per delivered warning and one line when
+a contest starts, including `wielded`, `relationship`, `aggressor` and the profile's own flags, plus
+one `[TaggedDialogue]` line per line that actually started playing.
+
+### The guard engagement decision
+
+`ATerritoryGuardCharacter` calls the same rule before it fights an exposed player, so an unarmed
+visitor who has not attacked anyone keeps **investigation and the warning line** instead of combat.
+A guard still fights:
+
+- a player who is wielding a weapon (that is the wielded-weapon test), or
+- a player whose last stealth evidence is aggressive - `Damage`, `Gunshot`, `BulletImpact`,
+  `FireSeen`, `DefenderKilledSeen`, or a story `Scripted` exposure.
+
+`Ignore War For Weapon Requirement` therefore covers both the contest and the engagement. With it
+off, an authored war admits a weaponless contest again (legacy behaviour).
+
+### War is derived from Narrative attitude
+
+The starting hostility in this project is authored, not random. Measured at PIE start:
+
+```text
+GameState          BP_NarrativeGameState_C
+FactionAllianceMap Narrative.Factions.Bandits -> Narrative.Factions.Heroes : TeamAttitude.HOSTILE
+Territory treaty   Narrative.Factions.Bandits <-> Narrative.Factions.Heroes : War
+```
+
+`UTerritoryDiplomacySubsystem::RefreshFromGameState` reads
+`ANarrativeGameState::FactionAllianceMap[...].AttitudeMap` and derives treaties through
+`AttitudeToDiplomacyState`; the reverse direction is `SyncNarrativeAttitudeForTreaty` /
+`DiplomacyStateToAttitude`. The mapping is lossless for the supported states:
+
+| Narrative attitude | Territory treaty | Narrative attitude written back |
+|---|---|---|
+| Friendly | Alliance / Trade / Non-Aggression | Friendly |
+| Hostile | **War** | Hostile |
+| Neutral | None (treaty row removed) | Neutral |
+
+`Friendly` is never written back as `Neutral`. To change the starting relationship, author the
+project's own GameState (or a project GameMode) rather than the vendor `BP_NarrativeGameState`, or
+declare peace at runtime through `UTerritoryDiplomacySubsystem`, which syncs back to Narrative
+attitudes and therefore to the dialogue-state tags.
+
+Debug: with `Project Settings → Territory → Debug → Enable Debug System` and the `Stealth`, `Capture`
+or `Tagged dialogue` category enabled, the gate logs one line per delivered warning and one line when
+a contest starts, including `wielded`, `relationship`, `aggressor` and the profile's own flags, plus
+one `[TaggedDialogue]` line per line that actually started playing.
+
+> District and City actors are `AGGREGATE_ONLY`: they show `Contested` whenever their children are not
+> uniformly owned and secured (`TerritoryHierarchyPolicy::ReduceControl`). That state is derived and
+> is not caused by a player standing inside a child Place.
+
 ## Verification checklist
 
 - Enter the Place unseen: state remains unchanged and the player is Undetected.
@@ -220,3 +420,7 @@ individual guards' short-lived sight memories.
 - Throw a distraction on another floor: only nearby path-reachable guards respond.
 - Join with two players: one may be exposed while the other remains independently tracked.
 - Remove the profile: legacy immediate contest behavior still works.
+- Enter a story-bounds Place with the weapon holstered: the Place stays Claimed and the nearest guard plays the warning line.
+- Draw the weapon while inside: the next evaluation registers the contest and the Territory becomes Contested.
+- Be at war with the Place owner: the weapon is never checked and the contest starts immediately.
+- Leave and re-enter inside the warning cooldown: the line is not repeated.

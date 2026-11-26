@@ -15,6 +15,7 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "SaveSystemStatics.h"
+#include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -24,8 +25,16 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryDialogueTags.h"
+#include "Core/TerritoryBlueprintLibrary.h"
+#include "AI/TerritoryDiplomacyDialogue.h"
+#include "UnrealFramework/NarrativeCharacter.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryEvidenceTags.h"
+#include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
+#include "NarrativeStableActor.h"
 #include "AI/NPCDefinition.h"
 #include "AI/NarrativeCharacterSubsystem.h"
 #include "AI/NarrativeNPCController.h"
@@ -304,11 +313,9 @@ void ATerritoryVolume::BeginPlay()
 			ApplyInitialStateDiplomacyPolicies();
 		}
 
-		if (!bGuardsReconciled)
-		{
-			ReconcileGuardsAfterLoad();
-			bGuardsReconciled = true;
-		}
+		// Registration resolves still-loaded posts before hydrating their records.
+		// The Native callback during BeginPlay defers physical restore to here.
+		ReconcileGuardsAfterLoad();
 		RefreshGarrisonSnapshot();
 	}
 	else if (!RegisterRuntimeTerritory())
@@ -326,7 +333,7 @@ void ATerritoryVolume::BeginPlay()
 	}
 	if (HasAuthority())
 	{
-		ReconcileAvailabilityDependentSystems();
+		ReconcileAvailabilityDependentSystems(false);
 	}
 
 	// Fire BP-exposed initialization event (only reached if registration succeeded)
@@ -392,7 +399,7 @@ void ATerritoryVolume::ApplyInitialStateDiplomacyPolicies()
 			continue;
 		}
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(DiplomacyEvent);
-		DiplomacyEvent->ExecuteEvent(nullptr, nullptr, nullptr);
+		TerritoryTales::ExecuteEvent(DiplomacyEvent, nullptr);
 	}
 }
 
@@ -418,16 +425,8 @@ void ATerritoryVolume::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		Registry->UnregisterTerritory(this);
 	}
 
-	// Clean up spawned guards
-	for (TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : SpawnedGuards)
-	{
-		if (GuardPtr.IsValid())
-		{
-			TerritoryNarrativeDeathSupport::PrepareForRemoval(*GuardPtr.Get());
-			GuardPtr->Destroy();
-		}
-	}
-	SpawnedGuards.Empty();
+	RetireGuards(EndPlayReason == EEndPlayReason::RemovedFromWorld
+		? EGuardRemovalReason::StreamingRetirement : EGuardRemovalReason::TerritoryDestroyed);
 
 	for (const TWeakObjectPtr<AActor>& DefenderPtr : RegisteredDefenders)
 	{
@@ -839,8 +838,7 @@ void ATerritoryVolume::Load_Implementation()
 		// gameplay participation now, but let its existing removal grace destroy
 		// the physical actor after Native finishes reading the actor/components.
 		TGuardValue<bool> GuardRecordRead(bDeferGuardDestructionForRecordLoad, true);
-		ReconcileGuardsAfterLoad();
-		bGuardsReconciled = true;
+		if (!IsActorBeginningPlay()) ReconcileGuardsAfterLoad();
 		if (UTerritoryControlSubsystem* Control = GetWorld()->GetSubsystem<UTerritoryControlSubsystem>();
 			Control && ControlMode != ETerritoryControlMode::AggregateOnly)
 		{
@@ -850,6 +848,13 @@ void ATerritoryVolume::Load_Implementation()
 		// campaign directory must still replace later ownership/history immediately,
 		// including before this actor streams out or a client joins.
 		PublishCaptureSummary();
+		if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(this))
+		{
+			if (UTerritoryEconomySubsystem* Economy = GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>())
+			{
+				Economy->RefreshProductionSite(Property, true);
+			}
+		}
 	}
 
 	const UTerritoryDeveloperSettings* DevSettings = GetDefault<UTerritoryDeveloperSettings>();
@@ -865,10 +870,25 @@ void ATerritoryVolume::Load_Implementation()
 
 void ATerritoryVolume::ReconcileGuardsAfterLoad()
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || !GetWorld() || bReconcilingGuardRestore) return;
+	const uint64 LoadGeneration = GarrisonLoadGeneration;
+	const FGuid LoadedGUID = TerritoryGUID;
+	const FGameplayTag LoadedOwner = OwnershipData.OwningFaction;
+	const auto IsRestoreCurrent = [this, LoadGeneration, LoadedGUID, LoadedOwner]()
+	{
+		return IsGameplayCallbackStateCurrent(LoadGeneration)
+			&& TerritoryGUID == LoadedGUID && OwnershipData.OwningFaction == LoadedOwner;
+	};
+	const int32 LegacyDefenders = OwnershipData.DefenderCount;
+	const TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
+	// Group hydration must finish before a post binding can deploy a guard or start
+	// its reserve timer. Native can invoke post callbacks in either load order.
+	{
+	TGuardValue<bool> Reconciliation(bReconcilingGuardRestore, true);
 	if (ControlMode == ETerritoryControlMode::AggregateOnly)
 	{
-		DespawnGuards();
+		RetireGuards(EGuardRemovalReason::LoadReconcile);
+		if (!IsRestoreCurrent()) return;
 		RegisteredDefenders.Reset();
 		OwnershipData.DesiredGuardCount = 0;
 		OwnershipData.DefenderCount = 0;
@@ -878,44 +898,83 @@ void ATerritoryVolume::ReconcileGuardsAfterLoad()
 		RefreshGarrisonSnapshot();
 		return;
 	}
-	const TArray<ATerritoryGuardSpawnPoint*> SpawnPoints = GetGuardSpawnPoints();
-	int32 SavedActiveGuards = 0;
+	bHasDurableGuardPostRecords = false;
+	LegacyGuardRestorePosts.Reset();
+	TArray<FGuid> AuthoredPostIDs;
+	UNarrativeSaveSubsystem* Save = GetWorld()->GetSubsystem<UNarrativeSaveSubsystem>();
+	if (TerritoryDefinition)
+	{
+		for (const FTerritoryGuardPostTemplate& Post : TerritoryDefinition->GuardPosts)
+		{
+			if (!Post.StableGuardPostGUID.IsValid()) continue;
+			AuthoredPostIDs.AddUnique(Post.StableGuardPostGUID);
+			bHasDurableGuardPostRecords |= Save && Save->DoesRecordExist(Post.StableGuardPostGUID);
+		}
+	}
 	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
 	{
-		if (!SpawnPoint) continue;
-		// Narrative loads actors independently. Explicitly hydrate referenced posts
-		// before reading their saved active counts so BeginPlay order cannot reroll
-		// the garrison strength.
+		if (!IsValid(SpawnPoint) || SpawnPoint->IsActorBeingDestroyed()) continue;
+		AuthoredPostIDs.AddUnique(SpawnPoint->GetActorGUID_Implementation());
 		if (bLoadedFromSave)
 		{
 			USaveSystemStatics::LoadSingleActor(SpawnPoint);
+			if (!IsRestoreCurrent()) return;
 		}
-		SavedActiveGuards += SpawnPoint->GetSavedActiveGuardCount();
+		bHasDurableGuardPostRecords |= SpawnPoint->bLoadedFromSave;
 	}
-	SavedActiveGuards = CalculateGuardRestoreCount(bLoadedFromSave, GetDesiredGuardCount(),
-		SavedActiveGuards, OwnershipData.DefenderCount);
-
-	// Despawn ALL existing guards (may be stale from BeginPlay initial faction)
-	DespawnGuards();
-
-	// Clean stale defender registrations
-	RegisteredDefenders.RemoveAll([](const TWeakObjectPtr<AActor>& Ptr) { return !Ptr.IsValid(); });
-	OwnershipData.DefenderCount = RegisteredDefenders.Num();
-
-	// Spawn guards for the loaded/current owner
-	if (IsAvailableForGameplay()
-		&& OwnershipData.State == ETerritoryState::Claimed
-		&& OwnershipData.OwningFaction.IsValid()
-		&& ResolveGuardDefinition(OwnershipData.OwningFaction)
-		&& SavedActiveGuards > 0)
+	if (bLoadedFromSave && !bHasDurableGuardPostRecords)
 	{
-		SpawnGuardsToCount(SavedActiveGuards);
+		// Only truly absent legacy occupancy permits a total-count migration.
+		// Assign stable slots before actors arrive, so streaming order cannot move
+		// survivors between posts. Explicit saved zero never enters this branch.
+		AuthoredPostIDs.Sort([](const FGuid& A, const FGuid& B) { return A < B; });
+		const int32 Count = FMath::Min(AuthoredPostIDs.Num(),
+			CalculateGuardRestoreCount(true, GetDesiredGuardCount(), 0, LegacyDefenders));
+		for (int32 Index = 0; Index < Count; ++Index) LegacyGuardRestorePosts.Add(AuthoredPostIDs[Index]);
+	}
+	RetireGuards(EGuardRemovalReason::LoadReconcile);
+	if (!IsRestoreCurrent()) return;
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
+	{
+		ReconcileRestoredGuardPost(SpawnPoint);
+		if (!IsRestoreCurrent()) return;
+	}
+	}
+	for (ATerritoryGuardSpawnPoint* SpawnPoint : SpawnPoints)
+	{
+		if (IsValid(SpawnPoint)) SpawnPoint->ResumePendingReserveSpawn();
 	}
 
 	// Sync RepNotify cache
 	PreviousOwningFaction = OwnershipData.OwningFaction;
 	PreviousState = OwnershipData.State;
 	RefreshGarrisonSnapshot();
+}
+
+void ATerritoryVolume::ReconcileRestoredGuardPost(ATerritoryGuardSpawnPoint* SpawnPoint)
+{
+	if (!HasAuthority() || !IsValid(SpawnPoint) || SpawnPoint->IsActorBeingDestroyed()
+		|| SpawnPoint->GetOwningTerritory() != this || IsActorBeingDestroyed()
+		|| ControlMode == ETerritoryControlMode::AggregateOnly || !IsAvailableForGameplay()
+		|| !ATerritoryGuardSpawnPoint::IsOwnerReserveDeploymentStateValid(
+			OwnershipData.State, OwnershipData.OwningFaction, OwnershipData.ContestingFaction)) return;
+	const bool bHasSavedSlot = SpawnPoint->bLoadedFromSave;
+	const bool bRestoreLivingSlot = bHasSavedSlot
+		? SpawnPoint->GetSavedActiveGuardCount() > 0
+		: (SpawnPoint->GetSavedActiveGuardCount() > 0
+			|| (SpawnPoint->bInitialGuardDeploymentPending && (!bLoadedFromSave
+				|| (!bHasDurableGuardPostRecords
+					&& LegacyGuardRestorePosts.Contains(SpawnPoint->GetActorGUID_Implementation())))));
+	if (!bRestoreLivingSlot)
+	{
+		if (SpawnPoint->GetActiveGuardCount() > 0)
+			RetireGuards(EGuardRemovalReason::LoadReconcile, SpawnPoint);
+		return;
+	}
+	if (SpawnPoint->GetActiveGuardCount() == 0 && GetSpawnedGuardCount() < GetDesiredGuardCount())
+	{
+		TrySpawnSingleGuard(SpawnPoint, false);
+	}
 }
 
 void ATerritoryVolume::OnRep_GarrisonSnapshot()
@@ -990,6 +1049,13 @@ void ATerritoryVolume::SetContestingFaction(const FGameplayTag& Faction)
 
 bool ATerritoryVolume::IsAvailableForGameplay() const
 {
+	bool bWaitingForAncestors = false;
+	return ResolveGameplayAvailability(bWaitingForAncestors);
+}
+
+bool ATerritoryVolume::ResolveGameplayAvailability(bool& bOutWaitingForAncestors) const
+{
+	bOutWaitingForAncestors = false;
 	if (IsLocked()) return false;
 
 	FGameplayTag ParentTag = GetParentTerritoryTag();
@@ -998,7 +1064,11 @@ bool ATerritoryVolume::IsAvailableForGameplay() const
 	UWorld* World = GetWorld();
 	const UTerritoryRegistrySubsystem* Registry = World
 		? World->GetSubsystem<UTerritoryRegistrySubsystem>() : nullptr;
-	if (!World || !Registry) return false;
+	if (!World || !Registry)
+	{
+		bOutWaitingForAncestors = true;
+		return false;
+	}
 
 	const ATerritoryWorldState* WorldState =
 		ATerritoryWorldState::FindTerritoryWorldState(this);
@@ -1018,14 +1088,14 @@ bool ATerritoryVolume::IsAvailableForGameplay() const
 			continue;
 		}
 
-		if (!WorldState) return false;
-		const FReplicatedCaptureSummary Summary =
-			WorldState->GetCaptureSummary(ParentTag);
-		if (Summary.TerritoryTag != ParentTag
-			|| Summary.Availability == ETerritoryAvailability::Locked)
+		const FReplicatedCaptureSummary Summary = WorldState
+			? WorldState->GetCaptureSummary(ParentTag) : FReplicatedCaptureSummary();
+		if (Summary.TerritoryTag != ParentTag)
 		{
+			bOutWaitingForAncestors = true;
 			return false;
 		}
+		if (Summary.Availability == ETerritoryAvailability::Locked) return false;
 		ParentTag = Summary.ParentTerritoryTag;
 	}
 	return true;
@@ -1298,6 +1368,167 @@ bool ATerritoryVolume::GetActiveTerritoryAudioConfig(
 	return false;
 }
 
+EDiplomacyState ATerritoryVolume::ResolveOwnerRelationship(const FGameplayTag& Faction) const
+{
+	const FGameplayTag OwnerFaction = GetOwningFaction();
+	const UWorld* World = GetWorld();
+	const UTerritoryDiplomacySubsystem* Diplomacy = World
+		? World->GetSubsystem<UTerritoryDiplomacySubsystem>()
+		: nullptr;
+	if (Diplomacy && OwnerFaction.IsValid() && Faction.IsValid())
+	{
+		return Diplomacy->GetDiplomacyState(OwnerFaction, Faction);
+	}
+	return EDiplomacyState::None;
+}
+
+bool ATerritoryVolume::ShouldAdmitStoryBoundsContest(const AActor* Pawn, const FGameplayTag& Faction) const
+{
+	// One shared rule owns this gate, the stealth exposure escalation and the guard engagement
+	// decision, so a holstered visitor cannot be contested or attacked by any of them.
+	const UTerritoryControlSubsystem* Control = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryControlSubsystem>()
+		: nullptr;
+	FTerritoryInfiltrationSnapshot Snapshot;
+	const UTerritoryStealthProfile* Profile = GetActiveStealthProfile();
+	const bool bAggressor = Control && Control->GetInfiltrationSnapshot(this, Pawn, Snapshot)
+		&& UTerritoryBlueprintLibrary::IsRecentAggressiveStealthEvidence(this, Snapshot,
+			Profile ? Profile->AggressionEvidenceWindow : 0.f);
+	return UTerritoryBlueprintLibrary::DoesPawnAdmitStoryContest(
+		Pawn, this, Profile, bAggressor);
+}
+
+void ATerritoryVolume::SyncDefenderDialogueStates(const FGameplayTag& OwnerRelationshipTag)
+{
+	UWorld* World = GetWorld();
+	if (!HasAuthority() || !World)
+	{
+		return;
+	}
+
+	const double Now = World->GetTimeSeconds();
+	ETerritoryDialogueState DesiredState = ETerritoryDialogueState::Neutral;
+	if (OwnerRelationshipTag == TerritoryDialogueTags::StateHostile)
+	{
+		DesiredState = ETerritoryDialogueState::Hostile;
+	}
+	else if (OwnerRelationshipTag == TerritoryDialogueTags::StateAlly)
+	{
+		DesiredState = ETerritoryDialogueState::Ally;
+	}
+
+	for (AActor* Defender : GetRegisteredDefenders())
+	{
+		if (!IsValid(Defender))
+		{
+			continue;
+		}
+		UTerritoryDiplomacyDialogueComponent* Dialogue =
+			Defender->FindComponentByClass<UTerritoryDiplomacyDialogueComponent>();
+		if (!Dialogue)
+		{
+			continue;
+		}
+
+		// A holstered-weapon warning owns the state for its cooldown window; never stomp it early.
+		if (const double* WaryUntil = WaryDialogueStateUntil.Find(Defender))
+		{
+			if (Now < *WaryUntil)
+			{
+				continue;
+			}
+			WaryDialogueStateUntil.Remove(Defender);
+			if (Dialogue->GetDialogueState() == ETerritoryDialogueState::Wary)
+			{
+				Dialogue->ClearDialogueState();
+			}
+		}
+
+		FGameplayTag& Applied = DefenderDialogueStateApplied.FindOrAdd(Defender);
+		if (OwnerRelationshipTag.IsValid())
+		{
+			if (Applied != OwnerRelationshipTag)
+			{
+				Dialogue->ApplyDialogueState(DesiredState);
+				Applied = OwnerRelationshipTag;
+			}
+		}
+		else if (Applied.IsValid())
+		{
+			Dialogue->ClearDialogueState();
+			Applied = FGameplayTag();
+		}
+	}
+}
+
+bool ATerritoryVolume::WarnHolsteredWeaponIfDue(AActor* Pawn)
+{
+	UWorld* World = GetWorld();
+	if (!HasAuthority() || !World || !IsValid(Pawn))
+	{
+		return false;
+	}
+
+	const UTerritoryStealthProfile* Profile = GetActiveStealthProfile();
+	const float Cooldown = Profile
+		? Profile->GetEffectiveHolsteredWeaponWarningCooldown()
+		: 20.f;
+	const double Now = World->GetTimeSeconds();
+	const double* LastWarning = HolsteredWeaponWarningTimes.Find(Pawn);
+	if (LastWarning && Cooldown > 0.f && Now - *LastWarning < Cooldown)
+	{
+		return false;
+	}
+
+	const FGameplayTag WarningTag = Profile
+		? Profile->GetEffectiveHolsteredWeaponWarningTag()
+		: TerritoryDialogueTags::WarnHolsteredWeapon;
+
+	// The nearest live defender delivers the line. The line itself lives in the guard's tagged
+	// dialogue set, so cooldown and listener distance stay authored in data.
+	AActor* NearestDefender = nullptr;
+	float BestDistanceSq = TNumericLimits<float>::Max();
+	for (AActor* Defender : GetRegisteredDefenders())
+	{
+		if (!IsValid(Defender))
+		{
+			continue;
+		}
+		const float DistanceSq = FVector::DistSquared(Defender->GetActorLocation(), Pawn->GetActorLocation());
+		if (DistanceSq < BestDistanceSq)
+		{
+			BestDistanceSq = DistanceSq;
+			NearestDefender = Defender;
+		}
+	}
+	if (!NearestDefender)
+	{
+		return false;
+	}
+
+	if (UTerritoryDiplomacyDialogueComponent* Dialogue =
+		NearestDefender->FindComponentByClass<UTerritoryDiplomacyDialogueComponent>())
+	{
+		// Only throttle when the line actually started: a listener already inside a dialogue, a
+		// missing row or an authored gate must not swallow the warning for the whole cooldown.
+		if (!Dialogue->RequestTaggedDialogue(WarningTag, Pawn))
+		{
+			return false;
+		}
+
+		// Wary for the length of this warning's cooldown: the Place is suspicious of a holstered
+		// visitor, which is what the dialogue-state tags express without a state machine.
+		Dialogue->ApplyDialogueState(ETerritoryDialogueState::Wary);
+		WaryDialogueStateUntil.Add(NearestDefender, Now + FMath::Max(Cooldown, 2.f));
+	}
+	else
+	{
+		return false;
+	}
+	HolsteredWeaponWarningTimes.Add(Pawn, Now);
+	return true;
+}
+
 void ATerritoryVolume::ReconcileStoryBoundsContesters()
 {
 	UWorld* World = GetWorld();
@@ -1308,12 +1539,15 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 		|| !IsAvailableForGameplay())
 	{
 		ReleaseStoryBoundsContesters();
+		SyncDefenderDialogueStates(FGameplayTag());
 		return;
 	}
 	const bool bCapturePaused = IsPrimaryRuntimeRuleSuspendedWithContext(
 		ETerritoryQuestOverrideEffect::AutomaticCapture, nullptr);
 
 	TSet<TWeakObjectPtr<AActor>> SeenInside;
+	// War wins over alliance when visitors from both are inside at once.
+	FGameplayTag OwnerRelationshipTag;
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		APlayerController* Controller = It->Get();
@@ -1340,6 +1574,20 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 		}
 
 		SeenInside.Add(Pawn);
+		switch (ResolveOwnerRelationship(Faction))
+		{
+		case EDiplomacyState::War:
+			OwnerRelationshipTag = TerritoryDialogueTags::StateHostile;
+			break;
+		case EDiplomacyState::Alliance:
+			if (OwnerRelationshipTag != TerritoryDialogueTags::StateHostile)
+			{
+				OwnerRelationshipTag = TerritoryDialogueTags::StateAlly;
+			}
+			break;
+		default:
+			break;
+		}
 		const TWeakObjectPtr<AActor> PawnKey(Pawn);
 		if (const FGameplayTag* PreviousFaction = StoryBoundsInfiltrators.Find(PawnKey);
 			PreviousFaction && *PreviousFaction != Faction)
@@ -1354,25 +1602,60 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 			StoryBoundsContesters.Remove(PawnKey);
 		}
 
-		const bool bStealthDeferred = Control->RegisterInfiltrator(this, Pawn, Faction);
-		if (bStealthDeferred)
+		// Stealth first: inside a stealth-enabled Place a visitor becomes an undetected infiltrator
+		// before any contest rule runs. While hidden (or while escalation is Local Alarm) the guards
+		// investigate evidence only: no holstered-weapon warning line and no story-bounds contest.
+		// Crouching into a Place therefore stays hidden instead of summoning a guard to lecture you.
+		const bool bStealthPlace = Control->IsStealthInfiltrationEnabled(this);
+		bool bHiddenInfiltrator = false;
+		if (bStealthPlace)
 		{
-			StoryBoundsInfiltrators.Add(PawnKey, Faction);
-			const UTerritoryStealthProfile* StealthProfile = GetActiveStealthProfile();
-			const bool bMayEscalateToContest = StealthProfile
-				&& StealthProfile->EscalationScope
-					!= ETerritoryStealthEscalationScope::LocalAlarm;
-			if (!bMayEscalateToContest
-				|| !Control->IsInfiltratorExposed(this, Pawn))
+			if (Control->RegisterInfiltrator(this, Pawn, Faction))
 			{
-				Control->UnregisterStoryBoundsContester(this, Pawn, Faction);
-				StoryBoundsContesters.Remove(PawnKey);
-				continue;
+				StoryBoundsInfiltrators.Add(PawnKey, Faction);
+				const UTerritoryStealthProfile* StealthProfile = GetActiveStealthProfile();
+				const bool bMayEscalateToContest = StealthProfile
+					&& StealthProfile->EscalationScope
+						!= ETerritoryStealthEscalationScope::LocalAlarm;
+				bHiddenInfiltrator = !bMayEscalateToContest
+					|| !Control->IsInfiltratorExposed(this, Pawn);
 			}
 		}
 		else if (StoryBoundsInfiltrators.Remove(PawnKey) > 0)
 		{
 			Control->UnregisterInfiltrator(this, Pawn);
+		}
+
+		if (bHiddenInfiltrator)
+		{
+			// Investigate-only. Evidence already dispatched investigators; the Place must not warn,
+			// contest, or commit a Contested read model for a player it cannot identify yet.
+			Control->UnregisterStoryBoundsContester(this, Pawn, Faction);
+			StoryBoundsContesters.Remove(PawnKey);
+			continue;
+		}
+
+		// Story-bounds gate for a non-stealth Place, or for an already exposed infiltrator: a
+		// holstered weapon must not open the confrontation. Drawing the weapon admits the contest on
+		// the next evaluation, and a faction already at war is admitted immediately.
+		if (!ShouldAdmitStoryBoundsContest(Pawn, Faction))
+		{
+			Control->UnregisterStoryBoundsContester(this, Pawn, Faction);
+			StoryBoundsContesters.Remove(PawnKey);
+			// In a stealth Place the reaction is investigation, never a warning line.
+			if (!bStealthPlace && WarnHolsteredWeaponIfDue(Pawn))
+			{
+				// Sparse by design: only the frames that actually deliver a line log.
+				if (const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+					Settings && (Settings->ShouldDebugStealth() || Settings->ShouldDebugCapture()))
+				{
+					UE_LOG(LogTerritory, Log,
+						TEXT("[ContestGate] %s: %s (faction %s) is holstered and relationship is %d - warned instead of contested."),
+						*GetTerritoryTag().ToString(), *Pawn->GetName(), *Faction.ToString(),
+						static_cast<int32>(ResolveOwnerRelationship(Faction)));
+				}
+			}
+			continue;
 		}
 
 		if (bCapturePaused)
@@ -1383,7 +1666,39 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 		}
 		else if (Control->TryRegisterStoryBoundsContester(this, Pawn, Faction))
 		{
+			const bool bNewContester = !StoryBoundsContesters.Contains(PawnKey);
 			StoryBoundsContesters.Add(PawnKey, Faction);
+			if (bNewContester)
+			{
+				// Logged once per player, not per tick, so a report of "still contested" is decidable.
+				if (const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+					Settings && (Settings->ShouldDebugStealth() || Settings->ShouldDebugCapture()))
+				{
+					int32 EvidenceValue = -1;
+					if (const UTerritoryControlSubsystem* ControlSubsystem = GetWorld()
+						? GetWorld()->GetSubsystem<UTerritoryControlSubsystem>() : nullptr)
+					{
+						FTerritoryInfiltrationSnapshot Snapshot;
+						if (ControlSubsystem->GetInfiltrationSnapshot(this, Pawn, Snapshot))
+						{
+							EvidenceValue = static_cast<int32>(Snapshot.LastEvidence);
+						}
+					}
+					const UTerritoryStealthProfile* LogProfile = GetActiveStealthProfile();
+					UE_LOG(LogTerritory, Log,
+						TEXT("[ContestGate] %s: %s (faction %s) started the story-bounds contest (wielded=%d, relationship=%d, aggressor=%d, evidence=%d, profile=%s, requires=%d, ignoreWar=%d, admit=%d)."),
+						*GetTerritoryTag().ToString(), *Pawn->GetName(), *Faction.ToString(),
+						UTerritoryBlueprintLibrary::IsPawnWieldingWeapon(Pawn) ? 1 : 0,
+						static_cast<int32>(ResolveOwnerRelationship(Faction)),
+						UTerritoryBlueprintLibrary::IsAggressiveStealthEvidence(
+							static_cast<ETerritoryStealthEvidence>(FMath::Max(0, EvidenceValue))) ? 1 : 0,
+						EvidenceValue,
+						*GetNameSafe(LogProfile),
+						LogProfile && LogProfile->bContestRequiresWieldedWeapon ? 1 : 0,
+						LogProfile && LogProfile->bContestRequiresWieldedWeaponEvenAtWar ? 1 : 0,
+						ShouldAdmitStoryBoundsContest(Pawn, Faction) ? 1 : 0);
+				}
+			}
 		}
 	}
 
@@ -1411,6 +1726,8 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 			{
 				Control->UnregisterStoryBoundsContester(this, Actor, *Faction);
 			}
+			// A player who left the bounds starts fresh: the next entry may warn again.
+			HolsteredWeaponWarningTimes.Remove(Participant);
 		}
 		if (AActor* Actor = Participant.Get())
 		{
@@ -1427,6 +1744,10 @@ void ATerritoryVolume::ReconcileStoryBoundsContesters()
 		StoryBoundsInfiltrators.Remove(Participant);
 		StoryBoundsContesters.Remove(Participant);
 	}
+
+	// Dialogue state follows the same evaluation: Hostile or Ally from the owner's relationship to whoever
+	// is inside, Wary while a holstered warning is being delivered, otherwise no Territory dialogue state.
+	SyncDefenderDialogueStates(OwnerRelationshipTag);
 }
 
 void ATerritoryVolume::ReleaseStoryBoundsContesters()
@@ -1455,7 +1776,7 @@ void ATerritoryVolume::ReleaseStoryBoundsContesters()
 	StoryBoundsInfiltrators.Empty();
 }
 
-void ATerritoryVolume::ReconcileAvailabilityDependentSystems()
+void ATerritoryVolume::ReconcileAvailabilityDependentSystems(bool bAllowFreshStaffing)
 {
 	if (!HasAuthority()) return;
 
@@ -1531,14 +1852,22 @@ void ATerritoryVolume::ReconcileAvailabilityDependentSystems()
 				&& Territory->GetControlMode() == ETerritoryControlMode::Independent
 				&& IsExactDescendant(Territory))
 			{
-				Territory->ReconcileAvailabilityDependentSystems();
+				Territory->ReconcileAvailabilityDependentSystems(bAllowFreshStaffing);
 			}
 		}
 		return;
 	}
 
-	if (!IsAvailableForGameplay())
+	bool bWaitingForAncestors = false;
+	if (!ResolveGameplayAvailability(bWaitingForAncestors))
 	{
+		if (bWaitingForAncestors)
+		{
+			// A missing City/District row is a load-order wait, not an authored lock.
+			// Preserve living slots, exhausted reserves and pending timer delay.
+			RetireGuards(EGuardRemovalReason::StreamingRetirement);
+			return;
+		}
 		if (UTerritoryControlSubsystem* Control = GetWorld()
 			? GetWorld()->GetSubsystem<UTerritoryControlSubsystem>() : nullptr)
 		{
@@ -1558,10 +1887,22 @@ void ATerritoryVolume::ReconcileAvailabilityDependentSystems()
 		return;
 	}
 
-	if (GetTerritoryState() == ETerritoryState::Claimed
+	if (bAllowFreshStaffing && GetTerritoryState() == ETerritoryState::Claimed
 		&& GetOwningFaction().IsValid() && GetDesiredGuardCount() > 0)
 	{
 		SpawnGuardsToCount(GetDesiredGuardCount());
+	}
+	// Ancestor registration can make already-loaded posts eligible for the first
+	// time. Reconcile exact saved/fresh slots without retiring a live cohort or
+	// reloading old campaign records over casualties sustained since the load.
+	const uint64 ReconcileGeneration = GarrisonLoadGeneration;
+	const FGameplayTag ReconcileOwner = OwnershipData.OwningFaction;
+	for (ATerritoryGuardSpawnPoint* Post : GetGuardSpawnPoints())
+	{
+		ReconcileRestoredGuardPost(Post);
+		if (!IsGameplayCallbackStateCurrent(ReconcileGeneration)
+			|| OwnershipData.OwningFaction != ReconcileOwner) return;
+		if (IsValid(Post)) Post->ResumePendingReserveSpawn();
 	}
 	RefreshGarrisonSnapshot();
 }
@@ -1742,6 +2083,13 @@ FGameplayTag ATerritoryVolume::ResolveCaptureInstigatorFaction(
 bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewData,
 	const FTerritoryTransitionContext& TransitionContext, bool bBypassConditionsForCommit)
 {
+	return CommitOwnershipDataValidated(NewData, TransitionContext, bBypassConditionsForCommit, [] { return true; });
+}
+
+bool ATerritoryVolume::CommitOwnershipDataValidated(const FTerritoryOwnershipData& NewData,
+	const FTerritoryTransitionContext& TransitionContext, bool bBypassConditionsForCommit,
+	TFunctionRef<bool()> FinalAdmission)
+{
 	if (!HasAuthority()) return false;
 	if (NewData.State == ETerritoryState::Locked)
 	{
@@ -1810,6 +2158,9 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 
 	// Conditions can restore a campaign too. Never write the old candidate over that load.
 	if (!IsCommitCurrent()) return false;
+	// All Narrative conditions have returned. Recheck physical/policy admission at
+	// the write boundary, while the existing ownership transaction lock is held.
+	if (!FinalAdmission() || !IsCommitCurrent()) return false;
 
 	// P2-N01: Compare all ownership data fields, not just owner/state/contest/progress
 	if (OldOwner == NewOwner && OldState == NewState
@@ -1922,7 +2273,7 @@ bool ATerritoryVolume::CommitOwnershipData(const FTerritoryOwnershipData& NewDat
 		OldOwner, NewOwner, OldState, NewState))
 	{
 	case ETerritoryGuardLifecycleAction::ReplaceForNewOwner:
-		DespawnGuards();
+		RetireGuards(EGuardRemovalReason::OwnerChanged);
 		if (!IsCommitCurrent()) return false;
 		if (NewOwner.IsValid() && ResolveGuardDefinition(NewOwner)
 			&& NewData.DesiredGuardCount > 0)
@@ -2239,7 +2590,7 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 			continue;
 		}
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
-		Event->ExecuteEvent(ContextPawn, ContextPC, TransitionContext.TalesComponent);
+		TerritoryTales::ExecuteEvent(Event, ContextPawn);
 		if (!IsGameplayCallbackStateCurrent(EventLoadGeneration)) return;
 	}
 }
@@ -2443,6 +2794,60 @@ void ATerritoryVolume::OnAllGuardsDefeated_Implementation()
 	}
 }
 
+void ATerritoryVolume::RecordGuardKilledEvidence(AActor* KilledActor, AActor* Killer)
+{
+	UWorld* World = GetWorld();
+	if (!World || !KilledActor) return;
+
+	UTerritoryEvidenceLedgerSubsystem* Ledger =
+		World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>();
+	if (!Ledger) return;
+
+	// Durable subject: the defender's stable GUID. A defender without one (a transient
+	// summon rather than a saved guard) has no identity a reload could restore, so the
+	// fact would become unattributable later and is deliberately not recorded.
+	if (!KilledActor->GetClass()->ImplementsInterface(UNarrativeStableActor::StaticClass())) return;
+	const FGuid DefenderGuid = INarrativeStableActor::Execute_GetActorGUID(KilledActor);
+	if (!DefenderGuid.IsValid()) return;
+
+	// Kill credit belongs to the killer's faction when it is resolvable. An environmental or
+	// unknown killer leaves it empty, which the ledger accepts because the defender's GUID
+	// already makes the row attributable.
+	FGameplayTag KillerFaction;
+	if (Killer)
+	{
+		const FGameplayTagContainer KillerFactions =
+			UTerritoryBlueprintLibrary::GetActorFactions(this, Killer);
+		KillerFaction = KillerFactions.IsEmpty() ? FGameplayTag() : KillerFactions.First();
+	}
+
+	const double GameTimeSeconds = UTerritoryEvidenceLedgerSubsystem::ResolveCampaignGameTime(this);
+
+	FTerritoryEvidenceRecord Record;
+	Record.EvidenceTag = TerritoryEvidenceTags::GuardKilled.GetTag();
+	Record.SubjectId = DefenderGuid;
+	Record.InstigatorFaction = KillerFaction;
+	Record.SourceTerritory = GetTerritoryTag();
+	// A defender instance dies once, so its GUID plus the campaign instant is a replay-safe
+	// key: a duplicated death callback de-duplicates, while a different defender - or the
+	// same guard dying again later - still records its own fact.
+	Record.ContextId = UTerritoryEvidenceLedgerSubsystem::MakeEvidenceContextId(
+		FString::Printf(TEXT("GuardKilled|%s|%s|%lld"),
+			*DefenderGuid.ToString(EGuidFormats::Digits),
+			*KillerFaction.ToString(),
+			static_cast<int64>(GameTimeSeconds * 1000.0)));
+	Record.Weight = 1;
+	Record.GameTimeSeconds = GameTimeSeconds;
+
+	const FTerritoryEvidenceMutationResult Result = Ledger->RecordEvidenceRecord(Record);
+	if (!Result.bSuccess && !Result.bAlreadyRecorded)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[Evidence] Defender death in %s committed but was not recorded: %s"),
+			*GetTerritoryTag().ToString(), *Result.FailureReason.ToString());
+	}
+}
+
 void ATerritoryVolume::OnTerritoryInitialized_Implementation()
 {
 }
@@ -2574,6 +2979,10 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 			}
 		}
 	}
+	// AGENTS.md 4.3 step 7: the death above is verified (authority, a registered defender,
+	// bIsDead) and the killer comes from Narrative's damage accounting, so the physical
+	// consequence is recorded before any Blueprint listener reacts to the broadcast below.
+	RecordGuardKilledEvidence(KilledActor, Killer);
 	OnGuardKilled.Broadcast(this, KilledActor, Killer, GetDefenderCount());
 
 	// Defender-death story hooks use the same explicit context rules as State Config.
@@ -2617,8 +3026,7 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 				continue;
 			}
 			TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
-			Event->ExecuteEvent(DefenderEventContext.TargetPawn,
-				DefenderEventContext.PlayerController, DefenderEventContext.TalesComponent);
+			TerritoryTales::ExecuteEvent(Event, DefenderEventContext.TargetPawn);
 		}
 	};
 	FireDefenderEvents(GetDefenderDiedEvents(), TEXT("DefenderDiedEvent"));
@@ -2694,8 +3102,7 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 			continue;
 		}
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
-		Event->ExecuteEvent(EventContext.TargetPawn,
-			EventContext.PlayerController, EventContext.TalesComponent);
+		TerritoryTales::ExecuteEvent(Event, EventContext.TargetPawn);
 	}
 }
 
@@ -2793,8 +3200,7 @@ void ATerritoryVolume::DispatchFloorClearedEvents(int32 FloorIndex,
 			continue;
 		}
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
-		Event->ExecuteEvent(TransitionContext.TargetPawn,
-			TransitionContext.PlayerController, TransitionContext.TalesComponent);
+		TerritoryTales::ExecuteEvent(Event, TransitionContext.TargetPawn);
 	}
 }
 
@@ -4144,20 +4550,35 @@ FTerritoryGarrisonMutationResult ATerritoryVolume::TrySendReinforcements(
 
 void ATerritoryVolume::DespawnGuards()
 {
+	RetireGuards(EGuardRemovalReason::ManualRemoval);
+}
+
+void ATerritoryVolume::RetireGuards(EGuardRemovalReason Reason, ATerritoryGuardSpawnPoint* OnlyPost)
+{
 	if (!HasAuthority()) return;
 	TArray<ATerritoryGuardSpawnPoint*> CachedSpawnPoints = GetGuardSpawnPoints();
 	for (ATerritoryGuardSpawnPoint* SpawnPoint : CachedSpawnPoints)
 	{
-		if (SpawnPoint)
+		if (SpawnPoint && (!OnlyPost || SpawnPoint == OnlyPost))
 		{
-			SpawnPoint->CancelPendingReserveSpawns();
+			if (Reason == EGuardRemovalReason::LoadReconcile || Reason == EGuardRemovalReason::StreamingRetirement)
+				SpawnPoint->PauseReserveSpawn();
+			else
+				SpawnPoint->CancelPendingReserveSpawns();
 		}
 	}
 
 	// Native activity deactivation can synchronously load another campaign or
 	// spawn replacement guards. Detach only the old cohort before any callbacks.
-	const TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> GuardsToRetire = MoveTemp(SpawnedGuards);
-	SpawnedGuards.Reset();
+	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> GuardsToRetire;
+	SpawnedGuards.RemoveAll([&](const TWeakObjectPtr<ATerritoryGuardCharacter>& Entry)
+	{
+		ATerritoryGuardCharacter* Guard = Entry.Get();
+		if (!Guard) return true;
+		if (OnlyPost && Guard->OwningTerritorySpawnPoint != OnlyPost) return false;
+		GuardsToRetire.Add(Entry);
+		return true;
+	});
 	for (const TWeakObjectPtr<ATerritoryGuardCharacter>& GuardPtr : GuardsToRetire)
 	{
 		if (ATerritoryGuardCharacter* Guard = GuardPtr.Get())
@@ -4167,7 +4588,7 @@ void ATerritoryVolume::DespawnGuards()
 			RegisteredDefenders.Remove(GuardPtr);
 			if (IsValid(Guard->OwningTerritorySpawnPoint))
 			{
-				Guard->OwningTerritorySpawnPoint->UnregisterGuard(Guard, EGuardRemovalReason::ManualRemoval);
+				Guard->OwningTerritorySpawnPoint->UnregisterGuard(Guard, Reason);
 			}
 		}
 	}
@@ -4258,18 +4679,10 @@ void ATerritoryVolume::RegisterResolvedGuardSpawnPoint(ATerritoryGuardSpawnPoint
 		ResolvedGuardSpawnPoints.Add(SpawnPoint);
 	}
 
-	if (HasAuthority() && HasActorBegunPlay())
+	if (HasAuthority() && HasActorBegunPlay() && !bReconcilingGuardRestore)
 	{
-		if (OwnershipData.State == ETerritoryState::Claimed
-			&& GetSpawnedGuardCount() < GetDesiredGuardCount()
-			&& (!SpawnPoint->bLoadedFromSave
-				|| SpawnPoint->GetSavedActiveGuardCount() > SpawnPoint->GetActiveGuardCount()))
-		{
-			// A returning empty post is a casualty, not a new recruitment request.
-			// Restore this post only; filling the whole garrison here would also
-			// replace casualties at unrelated posts for free.
-			TrySpawnSingleGuard(SpawnPoint, false);
-		}
+		ReconcileRestoredGuardPost(SpawnPoint);
+		SpawnPoint->ResumePendingReserveSpawn();
 		RefreshGarrisonSnapshot();
 	}
 }

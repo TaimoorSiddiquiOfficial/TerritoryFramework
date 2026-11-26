@@ -134,6 +134,19 @@ navigation. Its overlap trigger supplies only the entering player's controller/T
 The demo-map player controller now includes the listener component. This is an opt-in
 meeting example; no meeting was inserted into an existing patrol route automatically.
 
+A meeting point is a coordination trigger, never geometry. Collision profile
+**OverlapAllDynamic** only rewrites the eight built-in channels in BaseEngine.ini, so
+every custom game trace channel keeps the engine default of Block. Narrative traces
+weapons on **GameTraceChannel2** and projectiles on **GameTraceChannel6**, and a line
+trace returns the first blocking hit, so a player standing inside the trigger became
+the first hit for melee sweeps, firearm traces and projectile lines: every attack
+registered on the trigger instead of the enemy behind it. **ApplyNonCombatCollision**
+runs in BeginPlay and clears those trace responses on every primitive component while
+keeping pawn overlap intact, because that overlap is the only entry point into
+**TryStartConversation**. Authored Blueprints that add a primitive component at runtime
+must call it again. Give any other trigger volume the same treatment rather than
+relying on a profile name.
+
 The old unused patrol **ActivityTag** still serializes for compatibility and remains
 readable in Blueprint, but is no longer an editable Details setting. It starts no
 activity. Use the explicit meeting/profile workflow for the supported conversation.

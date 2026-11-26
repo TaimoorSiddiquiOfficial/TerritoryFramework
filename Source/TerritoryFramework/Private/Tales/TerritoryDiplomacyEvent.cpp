@@ -147,8 +147,7 @@ bool UTerritorySetDiplomacyEvent::ResolveFactionPair(
 	return OutFactionA.IsValid() && OutFactionB.IsValid() && OutFactionA != OutFactionB;
 }
 
-void UTerritorySetDiplomacyEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritorySetDiplomacyEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -249,8 +248,7 @@ FString UTerritorySetDiplomacyEvent::GetGraphDisplayText_Implementation()
 		*SideA, *SideB, *GetDiplomacyDisplayName(NewState));
 }
 
-void UTerritoryModifyReputationEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryModifyReputationEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(

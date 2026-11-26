@@ -40,6 +40,7 @@ private:
 	TArray<TWeakObjectPtr<UNPCGoalGenerator>> DeliveryGenerators;
 	TWeakObjectPtr<APawn> DeliveryPawn;
 	bool bDeliveringPerception = false;
+	void BindPerceptionRescoreTimer();
 	void RefreshPerceptionAndRescore();
 	void RefreshStoredPerception();
 };

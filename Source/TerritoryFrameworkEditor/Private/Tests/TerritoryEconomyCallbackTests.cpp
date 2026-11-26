@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "TerritoryAuditEventProbe.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryWorldState.h"
 #include "Economy/TerritoryProductionTags.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
@@ -121,6 +122,34 @@ bool FTFEconomyCallbackReentry::RunTest(const FString& Parameters)
 	Economy->ProcessResourceProduction();
 	TestEqual(TEXT("A later campaign cycle remains eligible"),
 		Inventory->GetTotalQuantityOfItemExact(ItemClass, false), 2);
+	auto* Directory = World->SpawnActor<ATerritoryWorldState>();
+	Directory->OnProductionStateChanged.AddDynamic(Probe, &UTerritoryAuditEventProbe::ProductionStateChanged);
+	FTerritoryProductionSiteRecord RateSite = Site;
+	RateSite.CurrencyRatesVersion = 1;
+	RateSite.bCurrencyCapitalPolicyKnown = true;
+	RateSite.bAllowCurrencyIncome = true;
+	RateSite.BaseCurrencyIncome = 10;
+	RateSite.ProductionProfile.Reset();
+	Economy->RestoreProductionState({}, {RateSite}, {});
+	int32 RateNotifications = 0;
+	Probe->ProductionCallback = [&]()
+	{
+		// The bound avoids crashing a regressed implementation while proving that
+		// the public callback cannot recursively publish another rate calculation.
+		if (++RateNotifications < 3) Economy->RecalculateIncome(Heroes);
+	};
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Rate observers cannot recursively republish currency rates"), RateNotifications, 1);
+	const int32 CurrencyBeforeRestoreCallback = Inventory->GetCurrency();
+	Probe->ProductionCallback = [&]()
+	{
+		TMap<FGameplayTag, FTerritoryTreasury> RestoredRates;
+		RestoredRates.FindOrAdd(Heroes).IncomePerTick = 77;
+		Economy->RestoreTreasuryState(RestoredRates);
+	};
+	Economy->OnEconomyTick();
+	TestEqual(TEXT("A callback-restored campaign cannot receive the old timer's payment"), Inventory->GetCurrency(), CurrencyBeforeRestoreCallback);
+	Probe->ProductionCallback = nullptr;
 	World->DestroyWorld(false);
 	GEngine->DestroyWorldContext(World);
 	return true;

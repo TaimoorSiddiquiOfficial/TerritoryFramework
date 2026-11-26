@@ -22,6 +22,10 @@ namespace TerritoryStealthTags
 		"GameplayEvent.Distraction.Impact",
 		"Sent to the thrower's Ability System when its distraction projectile produces the first hearing stimulus.");
 
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(DistractionReleaseEvent,
+		"GameplayEvent.Distraction.Release",
+		"Sent by a throw montage's Territory Throw Release notify at the release frame. Montage-driven throws wait for it before spawning.");
+
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(DistractionThrowable,
 		"Territory.Distraction.Throwable",
 		"Hearing stimulus produced by a nonlethal Territory distraction throwable.");

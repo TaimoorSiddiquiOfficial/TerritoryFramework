@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeCondition.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryGarrisonCondition.generated.h"
 
 UENUM(BlueprintType)
@@ -39,7 +40,7 @@ enum class ETerritoryIntegerComparison : uint8
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Garrison Condition",
 		ToolTip="Compare guards, all living defenders, capacity or finite reserves. Living Defenders includes custom registered defenders; Active Guards includes Territory guards only. Requires a loaded territory; clients read replicated counts."))
-class TERRITORYFRAMEWORK_API UTerritoryGarrisonCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryGarrisonCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -68,7 +69,8 @@ public:
 		int64 RequiredValue);
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+    virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

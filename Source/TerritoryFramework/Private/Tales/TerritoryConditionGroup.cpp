@@ -25,8 +25,7 @@ bool UTerritoryConditionGroup::HasValidStructure(
 	return true;
 }
 
-bool UTerritoryConditionGroup::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryConditionGroup::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	TSet<const UTerritoryConditionGroup*> Path;
 	if (bEvaluating || !HasValidStructure(Path, 0)) return false;

@@ -72,6 +72,11 @@ public:
 	bool AreAnyFactionsAtWar(const FGameplayTagContainer& FactionsA,
 		const FGameplayTagContainer& FactionsB) const;
 
+	/** Final combat relation: shared membership/protective treaties take precedence.
+	 * Personal hostility may admit self-defence against an otherwise neutral actor. */
+	bool CanFactionsEngage(const FGameplayTagContainer& FactionsA,
+		const FGameplayTagContainer& FactionsB, bool bPersonalHostility = false) const;
+
 	/** Check whether these factions currently have an alliance. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	bool IsAllied(FGameplayTag FactionA, FGameplayTag FactionB) const;
@@ -153,6 +158,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnDiplomacyStateChanged OnDiplomacyStateChanged;
 
+#if WITH_DEV_AUTOMATION_TESTS
+	/**
+	 * Expiration is driven by a timer, so a test world with no ticking timer manager cannot reach
+	 * it. This friend lets that one case call the private sweep directly and prove that an expiry
+	 * reports a diplomacy event while writing no evidence fact (nobody performed the expiry).
+	 */
+	friend class FTFEvidenceDiplomacyExpiry;
+#endif
+
 	/** Reports a recorded diplomacy event for history or UI presentation. */
 	UPROPERTY(BlueprintAssignable, Category = "Territory|Diplomacy")
 	FOnDiplomacyEvent OnDiplomacyEvent;
@@ -189,6 +203,13 @@ private:
 	void RemoveTreaty(FGameplayTag FactionA, FGameplayTag FactionB);
 	void RecordEvent(EDiplomacyEventType EventType, FGameplayTag FactionA, FGameplayTag FactionB);
 	ANarrativeGameState* GetNarrativeGameState() const;
+
+	/**
+	 * Projects one authored diplomacy act into the evidence ledger (physical consequences).
+	 * Records nothing for an event no faction performed, such as a treaty expiring.
+	 */
+	void RecordDiplomacyEvidence(const FDiplomacyEvent& Event);
+
 	ETeamAttitude::Type DiplomacyStateToAttitude(EDiplomacyState State) const;
 
 	/** Commit treaty provenance before Narrative or Territory observers run. */

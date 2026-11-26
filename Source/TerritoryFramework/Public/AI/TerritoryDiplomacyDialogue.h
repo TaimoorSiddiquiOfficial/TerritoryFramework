@@ -3,10 +3,13 @@
 #include "CoreMinimal.h"
 #include "AI/NPCInteractable.h"
 #include "Components/ActorComponent.h"
+#include "Core/TerritoryDialogueTags.h"
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "Engine/DataAsset.h"
+#include "GameplayTagContainer.h"
 #include "TerritoryDiplomacyDialogue.generated.h"
 
+class UAbilitySystemComponent;
 class UDialogue;
 
 /**
@@ -122,6 +125,61 @@ public:
 		meta=(DisplayName="Resolve Dialogue For Interactor"))
 	TSubclassOf<UDialogue> ResolveDialogueForInteractor(const APawn* Interactor,
 		TSubclassOf<UDialogue> DefaultDialogue) const;
+
+	/**
+	 * Ambient dialogue state. The same relationship this component already resolves for interaction
+	 * dialogue is mirrored onto the owner's Ability System as a `Territory.DialogueState.*` tag, which
+	 * is what Narrative's tagged dialogue entries (`FTaggedDialogue::RequiredTags` / `BlockedTags`) read.
+	 * Story/state machines ask through here instead of building a second relationship resolver, and a
+	 * second diplomacy/faction database is never created.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Dialogue",
+		meta=(DisplayName="Apply Dialogue State From Interactor"))
+	ETerritoryDialogueState ApplyDialogueStateFromInteractor(const APawn* Interactor);
+
+	/** Server-only. Replaces the previously applied state tag on the owner's Ability System. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Dialogue",
+		meta=(DisplayName="Apply Dialogue State"))
+	bool ApplyDialogueState(ETerritoryDialogueState NewState);
+
+	/** Server-only. Removes the applied state tag (also runs on EndPlay). */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Dialogue",
+		meta=(DisplayName="Clear Dialogue State"))
+	void ClearDialogueState();
+
+	/** Applied dialogue state. A read-model only; the diplomacy subsystem stays authoritative. */
+	UFUNCTION(BlueprintPure, Category="Territory|Dialogue",
+		meta=(DisplayName="Get Dialogue State"))
+	ETerritoryDialogueState GetDialogueState() const { return DialogueState; }
+
+	/** Tag currently applied to the owner, or an invalid tag when nothing is applied. */
+	UFUNCTION(BlueprintPure, Category="Territory|Dialogue",
+		meta=(DisplayName="Get Active Dialogue State Tag"))
+	FGameplayTag GetActiveDialogueStateTag() const { return AppliedStateTag; }
+
+	/**
+	 * Server-only. Requests a Narrative tagged dialogue on the owning NPC (for example
+	 * `Narrative.TaggedDialogue.Greet`). Narrative's own gate still applies: required/blocked tags,
+	 * the entry cooldown and the NPC Blueprint's listener check.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Dialogue",
+		meta=(DisplayName="Request Tagged Dialogue"))
+	bool RequestTaggedDialogue(FGameplayTag Tag, AActor* DialogueInstigator);
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+private:
+
+	/** Tag currently applied to the owner's Ability System. */
+	UPROPERTY(Transient)
+	FGameplayTag AppliedStateTag;
+
+	/** Mirrors AppliedStateTag for Blueprint reads. */
+	UPROPERTY(Transient)
+	ETerritoryDialogueState DialogueState = ETerritoryDialogueState::Neutral;
+
+	/** The owner's Ability System, or null when the owner has none. */
+	UAbilitySystemComponent* ResolveOwnerAbilitySystem() const;
 };
 
 /**

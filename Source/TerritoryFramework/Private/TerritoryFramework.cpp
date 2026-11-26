@@ -1,4 +1,5 @@
 #include "TerritoryFramework.h"
+#include "Framework/TerritoryNarrativeProAdapter.h"
 
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryWorldState.h"
@@ -372,8 +373,29 @@ namespace
 }
 #endif
 
+void FTerritoryFrameworkModule::RegisterVisualRemovalWorld(UWorld* World)
+{
+	if (!World || !World->IsGameWorld() || VisualActorDestroyedHandles.Contains(World)) return;
+	VisualActorDestroyedHandles.Add(World, World->AddOnActorDestroyedHandler(
+		FOnActorDestroyed::FDelegate::CreateStatic(&FTerritoryNarrativeProAdapter::HandleCharacterRemoval)));
+}
+
 void FTerritoryFrameworkModule::StartupModule()
 {
+	// Native character/visual actors have independent network lifetimes. Observe
+	// removal before Native Destroyed() and before the leader's components die.
+	VisualWorldInitializedHandle = FWorldDelegates::OnPostWorldInitialization.AddLambda(
+		[this](UWorld* World, const UWorld::InitializationValues) { RegisterVisualRemovalWorld(World); });
+	VisualWorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddLambda(
+		[this](UWorld* World, bool, bool)
+		{
+			if (const FDelegateHandle* Handle = VisualActorDestroyedHandles.Find(World))
+				World->RemoveOnActorDestroyedHandler(*Handle);
+			VisualActorDestroyedHandles.Remove(World);
+		});
+	if (GEngine)
+		for (const FWorldContext& Context : GEngine->GetWorldContexts()) RegisterVisualRemovalWorld(Context.World());
+
 	// Register the included example identities before their Definitions are loaded.
 	// Gameplay Tags remains the single tag registry for both plugin and project data.
 	if (const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("TerritoryFramework")))
@@ -394,6 +416,12 @@ void FTerritoryFrameworkModule::StartupModule()
 
 void FTerritoryFrameworkModule::ShutdownModule()
 {
+	FWorldDelegates::OnPostWorldInitialization.Remove(VisualWorldInitializedHandle);
+	FWorldDelegates::OnWorldCleanup.Remove(VisualWorldCleanupHandle);
+	for (const auto& Entry : VisualActorDestroyedHandles)
+		if (UWorld* World = Entry.Key.Get()) World->RemoveOnActorDestroyedHandler(Entry.Value);
+	VisualActorDestroyedHandles.Empty();
+
 #if WITH_GAMEPLAY_DEBUGGER
 	if (IGameplayDebugger::IsAvailable())
 	{

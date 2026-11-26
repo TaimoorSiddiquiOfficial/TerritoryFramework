@@ -4,7 +4,8 @@ import json, os, collections
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # plugin root; this file is in Tools/
 OUT = os.path.join(ROOT, "Docs", "37_Every_Option_Reference.md")
-rows = json.load(open(os.path.join(ROOT, "Tools", "options_inventory.json"), encoding="utf-8"))
+import runpy
+rows = runpy.run_path(os.path.join(ROOT, "Tools", "Extract-Options.py"))["read_fresh_inventory"]()
 
 # Only the dev-facing surface: EditAnywhere (what a designer can set in the editor).
 opts = [r for r in rows if r["edit_spec"]]

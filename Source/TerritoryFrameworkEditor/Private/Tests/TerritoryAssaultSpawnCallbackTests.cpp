@@ -167,6 +167,10 @@ bool FTFAssaultSpawnCallbacks::RunTest(const FString& Parameters)
 		}));
 	Approach.VehicleClass = TSoftClassPtr<ANarrativeVehicleBase>(FSoftObjectPath(
 		TEXT("/NarrativePro/Pro/Core/BP/Vehicles/Demo/vehicle03_Car/BPV_Sedan.BPV_Sedan_C")));
+	// This test calls the private deployment primitive to inject a spawn callback.
+	// Supply its normal scheduler precondition: the actual class is already loaded.
+	// Pending readiness/reserve accounting is covered separately by the async test.
+	TestNotNull(TEXT("Native vehicle fixture class loads before deployment"), Approach.VehicleClass.LoadSynchronous());
 	const TArray<ATerritoryAssaultCharacter*> VehicleOccupants = Counter->SpawnNarrativeVehicleParticipants(
 		Counter->Assaults.FindChecked(Record.AssaultID), Territory, Force, NPC, Approach,
 		FTransform(FVector(3000.f, 3000.f, 100.f)), FTransform::Identity, FTransform::Identity,

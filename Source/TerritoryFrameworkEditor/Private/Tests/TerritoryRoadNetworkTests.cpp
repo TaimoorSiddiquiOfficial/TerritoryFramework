@@ -341,6 +341,15 @@ bool FTFRoadSteeringObstacle::RunTest(const FString& Parameters)
 		Obstacle->SetActorEnableCollision(false);
 		TestFalse(TEXT("A cleared merge becomes traversable"),
 			Participant->QueryVehicleObstacleDistance(FVector::ZeroVector, Distance, FVector(750,550,0)));
+		AActor* Trigger = World->SpawnActor<AActor>();
+		UBoxComponent* TriggerBox = NewObject<UBoxComponent>(Trigger);
+		Trigger->SetRootComponent(TriggerBox);
+		TriggerBox->SetBoxExtent(FVector(100.f, 300.f, 200.f));
+		TriggerBox->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
+		TriggerBox->RegisterComponent();
+		Trigger->SetActorLocation(FVector(450.f, 0.f, 100.f));
+		TestFalse(TEXT("An overlap-only gameplay trigger cannot brake the vehicle"),
+			Participant->QueryVehicleObstacleDistance(FVector::ZeroVector, Distance));
 		auto* Occupant = World->SpawnActor<ATerritoryAssaultCharacter>();
 		Occupant->AssaultParticipant->NarrativeIngressVehicle = Vehicle;
 		auto* Sword = World->SpawnActor<AWeaponVisual>();

@@ -127,7 +127,7 @@ bool UTerritorySetNarrativePlayerFactionsEvent::ApplyToPlayerState(
 		&& (!PrimaryFaction.IsValid() || PlayerState->GetFactions().GetByIndex(0) == PrimaryFaction);
 }
 
-void UTerritorySetNarrativePlayerFactionsEvent::ExecuteEvent_Implementation(
+void UTerritorySetNarrativePlayerFactionsEvent::ExecuteEventInContext(
 	APawn* Target, APlayerController* Controller,
 	UTalesComponent* NarrativeComponent)
 {
@@ -161,7 +161,7 @@ UTerritoryHierarchyStoryOverrideEvent::UTerritoryHierarchyStoryOverrideEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryHierarchyStoryOverrideEvent::ExecuteEvent_Implementation(
+void UTerritoryHierarchyStoryOverrideEvent::ExecuteEventInContext(
 	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
@@ -275,8 +275,7 @@ UTerritoryScheduleEnemyWaveEvent::UTerritoryScheduleEnemyWaveEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryScheduleEnemyWaveEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryScheduleEnemyWaveEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	FText FailureReason;
 	TryScheduleWave(Target, Controller, NarrativeComponent, FailureReason, true);
@@ -389,8 +388,7 @@ UTerritoryStartBossChaseEvent::UTerritoryStartBossChaseEvent(
 	PursuitOptions.GracePeriodOverrideGameTime = 0.f;
 }
 
-void UTerritoryStartBossChaseEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryStartBossChaseEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -448,8 +446,7 @@ UTerritoryCancelEnemyWavesEvent::UTerritoryCancelEnemyWavesEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryCancelEnemyWavesEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryCancelEnemyWavesEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -507,8 +504,7 @@ UTerritorySetGarrisonTargetEvent::UTerritorySetGarrisonTargetEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritorySetGarrisonTargetEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritorySetGarrisonTargetEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -545,8 +541,7 @@ UTerritoryUpgradePropertyEvent::UTerritoryUpgradePropertyEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryUpgradePropertyEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryUpgradePropertyEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -575,8 +570,7 @@ UTerritoryExecuteResourceRecipeEvent::UTerritoryExecuteResourceRecipeEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryExecuteResourceRecipeEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryExecuteResourceRecipeEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -614,8 +608,7 @@ UTerritoryPlayCutsceneEvent::UTerritoryPlayCutsceneEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryPlayCutsceneEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryPlayCutsceneEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!CanRunTerritoryEvent(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(

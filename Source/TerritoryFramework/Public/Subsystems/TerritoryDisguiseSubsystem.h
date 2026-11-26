@@ -86,6 +86,10 @@ public:
 	FOnTerritoryDisguiseChanged OnDisguiseChanged;
 
 private:
+	// The compromise record is private because a caller must cross the existing refusal gates
+	// first; this test drives the record itself to pin its shape and its idempotency.
+	friend class FTFEvidenceDisguiseCompromisedProducer;
+
 	struct FDisguiseRuntime
 	{
 		TObjectPtr<UTerritoryDisguiseProfile> Profile = nullptr;
@@ -97,6 +101,17 @@ private:
 	};
 
 	TMap<TWeakObjectPtr<AActor>, FDisguiseRuntime> ActiveDisguises;
+
+	/**
+	 * Records one physical fact for a cover that an observer just saw through.
+	 *
+	 * Called after the burn is committed and before EmitChange, so a listener woken by that
+	 * delegate already sees the fact that caused its call. The disguised actor is the subject
+	 * only when it carries a durable identity; a player character has none, and the row then
+	 * stands on the acting observer faction and the Territory it happened in.
+	 */
+	void RecordDisguiseCompromisedEvidence(const AActor& Target,
+		const FGameplayTag& ObserverFaction, const ATerritoryVolume* Territory);
 
 	FGameplayTag ResolveObserverFaction(const ATerritoryVolume* Territory,
 		const AActor* Observer) const;

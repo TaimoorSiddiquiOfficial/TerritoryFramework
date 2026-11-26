@@ -12,6 +12,7 @@
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryUpgradeDefinition.h"
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultTargetPolicy.h"
@@ -32,6 +33,8 @@
 #include "Components/ShapeComponent.h"
 #include "Components/BoxComponent.h"
 #include "Engine/Level.h"
+#include "Engine/Blueprint.h"
+#include "Engine/AssetManager.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameplayEffect.h"
@@ -63,6 +66,12 @@
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
 #include "Tracks/MovieSceneSpawnTrack.h"
 #include "UObject/UnrealType.h"
+
+bool UTerritoryDataValidator::IsBlueprintCompiled(const UBlueprint* Blueprint)
+{
+	return Blueprint && Blueprint->GeneratedClass
+		&& (Blueprint->Status == BS_UpToDate || Blueprint->Status == BS_UpToDateWithWarnings);
+}
 
 namespace
 {
@@ -430,6 +439,67 @@ namespace
 		}
 	}
 
+	void ValidateUpgradeDefinition(const UTerritoryUpgradeDefinition* Definition,
+		TArray<FString>& OutErrors)
+	{
+		if (!Definition) return;
+		TSet<int32> SeenLevels;
+		for (const FTerritoryUpgradeTier& Tier : Definition->Tiers)
+		{
+			if (Tier.Level <= 0)
+			{
+				OutErrors.Add(TEXT("Upgrade tier Level must be positive"));
+				continue;
+			}
+			if (SeenLevels.Contains(Tier.Level))
+			{
+				OutErrors.Add(FString::Printf(TEXT("Upgrade tier level %d is duplicated"), Tier.Level));
+			}
+			SeenLevels.Add(Tier.Level);
+			if (Tier.RequiredFactionTier < 0)
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("Upgrade tier %d RequiredFactionTier must be non-negative"), Tier.Level));
+			}
+			for (const FTerritoryUpgradeCostEntry& Cost : Tier.Costs)
+			{
+				if (Cost.Payment == ETerritoryUpgradePayment::Currency && Cost.CurrencyAmount < 0)
+				{
+					OutErrors.Add(FString::Printf(
+						TEXT("Upgrade tier %d has a negative currency cost"), Tier.Level));
+				}
+				if (Cost.Payment == ETerritoryUpgradePayment::Item
+					&& (Cost.ItemClass.IsNull() || Cost.ItemQuantity <= 0))
+				{
+					OutErrors.Add(FString::Printf(
+						TEXT("Upgrade tier %d has an Item route without an item class or quantity"), Tier.Level));
+				}
+			}
+		}
+	}
+
+	void ValidateUpgradeBalanceProfile(const UTerritoryUpgradeBalanceProfile* Profile,
+		TArray<FString>& OutErrors)
+	{
+		if (!Profile) return;
+		if (!FMath::IsFinite(Profile->EvaluationInterval))
+		{
+			OutErrors.Add(TEXT("EvaluationInterval must be finite"));
+		}
+		else if (Profile->EvaluationInterval < 1.f)
+		{
+			OutErrors.Add(TEXT("EvaluationInterval is below the one-second minimum"));
+		}
+		if (Profile->MaxAutoTier < 0)
+		{
+			OutErrors.Add(TEXT("MaxAutoTier must be non-negative"));
+		}
+		if (!FMath::IsWithinInclusive(Profile->TierOffset, -3, 3))
+		{
+			OutErrors.Add(TEXT("TierOffset must stay between -3 and 3"));
+		}
+	}
+
 	void ValidateStealthProfile(const UTerritoryStealthProfile* Profile,
 		const FString& Context, TArray<FString>& OutErrors)
 	{
@@ -547,7 +617,7 @@ namespace
 		}
 		if (Profile->UnguardedLaunchProbability < Profile->MinimumLaunchProbability)
 		{
-			AddError(TEXT("UnguardedLaunchProbability must be greater than or equal to MinimumLaunchProbability so adding the first guard cannot increase launch probability"));
+			AddError(TEXT("MinimumLaunchProbability cannot exceed UnguardedLaunchProbability: the unguarded chance upper-bounds guarded launch chances"));
 		}
 		if (Profile->MaximumApproaches <= 0)
 		{
@@ -633,6 +703,8 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 	(void)InContext;
 	if (!InAsset) return false;
 	if (IsTerritoryDataAsset(InAsset)) return true;
+	if (InAsset->IsA<UNPCDefinition>()
+		&& InAssetData.PackageName.ToString().StartsWith(TEXT("/TerritoryFramework/"))) return true;
 	if (InAsset->IsA<UTaggedDialogueSet>())
 	{
 		const FString Package = InAssetData.PackageName.ToString();
@@ -681,6 +753,8 @@ bool UTerritoryDataValidator::CanValidateAsset_Implementation(
 		InAsset->IsA(UTerritoryCounterAttackProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryProductionProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryStealthProfile::StaticClass()) ||
+		InAsset->IsA(UTerritoryUpgradeDefinition::StaticClass()) ||
+		InAsset->IsA(UTerritoryUpgradeBalanceProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryDisguiseProfile::StaticClass()) ||
 		InAsset->IsA(UTerritoryDefinition::StaticClass()))
 	{
@@ -836,25 +910,43 @@ EDataValidationResult UTerritoryDataValidator::ValidateLoadedAsset_Implementatio
 	{
 		ValidateStealthProfile(StealthProfile, TEXT("Stealth profile"), Errors);
 	}
+	else if (const UTerritoryUpgradeDefinition* UpgradeDefinition =
+		Cast<UTerritoryUpgradeDefinition>(InAsset))
+	{
+		ValidateUpgradeDefinition(UpgradeDefinition, Errors);
+	}
+	else if (const UTerritoryUpgradeBalanceProfile* UpgradeBalance =
+		Cast<UTerritoryUpgradeBalanceProfile>(InAsset))
+	{
+		ValidateUpgradeBalanceProfile(UpgradeBalance, Errors);
+	}
 	else if (UDialogueBlueprint* DialogueBlueprint = Cast<UDialogueBlueprint>(InAsset))
 	{
 		ValidateDialogue(DialogueBlueprint->DialogueTemplate, Errors, Warnings);
 	}
 	else if (UNPCDefinition* NPCDefinition = Cast<UNPCDefinition>(InAsset))
 	{
+		const UAssetManager* Manager = UAssetManager::GetIfInitialized();
+		if (NPCDefinition->GetOutermost() != GetTransientPackage()
+			&& (!Manager || Manager->GetPrimaryAssetPath(NPCDefinition->GetPrimaryAssetId())
+				!= FSoftObjectPath(NPCDefinition)))
+		{
+			Errors.Add(TEXT("Narrative NPCDefinition is not registered at its actual path with Asset Manager. Add /TerritoryFramework to the existing NPCDefinition scan directories (retain /Game and /NarrativePro), then restart. Native SpawnedData bundles cannot load safely without this registration; also check duplicate primary asset names."));
+		}
 		const FSoftObjectPath AppearancePath =
 			NPCDefinition->DefaultAppearance.ToSoftObjectPath();
 		if (AppearancePath.IsNull())
 		{
 			Errors.Add(TEXT("Story NPC has no Narrative Character Appearance"));
 		}
-		else if (AppearancePath.GetLongPackageName().Contains(TEXT("/Mannequin/")))
+		else if (IsTerritoryStoryCaptureAsset(InAssetData)
+			&& AppearancePath.GetLongPackageName().Contains(TEXT("/Mannequin/")))
 		{
 			Warnings.Add(FString::Printf(
 				TEXT("Story NPC uses prototype Narrative mannequin appearance %s; mesh/card hair cannot receive MetaHuman Groom quality—replace it with an authored cinematic appearance or MetaHuman-compatible NPC visual"),
 				*AppearancePath.ToString()));
 		}
-		if (NPCDefinition->Dialogue.IsNull())
+		if (IsTerritoryStoryCaptureAsset(InAssetData) && NPCDefinition->Dialogue.IsNull())
 		{
 			Warnings.Add(TEXT("Story NPC has no default Narrative dialogue"));
 		}

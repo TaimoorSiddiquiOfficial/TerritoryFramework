@@ -1815,6 +1815,7 @@ void UTerritoryJournalWidget::RefreshDistrictList()
 		UTerritoryUIBlueprintLibrary::BuildEconomyOperationsView(
 			this, GetOwningPlayer(), ViewerFaction, 10);
 	Revision = HashCombineFast(Revision, GetTypeHash(Economy.Faction));
+	Revision = HashCombineFast(Revision, GetTypeHash(Economy.bTransactionHistoryReady));
 	for (int64 Value : {Economy.AvailableFunds, int64(Economy.IncomePerTick),
 		int64(Economy.CostsPerTick), int64(Economy.NetPerTick),
 		Economy.RecentCredits, Economy.RecentDebits})
@@ -2894,7 +2895,9 @@ void UTerritoryJournalWidget::RefreshOperationalSummaries(
 		TransactionLines.Add(GetTransactionLineText(
 			Transaction.Amount, Transaction.Reason, Transaction.SourceTerritory));
 	}
-	const FText TransactionAudit = GetTransactionAuditText(TransactionLines);
+	const FText TransactionAudit = Economy.bTransactionHistoryReady
+		? GetTransactionAuditText(TransactionLines)
+		: NSLOCTEXT("TerritoryJournal", "TransactionHistoryUnavailable", "Transaction history is not available yet.");
 	UTextBlock* ActiveCountText = Text_ActiveTerritoryCount
 		? Text_ActiveTerritoryCount.Get() : Text_ActiveQuestCount.Get();
 	if (ActiveCountText)

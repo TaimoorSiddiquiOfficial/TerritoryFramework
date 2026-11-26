@@ -12,6 +12,27 @@ Ensure `TerritoryFramework` is enabled in `.uproject`:
 
 ## Step 2: Configure Tags
 
+Before spawning the included NPCs, open **Project Settings > Asset Manager**.
+Add `/TerritoryFramework` to the **existing** `NPCDefinition` and
+`PlayerDefinition` scan directories, keeping `/NarrativePro` and `/Game`.
+Keep Native's `SpawnedData` bundles and cook rules. Restart the editor after this
+change. Loading a definition asset alone does not register its appearance/activity
+bundle; Native 2.4.2 can assert when that bundle is missing. Content validation now
+rejects unregistered plugin NPC definitions and duplicate primary asset names.
+
+Existing projects that copied the demo definitions into `/Game` must keep using
+that registered set. Native primary IDs use asset names: scanning both copies
+does not create two independent IDs. TDA retains its existing `/Game` definitions
+and IDs; the clean community host registers the plugin originals. Do not combine
+the two demo sets in one campaign or rename persisted NPC identities casually.
+
+Native 2.4.2's template also omits `SetByCaller.Damage`, required by its included
+`GE_Damage_SetByCaller`. Register that tag before loading the effect. For the
+included vehicle example, set **Territory Framework > Road Guide Blueprint Class**
+to `BP_TerritoryRoadGuide`, create its road with the existing authoring helper,
+and save all dirty map/external actor packages. Verify its route after reopening
+the map. The fresh release-host tool applies these settings to its isolated host.
+
 Add territory tags to `Config/DefaultGameplayTags.ini`:
 ```ini
 +GameplayTagList=(Tag="Territory.HavenReach")
@@ -76,7 +97,7 @@ Each spawned Guard Post actor is one active guard slot. Add more rows for more s
 
 ## Step 6: Place Persistence Actor
 
-1. Drag `BP_TerritoryWorldState` into level. **Single-player projects: use only `BP_TerritoryWorldState`** — it handles both single-player and multiplayer.
+1. Drag `BP_TerritoryWorldState` into the persistent level. Keep it outside unloading runtime Data Layers. World Partition residency is non-spatial; after upgrading old content, reload and resave its Blueprint and map/external actor before cooking. **Single-player projects: use only `BP_TerritoryWorldState`** — it handles both single-player and multiplayer.
 2. One instance is enough — it persists economy, diplomacy, and capture state.
 3. In a World Partition map, turn **Is Spatially Loaded** off on this actor. Keep it outside runtime Data Layers that can unload. It must remain present while Places and guard posts stream out.
 

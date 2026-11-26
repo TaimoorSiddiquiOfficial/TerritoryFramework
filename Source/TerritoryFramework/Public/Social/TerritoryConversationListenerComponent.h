@@ -20,6 +20,18 @@ public:
 	UTerritoryConversationListenerComponent();
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	/** Claim this listener for an authored meeting before either guard has walked over. A meeting
+	 * stages for up to Profile->MeetingTimeout before Native Tales starts, and during that window
+	 * the listener owns no dialogue at all, so every ambient tagged line (a hostile guard's Taunt,
+	 * a Territory warning) would otherwise be free to take the listener's Tales component first and
+	 * cancel the meeting with "Listener began another dialogue.". Ambient callers must ask
+	 * HasPreparedConversation()/IsReserved() before they start a line on this listener. */
+	bool Reserve(ATerritoryConversationMeetingPoint* Meeting, const FGuid& Session, double Duration);
+	void Unreserve(const FGuid& Session);
+	UFUNCTION(BlueprintPure, Category="Territory|Conversation")
+	bool IsReserved() const;
+	// Not Blueprint-exposed on purpose: UHT rejects const object pointer parameters.
+	bool IsReservedFor(const ATerritoryConversationMeetingPoint* Meeting) const;
 	bool Prepare(ATerritoryConversationMeetingPoint* Meeting, UTalesComponent* Listener,
 		const FGuid& Session, TSubclassOf<UTerritoryAmbientDialogue> Dialogue,
 		ATerritoryGuardCharacter* First, ATerritoryGuardCharacter* Second);
@@ -39,6 +51,12 @@ private:
 	UPROPERTY(Transient) TObjectPtr<ATerritoryGuardCharacter> FirstGuard;
 	UPROPERTY(Transient) TObjectPtr<ATerritoryGuardCharacter> SecondGuard;
 	UPROPERTY(Transient) TWeakObjectPtr<UTerritoryAmbientDialogue> PreparedDialogue;
+	// Reservation is separate from SessionID on purpose: SessionID means "roles were transported and
+	// acknowledged", while a reservation only means "an authored meeting already owns this listener".
+	// Prepare() must stay legal while a reservation is held.
+	UPROPERTY(Transient) TWeakObjectPtr<ATerritoryConversationMeetingPoint> ReservedMeeting;
+	FGuid ReservedSession;
+	double ReservedUntil = 0.;
 	FGuid SessionID;
 	bool bAcknowledged = false;
 	bool bStartingNativeDialogue = false;

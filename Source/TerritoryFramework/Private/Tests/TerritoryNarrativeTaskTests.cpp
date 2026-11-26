@@ -25,6 +25,7 @@
 #include "Tales/TerritoryStateTask.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 #include "UnrealFramework/NarrativePlayerState.h"
+#include "Tales/TerritoryNarrativeContext.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTerritoryNarrativeTaskContract,
 	"TerritoryFramework.Tales.Tasks.NarrativeContractAndMetadata",

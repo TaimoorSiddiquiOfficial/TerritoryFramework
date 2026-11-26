@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeCondition.h"
 #include "Tales/TerritoryCaptureEvent.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryCaptureEligibilityCondition.generated.h"
 
 /**
@@ -18,7 +19,7 @@ UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Capture Eligibility Condition",
 		ToolTip="Ask the existing capture authority whether a story handover is allowed. Normal locks, diplomacy and state conditions still apply. Optional checks require no living defenders, Contested state, or story capture mode. Does not capture."))
 class TERRITORYFRAMEWORK_API UTerritoryCaptureEligibilityCondition
-	: public UNarrativeCondition
+	: public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -57,7 +58,8 @@ public:
 	bool bRequireContestedState = false;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

@@ -76,6 +76,21 @@ bool FTFAssaultCombatAutonomy::RunTest(const FString& Parameters)
 	TestTrue(TEXT("No player exists and the Place is not Contested"), Place->GetTerritoryState() != ETerritoryState::Contested);
 	TestTrue(TEXT("Guard engages an active hostile assault before Contested"), Guard->CanEngageTerritoryTarget(Attacker));
 	TestTrue(TEXT("Attacker reciprocates against the guard without a nearby player"), Attacker->CanEngageAssaultTarget(Guard));
+	static_cast<INarrativeTeamAgentInterface*>(Guard)->AddFaction(Bandits);
+	TestFalse(TEXT("Shared membership wins over another War pair for assault combat"), Attacker->CanEngageAssaultTarget(Guard));
+	TestFalse(TEXT("Shared membership wins for guard combat too"), Guard->CanEngageTerritoryTarget(Attacker));
+	static_cast<INarrativeTeamAgentInterface*>(Guard)->RemoveFaction(Bandits);
+	const auto Police = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Police"));
+	static_cast<INarrativeTeamAgentInterface*>(Guard)->AddFaction(Police);
+	for (const auto Protected : {EDiplomacyState::Alliance, EDiplomacyState::TradeAgreement,
+		EDiplomacyState::NonAggression, EDiplomacyState::Ceasefire})
+	{
+		Diplomacy->SetDiplomacyState(Bandits, Police, Protected);
+		TestFalse(TEXT("Protective mixed membership overrides War for assault combat"), Attacker->CanEngageAssaultTarget(Guard));
+		TestFalse(TEXT("Protective mixed membership overrides War for guard combat"), Guard->CanEngageTerritoryTarget(Attacker));
+	}
+	Diplomacy->SetDiplomacyState(Bandits, Police, EDiplomacyState::None);
+	static_cast<INarrativeTeamAgentInterface*>(Guard)->RemoveFaction(Police);
 	TestFalse(TEXT("An ordinary friendly visitor cannot bypass the Claimed guard policy"), Guard->CanEngageTerritoryTarget(Shooter));
 	TestFalse(TEXT("A remote non-participant is not a takeover target"), Participant->CollectTakeoverCombatants(Place).Contains(Shooter));
 	TestTrue(TEXT("The real Narrative ASC damage delegate is bound"), Participant->BindNarrativeDeathAfterSpawnReady());
@@ -229,12 +244,22 @@ bool FTFAssaultWaveStrategies::RunTest(const FString& Parameters)
 	TestTrue(TEXT("After defeat deploys the finite second wave"), CanDeploy(false));
 	TestFalse(TEXT("Optional proximity still blocks reserves when explicitly enabled"),
 		UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(Record, false, false, true));
+	Record.VehicleStagingBlockedSince = 2140.0;
+	TestTrue(TEXT("First physical wait anchors without spending time"), UTerritoryCounterAttackSubsystem::AdvanceVehicleStagingWait(Record, 274.0));
+	TestTrue(TEXT("Two hundred campaign units in twenty world seconds cannot expire physical staging"), UTerritoryCounterAttackSubsystem::AdvanceVehicleStagingWait(Record, 294.0));
+	TestEqual(TEXT("Only physical time counts"), Record.VehicleStagingElapsedSeconds, 20.0);
+	TestTrue(TEXT("Repeated same-frame staging does not spend time twice"), UTerritoryCounterAttackSubsystem::AdvanceVehicleStagingWait(Record, 294.0));
+	TestEqual(TEXT("Duplicate call preserves elapsed time"), Record.VehicleStagingElapsedSeconds, 20.0);
+	TestTrue(TEXT("Existing car can retire before the physical grace expires"), UTerritoryCounterAttackSubsystem::AdvanceVehicleStagingWait(Record, 359.0));
+	TestFalse(TEXT("A permanent obstruction still exhausts the bounded wait"), UTerritoryCounterAttackSubsystem::AdvanceVehicleStagingWait(Record, 394.0));
 	for (ETerritoryAssaultWaveStrategy Strategy : {ETerritoryAssaultWaveStrategy::Legacy,
 		ETerritoryAssaultWaveStrategy::Simultaneous, ETerritoryAssaultWaveStrategy::BackToBack,
 		ETerritoryAssaultWaveStrategy::AfterDefeated})
 	{
 		Record.WaveStrategy = Strategy;
 		Record.VehicleStagingBlockedSince = 45.0;
+		Record.VehicleStagingElapsedSeconds = 37.0;
+		Record.VehicleStagingLastWorldSeconds = 900.0;
 		TArray<uint8> Bytes;
 		FMemoryWriter Writer(Bytes);
 		FObjectAndNameAsStringProxyArchive Save(Writer, false);
@@ -248,11 +273,29 @@ bool FTFAssaultWaveStrategies::RunTest(const FString& Parameters)
 		TestEqual(TEXT("Save preserves the selected strategy"), Loaded.WaveStrategy, Strategy);
 		TestEqual(TEXT("Save preserves permanently consumed first-wave casualties"), Loaded.KilledForce, 4);
 		TestEqual(TEXT("Save preserves the bounded traffic wait"), Loaded.VehicleStagingBlockedSince, 45.0);
+		TestEqual(TEXT("Save retains physical wait elapsed time"), Loaded.VehicleStagingElapsedSeconds, 37.0);
+		TestEqual(TEXT("Old process clock is never serialized"), Loaded.VehicleStagingLastWorldSeconds, -1.0);
+		TestTrue(TEXT("Cold world anchors without charging offline time"), UTerritoryCounterAttackSubsystem::AdvanceVehicleStagingWait(Loaded, 4.0));
+		TestEqual(TEXT("Cold anchor preserves wait already spent"), Loaded.VehicleStagingElapsedSeconds, 37.0);
+		TestFalse(TEXT("Restore cannot replenish the remaining physical grace"), UTerritoryCounterAttackSubsystem::AdvanceVehicleStagingWait(Loaded, 87.0));
 		Loaded.State = ETerritoryAssaultState::ScheduledWarning;
 		TestFalse(TEXT("Every strategy spawns zero during a warning"), UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(Loaded, true, true, false));
 		Loaded.State = ETerritoryAssaultState::Defeated;
 		TestFalse(TEXT("Every strategy respects terminal state"), UTerritoryCounterAttackSubsystem::ShouldDeployActiveReserveWave(Loaded, true, true, false));
 	}
+	UWorld* SaveWorld = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Physical wait snapshot world"), SaveWorld)) return false;
+	UTerritoryCounterAttackSubsystem* SaveCounter = SaveWorld->GetSubsystem<UTerritoryCounterAttackSubsystem>();
+	SaveWorld->TimeSeconds = 8.5;
+	Record.VehicleStagingElapsedSeconds = 37.0;
+	Record.VehicleStagingLastWorldSeconds = 8.0;
+	SaveCounter->Assaults.Add(Record.AssaultID, Record);
+	const TArray<FTerritoryAssaultRecord> SavedWait = SaveCounter->GetPersistentState();
+	TestEqual(TEXT("Save snapshots the wait between scheduler ticks"), SavedWait[0].VehicleStagingElapsedSeconds, 37.5);
+	TestEqual(TEXT("Save does not mutate the live elapsed time"), SaveCounter->Assaults.FindChecked(Record.AssaultID).VehicleStagingElapsedSeconds, 37.0);
+	TestEqual(TEXT("Repeated save cannot charge time twice"), SaveCounter->GetPersistentState()[0].VehicleStagingElapsedSeconds, 37.5);
+	SaveWorld->DestroyWorld(false);
+
 	return true;
 }
 

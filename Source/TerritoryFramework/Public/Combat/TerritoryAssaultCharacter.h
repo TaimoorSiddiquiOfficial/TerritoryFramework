@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayCueInterface.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "AI/TerritoryDeathCollisionState.h"
 #include "TerritoryAssaultCharacter.generated.h"
@@ -14,12 +15,16 @@ class UTerritoryDiplomacyDialogueComponent;
 
 /** Narrative NPC used for finite physical Territory counterattacks. */
 UCLASS(BlueprintType, Blueprintable)
-class TERRITORYFRAMEWORK_API ATerritoryAssaultCharacter : public ANarrativeNPCCharacter
+class TERRITORYFRAMEWORK_API ATerritoryAssaultCharacter : public ANarrativeNPCCharacter, public IGameplayCueInterface
 {
 	GENERATED_BODY()
 
 public:
 	ATerritoryAssaultCharacter(const FObjectInitializer& ObjectInitializer);
+
+	/** Drop transient Native damage reactions until the local appearance can render them. */
+	virtual bool ShouldAcceptGameplayCue(UObject* Self, FGameplayTag GameplayCueTag,
+		EGameplayCueEvent::Type EventType, const FGameplayCueParameters& Parameters) override;
 
 	/**
 	 * Verifies the complete Narrative Pro controller contract required by a dynamically

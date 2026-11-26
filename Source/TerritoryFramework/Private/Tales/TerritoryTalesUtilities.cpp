@@ -2,12 +2,14 @@
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Tales/TerritoryCaptureEvent.h"
+#include "Tales/TerritoryNarrativeContext.h"
 
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
 #include "Tales/NarrativeNodeBase.h"
 #include "Tales/NarrativePartyComponent.h"
 #include "Tales/TalesComponent.h"
+#include "UnrealFramework/NarrativeCharacter.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 
@@ -93,7 +95,33 @@ UWorld* TerritoryTales::ResolveWorld(const UObject* ContextObject, APawn* Target
 bool TerritoryTales::DoesConditionPass(UNarrativeCondition* Condition, APawn* Target,
 	APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
-	return Condition && Condition->CheckCondition(Target, Controller, NarrativeComponent) != Condition->bNot;
+	if (!IsValid(Condition)) return false;
+	if (UTerritoryNarrativeCondition* TerritoryCondition = Cast<UTerritoryNarrativeCondition>(Condition))
+	{
+		return TerritoryCondition->CheckConditionInContext(Target, Controller, NarrativeComponent) != Condition->bNot;
+	}
+	// Narrative 2.5 keeps CheckCondition protected and character-typed; its public
+	// entry point already applies the inherited Not option and character targets.
+	return Condition->ConditionPasses(Cast<ANarrativeCharacter>(Target));
+}
+
+void TerritoryTales::ExecuteEvent(UNarrativeEvent* Event, APawn* Target,
+	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+{
+	if (!IsValid(Event)) return;
+	if (UTerritoryNarrativeEvent* TerritoryEvent = Cast<UTerritoryNarrativeEvent>(Event))
+	{
+		TerritoryEvent->ExecuteEventInContext(Target, Controller, NarrativeComponent);
+		return;
+	}
+	// ExecuteEvent is protected in Narrative 2.5, so a plain Narrative event can only
+	// be reached through its public dispatch, which re-applies its own conditions.
+	ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(Target);
+	if (!Character && !IsValid(Target) && IsValid(Controller))
+	{
+		Character = Cast<ANarrativeCharacter>(Controller->GetPawn());
+	}
+	if (IsValid(Character)) Event->DispatchExecute(Character);
 }
 
 bool TerritoryTales::EvaluateConditionWithNarrative(UNarrativeNodeBase* Probe,
@@ -127,9 +155,9 @@ bool TerritoryTales::EvaluateConditionWithNarrative(UNarrativeNodeBase* Probe,
 	}
 	// One row per probe also avoids Narrative's early return after a party row
 	// skipping the later AND requirements of the Territory event or task.
-	Probe->Conditions.Reset();
-	Probe->Conditions.Add(Condition);
-	return Probe->AreConditionsMet(Target, Controller, NarrativeComponent);
+	// Narrative 2.5's node evaluator narrows the pawn to a Narrative character, so the
+	// explicit Tales context is evaluated directly to keep plain pawns supported.
+	return DoesConditionPass(Condition, Target, Controller, NarrativeComponent);
 }
 
 bool TerritoryTales::DoEventConditionsPass(const UNarrativeEvent* Event, APawn* Target,

@@ -509,7 +509,7 @@ raising the target to one can expose at most one of those reserves to defence pl
 After diplomacy and admission gates, `UnguardedLaunchProbability` owns the launch
 policy when the complete local cascade has zero active guards. Its default is `1.0`, so
 an empty front certainly launches after grace. This is not an ownership roll:
-approach/navigation, player proximity, finite physical NPCs, combat casualties,
+approach/navigation, any authored proximity gate, finite physical NPCs, combat casualties,
 defender validation, and normal capture completion remain mandatory.
 
 For the same campaign seed, stable territory GUID, attacking faction, and evaluation cycle, the decision seed is stable. The evaluated result and decision roll are stored in `FTerritoryAssaultRecord`, so save/load does not reroll it. `ATerritoryWorldState` also saves a server-only `FTerritoryAssaultCycleRecord` high-water ledger. Bounded terminal-history trimming therefore cannot reuse an old evaluation cycle or decision seed.
@@ -526,7 +526,26 @@ Defence invariants are enforced by tests:
 
 `ScheduledWarning` and `WaitingForPlayerProximity` contain zero live attackers and produce zero capture pressure. Notifications are sent only to relevant controllers inside `NotificationRadius`; `bNotifyDefendingFactionOnly` restricts them to the defending Narrative faction.
 
-The first relevant player entering `ActivationRadius` commits the record to `Active` before spawning. That state transition prevents two nearby players from duplicating the assault. Additional players do not create another force or wave. If `bGarrisonTriggersActivation` is on, a living registered defender in the target Place activates the assault instead, so the gate is satisfied without any player present. With the recommended `bContinueFiniteWavesAfterActivation`, the already-launched assault deploys its remaining finite reserve waves even after the player leaves. Disabling that policy pauses only later reserve deployment; it never removes the initial proximity gate.
+When `bRequirePlayerProximityForActivation` is enabled, the first relevant player entering `ActivationRadius` commits the record to `Active` before spawning. That state transition prevents two nearby players from duplicating the assault. Additional players do not create another force or wave. If `bGarrisonTriggersActivation` is on, a living registered defender in the target Place can satisfy that gate. Autonomous profiles retain activation without a nearby player. With `bContinueFiniteWavesAfterActivation`, an activated assault deploys its remaining finite reserve waves after the player leaves. Disabling that policy pauses later waves where the configured presence policy requires it.
+
+Shared faction membership or any protective treaty takes precedence over a War
+pair for both guards and assault NPCs. The final recapture uses the existing
+validated ownership mutation; it checks the current assault identity, physical
+living attacker, remaining defenders/reserves, availability, story conditions,
+diplomacy and authored handover deadline at the commit boundary. A rejected story
+condition keeps the handover retriable. A protective treaty cancels through the
+existing diplomacy outcome; neither rejection reports capture success.
+
+Movement uses the same defender-priority setting as attack scoring. A remembered
+distant shooter diverts a guard-priority force only with the explicit retaliation
+override. Accepted paths must produce physical progress. The existing retry
+interval/count bounds stalled movement; Native combat interruptions pause that
+clock. Exhaustion withdraws the participant once and removes its capture pressure.
+
+Estimated success reflects the committed transport/difficulty-adjusted finite
+force. Saved launch probability and decision roll are not rerolled. Economy,
+supply and momentum fields are authored planning inputs, not a live logistics or
+history simulation.
 
 Each wave uses deterministic three-column formation slots around every selected approach,
 facing the target. `ParticipantSpacing` controls slot separation and
@@ -712,6 +731,12 @@ Use Narrative Pro's **Show Narrative HUD Notification** (`UArsenalStatics::PushH
 or your project presentation. TerritoryFramework does not automatically open a major/modal
 notification, so combat is never paused by the framework event. The supplied HUD still renders
 the older warning as a timed inline alert and exposes `OnCounterAttackAlert` for animation.
+On-foot survivors pause their Native activity and physical movement before their
+target or supporting floor level streams out. They resume only after the exact
+target and a walkable physical floor return; the wait preserves their identity,
+health and finite budget and supplies no capture pressure. See
+[the physical streaming lifecycle](Verification/2026-10-05-assault-streaming-physics.md).
+
 `GetAssaultDebugString`
 reports target/attacking/defending factions, guard counts, reserve, attacker and defence power,
 ratio, strategic value, priority, launch/success probability, finite force counts in

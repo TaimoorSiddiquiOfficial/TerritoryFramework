@@ -34,8 +34,7 @@ UTerritoryStealthPolicyCondition::UTerritoryStealthPolicyCondition()
 	ConditionFilter = EConditionFilter::CF_OnlyPlayers;
 }
 
-bool UTerritoryStealthPolicyCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryStealthPolicyCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -58,8 +57,7 @@ UTerritoryExposureCondition::UTerritoryExposureCondition()
 	ConditionFilter = EConditionFilter::CF_OnlyPlayers;
 }
 
-bool UTerritoryExposureCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryExposureCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -102,8 +100,7 @@ UTerritoryStealthEvidenceCondition::UTerritoryStealthEvidenceCondition()
 	ConditionFilter = EConditionFilter::CF_OnlyPlayers;
 }
 
-bool UTerritoryStealthEvidenceCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryStealthEvidenceCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -135,8 +132,7 @@ UTerritorySuspicionCondition::UTerritorySuspicionCondition()
 	ConditionFilter = EConditionFilter::CF_OnlyPlayers;
 }
 
-bool UTerritorySuspicionCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritorySuspicionCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -161,8 +157,7 @@ UTerritoryDisguiseCondition::UTerritoryDisguiseCondition()
 	ConditionFilter = EConditionFilter::CF_OnlyPlayers;
 }
 
-bool UTerritoryDisguiseCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryDisguiseCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);

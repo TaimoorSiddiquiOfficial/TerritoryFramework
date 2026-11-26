@@ -9,12 +9,27 @@
 #include "Core/TerritoryGuardCharacter.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Engine/LatentActionManager.h"
+#include "LatentActions.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISense_Sight.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
+#include "TimerManager.h"
 #include "UObject/UnrealType.h"
+
+namespace
+{
+class FGeneratorDelayProbe final : public FPendingLatentAction
+{
+public:
+ explicit FGeneratorDelayProbe(int32& InCalls) : Calls(InCalls) {}
+ virtual void UpdateOperation(FLatentResponse& Response) override { ++Calls; Response.DoneIf(true); }
+private:
+ int32& Calls;
+};
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFPerceptionDelivery,
 	"TerritoryFramework.AI.Regression.StoredPerceptionDelivery",
@@ -103,8 +118,13 @@ bool FTFPerceptionDelivery::RunTest(const FString& Parameters)
 	Controller->SetRole(ROLE_Authority);
 	Activity->PrepareForSave_Implementation();
 	Activity->Load_Implementation();
-	Activity->RefreshStoredPerception();
-	TestEqual(TEXT("Save/load refreshes observations for restored generators once"), Generator->ReceivedStrengths.Num(), 3);
+	{
+		TGuardValue<uint64> FrameGuard(GFrameCounter, GFrameCounter + 1);
+		World->GetTimerManager().Tick(0.01f);
+		++GFrameCounter;
+		World->GetTimerManager().Tick(2.f);
+	}
+	TestEqual(TEXT("Natural rescore timer refreshes restored perception once after Native load"), Generator->ReceivedStrengths.Num(), 3);
 	Controller->SetPawn(nullptr);
 	Activity->RefreshStoredPerception();
 	TestTrue(TEXT("Dismount/unpossession clears the old pawn delivery cache"), Activity->DeliveredPerception.IsEmpty());
@@ -118,6 +138,26 @@ bool FTFPerceptionDelivery::RunTest(const FString& Parameters)
 	TestNull(TEXT("Reentrant generator removal remains removed"), Activity->GetGoalGenerator(UTerritoryNPCSaveProbe::StaticClass()));
 	Activity->RefreshStoredPerception();
 	TestEqual(TEXT("Removed generator receives no later refresh"), Generator->ReceivedStrengths.Num(), 4);
+	if (!Activity->HasBegunPlay()) Activity->BeginPlay();
+	// A generator removed from Native's array can still own Blueprint Delay
+	// continuations. EndPlay must cancel those too, without affecting another NPC.
+	auto* ActiveGenerator = Activity->AddGoalGenerator(UTerritoryNPCSaveReplacementProbe::StaticClass(), true);
+	auto* Unrelated = NewObject<UTerritoryNPCSaveProbe>(World);
+	int32 RemovedCallbacks = 0, ActiveCallbacks = 0, UnrelatedCallbacks = 0;
+	auto& Latent = World->GetLatentActionManager();
+	Latent.AddNewAction(Generator, 7101, new FGeneratorDelayProbe(RemovedCallbacks));
+	Latent.AddNewAction(ActiveGenerator, 7102, new FGeneratorDelayProbe(ActiveCallbacks));
+	Latent.AddNewAction(Unrelated, 7103, new FGeneratorDelayProbe(UnrelatedCallbacks));
+	FTimerHandle GeneratorTimer;
+	World->GetTimerManager().SetTimer(GeneratorTimer, Generator,
+		&UNPCGoalGenerator::InitializeGoalGenerator, 1.f, true);
+	Activity->EndPlay(EEndPlayReason::RemovedFromWorld);
+	TestFalse(TEXT("Streamed-out generator timer is cancelled"), World->GetTimerManager().TimerExists(GeneratorTimer));
+	Latent.BeginFrame();
+	Latent.ProcessLatentActions(nullptr, 1.f);
+	TestEqual(TEXT("Removed generator Delay cannot access a retired activity"), RemovedCallbacks, 0);
+	TestEqual(TEXT("Active generator Delay cannot access a retired activity"), ActiveCallbacks, 0);
+	TestEqual(TEXT("Unrelated actor's latent work is preserved"), UnrelatedCallbacks, 1);
 	return true;
 }
 

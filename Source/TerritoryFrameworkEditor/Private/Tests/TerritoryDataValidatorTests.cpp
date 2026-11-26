@@ -40,6 +40,48 @@
 #include "Vehicles/MountComponent.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 #include "ZoneShapeActor.h"
+#include "Engine/AssetManager.h"
+#include "UObject/Package.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFNativeDefinitionRegistration,
+	"TerritoryFramework.Editor.DataValidation.NativePrimaryRegistration",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFNativeDefinitionRegistration::RunTest(const FString& Parameters)
+{
+	UNPCDefinition* Shipped = LoadObject<UNPCDefinition>(nullptr,
+		TEXT("/TerritoryFramework/AI/NPC_TerritoryBanditAssault.NPC_TerritoryBanditAssault"));
+	if (!TestNotNull(TEXT("Included assault definition loads"), Shipped)) return false;
+	// TDA deliberately uses its existing /Game demo copies. A fresh reusable
+	// host uses the plugin originals. Native IDs are names, so these two copies
+	// must not be scanned together as though they were distinct primary assets.
+	const FSoftObjectPath RegisteredPath = UAssetManager::Get().GetPrimaryAssetPath(Shipped->GetPrimaryAssetId());
+	if (RegisteredPath.GetLongPackageName() == TEXT("/Game/TerritoryFramework/AI/NPC_TerritoryBanditAssault"))
+	{
+		Shipped = Cast<UNPCDefinition>(RegisteredPath.TryLoad());
+		if (!TestNotNull(TEXT("Existing TDA primary definition resolves"), Shipped)) return false;
+		AddInfo(TEXT("Verifying TDA's existing /Game primary definition; plugin originals are verified by the fresh Native release host."));
+	}
+	TestEqual(TEXT("Native's actual SpawnedData primary registration resolves this plugin definition"),
+		UAssetManager::Get().GetPrimaryAssetPath(Shipped->GetPrimaryAssetId()), FSoftObjectPath(Shipped));
+	UTerritoryDataValidator* Validator = NewObject<UTerritoryDataValidator>();
+	const TConstArrayView<FAssetData> NoAssociatedAssets;
+	FDataValidationContext Valid(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	const FAssetData AssetData(Shipped);
+	if (RegisteredPath.GetLongPackageName().StartsWith(TEXT("/TerritoryFramework/")))
+		TestTrue(TEXT("Registration validation includes assault NPCs outside StoryCapture"),
+			Validator->CanValidateAsset_Implementation(AssetData, Shipped, Valid));
+	TestEqual(TEXT("Registered plugin NPC validates"),
+		Validator->ValidateLoadedAsset_Implementation(AssetData, Shipped, Valid), EDataValidationResult::Valid);
+	UPackage* Package = CreatePackage(TEXT("/TerritoryFramework/Tests/UnregisteredNativeDefinition"));
+	UNPCDefinition* Unregistered = DuplicateObject<UNPCDefinition>(Shipped, Package, TEXT("UnregisteredNativeDefinition"));
+	FDataValidationContext Invalid(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+	TestEqual(TEXT("An existing definition object alone is insufficient without Native registration"),
+		Validator->ValidateLoadedAsset_Implementation(FAssetData(Unregistered), Unregistered, Invalid), EDataValidationResult::Invalid);
+	TestEqual(TEXT("Missing primary registration has one actionable error"), Invalid.GetNumErrors(), 1u);
+	Package->SetDirtyFlag(false);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFProjectNPCDefinitionIdentityRegression,
 	"TerritoryFramework.Editor.Identity.ProjectNPCDefinitionsUseDistinctGuids",
@@ -165,6 +207,14 @@ bool FTFTerritoryDataValidatorModernApi::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Non-monotonic launch configuration emits an error"),
 		NonMonotonicContext.GetNumErrors() > 0u);
 	Profile->MinimumLaunchProbability = 0.01f;
+	for (const float Unguarded : {0.05f, 0.25f, 0.5f, 1.f})
+	{
+		Profile->UnguardedLaunchProbability = Unguarded;
+		FDataValidationContext AcceptedContext(false, EDataValidationUsecase::Script, NoAssociatedAssets);
+		TestEqual(TEXT("Custom unguarded probabilities covered by monotonicity tests remain valid authoring"),
+			Validator->ValidateLoadedAsset_Implementation(AssetData, Profile, AcceptedContext),
+			EDataValidationResult::Valid);
+	}
 	Profile->UnguardedLaunchProbability = 1.f;
 
 	UNPCDefinition* Definition = NewObject<UNPCDefinition>(Profile);

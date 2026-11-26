@@ -2,6 +2,8 @@
 
 #include "AI/TerritoryDiplomacyDialogue.h"
 #include "Cinematics/TerritoryCinematicLightRig.h"
+#include "Cinematics/TerritoryDialogueShotPackSpec.h"
+#include "Tales/TerritoryReplyTimeoutProfile.h"
 #include "AssetToolsModule.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Combat/TerritoryFloorCombatPolicy.h"
@@ -10,10 +12,13 @@
 #include "Core/TerritoryFloorVolume.h"
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardPerceptionProfile.h"
+#include "Core/TerritoryNoiseProfile.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryUpgradeDefinition.h"
 #include "Core/TerritoryWorldState.h"
 #include "Engine/Blueprint.h"
 #include "Engine/DataAsset.h"
@@ -109,6 +114,16 @@ UTerritoryStealthProfileFactory::UTerritoryStealthProfileFactory()
 	InitializeFor(UTerritoryStealthProfile::StaticClass());
 }
 
+UTerritoryGuardPerceptionProfileFactory::UTerritoryGuardPerceptionProfileFactory()
+{
+	InitializeFor(UTerritoryGuardPerceptionProfile::StaticClass());
+}
+
+UTerritoryNoiseProfileFactory::UTerritoryNoiseProfileFactory()
+{
+	InitializeFor(UTerritoryNoiseProfile::StaticClass());
+}
+
 UTerritoryDisguiseProfileFactory::UTerritoryDisguiseProfileFactory()
 {
 	InitializeFor(UTerritoryDisguiseProfile::StaticClass());
@@ -117,6 +132,16 @@ UTerritoryDisguiseProfileFactory::UTerritoryDisguiseProfileFactory()
 UTerritoryDiplomacyDialogueProfileFactory::UTerritoryDiplomacyDialogueProfileFactory()
 {
 	InitializeFor(UTerritoryDiplomacyDialogueProfile::StaticClass());
+}
+
+UTerritoryUpgradeDefinitionFactory::UTerritoryUpgradeDefinitionFactory()
+{
+	InitializeFor(UTerritoryUpgradeDefinition::StaticClass());
+}
+
+UTerritoryUpgradeBalanceProfileFactory::UTerritoryUpgradeBalanceProfileFactory()
+{
+	InitializeFor(UTerritoryUpgradeBalanceProfile::StaticClass());
 }
 
 UTerritoryQuestCascadeRecipeFactory::UTerritoryQuestCascadeRecipeFactory()
@@ -137,6 +162,16 @@ UTerritoryDialogueRecipeFactory::UTerritoryDialogueRecipeFactory()
 UTerritoryConversationProfileFactory::UTerritoryConversationProfileFactory()
 {
 	InitializeFor(UTerritoryConversationProfile::StaticClass());
+}
+
+UTerritoryDialogueShotPackSpecFactory::UTerritoryDialogueShotPackSpecFactory()
+{
+	InitializeFor(UTerritoryDialogueShotPackSpec::StaticClass());
+}
+
+UTerritoryReplyTimeoutProfileFactory::UTerritoryReplyTimeoutProfileFactory()
+{
+	InitializeFor(UTerritoryReplyTimeoutProfile::StaticClass());
 }
 
 FString UTerritoryQuestCascadeRecipeFactory::GetDefaultNewAssetName() const

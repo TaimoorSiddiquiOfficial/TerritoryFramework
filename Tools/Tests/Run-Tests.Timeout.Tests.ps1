@@ -6,6 +6,20 @@ $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $powershellExecutable = (Get-Process -Id $PID).Path
 $checks = @()
+$completedText = "Result={Success}`nTEST COMPLETE. EXIT CODE: 0"
+foreach ($case in @(
+    @{ Name='completed'; Text=$completedText; Code=0; Timeout=$false; Passed=$true },
+    @{ Name='zero'; Text='TEST COMPLETE. EXIT CODE: 0'; Code=0; Timeout=$false; Passed=$false },
+    @{ Name='partial'; Text='Result={Success}'; Code=0; Timeout=$false; Passed=$false },
+    @{ Name='failed'; Text="$completedText`nResult={Fail}"; Code=0; Timeout=$false; Passed=$false },
+    @{ Name='crash'; Text="$completedText`nFatal error"; Code=0; Timeout=$false; Passed=$false },
+    @{ Name='timeout'; Text=$completedText; Code=0; Timeout=$true; Passed=$false },
+    @{ Name='process failure'; Text=$completedText; Code=7; Timeout=$false; Passed=$false }
+)) {
+    $result = Get-TerritoryAutomationResult -Text $case.Text -ExitCode $case.Code -TimedOut $case.Timeout
+    if ($result.passed -ne $case.Passed) { throw "Incorrect release admission: $($case.Name)" }
+}
+$checks += 'Release gate rejects zero, partial, failed, crashed, timed-out and nonzero runs'
 
 function Test-Child {
     param([string]$Name, [string]$Command, [int]$TimeoutSeconds = 15)

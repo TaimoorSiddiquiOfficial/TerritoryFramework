@@ -5,6 +5,7 @@
 #include "Cinematics/TerritoryCinematicPresentationSubsystem.h"
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
+#include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/WorldSettings.h"
@@ -45,32 +46,32 @@ bool FTFTerritoryCutsceneConditionPlayback::RunTest(const FString& Parameters)
 	OtherViewer->CurrentSequences.Add(Actor);
 	auto* Condition = NewObject<UTerritoryCutsceneCondition>();
 	TestFalse(TEXT("Registered but stopped sequence is not a cutscene"),
-		Condition->CheckCondition(nullptr, Viewer, nullptr));
+		Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
 	Player->Play();
 	TestTrue(TEXT("Real Narrative sequence player is playing"), Player->IsPlaying());
-	TestTrue(TEXT("Audience viewer passes expected true"), Condition->CheckCondition(nullptr, Viewer, nullptr));
-	TestFalse(TEXT("Excluded viewer fails even with Native registry entry"), Condition->CheckCondition(nullptr, OtherViewer, nullptr));
+	TestTrue(TEXT("Audience viewer passes expected true"), Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
+	TestFalse(TEXT("Excluded viewer fails even with Native registry entry"), Condition->CheckConditionInContext(nullptr, OtherViewer, nullptr));
 	Condition->bIsInCutscene = false;
-	TestTrue(TEXT("Excluded viewer passes expected false"), Condition->CheckCondition(nullptr, OtherViewer, nullptr));
-	TestFalse(TEXT("Missing context does not pass a negative condition"), Condition->CheckCondition(nullptr, nullptr, nullptr));
+	TestTrue(TEXT("Excluded viewer passes expected false"), Condition->CheckConditionInContext(nullptr, OtherViewer, nullptr));
+	TestFalse(TEXT("Missing context does not pass a negative condition"), Condition->CheckConditionInContext(nullptr, nullptr, nullptr));
 	Condition->bIsInCutscene = true;
 	Condition->Sequence = Sequence;
-	TestTrue(TEXT("Exact playing sequence matches"), Condition->CheckCondition(nullptr, Viewer, nullptr));
+	TestTrue(TEXT("Exact playing sequence matches"), Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
 	Condition->Sequence = TSoftObjectPtr<ULevelSequence>(FSoftObjectPath(TEXT("/Game/MissingCutscene.MissingCutscene")));
-	TestFalse(TEXT("Unloaded different sequence is not replaced by any-sequence query"), Condition->CheckCondition(nullptr, Viewer, nullptr));
+	TestFalse(TEXT("Unloaded different sequence is not replaced by any-sequence query"), Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
 	Condition->Sequence.Reset();
 	Player->Pause();
-	TestFalse(TEXT("Paused does not satisfy default playing policy"), Condition->CheckCondition(nullptr, Viewer, nullptr));
+	TestFalse(TEXT("Paused does not satisfy default playing policy"), Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
 	Condition->bIncludePaused = true;
-	TestTrue(TEXT("Paused policy is explicit"), Condition->CheckCondition(nullptr, Viewer, nullptr));
+	TestTrue(TEXT("Paused policy is explicit"), Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
 	Player->Stop();
-	TestFalse(TEXT("Stale registry entry after Stop is ignored"), Condition->CheckCondition(nullptr, Viewer, nullptr));
+	TestFalse(TEXT("Stale registry entry after Stop is ignored"), Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
 	Player->Play();
 	Viewer->CurrentSequences.Reset();
-	TestFalse(TEXT("Unregistered animation is never discovered through world scanning"), Condition->CheckCondition(nullptr, Viewer, nullptr));
+	TestFalse(TEXT("Unregistered animation is never discovered through world scanning"), Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
 	Viewer->CurrentSequences.Add(Actor);
 	Actor->Destroy();
-	TestFalse(TEXT("Streamed/destroyed sequence is ignored"), Condition->CheckCondition(nullptr, Viewer, nullptr));
+	TestFalse(TEXT("Streamed/destroyed sequence is ignored"), Condition->CheckConditionInContext(nullptr, Viewer, nullptr));
 	const UFunction* Query = UTerritoryCinematicPresentationSubsystem::StaticClass()->FindFunctionByName(TEXT("IsInCutscene"));
 	TestTrue(TEXT("Blueprint query is pure"), Query && Query->HasAnyFunctionFlags(FUNC_BlueprintPure));
 	TestFalse(TEXT("Playback query introduces no RPC"), Query && Query->HasAnyFunctionFlags(FUNC_Net));

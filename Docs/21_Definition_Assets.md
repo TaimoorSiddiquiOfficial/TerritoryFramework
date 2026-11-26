@@ -67,6 +67,13 @@ Example: the asset says a Blacksmith starts owned by Bandits. After Heroes captu
 placed Property actor and save data say Heroes own it. Reapplying the asset does **not** erase
 that campaign result.
 
+A Place Definition also contains a **unique durable identity**: its Territory tag,
+Territory GUID and embedded post GUIDs identify one Place in one campaign. Assigning
+that exact asset to two independent placed Places does not create two identities;
+it makes them compete for registry and save records. Reuse guard-post definitions,
+NPC definitions, production and counterattack profiles for common configuration.
+Create a separate Place Definition for each independently owned/saved location.
+
 ## Decide where the gameplay HUD card appears
 
 Use **09 Presentation > Show Passive Gameplay HUD Card** on any City, District, or Place
@@ -106,12 +113,18 @@ To make a new Bakery from the Blacksmith:
 
 1. Duplicate `DA_Place_Blacksmith` as `DA_Place_Bakery`.
 2. Give it a new Territory gameplay tag and display name.
+   Inspect its Territory GUID and embedded guard-post GUIDs: each must differ from
+   the source asset before adding either location to a campaign.
 3. Change its production, owner NPC/dialogue, guard posts, and event rules.
 4. Add it to the correct District's `Places` array.
 5. Refresh the City hierarchy and synchronize the level.
 
 Normal asset duplication creates new Territory and guard-post GUIDs. This prevents the Bakery
 from loading the Blacksmith's saved state. Never copy a stable GUID by hand.
+Duplicating a level actor while retaining the original Definition is not this
+workflow. Assign the new Definition, refresh/synchronize, then validate both the
+directory and placed actors for duplicate tags/GUIDs. Keep existing campaign IDs
+when renaming or moving a location; duplicate only to create a new location.
 
 ## Story and multiplayer capture
 

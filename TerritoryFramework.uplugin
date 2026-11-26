@@ -39,6 +39,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "NP_SkillTrees",
+			"Enabled": true
+		},
+		{
 			"Name": "ChaosVehiclesPlugin",
 			"Enabled": true
 		},

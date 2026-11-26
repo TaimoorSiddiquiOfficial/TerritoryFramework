@@ -12,6 +12,7 @@ public class TerritoryFramework : ModuleRules
 			"CoreUObject",
 			"Engine",
 			"GameplayAbilities",
+			"GameplayTasks",
 			"GameplayTags",
 			"AIModule",
 			"UMG",
@@ -23,6 +24,7 @@ public class TerritoryFramework : ModuleRules
 			"NarrativeArsenal",
 			"NarrativeCommonUI",
 			"NarrativeSaveSystem",
+			"NP_SkillTrees",
 			"MassSpawner",
 			"MassEntity"
 		});

@@ -5,6 +5,8 @@
 #include "GameFramework/GameModeBase.h"
 #include "Misc/ScopeExit.h"
 #include "Tales/NarrativeDialogueSettings.h"
+#include "Tales/TerritoryReplyTimeoutProfile.h"
+#include "TimerManager.h"
 #include "UnrealFramework/NarrativeParty.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "UnrealFramework/NarrativePlayerState.h"
@@ -363,15 +365,15 @@ bool UTerritoryNarrativePartyComponent::RemovePartyMember(UTalesComponent* Membe
 	return bRemoved && IsValid(Member) && Member->GetParty() != this && !PartyMembers.Contains(Member);
 }
 
-APlayerController* UTerritoryNarrativePartyComponent::GetOwningController() const
+ANarrativePlayerController* UTerritoryNarrativePartyComponent::GetOwningController() const
 {
 	// Native's dedicated-server path already uses its leader. Keep Native's
 	// local viewer on clients and listen hosts; only fill the remote-only gap.
-	if (APlayerController* Controller = Super::GetOwningController()) return Controller;
+	if (ANarrativePlayerController* Controller = Super::GetOwningController()) return Controller;
 	if (!HasAuthority()) return nullptr;
 	UTalesComponent* Leader = GetPartyLeader();
 	if (!IsValid(Leader) || Leader->GetParty() != this || !Leader->HasAuthority()) return nullptr;
-	APlayerController* Controller = Leader->GetOwningController();
+	ANarrativePlayerController* Controller = Leader->GetOwningController();
 	return IsValid(Controller) && Controller->HasAuthority() && Controller->GetWorld() == GetWorld()
 		? Controller : nullptr;
 }
@@ -383,6 +385,7 @@ void UTerritoryNarrativePartyComponent::OnRegister()
 	OnDialogueBegan.AddUniqueDynamic(this, &ThisClass::HandleDialogueBegan);
 	OnDialogueFinished.AddUniqueDynamic(this, &ThisClass::HandleDialogueFinished);
 	OnDialogueRepliesAvailable.AddUniqueDynamic(this, &ThisClass::HandleRepliesAvailable);
+	BindSiblingReplySources();
 	OnNPCDialogueLineStarted.AddUniqueDynamic(this, &ThisClass::HandleNPCLineStarted);
 	bReplyEventsBound = true;
 	if (HasAuthority() && !LogoutHandle.IsValid())
@@ -490,13 +493,28 @@ void UTerritoryNarrativePartyComponent::ServerSelectDialogueOption_Implementatio
 
 void UTerritoryNarrativePartyComponent::HandleRepliesAvailable(UDialogue* Dialogue, const TArray<UDialogueNode_Player*>& Replies)
 {
-	if (HasAuthority() && Dialogue && Dialogue == GetCurrentDialogue() && Dialogue->OwningComp == this
-		&& Dialogue->IsInitialized() && !Replies.IsEmpty()) ReadyDialogue = Dialogue;
+	if (!Dialogue || !Dialogue->IsInitialized() || Replies.IsEmpty() || !HasAuthority())
+	{
+		return;
+	}
+	// The dialogue may be owned by this adapter or by a sibling Tales component on the same actor:
+	// a plain Native dialogue runs on the owner's own component, without a party.
+	UTalesComponent* Owner = Dialogue->OwningComp;
+	if (!Owner || (Owner != this && Owner->GetOwner() != GetOwner()))
+	{
+		return;
+	}
+	if (Owner == this && Dialogue == GetCurrentDialogue())
+	{
+		ReadyDialogue = Dialogue;
+	}
+	StartReplyTimeout(Dialogue, Owner, Replies);
 }
 
 void UTerritoryNarrativePartyComponent::HandleDialogueBegan(UDialogue* Dialogue)
 {
 	if (Dialogue == GetCurrentDialogue()) ReadyDialogue.Reset();
+	if (Dialogue) CancelReplyTimeout(false);
 }
 
 void UTerritoryNarrativePartyComponent::HandleDialogueFinished(UDialogue* Dialogue, bool bStartingNewDialogue, EExitDialogueReason Reason)
@@ -504,6 +522,7 @@ void UTerritoryNarrativePartyComponent::HandleDialogueFinished(UDialogue* Dialog
 	(void)bStartingNewDialogue;
 	(void)Reason;
 	if (ReadyDialogue == Dialogue) ReadyDialogue.Reset();
+	if (Dialogue) CancelReplyTimeout(false);
 }
 
 void UTerritoryNarrativePartyComponent::HandleNPCLineStarted(UDialogue* Dialogue, UDialogueNode_NPC* Node,
@@ -512,5 +531,164 @@ void UTerritoryNarrativePartyComponent::HandleNPCLineStarted(UDialogue* Dialogue
 	(void)Node;
 	(void)Line;
 	(void)Speaker;
-	if (Dialogue == GetCurrentDialogue()) ReadyDialogue.Reset();
+	if (Dialogue == GetCurrentDialogue())
+	{
+		ReadyDialogue.Reset();
+		CancelReplyTimeout(false);
+	}
+}
+
+void UTerritoryNarrativePartyComponent::StartReplyTimeout(UDialogue* Dialogue,
+	UTalesComponent* Owner, const TArray<UDialogueNode_Player*>& Replies)
+{
+	if (!HasAuthority() || !ReplyTimeoutProfile || !Dialogue || !Owner || Replies.IsEmpty())
+	{
+		return;
+	}
+	if (!ReplyTimeoutProfile->IsEnabledForDialogue(Dialogue))
+	{
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+	const FName SilentReplyID = ReplyTimeoutProfile->ResolveSilentReplyID(Dialogue);
+	const float Seconds = ReplyTimeoutProfile->ResolveSeconds(Dialogue);
+	// Only run a countdown when the dialogue actually offers the authored silence reply. Never invent a choice.
+	const bool bSilentReplyOffered = Replies.ContainsByPredicate(
+		[SilentReplyID](const UDialogueNode_Player* Option)
+		{
+			return Option && Option->GetID() == SilentReplyID;
+		});
+	if (!bSilentReplyOffered)
+	{
+		return;
+	}
+	CancelReplyTimeout(false);
+	TimeoutDialogue = Dialogue;
+	TimeoutOwnerComponent = Owner;
+	PendingSilentReplyID = SilentReplyID;
+	ReplyTimeoutSeconds = Seconds;
+	World->GetTimerManager().SetTimer(ReplyTimeoutHandle, this,
+		&UTerritoryNarrativePartyComponent::HandleReplyTimeoutExpired, Seconds, false);
+	OnReplyTimeoutStarted.Broadcast(Seconds, SilentReplyID);
+}
+
+void UTerritoryNarrativePartyComponent::CancelReplyTimeout(bool bSelectedSilentReply)
+{
+	const bool bWasActive = ReplyTimeoutHandle.IsValid();
+	if (bWasActive)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().ClearTimer(ReplyTimeoutHandle);
+		}
+	}
+	ReplyTimeoutHandle.Invalidate();
+	TimeoutDialogue.Reset();
+	TimeoutOwnerComponent.Reset();
+	PendingSilentReplyID = NAME_None;
+	ReplyTimeoutSeconds = 0.f;
+	if (bWasActive)
+	{
+		OnReplyTimeoutEnded.Broadcast(bSelectedSilentReply);
+	}
+}
+
+bool UTerritoryNarrativePartyComponent::CanResolveReplyTimeoutToSilence(const FName& SilentReplyID) const
+{
+	const UDialogue* Dialogue = TimeoutDialogue.Get();
+	const UTalesComponent* Owner = TimeoutOwnerComponent.Get();
+	if (!HasAuthority() || !Dialogue || !Owner || SilentReplyID.IsNone()
+		|| Owner->GetCurrentDialogue() != Dialogue
+		|| Dialogue->OwningComp != Owner
+		|| !Dialogue->IsInitialized() || Dialogue->AvailableResponses.IsEmpty())
+	{
+		return false;
+	}
+	// Still the same replies on offer: the player has not answered yet.
+	return Dialogue->AvailableResponses.ContainsByPredicate(
+		[SilentReplyID](const UDialogueNode_Player* Option)
+		{
+			return Option && Option->GetID() == SilentReplyID;
+		});
+}
+
+void UTerritoryNarrativePartyComponent::HandleReplyTimeoutExpired()
+{
+	const FName SilentReplyID = PendingSilentReplyID;
+	UTalesComponent* Owner = TimeoutOwnerComponent.Get();
+	const bool bCanSelect = CanResolveReplyTimeoutToSilence(SilentReplyID);
+	// Clear our own state and report honestly before Native's selection re-enters these callbacks.
+	CancelReplyTimeout(bCanSelect);
+	if (bCanSelect && Owner)
+	{
+		Owner->ServerSelectDialogueOption(SilentReplyID);
+	}
+}
+
+bool UTerritoryNarrativePartyComponent::ResolveReplyCountdownNow()
+{
+	if (!ReplyTimeoutHandle.IsValid())
+	{
+		return false;
+	}
+	const FName SilentReplyID = PendingSilentReplyID;
+	UTalesComponent* Owner = TimeoutOwnerComponent.Get();
+	const bool bCanSelect = CanResolveReplyTimeoutToSilence(SilentReplyID);
+	CancelReplyTimeout(bCanSelect);
+	if (bCanSelect && Owner)
+	{
+		Owner->ServerSelectDialogueOption(SilentReplyID);
+	}
+	return bCanSelect;
+}
+
+void UTerritoryNarrativePartyComponent::BindSiblingReplySources()
+{
+	AActor* OwnerActor = GetOwner();
+	if (!OwnerActor)
+	{
+		return;
+	}
+	TArray<UTalesComponent*> Sources;
+	OwnerActor->GetComponents<UTalesComponent>(Sources);
+	for (UTalesComponent* Source : Sources)
+	{
+		if (Source && Source != this)
+		{
+			Source->OnDialogueRepliesAvailable.AddUniqueDynamic(this,
+				&ThisClass::HandleRepliesAvailable);
+		}
+	}
+}
+
+bool UTerritoryNarrativePartyComponent::IsReplyTimeoutActive() const
+{
+	return ReplyTimeoutHandle.IsValid();
+}
+
+float UTerritoryNarrativePartyComponent::GetReplyTimeRemaining() const
+{
+	if (!ReplyTimeoutHandle.IsValid())
+	{
+		return 0.f;
+	}
+	if (UWorld* World = GetWorld())
+	{
+		return FMath::Max(0.f, World->GetTimerManager().GetTimerRemaining(ReplyTimeoutHandle));
+	}
+	return 0.f;
+}
+
+float UTerritoryNarrativePartyComponent::GetReplyTimeoutDuration() const
+{
+	return ReplyTimeoutSeconds;
+}
+
+FName UTerritoryNarrativePartyComponent::GetPendingSilentReplyID() const
+{
+	return PendingSilentReplyID;
 }

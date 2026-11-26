@@ -14,7 +14,7 @@ UTerritoryLockEvent::UTerritoryLockEvent(const FObjectInitializer& ObjectInitial
 	bRefireOnLoad = false;
 }
 
-void UTerritoryLockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
+void UTerritoryLockEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -56,7 +56,7 @@ UTerritoryUnlockEvent::UTerritoryUnlockEvent(const FObjectInitializer& ObjectIni
 	bRefireOnLoad = false;
 }
 
-void UTerritoryUnlockEvent::ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
+void UTerritoryUnlockEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(

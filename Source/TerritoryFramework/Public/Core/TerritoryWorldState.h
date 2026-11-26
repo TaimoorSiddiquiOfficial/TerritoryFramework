@@ -5,8 +5,11 @@
 #include "GameplayTagContainer.h"
 #include "NarrativeSavableActor.h"
 #include "Core/TerritoryDiplomacyTypes.h"
+#include "Core/TerritoryEvidenceTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
+#include "Core/TerritoryTransactionSnapshot.h"
+#include "Core/TerritoryUpgradeTypes.h"
 #include "TerritoryWorldState.generated.h"
 
 class ATerritoryVolume;
@@ -236,8 +239,31 @@ class TERRITORYFRAMEWORK_API ATerritoryWorldState : public AActor, public INarra
 
 public:
 	ATerritoryWorldState();
+	virtual void PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker) override;
+	/** False until a complete supported history snapshot arrives; empty history is not proof of readiness. */
+	UFUNCTION(BlueprintPure, Category="Territory|Transaction")
+	bool IsTransactionHistoryReady() const;
+
+	/**
+	 * False on a client until the authoritative strategic directory has actually been received.
+	 *
+	 * The directory is replicated, but "no rows yet" and "the server holds no rows" are the same
+	 * empty array, so a client cannot tell a genuine zero from a hydration gap by looking at the
+	 * contents. Counting rows would therefore answer "this faction holds nothing" during join and
+	 * again after a reconnect, which is a false statement about another faction's holdings rather
+	 * than an unknown one. Consumers that gate story, capture or assault decisions must treat a
+	 * false result as unavailable instead of as a zero count.
+	 *
+	 * A server is always ready: its directory is the authority, and RegisterDefinitionHierarchy
+	 * seeds every authored CampaignCities row before any client can connect.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Capture|Hierarchy",
+		meta=(DisplayName="Is Capture Directory Ready"))
+	bool IsCaptureDirectoryReady() const;
+	virtual void PostLoad() override;
 	virtual void Serialize(FArchive& Ar) override;
 #if WITH_EDITOR
+	virtual bool CanChangeIsSpatiallyLoadedFlag() const override { return false; }
 	virtual EDataValidationResult IsDataValid(class FDataValidationContext& Context) const override;
 #endif
 
@@ -319,6 +345,30 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Diplomacy")
 	int32 GetReputation(const FGameplayTag& Faction) const;
 
+	// ─── Evidence Ledger API (server-authoritative) ───
+
+	/**
+	 * Projection writer used by the evidence ledger authority. Blueprint must record a
+	 * fact through UTerritoryEvidenceLedgerSubsystem; this only publishes the read model.
+	 */
+	void PublishEvidenceLedger();
+
+	/** Return the evidence window this world has published or received. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Evidence")
+	TArray<FTerritoryEvidenceRecord> GetEvidenceLedger() const;
+
+	/**
+	 * False on a client until the evidence ledger has actually been received.
+	 *
+	 * "No facts yet" and "the ledger has not replicated yet" are the same empty array,
+	 * so a client cannot tell a real zero from a hydration gap by looking at contents.
+	 * Consumers must treat a false result as unknown rather than as "no evidence".
+	 * A server is always ready: its ledger is the authority.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Evidence",
+		meta=(DisplayName="Is Evidence Ledger Ready"))
+	bool IsEvidenceLedgerReady() const;
+
 	// ─── Capture Summary API (server-authoritative) ───
 
 	/**
@@ -349,6 +399,13 @@ public:
 	/** Native projection writer for Definition rows; never overwrites live ownership. */
 	void RegisterDefinitionHierarchy(const UTerritoryDefinition* Definition);
 
+	/** Authored metadata from the existing campaign directory; never invents ownership. */
+	const UTerritoryDefinition* FindTerritoryDefinition(const FGameplayTag& Tag) const
+	{
+		const auto* Definition = RegisteredHierarchyDefinitions.Find(Tag);
+		return Definition ? Definition->Get() : nullptr;
+	}
+
 	/** Native projection reconciliation for configured and loaded Definitions. */
 	void RefreshStrategicDirectory();
 
@@ -361,6 +418,25 @@ public:
 	TArray<FReplicatedCaptureSummary> GetAllCaptureSummaries() const
 	{
 		return ReplicatedCaptureSummaries;
+	}
+
+	/** Server projection writer for a faction-scoped upgrade tier. */
+	void SetFactionUpgradeTier(const FGameplayTag& Faction, int32 Tier);
+
+	/** Replicated/read-model lookup; 0 means no tier unlocked. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Upgrades")
+	int32 GetFactionUpgradeTier(FGameplayTag Faction) const;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Upgrades")
+	TArray<FReplicatedFactionUpgradeTier> GetAllFactionUpgradeTiers() const
+	{
+		return ReplicatedFactionUpgradeTiers;
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Upgrades")
+	class UTerritoryUpgradeBalanceProfile* GetUpgradeBalanceProfile() const
+	{
+		return UpgradeBalanceProfile;
 	}
 
 	/**
@@ -505,8 +581,12 @@ protected:
 	UPROPERTY(ReplicatedUsing=OnRep_EconomyState)
 	TArray<FReplicatedFactionEconomy> ReplicatedTreasuries;
 
-	UPROPERTY(ReplicatedUsing=OnRep_EconomyState)
+	UPROPERTY(Transient)
 	TArray<FReplicatedTransaction> ReplicatedTransactions;
+	UPROPERTY(ReplicatedUsing=OnRep_TransactionState)
+	FTerritoryTransactionSnapshot TransactionSnapshot;
+	bool bTransactionSnapshotDirty = true;
+	bool bTransactionSnapshotDecoded = false;
 
 	UPROPERTY(ReplicatedUsing=OnRep_ProductionState)
 	TArray<FTerritoryProductionSiteRecord> ReplicatedProductionSites;
@@ -529,8 +609,49 @@ protected:
 	UPROPERTY(Replicated)
 	TArray<FReplicatedCaptureSummary> ReplicatedCaptureSummaries;
 
+	/**
+	 * Server signal that the strategic directory has been seeded, replicated so a client can tell
+	 * "no rows arrived yet" from "the authority holds no rows".
+	 *
+	 * A flag rather than a check of the array's contents because both of those states are the same
+	 * empty array on the wire, and because a campaign with no authored Cities would otherwise never
+	 * become ready. It is DECLARED after ReplicatedCaptureSummaries on purpose: a client applies
+	 * replicating properties in RepIndex order, UClass::SetUpRuntimeReplicationData assigns RepIndex
+	 * from the declared property list (native classes are not offset-sorted the way Blueprint ones
+	 * are), and FRepLayout::InitFromClass then iterates Parents by RepIndex. DOREPLIFETIME call
+	 * order does not affect that, so moving this declaration above the rows would break the
+	 * guarantee while leaving the registration list looking correct. The flag is server-set only
+	 * (see RefreshStrategicDirectory) and never cleared, so a late join receives it with the
+	 * initial snapshot.
+	 */
+	UPROPERTY(Replicated)
+	bool bCaptureDirectoryPublished = false;
+
 	UPROPERTY(ReplicatedUsing=OnRep_AssaultState)
 	TArray<FTerritoryAssaultRecord> ReplicatedAssaults;
+
+	/** Faction-scoped Place-upgrade tiers; one member's perk unlocks the tier for the whole faction. */
+	UPROPERTY(ReplicatedUsing=OnRep_UpgradeTiers, SaveGame, BlueprintReadOnly,
+		Category = "Territory|Upgrades")
+	TArray<FReplicatedFactionUpgradeTier> ReplicatedFactionUpgradeTiers;
+
+	/** Committed evidence facts; the server publishes them, clients read them. */
+	UPROPERTY(ReplicatedUsing=OnRep_EvidenceState)
+	TArray<FTerritoryEvidenceRecord> ReplicatedEvidence;
+
+	/**
+	 * Server signal that the evidence ledger has been published, replicated so a client can tell
+	 * "no rows arrived yet" from "the authority holds no facts".
+	 *
+	 * A flag rather than a check of the array's contents because both states are the same empty
+	 * array on the wire. DECLARED after ReplicatedEvidence on purpose, for the same RepIndex
+	 * reason documented on bCaptureDirectoryPublished: a client applies replicating properties in
+	 * RepIndex order, so a readiness flag declared before its rows could be applied first and
+	 * report readiness for an array that has not arrived. The flag is server-set only and is
+	 * refreshed by PublishEvidenceLedger, so a late join receives it with the initial snapshot.
+	 */
+	UPROPERTY(Replicated)
+	bool bEvidenceLedgerPublished = false;
 
 	// ─── Save Data (mirrors replicated state) ───
 
@@ -567,6 +688,16 @@ protected:
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryAssaultRecord> SavedAssaults;
 
+	UPROPERTY(SaveGame)
+	TArray<FReplicatedFactionUpgradeTier> SavedFactionUpgradeTiers;
+
+	/**
+	 * Coarse AI catch-up policy for faction tiers and AI-owned Places. Optional: empty disables
+	 * automatic AI upgrades and leaves player/faction purchases untouched.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Territory|Upgrades")
+	TObjectPtr<class UTerritoryUpgradeBalanceProfile> UpgradeBalanceProfile;
+
 	/** Server-only deterministic cycle ledger; clients need assault read models, not scheduler history. */
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryAssaultCycleRecord> SavedAssaultCycles;
@@ -579,6 +710,10 @@ protected:
 	 */
 	UPROPERTY(SaveGame)
 	TArray<FReplicatedCaptureSummary> SavedStrategicDirectory;
+
+	/** Committed evidence facts, mirrored from the ledger so the window survives a restart. */
+	UPROPERTY(SaveGame)
+	TArray<FTerritoryEvidenceRecord> SavedEvidence;
 
 	/** Stable editor-authored identity for the world's Narrative persistence and replicated Territory snapshot actor. */
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
@@ -602,6 +737,9 @@ private:
 	friend class FTFSavedStrategicDirectoryProjectionRoundTrip;
 	friend class FTFWorldPartitionActorRecords;
 	friend struct FTFTransitionFrameProbe;
+	friend class FTFCaptureDirectoryReadiness;
+	friend class FTFEvidenceLedgerProjection;
+	friend class FTFEvidenceLedgerPersistence;
 #endif
 	/** Authored topology only; political state remains in Volumes and derived snapshots. */
 	UPROPERTY(Transient)
@@ -637,17 +775,38 @@ private:
 	void SaveStreamingLevel(ULevel* Level, UWorld* World);
 	void SyncSubsystemsFromReplicatedState();
 	void SyncEconomySubsystemFromReplicatedState();
+	void SyncTreasuryFromReplicatedState();
+	void SyncTransactionsFromReplicatedState();
+	void SyncProductionFromReplicatedState();
 	void SyncDiplomacySubsystemFromReplicatedState();
 	void SyncCounterAttackSubsystemFromReplicatedState();
+	void SyncUpgradeSubsystemFromReplicatedState();
 
 	/** Sync the replicated diplomacy read model from the authoritative subsystem.
 	 *  Shared by the save boundary and by authority BeginPlay: the live handlers keep it
 	 *  current once it changes, this seeds the relationships a session starts with. */
 	void PublishDiplomacyReadModel();
 
+	/**
+	 * Seed the evidence read model from the authoritative ledger. The live handler keeps
+	 * it current once it changes; this seeds the window a session opens with, which no
+	 * live delegate ever fires for.
+	 */
+	void SyncEvidenceLedgerFromReplicatedState();
+
+	/** Hydrate the client-side evidence read model after the authoritative snapshot replicates. */
+	UFUNCTION()
+	void OnRep_EvidenceState();
+
+	UFUNCTION()
+	void OnEvidenceRecordedLive(const FTerritoryEvidenceRecord& Record);
+
 	/** Hydrate the client-side economy query model after authoritative snapshots replicate. */
 	UFUNCTION()
 	void OnRep_EconomyState();
+
+	UFUNCTION()
+	void OnRep_TransactionState();
 
 	UFUNCTION()
 	void OnRep_ProductionState();
@@ -655,6 +814,10 @@ private:
 	/** Hydrate the client-side diplomacy query model after authoritative snapshots replicate. */
 	UFUNCTION()
 	void OnRep_DiplomacyState();
+
+	/** Hydrate the client-side faction upgrade-tier read model. */
+	UFUNCTION()
+	void OnRep_UpgradeTiers();
 
 	UFUNCTION()
 	void OnReputationSubjectChangedLive(FGameplayTag SubjectFaction);

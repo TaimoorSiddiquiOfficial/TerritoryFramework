@@ -12,6 +12,8 @@
 #include "Engine/Level.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "UnrealFramework/NarrativePlayerController.h"
+#include "Tales/TerritoryNarrativeContext.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFTalesConditionCallbacks,
 	"TerritoryFramework.Tales.Regression.ConditionMutationAndTaskEndCallbacks",
@@ -65,11 +67,14 @@ bool FTFTalesConditionCallbacks::RunTest(const FString& Parameters)
 	UNarrativePartyComponent* Party = NewObject<UNarrativePartyComponent>(PartyOwner);
 	for (int32 Index = 0; Index < 2; ++Index)
 	{
-		APlayerController* MemberOwner = NewObject<APlayerController>(World->PersistentLevel);
+		// Narrative only admits a member whose outer resolves to its own controller type.
+		ANarrativePlayerController* MemberOwner = NewObject<ANarrativePlayerController>(World->PersistentLevel);
 		MemberOwner->SetRole(ROLE_Authority);
 		TestTrue(TEXT("Narrative admits a real controller-owned party member"),
 			Party->AddPartyMember(NewObject<UTalesComponent>(MemberOwner)));
 	}
+	const TArray<UTalesComponent*> PartyMembers = Party->GetPartyMembers();
+	if (!TestEqual(TEXT("The party retains both controller-owned members"), PartyMembers.Num(), 2)) return false;
 	First->PartyConditionPolicy = EPartyConditionPolicy::AnyPlayerPasses;
 	First->Callback = []() { return false; };
 	Event->Conditions = {First};
@@ -87,7 +92,7 @@ bool FTFTalesConditionCallbacks::RunTest(const FString& Parameters)
 	First->Callback = []() { return false; };
 	First->bNot = true;
 	TestTrue(TEXT("Party member evaluation honors Narrative Not"),
-		TerritoryTales::DoEventConditionsPass(Event, nullptr, nullptr, Party->GetPartyMembers()[0]));
+		TerritoryTales::DoEventConditionsPass(Event, nullptr, nullptr, PartyMembers[0]));
 	First->bNot = false;
 	First->Callback = []() { return true; };
 	Event->Conditions = {First, Second};

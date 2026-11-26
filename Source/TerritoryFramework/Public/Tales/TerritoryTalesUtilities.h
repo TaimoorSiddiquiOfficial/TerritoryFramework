@@ -59,6 +59,13 @@ namespace TerritoryTales
 	TERRITORYFRAMEWORK_API bool DoesConditionPass(UNarrativeCondition* Condition,
 		APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent);
 
+	/**
+	 * Runs one event with the explicit Tales context. Territory events keep the full
+	 * context; other Narrative events fall back to their public dispatch entry point.
+	 */
+	TERRITORYFRAMEWORK_API void ExecuteEvent(UNarrativeEvent* Event, APawn* Target,
+		APlayerController* Controller = nullptr, UTalesComponent* NarrativeComponent = nullptr);
+
 	/** Evaluates one node condition, including fail-closed Any/Leader party admission. */
 	TERRITORYFRAMEWORK_API bool EvaluateConditionWithNarrative(UNarrativeNodeBase* Probe,
 		UNarrativeCondition* Condition, APawn* Target, APlayerController* Controller,

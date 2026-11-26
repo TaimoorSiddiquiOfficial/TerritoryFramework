@@ -8,6 +8,27 @@
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "UObject/UnrealType.h"
 
+#if WITH_EDITOR
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFWorldStateNonSpatial,
+	"TerritoryFramework.WorldState.Regression.WorldPartitionResidency",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFWorldStateNonSpatial::RunTest(const FString& Parameters)
+{
+	TestFalse(TEXT("WorldState CDO is not spatially loaded"), GetDefault<ATerritoryWorldState>()->GetIsSpatiallyLoaded());
+	UWorld* World = UWorld::CreateWorld(EWorldType::Editor, false);
+	auto* State = World->SpawnActor<ATerritoryWorldState>();
+	TestFalse(TEXT("New placed WorldState cannot stream out with territory cells"), State->GetIsSpatiallyLoaded());
+	TestFalse(TEXT("Editor does not expose an unsafe residency toggle"), State->CanChangeIsSpatiallyLoadedFlag());
+	// Simulate an explicit true property serialized by a pre-repair Blueprint/map.
+	FindFProperty<FBoolProperty>(AActor::StaticClass(), TEXT("bIsSpatiallyLoaded"))->SetPropertyValue_InContainer(State, true);
+	State->PostLoad();
+	TestFalse(TEXT("Old serialized actor residency migrates on load"), State->GetIsSpatiallyLoaded());
+	World->DestroyWorld(false);
+	return true;
+}
+#endif
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFWorldStateDistrictIdentityBounds,
 	"TerritoryFramework.WorldState.Regression.DistrictIdentityBounds",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

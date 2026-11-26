@@ -33,6 +33,14 @@ ATerritoryDistractionProjectile::ATerritoryDistractionProjectile()
 	ProjectileMovement->InitialSpeed = 1200.f;
 	ProjectileMovement->MaxSpeed = 1200.f;
 	ProjectileMovement->ProjectileGravityScale = 1.f;
+	// The throwing ability spawns this actor deferred, writes a WORLD-space launch velocity
+	// (hand socket -> crosshair aim point), and only then calls FinishSpawning. That call runs
+	// UProjectileMovementComponent::InitializeComponent, which transforms the velocity by the
+	// component rotation when this flag is true (the engine default). The stone was therefore
+	// rotated a second time by its own launch rotation: a throw aimed along -X left along +X,
+	// which players reported as "the stone does not follow the crosshair". Every throw this
+	// plugin produces supplies world space, so the component must never re-interpret it.
+	ProjectileMovement->bInitialVelocityInLocalSpace = false;
 	ProjectileMovement->bRotationFollowsVelocity = true;
 	ProjectileMovement->bShouldBounce = true;
 	ProjectileMovement->Bounciness = 0.35f;

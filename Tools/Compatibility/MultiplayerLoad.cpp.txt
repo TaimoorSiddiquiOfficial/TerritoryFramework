@@ -1,0 +1,27 @@
+bool UNarrativeSaveSubsystem::MultiplayerLoad(const FString& SaveName, const bool bChangeMap)
+{
+	UWorld* World = GetWorld();
+	if (!World || !World->GetAuthGameMode() || World->GetNetMode() == NM_Client
+		|| !GEngine || !GEngine->GetWorldContextFromWorld(World) || !World->NextURL.IsEmpty()
+		|| World->IsInSeamlessTravel() || SaveName.IsEmpty()
+		|| SaveName.Contains(TEXT("?")) || SaveName.Contains(TEXT("#"))
+		|| SaveName.Contains(TEXT("\r")) || SaveName.Contains(TEXT("\n")))
+	{
+		return false;
+	}
+	TStrongObjectPtr<UNarrativeSave> LoadedSave(LoadTerritoryValidatedNativeSlot(SaveName, GetSaveGameClass()));
+	const FIntProperty* VersionField = FindFProperty<FIntProperty>(UNarrativeSave::StaticClass(), TEXT("SavedDataVersion"));
+	if (!LoadedSave.IsValid() || !LoadedSave->IsA(GetSaveGameClass()) || !VersionField
+		|| VersionField->GetPropertyValue_InContainer(LoadedSave.Get()) != ENarrativeSaveGameVersion::LatestVersion)
+	{
+		return false;
+	}
+	FString Destination = bChangeMap ? LoadedSave->LevelName : UGameplayStatics::GetCurrentLevelName(World, true);
+	if (Destination.IsEmpty() || Destination.Contains(TEXT("?")) || Destination.Contains(TEXT("#"))
+		|| !GEngine->MakeSureMapNameIsValid(Destination))
+	{
+		return false;
+	}
+	// ServerTravel reports admission failure and also works on an empty dedicated server.
+	return World->ServerTravel(Destination + TEXT("?SaveGameName=") + SaveName);
+}

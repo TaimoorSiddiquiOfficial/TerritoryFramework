@@ -4,7 +4,8 @@ import json, os, re, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # plugin root; this file is in Tools/
 DOC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "Docs", "37_Every_Option_Reference.md")
-rows = json.load(open(os.path.join(ROOT, "Tools", "options_inventory.json"), encoding="utf-8"))
+import runpy
+rows = runpy.run_path(os.path.join(ROOT, "Tools", "Extract-Options.py"))["read_fresh_inventory"]()
 
 inv = {(r["class"], r["name"]): r for r in rows if r["edit_spec"]}
 

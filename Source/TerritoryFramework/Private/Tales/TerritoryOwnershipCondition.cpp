@@ -5,9 +5,12 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryTalesUtilities.h"
+// Narrative 2.5 types GetOwningController() as ANarrativePlayerController*, so the
+// controller recovery below needs the concrete declaration to be a valid upcast.
+#include "UnrealFramework/NarrativePlayerController.h"
 #include "Engine/World.h"
 
-bool UTerritoryOwnershipCondition::CheckCondition_Implementation(APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryOwnershipCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryToCheck.IsValid())
 	{

@@ -3,7 +3,9 @@
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "GameplayTagContainer.h"
+#include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "Core/TerritoryTypes.h"
+#include "Core/TerritoryStealthProfile.h"
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "TerritoryBlueprintLibrary.generated.h"
 
@@ -19,6 +21,8 @@ class AAIController;
 class ANarrativeNPCCharacter;
 class ANarrativeNPCController;
 class UNPCGoalItem;
+class UNPCGoalGenerator;
+struct FTerritoryInfiltrationSnapshot;
 
 /**
  * Global Blueprint function library for territory queries.
@@ -33,6 +37,8 @@ class UNPCGoalItem;
  *   GetTerritoryEconomy(MyActor)->GetActorCurrency(Requester) -> int32
  *   TerritoryBlueprintLibrary::IsSameFaction(FactionA, FactionB) -> bool
  */
+enum class ETerritoryStealthEvidence : uint8;
+
 UCLASS(BlueprintType)
 class TERRITORYFRAMEWORK_API UTerritoryBlueprintLibrary : public UBlueprintFunctionLibrary
 {
@@ -67,6 +73,11 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Subsystem",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Territory Diplomacy"))
 	static UTerritoryDiplomacySubsystem* GetTerritoryDiplomacy(const UObject* WorldContextObject);
+
+	/** Get the evidence ledger subsystem (durable physical facts about the campaign). */
+	UFUNCTION(BlueprintPure, Category="Territory|Subsystem",
+		meta=(WorldContext="WorldContextObject", DisplayName="Get Territory Evidence Ledger"))
+	static UTerritoryEvidenceLedgerSubsystem* GetTerritoryEvidenceLedger(const UObject* WorldContextObject);
 
 	// ═══════════════════════════════════════════════════════════════════════════════
 	// Territory Queries (BlueprintPure)
@@ -116,6 +127,83 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Query",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction Territory Count"))
 	static int32 GetFactionTerritoryCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag);
+
+	// ═══════════════════════════════════════════════════════════════════════════════
+	// Stealth Contest Admission
+	// ═══════════════════════════════════════════════════════════════════════════════
+
+	/**
+	 * Single authority for the stealth profile's "who may start a contest inside a Place" rule.
+	 *
+	 * True when the profile does not require a wielded weapon, or a war already exists between the
+	 * Place owner and the pawn's faction, or the pawn is actually wielding a weapon. An equipped but
+	 * holstered weapon is not a threat. The story-bounds gate and the stealth exposure escalation
+	 * both call this, so a holstered visitor is warned instead of contested.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Does Pawn Admit Story Contest",
+			ToolTip="Stealth profile rule: profile flag off, an existing war, or a wielded weapon admits the contest."))
+	static bool DoesPawnAdmitStoryContest(const AActor* Pawn, const AActor* TerritoryActor,
+		const UTerritoryStealthProfile* Profile, bool bTreatAsAggressor = false);
+
+	/** True when this pawn's faction is at war with the faction owning the given Territory actor. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Is Pawn At War With Territory Owner"))
+	static bool IsPawnAtWarWithTerritoryOwner(const AActor* Pawn, const AActor* TerritoryActor);
+
+	/**
+	 * True when this evidence proves the target attacked rather than merely being seen: fired while
+	 * seen, an unseen gunshot or bullet impact, confirmed damage, a seen defender kill, or a story
+	 * scripted exposure. Such a target is a legitimate combat target whatever it is holding.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Is Aggressive Stealth Evidence"))
+	static bool IsAggressiveStealthEvidence(ETerritoryStealthEvidence Evidence);
+
+	/**
+	 * Aggression plus freshness: a clue older than WindowSeconds stops admitting the player to combat
+	 * and to the story-bounds contest. WindowSeconds <= 0 keeps the legacy "last evidence wins"
+	 * behaviour. The contest gate, the guard engagement decision and the attack-goal gate all call
+	 * this, so a guard and the Place can never disagree about whether a player is a threat.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(WorldContext="WorldContextObject",
+			DisplayName="Is Recent Aggressive Stealth Evidence",
+			ToolTip="True when the last evidence is aggressive and no older than Window Seconds. Stale gunfire no longer keeps a holstered visitor attackable."))
+	static bool IsRecentAggressiveStealthEvidence(const UObject* WorldContextObject,
+		const FTerritoryInfiltrationSnapshot& Snapshot, float WindowSeconds);
+
+	/**
+	 * Deterministic half of Is Recent Aggressive Stealth Evidence, exposed for tests and previews.
+	 * NowSeconds and LastEvidenceWorldTime must come from the same clock.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Is Recent Aggressive Stealth Evidence At Time"))
+	static bool IsRecentAggressiveStealthEvidenceAtTime(
+		const FTerritoryInfiltrationSnapshot& Snapshot, float NowSeconds, float WindowSeconds);
+
+	/**
+	 * Goal-generator gate for the guard attack goal.
+	 *
+	 * Call it at the top of a goal generator's "Try Add Attack Goal From Actor" before the parent
+	 * implementation runs. It resolves the generator's owning guard, asks that guard's stealth
+	 * observer whether this perceived actor must still be ignored (undetected, below the profile's
+	 * sight threshold), and returns false in that case. Parent filters (attitude, sense, class)
+	 * remain intact because the caller passes their result through bParentAllows.
+	 *
+	 * Fails open: a generator without a Territory guard, a non-stealth Place, or a missing
+	 * observer returns bParentAllows unchanged.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Evaluate Territory Attack Goal Gate",
+			ToolTip="True when the parent generator may add its attack goal. False while stealth still hides the target, so the guard investigates instead of attacking."))
+	static bool EvaluateAttackGoalGate(UNPCGoalGenerator* Generator,
+		AActor* PerceivedActor, bool bParentAllows = true);
+
+	/** True when the pawn's Narrative weapon is in hand (a wield slot is populated), not merely equipped. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Is Pawn Wielding Weapon"))
+	static bool IsPawnWieldingWeapon(const AActor* Pawn);
 
 	// ═══════════════════════════════════════════════════════════════════════════════
 	// Authored Floors
@@ -244,6 +332,11 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Capture",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Capture Progress"))
 	static float GetCaptureProgress(const UObject* WorldContextObject, const FGameplayTag& TerritoryTag);
+
+	/** Loaded actor first, then the existing WorldState directory. False means the row is not ready. */
+	UFUNCTION(BlueprintPure, Category="Territory|Capture", meta=(WorldContext="WorldContextObject"))
+	static bool TryGetTerritoryCaptureState(const UObject* WorldContextObject, const FGameplayTag& TerritoryTag,
+		ETerritoryState& OutState, FGameplayTag& OutContestingFaction, float& OutProgress);
 
 	/**
 	 * Immediately transfers ownership of territory to faction. Server-only.
@@ -420,15 +513,67 @@ public:
 	/**
 	 * Current unlocked Claimed Districts, including Definition-backed World
 	 * Partition rows. Contested, partial, locked, and unclaimed Districts do not count.
+	 *
+	 * This is the convenience count, and it answers 0 when it has nothing to count. Code that makes
+	 * a gameplay or story decision must use TryGetFactionDistrictCount instead: on a client that has
+	 * not received the authoritative directory yet, 0 here means "not known", not "holds none".
 	 */
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Faction District Count"))
 	static int32 GetFactionDistrictCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag);
 
+	/**
+	 * Readiness-aware claimed-District count.
+	 *
+	 * Returns false and leaves OutCount at 0 when the answer is genuinely unknown: a client whose
+	 * authoritative strategic directory has not arrived yet. Callers that gate story, capture or
+	 * assault decisions must refuse the decision on false rather than compare the unknown value,
+	 * because comparing it would read another faction's holdings as empty.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy",
+		meta=(WorldContext="WorldContextObject", DisplayName="Try Get Faction District Count"))
+	static bool TryGetFactionDistrictCount(const UObject* WorldContextObject,
+		const FGameplayTag& FactionTag, int32& OutCount);
+
 	/** Returns all districts marked as capitols (bIsCapital=true). */
 	UFUNCTION(BlueprintPure, Category="Territory|Hierarchy",
 		meta=(WorldContext="WorldContextObject", DisplayName="Get Capital Districts"))
 	static TArray<ATerritoryDistrict*> GetCapitalDistricts(const UObject* WorldContextObject);
+
+	// ═══════════════════════════════════════════════════════════════════════════════
+	// Dialogue State
+	// ═══════════════════════════════════════════════════════════════════════════════
+
+	/**
+	 * Maps a Territory diplomacy relationship onto the dialogue-state tag that a state machine
+	 * (or any other server authority) should apply to an NPC's Ability System. Ambient tagged
+	 * dialogue entries read that tag through their Required/Blocked tag filters.
+	 *
+	 * Read-only: this never changes a treaty or a Narrative attitude.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Dialogue",
+		meta=(DisplayName="Get Dialogue State Tag"))
+	static FGameplayTag GetDialogueStateTag(EDiplomacyState Relationship, bool bSameFaction);
+
+	/**
+	 * Plays one resolved tagged-dialogue line natively on the listener's Tales component - the same
+	 * call Narrative's own NPCInteractable makes.
+	 *
+	 * Narrative's ANarrativeNPCCharacter::ExecutePlayTaggedDialogue is a BlueprintImplementableEvent
+	 * with no implementation in this project, so a tagged line that goes through the vendor path would
+	 * only be stamped (LastPlayTime) and never heard. Territory NPC Blueprints can forward that event
+	 * here, and Territory's own requests fall back to it, so both routes share one playback rule.
+	 *
+	 * Listener = DialogueInstigator, else the nearest player pawn within the row's MaxDistance
+	 * (MaxDistance <= 0 means unlimited). Server-authoritative: returns false on a client, with no
+	 * dialogue class, no Tales component, or while that listener is already inside a dialogue.
+	 * bKeepMovementDuringLine (default true) keeps the listener moving and fighting: a tagged line is
+	 * an in-gameplay bark, so the dialogue must not root the player the way a cutscene does.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|Dialogue",
+		meta=(DisplayName="Play Tagged Dialogue Line"))
+	static bool PlayTaggedDialogueLine(const FTaggedDialogue& Row, AActor* Speaker,
+		AActor* DialogueInstigator = nullptr, bool bKeepMovementDuringLine = true);
 
 	// ═══════════════════════════════════════════════════════════════════════════════
 	// Debug Helpers

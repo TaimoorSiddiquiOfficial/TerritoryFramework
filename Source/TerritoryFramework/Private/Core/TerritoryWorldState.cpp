@@ -9,9 +9,11 @@
 #include "Core/TerritoryHierarchy.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryUpgradeSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
+#include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
 #include "SaveSystemStatics.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Engine/Level.h"
@@ -143,6 +145,20 @@ ATerritoryWorldState::ATerritoryWorldState()
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	bAlwaysRelevant = true;
+#if WITH_EDITORONLY_DATA
+	// Network relevance does not keep a placed actor resident in World Partition.
+	bIsSpatiallyLoaded = false;
+#endif
+}
+
+void ATerritoryWorldState::PostLoad()
+{
+	Super::PostLoad();
+#if WITH_EDITORONLY_DATA
+	// Old maps/Blueprints can carry an explicit inherited true value. Resave those
+	// assets before cooking so their external actor descriptors receive this value.
+	bIsSpatiallyLoaded = false;
+#endif
 }
 
 ATerritoryWorldState* ATerritoryWorldState::FindTerritoryWorldState(
@@ -191,6 +207,11 @@ void ATerritoryWorldState::BeginPlay()
 		// actor BeginPlay, and LoadFromGameState broadcasts nothing.
 		PublishDiplomacyReadModel();
 
+		// Same seeding reason for evidence: the ledger restores its window without
+		// broadcasting, so a session that opens with recorded facts would replicate none
+		// of them, and a late join would read an empty ledger as "no evidence".
+		PublishEvidenceLedger();
+
 		// Actor BeginPlay order is not guaranteed. Seed summaries for Territory actors
 		// that registered before this WorldState; territories that start later publish
 		// their own summary from ATerritoryVolume::BeginPlay.
@@ -227,7 +248,7 @@ void ATerritoryWorldState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTreasuries);
-	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTransactions);
+	DOREPLIFETIME(ATerritoryWorldState, TransactionSnapshot);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedProductionSites);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedResourceSnapshots);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedTreaties);
@@ -235,7 +256,11 @@ void ATerritoryWorldState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedReputationSubjectFaction);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedDiplomacyHistory);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedCaptureSummaries);
+	DOREPLIFETIME(ATerritoryWorldState, bCaptureDirectoryPublished);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedAssaults);
+	DOREPLIFETIME(ATerritoryWorldState, ReplicatedFactionUpgradeTiers);
+	DOREPLIFETIME(ATerritoryWorldState, ReplicatedEvidence);
+	DOREPLIFETIME(ATerritoryWorldState, bEvidenceLedgerPublished);
 }
 
 #if WITH_EDITOR
@@ -338,6 +363,40 @@ TArray<FGameplayTag> ATerritoryWorldState::GetAllFactionsWithEconomy() const
 	return Result;
 }
 
+void ATerritoryWorldState::SetFactionUpgradeTier(const FGameplayTag& Faction, int32 Tier)
+{
+	if (!HasAuthority() || !Faction.IsValid())
+	{
+		return;
+	}
+	for (FReplicatedFactionUpgradeTier& Entry : ReplicatedFactionUpgradeTiers)
+	{
+		if (Entry.Faction == Faction)
+		{
+			Entry.Tier = FMath::Max(0, Tier);
+			ForceNetUpdate();
+			return;
+		}
+	}
+	FReplicatedFactionUpgradeTier Entry;
+	Entry.Faction = Faction;
+	Entry.Tier = FMath::Max(0, Tier);
+	ReplicatedFactionUpgradeTiers.Add(Entry);
+	ForceNetUpdate();
+}
+
+int32 ATerritoryWorldState::GetFactionUpgradeTier(FGameplayTag Faction) const
+{
+	for (const FReplicatedFactionUpgradeTier& Entry : ReplicatedFactionUpgradeTiers)
+	{
+		if (Entry.Faction == Faction)
+		{
+			return Entry.Tier;
+		}
+	}
+	return 0;
+}
+
 void ATerritoryWorldState::SetProductionState(
 	const TArray<FTerritoryProductionCheckpoint>& Checkpoints,
 	const TArray<FTerritoryProductionSiteRecord>& Sites,
@@ -378,6 +437,7 @@ void ATerritoryWorldState::RecordTransaction(const FReplicatedTransaction& Trans
 {
 	if (!HasAuthority()) return;
 	ReplicatedTransactions.Add(Transaction);
+	bTransactionSnapshotDirty = true;
 
 	// Use MaxTransactionHistory from EconomySubsystem (default 500)
 	const UTerritoryEconomySubsystem* Economy = GetWorld()
@@ -414,6 +474,32 @@ TArray<FReplicatedTransaction> ATerritoryWorldState::GetTransactionHistory(const
 		}
 	}
 	return Result;
+}
+
+bool ATerritoryWorldState::IsTransactionHistoryReady() const
+{
+	return GetNetMode() != NM_Client || bTransactionSnapshotDecoded;
+}
+
+bool ATerritoryWorldState::IsCaptureDirectoryReady() const
+{
+	// A server's directory is the authority, so it is ready the moment it can be asked. A client
+	// must wait for the server's publish signal: an empty replicated array alone cannot prove that
+	// the authority holds no rows rather than that the snapshot has not arrived yet.
+	return GetNetMode() != NM_Client || bCaptureDirectoryPublished;
+}
+
+void ATerritoryWorldState::PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker)
+{
+	Super::PreReplication(ChangedPropertyTracker);
+	if (HasAuthority() && bTransactionSnapshotDirty)
+	{
+		bTransactionSnapshotDirty = false;
+		if (!TransactionSnapshot.Build(ReplicatedTransactions))
+		{
+			UE_LOG(LogTerritory, Warning, TEXT("Transaction history exceeds the bounded network snapshot budget. Native currency and saved history remain intact; clients report history unavailable."));
+		}
+	}
 }
 
 // ─── Treaty API ───
@@ -935,6 +1021,10 @@ bool ATerritoryWorldState::IsDirectoryIdentityRetired(const FGuid& Identity) con
 void ATerritoryWorldState::ApplyDirectoryRetirements(bool bReconcileAssaults)
 {
 	if (!HasAuthority() || RetiredDirectoryGUIDs.IsEmpty()) return;
+	if (UTerritoryEconomySubsystem* Economy = GetWorld() ? GetWorld()->GetSubsystem<UTerritoryEconomySubsystem>() : nullptr)
+	{
+		for (const FGuid& Identity : RetiredDirectoryGUIDs) Economy->RetireProductionSite(Identity);
+	}
 	if (bReconcileAssaults && GetWorld())
 	{
 		if (auto* Counter = GetWorld()->GetSubsystem<UTerritoryCounterAttackSubsystem>())
@@ -968,6 +1058,12 @@ EDataValidationResult ATerritoryWorldState::IsDataValid(FDataValidationContext& 
 	bool bConflict = RetiredDirectoryGUIDs.Contains(FGuid());
 	if (bConflict) Context.AddError(NSLOCTEXT("TerritoryDirectory", "EmptyRetirementGuid",
 		"Retired Directory GUIDs contains an empty identity."));
+	if (GetIsSpatiallyLoaded())
+	{
+		bConflict = true;
+		Context.AddError(NSLOCTEXT("TerritoryDirectory", "SpatialWorldState",
+			"Territory WorldState must remain non-spatially loaded. Reload and resave its map/Blueprint before cooking."));
+	}
 	TSet<const UTerritoryDefinition*> Visited;
 	TFunction<void(const UTerritoryDefinition*)> Check;
 	Check = [&](const UTerritoryDefinition* Definition)
@@ -1023,6 +1119,13 @@ void ATerritoryWorldState::RefreshStrategicDirectory()
 			}
 		}
 	}
+
+	// Last statement on purpose: the directory is now seeded from every authored CampaignCities
+	// tree and every loaded Volume, and restored rows have already been imported by
+	// ImportPersistentState. Publishing before that would certify an incomplete directory to
+	// clients that reconnect or late-join. The flag is set once and never cleared - there is no
+	// state in which the authority stops knowing its own directory.
+	bCaptureDirectoryPublished = true;
 }
 
 FReplicatedCaptureSummary ATerritoryWorldState::GetCaptureSummary(const FGameplayTag& TerritoryTag) const
@@ -1273,6 +1376,12 @@ void ATerritoryWorldState::ExportPersistentState()
 		}
 
 		PublishDiplomacyReadModel();
+		PublishEvidenceLedger();
+
+		if (UTerritoryUpgradeSubsystem* Upgrades = World->GetSubsystem<UTerritoryUpgradeSubsystem>())
+		{
+			ReplicatedFactionUpgradeTiers = Upgrades->GetAllFactionTiers();
+		}
 
 		if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 		{
@@ -1296,6 +1405,7 @@ void ATerritoryWorldState::ExportPersistentState()
 
 	SavedTreasuries = ReplicatedTreasuries;
 	SavedTransactions = ReplicatedTransactions;
+	bTransactionSnapshotDirty = true;
 	SavedProductionSites = ReplicatedProductionSites;
 	SavedResourceSnapshots = ReplicatedResourceSnapshots;
 	SavedTreaties = ReplicatedTreaties;
@@ -1303,6 +1413,7 @@ void ATerritoryWorldState::ExportPersistentState()
 	SavedReputationSubjectFaction = ReplicatedReputationSubjectFaction;
 	SavedDiplomacyHistory = ReplicatedDiplomacyHistory;
 	SavedAssaults = ReplicatedAssaults;
+	SavedFactionUpgradeTiers = ReplicatedFactionUpgradeTiers;
 	// This is a presentation/query cache only. It prevents unloaded World Partition
 	// rows from reverting to Definition defaults after a restart, but is never
 	// imported into ATerritoryVolume ownership.
@@ -1316,6 +1427,7 @@ void ATerritoryWorldState::ImportPersistentState()
 	// Direct assignment — no artificial transactions
 	ReplicatedTreasuries = SavedTreasuries;
 	ReplicatedTransactions = SavedTransactions;
+	bTransactionSnapshotDirty = true;
 	ReplicatedProductionSites = SavedProductionSites;
 	ReplicatedResourceSnapshots = SavedResourceSnapshots;
 	ReplicatedTreaties = SavedTreaties;
@@ -1323,7 +1435,9 @@ void ATerritoryWorldState::ImportPersistentState()
 	ReplicatedReputationSubjectFaction = SavedReputationSubjectFaction;
 	ReplicatedDiplomacyHistory = SavedDiplomacyHistory;
 	ReplicatedAssaults = SavedAssaults;
+	ReplicatedFactionUpgradeTiers = SavedFactionUpgradeTiers;
 	ReplicatedCaptureSummaries = SavedStrategicDirectory;
+	ReplicatedEvidence = SavedEvidence;
 	// Scheduler restoration migrates the incoming records, never the old campaign.
 	ApplyDirectoryRetirements(false);
 	ReconcileUnloadedHierarchy();
@@ -1338,18 +1452,27 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 	SyncEconomySubsystemFromReplicatedState();
 	SyncDiplomacySubsystemFromReplicatedState();
 	SyncCounterAttackSubsystemFromReplicatedState();
+	SyncUpgradeSubsystemFromReplicatedState();
+	SyncEvidenceLedgerFromReplicatedState();
 	// P0-03: Capture summary sync removed — TerritoryVolume is sole ownership authority.
 	// ApplyPendingCaptureSummaries and OnTerritoryRegistered removed entirely.
 }
 
 void ATerritoryWorldState::OnRep_EconomyState()
 {
-	SyncEconomySubsystemFromReplicatedState();
+	SyncTreasuryFromReplicatedState();
+}
+
+void ATerritoryWorldState::OnRep_TransactionState()
+{
+	bTransactionSnapshotDecoded = TransactionSnapshot.Decode(ReplicatedTransactions);
+	if (!bTransactionSnapshotDecoded) ReplicatedTransactions.Reset();
+	SyncTransactionsFromReplicatedState();
 }
 
 void ATerritoryWorldState::OnRep_ProductionState()
 {
-	SyncEconomySubsystemFromReplicatedState();
+	SyncProductionFromReplicatedState();
 	OnProductionStateChanged.Broadcast();
 }
 
@@ -1358,12 +1481,37 @@ void ATerritoryWorldState::OnRep_DiplomacyState()
 	SyncDiplomacySubsystemFromReplicatedState();
 }
 
+void ATerritoryWorldState::OnRep_UpgradeTiers()
+{
+	SyncUpgradeSubsystemFromReplicatedState();
+}
+
+void ATerritoryWorldState::SyncUpgradeSubsystemFromReplicatedState()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UTerritoryUpgradeSubsystem* Upgrades = World->GetSubsystem<UTerritoryUpgradeSubsystem>())
+		{
+			Upgrades->ImportFactionTiers(ReplicatedFactionUpgradeTiers);
+		}
+	}
+}
+
 void ATerritoryWorldState::OnRep_AssaultState()
 {
 	SyncCounterAttackSubsystemFromReplicatedState();
 }
 
 void ATerritoryWorldState::SyncEconomySubsystemFromReplicatedState()
+{
+	// A campaign import replaces all three snapshots. Individual replication
+	// notifications update only the cache belonging to the received property.
+	SyncTreasuryFromReplicatedState();
+	SyncTransactionsFromReplicatedState();
+	SyncProductionFromReplicatedState();
+}
+
+void ATerritoryWorldState::SyncTreasuryFromReplicatedState()
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -1383,7 +1531,15 @@ void ATerritoryWorldState::SyncEconomySubsystemFromReplicatedState()
 			Treasuries.Add(Entry.Faction, Treasury);
 		}
 		Economy->RestoreTreasuryState(Treasuries);
+	}
+}
 
+void ATerritoryWorldState::SyncTransactionsFromReplicatedState()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
+	{
 		TArray<FTerritoryTransaction> Transactions;
 		Transactions.Reserve(ReplicatedTransactions.Num());
 		for (const FReplicatedTransaction& Entry : ReplicatedTransactions)
@@ -1400,6 +1556,15 @@ void ATerritoryWorldState::SyncEconomySubsystemFromReplicatedState()
 			Transactions.Add(Transaction);
 		}
 		Economy->RestoreTransactionHistory(Transactions);
+	}
+}
+
+void ATerritoryWorldState::SyncProductionFromReplicatedState()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	if (UTerritoryEconomySubsystem* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>())
+	{
 		Economy->RestoreProductionState(
 			HasAuthority() ? SavedProductionCheckpoints
 				: TArray<FTerritoryProductionCheckpoint>(),
@@ -1484,6 +1649,87 @@ void ATerritoryWorldState::SyncDiplomacySubsystemFromReplicatedState()
 	}
 }
 
+// ─── Evidence ledger projection ───
+
+void ATerritoryWorldState::PublishEvidenceLedger()
+{
+	if (!HasAuthority()) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UTerritoryEvidenceLedgerSubsystem* Ledger = World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>();
+	if (!Ledger || !Ledger->IsEvidenceLedgerReady()) return;
+
+	ReplicatedEvidence = Ledger->GetPersistentState();
+
+	// Keep the save mirror in step with the published window. ExportPersistentState is the
+	// save boundary and this function is the only writer of the replicated rows, so the two
+	// arrays cannot drift apart between a live fact and the next save.
+	SavedEvidence = ReplicatedEvidence;
+
+	// Server-set only, and declared after the rows array, so a client applies the window
+	// before it can believe the ledger is complete.
+	bEvidenceLedgerPublished = true;
+
+	// The live handler pushes each fact as it commits; this seeds the window a session
+	// opens with, which no live delegate ever fires for.
+	ForceNetUpdate();
+}
+
+void ATerritoryWorldState::SyncEvidenceLedgerFromReplicatedState()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UTerritoryEvidenceLedgerSubsystem* Ledger = World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>();
+	if (!Ledger) return;
+
+	// On the authority this restores server state after a save import; on a client it
+	// hydrates the replica, which is what turns an empty read into a real answer.
+	Ledger->RestorePersistentState(ReplicatedEvidence);
+}
+
+void ATerritoryWorldState::OnRep_EvidenceState()
+{
+	SyncEvidenceLedgerFromReplicatedState();
+}
+
+void ATerritoryWorldState::OnEvidenceRecordedLive(const FTerritoryEvidenceRecord& Record)
+{
+	if (!HasAuthority()) return;
+
+	UWorld* World = GetWorld();
+	UTerritoryEvidenceLedgerSubsystem* Ledger = World
+		? World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>() : nullptr;
+	if (!Ledger) return;
+
+	// The ledger owns the window, including its retention rule, so copy its state instead
+	// of appending here and duplicating that rule.
+	ReplicatedEvidence = Ledger->GetPersistentState();
+	// SavedEvidence is deliberately NOT mirrored here: this class defines the save mirror as
+	// "the state at the last save boundary", which only PublishEvidenceLedger (BeginPlay and
+	// ExportPersistentState) is allowed to move. Mirroring a live fact would make a fact
+	// recorded after the last save survive a load, unlike every other projection on this actor.
+	bEvidenceLedgerPublished = true;
+
+	UE_LOG(LogTerritory, Verbose, TEXT("[Evidence] Live fact %s recorded; publishing %d row(s)."),
+		*Record.EvidenceTag.ToString(), ReplicatedEvidence.Num());
+
+	ForceNetUpdate();
+}
+
+TArray<FTerritoryEvidenceRecord> ATerritoryWorldState::GetEvidenceLedger() const
+{
+	return ReplicatedEvidence;
+}
+
+bool ATerritoryWorldState::IsEvidenceLedgerReady() const
+{
+	// A server is always ready: its ledger is the authority. A client is ready only once
+	// the published window has actually arrived, so an empty client read stays "unknown".
+	return HasAuthority() || bEvidenceLedgerPublished;
+}
+
 void ATerritoryWorldState::SyncCounterAttackSubsystemFromReplicatedState()
 {
 	if (UWorld* World = GetWorld())
@@ -1545,6 +1791,10 @@ void ATerritoryWorldState::SubscribeToLiveUpdates()
 	{
 		Counterattacks->OnAssaultChanged.AddDynamic(this, &ATerritoryWorldState::OnAssaultChangedLive);
 	}
+	if (UTerritoryEvidenceLedgerSubsystem* Ledger = World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>())
+	{
+		Ledger->OnEvidenceRecorded.AddDynamic(this, &ATerritoryWorldState::OnEvidenceRecordedLive);
+	}
 }
 
 void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
@@ -1575,6 +1825,10 @@ void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
 		World->GetSubsystem<UTerritoryCounterAttackSubsystem>())
 	{
 		Counterattacks->OnAssaultChanged.RemoveDynamic(this, &ATerritoryWorldState::OnAssaultChangedLive);
+	}
+	if (UTerritoryEvidenceLedgerSubsystem* Ledger = World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>())
+	{
+		Ledger->OnEvidenceRecorded.RemoveDynamic(this, &ATerritoryWorldState::OnEvidenceRecordedLive);
 	}
 }
 
@@ -1706,6 +1960,7 @@ void ATerritoryWorldState::OnTransactionRecordedLive(const FTerritoryTransaction
 	RepTx.Reason = Transaction.Reason;
 	RepTx.SourceTerritory = Transaction.SourceTerritory;
 	ReplicatedTransactions.Add(RepTx);
+	bTransactionSnapshotDirty = true;
 
 	// P0-N1: Cap replicated transactions to prevent unbounded array growth.
 	// Mirrors EconomySubsystem's MaxTransactionHistory cap.

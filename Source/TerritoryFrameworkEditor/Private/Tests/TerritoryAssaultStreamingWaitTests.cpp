@@ -12,6 +12,8 @@
 #include "Core/TerritoryWorldState.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Components/BoxComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
@@ -77,6 +79,25 @@ bool FTFAssaultTargetStreamingWait::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("Real Narrative spawn is admitted before its visual is ready"), NPC)) return false;
 	UTerritoryAssaultParticipantComponent* Participant = NPC->AssaultParticipant;
 	TestFalse(TEXT("Fixture has not initialized a Narrative assault goal"), NPC->IsNarrativeSpawnReady());
+	auto* FloorActor = World->SpawnActor<AActor>();
+	auto* Floor = NewObject<UBoxComponent>(FloorActor);
+	FloorActor->SetRootComponent(Floor);
+	Floor->SetBoxExtent(FVector(2000, 2000, 10));
+	Floor->SetCollisionProfileName(TEXT("BlockAll"));
+	Floor->RegisterComponent();
+	FloorActor->SetActorLocation(FVector(1000, 1000, -10));
+	auto* Movement = NPC->GetCharacterMovement();
+	Movement->SetMovementMode(MOVE_Walking);
+	Movement->Velocity = FVector(100, 0, 0);
+	const FVector BeforeUnload = NPC->GetActorLocation();
+	Participant->HandleLevelRemoving(World->PersistentLevel, World);
+	TestEqual(TEXT("Pre-removal suspends physics before floor collision disappears"), Movement->MovementMode.GetValue(), MOVE_None);
+	TestFalse(TEXT("Suspended body cannot authorize combat or recapture"), Participant->CanEngageCombat());
+	TestFalse(TEXT("Suspended body does not remain a collision obstacle"), NPC->GetActorEnableCollision());
+	Floor->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	TestFalse(TEXT("Registered target without physical floor cannot resume walking"), Participant->ResumeAfterStreaming(Territory));
+	Participant->SuspendForStreaming();
+	TestEqual(TEXT("Repeated suspension preserves original movement mode"), Participant->StreamingMovementMode, static_cast<uint8>(MOVE_Walking));
 	Registry->UnregisterTerritory(Territory);
 	TestNull(TEXT("The target is absent from the existing registry"), Participant->GetTargetTerritory());
 	for (int32 Attempt = 0; Attempt < 45; ++Attempt) Participant->UpdateParticipation();
@@ -88,6 +109,7 @@ bool FTFAssaultTargetStreamingWait::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Target unload is not a casualty or withdrawal"), Waiting.WithdrawnForce, 0);
 	TestEqual(TEXT("Only the original unspawned reserve remains"), Waiting.PendingReserveForce, 1);
 	TestEqual(TEXT("Save includes the same physical survivor"), Waiting.PendingSurvivors.Num(), 1);
+	TestEqual(TEXT("Streaming wait preserves physical pose rather than falling"), NPC->GetActorLocation(), BeforeUnload);
 	if (Participant->HasRetired()) return false;
 
 	// A different actor using the same tag must not end the GUID-based wait.
@@ -102,6 +124,7 @@ bool FTFAssaultTargetStreamingWait::RunTest(const FString& Parameters)
 	Registry->UnregisterTerritory(WrongTarget);
 	WrongTarget->Destroy();
 	Registry->RegisterTerritory(Territory);
+	Floor->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	TestTrue(TEXT("Returning target rebinds through its original stable GUID"), Participant->GetTargetTerritory() == Territory);
 	if (!TestTrue(TEXT("Returning valid target keeps the assault active"), Counter->IsAssaultActive(Record.AssaultID))) return false;
 	NPC->SetRole(ROLE_SimulatedProxy);
@@ -109,6 +132,9 @@ bool FTFAssaultTargetStreamingWait::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Client updates cannot consume initialization retries"), Participant->GoalInitializationAttempts, 0);
 	NPC->SetRole(ROLE_Authority);
 	Participant->UpdateParticipation();
+	TestEqual(TEXT("Physical floor readiness restores the prior walking mode"), Movement->MovementMode.GetValue(), MOVE_Walking);
+	TestTrue(TEXT("Resume restores actor collision"), NPC->GetActorEnableCollision());
+	TestFalse(TEXT("Resume clears suspension exactly once"), Participant->bStreamingSuspended);
 	TestEqual(TEXT("A loaded target resumes the real initialization budget"), Participant->GoalInitializationAttempts, 1);
 	TestFalse(TEXT("First genuine initialization retry does not retire the NPC"), Participant->HasRetired());
 	Registry->UnregisterTerritory(Territory);

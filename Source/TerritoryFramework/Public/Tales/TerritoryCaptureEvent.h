@@ -4,6 +4,7 @@
 #include "Tales/NarrativeEvent.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryCaptureEvent.generated.h"
 
 UENUM(BlueprintType)
@@ -18,7 +19,7 @@ enum class ETerritoryCaptureFactionSource : uint8
 };
 
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, meta=(ToolTip="Give a loaded independent Place to a faction through the existing capture authority. Normal mode checks locks, defenders, diplomacy and state conditions. Force is an explicit story override. Optional Situation Profile replaces the local Place and faction fields."))
-class TERRITORYFRAMEWORK_API UTerritoryCaptureEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryCaptureEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -49,5 +50,7 @@ public:
 	bool bForceCapture = false;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 };

@@ -4,6 +4,7 @@
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeCondition.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryDiplomacyCondition.generated.h"
 
 /**
@@ -15,7 +16,7 @@
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Diplomacy Condition",
 		ToolTip="Compare the rich Territory treaty between two different exact Narrative factions. War, Alliance and other treaty states are distinct. This is not a numeric reputation check."))
-class TERRITORYFRAMEWORK_API UTerritoryDiplomacyCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryDiplomacyCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -37,7 +38,8 @@ public:
 	EDiplomacyState RequiredState = EDiplomacyState::War;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

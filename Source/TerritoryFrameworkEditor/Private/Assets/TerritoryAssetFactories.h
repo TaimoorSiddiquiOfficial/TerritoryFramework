@@ -104,6 +104,22 @@ public:
 };
 
 UCLASS(hidecategories=Object)
+class UTerritoryGuardPerceptionProfileFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryGuardPerceptionProfileFactory();
+};
+
+UCLASS(hidecategories=Object)
+class UTerritoryNoiseProfileFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryNoiseProfileFactory();
+};
+
+UCLASS(hidecategories=Object)
 class UTerritoryDisguiseProfileFactory : public UTerritoryAssetFactoryBase
 {
 	GENERATED_BODY()
@@ -117,6 +133,22 @@ class UTerritoryDiplomacyDialogueProfileFactory : public UTerritoryAssetFactoryB
 	GENERATED_BODY()
 public:
 	UTerritoryDiplomacyDialogueProfileFactory();
+};
+
+UCLASS(hidecategories=Object)
+class UTerritoryUpgradeDefinitionFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryUpgradeDefinitionFactory();
+};
+
+UCLASS(hidecategories=Object)
+class UTerritoryUpgradeBalanceProfileFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryUpgradeBalanceProfileFactory();
 };
 
 UCLASS(hidecategories=Object)
@@ -150,6 +182,22 @@ class UTerritoryConversationProfileFactory : public UTerritoryAssetFactoryBase
 	GENERATED_BODY()
 public:
 	UTerritoryConversationProfileFactory();
+};
+
+UCLASS(hidecategories=Object)
+class UTerritoryDialogueShotPackSpecFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryDialogueShotPackSpecFactory();
+};
+
+UCLASS(hidecategories=Object)
+class UTerritoryReplyTimeoutProfileFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryReplyTimeoutProfileFactory();
 };
 
 /**

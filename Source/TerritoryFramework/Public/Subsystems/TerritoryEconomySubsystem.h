@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Core/TerritoryAssetPreload.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Core/TerritoryTypes.h"
@@ -198,7 +199,11 @@ public:
 	FTerritoryProductionSiteRecord GetProductionSite(const FGameplayTag& TerritoryTag) const;
 
 	/** Refresh the durable World Partition record for a loaded Property. */
-	void RefreshProductionSite(ATerritoryProperty* Property);
+	void RefreshProductionSite(ATerritoryProperty* Property, bool bPublish = false);
+
+	/** Explicit permanent removal. Streaming unregistration never calls this. */
+	void RetireProductionSite(const FGuid& TerritoryGUID);
+	bool TryGetCurrencyCapitalMultiplier(const ATerritoryProperty* Property, float& OutMultiplier) const;
 
 	/** Return the calculated income rate for this faction. */
 	UFUNCTION(BlueprintCallable, Category = "Territory|Economy")
@@ -317,6 +322,7 @@ private:
 	friend class FTFEconomyCallbackReentry;
 	friend class FTFProductionRestoreCallbacks;
 	friend class FTFCurrencyCallbacks;
+	friend class FTFDurableCurrencyPolicies;
 #endif
 
 	UPROPERTY(SaveGame)
@@ -329,6 +335,7 @@ private:
 	FTimerHandle ProductionCycleObservationTimerHandle;
 	int64 LastObservedProductionCycle = INDEX_NONE;
 	bool bProcessingEconomyTick = false;
+	bool bRecalculatingCurrencyRates = false;
 	/** Serializes Territory payments across synchronous Native currency and ledger callbacks. */
 	bool bCurrencySettlementInProgress = false;
 	uint64 CurrencyRestoreGeneration = 0;
@@ -351,9 +358,15 @@ private:
 	/** Invalidates active calculations when restore or actor refresh replaces their inputs. */
 	uint64 ProductionStateRevision = 0;
 	uint64 ProductionRestoreGeneration = 0;
+	FTerritoryAssetPreload ProductionAssets;
+	bool bProductionAssetsPending = false;
+	friend class FTFTerritoryAssetReadiness;
 
-	/** Factions whose income needs recalculation — processed once per economy tick. */
+	/** Factions whose rates need recalculation; coalesced on the existing observation/settlement timers. */
 	TSet<FGameplayTag> DirtyFactions;
+	void RefreshCurrencyInputs(const ATerritoryProperty* Property, FTerritoryProductionSiteRecord& Site) const;
+	bool ResolveCurrencyCapitalPolicy(FTerritoryProductionSiteRecord& Site) const;
+	bool MigrateCurrencyInputs(FTerritoryProductionSiteRecord& Site) const;
 
 	/** Runtime routing only. Narrative inventories own and persist the actual balances. */
 	TMap<FGameplayTag, TWeakObjectPtr<AActor>> SharedFactionAccounts;

@@ -6,6 +6,7 @@
 #include "Tales/NarrativeCondition.h"
 #include "Tales/TerritoryCaptureEvent.h"
 #include "Tales/TerritoryStoryConditions.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritorySituationCondition.generated.h"
 
 UENUM(BlueprintType)
@@ -122,7 +123,7 @@ enum class ETerritorySituationQuery : uint8
 /** Native Narrative branch condition: combine several on a node for AND; alternative nodes provide OR. */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, meta=(DisplayName="Territory Situation Condition",
 		ToolTip="Read a reusable Place and faction situation: retake history, district or city holdings, dominance, diplomacy or defence power. Empty faction override uses the profile source. Current defence power requires the relevant loaded actors on the server."))
-class TERRITORYFRAMEWORK_API UTerritorySituationCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritorySituationCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 public:
@@ -151,7 +152,8 @@ public:
 
 	bool MatchesReport(const FTerritorySituationReport& Report) const;
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

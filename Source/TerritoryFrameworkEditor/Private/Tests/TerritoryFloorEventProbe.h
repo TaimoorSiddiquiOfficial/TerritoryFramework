@@ -4,6 +4,7 @@
 #include "Core/TerritoryTypes.h"
 #include "Tales/NarrativeCondition.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryFloorEventProbe.generated.h"
 
 class APlayerController;
@@ -98,14 +99,14 @@ public:
  * dispatch actually reached the authored event rather than merely iterating the array.
  */
 UCLASS(Transient)
-class UTerritoryFloorClearedProbeEvent final : public UNarrativeEvent
+class UTerritoryFloorClearedProbeEvent final : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
 public:
 	UTerritoryFloorClearedProbeEvent(const FObjectInitializer& ObjectInitializer);
 
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller,
 		UTalesComponent* NarrativeComponent) override;
 
 	int32 ExecutionCount = 0;
@@ -116,13 +117,12 @@ public:
  * floor-cleared event instead of letting it run unconditionally.
  */
 UCLASS(Transient)
-class UTerritoryFloorClearedProbeCondition final : public UNarrativeCondition
+class UTerritoryFloorClearedProbeCondition final : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
 public:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		UTalesComponent* NarrativeComponent) override;
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
 
 	bool bPasses = false;
 };

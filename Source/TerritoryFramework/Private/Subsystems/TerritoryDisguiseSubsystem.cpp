@@ -2,10 +2,13 @@
 #include "Engine/World.h"
 
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryEvidenceTags.h"
 #include "Core/TerritoryStealthTags.h"
 #include "Core/TerritoryVolume.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
+#include "NarrativeStableActor.h"
+#include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 
 namespace
@@ -78,9 +81,61 @@ bool UTerritoryDisguiseSubsystem::CompromiseDisguise(AActor* Target,
 	if (ObserverFaction.IsValid()) Runtime->CompromisedFactions.Add(ObserverFaction);
 	else Runtime->bCompromisedForEveryone = true;
 	RefreshStateTags(Target, *Runtime);
+	// AGENTS.md §4.3 step 7: the burned cover is now committed state, so the durable fact is
+	// written before EmitChange wakes any listener or fires a Narrative event.
+	RecordDisguiseCompromisedEvidence(*Target, ObserverFaction, Territory);
 	EmitChange(Target, *Runtime, ETerritoryDisguiseChange::Compromised,
 		ObserverFaction, Territory);
 	return true;
+}
+
+void UTerritoryDisguiseSubsystem::RecordDisguiseCompromisedEvidence(const AActor& Target,
+	const FGameplayTag& ObserverFaction, const ATerritoryVolume* Territory)
+{
+	UWorld* World = GetWorld();
+	UTerritoryEvidenceLedgerSubsystem* Ledger =
+		World ? World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>() : nullptr;
+	if (!Ledger)
+	{
+		return;
+	}
+
+	// The observer that saw through the cover is the acting side. The disguised actor is the
+	// subject only when it carries a durable identity; player characters have none, and the row
+	// then stands on the acting faction and the Territory it happened in.
+	FGuid SubjectId;
+	const AActor* TargetPtr = &Target;
+	if (Target.GetClass()->ImplementsInterface(UNarrativeStableActor::StaticClass()))
+	{
+		SubjectId = INarrativeStableActor::Execute_GetActorGUID(TargetPtr);
+	}
+
+	const FGameplayTag TerritoryTag =
+		Territory ? Territory->GetTerritoryTag() : FGameplayTag();
+	const double GameTimeSeconds = UTerritoryEvidenceLedgerSubsystem::ResolveCampaignGameTime(this);
+
+	FTerritoryEvidenceRecord Record;
+	Record.EvidenceTag = TerritoryEvidenceTags::DisguiseCompromised.GetTag();
+	Record.SubjectId = SubjectId;
+	Record.InstigatorFaction = ObserverFaction;
+	Record.SourceTerritory = TerritoryTag;
+	// CompromiseDisguise already refuses a faction that burned this cover before, so the episode
+	// time is the replay key. The target's name only separates two actors compromised in the same
+	// millisecond; it is never stored as the subject.
+	Record.ContextId = UTerritoryEvidenceLedgerSubsystem::MakeEvidenceContextId(
+		FString::Printf(TEXT("DisguiseCompromised|%s|%s|%s|%lld"),
+			*GetNameSafe(&Target), *ObserverFaction.ToString(), *TerritoryTag.ToString(),
+			(int64)FMath::RoundToDouble(GameTimeSeconds * 1000.0)));
+	Record.Weight = 1;
+	Record.GameTimeSeconds = GameTimeSeconds;
+
+	const FTerritoryEvidenceMutationResult Result = Ledger->RecordEvidenceRecord(Record);
+	if (!Result.bSuccess && !Result.bAlreadyRecorded)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[Evidence] Compromised disguise of %s committed but was not recorded: %s"),
+			*GetNameSafe(&Target), *Result.FailureReason.ToString());
+	}
 }
 
 bool UTerritoryDisguiseSubsystem::RestoreDisguise(AActor* Target,

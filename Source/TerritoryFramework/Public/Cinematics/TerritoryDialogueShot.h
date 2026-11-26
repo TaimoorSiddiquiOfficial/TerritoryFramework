@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Tales/NarrativeDialogueSequence.h"
 #include "TerritoryDialogueShot.generated.h"
 
@@ -147,6 +148,17 @@ public:
 	/** Dialogue camera role used by this reusable shot configuration. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look")
 	ETerritoryDialogueShotRole ShotRole = ETerritoryDialogueShotRole::MediumCloseUp;
+
+	/**
+	 * Optional stable role identity. The shot pack fills this for the built-in roles from Shot Role;
+	 * a designer-authored pack row may name any editorial role it wants without extending the enum.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look")
+	FGameplayTag ShotRoleTag;
+
+	/** Return the role tag for this shot. Empty when the shot only carries the legacy enum role. */
+	UFUNCTION(BlueprintPure, Category="Territory|Cinematics")
+	FGameplayTag GetShotRoleTag() const { return ShotRoleTag; }
 
 	/** Override the focal length authored on the Cinecam binding at shot start. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory Cinematic Look")

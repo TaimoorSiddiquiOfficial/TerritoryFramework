@@ -4,6 +4,8 @@
 #include "Components/ActorComponent.h"
 #include "TerritoryDistractionComponent.generated.h"
 
+class UTerritoryNoiseProfile;
+
 /**
  * Add this to a Narrative throwable-projectile child. Its first blocking hit reports
  * a tagged hearing stimulus; Territory guards then choose the nearest investigators.
@@ -30,6 +32,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Distraction",
 		meta=(ClampMin="0.0", Units="cm"))
 	float MaximumRange = 3000.f;
+
+	/**
+	 * Optional shared noise recipe. When set it replaces Loudness, MaximumRange and the stimulus tag,
+	 * so a rock, a bottle and a grenade can all read from one authored asset.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Distraction",
+		meta=(ToolTip="Optional Territory Noise Profile. Overrides Loudness, Maximum Range and the noise tag when set."))
+	TObjectPtr<UTerritoryNoiseProfile> NoiseProfile;
 
 	/** May also be called explicitly by a Narrative ability or quest object. Server only. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Distraction")

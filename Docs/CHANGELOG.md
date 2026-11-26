@@ -1,5 +1,80 @@
 # Changelog
 
+## Unreleased — 2026-10-19 (Throw follows the mouse pointer, not just the crosshair)
+
+- Fix the distraction throw leaving in the wrong direction. `ATerritoryDistractionProjectile` inherited
+  the engine default `bInitialVelocityInLocalSpace = true`; the ability spawns deferred, writes a
+  world-space launch velocity, and `FinishSpawning` then rotated that velocity again by the launch
+  rotation, so a throw aimed along -X left along +X. The projectile now declares
+  `bInitialVelocityInLocalSpace = false` because every throw this plugin produces supplies world space.
+- Follow the pointer when the game shows one. `bAimWithVisibleMouseCursor` (on by default) deprojects
+  the local player's mouse position with `DeprojectScreenPositionToWorld` and rebuilds the aim ray
+  through that pixel; a hidden cursor or a pointer resolving behind the camera keeps the crosshair ray,
+  and remote clients are never deprojected because cursor state is not replicated.
+- Expose `ShouldAimWithMouseCursor` so the pointer/crosshair decision is pinned by automation.
+- Verify: `TerritoryFramework.Stealth` 22 of 22 tests green, including the new
+  `DistractionWorldSpaceLaunchVelocity` and `DistractionCursorAimDecision`.
+
+## Unreleased — 2026-10-18 (Throw follows the crosshair)
+
+- Fix the distraction throw not landing where the crosshair points. Two independent causes: no gravity
+  compensation, and the server proxy losing the remote client's aim pitch.
+- `UTerritoryDistractionAbility` now solves the low ballistic arc (`bCompensateLaunchForGravity`,
+  `MaxCompensatedLaunchPitch`) so the authored 1200 cm/s projectile under gravity still lands on the
+  traced aim point instead of sagging 0.9 m at 5 m and 3.4 m at 10 m. Unreachable, overhead, zero-gravity
+  and zero-speed cases keep the previous straight aim direction.
+- A `ServerOnly` ability running on the server's copy of a remote client used
+  `GetPlayerViewPoint` before `ServerUpdateCamera` had ever filled the camera cache, which falls back to
+  the view-target actor rotation (yaw only) and silently dropped the aim pitch. The ability now uses the
+  possessed pawn's replicated eye location plus the replicated `ControlRotation` in exactly that window.
+- Expose `ComputeAimCompensatedDirection` and `ShouldUseReplicatedClientAim` so the aim math and the
+  client-proxy decision are pinned by automation instead of a live session.
+- Verify: editor build of `UnrealEditor-TerritoryFramework.dll`; `TerritoryFramework.Stealth.Regression.Distraction*`
+  5 of 5 tests green including the new `DistractionAimCompensation` and
+  `DistractionRemoteClientReplicatedAim`.
+
+See [Stealth and Infiltration](24_Stealth_Infiltration.md).
+
+## Unreleased — 2026-10-15 (Data-driven dialogue shot packs)
+
+- Let designers author dialogue shot packs: the new `UTerritoryDialogueShotPackSpec` data
+  asset supplies the shot rows (role, dialogue slot, camera transform, lens, aperture,
+  focus, guidance) that `CreateStudioDialogueShotPack` builds. The built-in seven-row
+  table stays as the zero-config fallback and the previous signatures keep working.
+- Let `ApplyStudioDialogueShotPack` take the sequence and framing for the master,
+  speaker-coverage and reply-selection slots from the pack's slot rows.
+- Register the new asset in the Territory authoring menu with a named factory, as the
+  authoring contract test requires.
+- Give every shot a stable role identity: the seven native `Territory.Cinematic.Shot.*` tags plus
+  `FromLegacyRole()` map the enum, and a pack row may carry a tag the enum does not know, so a new
+  editorial role no longer needs C++.
+- Carry an optional character light rig (`LightRigProfile`, `bLightRigUsesListener`) from the pack row
+  onto each inline shot; empty keeps normal scene lighting.
+- Add `EnsureDialogueSpeaker` so a dialogue can gain the NPC speaker entry that per-speaker shot
+  coverage requires (the engine exposes `FSpeakerInfo::SpeakerID` read-only to Python).
+- Apply the pack to the five story dialogues (`DBP_Hahsir`, `DBP_Hahsir_Greet`, the three
+  `DBP_HopBanditLeader_*`) and to the six Territory dialogues; each gained its default, speaker and
+  reply-selection shots with `DA_NarrativeCharacterLights_UDS` lighting.
+- Add a server-owned reply countdown, because Native has no reply timeout: `UDialogueNode_Player` only
+  offers `bAutoSelect`/`bAutoSelectIfOnlyReply`/`IsRoutingNode()`, and `UDialogue::NPCFinishedTalking`
+  waits for a real answer forever. `UTerritoryReplyTimeoutProfile` carries the policy
+  (`bEnabled`, `DefaultSeconds`, `SilentReplyID`, per-dialogue overrides) and
+  `UTerritoryNarrativePartyComponent` runs one transient server timer per dialogue, cancelling it on a
+  real answer or any dialogue lifecycle change and, on expiry, selecting the authored silence reply
+  through the same `ServerSelectDialogueOption` path players use.
+- Publish `IsReplyTimeoutActive`, `GetReplyTimeRemaining`, `GetReplyTimeoutDuration`,
+  `GetPendingSilentReplyID`, `OnReplyTimeoutStarted`/`OnReplyTimeoutEnded` for a HUD countdown, and a
+  server-only `ResolveReplyCountdownNow` for QA/skip inputs and automation.
+- Reputation needs no new code: `UTerritoryModifyReputationEvent` (Add/Set an int32 against a resolved
+  faction, server-side) is placed on the silence reply, and options can be gated with
+  `TerritoryDiplomacyCondition`.
+- Verify: editor build; 66 of 66 `TerritoryFramework.Editor` tests green including the new
+  `DialogueShotPackSpecContract`; 51 of 51 `TerritoryFramework.Tales` tests green including the new
+  `TerritoryFramework.Tales.PartyReplies.ReplyTimeoutAuthorityAndSelection`; and a spec-driven build
+  plus apply run in the editor with zero errors.
+
+See [Dialogue Shots and Shot Packs](40_Dialogue_Shots_and_Shot_Packs.md).
+
 ## Unreleased — 2026-09-12 (Remote mount collision)
 
 - Stop simulated seated characters pushing their own Native mount on clients.

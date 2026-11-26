@@ -19,6 +19,9 @@
 #include "Sections/MovieScene3DTransformSection.h"
 #include "Sections/MovieSceneSpawnSection.h"
 #include "Sections/MovieSceneCameraCutSection.h"
+#include "Cinematics/TerritoryCinematicLightRig.h"
+#include "Cinematics/TerritoryShotRoleTags.h"
+#include "AI/NPCDefinition.h"
 #include "Tales/Dialogue.h"
 #include "Tracks/MovieScene3DTransformTrack.h"
 #include "Tracks/MovieSceneCameraCutTrack.h"
@@ -34,14 +37,17 @@ namespace TerritoryDialogueShotEditor
 	struct FStudioShotSpec
 	{
 		ETerritoryDialogueShotRole Role;
-		const TCHAR* AssetName;
-		const TCHAR* DisplayName;
+		FString AssetName;
+		FString DisplayName;
 		FVector CameraLocation;
 		FRotator CameraRotation;
 		float FocalLength;
 		float Aperture;
 		float ManualFocusDistance;
-		const TCHAR* BestUse;
+		FString BestUse;
+		FGameplayTag ShotRoleTag;
+		TObjectPtr<UTerritoryCinematicLightRigProfile> LightRigProfile;
+		bool bLightRigUsesListener = false;
 	};
 
 	const TArray<FStudioShotSpec>& GetStudioShotSpecs()
@@ -77,6 +83,56 @@ namespace TerritoryDialogueShotEditor
 				92.f, TEXT("Story prop, hand action, weapon, contract, or Territory handover detail.") }
 		};
 		return Specs;
+	}
+
+	/** Built-in seven rows, or the designer-authored rows when a shot pack spec asset is supplied. */
+	TArray<FStudioShotSpec> ResolveStudioShotSpecs(
+		const UTerritoryDialogueShotPackSpec* ShotSpec)
+	{
+		if (!ShotSpec || ShotSpec->StudioShots.IsEmpty())
+		{
+			return GetStudioShotSpecs();
+		}
+		TArray<FStudioShotSpec> Resolved;
+		Resolved.Reserve(ShotSpec->StudioShots.Num());
+		for (const FTerritoryStudioShotSpec& Row : ShotSpec->StudioShots)
+		{
+			FStudioShotSpec Spec;
+			Spec.Role = Row.Role;
+			Spec.AssetName = Row.AssetName;
+			Spec.DisplayName = Row.DisplayName.ToString();
+			Spec.CameraLocation = Row.CameraLocation;
+			Spec.CameraRotation = Row.CameraRotation;
+			Spec.FocalLength = Row.FocalLength;
+			Spec.Aperture = Row.Aperture;
+			Spec.ManualFocusDistance = Row.ManualFocusDistance;
+			Spec.BestUse = Row.BestUse.ToString();
+			Spec.ShotRoleTag = Row.ShotRoleTag.IsValid()
+				? Row.ShotRoleTag
+				: TerritoryShotRoleTags::FromLegacyRole(Row.Role);
+			Spec.LightRigProfile = Row.LightRigProfile;
+			Spec.bLightRigUsesListener = Row.bLightRigUsesListener;
+			Resolved.Add(MoveTemp(Spec));
+		}
+		return Resolved;
+	}
+
+	/** Shot playback length, honouring the pack asset override when it is set. */
+	int32 ResolveShotDurationFrames(const UTerritoryDialogueShotPackSpec* ShotSpec)
+	{
+		return (ShotSpec && ShotSpec->ShotDurationFrames > 0)
+			? ShotSpec->ShotDurationFrames : ShotDurationFrames;
+	}
+
+	/** First spec row authored into the given dialogue slot, or null. */
+	const FTerritoryStudioShotSpec* FindSpecRowForSlot(
+		const UTerritoryDialogueShotPackSpec* ShotSpec,
+		const ETerritoryDialogueShotSlot Slot)
+	{
+		return ShotSpec
+			? ShotSpec->StudioShots.FindByPredicate(
+				[Slot](const FTerritoryStudioShotSpec& Row) { return Row.Slot == Slot; })
+			: nullptr;
 	}
 
 	void ConfigureCameraTemplate(ACineCameraActor* CameraTemplate,
@@ -134,11 +190,12 @@ namespace TerritoryDialogueShotEditor
 	}
 
 	ULevelSequence* CreateStudioSequence(const FString& DestinationContentPath,
-		const FStudioShotSpec& Spec, FText& OutError)
+		const FStudioShotSpec& Spec, FText& OutError,
+		const int32 DurationFrames = ShotDurationFrames)
 	{
 		const FString PackageName = DestinationContentPath / Spec.AssetName;
 		const FString ObjectPath = FString::Printf(TEXT("%s.%s"),
-			*PackageName, Spec.AssetName);
+			*PackageName, *Spec.AssetName);
 		if (UObject* ExistingAsset = StaticLoadObject(
 			UObject::StaticClass(), nullptr, *ObjectPath))
 		{
@@ -194,7 +251,7 @@ namespace TerritoryDialogueShotEditor
 
 		UPackage* Package = CreatePackage(*PackageName);
 		ULevelSequence* Sequence = NewObject<ULevelSequence>(Package,
-			Spec.AssetName, RF_Public | RF_Standalone | RF_Transactional);
+			FName(*Spec.AssetName), RF_Public | RF_Standalone | RF_Transactional);
 		if (!Sequence)
 		{
 			OutError = FText::Format(LOCTEXT("SequenceCreateFailed",
@@ -214,7 +271,7 @@ namespace TerritoryDialogueShotEditor
 		}
 		MovieScene->SetDisplayRate(FFrameRate(24, 1));
 		MovieScene->SetTickResolutionDirectly(FFrameRate(24, 1));
-		MovieScene->SetPlaybackRange(0, ShotDurationFrames);
+		MovieScene->SetPlaybackRange(0, DurationFrames);
 
 		ACineCameraActor* CameraSource = NewObject<ACineCameraActor>(
 			GetTransientPackage(), ACineCameraActor::StaticClass(),
@@ -324,6 +381,9 @@ namespace TerritoryDialogueShotEditor
 		const EAnchorOriginRule AnchorRule,
 		const EShotTrackingRule TrackingRule,
 		const float FocalLength, const float Aperture,
+		const FGameplayTag& RoleTag,
+		UTerritoryCinematicLightRigProfile* InLightRigProfile,
+		const bool bInLightRigUsesListener,
 		const bool bUse180DegreeRule = true)
 	{
 		if (!Dialogue || !Sequence) return nullptr;
@@ -337,17 +397,23 @@ namespace TerritoryDialogueShotEditor
 		}
 		Shot->ConfigureEditorShot(Sequence, DisplayName, Role, AnchorRule,
 			TrackingRule, FocalLength, Aperture, bUse180DegreeRule);
+		Shot->ShotRoleTag = RoleTag;
+		Shot->LightRigProfile = InLightRigProfile;
+		Shot->bLightRigUsesListener = bInLightRigUsesListener;
 		return Shot;
 	}
 }
 
 FTerritoryDialogueShotPackBuildReport
 UTerritoryDialogueShotEditorLibrary::CreateStudioDialogueShotPack(
-	const FString& DestinationContentPath)
+	const FString& DestinationContentPath,
+	const UTerritoryDialogueShotPackSpec* ShotSpec)
 {
 	using namespace TerritoryDialogueShotEditor;
 	FTerritoryDialogueShotPackBuildReport Report;
 	Report.DestinationContentPath = DestinationContentPath;
+	const TArray<FStudioShotSpec> StudioShots = ResolveStudioShotSpecs(ShotSpec);
+	const int32 DurationFrames = ResolveShotDurationFrames(ShotSpec);
 	if (!FPackageName::IsValidLongPackageName(DestinationContentPath))
 	{
 		Report.Errors.Add(FText::Format(LOCTEXT("InvalidDestination",
@@ -356,11 +422,11 @@ UTerritoryDialogueShotEditorLibrary::CreateStudioDialogueShotPack(
 		return Report;
 	}
 
-	for (const FStudioShotSpec& Spec : GetStudioShotSpecs())
+	for (const FStudioShotSpec& Spec : StudioShots)
 	{
 		FText Error;
 		if (ULevelSequence* Sequence = CreateStudioSequence(
-			DestinationContentPath, Spec, Error))
+			DestinationContentPath, Spec, Error, DurationFrames))
 		{
 			Report.SequenceAssets.Add(Sequence);
 			Report.ShotRoles.Add(Spec.Role);
@@ -376,14 +442,15 @@ UTerritoryDialogueShotEditorLibrary::CreateStudioDialogueShotPack(
 		}
 	}
 	Report.bSucceeded = Report.Errors.IsEmpty()
-		&& Report.SequenceAssets.Num() == GetStudioShotSpecs().Num();
+		&& Report.SequenceAssets.Num() == StudioShots.Num();
 	return Report;
 }
 
 FTerritoryDialogueShotPackBuildReport
 UTerritoryDialogueShotEditorLibrary::ApplyStudioDialogueShotPack(
 	UDialogueBlueprint* DialogueBlueprint,
-	const FTerritoryDialogueShotPackBuildReport& ShotPack)
+	const FTerritoryDialogueShotPackBuildReport& ShotPack,
+	const UTerritoryDialogueShotPackSpec* ShotSpec)
 {
 	using namespace TerritoryDialogueShotEditor;
 	FTerritoryDialogueShotPackBuildReport Report = ShotPack;
@@ -403,16 +470,69 @@ UTerritoryDialogueShotEditorLibrary::ApplyStudioDialogueShotPack(
 		return Report;
 	}
 
-	ULevelSequence* TwoShot = FindSequenceForRole(ShotPack,
-		ETerritoryDialogueShotRole::TwoShot);
-	ULevelSequence* MediumCloseUp = FindSequenceForRole(ShotPack,
-		ETerritoryDialogueShotRole::MediumCloseUp);
-	ULevelSequence* Reaction = FindSequenceForRole(ShotPack,
-		ETerritoryDialogueShotRole::Reaction);
-	if (!TwoShot || !MediumCloseUp || !Reaction)
+	/**
+	 * Resolve the sequence and framing a shot pack should install into one dialogue slot.
+	 * A designer-authored spec row wins; otherwise the built-in role defaults are used.
+	 */
+	struct FResolvedDialogueShotSlot
+	{
+		ULevelSequence* Sequence = nullptr;
+		ETerritoryDialogueShotRole Role = ETerritoryDialogueShotRole::TwoShot;
+		float FocalLength = 45.f;
+		float Aperture = 3.2f;
+		FGameplayTag RoleTag;
+		UTerritoryCinematicLightRigProfile* LightRigProfile = nullptr;
+		bool bLightRigUsesListener = false;
+	};
+	auto ResolveDialogueShotSlot = [&ShotPack, ShotSpec](
+		const ETerritoryDialogueShotSlot Slot,
+		const ETerritoryDialogueShotRole FallbackRole,
+		const float FallbackFocalLength,
+		const float FallbackAperture) -> FResolvedDialogueShotSlot
+	{
+		FResolvedDialogueShotSlot Resolved;
+		if (const FTerritoryStudioShotSpec* Row = FindSpecRowForSlot(ShotSpec, Slot))
+		{
+			for (int32 Index = 0;
+				Index < ShotPack.ShotRoles.Num()
+					&& Index < ShotPack.SequenceAssets.Num(); ++Index)
+			{
+				if (ShotPack.ShotRoles[Index] == Row->Role)
+				{
+					Resolved.Sequence = ShotPack.SequenceAssets[Index];
+					Resolved.Role = Row->Role;
+					Resolved.FocalLength = Row->FocalLength;
+					Resolved.Aperture = Row->Aperture;
+					Resolved.RoleTag = Row->ShotRoleTag.IsValid()
+						? Row->ShotRoleTag
+						: TerritoryShotRoleTags::FromLegacyRole(Row->Role);
+					Resolved.LightRigProfile = Row->LightRigProfile;
+					Resolved.bLightRigUsesListener = Row->bLightRigUsesListener;
+					return Resolved;
+				}
+			}
+		}
+		Resolved.Sequence = FindSequenceForRole(ShotPack, FallbackRole);
+		Resolved.Role = FallbackRole;
+		Resolved.FocalLength = FallbackFocalLength;
+		Resolved.Aperture = FallbackAperture;
+		Resolved.RoleTag = TerritoryShotRoleTags::FromLegacyRole(FallbackRole);
+		return Resolved;
+	};
+
+	const FResolvedDialogueShotSlot Master = ResolveDialogueShotSlot(
+		ETerritoryDialogueShotSlot::Master,
+		ETerritoryDialogueShotRole::TwoShot, 45.f, 3.2f);
+	const FResolvedDialogueShotSlot SpeakerCoverage = ResolveDialogueShotSlot(
+		ETerritoryDialogueShotSlot::SpeakerCoverage,
+		ETerritoryDialogueShotRole::MediumCloseUp, 65.f, 2.8f);
+	const FResolvedDialogueShotSlot ReplySelection = ResolveDialogueShotSlot(
+		ETerritoryDialogueShotSlot::ReplySelection,
+		ETerritoryDialogueShotRole::Reaction, 75.f, 2.5f);
+	if (!Master.Sequence || !SpeakerCoverage.Sequence || !ReplySelection.Sequence)
 	{
 		Report.Errors.Add(LOCTEXT("RequiredShotsMissing",
-			"The shot pack must contain Two Shot, Medium Close-Up, and Reaction sequences."));
+			"The shot pack must contain Two Shot, Medium Close-Up, and Reaction sequences, or shot spec rows for the master, speaker-coverage, and reply-selection slots."));
 		Report.bSucceeded = false;
 		return Report;
 	}
@@ -423,11 +543,14 @@ UTerritoryDialogueShotEditorLibrary::ApplyStudioDialogueShotPack(
 
 	Dialogue->DefaultDialogueShot = CreateInlineShot(Dialogue,
 		Cast<UTerritoryDialogueShot>(Dialogue->DefaultDialogueShot),
-		TEXT("Territory_Default_TwoShot"), TwoShot,
+		TEXT("Territory_Default_TwoShot"), Master.Sequence,
 		LOCTEXT("DefaultTwoShot", "Territory Default Two Shot"),
-		ETerritoryDialogueShotRole::TwoShot,
+		Master.Role,
 		EAnchorOriginRule::AOR_ConversationCenter,
-		EShotTrackingRule::STR_Speaker, 45.f, 3.2f, false);
+		EShotTrackingRule::STR_Speaker,
+		Master.FocalLength, Master.Aperture,
+		Master.RoleTag, Master.LightRigProfile, Master.bLightRigUsesListener,
+		false);
 
 	for (int32 SpeakerIndex = 0; SpeakerIndex < Dialogue->Speakers.Num();
 		++SpeakerIndex)
@@ -436,34 +559,48 @@ UTerritoryDialogueShotEditorLibrary::ApplyStudioDialogueShotPack(
 		Speaker.DefaultSpeakerShot = CreateInlineShot(Dialogue,
 			Cast<UTerritoryDialogueShot>(Speaker.DefaultSpeakerShot),
 			*FString::Printf(TEXT("Territory_NPC_%d_MCU"), SpeakerIndex),
-			MediumCloseUp,
+			SpeakerCoverage.Sequence,
 			LOCTEXT("NPCMediumCloseUp", "Territory NPC Medium Close-Up"),
-			ETerritoryDialogueShotRole::MediumCloseUp,
+			SpeakerCoverage.Role,
 			EAnchorOriginRule::AOR_Speaker,
-			EShotTrackingRule::STR_Speaker, 65.f, 2.8f);
+			EShotTrackingRule::STR_Speaker,
+			SpeakerCoverage.FocalLength, SpeakerCoverage.Aperture,
+			SpeakerCoverage.RoleTag, SpeakerCoverage.LightRigProfile,
+			SpeakerCoverage.bLightRigUsesListener);
 	}
 
 	Dialogue->PlayerSpeakerInfo.DefaultSpeakerShot = CreateInlineShot(Dialogue,
 		Cast<UTerritoryDialogueShot>(
 			Dialogue->PlayerSpeakerInfo.DefaultSpeakerShot),
-		TEXT("Territory_Player_MCU"), MediumCloseUp,
+		TEXT("Territory_Player_MCU"), SpeakerCoverage.Sequence,
 		LOCTEXT("PlayerMediumCloseUp", "Territory Player Medium Close-Up"),
-		ETerritoryDialogueShotRole::MediumCloseUp,
+		SpeakerCoverage.Role,
 		EAnchorOriginRule::AOR_Speaker,
-		EShotTrackingRule::STR_Speaker, 65.f, 2.8f);
+		EShotTrackingRule::STR_Speaker,
+		SpeakerCoverage.FocalLength, SpeakerCoverage.Aperture,
+		SpeakerCoverage.RoleTag, SpeakerCoverage.LightRigProfile,
+		SpeakerCoverage.bLightRigUsesListener);
 	Dialogue->PlayerSpeakerInfo.SelectingReplyShot = CreateInlineShot(Dialogue,
 		Cast<UTerritoryDialogueShot>(
 			Dialogue->PlayerSpeakerInfo.SelectingReplyShot),
-		TEXT("Territory_Reply_Reaction"), Reaction,
+		TEXT("Territory_Reply_Reaction"), ReplySelection.Sequence,
 		LOCTEXT("ReplyReaction", "Territory Reply-Selection Reaction"),
-		ETerritoryDialogueShotRole::Reaction,
+		ReplySelection.Role,
 		EAnchorOriginRule::AOR_Listener,
-		EShotTrackingRule::STR_Listener, 75.f, 2.5f);
+		EShotTrackingRule::STR_Listener,
+		ReplySelection.FocalLength, ReplySelection.Aperture,
+		ReplySelection.RoleTag, ReplySelection.LightRigProfile,
+		ReplySelection.bLightRigUsesListener);
 
-	Dialogue->bShowCinematicBars = true;
-	Dialogue->bAutoStopMovement = true;
+	// Cinematic presentation and movement policy are the designer's call, not the pack's: forcing
+	// bShowCinematicBars / bAutoStopMovement / bFreeMovement here once turned every dialogue the tool
+	// touched into a letterboxed, rooted cutscene - including short gameplay barks. Bars come from
+	// Narrative itself when the dialogue asks for them (UDialogue::WantsCinematicBars_Implementation
+	// returns bShowCinematicBars and Narrative applies the loose
+	// Narrative.State.Player.WantsCinematicBars tag, Dialogue.cpp:637/:722/:836); a bark keeps the
+	// vendor default and is kept mobile by the play params at its call site. Only the two settings that
+	// make a shot read correctly are set here.
 	Dialogue->bAutoRotateSpeakers = true;
-	Dialogue->bFreeMovement = false;
 	Dialogue->DialogueBlendOutTime = 0.45f;
 
 	FBlueprintEditorUtils::MarkBlueprintAsModified(DialogueBlueprint);
@@ -495,10 +632,39 @@ UTerritoryDialogueShotEditorLibrary::ApplyStudioDialogueShotPack(
 FTerritoryDialogueShotPackBuildReport
 UTerritoryDialogueShotEditorLibrary::CreateAndApplyStudioDialogueShotPack(
 	UDialogueBlueprint* DialogueBlueprint,
-	const FString& DestinationContentPath)
+	const FString& DestinationContentPath,
+	const UTerritoryDialogueShotPackSpec* ShotSpec)
 {
 	return ApplyStudioDialogueShotPack(DialogueBlueprint,
-		CreateStudioDialogueShotPack(DestinationContentPath));
+		CreateStudioDialogueShotPack(DestinationContentPath, ShotSpec), ShotSpec);
+}
+
+bool UTerritoryDialogueShotEditorLibrary::EnsureDialogueSpeaker(
+	UDialogueBlueprint* DialogueBlueprint, const FName SpeakerID,
+	UNPCDefinition* SpeakerDefinition)
+{
+	if (!DialogueBlueprint || !DialogueBlueprint->DialogueTemplate
+		|| SpeakerID.IsNone() || !SpeakerDefinition)
+	{
+		return false;
+	}
+	UDialogue* Dialogue = DialogueBlueprint->DialogueTemplate;
+	for (const FSpeakerInfo& Existing : Dialogue->Speakers)
+	{
+		if (Existing.GetSpeakerID() == SpeakerID)
+		{
+			return true;
+		}
+	}
+	FSpeakerInfo& Added = Dialogue->Speakers.AddDefaulted_GetRef();
+	Added.SpeakerID = SpeakerID;
+	Added.NPCDataAsset = SpeakerDefinition;
+	DialogueBlueprint->Modify();
+	Dialogue->Modify();
+	FBlueprintEditorUtils::MarkBlueprintAsModified(DialogueBlueprint);
+	FKismetEditorUtilities::CompileBlueprint(DialogueBlueprint);
+	DialogueBlueprint->MarkPackageDirty();
+	return true;
 }
 
 #undef LOCTEXT_NAMESPACE

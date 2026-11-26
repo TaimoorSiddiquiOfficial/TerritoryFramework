@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeEvent.h"
 #include "Tales/TerritoryCaptureEvent.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryDiplomacyEvent.generated.h"
 
 UENUM(BlueprintType)
@@ -45,7 +46,7 @@ enum class ETerritoryDiplomacyFactionSource : uint8
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Set Territory Diplomacy",
 		ToolTip="Change the rich treaty and Narrative combat attitude on the server. Explicit tags work in global dialogue. Territory owner and transition sources require a containing state callback; read their fallback option carefully."))
-class TERRITORYFRAMEWORK_API UTerritorySetDiplomacyEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritorySetDiplomacyEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -127,8 +128,9 @@ public:
 	bool ResolveFactionPair(FGameplayTag& OutFactionA, FGameplayTag& OutFactionB) const;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -141,7 +143,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Modify Territory Faction Reputation",
 		ToolTip="Add to or set saved campaign reputation on the server. Negative values reduce it. Dynamic sources choose whose score changes. If Reputation Declares Diplomacy is enabled and an explicit campaign subject is set, the score can also change reputation-owned treaties."))
-class TERRITORYFRAMEWORK_API UTerritoryModifyReputationEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryModifyReputationEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -166,7 +168,8 @@ public:
 	int32 Value = 0;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

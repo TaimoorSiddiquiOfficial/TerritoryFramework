@@ -42,8 +42,7 @@ UTerritorySetStealthOverrideEvent::UTerritorySetStealthOverrideEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritorySetStealthOverrideEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritorySetStealthOverrideEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)) return;
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -70,8 +69,7 @@ UTerritoryRevealInfiltratorEvent::UTerritoryRevealInfiltratorEvent(
 	EventFilter = EEventFilter::EF_OnlyPlayers;
 }
 
-void UTerritoryRevealInfiltratorEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryRevealInfiltratorEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;
@@ -98,8 +96,7 @@ UTerritoryClearExposureEvent::UTerritoryClearExposureEvent(
 	EventFilter = EEventFilter::EF_OnlyPlayers;
 }
 
-void UTerritoryClearExposureEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryClearExposureEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;
@@ -126,8 +123,7 @@ UTerritoryReportDistractionEvent::UTerritoryReportDistractionEvent(
 	EventFilter = EEventFilter::EF_OnlyPlayers;
 }
 
-void UTerritoryReportDistractionEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryReportDistractionEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;
@@ -155,8 +151,7 @@ UTerritoryActivateDisguiseEvent::UTerritoryActivateDisguiseEvent(
 	EventFilter = EEventFilter::EF_OnlyPlayers;
 }
 
-void UTerritoryActivateDisguiseEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryActivateDisguiseEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target || !DisguiseProfile) return;
@@ -180,8 +175,7 @@ UTerritoryRemoveDisguiseEvent::UTerritoryRemoveDisguiseEvent(
 	EventFilter = EEventFilter::EF_OnlyPlayers;
 }
 
-void UTerritoryRemoveDisguiseEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryRemoveDisguiseEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;
@@ -205,8 +199,7 @@ UTerritorySetDisguiseCoverEvent::UTerritorySetDisguiseCoverEvent(
 	EventFilter = EEventFilter::EF_OnlyPlayers;
 }
 
-void UTerritorySetDisguiseCoverEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritorySetDisguiseCoverEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;
@@ -241,8 +234,7 @@ UTerritoryDisguiseIdentityCheckEvent::UTerritoryDisguiseIdentityCheckEvent(
 	EventFilter = EEventFilter::EF_OnlyPlayers;
 }
 
-void UTerritoryDisguiseIdentityCheckEvent::ExecuteEvent_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+void UTerritoryDisguiseIdentityCheckEvent::ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryTales::DoEventConditionsPass(this, Target, Controller, NarrativeComponent)
 		|| !Target) return;

@@ -870,6 +870,18 @@ public:
 		meta=(ClampMin="0"))
 	int32 IncomeBonusPerLevel = 25;
 
+	/**
+	 * Optional per-tier upgrade recipe. When assigned, the faction perk tier, authored
+	 * requirements, multi-purpose costs (currency / items / quest condition / free) and OnUpgraded
+	 * events replace the legacy UpgradeCostPerLevel formula. Leave empty to keep the old behaviour.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="10 Place|Upgrades")
+	TObjectPtr<class UTerritoryUpgradeDefinition> UpgradeDefinition;
+
+	/** Narrative events fired after a verified capture, carrying the Place, old owner, new owner and old level. */
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category="10 Place|Upgrades")
+	TArray<TObjectPtr<UNarrativeEvent>> PlaceCapturedEvents;
+
 	/** Optional protected Narrative NPC and dialogue configuration for explicit story handover. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="11 Place|Story")
 	FTerritoryStoryOwnerTemplate StoryOwner;

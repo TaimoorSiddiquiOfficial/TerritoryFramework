@@ -33,6 +33,9 @@ for asset in assets:
         if isinstance(obj, unreal.Blueprint):
             unreal.BlueprintEditorLibrary.compile_blueprint(obj)
             blueprints += 1
+            row['blueprint_compiled'] = unreal.TerritoryDataValidator.is_blueprint_compiled(obj)
+            if not row['blueprint_compiled']:
+                raise RuntimeError('Blueprint did not reach a compiled status; inspect compiler diagnostics')
         result, errors, warnings = validator.is_asset_valid(asset, unreal.DataValidationUsecase.MANUAL)
         row.update(result=str(result), errors=[str(e) for e in errors], warnings=[str(w) for w in warnings])
     except Exception as error:

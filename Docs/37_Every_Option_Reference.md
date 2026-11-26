@@ -10,12 +10,12 @@ rather than filling the gap with a guess.
 
 | | |
 |---|---|
-| Options documented | **787** |
-| Classes / structs covered | **117** |
-| Source areas | **9** |
-| Options whose author wrote a description | **389** |
-| Options with no description in source | **398** |
-| Options with a default written in code | **487** |
+| Options documented | **844** |
+| Classes / structs covered | **128** |
+| Source areas | **10** |
+| Options whose author wrote a description | **402** |
+| Options with no description in source | **442** |
+| Options with a default written in code | **519** |
 
 **What this file deliberately does not cover.** It lists options, not behaviour. For *what the
 system does* and *why*, read the plain-English guide that pairs with this one, and the numbered
@@ -43,9 +43,10 @@ a game build, so they are out of scope here.
 
 ## Index
 
-**AI — NPC behaviour, diplomacy, perception** — 10 option(s) in 3 class(es)
+**AI — NPC behaviour, diplomacy, perception** — 14 option(s) in 4 class(es)
 
 - `FTerritoryFactionDialogueProfile` — 2
+- `UNarrativeActorProvider_InteractableSpot` — 4
 - `UTerritoryDiplomacyDialogueProfile` — 7
 - `UTerritoryPatrolGoal` — 1
 
@@ -56,7 +57,7 @@ a game build, so they are out of scope here.
 - `UTerritoryCinematicLightRigProfile` — 7
 - `UTerritoryDialogueShot` — 12
 
-**Combat — assaults, counterattacks, targeting** — 121 option(s) in 10 class(es)
+**Combat — assaults, counterattacks, targeting** — 124 option(s) in 11 class(es)
 
 - `FTerritoryAssaultApproach` — 16
 - `FTerritoryCounterAttackQuestRule` — 4
@@ -68,21 +69,25 @@ a game build, so they are out of scope here.
 - `UBTTask_ReleaseTerritoryPermission` — 1
 - `UBTTask_RequestTerritoryPermission` — 2
 - `UTerritoryCounterAttackProfile` — 43
+- `UTerritoryFloorCombatPolicy` — 3
 
-**Core — definitions, districts, places, guards** — 297 option(s) in 23 class(es)
+**Core — definitions, districts, places, guards** — 319 option(s) in 26 class(es)
 
+- `ATerritoryFloorVolume` — 2
 - `ATerritorySavableData` — 1
-- `ATerritoryWorldState` — 2
+- `ATerritoryWorldState` — 3
 - `FTerritoryCapturePointTemplate` — 6
 - `FTerritoryFactionGuardDefinition` — 2
-- `FTerritoryGuardBehaviorTemplate` — 12
+- `FTerritoryFloorTemplate` — 5
+- `FTerritoryGuardBehaviorTemplate` — 13
 - `FTerritoryGuardPatrolTemplateNode` — 3
-- `FTerritoryGuardPostTemplate` — 21
+- `FTerritoryGuardPostTemplate` — 23
 - `FTerritoryManagementPointTemplate` — 7
 - `FTerritoryNotificationSettings` — 9
 - `FTerritoryPatrolNode` — 4
+- `FTerritoryPatrolSpot` — 7
 - `FTerritoryPropertyGameplayBenefit` — 7
-- `FTerritoryStateAudioConfig` — 10
+- `FTerritoryStateAudioConfig` — 11
 - `FTerritoryStateConfig` — 3
 - `FTerritoryStateGameplayRules` — 10
 - `FTerritoryStoryOwnerTemplate` — 8
@@ -91,8 +96,8 @@ a game build, so they are out of scope here.
 - `UTerritoryDeveloperSettings` — 78
 - `UTerritoryDisguiseProfile` — 13
 - `UTerritoryDistrictDefinition` — 4
-- `UTerritoryGuardPostDefinition` — 13
-- `UTerritoryPlaceDefinition` — 7
+- `UTerritoryGuardPostDefinition` — 14
+- `UTerritoryPlaceDefinition` — 9
 - `UTerritoryStealthProfile` — 39
 
 **Economy — production, resources, currency** — 39 option(s) in 7 class(es)
@@ -116,7 +121,12 @@ a game build, so they are out of scope here.
 - `FTerritoryVehicleRetirementSettings` — 3
 - `UTerritoryMapMarker` — 5
 
-**Tales — narrative tasks, quest cascades, story events** — 251 option(s) in 62 class(es)
+**Social** — 13 option(s) in 2 class(es)
+
+- `ATerritoryConversationMeetingPoint` — 3
+- `UTerritoryConversationProfile` — 10
+
+**Tales — narrative tasks, quest cascades, story events** — 266 option(s) in 66 class(es)
 
 - `ATerritoryNarrativeQuestStarter` — 6
 - `FTerritoryDialogueRecipeNode` — 8
@@ -125,6 +135,7 @@ a game build, so they are out of scope here.
 - `FTerritoryQuestRuntimeOverrideRule` — 7
 - `UTerritoryAIObservationTask` — 8
 - `UTerritoryActivateDisguiseEvent` — 1
+- `UTerritoryAssaultAdmissionTask` — 1
 - `UTerritoryAssaultCondition` — 8
 - `UTerritoryAssaultTask` — 4
 - `UTerritoryCancelEnemyWavesEvent` — 4
@@ -136,7 +147,8 @@ a game build, so they are out of scope here.
 - `UTerritoryCombatProgressTask` — 5
 - `UTerritoryConditionGroup` — 2
 - `UTerritoryControlProgressCondition` — 5
-- `UTerritoryDialogueRecipe` — 3
+- `UTerritoryCutsceneCondition` — 3
+- `UTerritoryDialogueRecipe` — 6
 - `UTerritoryDiplomacyCondition` — 3
 - `UTerritoryDisguiseCondition` — 3
 - `UTerritoryDisguiseIdentityCheckEvent` — 2
@@ -153,8 +165,10 @@ a game build, so they are out of scope here.
 - `UTerritoryNarrativeCheckpointEvent` — 3
 - `UTerritoryNarrativeConditionTask` — 4
 - `UTerritoryNarrativeDataTask` — 3
+- `UTerritoryNarrativePartyComponent` — 1
 - `UTerritoryOwnerHandoverEvent` — 2
 - `UTerritoryOwnershipCondition` — 5
+- `UTerritoryPlayCutsceneEvent` — 6
 - `UTerritoryPresenceCondition` — 2
 - `UTerritoryProductionStatusCondition` — 3
 - `UTerritoryQuestCascadeRecipe` — 12
@@ -173,7 +187,7 @@ a game build, so they are out of scope here.
 - `UTerritorySituationProfile` — 3
 - `UTerritoryStartBossChaseEvent` — 3
 - `UTerritoryStateCondition` — 5
-- `UTerritoryStateTask` — 3
+- `UTerritoryStateTask` — 4
 - `UTerritoryStealthEvidenceCondition` — 3
 - `UTerritoryStealthPolicyCondition` — 2
 - `UTerritorySuspicionCondition` — 2
@@ -199,6 +213,17 @@ a game build, so they are out of scope here.
 |---|---|---|---|---|---|
 | `DialogueProfile` | — | `TObjectPtr<UTerritoryDiplomacyDialogueProfile>` | `—` | Relationship dialogue profile for this exact faction. | — |
 | `Faction` | — | `FGameplayTag` | `—` | Exact current NPC faction that selects this profile. | `Categories` |
+
+### `UNarrativeActorProvider_InteractableSpot`
+
+*class* · `Source/TerritoryFramework/Public/AI/NarrativeActorProvider_InteractableSpot.h` · 4 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `SearchOrigin` | — | `FVector` | `FVector::ZeroVector` | *no description in source* | — |
+| `SearchRadius` | — | `float` | `0.f` | *no description in source* | `ClampMin` `UIMin` `UIMax` |
+| `SpotActorClass` | — | `TSubclassOf<AActor>` | `—` | *no description in source* | — |
+| `SpotTag` | — | `FGameplayTag` | `—` | *no description in source* | `Categories` |
 
 ### `UTerritoryDiplomacyDialogueProfile`
 
@@ -339,7 +364,7 @@ a game build, so they are out of scope here.
 |---|---|---|---|---|---|
 | `ActivityConfigurationOverride` | — | `TObjectPtr<UNPCActivityConfiguration>` | `nullptr` | Optional Narrative activity configuration override. Leave empty to use the NPC Definition's normal configuration. | — |
 | `AttackerDefinition` | — | `TObjectPtr<UNPCDefinition>` | `nullptr` | Narrative Pro NPC Definition used for every physical attacker. Territory never saves the spawned pawn pointer. | — |
-| `EconomyReadiness` | — | `float` | `1.f` | 0 means the faction cannot afford a response; 1 means fully ready. | `ClampMin` `ClampMax` |
+| `EconomyReadiness` | — | `float` | `1.f` | Authored planning input: 0 unready, 1 fully ready. This is not read from live currency or an economy simulation. | `ClampMin` `ClampMax` |
 | `EnemyLevelOffset` | — | `int32` | `1` | Added after player power is resolved. Use 1 for an enemy one level above the player. | `ClampMin` `ClampMax` `EditCondition` |
 | `Faction` | — | `FGameplayTag` | `—` | Exact Narrative faction allowed to launch this force. Example: Narrative.Factions.Bandits. | `Categories` |
 | `FinalFightDialogueTag` | — | `FGameplayTag` | `—` | Optional Narrative tagged dialogue played when a chase target abandons a damaged or blocked car and begins the final on-foot fight. | — |
@@ -351,13 +376,13 @@ a game build, so they are out of scope here.
 | `PlayerPowerTiers` | — | `TArray<FTerritoryPlayerPowerTier>` | `—` | Optional tag-to-level mappings. Narrative perk Gameplay Effects can grant these replicated tags when skills unlock. | `EditCondition` |
 | `PowerScalingEffect` | — | `TSubclassOf<UGameplayEffect>` | `—` | Optional Gameplay Effect whose scalable modifiers use the resolved enemy level. Leave empty when the Narrative NPC configuration already has level curves. | `EditCondition` |
 | `PowerScalingMagnitudePerEnemyLevel` | — | `float` | `0.f` | Value sent through Narrative Pro's existing SetByCaller.AttackDamage tag for each level above one. Example: 1.5 gives a level 6 enemy +7.5 Attack Damage. Narrative's AttackDamage, AttackRating, Armor, material and friendly-fire rules remain authoritative. | `ClampMin` `EditCondition` |
-| `RecentMomentum` | — | `float` | `0.f` | Recent performance: -1 losing badly, 0 neutral, 1 winning strongly. | `ClampMin` `ClampMax` |
+| `RecentMomentum` | — | `float` | `0.f` | Authored planning input: -1 losing, 0 neutral, 1 winning. Battle history does not automatically update this value. | `ClampMin` `ClampMax` |
 | `RecurringCounterCooldownGameTime` | — | `float` | `900.f` | Time between finite counterattack attempts. Example: 900 means a defeated wave cannot immediately reroll every subsystem update. | `ClampMin` |
 | `ReserveWaveAlertDialogueTag` | — | `FGameplayTag` | `—` | Optional Narrative dialogue tag used to alert a nearby player as a reserve wave arrives. Example: Territory.Dialogue.ReservesArriving. | — |
 | `ScheduleMode` | — | `ETerritoryCounterScheduleMode` | `ETerritoryCounterScheduleMode::UnlimitedSeries` | Easy example: Finite Series + 3 allows the faction to attempt at most three separate battles during this response series. Unlimited Schedule keeps trying after cooldowns while every gameplay rule still passes. | — |
 | `SignatureVehicleClass` | Faction Signature Vehicle | `TSoftClassPtr<ANarrativeVehicleBase>` | `—` | Narrative Vehicle Blueprint used by this faction on every vehicle approach. Easy example: Bandits use a rusty pickup while the Regime uses a black sedan, so the player recognizes the attacker from far away. Leave empty to use the vehicle stored on each Approach. | — |
 | `StagingRequirement` | — | `ETerritoryAssaultStagingRequirement` | `ETerritoryAssaultStagingRequirement::OwnsSecureDistrict` | Normal strategic admission rule. Recommended: require one loaded, unlocked District fully secured through its authored Places, so a defeated faction with no operational holding cannot keep launching counters. | — |
-| `SupplyReadiness` | — | `float` | `1.f` | 0 means no supply/proximity support; 1 means fully supplied. | `ClampMin` `ClampMax` |
+| `SupplyReadiness` | — | `float` | `1.f` | Authored planning input: 0 unsupported, 1 fully supplied. This does not simulate a live supply network. | `ClampMin` `ClampMax` |
 | `TakeoverStartedDialogueTag` | — | `FGameplayTag` | `—` | Optional Narrative tagged dialogue played once by the first attacker that enters the target and registers takeover pressure. Easy example: 'The market belongs to us now!' | — |
 | `TerritorialInfluence` | — | `float` | `0.5f` | Local political/logistics reach: 0 distant and weak, 1 deeply established. Higher values shorten response timing. | `ClampMin` `ClampMax` |
 | `TimePolicy` | — | `ETerritoryCounterTimePolicy` | `ETerritoryCounterTimePolicy::AnyTime` | Use Narrative / Ultra Dynamic Sky Time Window when attacks should begin only at night, dawn, or another story-friendly period. | — |
@@ -458,7 +483,7 @@ a game build, so they are out of scope here.
 | `ReserveMaximumPlayerDistance` | — | `float` | `5500.f` | Authored approaches farther than this receive a presentation penalty but may still be used when they are the only valid route. | `ClampMin` `EditCondition` |
 | `ReserveMinimumPlayerDistance` | — | `float` | `1200.f` | Authored approaches closer than this are strongly discouraged to avoid unfair pop-in. | `ClampMin` `EditCondition` |
 | `ReservePreferredPlayerDistance` | — | `float` | `2600.f` | Ideal distance for an arriving reserve wave. Example: 2600 cm leaves time for the alert line. | `ClampMin` `EditCondition` |
-| `SameFloorHeightTolerance` | — | `float` | `500.f` | Maximum height difference considered the same floor. Use authored Rooftop, Stair, or Custom approaches plus Nav Links for multi-floor Places. | `ClampMin` `EditCondition` |
+| `SameFloorHeightTolerance` | — | `float` | `500.f` | Preferred height band when staging a reserve wave near the player; approaches outside it are scored lower but still usable. This is not a same-floor requirement. Multi-floor Places need authored Rooftop, Stair, or Custom approaches plus Nav Links. | `ClampMin` `EditCondition` |
 | `SpawnPlacementAttemptsPerParticipant` | — | `int32` | `4` | *no description in source* | `ClampMin` `ClampMax` |
 | `StalledMovementRetryInterval` | — | `float` | `1.5f` | *no description in source* | `ClampMin` `ClampMax` |
 | `StrategicValueWeight` | — | `float` | `0.15f` | *no description in source* | `ClampMin` |
@@ -479,7 +504,26 @@ a game build, so they are out of scope here.
 | `bUsePlayerRelativeReserveStaging` | — | `bool` | `true` | Recommended. Prefer valid authored approaches near the player, on the same floor, and near the left or right edge of the camera. Navigation and route validation still decide whether spawning is legal. | — |
 | `bUseUnattendedRecaptureHandover` | Allow Unattended Recapture Countdown | `bool` | `true` | Recommended. If the defence is cleared while no living defending player is inside the Place or its District, start a countdown instead of capturing instantly. | — |
 
+### `UTerritoryFloorCombatPolicy`
+
+*class* · `Source/TerritoryFramework/Public/Combat/TerritoryFloorCombatPolicy.h` · 3 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `Description` | — | `FText` | `—` | *no description in source* | — |
+| `DisplayName` | — | `FText` | `—` | *no description in source* | — |
+| `EngagementPolicy` | — | `ETerritoryFloorEngagementPolicy` | `ETerritoryFloorEngagementPolicy::AnyFloor` | Any Floor keeps today's behaviour, since floors without a region already mean 'no separation declared'. The stricter settings only matter once ATerritoryFloorVolume regions exist for the floors being separated. | — |
+
 ## Core — definitions, districts, places, guards
+
+### `ATerritoryFloorVolume`
+
+*actor* · `Source/TerritoryFramework/Public/Core/TerritoryFloorVolume.h` · 2 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `FloorIndex` | — | `int32` | `0` | Authored floor row this region claims. Must name a row in the Place Definition's Floors list, or data validation errors. | — |
+| `PlaceDefinition` | — | `TObjectPtr<UTerritoryPlaceDefinition>` | `—` | The Place Definition whose floor this region claims. Floors exist only on Places; a City or District cannot own defenders and so cannot own a floor. | — |
 
 ### `ATerritorySavableData`
 
@@ -491,11 +535,12 @@ a game build, so they are out of scope here.
 
 ### `ATerritoryWorldState`
 
-*actor* · `Source/TerritoryFramework/Public/Core/TerritoryWorldState.h` · 2 option(s)
+*actor* · `Source/TerritoryFramework/Public/Core/TerritoryWorldState.h` · 3 option(s)
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
 | `CampaignCities` | Campaign City Definitions | `TArray<TObjectPtr<UTerritoryCityDefinition>>` | `—` | *no description in source* | — |
+| `RetiredDirectoryGUIDs` | — | `TSet<FGuid>` | `—` | *no description in source* | — |
 | `WorldStateGUID` | World State GUID (auto-generated) | `FGuid` | `—` | *no description in source* | — |
 
 ### `FTerritoryCapturePointTemplate`
@@ -520,9 +565,21 @@ a game build, so they are out of scope here.
 | `Faction` | — | `FGameplayTag` | `—` | *no description in source* | `Categories` |
 | `NPCDefinition` | — | `TObjectPtr<class UNPCDefinition>` | `—` | *no description in source* | — |
 
+### `FTerritoryFloorTemplate`
+
+*struct* · `Source/TerritoryFramework/Public/Core/TerritoryDefinition.h` · 5 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `CombatPolicy` | — | `TObjectPtr<UTerritoryFloorCombatPolicy>` | `—` | Leave empty to inherit the Place's Default Floor Combat Policy. Set it to give this one floor a different rule. | — |
+| `DesiredGuards` | — | `int32` | `0` | *no description in source* | `ClampMin` |
+| `DisplayName` | Display Name | `FText` | `—` | *no description in source* | — |
+| `FloorClearedEvents` | — | `TArray<TObjectPtr<UNarrativeEvent>>` | `—` | *no description in source* | — |
+| `FloorIndex` | Floor Index | `int32` | `0` | *no description in source* | `ClampMin` |
+
 ### `FTerritoryGuardBehaviorTemplate`
 
-*struct* · `Source/TerritoryFramework/Public/Core/TerritoryDefinition.h` · 12 option(s)
+*struct* · `Source/TerritoryFramework/Public/Core/TerritoryDefinition.h` · 13 option(s)
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
@@ -533,6 +590,7 @@ a game build, so they are out of scope here.
 | `PatrolAvoidanceConsiderationRadius` | — | `float` | `500.f` | *no description in source* | `ClampMin` `ClampMax` `EditCondition` |
 | `PatrolAvoidanceWeight` | — | `float` | `0.5f` | *no description in source* | `ClampMin` `ClampMax` `EditCondition` |
 | `PatrolGoalClass` | — | `TSubclassOf<UTerritoryPatrolGoal>` | `—` | *no description in source* | — |
+| `SpotInteractGoalClass` | — | `TSubclassOf<UNPCGoalItem>` | `—` | *no description in source* | — |
 | `bAllowPersonalRetaliation` | — | `bool` | `true` | *no description in source* | — |
 | `bDefendAgainstExposedEnemies` | — | `bool` | `true` | *no description in source* | — |
 | `bEnablePatrolCrowdAvoidance` | — | `bool` | `true` | *no description in source* | — |
@@ -545,19 +603,20 @@ a game build, so they are out of scope here.
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
-| `ActivityTag` | — | `FGameplayTag` | `—` | *no description in source* | `Categories` |
 | `RelativeTransform` | — | `FTransform` | `FTransform::Identity` | *no description in source* | — |
+| `Spot` | — | `FTerritoryPatrolSpot` | `—` | *no description in source* | — |
 | `WaitTime` | — | `float` | `2.f` | *no description in source* | `ClampMin` |
 
 ### `FTerritoryGuardPostTemplate`
 
-*struct* · `Source/TerritoryFramework/Public/Core/TerritoryDefinition.h` · 21 option(s)
+*struct* · `Source/TerritoryFramework/Public/Core/TerritoryDefinition.h` · 23 option(s)
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
 | `ActivityConfigurationOverride` | — | `TObjectPtr<UNPCActivityConfiguration>` | `—` | *no description in source* | — |
 | `ActorClass` | — | `TSoftClassPtr<ATerritoryGuardSpawnPoint>` | `—` | *no description in source* | — |
 | `FactionOverride` | — | `FGameplayTag` | `—` | *no description in source* | `Categories` |
+| `FloorIndex` | Floor Index | `int32` | `0` | *no description in source* | `ClampMin` |
 | `GuardPostDefinition` | — | `TObjectPtr<UTerritoryGuardPostDefinition>` | `—` | *no description in source* | — |
 | `GuardPostID` | Guard Post ID | `FName` | `—` | *no description in source* | — |
 | `NPCDefinitionOverride` | — | `TObjectPtr<UNPCDefinition>` | `—` | *no description in source* | — |
@@ -565,17 +624,18 @@ a game build, so they are out of scope here.
 | `Priority` | — | `int32` | `50` | *no description in source* | `ClampMin` `UIMin` `UIMax` |
 | `RelativeTransform` | — | `FTransform` | `FTransform::Identity` | *no description in source* | — |
 | `ReserveCameraAvoidanceRetryLimit` | — | `int32` | `3` | *no description in source* | `ClampMin` `ClampMax` |
-| `ReserveMinimumPlayerDistance` | — | `float` | `500.f` | *no description in source* | `ClampMin` |
+| `ReserveMinimumPlayerDistance` | — | `float` | `500.f` | *no description in source* | `ClampMin` `EditCondition` `EditConditionHides` |
 | `ReserveOwnershipPolicy` | — | `EReserveOwnershipPolicy` | `EReserveOwnershipPolicy::RefillOnOwnerChange` | *no description in source* | — |
-| `ReserveSlots` | — | `int32` | `1` | *no description in source* | `ClampMin` `UIMin` `UIMax` |
-| `ReserveSpawnCandidateCount` | — | `int32` | `12` | *no description in source* | `ClampMin` `ClampMax` |
-| `ReserveSpawnDelay` | — | `float` | `3.f` | *no description in source* | `ClampMin` |
-| `ReserveSpawnRadius` | — | `float` | `600.f` | *no description in source* | `ClampMin` |
-| `ReserveSpawnRetryInterval` | — | `float` | `2.f` | *no description in source* | `ClampMin` |
+| `ReserveSlots` | — | `int32` | `1` | *no description in source* | `ClampMin` `UIMin` `UIMax` `EditCondition` `EditConditionHides` |
+| `ReserveSpawnCandidateCount` | — | `int32` | `12` | *no description in source* | `ClampMin` `ClampMax` `EditCondition` `EditConditionHides` |
+| `ReserveSpawnDelay` | — | `float` | `3.f` | *no description in source* | `ClampMin` `EditCondition` `EditConditionHides` |
+| `ReserveSpawnRadius` | — | `float` | `600.f` | *no description in source* | `ClampMin` `EditCondition` `EditConditionHides` |
+| `ReserveSpawnRetryInterval` | — | `float` | `2.f` | *no description in source* | `ClampMin` `EditCondition` `EditConditionHides` |
 | `ReserveTotalRetryLimit` | — | `int32` | `10` | *no description in source* | `ClampMin` `ClampMax` |
 | `TriggerSetOverrides` | — | `TArray<TSoftObjectPtr<UTriggerSet>>` | `—` | *no description in source* | — |
 | `bAutoSpawnReserves` | — | `bool` | `true` | *no description in source* | — |
 | `bLoopPatrol` | — | `bool` | `true` | *no description in source* | — |
+| `bUseSpawnTransformAsPatrolStop` | Use Spawn Transform As Patrol Stop | `bool` | `false` | *no description in source* | — |
 
 ### `FTerritoryManagementPointTemplate`
 
@@ -613,10 +673,24 @@ a game build, so they are out of scope here.
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
-| `ActivityTag` | Activity Tag | `FGameplayTag` | `—` | *no description in source* | `Categories` |
 | `Location` | Location | `FVector` | `FVector::ZeroVector` | *no description in source* | — |
 | `Rotation` | Rotation | `FRotator` | `FRotator::ZeroRotator` | *no description in source* | — |
+| `Spot` | Spot | `FTerritoryPatrolSpot` | `—` | *no description in source* | — |
 | `WaitTime` | Wait Time | `float` | `2.f` | *no description in source* | `ClampMin` `UIMin` `UIMax` |
+
+### `FTerritoryPatrolSpot`
+
+*struct* · `Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h` · 7 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `GoalScore` | Goal Score | `float` | `1.1f` | *no description in source* | `ClampMin` `UIMin` `EditCondition` |
+| `MaximumVisitSeconds` | Maximum Visit Seconds | `float` | `30.f` | *no description in source* | `ClampMin` `UIMin` `EditCondition` |
+| `SearchRadius` | Search Radius | `float` | `0.f` | *no description in source* | `ClampMin` `UIMin` `UIMax` `EditCondition` |
+| `SlotIndex` | Slot Index | `int32` | `-1` | *no description in source* | `ClampMin` `UIMin` `UIMax` `EditCondition` |
+| `SpotActorClass` | Spot Actor Class | `TSubclassOf<AActor>` | `—` | *no description in source* | `EditCondition` |
+| `SpotTag` | Spot Tag | `FGameplayTag` | `—` | *no description in source* | `EditCondition` |
+| `bEnabled` | Enabled | `bool` | `false` | *no description in source* | — |
 
 ### `FTerritoryPropertyGameplayBenefit`
 
@@ -634,10 +708,11 @@ a game build, so they are out of scope here.
 
 ### `FTerritoryStateAudioConfig`
 
-*struct* · `Source/TerritoryFramework/Public/Core/TerritoryAudioTypes.h` · 10 option(s)
+*struct* · `Source/TerritoryFramework/Public/Core/TerritoryAudioTypes.h` · 11 option(s)
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
+| `MusicPriority` | — | `int32` | `0` | Places still take precedence over Districts and Cities. Within the same tier, higher priority wins; ties use smaller bounds then stable Territory identity. | `EditCondition` |
 | `MusicSetOverride` | — | `TSoftObjectPtr<UTaggedMusicSet>` | `—` | Optional Narrative Tagged Music Set for this Territory state. Easy example: Blacksmith Claimed can use a forge ambience set. Empty uses the current world/default Narrative music set. | `EditCondition` |
 | `MusicTheme` | — | `FGameplayTag` | `—` | Theme inside the selected Narrative Tagged Music Set. Easy examples: Music.Ambient for calm control, Music.Combat for Contested, or a custom Music.Territory.* theme. | `EditCondition` `Categories` |
 | `StateEffectPitch` | — | `float` | `1.f` | Pitch multiplier for this row's state-entered and state-exited sounds. | `ClampMin` `ClampMax` |
@@ -861,7 +936,7 @@ a game build, so they are out of scope here.
 
 ### `UTerritoryGuardPostDefinition`
 
-*definition DataAsset* · `Source/TerritoryFramework/Public/Core/TerritoryGuardPostDefinition.h` · 13 option(s)
+*definition DataAsset* · `Source/TerritoryFramework/Public/Core/TerritoryGuardPostDefinition.h` · 14 option(s)
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
@@ -878,13 +953,16 @@ a game build, so they are out of scope here.
 | `ReserveSpawnRetryInterval` | — | `float` | `2.f` | *no description in source* | `ClampMin` `UIMin` `UIMax` |
 | `TriggerSetOverrides` | — | `TArray<TSoftObjectPtr<UTriggerSet>>` | `—` | *no description in source* | — |
 | `bLoopPatrol` | — | `bool` | `true` | *no description in source* | — |
+| `bUseSpawnTransformAsPatrolStop` | Use Spawn Transform As Patrol Stop | `bool` | `false` | *no description in source* | — |
 
 ### `UTerritoryPlaceDefinition`
 
-*definition DataAsset* · `Source/TerritoryFramework/Public/Core/TerritoryDefinition.h` · 7 option(s)
+*definition DataAsset* · `Source/TerritoryFramework/Public/Core/TerritoryDefinition.h` · 9 option(s)
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
+| `DefaultFloorCombatPolicy` | — | `TObjectPtr<UTerritoryFloorCombatPolicy>` | `—` | Optional. Leave empty to keep floors as pure staging groups with no effect on combat. Set it to separate this Place's floors, then override individual floors in the Floors list if one needs a different rule. | — |
+| `Floors` | — | `TArray<FTerritoryFloorTemplate>` | `—` | *no description in source* | — |
 | `GameplayBenefits` | — | `TArray<FTerritoryPropertyGameplayBenefit>` | `—` | Abilities, persistent Gameplay Effects, benefit tags, and weapon catalog entries unlocked by owning and upgrading this Property. | — |
 | `IncomeBonusPerLevel` | — | `int32` | `25` | *no description in source* | `ClampMin` |
 | `MaxUpgradeLevel` | — | `int32` | `3` | *no description in source* | `ClampMin` |
@@ -1099,6 +1177,35 @@ a game build, so they are out of scope here.
 | `TrackedCapturedColor` | — | `FLinearColor` | `FLinearColor(0.08f, 0.95f, 0.46f, 1.f)` | *no description in source* | — |
 | `UnclaimedColor` | — | `FLinearColor` | `FLinearColor(1.f, 0.f, 0.f, 1.f)` | *no description in source* | — |
 
+## Social
+
+### `ATerritoryConversationMeetingPoint`
+
+*actor* · `Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h` · 3 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `FirstOffset` | — | `FVector` | `FVector(0.f, -120.f, 0.f)` | *no description in source* | — |
+| `Profile` | — | `TObjectPtr<UTerritoryConversationProfile>` | `—` | *no description in source* | — |
+| `SecondOffset` | — | `FVector` | `FVector(0.f, 120.f, 0.f)` | *no description in source* | — |
+
+### `UTerritoryConversationProfile`
+
+*profile DataAsset* · `Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h` · 10 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `ArrivalRadius` | — | `float` | `80.f` | *no description in source* | `ClampMin` |
+| `Cooldown` | — | `float` | `60.f` | *no description in source* | `ClampMin` |
+| `Dialogue` | — | `TSubclassOf<UTerritoryAmbientDialogue>` | `—` | *no description in source* | — |
+| `FirstRoleTags` | — | `FGameplayTagContainer` | `—` | *no description in source* | — |
+| `ListenerRadius` | — | `float` | `1200.f` | *no description in source* | `ClampMin` |
+| `MaximumDialogueDuration` | — | `float` | `90.f` | *no description in source* | `ClampMin` `ClampMax` |
+| `MeetingTimeout` | — | `float` | `30.f` | *no description in source* | `ClampMin` `ClampMax` |
+| `PreparationTimeout` | — | `float` | `5.f` | *no description in source* | `ClampMin` `ClampMax` |
+| `RecruitRadius` | — | `float` | `2000.f` | *no description in source* | `ClampMin` |
+| `SecondRoleTags` | — | `FGameplayTagContainer` | `—` | *no description in source* | — |
+
 ## Tales — narrative tasks, quest cascades, story events
 
 ### `ATerritoryNarrativeQuestStarter`
@@ -1192,6 +1299,14 @@ a game build, so they are out of scope here.
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
 | `DisguiseProfile` | — | `TObjectPtr<UTerritoryDisguiseProfile>` | `—` | Useful for a cutscene or dialogue reward. For normal inventory play, use Territory Disguise Clothing so equip and unequip happen automatically. | — |
+
+### `UTerritoryAssaultAdmissionTask`
+
+*AI / narrative task* · `Source/TerritoryFramework/Public/Tales/TerritoryAssaultAdmissionTask.h` · 1 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `Request` | — | `TObjectPtr<UTerritoryScheduleEnemyWaveEvent>` | `—` | *no description in source* | — |
 
 ### `UTerritoryAssaultCondition`
 
@@ -1318,14 +1433,27 @@ a game build, so they are out of scope here.
 | `ProgressPercent` | — | `float` | `75.f` | Progress percentage used by the comparison. Example: 75 means capture pressure reached seventy-five percent. | `ClampMin` `ClampMax` |
 | `TerritoryToCheck` | — | `FGameplayTag` | `—` | Territory whose real capture progress is inspected. | `Categories` |
 
-### `UTerritoryDialogueRecipe`
+### `UTerritoryCutsceneCondition`
 
-*class* · `Source/TerritoryFramework/Public/Tales/TerritoryDialogueRecipe.h` · 3 option(s)
+*class* · `Source/TerritoryFramework/Public/Tales/TerritoryCutsceneCondition.h` · 3 option(s)
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
+| `Sequence` | — | `TSoftObjectPtr<ULevelSequence>` | `—` | *no description in source* | — |
+| `bIncludePaused` | — | `bool` | `false` | *no description in source* | — |
+| `bIsInCutscene` | — | `bool` | `true` | *no description in source* | — |
+
+### `UTerritoryDialogueRecipe`
+
+*class* · `Source/TerritoryFramework/Public/Tales/TerritoryDialogueRecipe.h` · 6 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `FirstRoleID` | — | `FName` | `TEXT("FirstGuard")` | *no description in source* | — |
 | `Nodes` | — | `TArray<FTerritoryDialogueRecipeNode>` | `—` | *no description in source* | — |
+| `ParentDialogueClass` | — | `TSubclassOf<UDialogue>` | `—` | *no description in source* | — |
 | `RootID` | — | `FName` | `—` | *no description in source* | — |
+| `SecondRoleID` | — | `FName` | `TEXT("SecondGuard")` | *no description in source* | — |
 | `Speakers` | — | `TArray<TObjectPtr<UNPCDefinition>>` | `—` | *no description in source* | — |
 
 ### `UTerritoryDiplomacyCondition`
@@ -1499,6 +1627,14 @@ a game build, so they are out of scope here.
 | `DataTask` | — | `TObjectPtr<UNarrativeDataTask>` | `—` | *no description in source* | — |
 | `bCountPreviousCompletions` | — | `bool` | `false` | *no description in source* | — |
 
+### `UTerritoryNarrativePartyComponent`
+
+*component* · `Source/TerritoryFramework/Public/Tales/TerritoryNarrativePartyComponent.h` · 1 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `OwnerDeparturePolicy` | — | `ETerritoryPartyOwnerDeparturePolicy` | `ETerritoryPartyOwnerDeparturePolicy::ContinueWhenSupported` | *no description in source* | — |
+
 ### `UTerritoryOwnerHandoverEvent`
 
 *narrative event* · `Source/TerritoryFramework/Public/Tales/TerritoryOwnerHandoverEvent.h` · 2 option(s)
@@ -1519,6 +1655,19 @@ a game build, so they are out of scope here.
 | `bPassWhenContested` | — | `bool` | `false` | *no description in source* | — |
 | `bPassWhenLocked` | — | `bool` | `false` | *no description in source* | — |
 | `bPassWhenUnclaimed` | — | `bool` | `false` | *no description in source* | — |
+
+### `UTerritoryPlayCutsceneEvent`
+
+*narrative event* · `Source/TerritoryFramework/Public/Tales/TerritoryStoryEvents.h` · 6 option(s)
+
+| Option | Shown as | Type | Default | What it does | Rules |
+|---|---|---|---|---|---|
+| `AudienceFaction` | — | `FGameplayTag` | `—` | Faction whose players watch this cutscene when the event runs with no player context, such as a defender defeat with no instigator. Matched against Narrative faction identity exactly as capture context resolution does. Leave empty to play for nobody rather than guess. | `Categories` |
+| `CutsceneSequence` | — | `TSoftObjectPtr<ULevelSequence>` | `—` | Level Sequence asset played as the cutscene. Example: a short shot of defenders walking down the stairwell. | — |
+| `LightRigProfile` | — | `TObjectPtr<UTerritoryCinematicLightRigProfile>` | `—` | Optional Territory light rig to follow the sequence for each viewer. Leave empty to leave lighting authority with Narrative. | — |
+| `PlaybackSettings` | — | `FNarrativeSequencePlaybackSettings` | `—` | Narrative playback settings for this cutscene. Two fields are ignored. Auto Play: the engine would start the sequence before Territory had armed teardown, so Territory starts it instead, once teardown is armed. Pause At End: a paused sequence never fires OnStopped, which is the engine's only path that releases cinematic input suppression. | — |
+| `RelevancyDist` | — | `float` | `0.f` | Leave at 0 so every resolved viewer receives the cutscene regardless of distance. A non-zero radius additionally culls viewers who are far from the spawn location. | `ClampMin` |
+| `TeardownGraceSeconds` | — | `float` | `1.f` | Seconds the cutscene actor is kept alive after its sequence stops, so a client a moment behind is not cut off mid-shot. Raise it for a high-latency audience; 0 destroys immediately. | `ClampMin` |
 
 ### `UTerritoryPresenceCondition`
 
@@ -1724,11 +1873,12 @@ a game build, so they are out of scope here.
 
 ### `UTerritoryStateTask`
 
-*AI / narrative task* · `Source/TerritoryFramework/Public/Tales/TerritoryStateTask.h` · 3 option(s)
+*AI / narrative task* · `Source/TerritoryFramework/Public/Tales/TerritoryStateTask.h` · 4 option(s)
 
 | Option | Shown as | Type | Default | What it does | Rules |
 |---|---|---|---|---|---|
 | `Objective` | — | `ETerritoryStateTaskObjective` | `ETerritoryStateTaskObjective::BecomeAvailable` | What must happen. Easy example: choose Unlock Territory for a quest that reveals Castle Hill Farm. | — |
+| `TargetFloor` | — | `int32` | `-1` | Which floor this objective follows. -1 means the whole Place. Easy example: 2 for 'clear the defenders on floor 2'. | `ClampMin` `EditCondition` `EditConditionHides` |
 | `TargetTerritory` | — | `FGameplayTag` | `—` | Place, District, or City followed by this task. Easy example: Territory.HavenReach.CastleHill.Farm. | `Categories` |
 | `bCompleteIfAlreadySatisfied` | — | `bool` | `true` | If the objective is already true when the quest reaches this task, complete immediately. Leave Territory always requires an observed inside-to-outside transition. | — |
 

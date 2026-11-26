@@ -1,0 +1,48 @@
+bool UNarrativeSaveSubsystem::LoadPlayerOnlySave(APlayerController* PC)
+{
+	if (!IsValid(PC) || !PC->HasAuthority() || PC->GetWorld() != GetWorld())
+	{
+		return false;
+	}
+	APlayerState* PS = PC->GetPlayerState<APlayerState>();
+	APawn* Pawn = PC->GetPawn();
+	if (!IsValid(PS) || !IsValid(Pawn) || PS->GetPlayerName().IsEmpty())
+	{
+		return false;
+	}
+	// A player slot must never become the campaign save/record authority.
+	TStrongObjectPtr<UNarrativeSave> PlayerSave(LoadTerritoryValidatedNativeSlot(PS->GetPlayerName(), GetSaveGameClass()));
+	const FIntProperty* VersionField = FindFProperty<FIntProperty>(UNarrativeSave::StaticClass(), TEXT("SavedDataVersion"));
+	if (!PlayerSave.IsValid() || !PlayerSave->IsA(GetSaveGameClass()) || !VersionField
+		|| VersionField->GetPropertyValue_InContainer(PlayerSave.Get()) != ENarrativeSaveGameVersion::LatestVersion)
+	{
+		return false;
+	}
+	const FNarrativeSavePlayer& Records = PlayerSave->PlayerData;
+	const auto IsCompatible = [](const AActor* Actor, const FNarrativeActorRecord& Record)
+	{
+		const UClass* SavedClass = Record.ActorSoftClass.LoadSynchronous();
+		return Record.IsValid() && !Record.bDestroyed && !Record.ByteData.IsEmpty()
+			&& SavedClass && Actor->IsA(SavedClass);
+	};
+	if (!IsCompatible(Pawn, Records.PawnData) || !IsCompatible(PS, Records.PlayerStateData)
+		|| !IsCompatible(PC, Records.ControllerData))
+	{
+		return false;
+	}
+	TGuardValue<bool> LoadingScope(bIsCurrentlyLoading, true);
+	const auto IsContextCurrent = [PC, PS, Pawn]()
+	{
+		return IsValid(PC) && IsValid(PS) && IsValid(Pawn) && PC->HasAuthority()
+			&& PC->GetPawn() == Pawn && PC->GetPlayerState<APlayerState>() == PS;
+	};
+	const bool bKeepTransform = !UGameplayStatics::ParseOption(OptionString, TEXT("LevelTransition")).IsEmpty();
+	const FTransform PreviousTransform = Pawn->GetActorTransform();
+	LoadActorFromRecord(Pawn, Records.PawnData);
+	if (!IsContextCurrent()) return false;
+	if (bKeepTransform) Pawn->SetActorTransform(PreviousTransform);
+	LoadActorFromRecord(PS, Records.PlayerStateData);
+	if (!IsContextCurrent()) return false;
+	LoadActorFromRecord(PC, Records.ControllerData);
+	return IsContextCurrent();
+}

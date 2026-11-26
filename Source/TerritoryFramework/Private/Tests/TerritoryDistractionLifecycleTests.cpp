@@ -10,6 +10,8 @@
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Interaction/TerritoryDistractionComponent.h"
 #include "Interaction/TerritoryDistractionProjectile.h"
+#include "Components/BoxComponent.h"
+#include "GameFramework/ProjectileMovementComponent.h"
 #include "Items/InventoryComponent.h"
 #include "Items/EquippableItem.h"
 #include "Items/NarrativeItem.h"
@@ -230,6 +232,300 @@ bool FTFDistractionEquippedAsset::RunTest(const FString& Parameters)
 	ASC->GenericGameplayEventCallbacks.FindChecked(TerritoryStealthTags::DistractionThrownEvent).Remove(Listener);
 	World->DestroyWorld(false);
 	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
+/**
+ * The launch transform used to start on the camera view vector. In a third-person setup that is
+ * metres behind the character, so the stone appeared near the camera and a held item caught the aim
+ * trace, producing backwards throws. The contract now pinned here: the spawn point stays at the
+ * thrower, and the direction never points backwards.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDistractionLaunchOrigin,
+	"TerritoryFramework.Stealth.Regression.DistractionLaunchOriginAndDirection",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDistractionLaunchOrigin::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("Distraction aim test world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	TGuardValue<bool> ScriptCallbacks(GAllowActorScriptExecutionInEditor, true);
+
+	ATerritoryGuardCharacter* Thrower = World->SpawnActor<ATerritoryGuardCharacter>(
+		ATerritoryGuardCharacter::StaticClass(), FVector(0.f, 0.f, 100.f), FRotator::ZeroRotator);
+	if (!TestNotNull(TEXT("Thrower"), Thrower))
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+
+	// A blocking wall one metre ahead: the aim trace hits it, and the throw must still leave the
+	// hand forward rather than flipping backwards over the shoulder.
+	AActor* Wall = World->SpawnActor<AActor>(AActor::StaticClass(),
+		FVector(120.f, 0.f, 100.f), FRotator::ZeroRotator);
+	if (Wall)
+	{
+		UBoxComponent* Box = NewObject<UBoxComponent>(Wall);
+		Box->InitBoxExtent(FVector(5.f, 200.f, 200.f));
+		Box->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Box->SetCollisionProfileName(TEXT("BlockAll"));
+		Wall->SetRootComponent(Box);
+		Box->RegisterComponent();
+		Wall->SetActorLocation(FVector(120.f, 0.f, 100.f));
+	}
+
+	UNarrativeAbilitySystemComponent* ASC = Thrower->GetNarrativeAbilitySystemComponent();
+	ASC->InitAbilityActorInfo(Thrower, Thrower);
+	const FGameplayAbilitySpecHandle AbilityHandle =
+		Thrower->AddAbility(UTerritoryDistractionAbility::StaticClass());
+	const FGameplayAbilitySpec* Spec = ASC->FindAbilitySpecFromHandle(AbilityHandle);
+	UTerritoryDistractionAbility* Ability = Spec
+		? Cast<UTerritoryDistractionAbility>(Spec->GetPrimaryInstance()) : nullptr;
+	if (!TestNotNull(TEXT("Granted ability instance"), Ability))
+	{
+		if (Wall) Wall->Destroy();
+		Thrower->Destroy();
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+	FTransform Launch = FTransform::Identity;
+	const bool bResolved = Ability->GetDistractionLaunchTransform(Launch);
+	TestTrue(TEXT("Launch transform resolves without a controller"), bResolved);
+
+	const FVector FromThrower = Launch.GetLocation() - Thrower->GetActorLocation();
+	TestTrue(TEXT("Spawn point stays at the thrower, not on the camera"), FromThrower.Size() < 200.f);
+	TestTrue(TEXT("Launch direction never points backwards"),
+		Launch.GetRotation().Vector().GetSafeNormal().X > 0.f);
+
+	if (Wall) Wall->Destroy();
+	Thrower->Destroy();
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
+/**
+ * The stone left along the crosshair but gravity dropped it 0.9 m at 5 m and 3.4 m at 10 m,
+ * which players read as "the throw does not follow the crosshair". The launch must now bend up
+ * just enough that the authored speed and gravity land on the aim point, and it must degrade
+ * to "no compensation" only when the target is genuinely unreachable.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDistractionAimCompensation,
+	"TerritoryFramework.Stealth.Regression.DistractionAimCompensation",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDistractionAimCompensation::RunTest(const FString& Parameters)
+{
+	// Authored values: ATerritoryDistractionProjectile InitialSpeed 1200, gravity scale 1.0,
+	// world gravity 980 cm/s^2.
+	const float Speed = 1200.f;
+	const float Gravity = 980.f;
+	const FVector Start(0.f, 0.f, 100.f);
+
+	// 1) Reachable target: the ballistic arc must actually land on it.
+	for (const float Distance : {500.f, 1000.f})
+	{
+		const FVector AimPoint = Start + FVector(Distance, 0.f, 0.f);
+		FVector Direction = FVector::ZeroVector;
+		const bool bSolved = UTerritoryDistractionAbility::ComputeAimCompensatedDirection(
+			Start, AimPoint, Speed, Gravity, 55.f, Direction);
+		TestTrue(FString::Printf(TEXT("%.0f cm target resolves a launch arc"), Distance), bSolved);
+		if (!bSolved) continue;
+
+		TestTrue(FString::Printf(TEXT("%.0f cm arc points forward"), Distance), Direction.X > 0.f);
+		TestTrue(FString::Printf(TEXT("%.0f cm arc is not a mortar lob"), Distance),
+			Direction.Z < 1.f);
+
+		// Integrate the parabola and confirm the flight passes through the aim point.
+		const FVector Velocity = Direction * Speed;
+		const float HorizontalSpeed = Velocity.Size2D();
+		const float FlightTime = HorizontalSpeed > KINDA_SMALL_NUMBER
+			? (AimPoint - Start).Size2D() / HorizontalSpeed : 0.f;
+		const FVector Landed = Start + Velocity * FlightTime
+			+ FVector(0.f, 0.f, -0.5f * Gravity * FlightTime * FlightTime);
+		TestTrue(FString::Printf(TEXT("%.0f cm arc passes through the aim point"), Distance),
+			FVector::Dist(Landed, AimPoint) < 1.f);
+
+		// Straight-line aim would have undershot this much; the compensation must beat it.
+		const FVector Straight = (AimPoint - Start).GetSafeNormal();
+		const FVector StraightVelocity = Straight * Speed;
+		const FVector StraightLanded = Start + StraightVelocity * FlightTime
+			+ FVector(0.f, 0.f, -0.5f * Gravity * FlightTime * FlightTime);
+		TestTrue(FString::Printf(TEXT("%.0f cm compensation beats straight aim"), Distance),
+			FVector::Dist(Landed, AimPoint) < FVector::Dist(StraightLanded, AimPoint));
+	}
+
+	// 2) Unreachable target: no arc exists, so the caller keeps its straight aim direction.
+	{
+		FVector Direction = FVector::ZeroVector;
+		const FVector TooFar = Start + FVector(100000.f, 0.f, 0.f);
+		TestFalse(TEXT("Unreachable target reports no arc"),
+			UTerritoryDistractionAbility::ComputeAimCompensatedDirection(
+				Start, TooFar, Speed, Gravity, 55.f, Direction));
+	}
+
+	// 3) Disabled physics must not fabricate a launch direction.
+	{
+		FVector Direction = FVector::ZeroVector;
+		const FVector AimPoint = Start + FVector(500.f, 0.f, 0.f);
+		TestFalse(TEXT("Zero gravity reports no arc"),
+			UTerritoryDistractionAbility::ComputeAimCompensatedDirection(
+				Start, AimPoint, Speed, 0.f, 55.f, Direction));
+		TestFalse(TEXT("Zero speed reports no arc"),
+			UTerritoryDistractionAbility::ComputeAimCompensatedDirection(
+				Start, AimPoint, 0.f, Gravity, 55.f, Direction));
+	}
+
+	// 4) A target directly overhead has no horizontal arc to aim along.
+	{
+		FVector Direction = FVector::ZeroVector;
+		TestFalse(TEXT("A target directly overhead reports no arc"),
+			UTerritoryDistractionAbility::ComputeAimCompensatedDirection(
+				Start, Start + FVector(0.f, 0.f, 300.f), Speed, Gravity, 55.f, Direction));
+	}
+
+	// 5) The pitch cap is honoured, so a shallow cap must not overshoot the limit.
+	{
+		FVector Direction = FVector::ZeroVector;
+		const FVector AimPoint = Start + FVector(900.f, 0.f, 0.f);
+		const bool bSolved = UTerritoryDistractionAbility::ComputeAimCompensatedDirection(
+			Start, AimPoint, Speed, Gravity, 5.f, Direction);
+		TestTrue(TEXT("A capped arc still resolves"), bSolved);
+		TestTrue(TEXT("Capped elevation stays under the 5 degree limit"),
+			Direction.Rotation().Pitch <= 5.01f);
+	}
+
+	return true;
+}
+
+/**
+ * A ServerOnly ability runs on the server's copy of a remote client, where the camera is only
+ * refreshed by ServerUpdateCamera. Until the first camera update arrives GetPlayerViewPoint
+ * returns the view-target actor rotation, which is yaw only, so the throw silently lost pitch.
+ * This pins the decision the launch code relies on.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDistractionRemoteClientAim,
+	"TerritoryFramework.Stealth.Regression.DistractionRemoteClientReplicatedAim",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDistractionRemoteClientAim::RunTest(const FString& Parameters)
+{
+	TestTrue(TEXT("Remote controller without a camera cache uses the replicated aim"),
+		UTerritoryDistractionAbility::ShouldUseReplicatedClientAim(false, false));
+	TestFalse(TEXT("Remote controller with a camera cache keeps the synced camera"),
+		UTerritoryDistractionAbility::ShouldUseReplicatedClientAim(false, true));
+	TestFalse(TEXT("A local controller always keeps its own camera"),
+		UTerritoryDistractionAbility::ShouldUseReplicatedClientAim(true, false));
+	TestFalse(TEXT("A local controller with a camera keeps its own camera"),
+		UTerritoryDistractionAbility::ShouldUseReplicatedClientAim(true, true));
+	return true;
+}
+
+/**
+ * The projectile is spawned deferred, given a WORLD-space launch velocity, and only then finished.
+ * FinishSpawning runs UProjectileMovementComponent::InitializeComponent, which transforms Velocity
+ * by the component rotation whenever bInitialVelocityInLocalSpace is true (the engine default).
+ * A throw aimed along -X therefore left along +X, which players reported as "the stone does not
+ * follow the crosshair". This pins the world-space contract on the CDO and proves a finished
+ * actor keeps the direction it was given.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDistractionWorldSpaceLaunch,
+	"TerritoryFramework.Stealth.Regression.DistractionWorldSpaceLaunchVelocity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDistractionWorldSpaceLaunch::RunTest(const FString& Parameters)
+{
+	// 1) The shipped defaults must opt out of the local-space conversion.
+	const ATerritoryDistractionProjectile* Defaults =
+		GetDefault<ATerritoryDistractionProjectile>();
+	if (!TestNotNull(TEXT("Distraction projectile CDO"), Defaults)) return false;
+	if (!TestNotNull(TEXT("Distraction projectile movement"), Defaults->ProjectileMovement.Get()))
+	{
+		return false;
+	}
+	TestFalse(TEXT("Distraction projectile default velocity is authored in world space"),
+		Defaults->ProjectileMovement->bInitialVelocityInLocalSpace);
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("World space launch test world"), World)) return false;
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	TGuardValue<bool> ScriptCallbacks(GAllowActorScriptExecutionInEditor, true);
+
+	// 2) A finished projectile keeps the world direction it was given, for a yawed throw and a
+	//    pitched throw. Before the fix the yawed case reversed and the pitched case flattened.
+	const TArray<FRotator> LaunchRotations = {
+		FRotator(0.f, 180.f, 0.f),
+		FRotator(18.f, 90.f, 0.f),
+		FRotator(-12.f, -135.f, 0.f)
+	};
+	for (const FRotator& LaunchRotation : LaunchRotations)
+	{
+		const FVector SpawnLocation(0.f, 0.f, 100.f);
+		const float LaunchSpeed = 1200.f;
+		const FVector ExpectedDirection = LaunchRotation.Vector().GetSafeNormal();
+
+		ATerritoryDistractionProjectile* Projectile =
+			World->SpawnActorDeferred<ATerritoryDistractionProjectile>(
+				ATerritoryDistractionProjectile::StaticClass(),
+				FTransform(LaunchRotation, SpawnLocation), nullptr, nullptr,
+				ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!TestNotNull(*FString::Printf(TEXT("Deferred projectile %s"),
+			*LaunchRotation.ToString()), Projectile))
+		{
+			continue;
+		}
+		if (!TestNotNull(*FString::Printf(TEXT("Projectile movement %s"),
+			*LaunchRotation.ToString()), Projectile->ProjectileMovement.Get()))
+		{
+			Projectile->Destroy();
+			continue;
+		}
+
+		// This mirrors UTerritoryDistractionAbility::PerformThrow.
+		Projectile->ProjectileMovement->bInitialVelocityInLocalSpace = false;
+		Projectile->ProjectileMovement->Velocity = ExpectedDirection * LaunchSpeed;
+		Projectile->FinishSpawning(FTransform(LaunchRotation, SpawnLocation));
+
+		const FVector FinishedVelocity = Projectile->ProjectileMovement->Velocity;
+		TestTrue(*FString::Printf(TEXT("%s keeps its world-space speed after spawning"),
+			*LaunchRotation.ToString()),
+			FMath::IsNearlyEqual(FinishedVelocity.Size(), LaunchSpeed, 1.f));
+		TestTrue(*FString::Printf(TEXT("%s keeps its world-space direction after spawning"),
+			*LaunchRotation.ToString()),
+			FVector::DotProduct(FinishedVelocity.GetSafeNormal(), ExpectedDirection) > 0.999f);
+
+		Projectile->Destroy();
+	}
+
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
+	return true;
+}
+
+/**
+ * The screen centre is only the aim point while the project hides the cursor. A visible cursor
+ * means the player is pointing at a pixel, and the throw must use the camera ray through it.
+ * The pointer state of a remote client is not replicated, so that decision stays local-only.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDistractionCursorAim,
+	"TerritoryFramework.Stealth.Regression.DistractionCursorAimDecision",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDistractionCursorAim::RunTest(const FString& Parameters)
+{
+	TestTrue(TEXT("A local player with a visible cursor aims at the pointer"),
+		UTerritoryDistractionAbility::ShouldAimWithMouseCursor(true, true, true));
+	TestFalse(TEXT("A hidden cursor keeps the crosshair ray"),
+		UTerritoryDistractionAbility::ShouldAimWithMouseCursor(true, false, true));
+	TestFalse(TEXT("No pointer position keeps the crosshair ray"),
+		UTerritoryDistractionAbility::ShouldAimWithMouseCursor(true, true, false));
+	TestFalse(TEXT("A remote client without a visible cursor never deprojects"),
+		UTerritoryDistractionAbility::ShouldAimWithMouseCursor(false, true, true));
+	TestFalse(TEXT("A remote client never deprojects"),
+		UTerritoryDistractionAbility::ShouldAimWithMouseCursor(false, false, false));
 	return true;
 }
 

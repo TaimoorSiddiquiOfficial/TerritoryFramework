@@ -1,9 +1,11 @@
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Core/TerritoryTypes.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryEvidenceTags.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
+#include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "TimerManager.h"
@@ -16,6 +18,48 @@ namespace
 		// AuthGameMode made Definition state events silently fail during valid server
 		// startup, streaming, and automation contexts before a GameMode was available.
 		return World && World->GetNetMode() != NM_Client;
+	}
+
+	/**
+	 * Evidence tag for one authored diplomacy act, or an invalid tag when the act is not
+	 * a fact worth recording.
+	 *
+	 * Expiry is the one event nobody performed: a timed treaty simply ran out, so no
+	 * faction chose it and the ledger keeps no row for it. Every other event is a
+	 * deliberate act by FactionA and is recorded as either a signed or a broken treaty.
+	 */
+	FGameplayTag EvidenceTagForDiplomacyEvent(const EDiplomacyEventType EventType)
+	{
+		switch (EventType)
+		{
+		case EDiplomacyEventType::DeclaredWar:
+		case EDiplomacyEventType::BrokeCeasefire:
+		case EDiplomacyEventType::BrokeAlliance:
+			return TerritoryEvidenceTags::TreatyBroken.GetTag();
+
+		case EDiplomacyEventType::DeclaredPeace:
+		case EDiplomacyEventType::FormedAlliance:
+		case EDiplomacyEventType::SignedTradeAgreement:
+		case EDiplomacyEventType::SignedNonAggression:
+			return TerritoryEvidenceTags::TreatySigned.GetTag();
+
+		case EDiplomacyEventType::ExpiredTreaty:
+		default:
+			return FGameplayTag();
+		}
+	}
+
+	/**
+	 * The durable identity of a faction pair, taken from the treaty record itself so the
+	 * ledger's subject and FTreatyRecord::GetCanonicalKey() can never drift apart.
+	 * Returns an invalid GUID for a degenerate pair, which the ledger then refuses.
+	 */
+	FGuid MakeTreatyPairKey(const FGameplayTag& FactionA, const FGameplayTag& FactionB)
+	{
+		FTreatyRecord Pair;
+		Pair.FactionA = FactionA;
+		Pair.FactionB = FactionB;
+		return Pair.GetCanonicalKey();
 	}
 }
 
@@ -315,6 +359,19 @@ EDiplomacyState UTerritoryDiplomacySubsystem::GetDiplomacyState(FGameplayTag Fac
 {
 	const FTreatyRecord* Treaty = FindTreaty(FactionA, FactionB);
 	return Treaty ? Treaty->State : EDiplomacyState::None;
+}
+
+bool UTerritoryDiplomacySubsystem::CanFactionsEngage(const FGameplayTagContainer& FactionsA,
+	const FGameplayTagContainer& FactionsB, bool bPersonalHostility) const
+{
+	if (FactionsA.IsEmpty() || FactionsB.IsEmpty() || FactionsA.HasAnyExact(FactionsB)) return false;
+	for (const FGameplayTag& A : FactionsA)
+		for (const FGameplayTag& B : FactionsB)
+		{
+			const EDiplomacyState Relation = GetDiplomacyState(A, B);
+			if (Relation != EDiplomacyState::None && Relation != EDiplomacyState::War) return false;
+		}
+	return bPersonalHostility || AreAnyFactionsAtWar(FactionsA, FactionsB);
 }
 
 bool UTerritoryDiplomacySubsystem::AreAnyFactionsAtWar(
@@ -768,7 +825,59 @@ void UTerritoryDiplomacySubsystem::RecordEvent(EDiplomacyEventType EventType, FG
 		DiplomacyHistory.RemoveAt(0, Excess);
 	}
 
+	// AGENTS.md §4.3: the act is committed and verified by now, so its physical
+	// consequence is recorded before any listener reacts to the event itself.
+	RecordDiplomacyEvidence(Event);
+
 	OnDiplomacyEvent.Broadcast(Event);
+}
+
+void UTerritoryDiplomacySubsystem::RecordDiplomacyEvidence(const FDiplomacyEvent& Event)
+{
+	const FGameplayTag EvidenceTag = EvidenceTagForDiplomacyEvent(Event.EventType);
+	if (!EvidenceTag.IsValid())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	UTerritoryEvidenceLedgerSubsystem* Ledger = World
+		? World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>()
+		: nullptr;
+	if (!Ledger)
+	{
+		return;
+	}
+
+	FTerritoryEvidenceRecord Record;
+	Record.EvidenceTag = EvidenceTag;
+	// The durable subject is the faction pair, not either faction: a treaty is a fact
+	// about the relationship, and it must stay the same row subject when only one
+	// side's evidence later moves.
+	Record.SubjectId = MakeTreatyPairKey(Event.FactionA, Event.FactionB);
+	// The mutators pass the acting side first, so FactionA is the faction that did it.
+	Record.InstigatorFaction = Event.FactionA;
+	// Diplomacy is not territorial; the fact is attributed to a pair, not to a Place.
+	Record.SourceTerritory = FGameplayTag();
+	// Replay-safe: the same act at the same campaign time resolves to the same id, so a
+	// duplicated or replayed commit is absorbed by the ledger's idempotency rule.
+	Record.ContextId = UTerritoryEvidenceLedgerSubsystem::MakeEvidenceContextId(
+		FString::Printf(TEXT("Diplomacy|%d|%s|%s|%lld"),
+			static_cast<int32>(Event.EventType),
+			*Event.FactionA.ToString(),
+			*Event.FactionB.ToString(),
+			static_cast<int64>(Event.GameTime * 1000.f)));
+	Record.Weight = 1;
+	Record.GameTimeSeconds = Event.GameTime;
+
+	const FTerritoryEvidenceMutationResult Result = Ledger->RecordEvidenceRecord(Record);
+	if (!Result.bSuccess && !Result.bAlreadyRecorded)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[Evidence] Diplomacy event %d between %s and %s committed but was not recorded: %s"),
+			static_cast<int32>(Event.EventType), *Event.FactionA.ToString(), *Event.FactionB.ToString(),
+			*Result.FailureReason.ToString());
+	}
 }
 
 ANarrativeGameState* UTerritoryDiplomacySubsystem::GetNarrativeGameState() const

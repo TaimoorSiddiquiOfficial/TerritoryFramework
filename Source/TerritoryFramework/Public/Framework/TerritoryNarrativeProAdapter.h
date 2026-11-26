@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "GameplayCueInterface.h"
 #include "GenericTeamAgentInterface.h"
 
 class ANarrativeGameState;
@@ -31,6 +32,15 @@ class TERRITORYFRAMEWORK_API FTerritoryNarrativeProAdapter final
 public:
 	/** Read Native's published Blueprint loading query without duplicating its appearance or async-handle rules. Missing or changed contracts fail closed. */
 	static bool IsCharacterReady(ANarrativeCharacter* Character);
+
+	/** Presentation only: an unrenderable damage burst is discarded, never queued.
+	 * Other cue families and persistent cue lifecycle events retain Native behavior. */
+	static bool CanPresentGameplayCue(ANarrativeCharacter* Character, FGameplayTag CueTag,
+		EGameplayCueEvent::Type EventType);
+
+	/** World destruction observer: release only follower links to a retiring client character.
+	 * Native retains authority over visual actor destruction and appearance loading. */
+	static void HandleCharacterRemoval(AActor* Actor);
 
 	/** Narrative retains the player's character while a vehicle is possessed.
 	 * Use it for identity, inventory and management checks; use the current pawn

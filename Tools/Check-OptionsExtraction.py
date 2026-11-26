@@ -2,7 +2,8 @@
 import json, os, re, glob
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # plugin root; this file is in Tools/
-rows = json.load(open(os.path.join(ROOT, "Tools", "options_inventory.json"), encoding="utf-8"))
+import runpy
+rows = runpy.run_path(os.path.join(ROOT, "Tools", "Extract-Options.py"))["read_fresh_inventory"]()
 PASS = True
 def check(ok, label, detail=""):
     global PASS
@@ -36,7 +37,9 @@ for pat in ("Source/TerritoryFramework/**/*.h", "Source/TerritoryFramework/**/*.
             if s.startswith("//") and "UPROPERTY" in s:
                 commented.append(os.path.relpath(p, ROOT))
 print(f"   commented-out UPROPERTY lines: {len(commented)}")
-check(True, "documented: comment lines exist and are NOT matched (regex requires a trailing ';')")
+scanner = runpy.run_path(os.path.join(ROOT, "Tools", "Extract-Options.py"))["find_uproperties"]
+check(not scanner('// UPROPERTY() int32 Fake;\n/* UPROPERTY() int32 AlsoFake; */'),
+      "comment-only properties are excluded by the lexical scanner")
 
 print()
 print("=== C4: NO property name is a literal, keyword, or initializer fragment ===")
@@ -56,7 +59,7 @@ check(not selftype, "no row where type == name", f"{len(selftype)}")
 print()
 print("=== C6: class resolution — how many rows failed to resolve a class? ===")
 q = [r for r in rows if r["class"] == "?"]
-check(True, f"unresolved class rows: {len(q)} of {len(rows)}", "")
+check(not q, f"unresolved class rows: {len(q)} of {len(rows)}", "")
 for r in q[:8]:
     print(f"      {r['file']} :: {r['name']}  type={r['type']!r}")
 
@@ -68,3 +71,5 @@ check(not dupes, "no duplicate file/class/name rows", f"{len(dupes)}")
 
 print()
 print("RESULT:", "ALL CONTROLS PASS" if PASS else "SOME CONTROLS FAILED")
+
+raise SystemExit(0 if PASS else 1)

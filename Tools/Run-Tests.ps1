@@ -21,7 +21,11 @@ param(
     [switch]$Stomp,
     [string]$EngineRoot,
     [string]$Project,
-    [ValidateRange(1, 2147483)][int]$TimeoutSeconds = 1800
+    [string]$StartupMap = '/Engine/Maps/Entry',
+    [string]$ReportPath,
+    [ValidateRange(1, 2147483)][int]$TimeoutSeconds = 1800,
+    [ValidatePattern('^[A-Za-z][A-Za-z0-9_]*$')][string[]]$DisabledPlugins = @(),
+    [string[]]$RequiredTests = @()
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/Invoke-BoundedProcess.ps1"
@@ -59,8 +63,26 @@ $modules = @(
     @{ Name = 'TerritoryFramework';       Dir = "$plugin/Source/TerritoryFramework" },
     @{ Name = 'TerritoryFrameworkEditor'; Dir = "$plugin/Source/TerritoryFrameworkEditor" }
 )
+# Narrative is an installed dependency: UBT can refresh its import library while
+# retaining the existing DLL. A source-only patch must never count as a tested fix.
+$nativeDescriptor = "$projectRoot/Plugins/NarrativePro/NarrativePro.uplugin"
+# The Marketplace installer may keep the plugin in a hashed folder, and the editor prefers the
+# project copy over an identical engine copy, so resolve the project plugin before the engine one.
+if (-not (Test-Path -LiteralPath $nativeDescriptor) -and (Test-Path -LiteralPath "$projectRoot/Plugins")) {
+    $nativeProject = @(Get-ChildItem -LiteralPath "$projectRoot/Plugins" -Filter NarrativePro.uplugin -File -Recurse |
+        Sort-Object FullName | Select-Object -First 1)
+    if ($nativeProject.Count) { $nativeDescriptor = $nativeProject[0].FullName }
+}
+if (-not (Test-Path -LiteralPath $nativeDescriptor)) {
+    $nativeInstalled = Get-ChildItem -LiteralPath "$EngineRoot/Engine/Plugins" -Filter NarrativePro.uplugin -File -Recurse | Select-Object -First 1
+    if ($nativeInstalled) { $nativeDescriptor = $nativeInstalled.FullName }
+}
+if (Test-Path -LiteralPath $nativeDescriptor) {
+    $nativeRoot = Split-Path -Parent $nativeDescriptor
+    $modules += @{ Name = 'NarrativeSaveSystem'; Dir = "$nativeRoot/Source/NarrativeSaveSystem"; Dll = "$nativeRoot/Binaries/Win64/UnrealEditor-NarrativeSaveSystem.dll" }
+}
 foreach ($module in $modules) {
-    $moduleDll = "$plugin/Binaries/Win64/UnrealEditor-$($module.Name).dll"
+    $moduleDll = if ($module.Dll) { $module.Dll } else { "$plugin/Binaries/Win64/UnrealEditor-$($module.Name).dll" }
     if (-not (Test-Path -LiteralPath $moduleDll)) {
         throw "UnrealEditor-$($module.Name).dll is missing; build before running tests."
     }
@@ -81,26 +103,46 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $log) -Force | Out-Null
 
 $arguments = @(
     "`"$project`"",
+    "`"$StartupMap`"",
     "-ExecCmds=`"Automation RunTests $Filter; Quit`"",
     '-unattended', '-nopause', '-nosplash', '-nullrhi', '-NoSound',
     '-log', '-stdout', '-FullStdOutLogOutput',
     '-TestExit="Automation Test Queue Empty"'
 )
 if ($Stomp) { $arguments += '-stompmalloc' }
+if ($DisabledPlugins.Count) { $arguments += '-DisablePlugins=' + ($DisabledPlugins -join ',') }
 
 Write-Host "Running $Filter under the $label allocator. Log: $log"
 $process = Invoke-BoundedProcess -FilePath $editor -ArgumentList $arguments `
     -StandardOutputPath $log -StandardErrorPath "$log.err" -TimeoutSeconds $TimeoutSeconds
+$text = (Get-Content -LiteralPath $log -Raw) + (Get-Content -LiteralPath "$log.err" -Raw)
+$result = Get-TerritoryAutomationResult -Text $text -ExitCode $process.ExitCode -TimedOut $process.TimedOut
+$completed = @([regex]::Matches($text, 'Test Completed\. Result=\{Success(?:WithWarnings)?\}[^\r\n]*Path=\{([^}]+)\}') | ForEach-Object { $_.Groups[1].Value })
+$missing = @($RequiredTests | Where-Object { $_ -notin $completed })
+$result | Add-Member required_tests @($RequiredTests)
+$result | Add-Member missing_required_tests @($missing)
+if ($missing.Count) {
+    $result.passed = $false
+    Write-Host ('FAILED - required regressions were not completed successfully: ' + ($missing -join ', '))
+}
+$success = $result.success
+$warned = $result.success_with_warnings
+$failed = $result.failures
+$crash = $result.crash
+if ($ReportPath) {
+    $result | Add-Member filter $Filter
+    $result | Add-Member log $log
+    $result | Add-Member project $project
+    $result | Add-Member disabled_plugins @($DisabledPlugins)
+    $result | Add-Member finished_utc ([DateTime]::UtcNow.ToString('o'))
+    $reportFile = [IO.Path]::GetFullPath($ReportPath)
+    New-Item -ItemType Directory -Path (Split-Path -Parent $reportFile) -Force | Out-Null
+    $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $reportFile -Encoding utf8
+}
 if ($process.TimedOut) {
     Write-Host "FAILED - automation exceeded $TimeoutSeconds seconds; stopped child process $($process.ProcessId). See $log"
     exit 1
 }
-$text = (Get-Content -LiteralPath $log -Raw) + (Get-Content -LiteralPath "$log.err" -Raw)
-
-$success = ([regex]::Matches($text, 'Result=\{Success\}')).Count
-$warned = ([regex]::Matches($text, 'Result=\{SuccessWithWarnings\}')).Count
-$failed = ([regex]::Matches($text, 'Result=\{Fail\}')).Count
-$crash = $text -match 'EXCEPTION_ACCESS_VIOLATION|Fatal error|Assertion failed'
 
 Write-Host ("exit=$($process.ExitCode)  success=$success  successWithWarnings=$warned  " +
     "fail=$failed  crash=$crash")
@@ -109,7 +151,7 @@ if ($crash) {
     if ($frames.Count) { Write-Host "First frames: $($frames[0].Value)" }
 }
 #A run that never reached the queue is not a pass, however clean the counts look.
-if ($process.ExitCode -notin @(0, 2) -or $failed -gt 0 -or $crash -or ($success + $warned) -eq 0) {
+if (-not $result.passed) {
     Write-Host "FAILED - see $log"
     exit 1
 }

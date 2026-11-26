@@ -24,3 +24,7 @@ Thumbs.db
 # Local build/test scratch files (never committed)
 _tmp_*.bat
 _tmp_*.log
+
+# Python verification tools
+__pycache__/
+*.py[cod]

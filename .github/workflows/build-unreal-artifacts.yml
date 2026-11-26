@@ -109,31 +109,13 @@ jobs:
 
           $buildDirectory = Join-Path $env:RUNNER_TEMP ("TF-" + [guid]::NewGuid().ToString('N'))
           & (Join-Path $env:GITHUB_WORKSPACE 'Tools/Build-Release.ps1') `
-            -EngineRoot $env:UE_ROOT -PluginSource $env:GITHUB_WORKSPACE -OutputRoot $buildDirectory
+            -EngineRoot $env:UE_ROOT -PluginSource $env:GITHUB_WORKSPACE -OutputRoot $buildDirectory `
+            -SourceCommit $env:GITHUB_SHA -ApplyNarrativeCompatibilityPatch
+          if ($LASTEXITCODE -ne 0) { throw 'Release-host build or verification failed.' }
           $packageDirectory = Join-Path $buildDirectory 'Package/TerritoryFramework'
-          $env:TF_RELEASE_REPORT = Join-Path $packageDirectory 'CONTENT_VALIDATION.json'
-          $editor = Join-Path $env:UE_ROOT 'Engine/Binaries/Win64/UnrealEditor-Cmd.exe'
-          & $editor (Join-Path $buildDirectory 'HostProject/HostProject.uproject') `
-            -run=pythonscript "-script=$env:GITHUB_WORKSPACE/Tools/Validate-Content.py" `
-            -DDC=InstalledNoZenLocalFallback -unattended -nullrhi -nosplash -nop4
-          if ($LASTEXITCODE -ne 0) { throw 'Included content failed its clean-project check.' }
-          $content = Get-Content -LiteralPath $env:TF_RELEASE_REPORT -Raw | ConvertFrom-Json
-          if ($content.errors -ne 0 -or $content.invalid.Count -ne 0 -or
-              $content.assets_checked -ne $content.expected_assets -or
-              $content.missing_packages.Count -ne 0 -or $content.unexpected_packages.Count -ne 0 -or
-              $content.external_dependencies.Count -ne 0) {
-            throw 'The content report did not pass.'
-          }
-          @{
-            plugin_version = (Get-Content -LiteralPath $pluginDescriptor -Raw | ConvertFrom-Json).VersionName
-            unreal_version = $content.engine_version
-            narrative_pro_version = '2.4.2'
-            platform = 'Win64'
-            commit = $env:GITHUB_SHA
-            workflow_run = $env:GITHUB_RUN_ID
-            builds = @('Editor Development', 'Game Development', 'Game Shipping')
-            assets_checked = $content.assets_checked
-          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $packageDirectory 'BUILD_INFO.json') -Encoding utf8
+          $receipt = Get-Content -LiteralPath (Join-Path $packageDirectory 'BUILD_INFO.json') -Raw | ConvertFrom-Json
+          if (-not $receipt.build_automation_content_passed -or -not $receipt.automation.passed -or
+              $receipt.source_commit -ne $env:GITHUB_SHA) { throw 'Fresh build/test receipt is missing or mismatched.' }
           "package_directory=$packageDirectory" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 

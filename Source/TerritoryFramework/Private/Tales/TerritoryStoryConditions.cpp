@@ -37,8 +37,7 @@ UTerritoryQuestStateCondition::UTerritoryQuestStateCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryQuestStateCondition::CheckCondition_Implementation(
-	APawn*, APlayerController*, UTalesComponent* NarrativeComponent)
+bool UTerritoryQuestStateCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	return UTerritoryQuestRulesLibrary::DoesQuestStateMatch(
 		NarrativeComponent, QuestClass, RequiredState);
@@ -56,8 +55,7 @@ UTerritoryEventContextCondition::UTerritoryEventContextCondition()
 	ConditionFilter = EConditionFilter::CF_AnyCharacter;
 }
 
-bool UTerritoryEventContextCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryEventContextCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	const bool bHasValidTarget = IsValid(Target) && !Target->IsActorBeingDestroyed();
 	if (bRequireTargetPawn && !bHasValidTarget)
@@ -106,8 +104,7 @@ UTerritoryOwnershipTransitionCondition::UTerritoryOwnershipTransitionCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryOwnershipTransitionCondition::CheckCondition_Implementation(
-	APawn*, APlayerController*, UTalesComponent*)
+bool UTerritoryOwnershipTransitionCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	const ATerritoryVolume* Territory = GetTypedOuter<ATerritoryVolume>();
 	return Territory && Territory->IsOwnershipTransitionActive()
@@ -125,8 +122,7 @@ UTerritoryStateCondition::UTerritoryStateCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryStateCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryStateCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -195,8 +191,7 @@ bool UTerritoryControlProgressCondition::CompareValues(float ActualValue,
 	}
 }
 
-bool UTerritoryControlProgressCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryControlProgressCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -218,8 +213,7 @@ UTerritoryReputationCondition::UTerritoryReputationCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryReputationCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryReputationCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -244,17 +238,26 @@ UTerritoryFactionDistrictHoldingCondition::UTerritoryFactionDistrictHoldingCondi
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryFactionDistrictHoldingCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryFactionDistrictHoldingCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
 	const FGameplayTag ResolvedFaction = ResolveFaction(Target, Controller);
-	return World && ResolvedFaction.IsValid()
-		&& UTerritoryGarrisonCondition::CompareValues(
-			UTerritoryBlueprintLibrary::GetFactionDistrictCount(
-				World, ResolvedFaction), Comparison,
-			FMath::Max(0, DistrictCount));
+	if (!World || !ResolvedFaction.IsValid()) return false;
+
+	// A story condition must not decide on an unknown count. A client that has not received the
+	// authoritative strategic directory yet would otherwise compare 0 and read another faction's
+	// holdings as empty, which can grant or deny a quest for the wrong reason. Failing here keeps
+	// the condition false until the directory is genuinely known.
+	int32 ClaimedDistricts = 0;
+	if (!UTerritoryBlueprintLibrary::TryGetFactionDistrictCount(
+		World, ResolvedFaction, ClaimedDistricts))
+	{
+		return false;
+	}
+
+	return UTerritoryGarrisonCondition::CompareValues(ClaimedDistricts, Comparison,
+		FMath::Max(0, DistrictCount));
 }
 
 UTerritoryWaitTimeCondition::UTerritoryWaitTimeCondition()
@@ -268,9 +271,7 @@ bool UTerritoryWaitTimeCondition::HasWaitFinished(
 	return CurrentTimeSeconds >= FMath::Max(0.f, RequiredWaitSeconds);
 }
 
-bool UTerritoryWaitTimeCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller,
-	UTalesComponent* NarrativeComponent)
+bool UTerritoryWaitTimeCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -366,8 +367,7 @@ bool UTerritoryAssaultCondition::MatchesRecord(const FTerritoryAssaultRecord& Re
 		&& (ScenarioID.IsNone() || Record.StoryScenarioID == ScenarioID);
 }
 
-bool UTerritoryAssaultCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryAssaultCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -436,8 +436,7 @@ UTerritoryPresenceCondition::UTerritoryPresenceCondition()
 	ConditionFilter = EConditionFilter::CF_AnyCharacter;
 }
 
-bool UTerritoryPresenceCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryPresenceCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	APawn* ContextPawn = Target ? Target : (Controller ? Controller->GetPawn().Get() : nullptr);
 	UWorld* World = TerritoryTales::ResolveWorld(
@@ -469,8 +468,7 @@ UTerritoryProductionStatusCondition::UTerritoryProductionStatusCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryProductionStatusCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryProductionStatusCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);
@@ -500,8 +498,7 @@ UTerritoryResourceCondition::UTerritoryResourceCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryResourceCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryResourceCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);

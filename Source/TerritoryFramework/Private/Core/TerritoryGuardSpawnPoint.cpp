@@ -80,11 +80,18 @@ void ATerritoryGuardSpawnPoint::PrepareForSave_Implementation()
 	// A Place retires its physical guards when its cell leaves. Posts in other
 	// cells must keep the saved living slots until that owner returns, including
 	// when Native saves the still-loaded posts again in the meantime.
-	if (!IsWaitingForOwningTerritory())
+	if (!bRetiringForStreaming && !IsWaitingForOwningTerritory())
 	{
 		SavedActiveGuardCount = FMath::Clamp(GetActiveGuardCount(), 0, 1);
 	}
 	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0, 1);
+	ReserveTimingVersion = 1;
+	if (GetWorld() && HasPendingReserveSpawn())
+	{
+		const float Remaining = GetWorld()->GetTimerManager().GetTimerRemaining(ReserveSpawnTimer);
+		if (Remaining >= 0.f) SavedReserveRemainingDelay = Remaining;
+	}
+	if (!HasPendingReserveSpawn()) SavedReserveRemainingDelay = -1.f;
 }
 
 void ATerritoryGuardSpawnPoint::Load_Implementation()
@@ -107,6 +114,28 @@ void ATerritoryGuardSpawnPoint::Load_Implementation()
 	PendingReserveSpawns = FMath::Min(PendingReserveSpawns, CurrentReserveCount);
 	// Loaded zero is an exhausted reserve, never a request for fresh provisioning.
 	bReserveStateInitialized = true;
+	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(ReserveSpawnTimer);
+	if (ReserveTimingVersion == 0 || !FMath::IsFinite(SavedReserveRemainingDelay))
+	{
+		SavedReserveRemainingDelay = -1.f;
+	}
+	if (HasActorBegunPlay())
+	{
+		// Resolve itself can reconcile through RegisterResolvedGuardSpawnPoint.
+		// Suppress that callback until the Native record-read lifetime is guarded.
+		if (ATerritoryVolume* Territory = GetOwningTerritory())
+		{
+			TGuardValue<bool> RecordRead(Territory->bDeferGuardDestructionForRecordLoad, true);
+			ResolveOwningTerritory();
+		}
+		else ResolveOwningTerritory();
+		if (ATerritoryVolume* Territory = GetOwningTerritory(); Territory && !Territory->bReconcilingGuardRestore)
+		{
+			TGuardValue<bool> RecordRead(Territory->bDeferGuardDestructionForRecordLoad, true);
+			Territory->ReconcileRestoredGuardPost(this);
+		}
+		ResumePendingReserveSpawn();
+	}
 }
 
 bool ATerritoryGuardSpawnPoint::ShouldRespawn_Implementation() const
@@ -178,6 +207,7 @@ void ATerritoryGuardSpawnPoint::BindToTerritory(ATerritoryVolume* Territory)
 
 void ATerritoryGuardSpawnPoint::BeginPlay()
 {
+	bRetiringForStreaming = false;
 	Super::BeginPlay();
 	if (!ApplyTerritoryDefinition())
 	{
@@ -223,9 +253,13 @@ void ATerritoryGuardSpawnPoint::BeginPlay()
 
 void ATerritoryGuardSpawnPoint::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	bRetiringForStreaming = EndPlayReason == EEndPlayReason::RemovedFromWorld;
 	ForgetRecentGuardDamage();
+	PauseReserveSpawn();
 	if (ATerritoryVolume* Territory = GetOwningTerritory())
 	{
+		Territory->RetireGuards(EndPlayReason == EEndPlayReason::RemovedFromWorld
+			? EGuardRemovalReason::StreamingRetirement : EGuardRemovalReason::ManualRemoval, this);
 		Territory->UnregisterResolvedGuardSpawnPoint(this);
 	}
 	CachedTerritory.Reset();
@@ -410,6 +444,7 @@ void ATerritoryGuardSpawnPoint::SetResolvedTerritory(ATerritoryVolume* Territory
 	if (PreviousTerritory == Territory)
 	{
 		if (Territory) Territory->RegisterResolvedGuardSpawnPoint(this);
+		ResumePendingReserveSpawn();
 		return;
 	}
 	if (PreviousTerritory)
@@ -422,6 +457,7 @@ void ATerritoryGuardSpawnPoint::SetResolvedTerritory(ATerritoryVolume* Territory
 	{
 		Territory->RegisterResolvedGuardSpawnPoint(this);
 	}
+	ResumePendingReserveSpawn();
 }
 
 void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
@@ -476,12 +512,6 @@ void ATerritoryGuardSpawnPoint::ResolveOwningTerritory()
 void ATerritoryGuardSpawnPoint::InitializeReserves()
 {
 	if (!HasAuthority()) return;
-	// P1-02: Clear old timer FIRST, before any scheduling
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(ReserveSpawnTimer);
-	}
-
 	if (!bReserveStateInitialized)
 	{
 		CurrentReserveCount = FMath::Max(0, GetEffectiveReserveSlots());
@@ -489,10 +519,28 @@ void ATerritoryGuardSpawnPoint::InitializeReserves()
 	}
 	PendingReserveSpawns = FMath::Clamp(PendingReserveSpawns, 0,
 		FMath::Min(1, FMath::Max(0, CurrentReserveCount)));
-	if (bAutoSpawnReserves && PendingReserveSpawns > 0)
-	{
-		ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
-	}
+	ResumePendingReserveSpawn();
+}
+
+void ATerritoryGuardSpawnPoint::PauseReserveSpawn()
+{
+	if (!HasAuthority() || !GetWorld()) return;
+	const float Remaining = GetWorld()->GetTimerManager().GetTimerRemaining(ReserveSpawnTimer);
+	if (Remaining >= 0.f && HasPendingReserveSpawn()) SavedReserveRemainingDelay = Remaining;
+	GetWorld()->GetTimerManager().ClearTimer(ReserveSpawnTimer);
+}
+
+void ATerritoryGuardSpawnPoint::ResumePendingReserveSpawn()
+{
+	ATerritoryVolume* Territory = GetOwningTerritory();
+	if (!HasAuthority() || !GetWorld() || GetWorld()->bIsTearingDown || IsActorBeingDestroyed()
+		|| !HasPendingReserveSpawn() || !bAutoSpawnReserves || !IsValid(Territory)
+		|| Territory->bReconcilingGuardRestore || !Territory->IsAvailableForGameplay()
+		|| !IsOwnerReserveDeploymentStateValid(Territory->GetTerritoryState(),
+			Territory->GetOwningFaction(), Territory->GetOwnershipData().ContestingFaction)
+		|| GetWorld()->GetTimerManager().TimerExists(ReserveSpawnTimer)) return;
+	ScheduleAutomaticReserveSpawn(SavedReserveRemainingDelay >= 0.f
+		? SavedReserveRemainingDelay : GetEffectiveReserveSpawnDelay());
 }
 
 FTransform ATerritoryGuardSpawnPoint::GetSpawnTransform() const
@@ -586,6 +634,7 @@ void ATerritoryGuardSpawnPoint::RegisterSpawnedGuard(ATerritoryGuardCharacter* G
 		return;
 	}
 	ActiveGuards.AddUnique(Guard);
+	bInitialGuardDeploymentPending = false;
 	SavedActiveGuardCount = FMath::Clamp(ActiveGuards.Num(), 0, 1);
 }
 
@@ -613,7 +662,8 @@ void ATerritoryGuardSpawnPoint::UnregisterGuard(ATerritoryGuardCharacter* Guard,
 	});
 	// P1-N11: Keep saved count in sync after removal so subsequent queries
 	// (e.g. delta calculations in economy tick) see the correct active count.
-	if (Reason != EGuardRemovalReason::ManualRemoval || !IsWaitingForOwningTerritory())
+	if (Reason != EGuardRemovalReason::LoadReconcile && Reason != EGuardRemovalReason::StreamingRetirement
+		&& (Reason != EGuardRemovalReason::ManualRemoval || !IsWaitingForOwningTerritory()))
 	{
 		SavedActiveGuardCount = ActiveGuards.Num();
 	}
@@ -742,11 +792,14 @@ void ATerritoryGuardSpawnPoint::ScheduleAutomaticReserveSpawn(float Delay)
 	}
 
 	World->GetTimerManager().ClearTimer(ReserveSpawnTimer);
+	SavedReserveRemainingDelay = FMath::Max(0.01f, Delay);
+	ReserveTimingVersion = 1;
+	if (IsWaitingForOwningTerritory()) return;
 	World->GetTimerManager().SetTimer(
 		ReserveSpawnTimer,
 		this,
 		&ATerritoryGuardSpawnPoint::TryAutomaticReserveSpawn,
-		FMath::Max(0.1f, Delay),
+		SavedReserveRemainingDelay,
 		false);
 }
 
@@ -758,7 +811,7 @@ void ATerritoryGuardSpawnPoint::TryAutomaticReserveSpawn()
 	}
 	if (IsWaitingForOwningTerritory())
 	{
-		ScheduleAutomaticReserveSpawn(GetEffectiveReserveSpawnDelay());
+		PauseReserveSpawn();
 		return;
 	}
 
@@ -833,6 +886,7 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 	// This order is correct — do not move the decrement above the spawn call.
 	--CurrentReserveCount;
 	PendingReserveSpawns = FMath::Max(0, PendingReserveSpawns - 1);
+	if (PendingReserveSpawns == 0) SavedReserveRemainingDelay = -1.f;
 	Territory->RefreshGarrisonSnapshot();
 	// Admission and finite reserve accounting are complete before Narrative can
 	// select an activity or run Blueprint callbacks. The weak callback also lets
@@ -864,6 +918,7 @@ bool ATerritoryGuardSpawnPoint::TrySpawnReserveGuard(bool bRequireCameraAvoidanc
 void ATerritoryGuardSpawnPoint::CancelPendingReserveSpawns()
 {
 	PendingReserveSpawns = 0;
+	SavedReserveRemainingDelay = -1.f;
 	AutomaticReserveSpawnFailures = 0;
 	if (UWorld* World = GetWorld())
 	{

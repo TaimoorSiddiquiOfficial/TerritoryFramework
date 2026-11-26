@@ -1,0 +1,13 @@
+{
+  "version": "2.5.0",
+  "original_sha256_lf": "a1c3a596e9790a20ada2772a6044ef7c7824054d7fbaa5b3d5cbfd9d71132701",
+  "patched_sha256_lf": "0aacc303dd494a24c5aea8974cc0d6c7f5d6bce6b5590515868a53f6b5908514",
+  "scope": [
+    "LoadPlayerOnlySave",
+    "MultiplayerLoad"
+  ],
+  "regressions": [
+    "TerritoryFramework.Persistence.Regression.PlayerSaveIsolation",
+    "TerritoryFramework.Persistence.Regression.MultiplayerLoadValidation"
+  ]
+}

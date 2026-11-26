@@ -50,6 +50,9 @@
 #include "Tales/TerritoryStealthConditions.h"
 #include "Tales/TerritoryStealthEvents.h"
 #include "Tales/TerritoryTalesUtilities.h"
+// The contract cases below assert the Place capture/upgrade events derive from the
+// Territory Tales bases, so the concrete declarations must be visible here.
+#include "Tales/TerritoryUpgradeEvents.h"
 #include "Navigation/TerritoryMapMarker.h"
 #include "Navigation/TerritoryNavigationMarkerComponent.h"
 #include "NarrativeSavableActor.h"
@@ -625,27 +628,27 @@ bool FTFTerritoryEventContextConditionRegression::RunTest(const FString& Paramet
 	if (!Condition) return false;
 
 	TestFalse(TEXT("A world-level state recovery cannot run a player reward"),
-		Condition->CheckCondition(nullptr, nullptr, nullptr));
+		Condition->CheckConditionInContext(nullptr, nullptr, nullptr));
 
 	ANarrativeNPCCharacter* NarrativeNPC = NewObject<ANarrativeNPCCharacter>();
 	TestNotNull(TEXT("Narrative NPC with an ability system created"), NarrativeNPC);
 	if (!NarrativeNPC) return false;
 	TestFalse(TEXT("A valid NPC ability system does not satisfy the default player-only rule"),
-		Condition->CheckCondition(NarrativeNPC, nullptr, nullptr));
+		Condition->CheckConditionInContext(NarrativeNPC, nullptr, nullptr));
 
 	Condition->bRequirePlayerControlledTarget = false;
 	TestTrue(TEXT("An explicitly non-player event accepts a valid Narrative ability system"),
-		Condition->CheckCondition(NarrativeNPC, nullptr, nullptr));
+		Condition->CheckConditionInContext(NarrativeNPC, nullptr, nullptr));
 
 	APawn* PlainPawn = NewObject<APawn>();
 	TestNotNull(TEXT("Plain pawn without an ability system created"), PlainPawn);
 	if (!PlainPawn) return false;
 	TestFalse(TEXT("A target without an ability system cannot run a GAS event"),
-		Condition->CheckCondition(PlainPawn, nullptr, nullptr));
+		Condition->CheckConditionInContext(PlainPawn, nullptr, nullptr));
 
 	Condition->bRequireAbilitySystemComponent = false;
 	TestTrue(TEXT("A non-GAS event may opt out while still requiring a valid target"),
-		Condition->CheckCondition(PlainPawn, nullptr, nullptr));
+		Condition->CheckConditionInContext(PlainPawn, nullptr, nullptr));
 	return true;
 }
 
@@ -715,7 +718,7 @@ bool FTFTerritoryUnlockNarrativeEventRegression::RunTest(const FString& Paramete
 	UTerritoryUnlockEvent* UnlockEvent = NewObject<UTerritoryUnlockEvent>();
 	UnlockEvent->TargetTerritoryTag = TerritoryTag;
 	UnlockEvent->UnlockScope = ETerritoryUnlockScope::ForceExact;
-	UnlockEvent->OnActivate(EventTarget, nullptr, nullptr);
+	UnlockEvent->ActivateInContext(EventTarget, nullptr, nullptr);
 
 	TestFalse(TEXT("Narrative Unlock Event changes availability"), Territory->IsLocked());
 	TestEqual(TEXT("Narrative Unlock Event leaves the exact Place Claimed by its owner"),
@@ -5049,7 +5052,9 @@ bool FTFTalesCompleteConditionEventAudit::RunTest(const FString& Parameters)
 		UTerritoryRemoveDisguiseEvent::StaticClass(),
 		UTerritorySetDisguiseCoverEvent::StaticClass(),
 		UTerritoryDisguiseIdentityCheckEvent::StaticClass(),
-		UTerritoryPlayCutsceneEvent::StaticClass()
+		UTerritoryPlayCutsceneEvent::StaticClass(),
+		UTerritoryPlaceCapturedEvent::StaticClass(),
+		UTerritoryUpgradePlaceEvent::StaticClass()
 	};
 
 	auto AuditClasses = [this](const TArray<UClass*>& Classes,
@@ -5233,13 +5238,13 @@ bool FTFFactionClaimedDistrictCountCondition::RunTest(const FString& Parameters)
 	Condition->Comparison = ETerritoryIntegerComparison::AtLeast;
 	Condition->DistrictCount = 1;
 	TestTrue(TEXT("At Least 1 passes after the faction claims one or more Districts"),
-		Condition->CheckCondition(ContextPawn, nullptr, nullptr));
+		Condition->CheckConditionInContext(ContextPawn, nullptr, nullptr));
 	Condition->DistrictCount = 2;
 	TestTrue(TEXT("At Least 2 passes when the faction claims two Districts"),
-		Condition->CheckCondition(ContextPawn, nullptr, nullptr));
+		Condition->CheckConditionInContext(ContextPawn, nullptr, nullptr));
 	Condition->DistrictCount = 3;
 	TestFalse(TEXT("At Least 3 fails when only two Districts are Claimed"),
-		Condition->CheckCondition(ContextPawn, nullptr, nullptr));
+		Condition->CheckConditionInContext(ContextPawn, nullptr, nullptr));
 
 	ATerritoryGuardCharacter* DynamicFactionActor =
 		NewObject<ATerritoryGuardCharacter>();
@@ -5297,7 +5302,7 @@ bool FTFSetNarrativePlayerFactionsEvent::RunTest(const FString& Parameters)
 		NewObject<UTerritorySetNarrativePlayerFactionsEvent>(GetTransientPackage());
 	Event->NewFactions.AddTag(Heroes);
 	Event->bReplaceExistingFactions = true;
-	Event->ExecuteEvent(ContextPawn, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(Event, ContextPawn);
 	TestTrue(TEXT("Betrayal event replaces Police with Heroes"),
 		PlayerState->GetFactions().HasTagExact(Heroes));
 	TestFalse(TEXT("Replaced Police membership is removed"),
@@ -5308,7 +5313,7 @@ bool FTFSetNarrativePlayerFactionsEvent::RunTest(const FString& Parameters)
 	Event->NewFactions.Reset();
 	Event->NewFactions.AddTag(Bandits);
 	Event->bReplaceExistingFactions = false;
-	Event->ExecuteEvent(ContextPawn, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(Event, ContextPawn);
 	TestTrue(TEXT("Add mode preserves the existing membership"),
 		PlayerState->GetFactions().HasTagExact(Heroes));
 	TestTrue(TEXT("Add mode appends the selected membership"),
@@ -5374,7 +5379,7 @@ bool FTFDetachedNarrativeWorldResolution::RunTest(const FString& Parameters)
 	TestNull(TEXT("Detached condition has no world from its UObject outer"),
 		StateCondition->GetWorld());
 	TestTrue(TEXT("Detached condition reads Territory state through the live Narrative target"),
-		StateCondition->CheckCondition(ContextPawn, nullptr, nullptr));
+		StateCondition->CheckConditionInContext(ContextPawn, nullptr, nullptr));
 
 	UTerritoryModifyReputationEvent* ReputationEvent =
 		NewObject<UTerritoryModifyReputationEvent>(GetTransientPackage());
@@ -5383,7 +5388,7 @@ bool FTFDetachedNarrativeWorldResolution::RunTest(const FString& Parameters)
 	ReputationEvent->Value = 37;
 	TestNull(TEXT("Detached event has no world from its UObject outer"),
 		ReputationEvent->GetWorld());
-	ReputationEvent->ExecuteEvent(ContextPawn, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(ReputationEvent, ContextPawn);
 	TestEqual(TEXT("Detached event mutates the live world's diplomacy subsystem"),
 		Diplomacy->GetReputation(Heroes), 37);
 

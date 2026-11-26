@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Tales/QuestTask.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryNarrativeConditionTask.generated.h"
 
 class UNarrativeCondition;

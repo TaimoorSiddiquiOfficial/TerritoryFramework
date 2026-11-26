@@ -32,6 +32,7 @@
 
 #include "EdGraph/EdGraph.h"
 #include "Engine/Blueprint.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/SimpleConstructionScript.h"
@@ -43,6 +44,7 @@
 #include "K2Node_IfThenElse.h"
 #include "K2Node_VariableGet.h"
 #include "Misc/PackageName.h"
+#include "Misc/ScopeExit.h"
 #include "UObject/UnrealType.h"
 #include "ZoneGraphSubsystem.h"
 
@@ -460,8 +462,19 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 		return true;
 	}
 
-	UWorld* World = LoadObject<UWorld>(nullptr,
-		TEXT("/Game/HopDistrictTest.HopDistrictTest"));
+	const TCHAR* MapObjectPath = TEXT("/Game/HopDistrictTest.HopDistrictTest");
+	const bool bAlreadyLoaded = FindObject<UWorld>(nullptr, MapObjectPath) != nullptr;
+	UWorld* World = LoadObject<UWorld>(nullptr, MapObjectPath);
+	ON_SCOPE_EXIT
+	{
+		// Loading a map asset may initialize editor subsystems even without a
+		// gameplay world context. Pair our load with cleanup before a later test
+		// runs GC; never tear down an existing editor/PIE world owned by the user.
+		if (World && !bAlreadyLoaded && !GEngine->GetWorldContextFromWorld(World))
+		{
+			World->DestroyWorld(false);
+		}
+	};
 	TestNotNull(TEXT("Territory integration map loads"), World);
 	if (!World || !World->PersistentLevel) return false;
 

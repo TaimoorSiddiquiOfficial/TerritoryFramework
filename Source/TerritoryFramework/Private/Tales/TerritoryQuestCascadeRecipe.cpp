@@ -8,6 +8,7 @@
 #include "Tales/TerritoryNarrativeCheckpointEvent.h"
 #include "Tales/TerritoryNarrativeConditionTask.h"
 #include "UObject/UnrealType.h"
+#include "Tales/TerritoryNarrativeContext.h"
 
 #define LOCTEXT_NAMESPACE "TerritoryQuestCascadeRecipe"
 

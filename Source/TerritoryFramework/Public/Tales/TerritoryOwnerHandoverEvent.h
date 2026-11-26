@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryOwnerHandoverEvent.generated.h"
 
 /**
@@ -13,7 +14,7 @@
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory: Begin Owner Handover",
 		ToolTip="Activate the existing owner spawner for a Place on the server. It may start dialogue or wait for interaction. This reveals the owner; the capture event still performs ownership handover. The spawner must be loaded."))
-class TERRITORYFRAMEWORK_API UTerritoryOwnerHandoverEvent : public UNarrativeEvent
+class TERRITORYFRAMEWORK_API UTerritoryOwnerHandoverEvent : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -30,7 +31,8 @@ public:
 	bool bBeginDialogueImmediately = true;
 
 protected:
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

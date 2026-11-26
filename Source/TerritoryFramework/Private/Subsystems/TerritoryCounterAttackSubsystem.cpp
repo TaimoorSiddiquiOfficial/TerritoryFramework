@@ -11,6 +11,7 @@
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryCommandTags.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryEvidenceTags.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
@@ -21,6 +22,7 @@
 #include "Navigation/TerritoryRoadTrafficSubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UnrealFramework/NarrativePlayerController.h"
@@ -84,7 +86,7 @@ namespace
 	{
 		return Assault.LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
 			&& !Assault.StoryAttackerDefinitionOverride.IsNull()
-			? Assault.StoryAttackerDefinitionOverride.LoadSynchronous()
+			? Assault.StoryAttackerDefinitionOverride.Get()
 			: ForceConfig.AttackerDefinition.Get();
 	}
 
@@ -202,6 +204,7 @@ void UTerritoryCounterAttackSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UTerritoryCounterAttackSubsystem::Deinitialize()
 {
+	AssaultAssets.Reset();
 	++RestoreGeneration;
 	bRestoringState = true;
 	if (UWorld* World = GetWorld())
@@ -286,7 +289,8 @@ FTerritoryAssaultEvaluationResult UTerritoryCounterAttackSubsystem::CalculateEva
 	Result.LaunchProbability = Active <= 0.f
 		? FMath::Clamp(Profile->UnguardedLaunchProbability, 0.f, 1.f)
 		: FMath::Clamp(RawProbability,
-			Profile->MinimumLaunchProbability, Profile->MaximumLaunchProbability);
+			Profile->MinimumLaunchProbability,
+			FMath::Min(Profile->MaximumLaunchProbability, Profile->UnguardedLaunchProbability));
 	Result.EstimatedSuccessProbability = AttackPower
 		/ FMath::Max(1.f, AttackPower + Result.DistrictDefencePower);
 	Result.AttackPriority = FMath::Max(0.f,
@@ -799,7 +803,7 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		? StoryOptions->PlannedForceOverride : (ForceConfig ? ForceConfig->PlannedForce : 0);
 	const UNPCDefinition* RequestedDefinition = StoryOptions
 		&& !StoryOptions->AttackerDefinitionOverride.IsNull()
-		? StoryOptions->AttackerDefinitionOverride.LoadSynchronous()
+		? StoryOptions->AttackerDefinitionOverride.Get()
 		: (ForceConfig ? ForceConfig->AttackerDefinition.Get() : nullptr);
 	if (!Profile) return Reject(NSLOCTEXT("TerritoryCounterAttack", "MissingProfile",
 		"The target Territory Definition has no Counterattack Profile."));
@@ -827,7 +831,19 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 		return Reject(AdmissionFailure);
 	}
 	FText SpawnClassFailure;
-	if (!ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
+	FTerritoryAssaultRecord AssetRequest;
+	AssetRequest.AttackingFaction = AttackingFaction;
+	AssetRequest.LaunchMode = LaunchMode;
+	if (StoryOptions) AssetRequest.StoryAttackerDefinitionOverride = StoryOptions->AttackerDefinitionOverride;
+	const auto AssetReadiness = PrepareAssaultAssets(Territory, &AssetRequest);
+	RequestedDefinition = StoryOptions && !StoryOptions->AttackerDefinitionOverride.IsNull()
+		? StoryOptions->AttackerDefinitionOverride.Get() : ForceConfig->AttackerDefinition.Get();
+	if (AssetReadiness == ETerritoryAssetReadiness::Failed)
+		return Reject(NSLOCTEXT("TerritoryCounterAttack", "AssetsFailed", "An assault asset failed to load. Check the authored definition, triggers and vehicles."));
+	// Accept one durable schedule while loading; defer physical admission to the
+	// same scheduler. A one-shot story request must not disappear or reroll.
+	if (AssetReadiness == ETerritoryAssetReadiness::Ready
+		&& !ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
 		RequestedDefinition, RequestedForce, SpawnClassFailure))
 	{
 		UE_LOG(LogTerritory, Error,
@@ -1011,6 +1027,12 @@ bool UTerritoryCounterAttackSubsystem::StartAssaultImmediately(
 		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::Evaluating) || !IsValid(Territory)) return false;
 		EvaluateAssault(Assault, Territory);
 		if (!IsAssaultCurrent(Access)) return false;
+	}
+	if (Assault.State == ETerritoryAssaultState::Evaluating)
+	{
+		if (OutFailureReason) *OutFailureReason = NSLOCTEXT("TerritoryCounterAttack",
+			"ImmediateAssetsPending", "The assault is accepted and will deploy when its assets finish loading.");
+		return true;
 	}
 	if (Assault.IsTerminal())
 	{
@@ -1332,6 +1354,7 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 	UWorld* World = GetWorld();
 	if (!World) return;
 	const uint64 ThisRestoreGeneration = ++RestoreGeneration;
+	AssaultAssets.Reset();
 
 	const bool bAuthority = World->GetNetMode() != NM_Client;
 	TGuardValue<bool> RestoreGuard(bRestoringState, true);
@@ -1406,6 +1429,9 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 		{
 			Record.VehicleStagingBlockedSince = 0.0;
 		}
+		Record.VehicleStagingElapsedSeconds = FMath::IsFinite(Record.VehicleStagingElapsedSeconds)
+			? FMath::Clamp(Record.VehicleStagingElapsedSeconds, 0.0, 120.0) : 0.0;
+		Record.VehicleStagingLastWorldSeconds = -1.0;
 		Record.ConsecutiveSpawnFailures = FMath::Max(0, Record.ConsecutiveSpawnFailures);
 		Record.KilledForce = FMath::Clamp(Record.KilledForce, 0, Record.PlannedForce);
 		Record.WithdrawnForce = FMath::Clamp(
@@ -1484,6 +1510,7 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 				Record.PendingReserveForce, 0, MaximumRemaining - Record.AliveForce);
 		}
 		Assaults.Add(Record.AssaultID, Record);
+		if (bAuthority && !Record.IsTerminal()) PrepareAssaultAssets(ResolveTerritory(Record), &Record);
 		if (Record.TargetTerritoryGUID.IsValid() && Record.AttackingFaction.IsValid()
 			&& Record.EvaluationCycle > 0)
 		{
@@ -1543,6 +1570,8 @@ void UTerritoryCounterAttackSubsystem::UpdateAssaults()
 	{
 		if (FTerritoryAssaultRecord* Assault = Assaults.Find(ID))
 		{
+			if (!Assault->IsTerminal() && Assault->VehicleStagingBlockedSince > 0.0)
+				AdvanceVehicleStagingWait(*Assault, World->GetTimeSeconds());
 			AdvanceAssault(*Assault);
 		}
 	}
@@ -1659,8 +1688,10 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
 	const FTerritoryFactionAssaultConfig* ForceConfig = Profile
 		? Profile->FindFactionForce(Assault.AttackingFaction) : nullptr;
+	const auto AssetReadiness = PrepareAssaultAssets(Territory, &Assault);
+	if (AssetReadiness == ETerritoryAssetReadiness::Pending) return;
 	FText SpawnClassFailure;
-	if (!Profile || !ForceConfig
+	if (AssetReadiness == ETerritoryAssetReadiness::Failed || !Profile || !ForceConfig
 		|| !ATerritoryAssaultCharacter::ValidateNarrativeSpawnDefinition(
 			ResolveAssaultDefinition(Assault, *ForceConfig),
 			ResolveAssaultPlannedForce(Assault, *ForceConfig), SpawnClassFailure))
@@ -1840,29 +1871,7 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 
 		if (Profile)
 		{
-			bool bDefendersRemain = !TerritoryAssaultTargetPolicy::
-				CollectRegisteredDefenders(Territory).IsEmpty();
-			if (!bDefendersRemain)
-			{
-				for (ATerritoryVolume* Defence :
-					TerritoryAssaultTargetPolicy::BuildDefenceFront(Territory))
-				{
-					if (!Defence || (Defence != Territory
-						&& Defence->GetOwningFaction() != Assault.DefendingFaction))
-					{
-						continue;
-					}
-					for (const ATerritoryGuardSpawnPoint* Post : Defence->GetGuardSpawnPoints())
-					{
-						if (Post && Post->HasPendingReserveSpawn())
-						{
-							bDefendersRemain = true;
-							break;
-						}
-					}
-					if (bDefendersRemain) break;
-				}
-			}
+			const bool bDefendersRemain = HasUnresolvedDefenders(Territory, Assault.DefendingFaction);
 
 			bool bAliveDefendingPlayerInside = false;
 			bool bDeadDefendingPlayerInside = false;
@@ -1914,6 +1923,13 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory)
 {
+	const auto AssetReadiness = PrepareAssaultAssets(Territory, &Assault);
+	if (AssetReadiness == ETerritoryAssetReadiness::Pending) return;
+	if (AssetReadiness == ETerritoryAssetReadiness::Failed)
+	{
+		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::ConfigurationInvalid);
+		return;
+	}
 	if (Territory && !Territory->DoStateRulesAllowAssault(
 		Assault.AttackingFaction, Assault.bQuestOverrideAuthorized))
 	{
@@ -1963,7 +1979,7 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 			}
 			UClass* VehicleClass =
 				UTerritoryCounterAttackProfile::ResolveVehicleClass(
-					*ForceConfig, *Approach).LoadSynchronous();
+					*ForceConfig, *Approach).Get();
 			return !VehicleClass
 				|| !VehicleClass->IsChildOf(ANarrativeVehicleBase::StaticClass());
 		});
@@ -2068,6 +2084,7 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 			Assault.PlannedForce = TransportedForce;
 		}
 	}
+	UpdateCommittedForceEstimate(Assault, *ForceConfig, Profile);
 	Assault.AliveForce = 0;
 	Assault.PendingReserveForce = Assault.PlannedForce;
 	Assault.KilledForce = 0;
@@ -2076,6 +2093,8 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 		Assault, *ForceConfig, Assault.PlannedForce);
 	Assault.WaveStrategy = Profile->WaveStrategy;
 	Assault.VehicleStagingBlockedSince = 0.0;
+	Assault.VehicleStagingElapsedSeconds = 0.0;
+	Assault.VehicleStagingLastWorldSeconds = -1.0;
 	Assault.VehicleDeploymentsUsed = 0;
 	Assault.VehicleDeploymentsByApproach.Reset();
 	Assault.ScheduledGameTime = GetCampaignGameTime();
@@ -2085,9 +2104,24 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 	BroadcastStateTransition(Assault, PreviousState);
 }
 
+void UTerritoryCounterAttackSubsystem::UpdateCommittedForceEstimate(FTerritoryAssaultRecord& Assault,
+	const FTerritoryFactionAssaultConfig& ForceConfig, const UTerritoryCounterAttackProfile* Profile)
+{
+	// The launch probability/seeded roll stay fixed. Only the outcome estimate uses
+	// the final difficulty/transport-limited force. MilitaryPower is authored for
+	// ForceConfig.PlannedForce; this is not a live economy, supply or health simulation.
+	FTerritoryAssaultEvaluationInput CommittedInput = Assault.EvaluationInput;
+	CommittedInput.AttackingMilitaryPower *= static_cast<float>(Assault.PlannedForce)
+		/ FMath::Max(1, ForceConfig.PlannedForce);
+	const FTerritoryAssaultEvaluationResult Committed = CalculateEvaluation(CommittedInput, Profile);
+	Assault.EvaluationResult.EstimatedSuccessProbability = Committed.EstimatedSuccessProbability;
+	Assault.EvaluationResult.PowerRatio = Committed.PowerRatio;
+}
+
 bool UTerritoryCounterAttackSubsystem::ActivateAssault(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory)
 {
+	if (PrepareAssaultAssets(Territory, &Assault) != ETerritoryAssetReadiness::Ready) return false;
 	if (Assault.State != ETerritoryAssaultState::WaitingForPlayerProximity
 		|| !Territory || Territory->GetControlMode() != ETerritoryControlMode::Independent
 		|| !Territory->IsAvailableForGameplay() || Assault.SelectedApproaches.IsEmpty())
@@ -2134,11 +2168,27 @@ void UTerritoryCounterAttackSubsystem::IncrementSpawnFailureCount(FTerritoryAssa
 		FMath::Clamp(Assault.ConsecutiveSpawnFailures, 0, MAX_int32 - 1) + 1;
 }
 
+bool UTerritoryCounterAttackSubsystem::AdvanceVehicleStagingWait(
+	FTerritoryAssaultRecord& Assault, double WorldSeconds)
+{
+	// Vehicle movement/retirement use world seconds. Native's campaign clock can
+	// advance ten times faster, and must not burn a physical entrance's retry grace.
+	if (!FMath::IsFinite(WorldSeconds) || WorldSeconds < 0.0) return true;
+	Assault.VehicleStagingElapsedSeconds = FMath::IsFinite(Assault.VehicleStagingElapsedSeconds)
+		? FMath::Clamp(Assault.VehicleStagingElapsedSeconds, 0.0, 120.0) : 0.0;
+	if (Assault.VehicleStagingLastWorldSeconds >= 0.0 && WorldSeconds >= Assault.VehicleStagingLastWorldSeconds)
+		Assault.VehicleStagingElapsedSeconds = FMath::Min(120.0,
+			Assault.VehicleStagingElapsedSeconds + WorldSeconds - Assault.VehicleStagingLastWorldSeconds);
+	Assault.VehicleStagingLastWorldSeconds = WorldSeconds;
+	return Assault.VehicleStagingElapsedSeconds < 120.0;
+}
+
 void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory)
 {
 	if (bSpawningAssaultWave || !GetWorld() || GetWorld()->GetNetMode() == NM_Client
 		|| Assault.State != ETerritoryAssaultState::Active || !IsValid(Territory) || !Territory->HasAuthority()) return;
+	if (PrepareAssaultAssets(Territory, &Assault) != ETerritoryAssetReadiness::Ready) return;
 	TGuardValue<bool> WaveGuard(bSpawningAssaultWave, true);
 	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
 	UTerritoryCounterAttackProfile* Profile = Territory->GetCounterAttackProfile();
@@ -2457,6 +2507,8 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 	if (Spawned > 0)
 	{
 		Assault.VehicleStagingBlockedSince = 0.0;
+		Assault.VehicleStagingElapsedSeconds = 0.0;
+		Assault.VehicleStagingLastWorldSeconds = -1.0;
 		Assault.ConsecutiveSpawnFailures = 0;
 		BroadcastChanged(Assault);
 	}
@@ -2468,12 +2520,13 @@ void UTerritoryCounterAttackSubsystem::SpawnNextWave(
 			if (Assault.VehicleStagingBlockedSince <= 0.0)
 			{
 				Assault.VehicleStagingBlockedSince = FMath::Max(UE_SMALL_NUMBER, Now);
+				Assault.VehicleStagingLastWorldSeconds = GetWorld()->GetTimeSeconds();
 				BroadcastChanged(Assault);
 				return;
 			}
 			// A moving preceding car is a temporary reservation, not a failed spawn.
 			// A permanently blocked entrance still reaches the ordinary failure path.
-			if (Now - Assault.VehicleStagingBlockedSince < 120.0) return;
+			if (AdvanceVehicleStagingWait(Assault, GetWorld()->GetTimeSeconds())) return;
 		}
 		IncrementSpawnFailureCount(Assault);
 		BroadcastChanged(Assault);
@@ -2655,8 +2708,10 @@ UTerritoryCounterAttackSubsystem::SpawnNarrativeVehicleParticipants(
 	};
 	if (!IsDeploymentCurrent()) return Participants;
 	UWorld* World = GetWorld();
+	if (AssaultAssets.Poll({UTerritoryCounterAttackProfile::ResolveVehicleClass(
+		ForceConfig, Approach).ToSoftObjectPath()}) == ETerritoryAssetReadiness::Pending) return Participants;
 	UClass* VehicleClass = UTerritoryCounterAttackProfile::ResolveVehicleClass(
-		ForceConfig, Approach).LoadSynchronous();
+		ForceConfig, Approach).Get();
 	if (!IsDeploymentCurrent()) return Participants;
 	if (!World || !VehicleClass
 		|| !VehicleClass->IsChildOf(ANarrativeVehicleBase::StaticClass()))
@@ -2911,6 +2966,12 @@ void UTerritoryCounterAttackSubsystem::NotifyParticipantRemoved(
 
 	bool bForceExhausted = false;
 	if (!ApplyParticipantRemoval(*Assault, bKilled, bForceExhausted)) return;
+	if (bKilled)
+	{
+		// The casualty is committed above, so the physical fact is recorded before any listener
+		// runs and can read the ledger that already contains it (AGENTS.md §4.3 step 7).
+		RecordAttackerKilledEvidence(*Assault, *Participant);
+	}
 	const FAssaultAccess Access = CaptureAssaultAccess(*Assault);
 	BroadcastChanged(*Assault);
 
@@ -2921,9 +2982,41 @@ void UTerritoryCounterAttackSubsystem::NotifyParticipantRemoved(
 	}
 }
 
-bool UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(
-	bool bAllowsTerritoryCapture, ETerritoryState TerritoryState,
-	bool bRequirePlayerProximity, bool bRelevantPlayerNearby,
+void UTerritoryCounterAttackSubsystem::RecordAttackerKilledEvidence(
+	const FTerritoryAssaultRecord& Assault, const ATerritoryAssaultCharacter& Participant)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UTerritoryEvidenceLedgerSubsystem* Ledger = World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>();
+	if (!Ledger) return;
+	// The ledger deliberately accepts records before it reports readiness, and this callback only
+	// runs after the casualty was committed, so the fact is never gated on a later lifecycle step.
+	const FGuid ParticipantGUID = Participant.GetActorGUID_Implementation();
+	if (!ParticipantGUID.IsValid()) return;
+
+	FTerritoryEvidenceRecord Record;
+	Record.EvidenceTag = TerritoryEvidenceTags::AttackerKilled.GetTag();
+	Record.SubjectId = ParticipantGUID;
+	Record.InstigatorFaction = Assault.DefendingFaction;
+	Record.SourceTerritory = Assault.TargetTerritory;
+	Record.ContextId = UTerritoryEvidenceLedgerSubsystem::MakeEvidenceContextId(
+		FString::Printf(TEXT("AttackerKilled|%s|%s"),
+			*Assault.AssaultID.ToString(EGuidFormats::Digits),
+			*ParticipantGUID.ToString(EGuidFormats::Digits)));
+	Record.Weight = 1;
+	Record.GameTimeSeconds = UTerritoryEvidenceLedgerSubsystem::ResolveCampaignGameTime(this);
+
+	const FTerritoryEvidenceMutationResult Result = Ledger->RecordEvidenceRecord(Record);
+	if (!Result.bSuccess && !Result.bAlreadyRecorded)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[Evidence] Attacker death in %s committed but was not recorded: %s"),
+			*Assault.TargetTerritory.ToString(), *Result.FailureReason.ToString());
+	}
+}
+
+bool UTerritoryCounterAttackSubsystem::ShouldActivateWaitingAssault(bool bAllowsTerritoryCapture,
+	ETerritoryState TerritoryState, bool bRequirePlayerProximity, bool bRelevantPlayerNearby,
 	bool bGarrisonHoldsDefence)
 {
 	const bool bTerritoryStateAllowsActivation = !bAllowsTerritoryCapture
@@ -3497,23 +3590,47 @@ void UTerritoryCounterAttackSubsystem::GetDefendingPlayerPresence(
 	}
 }
 
+bool UTerritoryCounterAttackSubsystem::HasUnresolvedDefenders(ATerritoryVolume* Territory, FGameplayTag DefendingFaction)
+{
+	if (!TerritoryAssaultTargetPolicy::CollectRegisteredDefenders(Territory).IsEmpty()) return true;
+	for (const ATerritoryVolume* Defence : TerritoryAssaultTargetPolicy::BuildDefenceFront(Territory))
+	{
+		if (!Defence || (Defence != Territory && Defence->GetOwningFaction() != DefendingFaction)) continue;
+		for (const ATerritoryGuardSpawnPoint* Post : Defence->GetGuardSpawnPoints())
+			if (Post && Post->HasPendingReserveSpawn()) return true;
+	}
+	return false;
+}
+
 bool UTerritoryCounterAttackSubsystem::HasPhysicalAttackerInside(
 	const FTerritoryAssaultRecord& Assault, const ATerritoryVolume* Territory) const
 {
-	if (!Territory) return false;
+	return FindPhysicalAttackerInside(Assault, Territory) != nullptr;
+}
+
+ATerritoryAssaultCharacter* UTerritoryCounterAttackSubsystem::FindPhysicalAttackerInside(
+	const FTerritoryAssaultRecord& Assault, const ATerritoryVolume* Territory) const
+{
+	if (!IsValid(Territory) || Territory->IsActorBeingDestroyed()) return nullptr;
 	const TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>>* Participants =
 		LiveParticipants.Find(Assault.AssaultID);
-	if (!Participants) return false;
+	if (!Participants) return nullptr;
 	for (const TWeakObjectPtr<ATerritoryAssaultCharacter>& WeakParticipant : *Participants)
 	{
-		const ATerritoryAssaultCharacter* Participant = WeakParticipant.Get();
+		ATerritoryAssaultCharacter* Participant = WeakParticipant.Get();
+		const auto* Component = Participant ? Participant->AssaultParticipant.Get() : nullptr;
 		if (IsValid(Participant) && !Participant->IsActorBeingDestroyed()
+			&& Participant->IsAlive() && Participant->GetWorld() == GetWorld()
+			&& Component && !Component->HasRetired() && Component->CanEngageCombat()
+			&& Component->AllowsTerritoryCapture() && Component->MatchesTargetTerritory(Territory)
+			&& Component->GetAssaultID() == Assault.AssaultID
+			&& Component->GetAttackingFaction() == Assault.AttackingFaction
 			&& Territory->ContainsPoint(Participant->GetActorLocation()))
 		{
-			return true;
+			return Participant;
 		}
 	}
-	return false;
+	return nullptr;
 }
 
 bool UTerritoryCounterAttackSubsystem::CompleteRecapture(
@@ -3522,26 +3639,48 @@ bool UTerritoryCounterAttackSubsystem::CompleteRecapture(
 	UWorld* World = GetWorld();
 	UTerritoryControlSubsystem* Control = World
 		? World->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
-	if (!Control || !Territory || !Assault.AttackingFaction.IsValid()) return false;
-
-	FTerritoryTransitionContext Context;
-	Context.RequestingFaction = Assault.AttackingFaction;
-	if (const TSet<TWeakObjectPtr<ATerritoryAssaultCharacter>>* Participants =
-		LiveParticipants.Find(Assault.AssaultID))
+	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
+	if (!Control || !IsValid(Territory) || !IsAssaultCurrent(Access)) return false;
+	if (IsDiplomacyBlocked(Assault, Territory))
 	{
-		for (const TWeakObjectPtr<ATerritoryAssaultCharacter>& WeakParticipant : *Participants)
-		{
-			if (ATerritoryAssaultCharacter* Participant = WeakParticipant.Get())
-			{
-				if (!Territory->ContainsPoint(Participant->GetActorLocation())) continue;
-				Context.Instigator = Participant;
-				Context.TargetPawn = Participant;
-				break;
-			}
-		}
+		ResolveAssault(Assault, ETerritoryAssaultState::Cancelled, ETerritoryAssaultResolution::DiplomacyBlocked);
+		return false;
 	}
-	return Control->ForceCaptureWithContext(
-		Territory, Assault.AttackingFaction, Context);
+	const FGameplayTag AttackingFaction = Assault.AttackingFaction;
+	const auto IsAdmitted = [this, Access, Territory, World]()
+	{
+		if (!IsAssaultCurrent(Access) || !IsValid(Territory) || Territory->IsActorBeingDestroyed()) return false;
+		const FTerritoryAssaultRecord& Current = *Access.Address;
+		if ((Current.State != ETerritoryAssaultState::Active && Current.State != ETerritoryAssaultState::RecaptureCountdown)
+			|| !Current.bAllowsTerritoryCapture || Current.AliveForce <= 0 || !DoesAssaultTargetTerritory(Current, Territory)
+			|| Territory->GetOwningFaction() != Current.DefendingFaction
+			|| !Territory->IsAvailableForGameplay() || HasUnresolvedDefenders(Territory, Current.DefendingFaction)
+			|| !Territory->DoStateRulesAllowAssault(Current.AttackingFaction, Current.bQuestOverrideAuthorized)
+			|| IsDiplomacyBlocked(Current, Territory)) return false;
+		const auto* Body = FindPhysicalAttackerInside(Current, Territory);
+		const auto* Diplomacy = World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+		if (!Body || !Diplomacy || !Diplomacy->CanFactionsEngage(Body->GetFactions(), FGameplayTagContainer(Current.DefendingFaction))) return false;
+		const auto* Profile = Territory->GetCounterAttackProfile();
+		if (!Profile) return false;
+		bool bLivingPlayer = false, bDeadPlayer = false;
+		GetDefendingPlayerPresence(Current, Territory, bLivingPlayer, bDeadPlayer);
+		return EvaluateRecaptureDecision(false, true, bLivingPlayer, bDeadPlayer,
+			Current.State == ETerritoryAssaultState::RecaptureCountdown,
+			Current.RecaptureEndsGameTime > 0.0 && GetCampaignGameTime() >= Current.RecaptureEndsGameTime,
+			Profile->bUseUnattendedRecaptureHandover, Profile->bConcedeWhenDefendingPlayerDies)
+			== ERecaptureDecision::CompleteHandover;
+	};
+	if (!IsAdmitted()) return false;
+	FTerritoryMutationRequest Request;
+	Request.Territory = Territory;
+	Request.NewOwner = AttackingFaction;
+	Request.TransitionContext.RequestingFaction = AttackingFaction;
+	Request.TransitionContext.Instigator = FindPhysicalAttackerInside(Assault, Territory);
+	Request.TransitionContext.TargetPawn = Cast<APawn>(Request.TransitionContext.Instigator);
+	const FTerritoryMutationResponse Result = Control->ApplyTerritoryMutationValidated(Request, IsAdmitted);
+	// Ownership callbacks can retire the force or relocate the map. Never touch the
+	// old record reference here; a save replacement also invalidates this result.
+	return Access.Generation == RestoreGeneration && Result.Result == ETerritoryMutationResult::Success;
 }
 
 APawn* UTerritoryCounterAttackSubsystem::FindNearestRelevantPlayer(
@@ -3780,7 +3919,8 @@ bool UTerritoryCounterAttackSubsystem::ResolveApproachObjective(
 			ApproachWorldTransform.GetLocation(), OutObjective, OutFailureReason);
 	}
 
-	UClass* VehicleClass = Approach.VehicleClass.LoadSynchronous();
+	const bool bRuntime = GetWorld() && GetWorld()->IsGameWorld();
+	UClass* VehicleClass = bRuntime ? Approach.VehicleClass.Get() : Approach.VehicleClass.LoadSynchronous();
 	if (!VehicleClass || !VehicleClass->IsChildOf(ANarrativeVehicleBase::StaticClass()))
 	{
 		bool bHasFactionSignature = false;
@@ -3789,7 +3929,7 @@ bool UTerritoryCounterAttackSubsystem::ResolveApproachObjective(
 		{
 			for (const FTerritoryFactionAssaultConfig& Force : Profile->FactionForces)
 			{
-				UClass* SignatureClass = Force.SignatureVehicleClass.LoadSynchronous();
+				UClass* SignatureClass = bRuntime ? Force.SignatureVehicleClass.Get() : Force.SignatureVehicleClass.LoadSynchronous();
 				if (SignatureClass
 					&& SignatureClass->IsChildOf(ANarrativeVehicleBase::StaticClass()))
 				{
@@ -4463,11 +4603,47 @@ void UTerritoryCounterAttackSubsystem::HandleDiplomacyChanged(
 	}
 }
 
+ETerritoryAssetReadiness UTerritoryCounterAttackSubsystem::PrepareAssaultAssets(
+	const ATerritoryVolume* Territory, const FTerritoryAssaultRecord* Record)
+{
+	if (!IsValid(Territory)) return ETerritoryAssetReadiness::Failed;
+	const auto* Profile = Territory->GetCounterAttackProfile();
+	if (!Profile) return ETerritoryAssetReadiness::Ready;
+	TArray<FSoftObjectPath> Paths;
+	const bool bStoryDefinition = Record && Record->LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
+		&& !Record->StoryAttackerDefinitionOverride.IsNull();
+	if (bStoryDefinition) Paths.AddUnique(Record->StoryAttackerDefinitionOverride.ToSoftObjectPath());
+	for (const auto& Force : Profile->FactionForces)
+	{
+		if (Record && Force.Faction != Record->AttackingFaction) continue;
+		for (const auto& Approach : Territory->GetCounterAttackApproaches())
+			if (Approach.bEnabled && Approach.EntryType == ETerritoryAssaultEntryType::NarrativeVehicle)
+				Paths.AddUnique(UTerritoryCounterAttackProfile::ResolveVehicleClass(Force, Approach).ToSoftObjectPath());
+		if (!bStoryDefinition && Force.AttackerDefinition) Paths.AddUnique(FSoftObjectPath(Force.AttackerDefinition));
+		for (const auto& Trigger : Force.TriggerSetOverrides) Paths.AddUnique(Trigger.ToSoftObjectPath());
+	}
+	if (Record)
+		for (const auto& Vehicle : Record->VehicleCheckpoints) Paths.AddUnique(Vehicle.VehicleClass.ToSoftObjectPath());
+	const auto FirstStage = AssaultAssets.Poll(Paths);
+	if (FirstStage != ETerritoryAssetReadiness::Ready) return FirstStage;
+	for (const auto& Force : Profile->FactionForces)
+	{
+		if (Record && Force.Faction != Record->AttackingFaction) continue;
+		const auto* Definition = bStoryDefinition ? Record->StoryAttackerDefinitionOverride.Get() : Force.AttackerDefinition.Get();
+		if (!Definition) continue;
+		Paths.AddUnique(Definition->NPCClassPath.ToSoftObjectPath());
+		if (!Force.ActivityConfigurationOverride) Paths.AddUnique(Definition->ActivityConfiguration.ToSoftObjectPath());
+		for (const auto& Schedule : Definition->ActivitySchedules) Paths.AddUnique(Schedule.ToSoftObjectPath());
+	}
+	return AssaultAssets.Poll(Paths);
+}
+
 void UTerritoryCounterAttackSubsystem::HandleTerritoryRegistered(
 	ATerritoryVolume* Territory, bool bIsNew)
 {
 	(void)bIsNew;
 	if (!Territory || !GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
+	PrepareAssaultAssets(Territory);
 	TArray<FGuid> TargetAssaults;
 	for (const auto& Pair : Assaults)
 	{

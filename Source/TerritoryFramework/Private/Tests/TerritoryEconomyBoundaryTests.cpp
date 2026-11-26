@@ -4,8 +4,14 @@
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryHierarchy.h"
+#include "Core/TerritoryWorldState.h"
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/WorldSettings.h"
 #include "Economy/TerritoryProductionProfile.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
 #include "Items/NarrativeItem.h"
 #include "Items/InventoryComponent.h"
 #include "NarrativeSave.h"
@@ -203,6 +209,201 @@ bool FTFDistrictIncomeBoundaries::RunTest(const FString& Parameters)
 	World->GetSubsystem<UTerritoryRegistrySubsystem>()->UnregisterTerritory(Properties[0]);
 	TestEqual(TEXT("An unloaded District has no phantom loaded income"), District->GetEffectiveIncome(), 0);
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDurableCurrencyStreaming,
+	"TerritoryFramework.Economy.Regression.DurableCurrencyAcrossStreaming",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDurableCurrencyStreaming::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	auto* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	auto* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>();
+	const FGameplayTag Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	auto* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	Definition->StableTerritoryGUID = FGuid(20261005, 4, 1, 1);
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	Definition->IncomeBonusPerLevel = 5;
+	for (int32 Index = 0; Index < 2; ++Index)
+	{
+		auto& Post = Definition->GuardPosts.AddDefaulted_GetRef();
+		Post.GuardPostID = FName(*FString::Printf(TEXT("CurrencyPost%d"), Index));
+		Post.StableGuardPostGUID = FGuid(20261005, 4, 2, Index + 1);
+	}
+	auto* Property = World->SpawnActor<ATerritoryProperty>();
+	Definition->ApplyToTerritory(Property);
+	Registry->RegisterTerritory(Property);
+	FTerritoryOwnershipData State = Property->GetOwnershipData();
+	State.OwningFaction = Heroes;
+	State.State = ETerritoryState::Claimed;
+	State.ControlProgress = 1.f;
+	State.PeriodicIncome = 40;
+	State.GuardCost = 3;
+	State.DesiredGuardCount = 2;
+	TestTrue(TEXT("Currency fixture commits authored ownership and rates"), Property->CommitOwnershipData(State));
+	Property->SetUpgradeLevel(2);
+	const int32 TransactionsBeforeObservation = Economy->GetAllTransactionHistory().Num();
+	// The production observer must refresh a dirty rate even when no recipe/cycle
+	// advanced. Do not call RecalculateIncome or the currency settlement manually.
+	TGuardValue<uint64> FrameGuard(GFrameCounter, GFrameCounter + 1);
+	World->GetTimerManager().Tick(0.001f);
+	++GFrameCounter;
+	World->GetTimerManager().Tick(1.01f);
+	++GFrameCounter;
+	TestEqual(TEXT("Rate observation cannot settle currency"), Economy->GetAllTransactionHistory().Num(), TransactionsBeforeObservation);
+	const FTerritoryTreasury Before = Economy->GetFactionEconomy(Heroes);
+	TestEqual(TEXT("Loaded income includes the saved upgrade level"), Before.IncomePerTick, 50);
+	TestEqual(TEXT("Loaded upkeep uses desired rather than physical guards"), Before.CostsPerTick, 6);
+	Registry->UnregisterTerritory(Property);
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Unloaded owned Place continues currency income"), Economy->GetIncome(Heroes), Before.IncomePerTick);
+	TestEqual(TEXT("Unloaded owned Place continues currency upkeep"), Economy->GetCosts(Heroes), Before.CostsPerTick);
+	TestEqual(TEXT("Unloaded owned Place remains in durable economic count"), Economy->GetFactionEconomy(Heroes).TerritoryCount, 1);
+	Registry->RegisterTerritory(Property);
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Returning actor contributes only once"), Economy->GetIncome(Heroes), Before.IncomePerTick);
+	TestEqual(TEXT("Rate refresh alone creates no currency settlement"), Economy->GetTransactionHistory(Heroes, 100).Num(), 0);
+	Registry->UnregisterTerritory(Property);
+	auto* Save = World->GetSubsystem<UNarrativeSaveSubsystem>();
+	Save->UpdateSaveObject(true);
+	TestTrue(TEXT("Native accepts the legacy fixture's saved actor"), Save->SaveSingleActor(Property));
+	TestTrue(TEXT("Native produced the exact actor record before migration"), Save->GetSaveObject()->RecordMap.Contains(Definition->StableTerritoryGUID));
+	FTerritoryProductionSiteRecord Legacy = Economy->GetProductionSite(Definition->TerritoryTag);
+	Legacy.CurrencyRatesVersion = 0;
+	Legacy.BaseCurrencyIncome = Legacy.CurrencyGuardCost = Legacy.DesiredGarrison = 0;
+	Legacy.bAllowCurrencyIncome = false;
+	const auto* Campaign = Save->GetSaveObject();
+	const int32 RecordCount = Campaign->RecordMap.Num();
+	Economy->RestoreProductionState({}, {Legacy}, {});
+	Economy->RecalculateIncome(Heroes);
+	TestTrue(FString::Printf(TEXT("Complete Native record migration has no issue: %s"),
+		*Economy->GetProductionSite(Definition->TerritoryTag).CurrencyMigrationIssue.ToString()),
+		Economy->GetProductionSite(Definition->TerritoryTag).CurrencyMigrationIssue.IsEmpty());
+	TestEqual(TEXT("Legacy site migrates from Native saved ownership and upgrade data"), Economy->GetIncome(Heroes), 50);
+	TestEqual(TEXT("Legacy site restores saved desired-garrison upkeep"), Economy->GetCosts(Heroes), 6);
+	TestTrue(TEXT("Migration does not replace the campaign save"), Save->GetSaveObject() == Campaign);
+	TestEqual(TEXT("Migration does not write Native actor records"), Campaign->RecordMap.Num(), RecordCount);
+	TestEqual(TEXT("Migration records its completed version"), Economy->GetProductionSite(Definition->TerritoryTag).CurrencyRatesVersion, 1);
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Repeated reconciliation cannot double the migrated contribution"), Economy->GetIncome(Heroes), 50);
+	State = Property->GetOwnershipData();
+	State.PeriodicIncome = State.GuardCost = State.DesiredGuardCount = 0;
+	Property->CommitOwnershipData(State);
+	Property->SetUpgradeLevel(0);
+	Save->SaveSingleActor(Property);
+	Economy->RestoreProductionState({}, {Legacy}, {});
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Legacy migration preserves explicit zero income"), Economy->GetIncome(Heroes), 0);
+	TestEqual(TEXT("Legacy migration preserves explicit zero garrison/upkeep"), Economy->GetCosts(Heroes), 0);
+	Save->GetSaveObject()->RecordMap.Remove(Definition->StableTerritoryGUID);
+	Economy->RestoreProductionState({}, {Legacy}, {});
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Missing Native record cannot invent income"), Economy->GetIncome(Heroes), 0);
+	TestFalse(TEXT("Missing Native data is an explicit migration issue"), Economy->GetProductionSite(Definition->TerritoryTag).CurrencyMigrationIssue.IsEmpty());
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDurableCurrencyPolicies,
+	"TerritoryFramework.Economy.Regression.DurableCurrencyPolicies",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDurableCurrencyPolicies::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
+	World->SetGameInstance(NewObject<UGameInstance>(GEngine));
+	World->GetWorldSettings()->DefaultGameMode = AGameModeBase::StaticClass();
+	World->SetGameMode(FURL());
+	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
+	auto* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
+	auto* Economy = World->GetSubsystem<UTerritoryEconomySubsystem>();
+	auto* Directory = World->SpawnActor<ATerritoryWorldState>();
+	const auto Heroes = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"));
+	const auto Bandits = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Bandits"));
+	auto* DistrictDefinition = NewObject<UTerritoryDistrictDefinition>();
+	DistrictDefinition->TerritoryTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare"));
+	DistrictDefinition->StableTerritoryGUID = FGuid(20261005, 4, 3, 1);
+	DistrictDefinition->TerritoryActorClass = ATerritoryDistrict::StaticClass();
+	DistrictDefinition->bIsCapital = true;
+	DistrictDefinition->CapitalIncomeMultiplier = 2.f;
+	auto* Definition = NewObject<UTerritoryPlaceDefinition>();
+	Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith"));
+	Definition->StableTerritoryGUID = FGuid(20261005, 4, 3, 2);
+	Definition->TerritoryActorClass = ATerritoryProperty::StaticClass();
+	Definition->DerivedParentTerritoryTag = DistrictDefinition->TerritoryTag;
+	Definition->IncomeBonusPerLevel = 5;
+	DistrictDefinition->Places.Add(Definition);
+	Directory->RegisterDefinitionHierarchy(DistrictDefinition);
+	auto* District = World->SpawnActor<ATerritoryDistrict>();
+	DistrictDefinition->ApplyToTerritory(District);
+	Registry->RegisterTerritory(District);
+	auto* Property = World->SpawnActor<ATerritoryProperty>();
+	Definition->ApplyToTerritory(Property);
+	Registry->RegisterTerritory(Property);
+	auto State = Property->GetOwnershipData();
+	State.OwningFaction = Heroes; State.State = ETerritoryState::Claimed;
+	State.PeriodicIncome = 40; State.DesiredGuardCount = 0;
+	Property->CommitOwnershipData(State);
+	Property->SetUpgradeLevel(2);
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Capital multiplier applies to base before upgrade bonus"), Economy->GetIncome(Heroes), 90);
+	TestEqual(TEXT("Loaded public rate and durable rate share policy"), Property->GetEffectiveIncome(), 90);
+	Registry->UnregisterTerritory(Property);
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Unloaded child retains capital policy"), Economy->GetIncome(Heroes), 90);
+	auto ParentState = District->GetOwnershipData();
+	ParentState.Availability = ETerritoryAvailability::Locked;
+	District->CommitOwnershipData(ParentState);
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Parent lock suspends an unloaded child's currency"), Economy->GetIncome(Heroes), 0);
+	ParentState.Availability = ETerritoryAvailability::Unlocked;
+	District->CommitOwnershipData(ParentState);
+	District->CapitalIncomeMultiplier = 3.f;
+	Economy->OnEconomyTick();
+	TestEqual(TEXT("Next existing tick refreshes unloaded descendant capital policy"), Economy->GetIncome(Heroes), 130);
+	DistrictDefinition->CapitalIncomeMultiplier = 3.f;
+	Directory->PublishTerritorySummary(District);
+	Registry->UnregisterTerritory(District);
+	Economy->RecalculateIncome(Heroes);
+	TestEqual(TEXT("Unloaded parent resolves authored policy and retained availability"), Economy->GetIncome(Heroes), 130);
+	Registry->RegisterTerritory(Property);
+	State.OwningFaction = Bandits;
+	Property->CommitOwnershipData(State);
+	Economy->RecalculateIncome(Heroes); Economy->RecalculateIncome(Bandits);
+	TestEqual(TEXT("Ownership change removes the former owner's contribution"), Economy->GetIncome(Heroes), 0);
+	TestEqual(TEXT("New owner receives reset-upgrade rate exactly once"), Economy->GetIncome(Bandits), 120);
+	auto* Account = World->SpawnActor<ATerritoryGuardCharacter>();
+	Cast<INarrativeTeamAgentInterface>(Account)->AddFaction(Bandits);
+	auto* Inventory = Account->GetInventoryComponent();
+	Inventory->SetCurrency(0);
+	Economy->IncomePayoutPolicy = ETerritoryIncomePayoutPolicy::SharedNarrativeAccount;
+	Economy->RegisterFactionCurrencyAccount(Bandits, Economy->IncomePayoutPolicy, Account);
+	Economy->OnEconomyTick();
+	TestEqual(TEXT("Existing Native inventory receives one periodic payment"), Inventory->GetCurrency(), 120);
+	Registry->UnregisterTerritory(Property); Registry->RegisterTerritory(Property);
+	Economy->RecalculateIncome(Bandits);
+	TestEqual(TEXT("Stream reconciliation cannot create another payment"), Inventory->GetCurrency(), 120);
+	Economy->OnEconomyTick();
+	TestEqual(TEXT("Next independent payout remains enabled"), Inventory->GetCurrency(), 240);
+	Account->Destroy();
+	const int32 TransactionsBeforeMissingAccount = Economy->GetTransactionHistory(Bandits, 500).Num();
+	Economy->OnEconomyTick();
+	TestEqual(TEXT("Missing account cannot invent a payout transaction"),
+		Economy->GetTransactionHistory(Bandits, 500).Num(), TransactionsBeforeMissingAccount);
+	Economy->RetireProductionSite(Definition->StableTerritoryGUID);
+	TestTrue(TEXT("Scheduler row alone cannot erase a durable Place"), Economy->GetProductionSite(Definition->TerritoryTag).TerritoryGUID.IsValid());
+	Directory->RetiredDirectoryGUIDs.Add(Definition->StableTerritoryGUID);
+	Directory->RefreshStrategicDirectory();
+	Economy->RecalculateIncome(Bandits);
+	TestEqual(TEXT("Explicit directory retirement removes contribution despite a stale actor"), Economy->GetIncome(Bandits), 0);
+	TestFalse(TEXT("Retired site cannot be resurrected by loaded actor refresh"), Economy->GetProductionSite(Definition->TerritoryTag).TerritoryGUID.IsValid());
+	World->DestroyWorld(false);
+	GEngine->DestroyWorldContext(World);
 	return true;
 }
 

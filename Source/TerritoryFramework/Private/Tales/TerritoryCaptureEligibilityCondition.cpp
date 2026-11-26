@@ -15,8 +15,7 @@ UTerritoryCaptureEligibilityCondition::UTerritoryCaptureEligibilityCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryCaptureEligibilityCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryCaptureEligibilityCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	UWorld* World = TerritoryTales::ResolveWorld(
 		this, Target, Controller, NarrativeComponent);

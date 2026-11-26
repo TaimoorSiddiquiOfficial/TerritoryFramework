@@ -22,6 +22,7 @@
 #include "Tales/TerritoryNarrativeConditionTask.h"
 #include "Tales/TerritoryQuestCascadeRecipe.h"
 #include "UObject/UnrealType.h"
+#include "Tales/TerritoryNarrativeContext.h"
 
 #define LOCTEXT_NAMESPACE "TerritoryQuestCascadeEditorLibrary"
 

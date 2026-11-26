@@ -5,6 +5,9 @@
 #include "NarrativeGameplayTags.h"
 #include "Tales/NarrativePartyComponent.h"
 #include "UnrealFramework/NarrativeCharacter.h"
+// Narrative 2.5 returns ANarrativePlayerController* from GetOwningController(); the
+// comparison below needs the complete type to compare it with APlayerController*.
+#include "UnrealFramework/NarrativePlayerController.h"
 
 bool UTerritoryPartyDialogue::CanTransferPartyContext(APlayerController* NextController) const
 {

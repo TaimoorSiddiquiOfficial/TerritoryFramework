@@ -335,12 +335,15 @@ bool FTFGuardResponsePolicy::RunTest(const FString& Parameters)
 
 	// Prove Native consumes a real stored damage stimulus under the same quest lock.
 	UClass* ControllerClass = LoadClass<ANarrativeNPCController>(nullptr, TEXT("/TerritoryFramework/AI/BP_TerritoryNPCController.BP_TerritoryNPCController_C"));
+	if (!TestNotNull(TEXT("Shipped Territory controller class loads on this engine"), ControllerClass)) return false;
 	auto* Controller = F.World->SpawnActor<ANarrativeNPCController>(ControllerClass);
+	if (!TestNotNull(TEXT("Territory controller spawns"), Controller)) return false;
 	Controller->SetPawn(Guard);
 	auto* Visual = F.World->SpawnActor<ANarrativeCharacterVisual>();
 	Visual->bBaseAppearanceLoaded = true;
 	FindFProperty<FObjectPropertyBase>(Guard->GetClass(), TEXT("CharVisual"))->SetObjectPropertyValue_InContainer(Guard, Visual);
-	auto* Activity = CastChecked<UTerritoryNPCActivityComponent>(Controller->GetActivityComponent());
+	auto* Activity = Cast<UTerritoryNPCActivityComponent>(Controller->GetActivityComponent());
+	if (!TestNotNull(TEXT("Shipped controller owns the Territory activity component"), Activity)) return false;
 	FindFProperty<FObjectPropertyBase>(UNPCActivityComponent::StaticClass(), TEXT("OwnerController"))->SetObjectPropertyValue_InContainer(Activity, Controller);
 	Activity->Activate();
 	UClass* GeneratorClass = LoadClass<UNPCGoalGenerator>(nullptr, TEXT("/NarrativePro/Pro/Core/AI/Activities/Attacks/Goals/GoalGenerator_Attack.GoalGenerator_Attack_C"));

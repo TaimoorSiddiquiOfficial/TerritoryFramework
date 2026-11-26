@@ -34,6 +34,7 @@
     "/TerritoryFramework/AI/NPC_TerritoryBandit",
     "/TerritoryFramework/AI/NPC_TerritoryBanditAssault",
     "/TerritoryFramework/AI/NPC_TerritoryHero",
+    "/TerritoryFramework/AI/NPC_TerritoryRangedGuard",
     "/TerritoryFramework/AI/Triggers_Bandit",
     "/TerritoryFramework/Audio/DA_BlacksmithMusic",
     "/TerritoryFramework/Blueprints/BP_City_HavenReach",

@@ -1,0 +1,72 @@
+namespace
+{
+	// UE's general loader interprets a bad GVAS tag as an ancient unversioned
+	// class name. These two entrypoints accept only the UE5 format we support,
+	// bounding serialized names/counts before creating the Native save object.
+	class FTerritoryBoundedSaveArchive final : public FObjectAndNameAsStringProxyArchive
+	{
+	public:
+		explicit FTerritoryBoundedSaveArchive(FArchive& Reader)
+			: FObjectAndNameAsStringProxyArchive(Reader, true) {}
+		virtual FArchive& operator<<(FName& Name) override
+		{
+			FString Text;
+			{
+				TGuardValue<int64> Bound(InnerArchive.ArMaxSerializeSize, NAME_SIZE - 1);
+				InnerArchive << Text;
+			}
+			if (InnerArchive.IsError() || Text.Len() >= NAME_SIZE)
+			{
+				SetError();
+				Name = NAME_None;
+			}
+			else Name = FName(*Text);
+			return *this;
+		}
+		virtual FArchive& operator<<(UObject*& Object) override
+		{
+			TGuardValue<int64> Bound(InnerArchive.ArMaxSerializeSize, NAME_SIZE - 1);
+			return FObjectAndNameAsStringProxyArchive::operator<<(Object);
+		}
+	};
+
+	UNarrativeSave* LoadTerritoryValidatedNativeSlot(const FString& Slot, UClass* ExpectedClass)
+	{
+		TArray<uint8> Bytes;
+		if (!ExpectedClass || !UGameplayStatics::LoadDataFromSlot(Bytes, Slot, 0) || Bytes.Num() < 32) return nullptr;
+		FMemoryReader Reader(Bytes, true);
+		Reader.ArMaxSerializeSize = NAME_SIZE - 1;
+		int32 Magic = 0;
+		int32 Format = 0;
+		Reader << Magic << Format;
+		// UE 5.7/5.8 write GVAS format 3. Other containers require explicit migration.
+		if (Magic != 0x53415647 || Format != 3) return nullptr;
+		FPackageFileVersion PackageVersion;
+		FEngineVersion EngineVersion;
+		Reader << PackageVersion << EngineVersion;
+		if (Reader.IsError()) return nullptr;
+		Reader.SetUEVer(PackageVersion);
+		Reader.SetEngineVer(EngineVersion);
+		int32 CustomFormat = 0;
+		int32 VersionCount = 0;
+		Reader << CustomFormat;
+		const int64 CountPosition = Reader.Tell();
+		Reader << VersionCount;
+		if (Reader.IsError() || CustomFormat != static_cast<int32>(ECustomVersionSerializationFormat::Optimized)
+			|| VersionCount < 0 || VersionCount > (Reader.TotalSize() - Reader.Tell()) / 20) return nullptr;
+		Reader.Seek(CountPosition);
+		FCustomVersionContainer Versions;
+		Versions.Serialize(Reader, ECustomVersionSerializationFormat::Optimized);
+		Reader.SetCustomVersions(Versions);
+		FString ClassPath;
+		Reader << ClassPath;
+		if (Reader.IsError() || ClassPath.IsEmpty() || ClassPath.Len() >= NAME_SIZE) return nullptr;
+		UClass* SaveClass = LoadObject<UClass>(nullptr, *ClassPath);
+		if (!SaveClass || !SaveClass->IsChildOf(ExpectedClass)) return nullptr;
+		TStrongObjectPtr<UNarrativeSave> Save(NewObject<UNarrativeSave>(GetTransientPackage(), SaveClass));
+		Reader.ArMaxSerializeSize = Bytes.Num();
+		FTerritoryBoundedSaveArchive Archive(Reader);
+		static_cast<UObject*>(Save.Get())->Serialize(Archive);
+		return Reader.IsError() || Archive.IsError() ? nullptr : Save.Get();
+	}
+}

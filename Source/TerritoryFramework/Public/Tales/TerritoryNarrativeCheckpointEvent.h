@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Tales/NarrativeEvent.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryNarrativeCheckpointEvent.generated.h"
 
 /**
@@ -20,7 +21,7 @@ UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Save Narrative Quest Checkpoint",
 		ToolTip="Save Narrative Pro's current world and quest progress. Easy example: run at the Start of State 2 so death reloads State 2 instead of restarting State 1."))
 class TERRITORYFRAMEWORK_API UTerritoryNarrativeCheckpointEvent final
-	: public UNarrativeEvent
+	: public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 
@@ -49,9 +50,7 @@ public:
 			ToolTip="Unreal platform user slot, not the visible Narrative campaign number. Keep 0 for Narrative Pro's standard save menu."))
 	int32 PlatformUserSlot = 0;
 
-	virtual void ExecuteEvent_Implementation(APawn* Target,
-		APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+	virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
 
 	virtual FString GetGraphDisplayText_Implementation() override;
 	virtual FText GetHintText_Implementation() override;

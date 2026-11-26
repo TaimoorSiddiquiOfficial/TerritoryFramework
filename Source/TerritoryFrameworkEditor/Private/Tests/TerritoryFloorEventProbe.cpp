@@ -10,14 +10,13 @@ UTerritoryFloorClearedProbeEvent::UTerritoryFloorClearedProbeEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryFloorClearedProbeEvent::ExecuteEvent_Implementation(
+void UTerritoryFloorClearedProbeEvent::ExecuteEventInContext(
 	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
 {
 	++ExecutionCount;
 }
 
-bool UTerritoryFloorClearedProbeCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryFloorClearedProbeCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	return bPasses;
 }

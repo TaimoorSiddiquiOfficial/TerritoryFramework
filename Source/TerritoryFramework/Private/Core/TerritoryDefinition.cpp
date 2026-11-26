@@ -196,6 +196,7 @@ bool UTerritoryDefinition::ApplyToTerritory(ATerritoryVolume* Territory) const
 			Property->MaxUpgradeLevel = FMath::Max(0, Place->MaxUpgradeLevel);
 			Property->UpgradeCostPerLevel = FMath::Max(0, Place->UpgradeCostPerLevel);
 			Property->IncomeBonusPerLevel = FMath::Max(0, Place->IncomeBonusPerLevel);
+			Property->UpgradeDefinition = Place->UpgradeDefinition;
 		}
 	}
 	else if (const UTerritoryDistrictDefinition* District =

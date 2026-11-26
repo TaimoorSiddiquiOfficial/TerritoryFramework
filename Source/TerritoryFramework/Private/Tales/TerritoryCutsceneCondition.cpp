@@ -10,8 +10,7 @@ UTerritoryCutsceneCondition::UTerritoryCutsceneCondition()
 	ConditionFilter = EConditionFilter::CF_OnlyPlayers;
 }
 
-bool UTerritoryCutsceneCondition::CheckCondition_Implementation(
-	APawn* Target, APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryCutsceneCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	// A supplied target is authoritative; never silently check another player's
 	// cutscene when this pawn is unpossessed or belongs to an NPC.

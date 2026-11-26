@@ -8,6 +8,7 @@
 #include "AI/Activities/NPCActivityComponent.h"
 #include "AI/NarrativeNPCController.h"
 #include "Components/SceneComponent.h"
+#include "Core/TerritoryTypes.h"
 #include "Core/TerritoryGuardCharacter.h"
 #include "Core/TerritoryVolume.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
@@ -15,9 +16,12 @@
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryAmbientDialogue.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/PlayerController.h"
+#include "Navigation/PathFollowingComponent.h"
+#include "NarrativeArsenal.h"
 
 ATerritoryConversationMeetingPoint::ATerritoryConversationMeetingPoint()
 {
@@ -31,6 +35,9 @@ ATerritoryConversationMeetingPoint::ATerritoryConversationMeetingPoint()
 void ATerritoryConversationMeetingPoint::BeginPlay()
 {
 	Super::BeginPlay();
+	// A meeting point is a coordination trigger, never geometry. Doing this in BeginPlay also covers
+	// primitive components an authored Blueprint adds in its construction script.
+	ApplyNonCombatCollision();
 	if (HasAuthority())
 		if (auto* Saves = GetWorld()->GetSubsystem<UNarrativeSaveSubsystem>())
 			Saves->OnBeginLoad.AddUniqueDynamic(this, &ThisClass::OnBeginLoad);
@@ -43,6 +50,24 @@ void ATerritoryConversationMeetingPoint::EndPlay(const EEndPlayReason::Type Reas
 		if (auto* Saves = GetWorld()->GetSubsystem<UNarrativeSaveSubsystem>())
 			Saves->OnBeginLoad.RemoveDynamic(this, &ThisClass::OnBeginLoad);
 	Super::EndPlay(Reason);
+}
+
+void ATerritoryConversationMeetingPoint::ApplyNonCombatCollision()
+{
+	// Only trace channels are cleared. Pawn overlap must survive: it is the single entry point that
+	// calls TryStartConversation from the example Blueprint's ActorBeginOverlap.
+	TArray<UPrimitiveComponent*> Primitives;
+	GetComponents<UPrimitiveComponent>(Primitives);
+	for (UPrimitiveComponent* Primitive : Primitives)
+	{
+		if (!IsValid(Primitive)) continue;
+		Primitive->SetCollisionResponseToChannel(TraceChannel_NarrativeWeapon, ECR_Ignore);
+		Primitive->SetCollisionResponseToChannel(TraceChannel_NarrativeProjectile, ECR_Ignore);
+		Primitive->SetCollisionResponseToChannel(TraceChannel_NarrativeCover, ECR_Ignore);
+		Primitive->SetCollisionResponseToChannel(TraceChannel_NarrativeTraversable, ECR_Ignore);
+		Primitive->SetCollisionResponseToChannel(TraceChannel_NarrativeClimbable, ECR_Ignore);
+		Primitive->SetCollisionResponseToChannel(TraceChannel_NarrativeInteraction, ECR_Ignore);
+	}
 }
 
 bool ATerritoryConversationMeetingPoint::IsEligible(ATerritoryGuardCharacter* Guard,
@@ -122,6 +147,37 @@ bool ATerritoryConversationMeetingPoint::AddMeetingGoal(ATerritoryGuardCharacter
 	return true;
 }
 
+void ATerritoryConversationMeetingPoint::NudgeStalledWalker(ATerritoryGuardCharacter* Guard,
+	UTerritoryConversationGoal* Goal, int32& InOutCount)
+{
+	// The activity issues exactly one MoveTo when it starts. Native activity selection, a
+	// perception rescore, RVO avoidance, or a wedge in path following can abort that path while the
+	// goal stays admitted, leaving a guard standing still until the meeting times out. Re-issue the
+	// same destination; the meeting remains the authority for the goal and only this meeting nudges.
+	if (!IsValid(Guard) || !IsValid(Goal)) return;
+	if (Goal->Destination.ContainsNaN()) return;
+	const FVector Loc = Guard->GetActorLocation();
+	if (FVector::DistSquared2D(Loc, Goal->Destination) <= FMath::Square(Goal->ArrivalRadius)) return;
+	// A guard that is already walking must not be restarted, otherwise every nudge cancels
+	// the path it is following and the guard can never cover the distance.
+	if (Guard->GetVelocity().SizeSquared2D() > FMath::Square(10.f)) return;
+	auto* Controller = Guard->GetNPCController();
+	if (!IsValid(Controller) || Controller->IsActorBeingDestroyed()) return;
+	++InOutCount;
+	// Clear a wedged request first. Path following can keep reporting "Moving" while the pawn has
+	// no movement in progress, and re-issuing MoveTo on top of that request is silently ignored.
+	Controller->StopMovement();
+	// Project the authored meeting slot onto the navmesh: the slot is authored at standing height and
+	// the navmesh sits well below it, so an unprojected destination can leave the request alive while
+	// the pawn has nowhere to walk.
+	const EPathFollowingRequestResult::Type Result = Controller->MoveToLocation(Goal->Destination,
+		Goal->ArrivalRadius, false, true, true, false, nullptr, false);
+	UE_LOG(LogTerritory, Log,
+		TEXT("Conversation meeting %s nudged %s toward its meeting position (attempt %d, result=%d, dist2D=%.1f)."),
+		*GetPathName(), *GetNameSafe(Guard), InOutCount, static_cast<int32>(Result),
+		FVector::Dist2D(Loc, Goal->Destination));
+}
+
 bool ATerritoryConversationMeetingPoint::TryStartConversation(UTalesComponent* ExplicitListener, FString& Failure)
 {
 	Failure.Reset();
@@ -167,6 +223,28 @@ bool ATerritoryConversationMeetingPoint::TryStartConversation(UTalesComponent* E
 	Listener = ExplicitListener; ListenerAdapter = Adapter; Phase = ETerritoryConversationPhase::Staging;
 	Deadline = GetWorld()->GetTimeSeconds() + Profile->MeetingTimeout;
 	LastStopReason.Reset(); DeferredStopReason.Reset();
+	NextNudgeTime = 0.; FirstNudgeCount = 0; SecondNudgeCount = 0;
+	// Claim the listener for the whole staging window before either guard starts walking. Without
+	// this, an ambient TaggedDialogue line (a hostile guard's Taunt, a Territory warning) can start on
+	// the same Tales component and force the Tick guard to cancel with "Listener began another
+	// dialogue." - which is exactly what a meeting that never finishes looked like in PIE.
+	if (!Adapter->Reserve(this, SessionID,
+		Profile->MeetingTimeout + Profile->PreparationTimeout + Profile->MaximumDialogueDuration))
+	{
+		Listener.Reset(); ListenerAdapter.Reset(); SessionID.Invalidate();
+		Phase = ETerritoryConversationPhase::Idle; SetActorTickEnabled(false);
+		Failure = TEXT("The listener is already owned by another dialogue or meeting.");
+		return false;
+	}
+	// The listener necessarily stands near this actor while both guards walk to their slots, and the
+	// two slots straddle the actor origin. Without this the listener's own capsule wedges a guard on
+	// its final leg: the goal stays admitted, path following still reports "Moving", and the pawn
+	// covers no ground until the meeting times out.
+	if (APawn* ListenerPawn = Listener.IsValid() ? Listener->GetOwningPawn() : nullptr)
+	{
+		FirstGuard->MoveIgnoreActorAdd(ListenerPawn);
+		SecondGuard->MoveIgnoreActorAdd(ListenerPawn);
+	}
 	BindGuard(FirstGuard, true); BindGuard(SecondGuard, true);
 	SetActorTickEnabled(true);
 	UTerritoryConversationGoal* Added = nullptr;
@@ -205,6 +283,36 @@ void ATerritoryConversationMeetingPoint::Tick(float DeltaSeconds)
 		return FVector::DistSquared2D(Guard->GetActorLocation(), Goal->Destination) <= FMath::Square(Goal->ArrivalRadius)
 			&& FMath::Abs(Guard->GetActorLocation().Z - Goal->Destination.Z) <= 150.f;
 	};
+	// Staging diagnostics: a meeting that only times out is otherwise invisible. Log at most once
+	// per second so a long walk cannot flood the log while still showing both arrival distances.
+	if (GetWorld()->GetTimeSeconds() >= NextStagingLogTime)
+	{
+		NextStagingLogTime = GetWorld()->GetTimeSeconds() + 1.f;
+		const auto Describe = [](ATerritoryGuardCharacter* Guard, const UTerritoryConversationGoal* Goal)
+		{
+			if (!IsValid(Guard) || !IsValid(Goal)) return FString(TEXT("invalid"));
+			const FVector Loc = Guard->GetActorLocation();
+			auto* Activities = Guard->GetActivityComponent();
+			const UObject* Running = Activities ? Activities->GetCurrentActivity() : nullptr;
+			return FString::Printf(TEXT("%s loc=(%.0f,%.0f,%.0f) dest=(%.0f,%.0f,%.0f) dist2D=%.1f dz=%.1f radius=%.1f goal=%d arrived=%d speed=%.1f act=%s"),
+				*GetNameSafe(Guard), Loc.X, Loc.Y, Loc.Z,
+				Goal->Destination.X, Goal->Destination.Y, Goal->Destination.Z,
+				FVector::Dist2D(Loc, Goal->Destination),
+				Loc.Z - Goal->Destination.Z, Goal->ArrivalRadius,
+				Activities && Activities->GetCurrentActivityGoal() == Goal,
+				FVector::DistSquared2D(Loc, Goal->Destination) <= FMath::Square(Goal->ArrivalRadius) ? 1 : 0,
+				Guard->GetVelocity().Size2D(), *GetNameSafe(Running));
+		};
+		UE_LOG(LogTerritory, Verbose, TEXT("Conversation meeting %s staging: [%s] [%s] remaining=%.1fs"),
+			*GetPathName(), *Describe(FirstGuard, FirstGoal), *Describe(SecondGuard, SecondGoal),
+			Deadline - GetWorld()->GetTimeSeconds());
+	}
+	if (GetWorld()->GetTimeSeconds() >= NextNudgeTime)
+	{
+		NextNudgeTime = GetWorld()->GetTimeSeconds() + 1.f;
+		if (!Arrived(FirstGuard, FirstGoal)) NudgeStalledWalker(FirstGuard, FirstGoal, FirstNudgeCount);
+		if (!Arrived(SecondGuard, SecondGoal)) NudgeStalledWalker(SecondGuard, SecondGoal, SecondNudgeCount);
+	}
 	if (Arrived(FirstGuard, FirstGoal) && Arrived(SecondGuard, SecondGoal))
 	{
 		Phase = ETerritoryConversationPhase::PreparingListener;
@@ -233,6 +341,14 @@ void ATerritoryConversationMeetingPoint::ListenerPrepared(const FGuid& Session, 
 void ATerritoryConversationMeetingPoint::CancelConversation(const FString& Reason)
 {
 	if (!HasAuthority() || bCancelling || !SessionID.IsValid()) return;
+	{
+		const UDialogue* Blocking = Listener.IsValid() ? Listener->GetCurrentDialogue() : nullptr;
+		UE_LOG(LogTerritory, Warning,
+			TEXT("Conversation meeting %s cancelled in phase %d: %s (listener dialogue=%s class=%s owner=%s)"),
+			*GetPathName(), static_cast<int32>(Phase), *Reason, *GetNameSafe(Blocking),
+			Blocking ? *GetNameSafe(Blocking->GetClass()) : TEXT("none"),
+			Blocking && Blocking->OwningComp ? *GetNameSafe(Blocking->OwningComp->GetOwner()) : TEXT("none"));
+	}
 	if (ListenerAdapter.IsValid() && ListenerAdapter->IsStartingNativeDialogue(SessionID))
 	{
 		// Native BeginDialogue dereferences CurrentDialogue after OnDialogueBegan.
@@ -254,7 +370,18 @@ void ATerritoryConversationMeetingPoint::CancelConversation(const FString& Reaso
 	SessionID.Invalidate(); Phase = ETerritoryConversationPhase::Idle;
 	SetActorTickEnabled(false); LastStopReason = Reason;
 	NextAllowedTime = GetWorld() ? GetWorld()->GetTimeSeconds() + (Profile ? Profile->Cooldown : 0.f) : 0.;
+	// Release the listener claim before anything else can observe this meeting as idle. The adapter
+	// keeps its own SessionID lifetime for the transport RPCs, so this only drops the reservation.
+	if (ReleasedAdapter.IsValid())
+		ReleasedAdapter->Unreserve(ReleasedSession);
 	BindGuard(ReleasedFirst.Get(), false); BindGuard(ReleasedSecond.Get(), false);
+	// Drop the staging-time collision exemption; ordinary collision must return before the guards
+	// go back to patrol or engage in combat.
+	if (APawn* ListenerPawn = ReleasedListener.IsValid() ? ReleasedListener->GetOwningPawn() : nullptr)
+	{
+		if (IsValid(ReleasedFirst.Get())) ReleasedFirst->MoveIgnoreActorRemove(ListenerPawn);
+		if (IsValid(ReleasedSecond.Get())) ReleasedSecond->MoveIgnoreActorRemove(ListenerPawn);
+	}
 	if (ReleasedListener.IsValid())
 	{
 		UDialogue* Current = ReleasedListener->GetCurrentDialogue();

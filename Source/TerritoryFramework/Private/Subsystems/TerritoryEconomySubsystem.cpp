@@ -6,6 +6,7 @@
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Core/TerritoryBlueprintLibrary.h"
 #include "Core/TerritoryWorldState.h"
+#include "Economy/TerritoryCurrencyRates.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
@@ -377,6 +378,8 @@ void UTerritoryEconomySubsystem::Initialize(FSubsystemCollectionBase& Collection
 
 void UTerritoryEconomySubsystem::Deinitialize()
 {
+	ProductionAssets.Reset();
+	bProductionAssetsPending = false;
 	++CurrencyRestoreGeneration;
 	EndCurrencySettlement();
 	if (UWorld* World = GetWorld())
@@ -597,15 +600,19 @@ void UTerritoryEconomySubsystem::OnEconomyTick()
 
 	// Process deferred income recalculations — factions marked dirty by capture/ownership
 	// events get recalculated once per tick instead of O(N) times per capture cascade.
-	for (const FGameplayTag& DirtyFaction : DirtyFactions)
+	TSet<FGameplayTag> FactionsToRefresh = MoveTemp(DirtyFactions);
+	DirtyFactions.Reset();
+	// Capital/configuration policy can change without a Place actor being loaded.
+	// Re-read its inputs at the existing settlement boundary, never on a stream event.
+	for (const auto& Pair : ProductionSites) FactionsToRefresh.Add(Pair.Value.OwnerFaction);
+	for (const FGameplayTag& DirtyFaction : FactionsToRefresh)
 	{
 		if (DirtyFaction.IsValid())
 		{
 			RecalculateIncome(DirtyFaction);
+			if (Generation != CurrencyRestoreGeneration) return;
 		}
 	}
-	DirtyFactions.Empty();
-
 	TArray<FGameplayTag> Factions;
 	FactionTreasuries.GetKeys(Factions);
 	for (const FGameplayTag& Faction : Factions)
@@ -692,8 +699,19 @@ void UTerritoryEconomySubsystem::ObserveNarrativeProductionCycle()
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client) return;
 
+	// Coalesce rate-only refreshes on the existing observation timer. An ancestor
+	// arriving, or a captured Place, must not display stale rates until payout.
+	// This path never settles currency or advances a production checkpoint.
+	const uint64 Generation = CurrencyRestoreGeneration;
+	TSet<FGameplayTag> FactionsToRefresh = MoveTemp(DirtyFactions);
+	DirtyFactions.Reset();
+	for (const FGameplayTag& Faction : FactionsToRefresh)
+	{
+		RecalculateIncome(Faction);
+		if (Generation != CurrencyRestoreGeneration) return;
+	}
 	const int64 CurrentCycle = GetCurrentProductionCycle();
-	if (!HasProductionCycleAdvanced(LastObservedProductionCycle, CurrentCycle)) return;
+	if (!HasProductionCycleAdvanced(LastObservedProductionCycle, CurrentCycle) && !bProductionAssetsPending) return;
 
 	// ProcessResourceProduction prevents callback reentry and records each completed
 	// Territory/rule/cycle before a later observer or economy tick can award it again.
@@ -1463,13 +1481,15 @@ bool UTerritoryEconomySubsystem::ExecuteResourceRecipeOnInventory(
 	return true;
 }
 
-void UTerritoryEconomySubsystem::RefreshProductionSite(ATerritoryProperty* Property)
+void UTerritoryEconomySubsystem::RefreshProductionSite(ATerritoryProperty* Property, bool bPublish)
 {
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client || !Property
 		|| Property->GetWorld() != World) return;
 
 	const FGuid TerritoryGUID = Property->GetActorGUID_Implementation();
+	if (const auto* Directory = ATerritoryWorldState::FindTerritoryWorldState(World);
+		Directory && Directory->IsDirectoryIdentityRetired(TerritoryGUID)) return;
 	if (!TerritoryGUID.IsValid())
 	{
 		UE_LOG(LogTerritory, Warning,
@@ -1481,18 +1501,37 @@ void UTerritoryEconomySubsystem::RefreshProductionSite(ATerritoryProperty* Prope
 	++ProductionStateRevision;
 	FTerritoryProductionSiteRecord& Site = ProductionSites.FindOrAdd(TerritoryGUID);
 	const FGameplayTag PreviousOwner = Site.OwnerFaction;
+	const bool bCurrencyChanged = Site.CurrencyRatesVersion != 1
+		|| Site.BaseCurrencyIncome != Property->GetPeriodicIncome()
+		|| Site.CurrencyGuardCost != Property->GetGuardCost()
+		|| Site.DesiredGarrison != Property->GetDesiredGuardCount()
+		|| Site.UpgradeLevel != Property->UpgradeLevel
+		|| Site.CurrencyIncomePerUpgrade != Property->IncomeBonusPerLevel
+		|| Site.bAllowCurrencyIncome != Property->GetActiveStateGameplayRules().bAllowPeriodicIncome
+		|| Site.TerritoryState != Property->GetTerritoryState()
+		|| Site.Availability != Property->GetTerritoryAvailability()
+		|| Site.ParentTerritoryTag != Property->GetParentTerritoryTag();
 	const bool bProfileChanged = Site.ProductionProfile.Get() != Property->GetProductionProfile();
 	Site.TerritoryGUID = TerritoryGUID;
 	Site.TerritoryTag = Property->GetTerritoryTag();
+	if (Site.ParentTerritoryTag != Property->GetParentTerritoryTag()) Site.bCurrencyCapitalPolicyKnown = false;
 	Site.ParentTerritoryTag = Property->GetParentTerritoryTag();
 	Site.DisplayName = Property->GetTerritoryDisplayName();
 	Site.OwnerFaction = Property->GetOwningFaction();
 	Site.ProductionProfile = Property->GetProductionProfile();
 	Site.TerritoryDefinition = Property->GetTerritoryDefinition();
+	ProductionAssets.Poll({Site.ProductionProfile.ToSoftObjectPath(), Site.TerritoryDefinition.ToSoftObjectPath()});
 	Site.StateRulesVersion = 1;
 	Site.UpgradeLevel = FMath::Max(0, Property->UpgradeLevel);
 	Site.TerritoryState = Property->GetTerritoryState();
 	Site.Availability = Property->GetTerritoryAvailability();
+	RefreshCurrencyInputs(Property, Site);
+	ResolveCurrencyCapitalPolicy(Site);
+	if (bCurrencyChanged || PreviousOwner != Site.OwnerFaction)
+	{
+		MarkFactionDirty(PreviousOwner);
+		MarkFactionDirty(Site.OwnerFaction);
+	}
 
 	const int64 CurrentCycle = GetCurrentProductionCycle();
 	UTerritoryProductionProfile* Profile = Property->GetProductionProfile();
@@ -1529,6 +1568,24 @@ void UTerritoryEconomySubsystem::RefreshProductionSite(ATerritoryProperty* Prope
 			: NSLOCTEXT("TerritoryProduction", "InactiveAfterChange",
 				"Production requires a profile and an owning faction.");
 	}
+	if (bPublish) PublishProductionState();
+}
+
+void UTerritoryEconomySubsystem::RetireProductionSite(const FGuid& TerritoryGUID)
+{
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client || !TerritoryGUID.IsValid()) return;
+	const auto* Directory = ATerritoryWorldState::FindTerritoryWorldState(GetWorld());
+	// The existing directory tombstone is the durable deletion authority. An absent
+	// actor or a caller dropping a scheduler row must never retire an economic Place.
+	if (!Directory || !Directory->IsDirectoryIdentityRetired(TerritoryGUID)) return;
+	if (const auto* Site = ProductionSites.Find(TerritoryGUID)) MarkFactionDirty(Site->OwnerFaction);
+	if (ProductionSites.Remove(TerritoryGUID) == 0) return;
+	++ProductionStateRevision;
+	for (auto It = ProductionCheckpoints.CreateIterator(); It; ++It)
+	{
+		if (It.Value().TerritoryGUID == TerritoryGUID) It.RemoveCurrent();
+	}
+	PublishProductionState();
 }
 
 void UTerritoryEconomySubsystem::EvaluateProductionSite(
@@ -1536,7 +1593,18 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 {
 	const uint64 EvaluationRevision = ProductionStateRevision;
 	const uint64 EvaluationRestoreGeneration = ProductionRestoreGeneration;
-	UTerritoryProductionProfile* Profile = Site.ProductionProfile.LoadSynchronous();
+	const auto Readiness = ProductionAssets.Poll({Site.ProductionProfile.ToSoftObjectPath(), Site.TerritoryDefinition.ToSoftObjectPath()});
+	if (Readiness != ETerritoryAssetReadiness::Ready)
+	{
+		bProductionAssetsPending |= Readiness == ETerritoryAssetReadiness::Pending;
+		Site.LastStatus = Readiness == ETerritoryAssetReadiness::Pending
+			? ETerritoryProductionStatus::LoadingAssets : ETerritoryProductionStatus::InvalidProfile;
+		Site.StatusReason = Readiness == ETerritoryAssetReadiness::Pending
+			? NSLOCTEXT("TerritoryProduction", "AssetsPending", "Production assets are loading; no items or cycles have been consumed.")
+			: NSLOCTEXT("TerritoryProduction", "AssetsFailed", "A production profile or Territory definition failed to load.");
+		return;
+	}
+	UTerritoryProductionProfile* Profile = Site.ProductionProfile.Get();
 	if (EvaluationRevision != ProductionStateRevision) return;
 	if (!Profile)
 	{
@@ -1556,7 +1624,7 @@ void UTerritoryEconomySubsystem::EvaluateProductionSite(
 		return;
 	}
 
-	const UTerritoryDefinition* Definition = Site.TerritoryDefinition.LoadSynchronous();
+	const UTerritoryDefinition* Definition = Site.TerritoryDefinition.Get();
 	if (EvaluationRevision != ProductionStateRevision) return;
 	const FTerritoryStateConfig* StateConfig = Definition ? Definition->StateConfigs.Find(Site.TerritoryState) : nullptr;
 	const bool bPolicyKnown = Site.StateRulesVersion >= 1
@@ -1796,6 +1864,7 @@ void UTerritoryEconomySubsystem::ProcessResourceProduction()
 	const int64 CurrentCycle = GetCurrentProductionCycle();
 	if (CurrentCycle == INDEX_NONE) return;
 	LastObservedProductionCycle = CurrentCycle;
+	bProductionAssetsPending = false;
 
 	if (UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>())
 	{
@@ -1857,7 +1926,7 @@ void UTerritoryEconomySubsystem::UpdateResourceSnapshot(
 	TSet<UClass*> ReferencedClasses;
 	for (const TPair<FGuid, FTerritoryProductionSiteRecord>& Pair : ProductionSites)
 	{
-		const UTerritoryProductionProfile* Profile = Pair.Value.ProductionProfile.LoadSynchronous();
+		const UTerritoryProductionProfile* Profile = Pair.Value.ProductionProfile.Get();
 		if (!Profile) continue;
 		for (const FTerritoryProductionRule& Rule : Profile->Rules)
 		{
@@ -1975,6 +2044,8 @@ void UTerritoryEconomySubsystem::RestoreProductionState(
 	const TArray<FTerritoryProductionSiteRecord>& Sites,
 	const TArray<FTerritoryFactionResourceSnapshot>& InResourceSnapshots)
 {
+	ProductionAssets.Reset();
+	bProductionAssetsPending = false;
 	++ProductionStateRevision;
 	++ProductionRestoreGeneration;
 	ProductionCheckpoints.Empty();
@@ -1989,7 +2060,16 @@ void UTerritoryEconomySubsystem::RestoreProductionState(
 	ProductionSites.Empty();
 	for (const FTerritoryProductionSiteRecord& Site : Sites)
 	{
-		if (Site.TerritoryGUID.IsValid()) ProductionSites.Add(Site.TerritoryGUID, Site);
+		if (const auto* Directory = ATerritoryWorldState::FindTerritoryWorldState(GetWorld());
+			Directory && Directory->IsDirectoryIdentityRetired(Site.TerritoryGUID)) continue;
+		if (Site.TerritoryGUID.IsValid())
+		{
+			ProductionSites.Add(Site.TerritoryGUID, Site);
+			if (GetWorld() && GetWorld()->GetNetMode() != NM_Client)
+				bProductionAssetsPending |= ProductionAssets.Poll({Site.ProductionProfile.ToSoftObjectPath(),
+					Site.TerritoryDefinition.ToSoftObjectPath()}) == ETerritoryAssetReadiness::Pending;
+			if (GetWorld() && GetWorld()->GetNetMode() != NM_Client) MarkFactionDirty(Site.OwnerFaction);
+		}
 	}
 	ResourceSnapshots.Empty();
 	for (const FTerritoryFactionResourceSnapshot& Snapshot : InResourceSnapshots)
@@ -2103,37 +2183,61 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Client) return;
 	if (!Faction.IsValid()) return;
+	if (bRecalculatingCurrencyRates)
+	{
+		MarkFactionDirty(Faction);
+		return;
+	}
+	TGuardValue<bool> RateGuard(bRecalculatingCurrencyRates, true);
 
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	if (!Registry) return;
 
-	TArray<ATerritoryVolume*> Territories = Registry->GetTerritoriesOwnedByFaction(Faction);
-
-	FTerritoryTreasury& Treasury = FactionTreasuries.FindOrAdd(Faction);
+	// Loaded actors refresh durable inputs. Streaming retirement retains the same row;
+	// no inventory operation or payout checkpoint is touched by this reconciliation.
+	for (ATerritoryVolume* Territory : Registry->GetTerritoriesOwnedByFaction(Faction))
+	{
+		if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
+			RefreshProductionSite(Property);
+	}
 
 	int64 TotalIncome = 0;
 	int64 TotalCosts = 0;
 	int32 ActivePlaceCount = 0;
 
-	for (const ATerritoryVolume* Territory : Territories)
+	const uint64 Revision = ProductionStateRevision;
+	const uint64 RestoreGeneration = ProductionRestoreGeneration;
+	TArray<FGuid> SiteIDs;
+	ProductionSites.GetKeys(SiteIDs);
+	for (const FGuid& SiteID : SiteIDs)
 	{
-		if (!Territory || !Territory->IsAvailableForGameplay()) continue;
-		// Only count leaf-level (Property) income to avoid hierarchy double-counting.
-		// Cities and Districts are containers — their PeriodicIncome is metadata
-		// for UI display, not a separate income source.
-		if (Territory->IsA<ATerritoryProperty>())
+		FTerritoryProductionSiteRecord Site = ProductionSites.FindChecked(SiteID);
+		if (const auto* Directory = ATerritoryWorldState::FindTerritoryWorldState(World);
+			Directory && Directory->IsDirectoryIdentityRetired(SiteID)) continue;
+		const FGameplayTag PreviousOwner = Site.OwnerFaction;
+		const bool bInputsKnown = MigrateCurrencyInputs(Site);
+		const bool bCapitalKnown = ResolveCurrencyCapitalPolicy(Site);
+		if (Revision != ProductionStateRevision || RestoreGeneration != ProductionRestoreGeneration)
 		{
-			const ATerritoryProperty* Property = Cast<const ATerritoryProperty>(Territory);
-			++ActivePlaceCount;
-			TotalIncome += static_cast<int64>(Property->GetEffectiveIncome());
+			MarkFactionDirty(Faction);
+			return;
 		}
-
-		// GuardCost is the per-guard upkeep. Use the persistent desired garrison
-		// rather than the configured maximum so add/remove commands affect finances.
-		const int64 GuardUpkeep = static_cast<int64>(FMath::Max(0, Territory->GetGuardCost()))
-			* static_cast<int64>(Territory->GetDesiredGuardCount());
-		TotalCosts += GuardUpkeep;
+		if (bInputsKnown)
+			Site.CurrencyMigrationIssue = bCapitalKnown ? FText::GetEmpty()
+				: NSLOCTEXT("TerritoryEconomy", "MissingCapitalPolicy", "Currency contribution awaits the parent District policy.");
+		ProductionSites.FindChecked(SiteID) = Site;
+		if (PreviousOwner != Site.OwnerFaction)
+		{
+			MarkFactionDirty(PreviousOwner);
+			MarkFactionDirty(Site.OwnerFaction);
+		}
+		if (!bInputsKnown || !bCapitalKnown || Site.OwnerFaction != Faction || !IsProductionSiteAvailable(World, Site)) continue;
+		++ActivePlaceCount;
+		TotalIncome += TerritoryCurrencyRates::Income(Site.BaseCurrencyIncome, Site.CurrencyIncomePerUpgrade,
+			Site.UpgradeLevel, Site.CurrencyCapitalMultiplier, Site.bAllowCurrencyIncome);
+		TotalCosts += TerritoryCurrencyRates::Upkeep(Site.CurrencyGuardCost, Site.DesiredGarrison);
 	}
+	FTerritoryTreasury& Treasury = FactionTreasuries.FindOrAdd(Faction);
 	Treasury.TerritoryCount = ActivePlaceCount;
 	Treasury.IncomePerTick = static_cast<int32>(FMath::Clamp<int64>(TotalIncome, 0, MAX_int32));
 	Treasury.CostsPerTick = static_cast<int32>(FMath::Clamp<int64>(TotalCosts, 0, MAX_int32));
@@ -2145,6 +2249,7 @@ void UTerritoryEconomySubsystem::RecalculateIncome(const FGameplayTag& Faction)
 	{
 		WorldState->SetFactionTreasury(Faction, Treasury);
 	}
+	PublishProductionState();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2171,6 +2276,8 @@ void UTerritoryEconomySubsystem::OnTerritoryStateChanged(
 	ATerritoryVolume* Territory, ETerritoryState NewState)
 {
 	if (!Territory) return;
+	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
+		for (const auto& Pair : ProductionSites) MarkFactionDirty(Pair.Value.OwnerFaction);
 	if (Territory->GetOwningFaction().IsValid()) MarkFactionDirty(Territory->GetOwningFaction());
 	if (ATerritoryProperty* Property = Cast<ATerritoryProperty>(Territory))
 	{
@@ -2188,6 +2295,9 @@ void UTerritoryEconomySubsystem::OnTerritoryAvailabilityChanged(
 	{
 		return;
 	}
+	// Durable descendants can have no loaded actor at all. Re-evaluate their
+	// existing parent chain on the next rate pass, including unloaded ancestors.
+	for (const auto& Pair : ProductionSites) MarkFactionDirty(Pair.Value.OwnerFaction);
 
 	// A parent availability change gates every descendant Place without mutating
 	// child ownership. Dirty the affected faction ledgers so income/upkeep changes
@@ -2228,6 +2338,8 @@ void UTerritoryEconomySubsystem::OnTerritoryRegistered(ATerritoryVolume* Territo
 	// registry for lookups only — no income mutation or delegate binding.
 	UWorld* World = GetWorld();
 	if (World && World->GetNetMode() == NM_Client) return;
+	if (Territory->GetControlMode() == ETerritoryControlMode::AggregateOnly)
+		for (const auto& Pair : ProductionSites) MarkFactionDirty(Pair.Value.OwnerFaction);
 
 	// When a territory registers, bind its control-changed delegate
 	Territory->OnTerritoryOwnershipChanged.AddDynamic(this, &UTerritoryEconomySubsystem::OnTerritoryControlChanged);

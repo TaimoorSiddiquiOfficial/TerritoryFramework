@@ -65,7 +65,9 @@ enum class EGuardRemovalReason : uint8
 	/** Load reconciliation — despawning old-owner guards */
 	LoadReconcile,
 	/** Territory destroyed — cleanup only */
-	TerritoryDestroyed
+	TerritoryDestroyed,
+	/** Owner cell retired; preserve durable occupancy and finite queued reserves. */
+	StreamingRetirement
 };
 
 /**
@@ -743,6 +745,14 @@ protected:
 	UPROPERTY(SaveGame)
 	int32 SavedActiveGuardCount = 0;
 
+	/** Zero identifies legacy records, which resume using the configured delay. */
+	UPROPERTY(SaveGame)
+	int32 ReserveTimingVersion = 0;
+
+	/** Remaining game-time delay; negative means no saved deadline. */
+	UPROPERTY(SaveGame)
+	float SavedReserveRemainingDelay = -1.f;
+
 	FTimerHandle ReserveSpawnTimer;
 	int32 AutomaticReserveSpawnFailures = 0;
 
@@ -763,6 +773,8 @@ protected:
 
 	/** Native loaded a durable slot record; an empty saved slot is not a fresh hire. */
 	bool bLoadedFromSave = false;
+	/** Fresh posts get one initial deployment; later readiness is not a free casualty refill. */
+	bool bInitialGuardDeploymentPending = true;
 
 	/** Ensure GUID is baked at editor time. */
 	void EnsurePersistentSpawnPointGUID();
@@ -776,6 +788,7 @@ private:
 	friend class FTFGarrisonPurchaseCallbacks;
 	friend class FTFGuardReserveTotals;
 	friend class FTFIndependentGuardPostStreaming;
+	friend class FTFGuardRestoreComposition;
 	friend class FTFReserveThreatHandoff;
 	// Floor staging tests share one fixture, so the reserve seam lives in one class.
 	friend class FTFTerritoryFloorTestAccess;
@@ -800,6 +813,9 @@ private:
 	/** Registry absence pauses a tagged post without erasing its saved occupants. */
 	bool IsWaitingForOwningTerritory() const;
 	void InitializeReserves();
+	void PauseReserveSpawn();
+	void ResumePendingReserveSpawn();
+	bool bRetiringForStreaming = false;
 	void QueueReserveSpawn();
 	void ScheduleAutomaticReserveSpawn(float Delay);
 	void TryAutomaticReserveSpawn();

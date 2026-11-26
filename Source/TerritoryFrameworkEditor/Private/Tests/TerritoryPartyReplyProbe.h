@@ -4,6 +4,7 @@
 #include "Tales/TerritoryPartyDialogue.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/NarrativePartyComponent.h"
+#include "Tales/TerritoryNarrativePartyComponent.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/PlayerState.h"
 #include "UnrealFramework/NarrativePlayerController.h"
@@ -116,6 +117,17 @@ class UTerritoryPartyRefusingDepartureProbe : public UNarrativePartyComponent
 	GENERATED_BODY()
 public:
 	virtual bool RemovePartyMember(UTalesComponent* Member) override { return false; }
+};
+
+/** Records the reply a countdown selects instead of resolving it through Native. */
+UCLASS()
+class UTerritoryPartyReplyTimeoutProbe : public UTerritoryNarrativePartyComponent
+{
+	GENERATED_BODY()
+public:
+	virtual void ServerSelectDialogueOption_Implementation(const FName& OptionID) override;
+	UPROPERTY(Transient) FName RecordedSelection;
+	UPROPERTY(Transient) int32 SelectionCount = 0;
 };
 
 /** Native PIE dispatch avoids re-entering network gameplay from an editor Python stack. */

@@ -22,6 +22,7 @@
 #include "Tales/TerritoryStoryConditions.h"
 #include "Tales/TerritoryStoryEvents.h"
 #include "UnrealFramework/NarrativeGameState.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFStoryReinforcements,
 	"TerritoryFramework.CounterAttack.Story.OwnerReinforcementsBeforeHandover",
@@ -147,18 +148,18 @@ bool FTFStoryReinforcements::RunTest(const FString& Parameters)
 	Gate->TerritoryToCheck = Definition->TerritoryTag; Gate->AttackingFaction = Bandits;
 	Gate->ScenarioID = Options.ScenarioID; Gate->Query = ETerritoryAssaultConditionQuery::LatestResolution;
 	Gate->RequiredResolution = ETerritoryAssaultResolution::AllAttackersRemoved;
-	TestTrue(TEXT("Exact scenario defeat unlocks its Native condition"), Gate->CheckCondition(Pawn, nullptr, nullptr));
+	TestTrue(TEXT("Exact scenario defeat unlocks its Native condition"), Gate->CheckConditionInContext(Pawn, nullptr, nullptr));
 	Gate->AttackingFaction = Heroes;
-	TestFalse(TEXT("Another faction's victory cannot unlock it"), Gate->CheckCondition(Pawn, nullptr, nullptr));
+	TestFalse(TEXT("Another faction's victory cannot unlock it"), Gate->CheckConditionInContext(Pawn, nullptr, nullptr));
 	Gate->AttackingFaction = Bandits; Gate->ScenarioID = TEXT("DifferentStory");
-	TestFalse(TEXT("Another story's victory cannot unlock it"), Gate->CheckCondition(Pawn, nullptr, nullptr));
+	TestFalse(TEXT("Another story's victory cannot unlock it"), Gate->CheckConditionInContext(Pawn, nullptr, nullptr));
 	Gate->ScenarioID = Options.ScenarioID;
 	Record.AssaultID = FGuid::NewGuid(); Record.AliveForce = 0; Record.PendingReserveForce = 2;
 	Counter->RestorePersistentState({Record});
 	Diplomacy->SetDiplomacyState(Bandits, Heroes, EDiplomacyState::Ceasefire);
 	TestEqual(TEXT("A ceasefire cancels owner reinforcements rather than claiming an ownership victory"),
 		Counter->Assaults.FindChecked(Record.AssaultID).Resolution, ETerritoryAssaultResolution::DiplomacyBlocked);
-	TestFalse(TEXT("Cancellation never unlocks the defeat branch"), Gate->CheckCondition(Pawn, nullptr, nullptr));
+	TestFalse(TEXT("Cancellation never unlocks the defeat branch"), Gate->CheckConditionInContext(Pawn, nullptr, nullptr));
 	Record.bAllowsTerritoryCapture = true;
 	AddExpectedError(TEXT("invalid story reinforcement context"), EAutomationExpectedErrorFlags::Contains, 1);
 	Counter->RestorePersistentState({Record});
@@ -174,7 +175,7 @@ bool FTFStoryReinforcements::RunTest(const FString& Parameters)
 	Wave->TargetTerritory = Definition->TerritoryTag;
 	Wave->AttackingFaction = Bandits;
 	Wave->ScenarioID = TEXT("Blacksmith_PostCapture");
-	Wave->ExecuteEvent(Pawn, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(Wave, Pawn, nullptr, nullptr);
 	auto NamedRecords = Counter->GetPersistentState();
 	if (TestEqual(TEXT("Native strategic Wave event schedules one record"), NamedRecords.Num(), 1))
 	{
@@ -191,7 +192,7 @@ bool FTFStoryReinforcements::RunTest(const FString& Parameters)
 			Counter->TryScheduleAssaultWithReason(Place, Bandits, Named.LaunchMode, Identity, Reason));
 		Place->SetRole(ROLE_Authority);
 		Gate->ScenarioID = Wave->ScenarioID;
-		TestFalse(TEXT("A named warning is not a victory"), Gate->CheckCondition(Pawn, nullptr, nullptr));
+		TestFalse(TEXT("A named warning is not a victory"), Gate->CheckConditionInContext(Pawn, nullptr, nullptr));
 		Named.State = ETerritoryAssaultState::Defeated;
 		Named.Resolution = ETerritoryAssaultResolution::AllAttackersRemoved;
 		Named.PlannedForce = Named.KilledForce = 2;
@@ -216,7 +217,7 @@ bool FTFStoryReinforcements::RunTest(const FString& Parameters)
 				[&](const FTerritoryAssaultRecord& R) { return R.StoryScenarioID == Wave->ScenarioID; }));
 		}
 		Registry->UnregisterTerritory(Place);
-		TestTrue(TEXT("A streamed-out target still has its saved victory"), Gate->CheckCondition(Pawn, nullptr, nullptr));
+		TestTrue(TEXT("A streamed-out target still has its saved victory"), Gate->CheckConditionInContext(Pawn, nullptr, nullptr));
 		Registry->RegisterTerritory(Place);
 		Counter->RestorePersistentState({});
 		Identity.PlannedForceOverride = 999;
@@ -231,7 +232,7 @@ bool FTFStoryReinforcements::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Pursuit probability override remains ignored"), Strategic.bUseStrategicDecisionRoll);
 		Counter->RestorePersistentState({});
 		Wave->bChooseBestEligibleAttacker = true;
-		Wave->ExecuteEvent(Pawn, nullptr, nullptr);
+		TerritoryTales::ExecuteEvent(Wave, Pawn, nullptr, nullptr);
 		const auto Best = Counter->GetPersistentState();
 		if (TestEqual(TEXT("Best-eligible authored Wave schedules once"), Best.Num(), 1))
 			TestEqual(TEXT("Best-eligible path also retains the story ID"), Best[0].StoryScenarioID, Wave->ScenarioID);

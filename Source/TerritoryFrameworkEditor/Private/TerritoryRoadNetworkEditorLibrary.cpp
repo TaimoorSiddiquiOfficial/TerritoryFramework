@@ -145,7 +145,10 @@ bool Commit(UWorld* World, const FZoneLaneProfile& Profile, const TArray<FShapeP
 		if (Plan.bJunction && Plan.Points.Num() > 2 && Intersection.IsValid()) Shape->GetMutableTags().Add(Intersection);
 		Shape->GetMutablePoints() = Plan.Points;
 		for (FZoneShapePoint& Point : Shape->GetMutablePoints()) Point.Position -= Origin;
-		Shape->UpdateShape();
+		// Native property notification also refreshes the builder's spatial index/hash.
+		// UpdateShape alone leaves the component indexed at its pre-build geometry,
+		// so visually adjoining roads outside that old cell cannot find one another.
+		Shape->PostEditChange();
 		Actor->MarkPackageDirty();
 		if (Plan.bJunction) ++Report.Junctions; else ++Report.Roads;
 	}
@@ -432,8 +435,18 @@ FTerritoryRoadBuildReport UTerritoryRoadNetworkEditorLibrary::BakeRoadSurfaces(U
 	{ Report.Errors.Add(Failure); return Report; }
 	TArray<FShapePlan> Plans;
 	const FString Group = FString::Printf(TEXT("Territory.SurfaceBake.%s"), *Settings.BakeID.ToString(EGuidFormats::Digits));
+	TMap<FVector, FVector> MouthDirections;
+	TSet<FVector> AmbiguousMouths;
+	auto AddMouth = [&](const FVector& Mouth, const FVector& Adjacent)
+	{
+		if (MouthDirections.Contains(Mouth)) AmbiguousMouths.Add(Mouth);
+		MouthDirections.Add(Mouth, (Mouth - Adjacent).GetSafeNormal());
+	};
 	for (int32 Index = 0; Index < Network.Roads.Num(); ++Index)
 	{
+		const auto& Road = Network.Roads[Index];
+		AddMouth(Road[0], Road[1]);
+		AddMouth(Road.Last(), Road[Road.Num()-2]);
 		FShapePlan Plan;
 		Plan.Source = FName(*FString::Printf(TEXT("%s.Road.%d"), *Group, Index));
 		Plan.Label = FString::Printf(TEXT("Surface Road %d"), Index);
@@ -450,6 +463,18 @@ FTerritoryRoadBuildReport UTerritoryRoadNetworkEditorLibrary::BakeRoadSurfaces(U
 		Plan.Source = FName(*FString::Printf(TEXT("%s.Junction.%d"), *Group, Index));
 		Plan.Label = FString::Printf(TEXT("Surface Junction %d"), Index);
 		MakeJunction(Plan, Network.Junctions[Index]);
+		for (FZoneShapePoint& Point : Plan.Points)
+		{
+			const FVector* Inward = MouthDirections.Find(Point.Position);
+			if (!Inward || Inward->IsNearlyZero() || AmbiguousMouths.Contains(Point.Position))
+			{
+				Report.Errors.Add(TEXT("A surface junction mouth has no unique nonzero road tangent. Existing lanes were preserved."));
+				return Report;
+			}
+			// Match the exact incoming spline endpoint. A centroid-facing mouth is
+			// incorrect for T/irregular junctions and Native rejects the connection.
+			Point.SetRotationFromForwardAndUp(*Inward, FVector::UpVector);
+		}
 		Plans.Add(MoveTemp(Plan));
 	}
 	Report.OpenEnds = Network.OpenEnds;

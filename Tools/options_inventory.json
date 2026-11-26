@@ -1,5 +1,102 @@
 [
  {
+  "file": "Source/TerritoryFramework/Private/Tests/TerritoryPatrolSpotTestFixtures.h",
+  "class": "UTerritoryTestSlotBehavior",
+  "name": "bUsableInTest",
+  "type": "bool",
+  "default": "true",
+  "spec": "",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Private/Tests/TerritoryPatrolSpotTestFixtures.h",
+  "class": "UTerritoryTestSlotBehavior",
+  "name": "bStealableInTest",
+  "type": "bool",
+  "default": "false",
+  "spec": "",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/NarrativeActorProvider_InteractableSpot.h",
+  "class": "UNarrativeActorProvider_InteractableSpot",
+  "name": "SearchOrigin",
+  "type": "FVector",
+  "default": "FVector::ZeroVector",
+  "spec": "EditAnywhere, BlueprintReadWrite, Category = \"TerritorySpot\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/NarrativeActorProvider_InteractableSpot.h",
+  "class": "UNarrativeActorProvider_InteractableSpot",
+  "name": "SearchRadius",
+  "type": "float",
+  "default": "0.f",
+  "spec": "EditAnywhere, BlueprintReadWrite, Category = \"TerritorySpot\", meta = (ClampMin = \"0.0\", UIMin = \"0.0\", UIMax = \"5000.0\")",
+  "meta_keys": [
+   "ClampMin",
+   "UIMax",
+   "UIMin"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/NarrativeActorProvider_InteractableSpot.h",
+  "class": "UNarrativeActorProvider_InteractableSpot",
+  "name": "SpotActorClass",
+  "type": "TSubclassOf<AActor>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadWrite, Category = \"TerritorySpot\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/NarrativeActorProvider_InteractableSpot.h",
+  "class": "UNarrativeActorProvider_InteractableSpot",
+  "name": "SpotTag",
+  "type": "FGameplayTag",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadWrite, Category = \"TerritorySpot\", meta = (Categories = \"Interaction\")",
+  "meta_keys": [
+   "Categories"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/NarrativeActorProvider_InteractableSpot.h",
+  "class": "UNarrativeActorProvider_InteractableSpot",
+  "name": "ClaimerComponent",
+  "type": "TObjectPtr<UNarrativeInteractionComponent>",
+  "default": "",
+  "spec": "Transient, BlueprintReadWrite, Category = \"TerritorySpot\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
   "file": "Source/TerritoryFramework/Public/AI/TerritoryAssaultActivity.h",
   "class": "UTerritoryAssaultActivity",
   "name": "AcceptanceRadius",
@@ -75,6 +172,58 @@
   "type": "TWeakObjectPtr<ATerritoryVolume>",
   "default": "",
   "spec": "Transient, BlueprintReadOnly, Category=\"Territory|Assault\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/TerritoryConversationGoal.h",
+  "class": "UTerritoryConversationGoal",
+  "name": "Meeting",
+  "type": "TWeakObjectPtr<ATerritoryConversationMeetingPoint>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/TerritoryConversationGoal.h",
+  "class": "UTerritoryConversationGoal",
+  "name": "SessionID",
+  "type": "FGuid",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/TerritoryConversationGoal.h",
+  "class": "UTerritoryConversationGoal",
+  "name": "Destination",
+  "type": "FVector",
+  "default": "FVector::ZeroVector",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/TerritoryConversationGoal.h",
+  "class": "UTerritoryConversationGoal",
+  "name": "ArrivalRadius",
+  "type": "float",
+  "default": "80.f",
+  "spec": "Transient",
   "meta_keys": [],
   "tooltip": "",
   "display": "",
@@ -309,6 +458,19 @@
   "type": "bool",
   "default": "false",
   "spec": "BlueprintReadOnly, Category=\"Territory|Stealth\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/AI/TerritoryInvestigationGoal.h",
+  "class": "UTerritoryInvestigationGoal",
+  "name": "bRequireDamageReport",
+  "type": "bool",
+  "default": "false",
+  "spec": "Transient",
   "meta_keys": [],
   "tooltip": "",
   "display": "",
@@ -791,7 +953,7 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Cinematics/TerritoryCinematicPresentationSubsystem.h",
-  "class": "FComponentLODOverride",
+  "class": "UTerritoryCinematicPresentationSubsystem",
   "name": "BoundTalesComponent",
   "type": "TObjectPtr<UTalesComponent>",
   "default": "",
@@ -804,7 +966,7 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Cinematics/TerritoryCinematicPresentationSubsystem.h",
-  "class": "FComponentLODOverride",
+  "class": "UTerritoryCinematicPresentationSubsystem",
   "name": "BoundPartyComponent",
   "type": "TObjectPtr<UNarrativePartyComponent>",
   "default": "",
@@ -817,9 +979,22 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Cinematics/TerritoryCinematicPresentationSubsystem.h",
-  "class": "FComponentLODOverride",
+  "class": "UTerritoryCinematicPresentationSubsystem",
   "name": "ActiveDialogue",
   "type": "TObjectPtr<UDialogue>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Cinematics/TerritoryCutsceneTeardown.h",
+  "class": "UTerritoryCutsceneTeardownComponent",
+  "name": "SequenceActor",
+  "type": "TObjectPtr<ANarrativeLevelSequenceActor>",
   "default": "",
   "spec": "Transient",
   "meta_keys": [],
@@ -1422,6 +1597,19 @@
  {
   "file": "Source/TerritoryFramework/Public/Combat/TerritoryAssaultParticipantComponent.h",
   "class": "UTerritoryAssaultParticipantComponent",
+  "name": "bStreamingSuspended",
+  "type": "bool",
+  "default": "false",
+  "spec": "Replicated",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Combat/TerritoryAssaultParticipantComponent.h",
+  "class": "UTerritoryAssaultParticipantComponent",
   "name": "AssaultGoal",
   "type": "TObjectPtr<UTerritoryAssaultGoal>",
   "default": "",
@@ -1996,13 +2184,13 @@
   "name": "SameFloorHeightTolerance",
   "type": "float",
   "default": "500.f",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Force|Deployment|Presentation\", meta=(EditCondition=\"bUsePlayerRelativeReserveStaging\", ClampMin=\"0.0\", ToolTip=\"Maximum height difference considered the same floor. Use authored Rooftop, Stair, or Custom approaches plus Nav Links for multi-floor Places.\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Force|Deployment|Presentation\", meta=(EditCondition=\"bUsePlayerRelativeReserveStaging\", ClampMin=\"0.0\", ToolTip=\"Preferred height band when staging a reserve wave near the player; approaches outside it are scored lower but still usable. This is not a same-floor requirement. Multi-floor Places need authored Rooftop, Stair, or Custom approaches plus Nav Links.\")",
   "meta_keys": [
    "ClampMin",
    "EditCondition",
    "ToolTip"
   ],
-  "tooltip": "Maximum height difference considered the same floor. Use authored Rooftop, Stair, or Custom approaches plus Nav Links for multi-floor Places.",
+  "tooltip": "Preferred height band when staging a reserve wave near the player; approaches outside it are scored lower but still usable. This is not a same-floor requirement. Multi-floor Places need authored Rooftop, Stair, or Custom approaches plus Nav Links.",
   "display": "",
   "edit_spec": true,
   "config_spec": false
@@ -2885,13 +3073,13 @@
   "name": "EconomyReadiness",
   "type": "float",
   "default": "1.f",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Counter Attack\", meta=(ClampMin=\"0.0\", ClampMax=\"1.0\", ToolTip=\"0 means the faction cannot afford a response; 1 means fully ready.\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Counter Attack\", meta=(ClampMin=\"0.0\", ClampMax=\"1.0\", ToolTip=\"Authored planning input: 0 unready, 1 fully ready. This is not read from live currency or an economy simulation.\")",
   "meta_keys": [
    "ClampMax",
    "ClampMin",
    "ToolTip"
   ],
-  "tooltip": "0 means the faction cannot afford a response; 1 means fully ready.",
+  "tooltip": "Authored planning input: 0 unready, 1 fully ready. This is not read from live currency or an economy simulation.",
   "display": "",
   "edit_spec": true,
   "config_spec": false
@@ -2902,13 +3090,13 @@
   "name": "SupplyReadiness",
   "type": "float",
   "default": "1.f",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Counter Attack\", meta=(ClampMin=\"0.0\", ClampMax=\"1.0\", ToolTip=\"0 means no supply/proximity support; 1 means fully supplied.\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Counter Attack\", meta=(ClampMin=\"0.0\", ClampMax=\"1.0\", ToolTip=\"Authored planning input: 0 unsupported, 1 fully supplied. This does not simulate a live supply network.\")",
   "meta_keys": [
    "ClampMax",
    "ClampMin",
    "ToolTip"
   ],
-  "tooltip": "0 means no supply/proximity support; 1 means fully supplied.",
+  "tooltip": "Authored planning input: 0 unsupported, 1 fully supplied. This does not simulate a live supply network.",
   "display": "",
   "edit_spec": true,
   "config_spec": false
@@ -2919,13 +3107,13 @@
   "name": "RecentMomentum",
   "type": "float",
   "default": "0.f",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Counter Attack\", meta=(ClampMin=\"-1.0\", ClampMax=\"1.0\", ToolTip=\"Recent performance: -1 losing badly, 0 neutral, 1 winning strongly.\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Counter Attack\", meta=(ClampMin=\"-1.0\", ClampMax=\"1.0\", ToolTip=\"Authored planning input: -1 losing, 0 neutral, 1 winning. Battle history does not automatically update this value.\")",
   "meta_keys": [
    "ClampMax",
    "ClampMin",
    "ToolTip"
   ],
-  "tooltip": "Recent performance: -1 losing badly, 0 neutral, 1 winning strongly.",
+  "tooltip": "Authored planning input: -1 losing, 0 neutral, 1 winning. Battle history does not automatically update this value.",
   "display": "",
   "edit_spec": true,
   "config_spec": false
@@ -4332,6 +4520,19 @@
  {
   "file": "Source/TerritoryFramework/Public/Combat/TerritoryCounterAttackTypes.h",
   "class": "FTerritoryAssaultRecord",
+  "name": "VehicleStagingElapsedSeconds",
+  "type": "double",
+  "default": "0.0",
+  "spec": "SaveGame, NotReplicated",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Combat/TerritoryCounterAttackTypes.h",
+  "class": "FTerritoryAssaultRecord",
   "name": "NarrativeDifficultyAtLaunch",
   "type": "ENarrativeGameplayDifficulty",
   "default": "ENarrativeGameplayDifficulty::Medium",
@@ -4577,6 +4778,49 @@
   "config_spec": false
  },
  {
+  "file": "Source/TerritoryFramework/Public/Combat/TerritoryFloorCombatPolicy.h",
+  "class": "UTerritoryFloorCombatPolicy",
+  "name": "DisplayName",
+  "type": "FText",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"00 Display\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Combat/TerritoryFloorCombatPolicy.h",
+  "class": "UTerritoryFloorCombatPolicy",
+  "name": "Description",
+  "type": "FText",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"00 Display\", meta=(MultiLine=\"true\")",
+  "meta_keys": [
+   "MultiLine"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Combat/TerritoryFloorCombatPolicy.h",
+  "class": "UTerritoryFloorCombatPolicy",
+  "name": "EngagementPolicy",
+  "type": "ETerritoryFloorEngagementPolicy",
+  "default": "ETerritoryFloorEngagementPolicy::AnyFloor",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"01 Separation\", meta=(ToolTip=\"Any Floor keeps today's behaviour, since floors without a region already mean 'no separation declared'. The stricter settings only matter once ATerritoryFloorVolume regions exist for the floors being separated.\")",
+  "meta_keys": [
+   "ToolTip"
+  ],
+  "tooltip": "Any Floor keeps today's behaviour, since floors without a region already mean 'no separation declared'. The stricter settings only matter once ATerritoryFloorVolume regions exist for the floors being separated.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryAudioTypes.h",
   "class": "FTerritoryStateAudioConfig",
   "name": "bOverrideNarrativeMusic",
@@ -4589,6 +4833,22 @@
   ],
   "tooltip": "When enabled, a local player inside this Territory uses the Music Theme below. The most specific configured Place wins over its District and City. This is cosmetic and never changes replicated gameplay state.",
   "display": "Override Narrative Music",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryAudioTypes.h",
+  "class": "FTerritoryStateAudioConfig",
+  "name": "MusicPriority",
+  "type": "int32",
+  "default": "0",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Audio|Music\", meta=(EditCondition=\"bOverrideNarrativeMusic\", ToolTip=\"Places still take precedence over Districts and Cities. Within the same tier, higher priority wins; ties use smaller bounds then stable Territory identity.\")",
+  "meta_keys": [
+   "EditCondition",
+   "ToolTip"
+  ],
+  "tooltip": "Places still take precedence over Districts and Cities. Within the same tier, higher priority wins; ties use smaller bounds then stable Territory identity.",
+  "display": "",
   "edit_spec": true,
   "config_spec": false
  },
@@ -4876,10 +5136,25 @@
   "name": "ActivityTag",
   "type": "FGameplayTag",
   "default": "",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Patrol\", meta=(Categories=\"Guard.Activity\")",
+  "spec": "BlueprintReadOnly, Category=\"Patrol\", meta=(Categories=\"Guard.Activity\", DisplayName=\"Activity Tag (Not Implemented)\", ToolTip=\"Reserved metadata only. No patrol activity currently reads this tag, so setting it does not start an activity.\")",
   "meta_keys": [
-   "Categories"
+   "Categories",
+   "DisplayName",
+   "ToolTip"
   ],
+  "tooltip": "Reserved metadata only. No patrol activity currently reads this tag, so setting it does not start an activity.",
+  "display": "Activity Tag (Not Implemented)",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryGuardPatrolTemplateNode",
+  "name": "Spot",
+  "type": "FTerritoryPatrolSpot",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Patrol\"",
+  "meta_keys": [],
   "tooltip": "",
   "display": "",
   "edit_spec": true,
@@ -4890,6 +5165,19 @@
   "class": "FTerritoryGuardBehaviorTemplate",
   "name": "PatrolGoalClass",
   "type": "TSubclassOf<UTerritoryPatrolGoal>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Patrol\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryGuardBehaviorTemplate",
+  "name": "SpotInteractGoalClass",
+  "type": "TSubclassOf<UNPCGoalItem>",
   "default": "",
   "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Patrol\"",
   "meta_keys": [],
@@ -5060,6 +5348,80 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryFloorTemplate",
+  "name": "FloorIndex",
+  "type": "int32",
+  "default": "0",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Floor\", meta=(DisplayName=\"Floor Index\", ClampMin=\"0\")",
+  "meta_keys": [
+   "ClampMin",
+   "DisplayName"
+  ],
+  "tooltip": "",
+  "display": "Floor Index",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryFloorTemplate",
+  "name": "DisplayName",
+  "type": "FText",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Floor\", meta=(DisplayName=\"Display Name\")",
+  "meta_keys": [
+   "DisplayName"
+  ],
+  "tooltip": "",
+  "display": "Display Name",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryFloorTemplate",
+  "name": "DesiredGuards",
+  "type": "int32",
+  "default": "0",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Floor\", meta=(ClampMin=\"0\")",
+  "meta_keys": [
+   "ClampMin"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryFloorTemplate",
+  "name": "FloorClearedEvents",
+  "type": "TArray<TObjectPtr<UNarrativeEvent>>",
+  "default": "",
+  "spec": "EditAnywhere, Instanced, BlueprintReadOnly, Category=\"Floor|Narrative\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryFloorTemplate",
+  "name": "CombatPolicy",
+  "type": "TObjectPtr<UTerritoryFloorCombatPolicy>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Floor|Combat\", meta=(ToolTip=\"Leave empty to inherit the Place's Default Floor Combat Policy. Set it to give this one floor a different rule.\")",
+  "meta_keys": [
+   "ToolTip"
+  ],
+  "tooltip": "Leave empty to inherit the Place's Default Floor Combat Policy. Set it to give this one floor a different rule.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
   "class": "FTerritoryGuardPostTemplate",
   "name": "GuardPostID",
   "type": "FName",
@@ -5070,6 +5432,22 @@
   ],
   "tooltip": "",
   "display": "Guard Post ID",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryGuardPostTemplate",
+  "name": "FloorIndex",
+  "type": "int32",
+  "default": "0",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post\", meta=(DisplayName=\"Floor Index\", ClampMin=\"0\")",
+  "meta_keys": [
+   "ClampMin",
+   "DisplayName"
+  ],
+  "tooltip": "",
+  "display": "Floor Index",
   "edit_spec": true,
   "config_spec": false
  },
@@ -5202,9 +5580,11 @@
   "name": "ReserveSlots",
   "type": "int32",
   "default": "1",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"0\", UIMin=\"0\", UIMax=\"10\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"0\", UIMin=\"0\", UIMax=\"10\", EditCondition=\"GuardPostDefinition == nullptr\", EditConditionHides)",
   "meta_keys": [
    "ClampMin",
+   "EditCondition",
+   "EditConditionHides",
    "UIMax",
    "UIMin"
   ],
@@ -5232,9 +5612,11 @@
   "name": "ReserveSpawnDelay",
   "type": "float",
   "default": "3.f",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"0.1\", Units=\"s\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"0.1\", Units=\"s\", EditCondition=\"GuardPostDefinition == nullptr\", EditConditionHides)",
   "meta_keys": [
    "ClampMin",
+   "EditCondition",
+   "EditConditionHides",
    "Units"
   ],
   "tooltip": "",
@@ -5248,9 +5630,11 @@
   "name": "ReserveSpawnRetryInterval",
   "type": "float",
   "default": "2.f",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"0.1\", Units=\"s\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"0.1\", Units=\"s\", EditCondition=\"GuardPostDefinition == nullptr\", EditConditionHides)",
   "meta_keys": [
    "ClampMin",
+   "EditCondition",
+   "EditConditionHides",
    "Units"
   ],
   "tooltip": "",
@@ -5264,9 +5648,11 @@
   "name": "ReserveSpawnRadius",
   "type": "float",
   "default": "600.f",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"100.0\", Units=\"cm\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"100.0\", Units=\"cm\", EditCondition=\"GuardPostDefinition == nullptr\", EditConditionHides)",
   "meta_keys": [
    "ClampMin",
+   "EditCondition",
+   "EditConditionHides",
    "Units"
   ],
   "tooltip": "",
@@ -5280,9 +5666,11 @@
   "name": "ReserveMinimumPlayerDistance",
   "type": "float",
   "default": "500.f",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"0.0\", Units=\"cm\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"0.0\", Units=\"cm\", EditCondition=\"GuardPostDefinition == nullptr\", EditConditionHides)",
   "meta_keys": [
    "ClampMin",
+   "EditCondition",
+   "EditConditionHides",
    "Units"
   ],
   "tooltip": "",
@@ -5296,10 +5684,12 @@
   "name": "ReserveSpawnCandidateCount",
   "type": "int32",
   "default": "12",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"1\", ClampMax=\"64\")",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post|Reserve\", meta=(ClampMin=\"1\", ClampMax=\"64\", EditCondition=\"GuardPostDefinition == nullptr\", EditConditionHides)",
   "meta_keys": [
    "ClampMax",
-   "ClampMin"
+   "ClampMin",
+   "EditCondition",
+   "EditConditionHides"
   ],
   "tooltip": "",
   "display": "",
@@ -5374,6 +5764,21 @@
   "meta_keys": [],
   "tooltip": "",
   "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "FTerritoryGuardPostTemplate",
+  "name": "bUseSpawnTransformAsPatrolStop",
+  "type": "bool",
+  "default": "false",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Guard Post\", meta=(DisplayName=\"Use Spawn Transform As Patrol Stop\")",
+  "meta_keys": [
+   "DisplayName"
+  ],
+  "tooltip": "",
+  "display": "Use Spawn Transform As Patrol Stop",
   "edit_spec": true,
   "config_spec": false
  },
@@ -6280,6 +6685,36 @@
   "spec": "EditAnywhere, BlueprintReadOnly, Category=\"09 Management\"",
   "meta_keys": [],
   "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "UTerritoryPlaceDefinition",
+  "name": "Floors",
+  "type": "TArray<FTerritoryFloorTemplate>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"07 Guards|Floor\", meta=(TitleProperty=\"FloorIndex\")",
+  "meta_keys": [
+   "TitleProperty"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDefinition.h",
+  "class": "UTerritoryPlaceDefinition",
+  "name": "DefaultFloorCombatPolicy",
+  "type": "TObjectPtr<UTerritoryFloorCombatPolicy>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"07 Guards|Floor\", meta=(ToolTip=\"Optional. Leave empty to keep floors as pure staging groups with no effect on combat. Set it to separate this Place's floors, then override individual floors in the Floors list if one needs a different rule.\")",
+  "meta_keys": [
+   "ToolTip"
+  ],
+  "tooltip": "Optional. Leave empty to keep floors as pure staging groups with no effect on combat. Set it to separate this Place's floors, then override individual floors in the Floors list if one needs a different rule.",
   "display": "",
   "edit_spec": true,
   "config_spec": false
@@ -8040,6 +8475,19 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryDiplomacyTypes.h",
+  "class": "FTreatyRecord",
+  "name": "bNarrativeObserved",
+  "type": "bool",
+  "default": "false",
+  "spec": "SaveGame, BlueprintReadOnly, Category = \"Diplomacy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryDiplomacyTypes.h",
   "class": "FDiplomacyEvent",
   "name": "EventType",
   "type": "EDiplomacyEventType",
@@ -8395,6 +8843,75 @@
   "config_spec": false
  },
  {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryFloorVolume.h",
+  "class": "ATerritoryFloorVolume",
+  "name": "FloorBounds",
+  "type": "TObjectPtr<UBoxComponent>",
+  "default": "",
+  "spec": "VisibleAnywhere, BlueprintReadOnly, Category=\"Territory|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryFloorVolume.h",
+  "class": "ATerritoryFloorVolume",
+  "name": "PlaceDefinition",
+  "type": "TObjectPtr<UTerritoryPlaceDefinition>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Floor\", meta=(ToolTip=\"The Place Definition whose floor this region claims. Floors exist only on Places; a City or District cannot own defenders and so cannot own a floor.\")",
+  "meta_keys": [
+   "ToolTip"
+  ],
+  "tooltip": "The Place Definition whose floor this region claims. Floors exist only on Places; a City or District cannot own defenders and so cannot own a floor.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryFloorVolume.h",
+  "class": "ATerritoryFloorVolume",
+  "name": "FloorIndex",
+  "type": "int32",
+  "default": "0",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Floor\", meta=(ToolTip=\"Authored floor row this region claims. Must name a row in the Place Definition's Floors list, or data validation errors.\")",
+  "meta_keys": [
+   "ToolTip"
+  ],
+  "tooltip": "Authored floor row this region claims. Must name a row in the Place Definition's Floors list, or data validation errors.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryFloorVolume.h",
+  "class": "ATerritoryFloorVolume",
+  "name": "FloorVolumeGUID",
+  "type": "FGuid",
+  "default": "",
+  "spec": "VisibleAnywhere, BlueprintReadOnly, Category=\"Territory|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryFloorVolume.h",
+  "class": "ATerritoryFloorVolume",
+  "name": "OwnerTerritoryTag",
+  "type": "FGameplayTag",
+  "default": "",
+  "spec": "Transient, BlueprintReadOnly, Category=\"Territory|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardCharacter.h",
   "class": "ATerritoryGuardCharacter",
   "name": "TerritoryHomeTransform",
@@ -8457,6 +8974,32 @@
   "class": "ATerritoryGuardCharacter",
   "name": "TerritoryPatrolGoal",
   "type": "TObjectPtr<UTerritoryPatrolGoal>",
+  "default": "",
+  "spec": "Transient, BlueprintReadOnly, Category=\"Territory|AI|Patrol\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardCharacter.h",
+  "class": "ATerritoryGuardCharacter",
+  "name": "SpotInteractGoalClass",
+  "type": "TSubclassOf<UNPCGoalItem>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardCharacter.h",
+  "class": "ATerritoryGuardCharacter",
+  "name": "TerritorySpotGoal",
+  "type": "TObjectPtr<UNPCGoalItem>",
   "default": "",
   "spec": "Transient, BlueprintReadOnly, Category=\"Territory|AI|Patrol\"",
   "meta_keys": [],
@@ -8665,6 +9208,21 @@
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardPostDefinition.h",
   "class": "UTerritoryGuardPostDefinition",
+  "name": "bUseSpawnTransformAsPatrolStop",
+  "type": "bool",
+  "default": "false",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category = \"Guard Post|Patrol\", meta = (DisplayName = \"Use Spawn Transform As Patrol Stop\")",
+  "meta_keys": [
+   "DisplayName"
+  ],
+  "tooltip": "",
+  "display": "Use Spawn Transform As Patrol Stop",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardPostDefinition.h",
+  "class": "UTerritoryGuardPostDefinition",
   "name": "ReserveSlots",
   "type": "int32",
   "default": "1",
@@ -8767,6 +9325,129 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "FTerritoryPatrolSpot",
+  "name": "bEnabled",
+  "type": "bool",
+  "default": "false",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Spot\", meta=(DisplayName=\"Enabled\")",
+  "meta_keys": [
+   "DisplayName"
+  ],
+  "tooltip": "",
+  "display": "Enabled",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "FTerritoryPatrolSpot",
+  "name": "SearchRadius",
+  "type": "float",
+  "default": "0.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Spot\", meta=(EditCondition=\"bEnabled\", ClampMin=\"0.0\", UIMin=\"0.0\", UIMax=\"3000.0\", Units=\"cm\", DisplayName=\"Search Radius\")",
+  "meta_keys": [
+   "ClampMin",
+   "DisplayName",
+   "EditCondition",
+   "UIMax",
+   "UIMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "Search Radius",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "FTerritoryPatrolSpot",
+  "name": "GoalScore",
+  "type": "float",
+  "default": "1.1f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Spot\", meta=(EditCondition=\"bEnabled\", ClampMin=\"0.001\", UIMin=\"0.001\", DisplayName=\"Goal Score\")",
+  "meta_keys": [
+   "ClampMin",
+   "DisplayName",
+   "EditCondition",
+   "UIMin"
+  ],
+  "tooltip": "",
+  "display": "Goal Score",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "FTerritoryPatrolSpot",
+  "name": "MaximumVisitSeconds",
+  "type": "float",
+  "default": "30.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Spot\", meta=(EditCondition=\"bEnabled\", ClampMin=\"0.1\", UIMin=\"0.1\", Units=\"s\", DisplayName=\"Maximum Visit Seconds\")",
+  "meta_keys": [
+   "ClampMin",
+   "DisplayName",
+   "EditCondition",
+   "UIMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "Maximum Visit Seconds",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "FTerritoryPatrolSpot",
+  "name": "SpotActorClass",
+  "type": "TSubclassOf<AActor>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Spot\", meta=(EditCondition=\"bEnabled\", DisplayName=\"Spot Actor Class\")",
+  "meta_keys": [
+   "DisplayName",
+   "EditCondition"
+  ],
+  "tooltip": "",
+  "display": "Spot Actor Class",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "FTerritoryPatrolSpot",
+  "name": "SpotTag",
+  "type": "FGameplayTag",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Spot\", meta=(EditCondition=\"bEnabled\", DisplayName=\"Spot Tag\")",
+  "meta_keys": [
+   "DisplayName",
+   "EditCondition"
+  ],
+  "tooltip": "",
+  "display": "Spot Tag",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "FTerritoryPatrolSpot",
+  "name": "SlotIndex",
+  "type": "int32",
+  "default": "-1",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Spot\", meta=(EditCondition=\"bEnabled\", ClampMin=\"-1\", UIMin=\"-1\", UIMax=\"15\", DisplayName=\"Slot Index\")",
+  "meta_keys": [
+   "ClampMin",
+   "DisplayName",
+   "EditCondition",
+   "UIMax",
+   "UIMin"
+  ],
+  "tooltip": "",
+  "display": "Slot Index",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
   "class": "FTerritoryPatrolNode",
   "name": "Location",
   "type": "FVector",
@@ -8819,13 +9500,29 @@
   "name": "ActivityTag",
   "type": "FGameplayTag",
   "default": "",
-  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Patrol\", meta=(Categories=\"Guard.Activity\", DisplayName=\"Activity Tag\")",
+  "spec": "BlueprintReadOnly, Category=\"Patrol\", meta=(Categories=\"Guard.Activity\", DisplayName=\"Activity Tag (Not Implemented)\", ToolTip=\"Reserved metadata only. No patrol activity currently reads this tag, so setting it does not start an activity.\")",
   "meta_keys": [
    "Categories",
+   "DisplayName",
+   "ToolTip"
+  ],
+  "tooltip": "Reserved metadata only. No patrol activity currently reads this tag, so setting it does not start an activity.",
+  "display": "Activity Tag (Not Implemented)",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "FTerritoryPatrolNode",
+  "name": "Spot",
+  "type": "FTerritoryPatrolSpot",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Patrol\", meta=(DisplayName=\"Spot\")",
+  "meta_keys": [
    "DisplayName"
   ],
   "tooltip": "",
-  "display": "Activity Tag",
+  "display": "Spot",
   "edit_spec": true,
   "config_spec": false
  },
@@ -8835,6 +9532,19 @@
   "name": "OwnerTerritoryTag",
   "type": "FGameplayTag",
   "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "ATerritoryGuardSpawnPoint",
+  "name": "FloorIndex",
+  "type": "int32",
+  "default": "0",
   "spec": "Transient",
   "meta_keys": [],
   "tooltip": "",
@@ -8978,6 +9688,19 @@
   "name": "bLoopPatrol",
   "type": "bool",
   "default": "true",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "ATerritoryGuardSpawnPoint",
+  "name": "bUseSpawnTransformAsPatrolStop",
+  "type": "bool",
+  "default": "false",
   "spec": "Transient",
   "meta_keys": [],
   "tooltip": "",
@@ -9134,6 +9857,32 @@
   "name": "SavedActiveGuardCount",
   "type": "int32",
   "default": "0",
+  "spec": "SaveGame",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "ATerritoryGuardSpawnPoint",
+  "name": "ReserveTimingVersion",
+  "type": "int32",
+  "default": "0",
+  "spec": "SaveGame",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryGuardSpawnPoint.h",
+  "class": "ATerritoryGuardSpawnPoint",
+  "name": "SavedReserveRemainingDelay",
+  "type": "float",
+  "default": "-1.f",
   "spec": "SaveGame",
   "meta_keys": [],
   "tooltip": "",
@@ -10333,6 +11082,45 @@
   "config_spec": false
  },
  {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTransactionSnapshot.h",
+  "class": "FTerritoryTransactionSnapshot",
+  "name": "bAvailable",
+  "type": "bool",
+  "default": "false",
+  "spec": "",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTransactionSnapshot.h",
+  "class": "FTerritoryTransactionSnapshot",
+  "name": "DecodedBytes",
+  "type": "uint32",
+  "default": "0",
+  "spec": "",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTransactionSnapshot.h",
+  "class": "FTerritoryTransactionSnapshot",
+  "name": "Payload",
+  "type": "TArray<uint8>",
+  "default": "",
+  "spec": "",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
   "class": "FTerritoryTransitionContext",
   "name": "Instigator",
@@ -10685,6 +11473,110 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryFloorSnapshot",
+  "name": "FloorIndex",
+  "type": "int32",
+  "default": "0",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryFloorSnapshot",
+  "name": "ActiveGuards",
+  "type": "int32",
+  "default": "0",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryFloorSnapshot",
+  "name": "DesiredGuards",
+  "type": "int32",
+  "default": "0",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryFloorSnapshot",
+  "name": "MaximumGuards",
+  "type": "int32",
+  "default": "0",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryFloorSnapshot",
+  "name": "ReserveGuards",
+  "type": "int32",
+  "default": "0",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryFloorSnapshot",
+  "name": "PendingDeployments",
+  "type": "int32",
+  "default": "0",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards|Floor\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryFloorSnapshot",
+  "name": "bCountsKnown",
+  "type": "bool",
+  "default": "false",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryFloorRuntimeEvents",
+  "name": "Events",
+  "type": "TArray<TObjectPtr<UNarrativeEvent>>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
   "class": "FTerritoryGarrisonSnapshot",
   "name": "ActiveGuards",
   "type": "int32",
@@ -10741,6 +11633,32 @@
   "name": "PendingDeployments",
   "type": "int32",
   "default": "0",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryGarrisonSnapshot",
+  "name": "Floors",
+  "type": "TArray<FTerritoryFloorSnapshot>",
+  "default": "",
+  "spec": "BlueprintReadOnly, Category=\"Territory|Guards\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryTypes.h",
+  "class": "FTerritoryGarrisonSnapshot",
+  "name": "bCountsKnown",
+  "type": "bool",
+  "default": "false",
   "spec": "BlueprintReadOnly, Category=\"Territory|Guards\"",
   "meta_keys": [],
   "tooltip": "",
@@ -11868,6 +12786,36 @@
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryVolume.h",
   "class": "ATerritoryVolume",
+  "name": "OnFloorCleared",
+  "type": "FOnTerritoryFloorCleared",
+  "default": "",
+  "spec": "BlueprintAssignable, Category=\"Territory|Guards\", meta=(DisplayName=\"On Floor Cleared\")",
+  "meta_keys": [
+   "DisplayName"
+  ],
+  "tooltip": "",
+  "display": "On Floor Cleared",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryVolume.h",
+  "class": "ATerritoryVolume",
+  "name": "OnDefenderSpawned",
+  "type": "FOnTerritoryDefenderSpawned",
+  "default": "",
+  "spec": "BlueprintAssignable, Category=\"Territory|Guards\", meta=(DisplayName=\"On Defender Spawned\")",
+  "meta_keys": [
+   "DisplayName"
+  ],
+  "tooltip": "",
+  "display": "On Defender Spawned",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryVolume.h",
+  "class": "ATerritoryVolume",
   "name": "RegisteredDefenders",
   "type": "TArray<TWeakObjectPtr<AActor>>",
   "default": "",
@@ -11935,6 +12883,19 @@
   "class": "ATerritoryVolume",
   "name": "RuntimeAllDefendersDefeatedEvents",
   "type": "TArray<TObjectPtr<class UNarrativeEvent>>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryVolume.h",
+  "class": "ATerritoryVolume",
+  "name": "RuntimeFloorClearedEvents",
+  "type": "TMap<int32, FTerritoryFloorRuntimeEvents>",
   "default": "",
   "spec": "Transient",
   "meta_keys": [],
@@ -12231,6 +13192,19 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
+  "class": "FReplicatedTreaty",
+  "name": "bNarrativeObserved",
+  "type": "bool",
+  "default": "false",
+  "spec": "SaveGame, BlueprintReadOnly, Category = \"Territory|Diplomacy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
   "class": "FReplicatedCaptureSummary",
   "name": "TerritoryTag",
   "type": "FGameplayTag",
@@ -12349,6 +13323,32 @@
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
   "class": "FReplicatedCaptureSummary",
+  "name": "CapturedBy",
+  "type": "FGameplayTag",
+  "default": "",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Capture|History\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
+  "class": "FReplicatedCaptureSummary",
+  "name": "CapturedFor",
+  "type": "FGameplayTag",
+  "default": "",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Capture|History\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
+  "class": "FReplicatedCaptureSummary",
   "name": "ContestingFaction",
   "type": "FGameplayTag",
   "default": "",
@@ -12442,6 +13442,19 @@
  {
   "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
   "class": "ATerritoryWorldState",
+  "name": "RetiredDirectoryGUIDs",
+  "type": "TSet<FGuid>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory|Directory\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
+  "class": "ATerritoryWorldState",
   "name": "OnTransactionRecorded",
   "type": "FOnTransactionRecorded",
   "default": "",
@@ -12484,7 +13497,20 @@
   "name": "ReplicatedTransactions",
   "type": "TArray<FReplicatedTransaction>",
   "default": "",
-  "spec": "ReplicatedUsing=OnRep_EconomyState",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
+  "class": "ATerritoryWorldState",
+  "name": "TransactionSnapshot",
+  "type": "FTerritoryTransactionSnapshot",
+  "default": "",
+  "spec": "ReplicatedUsing=OnRep_TransactionState",
   "meta_keys": [],
   "tooltip": "",
   "display": "",
@@ -12764,6 +13790,19 @@
   "tooltip": "",
   "display": "World State GUID (auto-generated)",
   "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Core/TerritoryWorldState.h",
+  "class": "ATerritoryWorldState",
+  "name": "RegisteredHierarchyDefinitions",
+  "type": "TMap<FGameplayTag, TObjectPtr<UTerritoryDefinition>>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
   "config_spec": false
  },
  {
@@ -13603,6 +14642,123 @@
   "type": "int32",
   "default": "0",
   "spec": "SaveGame",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "CurrencyRatesVersion",
+  "type": "int32",
+  "default": "0",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "BaseCurrencyIncome",
+  "type": "int32",
+  "default": "0",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "CurrencyIncomePerUpgrade",
+  "type": "int32",
+  "default": "0",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "CurrencyGuardCost",
+  "type": "int32",
+  "default": "0",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "DesiredGarrison",
+  "type": "int32",
+  "default": "0",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "bAllowCurrencyIncome",
+  "type": "bool",
+  "default": "false",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "CurrencyCapitalMultiplier",
+  "type": "float",
+  "default": "1.f",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "bCurrencyCapitalPolicyKnown",
+  "type": "bool",
+  "default": "false",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Economy/TerritoryProductionProfile.h",
+  "class": "FTerritoryProductionSiteRecord",
+  "name": "CurrencyMigrationIssue",
+  "type": "FText",
+  "default": "",
+  "spec": "SaveGame, BlueprintReadOnly, Category=\"Territory|Economy\"",
   "meta_keys": [],
   "tooltip": "",
   "display": "",
@@ -15292,6 +16448,398 @@
   "config_spec": false
  },
  {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationListenerComponent.h",
+  "class": "UTerritoryConversationListenerComponent",
+  "name": "PendingMeeting",
+  "type": "TWeakObjectPtr<ATerritoryConversationMeetingPoint>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationListenerComponent.h",
+  "class": "UTerritoryConversationListenerComponent",
+  "name": "PreparedClass",
+  "type": "TSubclassOf<UTerritoryAmbientDialogue>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationListenerComponent.h",
+  "class": "UTerritoryConversationListenerComponent",
+  "name": "FirstGuard",
+  "type": "TObjectPtr<ATerritoryGuardCharacter>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationListenerComponent.h",
+  "class": "UTerritoryConversationListenerComponent",
+  "name": "SecondGuard",
+  "type": "TObjectPtr<ATerritoryGuardCharacter>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationListenerComponent.h",
+  "class": "UTerritoryConversationListenerComponent",
+  "name": "PreparedDialogue",
+  "type": "TWeakObjectPtr<UTerritoryAmbientDialogue>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "Territory",
+  "type": "TObjectPtr<ATerritoryVolume>",
+  "default": "",
+  "spec": "EditInstanceOnly, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "Profile",
+  "type": "TObjectPtr<UTerritoryConversationProfile>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "FirstOffset",
+  "type": "FVector",
+  "default": "FVector(0.f, -120.f, 0.f)",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Conversation\", meta=(MakeEditWidget)",
+  "meta_keys": [
+   "MakeEditWidget"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "SecondOffset",
+  "type": "FVector",
+  "default": "FVector(0.f, 120.f, 0.f)",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Conversation\", meta=(MakeEditWidget)",
+  "meta_keys": [
+   "MakeEditWidget"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "Phase",
+  "type": "ETerritoryConversationPhase",
+  "default": "ETerritoryConversationPhase::Idle",
+  "spec": "Transient, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "FirstGuard",
+  "type": "TObjectPtr<ATerritoryGuardCharacter>",
+  "default": "",
+  "spec": "Transient, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "SecondGuard",
+  "type": "TObjectPtr<ATerritoryGuardCharacter>",
+  "default": "",
+  "spec": "Transient, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "LastStopReason",
+  "type": "FString",
+  "default": "",
+  "spec": "Transient, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "FirstGoal",
+  "type": "TObjectPtr<UTerritoryConversationGoal>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "SecondGoal",
+  "type": "TObjectPtr<UTerritoryConversationGoal>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "Listener",
+  "type": "TWeakObjectPtr<UTalesComponent>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "ListenerAdapter",
+  "type": "TWeakObjectPtr<UTerritoryConversationListenerComponent>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationMeetingPoint.h",
+  "class": "ATerritoryConversationMeetingPoint",
+  "name": "PlayingDialogue",
+  "type": "TWeakObjectPtr<UDialogue>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "Dialogue",
+  "type": "TSubclassOf<UTerritoryAmbientDialogue>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "FirstRoleTags",
+  "type": "FGameplayTagContainer",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "SecondRoleTags",
+  "type": "FGameplayTagContainer",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Conversation\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "RecruitRadius",
+  "type": "float",
+  "default": "2000.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Distances\", meta=(ClampMin=\"100\", Units=\"cm\")",
+  "meta_keys": [
+   "ClampMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "ListenerRadius",
+  "type": "float",
+  "default": "1200.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Distances\", meta=(ClampMin=\"100\", Units=\"cm\")",
+  "meta_keys": [
+   "ClampMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "ArrivalRadius",
+  "type": "float",
+  "default": "80.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Distances\", meta=(ClampMin=\"10\", Units=\"cm\")",
+  "meta_keys": [
+   "ClampMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "MeetingTimeout",
+  "type": "float",
+  "default": "30.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Timing\", meta=(ClampMin=\"1\", ClampMax=\"120\", Units=\"s\")",
+  "meta_keys": [
+   "ClampMax",
+   "ClampMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "PreparationTimeout",
+  "type": "float",
+  "default": "5.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Timing\", meta=(ClampMin=\"1\", ClampMax=\"15\", Units=\"s\")",
+  "meta_keys": [
+   "ClampMax",
+   "ClampMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "MaximumDialogueDuration",
+  "type": "float",
+  "default": "90.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Timing\", meta=(ClampMin=\"1\", ClampMax=\"300\", Units=\"s\")",
+  "meta_keys": [
+   "ClampMax",
+   "ClampMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Social/TerritoryConversationProfile.h",
+  "class": "UTerritoryConversationProfile",
+  "name": "Cooldown",
+  "type": "float",
+  "default": "60.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Timing\", meta=(ClampMin=\"0\", Units=\"s\")",
+  "meta_keys": [
+   "ClampMin",
+   "Units"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
   "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryControlSubsystem.h",
   "class": "UTerritoryControlSubsystem",
   "name": "OnTerritoryControlChanged",
@@ -15345,7 +16893,7 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryCounterAttackSubsystem.h",
-  "class": "ERecaptureDecision",
+  "class": "UTerritoryCounterAttackSubsystem",
   "name": "OnAssaultChanged",
   "type": "FOnTerritoryAssaultChanged",
   "default": "",
@@ -15358,7 +16906,7 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryCounterAttackSubsystem.h",
-  "class": "ERecaptureDecision",
+  "class": "UTerritoryCounterAttackSubsystem",
   "name": "OnAssaultWarning",
   "type": "FOnTerritoryAssaultWarning",
   "default": "",
@@ -15371,7 +16919,7 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryCounterAttackSubsystem.h",
-  "class": "ERecaptureDecision",
+  "class": "UTerritoryCounterAttackSubsystem",
   "name": "OnCounterHappened",
   "type": "FOnTerritoryCounterHappened",
   "default": "",
@@ -15730,7 +17278,7 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryMusicSubsystem.h",
-  "class": "FStateSoundRequest",
+  "class": "UTerritoryMusicSubsystem",
   "name": "EvaluatedWorld",
   "type": "TWeakObjectPtr<UWorld>",
   "default": "",
@@ -15743,7 +17291,7 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryMusicSubsystem.h",
-  "class": "FStateSoundRequest",
+  "class": "UTerritoryMusicSubsystem",
   "name": "ObservedTerritory",
   "type": "TWeakObjectPtr<ATerritoryVolume>",
   "default": "",
@@ -15756,7 +17304,7 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryMusicSubsystem.h",
-  "class": "FStateSoundRequest",
+  "class": "UTerritoryMusicSubsystem",
   "name": "MusicTerritory",
   "type": "TWeakObjectPtr<ATerritoryVolume>",
   "default": "",
@@ -15769,9 +17317,22 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryMusicSubsystem.h",
-  "class": "FStateSoundRequest",
+  "class": "UTerritoryMusicSubsystem",
   "name": "BaselineMusicSet",
   "type": "TSoftObjectPtr<UTaggedMusicSet>",
+  "default": "",
+  "spec": "Transient",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Subsystems/TerritoryMusicSubsystem.h",
+  "class": "UTerritoryMusicSubsystem",
+  "name": "StateSoundComponent",
+  "type": "TObjectPtr<UAudioComponent>",
   "default": "",
   "spec": "Transient",
   "meta_keys": [],
@@ -15983,6 +17544,58 @@
   "type": "TWeakObjectPtr<UNarrativeAbilitySystemComponent>",
   "default": "",
   "spec": "",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryAmbientDialogue.h",
+  "class": "UTerritoryAmbientDialogue",
+  "name": "FirstRoleID",
+  "type": "FName",
+  "default": "TEXT(\"FirstGuard\")",
+  "spec": "EditDefaultsOnly, BlueprintReadOnly, Category=\"Territory|Roles\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryAmbientDialogue.h",
+  "class": "UTerritoryAmbientDialogue",
+  "name": "SecondRoleID",
+  "type": "FName",
+  "default": "TEXT(\"SecondGuard\")",
+  "spec": "EditDefaultsOnly, BlueprintReadOnly, Category=\"Territory|Roles\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryAssaultAdmissionTask.h",
+  "class": "UTerritoryAssaultAdmissionTask",
+  "name": "Request",
+  "type": "TObjectPtr<UTerritoryScheduleEnemyWaveEvent>",
+  "default": "",
+  "spec": "EditAnywhere, Instanced, BlueprintReadOnly, Category=\"Territory Task\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryAssaultAdmissionTask.h",
+  "class": "UTerritoryAssaultAdmissionTask",
+  "name": "LastAdmissionFailure",
+  "type": "FText",
+  "default": "",
+  "spec": "Transient, BlueprintReadOnly, Category=\"Territory Task\"",
   "meta_keys": [],
   "tooltip": "",
   "display": "",
@@ -16481,6 +18094,45 @@
   "config_spec": false
  },
  {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryCutsceneCondition.h",
+  "class": "UTerritoryCutsceneCondition",
+  "name": "bIsInCutscene",
+  "type": "bool",
+  "default": "true",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Cutscene\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryCutsceneCondition.h",
+  "class": "UTerritoryCutsceneCondition",
+  "name": "Sequence",
+  "type": "TSoftObjectPtr<ULevelSequence>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Cutscene\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryCutsceneCondition.h",
+  "class": "UTerritoryCutsceneCondition",
+  "name": "bIncludePaused",
+  "type": "bool",
+  "default": "false",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Cutscene\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
   "file": "Source/TerritoryFramework/Public/Tales/TerritoryDialogueLifecycleComponent.h",
   "class": "UTerritoryDialogueLifecycleComponent",
   "name": "Tales",
@@ -16596,6 +18248,47 @@
   "type": "TArray<FName>",
   "default": "",
   "spec": "EditAnywhere, BlueprintReadWrite, Category=\"Dialogue\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryDialogueRecipe.h",
+  "class": "UTerritoryDialogueRecipe",
+  "name": "ParentDialogueClass",
+  "type": "TSubclassOf<UDialogue>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadWrite, Category=\"Dialogue\", meta=(AllowAbstract=\"false\")",
+  "meta_keys": [
+   "AllowAbstract"
+  ],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryDialogueRecipe.h",
+  "class": "UTerritoryDialogueRecipe",
+  "name": "FirstRoleID",
+  "type": "FName",
+  "default": "TEXT(\"FirstGuard\")",
+  "spec": "EditAnywhere, BlueprintReadWrite, Category=\"Dialogue|Ambient Roles\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryDialogueRecipe.h",
+  "class": "UTerritoryDialogueRecipe",
+  "name": "SecondRoleID",
+  "type": "FName",
+  "default": "TEXT(\"SecondGuard\")",
+  "spec": "EditAnywhere, BlueprintReadWrite, Category=\"Dialogue|Ambient Roles\"",
   "meta_keys": [],
   "tooltip": "",
   "display": "",
@@ -17386,6 +19079,19 @@
   "type": "bool",
   "default": "false",
   "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Narrative Data Task\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryNarrativePartyComponent.h",
+  "class": "UTerritoryNarrativePartyComponent",
+  "name": "OwnerDeparturePolicy",
+  "type": "ETerritoryPartyOwnerDeparturePolicy",
+  "default": "ETerritoryPartyOwnerDeparturePolicy::ContinueWhenSupported",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Parties\"",
   "meta_keys": [],
   "tooltip": "",
   "display": "",
@@ -18845,6 +20551,24 @@
    "ToolTip"
   ],
   "tooltip": "Place, District, or City followed by this task. Easy example: Territory.HavenReach.CastleHill.Farm.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryStateTask.h",
+  "class": "UTerritoryStateTask",
+  "name": "TargetFloor",
+  "type": "int32",
+  "default": "-1",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory Task|Target\", meta=(ClampMin=\"-1\", EditCondition=\"Objective == ETerritoryStateTaskObjective::AllDefendersDefeated || Objective == ETerritoryStateTaskObjective::ReachDesiredGarrison\", EditConditionHides, ToolTip=\"Which floor this objective follows. -1 means the whole Place. Easy example: 2 for 'clear the defenders on floor 2'.\")",
+  "meta_keys": [
+   "ClampMin",
+   "EditCondition",
+   "EditConditionHides",
+   "ToolTip"
+  ],
+  "tooltip": "Which floor this objective follows. -1 means the whole Place. Easy example: 2 for 'clear the defenders on floor 2'.",
   "display": "",
   "edit_spec": true,
   "config_spec": false
@@ -20420,6 +22144,103 @@
    "ToolTip"
   ],
   "tooltip": "Finite number of recipe batches executed in one validated transaction.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryStoryEvents.h",
+  "class": "UTerritoryPlayCutsceneEvent",
+  "name": "CutsceneSequence",
+  "type": "TSoftObjectPtr<ULevelSequence>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory Event\", meta=(AllowedClasses=\"/Script/LevelSequence.LevelSequence\", ToolTip=\"Level Sequence asset played as the cutscene. Example: a short shot of defenders walking down the stairwell.\")",
+  "meta_keys": [
+   "AllowedClasses",
+   "ToolTip"
+  ],
+  "tooltip": "Level Sequence asset played as the cutscene. Example: a short shot of defenders walking down the stairwell.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryStoryEvents.h",
+  "class": "UTerritoryPlayCutsceneEvent",
+  "name": "PlaybackSettings",
+  "type": "FNarrativeSequencePlaybackSettings",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory Event\", meta=(ShowOnlyInnerProperties, ToolTip=\"Narrative playback settings for this cutscene. Two fields are ignored. Auto Play: the engine would start the sequence before Territory had armed teardown, so Territory starts it instead, once teardown is armed. Pause At End: a paused sequence never fires OnStopped, which is the engine's only path that releases cinematic input suppression.\")",
+  "meta_keys": [
+   "ShowOnlyInnerProperties",
+   "ToolTip"
+  ],
+  "tooltip": "Narrative playback settings for this cutscene. Two fields are ignored. Auto Play: the engine would start the sequence before Territory had armed teardown, so Territory starts it instead, once teardown is armed. Pause At End: a paused sequence never fires OnStopped, which is the engine's only path that releases cinematic input suppression.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryStoryEvents.h",
+  "class": "UTerritoryPlayCutsceneEvent",
+  "name": "RelevancyDist",
+  "type": "float",
+  "default": "0.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory Event\", meta=(ClampMin=\"0.0\", Units=\"cm\", ToolTip=\"Leave at 0 so every resolved viewer receives the cutscene regardless of distance. A non-zero radius additionally culls viewers who are far from the spawn location.\")",
+  "meta_keys": [
+   "ClampMin",
+   "ToolTip",
+   "Units"
+  ],
+  "tooltip": "Leave at 0 so every resolved viewer receives the cutscene regardless of distance. A non-zero radius additionally culls viewers who are far from the spawn location.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryStoryEvents.h",
+  "class": "UTerritoryPlayCutsceneEvent",
+  "name": "AudienceFaction",
+  "type": "FGameplayTag",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory Event\", meta=(Categories=\"Territory\", ToolTip=\"Faction whose players watch this cutscene when the event runs with no player context, such as a defender defeat with no instigator. Matched against Narrative faction identity exactly as capture context resolution does. Leave empty to play for nobody rather than guess.\")",
+  "meta_keys": [
+   "Categories",
+   "ToolTip"
+  ],
+  "tooltip": "Faction whose players watch this cutscene when the event runs with no player context, such as a defender defeat with no instigator. Matched against Narrative faction identity exactly as capture context resolution does. Leave empty to play for nobody rather than guess.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryStoryEvents.h",
+  "class": "UTerritoryPlayCutsceneEvent",
+  "name": "LightRigProfile",
+  "type": "TObjectPtr<UTerritoryCinematicLightRigProfile>",
+  "default": "",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory Event\", meta=(ToolTip=\"Optional Territory light rig to follow the sequence for each viewer. Leave empty to leave lighting authority with Narrative.\")",
+  "meta_keys": [
+   "ToolTip"
+  ],
+  "tooltip": "Optional Territory light rig to follow the sequence for each viewer. Leave empty to leave lighting authority with Narrative.",
+  "display": "",
+  "edit_spec": true,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/Tales/TerritoryStoryEvents.h",
+  "class": "UTerritoryPlayCutsceneEvent",
+  "name": "TeardownGraceSeconds",
+  "type": "float",
+  "default": "1.f",
+  "spec": "EditAnywhere, BlueprintReadOnly, Category=\"Territory Event\", meta=(ClampMin=\"0.0\", Units=\"s\", ToolTip=\"Seconds the cutscene actor is kept alive after its sequence stops, so a client a moment behind is not cut off mid-shot. Raise it for a high-latency audience; 0 destroys immediately.\")",
+  "meta_keys": [
+   "ClampMin",
+   "ToolTip",
+   "Units"
+  ],
+  "tooltip": "Seconds the cutscene actor is kept alive after its sequence stops, so a client a moment behind is not cut off mid-shot. Raise it for a high-latency audience; 0 destroys immediately.",
   "display": "",
   "edit_spec": true,
   "config_spec": false
@@ -24076,6 +25897,19 @@
  },
  {
   "file": "Source/TerritoryFramework/Public/UI/TerritoryUIBlueprintLibrary.h",
+  "class": "FTerritoryHierarchyOperationsView",
+  "name": "bReductionComplete",
+  "type": "bool",
+  "default": "false",
+  "spec": "BlueprintReadOnly, Category=\"Territory|UI|Hierarchy\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/UI/TerritoryUIBlueprintLibrary.h",
   "class": "FTerritoryResourceOperationsView",
   "name": "ItemClass",
   "type": "TSubclassOf<class UNarrativeItem>",
@@ -26290,6 +28124,19 @@
   "name": "RecentTransactions",
   "type": "TArray<FTerritoryTransaction>",
   "default": "",
+  "spec": "BlueprintReadOnly, Category=\"Territory|UI|Finance\"",
+  "meta_keys": [],
+  "tooltip": "",
+  "display": "",
+  "edit_spec": false,
+  "config_spec": false
+ },
+ {
+  "file": "Source/TerritoryFramework/Public/UI/TerritoryUIBlueprintLibrary.h",
+  "class": "FTerritoryEconomyOperationsView",
+  "name": "bTransactionHistoryReady",
+  "type": "bool",
+  "default": "false",
   "spec": "BlueprintReadOnly, Category=\"Territory|UI|Finance\"",
   "meta_keys": [],
   "tooltip": "",

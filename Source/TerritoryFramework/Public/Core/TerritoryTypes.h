@@ -213,7 +213,9 @@ enum class ETerritoryTransactionType : uint8
 	Reward,
 	Scripted,
 	ManualCredit,
-	ManualDebit
+	ManualDebit,
+	/** Refund of a Place-upgrade charge after a rejected/late transaction. */
+	UpgradeRefund
 };
 
 /** Explicit policy for distributing territory-generated currency. */

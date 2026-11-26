@@ -298,6 +298,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	int32 GetUpgradeCost() const;
 
+	/** Optional per-tier upgrade recipe copied from the Place Definition. Null keeps the legacy formula. */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Territory|Property|Upgrades")
+	TObjectPtr<class UTerritoryUpgradeDefinition> UpgradeDefinition;
+
+	UFUNCTION(BlueprintPure, Category = "Territory|Property|Upgrades")
+	class UTerritoryUpgradeDefinition* GetUpgradeDefinition() const { return UpgradeDefinition; }
+
+	/**
+	 * Server-authoritative upgrade to one exact next level. Validates the faction perk tier, authored
+	 * requirements and the multi-purpose cost plan before staging the level, and fires OnUpgraded
+	 * events only after a verified commit.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Property|Upgrades")
+	bool TryUpgradeToLevel(int32 TargetLevel, AActor* Requester, bool bAllowForeignOwnership,
+		bool bFree, FString& OutFailure);
+
+	/** Quest/event path: same mutation, explicit requesting faction and optional foreign ownership. */
+	bool ApplyScriptedUpgrade(int32 TargetLevel, FGameplayTag RequestingFaction,
+		bool bAllowForeignOwnership, bool bFree, AActor* Requester, FString& OutFailure);
+
 	/** Return the Place's income after its current upgrade and other applicable income modifiers. */
 	UFUNCTION(BlueprintPure, Category = "Territory|Property")
 	int32 GetEffectiveIncome() const;
@@ -338,4 +358,16 @@ private:
 	/** Update plugin state without invoking Blueprint or inventory callbacks. */
 	void ApplyUpgradeLevel(int32 NewLevel);
 	void PublishUpgradeLevelChange(int32 OldLevel);
+
+	/** Fire the Place Definition's captured events with the real pre-reset payload. */
+	void DispatchPlaceCaptureEvents(FGameplayTag OldOwner, FGameplayTag NewOwner, int32 OldLevel);
+
+	bool TryUpgradeInternal(int32 TargetLevel, AActor* Requester, FGameplayTag RequestingFaction,
+		bool bAllowForeignOwnership, bool bFree, FString& OutFailure);
+
+	/** Set by the ownership reconcile before the level is reset, consumed by the capture dispatch. */
+	int32 PendingCaptureOldLevel = INDEX_NONE;
+
+	/** Blocks recursive scripted upgrades while OnUpgraded events execute. */
+	bool bUpgradeEventDispatchInProgress = false;
 };

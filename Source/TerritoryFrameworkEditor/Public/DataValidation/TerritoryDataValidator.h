@@ -16,6 +16,7 @@ class UTerritoryProductionProfile;
 class UTerritoryDefinition;
 class UQuestBlueprint;
 class UDialogue;
+class UBlueprint;
 
 /**
  * Editor data validator for TerritoryFramework assets.
@@ -49,6 +50,9 @@ class TERRITORYFRAMEWORKEDITOR_API UTerritoryDataValidator : public UEditorValid
 
 public:
 	UTerritoryDataValidator();
+	/** Read compiler state through C++; Status is protected from Python in UE 5.7. */
+	UFUNCTION(BlueprintPure, Category="Territory|Validation")
+	static bool IsBlueprintCompiled(const UBlueprint* Blueprint);
 
 	// UEditorValidatorBase interface (UE 5.5+ native validation path).
 	virtual bool CanValidateAsset_Implementation(

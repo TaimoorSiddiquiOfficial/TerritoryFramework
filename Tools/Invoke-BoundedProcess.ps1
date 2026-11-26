@@ -1,4 +1,24 @@
-# Kept separate so the automation runner's timeout can be exercised without launching Unreal.
+# Kept separate so release admission and timeout can be exercised without launching Unreal.
+function Get-TerritoryAutomationResult {
+    param([AllowEmptyString()][string]$Text, [int]$ExitCode, [bool]$TimedOut)
+    $success = ([regex]::Matches($Text, 'Result=\{Success\}')).Count
+    $warnings = ([regex]::Matches($Text, 'Result=\{SuccessWithWarnings\}')).Count
+    $failures = ([regex]::Matches($Text, 'Result=\{Fail\}')).Count
+    $crash = $Text -match 'EXCEPTION_ACCESS_VIOLATION|Fatal error|Assertion failed'
+    $complete = $Text -match 'TEST COMPLETE\. EXIT CODE: 0'
+    [pscustomobject]@{
+        passed = -not $TimedOut -and $ExitCode -in @(0,2) -and -not $crash -and
+            $failures -eq 0 -and ($success + $warnings) -gt 0 -and $complete
+        exit_code = $ExitCode
+        timed_out = $TimedOut
+        success = $success
+        success_with_warnings = $warnings
+        failures = $failures
+        crash = $crash
+        queue_completed = $complete
+    }
+}
+
 function Invoke-BoundedProcess {
     [CmdletBinding()]
     param(

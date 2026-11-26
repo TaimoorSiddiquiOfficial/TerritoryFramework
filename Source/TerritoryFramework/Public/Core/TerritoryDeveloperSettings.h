@@ -485,6 +485,39 @@ public:
 	TSoftObjectPtr<UTexture2D> TerritoryProgressFillTexture;
 
 	// ═══════════════════════════════════════════════════════════════════════════
+	// Narrative combat — automatic healing item
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	/**
+	 * Allow Territory characters (guards, counterattack participants and the player pawn) to
+	 * consume a Narrative healing item automatically when they take damage.
+	 * The item owns the heal through its SetByCaller gameplay effect; Territory never writes
+	 * health. Consume is server-authoritative and rate limited by the cooldown below.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Combat|Auto Heal",
+		meta = (DisplayName = "Enable Auto Consume Healing Item"))
+	bool bEnableAutoConsumeHealItem = true;
+
+	/**
+	 * Narrative item consumed automatically, for example BPNI_HealthPotion. It must carry a
+	 * SetByCaller heal effect (SetByCaller.Heal) so the heal comes from Narrative, not Territory.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Combat|Auto Heal",
+		meta = (DisplayName = "Auto Consume Healing Item Class"))
+	TSubclassOf<class UNarrativeItem> AutoConsumeHealItemClass;
+
+	/** Consume only when the character's Narrative health fraction is at or below this value. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Combat|Auto Heal",
+		meta = (ClampMin = "0.05", ClampMax = "1.0", UIMin = "0.05", UIMax = "1.0",
+			DisplayName = "Auto Consume Health Fraction"))
+	float AutoConsumeHealthFraction = 0.35f;
+
+	/** Minimum real seconds between two automatic consumes for the same character. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Combat|Auto Heal",
+		meta = (ClampMin = "0.0", UIMax = "60.0", DisplayName = "Auto Consume Cooldown Seconds"))
+	float AutoConsumeCooldownSeconds = 10.f;
+
+	// ═══════════════════════════════════════════════════════════════════════════
 	// Debug — Toggle individual debug categories
 	// ═══════════════════════════════════════════════════════════════════════════
 
@@ -517,6 +550,11 @@ public:
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Stealth",
 		meta = (EditCondition = "bEnableDebug"))
 	bool bDebugStealth = false;
+
+	/** Log the Territory tagged-dialogue chain: row resolution, gating and the Tales playback call. */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|Dialogue",
+		meta = (EditCondition = "bEnableDebug"))
+	bool bDebugDialogue = false;
 
 	/** Log replicated WorldState/directory publication and runtime actor hydration. */
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category = "Territory|Debug|World State",
@@ -665,6 +703,7 @@ public:
 	bool ShouldDebugProduction() const { return IsDebugLevelEnabled() && bDebugProduction; }
 	bool ShouldDebugUI() const { return IsDebugLevelEnabled() && bDebugUI; }
 	bool ShouldDebugStealth() const { return IsDebugLevelEnabled() && bDebugStealth; }
+	bool ShouldDebugDialogue() const { return IsDebugLevelEnabled() && bDebugDialogue; }
 	bool ShouldDebugWorldState() const { return IsDebugLevelEnabled() && bDebugWorldState; }
 	bool ShouldDebugInteraction() const { return IsDebugLevelEnabled() && bDebugInteraction; }
 	bool ShouldDebugRegistry() const { return IsDebugLevelEnabled() && bDebugRegistry; }

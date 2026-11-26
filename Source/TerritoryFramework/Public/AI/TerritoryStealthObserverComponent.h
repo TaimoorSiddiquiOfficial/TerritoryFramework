@@ -8,6 +8,7 @@
 class ATerritoryGuardCharacter;
 class ATerritoryVolume;
 class UAIPerceptionComponent;
+class UTerritoryGuardPerceptionProfile;
 class UTerritoryStealthProfile;
 
 /**
@@ -25,6 +26,37 @@ public:
 	/** Effective sight after Narrative Stealth Rating and invisibility are applied. */
 	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
 	float CalculateEffectiveSightStrength(AActor* Target, float RawSightStrength) const;
+
+	/**
+	 * True while this guard must not create its normal attack goal for Target: the target is inside
+	 * the Territory, not exposed, not point-blank, and effective sight is below the profile's
+	 * MinimumSightEvidence. Fails open (false) whenever stealth does not apply, so a non-stealth
+	 * Place or a missing profile never disables guard combat.
+	 *
+	 * Called from the attack goal generator so a hidden player is investigated instead of attacked.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Should Suppress Attack Goal"))
+	bool ShouldSuppressAttackGoal(AActor* Target) const;
+
+	/**
+	 * Optional guard-quality perception tier. Applied once to the controller's AIPerception when the
+	 * observer binds, so a rookie/veteran/elite guard can see and hear differently without editing
+	 * Narrative's controller Blueprint.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Stealth")
+	TObjectPtr<UTerritoryGuardPerceptionProfile> PerceptionProfile;
+
+	/**
+	 * Deterministic half of ShouldSuppressAttackGoal, exposed for tests and UI previews.
+	 * A target that the shared contest rule does not admit to combat (holstered weapon, no war,
+	 * no recent aggression) is never given an attack goal; an admitted target keeps one unless it is
+	 * still hidden (effective sight below the profile's MinimumSightEvidence).
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
+	static bool ShouldSuppressAttackGoalForState(ETerritoryExposureState ExposureState,
+		bool bPointBlank, bool bFiringWhileSeen, bool bAdmittedToCombat,
+		float EffectiveSight, float MinimumSightEvidence);
 
 	/** Deterministic formula exposed for equipment previews, UI, and automation tests. */
 	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
@@ -50,9 +82,13 @@ private:
 	};
 
 	TWeakObjectPtr<UAIPerceptionComponent> BoundPerception;
+	/** Perception component this tier was already written to, so it is applied once per bind. */
+	TWeakObjectPtr<UAIPerceptionComponent> PerceptionProfileAppliedTo;
 	TWeakObjectPtr<ATerritoryVolume> ObservedTerritory;
 	TMap<TWeakObjectPtr<AActor>, FObservedSight> CurrentlySeenTargets;
 	TMap<TWeakObjectPtr<AActor>, FRecentGunshot> RecentGunshots;
+	/** Last time each target's footsteps became evidence, so one walk pass is not ten reports. */
+	TMap<TWeakObjectPtr<AActor>, double> RecentFootsteps;
 	FTimerHandle BindingRetryTimer;
 	FTimerHandle SightRefreshTimer;
 	double LastSightRefreshWorldTime = -1.0;

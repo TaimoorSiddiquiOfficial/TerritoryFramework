@@ -4,6 +4,10 @@
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "AIController.h"
 #include "Core/TerritoryGuardCharacter.h"
+#include "Core/TerritoryGuardPerceptionProfile.h"
+#include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryDisguiseProfile.h"
+#include "Subsystems/TerritoryDisguiseSubsystem.h"
 #include "Core/TerritoryStealthProfile.h"
 #include "Core/TerritoryStealthTags.h"
 #include "Core/TerritoryVolume.h"
@@ -97,6 +101,12 @@ bool UTerritoryStealthObserverComponent::BindToCurrentPerception()
 	}
 	UnbindFromPerception();
 	BoundPerception = Perception;
+	// Guard quality tier: write this profile onto the vendor controller's existing sense configs.
+	if (PerceptionProfile && PerceptionProfileAppliedTo.Get() != Perception
+		&& PerceptionProfile->ApplyTo(Perception))
+	{
+		PerceptionProfileAppliedTo = Perception;
+	}
 	Perception->OnTargetPerceptionUpdated.AddUniqueDynamic(
 		this, &UTerritoryStealthObserverComponent::HandleTargetPerceptionUpdated);
 	if (UWorld* World = GetWorld())
@@ -164,8 +174,20 @@ bool UTerritoryStealthObserverComponent::ShouldForcePointBlankExposure(
 }
 
 float UTerritoryStealthObserverComponent::CalculateEffectiveSightStrength(
-	AActor* Target, float RawSightStrength) const
+	AActor* Target, const float RawSightStrength) const
 {
+	const ATerritoryGuardCharacter* Guard = GetTerritoryGuard();
+	const ATerritoryVolume* Territory = Guard ? Guard->GetOwningTerritory() : nullptr;
+	// A hiding spot removes the sight channel entirely until the player leaves it.
+	if (Territory && IsValid(Target))
+	{
+		if (const UTerritoryControlSubsystem* Control = GetWorld()
+			? GetWorld()->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
+			Control && Control->IsTargetHidden(Territory, Target))
+		{
+			return 0.f;
+		}
+	}
 	const UTerritoryStealthProfile* Profile = GetActiveProfile();
 	if (!Profile || !Target) return FMath::Clamp(RawSightStrength, 0.f, 1.f);
 	if (IsNarrativeInvisible(Target))
@@ -192,6 +214,67 @@ float UTerritoryStealthObserverComponent::ApplyStealthRatingToSight(
 		: 0.f;
 	return FMath::Clamp(RawSightStrength * FMath::Max(0.f, GuardDetectionMultiplier)
 		* (1.f - StealthFraction), 0.f, 1.f);
+}
+
+bool UTerritoryStealthObserverComponent::ShouldSuppressAttackGoal(AActor* Target) const
+{
+	const ATerritoryGuardCharacter* Guard = GetTerritoryGuard();
+	const ATerritoryVolume* Territory = Guard ? Guard->GetOwningTerritory() : nullptr;
+	const UTerritoryStealthProfile* Profile = GetActiveProfile();
+	const UTerritoryControlSubsystem* Control = GetWorld()
+		? GetWorld()->GetSubsystem<UTerritoryControlSubsystem>() : nullptr;
+
+	// Fail open: any missing piece must leave the guard's normal combat untouched.
+	if (!Guard || !Guard->HasAuthority() || !Guard->IsAlive()
+		|| !IsValid(Target) || !Territory || !Profile || !Control
+		|| !Control->IsStealthInfiltrationEnabled(Territory))
+	{
+		return false;
+	}
+
+	// A hidden target keeps no attack goal while the hiding spot holds it.
+	if (Control->IsTargetHidden(Territory, Target))
+	{
+		return true;
+	}
+
+	FTerritoryInfiltrationSnapshot Snapshot;
+	if (!Control->GetInfiltrationSnapshot(Territory, Target, Snapshot))
+	{
+		return false;
+	}
+
+	FAIStimulus Sight;
+	const float Raw = ReadCurrentSight(Target, Sight) ? FMath::Max(0.f, Sight.Strength) : 0.f;
+	// Same admission rule the Place and the guard's combat check use, so the goal can never
+	// outlive the permission to attack (that mismatch made guards chase a holstered player).
+	const bool bAdmittedToCombat = UTerritoryBlueprintLibrary::DoesPawnAdmitStoryContest(
+		Target, Territory, Profile,
+		UTerritoryBlueprintLibrary::IsRecentAggressiveStealthEvidence(
+			this, Snapshot, Profile->AggressionEvidenceWindow));
+	return ShouldSuppressAttackGoalForState(
+		Snapshot.ExposureState,
+		ShouldForcePointBlankExposure(Target),
+		Profile->bFireWhileSeenExposes && IsTargetFiring(Target),
+		bAdmittedToCombat,
+		CalculateEffectiveSightStrength(Target, Raw),
+		Profile->MinimumSightEvidence);
+}
+
+bool UTerritoryStealthObserverComponent::ShouldSuppressAttackGoalForState(
+	const ETerritoryExposureState ExposureState, const bool bPointBlank,
+	const bool bFiringWhileSeen, const bool bAdmittedToCombat,
+	const float EffectiveSight, const float MinimumSightEvidence)
+{
+	// Not a physical threat yet (holstered, no war, no recent aggression): investigate and warn,
+	// never chase. This is what stops the follow-out-and-return loop.
+	if (!bAdmittedToCombat) return true;
+	// A hidden player standing in the guard's face is caught, never ignored.
+	if (bPointBlank) return false;
+	if (ExposureState == ETerritoryExposureState::Exposed) return false;
+	// Firing while the guard has real sight is aggression, not stealth.
+	if (bFiringWhileSeen) return false;
+	return EffectiveSight < MinimumSightEvidence;
 }
 
 void UTerritoryStealthObserverComponent::HandleTargetPerceptionUpdated(
@@ -247,6 +330,25 @@ void UTerritoryStealthObserverComponent::HandleTargetPerceptionUpdated(
 			ETerritoryStealthEvidence::ThrowableDistraction,
 			Profile->ThrowableDistractionSuspicion, Stimulus.StimulusLocation,
 			FVector::ZeroVector, false);
+		return;
+	}
+
+	// Narrative's foley notify reports footsteps with tag "Footstep" and a loudness/range that
+	// already scale with the character's StealthRating (100 = silent). Consume them as anonymous
+	// evidence so crouching and the Sneak perks change how guards react.
+	if (StimulusTag == FName(TEXT("Footstep")))
+	{
+		if (!Profile->bFootstepsRaiseSuspicion) return;
+		if (const double* Last = RecentFootsteps.Find(Target))
+		{
+			if (Now - *Last < Profile->FootstepEvidenceCooldown) return;
+		}
+		RecentFootsteps.Add(Target, Now);
+		const float Loudness = FMath::Clamp(Stimulus.Strength, 0.f, 1.f);
+		const float Weight = Profile->FootstepSuspicion * (Loudness > 0.f ? Loudness : 1.f);
+		Control->ReportStealthEvidence(Territory, Target, Guard,
+			ETerritoryStealthEvidence::Footstep, Weight,
+			Stimulus.StimulusLocation, FVector::ZeroVector, false);
 		return;
 	}
 
@@ -373,12 +475,41 @@ void UTerritoryStealthObserverComponent::RefreshVisibleTargets()
 		FAIStimulus Stimulus;
 		ReadCurrentSight(Target.Get(), Stimulus);
 		ReportSight(Target.Get(), Stimulus, ElapsedSeconds);
+
+		// A uniform that fails this Place's policy is doubt, not proof: it accumulates slowly while
+		// the disguised player stays visible, instead of granting a free pass or instant exposure.
+		if (Profile->bDisguiseRaisesSuspicion && Profile->DisguiseSuspicionPerSecond > 0.f)
+		{
+			if (const UTerritoryDisguiseSubsystem* Disguises =
+				World->GetSubsystem<UTerritoryDisguiseSubsystem>())
+			{
+				FTerritoryDisguiseSnapshot Disguise;
+				FText Reason;
+				if (Disguises->GetDisguiseSnapshot(Target.Get(), Disguise) && Disguise.bActive
+					&& !Disguises->IsDisguiseAccepted(Target.Get(), Territory,
+						Territory->GetOwningFaction(), Reason))
+				{
+					Control->ReportStealthEvidence(Territory, Target.Get(), Guard,
+						ETerritoryStealthEvidence::Disguise,
+						Profile->DisguiseSuspicionPerSecond * FMath::Clamp(ElapsedSeconds, 0.f, 1.f),
+						Target->GetActorLocation(), FVector::ZeroVector, false, 0.f);
+				}
+			}
+		}
 	}
 
 	for (auto It = RecentGunshots.CreateIterator(); It; ++It)
 	{
 		if (!It->Key.IsValid()
 			|| Now - It->Value.WorldTime > Profile->ShotCorrelationWindow)
+		{
+			It.RemoveCurrent();
+		}
+	}
+	for (auto It = RecentFootsteps.CreateIterator(); It; ++It)
+	{
+		if (!It->Key.IsValid()
+			|| Now - It->Value > FMath::Max(Profile->FootstepEvidenceCooldown, 1.0f))
 		{
 			It.RemoveCurrent();
 		}

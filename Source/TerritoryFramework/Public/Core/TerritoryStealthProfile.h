@@ -33,7 +33,20 @@ enum class ETerritoryStealthEvidence : uint8
 	DefenderKilledSeen UMETA(DisplayName="Defender Kill Seen"),
 	Corpse UMETA(DisplayName="Unseen Defender Death / Corpse"),
 	ThrowableDistraction UMETA(DisplayName="Throwable Distraction"),
-	Scripted UMETA(DisplayName="Story Event")
+	Scripted UMETA(DisplayName="Story Event"),
+	Footstep UMETA(DisplayName="Footsteps Heard"),
+	Disguise UMETA(DisplayName="Disguise Doubt")
+};
+
+/** Escalation ladder exposed to the HUD, Tales conditions and the alarm readers. */
+UENUM(BlueprintType)
+enum class ETerritoryAlertLevel : uint8
+{
+	Calm UMETA(DisplayName="Calm"),
+	Suspicious UMETA(DisplayName="Suspicious"),
+	Searching UMETA(DisplayName="Searching"),
+	Alarmed UMETA(DisplayName="Alarmed"),
+	Lockdown UMETA(DisplayName="Lockdown")
 };
 
 /** How far confirmed exposure should escalate. Faction War preserves the existing contest flow. */
@@ -85,6 +98,39 @@ struct TERRITORYFRAMEWORK_API FTerritoryInfiltrationSnapshot
 	/** Whether the viewer is currently inside the reported Territory. */
 	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
 	bool bInsideTerritory = false;
+
+	/** Current escalation ladder for this target in this Territory. */
+	UPROPERTY(BlueprintReadOnly, Category="Territory|Stealth")
+	ETerritoryAlertLevel AlertLevel = ETerritoryAlertLevel::Calm;
+};
+
+/**
+ * One data-driven evidence rule. Lets a project tune or extend evidence handling from a data asset
+ * instead of C++: override the suspicion weight of any existing evidence channel, make it force
+ * exposure, and give it a semantic tag so external systems can report it by tag.
+ */
+USTRUCT(BlueprintType)
+struct TERRITORYFRAMEWORK_API FTerritoryEvidenceRule
+{
+	GENERATED_BODY()
+
+	/** Optional tag used by Report Stealth Evidence By Tag. Leave invalid for an enum-only override. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Rule")
+	FGameplayTag Tag;
+
+	/** Evidence channel this rule tunes. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Rule")
+	ETerritoryStealthEvidence Evidence = ETerritoryStealthEvidence::Footstep;
+
+	/** Suspicion added by one report on this channel, 0 to 1. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Rule",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float Suspicion = 0.1f;
+
+	/** Confirms exposure immediately, like damage or a seen defender kill. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Rule",
+		meta=(DisplayName="Forces Exposure"))
+	bool bForcesExposure = false;
 };
 
 /**
@@ -196,10 +242,94 @@ public:
 		meta=(ClampMin="0.0", ClampMax="1.0"))
 	float ThrowableDistractionSuspicion = 0.25f;
 
+	/**
+	 * Narrative's foley notify reports each footstep as a hearing stimulus whose loudness and range
+	 * are already scaled by the character's StealthRating (100 = silent). Turn those stimuli into
+	 * anonymous suspicion so crouching and the Sneak perks actually change how guards react.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
+		meta=(DisplayName="Footsteps Raise Suspicion",
+			ToolTip="Consume Narrative's Footstep hearing stimuli as evidence. Off ignores footsteps entirely."))
+	bool bFootstepsRaiseSuspicion = true;
+
+	/** How much one heard footstep adds to suspicion, from 0 to 1. Steps repeat, so keep this small. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
+		meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Footstep Suspicion",
+			ToolTip="Scaled by the stimulus loudness Narrative already reduced for high StealthRating. 0.06 adds six percent of a full suspicion meter per heard step."))
+	float FootstepSuspicion = 0.06f;
+
+	/** Seconds before the same guard counts another footstep from the same target as evidence. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
+		meta=(ClampMin="0.0", Units="s", DisplayName="Footstep Evidence Cooldown",
+			ToolTip="Narrative reports one stimulus per step. This keeps a walking player from filling the meter on one pass."))
+	float FootstepEvidenceCooldown = 1.5f;
+
+	/**
+	 * How long an aggressive clue keeps admitting the player to combat and to the story-bounds
+	 * contest. A gunshot heard ten minutes ago must not make a holstered visitor attackable forever;
+	 * with the default, aggression expires and the guards fall back to investigation and warning.
+	 * Zero disables the window and keeps the legacy "last evidence wins" behaviour.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
+		meta=(ClampMin="0.0", Units="s", DisplayName="Aggression Evidence Window",
+			ToolTip="Age after which a gunshot/impact/damage clue stops counting as aggression. 0 keeps the legacy behaviour."))
+	float AggressionEvidenceWindow = 20.f;
+
+	/**
+	 * A recognised disguise still raises suspicion when it does not pass this Place's uniform policy
+	 * (wrong faction, quality too low, missing clearance). Guards doubt the uniform instead of
+	 * accepting it outright, so a bad disguise is a slow burn rather than a free pass.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
+		meta=(DisplayName="Disguise Raises Suspicion",
+			ToolTip="Wrong or low-quality uniforms add suspicion while the disguised player stays visible."))
+	bool bDisguiseRaisesSuspicion = true;
+
+	/** Suspicion per second while a rejected disguise is visible. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence",
+		meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Disguise Suspicion Per Second"))
+	float DisguiseSuspicionPerSecond = 0.05f;
+
+	/**
+	 * Optional rules that override the evidence weights above (and may force exposure) without a C++
+	 * change. A rule for an evidence channel replaces the matching property; a rule carrying a Tag
+	 * lets external systems report that evidence by tag.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="03 Evidence")
+	TArray<FTerritoryEvidenceRule> EvidenceRules;
+
+	/** Find the first rule for an evidence channel. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth|Evidence")
+	bool FindEvidenceRule(ETerritoryStealthEvidence Evidence,
+		FTerritoryEvidenceRule& OutRule) const;
+
+	/** Find the first rule carrying this tag. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth|Evidence")
+	bool FindEvidenceRuleForTag(FGameplayTag Tag, FTerritoryEvidenceRule& OutRule) const;
+
+	/** Rule suspicion when one exists, otherwise the caller's built-in fallback. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth|Evidence",
+		meta=(DisplayName="Get Evidence Suspicion"))
+	float GetEvidenceSuspicion(ETerritoryStealthEvidence Evidence, float Fallback) const;
+
+	/** True when a rule makes this evidence confirm exposure immediately. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth|Evidence")
+	bool IsEvidenceForcedExposure(ETerritoryStealthEvidence Evidence) const;
+
 	/** Maximum guards assigned to investigate one evidence response; zero prevents investigation assignments. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Investigation",
 		meta=(ClampMin="0", ClampMax="8"))
 	int32 MaximumInvestigators = 2;
+
+	/**
+	 * Minimum suspicion before any clue dispatches an investigator. A crouched player's footsteps add
+	 * a little suspicion but stay below this, so sneaking does not send guards to their exact position;
+	 * a distraction, gunshot, impact or real sight passes it immediately.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Investigation",
+		meta=(ClampMin="0.0", ClampMax="1.0", DisplayName="Investigation Suspicion Threshold",
+			ToolTip="Footsteps and other tiny clues build suspicion quietly below this value. 0 sends investigators for any suspicion at all."))
+	float InvestigationSuspicionThreshold = 0.15f;
 
 	/** Search radius in centimetres for selecting nearby guards to investigate evidence. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Investigation",
@@ -224,6 +354,23 @@ public:
 	/** Optional Blueprint child can add Narrative dialogue or a custom search Behaviour Tree. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="04 Investigation")
 	TSubclassOf<UTerritoryInvestigationActivity> InvestigationActivityClass;
+
+	// ─── 08 Alarm ───
+
+	/** Suspicion at which the Place reports Searching (guards keep investigating). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Alarm",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float SearchingSuspicionThreshold = 0.3f;
+
+	/** Suspicion at which the Place reports Alarmed. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Alarm",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float AlarmedSuspicionThreshold = 0.6f;
+
+	/** Suspicion at which a confirmed target puts the Place into Lockdown. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="08 Alarm",
+		meta=(ClampMin="0.0", ClampMax="1.0"))
+	float LockdownSuspicionThreshold = 0.9f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="05 Ability Integration",
 		meta=(Categories="Territory.Event.Stealth",
@@ -276,6 +423,60 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="06 Disguise",
 		meta=(ToolTip="A failed scripted identity check burns the disguise for the checking faction. Disable this for a warning-only checkpoint."))
 	bool bCompromiseDisguiseOnFailedIdentityCheck = true;
+
+	// ─── 07 Contest Gate ───
+
+	/**
+	 * Story-bounds Places only. While true, a player who is inside the Place bounds with a
+	 * holstered weapon does not start the story confrontation: the Place stays Claimed, guards
+	 * keep patrolling, and a nearby guard delivers a warning line instead. Drawing the weapon
+	 * contests immediately on the next evaluation.
+	 *
+	 * A faction already at war with this Place's owning faction is exempt: hostility is already
+	 * declared, so the weapon is never checked. Capture Points and automatic capture ignore this.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="07 Contest Gate",
+		meta=(DisplayName="Require Wielded Weapon For Contest",
+			ToolTip="Holstered weapon inside a story-bounds Place warns instead of contesting. A faction at war is always contested."))
+	bool bContestRequiresWieldedWeapon = true;
+
+	/**
+	 * When true, an existing war no longer waives the wielded-weapon requirement for the contest:
+	 * an unarmed visitor is warned even in a war. Guards still treat a faction at war as an enemy
+	 * to fight, because that decision passes the war in as aggression.
+	 *
+	 * Default is on: a Place must not be flipped by an unarmed visitor, and a project that wants an
+	 * authored war to admit a weaponless contest turns this off on the profile.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="07 Contest Gate",
+		meta=(DisplayName="Ignore War For Weapon Requirement",
+			ToolTip="On: a faction at war still has to show a weapon before the Place is contested. Guards still fight enemies at war."))
+	bool bContestRequiresWieldedWeaponEvenAtWar = true;
+
+	/**
+	 * Line played on the nearest guard while a holstered player stays inside. Empty uses the native
+	 * Territory.TaggedDialogue.Warn.HolsteredWeapon.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="07 Contest Gate",
+		meta=(Categories="Territory.TaggedDialogue",
+			DisplayName="Holstered Weapon Warning Tag",
+			ToolTip="Default is Territory.TaggedDialogue.Warn.HolsteredWeapon. Author the matching row in the guard's Tagged Dialogue Set."))
+	FGameplayTag HolsteredWeaponWarningTag;
+
+	/** Minimum seconds between warning lines for the same player. Zero warns every evaluation. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="07 Contest Gate",
+		meta=(ClampMin="0.0", DisplayName="Holstered Weapon Warning Cooldown"))
+	float HolsteredWeaponWarningCooldown = 20.f;
+
+	/** The warning tag actually used: the authored value, or the native Territory default. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Get Effective Holstered Weapon Warning Tag"))
+	FGameplayTag GetEffectiveHolsteredWeaponWarningTag() const;
+
+	/** The warning cooldown actually used: authored, clamped to zero. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth",
+		meta=(DisplayName="Get Effective Holstered Weapon Warning Cooldown"))
+	float GetEffectiveHolsteredWeaponWarningCooldown() const;
 
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 };

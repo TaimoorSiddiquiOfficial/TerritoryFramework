@@ -1,9 +1,11 @@
 #include "Core/TerritoryBlueprintLibrary.h"
+#include "Core/TerritoryDialogueTags.h"
 #include "Combat/TerritoryCombatTargetPolicy.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryControlSubsystem.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
+#include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
 #include "Combat/TerritoryCombatDirector.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Combat/TerritoryAssaultParticipantComponent.h"
@@ -11,14 +13,26 @@
 #include "Core/TerritoryVolume.h"
 #include "Core/TerritoryHierarchy.h"
 #include "Core/TerritoryDeveloperSettings.h"
+#include "Core/TerritoryStealthProfile.h"
+#include "UnrealFramework/NarrativeCharacter.h"
 #include "Core/TerritoryWorldState.h"
 #include "AIController.h"
 #include "ArsenalSettings.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "AI/Activities/NPCActivityComponent.h"
 #include "AI/Activities/NPCGoalItem.h"
+#include "AI/Activities/NPCGoalGenerator.h"
+#include "AI/TerritoryStealthObserverComponent.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/Controller.h"
 #include "AI/NarrativeNPCController.h"
 #include "AI/NPCInteractable.h"
+#include "Tales/TalesComponent.h"
+#include "Tales/NarrativeFunctionLibrary.h"
+#include "Tales/Dialogue.h"
+#include "Social/TerritoryConversationListenerComponent.h"
+#include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Character/CharacterMapMarker.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -88,6 +102,12 @@ UTerritoryDiplomacySubsystem* UTerritoryBlueprintLibrary::GetTerritoryDiplomacy(
 {
 	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull);
 	return World ? World->GetSubsystem<UTerritoryDiplomacySubsystem>() : nullptr;
+}
+
+UTerritoryEvidenceLedgerSubsystem* UTerritoryBlueprintLibrary::GetTerritoryEvidenceLedger(const UObject* WorldContextObject)
+{
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull);
+	return World ? World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>() : nullptr;
 }
 
 ATerritoryVolume* UTerritoryBlueprintLibrary::GetTerritoryAtLocation(const UObject* WorldContextObject, const FVector& WorldLocation)
@@ -283,14 +303,47 @@ TArray<FGameplayTag> UTerritoryBlueprintLibrary::GetAllFactions(const UObject* W
 
 ETerritoryState UTerritoryBlueprintLibrary::GetTerritoryState(const UObject* WorldContextObject, const FGameplayTag& TerritoryTag)
 {
-	ATerritoryVolume* Territory = GetTerritoryByTag(WorldContextObject, TerritoryTag);
-	return Territory ? Territory->GetTerritoryState() : ETerritoryState::Unclaimed;
+	ETerritoryState State;
+	FGameplayTag Faction;
+	float Progress;
+	TryGetTerritoryCaptureState(WorldContextObject, TerritoryTag, State, Faction, Progress);
+	return State;
 }
 
 float UTerritoryBlueprintLibrary::GetCaptureProgress(const UObject* WorldContextObject, const FGameplayTag& TerritoryTag)
 {
-	ATerritoryVolume* Territory = GetTerritoryByTag(WorldContextObject, TerritoryTag);
-	return Territory ? Territory->GetControlProgress() : 0.f;
+	ETerritoryState State;
+	FGameplayTag Faction;
+	float Progress;
+	TryGetTerritoryCaptureState(WorldContextObject, TerritoryTag, State, Faction, Progress);
+	return Progress;
+}
+
+bool UTerritoryBlueprintLibrary::TryGetTerritoryCaptureState(const UObject* WorldContextObject,
+	const FGameplayTag& TerritoryTag, ETerritoryState& OutState, FGameplayTag& OutContestingFaction, float& OutProgress)
+{
+	OutState = ETerritoryState::Unclaimed;
+	OutContestingFaction = FGameplayTag();
+	OutProgress = 0.f;
+	if (!TerritoryTag.IsValid()) return false;
+	if (const ATerritoryVolume* Territory = GetTerritoryByTag(WorldContextObject, TerritoryTag))
+	{
+		const FTerritoryOwnershipData Data = Territory->GetOwnershipData();
+		OutState = Data.State;
+		OutContestingFaction = Data.ContestingFaction;
+		OutProgress = Data.ControlProgress;
+		return true;
+	}
+	if (const ATerritoryWorldState* WorldState = ATerritoryWorldState::FindTerritoryWorldState(WorldContextObject))
+	{
+		const FReplicatedCaptureSummary Summary = WorldState->GetCaptureSummary(TerritoryTag);
+		if (Summary.TerritoryTag != TerritoryTag) return false;
+		OutState = Summary.State;
+		OutContestingFaction = Summary.ContestingFaction;
+		OutProgress = Summary.ControlProgress;
+		return true;
+	}
+	return false;
 }
 
 void UTerritoryBlueprintLibrary::ForceCaptureTerritory(const UObject* WorldContextObject, const FGameplayTag& TerritoryTag, const FGameplayTag& FactionTag)
@@ -513,6 +566,151 @@ FGameplayTag UTerritoryBlueprintLibrary::GetActorPrimaryFaction(const UObject* W
 	return FGameplayTag();
 }
 
+bool UTerritoryBlueprintLibrary::IsPawnWieldingWeapon(const AActor* Pawn)
+{
+	const ANarrativeCharacter* Character = Cast<ANarrativeCharacter>(Pawn);
+	if (!Character)
+	{
+		// No Narrative weapon state to read, so the pawn can never be reported as armed.
+		return false;
+	}
+
+	// WieldSlots lists the slots a weapon is currently wielded from. An equipped-but-holstered
+	// weapon stays in EquipSlots only, so it must not open a confrontation.
+	return Character->GetWeaponWieldState().WieldSlots.Num() > 0;
+}
+
+bool UTerritoryBlueprintLibrary::IsPawnAtWarWithTerritoryOwner(const AActor* Pawn, const AActor* TerritoryActor)
+{
+	if (!Pawn)
+	{
+		return false;
+	}
+	const ATerritoryVolume* Volume = Cast<ATerritoryVolume>(TerritoryActor);
+	if (!Volume)
+	{
+		return false;
+	}
+
+	const FGameplayTag OwnerFaction = Volume->GetOwningFaction();
+	const FGameplayTag PawnFaction = GetActorPrimaryFaction(Volume, const_cast<AActor*>(Pawn));
+	const UWorld* World = Volume->GetWorld();
+	const UTerritoryDiplomacySubsystem* Diplomacy = World
+		? World->GetSubsystem<UTerritoryDiplomacySubsystem>()
+		: nullptr;
+	return Diplomacy && OwnerFaction.IsValid() && PawnFaction.IsValid()
+		&& Diplomacy->GetDiplomacyState(OwnerFaction, PawnFaction) == EDiplomacyState::War;
+}
+
+bool UTerritoryBlueprintLibrary::DoesPawnAdmitStoryContest(const AActor* Pawn, const AActor* TerritoryActor,
+	const UTerritoryStealthProfile* Profile, bool bTreatAsAggressor)
+{
+	if (!Pawn)
+	{
+		return false;
+	}
+	if (!Profile || !Profile->bContestRequiresWieldedWeapon)
+	{
+		// Unconfigured or legacy profiles keep the unrestricted behaviour.
+		return true;
+	}
+	if (bTreatAsAggressor)
+	{
+		// Firing, damaging or killing a defender ends the warning stage immediately.
+		return true;
+	}
+
+	// A war that already exists needs no further warning: hostility is already declared. A profile
+	// may override that so an unarmed visitor is still only warned inside a war.
+	if (IsPawnAtWarWithTerritoryOwner(Pawn, TerritoryActor)
+		&& !Profile->bContestRequiresWieldedWeaponEvenAtWar)
+	{
+		return true;
+	}
+
+	return IsPawnWieldingWeapon(Pawn);
+}
+
+bool UTerritoryBlueprintLibrary::IsAggressiveStealthEvidence(ETerritoryStealthEvidence Evidence)
+{
+	switch (Evidence)
+	{
+	case ETerritoryStealthEvidence::FireSeen:
+	case ETerritoryStealthEvidence::Gunshot:
+	case ETerritoryStealthEvidence::BulletImpact:
+	case ETerritoryStealthEvidence::Damage:
+	case ETerritoryStealthEvidence::DefenderKilledSeen:
+	case ETerritoryStealthEvidence::Scripted:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool UTerritoryBlueprintLibrary::IsRecentAggressiveStealthEvidence(
+	const UObject* WorldContextObject, const FTerritoryInfiltrationSnapshot& Snapshot,
+	const float WindowSeconds)
+{
+	const UWorld* World = GEngine
+		? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull)
+		: nullptr;
+	const float NowSeconds = World ? World->GetTimeSeconds() : -1.f;
+	return IsRecentAggressiveStealthEvidenceAtTime(Snapshot, NowSeconds, WindowSeconds);
+}
+
+bool UTerritoryBlueprintLibrary::IsRecentAggressiveStealthEvidenceAtTime(
+	const FTerritoryInfiltrationSnapshot& Snapshot, const float NowSeconds,
+	const float WindowSeconds)
+{
+	if (!IsAggressiveStealthEvidence(Snapshot.LastEvidence))
+	{
+		return false;
+	}
+	if (WindowSeconds <= 0.f)
+	{
+		// Legacy behaviour: the last evidence wins regardless of age.
+		return true;
+	}
+	if (Snapshot.LastEvidenceWorldTime < 0.0 || NowSeconds < 0.f)
+	{
+		return false;
+	}
+	return NowSeconds - Snapshot.LastEvidenceWorldTime <= WindowSeconds;
+}
+
+bool UTerritoryBlueprintLibrary::EvaluateAttackGoalGate(UNPCGoalGenerator* Generator,
+	AActor* PerceivedActor, const bool bParentAllows)
+{
+	if (!bParentAllows || !Generator || !IsValid(PerceivedActor))
+	{
+		return bParentAllows;
+	}
+
+	// Goal generators live on the NPC controller (or its activity component); the stealth
+	// observer lives on the guard pawn.
+	AActor* OwnerActor = Generator->GetTypedOuter<AActor>();
+	APawn* GuardPawn = Cast<APawn>(OwnerActor);
+	if (!GuardPawn && OwnerActor)
+	{
+		if (const AController* OwnerController = Cast<AController>(OwnerActor))
+		{
+			GuardPawn = OwnerController->GetPawn();
+		}
+	}
+	if (!GuardPawn)
+	{
+		return bParentAllows;
+	}
+
+	const UTerritoryStealthObserverComponent* Observer =
+		GuardPawn->FindComponentByClass<UTerritoryStealthObserverComponent>();
+	if (!Observer)
+	{
+		return bParentAllows;
+	}
+	return !Observer->ShouldSuppressAttackGoal(PerceivedActor);
+}
+
 bool UTerritoryBlueprintLibrary::AreActorsAllied(AActor* A, AActor* B)
 {
 	if (!A || !B) return false;
@@ -585,10 +783,30 @@ int32 UTerritoryBlueprintLibrary::GetFactionCityCount(const UObject* WorldContex
 
 int32 UTerritoryBlueprintLibrary::GetFactionDistrictCount(const UObject* WorldContextObject, const FGameplayTag& FactionTag)
 {
-	if (!FactionTag.IsValid()) return 0;
-	if (const ATerritoryWorldState* WorldState =
-		ATerritoryWorldState::FindTerritoryWorldState(WorldContextObject))
+	// Delegated so the convenience count and the readiness-aware query can never disagree about
+	// which rows count. An unknown answer is reported as 0 here only because this signature has no
+	// way to say otherwise; gameplay must call TryGetFactionDistrictCount.
+	int32 Count = 0;
+	return TryGetFactionDistrictCount(WorldContextObject, FactionTag, Count) ? Count : 0;
+}
+
+bool UTerritoryBlueprintLibrary::TryGetFactionDistrictCount(const UObject* WorldContextObject,
+	const FGameplayTag& FactionTag, int32& OutCount)
+{
+	OutCount = 0;
+	if (!FactionTag.IsValid()) return false;
+
+	const ATerritoryWorldState* WorldState =
+		ATerritoryWorldState::FindTerritoryWorldState(WorldContextObject);
+
+	if (WorldState)
 	{
+		// An empty replicated directory and a not-yet-received one are the same array on the wire,
+		// so a client must not read a count from it until the authority says it published. Without
+		// this a joining client answers "this faction holds no Districts", which is a false claim
+		// about another faction rather than an unknown one.
+		if (!WorldState->IsCaptureDirectoryReady()) return false;
+
 		const bool bHasStrategicDistrictRows =
 			WorldState->GetAllCaptureSummaries().ContainsByPredicate(
 				[](const FReplicatedCaptureSummary& Summary)
@@ -598,13 +816,14 @@ int32 UTerritoryBlueprintLibrary::GetFactionDistrictCount(const UObject* WorldCo
 				});
 		if (bHasStrategicDistrictRows)
 		{
-			return WorldState->GetClaimedDistrictCountForFaction(FactionTag);
+			OutCount = WorldState->GetClaimedDistrictCountForFaction(FactionTag);
+			return true;
 		}
 	}
 
-	// Small maps may intentionally omit TerritoryWorldState. In that case the
-	// loaded aggregate District remains the authority and must be fully secured.
-	int32 Count = 0;
+	// Small maps may intentionally omit TerritoryWorldState, or author no strategic District rows
+	// at all. In that case the loaded aggregate District remains the authority and must be fully
+	// secured - and because every row is loaded, the answer is known rather than partial.
 	for (ATerritoryDistrict* D : GetAllDistricts(WorldContextObject))
 	{
 		if (D && D->IsAvailableForGameplay()
@@ -612,10 +831,10 @@ int32 UTerritoryBlueprintLibrary::GetFactionDistrictCount(const UObject* WorldCo
 			&& D->GetOwningFaction() == FactionTag
 			&& D->AllPropertiesOwnedBy(FactionTag))
 		{
-			++Count;
+			++OutCount;
 		}
 	}
-	return Count;
+	return true;
 }
 
 TArray<ATerritoryDistrict*> UTerritoryBlueprintLibrary::GetCapitalDistricts(const UObject* WorldContextObject)
@@ -656,4 +875,132 @@ void UTerritoryBlueprintLibrary::PrintAllTerritoryDebug(const UObject* WorldCont
 			PrintTerritoryDebug(WorldContextObject, Vol, Duration);
 		}
 	}
+}
+
+FGameplayTag UTerritoryBlueprintLibrary::GetDialogueStateTag(EDiplomacyState Relationship, bool bSameFaction)
+{
+	return TerritoryDialogueTags::GetDialogueStateTag(Relationship, bSameFaction);
+}
+
+bool UTerritoryBlueprintLibrary::PlayTaggedDialogueLine(const FTaggedDialogue& Row, AActor* Speaker,
+	AActor* DialogueInstigator, bool bKeepMovementDuringLine)
+{
+	UClass* DialogueClass = Row.Dialogue.LoadSynchronous();
+	ANarrativeNPCCharacter* NPCSpeaker = Cast<ANarrativeNPCCharacter>(Speaker);
+	const UTerritoryDeveloperSettings* Settings = GetDefault<UTerritoryDeveloperSettings>();
+	const bool bLog = Settings && Settings->ShouldDebugDialogue();
+	if (!DialogueClass || !NPCSpeaker || !NPCSpeaker->HasAuthority())
+	{
+		if (bLog)
+		{
+			UE_LOG(LogTerritory, Log,
+				TEXT("[TaggedDialogue] refused %s on %s: class=%s speaker=%s authority=%d."),
+				*Row.Tag.ToString(), *GetNameSafe(Speaker), *GetNameSafe(DialogueClass),
+				*GetNameSafe(NPCSpeaker), NPCSpeaker ? (NPCSpeaker->HasAuthority() ? 1 : 0) : -1);
+		}
+		return false;
+	}
+
+	// Candidate listeners, in priority order: the explicit instigator (unless it is the speaker, which
+	// is what Narrative's own callers pass), then the nearest player pawn inside the row's range,
+	// then the remaining player pawns. A candidate only wins if it actually has a Tales component, so
+	// an NPC instigator never swallows the line.
+	TArray<AActor*> Candidates;
+	if (IsValid(DialogueInstigator) && DialogueInstigator != NPCSpeaker)
+	{
+		Candidates.Add(DialogueInstigator);
+	}
+	APawn* NearestPawn = nullptr;
+	float NearestDistanceSq = TNumericLimits<float>::Max();
+	if (UWorld* World = NPCSpeaker->GetWorld())
+	{
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APawn* Candidate = It->Get() ? It->Get()->GetPawn() : nullptr;
+			if (!Candidate || Candidate == NPCSpeaker)
+			{
+				continue;
+			}
+			const float DistanceSq = FVector::DistSquared(Candidate->GetActorLocation(),
+				NPCSpeaker->GetActorLocation());
+			if (Row.MaxDistance > 0.f && DistanceSq > FMath::Square(Row.MaxDistance))
+			{
+				continue;
+			}
+			if (DistanceSq < NearestDistanceSq)
+			{
+				NearestDistanceSq = DistanceSq;
+				NearestPawn = Candidate;
+			}
+			Candidates.AddUnique(Candidate);
+		}
+	}
+	if (NearestPawn)
+	{
+		Candidates.Remove(NearestPawn);
+		Candidates.Insert(NearestPawn, Candidates.Num() ? 1 : 0);
+	}
+
+	// A listener claimed by an authored conversation meeting is not an ambient bark target. The
+	// meeting spends its staging window with no dialogue running, so without this check a hostile
+	// guard's Taunt would win the listener's Tales component and the meeting would cancel.
+	const auto IsListenerClaimed = [](AActor* Candidate)
+	{
+		const APawn* Pawn = Cast<APawn>(Candidate);
+		const AController* Controller = Pawn ? Pawn->GetController() : nullptr;
+		const UTerritoryConversationListenerComponent* Adapter = Controller
+			? Controller->FindComponentByClass<UTerritoryConversationListenerComponent>() : nullptr;
+		return Adapter && Adapter->IsReserved();
+	};
+
+	bool bSawTalesListener = false;
+	for (AActor* Candidate : Candidates)
+	{
+		UTalesComponent* Tales = UNarrativeFunctionLibrary::GetTalesComponentFromTarget(Candidate);
+		if (!Tales)
+		{
+			continue;
+		}
+		if (IsListenerClaimed(Candidate))
+		{
+			continue;
+		}
+		bSawTalesListener = true;
+
+		// Speakers[0] is the NPC: Narrative assumes the dialogue's first speaker owns these lines.
+		FDialoguePlayParams PlayParams;
+		PlayParams.Speakers.Add(NPCSpeaker);
+		// A Territory tagged line is an in-gameplay bark, not a cutscene. Native freezes the listener
+		// by default (UDialogue::bAutoStopMovement = true, Dialogue.cpp:56, applied at Dialogue.cpp:655)
+		// unless the caller overrides it, and Native's own quest path asks for free movement
+		// (Quest.cpp:26-27). Without this a warning or a taunt would root the player mid-fight.
+		PlayParams.bOverride_bFreeMovement = true;
+		PlayParams.bFreeMovement = bKeepMovementDuringLine;
+		PlayParams.bOverride_bStopMovement = true;
+		PlayParams.bStopMovement = !bKeepMovementDuringLine;
+		if (!Tales->HasDialogueAvailable(DialogueClass, PlayParams))
+		{
+			continue;
+		}
+
+		const bool bStarted = Tales->BeginDialogue(DialogueClass, PlayParams);
+		if (bLog)
+		{
+			UE_LOG(LogTerritory, Log, TEXT("[TaggedDialogue] %s played %s %s on %s (started=%d)."),
+				*GetNameSafe(Speaker), *Row.Tag.ToString(), *DialogueClass->GetName(),
+				*GetNameSafe(Candidate), bStarted ? 1 : 0);
+		}
+		if (bStarted)
+		{
+			return true;
+		}
+	}
+
+	if (bLog)
+	{
+		UE_LOG(LogTerritory, Log,
+			TEXT("[TaggedDialogue] refused %s on %s: candidates=%d listener_with_tales=%d."),
+			*Row.Tag.ToString(), *GetNameSafe(Speaker), Candidates.Num(), bSawTalesListener ? 1 : 0);
+	}
+	return false;
 }

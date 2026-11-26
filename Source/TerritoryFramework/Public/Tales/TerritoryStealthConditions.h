@@ -4,6 +4,7 @@
 #include "Core/TerritoryStealthProfile.h"
 #include "GameplayTagContainer.h"
 #include "Tales/NarrativeCondition.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryStealthConditions.generated.h"
 
 UENUM(BlueprintType)
@@ -30,7 +31,7 @@ enum class ETerritoryExposureRequirement : uint8
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Stealth Policy Condition",
 		ToolTip="Server story check for the active stealth profile and its runtime override. Empty territory uses the containing state-config place, then the target location. This is not a client-side security read model."))
-class TERRITORYFRAMEWORK_API UTerritoryStealthPolicyCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryStealthPolicyCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -46,8 +47,9 @@ public:
 	bool bRequireEnabled = true;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -55,7 +57,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Exposure Condition",
 		ToolTip="Read server awareness for the exact Narrative target. Undetected, Suspicious and Exposed are separate states. Exposed Or Stealth Disabled also supports places without stealth. Missing infiltration records fail."))
-class TERRITORYFRAMEWORK_API UTerritoryExposureCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryExposureCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -72,8 +74,9 @@ public:
 		ETerritoryExposureRequirement::ExposedOrStealthDisabled;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -81,7 +84,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Stealth Evidence Condition",
 		ToolTip="Read the latest server evidence for the exact Narrative target. Choose sight, shot, damage or another kind and an age limit. Empty territory uses the containing place or target location. This does not search all past evidence."))
-class TERRITORYFRAMEWORK_API UTerritoryStealthEvidenceCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryStealthEvidenceCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -101,8 +104,9 @@ public:
 	float MaximumEvidenceAge = 5.f;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -110,7 +114,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Suspicion Condition",
 		ToolTip="Check the exact target suspicion on the server. Fifty means fifty percent. Empty territory uses the containing place or target location. Missing infiltration records fail."))
-class TERRITORYFRAMEWORK_API UTerritorySuspicionCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritorySuspicionCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -127,8 +131,9 @@ public:
 	float MinimumSuspicionPercent = 50.f;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -136,7 +141,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Disguise Condition",
 		ToolTip="Check the target disguise or real faction through the existing disguise system. Disguise changes perceived identity, not political ownership. Security acceptance requires a loaded place and the server security rules."))
-class TERRITORYFRAMEWORK_API UTerritoryDisguiseCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryDisguiseCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -159,7 +164,8 @@ public:
 	FGameplayTag TerritoryToCheck;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

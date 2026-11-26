@@ -84,6 +84,23 @@ bool FTFAssaultSavedVehicleBudget::RunTest(const FString& Parameters)
 	Base.DecisionSeed = 450;
 	Base.DecisionRoll = 0.375f;
 	Base.PhysicalStateVersion = 1;
+	FTerritoryAssaultRecord Estimate = Base;
+	FTerritoryFactionAssaultConfig AuthoredForce;
+	AuthoredForce.PlannedForce = 6;
+	Estimate.PlannedForce = UTerritoryCounterAttackSubsystem::ResolveVehicleOnlyPlannedForce(6, 1, {3, 3});
+	Estimate.EvaluationInput.ActiveGuards = Estimate.EvaluationInput.MaximumGuards = 10;
+	Estimate.EvaluationInput.GuardQuality = 10.f;
+	Estimate.EvaluationInput.AttackingMilitaryPower = 100.f;
+	Estimate.EvaluationResult.LaunchProbability = 0.25f;
+	Estimate.EvaluationResult.AttackPriority = 42.f;
+	Counter->UpdateCommittedForceEstimate(Estimate, AuthoredForce, Definition->CounterAttackProfile);
+	TestEqual(TEXT("One difficulty-authorized car commits only its three seats"), Estimate.PlannedForce, 3);
+	TestEqual(TEXT("Half the authored force estimates fifty power against one hundred defence"), Estimate.EvaluationResult.PowerRatio, 0.5f);
+	TestTrue(TEXT("Final displayed success uses the transport-adjusted force"), FMath::IsNearlyEqual(Estimate.EvaluationResult.EstimatedSuccessProbability, 1.f / 3.f));
+	TestEqual(TEXT("Revised success estimate cannot reroll admission probability"), Estimate.EvaluationResult.LaunchProbability, 0.25f);
+	TestEqual(TEXT("Revised success estimate cannot reroll the saved decision"), Estimate.DecisionRoll, Base.DecisionRoll);
+	TestEqual(TEXT("Launch priority remains the authored admission snapshot"), Estimate.EvaluationResult.AttackPriority, 42.f);
+	TestEqual(TEXT("Saved estimate survives an ordinary record roundtrip"), RoundTrip(Estimate).EvaluationResult.EstimatedSuccessProbability, Estimate.EvaluationResult.EstimatedSuccessProbability);
 	const auto CheckInvalid = [&](const FString& Case, const FTerritoryAssaultRecord& Record)
 	{
 		Counter->RestorePersistentState({RoundTrip(Record)});

@@ -87,6 +87,26 @@ bool FTFGuardReserveReconciliation::RunTest(const FString& Parameters)
 		}
 	}
 	ATerritoryGuardSpawnPoint* ClientPost = World->SpawnActor<ATerritoryGuardSpawnPoint>();
+	Post->CurrentReserveCount = 1;
+	Post->PendingReserveSpawns = 1;
+	Post->ReserveTimingVersion = 1;
+	Post->SavedReserveRemainingDelay = 1.25f;
+	FNarrativeActorRecord TimedRecord;
+	TestTrue(TEXT("Native records a paused remaining delay"), Save->CreateActorRecord(Post, TimedRecord));
+	Save->LoadActorFromRecord(LatePost, TimedRecord);
+	TestEqual(TEXT("New save restores its remaining delay"), LatePost->SavedReserveRemainingDelay, 1.25f);
+	Post->ReserveTimingVersion = 0;
+	Post->SavedReserveRemainingDelay = -1.f;
+	TimedRecord.ByteData.Reset();
+	{
+		FMemoryWriter Writer(TimedRecord.ByteData);
+		FObjectAndNameAsStringProxyArchive LegacyArchive(Writer, true);
+		LegacyArchive.ArIsSaveGame = true;
+		Post->AActor::Serialize(LegacyArchive);
+	}
+	Save->LoadActorFromRecord(LatePost, TimedRecord);
+	TestEqual(TEXT("Legacy missing timing uses the configured-delay sentinel"), LatePost->SavedReserveRemainingDelay, -1.f);
+	TestEqual(TEXT("Legacy timing migration retains the finite pending request"), LatePost->GetPendingReserveCount(), 1);
 	ClientPost->SetRole(ROLE_SimulatedProxy);
 	ClientPost->ReserveSlots = 3;
 	ClientPost->InitializeReserves();

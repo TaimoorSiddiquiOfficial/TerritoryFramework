@@ -243,6 +243,7 @@ FText UTerritoryDebugger::BuildDebugSettingsSummary()
 	Add(Settings->ShouldDebugCaptureAttempts(), TEXT("Capture attempts"));
 	Add(Settings->ShouldDebugOwnership(), TEXT("Ownership"));
 	Add(Settings->ShouldDebugStateTransitions(), TEXT("State transitions"));
+	Add(Settings->ShouldDebugDialogue(), TEXT("Tagged dialogue"));
 	Add(Settings->ShouldDebugEconomy(), TEXT("Economy"));
 	Add(Settings->ShouldDebugTransactions(), TEXT("Transactions"));
 	Add(Settings->ShouldDebugProduction(), TEXT("Production"));

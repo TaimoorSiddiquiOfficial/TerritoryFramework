@@ -13,6 +13,7 @@
 #include "AI/NPCDefinition.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "UI/TerritoryEconomyWidget.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryAuditEventProbe.generated.h"
 
 class ATerritoryWorldState;
@@ -153,6 +154,8 @@ public:
 	{
 		if (ProductionCallback) ProductionCallback();
 	}
+	UFUNCTION()
+	void ProductionStateChanged() { if (ProductionCallback) ProductionCallback(); }
 
 	UFUNCTION()
 	void CurrencyChanged(int32 OldCurrency, int32 NewCurrency)
@@ -225,13 +228,12 @@ public:
 
 /** Native Narrative condition with a controllable callback for integration regressions. */
 UCLASS(Transient)
-class UTerritoryAuditCondition final : public UNarrativeCondition
+class UTerritoryAuditCondition final : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 public:
 	TFunction<bool()> Callback;
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		UTalesComponent* NarrativeComponent) override
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override
 	{
 		return Callback ? Callback() : false;
 	}
@@ -239,16 +241,15 @@ public:
 
 /** Native Narrative event used to verify synchronous callback ordering. */
 UCLASS(Transient)
-class UTerritoryAuditNarrativeEvent final : public UNarrativeEvent
+class UTerritoryAuditNarrativeEvent final : public UTerritoryNarrativeEvent
 {
 	GENERATED_BODY()
 public:
 	TFunction<void()> Callback;
 	TFunction<void(APawn*, APlayerController*, UTalesComponent*)> ContextCallback;
-	virtual void ExecuteEvent_Implementation(APawn* Target, APlayerController* Controller,
-		UTalesComponent* NarrativeComponent) override
+  virtual void ExecuteEventInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override
 	{
 		if (Callback) Callback();
-		if (ContextCallback) ContextCallback(Target, Controller, NarrativeComponent);
+       if (ContextCallback) ContextCallback(Target, Controller, NarrativeComponent);
 	}
 };

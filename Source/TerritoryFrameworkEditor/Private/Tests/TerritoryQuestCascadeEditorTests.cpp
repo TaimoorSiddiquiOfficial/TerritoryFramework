@@ -17,6 +17,7 @@
 #include "Tales/TerritoryStateTask.h"
 #include "Tales/TerritoryStoryConditions.h"
 #include "UObject/UnrealType.h"
+#include "Tales/TerritoryNarrativeContext.h"
 
 namespace TerritoryQuestCascadeEditorTests
 {

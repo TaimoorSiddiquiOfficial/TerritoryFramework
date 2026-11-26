@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 #include "Cinematics/NarrativeLevelSequenceActor.h"
 #include "Cinematics/NarrativeLevelSequencePlayer.h"
+#include "Cinematics/TerritoryCinematicLightRig.h"
 #include "Cinematics/TerritoryCutsceneTeardown.h"
 #include "Cinematics/TerritoryDialogueShot.h"
 #include "Core/TerritoryGuardCharacter.h"
@@ -21,6 +22,7 @@
 #include "TerritoryCinematicAudienceProbe.h"
 #include "UnrealFramework/NarrativeGameState.h"
 #include "UObject/UnrealType.h"
+#include "Tales/TerritoryTalesUtilities.h"
 
 /**
  * The paused-guard seam. HandleSequenceStopped is private because only the sequence player's own
@@ -327,7 +329,7 @@ namespace TerritoryCutsceneTests
 		UTerritoryPlayCutsceneEvent* Event =
 			MakeEvent(Fixture.World, Heroes, MakeSequence(Fixture.World));
 		Event->TeardownGraceSeconds = GraceSeconds;
-		Event->ExecuteEvent(nullptr, nullptr, nullptr);
+		TerritoryTales::ExecuteEvent(Event, nullptr, nullptr, nullptr);
 		return SoleCutscene(Fixture.World);
 	}
 
@@ -532,7 +534,7 @@ bool FTFTerritoryCutsceneAudienceFallback::RunTest(const FString&)
 
 	// This is the empty-context path: a defender defeat with no instigator passes no player at
 	// all, and the authored faction is what must resolve the audience.
-	Event->ExecuteEvent(nullptr, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, nullptr, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("A defender defeat with no instigator still plays the cutscene for its faction"),
@@ -594,7 +596,7 @@ bool FTFTerritoryCutsceneExplicitAudience::RunTest(const FString&)
 
 	// The event's own context is authoritative. A cutscene must reach the player the transition
 	// was actually about, not whoever happens to match the authored faction.
-	Event->ExecuteEvent(nullptr, Explicit, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, Explicit, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene plays for the explicit context"), Cutscene);
@@ -643,7 +645,7 @@ bool FTFTerritoryCutsceneNeverPausesAtEnd::RunTest(const FString&)
 	Event->PlaybackSettings.bPauseAtEnd = true;
 	Event->PlaybackSettings.bAutoPlay = false;
 
-	Event->ExecuteEvent(nullptr, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, nullptr, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene still starts"), Cutscene);
@@ -695,7 +697,7 @@ bool FTFTerritoryCutsceneFailurePaths::RunTest(const FString&)
 	// moment for a stranger, so the event must report why and start nothing.
 	UTerritoryPlayCutsceneEvent* NoAudience =
 		MakeEvent(Fixture.World, FGameplayTag(), Sequence);
-	NoAudience->ExecuteEvent(nullptr, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(NoAudience, nullptr, nullptr, nullptr);
 	TestEqual(TEXT("No resolvable audience starts no cutscene"),
 		CountCutscenes(Fixture.World), 0);
 
@@ -703,7 +705,7 @@ bool FTFTerritoryCutsceneFailurePaths::RunTest(const FString&)
 	// the same outcome as no faction at all.
 	UTerritoryPlayCutsceneEvent* AbsentFaction =
 		MakeEvent(Fixture.World, Heroes, Sequence);
-	AbsentFaction->ExecuteEvent(nullptr, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(AbsentFaction, nullptr, nullptr, nullptr);
 	TestEqual(TEXT("A faction with no connected player starts no cutscene"),
 		CountCutscenes(Fixture.World), 0);
 
@@ -715,7 +717,7 @@ bool FTFTerritoryCutsceneFailurePaths::RunTest(const FString&)
 	{
 		UTerritoryPlayCutsceneEvent* NoSequence =
 			MakeEvent(Fixture.World, Heroes, nullptr);
-		NoSequence->ExecuteEvent(nullptr, nullptr, nullptr);
+		TerritoryTales::ExecuteEvent(NoSequence, nullptr, nullptr, nullptr);
 		TestEqual(TEXT("An event with no authored sequence starts no cutscene"),
 			CountCutscenes(Fixture.World), 0);
 	}
@@ -726,7 +728,7 @@ bool FTFTerritoryCutsceneFailurePaths::RunTest(const FString&)
 	{
 		UTerritoryPlayCutsceneEvent* Working =
 			MakeEvent(Fixture.World, Heroes, Sequence);
-		Working->ExecuteEvent(nullptr, nullptr, nullptr);
+		TerritoryTales::ExecuteEvent(Working, nullptr, nullptr, nullptr);
 		TestEqual(TEXT("The same fixture does start a cutscene once every input is present"),
 			CountCutscenes(Fixture.World), 1);
 	}
@@ -997,7 +999,7 @@ bool FTFTerritoryCutscenePlaybackStartedByEvent::RunTest(const FString&)
 	Event->PlaybackSettings.bAutoPlay = true;
 	Event->PlaybackSettings.bPauseAtEnd = true;
 
-	Event->ExecuteEvent(nullptr, nullptr, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, nullptr, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The event creates exactly one cutscene actor"), Cutscene);
@@ -1344,7 +1346,7 @@ bool FTFTerritoryCinematicAudienceReleased::RunTest(const FString&)
 
 	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
 		MakeSequence(Fixture.World));
-	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, Watcher, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene starts for the explicit audience"), Cutscene);
@@ -1427,7 +1429,7 @@ bool FTFTerritoryCinematicAudienceCovered::RunTest(const FString&)
 
 	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
 		MakeSequence(Fixture.World));
-	Event->ExecuteEvent(nullptr, Only, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, Only, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene starts"), Cutscene);
@@ -1493,7 +1495,7 @@ bool FTFTerritoryCinematicBystanderAlreadyFrozen::RunTest(const FString&)
 
 	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
 		MakeSequence(Fixture.World));
-	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, Watcher, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene starts"), Cutscene);
@@ -1542,7 +1544,7 @@ bool FTFTerritoryCinematicPausedSequence::RunTest(const FString&)
 
 	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
 		MakeSequence(Fixture.World));
-	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, Watcher, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene starts"), Cutscene);
@@ -1635,7 +1637,7 @@ bool FTFTerritoryCinematicLaterSuppressionSurvives::RunTest(const FString&)
 
 	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
 		MakeSequence(Fixture.World));
-	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, Watcher, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene starts"), Cutscene);
@@ -1707,7 +1709,7 @@ bool FTFTerritoryCinematicUnansweredDebt::RunTest(const FString&)
 
 	UTerritoryPlayCutsceneEvent* Event = MakeSuppressingEvent(Fixture.World, Heroes,
 		MakeSequence(Fixture.World));
-	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, Watcher, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene starts"), Cutscene);
@@ -1810,7 +1812,7 @@ bool FTFTerritoryCinematicSelfTerminating::RunTest(const FString&)
 		MakeSequence(Fixture.World));
 	// A grace, so the actor outlives its sequence and the reconcile is still in place afterwards.
 	Event->TeardownGraceSeconds = 1.f;
-	Event->ExecuteEvent(nullptr, Watcher, nullptr);
+	TerritoryTales::ExecuteEvent(Event, nullptr, Watcher, nullptr);
 
 	ANarrativeLevelSequenceActor* Cutscene = SoleCutscene(Fixture.World);
 	TestNotNull(TEXT("The cutscene starts"), Cutscene);

@@ -102,7 +102,6 @@ bool FTFAssaultPlayerPower::RunTest(const FString& Parameters)
 	PlayerASC->SetNumericAttributeBase(UNarrativeAttributeSetBase::GetXPAttribute(), 900.f);
 	const int32 NativeLevel = Character->GetCharacterLevel();
 	TestTrue(TEXT("The player has a real Native XP-derived level"), NativeLevel > 1);
-	PlayerASC->AttributesToSave.AddUnique(UNarrativeAttributeSetBase::GetXPAttribute());
 	INarrativeSavableComponent::Execute_PrepareForSave(PlayerASC);
 	PlayerASC->SetNumericAttributeBase(UNarrativeAttributeSetBase::GetXPAttribute(), 0.f);
 	INarrativeSavableComponent::Execute_Load(PlayerASC);

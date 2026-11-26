@@ -215,3 +215,66 @@ Source references: `UNarrativePartyComponent::SelectDialogueOption`,
 and `ANarrativeParty`'s `PartyTalesComponent` slot.
 Territory uses the same `SetDefaultSubobjectClass` pattern as Native's character,
 NPC controller and level-sequence actor adapters.
+
+## Timed replies (server reply countdown)
+
+Native has **no** reply timeout: `UDialogueNode_Player` exposes only `bAutoSelect`,
+`bAutoSelectIfOnlyReply` and `IsRoutingNode()`, and once `UDialogue::NPCFinishedTalking`
+broadcasts `OnDialogueRepliesAvailable` the dialogue waits for a real answer indefinitely. That
+function's own comment states the rule this feature follows: *"Auto-selects should be handled by the
+server - clients never need to ask server to auto-select, since it will anyway"*, and it runs under
+`OwningComp->HasAuthority()`. Player answers travel `UTalesComponent::ClientSelectDialogueOption`
+(client RPC) → `ServerSelectDialogueOption(OptionID)`, resolved by `Option->GetID()`.
+
+### Policy
+
+`UTerritoryReplyTimeoutProfile` (Data Asset, `Tales/TerritoryReplyTimeoutProfile.h`) is the
+server-owned countdown policy:
+
+| Field | Meaning |
+|---|---|
+| `bEnabled` | Master switch; disabled keeps Native's indefinite wait |
+| `DefaultSeconds` | Answer window for every dialogue; zero disables it |
+| `SilentReplyID` | Node id of the authored silence reply (default `SayNothing`) |
+| `DialogueOverrides` | Per-dialogue `Seconds` and `SilentReplyID` via `FTerritoryReplyTimeoutRule` |
+
+`ResolveSeconds`, `ResolveSilentReplyID` and `IsEnabledForDialogue` are `BlueprintPure` resolvers; a
+matching override always wins over the default.
+
+### Runtime
+
+`UTerritoryNarrativePartyComponent` (the component that already owns the server reply path) runs it:
+
+1. `HandleRepliesAvailable` → `StartReplyTimeout`. A countdown starts **only** when the profile is
+   enabled for that dialogue **and** the authored silence reply is genuinely among the offered
+   replies — the code never invents a choice.
+2. One server timer per dialogue, with `IsReplyTimeoutActive()`, `GetReplyTimeRemaining()`,
+   `GetReplyTimeoutDuration()` and `GetPendingSilentReplyID()` for the HUD, plus
+   `OnReplyTimeoutStarted` / `OnReplyTimeoutEnded` (Blueprint-assignable) for a countdown bar.
+3. `HandleDialogueBegan`, `HandleDialogueFinished` and `HandleNPCLineStarted` cancel it, so a real
+   answer — or any dialogue lifecycle change — always wins.
+4. On expiry the callback re-checks that the *same* replies are still on offer; if the player
+   already answered nothing is selected. Otherwise it calls the same
+   `ServerSelectDialogueOption(SilentReplyID)` the player path uses, so party policy, authority and
+   Narrative events all behave identically.
+5. `ResolveReplyCountdownNow()` (server-only, `BlueprintAuthorityOnly`) resolves a running countdown
+   immediately — useful for QA/skip inputs and for automation, which cannot rely on the engine's
+   world tick to advance the timer manager.
+
+The state is transient: never replicated, never campaign data.
+
+### Authoring the silence reply
+
+Author a normal `UDialogueNode_Player` whose **node id** matches the profile's `SilentReplyID` (for
+example `SayNothing`) — that id is what the countdown selects, and it is what makes the option a
+first-class reply the player may also pick deliberately. Put the story consequences on that node like
+on any other reply, for example `UTerritoryModifyReputationEvent` (Add/Set an int32 value against a
+resolved faction, server-side) or `UTerritorySetDiplomacyEvent`, and gate other replies with
+`TerritoryDiplomacyCondition`. No code is needed per dialogue.
+
+### Verified
+
+Server-scheduling, the "only when the silence reply is offered" guard, expiry selecting the authored
+id exactly once, the answered-first guard, and the profile policy (override wins, disabled, zero
+seconds, missing profile) are covered by
+`TerritoryFramework.Tales.PartyReplies.ReplyTimeoutAuthorityAndSelection`.

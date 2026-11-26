@@ -1,12 +1,14 @@
 #pragma once
 
 #include "Cinematics/TerritoryDialogueShot.h"
+#include "Cinematics/TerritoryDialogueShotPackSpec.h"
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "TerritoryDialogueShotEditorLibrary.generated.h"
 
 class UDialogueBlueprint;
 class ULevelSequence;
+class UTerritoryDialogueShotPackSpec;
 
 /** Result of creating and optionally applying the reusable Territory dialogue shot pack. */
 USTRUCT(BlueprintType)
@@ -63,28 +65,52 @@ public:
 	/** Create a stable seven-shot Level Sequence pack, reusing existing assets in the folder. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Dialogue|Editor",
 		meta=(DisplayName="Create Territory AAA Dialogue Shot Pack",
-			ToolTip="Creates or repairs seven 24 fps Narrative-ready Level Sequences. Each has a Cinecam spawnable, explicit full-range Spawn track, Camera Cut, role-specific lens, focus, aperture, and composition. Recommended destination: /Game/TerritoryFramework/Cinematics/Dialogue/Shots."))
+			ToolTip="Creates or repairs seven 24 fps Narrative-ready Level Sequences. Each has a Cinecam spawnable, explicit full-range Spawn track, Camera Cut, role-specific lens, focus, aperture, and composition. Recommended destination: /Game/TerritoryFramework/Cinematics/Dialogue/Shots.",
+			AdvancedDisplay="ShotSpec"))
 	static FTerritoryDialogueShotPackBuildReport CreateStudioDialogueShotPack(
 		UPARAM(meta=(ToolTip="Unreal content folder for project-owned shot assets. Use /Game, never the Narrative Pro vendor plugin."))
-		const FString& DestinationContentPath);
+		const FString& DestinationContentPath,
+		UPARAM(meta=(ToolTip="Optional designer-authored shot pack. When supplied, its rows replace the built-in seven-shot table."))
+		const UTerritoryDialogueShotPackSpec* ShotSpec = nullptr);
 
 	/** Apply a generated shot pack to a Narrative Dialogue Blueprint without touching line-level shots. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Dialogue|Editor",
 		meta=(DisplayName="Apply Territory AAA Shot Pack To Dialogue",
-			ToolTip="Assigns safe master, speaker, and reply-selection defaults to a Narrative Dialogue Blueprint, enables cinematic bars and movement control, and preserves every authored line-level shot."))
+			ToolTip="Assigns safe master, speaker, and reply-selection defaults to a Narrative Dialogue Blueprint, enables cinematic bars and movement control, and preserves every authored line-level shot.",
+			AdvancedDisplay="ShotSpec"))
 	static FTerritoryDialogueShotPackBuildReport ApplyStudioDialogueShotPack(
 		UPARAM(meta=(ToolTip="Project-owned Narrative Dialogue Blueprint to configure."))
 		UDialogueBlueprint* DialogueBlueprint,
 		UPARAM(meta=(ToolTip="Successful result returned by Create Territory AAA Dialogue Shot Pack."))
-		const FTerritoryDialogueShotPackBuildReport& ShotPack);
+		const FTerritoryDialogueShotPackBuildReport& ShotPack,
+		UPARAM(meta=(ToolTip="The same shot pack used to build this result. Its slot rows choose which sequence and framing each dialogue slot receives."))
+		const UTerritoryDialogueShotPackSpec* ShotSpec = nullptr);
 
 	/** Convenience operation used by content authors and automation. */
 	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Dialogue|Editor",
 		meta=(DisplayName="Create And Apply Territory AAA Dialogue Shot Pack",
-			ToolTip="One-click authoring path: creates or repairs the complete camera pack and applies the recommended defaults to the selected project-owned Narrative Dialogue Blueprint."))
+			ToolTip="One-click authoring path: creates or repairs the complete camera pack and applies the recommended defaults to the selected project-owned Narrative Dialogue Blueprint.",
+			AdvancedDisplay="ShotSpec"))
 	static FTerritoryDialogueShotPackBuildReport CreateAndApplyStudioDialogueShotPack(
 		UPARAM(meta=(ToolTip="Project-owned Narrative Dialogue Blueprint. Vendor assets are reference-only."))
 		UDialogueBlueprint* DialogueBlueprint,
 		UPARAM(meta=(ToolTip="Recommended: /Game/TerritoryFramework/Cinematics/Dialogue/Shots."))
-		const FString& DestinationContentPath);
+		const FString& DestinationContentPath,
+		UPARAM(meta=(ToolTip="Optional designer-authored shot pack. When supplied, its rows replace the built-in seven-shot table."))
+		const UTerritoryDialogueShotPackSpec* ShotSpec = nullptr);
+
+	/**
+	 * Add the NPC speaker entry a dialogue is missing, so the shot pack can give that speaker its own
+	 * coverage. Narrative matches a line to a speaker by id, so the id must be the one the lines use.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Territory|Narrative Dialogue|Editor",
+		meta=(DisplayName="Ensure Territory Dialogue Speaker",
+			ToolTip="Adds one NPC speaker entry to a Narrative Dialogue Blueprint when it is missing. Existing speaker entries are never modified."))
+	static bool EnsureDialogueSpeaker(
+		UPARAM(meta=(ToolTip="Project-owned Narrative Dialogue Blueprint to configure."))
+		UDialogueBlueprint* DialogueBlueprint,
+		UPARAM(meta=(ToolTip="Speaker id the dialogue lines use, for example Hashir or BanditLeader."))
+		FName SpeakerID,
+		UPARAM(meta=(ToolTip="NPC definition that resolves this speaker's character. Narrative requires it."))
+		class UNPCDefinition* SpeakerDefinition);
 };

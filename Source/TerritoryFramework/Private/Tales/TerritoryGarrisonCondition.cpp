@@ -27,8 +27,7 @@ bool UTerritoryGarrisonCondition::CompareValues(int64 ActualValue,
 	}
 }
 
-bool UTerritoryGarrisonCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryGarrisonCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!TerritoryToCheck.IsValid())
 	{

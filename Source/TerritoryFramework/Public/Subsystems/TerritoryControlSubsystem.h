@@ -25,6 +25,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
 	ETerritoryExposureState, OldState,
 	ETerritoryExposureState, NewState);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+	FOnTerritoryAlertChanged,
+	ATerritoryVolume*, Territory,
+	AActor*, Target,
+	ETerritoryAlertLevel, OldLevel,
+	ETerritoryAlertLevel, NewLevel);
+
 UCLASS()
 class TERRITORYFRAMEWORK_API UTerritoryControlSubsystem : public UWorldSubsystem
 {
@@ -42,6 +49,10 @@ public:
 	/** Reset the Territory's active capture contest through the server's capture system. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
 	void ResetCapture(ATerritoryVolume* Territory);
+
+	/** Recover through normal state conditions. Rejected recovery stays pending for retry. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Territory|Capture")
+	FTerritoryMutationResponse TryResetCapture(ATerritoryVolume* Territory);
 
 	/** P0-01: Remove only the runtime capture tracking map entry — does NOT mutate territory state. */
 	void ClearCaptureTrackingOnly(ATerritoryVolume* Territory);
@@ -131,6 +142,20 @@ public:
 		const FVector& EvidenceLocation, const FVector& EstimatedSourceDirection,
 		bool bConfirmedIdentity, float SightEvidenceSeconds = 0.25f);
 
+	/**
+	 * Tag-addressed evidence path for external systems (quests, abilities, vehicles, pets).
+	 *
+	 * A tag mapped by a profile Evidence Rule reports that rule's evidence channel and weight;
+	 * Territory's native distraction tag maps without any rule. Unknown tags are rejected, so a new
+	 * evidence source is authored in the stealth profile rather than in C++.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth",
+		meta=(DisplayName="Report Stealth Evidence By Tag"))
+	bool ReportStealthEvidenceByTag(ATerritoryVolume* Territory, AActor* Target,
+		AActor* Observer, FGameplayTag EvidenceTag, float Strength,
+		const FVector& EvidenceLocation, const FVector& EstimatedSourceDirection,
+		bool bConfirmedIdentity, float SightEvidenceSeconds = 0.25f);
+
 	/** Clear confirmed exposure and its exposure/bounds contest registrations. Explicit story and flag-capture registrations, Narrative personal hostility and burned disguises are retained. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
 	bool ClearInfiltratorExposure(ATerritoryVolume* Territory, AActor* Target,
@@ -180,12 +205,19 @@ public:
 	FGameplayTag GetContestingFaction(const ATerritoryVolume* Territory) const;
 
 	/** Check whether another attacker fits the Territory's strategic attacker limit. */
-	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
+	UFUNCTION(BlueprintPure, Category = "Territory|Capture", meta = (DeprecatedFunction,
+		DeprecationMessage = "Use Try Get Capture Participants and check readiness before calculating remaining capacity."))
 	bool HasAttackBudget(const ATerritoryVolume* Territory, const FGameplayTag& Faction) const;
 
 	/** Return the living attackers currently registered for this Territory's capture. */
-	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
+	UFUNCTION(BlueprintPure, Category = "Territory|Capture", meta = (DeprecatedFunction,
+		DeprecationMessage = "Use Try Get Capture Participants. Exact counts are server-only; -1 means unknown."))
 	int32 GetActiveAttackers(const ATerritoryVolume* Territory, const FGameplayTag& Faction) const;
+
+	/** True means exact server data, including a known zero. False sets both counts to -1 (unknown). */
+	UFUNCTION(BlueprintPure, Category = "Territory|Capture")
+	bool TryGetCaptureParticipants(const ATerritoryVolume* Territory, const FGameplayTag& Faction,
+		int32& OutLivingAttackers, int32& OutCapturePressure) const;
 
 	/**
 	 * Side-effect-free capture admission result for planning UI and AI.
@@ -228,6 +260,23 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Stealth")
 	FOnTerritoryStealthEvidenceReported OnStealthEvidenceReported;
 
+	/** Called when the Calm -> Suspicious -> Searching -> Alarmed -> Lockdown ladder changes. */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Stealth")
+	FOnTerritoryAlertChanged OnTerritoryAlertChanged;
+
+	/** Hiding spot registration: while hidden the stealth observer treats the target as unseen. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Stealth")
+	void SetTargetHidden(ATerritoryVolume* Territory, AActor* Target, bool bHidden);
+
+	/** True while a hiding spot in this Territory holds the target hidden. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
+	bool IsTargetHidden(const ATerritoryVolume* Territory, const AActor* Target) const;
+
+	/** Deterministic alert ladder used by the snapshot and the alarm delegate. */
+	UFUNCTION(BlueprintPure, Category="Territory|Stealth")
+	static ETerritoryAlertLevel ComputeAlertLevel(const UTerritoryStealthProfile* Profile,
+		ETerritoryExposureState ExposureState, float Suspicion);
+
 	/** Called when the target's stealth exposure changes. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Stealth")
 	FOnTerritoryExposureChanged OnExposureChanged;
@@ -247,6 +296,38 @@ public:
 
 private:
 	friend class FTFCaptureAtomicContestTransition;
+	friend class UTerritoryCounterAttackSubsystem;
+	// The exposure producer is private because a report must cross the exposure latch; these two
+	// tests drive the record itself, one for the shape it writes and one for the client refusal.
+	friend class FTFEvidenceStealthExposedProducer;
+	friend class FTFEvidenceStealthExposedRefusedOnClient;
+	FTerritoryMutationResponse ApplyTerritoryMutationValidated(const FTerritoryMutationRequest& Request,
+		TFunctionRef<bool()> FinalAdmission);
+
+	/**
+	 * Records the physical fact of a committed ownership change in the evidence ledger.
+	 *
+	 * Called after the final-state check and before OnTerritoryControlChanged, so a listener
+	 * woken by that delegate already sees the fact that caused its call. The context id is
+	 * derived from the transition itself (Place, old owner, new owner, campaign time), which
+	 * makes a replayed commit idempotent without suppressing a later, legitimate recapture.
+	 */
+	void RecordCaptureEvidence(ATerritoryVolume& Territory, const FGameplayTag& OldOwner,
+		const FGameplayTag& NewOwner);
+
+	/**
+	 * Records one physical exposure fact for an infiltrator that just crossed into Exposed.
+	 *
+	 * Called as soon as that state is committed and before any stealth broadcast, so a listener
+	 * woken by OnExposureChanged already sees the fact that caused its call. The exposure latch
+	 * keeps this to one row per episode; repeated sight updates on an already exposed target add
+	 * nothing. The infiltrator is the subject only when it carries a durable identity - a player
+	 * character has none, and the row then stands on the acting observer faction instead.
+	 */
+	void RecordStealthExposedEvidence(ATerritoryVolume& Territory, AActor& Target, AActor* Observer);
+
+	/** Campaign clock used for evidence stamps. Zero when no Narrative game state is ticking. */
+	double GetCampaignGameTime() const;
 
 	enum class EParticipationSource : uint8
 	{
@@ -261,6 +342,7 @@ private:
 		/** Why each identity is admitted. Only Capture adds pressure; each caller releases its own bits. Transient, like the actor registrations. */
 		TMap<FGameplayTag, TMap<TWeakObjectPtr<AActor>, uint8>> ParticipationSourcesByFaction;
 		TMap<FGameplayTag, float> CaptureProgressByFaction;
+		bool bRecoveryPending = false;
 	};
 
 	TMap<TWeakObjectPtr<ATerritoryVolume>, FPerTerritoryState> TerritoryCaptureState;
@@ -280,6 +362,8 @@ private:
 
 	TMap<TWeakObjectPtr<ATerritoryVolume>,
 		TMap<TWeakObjectPtr<AActor>, FInfiltrationRuntime>> TerritoryInfiltrationState;
+	/** Hiding spot registrations. A target is hidden while at least one spot holds it. */
+	TMap<TWeakObjectPtr<ATerritoryVolume>, TSet<TWeakObjectPtr<AActor>>> HiddenTargets;
 
 	/** Explicit quest overrides; absence means use the active Definition profile. */
 	TMap<TWeakObjectPtr<ATerritoryVolume>, bool> StealthInfiltrationOverrides;
@@ -291,6 +375,7 @@ private:
 		EType Type;
 		TWeakObjectPtr<ATerritoryVolume> Territory;
 		FGameplayTag Faction;
+		uint64 LoadGeneration = 0;
 	};
 	TArray<FDeferredCommand> DeferredCommands;
 
@@ -301,6 +386,7 @@ private:
 	void OnCaptureTick();
 
 	void EvaluateCaptureState(ATerritoryVolume* Territory, float DeltaTime);
+	void SelectCaptureLeader(const ATerritoryVolume* Territory, FGameplayTag& OutFaction, float& OutProgress) const;
 	void CompleteCapture(ATerritoryVolume* Territory, const FGameplayTag& NewOwner);
 	void EvaluateInfiltrationState(float DeltaTime);
 	void RemoveInfiltratorFromAllTerritories(AActor* Target);

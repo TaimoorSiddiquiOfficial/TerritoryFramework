@@ -9,6 +9,7 @@
 #include "Tales/TerritoryCaptureEvent.h"
 #include "Tales/TerritoryGarrisonCondition.h"
 #include "Tales/TerritoryQuestRules.h"
+#include "Tales/TerritoryNarrativeContext.h"
 #include "TerritoryStoryConditions.generated.h"
 
 class UNarrativeItem;
@@ -25,7 +26,7 @@ enum class ETerritoryWaitTimeSource : uint8
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Narrative Quest State Condition",
 		ToolTip="Read the quest on the Tales component supplied by Narrative. This does not begin a quest. Example: Not Started shows an offer; In Progress shows a reminder."))
-class TERRITORYFRAMEWORK_API UTerritoryQuestStateCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryQuestStateCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -42,8 +43,9 @@ public:
 		ETerritoryQuestStateRequirement::InProgress;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -55,7 +57,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Wait Time Condition",
 		ToolTip="Check an elapsed clock. This does not pause a dialogue or wait after entering a node. Example: 600 campaign seconds means ten minutes since the campaign began. Use a quest condition task to poll until it passes."))
-class TERRITORYFRAMEWORK_API UTerritoryWaitTimeCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryWaitTimeCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -76,9 +78,9 @@ public:
 		float RequiredWaitSeconds);
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target,
-		APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -89,7 +91,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Event Context Condition",
 		ToolTip="Require the exact pawn, controller, Tales component or Ability System needed by the next event. Each checkbox is independent. This never selects the first player in the world."))
-class TERRITORYFRAMEWORK_API UTerritoryEventContextCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryEventContextCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -117,8 +119,9 @@ public:
 	bool bRequireTalesComponent = false;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -132,7 +135,7 @@ UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Ownership Changed During Transition",
 		ToolTip="Pass only during a Territory state callback that changes the owner. Use on capture rewards to avoid paying for same-owner recovery. Ordinary dialogue outside that callback fails."))
 class TERRITORYFRAMEWORK_API UTerritoryOwnershipTransitionCondition
-	: public UNarrativeCondition
+	: public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -140,9 +143,9 @@ public:
 	UTerritoryOwnershipTransitionCondition();
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target,
-		APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -169,7 +172,7 @@ enum class ETerritoryStateConditionQuery : uint8
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory State Condition",
 		ToolTip="Check political state, local lock state, or whether territory data is known. Claimed and Locked can both be true. Old Locked selections now read the real lock field. Use Known before an inverted check when missing data must fail."))
-class TERRITORYFRAMEWORK_API UTerritoryStateCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryStateCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -203,8 +206,9 @@ public:
 	bool MatchesState(ETerritoryState State, ETerritoryAvailability Availability) const;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -212,7 +216,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Control Progress Condition",
 		ToolTip="Compare real control progress from zero to one hundred percent. Optional faction means the exact faction applying pressure. Full control may also mean a stable Claimed place; add a Contested state condition for ongoing capture. Requires a loaded territory."))
-class TERRITORYFRAMEWORK_API UTerritoryControlProgressCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryControlProgressCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -246,8 +250,9 @@ public:
 		float RequiredValue, float Tolerance);
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -255,7 +260,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Faction Reputation Condition",
 		ToolTip="Compare saved campaign reputation for one faction. Explicit uses the selected tag; dynamic sources follow the current Narrative participant. This does not compare treaties or NPC attitude."))
-class TERRITORYFRAMEWORK_API UTerritoryReputationCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryReputationCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -279,8 +284,9 @@ public:
 	int32 Value = 0;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -292,7 +298,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Faction Claimed District Count Condition",
 		ToolTip="Count complete, unlocked Districts held by one faction using the campaign directory. Partial or Contested Districts do not count. Use a Situation condition to count individual Places instead."))
-class TERRITORYFRAMEWORK_API UTerritoryFactionDistrictHoldingCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryFactionDistrictHoldingCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -328,8 +334,9 @@ public:
 		APlayerController* Controller) const;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -353,7 +360,7 @@ enum class ETerritoryAssaultConditionQuery : uint8
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Enemy Wave / Assault Condition",
 		ToolTip="Read finite enemy-wave records. Filter by territory, optional exact attacking faction and optional story ID. Latest queries prefer an unfinished matching assault over old results. Missing records fail, including a zero-count check."))
-class TERRITORYFRAMEWORK_API UTerritoryAssaultCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryAssaultCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -401,8 +408,9 @@ public:
 	bool MatchesRecord(const FTerritoryAssaultRecord& Record) const;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -410,7 +418,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Narrative Target Is In Territory Condition",
 		ToolTip="Check the Narrative target position, or the explicit controller pawn if Target is empty. Child inclusion follows authored parent links. Only loaded territory bounds can be checked."))
-class TERRITORYFRAMEWORK_API UTerritoryPresenceCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryPresenceCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -426,8 +434,9 @@ public:
 	bool bIncludeChildTerritories = true;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -435,7 +444,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Production Status Condition",
 		ToolTip="Read the last recorded production status for a place or one recipe. This does not run production. Missing production records fail; clients use the replicated economy view."))
-class TERRITORYFRAMEWORK_API UTerritoryProductionStatusCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryProductionStatusCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -455,8 +464,9 @@ public:
 	ETerritoryProductionStatus RequiredStatus = ETerritoryProductionStatus::Produced;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };
 
@@ -464,7 +474,7 @@ protected:
 UCLASS(BlueprintType, Blueprintable, EditInlineNew,
 	meta=(DisplayName="Territory Faction Resource Condition",
 		ToolTip="Compare a faction storage account for one Narrative item. This is faction storage, not the speaking NPC inventory. A missing storage account fails even when checking for zero items."))
-class TERRITORYFRAMEWORK_API UTerritoryResourceCondition : public UNarrativeCondition
+class TERRITORYFRAMEWORK_API UTerritoryResourceCondition : public UTerritoryNarrativeCondition
 {
 	GENERATED_BODY()
 
@@ -488,7 +498,8 @@ public:
 	int32 Quantity = 1;
 
 protected:
-	virtual bool CheckCondition_Implementation(APawn* Target, APlayerController* Controller,
-		class UTalesComponent* NarrativeComponent) override;
+public:
+	virtual bool CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent) override;
+protected:
 	virtual FString GetGraphDisplayText_Implementation() override;
 };

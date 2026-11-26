@@ -556,10 +556,10 @@ probability is not.
   the row entirely.** **Example:** **BP_BanditRaider**.
 - `MilitaryPower` — strategic strength, feeding the attack power ratio and the launch chance. It never
   captures by itself. **Example:** 100 for a matched fight; 300 for a faction that should usually win.
-- `EconomyReadiness` / `SupplyReadiness` — averaged into the readiness term, which only affects the
-  launch chance, not troop count or combat strength. **Example:** 0.5 each for a faction that is
-  struggling to fund its war.
-- `RecentMomentum` — recent wins and losses, contributing at most ±0.05. **Example:** leave it at 0 and
+- `EconomyReadiness` / `SupplyReadiness` — authored planning values averaged into the readiness term.
+  They affect launch chance, not troop count or combat strength. Neither value is a live wallet or
+  supply-network measurement. **Example:** author 0.5 each for a faction portrayed as poorly supplied.
+- `RecentMomentum` — authored momentum, contributing at most ±0.05; battle history does not update it automatically. **Example:** leave it at 0 and
   drive the drama from readiness and influence instead.
 - `TerritorialInfluence` — how established this faction is locally. It raises the launch chance **and**
   shortens the grace period, so an entrenched faction attacks sooner and more often. **Example:** 0.8 for

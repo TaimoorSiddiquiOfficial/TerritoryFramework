@@ -91,13 +91,64 @@ bool FTFJournalTransactionRefresh::RunTest(const FString& Parameters)
 		Client->NextURL = TEXT("127.0.0.1");
 		TestEqual(TEXT("Fixture uses the client read path"), Client->GetNetMode(), NM_Client);
 		ClientJournal->RefreshDistrictList();
-		ClientState->ReplicatedTransactions = SavedProjection;
+		TestFalse(TEXT("A client does not invent empty history before receipt"), ClientState->IsTransactionHistoryReady());
+		TestTrue(TEXT("History can be transported losslessly"), ClientState->TransactionSnapshot.Build(SavedProjection));
+		ClientState->OnRep_TransactionState();
+		TestTrue(TEXT("A complete snapshot makes history ready"), ClientState->IsTransactionHistoryReady());
 		ClientJournal->RefreshDistrictList();
 		TestTrue(TEXT("A joining client's journal refreshes replicated history"),
 			ClientJournal->RichText_EarningsSummary->GetText().ToString().Contains(TEXT("Audit credit")));
 		TestFalse(TEXT("Client journal cannot settle currency"), Client->GetSubsystem<UTerritoryEconomySubsystem>()->CreditCurrency(
 			ClientJournal->GetOwningPlayer(), 80, Heroes, TEXT("Rejected client credit")));
 		TestEqual(TEXT("Rendering cannot alter the received ledger"), ClientState->ReplicatedTransactions.Num(), SavedProjection.Num());
+
+		// A production/treasury notification must not rebuild an unrelated
+		// 500-row history, nor replace a cache whose own property has not notified.
+		auto* ClientEconomy = Client->GetSubsystem<UTerritoryEconomySubsystem>();
+		TArray<FTerritoryTransaction> RetainedHistory;
+		for (int32 Row = 0; Row < 500; ++Row)
+		{
+			FTerritoryTransaction Transaction;
+			Transaction.TransactionID = FGuid::NewGuid();
+			Transaction.Faction = Heroes;
+			Transaction.Amount = Row;
+			RetainedHistory.Add(Transaction);
+		}
+		ClientEconomy->RestoreTransactionHistory(RetainedHistory);
+		FTerritoryTreasury RetainedTreasury;
+		RetainedTreasury.IncomePerTick = 111;
+		ClientEconomy->RestoreTreasuryState({{Heroes, RetainedTreasury}});
+		FReplicatedFactionEconomy ReceivedTreasury;
+		ReceivedTreasury.Faction = Heroes;
+		ReceivedTreasury.IncomePerTick = 222;
+		ClientState->ReplicatedTreasuries = {ReceivedTreasury};
+		ClientState->OnRep_ProductionState();
+		TestEqual(TEXT("Production notification preserves unrelated treasury cache"),
+			ClientEconomy->GetFactionEconomy(Heroes).IncomePerTick, 111);
+		TestEqual(TEXT("Production notification preserves 500-row history cache"),
+			ClientEconomy->GetAllTransactionHistory().Num(), 500);
+		FTerritoryProductionSiteRecord RetainedSite;
+		RetainedSite.TerritoryGUID = FGuid::NewGuid();
+		ClientEconomy->RestoreProductionState({}, {RetainedSite}, {});
+		ClientState->OnRep_EconomyState();
+		TestEqual(TEXT("Treasury notification updates its own cache"),
+			ClientEconomy->GetFactionEconomy(Heroes).IncomePerTick, 222);
+		TestEqual(TEXT("Treasury notification preserves production cache"),
+			ClientEconomy->GetAllProductionSites().Num(), 1);
+		const auto AfterNotifications = ClientEconomy->GetAllTransactionHistory();
+		TestEqual(TEXT("Treasury notification preserves 500-row history cache"), AfterNotifications.Num(), 500);
+		if (AfterNotifications.Num() == 500)
+		{
+			TestEqual(TEXT("Unrelated notifications preserve exact history identity"),
+				AfterNotifications.Last().TransactionID, RetainedHistory.Last().TransactionID);
+		}
+		ClientState->OnRep_TransactionState();
+		TestEqual(TEXT("History notification replaces only its own cache"),
+			ClientEconomy->GetAllTransactionHistory().Num(), SavedProjection.Num());
+		TestEqual(TEXT("History notification preserves production cache"),
+			ClientEconomy->GetAllProductionSites().Num(), 1);
+		TestEqual(TEXT("History notification preserves treasury cache"),
+			ClientEconomy->GetFactionEconomy(Heroes).IncomePerTick, 222);
 	}
 	for (UWorld* World : Worlds)
 	{

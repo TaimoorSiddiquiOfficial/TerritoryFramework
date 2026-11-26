@@ -47,11 +47,11 @@ UTerritoryNarrativeCheckpointEvent::UTerritoryNarrativeCheckpointEvent(
 	bRefireOnLoad = false;
 }
 
-void UTerritoryNarrativeCheckpointEvent::ExecuteEvent_Implementation(
+void UTerritoryNarrativeCheckpointEvent::ExecuteEventInContext(
 	APawn* Target, APlayerController* Controller,
 	UTalesComponent* NarrativeComponent)
 {
-	Super::ExecuteEvent_Implementation(Target, Controller, NarrativeComponent);
+	Super::ExecuteEventInContext(Target, Controller, NarrativeComponent);
 	if (!TerritoryTales::DoEventConditionsPass(
 		this, Target, Controller, NarrativeComponent)) return;
 	if (!NarrativeComponent || !NarrativeComponent->HasAuthority()) return;

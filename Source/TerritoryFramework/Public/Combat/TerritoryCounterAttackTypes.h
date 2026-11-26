@@ -392,15 +392,15 @@ struct FTerritoryFactionAssaultConfig
 	float MilitaryPower = 100.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack",
-		meta=(ClampMin="0.0", ClampMax="1.0", ToolTip="0 means the faction cannot afford a response; 1 means fully ready."))
+		meta=(ClampMin="0.0", ClampMax="1.0", ToolTip="Authored planning input: 0 unready, 1 fully ready. This is not read from live currency or an economy simulation."))
 	float EconomyReadiness = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack",
-		meta=(ClampMin="0.0", ClampMax="1.0", ToolTip="0 means no supply/proximity support; 1 means fully supplied."))
+		meta=(ClampMin="0.0", ClampMax="1.0", ToolTip="Authored planning input: 0 unsupported, 1 fully supplied. This does not simulate a live supply network."))
 	float SupplyReadiness = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Counter Attack",
-		meta=(ClampMin="-1.0", ClampMax="1.0", ToolTip="Recent performance: -1 losing badly, 0 neutral, 1 winning strongly."))
+		meta=(ClampMin="-1.0", ClampMax="1.0", ToolTip="Authored planning input: -1 losing, 0 neutral, 1 winning. Battle history does not automatically update this value."))
 	float RecentMomentum = 0.f;
 
 	/** Durable local political/logistical reach. Higher values accelerate finite responses. */
@@ -729,8 +729,12 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") int32 WaveSize = 1;
 	/** How finite waves are released: together, in sequence or under the selected strategy. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") ETerritoryAssaultWaveStrategy WaveStrategy = ETerritoryAssaultWaveStrategy::Legacy;
-	/** Bounded wait for an occupied vehicle staging area; zero means no current wait. */
+	/** Campaign timestamp retained for diagnostics/legacy saves; not a physical timeout clock. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") double VehicleStagingBlockedSince = 0.0;
+	/** Elapsed physical world seconds of the bounded staging wait. Pauses across process restart. */
+	UPROPERTY(SaveGame, NotReplicated) double VehicleStagingElapsedSeconds = 0.0;
+	/** Runtime-only clock anchor. A restored record must re-anchor in its new world. */
+	double VehicleStagingLastWorldSeconds = -1.0;
 	/** Narrative difficulty is snapshotted so loading cannot silently change this assault's car budget. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack|Vehicle") ENarrativeGameplayDifficulty NarrativeDifficultyAtLaunch = ENarrativeGameplayDifficulty::Medium;
 	/** Maximum signature/fallback cars across every road approach in this finite assault. */

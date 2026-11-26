@@ -2,6 +2,8 @@
 
 #include "AI/NarrativeNPCController.h"
 #include "Engine/World.h"
+#include "Engine/LatentActionManager.h"
+#include "UObject/UObjectHash.h"
 #include "Framework/TerritoryNarrativeProAdapter.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "TimerManager.h"
@@ -17,7 +19,13 @@
 void UTerritoryNPCActivityComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	if (GetOwner()->HasAuthority())
+	BindPerceptionRescoreTimer();
+}
+
+void UTerritoryNPCActivityComponent::BindPerceptionRescoreTimer()
+{
+	if (GetWorld() && !GetWorld()->bIsTearingDown && IsValid(GetOwner())
+		&& !GetOwner()->IsActorBeingDestroyed() && GetOwner()->HasAuthority())
 	{
 		// Keep Native's existing selection timer. Its sight sense reports visibility
 		// edges, not later changes to the stored strength or Territory attitude.
@@ -29,7 +37,23 @@ void UTerritoryNPCActivityComponent::BeginPlay()
 
 void UTerritoryNPCActivityComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(TimerHandle_RescoreGoals);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(TimerHandle_RescoreGoals);
+		// Native generators are owned UObjects, not components. Actor EndPlay
+		// does not cancel their Blueprint Delay/EQS loops or object-bound timers.
+		// Include removed generators still retained by a latent action/delegate.
+		TArray<UObject*> OwnedObjects;
+		GetObjectsWithOuter(this, OwnedObjects);
+		for (UObject* Object : OwnedObjects)
+		{
+			if (UNPCGoalGenerator* Generator = Cast<UNPCGoalGenerator>(Object))
+			{
+				World->GetLatentActionManager().RemoveActionsForObject(Generator);
+				World->GetTimerManager().ClearAllTimersForObject(Generator);
+			}
+		}
+	}
 	DeliveredPerception.Reset();
 	DeliveryGenerators.Reset();
 	DeliveryPawn.Reset();
@@ -229,4 +253,8 @@ void UTerritoryNPCActivityComponent::Load_Implementation()
 		}
 	}
 	Super::Load_Implementation();
+	// Native restores RescoreInterval and rebinds this SAME handle to its
+	// nonvirtual RescoreGoals. Reinstall the adapter after that work, including
+	// post-BeginPlay actor-record loads. SetTimer replaces, never adds a timer.
+	BindPerceptionRescoreTimer();
 }

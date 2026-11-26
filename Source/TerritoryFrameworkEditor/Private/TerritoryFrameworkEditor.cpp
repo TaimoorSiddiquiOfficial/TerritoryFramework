@@ -7,11 +7,16 @@
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryDeveloperSettings.h"
 #include "Cinematics/TerritoryCinematicLightRig.h"
+#include "Cinematics/TerritoryDialogueShotPackSpec.h"
+#include "Tales/TerritoryReplyTimeoutProfile.h"
 #include "Cinematics/TerritoryLightRigEditorLibrary.h"
 #include "Misc/MessageDialog.h"
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Core/TerritoryGuardPostDefinition.h"
 #include "Core/TerritoryStealthProfile.h"
+#include "Core/TerritoryUpgradeDefinition.h"
+#include "Core/TerritoryGuardPerceptionProfile.h"
+#include "Core/TerritoryNoiseProfile.h"
 #include "Core/TerritoryVolume.h"
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Combat/TerritoryFloorCombatPolicy.h"
@@ -703,10 +708,19 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 	const FText StealthMenu = LOCTEXT("TerritoryStealthAssetSubMenu", "Stealth & Disguise");
 	const FText DiplomacyMenu = LOCTEXT("TerritoryDiplomacyAssetSubMenu", "AI & Diplomacy");
 	const FText StoryMenu = LOCTEXT("TerritoryStoryAssetSubMenu", "Story & Quests");
+	const FText UpgradeMenu = LOCTEXT("TerritoryUpgradeAssetSubMenu", "Upgrades & Progression");
 	Register(UTerritoryCinematicLightRigProfile::StaticClass(),
 		LOCTEXT("TerritoryLightRigProfileAsset", "Territory Cinematic Light Rig Profile"),
 		LOCTEXT("TerritoryLightRigProfileDescription", "Optional character lights for Narrative shots and cutscenes, with a project control panel for authoring the look."),
 		StoryMenu, FColor(223, 180, 99));
+	Register(UTerritoryDialogueShotPackSpec::StaticClass(),
+		LOCTEXT("TerritoryDialogueShotPackSpecAsset", "Territory Studio Shot Pack"),
+		LOCTEXT("TerritoryDialogueShotPackSpecDescription", "Designer-authored dialogue shot rows: camera framing, lens, aperture and the dialogue slot each shot installs into. The shot pack tool builds from this asset instead of its built-in table."),
+		StoryMenu, FColor(150, 196, 255));
+	Register(UTerritoryReplyTimeoutProfile::StaticClass(),
+		LOCTEXT("TerritoryReplyTimeoutProfileAsset", "Territory Reply Timeout Profile"),
+		LOCTEXT("TerritoryReplyTimeoutProfileDescription", "Server-owned reply countdown policy: how long a player has to answer a dialogue, and which authored silence reply is selected when they do not."),
+		StoryMenu, FColor(214, 160, 120));
 
 	Register(
 		UTerritoryPlaceDefinition::StaticClass(),
@@ -764,6 +778,34 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 			"Defines detection, exposure, suspicious actions, gunfire, and stealth-breaking rules."),
 		StealthMenu,
 		FColor(116, 105, 190));
+	Register(
+		UTerritoryUpgradeDefinition::StaticClass(),
+		LOCTEXT("TerritoryUpgradeDefinitionAsset", "Territory Upgrade Definition"),
+		LOCTEXT("TerritoryUpgradeDefinitionDescription",
+			"Per-tier Place upgrade recipe: faction perk gate, instanced Narrative requirements, currency/items/quest-condition/free cost routes, and OnUpgraded events."),
+		UpgradeMenu,
+		FColor(84, 160, 120));
+	Register(
+		UTerritoryUpgradeBalanceProfile::StaticClass(),
+		LOCTEXT("TerritoryUpgradeBalanceProfileAsset", "Territory Upgrade Balance Profile"),
+		LOCTEXT("TerritoryUpgradeBalanceProfileDescription",
+			"Deterministic AI catch-up: target faction tier = player tier + offset, optional automatic AI Place upgrades, and the server evaluation interval."),
+		UpgradeMenu,
+		FColor(120, 132, 88));
+	Register(
+		UTerritoryGuardPerceptionProfile::StaticClass(),
+		LOCTEXT("TerritoryGuardPerceptionProfileAsset", "Territory Guard Perception Profile"),
+		LOCTEXT("TerritoryGuardPerceptionProfileDescription",
+			"Guard quality tier: sight radius, peripheral angle, sight/hearing/damage memory time and hearing range, applied to Narrative's AI Perception per guard."),
+		StealthMenu,
+		FColor(124, 140, 214));
+	Register(
+		UTerritoryNoiseProfile::StaticClass(),
+		LOCTEXT("TerritoryNoiseProfileAsset", "Territory Noise Profile"),
+		LOCTEXT("TerritoryNoiseProfileDescription",
+			"Shared loudness, range and stimulus tag for distractions, weapons and scripted noises, so every sound source reads from one authored recipe."),
+		StealthMenu,
+		FColor(96, 178, 170));
 	Register(
 		UTerritoryDisguiseProfile::StaticClass(),
 		LOCTEXT("TerritoryDisguiseProfileAsset", "Territory Disguise Profile"),

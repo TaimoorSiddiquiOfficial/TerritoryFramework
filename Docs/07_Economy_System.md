@@ -99,7 +99,7 @@ NetPerTick = FactionIncome - FactionCosts
 
 `GuardCost` is recurring upkeep only. `GuardRecruitmentCost` is the one-time price used when an absolute desired target is raised. Both default to 50 but are independently authored. Lowering a target has no refund; it immediately reduces the calculated upkeep rate.
 
-Staffing mutations call `RecalculateIncome` immediately and publish the new rate snapshot to the existing `ATerritoryWorldState`. Ownership/upgrade cascades remain deferred through the dirty-faction reducer. Clients and late joiners read income/cost/territory-count and transaction history from the replicated WorldState projection; Narrative inventory remains the balance authority.
+Staffing mutations call `RecalculateIncome` immediately and publish the new rate snapshot to the existing `ATerritoryWorldState`. Ownership/upgrade/ancestor cascades remain coalesced through the dirty-faction reducer on the existing production observation timer. Rate refresh does not settle money or advance production checkpoints. Clients and late joiners read income/cost/territory-count and transaction history from the replicated WorldState projection; Narrative inventory remains the balance authority.
 
 ## Transaction Ledger
 

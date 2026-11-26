@@ -4,6 +4,7 @@
 #include "Tales/NarrativeNodeBase.h"
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryTalesUtilities.h"
+#include "Tales/TerritoryNarrativeContext.h"
 
 #define LOCTEXT_NAMESPACE "TerritoryNarrativeConditionTask"
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Core/TerritoryAssetPreload.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Core/TerritoryTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
@@ -334,6 +335,8 @@ private:
 	friend class FTFAssaultCheckpointValidation;
 	friend class FTFStrategicValueAggregation;
 	friend class FTFAssaultSpawnFailureBudget;
+	friend class FTFAssaultWaveStrategies;
+	static bool AdvanceVehicleStagingWait(FTerritoryAssaultRecord& Assault, double WorldSeconds);
 	friend class FTFAssaultTargetStreamingWait;
 	friend class FTFAssaultSavedVehicleBudget;
 	friend class FTFStoryReinforcements;
@@ -366,6 +369,10 @@ private:
 	bool bUpdatingAssaults = false;
 	bool bSpawningAssaultWave = false;
 	uint64 RestoreGeneration = 0;
+	FTerritoryAssetPreload AssaultAssets;
+	ETerritoryAssetReadiness PrepareAssaultAssets(const ATerritoryVolume* Territory,
+		const FTerritoryAssaultRecord* Record = nullptr);
+	friend class FTFTerritoryAssetReadiness;
 	/** Transient access token; detects map relocation or replacement across synchronous callbacks. */
 	struct FAssaultAccess
 	{
@@ -401,6 +408,8 @@ private:
 	void TryScheduleRecurringStrategicAssaults();
 	void AdvanceAssault(FTerritoryAssaultRecord& Assault);
 	void EvaluateAssault(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
+	static void UpdateCommittedForceEstimate(FTerritoryAssaultRecord& Assault,
+		const FTerritoryFactionAssaultConfig& ForceConfig, const UTerritoryCounterAttackProfile* Profile);
 	bool ActivateAssault(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
 	void SpawnNextWave(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
 	/** Saved retry counts must saturate so exhausted deployments cannot wrap and retry forever. */
@@ -423,6 +432,16 @@ private:
 	void ResolveAssault(FTerritoryAssaultRecord& Assault, ETerritoryAssaultState FinalState,
 		ETerritoryAssaultResolution Reason);
 	void RetireLiveParticipants(FTerritoryAssaultRecord& Assault, bool bDestroyActors);
+	/**
+	 * Record one attacker's death as a durable physical fact.
+	 *
+	 * Only deaths are recorded: an attacker that withdraws leaves the field but was not killed by
+	 * anyone, and the ledger stores attributable facts, so a withdrawal has no instigator to name.
+	 * The defending faction is credited because this callback only runs for an assault committed
+	 * against its Territory.
+	 */
+	void RecordAttackerKilledEvidence(const FTerritoryAssaultRecord& Assault,
+		const ATerritoryAssaultCharacter& Participant);
 	void RetireLiveVehicles(const FGuid& AssaultID, bool bDestroyActors,
 		bool bForCampaignRestore = false);
 	void UpdateRetiringVehicles();
@@ -447,6 +466,9 @@ private:
 		const ATerritoryVolume* Territory, bool& bOutAliveInside,
 		bool& bOutDeadInside) const;
 	bool HasPhysicalAttackerInside(const FTerritoryAssaultRecord& Assault,
+		const ATerritoryVolume* Territory) const;
+	static bool HasUnresolvedDefenders(ATerritoryVolume* Territory, FGameplayTag DefendingFaction);
+	ATerritoryAssaultCharacter* FindPhysicalAttackerInside(const FTerritoryAssaultRecord& Assault,
 		const ATerritoryVolume* Territory) const;
 	bool CompleteRecapture(FTerritoryAssaultRecord& Assault,
 		ATerritoryVolume* Territory);
@@ -525,4 +547,10 @@ private:
 	friend class FTFAssaultPlayerPower;
 	friend class FTFGuardReserveTotals;
 	friend class FTFAssaultTeardownAccounting;
+	friend class FTFAssaultHandoverAdmission;
+	friend class FTFAssaultMovementWatchdog;
+	/** Seeds one assault record so the attacker-death evidence commit can be exercised. */
+	friend class FTFEvidenceAssaultKilledProducer;
+	/** Seeds a registered attacker in a client world to prove the refusal path. */
+	friend class FTFEvidenceAssaultKilledRefusedOnClient;
 };

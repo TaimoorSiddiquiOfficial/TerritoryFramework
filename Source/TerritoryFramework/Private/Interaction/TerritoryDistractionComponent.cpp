@@ -1,4 +1,5 @@
 #include "Interaction/TerritoryDistractionComponent.h"
+#include "Core/TerritoryNoiseProfile.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 
@@ -52,9 +53,14 @@ bool UTerritoryDistractionComponent::ReportDistractionAtLocation(
 	bHasReported = true;
 	AActor* Source = Owner->GetInstigator();
 	if (!Source) Source = Owner;
+	// A shared noise profile keeps throwable, weapon and scripted noises on one authored recipe.
+	const float UseLoudness = NoiseProfile ? NoiseProfile->Loudness : Loudness;
+	const float UseRange = NoiseProfile ? NoiseProfile->MaximumRange : MaximumRange;
+	const FGameplayTag NoiseTag = NoiseProfile && NoiseProfile->NoiseTag.IsValid()
+		? NoiseProfile->NoiseTag : TerritoryStealthTags::DistractionThrowable.GetTag();
 	UAISense_Hearing::ReportNoiseEvent(World, WorldLocation,
-		FMath::Max(0.f, Loudness), Source, FMath::Max(0.f, MaximumRange),
-		TerritoryStealthTags::DistractionThrowable.GetTag().GetTagName());
+		FMath::Max(0.f, UseLoudness), Source, FMath::Max(0.f, UseRange),
+		NoiseTag.GetTagName());
 
 	// Publish the same impact into Narrative GAS. Quests, abilities, Gameplay
 	// Effects, and analytics may listen without polling AI Perception.
@@ -63,7 +69,7 @@ bool UTerritoryDistractionComponent::ReportDistractionAtLocation(
 	Payload.Instigator = Source;
 	Payload.Target = Owner;
 	Payload.OptionalObject = Owner;
-	Payload.EventMagnitude = FMath::Max(0.f, Loudness);
+	Payload.EventMagnitude = FMath::Max(0.f, UseLoudness);
 	if (Source != Owner)
 	{
 		UAbilitySystemBlueprintLibrary::SendGameplayEventToActor(

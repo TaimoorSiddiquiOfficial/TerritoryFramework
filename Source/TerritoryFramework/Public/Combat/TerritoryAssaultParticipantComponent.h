@@ -10,6 +10,7 @@
 class ANarrativeNPCCharacter;
 class ANarrativeVehicleBase;
 class ATerritoryVolume;
+class ULevel;
 class UNarrativeAbilitySystemComponent;
 class UNPCActivity;
 class UNPCActivityComponent;
@@ -83,7 +84,7 @@ public:
 	/** Check whether the attacker is still arriving by vehicle and has not completed its entry phase. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault|Vehicle") bool IsVehicleIngressPending() const { return bVehicleIngressRequired && !bVehicleIngressComplete; }
 	/** Check whether this participant may currently enter combat under its assault state and vehicle rules. */
-	UFUNCTION(BlueprintPure, Category="Territory|Assault|Vehicle") bool CanEngageCombat() const { return !IsVehicleIngressPending() && !bEscapeOnVehicleArrival; }
+	UFUNCTION(BlueprintPure, Category="Territory|Assault|Vehicle") bool CanEngageCombat() const { return !bStreamingSuspended && !IsVehicleIngressPending() && !bEscapeOnVehicleArrival; }
 	/** Check whether this assault participant is allowed to help capture its assigned Territory. */
 	UFUNCTION(BlueprintPure, Category="Territory|Assault") bool AllowsTerritoryCapture() const { return bAllowsTerritoryCapture; }
 	/** Check whether this participant has a valid assault configuration. */
@@ -109,6 +110,7 @@ private:
 	friend class FTFAssaultSurvivorRestore;
 	friend class FTFAssaultTargetStreamingWait;
 	friend class FTFAssaultCombatAutonomy;
+	friend class FTFAssaultMovementWatchdog;
 	friend class FTFRoadSteeringObstacle;
 	// Bounded transient perception context, never campaign state or client input.
 	TMap<TWeakObjectPtr<AActor>, double> DamagingEnemies;
@@ -118,6 +120,12 @@ private:
 	UPROPERTY(Replicated) FGameplayTag AttackingFaction;
 	UPROPERTY(Replicated) bool bCaptureRegistered = false;
 	UPROPERTY(Replicated) bool bAllowsTerritoryCapture = true;
+	UPROPERTY(Replicated) bool bStreamingSuspended = false;
+	uint8 StreamingMovementMode = 0;
+	uint8 StreamingCustomMovementMode = 0;
+	FVector StreamingVelocity = FVector::ZeroVector;
+	bool bStreamingActivityWasActive = false;
+	bool bStreamingCollisionWasEnabled = false;
 	bool bPrioritizeTerritoryTakeover = false;
 	float DefendingPlayerEngagementPadding = 800.f;
 	FGameplayTag TakeoverStartedDialogueTag;
@@ -168,9 +176,17 @@ private:
 	int32 GoalInitializationAttempts = 0;
 	int32 ConsecutiveMovementRestartFailures = 0;
 	double NextMovementRestartTime = 0.0;
+	bool bHasMovementProgressSample = false;
+	FVector LastMovementLocation = FVector::ZeroVector;
+	FVector LastMovementWaypoint = FVector::ZeroVector;
+	FVector LastMovementObjective = FVector::ZeroVector;
+	double LastMovementRemainingDistance = 0.0;
 	bool bRemovalReported = false;
 
 	void UpdateParticipation();
+	void HandleLevelRemoving(ULevel* Level, UWorld* World);
+	void SuspendForStreaming();
+	bool ResumeAfterStreaming(ATerritoryVolume* Territory);
 	ATerritoryVolume* ResolveTargetTerritory() const;
 	bool BindNarrativeDeathAfterSpawnReady();
 	bool EnsureNarrativeVehicleIngress();

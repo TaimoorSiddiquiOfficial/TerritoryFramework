@@ -134,10 +134,64 @@ bool UTerritoryConversationListenerComponent::ResolvePlayParams(UTalesComponent*
 	return true;
 }
 
+bool UTerritoryConversationListenerComponent::Reserve(ATerritoryConversationMeetingPoint* Meeting,
+	const FGuid& Session, double Duration)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !IsValid(Meeting) || !Session.IsValid())
+	{
+		return false;
+	}
+	// A reservation may be refreshed by its own meeting, but never stolen by another one, and never
+	// granted to a meeting while this listener is already inside a running dialogue.
+	if (ReservedSession.IsValid() && ReservedSession != Session)
+	{
+		return ReservedMeeting.Get() == Meeting && ReservedSession == Session;
+	}
+	if (UTalesComponent* Tales = GetPersonalTales())
+	{
+		if (Tales->GetCurrentDialogue())
+		{
+			return false;
+		}
+	}
+	ReservedMeeting = Meeting;
+	ReservedSession = Session;
+	ReservedUntil = GetWorld()->GetTimeSeconds() + FMath::Max(Duration, 1.);
+	SetComponentTickEnabled(true);
+	return true;
+}
+
+void UTerritoryConversationListenerComponent::Unreserve(const FGuid& Session)
+{
+	if (!Session.IsValid() || ReservedSession != Session)
+	{
+		return;
+	}
+	ReservedMeeting.Reset();
+	ReservedSession.Invalidate();
+	ReservedUntil = 0.;
+	if (!SessionID.IsValid())
+	{
+		SetComponentTickEnabled(false);
+	}
+}
+
+bool UTerritoryConversationListenerComponent::IsReserved() const
+{
+	return ReservedSession.IsValid() && IsValid(ReservedMeeting.Get()) && GetWorld()
+		&& GetWorld()->GetTimeSeconds() < ReservedUntil;
+}
+
+bool UTerritoryConversationListenerComponent::IsReservedFor(const ATerritoryConversationMeetingPoint* Meeting) const
+{
+	return IsReserved() && ReservedMeeting.Get() == Meeting;
+}
+
 void UTerritoryConversationListenerComponent::ResetContext()
 {
 	SessionID.Invalidate(); PreparedClass = nullptr; FirstGuard = nullptr; SecondGuard = nullptr;
 	PendingMeeting.Reset(); PreparedDialogue.Reset(); bAcknowledged = false; bStartingNativeDialogue = false; ExpiresAt = 0.;
+	ReservedMeeting.Reset(); ReservedSession.Invalidate(); ReservedUntil = 0.;
 	SetComponentTickEnabled(false);
 }
 

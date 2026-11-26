@@ -11,8 +11,7 @@ UTerritoryDiplomacyCondition::UTerritoryDiplomacyCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
-bool UTerritoryDiplomacyCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritoryDiplomacyCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	if (!FactionA.IsValid() || !FactionB.IsValid() || FactionA == FactionB)
 	{

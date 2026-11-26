@@ -11,7 +11,8 @@ SRC = os.path.join(ROOT, "Source", "TerritoryFramework")
 OUT = os.path.join(ROOT, "Tools", "options_inventory.json")
 
 def read(p):
-    return open(p, encoding="utf-8", errors="replace").read()
+    with open(p, encoding="utf-8", errors="replace") as source:
+        return source.read()
 
 def consume_balanced(text, i):
     """text[i] must be '('. Return (body, index_after_closing_paren)."""
@@ -103,11 +104,29 @@ def find_uproperties(text):
 
 DECL = re.compile(r"(?:class|struct)\s+(?:\w+_API\s+)?(?P<name>\w+)\s*(?:final\s*|abstract\s*)?(?=[:{])")
 
-def enclosing_class(text, offset):
-    """Nearest preceding real type declaration. Requires ':' or '{' after the name, which
-    excludes forward declarations (`class UDialogue;`) and elaborated parameters (`class UX* p`)."""
-    hits = list(DECL.finditer(text, 0, offset))
-    return hits[-1].group("name") if hits else "?"
+def type_ranges(text):
+    """Lexical type bodies; comments, literals and closed nested types cannot own a row."""
+    # Keep offsets and newlines so declarations and property offsets share coordinates.
+    literals = re.compile(r'//[^\n]*|/\*[\s\S]*?\*/|R"([^ ()\\\t\r\n]{0,16})\([\s\S]*?\)\1"|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'')
+    code = literals.sub(lambda m: re.sub(r'[^\n]', ' ', m.group()), text)
+    stack, closes = [], {}
+    for i, ch in enumerate(code):
+        if ch == '{':
+            stack.append(i)
+        elif ch == '}' and stack:
+            closes[stack.pop()] = i
+    ranges = []
+    for match in DECL.finditer(code):
+        start = code.find('{', match.end())
+        semicolon = code.find(';', match.end())
+        if start in closes and (semicolon < 0 or start < semicolon):
+            ranges.append((start, closes[start], match.group('name')))
+    return ranges
+
+def enclosing_class(text, offset, ranges=None):
+    owners = [entry for entry in (type_ranges(text) if ranges is None else ranges)
+              if entry[0] < offset < entry[1]]
+    return max(owners, key=lambda entry: entry[0])[2] if owners else '?'
 
 META = re.compile(r"meta\s*=\s*\((?P<meta>(?:[^()]|\([^()]*\))*)\)", re.S)
 
@@ -158,53 +177,69 @@ def unquote(s):
         return s[1:-1]
     return s
 
-rows = []
-files = sorted(glob.glob(os.path.join(SRC, "**", "*.h"), recursive=True)) + \
-        sorted(glob.glob(os.path.join(SRC, "**", "*.cpp"), recursive=True))
+def extract_inventory(root=ROOT):
+    source = os.path.join(root, "Source", "TerritoryFramework")
+    rows = []
+    files = sorted(glob.glob(os.path.join(source, "**", "*.h"), recursive=True)) + \
+            sorted(glob.glob(os.path.join(source, "**", "*.cpp"), recursive=True))
 
-for path in files:
-    text = read(path)
-    rel = os.path.relpath(path, ROOT).replace("\\", "/")
-    for spec, decl, off in find_uproperties(text):
-        keys, vals = {}, {}
-        mm = META.search(spec)
-        if mm:
-            for kv in split_meta(mm.group("meta")):
-                if "=" in kv:
-                    k, v = kv.split("=", 1)
-                    keys[k.strip()] = True; vals[k.strip()] = unquote(v)
-                elif kv:
-                    keys[kv.strip()] = True
-        base = strip_top_level_initializer(decl)
-        names = re.findall(r"\b([A-Za-z_]\w*)\b", base)
-        name = names[-1] if names else "?"
-        typ = base[:base.rfind(name)].strip() if name in base else base
-        # capture the default initializer, if the author wrote one: `= false`, `= 328.f`, `= {}`
-        init = decl[len(base):].lstrip()
-        default = init[1:].strip() if init.startswith("=") else ""
-        rows.append({
-            "file": rel,
-            "class": enclosing_class(text, off),
-            "name": name,
-            "type": typ,
-            "default": default,
-            "spec": spec,
-            "meta_keys": sorted(keys),
-            "tooltip": vals.get("ToolTip", ""),
-            "display": vals.get("DisplayName", ""),
-            "edit_spec": "EditAnywhere" in spec,
-            "config_spec": "Config" in spec,
-        })
+    for path in files:
+        text = read(path)
+        ranges = type_ranges(text)
+        rel = os.path.relpath(path, root).replace("\\", "/")
+        for spec, decl, off in find_uproperties(text):
+            keys, vals = {}, {}
+            mm = META.search(spec)
+            if mm:
+                for kv in split_meta(mm.group("meta")):
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        keys[k.strip()] = True; vals[k.strip()] = unquote(v)
+                    elif kv:
+                        keys[kv.strip()] = True
+            base = strip_top_level_initializer(decl)
+            names = re.findall(r"\b([A-Za-z_]\w*)\b", base)
+            name = names[-1] if names else "?"
+            typ = base[:base.rfind(name)].strip() if name in base else base
+            # capture the default initializer, if the author wrote one: `= false`, `= 328.f`, `= {}`
+            init = decl[len(base):].lstrip()
+            default = init[1:].strip() if init.startswith("=") else ""
+            rows.append({
+                "file": rel,
+                "class": enclosing_class(text, off, ranges),
+                "name": name,
+                "type": typ,
+                "default": default,
+                "spec": spec,
+                "meta_keys": sorted(keys),
+                "tooltip": vals.get("ToolTip", ""),
+                "display": vals.get("DisplayName", ""),
+                "edit_spec": "EditAnywhere" in spec,
+                "config_spec": "Config" in spec,
+            })
 
-with open(OUT, "w", encoding="utf-8") as f:
-    json.dump(rows, f, indent=1)
+    return rows
 
-print("OUT:", OUT)
-print("UPROPERTY_TOTAL:", len(rows))
-print("FILES_SCANNED:", len(files))
-print("EDITANYWHERE:", sum(1 for r in rows if r["edit_spec"]))
-print("CONFIG:", sum(1 for r in rows if r["config_spec"]))
-print("WITH_TOOLTIP:", sum(1 for r in rows if r["tooltip"]))
-print("WITH_DISPLAYNAME:", sum(1 for r in rows if r["display"]))
-print("DISTINCT_CLASSES:", len({r["class"] for r in rows}))
-print("UNRESOLVED_CLASS:", sum(1 for r in rows if r["class"] == "?"))
+def read_fresh_inventory(root=ROOT):
+    """Refuse stale cached documentation input; never silently rewrite it during verification."""
+    path = os.path.join(root, "Tools", "options_inventory.json")
+    cached = json.loads(read(path))
+    fresh = extract_inventory(root)
+    if cached != fresh:
+        raise SystemExit("Stale options_inventory.json: run Tools/Extract-Options.py against current source first.")
+    return fresh
+
+if __name__ == "__main__":
+    rows = extract_inventory()
+    with open(OUT, "w", encoding="utf-8") as f:
+        json.dump(rows, f, indent=1)
+
+    print("OUT:", OUT)
+    print("UPROPERTY_TOTAL:", len(rows))
+    print("FILES_WITH_PROPERTIES:", len({row["file"] for row in rows}))
+    print("EDITANYWHERE:", sum(1 for r in rows if r["edit_spec"]))
+    print("CONFIG:", sum(1 for r in rows if r["config_spec"]))
+    print("WITH_TOOLTIP:", sum(1 for r in rows if r["tooltip"]))
+    print("WITH_DISPLAYNAME:", sum(1 for r in rows if r["display"]))
+    print("DISTINCT_CLASSES:", len({r["class"] for r in rows}))
+    print("UNRESOLVED_CLASS:", sum(1 for r in rows if r["class"] == "?"))

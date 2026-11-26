@@ -35,6 +35,10 @@ TArray<FTerritoryAssaultRecord> UTerritoryCounterAttackSubsystem::GetPersistentS
 	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client) return Result;
 	for (FTerritoryAssaultRecord& Record : Result)
 	{
+		// Save the sub-tick physical wait as well. Adjust only the value snapshot;
+		// saving must not advance live state or charge the same interval twice.
+		if (!Record.IsTerminal() && Record.VehicleStagingBlockedSince > 0.0)
+			AdvanceVehicleStagingWait(Record, GetWorld()->GetTimeSeconds());
 		// Pending manifests are already durable. Append admitted actors without changing
 		// the live record or invoking Narrative's save callbacks from this read method.
 		if (const auto* Participants = LiveParticipants.Find(Record.AssaultID))
@@ -163,6 +167,7 @@ TArray<ATerritoryAssaultCharacter*> UTerritoryCounterAttackSubsystem::Reconstruc
 	TArray<ATerritoryAssaultCharacter*> Spawned;
 	if (bReconstructingParticipants || bRestoringState || !GetWorld() || GetWorld()->GetNetMode() == NM_Client
 		|| !IsValid(Territory) || !Territory->HasAuthority() || Assault.IsTerminal()) return Spawned;
+	if (PrepareAssaultAssets(Territory, &Assault) != ETerritoryAssetReadiness::Ready) return Spawned;
 	TGuardValue<bool> ReconstructionGuard(bReconstructingParticipants, true);
 	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
 	const auto Current = [&]() { return IsAssaultCurrent(Access) && !Assault.IsTerminal() && IsValid(Territory); };
@@ -171,7 +176,7 @@ TArray<ATerritoryAssaultCharacter*> UTerritoryCounterAttackSubsystem::Reconstruc
 	if (!AuthoredForce) return Spawned;
 	const FTerritoryFactionAssaultConfig Force = *AuthoredForce;
 	UNPCDefinition* Definition = Assault.LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
-		&& !Assault.StoryAttackerDefinitionOverride.IsNull() ? Assault.StoryAttackerDefinitionOverride.LoadSynchronous() : Force.AttackerDefinition.Get();
+		&& !Assault.StoryAttackerDefinitionOverride.IsNull() ? Assault.StoryAttackerDefinitionOverride.Get() : Force.AttackerDefinition.Get();
 	if (!Current() || !Definition) return Spawned;
 	const int32 OverrideLevel = ResolveScaledEnemyLevel(Assault, Territory, Force);
 	const auto Pending = Assault.PendingSurvivors;
@@ -245,7 +250,7 @@ TArray<ATerritoryAssaultCharacter*> UTerritoryCounterAttackSubsystem::Reconstruc
 			}
 			else if (!IsValid(Vehicle))
 			{
-				UClass* VehicleClass = VehicleState.VehicleClass.LoadSynchronous();
+				UClass* VehicleClass = VehicleState.VehicleClass.Get();
 				if (!Current()) return Spawned;
 				if (!VehicleClass || !VehicleClass->IsChildOf(ANarrativeVehicleBase::StaticClass())) continue;
 				FActorSpawnParameters Params;
@@ -352,13 +357,14 @@ TArray<ATerritoryAssaultCharacter*> UTerritoryCounterAttackSubsystem::Reconstruc
 bool UTerritoryCounterAttackSubsystem::MigrateLegacySurvivors(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory)
 {
 	if (Assault.LegacySurvivorsToRestore <= 0 || !Assault.PendingSurvivors.IsEmpty()) return true;
+	if (PrepareAssaultAssets(Territory, &Assault) != ETerritoryAssetReadiness::Ready) return false;
 	const FAssaultAccess Access = CaptureAssaultAccess(Assault);
 	const auto* Profile = Territory->GetCounterAttackProfile();
 	const auto* AuthoredForce = Profile ? Profile->FindFactionForce(Assault.AttackingFaction) : nullptr;
 	if (!AuthoredForce) return false;
 	const FTerritoryFactionAssaultConfig Force = *AuthoredForce;
 	UNPCDefinition* Definition = Assault.LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit
-		&& !Assault.StoryAttackerDefinitionOverride.IsNull() ? Assault.StoryAttackerDefinitionOverride.LoadSynchronous() : Force.AttackerDefinition.Get();
+		&& !Assault.StoryAttackerDefinitionOverride.IsNull() ? Assault.StoryAttackerDefinitionOverride.Get() : Force.AttackerDefinition.Get();
 	if (!IsAssaultCurrent(Access)) return false;
 	for (FName ApproachID : Assault.SelectedApproaches)
 	{

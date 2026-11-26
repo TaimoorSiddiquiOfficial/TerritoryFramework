@@ -247,8 +247,7 @@ bool UTerritorySituationCondition::MatchesReport(const FTerritorySituationReport
 	}
 }
 
-bool UTerritorySituationCondition::CheckCondition_Implementation(APawn* Target,
-	APlayerController* Controller, UTalesComponent* NarrativeComponent)
+bool UTerritorySituationCondition::CheckConditionInContext(APawn* Target, APlayerController* Controller, class UTalesComponent* NarrativeComponent)
 {
 	return Profile && MatchesReport(Profile->InspectSituation(Target, Controller, NarrativeComponent, Scope, FactionOverride));
 }

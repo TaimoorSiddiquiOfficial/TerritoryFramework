@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Tales/NarrativePartyComponent.h"
+#include "Tales/TerritoryReplyTimeoutProfile.h"
 #include "TerritoryNarrativePartyComponent.generated.h"
 
 UENUM(BlueprintType)
@@ -10,6 +11,14 @@ enum class ETerritoryPartyOwnerDeparturePolicy : uint8
 	ContinueWhenSupported UMETA(DisplayName="Continue with compatible dialogue adapter"),
 	EndConversation UMETA(DisplayName="End the conversation safely")
 };
+
+/** Fired on the server when a reply countdown starts, so the HUD can draw it. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnTerritoryReplyTimeoutStarted,
+	float, Seconds, FName, SilentReplyID);
+
+/** Fired when a reply countdown stops. True when it stopped by selecting the silent reply. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryReplyTimeoutEnded,
+	bool, bSelectedSilentReply);
 
 /** Native shared Tales component with server checks for who may choose a reply.
  * Uses Narrative's Party Dialogue Control Policy, members, leader and dialogue.
@@ -27,7 +36,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Parties")
 	ETerritoryPartyOwnerDeparturePolicy OwnerDeparturePolicy = ETerritoryPartyOwnerDeparturePolicy::ContinueWhenSupported;
 	/** Keep Native's local viewing player. A server with only remote members uses the Native leader. */
-	virtual APlayerController* GetOwningController() const override;
+  virtual ANarrativePlayerController* GetOwningController() const override;
 	/** Join through Native only after the old party confirms departure. Requires a valid
 	 * server controller and PlayerState in this world. A repeated join returns false.
 	 * Active conversations reject new members; Native has no playback catch-up.
@@ -56,7 +65,63 @@ public:
 	UFUNCTION(BlueprintPure, BlueprintAuthorityOnly, Category="Territory|Dialogue")
 	bool CanMemberChooseDialogueReply(APlayerState* Member) const;
 
+	/** Server-owned reply countdown policy. An empty profile, or zero seconds, keeps Native's behaviour
+	 * of waiting for a real answer. Set it on the party component (or its Blueprint default). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Dialogue|Reply Timeout",
+		meta=(ToolTip="Optional reply countdown policy. With no profile, or zero seconds, the reply UI waits indefinitely like Native."))
+	TObjectPtr<UTerritoryReplyTimeoutProfile> ReplyTimeoutProfile;
+
+	/** True while the server is waiting out a reply countdown for the current dialogue. */
+	UFUNCTION(BlueprintPure, Category="Territory|Dialogue|Reply Timeout",
+		meta=(ToolTip="True while a reply countdown is running on the server for the current dialogue."))
+	bool IsReplyTimeoutActive() const;
+
+	/** Seconds the player has left to answer, or zero when no countdown is running. */
+	UFUNCTION(BlueprintPure, Category="Territory|Dialogue|Reply Timeout",
+		meta=(ToolTip="Seconds left before the silent reply is selected, or zero when no countdown is running."))
+	float GetReplyTimeRemaining() const;
+
+	/** Length of the countdown that is running, or zero when none is. */
+	UFUNCTION(BlueprintPure, Category="Territory|Dialogue|Reply Timeout",
+		meta=(ToolTip="Total length of the running countdown in seconds, or zero when none is running."))
+	float GetReplyTimeoutDuration() const;
+
+	/** Node id the running countdown will select when it expires. */
+	UFUNCTION(BlueprintPure, Category="Territory|Dialogue|Reply Timeout",
+		meta=(ToolTip="Node id of the silence reply the running countdown will select. Empty when none is running."))
+	FName GetPendingSilentReplyID() const;
+
+	/** Server-only: resolve the running countdown immediately, exactly as the timer would.
+	 * Handy for QA keys, skip inputs and automation; production relies on the timer. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="Territory|Dialogue|Reply Timeout",
+		meta=(ToolTip="Resolve the running reply countdown now, exactly as the timer would. Returns true when the silence reply was selected."))
+	bool ResolveReplyCountdownNow();
+
+	/** Fired on the server when a countdown starts. */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Dialogue|Reply Timeout")
+	FOnTerritoryReplyTimeoutStarted OnReplyTimeoutStarted;
+
+	/** Fired when a countdown stops, with the reason it stopped. */
+	UPROPERTY(BlueprintAssignable, Category="Territory|Dialogue|Reply Timeout")
+	FOnTerritoryReplyTimeoutEnded OnReplyTimeoutEnded;
+
 private:
+	// Server-only reply countdown. Transient: never campaign state, never replicated.
+	void StartReplyTimeout(UDialogue* Dialogue, class UTalesComponent* Owner,
+		const TArray<UDialogueNode_Player*>& Replies);
+	void CancelReplyTimeout(bool bSelectedSilentReply);
+	void HandleReplyTimeoutExpired();
+	bool CanResolveReplyTimeoutToSilence(const FName& SilentReplyID) const;
+	/** Also listen to sibling Tales components on the same actor, so the countdown covers a plain
+	 * Native dialogue that runs on the owner's own component instead of this party adapter. */
+	void BindSiblingReplySources();
+	FTimerHandle ReplyTimeoutHandle;
+	TWeakObjectPtr<UDialogue> TimeoutDialogue;
+	/** Component that owns the dialogue the countdown belongs to; the silence reply is selected there. */
+	TWeakObjectPtr<UTalesComponent> TimeoutOwnerComponent;
+	FName PendingSilentReplyID;
+	float ReplyTimeoutSeconds = 0.f;
+
 	// Records only Native's one party-member grant, never its separate avatar grant.
 	// Connection/ASC references and the active dialogue are transient, not campaign data.
 	TWeakObjectPtr<UDialogue> SpeakerTagDialogue;
