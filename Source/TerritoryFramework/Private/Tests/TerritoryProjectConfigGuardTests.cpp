@@ -9,6 +9,7 @@
 #include "HAL/FileManager.h"
 #include "Engine/AssetManager.h"
 #include "Engine/AssetManagerSettings.h"
+#include "Interfaces/IPluginManager.h"
 
 /**
  * Guards project config that NarrativePro's setup merge can damage in the host project.
@@ -41,9 +42,15 @@
  */
 namespace TerritoryProjectConfigGuardTests
 {
-	/** The map TDA deliberately opens in the editor and enters the game through. */
+	/** The map TDA deliberately opens in the editor, and the map it deliberately enters the game
+	 *  through. They are two separate decisions and drifted apart: the editor moved on to the
+	 *  Ambulance mission while the game still enters through the district. Pinning one constant for
+	 *  both meant this guard reported the move as a vendor-merge failure (2026-11-26). Update the
+	 *  matching constant whenever the project deliberately moves one of them -- the guard's teeth come
+	 *  from the pinned value being the project's own map, not from the value being frozen. */
 	const TCHAR* HostProjectName = TEXT("TDA");
-	const TCHAR* ProjectMap = TEXT("/Game/HopDistrictTest.HopDistrictTest");
+	const TCHAR* ProjectStartupMap = TEXT("/Game/HOPTRENDY/Missions/Ambulance/Map/L_AmbulanceMission.L_AmbulanceMission");
+	const TCHAR* ProjectEntryMap = TEXT("/Game/HopDistrictTest.HopDistrictTest");
 
 	const TCHAR* GameMapsSettingsSection = TEXT("/Script/EngineSettings.GameMapsSettings");
 	const TCHAR* ArsenalSettingsSection = TEXT("/Script/NarrativeArsenal.ArsenalSettings");
@@ -55,9 +62,23 @@ namespace TerritoryProjectConfigGuardTests
 	/** The settings key that decides whether the vendor template is part of an apply at all. */
 	const TCHAR* GateKey = TEXT("bCheckProjectSettingsOnStartup");
 
+	/** Resolves the installed NarrativePro plugin's own template file.
+	 *
+	 *  Deliberately not a literal Plugins/NarrativePro path: the marketplace install folder is named
+	 *  after the listing (Narrative383be31f74eV7 for 2.5), so a hardcoded folder name silently turned
+	 *  this guard's vendor-template half into a no-op after the 2.5 upgrade -- the file was never read
+	 *  and the "the threat really exists" assertions below never ran. Ask the plugin manager instead,
+	 *  and fail (not skip) when the plugin is missing, because a missing NarrativePro is itself a
+	 *  broken host. */
 	FString VendorTemplatePath()
 	{
-		return FPaths::ProjectPluginsDir() / TEXT("NarrativePro/Resources/IniSetups/Add/DefaultEngine.ini");
+		const TSharedPtr<IPlugin> NarrativePlugin = IPluginManager::Get().FindPlugin(TEXT("NarrativePro"));
+		if (!NarrativePlugin.IsValid())
+		{
+			return FPaths::ProjectPluginsDir() / TEXT("<NarrativePro plugin not found>/Resources/IniSetups/Add/DefaultEngine.ini");
+		}
+
+		return NarrativePlugin->GetBaseDir() / TEXT("Resources/IniSetups/Add/DefaultEngine.ini");
 	}
 
 	/** Reads a key from the live config the engine actually uses, through GConfig rather than by
@@ -127,8 +148,8 @@ bool FTerritoryHostProjectStartupMapsSurviveVendorSetupMerge::RunTest(const FStr
 
 	TestTrue(TEXT("The project config declares EditorStartupMap"), bHasStartupMap);
 	TestTrue(TEXT("The project config declares GameEntryMap"), bHasEntryMap);
-	TestEqual(TEXT("The editor opens this project's district"), LiveStartupMap, FString(ProjectMap));
-	TestEqual(TEXT("The game is entered through this project's district"), LiveEntryMap, FString(ProjectMap));
+	TestEqual(TEXT("The editor opens the project's own map"), LiveStartupMap, FString(ProjectStartupMap));
+	TestEqual(TEXT("The game is entered through the project's own map"), LiveEntryMap, FString(ProjectEntryMap));
 
 	// The flag is the entire protection, and it is deliberately False. With it False, CombineIniUpdates
 	// never folds the vendor template into an apply, so neither key above has a source that could
@@ -227,9 +248,19 @@ namespace TerritoryProjectConfigGuardTests
 	const TCHAR* VendorScannedPaths[] = { TEXT("/Game"), TEXT("/NarrativePro") };
 	const TCHAR* VendorCookRule = TEXT("AlwaysCook");
 
+	/** The vendor's DefaultGame.ini template, resolved through the plugin manager for the same reason
+	 *  VendorTemplatePath() above is: the marketplace install folder carries the listing hash, so a
+	 *  literal Plugins/NarrativePro path stops resolving after an upgrade and this half of the guard
+	 *  goes quiet. */
 	FString VendorGameTemplatePath()
 	{
-		return FPaths::ProjectPluginsDir() / TEXT("NarrativePro/Resources/IniSetups/Add/DefaultGame.ini");
+		const TSharedPtr<IPlugin> NarrativePlugin = IPluginManager::Get().FindPlugin(TEXT("NarrativePro"));
+		if (!NarrativePlugin.IsValid())
+		{
+			return FPaths::ProjectPluginsDir() / TEXT("<NarrativePro plugin not found>/Resources/IniSetups/Add/DefaultGame.ini");
+		}
+
+		return NarrativePlugin->GetBaseDir() / TEXT("Resources/IniSetups/Add/DefaultGame.ini");
 	}
 
 	/** One `+PrimaryAssetTypesToScan=` declaration, parsed from ini text. */
@@ -632,12 +663,17 @@ bool FTerritoryVendorConfigCleanupHolds::RunTest(const FString& Parameters)
 			}
 		}
 
-		TestEqual(
-			TEXT("NarrativePro.DisableProjectSettingsSetupNotification is declared exactly once in "
+		// The invariant is no regrowth: AddToSection appends without dedup, so two declarations mean the
+		// notice's button has been clicked again and would keep stacking. Zero declarations is the
+		// cleaner end state (the vendor declares this CVar but never reads it -- only
+		// NarrativeProjectSetup.cpp:24 and the write at :991 mention it), so pin "at most one" rather
+		// than exactly one: the shipped four-line residue is what this guards against, not an absence.
+		TestTrue(
+			TEXT("NarrativePro.DisableProjectSettingsSetupNotification is declared at most once in "
 				 "Config/DefaultEditor.ini. It shipped four times: AddToSection appends, so four clicks of "
 				 "the notice's button stacked four identical lines, and no vendor template covers "
 				 "DefaultEditor.ini to normalise it."),
-			CvarDeclarations, 1);
+			CvarDeclarations <= 1);
 	}
 
 	// --- 3. The dead HopDistrictSettings section --------------------------------------------
@@ -692,20 +728,31 @@ bool FTerritoryVendorConfigCleanupHolds::RunTest(const FString& Parameters)
 		TEXT("PackageName contains no '[' or ']', which are not legal in an Android package identifier"),
 		LivePackageName.Contains(TEXT("[")) || LivePackageName.Contains(TEXT("]")));
 
-	// Assert the threat is still real, the same way guard 1 does for the maps: if the vendor template
-	// stops shipping the placeholder, the check above stops meaning anything.
-	const FString VendorEngineTemplate = FPaths::ProjectPluginsDir() / TEXT("NarrativePro/Resources/IniSetups/Add/DefaultEngine.ini");
+	// Assert the threat is still real, the same way guard 1 does for the maps -- but only while it is.
+	// The premise moved in Narrative 2.5: the vendor's setup template no longer declares the Android
+	// section at all (2.4.2 shipped PackageName=com.Narrative.[PROJECT] at DefaultEngine.ini:228), so
+	// an apply can no longer overwrite this key and the remaining work is the project's own identifier.
+	// Saying so out loud keeps the check above meaningful instead of silently vacuous. Resolved through
+	// the plugin manager, because a literal Plugins/NarrativePro path resolves nowhere after 2.5.
+	const FString VendorEngineTemplate = VendorTemplatePath();
 	FString VendorEngineText;
 	if (TestTrue(*FString::Printf(TEXT("The vendor setup template is readable at %s"), *VendorEngineTemplate),
 		FFileHelper::LoadFileToString(VendorEngineText, *VendorEngineTemplate)))
 	{
 		FString VendorPackageName;
-		TestTrue(TEXT("The vendor template still declares PackageName"),
-			ReadIniKeyFromText(VendorEngineText, AndroidSection, PackageNameKey, VendorPackageName));
-		TestNotEqual(
-			TEXT("The vendor template's PackageName differs from this project's, so the project value is a "
-				 "deliberate substitution rather than an untouched copy of the placeholder"),
-			VendorPackageName, LivePackageName);
+		if (ReadIniKeyFromText(VendorEngineText, AndroidSection, PackageNameKey, VendorPackageName))
+		{
+			TestNotEqual(
+				TEXT("The vendor template's PackageName differs from this project's, so the project value is a "
+					 "deliberate substitution rather than an untouched copy of the placeholder"),
+				VendorPackageName, LivePackageName);
+		}
+		else
+		{
+			AddInfo(TEXT("The Narrative 2.5 setup template no longer declares AndroidRuntimeSettings PackageName; "
+						 "the project value can no longer be overwritten by an apply, so the only remaining work is "
+						 "choosing the shipped Android application id."));
+		}
 	}
 
 	return true;
