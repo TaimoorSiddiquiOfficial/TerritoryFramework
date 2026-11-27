@@ -117,7 +117,11 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Territory|Patrol")
 	TObjectPtr<USplineComponent> RouteSpline;
 
-	/** Close the loop so the guard returns to the first point after the last one. */
+	/**
+	 * Close the loop so the guard returns to the first point after the last one. This is the
+	 * route's own loop policy: the spline component's closed-loop flag stays off because the
+	 * engine's spline visualizer asserts while a closed loop is edited in the viewport.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory|Patrol")
 	bool bLoop = true;
 

@@ -208,4 +208,64 @@ bool FTFPatrolRouteReference::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * The spline's own closed-loop flag must never be set: the engine's spline visualizer asserts in
+ * FSplineComponentVisualizer::UpdateAddSegment as soon as an end point of a closed loop is dragged,
+ * which crashed the editor once already. Loop policy lives on the actor instead.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFPatrolRouteLoopPolicy,
+	"TerritoryFramework.Patrol.Regression.ClosedLoopSplineIsRefusedAndNeverAuthored",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFPatrolRouteLoopPolicy::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryPatrolRouteTests;
+
+	FFixture Fixture;
+	if (!TestNotNull(TEXT("A Game world was created"), Fixture.World))
+	{
+		return false;
+	}
+
+	const TArray<FVector> Points = {
+		FVector(0.f, 0.f, 0.f),
+		FVector(600.f, 0.f, 0.f),
+		FVector(600.f, 600.f, 0.f)
+	};
+
+	ATerritoryPatrolRoute* Route = Fixture.SpawnRoute(TEXT("PatrolTest_Loop"), Points);
+	if (!TestNotNull(TEXT("The patrol route actor was spawned"), Route))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("The route loops by default"), Route->IsLooping());
+	TestFalse(TEXT("An authored loop never closes the spline the visualizer edits"),
+		Route->GetRouteSpline()->IsClosedLoop());
+
+#if WITH_EDITOR
+	Route->SyncPointSettingsToSpline();
+	TestFalse(TEXT("The editor sync keeps the spline open"),
+		Route->GetRouteSpline()->IsClosedLoop());
+	TestTrue(TEXT("The editor sync leaves the actor's own loop flag alone"), Route->IsLooping());
+#endif
+
+	// A spline closed by hand (or by a spliced-in asset) is reported, not handed to the visualizer.
+	Route->GetRouteSpline()->SetClosedLoop(true, false);
+
+	FText Reason;
+	TestFalse(TEXT("A closed-loop spline fails validation"), Route->ValidatePatrolRoute(Reason));
+	TestTrue(TEXT("The failure names the closed loop"),
+		Reason.ToString().Contains(TEXT("closed loop")));
+
+#if WITH_EDITOR
+	Route->SyncPointSettingsToSpline();
+	TestFalse(TEXT("The editor sync forces a hand-closed loop back open"),
+		Route->GetRouteSpline()->IsClosedLoop());
+	TestTrue(TEXT("A route whose loop was forced open validates again"), Route->ValidatePatrolRoute(Reason));
+#endif
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -97,6 +97,16 @@ bool ATerritoryPatrolRoute::ValidatePatrolRoute(FText& OutFailureReason) const
 		return false;
 	}
 
+	// Defence in depth for the crash below: nothing in the plugin sets a closed loop, and the
+	// editor sync forces the flag open, but a spliced-in spline or a hand-edited asset should be
+	// reported rather than handed to the visualizer that asserts on it.
+	if (RouteSpline->IsClosedLoop())
+	{
+		OutFailureReason = LOCTEXT("ClosedLoopSpline",
+			"The patrol route spline is a closed loop. Leave the spline's own Closed Loop flag off and set the actor's Loop Patrol flag instead: the engine's spline visualizer asserts while a closed-loop spline is edited in the viewport.");
+		return false;
+	}
+
 	const int32 PointCount = RouteSpline->GetNumberOfSplinePoints();
 	if (PointCount <= 0)
 	{
@@ -149,9 +159,13 @@ void ATerritoryPatrolRoute::SyncPointSettingsToSpline()
 		PointSettings.SetNum(PointCount);
 	}
 
-	if (RouteSpline->IsClosedLoop() != bLoop)
+	// Loop policy is ours (bLoop), never the spline's own flag. The engine's spline visualizer
+	// asserts on a closed loop the moment an end point is dragged to extend the route
+	// (SplineComponentVisualizer::UpdateAddSegment), so the flag is forced open here and the
+	// closing arrow below is what shows the authored loop in the viewport.
+	if (RouteSpline->IsClosedLoop())
 	{
-		RouteSpline->SetClosedLoop(bLoop, false);
+		RouteSpline->SetClosedLoop(false, false);
 	}
 
 #if ENABLE_DRAW_DEBUG
