@@ -24,6 +24,7 @@
 #include "Interaction/TerritoryDistrictManagementPoint.h"
 #include "Interaction/TerritoryStoryOwnerSpawner.h"
 #include "Navigation/TerritoryRoadGuide.h"
+#include "Navigation/TerritoryPatrolRoute.h"
 #include "Music/TaggedMusicSet.h"
 #include "AI/NPCDefinition.h"
 #include "DialogueBlueprint.h"
@@ -1028,6 +1029,7 @@ bool UTerritoryDataValidator::ValidateLevel(ULevel* Level, TArray<FString>& OutE
 	CheckOrphanedSpawnPoints(Level, OutWarnings);
 	CheckGuardPostBindings(Level, OutWarnings);
 	CheckPatrolContainment(Level, OutWarnings, OutErrors);
+	CheckPatrolRoutes(Level, OutWarnings, OutErrors);
 	CheckPatrolSpots(Level, OutErrors);
 	CheckGuardDeploymentFeasibility(Level, OutWarnings);
 	CheckFloorVolumes(Level, OutErrors, OutWarnings);
@@ -2748,6 +2750,103 @@ void UTerritoryDataValidator::CheckPatrolContainment(ULevel* Level, TArray<FStri
 					Policy == ETerritoryGuardPatrolContainment::DropOutsideNodes
 						? TEXT("drops") : TEXT("moves")));
 			}
+		}
+	}
+}
+
+void UTerritoryDataValidator::CheckPatrolRoutes(ULevel* Level, TArray<FString>& OutWarnings, TArray<FString>& OutErrors)
+{
+	if (!Level)
+	{
+		return;
+	}
+
+	UWorld* World = Level->OwningWorld;
+
+	// The route lives in the level while the row that names it is a data asset, so the ID is the
+	// only link. Collect what the level actually contains first: a nameless route and two routes
+	// answering to one ID are both invisible to every other check.
+	TMap<FName, ATerritoryPatrolRoute*> RoutesByID;
+	TArray<ATerritoryPatrolRoute*> Routes;
+	if (World)
+	{
+		for (TActorIterator<ATerritoryPatrolRoute> It(World); It; ++It)
+		{
+			ATerritoryPatrolRoute* Route = *It;
+			if (!IsValid(Route))
+			{
+				continue;
+			}
+
+			Routes.Add(Route);
+
+			const FName RouteID = Route->GetPatrolRouteID();
+			if (RouteID.IsNone())
+			{
+				OutWarnings.Add(FString::Printf(
+					TEXT("%s: patrol route actor has no Patrol Route ID, so no guard post can reference it and its spline is ignored"),
+					*Route->GetActorLabel()));
+				continue;
+			}
+
+			if (ATerritoryPatrolRoute** Existing = RoutesByID.Find(RouteID))
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("DUPLICATE PATROL ROUTE ID '%s': '%s' and '%s' both answer to it, so the runtime resolves whichever actor loads first"),
+					*RouteID.ToString(), *(*Existing)->GetActorLabel(), *Route->GetActorLabel()));
+				continue;
+			}
+
+			RoutesByID.Add(RouteID, Route);
+		}
+	}
+
+	// A route that cannot build nodes is a silent fallback: the guards keep the authored array and
+	// the designer keeps looking at a spline that appears to be wired up.
+	for (const ATerritoryPatrolRoute* Route : Routes)
+	{
+		FText FailureReason;
+		if (!Route->ValidatePatrolRoute(FailureReason))
+		{
+			OutErrors.Add(FString::Printf(TEXT("%s: %s"), *Route->GetActorLabel(), *FailureReason.ToString()));
+		}
+	}
+
+	const FSpawnPointPlaceIndex Index = BuildSpawnPointPlaceIndex(Level);
+	TSet<FName> ReferencedRouteIDs;
+	for (const ATerritoryGuardSpawnPoint* Post : Index.Posts)
+	{
+		if (!Post)
+		{
+			continue;
+		}
+
+		const FName RouteID = Post->GetEffectivePatrolRouteID();
+		if (RouteID.IsNone())
+		{
+			continue;
+		}
+
+		ReferencedRouteIDs.Add(RouteID);
+
+		if (!RoutesByID.Contains(RouteID))
+		{
+			const ATerritoryVolume* Owner = ResolvePostTerritory(Post, Index).Owner;
+			OutErrors.Add(FString::Printf(
+				TEXT("%s: guard spawn point '%s' references patrol route '%s' but this level has no ATerritoryPatrolRoute with that ID, so its guards keep the authored node array"),
+				Owner ? *Owner->GetActorLabel() : *Post->GetActorLabel(),
+				*Post->GetActorLabel(), *RouteID.ToString()));
+		}
+	}
+
+	// A route nobody references is inert authored work: worth telling the designer, never an error.
+	for (const TPair<FName, ATerritoryPatrolRoute*>& Pair : RoutesByID)
+	{
+		if (!ReferencedRouteIDs.Contains(Pair.Key))
+		{
+			OutWarnings.Add(FString::Printf(
+				TEXT("%s: patrol route '%s' is not referenced by any guard post in this level, so no guard walks it"),
+				*Pair.Value->GetActorLabel(), *Pair.Key.ToString()));
 		}
 	}
 }

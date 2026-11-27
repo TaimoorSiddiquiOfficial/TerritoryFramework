@@ -88,6 +88,18 @@ public:
 		meta = (DisplayName = "Use Spawn Transform As Patrol Stop"))
 	bool bUseSpawnTransformAsPatrolStop = false;
 
+	/**
+	 * Optional placed ATerritoryPatrolRoute selected by ID: the authoring-friendly alternative to
+	 * typing world-space locations into PatrolRoute above.
+	 *
+	 * By convention leave this blank and name the route actor after the guard post ID. A referenced
+	 * route actor wins over this asset's PatrolRoute. A reference that resolves to nothing leaves
+	 * the array route in charge, and the editor validator reports it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Guard Post|Patrol",
+		meta = (DisplayName = "Patrol Route ID"))
+	FName PatrolRouteID;
+
 	// ─── Capacity & Reserves ───
 
 	/** Number of reserve guards that spawn on demand when active guards die. */

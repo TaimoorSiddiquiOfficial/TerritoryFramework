@@ -437,6 +437,18 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPostTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post",
 		meta=(DisplayName="Use Spawn Transform As Patrol Stop"))
 	bool bUseSpawnTransformAsPatrolStop = false;
+
+	/**
+	 * Optional placed ATerritoryPatrolRoute selected by PatrolRouteID, which is the authoring-friendly
+	 * alternative to typing world-space locations into PatrolRoute above.
+	 *
+	 * By convention leave this blank and name the route actor after GuardPostID. A referenced route
+	 * actor wins over PatrolRoute and over the nested Guard Post Definition's route. A reference
+	 * that resolves to nothing leaves the array routes in charge, and the editor validator reports it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Guard Post|Patrol",
+		meta=(DisplayName="Patrol Route ID"))
+	FName PatrolRouteID;
 };
 
 /** Physical multiplayer capture-point Blueprint and settings for a Place. */

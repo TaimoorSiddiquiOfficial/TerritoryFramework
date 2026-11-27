@@ -107,6 +107,17 @@ private:
 	 */
 	static void CheckGuardPostBindings(ULevel* Level, TArray<FString>& OutWarnings);
 	static void CheckPatrolContainment(ULevel* Level, TArray<FString>& OutWarnings, TArray<FString>& OutErrors);
+	/**
+	 * Validate the placed ATerritoryPatrolRoute actors a guard post's PatrolRouteID selects.
+	 *
+	 * The reference is an ID, not an actor pointer, because the row that names it is a data asset
+	 * and the route lives in a level. That indirection is exactly what can go wrong silently: the
+	 * ID can name nothing, two actors can answer to the same ID, or the spline can be empty or
+	 * carry a point-settings array that does not match its points. The runtime falls back to the
+	 * array route in every one of those cases, which is safe but invisible - a designer who
+	 * authored a route and sees guards ignore it gets no message anywhere else.
+	 */
+	static void CheckPatrolRoutes(ULevel* Level, TArray<FString>& OutWarnings, TArray<FString>& OutErrors);
 	/** Validate enabled spot settings against the route and territory definition used after BeginPlay. */
 	static void CheckPatrolSpots(ULevel* Level, TArray<FString>& OutErrors);
 	static void CheckGuardDeploymentFeasibility(ULevel* Level, TArray<FString>& OutWarnings);

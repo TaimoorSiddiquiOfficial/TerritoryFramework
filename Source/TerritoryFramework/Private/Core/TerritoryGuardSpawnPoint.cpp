@@ -12,7 +12,9 @@
 #include "Combat/TerritoryCounterAttackProfile.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryRegistrySubsystem.h"
+#include "Navigation/TerritoryPatrolRoute.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Components/BillboardComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "NavigationSystem.h"
@@ -345,6 +347,12 @@ bool ATerritoryGuardSpawnPoint::ApplyTerritoryDefinition()
 	ReserveOwnershipPolicy = Template->ReserveOwnershipPolicy;
 	bLoopPatrol = Template->bLoopPatrol;
 	bUseSpawnTransformAsPatrolStop = Template->bUseSpawnTransformAsPatrolStop;
+	// The route actor reference is authored on the row and resolved by ID at runtime, so the
+	// placed actor still carries no authoring surface of its own. Re-applying a definition also
+	// invalidates the previous lookup: the row may now name a different route, or none.
+	PatrolRouteID = Template->PatrolRouteID;
+	CachedPatrolRouteActor.Reset();
+	CachedRouteActorNodes.Reset();
 	if (Template->StableGuardPostGUID.IsValid())
 	{
 		SpawnPointGUID = Template->StableGuardPostGUID;
@@ -1221,12 +1229,87 @@ FGameplayTag ATerritoryGuardSpawnPoint::GetEffectiveFactionOverride() const
 	return FGameplayTag();
 }
 
+FName ATerritoryGuardSpawnPoint::GetEffectivePatrolRouteID() const
+{
+	// The row is the first authority; a nested Guard Post Definition can still name the route when
+	// the row leaves it blank, which mirrors how the array route falls back to that asset.
+	return !PatrolRouteID.IsNone()
+		? PatrolRouteID
+		: (GuardPostDefinition ? GuardPostDefinition->PatrolRouteID : NAME_None);
+}
+
+ATerritoryPatrolRoute* ATerritoryGuardSpawnPoint::ResolvePatrolRouteActor() const
+{
+	const FName EffectiveRouteID = GetEffectivePatrolRouteID();
+
+	if (EffectiveRouteID.IsNone())
+	{
+		CachedPatrolRouteActor.Reset();
+		CachedRouteActorNodes.Reset();
+		return nullptr;
+	}
+
+	// The reference is an ID rather than an actor pointer because the route is placed in a level
+	// and the row that names it is a data asset. A cached actor that no longer matches the ID
+	// (the level was re-saved with a different route) is dropped instead of silently reused.
+	if (ATerritoryPatrolRoute* Cached = CachedPatrolRouteActor.Get())
+	{
+		if (Cached->GetPatrolRouteID() == EffectiveRouteID)
+		{
+			return Cached;
+		}
+		CachedPatrolRouteActor.Reset();
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	for (TActorIterator<ATerritoryPatrolRoute> It(World); It; ++It)
+	{
+		ATerritoryPatrolRoute* Candidate = *It;
+		if (!IsValid(Candidate) || Candidate->GetPatrolRouteID() != EffectiveRouteID)
+		{
+			continue;
+		}
+
+		CachedPatrolRouteActor = Candidate;
+		return Candidate;
+	}
+
+	return nullptr;
+}
+
 const TArray<FTerritoryPatrolNode>& ATerritoryGuardSpawnPoint::GetEffectivePatrolRoute() const
 {
 	// Returns *authored* nodes only: an implicit stop is never synthesised here because the
 	// fallback below is a function-local static, so a caller holding this reference and
 	// comparing or mutating it across frames would be reading shared state. Consumers that
 	// need patrol duty ask HasAnyPatrolDuty() and build the stop via GetImplicitPatrolStop().
+	//
+	// A referenced route actor wins over the array routes: it is the authoring surface the row
+	// deliberately points at, and the sampled nodes are cached on this post so the returned
+	// reference stays valid for every consumer (guard, validator, spawn comparators).
+	if (const ATerritoryPatrolRoute* RouteActor = ResolvePatrolRouteActor())
+	{
+		CachedRouteActorNodes.Reset();
+		FText FailureReason;
+		if (RouteActor->BuildPatrolNodes(CachedRouteActorNodes, FailureReason) &&
+			!CachedRouteActorNodes.IsEmpty())
+		{
+			return CachedRouteActorNodes;
+		}
+
+		CachedRouteActorNodes.Reset();
+		// A referenced route that cannot produce nodes is an authoring error, not a silent
+		// demotion: keeping the array route means a broken spline never strips patrol duty.
+		UE_LOG(LogTerritory, Warning,
+			TEXT("Guard post %s references patrol route '%s' but it produced no nodes (%s); falling back to the authored node array."),
+			*GetName(), *PatrolRouteID.ToString(), *FailureReason.ToString());
+	}
+
 	if (!PatrolRoute.IsEmpty()) return PatrolRoute;
 	if (GuardPostDefinition && !GuardPostDefinition->PatrolRoute.IsEmpty())
 		return GuardPostDefinition->PatrolRoute;
@@ -1236,8 +1319,17 @@ const TArray<FTerritoryPatrolNode>& ATerritoryGuardSpawnPoint::GetEffectivePatro
 
 bool ATerritoryGuardSpawnPoint::GetEffectiveLoopPatrol() const
 {
-	// The loop policy follows the route authority. A Place Definition row route owns
-	// its row loop flag; a nested GuardPostDefinition route owns that asset's flag.
+	// The loop policy follows the route authority. A referenced route actor owns its own loop
+	// flag; a Place Definition row route owns its row loop flag; a nested GuardPostDefinition
+	// route owns that asset's flag.
+	if (const ATerritoryPatrolRoute* RouteActor = ResolvePatrolRouteActor())
+	{
+		if (!CachedRouteActorNodes.IsEmpty())
+		{
+			return RouteActor->IsLooping();
+		}
+	}
+
 	if (!PatrolRoute.IsEmpty()) return bLoopPatrol;
 	if (GuardPostDefinition && !GuardPostDefinition->PatrolRoute.IsEmpty())
 		return GuardPostDefinition->bLoopPatrol;

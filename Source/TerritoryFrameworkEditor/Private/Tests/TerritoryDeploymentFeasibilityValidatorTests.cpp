@@ -16,6 +16,7 @@
 #include "AI/NPCDefinition.h"
 #include "AI/Activities/NPCGoalItem.h"
 #include "Components/BoxComponent.h"
+#include "Components/SplineComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/TerritoryDefinition.h"
 #include "Core/TerritoryGuardCharacter.h"
@@ -30,6 +31,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "Navigation/TerritoryPatrolRoute.h"
 
 /**
  * The authored state these checks read that a test cannot otherwise write: BoundsShape and the
@@ -1483,6 +1485,115 @@ bool FTFCounterAttackEditorObjectives::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Editor objective discovery cannot turn a world without navmesh into a valid route"),
 		UTerritoryDataValidator::FindReachableCounterAttackObjective(Fixture.Place, FVector::ZeroVector, Reachable, Failure));
 	TestFalse(TEXT("Unusable physical route retains a diagnostic"), Failure.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFValidatorPatrolRouteReferences,
+	"TerritoryFramework.Editor.DataValidation.PatrolRouteActorReferencesAreChecked",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFValidatorPatrolRouteReferences::RunTest(const FString& Parameters)
+{
+	// A patrol route actor is referenced by ID from a data asset, so the link is invisible to every
+	// other check. Three authoring mistakes hide inside it: an ID nothing answers to, two actors
+	// answering to one ID, and a spline whose point rows do not describe its points. The runtime
+	// falls back to the authored node array in all three cases - safe, and completely silent.
+	FFixture Fixture;
+	ATerritoryProperty* Place = Fixture.SpawnPlace(TEXT("Validator Patrol Route"), FGuid(5300, 9, 9, 9));
+	if (!TestNotNull(TEXT("Fixture Place exists"), Place))
+	{
+		return false;
+	}
+
+	ATerritoryGuardSpawnPoint* Post = Fixture.SpawnBoundPost(TEXT("Ground_A"), 0, FVector::ZeroVector);
+	if (!TestNotNull(TEXT("Bound post exists"), Post))
+	{
+		return false;
+	}
+
+	auto AuthorPoints = [](ATerritoryPatrolRoute* Route, const TArray<FVector>& Points)
+	{
+		USplineComponent* Spline = Route ? Route->GetRouteSpline() : nullptr;
+		if (!Spline)
+		{
+			return;
+		}
+		Spline->ClearSplinePoints(false);
+		for (const FVector& Point : Points)
+		{
+			Spline->AddSplinePoint(Point, ESplineCoordinateSpace::World, false);
+		}
+		Spline->UpdateSpline();
+	};
+
+	TArray<FString> Errors;
+	TArray<FString> Warnings;
+
+	// An actor with no ID can never be named by a post, and an ID no actor answers to is a fallback.
+	ATerritoryPatrolRoute* Unnamed = Fixture.World->SpawnActor<ATerritoryPatrolRoute>();
+	if (!TestNotNull(TEXT("Unnamed patrol route spawned"), Unnamed))
+	{
+		return false;
+	}
+	AuthorPoints(Unnamed, { FVector::ZeroVector, FVector(200.f, 0.f, 0.f) });
+
+	Post->PatrolRouteID = TEXT("Validator_MissingRoute");
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("An ID that no route actor answers to is an error"),
+		CountErrors(Errors, TEXT("has no ATerritoryPatrolRoute with that ID")), 1);
+	TestEqual(TEXT("A route actor with no ID is only a warning"),
+		CountWarnings(Warnings, TEXT("has no Patrol Route ID")), 1);
+
+	// Now the ID resolves, so the post is satisfied and the route is referenced.
+	ATerritoryPatrolRoute* Route = Fixture.World->SpawnActor<ATerritoryPatrolRoute>();
+	if (!TestNotNull(TEXT("Named patrol route spawned"), Route))
+	{
+		return false;
+	}
+	Route->PatrolRouteID = TEXT("Validator_MissingRoute");
+	AuthorPoints(Route, { FVector::ZeroVector, FVector(300.f, 0.f, 0.f) });
+
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("A resolvable route ID clears the missing-route error"),
+		CountErrors(Errors, TEXT("has no ATerritoryPatrolRoute with that ID")), 0);
+	TestEqual(TEXT("A referenced route is no longer reported as unreferenced"),
+		CountWarnings(Warnings, TEXT("is not referenced by any guard post")), 0);
+
+	// Two actors on one ID resolve by load order, which is not authoring.
+	ATerritoryPatrolRoute* Duplicate = Fixture.World->SpawnActor<ATerritoryPatrolRoute>();
+	if (!TestNotNull(TEXT("Duplicate patrol route spawned"), Duplicate))
+	{
+		return false;
+	}
+	Duplicate->PatrolRouteID = TEXT("Validator_MissingRoute");
+	AuthorPoints(Duplicate, { FVector::ZeroVector, FVector(400.f, 0.f, 0.f) });
+
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("Two route actors sharing one ID are an error"),
+		CountErrors(Errors, TEXT("DUPLICATE PATROL ROUTE ID")), 1);
+
+	// Causality: remove the duplicate and the same authoring is accepted again.
+	Duplicate->Destroy();
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("Removing the duplicate clears the ID error"),
+		CountErrors(Errors, TEXT("DUPLICATE PATROL ROUTE ID")), 0);
+
+	// Point rows that belong to a different spline are the mistake that still looks authored.
+	Route->PointSettings.SetNum(5);
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("A point-row count that disagrees with the spline is an error"),
+		CountErrors(Errors, TEXT("point setting rows")), 1);
+
+	Route->PointSettings.SetNum(2);
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("Matching point rows clear the cardinality error"),
+		CountErrors(Errors, TEXT("point setting rows")), 0);
+
+	// A route nobody references is authored work no guard walks: warn, never fail the map.
+	Route->PatrolRouteID = TEXT("Validator_UnreferencedRoute");
+	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+	TestEqual(TEXT("An unreferenced route actor is a warning"),
+		CountWarnings(Warnings, TEXT("is not referenced by any guard post")), 1);
 	return true;
 }
 

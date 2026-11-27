@@ -8,6 +8,7 @@
 
 class ATerritoryVolume;
 class ATerritoryGuardCharacter;
+class ATerritoryPatrolRoute;
 class UNPCDefinition;
 class UNPCActivityConfiguration;
 class UTriggerSet;
@@ -329,6 +330,17 @@ public:
 	/** If true, the patrol loop returns to Node0 after the last node. */
 	UPROPERTY(Transient)
 	bool bLoopPatrol = true;
+
+	/**
+	 * Optional authored patrol route actor, matched by ID in the level. Copied from the Place
+	 * Definition guard-post row or the nested Guard Post Definition, so the placed actor has no
+	 * authoring surface of its own. Blank keeps the array routes above.
+	 *
+	 * By convention use the guard post ID, which means a route actor named after its post needs
+	 * no extra authoring on the row.
+	 */
+	UPROPERTY(Transient)
+	FName PatrolRouteID;
 
 	/**
 	 * Let this post patrol with no authored route: its own spawn transform becomes the guard's
@@ -705,6 +717,20 @@ public:
 	bool GetEffectiveLoopPatrol() const;
 
 	/**
+	 * Resolve this post's authored patrol route actor by ID, or null when it references none.
+	 * The lookup is cached per world; the cache is dropped when the definition is re-applied.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Patrol")
+	ATerritoryPatrolRoute* ResolvePatrolRouteActor() const;
+
+	/**
+	 * Patrol route ID this post actually asks for: the Place Definition row's ID, or the nested
+	 * Guard Post Definition's ID when the row leaves it blank. None means no route actor.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Patrol")
+	FName GetEffectivePatrolRouteID() const;
+
+	/**
 	 * Owner reserves may deploy while securely claimed or while physically defending
 	 * an opposing faction's active contest. Locked/unclaimed/self-contested states reject it.
 	 */
@@ -729,6 +755,18 @@ protected:
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<ATerritoryVolume> CachedTerritory;
+
+	/**
+	 * Cached level lookup for PatrolRouteID. A weak pointer, so a route actor destroyed by level
+	 * streaming simply resolves again on the next request.
+	 */
+	mutable TWeakObjectPtr<ATerritoryPatrolRoute> CachedPatrolRouteActor;
+
+	/**
+	 * Nodes sampled from the resolved route actor. Owned here because GetEffectivePatrolRoute()
+	 * hands callers a reference, so the sampled array has to outlive that call.
+	 */
+	mutable TArray<FTerritoryPatrolNode> CachedRouteActorNodes;
 
 	UPROPERTY()
 	TArray<TWeakObjectPtr<ATerritoryGuardCharacter>> ActiveGuards;
