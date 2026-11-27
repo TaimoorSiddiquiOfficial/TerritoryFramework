@@ -709,6 +709,12 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double GraceEndsGameTime = 0.0;
 	/** Campaign-clock time when this assault was scheduled. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ScheduledGameTime = 0.0;
+	/**
+	 * Authored story deployment delay: the warned force may not leave its warning before this
+	 * campaign time. Zero keeps the engine's own timing, so automatic and legacy schedules are
+	 * unchanged, and a saved assault keeps its authored deployment window across load.
+	 */
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double DeploymentOpensGameTime = 0.0;
 	/** Campaign-clock time when this assault became active. */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ActivatedGameTime = 0.0;
 	/** Absolute campaign-time deadline for an unattended physical recapture. Zero means inactive. */

@@ -75,11 +75,13 @@ bool FTFStoryReinforcements::RunTest(const FString& Parameters)
 	const auto Schedule = [&](bool bImmediate)
 	{
 		return Counter->TryScheduleAssaultAdvancedWithReason(Place, Bandits,
-			ETerritoryAssaultLaunchMode::StoryReinforcements, Options, bImmediate, Reason);
+			ETerritoryAssaultLaunchMode::StoryReinforcements, Options, bImmediate,
+			/*DeploymentDelaySeconds=*/0.f, Reason);
 	};
 	TestFalse(TEXT("A normal counterattack still rejects its own Place"),
 		Counter->TryScheduleAssaultAdvancedWithReason(Place, Bandits,
-			ETerritoryAssaultLaunchMode::StrategicCounterattack, Options, true, Reason));
+			ETerritoryAssaultLaunchMode::StrategicCounterattack, Options, true,
+			/*DeploymentDelaySeconds=*/0.f, Reason));
 	Place->SetRole(ROLE_SimulatedProxy);
 	TestFalse(TEXT("A client-role Place cannot schedule owner reinforcements"), Schedule(false));
 	Place->SetRole(ROLE_Authority);

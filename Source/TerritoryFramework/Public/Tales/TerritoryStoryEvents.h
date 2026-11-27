@@ -168,6 +168,19 @@ public:
 			ToolTip="Launch the physical force immediately after validation. Use for an authored ambush or Quest climax. Leave off for the normal strategic schedule."))
 	bool bStartImmediately = false;
 
+	/**
+	 * Timed story beat: warn now, deploy after this many campaign-clock seconds.
+	 * The force stays in its warning until the window opens, then the normal
+	 * proximity/garrison activation policy applies. Seconds are campaign time (the
+	 * same clock the grace period and capture history use), not wall-clock, so a
+	 * loaded save resumes the same remaining wait. Ignored when Immediate is on.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
+		meta=(DisplayName="Deployment Delay (seconds)", ClampMin="0", UIMin="0", UIMax="3600",
+			EditCondition="!bStartImmediately", EditConditionHides,
+			ToolTip="Campaign-time seconds the warned force waits before the deployment window opens. 0 uses the normal immediate warning advance, a positive value gives players a timed countdown before the assault may begin."))
+	float DeploymentDelaySeconds = 0.f;
+
 	/** Native admission used by this event and persistent Narrative admission tasks.
 	 * Rechecks conditions and returns the scheduler's refusal without logging retries. */
 	bool TryScheduleWave(APawn* Target, APlayerController* Controller,

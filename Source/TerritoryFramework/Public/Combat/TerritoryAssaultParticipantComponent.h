@@ -15,6 +15,7 @@ class UNarrativeAbilitySystemComponent;
 class UNPCActivity;
 class UNPCActivityComponent;
 class UNPCGoalItem;
+class UMountComponent;
 class UTerritoryAssaultGoal;
 struct FGameplayEffectSpec;
 struct FTerritoryAssaultVehicleCheckpoint;
@@ -107,6 +108,9 @@ public:
 
 private:
 	friend class FTFAssaultPassengerDriverLoss;
+	friend class FTFAssaultSeatClaimRetry;
+	friend class FTFAssaultSeatBehaviourReport;
+	friend class FTFAssaultAuthoredVehicleSeats;
 	friend class FTFAssaultSurvivorRestore;
 	friend class FTFAssaultTargetStreamingWait;
 	friend class FTFAssaultCombatAutonomy;
@@ -144,6 +148,10 @@ private:
 	bool bVehicleIngressComplete = false;
 	bool bVehicleIngressFailed = false;
 	bool bVehicleMountRequested = false;
+	/** One-shot so a refused Narrative seat claim reports why, instead of on every retry. */
+	bool bVehicleSeatClaimRejectionReported = false;
+	/** One-shot so a seat whose authored interact behaviour is missing everywhere warns once. */
+	bool bVehicleSeatBehaviourRepairReported = false;
 	bool bVehiclePossessionConfirmed = false;
 	bool bNarrativeVehicleDriver = true;
 	bool bReportsVehicleStoryOutcome = true;
@@ -189,6 +197,7 @@ private:
 	bool ResumeAfterStreaming(ATerritoryVolume* Territory);
 	ATerritoryVolume* ResolveTargetTerritory() const;
 	bool BindNarrativeDeathAfterSpawnReady();
+	bool EnsureNarrativeSeatInteractBehaviour(UMountComponent* Mount);
 	bool EnsureNarrativeVehicleIngress();
 	bool EnsureNarrativeActivityAndGoal();
 	bool MaintainAssaultMovement(ATerritoryVolume* Territory);

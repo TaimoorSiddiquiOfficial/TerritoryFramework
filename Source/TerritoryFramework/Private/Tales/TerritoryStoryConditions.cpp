@@ -330,6 +330,28 @@ UTerritoryAssaultCondition::UTerritoryAssaultCondition()
 	ConditionFilter = EConditionFilter::CF_DontTarget;
 }
 
+namespace
+{
+	/**
+	 * Record facts are integers; an authored deployment window is a campaign-time duration in
+	 * seconds, so the shared integer comparison cannot represent it exactly.
+	 */
+	bool CompareSeconds(const double Actual, const ETerritoryIntegerComparison Comparison,
+		const double Threshold)
+	{
+		switch (Comparison)
+		{
+		case ETerritoryIntegerComparison::Equal: return FMath::IsNearlyEqual(Actual, Threshold);
+		case ETerritoryIntegerComparison::NotEqual: return !FMath::IsNearlyEqual(Actual, Threshold);
+		case ETerritoryIntegerComparison::AtLeast: return Actual >= Threshold;
+		case ETerritoryIntegerComparison::AtMost: return Actual <= Threshold;
+		case ETerritoryIntegerComparison::GreaterThan: return Actual > Threshold;
+		case ETerritoryIntegerComparison::LessThan: return Actual < Threshold;
+		default: return false;
+		}
+	}
+}
+
 const FTerritoryAssaultRecord* UTerritoryAssaultCondition::SelectLatestRecord(
 	const TArray<FTerritoryAssaultRecord>& Records)
 {
@@ -401,6 +423,20 @@ bool UTerritoryAssaultCondition::CheckConditionInContext(APawn* Target, APlayerC
 	if (!Record) return false;
 	if (Query == ETerritoryAssaultConditionQuery::LatestState) return Record->State == RequiredState;
 	if (Query == ETerritoryAssaultConditionQuery::LatestResolution) return Record->Resolution == RequiredResolution;
+	// Authored deployment timing. A record without an authored delay reads as already open and
+	// zero seconds remaining, so an undelayed story assault behaves exactly as before.
+	const double SecondsUntilDeployment = Record->DeploymentOpensGameTime > 0.0
+		? FMath::Max(0.0, Record->DeploymentOpensGameTime - Counter->GetCampaignGameTime())
+		: 0.0;
+	if (Query == ETerritoryAssaultConditionQuery::DeploymentWindowOpen)
+	{
+		return SecondsUntilDeployment <= 0.0;
+	}
+	if (Query == ETerritoryAssaultConditionQuery::SecondsUntilDeployment)
+	{
+		return CompareSeconds(SecondsUntilDeployment, Comparison,
+			static_cast<double>(FMath::Max(0.f, SecondsThreshold)));
+	}
 
 	int32 ActualValue = 0;
 	switch (Query)
@@ -428,6 +464,9 @@ FString UTerritoryAssaultCondition::GetGraphDisplayText_Implementation()
 		Result += TEXT(" = ") + UEnum::GetDisplayValueAsText(RequiredState).ToString();
 	if (Query == ETerritoryAssaultConditionQuery::LatestResolution)
 		Result += TEXT(" = ") + UEnum::GetDisplayValueAsText(RequiredResolution).ToString();
+	if (Query == ETerritoryAssaultConditionQuery::SecondsUntilDeployment)
+		Result += FString::Printf(TEXT(" %s %.1f s"), *UEnum::GetDisplayValueAsText(Comparison).ToString(),
+			FMath::Max(0.f, SecondsThreshold));
 	return Result;
 }
 

@@ -317,7 +317,7 @@ bool UTerritoryScheduleEnemyWaveEvent::TryScheduleWave(APawn* Target,
 			: UTerritoryBlueprintLibrary::GetActorPrimaryFaction(this, Requester);
 		Options.ScenarioID = ScenarioID;
 		bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(Territory,
-			AttackingFaction, LaunchMode, Options, bStartImmediately, FailureReason);
+			AttackingFaction, LaunchMode, Options, bStartImmediately, DeploymentDelaySeconds, FailureReason);
 	}
 	else if (LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit)
 	{
@@ -328,7 +328,7 @@ bool UTerritoryScheduleEnemyWaveEvent::TryScheduleWave(APawn* Target,
 		LegacyOptions.ScenarioID = ScenarioID;
 		bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(Territory,
 			AttackingFaction, LaunchMode, LegacyOptions,
-			bStartImmediately, FailureReason);
+			bStartImmediately, DeploymentDelaySeconds, FailureReason);
 	}
 	else if (bChooseBestEligibleAttacker)
 	{
@@ -343,7 +343,7 @@ bool UTerritoryScheduleEnemyWaveEvent::TryScheduleWave(APawn* Target,
 			IdentityOptions.ScenarioID = ScenarioID;
 			bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(
 				Territory, ChosenFaction, LaunchMode, IdentityOptions,
-				bStartImmediately, FailureReason);
+				bStartImmediately, DeploymentDelaySeconds, FailureReason);
 		}
 	}
 	else
@@ -352,7 +352,7 @@ bool UTerritoryScheduleEnemyWaveEvent::TryScheduleWave(APawn* Target,
 		IdentityOptions.ScenarioID = ScenarioID;
 		bScheduled = Counter->TryScheduleAssaultAdvancedWithReason(Territory,
 			AttackingFaction, LaunchMode, IdentityOptions,
-			bStartImmediately, FailureReason);
+			bStartImmediately, DeploymentDelaySeconds, FailureReason);
 	}
 	if (!bScheduled && bLogFailure)
 		UE_LOG(LogTerritory, Warning, TEXT("[EnemyWaveEvent] No Territory assault was scheduled for %s: %s"),
@@ -362,18 +362,23 @@ bool UTerritoryScheduleEnemyWaveEvent::TryScheduleWave(APawn* Target,
 
 FString UTerritoryScheduleEnemyWaveEvent::GetGraphDisplayText_Implementation()
 {
+	// A deployment delay is a timed story beat: warn now, deploy when the window opens.
+	const FString DelaySuffix = (!bStartImmediately && DeploymentDelaySeconds > 0.f)
+		? FString::Printf(TEXT(", deploy after %.0f s of campaign time"), DeploymentDelaySeconds)
+		: FString();
 	if (LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
-		return FString::Printf(TEXT("Owner reinforcements%s: %s at %s against %s [story: %s]"),
-			bStartImmediately ? TEXT(" now") : TEXT(" after preparation"), *AttackingFaction.ToString(),
+		return FString::Printf(TEXT("Owner reinforcements%s%s: %s at %s against %s [story: %s]"),
+			bStartImmediately ? TEXT(" now") : TEXT(" after preparation"), *DelaySuffix,
+			*AttackingFaction.ToString(),
 			*TargetTerritory.ToString(), OpposingFaction.IsValid() ? *OpposingFaction.ToString() : TEXT("Narrative target faction"),
 			*ScenarioID.ToString());
 	const bool bStoryPursuit = LaunchMode == ETerritoryAssaultLaunchMode::StoryPursuit;
-	return FString::Printf(TEXT("Enemy wave (%s%s): schedule %s against %s"),
+	return FString::Printf(TEXT("Enemy wave (%s%s): schedule %s against %s%s"),
 		bStoryPursuit ? TEXT("one story pursuit") : TEXT("profile-governed strategic response"),
 		bStartImmediately ? TEXT(", immediate deployment") : TEXT(""),
 		!bStoryPursuit && bChooseBestEligibleAttacker
 			? TEXT("best eligible faction") : *AttackingFaction.ToString(),
-		*TargetTerritory.ToString());
+		*TargetTerritory.ToString(), *DelaySuffix);
 }
 
 UTerritoryStartBossChaseEvent::UTerritoryStartBossChaseEvent(

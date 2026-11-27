@@ -260,7 +260,7 @@ namespace
 		FText FailureReason;
 		const bool bScheduled = Counterattacks->TryScheduleAssaultAdvancedWithReason(
 			Target, AttackingFaction, ETerritoryAssaultLaunchMode::StoryPursuit,
-			StoryOptions, bStartImmediately, FailureReason);
+			StoryOptions, bStartImmediately, /*DeploymentDelaySeconds=*/0.f, FailureReason);
 		UE_LOG(LogTemp, Display,
 			TEXT("[TerritoryAssaultGate] result=%s target=%s attacker=%s defender=%s immediate=%s difficulty=%s preparationAssaultsCancelled=%d reason=\"%s\" world=%s"),
 			bScheduled ? TEXT("Scheduled") : TEXT("Rejected"), *Args[0], *Args[1],

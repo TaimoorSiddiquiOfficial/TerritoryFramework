@@ -671,14 +671,14 @@ bool UTerritoryCounterAttackSubsystem::TryScheduleAssaultWithReason(
 	FText& OutFailureReason)
 {
 	return TryScheduleAssaultAdvancedWithReason(Territory, AttackingFaction,
-		LaunchMode, StoryOptions, false, OutFailureReason);
+		LaunchMode, StoryOptions, false, /*DeploymentDelaySeconds=*/0.f, OutFailureReason);
 }
 
 bool UTerritoryCounterAttackSubsystem::TryScheduleAssaultAdvancedWithReason(
 	ATerritoryVolume* Territory, FGameplayTag AttackingFaction,
 	ETerritoryAssaultLaunchMode LaunchMode,
 	const FTerritoryStoryPursuitOptions& StoryOptions,
-	bool bStartImmediately, FText& OutFailureReason)
+	bool bStartImmediately, float DeploymentDelaySeconds, FText& OutFailureReason)
 {
 	OutFailureReason = FText::GetEmpty();
 	const FTerritoryStoryPursuitOptions* Options =
@@ -686,7 +686,8 @@ bool UTerritoryCounterAttackSubsystem::TryScheduleAssaultAdvancedWithReason(
 			|| LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements)
 		? &StoryOptions : nullptr;
 	return ScheduleAssault(Territory, AttackingFaction, LaunchMode,
-		false, Options, &OutFailureReason, true, bStartImmediately, StoryOptions.ScenarioID);
+		false, Options, &OutFailureReason, true, bStartImmediately, StoryOptions.ScenarioID,
+		DeploymentDelaySeconds);
 }
 
 bool UTerritoryCounterAttackSubsystem::ScheduleCounterAttack(
@@ -723,7 +724,7 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	ETerritoryAssaultLaunchMode LaunchMode, bool bContinueExistingSchedule,
 	const FTerritoryStoryPursuitOptions* StoryOptions,
 	FText* OutFailureReason, bool bQuestOverrideAuthorized,
-	bool bStartImmediately, FName AuthoredScenarioID)
+	bool bStartImmediately, FName AuthoredScenarioID, float DeploymentDelaySeconds)
 {
 	if (OutFailureReason) *OutFailureReason = FText::GetEmpty();
 	const bool bOwnerReinforcements = LaunchMode == ETerritoryAssaultLaunchMode::StoryReinforcements;
@@ -978,6 +979,14 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	Record.GraceEndsGameTime = Record.CapturedGameTime + CalculateInfluenceAdjustedDelay(
 		BaseGrace, ForceConfig->TerritorialInfluence,
 		Profile->MinimumInfluenceTimingScale);
+	// An authored story delay warns now and holds the force until the declared campaign-time window
+	// opens. Immediate deployments never wait, and zero keeps the engine's own timing so automatic
+	// strategic schedules, legacy data and every existing caller stay unchanged.
+	constexpr double MaximumStoryDeploymentDelaySeconds = 24.0 * 60.0 * 60.0;
+	Record.DeploymentOpensGameTime = (!bStartImmediately && DeploymentDelaySeconds > 0.f)
+		? Record.CapturedGameTime + FMath::Clamp(
+			static_cast<double>(DeploymentDelaySeconds), 0.0, MaximumStoryDeploymentDelaySeconds)
+		: 0.0;
 	Assaults.Add(Record.AssaultID, Record);
 	if (Settings && Settings->ShouldDebugCounterAttacks())
 	{
@@ -1047,7 +1056,8 @@ bool UTerritoryCounterAttackSubsystem::StartAssaultImmediately(
 	}
 	if (Assault.State == ETerritoryAssaultState::ScheduledWarning)
 	{
-		NotifyRelevantPlayers(Assault, Territory);
+		// The warning was already announced when this assault committed its evaluation, so an
+		// immediate deployment only has to open the proximity wait.
 		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::ScheduledWarning) || !IsValid(Territory)) return false;
 		const ETerritoryAssaultState PreviousState = Assault.State;
 		Assault.State = ETerritoryAssaultState::WaitingForPlayerProximity;
@@ -1792,7 +1802,14 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		}
 		break;
 	case ETerritoryAssaultState::ScheduledWarning:
-		NotifyRelevantPlayers(Assault, Territory);
+		// The warning is announced once, when the force is scheduled or an immediate deployment
+		// starts, so a held warning is never re-announced. An authored story delay keeps the force
+		// here until its deployment window opens instead of advancing on the next update cycle.
+		if (Assault.DeploymentOpensGameTime > 0.0
+			&& GetCampaignGameTime() < Assault.DeploymentOpensGameTime)
+		{
+			break;
+		}
 		if (!IsAssaultCurrent(Access, ETerritoryAssaultState::ScheduledWarning) || !IsValid(Territory)) return;
 		{
 			const ETerritoryAssaultState PreviousState = Assault.State;
@@ -2102,6 +2119,9 @@ void UTerritoryCounterAttackSubsystem::EvaluateAssault(
 	Assault.State = ETerritoryAssaultState::ScheduledWarning;
 	Assault.Resolution = ETerritoryAssaultResolution::None;
 	BroadcastStateTransition(Assault, PreviousState);
+	// Announced here, once, instead of on every warning update: an authored deployment delay may
+	// hold this warning for a long time and must not repeat the notification each cycle.
+	NotifyRelevantPlayers(Assault, Territory);
 }
 
 void UTerritoryCounterAttackSubsystem::UpdateCommittedForceEstimate(FTerritoryAssaultRecord& Assault,

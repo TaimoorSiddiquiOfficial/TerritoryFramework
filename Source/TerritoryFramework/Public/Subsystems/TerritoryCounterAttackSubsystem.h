@@ -79,6 +79,8 @@ public:
 	 * Reinforcements-capability, or counter-Quest gates. It still validates authority,
 	 * opposing ownership, diplomacy, finite force, spawn definitions, budget, and route.
 	 * Immediate also skips grace, time window, chance, warning delay, and proximity.
+	 * A positive Deployment Delay seconds keeps the warned force in its warning until
+	 * that campaign-time window opens, then the normal proximity/garrison policy applies.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category="Territory|Counter Attack|Diagnostics",
@@ -86,7 +88,7 @@ public:
 	bool TryScheduleAssaultAdvancedWithReason(ATerritoryVolume* Territory,
 		FGameplayTag AttackingFaction, ETerritoryAssaultLaunchMode LaunchMode,
 		const FTerritoryStoryPursuitOptions& StoryOptions,
-		bool bStartImmediately, FText& OutFailureReason);
+		bool bStartImmediately, float DeploymentDelaySeconds, FText& OutFailureReason);
 
 	/** Best-attacker admission with a player/developer-readable rejection reason. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
@@ -329,6 +331,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="Territory|Counter Attack")
 	FOnTerritoryCounterHappened OnCounterHappened;
 
+	/**
+	 * Campaign-clock seconds that stamp every durable assault timestamp: the Narrative game
+	 * state's accumulated time on a real session, world seconds when no Narrative clock exists.
+	 * UI, conditions and story gates read the same clock so an authored deployment delay keeps
+	 * the same remaining wait after a save/load.
+	 */
+	double GetCampaignGameTime() const;
+
 private:
 	friend class FTFCounterAttackMapConfigurationRegression;
 	friend class FTFAssaultSurvivorRestore;
@@ -508,7 +518,8 @@ private:
 		const FTerritoryStoryPursuitOptions* StoryOptions = nullptr,
 		FText* OutFailureReason = nullptr,
 		bool bQuestOverrideAuthorized = false,
-		bool bStartImmediately = false, FName AuthoredScenarioID = NAME_None);
+		bool bStartImmediately = false, FName AuthoredScenarioID = NAME_None,
+		float DeploymentDelaySeconds = 0.f);
 	bool StartAssaultImmediately(FTerritoryAssaultRecord& Assault,
 		ATerritoryVolume* Territory, FText* OutFailureReason = nullptr);
 	bool HasPendingVehicleIngress(const FGuid& AssaultID) const;
@@ -523,7 +534,6 @@ private:
 		FText* OutFailureReason = nullptr) const;
 	bool FindReachableObjective(const ATerritoryVolume* Territory, const FVector& Start,
 		FVector& OutObjective, FString* OutFailureReason = nullptr) const;
-	double GetCampaignGameTime() const;
 	float GetNarrativeTimeOfDay() const;
 	bool IsForceTimeWindowOpen(const FTerritoryFactionAssaultConfig& ForceConfig) const;
 	int32 MakeDecisionSeed(const ATerritoryVolume* Territory,
@@ -553,4 +563,6 @@ private:
 	friend class FTFEvidenceAssaultKilledProducer;
 	/** Seeds a registered attacker in a client world to prove the refusal path. */
 	friend class FTFEvidenceAssaultKilledRefusedOnClient;
+	/** Resolves an authored on-foot approach and deploys one walker to prove the walking entry mode. */
+	friend class FTFAssaultOnFootApproachWalkers;
 };

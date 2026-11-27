@@ -578,6 +578,9 @@ bool FTFCounterAttackMapConfigurationRegression::RunTest(const FString& Paramete
 			ETerritoryAssaultEntryType::NarrativeVehicle);
 		TestTrue(TEXT("Blacksmith vehicle route references the project Sedan"),
 			BlacksmithRoute->VehicleClass.ToSoftObjectPath().ToString()
+				.Contains(TEXT("/Game/HOPTRENDY/BPV_Sedan")));
+		TestFalse(TEXT("Blacksmith vehicle route avoids the vendor sedan whose seat behaviours never reach an instance"),
+			BlacksmithRoute->VehicleClass.ToSoftObjectPath().ToString()
 				.Contains(TEXT("BPV_Sedan_Mass")));
 		TestEqual(TEXT("Blacksmith permits two vehicle deployments per assault route"),
 			BlacksmithRoute->MaximumVehicleDeployments, 2);

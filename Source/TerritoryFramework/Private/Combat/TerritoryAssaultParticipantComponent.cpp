@@ -19,12 +19,14 @@
 #include "AI/Activities/NPCGoalItem.h"
 #include "AI/NarrativeNPCController.h"
 #include "AI/NPCDefinition.h"
+#include "Interaction/InteractableComponent.h"
 #include "Interaction/NPCInteractionComponent.h"
 #include "Vehicles/MountComponent.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 #include "ChaosWheeledVehicleMovementComponent.h"
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "GAS/NarrativeAttributeSetBase.h"
+#include "GAS/NarrativeInteractAbility.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 #include "UnrealFramework/NarrativeTeamAgentInterface.h"
 #include "Engine/World.h"
@@ -96,6 +98,7 @@ void UTerritoryAssaultParticipantComponent::ConfigureNarrativeVehicleIngress(
 	bVehicleIngressComplete = false;
 	bVehicleIngressFailed = !IsValid(InVehicle) || VehicleRoutePoints.IsEmpty();
 	bVehicleMountRequested = false;
+	bVehicleSeatClaimRejectionReported = false;
 	bVehiclePossessionConfirmed = false;
 	bNarrativeVehicleDriver = true;
 	bReportsVehicleStoryOutcome = true;
@@ -213,6 +216,58 @@ void UTerritoryAssaultParticipantComponent::GetLifetimeReplicatedProps(
 	DOREPLIFETIME(UTerritoryAssaultParticipantComponent, bStreamingSuspended);
 }
 
+bool UTerritoryAssaultParticipantComponent::EnsureNarrativeSeatInteractBehaviour(UMountComponent* Mount)
+{
+	if (!Mount || !Mount->InteractionSlots.IsValidIndex(NarrativeVehicleSeatIndex))
+	{
+		return false;
+	}
+
+	UInteractionSlotBehavior* SeatBehaviour =
+		Mount->InteractionSlots[NarrativeVehicleSeatIndex].SlotInteractBehavior;
+	if (IsValid(SeatBehaviour) && IsValid(SeatBehaviour->GetInteractAbility()))
+	{
+		return true;
+	}
+
+	// Narrative authors each seat's interaction behaviour as an instanced sub-object of the vehicle
+	// Blueprint's mount component. The construction script still carries it, but the authored value is
+	// not carried onto the spawned mount instance, so Narrative's own RunInteractBehavior refuses the
+	// seat claim with a bare false. Restore the authored behaviour on this instance from the vehicle
+	// class default; Narrative's API, asset data and seat authority stay untouched.
+	const ANarrativeVehicleBase* Vehicle = NarrativeIngressVehicle.Get();
+	const ANarrativeVehicleBase* VehicleCDO = Vehicle && Vehicle->GetClass()
+		? Vehicle->GetClass()->GetDefaultObject<ANarrativeVehicleBase>() : nullptr;
+	const UMountComponent* MountCDO = VehicleCDO
+		? VehicleCDO->FindComponentByClass<UMountComponent>() : nullptr;
+	const UInteractionSlotBehavior* AuthoredBehaviour = (MountCDO
+		&& MountCDO->InteractionSlots.IsValidIndex(NarrativeVehicleSeatIndex))
+		? MountCDO->InteractionSlots[NarrativeVehicleSeatIndex].SlotInteractBehavior : nullptr;
+
+	if (!IsValid(AuthoredBehaviour) || !IsValid(AuthoredBehaviour->GetInteractAbility()))
+	{
+		if (!bVehicleSeatBehaviourRepairReported)
+		{
+			bVehicleSeatBehaviourRepairReported = true;
+			UE_LOG(LogTerritory, Warning,
+				TEXT("[CounterAttack] mount %s seat %d carries no usable Narrative interaction behaviour ")
+				TEXT("on this instance and the vehicle class default %s carries none either; the seat ")
+				TEXT("claim cannot start an interact ability."),
+				*GetNameSafe(Mount), NarrativeVehicleSeatIndex,
+				VehicleCDO ? *GetNameSafe(VehicleCDO) : TEXT("(none)"));
+		}
+		return false;
+	}
+
+	Mount->InteractionSlots[NarrativeVehicleSeatIndex].SlotInteractBehavior =
+		DuplicateObject<UInteractionSlotBehavior>(AuthoredBehaviour, Mount);
+	UE_LOG(LogTerritory, Display,
+		TEXT("[CounterAttack] restored the authored Narrative seat interaction behaviour %s on %s seat %d ")
+		TEXT("from the vehicle class default before claiming the seat."),
+		*GetNameSafe(AuthoredBehaviour), *GetNameSafe(Mount), NarrativeVehicleSeatIndex);
+	return true;
+}
+
 bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority() || bRemovalReported) return false;
@@ -251,18 +306,51 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 	// Territory supplies the explicit seat assignment and only the driver steers.
 	if (!bVehicleMountRequested)
 	{
-		if (!Interaction->TargetInteractionSlot(
-			Mount, NarrativeVehicleSeatIndex, false)
-			|| !Interaction->RunInteractBehavior(false))
+		// Restore the authored seat behaviour the spawned mount instance lost, otherwise every claim
+		// below is refused before Narrative can start the mount ability.
+		EnsureNarrativeSeatInteractBehaviour(Mount);
+		const bool bSeatTargeted = Interaction->TargetInteractionSlot(
+			Mount, NarrativeVehicleSeatIndex, false);
+		const bool bSeatAbilityStarted = bSeatTargeted
+			&& Interaction->RunInteractBehavior(false);
+		if (!bSeatTargeted || !bSeatAbilityStarted)
 		{
-			UE_LOG(LogTerritory, Error,
-				TEXT("[CounterAttack] Narrative mount interaction rejected %s %s seat=%d vehicle=%s"),
-				bNarrativeVehicleDriver ? TEXT("driver") : TEXT("passenger"),
-				*GetNameSafe(NPC), NarrativeVehicleSeatIndex, *GetNameSafe(Vehicle));
+			// Narrative answers both steps with a bare bool and logs nothing, so a rejected claim is
+			// otherwise undiagnosable. Report the state Narrative's own gates consult, once per
+			// participant, then latch the structural failure the rest of the component already
+			// treats as unrecoverable ingress.
+			if (!bVehicleSeatClaimRejectionReported)
+			{
+				bVehicleSeatClaimRejectionReported = true;
+				const bool bSeatAuthored = Mount->InteractionSlots.IsValidIndex(
+					NarrativeVehicleSeatIndex);
+				const UInteractionSlotBehavior* SeatBehavior = bSeatAuthored
+					? Mount->InteractionSlots[NarrativeVehicleSeatIndex].SlotInteractBehavior.Get()
+					: nullptr;
+				UClass* SeatAbilityClass = SeatBehavior
+					? SeatBehavior->GetInteractAbility().Get() : nullptr;
+				UE_LOG(LogTerritory, Warning,
+					TEXT("[CounterAttack] Narrative mount interaction rejected %s %s seat=%d vehicle=%s ")
+					TEXT("(seatTargeted=%s interactAbilityStarted=%s authoredSlots=%d activeSlots=%d ")
+					TEXT("seatAuthored=%s seatBehavior=%s seatAbilityClass=%s controllerPawn=%s ")
+					TEXT("occupiedInteractable=%s narrativeASC=%s); the ingress attempt is refused."),
+					bNarrativeVehicleDriver ? TEXT("driver") : TEXT("passenger"),
+					*GetNameSafe(NPC), NarrativeVehicleSeatIndex, *GetNameSafe(Vehicle),
+					bSeatTargeted ? TEXT("yes") : TEXT("no"),
+					bSeatAbilityStarted ? TEXT("yes") : TEXT("no"),
+					Mount->InteractionSlots.Num(), Mount->SlotStatuses.Num(),
+					bSeatAuthored ? TEXT("yes") : TEXT("no"),
+					*GetNameSafe(SeatBehavior),
+					SeatAbilityClass ? *SeatAbilityClass->GetName() : TEXT("none"),
+					*GetNameSafe(Controller->GetPawn()),
+					Interaction->HasOccupiedInteractable() ? TEXT("yes") : TEXT("no"),
+					NPC->GetAbilitySystemComponent() ? TEXT("yes") : TEXT("no"));
+			}
 			bVehicleIngressFailed = true;
 			return false;
 		}
 		bVehicleMountRequested = true;
+		bVehicleSeatClaimRejectionReported = false;
 		UE_LOG(LogTerritory, Display,
 			TEXT("[CounterAttack] Narrative %s %s claimed seat %d in %s"),
 			bNarrativeVehicleDriver ? TEXT("driver") : TEXT("passenger"),

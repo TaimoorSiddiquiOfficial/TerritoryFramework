@@ -353,7 +353,9 @@ enum class ETerritoryAssaultConditionQuery : uint8
 	KilledAttackers UMETA(DisplayName="Latest Killed Attackers"),
 	WithdrawnAttackers UMETA(DisplayName="Latest Withdrawn Attackers"),
 	RemainingAttackers UMETA(DisplayName="Latest Living Plus Reserve Attackers"),
-	AnyRecorded UMETA(DisplayName="Has A Matching Assault Record")
+	AnyRecorded UMETA(DisplayName="Has A Matching Assault Record"),
+	DeploymentWindowOpen UMETA(DisplayName="Authored Deployment Window Is Open"),
+	SecondsUntilDeployment UMETA(DisplayName="Latest Seconds Until Deployment Opens")
 };
 
 /** Reads durable counterattack records; it never schedules or resolves an assault. */
@@ -402,6 +404,13 @@ public:
 		meta=(ClampMin="0", EditCondition="Query >= ETerritoryAssaultConditionQuery::PlannedAttackers && Query <= ETerritoryAssaultConditionQuery::RemainingAttackers", EditConditionHides,
 			ToolTip="Example: Killed Attackers At Least 3 can unlock a reinforcement objective."))
 	int32 Value = 1;
+
+	/** Campaign-time seconds threshold used by the deployment timing query. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Condition",
+		meta=(ClampMin="0", UIMin="0", UIMax="3600",
+			EditCondition="Query == ETerritoryAssaultConditionQuery::SecondsUntilDeployment", EditConditionHides,
+			ToolTip="Example: Seconds Until Deployment Opens At Least 30 keeps a countdown line hidden until the warned force is close to deploying. A record without an authored delay reads zero and is already open."))
+	float SecondsThreshold = 30.f;
 
 	static const FTerritoryAssaultRecord* SelectLatestRecord(
 		const TArray<FTerritoryAssaultRecord>& Records);
