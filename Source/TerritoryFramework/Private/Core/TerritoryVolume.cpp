@@ -2590,7 +2590,13 @@ void ATerritoryVolume::FireStateEvents(ETerritoryState State, bool bEntering, co
 			continue;
 		}
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
-		TerritoryTales::ExecuteEvent(Event, ContextPawn);
+		// The context is passed through in full. The 2.5 adaptation that routed these calls
+		// through TerritoryTales::ExecuteEvent kept only the pawn, which silently starved every
+		// event that resolves its faction from the controller (ControllerPawnFaction) or that
+		// needs the Tales component for party policy and task-context recovery. Conditions above
+		// already ran against all three, so dropping them at dispatch time was never intended.
+		TerritoryTales::ExecuteEvent(Event, ContextPawn, ContextPC,
+			TransitionContext.TalesComponent);
 		if (!IsGameplayCallbackStateCurrent(EventLoadGeneration)) return;
 	}
 }
@@ -3026,7 +3032,11 @@ void ATerritoryVolume::OnDefenderDied(AActor* KilledActor,
 				continue;
 			}
 			TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
-			TerritoryTales::ExecuteEvent(Event, DefenderEventContext.TargetPawn);
+			// Full context (see FireStateEvents): the defender-death events are authored with
+			// controller-derived faction sources, and the conditions above were evaluated with
+			// exactly these three handles.
+			TerritoryTales::ExecuteEvent(Event, DefenderEventContext.TargetPawn,
+				DefenderEventContext.PlayerController, DefenderEventContext.TalesComponent);
 		}
 	};
 	FireDefenderEvents(GetDefenderDiedEvents(), TEXT("DefenderDiedEvent"));
@@ -3102,7 +3112,9 @@ void ATerritoryVolume::TryCompleteDefenderDefeat(
 			continue;
 		}
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
-		TerritoryTales::ExecuteEvent(Event, EventContext.TargetPawn);
+		// Full context (see FireStateEvents).
+		TerritoryTales::ExecuteEvent(Event, EventContext.TargetPawn,
+			EventContext.PlayerController, EventContext.TalesComponent);
 	}
 }
 
@@ -3200,7 +3212,9 @@ void ATerritoryVolume::DispatchFloorClearedEvents(int32 FloorIndex,
 			continue;
 		}
 		TerritoryTales::FScopedPrevalidatedEvent Prevalidated(Event);
-		TerritoryTales::ExecuteEvent(Event, TransitionContext.TargetPawn);
+		// Full context (see FireStateEvents).
+		TerritoryTales::ExecuteEvent(Event, TransitionContext.TargetPawn,
+			TransitionContext.PlayerController, TransitionContext.TalesComponent);
 	}
 }
 

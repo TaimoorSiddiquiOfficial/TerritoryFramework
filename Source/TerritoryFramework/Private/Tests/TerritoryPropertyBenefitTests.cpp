@@ -159,11 +159,34 @@ bool FTFProjectDistractionAssetWiring::RunTest(const FString& Parameters)
 		EquipmentEffectProperty
 			? Cast<UClass>(EquipmentEffectProperty->GetObjectPropertyValue_InContainer(Rock))
 			: nullptr);
-	const FFloatProperty* StealthProperty = FindFProperty<FFloatProperty>(
-		RockClass, TEXT("StealthRating"));
-	TestEqual(TEXT("Rock does not inherit the demo throwable's stealth bonus"),
-		StealthProperty ? StealthProperty->GetPropertyValue_InContainer(Rock) : -1.f,
-		0.f);
+	// Narrative 2.5 removed the per-item StealthRating float from UEquippableItem and moved the
+	// bonuses into the protected SetByCaller EquipmentEffectValues map (EquippableItem.h:118-120),
+	// so the demo throwable's stealth bonus can only leak into the rock through a non-zero entry
+	// there. Reading the retired float through FindFProperty reported the -1 sentinel and failed
+	// the test even though the rock carried no bonus at all.
+	const FMapProperty* EffectValuesProperty = FindFProperty<FMapProperty>(
+		RockClass, TEXT("EquipmentEffectValues"));
+	TestNotNull(TEXT("Narrative Equippable Item still exposes the SetByCaller effect values"),
+		EffectValuesProperty);
+	bool bCarriesStealthBonus = false;
+	if (EffectValuesProperty)
+	{
+		FScriptMapHelper EffectValues(EffectValuesProperty,
+			EffectValuesProperty->ContainerPtrToValuePtr<void>(Rock));
+		for (int32 Index = 0; Index < EffectValues.Num(); ++Index)
+		{
+			const FGameplayTag* Key =
+				reinterpret_cast<const FGameplayTag*>(EffectValues.GetKeyPtr(Index));
+			const float* Value = reinterpret_cast<const float*>(EffectValues.GetValuePtr(Index));
+			if (Key && Value && Key->ToString().Contains(TEXT("Stealth"))
+				&& !FMath::IsNearlyZero(*Value))
+			{
+				bCarriesStealthBonus = true;
+			}
+		}
+	}
+	TestFalse(TEXT("Rock does not inherit the demo throwable's stealth bonus"),
+		bCarriesStealthBonus);
 
 	const FStructProperty* RequiredTagsProperty = FindFProperty<FStructProperty>(
 		AbilityClass, TEXT("ActivationRequiredTags"));

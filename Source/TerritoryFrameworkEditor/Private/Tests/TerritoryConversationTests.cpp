@@ -16,6 +16,7 @@
 #include "GAS/NarrativeAbilitySystemComponent.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "UnrealFramework/NarrativeGameState.h"
+#include "UnrealFramework/NarrativePlayerCharacter.h"
 #include "UnrealFramework/NarrativePlayerController.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -184,7 +185,11 @@ bool FTFTerritoryConversationTransport::RunTest(const FString& Parameters)
 	ON_SCOPE_EXIT { World->DestroyWorld(false); };
 	auto* PC = NewObject<ANarrativePlayerController>(World->PersistentLevel);
 	PC->SetRole(ROLE_Authority);
-	auto* Pawn = World->SpawnActor<APawn>();
+	// Narrative 2.5 resolves the listener's avatar as an ANarrativeCharacter
+	// (UTalesComponent::GetOwningPawn returns the character, not the APawn it used to), and the
+	// adapter refuses a listener without an avatar because the ambient cleanup has to hide and
+	// unhide that pawn. The fixture therefore possesses a real character, not a bare APawn.
+	auto* Pawn = NewObject<ANarrativePlayerCharacter>(World->PersistentLevel);
 	PC->SetPawn(Pawn);
 	auto* Adapter = NewObject<UTerritoryConversationListenerComponent>(PC);
 	PC->AddInstanceComponent(Adapter); Adapter->RegisterComponent();
@@ -196,8 +201,13 @@ bool FTFTerritoryConversationTransport::RunTest(const FString& Parameters)
 	PartyProperty->SetObjectPropertyValue_InContainer(Tales, NewObject<UNarrativePartyComponent>(PC));
 	TestFalse(TEXT("Party listeners are explicitly rejected"), Adapter->IsSupportedListener(Tales, Adapter));
 	PartyProperty->SetObjectPropertyValue_InContainer(Tales, nullptr);
+	// Aliveness is an ability-system state: a bare spawned guard has no initialised ASC, so
+	// ResolvePlayParams would reject the pair as dead and every later assertion would fail for
+	// the wrong reason (the sibling coordination test uses the same recipe).
 	auto* First = World->SpawnActor<ATerritoryGuardCharacter>();
 	auto* Second = World->SpawnActor<ATerritoryGuardCharacter>();
+	First->GetNarrativeAbilitySystemComponent()->InitAbilityActorInfo(First, First);
+	Second->GetNarrativeAbilitySystemComponent()->InitAbilityActorInfo(Second, Second);
 	Adapter->SessionID = FGuid::NewGuid();
 	Adapter->PreparedClass = UTerritoryAmbientDialogue::StaticClass();
 	Adapter->FirstGuard = First; Adapter->SecondGuard = Second;

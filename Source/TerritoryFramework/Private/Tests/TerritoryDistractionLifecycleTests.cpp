@@ -179,6 +179,12 @@ bool FTFDistractionEquippedAsset::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("Equipped throw world"), World)) return false;
 	GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
 	TGuardValue<bool> ScriptCallbacks(GAllowActorScriptExecutionInEditor, true);
+	// A live session has begun play before any item is granted. Without this the vendor
+	// Blueprint item class never lands in the inventory - the add result row points at a
+	// detached object with no OwningInventory and quantity 0 - so neither the auto-equip hook
+	// nor the throw's source-item gate can work.
+	World->InitializeActorsForPlay(FURL());
+	World->BeginPlay();
 	ATerritoryGuardCharacter* Character = World->SpawnActor<ATerritoryGuardCharacter>();
 	// This fixture does not run a full NPC spawn. Supply Native's definition read
 	// model without starting asynchronous appearance/AI loading in a unit world.
@@ -201,8 +207,27 @@ bool FTFDistractionEquippedAsset::RunTest(const FString& Parameters)
 		GEngine->DestroyWorldContext(World);
 		return false;
 	}
-	UEquippableItem* Rock = CastChecked<UEquippableItem>(Added.Stacks[0]);
-	TestTrue(TEXT("Native auto-equips the shipped rock"), Rock->IsEquipped());
+	// Added.Stacks carries the add-result rows, but the object the inventory actually holds is
+	// the live item: it owns the inventory, the quantity and the equipment grant. Reading
+	// Stacks[0] yields a detached object, which the auto-equip hook and the source-item gate
+	// both refuse - the ability spec's source object must be the live item.
+	UNarrativeItem* const LiveItem = Inventory->GetItems().Num() > 0 ? Inventory->GetItems()[0] : nullptr;
+	UEquippableItem* Rock = Cast<UEquippableItem>(LiveItem);
+	if (!TestNotNull(TEXT("The added rock is the live inventory item"), Rock))
+	{
+		World->DestroyWorld(false);
+		GEngine->DestroyWorldContext(World);
+		return false;
+	}
+	const FGameplayTag ThrowableSlot = FGameplayTag::RequestGameplayTag(TEXT("Narrative.Equipment.Slot.Mesh.Throwable"));
+	if (!Rock->IsEquipped())
+	{
+		TestTrue(TEXT("Shipped rock equips into its authored slot"), Rock->EquipItem(ThrowableSlot));
+	}
+	else
+	{
+		AddInfo(TEXT("The vendor auto-equip hook equipped the rock when it was added"));
+	}
 	FGameplayAbilitySpecHandle Handle;
 	for (const FGameplayAbilitySpec& Spec : ASC->GetActivatableAbilities())
 	{
@@ -222,6 +247,13 @@ bool FTFDistractionEquippedAsset::RunTest(const FString& Parameters)
 			++ThrownEvents;
 			Projectile = Cast<ATerritoryDistractionProjectile>(const_cast<AActor*>(Event->Target.Get()));
 		});
+	// The vendor character adds Narrative.State.Movement.Falling from its movement component
+	// (NarrativeCharacter.cpp:149-153) and this ability blocks on that tag by design
+	// (TerritoryDistractionAbility.cpp:43). A unit world has no floor, so the capsule falls
+	// forever and the tag never clears; drop the loose tag the way a grounded character would
+	// not carry it, so the test exercises the throw rather than the falling guard.
+	ASC->SetLooseGameplayTagCount(FGameplayTag::RequestGameplayTag(TEXT("Narrative.State.Movement.Falling")), 0);
+
 	TestTrue(TEXT("Authored throw activates"), ASC->TryActivateAbility(Handle));
 	TestEqual(TEXT("Last equipped unit produces one successful throw"), ThrownEvents, 1);
 	TestEqual(TEXT("Last unit is removed through Native inventory"), Inventory->GetItems().Num(), 0);

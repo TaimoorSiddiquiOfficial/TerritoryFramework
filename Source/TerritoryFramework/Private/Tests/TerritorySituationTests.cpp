@@ -22,6 +22,7 @@
 #include "Tales/TerritorySituationCondition.h"
 #include "UObject/UnrealType.h"
 #include "Tales/TerritoryTalesUtilities.h"
+#include "UnrealFramework/NarrativePlayerCharacter.h"
 
 namespace
 {
@@ -134,7 +135,11 @@ bool FTFSituationHistoryAndNarrative::RunTest(const FString& Parameters)
 	TGuardValue<bool> AllowCallbacks(GAllowActorScriptExecutionInEditor, true);
 	ATerritoryWorldState* State = World->SpawnActor<ATerritoryWorldState>();
 	ATerritoryProperty* Place = World->SpawnActor<ATerritoryProperty>();
-	APawn* Pawn = World->SpawnActor<APawn>();
+	// Narrative 2.5 dispatches conditions with a single ANarrativeCharacter
+	// (NarrativeNodeBase.cpp:116 casts the pawn), so a fixture that claims to prove the native
+	// reply selection has to hand the graph a narrative character. A bare APawn casts to null
+	// and the condition never sees a world.
+	ANarrativePlayerCharacter* Pawn = World->SpawnActor<ANarrativePlayerCharacter>();
 	UTalesComponent* Tales = NewObject<UTalesComponent>(Pawn);
 	UNarrativeSaveSubsystem* Save = World->GetSubsystem<UNarrativeSaveSubsystem>();
 	UTerritoryRegistrySubsystem* Registry = World->GetSubsystem<UTerritoryRegistrySubsystem>();

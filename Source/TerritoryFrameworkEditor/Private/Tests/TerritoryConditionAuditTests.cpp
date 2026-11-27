@@ -32,6 +32,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryDiplomacySubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
+#include "Combat/TerritoryCounterAttackProfile.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "NarrativeSave.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
@@ -244,7 +245,7 @@ bool FTFTalesDynamicReputation::RunTest(const FString&)
 	Event->Faction = Bandits;
 	Event->FactionSource = ETerritoryCaptureFactionSource::ControllerPawnFaction;
 	Event->Value = 12;
-   TerritoryTales::ExecuteEvent(Event, Pawn);
+   TerritoryTales::ExecuteEvent(Event, Pawn, Controller, Tales);
 	TestEqual(TEXT("Dynamic reputation credits the player's current Heroes faction"), Diplomacy->GetReputation(Heroes), 12);
 	TestEqual(TEXT("Unused explicit fallback does not receive reputation"), Diplomacy->GetReputation(Bandits), 0);
 	auto* Condition = NewObject<UTerritoryReputationCondition>();
@@ -253,7 +254,7 @@ bool FTFTalesDynamicReputation::RunTest(const FString&)
  TestTrue(TEXT("Dynamic condition reads the same faction"), TerritoryTales::DoesConditionPass(Condition, Pawn, Controller, Tales));
 	State->SetFactions(FGameplayTagContainer(Bandits));
   TestFalse(TEXT("Betrayal immediately changes the faction being checked"), TerritoryTales::DoesConditionPass(Condition, Pawn, Controller, Tales));
-  TerritoryTales::ExecuteEvent(Event, Pawn, nullptr, nullptr);
+  TerritoryTales::ExecuteEvent(Event, Pawn, Controller, Tales);
 	TestEqual(TEXT("Following event credits the newly adopted faction"), Diplomacy->GetReputation(Bandits), 12);
 	TestEqual(TEXT("Old faction reputation is preserved"), Diplomacy->GetReputation(Heroes), 12);
  TerritoryTales::ExecuteEvent(Event, nullptr);
@@ -261,7 +262,7 @@ bool FTFTalesDynamicReputation::RunTest(const FString&)
 	auto* Deny = NewObject<UTerritoryAuditCondition>(Event);
 	Deny->Callback = [] { return false; };
 	Event->Conditions = {Deny};
-   TerritoryTales::ExecuteEvent(Event, Pawn, nullptr, nullptr);
+   TerritoryTales::ExecuteEvent(Event, Pawn, Controller, Tales);
 	TestEqual(TEXT("Inherited event conditions block the mutation"), Diplomacy->GetReputation(Bandits), 12);
 	auto* Directory = Fixture.World->SpawnActor<ATerritoryWorldState>();
 	Directory->ExportPersistentState();
@@ -358,9 +359,24 @@ bool FTFHashirQuestEntryLifecycle::RunTest(const FString&)
 		|| !TestNotNull(TEXT("Authored quest compiles"), QuestClass)) return false;
 	TerritoryConditionAudit::FWorldFixture Fixture;
 	TGuardValue<bool> Callbacks(GAllowActorScriptExecutionInEditor, true);
+	auto* PlayerState = NewObject<ANarrativePlayerState>(Fixture.World->PersistentLevel);
+	PlayerState->SetRole(ROLE_Authority);
+	PlayerState->SetFactions(FGameplayTagContainer(FGameplayTag::RequestGameplayTag(TEXT("Narrative.Factions.Heroes"))));
+	auto* Pawn = NewObject<ANarrativePlayerCharacter>(Fixture.World->PersistentLevel);
+	Pawn->SetRole(ROLE_Authority); Pawn->SetPlayerState(PlayerState);
 	auto* Controller = NewObject<ANarrativePlayerController>(Fixture.World->PersistentLevel);
 	Controller->SetRole(ROLE_Authority);
-	auto* Tales = NewObject<UTalesComponent>(Controller);
+	Controller->SetPlayerState(PlayerState);
+	Controller->SetOwnedCharacter(Pawn); Controller->SetPawn(Pawn);
+	// SetPawn does not write APawn::Controller: the character resolves its owning
+	// controller from the pawn side, so set it explicitly.
+	Pawn->SetController(Controller);
+	// The compiled dialogue graph resolves its Tales component from the event target:
+	// UNarrativeFunctionLibrary::GetTalesComponentFromTarget returns null for a null
+	// target, so this fixture has to own a real character and pass it as the target,
+	// exactly like the live dialogue does.
+	auto* Tales = Controller->FindComponentByClass<UTalesComponent>();
+	if (!TestNotNull(TEXT("Native controller owns its Tales component"), Tales)) return false;
 	auto* GeneratedClass = Cast<UDialogueBlueprintGeneratedClass>(DialogueClass);
 	if (!TestNotNull(TEXT("Native compiled dialogue template is available"), GeneratedClass)) return false;
 	auto* Dialogue = NewObject<UDialogue>(Tales, DialogueClass);
@@ -368,6 +384,7 @@ bool FTFHashirQuestEntryLifecycle::RunTest(const FString&)
 	GeneratedClass->InitializeDialogue(Dialogue);
 	Dialogue->OwningComp = Tales;
 	Dialogue->OwningController = Controller;
+	Dialogue->OwningPawn = Pawn;
 	UDialogueNode* Offer = nullptr;
 	UDialogueNode* Trip = nullptr;
 	UDialogueNode* Departure = nullptr;
@@ -394,10 +411,10 @@ bool FTFHashirQuestEntryLifecycle::RunTest(const FString&)
 		Definition->ApplyToTerritory(Place);
 		Registry->RegisterTerritory(Place);
 	}
-	auto PlayEvents = [Controller, Tales, &Fixture](UDialogueNode* Node)
+	auto PlayEvents = [Controller, Tales, Pawn, &Fixture](UDialogueNode* Node)
 	{
-		Node->ProcessEvents(nullptr, Controller, Tales, EEventRuntime::Start);
-		Node->ProcessEvents(nullptr, Controller, Tales, EEventRuntime::End);
+		Node->ProcessEvents(Pawn, Controller, Tales, EEventRuntime::Start);
+		Node->ProcessEvents(Pawn, Controller, Tales, EEventRuntime::End);
 		// NE_BeginQuest uses Async Load Class Asset even when the class is already loaded.
 		// Process its real latent callback before checking for a quest or a duplicate start.
 		Fixture.World->GetLatentActionManager().BeginFrame();
@@ -448,16 +465,39 @@ bool FTFHashirWaitsForDefence::RunTest(const FString&)
 	auto* Controller = NewObject<ANarrativePlayerController>(Fixture.World->PersistentLevel);
 	Controller->SetRole(ROLE_Authority); Controller->SetPlayerState(PlayerState);
 	Controller->SetOwnedCharacter(Pawn); Controller->SetPawn(Pawn);
+	// Narrative 2.5 resolves every condition from the character: NC_IsQuestAtState - one of the
+	// conditions gating the defence reminder - reaches Tales through the character's owning
+	// controller. APawn::SetController is what closes that link; PlayerController::SetPawn does
+	// not write the reverse pointer, so without this line every reply in this dialogue fails.
+	Pawn->SetController(Controller);
 	auto* Tales = Controller->FindComponentByClass<UTalesComponent>();
 	if (!TestNotNull(TEXT("Native controller owns its Tales component"), Tales)) return false;
 	auto* Registry = Fixture.World->GetSubsystem<UTerritoryRegistrySubsystem>();
 	auto* Counter = Fixture.World->GetSubsystem<UTerritoryCounterAttackSubsystem>();
+	// The post-capture Wave is a counterattack: the counterattack subsystem refuses to
+	// schedule one unless diplomacy permits it, and the authored war in the shipped map
+	// is what opens that gate. This fixture builds its Territories in code, so declare
+	// the war the map authors.
+	auto* Diplomacy = Fixture.World->GetSubsystem<UTerritoryDiplomacySubsystem>();
+	if (TestNotNull(TEXT("Diplomacy subsystem is available"), Diplomacy))
+	{
+		Diplomacy->DeclareWar(Bandits, Heroes);
+	}
 	ATerritoryProperty* Blacksmith = nullptr;
 	for (const TCHAR* Name : {TEXT("Territory.HavenReach.MarketSquare.Blacksmith"), TEXT("Territory.HavenReach.CastleHill.Farm")})
 	{
 		auto* Definition = NewObject<UTerritoryPlaceDefinition>();
 		Definition->TerritoryTag = FGameplayTag::RequestGameplayTag(Name);
 		Definition->StableTerritoryGUID = FGuid::NewGuid(); Definition->InitialGuardCount = 0;
+		// The synthetic definition has to carry the project's authored counterattack
+		// profile: the quest's wave event refuses to schedule an assault for a Territory
+		// without one ("has no Counterattack Profile"), and every post-victory routing
+		// assertion in this test depends on that assault actually being scheduled.
+		if (auto* Profile = LoadObject<UTerritoryCounterAttackProfile>(nullptr,
+			TEXT("/Game/TerritoryFramework/DA_CounterAttack.DA_CounterAttack")))
+		{
+			Definition->CounterAttackProfile = Profile;
+		}
 		auto* Place = Fixture.World->SpawnActor<ATerritoryProperty>();
 		Definition->ApplyToTerritory(Place); Registry->RegisterTerritory(Place);
 		FTerritoryOwnershipData Data = Place->GetOwnershipData();

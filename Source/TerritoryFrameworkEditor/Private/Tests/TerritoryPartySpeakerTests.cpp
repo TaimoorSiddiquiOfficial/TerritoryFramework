@@ -47,6 +47,12 @@ struct FPartySpeakerFixture
 			Avatar->SetRole(ROLE_Authority);
 			Avatar->PlayerASC = State->GetAbilitySystemComponent();
 			PC->SetPawn(Avatar);
+			// A controller that only owns the pawn leaves APawn::Controller unset, and Narrative
+			// 2.5 recovers the whole event context from the character, so the fixture has to wire
+			// the controller the way possession does. SetController() sets exactly that pointer;
+			// AController::Possess() is unusable here because its client-restart path reaches UMG
+			// with no viewport client and crashes the process.
+			Avatar->SetController(PC);
 			Members.Add(Member);
 			States.Add(State);
 			ASCs.Add(State->GetAbilitySystemComponent());
@@ -95,7 +101,15 @@ bool FTFTerritoryPartyContextMigration::RunTest(const FString& Parameters)
 		auto* Event = NewObject<UTerritoryAuditNarrativeEvent>(Line);
 		Event->EventRuntime = EEventRuntime::Start;
 		Event->ContextCallback = [&](APawn* Pawn, APlayerController* PC, UTalesComponent* Tales)
-		{ bCorrectContext = Pawn == NextPawn && PC == F.Members[1]->GetOwningController() && Tales == F.Party; };
+		{
+			bCorrectContext = Pawn == NextPawn && PC == F.Members[1]->GetOwningController() && Tales == F.Party;
+			// Diagnostic detail: the context recovery is the thing under test, so record every
+			// handle we were handed (and what each was expected to be) instead of only the verdict.
+			AddInfo(FString::Printf(TEXT("Node event context: pawn=%s (expected %s), controller=%s (expected %s), tales=%s (expected %s)"),
+				*GetNameSafe(Pawn), *GetNameSafe(NextPawn),
+				*GetNameSafe(PC), *GetNameSafe(F.Members[1]->GetOwningController()),
+				*GetNameSafe(Tales), *GetNameSafe(F.Party)));
+		};
 		Line->Events.Add(Event);
 		TestTrue(TEXT("Remote owner departure transfers context"), F.Party->RemovePartyMember(F.Members[0]));
 		TestTrue(TEXT("No restart or synthetic skip"), F.Party->GetCurrentDialogue() == Dialogue && Dialogue->GetCurrentNode() == Line);

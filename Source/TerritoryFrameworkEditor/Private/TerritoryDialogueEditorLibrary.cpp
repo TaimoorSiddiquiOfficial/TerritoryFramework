@@ -25,6 +25,17 @@ namespace
 		const FObjectPropertyBase* Property = Node ? FindFProperty<FObjectPropertyBase>(Node->GetClass(), TEXT("DialogueNode")) : nullptr;
 		return Property ? Cast<UDialogueNode>(Property->GetObjectPropertyValue_InContainer(Node)) : nullptr;
 	}
+
+	/**
+	 * Narrative 2.5 derives FSpeakerInfo::GetSpeakerID() from UNPCDefinition::CharacterID
+	 * (Dialogue.h:76); 2.4.2 read NPCID, which 2.5 still carries but marks deprecated
+	 * (NPCDefinition.h:26-28). Authoring and the post-compile verification must use the same
+	 * identity as Narrative, otherwise every compiled speaker fails the comparison.
+	 */
+	FName SpeakerIdentity(const UNPCDefinition& Definition)
+	{
+		return Definition.CharacterID.IsNone() ? Definition.NPCID : Definition.CharacterID;
+	}
 }
 
 bool UTerritoryDialogueEditorLibrary::AddDialogueReply(UDialogueBlueprint* Dialogue,
@@ -349,7 +360,7 @@ UDialogueBlueprint* UTerritoryDialogueEditorLibrary::CreateDialogueFromRecipe(
 		{
 			FSpeakerInfo Speaker;
 			Speaker.NPCDataAsset = Definition;
-			Speaker.SpeakerID = Definition->NPCID;
+			Speaker.SpeakerID = SpeakerIdentity(*Definition);
 			CDO->Speakers.Add(Speaker);
 		}
 	}
@@ -438,7 +449,7 @@ UDialogueBlueprint* UTerritoryDialogueEditorLibrary::CreateDialogueFromRecipe(
 		bool bSpeakersPreserved = CompiledDefaults && CompiledDefaults->Speakers.Num() == Recipe->Speakers.Num();
 		for (int32 Index = 0; bSpeakersPreserved && Index < Recipe->Speakers.Num(); ++Index)
 			bSpeakersPreserved = CompiledDefaults->Speakers[Index].NPCDataAsset == Recipe->Speakers[Index]
-				&& CompiledDefaults->Speakers[Index].GetSpeakerID() == Recipe->Speakers[Index]->NPCID;
+				&& CompiledDefaults->Speakers[Index].GetSpeakerID() == SpeakerIdentity(*Recipe->Speakers[Index]);
 		if (!bSpeakersPreserved)
 		{
 			OutError = FText::FromString(TEXT("Native compilation did not preserve the configured NPC Definition speakers. The unsaved asset needs review."));

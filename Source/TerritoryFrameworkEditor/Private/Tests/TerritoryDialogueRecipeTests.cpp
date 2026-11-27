@@ -33,6 +33,10 @@ bool FTFDialogueRecipeBuilder::RunTest(const FString& Parameters)
 	const FString SpeakerPath = TEXT("/Game/Developers/TerritoryAutomation/") + SpeakerName;
 	UPackage* SpeakerPackage = CreatePackage(*SpeakerPath);
 	auto* Speaker = NewObject<UNPCDefinition>(SpeakerPackage, *SpeakerName, RF_Public);
+	// Narrative 2.5 derives a speaker's identity from CharacterID; NPCID is the deprecated
+	// 2.4.2 field the vendor still carries (NPCDefinition.h:26-28). Author both so the recipe
+	// proves the current identity path while legacy data stays representable.
+	Speaker->CharacterID = TEXT("RetakeTestCharacter");
 	Speaker->NPCID = TEXT("RetakeTestOwner");
 	Recipe->Speakers.Add(Speaker);
 	Recipe->RootID = TEXT("Entry");
@@ -41,7 +45,7 @@ bool FTFDialogueRecipeBuilder::RunTest(const FString& Parameters)
 	Entry.Replies = {TEXT("Offer")};
 	FTerritoryDialogueRecipeNode Offer;
 	Offer.ID = TEXT("Offer");
-	Offer.SpeakerID = Speaker->NPCID;
+	Offer.SpeakerID = Speaker->CharacterID;
 	Offer.Text = FText::FromString(TEXT("We can discuss the Place."));
 	Offer.Position = FVector2D(500, 500);
 	Offer.Replies = {TEXT("Leave")};
@@ -54,6 +58,7 @@ bool FTFDialogueRecipeBuilder::RunTest(const FString& Parameters)
 	FText Error;
 	TestTrue(TEXT("Valid Native recipe"), Recipe->ValidateRecipe(Error));
 	auto* PrivateSpeaker = NewObject<UNPCDefinition>(Recipe);
+	PrivateSpeaker->CharacterID = Speaker->CharacterID;
 	PrivateSpeaker->NPCID = Speaker->NPCID;
 	Recipe->Speakers[0] = PrivateSpeaker;
 	TestFalse(TEXT("Private cross-package speakers fail before Native compilation can clear them"), Recipe->ValidateRecipe(Error));

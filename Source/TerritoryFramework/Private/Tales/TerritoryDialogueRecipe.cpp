@@ -5,6 +5,21 @@
 #include "UObject/UnrealType.h"
 #include "UObject/Package.h"
 
+namespace
+{
+	/**
+	 * Narrative 2.5 derives FSpeakerInfo::GetSpeakerID() from UNPCDefinition::CharacterID;
+	 * 2.4.2 read NPCID, which 2.5 still carries but marks deprecated (NPCDefinition.h:26-28).
+	 * Recipe validation, Blueprint authoring and the compiled-defaults verification all have
+	 * to agree on one identity, otherwise a definition authored the 2.5 way (CharacterID only)
+	 * is rejected here and a legacy one never matches the speaker Narrative compiles.
+	 */
+	FName TerritorySpeakerIdentity(const UNPCDefinition& Definition)
+	{
+		return Definition.CharacterID.IsNone() ? Definition.NPCID : Definition.CharacterID;
+	}
+}
+
 UTerritoryDialogueRecipe::UTerritoryDialogueRecipe()
 {
 	ParentDialogueClass = UDialogue::StaticClass();
@@ -43,14 +58,15 @@ bool UTerritoryDialogueRecipe::ValidateRecipe(FText& OutError) const
 	}
 	for (const UNPCDefinition* Speaker : Speakers)
 	{
-		if (!Speaker || Speaker->NPCID.IsNone() || SpeakerIDs.Contains(Speaker->NPCID))
+		const FName SpeakerIdentity = Speaker ? TerritorySpeakerIdentity(*Speaker) : NAME_None;
+		if (!Speaker || SpeakerIdentity.IsNone() || SpeakerIDs.Contains(SpeakerIdentity))
 			return Fail(TEXT("Speakers require distinct Narrative NPC IDs."));
 		// The generated Blueprint belongs to a different package. Native compilation
 		// clears private external references, so an inline/transient definition cannot bind a speaker.
 		if (!Speaker->IsAsset() || Speaker->GetOutermost() == GetTransientPackage()
 			|| Speaker->GetOutermost()->HasAnyFlags(RF_Transient))
 			return Fail(TEXT("Speakers must reference public Narrative NPC Definition assets, not private or transient objects."));
-		SpeakerIDs.Add(Speaker->NPCID);
+		SpeakerIDs.Add(SpeakerIdentity);
 	}
 	for (const auto& Node : Nodes)
 	{

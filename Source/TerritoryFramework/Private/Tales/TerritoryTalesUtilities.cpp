@@ -146,6 +146,22 @@ bool TerritoryTales::EvaluateConditionWithNarrative(UNarrativeNodeBase* Probe,
 			}
 			return false;
 		}
+		if (Condition->PartyConditionPolicy == EPartyConditionPolicy::AllPlayersPass)
+		{
+			// Narrative 2.5 commented its node-level All Players branch out (the whole party
+			// policy block in NarrativeNodeBase.cpp), so nothing upstream rejects a later
+			// failing member any more. Territory owns this policy for its own conditions:
+			// every member must pass, and an empty party has no member that can satisfy it.
+			const TArray<UTalesComponent*> Members = Party->GetPartyMembers();
+			if (Members.Num() == 0) return false;
+			for (UTalesComponent* Member : Members)
+			{
+				if (!IsValid(Member)) continue;
+				if (!DoesConditionPass(Condition, Member->GetOwningPawn(),
+					Member->GetOwningController(), Member)) return false;
+			}
+			return true;
+		}
 		if (Condition->PartyConditionPolicy == EPartyConditionPolicy::PartyLeaderPasses)
 		{
 			UTalesComponent* Leader = Party->GetPartyLeader();

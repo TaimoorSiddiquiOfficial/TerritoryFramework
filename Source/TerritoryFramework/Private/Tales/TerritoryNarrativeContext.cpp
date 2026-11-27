@@ -2,16 +2,73 @@
 
 #include "GameFramework/Controller.h"
 #include "GameFramework/PlayerController.h"
+#include "Tales/NarrativeFunctionLibrary.h"
+#include "Tales/NarrativePartyComponent.h"
 #include "Tales/TalesComponent.h"
 #include "UnrealFramework/NarrativeCharacter.h"
 
 namespace
 {
 	/**
-	 * Recovers the Tales execution context from the character Narrative handed us.
-	 * GetOwningController keeps working while a vehicle or possession swap owns the
-	 * pawn, which is why Narrative exposes it separately from GetController().
+	 * Picks the Tales component that actually owns the dialogue Narrative is dispatching for.
+	 * A controller can host more than one Tales component (Pro's personal one plus a party
+	 * member slot), so "the first component found" is not enough: the one with an open dialogue
+	 * wins, and failing that the party owning the shared dialogue does. Candidates are ordered
+	 * character-first so a character that hosts its own Tales component keeps precedence.
 	 */
+	UTalesComponent* PickActiveTales(const TArray<UTalesComponent*>& Candidates)
+	{
+		// A party member mirrors the shared dialogue, so the member's own slot and the party
+		// component can both report one. The party is the component that owns a shared dialogue
+		// (OwningComp), and that is the context Narrative 2.4.2 passed explicitly, so it wins
+		// whenever the two agree. A member holding a dialogue of its own keeps it.
+		UTalesComponent* FirstWithDialogue = nullptr;
+		for (UTalesComponent* Candidate : Candidates)
+		{
+			if (!IsValid(Candidate) || !Candidate->CurrentDialogue)
+			{
+				continue;
+			}
+			if (UNarrativePartyComponent* Party = Candidate->GetParty())
+			{
+				if (Party->CurrentDialogue == Candidate->CurrentDialogue)
+				{
+					return Party;
+				}
+			}
+			if (!FirstWithDialogue)
+			{
+				FirstWithDialogue = Candidate;
+			}
+		}
+		if (FirstWithDialogue)
+		{
+			return FirstWithDialogue;
+		}
+		for (UTalesComponent* Candidate : Candidates)
+		{
+			if (!IsValid(Candidate))
+			{
+				continue;
+			}
+			if (UNarrativePartyComponent* Party = Candidate->GetParty())
+			{
+				if (Party->CurrentDialogue)
+				{
+					return Party;
+				}
+			}
+		}
+		for (UTalesComponent* Candidate : Candidates)
+		{
+			if (IsValid(Candidate))
+			{
+				return Candidate;
+			}
+		}
+		return nullptr;
+	}
+
 	void ResolveNarrativeContext(ANarrativeCharacter* Character, APawn*& OutTarget,
 		APlayerController*& OutController, UTalesComponent*& OutNarrativeComponent)
 	{
@@ -22,8 +79,26 @@ namespace
 			OwningController = Character->GetController();
 		}
 		OutController = Cast<APlayerController>(OwningController);
-		OutNarrativeComponent = IsValid(OutController)
-			? OutController->FindComponentByClass<UTalesComponent>() : nullptr;
+
+		TArray<UTalesComponent*> Candidates;
+		if (IsValid(Character))
+		{
+			Character->GetComponents<UTalesComponent>(Candidates);
+		}
+		if (IsValid(OutController))
+		{
+			TArray<UTalesComponent*> ControllerCandidates;
+			OutController->GetComponents<UTalesComponent>(ControllerCandidates);
+			Candidates.Append(ControllerCandidates);
+		}
+
+		OutNarrativeComponent = PickActiveTales(Candidates);
+		if (!IsValid(OutNarrativeComponent) && IsValid(Character))
+		{
+			// Canonical Narrative resolution, kept as the last resort so the adapter still works
+			// when the Tales component lives somewhere the two actors above do not expose.
+			OutNarrativeComponent = UNarrativeFunctionLibrary::GetTalesComponentFromTarget(Character);
+		}
 	}
 }
 

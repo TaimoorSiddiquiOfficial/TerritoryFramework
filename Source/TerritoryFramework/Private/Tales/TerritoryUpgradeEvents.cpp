@@ -10,6 +10,22 @@
 #include "Tales/TalesComponent.h"
 #include "Tales/TerritoryTalesUtilities.h"
 
+UTerritoryPlaceCapturedEvent::UTerritoryPlaceCapturedEvent(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// This event reports a capture that already happened, so replaying it while a quest loads
+	// would re-deliver a mutation the save already accounts for (NarrativeEvent.h documents the
+	// hazard for exactly this kind of event).
+	bRefireOnLoad = false;
+}
+
+UTerritoryUpgradePlaceEvent::UTerritoryUpgradePlaceEvent(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// Same rule as UTerritoryPlaceCapturedEvent: an upgrade is a mutation, not a state readout.
+	bRefireOnLoad = false;
+}
+
 void UTerritoryPlaceCapturedEvent::SetPayload(ATerritoryVolume* Place, FGameplayTag InPreviousOwner,
 	FGameplayTag InNewOwner, int32 InOldUpgradeLevel)
 {

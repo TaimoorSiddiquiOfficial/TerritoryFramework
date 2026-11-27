@@ -21,6 +21,8 @@ class TERRITORYFRAMEWORK_API UTerritoryPlaceCapturedEvent : public UTerritoryNar
 	GENERATED_BODY()
 
 public:
+	UTerritoryPlaceCapturedEvent(const FObjectInitializer& ObjectInitializer);
+
 	/** Optional filter: only fire for this Place tag. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Capture")
 	FGameplayTag PlaceTag;
@@ -65,6 +67,9 @@ class TERRITORYFRAMEWORK_API UTerritoryUpgradePlaceEvent : public UTerritoryNarr
 	GENERATED_BODY()
 
 public:
+	UTerritoryUpgradePlaceEvent(const FObjectInitializer& ObjectInitializer);
+
+	/** Optional filter: only upgrade this Place. Leave empty to upgrade the one the quest names. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Upgrade",
 		meta = (Categories = "Territory"))
 	FGameplayTag PlaceTag;
@@ -73,6 +78,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Upgrade", meta = (ClampMin = "1"))
 	int32 TargetLevel = 1;
 
+	/**
+	 * Allow the upgrade to run on a Place the acting faction does not own. Off by default so a
+	 * mis-authored quest cannot spend another faction's upgrade budget.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Upgrade")
 	bool bAllowForeignOwnership = false;
 
