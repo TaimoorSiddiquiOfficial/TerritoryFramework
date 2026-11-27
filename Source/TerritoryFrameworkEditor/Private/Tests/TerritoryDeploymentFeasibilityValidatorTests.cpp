@@ -328,6 +328,30 @@ int32 CountWarnings(const TArray<FString>& Warnings, const FString& Fragment)
 	return Count;
 }
 
+bool HasError(const TArray<FString>& Errors, const FString& Fragment)
+{
+	return Errors.ContainsByPredicate([&Fragment](const FString& Error)
+	{
+		return Error.Contains(Fragment);
+	});
+}
+
+int32 CountErrors(const TArray<FString>& Errors, const FString& Fragment)
+{
+	int32 Count = 0;
+	for (const FString& Error : Errors)
+	{
+		Count += Error.Contains(Fragment) ? 1 : 0;
+	}
+	return Count;
+}
+
+/** Counts a fragment in whichever array the policy routed it to, so a policy change cannot hide it. */
+int32 CountRejections(const TArray<FString>& Errors, const TArray<FString>& Warnings, const FString& Fragment)
+{
+	return CountErrors(Errors, Fragment) + CountWarnings(Warnings, Fragment);
+}
+
 const TCHAR* const OutsideOwnPlaceFragment =
 	TEXT("lies outside this Place");
 const TCHAR* const BlockedDeploymentFragment =
@@ -405,9 +429,26 @@ bool FTFValidatorPatrolLeavesOwnPlace::RunTest(const FString& Parameters)
 
 	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
 	TestTrue(TEXT("A patrol node outside its own Place is reported"),
-		HasWarning(Warnings, OutsideOwnPlaceFragment));
+		CountRejections(Errors, Warnings, OutsideOwnPlaceFragment) == 1);
 	TestFalse(TEXT("The out-of-bounds node is not also reported as an orphaned post"),
 		HasWarning(Warnings, OrphanedPostFragment));
+
+	// The authored escape hatch keeps the node, but the report still has to say so: the author asked
+	// for nodes outside the Place, so it is a warning that names the policy, never an error.
+	if (UTerritoryDefinition* Definition = Place->GetTerritoryDefinition())
+	{
+		Definition->GuardBehavior.PatrolContainment = ETerritoryGuardPatrolContainment::AllowOutsideNodes;
+		ValidateFixtureWorld(Fixture.World, Errors, Warnings);
+		TestEqual(TEXT("AllowOutsideNodes raises no containment error"),
+			CountErrors(Errors, OutsideOwnPlaceFragment), 0);
+		TestEqual(TEXT("AllowOutsideNodes still surfaces the node once as a warning"),
+			CountWarnings(Warnings, OutsideOwnPlaceFragment), 1);
+		Definition->GuardBehavior.PatrolContainment = ETerritoryGuardPatrolContainment::ClampToPlace;
+	}
+	else
+	{
+		AddError(TEXT("The fixture Place lost its bound Definition"));
+	}
 
 	// Green: the same post with the node inside its own bounds must produce no containment warning.
 	const FVector InsideNode(200.f, 0.f, 0.f);
@@ -417,8 +458,8 @@ bool FTFValidatorPatrolLeavesOwnPlace::RunTest(const FString& Parameters)
 		Place->ContainsPoint(InsideNode));
 
 	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
-	TestFalse(TEXT("A patrol node inside its own Place is not reported"),
-		HasWarning(Warnings, OutsideOwnPlaceFragment));
+	TestEqual(TEXT("A patrol node inside its own Place is not reported"),
+		CountRejections(Errors, Warnings, OutsideOwnPlaceFragment), 0);
 	return true;
 }
 
@@ -722,7 +763,7 @@ bool FTFValidatorFindingsReportedOnce::RunTest(const FString& Parameters)
 	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
 
 	TestEqual(TEXT("One out-of-bounds patrol node is reported once"),
-		CountWarnings(Warnings, OutsideOwnPlaceFragment), 1);
+		CountRejections(Errors, Warnings, OutsideOwnPlaceFragment), 1);
 	TestEqual(TEXT("One blocked post is reported once"),
 		CountWarnings(Warnings, BlockedDeploymentFragment), 1);
 	TestEqual(TEXT("One unstaffable floor is reported once"),
@@ -774,8 +815,12 @@ bool FTFValidatorMissingBoundsSuppressesPatrolCascade::RunTest(const FString& Pa
 
 	TestTrue(TEXT("The missing bounds shape is still reported by the bounds check"),
 		HasWarning(Warnings, TEXT("BoundsShape is null")));
+	// The containment policy needs a shape to verify against, so an unverifiable Place is called out
+	// once, as an error, instead of silently dropping the check. The per-node cascade stays off.
+	TestEqual(TEXT("A Place with patrol nodes but no bounds shape is reported once"),
+		CountErrors(Errors, TEXT("has no BoundsShape")), 1);
 	TestEqual(TEXT("A missing bounds shape does not turn every patrol node into a finding"),
-		CountWarnings(Warnings, OutsideOwnPlaceFragment), 0);
+		CountRejections(Errors, Warnings, OutsideOwnPlaceFragment), 0);
 	// The deployment check reads collision in the world rather than the bounds shape, so an absent
 	// shape must not make the post look undeployable either.
 	TestEqual(TEXT("A missing bounds shape does not make the post look blocked"),
@@ -789,7 +834,7 @@ bool FTFValidatorMissingBoundsSuppressesPatrolCascade::RunTest(const FString& Pa
 		!Place->ContainsPoint(Node.Location));
 	ValidateFixtureWorld(Fixture.World, Errors, Warnings);
 	TestEqual(TEXT("Control: the same node is reported once the bounds exist"),
-		CountWarnings(Warnings, OutsideOwnPlaceFragment), 1);
+		CountRejections(Errors, Warnings, OutsideOwnPlaceFragment), 1);
 	return true;
 }
 
@@ -978,7 +1023,7 @@ bool FTFValidatorBoundPostOutsidePlace::RunTest(const FString& Parameters)
 	TestEqual(TEXT("A post bound by its serialized row is not reported as orphaned for standing outside the bounds"),
 		CountWarnings(Warnings, OrphanedPostFragment), 0);
 	TestEqual(TEXT("Its out-of-bounds patrol node is reported against the Place it is bound to"),
-		CountWarnings(Warnings, OutsideOwnPlaceFragment), 1);
+		CountRejections(Errors, Warnings, OutsideOwnPlaceFragment), 1);
 
 	// Causality: drop the binding and the same post is exactly what the orphan check owns.
 	Post->SetDefinitionBinding(nullptr, NAME_None);

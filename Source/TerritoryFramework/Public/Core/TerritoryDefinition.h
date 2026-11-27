@@ -106,6 +106,26 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardPatrolTemplateNode
 	FTerritoryPatrolSpot Spot;
 };
 
+/**
+ * How a guard's authored patrol nodes are kept inside the Place the guard belongs to.
+ *
+ * Authored nodes are free to sit anywhere in the level, and until this existed only an editor
+ * warning mentioned a node outside its Place — the live report "one of the guard goes outside of
+ * territory" came from exactly that gap, with no runtime answer at all.
+ */
+UENUM(BlueprintType)
+enum class ETerritoryGuardPatrolContainment : uint8
+{
+	/** Move every node outside the Place to the nearest point inside its bounds. Needs nothing authored. */
+	ClampToPlace UMETA(DisplayName="Clamp Nodes Into The Place"),
+
+	/** Keep only the nodes already inside the Place; outside nodes are dropped and reported once. */
+	DropOutsideNodes UMETA(DisplayName="Drop Nodes Outside The Place"),
+
+	/** Keep the authored route untouched. Choose this only when a patrol deliberately leaves the Place. */
+	AllowOutsideNodes UMETA(DisplayName="Allow Nodes Outside The Place")
+};
+
 /** Territory-wide behavior applied to every stationary defender spawned for this asset. */
 USTRUCT(BlueprintType)
 struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
@@ -146,6 +166,27 @@ struct TERRITORYFRAMEWORK_API FTerritoryGuardBehaviorTemplate
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Crowd Avoidance",
 		meta=(EditCondition="bEnablePatrolCrowdAvoidance", ClampMin="0.0", ClampMax="1.0"))
 	float PatrolAvoidanceWeight = 0.5f;
+
+	/**
+	 * How authored patrol nodes are kept inside this Place once a guard builds its route.
+	 *
+	 * Applied by ATerritoryGuardCharacter::BuildStaggeredPatrolRoute before the route is staggered,
+	 * so the guard, its patrol goal and the editor validator all read the same containment rule.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Boundary",
+		meta=(ToolTip="Clamp moves a node outside this Place to the nearest point inside its bounds. Drop keeps only the nodes already inside. Allow keeps the authored route untouched and is the only policy the validator accepts outside nodes under."))
+	ETerritoryGuardPatrolContainment PatrolContainment = ETerritoryGuardPatrolContainment::ClampToPlace;
+
+	/**
+	 * How far a guard may stray from its post before the patrol goal outranks whatever pulled it away.
+	 *
+	 * A leash, not a wall: investigation and combat still work inside the radius, and the existing
+	 * Narrative goal scoring is what turns the guard around — no separate movement system is added.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Patrol|Boundary",
+		meta=(ClampMin="0.0", UIMax="20000.0", Units="cm",
+			ToolTip="Distance in centimetres from the guard post at which the patrol goal takes over and walks the guard home. 0 disables the leash."))
+	float MaximumChaseDistanceFromHome = 3000.f;
 
 	/** Adds a small score preference for the nearest hostile player during a valid Territory war. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Combat")

@@ -18,6 +18,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category="Territory|Patrol")
 	TArray<FTerritoryPatrolNode> TerritoryPatrol;
 
+	/**
+	 * Score returned while the owning guard is outside its authored leash.
+	 *
+	 * Above the patrol's default 1.0 so the patrol activity reclaims a guard that chased something
+	 * out of the Place, and low enough that a deliberate activity score can still outrank it.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Territory|Patrol",
+		meta=(ClampMin="0.0", UIMax="20.0",
+			ToolTip="Patrol goal score while the guard is farther from its post than the Place's Maximum Chase Distance From Home."))
+	float LeashReturnScore = 6.f;
+
 	virtual float GetGoalScore_Implementation() const override;
 	virtual FString GetDebugString_Implementation() const override;
 	virtual bool ShouldCleanup_Implementation() const override;

@@ -1027,7 +1027,7 @@ bool UTerritoryDataValidator::ValidateLevel(ULevel* Level, TArray<FString>& OutE
 	CheckDuplicateDisplayNames(Level, OutWarnings);
 	CheckOrphanedSpawnPoints(Level, OutWarnings);
 	CheckGuardPostBindings(Level, OutWarnings);
-	CheckPatrolContainment(Level, OutWarnings);
+	CheckPatrolContainment(Level, OutWarnings, OutErrors);
 	CheckPatrolSpots(Level, OutErrors);
 	CheckGuardDeploymentFeasibility(Level, OutWarnings);
 	CheckFloorVolumes(Level, OutErrors, OutWarnings);
@@ -2680,7 +2680,7 @@ void UTerritoryDataValidator::CheckGuardPostBindings(ULevel* Level, TArray<FStri
 	}
 }
 
-void UTerritoryDataValidator::CheckPatrolContainment(ULevel* Level, TArray<FString>& OutWarnings)
+void UTerritoryDataValidator::CheckPatrolContainment(ULevel* Level, TArray<FString>& OutWarnings, TArray<FString>& OutErrors)
 {
 	if (!Level) return;
 
@@ -2689,6 +2689,10 @@ void UTerritoryDataValidator::CheckPatrolContainment(ULevel* Level, TArray<FStri
 	// neighbour still counts as bound and warns nothing. Here each node is tested against the
 	// Place the post actually belongs to, which is the reported "guard patrols outside the
 	// territory bound" defect.
+	//
+	// Severity follows the Place's authored containment policy, because that is what the runtime
+	// does: ClampToPlace and DropOutsideNodes rewrite the guard's route, so an outside node is a
+	// real authoring error. AllowOutsideNodes keeps the route on purpose and only warns.
 	const FSpawnPointPlaceIndex Index = BuildSpawnPointPlaceIndex(Level);
 	for (ATerritoryGuardSpawnPoint* Post : Index.Posts)
 	{
@@ -2701,19 +2705,49 @@ void UTerritoryDataValidator::CheckPatrolContainment(ULevel* Level, TArray<FStri
 		const TArray<FTerritoryPatrolNode>& Route = Post->GetEffectivePatrolRoute();
 		if (Route.IsEmpty()) continue;
 
-		// ContainsPoint answers false for every point when there is no bounds shape, which would
-		// turn every patrol node in the level into a warning. CheckBoundsShape already reports the
-		// missing shape, so stay silent here and leave that one finding standing alone.
-		if (!Owner->BoundsShape) continue;
+		const UTerritoryDefinition* Definition = Owner->GetTerritoryDefinition();
+		const ETerritoryGuardPatrolContainment Policy = Definition
+			? Definition->GuardBehavior.PatrolContainment
+			: ETerritoryGuardPatrolContainment::ClampToPlace;
+		const bool bPolicyAllowsOutsideNodes = Policy == ETerritoryGuardPatrolContainment::AllowOutsideNodes;
+
+		// ContainsPoint answers false for every point when there is no bounds shape, and the runtime
+		// containment has nothing to project against either. Report the missing shape against the
+		// patrol it silently strands instead of staying mute the way this check used to.
+		if (!Owner->BoundsShape)
+		{
+			if (!bPolicyAllowsOutsideNodes)
+			{
+				OutErrors.Add(FString::Printf(
+					TEXT("%s: guard spawn point '%s' has %d patrol node(s) but the Place has no BoundsShape; patrol containment cannot be verified and its guards get no leash reference"),
+					*Owner->GetActorLabel(), *Post->GetActorLabel(), Route.Num()));
+			}
+			continue;
+		}
 
 		for (int32 NodeIndex = 0; NodeIndex < Route.Num(); ++NodeIndex)
 		{
 			const FVector& NodeLocation = Route[NodeIndex].Location;
 			if (Owner->ContainsPoint(NodeLocation)) continue;
-			OutWarnings.Add(FString::Printf(
-				TEXT("%s: guard spawn point '%s' patrol node %d at %s lies outside this Place; its guards leave the territory bound"),
+
+			const FString Message = FString::Printf(
+				TEXT("%s: guard spawn point '%s' patrol node %d at %s lies outside this Place"),
 				*Owner->GetActorLabel(), *Post->GetActorLabel(), NodeIndex,
-				*NodeLocation.ToCompactString()));
+				*NodeLocation.ToCompactString());
+			if (bPolicyAllowsOutsideNodes)
+			{
+				OutWarnings.Add(Message
+					+ TEXT("; Patrol Containment allows nodes outside the Place, so its guards leave the territory bound by design"));
+			}
+			else
+			{
+				OutErrors.Add(Message + FString::Printf(
+					TEXT("; Patrol Containment is '%s', so the runtime %s this node"),
+					Policy == ETerritoryGuardPatrolContainment::DropOutsideNodes
+						? TEXT("Drop Nodes Outside The Place") : TEXT("Clamp Nodes Into The Place"),
+					Policy == ETerritoryGuardPatrolContainment::DropOutsideNodes
+						? TEXT("drops") : TEXT("moves")));
+			}
 		}
 	}
 }

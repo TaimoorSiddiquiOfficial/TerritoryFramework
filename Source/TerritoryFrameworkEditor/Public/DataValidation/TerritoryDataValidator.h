@@ -106,7 +106,7 @@ private:
 	 * what writes OwnerTerritoryTag and FloorIndex, so both stay transient.
 	 */
 	static void CheckGuardPostBindings(ULevel* Level, TArray<FString>& OutWarnings);
-	static void CheckPatrolContainment(ULevel* Level, TArray<FString>& OutWarnings);
+	static void CheckPatrolContainment(ULevel* Level, TArray<FString>& OutWarnings, TArray<FString>& OutErrors);
 	/** Validate enabled spot settings against the route and territory definition used after BeginPlay. */
 	static void CheckPatrolSpots(ULevel* Level, TArray<FString>& OutErrors);
 	static void CheckGuardDeploymentFeasibility(ULevel* Level, TArray<FString>& OutWarnings);

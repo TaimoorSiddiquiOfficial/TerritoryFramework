@@ -15,7 +15,24 @@ float UTerritoryPatrolGoal::GetGoalScore_Implementation() const
 {
 	// One stop is a real patrol: the guard walks there and holds it. Only a goal with no stops
 	// at all scores zero, which is how a post that has no patrol duty stays inert.
-	return TerritoryPatrol.Num() >= 1 ? Super::GetGoalScore_Implementation() : 0.f;
+	if (TerritoryPatrol.Num() < 1)
+	{
+		return 0.f;
+	}
+
+	// The leash. A guard pulled out of its Place by an investigation or a chase scores its patrol
+	// goal high enough for the existing Narrative goal scoring to walk it back to a contained node.
+	// Nothing new moves the guard: the patrol activity already consumes this goal.
+	if (const ATerritoryGuardCharacter* Guard = OwnerController
+		? Cast<ATerritoryGuardCharacter>(OwnerController->GetPawn()) : nullptr)
+	{
+		if (Guard->IsBeyondTerritoryLeash())
+		{
+			return LeashReturnScore;
+		}
+	}
+
+	return Super::GetGoalScore_Implementation();
 }
 
 FString UTerritoryPatrolGoal::GetDebugString_Implementation() const

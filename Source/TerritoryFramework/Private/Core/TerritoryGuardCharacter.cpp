@@ -252,6 +252,8 @@ void ATerritoryGuardCharacter::ApplyGuardBehaviorFromTerritoryDefinition()
 	PatrolAvoidanceConsiderationRadius = FMath::Max(
 		100.f, Behavior.PatrolAvoidanceConsiderationRadius);
 	PatrolAvoidanceWeight = FMath::Clamp(Behavior.PatrolAvoidanceWeight, 0.f, 1.f);
+	PatrolContainment = Behavior.PatrolContainment;
+	MaximumChaseDistanceFromHome = FMath::Max(0.f, Behavior.MaximumChaseDistanceFromHome);
 	bPrioritizeClosestHostilePlayer = Behavior.bPrioritizeClosestHostilePlayer;
 	ClosestHostilePlayerGoalScoreBonus = FMath::Max(
 		0.f, Behavior.ClosestHostilePlayerGoalScoreBonus);
@@ -1222,6 +1224,9 @@ TArray<FTerritoryPatrolNode> ATerritoryGuardCharacter::BuildStaggeredPatrolRoute
 			SourceRoute.Add(OwningTerritorySpawnPoint->GetImplicitPatrolStop());
 		}
 	}
+	// Containment runs before the stagger so every consumer (patrol goal, spot delivery, debug
+	// strings) reads the same contained array, and a dropped node can never shift a start index.
+	ApplyPatrolContainmentToRoute(OwningTerritory.Get(), PatrolContainment, SourceRoute);
 	if (SourceRoute.Num() <= 1)
 	{
 		return SourceRoute;
@@ -1246,6 +1251,96 @@ void ATerritoryGuardCharacter::RefreshPatrolCrowdAvoidance()
 			100.f, PatrolAvoidanceConsiderationRadius);
 		Movement->AvoidanceWeight = FMath::Clamp(PatrolAvoidanceWeight, 0.f, 1.f);
 	}
+}
+
+void ATerritoryGuardCharacter::ApplyPatrolContainmentToRoute(const ATerritoryVolume* Place,
+	ETerritoryGuardPatrolContainment Policy, TArray<FTerritoryPatrolNode>& InOutRoute,
+	int32* OutClampedNodes, int32* OutDroppedNodes)
+{
+	if (OutClampedNodes)
+	{
+		*OutClampedNodes = 0;
+	}
+	if (OutDroppedNodes)
+	{
+		*OutDroppedNodes = 0;
+	}
+
+	// Nothing to contain against: no Place, no bounds shape, the authored escape hatch, or no route.
+	// GetBoundsShape is the public read-only view of the protected authored component; the helper stays
+	// static so the editor validator, the tests and the guard's own route build share one implementation.
+	if (!Place || !Place->GetBoundsShape()
+		|| Policy == ETerritoryGuardPatrolContainment::AllowOutsideNodes || InOutRoute.IsEmpty())
+	{
+		return;
+	}
+
+	const UPrimitiveComponent* Bounds = Place->GetBoundsShape();
+	for (int32 NodeIndex = InOutRoute.Num() - 1; NodeIndex >= 0; --NodeIndex)
+	{
+		FVector& NodeLocation = InOutRoute[NodeIndex].Location;
+		if (Place->ContainsPoint(NodeLocation))
+		{
+			continue;
+		}
+
+		if (Policy == ETerritoryGuardPatrolContainment::DropOutsideNodes)
+		{
+			InOutRoute.RemoveAt(NodeIndex, 1, EAllowShrinking::No);
+			if (OutDroppedNodes)
+			{
+				++(*OutDroppedNodes);
+			}
+			continue;
+		}
+
+		// ClampToPlace: project the node onto the Place shape. GetClosestPointOnCollision answers 0
+		// for a point it already contains, so a positive distance here is exactly the outside case.
+		// A degenerate shape that projects nothing keeps the authored node instead of inventing one.
+		FVector ClosestPointOnBounds = NodeLocation;
+		if (Bounds->GetClosestPointOnCollision(NodeLocation, ClosestPointOnBounds) > 0.f)
+		{
+			NodeLocation = ClosestPointOnBounds;
+			if (OutClampedNodes)
+			{
+				++(*OutClampedNodes);
+			}
+		}
+	}
+}
+
+float ATerritoryGuardCharacter::GetMaximumChaseDistanceFromHome() const
+{
+	return MaximumChaseDistanceFromHome;
+}
+
+FVector ATerritoryGuardCharacter::GetTerritoryHomeLocation() const
+{
+	// The post is the durable anchor. TerritoryHomeTransform is the replicated copy the vendor's
+	// ReturnToSpawn activity reads, so it is the fallback for a guard whose post has already gone.
+	if (IsValid(OwningTerritorySpawnPoint))
+	{
+		return OwningTerritorySpawnPoint->GetActorLocation();
+	}
+	return TerritoryHomeTransform.GetLocation();
+}
+
+bool ATerritoryGuardCharacter::IsBeyondTerritoryLeash() const
+{
+	const float Leash = MaximumChaseDistanceFromHome;
+	if (Leash <= 0.f)
+	{
+		return false;
+	}
+
+	if (!IsValid(OwningTerritorySpawnPoint) && TerritoryHomeTransform.GetLocation().IsNearlyZero())
+	{
+		// No post and no replicated home: there is nothing to measure a leash against, so the guard
+		// keeps the vendor behaviour rather than being turned around toward the world origin.
+		return false;
+	}
+
+	return FVector::Dist2D(GetActorLocation(), GetTerritoryHomeLocation()) > static_cast<double>(Leash);
 }
 
 bool ATerritoryGuardCharacter::IsPatrolCrowdAvoidanceActive() const

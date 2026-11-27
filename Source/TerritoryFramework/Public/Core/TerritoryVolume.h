@@ -184,6 +184,14 @@ public:
 	bool ContainsPoint(const FVector& WorldPoint) const;
 
 	/**
+	 * The authored component that defines this Place's physical footprint. Null when the Place has no
+	 * bounds at all. Exposed read-only so containment systems (guard patrol clamping, spawn checks)
+	 * can project against the real shape instead of the looser AABB from GetTerritoryBounds.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Bounds", meta=(DisplayName="Get Bounds Shape"))
+	UShapeComponent* GetBoundsShape() const { return BoundsShape; }
+
+	/**
 	 * True when this independently capturable Place uses the complete Territory bounds
 	 * for its story confrontation. A living player anywhere inside the bounds can hold
 	 * the Place Contested, including upper floors, but never fills automatic capture

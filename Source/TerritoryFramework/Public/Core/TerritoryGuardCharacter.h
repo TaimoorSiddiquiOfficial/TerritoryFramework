@@ -4,6 +4,7 @@
 #include "GameplayCueInterface.h"
 #include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "TerritoryGuardSpawnPoint.h"
+#include "Core/TerritoryDefinition.h"
 #include "Combat/TerritoryAssaultTargetPolicy.h"
 #include "AI/TerritoryDeathCollisionState.h"
 #include "TerritoryGuardCharacter.generated.h"
@@ -203,6 +204,14 @@ public:
 	UPROPERTY(Transient)
 	float PatrolAvoidanceWeight = 0.5f;
 
+	/** Copied from the Place's Guard Behavior: how authored patrol nodes are kept inside the Place. */
+	UPROPERTY(Transient)
+	ETerritoryGuardPatrolContainment PatrolContainment = ETerritoryGuardPatrolContainment::ClampToPlace;
+
+	/** Copied from the Place's Guard Behavior: leash length in centimetres from this guard's post; 0 disables it. */
+	UPROPERTY(Transient)
+	float MaximumChaseDistanceFromHome = 3000.f;
+
 	/**
 	 * While this Place is Contested and diplomacy is War, give the nearest hostile
 	 * player a small Narrative goal-score advantage. Narrative attack tokens still
@@ -287,6 +296,40 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol|Crowd Avoidance",
 		meta=(DisplayName="Is Patrol Crowd Avoidance Active"))
 	bool IsPatrolCrowdAvoidanceActive() const;
+
+	/** Leash length in centimetres measured from this guard's post; 0 means no leash. */
+	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol|Boundary",
+		meta=(DisplayName="Get Maximum Chase Distance From Home"))
+	float GetMaximumChaseDistanceFromHome() const;
+
+	/**
+	 * Returns true when this guard is farther from its post than the authored leash allows.
+	 *
+	 * UTerritoryPatrolGoal raises its score while this is true, which is how the guard is walked
+	 * back: the existing Narrative goal scoring selects the patrol activity again, and the patrol
+	 * activity moves the guard to a node that is already inside the Place.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol|Boundary",
+		meta=(DisplayName="Is Beyond Territory Leash"))
+	bool IsBeyondTerritoryLeash() const;
+
+	/** World location the leash is measured from: the assigned post, else the replicated home transform. */
+	UFUNCTION(BlueprintPure, Category="Territory|Guard|Patrol|Boundary",
+		meta=(DisplayName="Get Territory Home Location"))
+	FVector GetTerritoryHomeLocation() const;
+
+	/**
+	 * Applies an authored containment policy to a route copy: clamps, drops or keeps each node.
+	 *
+	 * Static and side-effect free so the editor validator, the tests and the guard's own route
+	 * build all exercise one implementation. A null Place or a Place without a BoundsShape keeps
+	 * the route untouched: there is nothing to contain against.
+	 *
+	 * OutClampedNodes and OutDroppedNodes are optional counters for logging and tests.
+	 */
+	static void ApplyPatrolContainmentToRoute(const ATerritoryVolume* Place,
+		ETerritoryGuardPatrolContainment Policy, TArray<FTerritoryPatrolNode>& InOutRoute,
+		int32* OutClampedNodes = nullptr, int32* OutDroppedNodes = nullptr);
 
 	/**
 	 * Safely fetches a single patrol node by index. Returns false if the index is out of range
