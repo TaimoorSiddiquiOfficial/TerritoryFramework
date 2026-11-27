@@ -11,6 +11,7 @@
 #include "Spawn/TerritorySpawnTags.h"
 #include "Spawn/TerritorySpawnTypes.h"
 #include "Tests/Spawn/TerritorySpawnTestFixtures.h"
+#include "UnrealFramework/NarrativeNPCCharacter.h"
 #include "Vehicles/TerritorySpawnExecutorVehicle.h"
 #include "Vehicles/NarrativeVehicleBase.h"
 #include "Vehicles/TerritorySpawnPolicyAmbulance.h"
