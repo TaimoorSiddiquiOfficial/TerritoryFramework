@@ -515,10 +515,10 @@ void UTerritoryDossierWidget::RefreshDossier()
 		}
 	}
 
-	if (HistoryList)
+	else if (HistoryList)
 	{
-		// The virtualised list is filled with entries; the VerticalBox below stays the fallback for
-		// a WBP that authors plain rows instead of a ListView. A designer picks one of the two.
+		// The virtualised list wins when it exists: filling both would list every fact twice. The
+		// VerticalBox stays the fallback for a WBP that authors plain rows instead of a ListView.
 		FillHistoryList(Records);
 	}
 

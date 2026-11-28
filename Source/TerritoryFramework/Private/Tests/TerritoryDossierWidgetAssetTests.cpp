@@ -6,6 +6,7 @@
 
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/ListView.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/WidgetSwitcher.h"
@@ -30,6 +31,8 @@ namespace TerritoryDossierWidgetAssetTests
 		TEXT("/Game/TerritoryFramework/UI/WBP_HopDossier.WBP_HopDossier_C");
 	static const TCHAR* RowClassPath =
 		TEXT("/Game/TerritoryFramework/UI/WBP_DossierRecordRow.WBP_DossierRecordRow_C");
+	static const TCHAR* CardClassPath =
+		TEXT("/Game/TerritoryFramework/UI/WBP_EventCard.WBP_EventCard_C");
 
 	UWidgetBlueprintGeneratedClass* LoadWidgetClass(FAutomationTestBase& Test, const TCHAR* ClassPath)
 	{
@@ -137,6 +140,13 @@ bool FTFDossierShellWidgetContract::RunTest(const FString& Parameters)
 	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_StatisticsTab"));
 	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_AchievementsTab"));
 	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_LoreTab"));
+	ExpectBoundWidget<UListView>(*this, ShellTree, TEXT("HistoryList"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_FilterAll"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_FilterControl"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_FilterConflict"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_FilterStealth"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_FilterDiplomacy"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_FilterTales"));
 
 	if (ShellClass)
 	{
@@ -157,6 +167,32 @@ bool FTFDossierShellWidgetContract::RunTest(const FString& Parameters)
 			TEXT("The switcher carries one page per dossier drawer"),
 			Switcher->GetChildrenCount(),
 			static_cast<int32>(ETerritoryDossierDrawer::Lore) + 1);
+	}
+
+	// A ListView renders nothing without an entry widget class, and the class default is the
+	// only place the designer sets it (UListViewBase keeps the property protected, so C++ cannot
+	// repair it at runtime). An empty or wrong value leaves the History drawer silently blank.
+	UWidgetBlueprintGeneratedClass* CardClass = LoadWidgetClass(*this, CardClassPath);
+
+	if (UListView* HistoryList = ShellTree
+		? Cast<UListView>(ShellTree->FindWidget(TEXT("HistoryList")))
+		: nullptr)
+	{
+		if (const FObjectPropertyBase* EntryClassProperty =
+			FindFProperty<FObjectPropertyBase>(UListView::StaticClass(), TEXT("EntryWidgetClass")))
+		{
+			const UClass* EntryClass =
+				Cast<UClass>(EntryClassProperty->GetObjectPropertyValue_InContainer(HistoryList));
+			TestNotNull(TEXT("The authored history list names an entry widget class"), EntryClass);
+			TestEqual(
+				TEXT("The authored history list instantiates the authored event card"),
+				EntryClass ? EntryClass->GetName() : FString(),
+				CardClass ? CardClass->GetName() : FString());
+		}
+		else
+		{
+			AddError(TEXT("UListViewBase no longer exposes EntryWidgetClass."));
+		}
 	}
 
 	// The shell instantiates its rows from this class default, so an empty value would
@@ -183,6 +219,40 @@ bool FTFDossierShellWidgetContract::RunTest(const FString& Parameters)
 		{
 			AddError(TEXT("UTerritoryDossierWidget no longer exposes RecordRowWidgetClass."));
 		}
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FTFDossierEventCardContract,
+	"TerritoryFramework.Dossier.Contract.AuthoredEventCardBindsItsBadgesAndButton",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDossierEventCardContract::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryDossierWidgetAssetTests;
+
+	UWidgetBlueprintGeneratedClass* CardClass = LoadWidgetClass(*this, CardClassPath);
+	UWidgetTree* CardTree = LoadAuthoredTree(*this, CardClass);
+
+	// Every text the row widget fills must be bindable by name, otherwise the card compiles
+	// and simply never shows that field.
+	ExpectBoundWidget<UTextBlock>(*this, CardTree, TEXT("HeadlineText"));
+	ExpectBoundWidget<UTextBlock>(*this, CardTree, TEXT("MetaText"));
+	ExpectBoundWidget<UTextBlock>(*this, CardTree, TEXT("WeightText"));
+	ExpectBoundWidget<UTextBlock>(*this, CardTree, TEXT("CategoryText"));
+	ExpectBoundWidget<UTextBlock>(*this, CardTree, TEXT("EntityText"));
+	ExpectBoundWidget<UTextBlock>(*this, CardTree, TEXT("TimeText"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, CardTree, TEXT("FocusButton"));
+
+	if (CardClass)
+	{
+		const UClass* ParentClass = CardClass->GetSuperClass();
+		TestEqual(
+			TEXT("The authored event card derives from the Territory dossier row widget"),
+			ParentClass ? ParentClass->GetName() : FString(),
+			FString(UTerritoryDossierRowWidget::StaticClass()->GetName()));
 	}
 
 	return true;
