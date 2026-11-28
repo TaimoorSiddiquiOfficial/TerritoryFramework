@@ -128,6 +128,22 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> HistoryEmptyText;
 
+	/** Hosts the session-log lines built from the ledger. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UVerticalBox> LogsEntries;
+
+	/** Explains an empty log instead of leaving it blank. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> LogsEmptyText;
+
+	/** Hosts the aggregate rows derived from the ledger. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UVerticalBox> StatisticsEntries;
+
+	/** Explains why a statistic cannot be shown yet instead of printing a zero. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> StatisticsEmptyText;
+
 	/** Optional headline. The class writes it so the screen is localised in one place. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> TitleText;
@@ -140,13 +156,22 @@ protected:
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_HistoryTab;
 
 	UPROPERTY(meta=(BindWidgetOptional))
-	TObjectPtr<UNarrativeCommonButtonBase> Btn_NotesTab;
-
-	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_CollectiblesTab;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_RelationshipsTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_LogsTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_StatisticsTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_AchievementsTab;
+
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_LoreTab;
 
 	/** Row widget class built into HistoryEntries. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Dossier")
@@ -157,6 +182,9 @@ protected:
 	TObjectPtr<UWidgetAnimation> DossierReveal;
 
 private:
+	/** Reads the drawer navigation contract (name, empty-state copy, switcher index). */
+	friend class FTFDossierDrawerContract;
+
 	UPROPERTY(Transient)
 	ETerritoryDossierCategory SelectedCategory = ETerritoryDossierCategory::All;
 
@@ -170,11 +198,22 @@ private:
 	void BuildNativeLayout();
 	void BindTabButton(UNarrativeCommonButtonBase* Button, ETerritoryDossierDrawer Drawer);
 	void WriteHeaderText();
+
+	/** Builds the session-log lines from the same ledger the History page reads. */
+	void RefreshLogs();
+	/** Builds the aggregate rows from ledger counters; a missing number is explained, not faked. */
+	void RefreshStatistics();
+
+	/** One labelled row in the Statistics page. */
+	UWidget* BuildStatisticRow(const FText& Label, const FText& Value);
 	void HandleDrawerButtonClicked(ETerritoryDossierDrawer Drawer);
 	void HandleHistoryTabClicked();
-	void HandleNotesTabClicked();
 	void HandleCollectiblesTabClicked();
 	void HandleRelationshipsTabClicked();
+	void HandleLogsTabClicked();
+	void HandleStatisticsTabClicked();
+	void HandleAchievementsTabClicked();
+	void HandleLoreTabClicked();
 
 	UFUNCTION()
 	void HandleHistoryRowFocusRequested(FGameplayTag TerritoryTag);

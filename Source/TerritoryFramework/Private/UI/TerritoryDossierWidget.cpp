@@ -1,6 +1,7 @@
 #include "UI/TerritoryDossierWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Components/HorizontalBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/WidgetSwitcher.h"
@@ -88,9 +89,12 @@ void UTerritoryDossierWidget::NativeDestruct()
 void UTerritoryDossierWidget::BuildNativeLayout()
 {
 	BindTabButton(Btn_HistoryTab, ETerritoryDossierDrawer::History);
-	BindTabButton(Btn_NotesTab, ETerritoryDossierDrawer::Notes);
 	BindTabButton(Btn_CollectiblesTab, ETerritoryDossierDrawer::Collectibles);
 	BindTabButton(Btn_RelationshipsTab, ETerritoryDossierDrawer::Relationships);
+	BindTabButton(Btn_LogsTab, ETerritoryDossierDrawer::Logs);
+	BindTabButton(Btn_StatisticsTab, ETerritoryDossierDrawer::Statistics);
+	BindTabButton(Btn_AchievementsTab, ETerritoryDossierDrawer::Achievements);
+	BindTabButton(Btn_LoreTab, ETerritoryDossierDrawer::Lore);
 	WriteHeaderText();
 }
 
@@ -107,14 +111,23 @@ void UTerritoryDossierWidget::BindTabButton(UNarrativeCommonButtonBase* Button, 
 
 	switch (Drawer)
 	{
-	case ETerritoryDossierDrawer::Notes:
-		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleNotesTabClicked);
-		break;
 	case ETerritoryDossierDrawer::Collectibles:
 		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleCollectiblesTabClicked);
 		break;
 	case ETerritoryDossierDrawer::Relationships:
 		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleRelationshipsTabClicked);
+		break;
+	case ETerritoryDossierDrawer::Logs:
+		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleLogsTabClicked);
+		break;
+	case ETerritoryDossierDrawer::Statistics:
+		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleStatisticsTabClicked);
+		break;
+	case ETerritoryDossierDrawer::Achievements:
+		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleAchievementsTabClicked);
+		break;
+	case ETerritoryDossierDrawer::Lore:
+		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleLoreTabClicked);
 		break;
 	case ETerritoryDossierDrawer::History:
 	default:
@@ -182,11 +195,6 @@ void UTerritoryDossierWidget::HandleHistoryTabClicked()
 	HandleDrawerButtonClicked(ETerritoryDossierDrawer::History);
 }
 
-void UTerritoryDossierWidget::HandleNotesTabClicked()
-{
-	HandleDrawerButtonClicked(ETerritoryDossierDrawer::Notes);
-}
-
 void UTerritoryDossierWidget::HandleCollectiblesTabClicked()
 {
 	HandleDrawerButtonClicked(ETerritoryDossierDrawer::Collectibles);
@@ -195,6 +203,26 @@ void UTerritoryDossierWidget::HandleCollectiblesTabClicked()
 void UTerritoryDossierWidget::HandleRelationshipsTabClicked()
 {
 	HandleDrawerButtonClicked(ETerritoryDossierDrawer::Relationships);
+}
+
+void UTerritoryDossierWidget::HandleLogsTabClicked()
+{
+	HandleDrawerButtonClicked(ETerritoryDossierDrawer::Logs);
+}
+
+void UTerritoryDossierWidget::HandleStatisticsTabClicked()
+{
+	HandleDrawerButtonClicked(ETerritoryDossierDrawer::Statistics);
+}
+
+void UTerritoryDossierWidget::HandleAchievementsTabClicked()
+{
+	HandleDrawerButtonClicked(ETerritoryDossierDrawer::Achievements);
+}
+
+void UTerritoryDossierWidget::HandleLoreTabClicked()
+{
+	HandleDrawerButtonClicked(ETerritoryDossierDrawer::Lore);
 }
 
 void UTerritoryDossierWidget::HandleDrawerButtonClicked(ETerritoryDossierDrawer Drawer)
@@ -214,9 +242,20 @@ void UTerritoryDossierWidget::SetDossierDrawer(ETerritoryDossierDrawer InDrawer)
 	{
 		DossierSwitcher->SetActiveWidgetIndex(GetSwitcherIndexForDrawer(InDrawer));
 	}
-	if (InDrawer == ETerritoryDossierDrawer::History)
+
+	// Only the page being opened is rebuilt; the Data pages are cheap, the row pages are not.
+	switch (InDrawer)
 	{
+	case ETerritoryDossierDrawer::Logs:
+		RefreshLogs();
+		break;
+	case ETerritoryDossierDrawer::Statistics:
+		RefreshStatistics();
+		break;
+	case ETerritoryDossierDrawer::History:
+	default:
 		RefreshDossier();
+		break;
 	}
 }
 
@@ -230,15 +269,21 @@ FText UTerritoryDossierWidget::GetDossierDrawerText(ETerritoryDossierDrawer Draw
 {
 	switch (Drawer)
 	{
-	case ETerritoryDossierDrawer::Notes:
-		return LOCTEXT("DossierDrawerNotes", "Notes");
 	case ETerritoryDossierDrawer::Collectibles:
 		return LOCTEXT("DossierDrawerCollectibles", "Collectibles");
 	case ETerritoryDossierDrawer::Relationships:
-		return LOCTEXT("DossierDrawerRelationships", "Relationships");
+		return LOCTEXT("DossierDrawerRelationships", "NPC Relationships");
+	case ETerritoryDossierDrawer::Logs:
+		return LOCTEXT("DossierDrawerLogs", "Game Logs");
+	case ETerritoryDossierDrawer::Statistics:
+		return LOCTEXT("DossierDrawerStatistics", "Statistics");
+	case ETerritoryDossierDrawer::Achievements:
+		return LOCTEXT("DossierDrawerAchievements", "Achievements");
+	case ETerritoryDossierDrawer::Lore:
+		return LOCTEXT("DossierDrawerLore", "Lore & Notes");
 	case ETerritoryDossierDrawer::History:
 	default:
-		return LOCTEXT("DossierDrawerHistory", "History");
+		return LOCTEXT("DossierDrawerHistory", "Game History");
 	}
 }
 
@@ -246,15 +291,24 @@ FText UTerritoryDossierWidget::GetDossierPlaceholderText(ETerritoryDossierDrawer
 {
 	switch (Drawer)
 	{
-	case ETerritoryDossierDrawer::Notes:
-		return LOCTEXT("DossierNotesPlaceholder",
-			"Player notes are not tracked yet. When they are, they will be the player's own words and will never be written by the campaign.");
 	case ETerritoryDossierDrawer::Collectibles:
 		return LOCTEXT("DossierCollectiblesPlaceholder",
 			"Collectibles are not tracked yet. This page stays empty rather than listing items the campaign never recorded.");
 	case ETerritoryDossierDrawer::Relationships:
 		return LOCTEXT("DossierRelationshipsPlaceholder",
 			"Per-character standing is not tracked yet. Until a relationship authority exists, this page shows nothing.");
+	case ETerritoryDossierDrawer::Achievements:
+		return LOCTEXT("DossierAchievementsPlaceholder",
+			"Achievements are not tracked yet. They must be awarded by gameplay, never by this screen.");
+	case ETerritoryDossierDrawer::Lore:
+		return LOCTEXT("DossierLorePlaceholder",
+			"Notes and lore readings are not tracked yet. When they are, they will be the player's own words and will never be written by the campaign.");
+	case ETerritoryDossierDrawer::Logs:
+		return LOCTEXT("DossierLogsPlaceholder",
+			"Committed facts about this campaign appear here as a timeline.");
+	case ETerritoryDossierDrawer::Statistics:
+		return LOCTEXT("DossierStatisticsPlaceholder",
+			"No statistic can be derived from the campaign ledger yet.");
 	case ETerritoryDossierDrawer::History:
 	default:
 		return LOCTEXT("DossierHistoryPlaceholder",
@@ -327,30 +381,30 @@ TArray<FTerritoryDossierRecordView> UTerritoryDossierWidget::GetHistoryRecords()
 
 void UTerritoryDossierWidget::RefreshDossier()
 {
-	if (!HistoryEntries)
-	{
-		return;
-	}
-
+	// Each page refreshes on its own so a WBP that only authors one of them still works.
 	const TArray<FTerritoryDossierRecordView> Records = GetHistoryRecords();
-	HistoryEntries->ClearChildren();
 
-	if (RecordRowWidgetClass)
+	if (HistoryEntries)
 	{
-		APlayerController* OwningPlayer = GetOwningPlayer();
-		for (const FTerritoryDossierRecordView& View : Records)
-		{
-			UTerritoryDossierRowWidget* Row = OwningPlayer
-				? CreateWidget<UTerritoryDossierRowWidget>(OwningPlayer, RecordRowWidgetClass)
-				: CreateWidget<UTerritoryDossierRowWidget>(this, RecordRowWidgetClass);
-			if (!Row)
-			{
-				continue;
-			}
+		HistoryEntries->ClearChildren();
 
-			Row->OnTerritoryRequested.AddUniqueDynamic(this, &UTerritoryDossierWidget::HandleHistoryRowFocusRequested);
-			Row->InitializeDossierRecord(View);
-			HistoryEntries->AddChildToVerticalBox(Row);
+		if (RecordRowWidgetClass)
+		{
+			APlayerController* OwningPlayer = GetOwningPlayer();
+			for (const FTerritoryDossierRecordView& View : Records)
+			{
+				UTerritoryDossierRowWidget* Row = OwningPlayer
+					? CreateWidget<UTerritoryDossierRowWidget>(OwningPlayer, RecordRowWidgetClass)
+					: CreateWidget<UTerritoryDossierRowWidget>(this, RecordRowWidgetClass);
+				if (!Row)
+				{
+					continue;
+				}
+
+				Row->OnTerritoryRequested.AddUniqueDynamic(this, &UTerritoryDossierWidget::HandleHistoryRowFocusRequested);
+				Row->InitializeDossierRecord(View);
+				HistoryEntries->AddChildToVerticalBox(Row);
+			}
 		}
 	}
 
@@ -362,6 +416,154 @@ void UTerritoryDossierWidget::RefreshDossier()
 
 	// The counters move as facts are recorded, so the header is rewritten with the rows.
 	WriteHeaderText();
+	RefreshLogs();
+	RefreshStatistics();
+}
+
+void UTerritoryDossierWidget::RefreshLogs()
+{
+	if (!LogsEntries)
+	{
+		return;
+	}
+
+	LogsEntries->ClearChildren();
+
+	const TArray<FTerritoryDossierRecordView> Records = GetHistoryRecords();
+	if (Records.Num() == 0)
+	{
+		if (LogsEmptyText)
+		{
+			LogsEmptyText->SetText(GetHistoryEmptyStateText());
+			LogsEmptyText->SetVisibility(ESlateVisibility::Visible);
+		}
+		return;
+	}
+
+	if (LogsEmptyText)
+	{
+		LogsEmptyText->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	// The log lines are written from the same ledger rows the History page lists, so a player who
+	// reads the log and a player who reads the history can never be told two different stories.
+	for (const FTerritoryDossierRecordView& View : Records)
+	{
+		UTextBlock* Line = WidgetTree ? WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass()) : nullptr;
+		if (!Line)
+		{
+			continue;
+		}
+
+		Line->SetText(FText::Format(
+			LOCTEXT("DossierLogLineFmt", "[{0}] {1}: {2}"),
+			FText::AsNumber(FMath::RoundToInt(View.GameTimeSeconds)),
+			GetDossierCategoryText(View.Category),
+			GetEvidenceHeadlineText(View)));
+		if (LogsEmptyText)
+		{
+			Line->SetFont(LogsEmptyText->GetFont());
+		}
+		LogsEntries->AddChildToVerticalBox(Line);
+	}
+}
+
+void UTerritoryDossierWidget::RefreshStatistics()
+{
+	if (!StatisticsEntries)
+	{
+		return;
+	}
+
+	StatisticsEntries->ClearChildren();
+
+	const FTerritoryDossierLedgerState State = GetDossierLedgerState();
+	if (!State.bLedgerReady)
+	{
+		// Showing zeros here would read as "nothing ever happened" instead of "not known yet".
+		if (StatisticsEmptyText)
+		{
+			StatisticsEmptyText->SetText(GetDossierPlaceholderText(ETerritoryDossierDrawer::Statistics));
+			StatisticsEmptyText->SetVisibility(ESlateVisibility::Visible);
+		}
+		return;
+	}
+
+	if (StatisticsEmptyText)
+	{
+		StatisticsEmptyText->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	TMap<FGameplayTag, int32> CountsByTag;
+	int64 TotalWeight = 0;
+	if (const UTerritoryEvidenceLedgerSubsystem* Ledger = ResolveDossierLedger(this))
+	{
+		for (const FTerritoryEvidenceRecord& Record : Ledger->GetEvidenceRecords())
+		{
+			CountsByTag.FindOrAdd(Record.EvidenceTag)++;
+			TotalWeight += Record.Weight;
+		}
+	}
+
+	if (UWidget* Row = BuildStatisticRow(LOCTEXT("DossierStatRecorded", "Facts recorded"), FText::AsNumber(State.TotalRecordedCount)))
+	{
+		StatisticsEntries->AddChildToVerticalBox(Row);
+	}
+	if (UWidget* Row = BuildStatisticRow(LOCTEXT("DossierStatKept", "Facts kept in this window"), FText::AsNumber(State.RetainedCount)))
+	{
+		StatisticsEntries->AddChildToVerticalBox(Row);
+	}
+	if (UWidget* Row = BuildStatisticRow(LOCTEXT("DossierStatTrimmed", "Facts trimmed by the retention limit"), FText::AsNumber(State.EvictedCount)))
+	{
+		StatisticsEntries->AddChildToVerticalBox(Row);
+	}
+	if (UWidget* Row = BuildStatisticRow(LOCTEXT("DossierStatWeight", "Recorded weight"), FText::AsNumber(TotalWeight)))
+	{
+		StatisticsEntries->AddChildToVerticalBox(Row);
+	}
+
+	// One row per fact type that actually happened. Nothing is invented for a type with no rows.
+	CountsByTag.KeySort([](const FGameplayTag& A, const FGameplayTag& B) { return A.ToString() < B.ToString(); });
+	for (const TPair<FGameplayTag, int32>& Pair : CountsByTag)
+	{
+		FTerritoryDossierRecordView Sample;
+		Sample.EvidenceTag = Pair.Key;
+		Sample.Category = ResolveDossierCategory(Pair.Key);
+		if (UWidget* Row = BuildStatisticRow(GetEvidenceHeadlineText(Sample), FText::AsNumber(Pair.Value)))
+		{
+			StatisticsEntries->AddChildToVerticalBox(Row);
+		}
+	}
+}
+
+UWidget* UTerritoryDossierWidget::BuildStatisticRow(const FText& Label, const FText& Value)
+{
+	if (!WidgetTree)
+	{
+		return nullptr;
+	}
+
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	UTextBlock* LabelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	UTextBlock* ValueText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	if (!Row || !LabelText || !ValueText)
+	{
+		return nullptr;
+	}
+
+	LabelText->SetText(Label);
+	ValueText->SetText(Value);
+	ValueText->SetJustification(ETextJustify::Right);
+	if (StatisticsEmptyText)
+	{
+		LabelText->SetFont(StatisticsEmptyText->GetFont());
+		ValueText->SetFont(StatisticsEmptyText->GetFont());
+	}
+	ValueText->SetColorAndOpacity(FSlateColor(FLinearColor(0.902f, 0.824f, 0.478f, 1.f)));
+
+	Row->AddChildToHorizontalBox(LabelText);
+	Row->AddChildToHorizontalBox(ValueText);
+	return Row;
 }
 
 FText UTerritoryDossierWidget::GetHistoryEmptyStateText() const

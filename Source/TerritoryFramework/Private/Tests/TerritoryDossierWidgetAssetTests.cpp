@@ -126,10 +126,17 @@ bool FTFDossierShellWidgetContract::RunTest(const FString& Parameters)
 	ExpectBoundWidget<UWidgetSwitcher>(*this, ShellTree, TEXT("DossierSwitcher"));
 	ExpectBoundWidget<UVerticalBox>(*this, ShellTree, TEXT("HistoryEntries"));
 	ExpectBoundWidget<UTextBlock>(*this, ShellTree, TEXT("HistoryEmptyText"));
+	ExpectBoundWidget<UVerticalBox>(*this, ShellTree, TEXT("LogsEntries"));
+	ExpectBoundWidget<UTextBlock>(*this, ShellTree, TEXT("LogsEmptyText"));
+	ExpectBoundWidget<UVerticalBox>(*this, ShellTree, TEXT("StatisticsEntries"));
+	ExpectBoundWidget<UTextBlock>(*this, ShellTree, TEXT("StatisticsEmptyText"));
 	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_HistoryTab"));
-	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_NotesTab"));
 	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_CollectiblesTab"));
 	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_RelationshipsTab"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_LogsTab"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_StatisticsTab"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_AchievementsTab"));
+	ExpectBoundWidget<UNarrativeCommonButtonBase>(*this, ShellTree, TEXT("Btn_LoreTab"));
 
 	if (ShellClass)
 	{
@@ -149,7 +156,7 @@ bool FTFDossierShellWidgetContract::RunTest(const FString& Parameters)
 		TestEqual(
 			TEXT("The switcher carries one page per dossier drawer"),
 			Switcher->GetChildrenCount(),
-			static_cast<int32>(ETerritoryDossierDrawer::Relationships) + 1);
+			static_cast<int32>(ETerritoryDossierDrawer::Lore) + 1);
 	}
 
 	// The shell instantiates its rows from this class default, so an empty value would

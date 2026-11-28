@@ -7,21 +7,30 @@
 /**
  * One page of the Dossier screen.
  *
- * Batch 1 ships History, which is a read-only projection of the evidence ledger. The other
- * three pages exist so the authoring contract is visible, and they say what they do not track
- * yet instead of showing invented rows.
+ * The order below is the sidebar order and therefore the switcher page order: a designer only
+ * has to keep the authored switcher children in the same sequence.
+ *
+ * History, Logs and Statistics read the evidence ledger that already exists. Collectibles,
+ * Relationships, Achievements and Lore each need an authority that does not exist yet, so those
+ * pages say what is missing instead of drawing invented rows.
  */
 UENUM(BlueprintType)
 enum class ETerritoryDossierDrawer : uint8
 {
-	/** Committed facts: the evidence ledger projection. */
-	History UMETA(DisplayName="History"),
-	/** Player-authored notes. Not tracked yet. */
-	Notes UMETA(DisplayName="Notes"),
-	/** Collected items and lore finds. Not tracked yet. */
+	/** Committed facts: the evidence ledger projection, newest first. */
+	History UMETA(DisplayName="Game History"),
+	/** Collected items and lore finds. Needs a discovery authority. */
 	Collectibles UMETA(DisplayName="Collectibles"),
-	/** Per-NPC standing. Not tracked yet. */
-	Relationships UMETA(DisplayName="Relationships")
+	/** Per-NPC standing. Needs a relationship authority (Narrative owns faction attitude). */
+	Relationships UMETA(DisplayName="NPC Relationships"),
+	/** The same facts as History, written as a session log instead of cards. */
+	Logs UMETA(DisplayName="Game Logs"),
+	/** Aggregates derived from the ledger: this page never invents a statistic. */
+	Statistics UMETA(DisplayName="Statistics"),
+	/** Milestones. Needs an achievement authority; the UI must not award them. */
+	Achievements UMETA(DisplayName="Achievements"),
+	/** Lore entries and player notes. Needs a lore/notes authority. */
+	Lore UMETA(DisplayName="Lore & Notes")
 };
 
 /**

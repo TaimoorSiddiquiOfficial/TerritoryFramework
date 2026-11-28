@@ -139,4 +139,54 @@ bool FTFDossierRecordText::RunTest(const FString& Parameters)
 	return true;
 }
 
+/**
+ * The drawer set is the screen's navigation contract: the switcher pages, the tab buttons and the
+ * empty-state copy all key off ETerritoryDossierDrawer, so a drawer without its own name or its own
+ * honest explanation would ship a page a player cannot read or cannot trust.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTFDossierDrawerContract,
+	"TerritoryFramework.Dossier.Behavior.EveryDrawerHasItsOwnNameAndHonestEmptyState",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDossierDrawerContract::RunTest(const FString& Parameters)
+{
+	const ETerritoryDossierDrawer Drawers[] = {
+		ETerritoryDossierDrawer::History,
+		ETerritoryDossierDrawer::Collectibles,
+		ETerritoryDossierDrawer::Relationships,
+		ETerritoryDossierDrawer::Logs,
+		ETerritoryDossierDrawer::Statistics,
+		ETerritoryDossierDrawer::Achievements,
+		ETerritoryDossierDrawer::Lore
+	};
+
+	TSet<FString> Names;
+	TSet<FString> Placeholders;
+	int32 ExpectedIndex = 0;
+
+	for (const ETerritoryDossierDrawer Drawer : Drawers)
+	{
+		// The switcher index is the raw enum value, so the enum order IS the page order.
+		TestEqual(TEXT("The drawer maps onto its own switcher page"),
+			UTerritoryDossierWidget::GetSwitcherIndexForDrawer(Drawer), ExpectedIndex);
+		++ExpectedIndex;
+
+		const FString Name = UTerritoryDossierWidget::GetDossierDrawerText(Drawer).ToString();
+		TestFalse(TEXT("Every drawer has a tab name"), Name.IsEmpty());
+		TestFalse(TEXT("No two drawers share a tab name"), Names.Contains(Name));
+		Names.Add(Name);
+
+		const FString Placeholder = UTerritoryDossierWidget::GetDossierPlaceholderText(Drawer).ToString();
+		TestFalse(TEXT("Every drawer explains its own empty state"), Placeholder.IsEmpty());
+		// Sharing copy would let one page quietly claim another page's data exists.
+		TestFalse(TEXT("No two drawers share empty-state copy"), Placeholders.Contains(Placeholder));
+		Placeholders.Add(Placeholder);
+	}
+
+	TestEqual(TEXT("The drawer enum carries exactly the authored pages"),
+		static_cast<int32>(ETerritoryDossierDrawer::Lore), 6);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
