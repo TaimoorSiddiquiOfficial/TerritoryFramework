@@ -100,6 +100,13 @@ public:
 	UFUNCTION(BlueprintPure, Category="Territory|Dossier")
 	static FText GetEvidenceMetaText(const FTerritoryDossierRecordView& Record);
 
+	/**
+	 * Accent colour for a drawer. The palette lives in one place so the list reads as
+	 * categories (control, conflict, stealth, diplomacy, tales) instead of one grey column.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Dossier")
+	static FLinearColor GetDossierCategoryAccentColor(ETerritoryDossierCategory Category);
+
 	/** Raised when a row asks to focus its Territory. */
 	UPROPERTY(BlueprintAssignable, Category="Territory|Dossier")
 	FOnTerritoryDossierFocusRequested OnTerritoryFocusRequested;
@@ -120,6 +127,14 @@ protected:
 	/** Explains an empty list instead of leaving it blank. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> HistoryEmptyText;
+
+	/** Optional headline. The class writes it so the screen is localised in one place. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TitleText;
+
+	/** Optional status line: the real retention counters, or the reason they are unknown. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> StatusText;
 
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_HistoryTab;
@@ -153,7 +168,8 @@ private:
 	TArray<TObjectPtr<UNarrativeCommonButtonBase>> BoundTabButtons;
 
 	void BuildNativeLayout();
-	void BindTabButton(UNarrativeCommonButtonBase* Button);
+	void BindTabButton(UNarrativeCommonButtonBase* Button, ETerritoryDossierDrawer Drawer);
+	void WriteHeaderText();
 	void HandleDrawerButtonClicked(ETerritoryDossierDrawer Drawer);
 	void HandleHistoryTabClicked();
 	void HandleNotesTabClicked();

@@ -1,6 +1,7 @@
 #include "UI/TerritoryDossierRowWidget.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
 #include "Components/TextBlock.h"
 #include "UI/TerritoryDossierWidget.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
@@ -57,6 +58,10 @@ void UTerritoryDossierRowWidget::BuildNativeLayout()
 
 	if (FocusButton && !bFocusBound)
 	{
+		// Same convention as the shell: the project labels territory buttons in C++, because the
+		// authored button only carries the common "BUTTON TEXT" placeholder.
+		FocusButton->SetButtonText(NSLOCTEXT("TerritoryDossierRow", "FocusButton", "Locate"));
+
 		FocusButton->OnClicked().AddUObject(this, &UTerritoryDossierRowWidget::HandleFocusClicked);
 		bFocusBound = true;
 	}
@@ -67,6 +72,11 @@ void UTerritoryDossierRowWidget::RefreshRecord()
 	if (HeadlineText)
 	{
 		HeadlineText->SetText(UTerritoryDossierWidget::GetEvidenceHeadlineText(Record));
+
+		// Category identity in the text itself: the accent is brightened because a saturated
+		// strip colour is too dark to read as body text on the panel background.
+		const FLinearColor Accent = UTerritoryDossierWidget::GetDossierCategoryAccentColor(Record.Category);
+		HeadlineText->SetColorAndOpacity(FSlateColor(FLinearColor::LerpUsingHSV(Accent, FLinearColor::White, 0.35f)));
 	}
 	if (MetaText)
 	{
@@ -77,6 +87,18 @@ void UTerritoryDossierRowWidget::RefreshRecord()
 		WeightText->SetText(FText::Format(
 			NSLOCTEXT("TerritoryDossier", "EvidenceWeight", "Weight {0}"),
 			FText::AsNumber(Record.Weight)));
+	}
+	if (AccentBar)
+	{
+		// The strip carries the category, so the list reads as a hierarchy instead of a grey column.
+		AccentBar->SetBrushColor(UTerritoryDossierWidget::GetDossierCategoryAccentColor(Record.Category));
+	}
+	if (RowSurface)
+	{
+		// A faint wash of the same colour: enough to group rows at a glance, weak enough that the
+		// body text keeps its contrast against the panel behind it.
+		const FLinearColor Accent = UTerritoryDossierWidget::GetDossierCategoryAccentColor(Record.Category);
+		RowSurface->SetBrushColor(FLinearColor(Accent.R, Accent.G, Accent.B, 0.18f));
 	}
 	if (FocusButton)
 	{

@@ -7,6 +7,7 @@
 #include "TerritoryDossierRowWidget.generated.h"
 
 class UTextBlock;
+class UBorder;
 class UNarrativeCommonButtonBase;
 
 /** Asks the Dossier to focus the Territory a fact happened in. */
@@ -60,6 +61,20 @@ protected:
 	 */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> FocusButton;
+
+	/**
+	 * Optional accent strip along the row, tinted with the record's category colour so a long
+	 * list can be scanned for conflicts, treaties or stealth without reading every line.
+	 */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UBorder> AccentBar;
+
+	/**
+	 * Optional row surface (normally the root border). Tinted with a faint wash of the category
+	 * colour, which is what makes the list read as grouped rows instead of one grey slab.
+	 */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UBorder> RowSurface;
 
 private:
 	UPROPERTY(Transient)

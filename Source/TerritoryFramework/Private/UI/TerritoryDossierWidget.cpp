@@ -87,37 +87,94 @@ void UTerritoryDossierWidget::NativeDestruct()
 
 void UTerritoryDossierWidget::BuildNativeLayout()
 {
-	BindTabButton(Btn_HistoryTab);
-	BindTabButton(Btn_NotesTab);
-	BindTabButton(Btn_CollectiblesTab);
-	BindTabButton(Btn_RelationshipsTab);
+	BindTabButton(Btn_HistoryTab, ETerritoryDossierDrawer::History);
+	BindTabButton(Btn_NotesTab, ETerritoryDossierDrawer::Notes);
+	BindTabButton(Btn_CollectiblesTab, ETerritoryDossierDrawer::Collectibles);
+	BindTabButton(Btn_RelationshipsTab, ETerritoryDossierDrawer::Relationships);
+	WriteHeaderText();
 }
 
-void UTerritoryDossierWidget::BindTabButton(UNarrativeCommonButtonBase* Button)
+void UTerritoryDossierWidget::BindTabButton(UNarrativeCommonButtonBase* Button, ETerritoryDossierDrawer Drawer)
 {
 	if (!Button || BoundTabButtons.Contains(Button))
 	{
 		return;
 	}
 
-	if (Button == Btn_HistoryTab)
+	// The project writes every territory button label in C++ (the authored WBP only carries the
+	// placeholder), so each tab gets its localised drawer name here rather than in the asset.
+	Button->SetButtonText(GetDossierDrawerText(Drawer));
+
+	switch (Drawer)
 	{
-		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleHistoryTabClicked);
-	}
-	else if (Button == Btn_NotesTab)
-	{
+	case ETerritoryDossierDrawer::Notes:
 		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleNotesTabClicked);
-	}
-	else if (Button == Btn_CollectiblesTab)
-	{
+		break;
+	case ETerritoryDossierDrawer::Collectibles:
 		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleCollectiblesTabClicked);
-	}
-	else
-	{
+		break;
+	case ETerritoryDossierDrawer::Relationships:
 		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleRelationshipsTabClicked);
+		break;
+	case ETerritoryDossierDrawer::History:
+	default:
+		Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleHistoryTabClicked);
+		break;
 	}
 
 	BoundTabButtons.Add(Button);
+}
+
+void UTerritoryDossierWidget::WriteHeaderText()
+{
+	if (TitleText)
+	{
+		TitleText->SetText(LOCTEXT("DossierTitle", "Dossier"));
+	}
+
+	if (!StatusText)
+	{
+		return;
+	}
+
+	const FTerritoryDossierLedgerState State = GetDossierLedgerState();
+	if (!State.bLedgerReady)
+	{
+		// "Not known yet" is not the same claim as "nothing happened" (AGENTS.md §4.2).
+		StatusText->SetText(LOCTEXT("DossierStatusSyncing", "History is still syncing with the server"));
+		return;
+	}
+
+	StatusText->SetText(State.bHistoryTruncated
+		? FText::Format(LOCTEXT("DossierStatusTrimmed",
+			"{0} facts recorded  |  {1} kept  |  {2} trimmed"),
+			FText::AsNumber(State.TotalRecordedCount),
+			FText::AsNumber(State.RetainedCount),
+			FText::AsNumber(State.EvictedCount))
+		: FText::Format(LOCTEXT("DossierStatusCounts", "{0} facts recorded  |  {1} kept"),
+			FText::AsNumber(State.TotalRecordedCount),
+			FText::AsNumber(State.RetainedCount)));
+}
+
+FLinearColor UTerritoryDossierWidget::GetDossierCategoryAccentColor(ETerritoryDossierCategory Category)
+{
+	// Linear values, in step with the territory palette the journal and district rows use.
+	switch (Category)
+	{
+	case ETerritoryDossierCategory::Control:
+		return FLinearColor(0.588f, 0.391f, 0.061f);
+	case ETerritoryDossierCategory::Conflict:
+		return FLinearColor(0.549f, 0.086f, 0.070f);
+	case ETerritoryDossierCategory::Stealth:
+		return FLinearColor(0.247f, 0.131f, 0.420f);
+	case ETerritoryDossierCategory::Diplomacy:
+		return FLinearColor(0.090f, 0.251f, 0.502f);
+	case ETerritoryDossierCategory::Tales:
+		return FLinearColor(0.130f, 0.400f, 0.200f);
+	case ETerritoryDossierCategory::All:
+	default:
+		return FLinearColor(0.451f, 0.478f, 0.502f);
+	}
 }
 
 void UTerritoryDossierWidget::HandleHistoryTabClicked()
@@ -302,6 +359,9 @@ void UTerritoryDossierWidget::RefreshDossier()
 		HistoryEmptyText->SetText(GetHistoryEmptyStateText());
 		HistoryEmptyText->SetVisibility(Records.Num() > 0 ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
+
+	// The counters move as facts are recorded, so the header is rewritten with the rows.
+	WriteHeaderText();
 }
 
 FText UTerritoryDossierWidget::GetHistoryEmptyStateText() const
