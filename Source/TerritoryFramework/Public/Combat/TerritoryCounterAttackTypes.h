@@ -711,8 +711,9 @@ struct FTerritoryAssaultRecord
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double ScheduledGameTime = 0.0;
 	/**
 	 * Authored story deployment delay: the warned force may not leave its warning before this
-	 * campaign time. Zero keeps the engine's own timing, so automatic and legacy schedules are
-	 * unchanged, and a saved assault keeps its authored deployment window across load.
+	 * campaign time. The window is measured from the end of the assault's own grace period, because
+	 * the warning state is only reachable after that grace. Zero keeps the engine's own timing, so
+	 * automatic and legacy schedules are unchanged, and a saved assault keeps its authored window.
 	 */
 	UPROPERTY(SaveGame, BlueprintReadOnly, Category="Territory|Counter Attack") double DeploymentOpensGameTime = 0.0;
 	/** Campaign-clock time when this assault became active. */

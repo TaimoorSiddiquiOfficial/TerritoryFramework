@@ -79,8 +79,8 @@ public:
 	 * Reinforcements-capability, or counter-Quest gates. It still validates authority,
 	 * opposing ownership, diplomacy, finite force, spawn definitions, budget, and route.
 	 * Immediate also skips grace, time window, chance, warning delay, and proximity.
-	 * A positive Deployment Delay seconds keeps the warned force in its warning until
-	 * that campaign-time window opens, then the normal proximity/garrison policy applies.
+	 * A positive Deployment Delay seconds keeps the warned force in its warning for that long
+	 * after its own grace period ends, then the normal proximity/garrison policy applies.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category="Territory|Counter Attack|Diagnostics",
@@ -416,6 +416,12 @@ private:
 
 	void UpdateAssaults();
 	void TryScheduleRecurringStrategicAssaults();
+	/**
+	 * True while an authored story deployment window still holds the warned force in place.
+	 * A window of zero means the author asked for no delay, so the engine's own timing applies.
+	 * Kept as one predicate so the update tick and the regression test read the same rule.
+	 */
+	static bool IsDeploymentWindowHolding(const FTerritoryAssaultRecord& Assault, double CampaignGameTime);
 	void AdvanceAssault(FTerritoryAssaultRecord& Assault);
 	void EvaluateAssault(FTerritoryAssaultRecord& Assault, ATerritoryVolume* Territory);
 	static void UpdateCommittedForceEstimate(FTerritoryAssaultRecord& Assault,
@@ -565,4 +571,6 @@ private:
 	friend class FTFEvidenceAssaultKilledRefusedOnClient;
 	/** Resolves an authored on-foot approach and deploys one walker to prove the walking entry mode. */
 	friend class FTFAssaultOnFootApproachWalkers;
+	/** Drives one hand-built record through the update tick to prove the authored window holds it. */
+	friend class FTFAssaultDeploymentHold;
 };

@@ -178,7 +178,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Territory Event",
 		meta=(DisplayName="Deployment Delay (seconds)", ClampMin="0", UIMin="0", UIMax="3600",
 			EditCondition="!bStartImmediately", EditConditionHides,
-			ToolTip="Campaign-time seconds the warned force waits before the deployment window opens. 0 uses the normal immediate warning advance, a positive value gives players a timed countdown before the assault may begin."))
+			ToolTip="Campaign-time seconds the warned force waits after it finishes its grace period before the deployment window opens. 0 uses the normal immediate warning advance, a positive value gives players a timed countdown before the assault may begin."))
 	float DeploymentDelaySeconds = 0.f;
 
 	/** Native admission used by this event and persistent Narrative admission tasks.

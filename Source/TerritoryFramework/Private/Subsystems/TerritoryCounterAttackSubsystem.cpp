@@ -53,6 +53,13 @@
 #include "TimerManager.h"
 #include "UObject/UnrealType.h"
 #include "ZoneGraphAStar.h"
+
+namespace
+{
+	// Longest authored deployment delay a schedule accepts. The same bound is re-applied when a
+	// saved window is restored, so a damaged or edited ledger cannot park a record in its warning.
+	constexpr double MaximumStoryDeploymentDelaySeconds = 24.0 * 60.0 * 60.0;
+}
 #include "ZoneGraphSubsystem.h"
 #include "ZoneGraphTypes.h"
 
@@ -979,12 +986,15 @@ bool UTerritoryCounterAttackSubsystem::ScheduleAssault(
 	Record.GraceEndsGameTime = Record.CapturedGameTime + CalculateInfluenceAdjustedDelay(
 		BaseGrace, ForceConfig->TerritorialInfluence,
 		Profile->MinimumInfluenceTimingScale);
-	// An authored story delay warns now and holds the force until the declared campaign-time window
-	// opens. Immediate deployments never wait, and zero keeps the engine's own timing so automatic
+	// An authored story delay holds the warned force until the declared campaign-time window opens.
+	// The hold only becomes reachable once the assault has finished its own grace period
+	// (Grace -> Evaluating -> ScheduledWarning), so the window is measured from the grace end rather
+	// than from the capture stamp. A delay shorter than the grace would otherwise expire before the
+	// force ever reaches its warning, and the authored wait would silently become a no-op.
+	// Immediate deployments never wait, and zero keeps the engine's own timing so automatic
 	// strategic schedules, legacy data and every existing caller stay unchanged.
-	constexpr double MaximumStoryDeploymentDelaySeconds = 24.0 * 60.0 * 60.0;
 	Record.DeploymentOpensGameTime = (!bStartImmediately && DeploymentDelaySeconds > 0.f)
-		? Record.CapturedGameTime + FMath::Clamp(
+		? Record.GraceEndsGameTime + FMath::Clamp(
 			static_cast<double>(DeploymentDelaySeconds), 0.0, MaximumStoryDeploymentDelaySeconds)
 		: 0.0;
 	Assaults.Add(Record.AssaultID, Record);
@@ -1446,6 +1456,12 @@ void UTerritoryCounterAttackSubsystem::RestorePersistentState(
 		Record.KilledForce = FMath::Clamp(Record.KilledForce, 0, Record.PlannedForce);
 		Record.WithdrawnForce = FMath::Clamp(
 			Record.WithdrawnForce, 0, Record.PlannedForce - Record.KilledForce);
+		// The authored deployment window is only meaningful for the campaign time directly after this
+		// record's own grace. Clamping it here keeps a damaged or edited save from parking the record
+		// in ScheduledWarning forever, which would also block the territory and keep consuming budget.
+		Record.DeploymentOpensGameTime = FMath::Clamp(
+			Record.DeploymentOpensGameTime, 0.0,
+			Record.GraceEndsGameTime + MaximumStoryDeploymentDelaySeconds);
 		if (bAuthority)
 		{
 			// Admission and difficulty planning never authorize more than eight cars.
@@ -1560,6 +1576,13 @@ void UTerritoryCounterAttackSubsystem::ReconcileRetiredTargets()
 			if (RestoreGeneration != Generation || !IsValid(State)) return;
 		}
 	}
+}
+
+bool UTerritoryCounterAttackSubsystem::IsDeploymentWindowHolding(
+	const FTerritoryAssaultRecord& Assault, const double CampaignGameTime)
+{
+	// Zero means "no authored window": the engine's own timing applies and nothing is held.
+	return Assault.DeploymentOpensGameTime > 0.0 && CampaignGameTime < Assault.DeploymentOpensGameTime;
 }
 
 void UTerritoryCounterAttackSubsystem::UpdateAssaults()
@@ -1805,8 +1828,7 @@ void UTerritoryCounterAttackSubsystem::AdvanceAssault(FTerritoryAssaultRecord& A
 		// The warning is announced once, when the force is scheduled or an immediate deployment
 		// starts, so a held warning is never re-announced. An authored story delay keeps the force
 		// here until its deployment window opens instead of advancing on the next update cycle.
-		if (Assault.DeploymentOpensGameTime > 0.0
-			&& GetCampaignGameTime() < Assault.DeploymentOpensGameTime)
+		if (IsDeploymentWindowHolding(Assault, GetCampaignGameTime()))
 		{
 			break;
 		}
