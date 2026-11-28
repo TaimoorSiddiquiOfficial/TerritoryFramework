@@ -3,6 +3,7 @@
 #include "Assets/TerritoryAssetTypeActions.h"
 #include "Assets/TerritoryAuthoringMenu.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryCollectibleDefinition.h"
 #include "Core/TerritoryFloorVolume.h"
 #include "Core/TerritoryGuardSpawnPoint.h"
 #include "Core/TerritoryDeveloperSettings.h"
@@ -709,6 +710,7 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 	const FText DiplomacyMenu = LOCTEXT("TerritoryDiplomacyAssetSubMenu", "AI & Diplomacy");
 	const FText StoryMenu = LOCTEXT("TerritoryStoryAssetSubMenu", "Story & Quests");
 	const FText UpgradeMenu = LOCTEXT("TerritoryUpgradeAssetSubMenu", "Upgrades & Progression");
+	const FText CollectionMenu = LOCTEXT("TerritoryCollectibleAssetSubMenu", "Collectibles & Discovery");
 	Register(UTerritoryCinematicLightRigProfile::StaticClass(),
 		LOCTEXT("TerritoryLightRigProfileAsset", "Territory Cinematic Light Rig Profile"),
 		LOCTEXT("TerritoryLightRigProfileDescription", "Optional character lights for Narrative shots and cutscenes, with a project control panel for authoring the look."),
@@ -839,6 +841,20 @@ void FTerritoryFrameworkEditorModule::RegisterTerritoryAssetTypes()
 		LOCTEXT("TerritoryConversationProfileAsset", "Territory Conversation Profile"),
 		LOCTEXT("TerritoryConversationProfileDescription", "Configures a two-guard ambient dialogue, recruitment tags, meeting distances and bounded session timing."),
 		StoryMenu, FColor(78, 171, 204));
+	Register(
+		UTerritoryCollectibleDefinition::StaticClass(),
+		LOCTEXT("TerritoryCollectibleDefinitionAsset", "Territory Collectible"),
+		LOCTEXT("TerritoryCollectibleDefinitionDescription",
+			"One discoverable item or secret: its identity tag, what the Dossier calls it, and the icon and description it shows after a player finds it."),
+		CollectionMenu,
+		FColor(206, 158, 86));
+	Register(
+		UTerritoryCollectibleSet::StaticClass(),
+		LOCTEXT("TerritoryCollectibleSetAsset", "Territory Collectible Set"),
+		LOCTEXT("TerritoryCollectibleSetDescription",
+			"The campaign's completion list: which authored collectibles the Dossier counts, so \"found 7 of 24\" is a real number rather than a guess."),
+		CollectionMenu,
+		FColor(186, 138, 76));
 }
 
 void FTerritoryFrameworkEditorModule::UnregisterTerritoryAssetTypes()

@@ -6,6 +6,7 @@
 #include "NarrativeSavableActor.h"
 #include "Core/TerritoryDiplomacyTypes.h"
 #include "Core/TerritoryEvidenceTypes.h"
+#include "Core/TerritoryCollectibleTypes.h"
 #include "Combat/TerritoryCounterAttackTypes.h"
 #include "Subsystems/TerritoryEconomySubsystem.h"
 #include "Core/TerritoryTransactionSnapshot.h"
@@ -369,6 +370,30 @@ public:
 		meta=(DisplayName="Is Evidence Ledger Ready"))
 	bool IsEvidenceLedgerReady() const;
 
+	// ─── Collectible Findings API (server-authoritative) ───
+
+	/**
+	 * Projection writer used by the collectible authority. Blueprint must record a
+	 * finding through UTerritoryCollectibleSubsystem; this only publishes the read model.
+	 */
+	void PublishCollectibleFindings();
+
+	/** Return the finding window this world has published or received. */
+	UFUNCTION(BlueprintPure, Category = "Territory|Collectibles")
+	TArray<FTerritoryCollectibleFinding> GetCollectibleFindings() const;
+
+	/**
+	 * False on a client until the findings have actually been received.
+	 *
+	 * "Nothing found yet" and "the findings have not replicated yet" are the same empty
+	 * array, so a client cannot tell a real zero from a hydration gap by looking at
+	 * contents. Consumers must treat a false result as unknown rather than as "none".
+	 * A server is always ready: its findings are the authority.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Territory|Collectibles",
+		meta=(DisplayName="Is Collectible Read Model Ready"))
+	bool IsCollectibleReadModelReady() const;
+
 	// ─── Capture Summary API (server-authoritative) ───
 
 	/**
@@ -653,6 +678,19 @@ protected:
 	UPROPERTY(Replicated)
 	bool bEvidenceLedgerPublished = false;
 
+	/** Committed collectible findings; the server publishes them, clients read them. */
+	UPROPERTY(ReplicatedUsing=OnRep_CollectibleState)
+	TArray<FTerritoryCollectibleFinding> ReplicatedCollectibleFindings;
+
+	/**
+	 * Server signal that the collectible findings have been published. Declared after the
+	 * rows on purpose, for the same RepIndex reason documented on bEvidenceLedgerPublished:
+	 * a client applies replicating properties in RepIndex order, so a readiness flag
+	 * declared before its rows could report readiness for an array that has not arrived.
+	 */
+	UPROPERTY(Replicated)
+	bool bCollectibleFindingsPublished = false;
+
 	// ─── Save Data (mirrors replicated state) ───
 
 	UPROPERTY(SaveGame)
@@ -715,6 +753,13 @@ protected:
 	UPROPERTY(SaveGame)
 	TArray<FTerritoryEvidenceRecord> SavedEvidence;
 
+	/**
+	 * Committed collectible findings, mirrored from the collectible authority so the
+	 * campaign remembers what it found across a restart.
+	 */
+	UPROPERTY(SaveGame)
+	TArray<FTerritoryCollectibleFinding> SavedCollectibleFindings;
+
 	/** Stable editor-authored identity for the world's Narrative persistence and replicated Territory snapshot actor. */
 	UPROPERTY(SaveGame, EditAnywhere, BlueprintReadOnly, Category = "Territory|Identity",
 		meta = (DisplayName = "World State GUID (auto-generated)"))
@@ -740,6 +785,8 @@ private:
 	friend class FTFCaptureDirectoryReadiness;
 	friend class FTFEvidenceLedgerProjection;
 	friend class FTFEvidenceLedgerPersistence;
+	friend class FTFCollectibleProjection;
+	friend class FTFCollectiblePersistence;
 #endif
 	/** Authored topology only; political state remains in Volumes and derived snapshots. */
 	UPROPERTY(Transient)
@@ -800,6 +847,16 @@ private:
 
 	UFUNCTION()
 	void OnEvidenceRecordedLive(const FTerritoryEvidenceRecord& Record);
+
+	/** Push the replicated collectible window into the local collectible authority. */
+	void SyncCollectibleFindingsFromReplicatedState();
+
+	/** Hydrate the client-side collectible read model after the authoritative snapshot replicates. */
+	UFUNCTION()
+	void OnRep_CollectibleState();
+
+	UFUNCTION()
+	void OnCollectibleFoundLive(const FTerritoryCollectibleFinding& Finding);
 
 	/** Hydrate the client-side economy query model after authoritative snapshots replicate. */
 	UFUNCTION()

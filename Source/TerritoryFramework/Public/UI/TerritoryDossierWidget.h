@@ -11,9 +11,13 @@ class UVerticalBox;
 class UWidgetSwitcher;
 class UWidgetAnimation;
 class UListView;
+class UTileView;
 class UNarrativeCommonButtonBase;
 class UTerritoryDossierRowWidget;
 class UTerritoryDossierEntryObject;
+class UTerritoryCollectibleTileWidget;
+class UTerritoryCollectibleTileObject;
+class UTerritoryCollectibleSubsystem;
 
 /** Asks the hosting screen to focus one Territory (the Dossier itself owns no map state). */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryDossierFocusRequested, FGameplayTag, TerritoryTag);
@@ -223,6 +227,24 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Dossier")
 	TSubclassOf<UTerritoryDossierRowWidget> RecordRowWidgetClass;
 
+	/**
+	 * Optional collectible grid. The reference design calls for a tile wall, so this is a
+	 * UTileView; the authored placeholder text stays visible when no grid is authored.
+	 */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTileView> CollectiblesGrid;
+
+	/** Optional "x of y found" line above the grid. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> CollectiblesProgressText;
+
+	/**
+	 * Tile widget class for the collectibles grid, and for a hand-built tile wall. Configured
+	 * with the tile class by the designer, the same way RecordRowWidgetClass is.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Dossier")
+	TSubclassOf<UTerritoryCollectibleTileWidget> CollectibleTileWidgetClass;
+
 	/** Optional reveal animation, same authoring contract as the Territory journal. */
 	UPROPERTY(Transient, meta=(BindWidgetAnimOptional))
 	TObjectPtr<UWidgetAnimation> DossierReveal;
@@ -252,6 +274,13 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTerritoryDossierEntryObject>> HistoryListEntries;
 
+	/**
+	 * Entries handed to CollectiblesGrid, kept alive for the same reason as the History
+	 * entries: the tile view holds them only while they are in its item array.
+	 */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTerritoryCollectibleTileObject>> CollectibleTileEntries;
+
 	void BuildNativeLayout();
 	void BindTabButton(UNarrativeCommonButtonBase* Button, ETerritoryDossierDrawer Drawer);
 	void BindFilterChip(UNarrativeCommonButtonBase* Button, ETerritoryDossierCategory Category);
@@ -268,6 +297,21 @@ private:
 	 * entries — not widgets — are the thing this class hands over.
 	 */
 	void FillHistoryList(const TArray<FTerritoryDossierRecordView>& Records);
+
+	/**
+	 * Fills CollectiblesGrid from the collectible authority: the authored set joined with the
+	 * campaign's findings. Reports "unknown" instead of "0 of 0" when the set is not authored.
+	 */
+	void FillCollectiblesGrid();
+
+	/** "Found x of y" line, or the honest reason the total is unknown. */
+	static FText GetCollectibleProgressText(const FTerritoryCollectibleProgress& Progress);
+
+	/** Progress snapshot from the collectible authority, for the Collectibles page header. */
+	static FTerritoryCollectibleProgress GetCollectibleProgressSnapshot(const UObject* WorldContextObject);
+
+	/** The collectible authority for this screen's world, if that world has one. */
+	static UTerritoryCollectibleSubsystem* GetCollectibleSubsystem(const UObject* WorldContextObject);
 
 	/** Builds the session-log lines from the same ledger the History page reads. */
 	void RefreshLogs();

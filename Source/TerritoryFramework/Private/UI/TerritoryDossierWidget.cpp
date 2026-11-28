@@ -4,9 +4,13 @@
 #include "Components/HorizontalBox.h"
 #include "Components/ListView.h"
 #include "Components/TextBlock.h"
+#include "Components/TileView.h"
 #include "Components/VerticalBox.h"
 #include "Components/WidgetSwitcher.h"
+#include "Subsystems/TerritoryCollectibleSubsystem.h"
 #include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
+#include "UI/TerritoryCollectibleTileObject.h"
+#include "UI/TerritoryCollectibleTileWidget.h"
 #include "UI/TerritoryDossierEntryObject.h"
 #include "UI/TerritoryDossierRowWidget.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
@@ -94,6 +98,7 @@ void UTerritoryDossierWidget::NativeDestruct()
 	}
 	BoundFilterChips.Reset();
 	HistoryListEntries.Reset();
+	CollectibleTileEntries.Reset();
 	Super::NativeDestruct();
 }
 
@@ -241,6 +246,97 @@ void UTerritoryDossierWidget::FillHistoryList(const TArray<FTerritoryDossierReco
 	HistoryList->SetListItems(Items);
 }
 
+void UTerritoryDossierWidget::FillCollectiblesGrid()
+{
+	if (!CollectiblesGrid && !CollectiblesProgressText)
+	{
+		return;
+	}
+
+	const FTerritoryCollectibleProgress Progress = GetCollectibleProgressSnapshot(this);
+
+	if (CollectiblesProgressText)
+	{
+		CollectiblesProgressText->SetText(GetCollectibleProgressText(Progress));
+	}
+
+	if (!CollectiblesGrid)
+	{
+		return;
+	}
+
+	if (CollectiblesGrid->GetEntryWidgetClass() == nullptr)
+	{
+		// A list with no entry class renders nothing at all, and C++ cannot set it
+		// (UListViewBase::EntryWidgetClass is protected, and there is no setter), so name the
+		// asset the designer is expected to assign instead of leaving a silently empty grid.
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[Dossier] %s exposes a collectibles TileView with no entry widget class. ")
+			TEXT("Assign %s to it, or the grid renders nothing."),
+			*GetNameSafe(this),
+			CollectibleTileWidgetClass
+				? *CollectibleTileWidgetClass->GetPathName()
+				: TEXT("/Game/TerritoryFramework/UI/WBP_CollectibleTile"));
+		return;
+	}
+
+	CollectibleTileEntries.Reset();
+	TArray<UObject*> Items;
+
+	const UTerritoryCollectibleSubsystem* Collectibles = GetCollectibleSubsystem(this);
+	const TArray<FTerritoryCollectibleView> Views = Collectibles
+		? Collectibles->BuildCollectibleViews()
+		: TArray<FTerritoryCollectibleView>();
+
+	Items.Reserve(Views.Num());
+	for (const FTerritoryCollectibleView& View : Views)
+	{
+		// Same ownership rule as the history entries: the tile view holds them only while they
+		// are in its item array, so the shell keeps the strong reference.
+		UTerritoryCollectibleTileObject* Entry = NewObject<UTerritoryCollectibleTileObject>(this);
+		Entry->SetCollectibleView(View);
+		CollectibleTileEntries.Add(Entry);
+		Items.Add(Entry);
+	}
+
+	CollectiblesGrid->SetListItems(Items);
+}
+
+FText UTerritoryDossierWidget::GetCollectibleProgressText(const FTerritoryCollectibleProgress& Progress)
+{
+	if (!Progress.bProgressKnown)
+	{
+		// The page says it does not know rather than claiming an empty collection.
+		return LOCTEXT("DossierCollectiblesUnknown", "Collection progress is not known on this client.");
+	}
+
+	if (Progress.UnknownTagCount > 0)
+	{
+		return FText::Format(
+			LOCTEXT("DossierCollectiblesWithUnknown", "Found {0} of {1}  |  {2} found item(s) no longer in the authored set"),
+			FText::AsNumber(Progress.FoundCount),
+			FText::AsNumber(Progress.TotalCount),
+			FText::AsNumber(Progress.UnknownTagCount));
+	}
+
+	return FText::Format(
+		LOCTEXT("DossierCollectiblesProgress", "Found {0} of {1}"),
+		FText::AsNumber(Progress.FoundCount),
+		FText::AsNumber(Progress.TotalCount));
+}
+
+FTerritoryCollectibleProgress UTerritoryDossierWidget::GetCollectibleProgressSnapshot(const UObject* WorldContextObject)
+{
+	const UTerritoryCollectibleSubsystem* Collectibles = GetCollectibleSubsystem(WorldContextObject);
+	return Collectibles ? Collectibles->GetCollectibleProgress() : FTerritoryCollectibleProgress();
+}
+
+UTerritoryCollectibleSubsystem* UTerritoryDossierWidget::GetCollectibleSubsystem(const UObject* WorldContextObject)
+{
+	const UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+	return World ? World->GetSubsystem<UTerritoryCollectibleSubsystem>() : nullptr;
+}
+
 void UTerritoryDossierWidget::WriteHeaderText()
 {
 	if (TitleText)
@@ -349,6 +445,9 @@ void UTerritoryDossierWidget::SetDossierDrawer(ETerritoryDossierDrawer InDrawer)
 	// Only the page being opened is rebuilt; the Data pages are cheap, the row pages are not.
 	switch (InDrawer)
 	{
+	case ETerritoryDossierDrawer::Collectibles:
+		FillCollectiblesGrid();
+		break;
 	case ETerritoryDossierDrawer::Logs:
 		RefreshLogs();
 		break;
@@ -532,6 +631,7 @@ void UTerritoryDossierWidget::RefreshDossier()
 	WriteHeaderText();
 	RefreshLogs();
 	RefreshStatistics();
+	FillCollectiblesGrid();
 }
 
 void UTerritoryDossierWidget::RefreshLogs()

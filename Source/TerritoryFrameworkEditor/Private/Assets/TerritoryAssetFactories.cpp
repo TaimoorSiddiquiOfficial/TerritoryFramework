@@ -9,6 +9,7 @@
 #include "Combat/TerritoryFloorCombatPolicy.h"
 #include "Combat/TerritoryAssaultCharacter.h"
 #include "Core/TerritoryDefinition.h"
+#include "Core/TerritoryCollectibleDefinition.h"
 #include "Core/TerritoryFloorVolume.h"
 #include "Core/TerritoryDisguiseProfile.h"
 #include "Core/TerritoryGuardCharacter.h"
@@ -142,6 +143,16 @@ UTerritoryUpgradeDefinitionFactory::UTerritoryUpgradeDefinitionFactory()
 UTerritoryUpgradeBalanceProfileFactory::UTerritoryUpgradeBalanceProfileFactory()
 {
 	InitializeFor(UTerritoryUpgradeBalanceProfile::StaticClass());
+}
+
+UTerritoryCollectibleDefinitionFactory::UTerritoryCollectibleDefinitionFactory()
+{
+	InitializeFor(UTerritoryCollectibleDefinition::StaticClass());
+}
+
+UTerritoryCollectibleSetFactory::UTerritoryCollectibleSetFactory()
+{
+	InitializeFor(UTerritoryCollectibleSet::StaticClass());
 }
 
 UTerritoryQuestCascadeRecipeFactory::UTerritoryQuestCascadeRecipeFactory()

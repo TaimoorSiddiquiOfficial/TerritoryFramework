@@ -14,6 +14,7 @@
 #include "Subsystems/TerritoryRegistrySubsystem.h"
 #include "Subsystems/TerritoryCounterAttackSubsystem.h"
 #include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
+#include "Subsystems/TerritoryCollectibleSubsystem.h"
 #include "SaveSystemStatics.h"
 #include "Subsystems/NarrativeSaveSubsystem.h"
 #include "Engine/Level.h"
@@ -212,6 +213,11 @@ void ATerritoryWorldState::BeginPlay()
 		// of them, and a late join would read an empty ledger as "no evidence".
 		PublishEvidenceLedger();
 
+		// Same seeding reason for collectible findings: the authority restores its rows
+		// without broadcasting, so a session that opens with findings would replicate none
+		// of them, and a late join would read an empty grid as "nothing found".
+		PublishCollectibleFindings();
+
 		// Actor BeginPlay order is not guaranteed. Seed summaries for Territory actors
 		// that registered before this WorldState; territories that start later publish
 		// their own summary from ATerritoryVolume::BeginPlay.
@@ -261,6 +267,8 @@ void ATerritoryWorldState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedFactionUpgradeTiers);
 	DOREPLIFETIME(ATerritoryWorldState, ReplicatedEvidence);
 	DOREPLIFETIME(ATerritoryWorldState, bEvidenceLedgerPublished);
+	DOREPLIFETIME(ATerritoryWorldState, ReplicatedCollectibleFindings);
+	DOREPLIFETIME(ATerritoryWorldState, bCollectibleFindingsPublished);
 }
 
 #if WITH_EDITOR
@@ -1377,6 +1385,7 @@ void ATerritoryWorldState::ExportPersistentState()
 
 		PublishDiplomacyReadModel();
 		PublishEvidenceLedger();
+		PublishCollectibleFindings();
 
 		if (UTerritoryUpgradeSubsystem* Upgrades = World->GetSubsystem<UTerritoryUpgradeSubsystem>())
 		{
@@ -1438,6 +1447,7 @@ void ATerritoryWorldState::ImportPersistentState()
 	ReplicatedFactionUpgradeTiers = SavedFactionUpgradeTiers;
 	ReplicatedCaptureSummaries = SavedStrategicDirectory;
 	ReplicatedEvidence = SavedEvidence;
+	ReplicatedCollectibleFindings = SavedCollectibleFindings;
 	// Scheduler restoration migrates the incoming records, never the old campaign.
 	ApplyDirectoryRetirements(false);
 	ReconcileUnloadedHierarchy();
@@ -1454,6 +1464,7 @@ void ATerritoryWorldState::SyncSubsystemsFromReplicatedState()
 	SyncCounterAttackSubsystemFromReplicatedState();
 	SyncUpgradeSubsystemFromReplicatedState();
 	SyncEvidenceLedgerFromReplicatedState();
+	SyncCollectibleFindingsFromReplicatedState();
 	// P0-03: Capture summary sync removed — TerritoryVolume is sole ownership authority.
 	// ApplyPendingCaptureSummaries and OnTerritoryRegistered removed entirely.
 }
@@ -1730,6 +1741,89 @@ bool ATerritoryWorldState::IsEvidenceLedgerReady() const
 	return HasAuthority() || bEvidenceLedgerPublished;
 }
 
+// ─── Collectible findings projection ───
+
+void ATerritoryWorldState::PublishCollectibleFindings()
+{
+	if (!HasAuthority()) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UTerritoryCollectibleSubsystem* Collectibles = World->GetSubsystem<UTerritoryCollectibleSubsystem>();
+	if (!Collectibles || !Collectibles->IsCollectibleLedgerReady()) return;
+
+	ReplicatedCollectibleFindings = Collectibles->GetPersistentState();
+
+	// Keep the save mirror in step with the published window, for the same reason as the
+	// evidence ledger: ExportPersistentState is the save boundary and this function is the
+	// only writer of the replicated rows, so the two arrays cannot drift apart between a
+	// live finding and the next save.
+	SavedCollectibleFindings = ReplicatedCollectibleFindings;
+
+	// Server-set only, and declared after the rows array, so a client applies the window
+	// before it can believe the read model is complete.
+	bCollectibleFindingsPublished = true;
+
+	// The live handler pushes each finding as it commits; this seeds the window a session
+	// opens with, which no live delegate ever fires for.
+	ForceNetUpdate();
+}
+
+void ATerritoryWorldState::SyncCollectibleFindingsFromReplicatedState()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UTerritoryCollectibleSubsystem* Collectibles = World->GetSubsystem<UTerritoryCollectibleSubsystem>();
+	if (!Collectibles) return;
+
+	// On the authority this restores state after a save import; on a client it hydrates the
+	// replica, which is what turns an empty read into a real answer.
+	Collectibles->RestorePersistentState(ReplicatedCollectibleFindings);
+}
+
+void ATerritoryWorldState::OnRep_CollectibleState()
+{
+	SyncCollectibleFindingsFromReplicatedState();
+}
+
+void ATerritoryWorldState::OnCollectibleFoundLive(const FTerritoryCollectibleFinding& Finding)
+{
+	if (!HasAuthority()) return;
+
+	UWorld* World = GetWorld();
+	UTerritoryCollectibleSubsystem* Collectibles = World
+		? World->GetSubsystem<UTerritoryCollectibleSubsystem>() : nullptr;
+	if (!Collectibles) return;
+
+	// The authority owns the window, including its retention rule, so copy its state
+	// instead of appending here and duplicating that rule.
+	ReplicatedCollectibleFindings = Collectibles->GetPersistentState();
+	// SavedCollectibleFindings is deliberately NOT mirrored here: this class defines the
+	// save mirror as "the state at the last save boundary", which only
+	// PublishCollectibleFindings (BeginPlay and ExportPersistentState) is allowed to move.
+	// Mirroring a live finding would make a finding recorded after the last save survive a
+	// load, unlike every other projection on this actor.
+	bCollectibleFindingsPublished = true;
+
+	UE_LOG(LogTerritory, Verbose, TEXT("[Collectibles] Live finding %s recorded; publishing %d row(s)."),
+		*Finding.CollectibleTag.ToString(), ReplicatedCollectibleFindings.Num());
+
+	ForceNetUpdate();
+}
+
+TArray<FTerritoryCollectibleFinding> ATerritoryWorldState::GetCollectibleFindings() const
+{
+	return ReplicatedCollectibleFindings;
+}
+
+bool ATerritoryWorldState::IsCollectibleReadModelReady() const
+{
+	// A server is always ready: its findings are the authority. A client is ready only once
+	// the published window has actually arrived, so an empty client read stays "unknown".
+	return HasAuthority() || bCollectibleFindingsPublished;
+}
+
 void ATerritoryWorldState::SyncCounterAttackSubsystemFromReplicatedState()
 {
 	if (UWorld* World = GetWorld())
@@ -1795,6 +1889,10 @@ void ATerritoryWorldState::SubscribeToLiveUpdates()
 	{
 		Ledger->OnEvidenceRecorded.AddDynamic(this, &ATerritoryWorldState::OnEvidenceRecordedLive);
 	}
+	if (UTerritoryCollectibleSubsystem* Collectibles = World->GetSubsystem<UTerritoryCollectibleSubsystem>())
+	{
+		Collectibles->OnCollectibleFound.AddDynamic(this, &ATerritoryWorldState::OnCollectibleFoundLive);
+	}
 }
 
 void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
@@ -1829,6 +1927,10 @@ void ATerritoryWorldState::UnsubscribeFromLiveUpdates()
 	if (UTerritoryEvidenceLedgerSubsystem* Ledger = World->GetSubsystem<UTerritoryEvidenceLedgerSubsystem>())
 	{
 		Ledger->OnEvidenceRecorded.RemoveDynamic(this, &ATerritoryWorldState::OnEvidenceRecordedLive);
+	}
+	if (UTerritoryCollectibleSubsystem* Collectibles = World->GetSubsystem<UTerritoryCollectibleSubsystem>())
+	{
+		Collectibles->OnCollectibleFound.RemoveDynamic(this, &ATerritoryWorldState::OnCollectibleFoundLive);
 	}
 }
 

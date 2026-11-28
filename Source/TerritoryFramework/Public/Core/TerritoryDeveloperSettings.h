@@ -14,6 +14,7 @@ class ATerritoryRoadGuide;
 class ATerritoryRoadTrafficControls;
 class AMassVehicleSpawner;
 class UMassEntityConfigAsset;
+class UTerritoryCollectibleSet;
 
 /**
  * Player-facing Territory notification policy.
@@ -363,6 +364,18 @@ public:
 	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Theme",
 		meta=(DisplayName="Territory Interface Font"))
 	TSoftObjectPtr<UFont> TerritoryInterfaceFont;
+
+	/**
+	 * The authored collectibles this campaign counts, used by the Dossier's
+	 * Collectibles drawer for its "found x of y" total.
+	 * Easy example: one set per campaign, listing every landmark photo, document, and
+	 * artefact. Leave it empty while content is still being authored and the Dossier
+	 * lists findings without claiming a total, instead of reporting a smaller total
+	 * that depends on which districts the player has streamed in.
+	 */
+	UPROPERTY(EditAnywhere, config, BlueprintReadOnly, Category="Territory|UI|Collectibles",
+		meta=(DisplayName="Collectible Set"))
+	TSoftObjectPtr<UTerritoryCollectibleSet> CollectibleSet;
 
 	/**
 	 * Multiplies Territory text sizes after the Narrative CommonUI style is applied.

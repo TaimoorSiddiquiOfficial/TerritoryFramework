@@ -6,11 +6,15 @@
 
 #include "Blueprint/WidgetBlueprintGeneratedClass.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/Image.h"
 #include "Components/ListView.h"
 #include "Components/TextBlock.h"
+#include "Components/TileView.h"
 #include "Components/VerticalBox.h"
 #include "Components/WidgetSwitcher.h"
 #include "Misc/AutomationTest.h"
+#include "UI/TerritoryCollectibleTileWidget.h"
 #include "UI/TerritoryDossierRowWidget.h"
 #include "UI/TerritoryDossierWidget.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
@@ -33,6 +37,8 @@ namespace TerritoryDossierWidgetAssetTests
 		TEXT("/Game/TerritoryFramework/UI/WBP_DossierRecordRow.WBP_DossierRecordRow_C");
 	static const TCHAR* CardClassPath =
 		TEXT("/Game/TerritoryFramework/UI/WBP_EventCard.WBP_EventCard_C");
+	static const TCHAR* TileClassPath =
+		TEXT("/Game/TerritoryFramework/UI/WBP_CollectibleTile.WBP_CollectibleTile_C");
 
 	UWidgetBlueprintGeneratedClass* LoadWidgetClass(FAutomationTestBase& Test, const TCHAR* ClassPath)
 	{
@@ -195,6 +201,36 @@ bool FTFDossierShellWidgetContract::RunTest(const FString& Parameters)
 		}
 	}
 
+	// The Collectibles drawer renders a TileView instead of hand-built rows, so the authored
+	// grid, its progress line and the entry widget class are one contract: the two names must
+	// bind and the tile class must be named, or the page renders the progress line over a grid
+	// that never instantiates a tile.
+	ExpectBoundWidget<UTileView>(*this, ShellTree, TEXT("CollectiblesGrid"));
+	ExpectBoundWidget<UTextBlock>(*this, ShellTree, TEXT("CollectiblesProgressText"));
+
+	UWidgetBlueprintGeneratedClass* TileClass = LoadWidgetClass(*this, TileClassPath);
+
+	if (UTileView* CollectiblesGrid = ShellTree
+		? Cast<UTileView>(ShellTree->FindWidget(TEXT("CollectiblesGrid")))
+		: nullptr)
+	{
+		if (const FObjectPropertyBase* EntryClassProperty =
+			FindFProperty<FObjectPropertyBase>(UTileView::StaticClass(), TEXT("EntryWidgetClass")))
+		{
+			const UClass* EntryClass =
+				Cast<UClass>(EntryClassProperty->GetObjectPropertyValue_InContainer(CollectiblesGrid));
+			TestNotNull(TEXT("The authored collectibles grid names an entry widget class"), EntryClass);
+			TestEqual(
+				TEXT("The authored collectibles grid instantiates the authored collectible tile"),
+				EntryClass ? EntryClass->GetName() : FString(),
+				TileClass ? TileClass->GetName() : FString());
+		}
+		else
+		{
+			AddError(TEXT("UListViewBase no longer exposes EntryWidgetClass."));
+		}
+	}
+
 	// The shell instantiates its rows from this class default, so an empty value would
 	// leave the History drawer permanently blank without any compile error.
 	UWidgetBlueprintGeneratedClass* RowClass = LoadWidgetClass(*this, RowClassPath);
@@ -253,6 +289,40 @@ bool FTFDossierEventCardContract::RunTest(const FString& Parameters)
 			TEXT("The authored event card derives from the Territory dossier row widget"),
 			ParentClass ? ParentClass->GetName() : FString(),
 			FString(UTerritoryDossierRowWidget::StaticClass()->GetName()));
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FTFDossierCollectibleTileContract,
+	"TerritoryFramework.Dossier.Contract.AuthoredCollectibleTileBindsItsIconAndTexts",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDossierCollectibleTileContract::RunTest(const FString& Parameters)
+{
+	using namespace TerritoryDossierWidgetAssetTests;
+
+	UWidgetBlueprintGeneratedClass* TileClass = LoadWidgetClass(*this, TileClassPath);
+	UWidgetTree* TileTree = LoadAuthoredTree(*this, TileClass);
+
+	// Every field the tile widget writes must be bindable by name. A tile that binds nothing
+	// still compiles and renders an empty frame for every authored collectible.
+	ExpectBoundWidget<UTextBlock>(*this, TileTree, TEXT("NameText"));
+	ExpectBoundWidget<UTextBlock>(*this, TileTree, TEXT("CategoryText"));
+	ExpectBoundWidget<UTextBlock>(*this, TileTree, TEXT("StatusText"));
+	ExpectBoundWidget<UTextBlock>(*this, TileTree, TEXT("DescriptionText"));
+	ExpectBoundWidget<UImage>(*this, TileTree, TEXT("IconImage"));
+	ExpectBoundWidget<UBorder>(*this, TileTree, TEXT("TileSurface"));
+	ExpectBoundWidget<UBorder>(*this, TileTree, TEXT("HiddenOverlay"));
+
+	if (TileClass)
+	{
+		const UClass* ParentClass = TileClass->GetSuperClass();
+		TestEqual(
+			TEXT("The authored collectible tile derives from the Territory collectible tile widget"),
+			ParentClass ? ParentClass->GetName() : FString(),
+			FString(UTerritoryCollectibleTileWidget::StaticClass()->GetName()));
 	}
 
 	return true;

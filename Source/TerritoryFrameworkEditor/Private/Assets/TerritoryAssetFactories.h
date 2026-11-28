@@ -143,6 +143,24 @@ public:
 	UTerritoryUpgradeDefinitionFactory();
 };
 
+/** Creates one authored collectible that the Dossier's Collectibles page tracks. */
+UCLASS(hidecategories=Object)
+class UTerritoryCollectibleDefinitionFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryCollectibleDefinitionFactory();
+};
+
+/** Creates one authored collectible set: the completion list the Dossier reports progress against. */
+UCLASS(hidecategories=Object)
+class UTerritoryCollectibleSetFactory : public UTerritoryAssetFactoryBase
+{
+	GENERATED_BODY()
+public:
+	UTerritoryCollectibleSetFactory();
+};
+
 UCLASS(hidecategories=Object)
 class UTerritoryUpgradeBalanceProfileFactory : public UTerritoryAssetFactoryBase
 {
