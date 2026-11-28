@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Blueprint/IUserObjectListEntry.h"
 #include "Blueprint/UserWidget.h"
 #include "GameplayTagContainer.h"
 #include "UI/TerritoryDossierTypes.h"
@@ -19,9 +20,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryDossierTerritoryRequeste
  * The row mirrors UTerritoryLiveEventRowWidget: a designer-authored Blueprint supplies the
  * layout, and this class only fills text and forwards a request. It never writes gameplay
  * state, so a row can be reused for any drawer without touching the ledger.
+ *
+ * The class implements IUserObjectListEntry so the same Blueprint can be the entry widget of a
+ * UListView (the reference design's virtualised timeline) and still work as a hand-built row in
+ * a plain VerticalBox. A designer picks one of the two; the widget fills itself either way.
  */
 UCLASS(BlueprintType, Blueprintable)
-class TERRITORYFRAMEWORK_API UTerritoryDossierRowWidget : public UUserWidget
+class TERRITORYFRAMEWORK_API UTerritoryDossierRowWidget : public UUserWidget, public IUserObjectListEntry
 {
 	GENERATED_BODY()
 
@@ -43,6 +48,13 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
+	/**
+	 * ListView hand-off. A row used as a UListView entry receives its item object here and reads
+	 * the fact out of it; a row placed by hand never sees this call and relies on
+	 * InitializeDossierRecord() instead.
+	 */
+	virtual void NativeOnListItemObjectSet(UObject* ListItemObject) override;
+
 	/** Fact text, rebuilt from the record on every refresh. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> HeadlineText;
@@ -50,6 +62,24 @@ protected:
 	/** Subject, faction, territory and campaign time line. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> MetaText;
+
+	/**
+	 * Optional category chip in the card's header. Bound to the same derived category the accent
+	 * strip uses, so a reader can filter by eye before filtering for real.
+	 */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> CategoryText;
+
+	/**
+	 * Optional subject line on its own. Split out for the reference card, where the subject is a
+	 * column of its own instead of being folded into the meta line.
+	 */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> EntityText;
+
+	/** Optional campaign-time readout, for cards that print the moment next to the text. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UTextBlock> TimeText;
 
 	/** Bounded weight readout. */
 	UPROPERTY(meta=(BindWidgetOptional))

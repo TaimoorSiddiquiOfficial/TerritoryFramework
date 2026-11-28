@@ -3,6 +3,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/TextBlock.h"
+#include "UI/TerritoryDossierEntryObject.h"
 #include "UI/TerritoryDossierWidget.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 
@@ -34,6 +35,26 @@ void UTerritoryDossierRowWidget::NativeDestruct()
 		bFocusBound = false;
 	}
 	Super::NativeDestruct();
+}
+
+void UTerritoryDossierRowWidget::NativeOnListItemObjectSet(UObject* ListItemObject)
+{
+	// The interface's own native hook is what routes this to the designer's Blueprint event, so it
+	// has to be called explicitly (UUserWidget carries no such Super method).
+	IUserObjectListEntry::NativeOnListItemObjectSet(ListItemObject);
+
+	if (const UTerritoryDossierEntryObject* Entry = Cast<UTerritoryDossierEntryObject>(ListItemObject))
+	{
+		if (Entry->HasDossierRecord())
+		{
+			InitializeDossierRecord(Entry->GetDossierRecord());
+			return;
+		}
+	}
+
+	// A recycled row must never keep showing the previous fact: an emptied entry clears the row
+	// instead of leaving stale history on screen.
+	InitializeDossierRecord(FTerritoryDossierRecordView());
 }
 
 void UTerritoryDossierRowWidget::BuildNativeLayout()
@@ -81,6 +102,22 @@ void UTerritoryDossierRowWidget::RefreshRecord()
 	if (MetaText)
 	{
 		MetaText->SetText(UTerritoryDossierWidget::GetEvidenceMetaText(Record));
+	}
+	if (CategoryText)
+	{
+		// Same derived category the accent strip and the filter chips use, so the chip in the card
+		// header and the chip in the filter row can never disagree.
+		CategoryText->SetText(UTerritoryDossierWidget::GetDossierCategoryText(Record.Category));
+		CategoryText->SetColorAndOpacity(FSlateColor(
+			UTerritoryDossierWidget::GetDossierCategoryAccentColor(Record.Category)));
+	}
+	if (EntityText)
+	{
+		EntityText->SetText(UTerritoryDossierWidget::GetEvidenceEntityText(Record));
+	}
+	if (TimeText)
+	{
+		TimeText->SetText(UTerritoryDossierWidget::GetEvidenceTimeText(Record));
 	}
 	if (WeightText)
 	{

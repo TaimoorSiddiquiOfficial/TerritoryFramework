@@ -45,6 +45,22 @@
 #include "UObject/UnrealType.h"
 #include "Misc/EngineVersionComparison.h"
 
+namespace
+{
+	/**
+	 * A refused seat claim already spent two Narrative calls and a replicated slot-status change,
+	 * so the participation timer must not repeat it twice a second. Retry on a slower cadence.
+	 */
+	constexpr float VehicleIngressRetryIntervalSeconds = 2.f;
+
+	/**
+	 * Spaced retries allowed for a refused (but structurally valid) seat before the ingress is
+	 * treated as failed. A passenger that dismounts frees its seat within this window; anything
+	 * past it is a refusal the vendor will keep giving, and the finite force is returned instead.
+	 */
+	constexpr int32 VehicleIngressMaximumSoftRetries = 5;
+}
+
 UTerritoryAssaultParticipantComponent::UTerritoryAssaultParticipantComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -140,7 +156,15 @@ void UTerritoryAssaultParticipantComponent::ConfigureNarrativeVehiclePassenger(
 		bInEscapeOnArrival, FTerritoryVehicleAwarenessSettings());
 	bNarrativeVehicleDriver = false;
 	bReportsVehicleStoryOutcome = false;
-	NarrativeVehicleSeatIndex = FMath::Max(1, InSeatIndex);
+	// A saved seat index outlives the car it was authored for: a legacy or damaged save can name a
+	// seat this mount no longer exposes, and Narrative refuses any index its slots do not contain.
+	// Clamp the restored seat to what the mount actually carries so restoration aims at a real seat.
+	const UMountComponent* SeatMount = InVehicle
+		? InVehicle->FindComponentByClass<UMountComponent>() : nullptr;
+	const int32 SeatCount = SeatMount ? SeatMount->InteractionSlots.Num() : 0;
+	NarrativeVehicleSeatIndex = SeatCount > 0
+		? FMath::Clamp(InSeatIndex, 1, FMath::Max(1, SeatCount - 1))
+		: FMath::Max(1, InSeatIndex);
 	NarrativeVehicleDriver = InDriver;
 }
 
@@ -268,6 +292,48 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeSeatInteractBehaviour
 	return true;
 }
 
+void UTerritoryAssaultParticipantComponent::ReportVehicleSeatClaimRefusal(
+	const bool bSeatTargeted, const bool bSeatAbilityStarted,
+	UMountComponent* Mount, ATerritoryAssaultCharacter* NPC,
+	ANarrativeNPCController* Controller)
+{
+	if (bVehicleSeatClaimRejectionReported)
+	{
+		return;
+	}
+	bVehicleSeatClaimRejectionReported = true;
+
+	// Narrative answers both steps with a bare bool and logs nothing, so a refused claim is
+	// otherwise undiagnosable. Report the state Narrative's own gates consult, once per ingress.
+	const ANarrativeVehicleBase* Vehicle = NarrativeIngressVehicle.Get();
+	const bool bSeatAuthored = Mount
+		&& Mount->InteractionSlots.IsValidIndex(NarrativeVehicleSeatIndex);
+	const UInteractionSlotBehavior* SeatBehavior = bSeatAuthored
+		? Mount->InteractionSlots[NarrativeVehicleSeatIndex].SlotInteractBehavior.Get() : nullptr;
+	const UClass* SeatAbilityClass = SeatBehavior
+		? SeatBehavior->GetInteractAbility().Get() : nullptr;
+	const UNPCInteractionComponent* Interaction = Controller
+		? Controller->GetInteractionComponent() : nullptr;
+
+	UE_LOG(LogTerritory, Warning,
+		TEXT("[CounterAttack] Narrative mount interaction rejected %s %s seat=%d vehicle=%s ")
+		TEXT("(seatTargeted=%s interactAbilityStarted=%s authoredSlots=%d activeSlots=%d ")
+		TEXT("seatAuthored=%s seatBehavior=%s seatAbilityClass=%s controllerPawn=%s ")
+		TEXT("occupiedInteractable=%s narrativeASC=%s); a refusal is retried on a %g s cadence."),
+		bNarrativeVehicleDriver ? TEXT("driver") : TEXT("passenger"),
+		*GetNameSafe(NPC), NarrativeVehicleSeatIndex, *GetNameSafe(Vehicle),
+		bSeatTargeted ? TEXT("yes") : TEXT("no"),
+		bSeatAbilityStarted ? TEXT("yes") : TEXT("no"),
+		Mount ? Mount->InteractionSlots.Num() : 0, Mount ? Mount->SlotStatuses.Num() : 0,
+		bSeatAuthored ? TEXT("yes") : TEXT("no"),
+		*GetNameSafe(SeatBehavior),
+		SeatAbilityClass ? *SeatAbilityClass->GetName() : TEXT("none"),
+		*GetNameSafe(Controller ? Controller->GetPawn() : nullptr),
+		Interaction && Interaction->HasOccupiedInteractable() ? TEXT("yes") : TEXT("no"),
+		NPC && NPC->GetAbilitySystemComponent() ? TEXT("yes") : TEXT("no"),
+		VehicleIngressRetryIntervalSeconds);
+}
+
 bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority() || bRemovalReported) return false;
@@ -281,6 +347,11 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 		|| VehicleRoutePoints.IsEmpty())
 	{
 		bVehicleIngressFailed = true;
+		VehicleIngressFailureReason = !IsValid(Vehicle) || Vehicle->IsActorBeingDestroyed()
+			? TEXT("the Narrative vehicle was destroyed before the seat was claimed")
+			: (!Controller
+				? TEXT("the attacker has no Narrative NPC controller")
+				: TEXT("the vehicle has no ZoneGraph drive route"));
 		return false;
 	}
 
@@ -289,6 +360,9 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 	if (!Mount || !Interaction)
 	{
 		bVehicleIngressFailed = true;
+		VehicleIngressFailureReason = !Mount
+			? TEXT("the Narrative vehicle exposes no mount component")
+			: TEXT("the attacker's Narrative controller exposes no interaction component");
 		return false;
 	}
 
@@ -308,49 +382,53 @@ bool UTerritoryAssaultParticipantComponent::EnsureNarrativeVehicleIngress()
 	{
 		// Restore the authored seat behaviour the spawned mount instance lost, otherwise every claim
 		// below is refused before Narrative can start the mount ability.
-		EnsureNarrativeSeatInteractBehaviour(Mount);
+		if (!EnsureNarrativeSeatInteractBehaviour(Mount))
+		{
+			// Structural: Narrative's RunInteractBehavior consults this behaviour before it starts
+			// the mount ability, so no number of retries can claim the seat.
+			bVehicleIngressFailed = true;
+			VehicleIngressFailureReason =
+				TEXT("the Narrative mount exposes no usable seat interaction behaviour");
+			ReportVehicleSeatClaimRefusal(false, false, Mount, NPC, Controller);
+			return false;
+		}
+
 		const bool bSeatTargeted = Interaction->TargetInteractionSlot(
 			Mount, NarrativeVehicleSeatIndex, false);
 		const bool bSeatAbilityStarted = bSeatTargeted
 			&& Interaction->RunInteractBehavior(false);
 		if (!bSeatTargeted || !bSeatAbilityStarted)
 		{
-			// Narrative answers both steps with a bare bool and logs nothing, so a rejected claim is
-			// otherwise undiagnosable. Report the state Narrative's own gates consult, once per
-			// participant, then latch the structural failure the rest of the component already
-			// treats as unrecoverable ingress.
-			if (!bVehicleSeatClaimRejectionReported)
+			ReportVehicleSeatClaimRefusal(bSeatTargeted, bSeatAbilityStarted, Mount, NPC, Controller);
+
+			// The seat may be held by someone else right now, so this is worth a spaced retry.
+			// Retrying on the participation timer instead would repeat two Narrative calls and a
+			// replicated slot-status change five times a second for the same answer.
+			++VehicleIngressSoftRetries;
+			if (VehicleIngressSoftRetries >= VehicleIngressMaximumSoftRetries)
 			{
-				bVehicleSeatClaimRejectionReported = true;
-				const bool bSeatAuthored = Mount->InteractionSlots.IsValidIndex(
-					NarrativeVehicleSeatIndex);
-				const UInteractionSlotBehavior* SeatBehavior = bSeatAuthored
-					? Mount->InteractionSlots[NarrativeVehicleSeatIndex].SlotInteractBehavior.Get()
-					: nullptr;
-				UClass* SeatAbilityClass = SeatBehavior
-					? SeatBehavior->GetInteractAbility().Get() : nullptr;
-				UE_LOG(LogTerritory, Warning,
-					TEXT("[CounterAttack] Narrative mount interaction rejected %s %s seat=%d vehicle=%s ")
-					TEXT("(seatTargeted=%s interactAbilityStarted=%s authoredSlots=%d activeSlots=%d ")
-					TEXT("seatAuthored=%s seatBehavior=%s seatAbilityClass=%s controllerPawn=%s ")
-					TEXT("occupiedInteractable=%s narrativeASC=%s); the ingress attempt is refused."),
-					bNarrativeVehicleDriver ? TEXT("driver") : TEXT("passenger"),
-					*GetNameSafe(NPC), NarrativeVehicleSeatIndex, *GetNameSafe(Vehicle),
-					bSeatTargeted ? TEXT("yes") : TEXT("no"),
-					bSeatAbilityStarted ? TEXT("yes") : TEXT("no"),
-					Mount->InteractionSlots.Num(), Mount->SlotStatuses.Num(),
-					bSeatAuthored ? TEXT("yes") : TEXT("no"),
-					*GetNameSafe(SeatBehavior),
-					SeatAbilityClass ? *SeatAbilityClass->GetName() : TEXT("none"),
-					*GetNameSafe(Controller->GetPawn()),
-					Interaction->HasOccupiedInteractable() ? TEXT("yes") : TEXT("no"),
-					NPC->GetAbilitySystemComponent() ? TEXT("yes") : TEXT("no"));
+				bVehicleIngressFailed = true;
+				VehicleIngressFailureReason = FString::Printf(
+					TEXT("Narrative refused seat %d on %s %d times in a row (last gate: seatTargeted=%s interactAbilityStarted=%s)"),
+					NarrativeVehicleSeatIndex, *GetNameSafe(GetOwner()),
+					VehicleIngressSoftRetries, bSeatTargeted ? TEXT("yes") : TEXT("no"),
+					bSeatAbilityStarted ? TEXT("yes") : TEXT("no"));
 			}
-			bVehicleIngressFailed = true;
+			else if (const UWorld* World = GetWorld())
+			{
+				NextVehicleIngressAttemptTime =
+					World->GetTimeSeconds() + VehicleIngressRetryIntervalSeconds;
+			}
 			return false;
 		}
+
 		bVehicleMountRequested = true;
 		bVehicleSeatClaimRejectionReported = false;
+		bVehicleSeatBehaviourRepairReported = false;
+		// A later attempt can still succeed, so a soft refusal must never stay latched.
+		bVehicleIngressFailed = false;
+		VehicleIngressSoftRetries = 0;
+		VehicleIngressFailureReason.Reset();
 		UE_LOG(LogTerritory, Display,
 			TEXT("[CounterAttack] Narrative %s %s claimed seat %d in %s"),
 			bNarrativeVehicleDriver ? TEXT("driver") : TEXT("passenger"),
@@ -655,17 +733,24 @@ void UTerritoryAssaultParticipantComponent::UpdateParticipation()
 			&& World->GetTimeSeconds() >= VehicleIngressDeadline;
 		if (bVehicleIngressFailed || bTimedOut)
 		{
+			// Carry the real reason out of the component: a missing seat behaviour, a refused
+			// claim and an invalid vehicle all end here, and a generic line hides which one.
 			WithdrawForVehicleIngressFailure(bTimedOut
 				? TEXT("Narrative vehicle ingress timed out")
-				: TEXT("Narrative vehicle or ZoneGraph drive state became invalid"));
+				: (VehicleIngressFailureReason.IsEmpty()
+					? TEXT("Narrative vehicle or ZoneGraph drive state became invalid")
+					: *VehicleIngressFailureReason));
 			return;
 		}
+		// A refused seat is retried on its own slower cadence, never on every participation tick.
+		if (World->GetTimeSeconds() < NextVehicleIngressAttemptTime) return;
 		if (!EnsureNarrativeVehicleIngress())
 		{
 			if (bVehicleIngressFailed || ++GoalInitializationAttempts >= 40)
 			{
-				WithdrawForVehicleIngressFailure(
-					TEXT("Narrative vehicle ingress could not initialize"));
+				WithdrawForVehicleIngressFailure(VehicleIngressFailureReason.IsEmpty()
+					? TEXT("Narrative vehicle ingress could not initialize")
+					: *VehicleIngressFailureReason);
 			}
 			return;
 		}

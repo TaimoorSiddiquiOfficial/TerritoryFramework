@@ -10,8 +10,10 @@ class UTextBlock;
 class UVerticalBox;
 class UWidgetSwitcher;
 class UWidgetAnimation;
+class UListView;
 class UNarrativeCommonButtonBase;
 class UTerritoryDossierRowWidget;
+class UTerritoryDossierEntryObject;
 
 /** Asks the hosting screen to focus one Territory (the Dossier itself owns no map state). */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryDossierFocusRequested, FGameplayTag, TerritoryTag);
@@ -19,10 +21,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTerritoryDossierFocusRequested, F
 /**
  * The Dossier: one screen for the player's history in this campaign.
  *
- * Batch 1 ships the shell plus the History drawer, which is a read-only projection of the
- * authoritative evidence ledger. Notes, Collectibles and Relationships are authored pages
- * with no data behind them yet, and the shell says so instead of inventing rows: nothing here
- * writes gameplay state, and nothing here invents a second authority for what happened.
+ * The shell owns seven drawers (History, Collectibles, NPC Relationships, Game Logs, Statistics,
+ * Achievements, Lore) and a category chip row for the timeline. History, Logs and Statistics are
+ * read-only projections of the authoritative evidence ledger; the other four pages have no data
+ * behind them yet and say so instead of inventing rows. Nothing here writes gameplay state, and
+ * nothing here invents a second authority for what happened.
  *
  * The widget stays Abstract so the project authors the layout; this class only binds, reads
  * and formats.
@@ -101,6 +104,17 @@ public:
 	static FText GetEvidenceMetaText(const FTerritoryDossierRecordView& Record);
 
 	/**
+	 * Subject line on its own, for the reference card where the subject is its own column.
+	 * A fact recorded without a subject says so instead of printing an empty GUID.
+	 */
+	UFUNCTION(BlueprintPure, Category="Territory|Dossier")
+	static FText GetEvidenceEntityText(const FTerritoryDossierRecordView& Record);
+
+	/** Campaign-time readout on its own, so a card can print the moment next to the text. */
+	UFUNCTION(BlueprintPure, Category="Territory|Dossier")
+	static FText GetEvidenceTimeText(const FTerritoryDossierRecordView& Record);
+
+	/**
 	 * Accent colour for a drawer. The palette lives in one place so the list reads as
 	 * categories (control, conflict, stealth, diplomacy, tales) instead of one grey column.
 	 */
@@ -127,6 +141,14 @@ protected:
 	/** Explains an empty list instead of leaving it blank. */
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UTextBlock> HistoryEmptyText;
+
+	/**
+	 * Optional virtualised History list. The reference dashboard wants a real ListView, so when a
+	 * designer authors one the shell fills it with UTerritoryDossierEntryObject entries and leaves
+	 * HistoryEntries alone; the plain VerticalBox stays as the fallback for hand-built rows.
+	 */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UListView> HistoryList;
 
 	/** Hosts the session-log lines built from the ledger. */
 	UPROPERTY(meta=(BindWidgetOptional))
@@ -173,6 +195,30 @@ protected:
 	UPROPERTY(meta=(BindWidgetOptional))
 	TObjectPtr<UNarrativeCommonButtonBase> Btn_LoreTab;
 
+	/** All Evidence chip, the default filter. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_FilterAll;
+
+	/** Control chip: captures and lost territories. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_FilterControl;
+
+	/** Conflict chip: guards and attackers killed. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_FilterConflict;
+
+	/** Stealth chip: exposures and compromised disguises. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_FilterStealth;
+
+	/** Diplomacy chip: treaties signed and broken. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_FilterDiplomacy;
+
+	/** Tales chip: quests and dialogues completed. */
+	UPROPERTY(meta=(BindWidgetOptional))
+	TObjectPtr<UNarrativeCommonButtonBase> Btn_FilterTales;
+
 	/** Row widget class built into HistoryEntries. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Territory|Dossier")
 	TSubclassOf<UTerritoryDossierRowWidget> RecordRowWidgetClass;
@@ -195,9 +241,33 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UNarrativeCommonButtonBase>> BoundTabButtons;
 
+	/** Filter chips this instance bound, in category order, so the active one can be marked. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UNarrativeCommonButtonBase>> BoundFilterChips;
+
+	/**
+	 * Entries handed to HistoryList. Kept as a strong reference because the list view owns them
+	 * only for as long as they are in its item array.
+	 */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UTerritoryDossierEntryObject>> HistoryListEntries;
+
 	void BuildNativeLayout();
 	void BindTabButton(UNarrativeCommonButtonBase* Button, ETerritoryDossierDrawer Drawer);
+	void BindFilterChip(UNarrativeCommonButtonBase* Button, ETerritoryDossierCategory Category);
 	void WriteHeaderText();
+
+	/**
+	 * Labels every bound chip and marks the active one, so the History page always shows which
+	 * filter is in force instead of letting the list look arbitrarily short.
+	 */
+	void RefreshFilterChips();
+
+	/**
+	 * Fills HistoryList with one entry per record. A ListView rebuilds its rows on demand, so the
+	 * entries — not widgets — are the thing this class hands over.
+	 */
+	void FillHistoryList(const TArray<FTerritoryDossierRecordView>& Records);
 
 	/** Builds the session-log lines from the same ledger the History page reads. */
 	void RefreshLogs();
@@ -207,6 +277,7 @@ private:
 	/** One labelled row in the Statistics page. */
 	UWidget* BuildStatisticRow(const FText& Label, const FText& Value);
 	void HandleDrawerButtonClicked(ETerritoryDossierDrawer Drawer);
+	void HandleFilterChipClicked(ETerritoryDossierCategory Category);
 	void HandleHistoryTabClicked();
 	void HandleCollectiblesTabClicked();
 	void HandleRelationshipsTabClicked();

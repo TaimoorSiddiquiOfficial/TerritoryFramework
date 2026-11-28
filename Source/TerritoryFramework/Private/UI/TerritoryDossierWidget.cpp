@@ -2,10 +2,12 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/HorizontalBox.h"
+#include "Components/ListView.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/WidgetSwitcher.h"
 #include "Subsystems/TerritoryEvidenceLedgerSubsystem.h"
+#include "UI/TerritoryDossierEntryObject.h"
 #include "UI/TerritoryDossierRowWidget.h"
 #include "Widgets/NarrativeCommonButtonBase.h"
 #include "Engine/World.h"
@@ -83,6 +85,15 @@ void UTerritoryDossierWidget::NativeDestruct()
 		}
 	}
 	BoundTabButtons.Reset();
+	for (const TObjectPtr<UNarrativeCommonButtonBase>& Chip : BoundFilterChips)
+	{
+		if (Chip)
+		{
+			Chip->OnClicked().RemoveAll(this);
+		}
+	}
+	BoundFilterChips.Reset();
+	HistoryListEntries.Reset();
 	Super::NativeDestruct();
 }
 
@@ -95,6 +106,27 @@ void UTerritoryDossierWidget::BuildNativeLayout()
 	BindTabButton(Btn_StatisticsTab, ETerritoryDossierDrawer::Statistics);
 	BindTabButton(Btn_AchievementsTab, ETerritoryDossierDrawer::Achievements);
 	BindTabButton(Btn_LoreTab, ETerritoryDossierDrawer::Lore);
+
+	BindFilterChip(Btn_FilterAll, ETerritoryDossierCategory::All);
+	BindFilterChip(Btn_FilterControl, ETerritoryDossierCategory::Control);
+	BindFilterChip(Btn_FilterConflict, ETerritoryDossierCategory::Conflict);
+	BindFilterChip(Btn_FilterStealth, ETerritoryDossierCategory::Stealth);
+	BindFilterChip(Btn_FilterDiplomacy, ETerritoryDossierCategory::Diplomacy);
+	BindFilterChip(Btn_FilterTales, ETerritoryDossierCategory::Tales);
+
+	// UListViewBase keeps EntryWidgetClass protected and only exposes GetEntryWidgetClass() to the
+	// editor, so the entry widget is authored on the list itself. The shell cannot complete that
+	// wiring at runtime; a list without an entry class simply renders no rows, and the hand-built
+	// HistoryEntries column stays available as the fallback the designer can lean on.
+	if (HistoryList && !RecordRowWidgetClass)
+	{
+		UE_LOG(LogTerritory, Warning,
+			TEXT("[Dossier] %s exposes a history ListView but no row widget class, so a designer ")
+			TEXT("cannot know which entry WBP the list must use."),
+			*GetNameSafe(this));
+	}
+
+	RefreshFilterChips();
 	WriteHeaderText();
 }
 
@@ -136,6 +168,77 @@ void UTerritoryDossierWidget::BindTabButton(UNarrativeCommonButtonBase* Button, 
 	}
 
 	BoundTabButtons.Add(Button);
+}
+
+void UTerritoryDossierWidget::BindFilterChip(UNarrativeCommonButtonBase* Button, ETerritoryDossierCategory Category)
+{
+	if (!Button || BoundFilterChips.Contains(Button))
+	{
+		return;
+	}
+
+	// Same convention as the drawer tabs: the label is written here, so the authored chip only has
+	// to exist with the right name and the localisation stays in one file.
+	Button->SetButtonText(GetDossierCategoryText(Category));
+	Button->OnClicked().AddUObject(this, &UTerritoryDossierWidget::HandleFilterChipClicked, Category);
+	BoundFilterChips.Add(Button);
+}
+
+void UTerritoryDossierWidget::RefreshFilterChips()
+{
+	// The active chip is disabled rather than restyled: the shell reads every filter state from
+	// one place, and a disabled chip is the one clear "already applied" signal available to any
+	// CommonUI button style without this class reaching into a designer's brush.
+	static constexpr ETerritoryDossierCategory ChipOrder[] =
+	{
+		ETerritoryDossierCategory::All,
+		ETerritoryDossierCategory::Control,
+		ETerritoryDossierCategory::Conflict,
+		ETerritoryDossierCategory::Stealth,
+		ETerritoryDossierCategory::Diplomacy,
+		ETerritoryDossierCategory::Tales
+	};
+
+	for (int32 Index = 0; Index < BoundFilterChips.Num(); ++Index)
+	{
+		UNarrativeCommonButtonBase* Chip = BoundFilterChips[Index];
+		if (!Chip)
+		{
+			continue;
+		}
+
+		const ETerritoryDossierCategory ChipCategory = ChipOrder[Index < UE_ARRAY_COUNT(ChipOrder) ? Index : 0];
+		Chip->SetIsEnabled(ChipCategory != SelectedCategory);
+	}
+}
+
+void UTerritoryDossierWidget::HandleFilterChipClicked(ETerritoryDossierCategory Category)
+{
+	SetDossierCategory(Category);
+}
+
+void UTerritoryDossierWidget::FillHistoryList(const TArray<FTerritoryDossierRecordView>& Records)
+{
+	if (!HistoryList)
+	{
+		return;
+	}
+
+	HistoryListEntries.Reset();
+	TArray<UObject*> Items;
+	Items.Reserve(Records.Num());
+
+	for (const FTerritoryDossierRecordView& Record : Records)
+	{
+		// Outer is this widget so the entries live exactly as long as the screen that shows them.
+		UTerritoryDossierEntryObject* Entry = NewObject<UTerritoryDossierEntryObject>(this);
+		Entry->SetDossierRecord(Record);
+		HistoryListEntries.Add(Entry);
+		Items.Add(Entry);
+	}
+
+	// SetListItems clears first, so a refresh never stacks a second copy of the history.
+	HistoryList->SetListItems(Items);
 }
 
 void UTerritoryDossierWidget::WriteHeaderText()
@@ -262,6 +365,10 @@ void UTerritoryDossierWidget::SetDossierDrawer(ETerritoryDossierDrawer InDrawer)
 void UTerritoryDossierWidget::SetDossierCategory(ETerritoryDossierCategory InCategory)
 {
 	SelectedCategory = InCategory;
+
+	// The chips are the visible half of the filter: without this the list would look arbitrarily
+	// short with no indication of which category is in force.
+	RefreshFilterChips();
 	RefreshDossier();
 }
 
@@ -406,6 +513,13 @@ void UTerritoryDossierWidget::RefreshDossier()
 				HistoryEntries->AddChildToVerticalBox(Row);
 			}
 		}
+	}
+
+	if (HistoryList)
+	{
+		// The virtualised list is filled with entries; the VerticalBox below stays the fallback for
+		// a WBP that authors plain rows instead of a ListView. A designer picks one of the two.
+		FillHistoryList(Records);
 	}
 
 	if (HistoryEmptyText)
@@ -715,6 +829,27 @@ FText UTerritoryDossierWidget::GetEvidenceMetaText(const FTerritoryDossierRecord
 	Parts.Add(FString::Printf(TEXT("%.1f s"), Record.GameTimeSeconds));
 
 	return FText::FromString(FString::Join(Parts, TEXT("  |  ")));
+}
+
+FText UTerritoryDossierWidget::GetEvidenceEntityText(const FTerritoryDossierRecordView& Record)
+{
+	if (!Record.SubjectId.IsValid())
+	{
+		// A producer may record a fact about no particular subject (a treaty, a wave). Saying so is
+		// honest; printing an empty GUID would read as corrupted data.
+		return LOCTEXT("EvidenceNoSubject", "No subject");
+	}
+
+	// Short form on purpose: the card shows this next to the headline, and the full GUID stays
+	// traceable in the meta line and in the ledger itself.
+	return FText::FromString(Record.SubjectId.ToString(EGuidFormats::Short));
+}
+
+FText UTerritoryDossierWidget::GetEvidenceTimeText(const FTerritoryDossierRecordView& Record)
+{
+	// Campaign time, never wall-clock: a save that is reloaded months later must still read in the
+	// order the campaign happened (AGENTS.md §7 — saved state, not real time).
+	return FText::FromString(FString::Printf(TEXT("T+%.0f s"), Record.GameTimeSeconds));
 }
 
 void UTerritoryDossierWidget::HandleHistoryRowFocusRequested(FGameplayTag TerritoryTag)

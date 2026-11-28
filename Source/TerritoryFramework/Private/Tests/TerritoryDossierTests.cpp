@@ -3,6 +3,7 @@
 #include "Misc/AutomationTest.h"
 
 #include "GameplayTagContainer.h"
+#include "UI/TerritoryDossierEntryObject.h"
 #include "UI/TerritoryDossierTypes.h"
 #include "UI/TerritoryDossierWidget.h"
 
@@ -185,6 +186,101 @@ bool FTFDossierDrawerContract::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("The drawer enum carries exactly the authored pages"),
 		static_cast<int32>(ETerritoryDossierDrawer::Lore), 6);
+
+	return true;
+}
+
+/**
+ * The reference dashboard filters the timeline with a chip row, so every category needs its own
+ * chip label, its own derived family and a subject/time readout a card can print as its own column.
+ * A missing or shared label would make two filters indistinguishable to the player.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+	FTFDossierCategoryContractTest,
+	"TerritoryFramework.Dossier.Contract.EveryCategoryHasItsOwnChipAndCardText",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FTFDossierCategoryContractTest::RunTest(const FString& Parameters)
+{
+	const ETerritoryDossierCategory Categories[] = {
+		ETerritoryDossierCategory::All,
+		ETerritoryDossierCategory::Control,
+		ETerritoryDossierCategory::Conflict,
+		ETerritoryDossierCategory::Stealth,
+		ETerritoryDossierCategory::Diplomacy,
+		ETerritoryDossierCategory::Tales
+	};
+
+	TSet<FString> Labels;
+	for (const ETerritoryDossierCategory Category : Categories)
+	{
+		const FString Label = UTerritoryDossierWidget::GetDossierCategoryText(Category).ToString();
+		TestFalse(TEXT("Every category has a chip label"), Label.IsEmpty());
+		TestFalse(TEXT("No two categories share a chip label"), Labels.Contains(Label));
+		Labels.Add(Label);
+	}
+
+	TestEqual(TEXT("The chip row carries one chip per category"),
+		Labels.Num(), static_cast<int32>(UE_ARRAY_COUNT(Categories)));
+
+	// The filter must keep every category visible under All and separate under a specific chip.
+	for (const ETerritoryDossierCategory Category : Categories)
+	{
+		TestTrue(TEXT("All Evidence keeps every category"),
+			UTerritoryDossierWidget::MatchesDossierFilter(ETerritoryDossierCategory::All, Category));
+	}
+	TestFalse(TEXT("A specific chip hides the other families"),
+		UTerritoryDossierWidget::MatchesDossierFilter(ETerritoryDossierCategory::Control, ETerritoryDossierCategory::Conflict));
+
+	// The category is derived from the evidence tag, never stored, so the tag family IS the filter.
+	const FGameplayTag CaptureTag = DossierTag(TEXT("Territory.Evidence.Capture.Committed"));
+	const FGameplayTag GuardKilledTag = DossierTag(TEXT("Territory.Evidence.Combat.GuardKilled"));
+	const FGameplayTag ExposedTag = DossierTag(TEXT("Territory.Evidence.Stealth.Exposed"));
+	const FGameplayTag TreatyTag = DossierTag(TEXT("Territory.Evidence.Treaty.Signed"));
+	const FGameplayTag QuestTag = DossierTag(TEXT("Territory.Evidence.Tales.QuestCompleted"));
+
+	TestEqual(TEXT("Capture facts read as control"),
+		UTerritoryDossierWidget::ResolveDossierCategory(CaptureTag), ETerritoryDossierCategory::Control);
+	TestEqual(TEXT("Guard deaths read as conflict"),
+		UTerritoryDossierWidget::ResolveDossierCategory(GuardKilledTag), ETerritoryDossierCategory::Conflict);
+	TestEqual(TEXT("Exposures read as stealth"),
+		UTerritoryDossierWidget::ResolveDossierCategory(ExposedTag), ETerritoryDossierCategory::Stealth);
+	TestEqual(TEXT("Treaties read as diplomacy"),
+		UTerritoryDossierWidget::ResolveDossierCategory(TreatyTag), ETerritoryDossierCategory::Diplomacy);
+	TestEqual(TEXT("Quest completions read as tales"),
+		UTerritoryDossierWidget::ResolveDossierCategory(QuestTag), ETerritoryDossierCategory::Tales);
+
+	const FGuid Subject = FGuid::NewGuid();
+	const FTerritoryDossierRecordView WithSubject = MakeDossierView(
+		CaptureTag, Subject, DossierTag(TEXT("Narrative.Factions.Heroes")),
+		DossierTag(TEXT("Territory.HavenReach.MarketSquare.Blacksmith")), 50, 1794.8);
+	const FTerritoryDossierRecordView WithoutSubject = MakeDossierView(
+		TreatyTag, FGuid(), FGameplayTag(), FGameplayTag(), 20, 12.0);
+
+	TestEqual(TEXT("The entity column prints the subject"),
+		UTerritoryDossierWidget::GetEvidenceEntityText(WithSubject).ToString(),
+		Subject.ToString(EGuidFormats::Short));
+	TestFalse(TEXT("A fact about no subject says so instead of printing an empty id"),
+		UTerritoryDossierWidget::GetEvidenceEntityText(WithoutSubject).ToString().IsEmpty());
+	TestNotEqual(TEXT("An empty subject is not printed as a blank id"),
+		UTerritoryDossierWidget::GetEvidenceEntityText(WithoutSubject).ToString(),
+		FGuid().ToString(EGuidFormats::Short));
+
+	// Campaign time, not wall clock: the same save must read the same way after a reload.
+	TestTrue(TEXT("The time column carries the campaign moment"),
+		UTerritoryDossierWidget::GetEvidenceTimeText(WithSubject).ToString().Contains(TEXT("1795")));
+
+	// The ListView hand-off: the shell builds entries, the row reads them back.
+	UTerritoryDossierEntryObject* Entry = NewObject<UTerritoryDossierEntryObject>(GetTransientPackage());
+	TestNotNull(TEXT("An entry can be created for the list"), Entry);
+	TestFalse(TEXT("A fresh entry carries no fact"), Entry->HasDossierRecord());
+
+	Entry->SetDossierRecord(WithSubject);
+	TestTrue(TEXT("An entry with an evidence tag carries a fact"), Entry->HasDossierRecord());
+	TestEqual(TEXT("The entry round-trips the weight"), Entry->GetDossierRecord().Weight, 50);
+	TestTrue(TEXT("The entry round-trips the subject"), Entry->GetDossierRecord().SubjectId == Subject);
+	TestEqual(TEXT("The entry round-trips the derived category"),
+		Entry->GetDossierRecord().Category, ETerritoryDossierCategory::Control);
 
 	return true;
 }

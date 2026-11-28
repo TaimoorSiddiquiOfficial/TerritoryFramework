@@ -150,6 +150,12 @@ private:
 	bool bVehicleMountRequested = false;
 	/** One-shot so a refused Narrative seat claim reports why, instead of on every retry. */
 	bool bVehicleSeatClaimRejectionReported = false;
+	/** Earliest world time for the next seat claim retry; a refused claim is not retried every tick. */
+	double NextVehicleIngressAttemptTime = 0.0;
+	/** Spaced retries this ingress has spent; a structural failure does not spend them. */
+	int32 VehicleIngressSoftRetries = 0;
+	/** Why the ingress gave up, so the withdrawal log carries the real reason, not a generic one. */
+	FString VehicleIngressFailureReason;
 	/** One-shot so a seat whose authored interact behaviour is missing everywhere warns once. */
 	bool bVehicleSeatBehaviourRepairReported = false;
 	bool bVehiclePossessionConfirmed = false;
@@ -198,6 +204,14 @@ private:
 	ATerritoryVolume* ResolveTargetTerritory() const;
 	bool BindNarrativeDeathAfterSpawnReady();
 	bool EnsureNarrativeSeatInteractBehaviour(UMountComponent* Mount);
+	/**
+	 * Reports a refused seat claim with the exact state Narrative's own gates consult, and keeps
+	 * the final outcome visible: the first report is one-shot, the last one carries the count.
+	 */
+	void ReportVehicleSeatClaimRefusal(
+		const bool bSeatTargeted, const bool bSeatAbilityStarted,
+		UMountComponent* Mount, class ATerritoryAssaultCharacter* NPC,
+		class ANarrativeNPCController* Controller);
 	bool EnsureNarrativeVehicleIngress();
 	bool EnsureNarrativeActivityAndGoal();
 	bool MaintainAssaultMovement(ATerritoryVolume* Territory);
